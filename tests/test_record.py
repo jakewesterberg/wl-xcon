@@ -15,8 +15,11 @@ from pathlib import Path
 
 import pytest
 
+from wl_xcon.actor import Box
 from wl_xcon.levels import Position
-from wl_xcon.record import RUNS, REFUSAL_LOG_LIMIT, TRIAL_STARTS, SessionRecord, welfare_note
+from wl_xcon.record import (
+    CONTROLS, RUNS, REFUSAL_LOG_LIMIT, TRIAL_STARTS, SessionRecord, welfare_note,
+)
 
 
 def test_the_record_lands_where_wl_preproc_expects_it(tmp_path):
@@ -215,7 +218,7 @@ def test_a_trial_row_carries_its_ten_position_numbers(tmp_path):
 
 def test_a_run_row_carries_its_event_its_run_and_its_local_time(tmp_path):
     record = SessionRecord.open(tmp_path, session_id="2027-01-14_01", subject="A")
-    record.run_row("start", 0, 1_700_000_000.0, task="t.py", by="jake")
+    record.run_row("start", 0, 1_700_000_000.0, task="t.py", by=Box("jake"))
     record.run_row("end", 0, 1_700_000_060.0, stop_kind="completed")
 
     rows = [json.loads(line) for line in (record.directory / RUNS).read_text().splitlines()]
@@ -224,7 +227,7 @@ def test_a_run_row_carries_its_event_its_run_and_its_local_time(tmp_path):
         ("start", 0, 1_700_000_000.0),
         ("end", 0, 1_700_000_060.0),
     ]
-    assert rows[0]["task"] == "t.py" and rows[0]["by"] == "jake"
+    assert rows[0]["task"] == "t.py" and rows[0]["by"] == {"kind": "box", "name": "jake"}
     assert "local" in rows[0]["at_local"]
 
 
@@ -233,10 +236,10 @@ def test_the_refusal_cap_is_the_sessions_and_each_run_says_what_it_dropped(tmp_p
     that dropped rows says so at its close, and a run that dropped none adds nothing."""
     record = SessionRecord.open(tmp_path, session_id="2027-01-14_01", subject="A")
     for i in range(REFUSAL_LOG_LIMIT):
-        record.refusal("reward_correct", 1.0 + i, "jake", "over", i, float(i))
+        record.refusal("reward_correct", 1.0 + i, Box("jake"), "over", i, float(i))
     record.close()
     for i in range(3):
-        record.refusal("reward_correct", 2.0, "jake", "over", i, float(i))
+        record.refusal("reward_correct", 2.0, Box("jake"), "over", i, float(i))
     record.close()
     record.close()
 
@@ -254,7 +257,7 @@ def test_a_parameter_change_is_recorded_against_the_sequence_number_it_strobed(t
     values live here (S2 §5.2). If the two disagree the change cannot be placed on
     the recording clock at all, so the join is the whole point."""
     record = SessionRecord.open(tmp_path, session_id="2027-01-14_01", subject="A")
-    record.parameter_change(sequence=7, name="fix_hold", was=0.3, now=0.5, by="console")
+    record.parameter_change(sequence=7, name="fix_hold", was=0.3, now=0.5, by=Box("console"))
 
     row = json.loads(
         (tmp_path / "2027-01-14_01" / "xcon" / "parameter_changes.jsonl")
@@ -262,7 +265,30 @@ def test_a_parameter_change_is_recorded_against_the_sequence_number_it_strobed(t
     )
 
     assert (row["sequence"], row["name"], row["was"], row["now"]) == (7, "fix_hold", 0.3, 0.5)
-    assert row["by"] == "console"
+    assert row["by"] == {"kind": "box", "name": "console"}
+
+
+def test_a_control_row_holds_its_actors_map_and_null_for_nobody(tmp_path):
+    """b2b spec §6: the record writes `actor.to_map`'s form, and a mark's stamp, whose
+    sender arrives with its note, is null -- never a placeholder name."""
+    record = SessionRecord.open(tmp_path, session_id="2027-01-14_01", subject="A")
+    record.control("mark", None, 1_700_000_000.0, 3, mark=7)
+    record.control("pause", Box("jake"), 1_700_000_001.0, 3)
+
+    stamp, pause = [
+        json.loads(line) for line in (record.directory / CONTROLS).read_text().splitlines()
+    ]
+    assert stamp["by"] is None
+    assert pause["by"] == {"kind": "box", "name": "jake"}
+
+
+def test_a_control_row_refuses_a_by_that_is_a_string(tmp_path):
+    """Ruling 3: a writer converts with `actor.to_map`, which refuses a string, so a call
+    site the actor types never reached fails here rather than writing a bare name."""
+    record = SessionRecord.open(tmp_path, session_id="2027-01-14_01", subject="A")
+
+    with pytest.raises(TypeError):
+        record.control("pause", "jake", 1_700_000_001.0, 3)
 
 
 def test_a_crash_leaves_every_trial_written_so_far(tmp_path):
@@ -388,14 +414,14 @@ def test_a_welfare_note_is_written_before_the_record_is_open(tmp_path):
         was=1_700_000_000.0,
         now=1_700_032_400.0,
         reason="typed 08:45 for 18:45",
-        by="jake",
+        by=Box("jake"),
         how="amended at the terminal",
         recorded_at=1_700_032_500.0,
     )
 
     row = json.loads((directory / "welfare_notes.jsonl").read_text().splitlines()[0])
     assert row["reason"] == "typed 08:45 for 18:45"
-    assert row["by"] == "jake"
+    assert row["by"] == {"kind": "box", "name": "jake"}
     assert row["was"] == 1_700_000_000.0 and row["now"] == 1_700_032_400.0
 
 
@@ -415,7 +441,7 @@ def test_a_welfare_note_says_the_time_in_words_a_person_can_read(tmp_path):
         was=1_700_000_000.0,
         now=1_700_000_000.0,
         reason="",
-        by="",
+        by=Box(""),
         how="confirmed at the terminal",
         recorded_at=1_700_000_100.0,
     )
@@ -441,7 +467,7 @@ def test_welfare_notes_are_not_capped_like_refusals(tmp_path):
             was=float(index),
             now=float(index) + 1.0,
             reason="a reason",
-            by="jake",
+            by=Box("jake"),
             how="--amend-out-of-cage-to",
             recorded_at=0.0,
         )
@@ -464,7 +490,7 @@ def test_a_welfare_note_is_not_written_into_either_file_beside_it(tmp_path):
         was=1.0,
         now=1.0,
         reason="",
-        by="",
+        by=Box(""),
         how="--confirm-out-of-cage, with no terminal attached",
         recorded_at=0.0,
     )

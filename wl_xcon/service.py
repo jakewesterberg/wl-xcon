@@ -73,6 +73,7 @@ from wl_xcon import marks as _marks
 from wl_xcon import preflight as _preflight
 from wl_xcon import resume as _resume_mod
 from wl_xcon import stranded as _stranded
+from wl_xcon.actor import Actor
 from wl_xcon.bounds import Bounds, Exceeded
 from wl_xcon.cli import _load_allocation, _load_bounds, _load_rig, _load_subject_settings
 from wl_xcon.codes import Allocation
@@ -342,8 +343,9 @@ class Service:
         #: (`_route`).
         self.closed: _link.Telemetry | None = None
         #: The service's runs (the b3a-1 plan, decision 18): a run `_start` accepted
-        #: this pass and not started, `(RunSpec, rows, by)`; and an `EndSession` that
-        #: arrived during a run (`_Routed`), finished once the run returns (`step`).
+        #: this pass and not started, `(RunSpec, rows, by)` with `by` an `Actor`; and an
+        #: `EndSession` that arrived during a run (`_Routed`), finished once the run
+        #: returns (`step`).
         self._starting = None
         self._ending = None
 
@@ -464,7 +466,7 @@ class Service:
                 "session first",
             )
 
-    def _refuse(self, name: str, by: str, why: str) -> None:
+    def _refuse(self, name: str, by: Actor | None, why: str) -> None:
         """Onto the open session's feed, or, with none open, the idle frame's."""
         if self.session is not None:
             self.session.refuse(name, by, why)
@@ -480,7 +482,7 @@ class Service:
         if self.session is not None:
             self.session.stamp(mark)
         else:
-            self._refuse("mark", "<unknown>", "no session is open, so the mark was not recorded")
+            self._refuse("mark", None, "no session is open, so the mark was not recorded")
 
     def _animals(self) -> tuple[str, ...]:
         """The animals a session may be opened for: folders under `--subjects` holding a
@@ -602,7 +604,7 @@ class Service:
         )
         return session, bounds
 
-    def _built(self, kind: str, by: str, build: Callable[[], _Built]) -> _Built | None:
+    def _built(self, kind: str, by: Actor, build: Callable[[], _Built]) -> _Built | None:
         """What `build` returns -- a session built and not opened, for an open or a
         resume -- or `None`, refused under `kind`, saying why: a `SystemExit`,
         `ValueError`, `TypeError` or `Exceeded` with its own sentence, and anything else
@@ -817,7 +819,7 @@ class Service:
 
     # --- runs -----------------------------------------------------------------------
 
-    def _between_runs(self, kind: str, by: str) -> Session | None:
+    def _between_runs(self, kind: str, by: Actor) -> Session | None:
         """The open session, when a run may be checked or started; otherwise refused,
         saying why."""
         if self.session is None:
@@ -834,7 +836,7 @@ class Service:
             return None
         return self.session
 
-    def _task(self, name: str, kind: str, by: str) -> Path | None:
+    def _task(self, name: str, kind: str, by: Actor) -> Path | None:
         """A task file under `--tasks`, named by one file name ending `.py`; refused
         otherwise. **The name is held to `_folder_name` before any path is built**
         (carried from Task 7): it arrives over the wire, and the file it names is code
@@ -942,7 +944,7 @@ class Service:
             command.by,
         )
 
-    def _run(self, run: RunSpec, rows: list, by: str) -> None:
+    def _run(self, run: RunSpec, rows: list, by: Actor) -> None:
         """The run, to its end. **Its two backstop refusals** (`Session.run`'s blocking
         finding and `welfare.preflight`), raised before it starts, are refusals here.
         **Anything else is a fault, and contained** (the b3a-1 plan, decision 14): one

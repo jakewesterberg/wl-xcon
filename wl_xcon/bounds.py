@@ -31,6 +31,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
+from wl_xcon.actor import Actor
+
 
 class Exceeded(ValueError):
     """A value or a delivery would go past a ceiling. Never caught internally."""
@@ -191,7 +193,7 @@ class Bounds:
                 f"(asked for {value}); the previous value stands"
             )
 
-    def set(self, name: str, value: float, by: str) -> None:
+    def set(self, name: str, value: float, by: Actor) -> None:
         """Move a bounded value, within its ceiling.
 
         **Validated through `validate`, never by a second copy of the rule here.**

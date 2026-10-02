@@ -64,10 +64,12 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from wl_xcon import actor as actors
 from wl_xcon import health as _health
 from wl_xcon import link as _link
 from wl_xcon import web as _web
 from wl_xcon import welfare as _welfare
+from wl_xcon.actor import Actor, Box
 
 #: Seconds without a frame, while more are due, before the page greys and `/health`
 #: says `degraded`. A display choice (spec §3), not a measurement.
@@ -504,7 +506,7 @@ class MarkSignal:
     """M pressed at the box: send the mark's signal now, ahead of every command (spec
     §5.3). `pressed_at` is the browser's clock, `None` if it did not say."""
 
-    by: str
+    by: Actor
     pressed_at: float | None
 
 
@@ -515,7 +517,7 @@ class MarkNote:
 
     mark: int
     note: str
-    by: str
+    by: Actor
 
 
 #: The fields each kind of command takes besides `kind` and `by`. A schedule takes
@@ -558,10 +560,11 @@ def _finite(value: int | float) -> bool:
         return False
 
 
-def _person(by: object) -> str:
-    """The actor a box command is recorded under: the name the page asked for, as
-    `NAME (box, unverified)` (spec §2, S9a §6: a forgeable name is worse than none,
-    because it is believed, so it says it is unverified)."""
+def _person(by: object) -> Box:
+    """The actor a box command is recorded under: the name the page asked for, as a
+    `Box`, which prints as `NAME (box, unverified)` (spec §2, S9a §6: a forgeable name
+    is worse than none, because it is believed, so it says it is unverified; b2b spec
+    §6)."""
     if (
         not isinstance(by, str)
         or not by.strip()
@@ -572,7 +575,7 @@ def _person(by: object) -> str:
             f"every command records who sent it (S9a §6): give a name of 1 to "
             f"{NAME_LIMIT} printable characters"
         )
-    return f"{by.strip()} (box, unverified)"
+    return Box(by.strip())
 
 
 def parse_command(data: object):
@@ -600,7 +603,7 @@ def parse_command(data: object):
         raise BadCommand(f"a {kind} command takes no {', '.join(sorted(extra))}")
     if kind in _SERVICE_KINDS:
         try:
-            return _link._command_from({**data, "by": by})
+            return _link._command_from({**data, "by": actors.to_map(by)})
         except _link.CommandRefused as refused:
             raise BadCommand(refused.why) from refused
     if kind == "set":

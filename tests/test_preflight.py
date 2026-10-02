@@ -13,6 +13,7 @@ from _rig import DIRECT, RIG, STEREOSCOPE
 import _sessions
 from _sessions import WALL, session
 from wl_xcon import preflight
+from wl_xcon.actor import Box
 from wl_xcon.check import parameters_used
 from wl_xcon.cli import _load_allocation, _load_trial
 from wl_xcon.link import Preflight, PreflightItem
@@ -304,25 +305,25 @@ def test_a_preflight_without_the_out_of_cage_item_does_not_open_the_gate():
 
 def test_the_record_says_who_acknowledged_each_unknown_and_no_one_else():
     rows = preflight.rows(
-        _checked("pass", "unknown", "unknown"), "jake (box, unverified)", ("item 2",)
+        _checked("pass", "unknown", "unknown"), Box("jake"), ("item 2",)
     )
 
     assert [(r["name"], r["result"], r["acknowledged_by"]) for r in rows] == [
         ("item 0", "pass", None),
         ("item 1", "unknown", None),
-        ("item 2", "unknown", "jake (box, unverified)"),
+        ("item 2", "unknown", {"kind": "box", "name": "jake"}),
         ("out of cage", "pass", None),
     ]
 
 
-@pytest.mark.parametrize("by", ["", "   ", None])
+@pytest.mark.parametrize("by", [Box(""), Box("   "), None, "jake"])
 def test_the_record_refuses_an_acknowledgement_nobody_signed(by):
     with pytest.raises(ValueError, match="who acknowledged"):
         preflight.rows(_checked("unknown"), by, ("item 0",))
 
 
 def test_a_blank_name_is_fine_when_nothing_was_acknowledged():
-    rows = preflight.rows(_checked("pass", "unknown"), "", ())
+    rows = preflight.rows(_checked("pass", "unknown"), None, ())
 
     assert all(r["acknowledged_by"] is None for r in rows)
 

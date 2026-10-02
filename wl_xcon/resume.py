@@ -18,6 +18,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from wl_xcon import actor as actors
 from wl_xcon.levels import Levels, task_name
 from wl_xcon.record import CONTROLS, RUNS, TRIAL_STARTS
 from wl_xcon.simulate import Tally
@@ -196,7 +197,11 @@ def _read(directory: Path, departure: float) -> Restoration:
             )
             stop_kind = "fault"
     elif ends:
-        stopped_because = f"session ended by {ends[0]['by']}, before any run"
+        # A record written before b2b (2026-10-02) holds a string here, and `actor.read`
+        # returns it as written.
+        stopped_because = (
+            f"session ended by {actors.shown(actors.read(ends[0]['by']))}, before any run"
+        )
         stop_kind = "operator"
     return Restoration(
         session_id=str(config["session_id"]),

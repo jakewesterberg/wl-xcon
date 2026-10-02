@@ -18,6 +18,7 @@ import unicodedata
 from contextlib import nullcontext
 from pathlib import Path
 
+from wl_xcon import actor as actors
 from wl_xcon import link as _link
 from wl_xcon import marks as _marks
 from wl_xcon.marks import TIME_FORMATS as _TIME_FORMATS
@@ -28,6 +29,7 @@ from wl_xcon.check import check
 from wl_xcon.review import render as render_review
 from wl_xcon.codes import PROVISIONAL, Allocation
 from wl_xcon.geometry import VIEWS, Geometry, Rig, SubjectSettings
+from wl_xcon.actor import Actor, Box
 from wl_xcon.task import Trial
 from wl_xcon.welfare import Deployment
 
@@ -332,7 +334,7 @@ def _settle_departure(session, args) -> _marks.Departure:
     would otherwise be defeated in silence.
     """
     at = args.out_of_cage_at
-    given = {"by": args.actor, "how": "--out-of-cage-at"}
+    given = {"by": Box(args.actor or ""), "how": "--out-of-cage-at"}
     if args.amend_out_of_cage_to is not None:
         return _marks.decide_departure(
             session,
@@ -340,7 +342,7 @@ def _settle_departure(session, args) -> _marks.Departure:
             _marks.Amend(
                 at=args.amend_out_of_cage_to,
                 reason=args.amend_reason,
-                by=args.actor,
+                by=Box(args.actor or ""),
                 how="--amend-out-of-cage-to",
             ),
             **given,
@@ -358,7 +360,7 @@ def _settle_departure(session, args) -> _marks.Departure:
             else "--confirm-out-of-cage, with no terminal attached"
         )
         return _marks.decide_departure(
-            session, at, _marks.Confirm(by=args.actor, how=how), **given
+            session, at, _marks.Confirm(by=Box(args.actor or ""), how=how), **given
         )
 
     if not _at_a_terminal():
@@ -390,7 +392,7 @@ def _settle_departure(session, args) -> _marks.Departure:
         return _marks.decide_departure(
             session,
             at,
-            _marks.Amend(at=amended_at, reason=reason, by=by, how="amended at the terminal"),
+            _marks.Amend(at=amended_at, reason=reason, by=Box(by), how="amended at the terminal"),
             **given,
         )
 
@@ -398,7 +400,7 @@ def _settle_departure(session, args) -> _marks.Departure:
         return _marks.decide_departure(
             session,
             at,
-            _marks.Confirm(by=args.actor, how="confirmed at the terminal"),
+            _marks.Confirm(by=Box(args.actor or ""), how="confirmed at the terminal"),
             **given,
         )
 
@@ -424,7 +426,7 @@ def _local(at: float) -> str:
     return f"{time.strftime('%Y-%m-%d %H:%M', moment)} ({time.strftime('%Z', moment)})"
 
 
-def _settle_return(session, actor: str, attempts: int = 3) -> str | None:
+def _settle_return(session, actor: Actor, attempts: int = 3) -> str | None:
     """Ask the person at the terminal when the animal went back into its cage.
 
     **Welfare-critical, outside the two welfare modules** (P4d-2a final review I5,
@@ -589,7 +591,7 @@ def _close_interval(session, args) -> bool:
         # thread: one that fails first ends the wait.
         while session.phase == "running" and waiter.is_alive():
             waiter.join(0.01)
-        why = _settle_return(session, args.actor or "")
+        why = _settle_return(session, Box(args.actor or ""))
     except KeyboardInterrupt:
         why = "interrupted at the terminal"
         interrupted = True
@@ -740,8 +742,11 @@ def _refusal_lines(refusals: tuple, dropped: int) -> list[str]:
             f"{len(refusals)} are kept (link.REFUSAL_HISTORY)"
         )
     for refusal in refusals:
+        # Nobody (`None`, b2b spec §6) names no one, as a control's line does.
+        by = _printable(actors.shown(refusal.by))
+        who = f" by {by}" if by else ""
         lines.append(
-            f"  refused: {_printable(refusal.name)} by {_printable(refusal.by)}: "
+            f"  refused: {_printable(refusal.name)}{who}: "
             f"{_printable(refusal.why)}"
         )
     return lines
@@ -956,7 +961,7 @@ def render(frame: _link.Telemetry | _link.Idle) -> str:
         "  scheduled stop: none"
         if frame.scheduled_stop is None
         else f"  scheduled stop: {_printable(frame.scheduled_stop.said)}, set by "
-        f"{_printable(frame.scheduled_stop.by)}"
+        f"{_printable(actors.shown(frame.scheduled_stop.by))}"
     )
     if frame.stopped_because:
         lines.append(f"  STOPPED: {_printable(frame.stopped_because)}")
@@ -1094,7 +1099,7 @@ def render(frame: _link.Telemetry | _link.Idle) -> str:
             )
             lines.append(
                 f"  staged: {_printable(change.name)} {_value(change.was)} -> "
-                f"{_value(change.now)} by {_printable(change.by)} ({kind})"
+                f"{_value(change.now)} by {_printable(actors.shown(change.by))} ({kind})"
             )
     else:
         lines.append("  staged: none")
@@ -1111,7 +1116,7 @@ def render(frame: _link.Telemetry | _link.Idle) -> str:
                 f"(link.CONTROL_HISTORY)"
             )
         for control in frame.controls:
-            by = _printable(control.by)
+            by = _printable(actors.shown(control.by))
             who = f" by {by}" if by else ""
             lines.append(
                 f"  control: {_printable(control.kind)}{who}: "
@@ -1872,9 +1877,9 @@ def main(argv: list[str] | None = None) -> int:
                     file=sys.stderr,
                 )
                 return 1
-            commands.append(_link.SetParameter(name=name, value=value, by=args.actor))
+            commands.append(_link.SetParameter(name=name, value=value, by=Box(args.actor)))
         if args.stop:
-            commands.append(_link.Stop(by=args.actor))
+            commands.append(_link.Stop(by=Box(args.actor)))
 
         with _link.ZmqConsole(args.sub, args.req) as console:
             # `send()` is inside this same `try` -- fix round 1, IMPORTANT 1: a

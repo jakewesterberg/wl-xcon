@@ -941,9 +941,11 @@ def _changes(frame: Telemetry | None) -> str:
             f"recent {len(frame.refusals)} are kept</span></div>"
         )
     for refusal in frame.refusals:
+        # Nobody (`None`, b2b spec §6) names no one, where a placeholder name stood.
+        who = "" if refusal.by is None else f" by {_e(refusal.by)}"
         rows.append(
             f'<div class="ev refused"><span class="kind">refused</span><span>'
-            f"{_e(refusal.name)} by {_e(refusal.by)}: {_e(refusal.why)}</span></div>"
+            f"{_e(refusal.name)}{who}: {_e(refusal.why)}</span></div>"
         )
     return "".join(rows) or '<span class="nm">nothing staged, controlled or refused</span>'
 
@@ -1252,9 +1254,11 @@ def _idle_refusals(frame: Idle) -> str:
             f"recent {len(frame.refusals)} are kept</span></div>"
         )
     for refusal in frame.refusals:
+        # Nobody (`None`, b2b spec §6) names no one, where a placeholder name stood.
+        who = "" if refusal.by is None else f" by {_e(refusal.by)}"
         rows.append(
             f'<div class="ev refused"><span class="kind">refused</span><span>'
-            f"{_e(refusal.name)} by {_e(refusal.by)}: {_e(refusal.why)}</span></div>"
+            f"{_e(refusal.name)}{who}: {_e(refusal.why)}</span></div>"
         )
     return "".join(rows) or '<span class="nm">nothing refused</span>'
 

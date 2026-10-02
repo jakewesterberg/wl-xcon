@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from _frames import frame, idle, view
+from wl_xcon.actor import Box
 from wl_xcon.cli import _clock, _local
 from wl_xcon.link import Control, Counts, ParamRow, Performance, Preflight, PreflightItem, Question, Refused, ScheduledStop, Staged, Stranded
 from wl_xcon.web import (
@@ -124,13 +125,27 @@ def test_the_duration_warning_is_never_dropped():
 
 def test_the_refusals_that_fell_off_the_cap_are_counted_before_the_rows():
     parts = fragments(
-        frame(refusals=(Refused("fx_hold", "sam", "not declared"),), refusals_dropped=417),
+        frame(refusals=(Refused("fx_hold", Box("sam"), "not declared"),), refusals_dropped=417),
         view(),
     )
 
     changes = parts["rt-changes"]
     assert "417 earlier refusal(s) not shown" in changes
     assert changes.index("417 earlier") < changes.index("fx_hold")
+
+
+def test_a_refusal_from_nobody_names_no_one():
+    """b2b spec §6: a refusal with no readable sender behind it -- a packet that named
+    none, a mark with no session open -- carries `None`, and the feed names no one
+    rather than printing it."""
+    nobody = (Refused("mark", None, "no session is open, so the mark was not recorded"),)
+
+    for shown in (
+        fragments(frame(refusals=nobody), view())["rt-changes"],
+        fragments(idle(refusals=nobody), view())["rt-changes"],
+    ):
+        assert "mark: no session is open" in shown
+        assert "None" not in shown
 
 
 # --- never a zero for what nothing measured -----------------------------------
@@ -192,7 +207,7 @@ def test_a_finite_instant_this_host_cannot_show_is_a_dash_not_a_crash(at):
     which ends every stream and `GET /`, as m1's non-finite reward did. A pause's
     instant and a control's are both on the wire."""
     parts = fragments(
-        frame(paused_at=at, controls=(Control("pause", "jake", at, "paused before trial 3"),)),
+        frame(paused_at=at, controls=(Control("pause", Box("jake"), at, "paused before trial 3"),)),
         view(),
     )
 
@@ -597,7 +612,7 @@ def test_parameters_show_value_range_ceiling_and_what_is_staged():
                 ParamRow("fix_window", "deg", None, 5.0, 2.0, False),
                 ParamRow("shape", "", None, None, "penguin", False),
             ),
-            staged=(Staged("fix_hold", 0.3, 0.4, "jake", False),),
+            staged=(Staged("fix_hold", 0.3, 0.4, Box("jake"), False),),
         ),
         view(),
     )["params"]
@@ -671,8 +686,8 @@ def test_every_telemetry_string_is_escaped():
         outcomes={EVIL: 1, "correct": 2},
         owed={EVIL: 3},
         recent_outcomes=(EVIL, "correct"),
-        staged=(Staged(EVIL, 0.1, 0.2, EVIL, False),),
-        refusals=(Refused(EVIL, EVIL, EVIL),),
+        staged=(Staged(EVIL, 0.1, 0.2, Box(EVIL), False),),
+        refusals=(Refused(EVIL, Box(EVIL), EVIL),),
         params=(ParamRow(EVIL, EVIL, None, None, EVIL, False),),
         performance=replace(frame().performance, task_name=EVIL, block_type=EVIL),
     )
@@ -932,7 +947,7 @@ def test_everywhere_but_the_box_the_controls_are_greyed_with_the_sentence():
     served. Refused at `POST /commands` too; this is so nobody is offered a button
     that cannot work."""
     parts = fragments(
-        frame(scheduled_stop=ScheduledStop("trials", 48.0, "jake", "after trial 48")),
+        frame(scheduled_stop=ScheduledStop("trials", 48.0, Box("jake"), "after trial 48")),
         view(on_box=False, can_write=False),
     )
     written = parts["controls"] + parts["params"] + parts["strip"]
@@ -991,8 +1006,8 @@ def test_a_refusal_shows_on_its_parameters_card_with_its_sentence():
     params = fragments(
         frame(
             refusals=(
-                Refused("fix_hold", "jake", "first"),
-                Refused("fix_hold", "jake", "'fix_hold' is declared over [0.05, 2.0] s and 9 is outside it"),
+                Refused("fix_hold", Box("jake"), "first"),
+                Refused("fix_hold", Box("jake"), "'fix_hold' is declared over [0.05, 2.0] s and 9 is outside it"),
             )
         ),
         view(),
@@ -1009,7 +1024,7 @@ def test_the_strip_shows_a_scheduled_stop_with_who_set_it_and_a_cancel():
     """Spec §5.2: while a schedule is active the strip shows it -- *stop at 14:30 ·
     set by jake* -- with a cancel button."""
     strip = fragments(
-        frame(scheduled_stop=ScheduledStop("clock", 1_700_003_600.0, "jake (box, unverified)", "at 14:30")),
+        frame(scheduled_stop=ScheduledStop("clock", 1_700_003_600.0, Box("jake"), "at 14:30")),
         view(),
     )["strip"]
 
@@ -1034,7 +1049,7 @@ def test_the_strip_guards_against_an_ended_frame_still_carrying_a_schedule():
     strip = fragments(
         frame(
             **STATES["returned"],
-            scheduled_stop=ScheduledStop("trials", 48.0, "jake", "after trial 48"),
+            scheduled_stop=ScheduledStop("trials", 48.0, Box("jake"), "after trial 48"),
         ),
         view(),
     )["strip"]
@@ -1051,9 +1066,9 @@ def test_the_feed_lists_control_events_newest_first_with_who_and_counts_the_rest
     changes = fragments(
         frame(
             controls=(
-                Control("mark", "", at, "mark 1 stamped in trial 3, frame 10"),
-                Control("note", "jake", at, 'mark 1: "bubble"'),
-                Control("set", "sam", at, "fix_hold 0.30 → 0.40, from trial 4"),
+                Control("mark", None, at, "mark 1 stamped in trial 3, frame 10"),
+                Control("note", Box("jake"), at, 'mark 1: "bubble"'),
+                Control("set", Box("sam"), at, "fix_hold 0.30 → 0.40, from trial 4"),
             ),
             controls_dropped=5,
         ),
@@ -1072,10 +1087,10 @@ def test_every_control_string_is_escaped():
     """Review Focus 2 for b2a's strings: an actor's typed name, a note, a schedule's
     words, and a parameter's name in the attributes its input carries."""
     evil = frame(
-        controls=(Control(EVIL, EVIL, 1_700_000_001.0, EVIL),),
-        scheduled_stop=ScheduledStop(EVIL, 1.0, EVIL, EVIL),
+        controls=(Control(EVIL, Box(EVIL), 1_700_000_001.0, EVIL),),
+        scheduled_stop=ScheduledStop(EVIL, 1.0, Box(EVIL), EVIL),
         params=(ParamRow(EVIL, EVIL, 0.0, 1.0, 0.5, False), ParamRow("w", "", None, None, EVIL, False)),
-        refusals=(Refused(EVIL, EVIL, EVIL),),
+        refusals=(Refused(EVIL, Box(EVIL), EVIL),),
     )
 
     text = "".join(fragments(evil, view()).values())
@@ -1270,12 +1285,12 @@ def test_while_paused_the_controls_show_the_fluid_total_and_what_the_last_press_
         controls=(
             Control(
                 "reward",
-                "jake (box, unverified)",
+                Box("jake"),
                 at,
                 "0.15 mL of reward_correct, given while paused before trial 40",
             ),
         ),
-        refusals=(Refused(name="reward", by="sam", why="the session is <not> paused"),),
+        refusals=(Refused(name="reward", by=Box("sam"), why="the session is <not> paused"),),
     )
     clock = time.strftime("%H:%M:%S", time.localtime(at))
 
@@ -1349,7 +1364,7 @@ def test_the_page_with_no_session_open_says_so_and_puts_a_stranded_animal_first(
         idle(
             stranded=(Stranded("2027-01-13_01", "<b>B</b>", 1_700_000_000.0),),
             question=Question("departure", "2027-01-14_01", 1.0, "far <i>", ("confirm", "amend")),
-            refusals=(Refused("open", "jake", "refused <script>"),),
+            refusals=(Refused("open", Box("jake"), "refused <script>"),),
         ),
         view(),
     )
@@ -1387,7 +1402,7 @@ def test_the_page_escapes_control_characters_and_markup_in_an_idle_frames_text()
         idle(
             stranded=(Stranded("<s>", "B\x1b[2J<", None),),
             question=Question("return", "<q>", 1.0, "far\x1b", ("<a>",)),
-            refusals=(Refused("<n>", "<by>", "<why>\x1b"),),
+            refusals=(Refused("<n>", Box("<by>"), "<why>\x1b"),),
         ),
         view(),
     )
@@ -1603,7 +1618,7 @@ def test_outside_a_run_the_hand_reward_and_mark_are_live_with_what_the_last_pres
             phase=phase,
             fluid_session_ml=0.4,
             controls=(
-                Control("reward", "jake (box, unverified)", 1_700_000_035.0,
+                Control("reward", Box("jake"), 1_700_000_035.0,
                         "0.15 mL of reward_correct, given between runs"),
             ),
         ),
@@ -1626,10 +1641,10 @@ def test_a_refused_session_command_shows_in_the_control_bar_escaped(name, phase)
     the page shows a refusal with its reason; the newest of the session's own commands'
     refusals shows in the always-visible control bar, as a reward's does."""
     refusals = (
-        Refused("start", "jake", "older"),
-        Refused("reward", "jake", "a reward's own"),
-        Refused(name, "jake", "why <b>&"),
-        Refused("set", "jake", "not a session command"),
+        Refused("start", Box("jake"), "older"),
+        Refused("reward", Box("jake"), "a reward's own"),
+        Refused(name, Box("jake"), "why <b>&"),
+        Refused("set", Box("jake"), "not a session command"),
     )
 
     controls = fragments(_between(phase=phase, refusals=refusals), view())["controls"]
@@ -1639,7 +1654,7 @@ def test_a_refused_session_command_shows_in_the_control_bar_escaped(name, phase)
 
 
 def test_the_idle_control_bar_shows_a_refused_open_or_stranded_return():
-    refusals = (Refused("open", "jake", "no session opens while <b>"),)
+    refusals = (Refused("open", Box("jake"), "no session opens while <b>"),)
 
     controls = fragments(idle(refusals=refusals), view())["controls"]
 

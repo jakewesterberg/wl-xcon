@@ -40,12 +40,12 @@ def _line(number, outcome, fluid_ml, last_reward_at, run):
 
 def _reward(ml, at):
     # The real row (`record.control`) also carries `at_local`, `trial_index` and `run`.
-    return {"kind": "reward", "by": "jake", "at": at, "ml": ml, "entry": "reward_correct",
+    return {"kind": "reward", "by": {"kind": "box", "name": "jake"}, "at": at, "ml": ml, "entry": "reward_correct",
             "trial_index": 0, "run": None}
 
 
 def _change(sequence, name, was, now, run):
-    return {"sequence": sequence, "name": name, "was": was, "now": now, "by": "jake", "run": run}
+    return {"sequence": sequence, "name": name, "was": was, "now": now, "by": {"kind": "box", "name": "jake"}, "run": run}
 
 
 def _config(**over):
@@ -219,7 +219,7 @@ def test_a_session_whose_runs_were_ended_reads_back_as_ended(tmp_path):
     assert read(directory, DEPARTURE).ended is False
 
     with (directory / "controls.jsonl").open("a") as handle:
-        handle.write(json.dumps({"kind": "end", "by": "jake", "at": DEPARTURE + 950,
+        handle.write(json.dumps({"kind": "end", "by": {"kind": "box", "name": "jake"}, "at": DEPARTURE + 950,
                                  "trial_index": 0, "run": 1}) + "\n")
 
     assert read(directory, DEPARTURE).ended is True
@@ -244,10 +244,25 @@ def test_how_the_last_run_ended_is_read_back_and_never_before_any_run(tmp_path):
     assert (stopped.stopped_because, stopped.stop_kind) == ("stopped by jake", "operator")
     none = read(_folder(tmp_path / "c"), DEPARTURE)
     assert (none.stopped_because, none.stop_kind) == ("", None)
-    ended = read(_folder(tmp_path / "d", controls=[_ended_by("jake")]), DEPARTURE)
-    assert (ended.stopped_because, ended.stop_kind) == (
-        "session ended by jake, before any run", "operator",
+    ended = read(
+        _folder(tmp_path / "d", controls=[_ended_by({"kind": "box", "name": "jake"})]), DEPARTURE
     )
+    assert (ended.stopped_because, ended.stop_kind) == (
+        "session ended by jake (box, unverified), before any run", "operator",
+    )
+
+
+def test_a_session_ended_before_b2b_names_who_ended_it_as_written(tmp_path):
+    """Review Focus 1 (b2b spec §6): a record written before 2026-10-02 holds its `by`
+    as a string, and a record is never rewritten, so a resume reads it back as written."""
+    directory = _folder(tmp_path, controls=[_ended_by({"kind": "box", "name": "jake"})])
+    (row,) = [json.loads(line) for line in (directory / "controls.jsonl").read_text().splitlines()]
+    row["by"] = "jake (box, unverified)"
+    _jsonl(directory / "controls.jsonl", [row])
+
+    ended = read(directory, DEPARTURE)
+
+    assert ended.stopped_because == "session ended by jake (box, unverified), before any run"
 
 
 def test_a_restored_tally_counts_hangs(tmp_path):

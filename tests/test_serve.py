@@ -37,6 +37,7 @@ from _rig import DIRECT, PATH as RIG_FILE, RIG
 # `wlx run --link`'s included, has its context destroyed at teardown without `close()`.
 from _zmq_release import _every_zmq_context_released  # noqa: F401
 from wl_xcon import marks, serve
+from wl_xcon.actor import Box
 from wl_xcon.cli import _load_allocation, main
 from wl_xcon.service import Service
 from wl_xcon.link import (
@@ -1405,7 +1406,7 @@ def test_the_console_follows_a_simulated_session_through_a_restart_to_its_end(
         ) as response:
             events = _events(response)
             next(events)
-            console.send(Stop(by="e2e"))
+            console.send(Stop(by=Box("e2e")))
             ended = None
             for _, payload in zip(range(20_000), events):
                 if 'data-state="ended"' in payload["frags"].get("state", ""):
@@ -1427,7 +1428,7 @@ def test_the_console_follows_a_simulated_session_through_a_restart_to_its_end(
         if runner.is_alive():
             try:
                 with zmq_cleanup(ZmqConsole(pub, rep)) as rescue:
-                    rescue.send(Stop(by="e2e-cleanup"))
+                    rescue.send(Stop(by=Box("e2e-cleanup")))
             except Exception:  # noqa: BLE001 -- best-effort cleanup, never masks
                 pass  # the real failure above with a cleanup-path exception here
         runner.join(timeout=30)
@@ -2275,7 +2276,7 @@ def test_a_command_from_the_boxs_own_page_is_dispatched_as_the_person_named():
         status, answer = _post(port, {"kind": "pause", "by": " jake "})
 
     assert (status, answer) == (200, {"status": "sent", "said": "sent: test"})
-    assert dispatch.seen == [Pause(by="jake (box, unverified)")]
+    assert dispatch.seen == [Pause(by=Box("jake"))]
 
 
 @pytest.mark.parametrize(
@@ -2429,24 +2430,24 @@ def test_a_body_longer_than_the_limit_or_without_a_length_is_refused_unread():
     ("body", "expected"),
     [
         ({"kind": "set", "by": "jake", "name": "fix_hold", "value": 1},
-         SetParameter(name="fix_hold", value=1.0, by="jake (box, unverified)")),
+         SetParameter(name="fix_hold", value=1.0, by=Box("jake"))),
         ({"kind": "set", "by": "jake", "name": "shape", "value": "penguin"},
-         SetParameter(name="shape", value="penguin", by="jake (box, unverified)")),
-        ({"kind": "stop", "by": "jake"}, Stop(by="jake (box, unverified)")),
-        ({"kind": "resume", "by": "jake"}, Resume(by="jake (box, unverified)")),
-        ({"kind": "cancel", "by": "jake"}, CancelScheduledStop(by="jake (box, unverified)")),
+         SetParameter(name="shape", value="penguin", by=Box("jake"))),
+        ({"kind": "stop", "by": "jake"}, Stop(by=Box("jake"))),
+        ({"kind": "resume", "by": "jake"}, Resume(by=Box("jake"))),
+        ({"kind": "cancel", "by": "jake"}, CancelScheduledStop(by=Box("jake"))),
         ({"kind": "schedule", "by": "jake", "at": "14:30"},
-         ScheduleStop(kind="clock", value="14:30", by="jake (box, unverified)")),
+         ScheduleStop(kind="clock", value="14:30", by=Box("jake"))),
         ({"kind": "schedule", "by": "jake", "trials": 12},
-         ScheduleStop(kind="trials", value=12, by="jake (box, unverified)")),
+         ScheduleStop(kind="trials", value=12, by=Box("jake"))),
         ({"kind": "schedule", "by": "jake", "ml": 5},
-         ScheduleStop(kind="fluid", value=5, by="jake (box, unverified)")),
+         ScheduleStop(kind="fluid", value=5, by=Box("jake"))),
         ({"kind": "mark", "by": "jake", "pressed_at": 1_700_000_000},
-         MarkSignal(by="jake (box, unverified)", pressed_at=1_700_000_000.0)),
-        ({"kind": "mark", "by": "jake"}, MarkSignal(by="jake (box, unverified)", pressed_at=None)),
+         MarkSignal(by=Box("jake"), pressed_at=1_700_000_000.0)),
+        ({"kind": "mark", "by": "jake"}, MarkSignal(by=Box("jake"), pressed_at=None)),
         ({"kind": "note", "by": "jake", "mark": 7, "note": "bubble"},
-         MarkNote(mark=7, note="bubble", by="jake (box, unverified)")),
-        ({"kind": "reward", "by": "jake"}, ManualReward(by="jake (box, unverified)")),
+         MarkNote(mark=7, note="bubble", by=Box("jake"))),
+        ({"kind": "reward", "by": "jake"}, ManualReward(by=Box("jake"))),
     ],
 )
 def test_each_command_the_page_sends_parses_to_what_the_rig_is_sent(body, expected):
@@ -2471,7 +2472,7 @@ START_BODY = {
     "trials": 3, "acknowledged": ["pump calibration", "eye tracker"],
 }
 END_BODY = {"kind": "end", "by": "jake", "session_id": None, "returned": None, "confirm": False}
-PAGE = "jake (box, unverified)"
+PAGE = Box("jake")
 
 
 @pytest.mark.parametrize(
@@ -2508,7 +2509,7 @@ def test_each_session_command_the_page_sends_is_the_one_the_wire_would_decode(bo
     from wl_xcon.link import _decode_command
 
     assert parse_command(body) == expected
-    assert _decode_command(msgpack.packb({**body, "by": PAGE}, use_bin_type=True)) == expected
+    assert _decode_command(msgpack.packb({**body, "by": {"kind": "box", "name": "jake"}}, use_bin_type=True)) == expected
 
 
 @pytest.mark.parametrize(
@@ -2845,14 +2846,14 @@ def test_a_command_is_sent_when_the_rig_acknowledges_it(zmq_cleanup, server_clea
     )
     server.start()
     try:
-        thread, got = _drained(rig, Pause(by="jake (box, unverified)"))
+        thread, got = _drained(rig, Pause(by=Box("jake")))
         status, answer = _post(server.address[1], {"kind": "pause", "by": "jake"})
         thread.join(timeout=15)
     finally:
         server.close()
 
     assert (status, answer["status"]) == (200, "sent")
-    assert got == [Pause(by="jake (box, unverified)")]
+    assert got == [Pause(by=Box("jake"))]
 
 
 def test_with_taskd_gone_the_page_is_told_not_delivered(server_cleanup):
@@ -2943,7 +2944,7 @@ def test_a_mark_goes_ahead_of_a_command_waiting_on_the_rig(zmq_cleanup, server_c
     assert waiting and waiting[0][0] == 504, "the pause was never acknowledged"
     assert noted[0] == 200
     (note,) = [command for command in got if isinstance(command, Mark)]
-    assert (note.mark, note.note, note.by) == (answer["mark"], "bubble", "jake (box, unverified)")
+    assert (note.mark, note.note, note.by) == (answer["mark"], "bubble", Box("jake"))
     assert note.pressed_at == 1_700_000_000.5
     assert before <= note.received_at <= after
 
@@ -2984,7 +2985,7 @@ def test_a_note_for_a_mark_this_console_does_not_know_carries_no_instants(
         server.close()
 
     assert status == 200
-    assert got == [Mark(mark=42, note="", by="jake (box, unverified)", pressed_at=None, received_at=None)]
+    assert got == [Mark(mark=42, note="", by=Box("jake"), pressed_at=None, received_at=None)]
 
 
 def test_the_marks_kept_for_their_notes_are_the_newest_and_each_is_given_once():
@@ -3225,7 +3226,7 @@ class _Session:
         if self.runner.is_alive():
             try:
                 with self.zmq_cleanup(ZmqConsole(self.pub, self.rep)) as rescue:
-                    rescue.send(Stop(by="e2e-cleanup"))
+                    rescue.send(Stop(by=Box("e2e-cleanup")))
             except Exception:  # noqa: BLE001 -- best-effort cleanup
                 pass
         self.runner.join(timeout=30)
@@ -3346,13 +3347,13 @@ def test_e2e_a_setting_is_staged_then_applied_at_the_next_trial(
         applied = run.seen(applied_value)
         (row,) = staged.staged
         assert (row.name, row.was, row.now, row.by) == (
-            "fix_hold", 0.3, 0.4, "jake (box, unverified)"
+            "fix_hold", 0.3, 0.4, Box("jake")
         )
         assert any(p.name == "fix_hold" and p.value == 0.3 for p in staged.params)
         assert not applied.staged
         assert applied.trial_index == staged.trial_index + 1
         assert any(
-            c.kind == "set" and c.by == "jake (box, unverified)" and c.said.startswith("fix_hold 0.30 → 0.40")
+            c.kind == "set" and c.by == Box("jake") and c.said.startswith("fix_hold 0.30 → 0.40")
             for c in applied.controls
         )
     run.finished()
@@ -3370,7 +3371,7 @@ def test_e2e_a_malformed_setting_is_refused_on_the_feed_and_the_session_runs_on(
         assert run.post({"kind": "set", "by": "jake", "name": "fix_hold", "value": "abc"})[0] == 200
         refused = run.frame(lambda f: any(r.name == "fix_hold" for r in f.refusals))
         (refusal,) = [r for r in refused.refusals if r.name == "fix_hold"]
-        assert refusal.by == "jake (box, unverified)"
+        assert refusal.by == Box("jake")
         assert "'fix_hold' takes a number (s)" in refusal.why
         run.frame(lambda f: f.trial_index > refused.trial_index + 2)
         assert run.post({"kind": "stop", "by": "jake"})[0] == 200
@@ -3482,7 +3483,7 @@ def test_e2e_a_mark_is_strobed_in_its_trial_and_recorded_with_three_instants_and
     stamp, pause, note, stop = run.controls()
     assert pause["kind"] == "pause"
     assert (stamp["kind"], stamp["mark"], stamp["number"]) == ("mark", signal["mark"], 1)
-    assert (stop["kind"], stop["by"]) == ("stop", "jake (box, unverified)")
+    assert (stop["kind"], stop["by"]) == ("stop", {"kind": "box", "name": "jake"})
     codes = run.cards[0].codes
     assert codes.count(MARK_CODE) == 1
     starts = [i for i, code in enumerate(codes) if code == FIX_ON]
@@ -3494,7 +3495,7 @@ def test_e2e_a_mark_is_strobed_in_its_trial_and_recorded_with_three_instants_and
     else:
         trial_end = next(i for i in range(trial_start, len(codes)) if codes[i] in MARKERS)
         assert trial_start < at < trial_end, "strobed inside the trial its stamp names"
-    assert note["note"] == "sneeze" and note["by"] == "jake (box, unverified)"
+    assert note["note"] == "sneeze" and note["by"] == {"kind": "box", "name": "jake"}
     assert note["pressed_at"] == pressed
     assert pressed <= note["received_at"] <= note["stamped_at"] + 60.0
     assert note["received_after_pressed_s"] == pytest.approx(note["received_at"] - pressed)
@@ -3565,7 +3566,7 @@ def test_e2e_each_kind_of_scheduled_stop_ends_the_session_with_its_reason(
         target = None
     assert ended.stop_kind == "operator"
     assert ended.stopped_because == reason.format(target=target, day=day)
-    assert fired["by"] == "jake (box, unverified)"
+    assert fired["by"] == {"kind": "box", "name": "jake"}
     assert ended.scheduled_stop is None
     assert running.stop_kind is None
     if "ml" in body:
@@ -3742,8 +3743,8 @@ def test_a_rewards_answer_is_sent_unknown_or_not_given_and_it_is_delivered_once(
     delivered*, and says no reward was given. Each is handed to the sender once."""
     sender = _Answers(raised)
 
-    assert serve._rewarded(ManualReward(by="jake"))(sender) == answer
-    assert sender.sent == [ManualReward(by="jake")]
+    assert serve._rewarded(ManualReward(by=Box("jake")))(sender) == answer
+    assert sender.sent == [ManualReward(by=Box("jake"))]
 
 
 def test_a_reward_the_rig_takes_and_never_acknowledges_is_unknown_and_sent_once(
@@ -3790,7 +3791,7 @@ def test_a_reward_the_rig_takes_and_never_acknowledges_is_unknown_and_sent_once(
 
     assert answer == REWARD_UNKNOWN
     assert [_decode_command(frames[-1]) for frames in seen] == [
-        ManualReward(by="jake (box, unverified)")
+        ManualReward(by=Box("jake"))
     ]
 
 
@@ -3827,7 +3828,7 @@ def test_e2e_a_reward_pressed_while_paused_is_one_correct_trial_reward_on_the_re
     assert running.stop_kind is None
     assert 'data-cmd="reward" disabled' in greyed
     (refusal,) = [r for r in refused.refusals if r.name == "reward"]
-    assert refusal.by == "jake (box, unverified)"
+    assert refusal.by == Box("jake")
     assert "the session is not paused" in refusal.why
     assert '<button type="button" class="btn" data-cmd="reward">give reward</button>' in live
     assert given.paused_at is not None and given.trial_index == paused.trial_index
@@ -3837,7 +3838,7 @@ def test_e2e_a_reward_pressed_while_paused_is_one_correct_trial_reward_on_the_re
     assert ended.trial_index == paused.trial_index
     pause, reward, stop = run.controls()
     assert (pause["kind"], reward["kind"], stop["kind"]) == ("pause", "reward", "stop")
-    assert reward["by"] == "jake (box, unverified)"
+    assert reward["by"] == {"kind": "box", "name": "jake"}
     assert (reward["ml"], reward["entry"]) == (REWARD_ML, "reward_correct")
     assert reward["trial_index"] == paused.trial_index
     assert reward["at"] == given.last_reward_at
@@ -3877,7 +3878,9 @@ TASK = "fixation_detection.py"
 #: What nothing measures yet, acknowledged by name to start a run.
 UNKNOWN = ["pump calibration", "eye tracker"]
 #: Who the page's commands are recorded as (`serve._person`).
-BY = "jake (box, unverified)"
+BY = Box("jake")
+#: `BY` as the record writes it: `actor.to_map`'s map (b2b spec §6).
+BY_MAP = {"kind": "box", "name": "jake"}
 #: `wlx taskd`'s head-fixation, release, run-start and run-end codes (`tasks/allocation.py`).
 HEAD_FIXED, HEAD_RELEASED, RUN_START, RUN_END = 4128, 4129, 4135, 4136
 
@@ -4090,10 +4093,10 @@ def test_page_e2e_open_a_session_run_it_twice_and_end_it(tmp_path, monkeypatch, 
     runs = _record(root, "runs.jsonl")
     assert [(r["event"], r["run"]) for r in runs] == [("start", 0), ("end", 0), ("start", 1), ("end", 1)]
     for start in (runs[0], runs[2]):
-        assert start["by"] == BY and start["layers"]["run"] == {}
+        assert start["by"] == BY_MAP and start["layers"]["run"] == {}
         assert start["layers"]["task"]["fix_hold"] == 0.3
         assert {r["name"]: r["acknowledged_by"] for r in start["preflight"] if r["result"] == "unknown"} == {
-            name: BY for name in UNKNOWN
+            name: BY_MAP for name in UNKNOWN
         }
     (refusal,) = [r for r in twice.refusals if r.name == "start"]
     assert refusal.by == BY
@@ -4209,7 +4212,7 @@ def test_page_e2e_an_unknown_item_is_acknowledged_by_its_name_and_found_in_runs_
     assert "pump calibration, eye tracker" in why
     (start,) = [r for r in _record(taskd.folders[2], "runs.jsonl") if r["event"] == "start"]
     assert {r["name"]: r["acknowledged_by"] for r in start["preflight"] if r["result"] == "unknown"} == {
-        name: BY for name in UNKNOWN
+        name: BY_MAP for name in UNKNOWN
     }
 
 
@@ -4313,7 +4316,7 @@ def test_page_e2e_the_hand_reward_is_given_between_runs_and_while_the_return_is_
     assert "no session is open, so no reward was given" in none.why and "XC-158" in none.why
     assert taskd.cards[0].codes.count(MANUAL_REWARD_CODE) == 2, "one press, one reward, none refused"
     rows = [row for row in _record(taskd.folders[2], "controls.jsonl") if row["kind"] == "reward"]
-    assert [(r["by"], r["ml"], r["entry"]) for r in rows] == [(BY, REWARD_ML, "reward_correct")] * 2
+    assert [(r["by"], r["ml"], r["entry"]) for r in rows] == [(BY_MAP, REWARD_ML, "reward_correct")] * 2
 
 
 def test_a_resume_command_from_the_page_is_the_one_the_wire_would_decode_and_is_dispatched():
@@ -4327,7 +4330,7 @@ def test_a_resume_command_from_the_page_is_the_one_the_wire_would_decode_and_is_
     expected = ResumeSession(by=PAGE, session_id="x")
 
     assert parse_command(body) == expected
-    assert _decode_command(msgpack.packb({**body, "by": PAGE}, use_bin_type=True)) == expected
+    assert _decode_command(msgpack.packb({**body, "by": {"kind": "box", "name": "jake"}}, use_bin_type=True)) == expected
     with pytest.raises(BadCommand):
         parse_command({**body, "extra": 1})
     with pytest.raises(BadCommand):

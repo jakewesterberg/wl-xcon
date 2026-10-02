@@ -48,6 +48,8 @@ import re
 from dataclasses import dataclass, field
 from typing import ClassVar, Protocol
 
+from wl_xcon import actor as actors
+from wl_xcon.actor import Actor
 from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 
 #: Bumped whenever a field changes meaning or disappears. ADR-0003: "schema-versioned
@@ -136,7 +138,12 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: can be resumed and why not; `Telemetry.resumed_at`, the instant a session was resumed
 #: (`None` for one opened in this process). Nothing else changed meaning. A reader of 12
 #: refuses 13 and 13 refuses 12, by name.
-SCHEMA = 13
+#:
+#: 14 (2026-10-02, P4d-2b b2b spec §6): every `by` is an actor's map, a box name or a
+#: wl.works member (`actor.to_map`), where it was a string; a refusal's and a control's
+#: is null for nobody, where it was `"<unknown>"` or empty. A reader of 13 refuses 14 and
+#: 14 refuses 13, by name.
+SCHEMA = 14
 
 #: How many refusals a session keeps, per source, and therefore how many one
 #: `Telemetry` frame can carry.
@@ -211,7 +218,7 @@ class Staged:
     name: str
     was: float | None
     now: float
-    by: str
+    by: Actor
     bounded: bool
 
 
@@ -229,7 +236,7 @@ class Refused:
     """
 
     name: str
-    by: str
+    by: Actor | None
     why: str
 
 
@@ -265,7 +272,7 @@ class ScheduledStop:
 
     kind: str
     target: float
-    by: str
+    by: Actor
     said: str
 
 
@@ -275,13 +282,13 @@ class Control:
     from `taskd.Session.controls`. `kind` is `stop`, `pause`, `resume`, `mark`,
     `note`, `schedule`, `cancel`, `scheduled_stop`, `set` (a staged setting applied) or
     `reward` (a manual reward, given while paused);
-    `by` is who sent it, empty for a mark's stamp, whose sender arrives with its note;
+    `by` is who sent it, `None` for a mark's stamp, whose sender arrives with its note;
     `at` is on the session's anchored clock; `said` is the sentence after the kind.
     The session record keeps every one (`record.CONTROLS`); this feed keeps the last
     `CONTROL_HISTORY`."""
 
     kind: str
-    by: str
+    by: Actor | None
     at: float
     said: str
 
@@ -786,7 +793,7 @@ class Telemetry:
 
 
 def _refusals_out(refusals) -> list:
-    return [{"name": r.name, "by": r.by, "why": r.why} for r in refusals]
+    return [{"name": r.name, "by": actors.to_map_or_none(r.by), "why": r.why} for r in refusals]
 
 
 def _preflight_out(preflight: Preflight | None) -> dict | None:
@@ -926,7 +933,13 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
         "hangs": telemetry.hangs,
         "owed": telemetry.owed,
         "staged": [
-            {"name": s.name, "was": s.was, "now": s.now, "by": s.by, "bounded": s.bounded}
+            {
+                "name": s.name,
+                "was": s.was,
+                "now": s.now,
+                "by": actors.to_map(s.by),
+                "bounded": s.bounded,
+            }
             for s in telemetry.staged
         ],
         "refusals": _refusals_out(telemetry.refusals),
@@ -957,12 +970,12 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
             else {
                 "kind": telemetry.scheduled_stop.kind,
                 "target": telemetry.scheduled_stop.target,
-                "by": telemetry.scheduled_stop.by,
+                "by": actors.to_map(telemetry.scheduled_stop.by),
                 "said": telemetry.scheduled_stop.said,
             }
         ),
         "controls": [
-            {"kind": c.kind, "by": c.by, "at": c.at, "said": c.said}
+            {"kind": c.kind, "by": actors.to_map_or_none(c.by), "at": c.at, "said": c.said}
             for c in telemetry.controls
         ],
         "controls_dropped": telemetry.controls_dropped,
@@ -1056,7 +1069,7 @@ def decode(payload: bytes) -> Telemetry | Idle:
         if data.get("phase") == "idle":
             return _idle_from(data)
         return _telemetry_from(data)
-    except (KeyError, TypeError) as exc:
+    except (KeyError, TypeError, actors.NotAnActor) as exc:
         raise FrameError(
             f"a telemetry frame could not be decoded, so it is not shown: "
             f"{_describe(exc)}"
@@ -1073,6 +1086,15 @@ def _describe(exc: Exception) -> str:
     return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
 
+def _refused_in(r: dict) -> Refused:
+    """A refusal row off the wire: its `by` an actor's map, or null for nobody."""
+    return Refused(
+        name=r["name"],
+        by=None if r["by"] is None else actors.from_map(r["by"]),
+        why=r["why"],
+    )
+
+
 def _idle_from(data: dict) -> Idle:
     """`_telemetry_from`'s twin for the idle shape."""
     return Idle(
@@ -1087,7 +1109,7 @@ def _idle_from(data: dict) -> Idle:
             for s in data["stranded"]
         ),
         question=_question_in(data["question"]),
-        refusals=tuple(Refused(**r) for r in data["refusals"]),
+        refusals=tuple(_refused_in(r) for r in data["refusals"]),
         refusals_dropped=data["refusals_dropped"],
         animals=tuple(data["animals"]),
         offered_tasks=tuple(data["offered_tasks"]),
@@ -1119,8 +1141,8 @@ def _telemetry_from(data: dict) -> Telemetry:
         outcomes=data["outcomes"],
         hangs=data["hangs"],
         owed=data["owed"],
-        staged=tuple(Staged(**s) for s in data["staged"]),
-        refusals=tuple(Refused(**r) for r in data["refusals"]),
+        staged=tuple(Staged(**{**s, "by": actors.from_map(s["by"])}) for s in data["staged"]),
+        refusals=tuple(_refused_in(r) for r in data["refusals"]),
         refusals_dropped=data["refusals_dropped"],
         task=data["task"],
         allocation=data["allocation"],
@@ -1135,9 +1157,14 @@ def _telemetry_from(data: dict) -> Telemetry:
         scheduled_stop=(
             None
             if data["scheduled_stop"] is None
-            else ScheduledStop(**data["scheduled_stop"])
+            else ScheduledStop(
+                **{**data["scheduled_stop"], "by": actors.from_map(data["scheduled_stop"]["by"])}
+            )
         ),
-        controls=tuple(Control(**c) for c in data["controls"]),
+        controls=tuple(
+            Control(**{**c, "by": None if c["by"] is None else actors.from_map(c["by"])})
+            for c in data["controls"]
+        ),
         controls_dropped=data["controls_dropped"],
         view=data["view"],
         half_ipd_cm=data["half_ipd_cm"],
@@ -1175,7 +1202,7 @@ class SetParameter:
 
     name: str
     value: float | str
-    by: str
+    by: Actor
 
 
 @dataclass(frozen=True, slots=True)
@@ -1186,7 +1213,7 @@ class Stop:
 
     KIND: ClassVar[str] = "stop"
 
-    by: str
+    by: Actor
 
 
 @dataclass(frozen=True, slots=True)
@@ -1198,7 +1225,7 @@ class Pause:
 
     KIND: ClassVar[str] = "pause"
 
-    by: str
+    by: Actor
 
 
 @dataclass(frozen=True, slots=True)
@@ -1208,7 +1235,7 @@ class Resume:
 
     KIND: ClassVar[str] = "resume"
 
-    by: str
+    by: Actor
 
 
 @dataclass(frozen=True, slots=True)
@@ -1237,7 +1264,7 @@ class Mark:
 
     mark: int
     note: str
-    by: str
+    by: Actor
     pressed_at: float | None
     received_at: float | None
 
@@ -1260,7 +1287,7 @@ class ScheduleStop:
 
     kind: str
     value: str | int | float
-    by: str
+    by: Actor
 
 
 @dataclass(frozen=True, slots=True)
@@ -1269,7 +1296,7 @@ class CancelScheduledStop:
 
     KIND: ClassVar[str] = "cancel"
 
-    by: str
+    by: Actor
 
 
 @dataclass(frozen=True, slots=True)
@@ -1290,7 +1317,7 @@ class ManualReward:
 
     KIND: ClassVar[str] = "reward"
 
-    by: str
+    by: Actor
 
 
 @dataclass(frozen=True, slots=True)
@@ -1303,7 +1330,7 @@ class OpenSession:
 
     KIND: ClassVar[str] = "open"
 
-    by: str
+    by: Actor
     session_id: str
     animal: str
     deployment: str
@@ -1322,7 +1349,7 @@ class CheckRun:
 
     KIND: ClassVar[str] = "check"
 
-    by: str
+    by: Actor
     task: str
     values: dict
 
@@ -1335,7 +1362,7 @@ class StartRun:
 
     KIND: ClassVar[str] = "start"
 
-    by: str
+    by: Actor
     task: str
     values: dict
     trials: int
@@ -1351,7 +1378,7 @@ class EndSession:
 
     KIND: ClassVar[str] = "end"
 
-    by: str
+    by: Actor
     session_id: str | None
     returned: str | None
     confirm: bool
@@ -1363,7 +1390,7 @@ class ResumeSession:
 
     KIND: ClassVar[str] = "resume_session"
 
-    by: str
+    by: Actor
     session_id: str
 
 
@@ -1467,15 +1494,20 @@ def _encode_command(command: Command) -> bytes:
     import msgpack
 
     if isinstance(command, SetParameter):
-        payload = {"kind": "set", "name": command.name, "value": command.value, "by": command.by}
+        payload = {
+            "kind": "set",
+            "name": command.name,
+            "value": command.value,
+            "by": actors.to_map(command.by),
+        }
     elif isinstance(command, (Stop, Pause, Resume, CancelScheduledStop, ManualReward)):
-        payload = {"kind": command.KIND, "by": command.by}
+        payload = {"kind": command.KIND, "by": actors.to_map(command.by)}
     elif isinstance(command, Mark):
         payload = {
             "kind": "mark",
             "mark": command.mark,
             "note": command.note,
-            "by": command.by,
+            "by": actors.to_map(command.by),
             "pressed_at": command.pressed_at,
             "received_at": command.received_at,
         }
@@ -1484,11 +1516,11 @@ def _encode_command(command: Command) -> bytes:
             "kind": "schedule",
             "stop": command.kind,
             "value": command.value,
-            "by": command.by,
+            "by": actors.to_map(command.by),
         }
     elif isinstance(command, OpenSession):
         payload = {
-            "kind": "open", "by": command.by, "session_id": command.session_id,
+            "kind": "open", "by": actors.to_map(command.by), "session_id": command.session_id,
             "animal": command.animal, "deployment": command.deployment,
             "view": command.view, "departure": command.departure,
             "delivered_today": command.delivered_today, "answer": command.answer,
@@ -1496,7 +1528,7 @@ def _encode_command(command: Command) -> bytes:
         }
     elif isinstance(command, (CheckRun, StartRun)):
         payload = {
-            "kind": command.KIND, "by": command.by, "task": command.task,
+            "kind": command.KIND, "by": actors.to_map(command.by), "task": command.task,
             "values": dict(command.values),
         }
         if isinstance(command, StartRun):
@@ -1504,11 +1536,15 @@ def _encode_command(command: Command) -> bytes:
             payload["acknowledged"] = list(command.acknowledged)
     elif isinstance(command, EndSession):
         payload = {
-            "kind": "end", "by": command.by, "session_id": command.session_id,
+            "kind": "end", "by": actors.to_map(command.by), "session_id": command.session_id,
             "returned": command.returned, "confirm": command.confirm,
         }
     elif isinstance(command, ResumeSession):
-        payload = {"kind": command.KIND, "by": command.by, "session_id": command.session_id}
+        payload = {
+            "kind": command.KIND,
+            "by": actors.to_map(command.by),
+            "session_id": command.session_id,
+        }
     else:
         raise TypeError(f"no wire encoding for {command!r}")
     return msgpack.packb(payload, use_bin_type=True)
@@ -1520,9 +1556,9 @@ class CommandRefused(ValueError):
     Carries what the packet said of the parameter and of the sender, where it said
     them, so the `Refused` row `ZmqLink.drain` makes from it names both: a console's
     feed then says whose write was refused and which setting it was for, not
-    `<transport>` by `<unknown>`. `why` is a complete sentence."""
+    `<transport>` by nobody. `why` is a complete sentence."""
 
-    def __init__(self, name: str, by: str, why: str) -> None:
+    def __init__(self, name: str, by: Actor | None, why: str) -> None:
         super().__init__(why)
         self.name = name
         self.by = by
@@ -1549,23 +1585,41 @@ def _quoted(value: object) -> str:
     return text
 
 
-def _actor(by: object, name: str) -> str:
-    """`by`, when it is a name: a non-empty string no longer than `TEXT_LIMIT`.
+def _actor(by: object, name: str) -> Actor:
+    """`by`, when it is an actor's map with a name (b2b spec §6): a box name of 1 to
+    `TEXT_LIMIT` characters, or a wl.works member.
 
     S9a §6: every welfare-affecting write records its actor, and a write from nobody
-    is refused rather than recorded as written by nobody. `name` is what the refusal
-    is filed under -- the parameter for a setting, the command's kind otherwise."""
-    if not isinstance(by, str) or not by.strip() or len(by) > TEXT_LIMIT:
+    is refused rather than recorded as written by nobody. **A bare string is refused
+    too**: since b2b a name with nothing to say what kind it is is not an actor. `name`
+    is what the refusal is filed under -- the parameter for a setting, the command's
+    kind otherwise."""
+    try:
+        who = actors.from_map(by)
+    except actors.NotAnActor:
+        who = None
+    if who is None or not who.name.strip():
         raise CommandRefused(
             name,
-            "<unknown>",
-            f"a {name!r} command must say who sent it (`by`, a name of at most "
-            f"{TEXT_LIMIT} characters; S9a §6), and this one did not, so it is refused",
+            None,
+            f"a {name!r} command must say who sent it (`by`: a box name or a wl.works "
+            f"member; S9a §6), and this one did not, so it is refused",
         )
-    return by
+    return who
 
 
-def _setting(value: object, name: str, by: str) -> float | str:
+def _sender(by: object) -> Actor | None:
+    """Who a malformed command said it was from, when it said so readably, for its
+    refusal's row; `None` otherwise. **Under `_actor`'s rule**: a blank box name, which
+    `actor.from_map` reads because a record can hold one, names nobody here."""
+    try:
+        who = actors.from_map(by)
+    except actors.NotAnActor:
+        return None
+    return who if who.name.strip() else None
+
+
+def _setting(value: object, name: str, by: Actor) -> float | str:
     """**M8.** A setting's value: a finite real number that is not a `bool`, returned
     as a `float`, or a word for a categorical parameter, returned as itself.
 
@@ -1619,7 +1673,7 @@ def _setting(value: object, name: str, by: str) -> float | str:
     return float(value)
 
 
-def _word(data: dict, key: str, kind: str, by: str, *, optional: bool = False) -> str | None:
+def _word(data: dict, key: str, kind: str, by: Actor, *, optional: bool = False) -> str | None:
     """A field that is one non-empty string of at most `TEXT_LIMIT` characters, or
     `None` where `optional` allows it; refused otherwise, naming the field."""
     value = data.get(key)
@@ -1635,7 +1689,7 @@ def _word(data: dict, key: str, kind: str, by: str, *, optional: bool = False) -
     return value
 
 
-def _values(data: dict, kind: str, by: str) -> dict:
+def _values(data: dict, kind: str, by: Actor) -> dict:
     """A run's starting values: at most `VALUES_LIMIT` names, each a parameter name, each
     value what a setting may be (`_setting`, M8's rule, called unchanged)."""
     values = data.get("values")
@@ -1687,12 +1741,9 @@ def _command_from(data: dict) -> Command:
     if kind == "set":
         name = data.get("name")
         if not isinstance(name, str) or not name or len(name) > TEXT_LIMIT:
-            sender = data.get("by")
             raise CommandRefused(
                 "<transport>",
-                sender
-                if isinstance(sender, str) and sender.strip() and len(sender) <= TEXT_LIMIT
-                else "<unknown>",
+                _sender(data.get("by")),
                 f"a setting arrived with no parameter name it could be for "
                 f"({_quoted(name)}), so it is refused",
             )
@@ -1812,7 +1863,7 @@ def _command_from(data: dict) -> Command:
     raise ValueError(f"unknown command kind on the wire: {_quoted(kind)}")
 
 
-def _instant(data: dict, key: str, by: str) -> float | None:
+def _instant(data: dict, key: str, by: Actor) -> float | None:
     """`pressed_at` or `received_at`: absent or `None` is `None`; otherwise a finite
     number of POSIX seconds, or the mark is refused."""
     value = data.get(key)
@@ -2167,10 +2218,11 @@ class ZmqLink:
         **That authentication is P4d-3's, and this is what it is waiting for**
         (CLAUDE.md: a "not yet" must name what it is waiting for). S9a §6 designs it:
         the box as an OAuth2 client of `wl-works`, `Actor` as `Verified(person,
-        issuer, token id)` or `Local(box credential)` rather than the bare `by: str`
-        this link carries today. Until that lands, `by` is whatever the sender typed,
-        and a loopback-only bind is the only thing making that acceptable. Grep
-        `P4d-3` when it does.
+        issuer, token id)` or `Local(box credential)`. The actor types exist since b2b
+        (`actor.py`), and a `Member` is made only by `wlx serve` after a wl.works token
+        checks out; on this socket, a `by` is still whatever the local sender wrote, so
+        the loopback-only bind remains what makes that acceptable. Grep `P4d-3` when
+        that authentication lands.
 
         `ZmqConsole` is deliberately not restricted the same way: it *connects*, and
         a console reaching a session on another host is a decision the console's own
@@ -2336,7 +2388,7 @@ class ZmqLink:
         realistic source of this, not just corruption) loses a command with no
         record anywhere that anything was even attempted -- the same failure
         `Session.refusals` exists to prevent for a rejected `SetParameter`. `name`
-        and `by` are placeholders (`"<transport>"`, `"<unknown>"`): a packet that
+        is a placeholder (`"<transport>"`) and `by` is `None`: a packet that
         failed to decode carries no reliable actor or parameter name to report,
         unlike a `SetParameter` that decoded fine and was rejected by `Session.set`.
 
@@ -2359,7 +2411,7 @@ class ZmqLink:
             self._refuse(
                 Refused(
                     name="mark",
-                    by="<unknown>",
+                    by=None,
                     why=(
                         f"{self.mark_malformed} mark signal(s) were not eight bytes "
                         f"naming a mark, and were ignored"
@@ -2378,7 +2430,7 @@ class ZmqLink:
                 self._refuse(Refused(name=refused.name, by=refused.by, why=refused.why))
             except Exception as exc:  # noqa: BLE001 -- deliberately broad, see above
                 self._refuse(
-                    Refused(name="<transport>", by="<unknown>", why=f"could not decode command: {exc}")
+                    Refused(name="<transport>", by=None, why=f"could not decode command: {exc}")
                 )
         return commands
 

@@ -9,6 +9,7 @@ import pytest
 
 from _sessions import WALL, bounds
 from wl_xcon import marks, stranded
+from wl_xcon.actor import Box
 from wl_xcon.bounds import Exceeded
 from wl_xcon.link import Stranded
 from wl_xcon.record import welfare_note
@@ -23,7 +24,7 @@ def _notes(root, session_id, *rows):
     directory.mkdir(parents=True)
     for kind, at in rows:
         welfare_note(directory, kind=kind, subject="A", was=at, now=at, reason="",
-                     by="jake", how="t", recorded_at=at)
+                     by=Box("jake"), how="t", recorded_at=at)
     return directory
 
 
@@ -119,10 +120,10 @@ def test_a_restored_session_takes_its_return_under_the_rules_and_writes_its_rows
     restored = stranded.restore(found, bounds(), directory, lambda: WALL)
 
     with pytest.raises(marks.Owed):
-        marks.take_return(restored, WALL - 2 * 3600, confirmed=False, by="jake", how="the page")
+        marks.take_return(restored, WALL - 2 * 3600, confirmed=False, by=Box("jake"), how="the page")
     with pytest.raises(Exceeded, match="having left it at"):
-        marks.take_return(restored, WALL - 4 * 3600, confirmed=True, by="jake", how="the page")
-    marks.take_return(restored, WALL - 2 * 3600, confirmed=True, by="jake", how="the page")
+        marks.take_return(restored, WALL - 4 * 3600, confirmed=True, by=Box("jake"), how="the page")
+    marks.take_return(restored, WALL - 2 * 3600, confirmed=True, by=Box("jake"), how="the page")
 
     rows = [json.loads(l) for l in (directory / "welfare_notes.jsonl").read_text().splitlines()]
     assert [row["kind"] for row in rows] == ["departure", "returned", "return confirmed"]

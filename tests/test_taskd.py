@@ -30,6 +30,7 @@ from pathlib import Path
 
 import pytest
 
+from wl_xcon.actor import Box
 from wl_xcon.bounds import Bounds, Ceiling, Exceeded, Floor
 from wl_xcon.cli import _load_trial
 from wl_xcon.codes import BLOCK_END
@@ -301,7 +302,7 @@ def test_the_run_a_session_spec_describes_is_run_0_in_every_file_it_writes(tmp_p
     """Spec §6.3: a row per run -- as a start and an end (Plan decision 4) -- and every
     trial row names its run. `wlx run`'s one run is run 0, with no pre-flight taken."""
     session = _session(_spec(tmp_path, trials=5))
-    session.set("fix_hold", 0.5, by="console")
+    session.set("fix_hold", 0.5, by=Box("console"))
 
     session.run()
 
@@ -448,7 +449,7 @@ def test_a_second_run_starts_afresh_and_the_session_goes_on(tmp_path):
     session = _session(_spec(tmp_path, deployment=Deployment.RIG_CHAIRED))
     session.run(_run_spec(trials=4, fix_hold=0.4))
     fluid = session.welfare.commanded
-    session.scheduled_stop = ("trials", 99.0, "jake", "after trial 99")
+    session.scheduled_stop = ("trials", 99.0, Box("jake"), "after trial 99")
 
     census = session.run(_run_spec(trials=2))
 
@@ -505,14 +506,14 @@ def test_the_config_holds_what_is_fixed_and_is_written_as_the_session_opens(tmp_
 
 def test_a_control_names_the_run_it_was_made_in(tmp_path):
     """Plan decision 4: rows in `controls.jsonl` name their run, as trial rows do."""
-    link = _Scripted(script={1: [Resume(by="sam")]})
+    link = _Scripted(script={1: [Resume(by=Box("sam"))]})
     session = _session(
         _spec(tmp_path, trials=2, deployment=Deployment.RIG_CHAIRED), link=link
     )
-    link.queue(Pause(by="jake"))
+    link.queue(Pause(by=Box("jake")))
     session.run(_run_spec(trials=2))
-    link.script = {2: [Resume(by="sam")]}
-    link.queue(Pause(by="jake"))
+    link.script = {2: [Resume(by=Box("sam"))]}
+    link.queue(Pause(by=Box("jake")))
     session.run(_run_spec(trials=2))
 
     rows = _controls_rows(session)
@@ -552,7 +553,7 @@ def test_a_setting_offered_before_any_run_of_a_taskless_session_is_refused(tmp_p
     session = _session(_spec(tmp_path, task=""))
 
     with pytest.raises(Exceeded, match="not a parameter this task declares"):
-        session.set("fix_hold", 0.5, by="console")
+        session.set("fix_hold", 0.5, by=Box("console"))
 
 
 def test_a_refused_run_leaves_the_last_runs_state_as_it_was(tmp_path):
@@ -1048,7 +1049,7 @@ def test_a_live_write_is_staged_and_applied_at_a_trial_boundary(tmp_path):
     parameter that changed under a running trial makes that trial's record a
     description of neither value."""
     session = _session(_spec(tmp_path, trials=4))
-    session.set("fix_hold", 0.5, by="console")
+    session.set("fix_hold", 0.5, by=Box("console"))
 
     assert session.spec.values["fix_hold"] == 0.3, "not until the boundary"
 
@@ -1067,7 +1068,7 @@ def test_a_live_write_is_recorded_with_its_origin(tmp_path):
     """One validated write path whatever the origin, and the actor recorded -- half
     a guarantee otherwise (S8 §3.3)."""
     session = _session(_spec(tmp_path, trials=4))
-    session.set("fix_hold", 0.5, by="console")
+    session.set("fix_hold", 0.5, by=Box("console"))
 
     session.run()
 
@@ -1079,8 +1080,8 @@ def test_a_live_write_is_recorded_with_its_origin(tmp_path):
     ]
     assert changes == [
         {
-            "sequence": 1, "name": "fix_hold", "was": 0.3, "now": 0.5, "by": "console",
-            "run": 0,
+            "sequence": 1, "name": "fix_hold", "was": 0.3, "now": 0.5,
+            "by": {"kind": "box", "name": "console"}, "run": 0,
         }
     ]
 
@@ -1092,7 +1093,7 @@ def test_a_live_write_outside_a_parameters_declared_range_is_refused(tmp_path):
     session = _session(_spec(tmp_path, trials=4))
 
     with pytest.raises(Exceeded, match="fix_hold"):
-        session.set("fix_hold", 99.0, by="console")
+        session.set("fix_hold", 99.0, by=Box("console"))
 
 
 def test_a_live_write_to_an_undeclared_parameter_is_refused(tmp_path):
@@ -1101,7 +1102,7 @@ def test_a_live_write_to_an_undeclared_parameter_is_refused(tmp_path):
     session = _session(_spec(tmp_path, trials=4))
 
     with pytest.raises(Exceeded, match="fix_hld"):
-        session.set("fix_hld", 0.5, by="console")
+        session.set("fix_hld", 0.5, by=Box("console"))
 
 
 def test_a_live_write_to_a_welfare_bounded_value_goes_through_its_ceiling(tmp_path):
@@ -1118,14 +1119,14 @@ def test_a_live_write_to_a_welfare_bounded_value_goes_through_its_ceiling(tmp_pa
     """
     session = _session(_spec(tmp_path, trials=4))
 
-    session.set("reward_correct", 0.30, by="console")
+    session.set("reward_correct", 0.30, by=Box("console"))
     assert session.spec.bounds.value("reward_correct") == 0.15, (
         "the value moved as the command was offered rather than at the boundary"
     )
-    assert session.staged[-1] == ("reward_correct", 0.15, 0.30, "console", True)
+    assert session.staged[-1] == ("reward_correct", 0.15, 0.30, Box("console"), True)
 
     with pytest.raises(Exceeded, match="reward_correct"):
-        session.set("reward_correct", 0.90, by="console")
+        session.set("reward_correct", 0.90, by=Box("console"))
 
 
 def test_a_parameter_change_is_strobed_so_the_discontinuity_is_on_the_clock(tmp_path):
@@ -1134,7 +1135,7 @@ def test_a_parameter_change_is_strobed_so_the_discontinuity_is_on_the_clock(tmp_
     range puts the *timing* of the discontinuity in the stream, with the values in
     the session record beside it."""
     session = _session(_spec(tmp_path, trials=4))
-    session.set("fix_hold", 0.5, by="console")
+    session.set("fix_hold", 0.5, by=Box("console"))
 
     session.run()
 
@@ -1185,7 +1186,7 @@ def test_a_queued_commands_staged_value_is_visible_before_it_applies(tmp_path):
     link = Simulated()
     spec = _spec(tmp_path, trials=3)
     session = _session(spec, link=link)
-    link.queue(SetParameter(name="fix_hold", value=0.4, by="jake"))
+    link.queue(SetParameter(name="fix_hold", value=0.4, by=Box("jake")))
 
     session.run()
 
@@ -1208,13 +1209,13 @@ def test_a_command_from_a_console_lands_at_the_next_boundary_with_its_actor(tmp_
     link = Simulated()
     spec = _spec(tmp_path, trials=3)
     session = _session(spec, link=link)
-    link.queue(SetParameter(name="fix_hold", value=0.4, by="jake"))
+    link.queue(SetParameter(name="fix_hold", value=0.4, by=Box("jake")))
 
     session.run()
 
     changes = _parameter_changes(session)
     assert changes[0]["name"] == "fix_hold"
-    assert changes[0]["by"] == "jake"
+    assert changes[0]["by"] == {"kind": "box", "name": "jake"}
 
 
 def test_a_console_command_moving_reward_volume_goes_through_its_ceiling(tmp_path):
@@ -1233,14 +1234,14 @@ def test_a_console_command_moving_reward_volume_goes_through_its_ceiling(tmp_pat
     link = Simulated()
     spec = _spec(tmp_path, trials=3)
     session = _session(spec, link=link)
-    link.queue(SetParameter(name="reward_correct", value=0.90, by="jake"))
-    link.queue(SetParameter(name="reward_correct", value=0.30, by="jake"))
+    link.queue(SetParameter(name="reward_correct", value=0.90, by=Box("jake")))
+    link.queue(SetParameter(name="reward_correct", value=0.30, by=Box("jake")))
 
     session.run()
 
     assert len(session.refusals) == 1
     assert session.refusals[0][0] == "reward_correct"
-    assert session.refusals[0][1] == "jake"
+    assert session.refusals[0][1] == Box("jake")
     assert session.spec.bounds.value("reward_correct") == 0.30
 
     staged = link.published[0].staged
@@ -1258,11 +1259,11 @@ def test_a_stop_command_ends_the_session_at_a_boundary_not_mid_trial(tmp_path):
     link = Simulated()
     spec = _spec(tmp_path, trials=100)
     session = _session(spec, link=link)
-    link.queue(Stop(by="jake"))
+    link.queue(Stop(by=Box("jake")))
 
     census = session.run()
 
-    assert session.stopped_because == "stopped by jake"
+    assert session.stopped_because == "stopped by jake (box, unverified)"
     assert sum(census.outcomes.values()) < 100
 
 
@@ -1273,14 +1274,14 @@ def test_a_refused_command_does_not_stop_the_session(tmp_path):
     link = Simulated()
     spec = _spec(tmp_path, trials=3)
     session = _session(spec, link=link)
-    link.queue(SetParameter(name="not_a_parameter", value=1.0, by="jake"))
+    link.queue(SetParameter(name="not_a_parameter", value=1.0, by=Box("jake")))
 
     census = session.run()
 
     assert sum(census.outcomes.values()) == 3, "the session ran its block quota"
     assert len(session.refusals) == 1
     assert session.refusals[0][0] == "not_a_parameter"
-    assert session.refusals[0][1] == "jake"
+    assert session.refusals[0][1] == Box("jake")
 
 
 def test_a_refusal_appears_in_the_telemetry_a_console_reads(tmp_path):
@@ -1292,14 +1293,14 @@ def test_a_refusal_appears_in_the_telemetry_a_console_reads(tmp_path):
     link = Simulated()
     spec = _spec(tmp_path, trials=3)
     session = _session(spec, link=link)
-    link.queue(SetParameter(name="not_a_parameter", value=1.0, by="jake"))
+    link.queue(SetParameter(name="not_a_parameter", value=1.0, by=Box("jake")))
 
     session.run()
 
     refused = link.published[0].refusals
     assert len(refused) == 1
     assert refused[0].name == "not_a_parameter"
-    assert refused[0].by == "jake"
+    assert refused[0].by == Box("jake")
     # Still on the very last frame -- refusals accumulate for the session's life,
     # unlike `staged`, which clears at the boundary the change actually applies.
     assert len(link.published[-1].refusals) == 1
@@ -1335,11 +1336,11 @@ def test_the_last_telemetry_names_a_consoles_stop_reason(tmp_path):
     link = Simulated()
     spec = _spec(tmp_path, trials=100)
     session = _session(spec, link=link)
-    link.queue(Stop(by="jake"))
+    link.queue(Stop(by=Box("jake")))
 
     session.run()
 
-    assert link.published[-1].stopped_because == "stopped by jake"
+    assert link.published[-1].stopped_because == "stopped by jake (box, unverified)"
 
 
 def test_the_last_telemetry_names_every_block_finished(tmp_path):
@@ -1401,7 +1402,7 @@ def test_a_welfare_bounded_change_applies_at_the_next_boundary_like_any_other(
     spec = _spec(tmp_path, trials=3)
     session = _session(spec, link=link)
     seen = _watch(session)
-    link.queue(SetParameter(name="reward_correct", value=0.30, by="jake"))
+    link.queue(SetParameter(name="reward_correct", value=0.30, by=Box("jake")))
 
     session.run()
 
@@ -1424,7 +1425,7 @@ def test_a_bounded_changes_record_row_lands_in_the_pass_that_applies_it(tmp_path
     spec = _spec(tmp_path, trials=3)
     session = _session(spec, link=link)
     seen = _watch(session)
-    link.queue(SetParameter(name="reward_correct", value=0.30, by="jake"))
+    link.queue(SetParameter(name="reward_correct", value=0.30, by=Box("jake")))
 
     session.run()
 
@@ -1475,7 +1476,7 @@ def test_a_refused_welfare_bounded_set_reaches_the_session_record(tmp_path):
     link = Simulated()
     spec = _spec(tmp_path, trials=3)
     session = _session(spec, link=link)
-    link.queue(SetParameter(name="reward_correct", value=0.90, by="jake"))
+    link.queue(SetParameter(name="reward_correct", value=0.90, by=Box("jake")))
 
     session.run()
 
@@ -1485,7 +1486,7 @@ def test_a_refused_welfare_bounded_set_reaches_the_session_record(tmp_path):
     ]
     assert len(rows) == 1
     assert rows[0]["name"] == "reward_correct"
-    assert rows[0]["by"] == "jake"
+    assert rows[0]["by"] == {"kind": "box", "name": "jake"}
     assert rows[0]["asked"] == 0.90
     assert "0.4" in rows[0]["why"], "the row does not say what the ceiling was"
 
@@ -1504,9 +1505,9 @@ def test_a_recorded_refusal_says_where_in_the_session_it_happened(tmp_path):
     link = Simulated()
     spec = _spec(tmp_path, trials=3)
     session = _session(spec, link=link)
-    link.queue(SetParameter(name="reward_correct", value=0.90, by="jake"))
+    link.queue(SetParameter(name="reward_correct", value=0.90, by=Box("jake")))
     session.observe = lambda condition, values, result: (
-        link.queue(SetParameter(name="reward_correct", value=0.80, by="sam"))
+        link.queue(SetParameter(name="reward_correct", value=0.80, by=Box("sam")))
         if not link._queued
         else None
     )
@@ -1527,7 +1528,7 @@ def test_a_recorded_refusal_says_where_in_the_session_it_happened(tmp_path):
     assert rows[1]["session_seconds"] > 0.0, "every row reads as the session's start"
     seconds = [row["session_seconds"] for row in rows]
     assert seconds == sorted(seconds) and len(set(seconds)) == 4
-    assert [row["by"] for row in rows] == ["jake", "sam", "sam", "sam"]
+    assert [row["by"]["name"] for row in rows] == ["jake", "sam", "sam", "sam"]
 
 
 def test_an_ordinary_parameter_typo_stays_out_of_the_session_record(tmp_path):
@@ -1539,7 +1540,7 @@ def test_an_ordinary_parameter_typo_stays_out_of_the_session_record(tmp_path):
     link = Simulated()
     spec = _spec(tmp_path, trials=3)
     session = _session(spec, link=link)
-    link.queue(SetParameter(name="not_a_parameter", value=1.0, by="jake"))
+    link.queue(SetParameter(name="not_a_parameter", value=1.0, by=Box("jake")))
 
     session.run()
 
@@ -1558,7 +1559,7 @@ def _flood(link, n: int) -> None:
     """`n` ceiling refusals with distinguishable asked-values, so a test can tell
     which end of the flood survived."""
     for i in range(n):
-        link.queue(SetParameter(name="reward_correct", value=1.0 + i / 100, by="jake"))
+        link.queue(SetParameter(name="reward_correct", value=1.0 + i / 100, by=Box("jake")))
 
 
 def test_the_recorded_refusal_log_keeps_the_first_rows_not_the_last(tmp_path):
@@ -1629,7 +1630,7 @@ def test_the_sessions_own_refusal_list_is_capped_like_the_other_two(tmp_path):
     spec = _spec(tmp_path, trials=3)
     session = _session(spec, link=link)
     for n in range(REFUSAL_HISTORY + 10):
-        link.queue(SetParameter(name=f"not_a_parameter_{n}", value=1.0, by="jake"))
+        link.queue(SetParameter(name=f"not_a_parameter_{n}", value=1.0, by=Box("jake")))
 
     session.run()
 
@@ -1657,7 +1658,7 @@ def test_a_session_that_finishes_its_blocks_says_it_completed(tmp_path):
 
 def test_a_session_a_console_stopped_says_an_operator_stopped_it(tmp_path):
     link = Simulated()
-    link.queue(Stop(by="jake"))
+    link.queue(Stop(by=Box("jake")))
     session = _session(_spec(tmp_path, trials=50), link=link)
 
     session.run()
@@ -1842,12 +1843,12 @@ def test_a_return_is_recorded_with_who_and_how(tmp_path):
     session = _chaired(tmp_path)
     session.left_cage(at=WALL_NOW - 60.0)
 
-    session.returned_to_cage(at=WALL_NOW, by="jake", how="terminal")
+    session.returned_to_cage(at=WALL_NOW, by=Box("jake"), how="terminal")
 
     rows = _welfare_notes(session)
     assert [row["kind"] for row in rows] == ["departure", "returned"]
     assert rows[1]["now"] == WALL_NOW
-    assert rows[1]["by"] == "jake"
+    assert rows[1]["by"] == {"kind": "box", "name": "jake"}
     assert rows[1]["how"] == "terminal"
 
 
@@ -1855,7 +1856,7 @@ def test_a_far_return_that_was_confirmed_says_so(tmp_path):
     session = _chaired(tmp_path, bounds=_bounds(out_of_cage=28_800.0))
     session.left_cage(at=WALL_NOW - 7_200.0, confirmed=True)
 
-    session.returned_to_cage(at=WALL_NOW - 3_600.0, confirmed=True, by="jake")
+    session.returned_to_cage(at=WALL_NOW - 3_600.0, confirmed=True, by=Box("jake"))
 
     kinds = [row["kind"] for row in _welfare_notes(session)]
     assert kinds == ["departure", "returned", "return confirmed"]
@@ -2066,7 +2067,7 @@ def test_the_closed_frame_tells_nobody_to_bring_back_an_animal_already_home(
     try:
         assert _until(lambda: link.published[-1].phase == "awaiting_return")
         assert link.published[-1].duration_warning is not None, "open, it warns"
-        session.returned_to_cage(at=WALL_NOW + 60.0, by="jake")
+        session.returned_to_cage(at=WALL_NOW + 60.0, by=Box("jake"))
         assert _until(lambda: session.phase == "closed")
     finally:
         give_up.set()
@@ -2092,7 +2093,7 @@ def test_a_return_past_the_ceiling_closes_with_no_warning_on_any_frame(tmp_path)
     session.phase = "awaiting_return"  # where `await_return` has put it
     assert "against a ceiling of" in session.duration_warning(wall()), "open, past it"
 
-    session.returned_to_cage(at=WALL_NOW + 850.0, by="jake")
+    session.returned_to_cage(at=WALL_NOW + 850.0, by=Box("jake"))
 
     assert session.phase == "awaiting_return", "the window before the closed frame"
     assert session.duration_warning(wall()) is None
@@ -2199,7 +2200,7 @@ def test_the_terminal_can_record_the_return_while_await_return_is_polling(tmp_pa
     thread, give_up = _awaiting(session)
     try:
         assert _until(lambda: link.published[-1].phase == "awaiting_return")
-        session.returned_to_cage(at=WALL_NOW + 60.0, by="jake")
+        session.returned_to_cage(at=WALL_NOW + 60.0, by=Box("jake"))
         assert _until(lambda: session.phase == "closed")
     finally:
         give_up.set()
@@ -2214,8 +2215,8 @@ def test_after_the_loop_a_parameter_or_a_stop_is_refused_not_applied(tmp_path):
     """Review Focus 5."""
     link, wall = Simulated(), _Wall(WALL_NOW)
     session = _fixed_and_run(tmp_path, link, wall)
-    link.queue(SetParameter(name="fix_hold", value=0.4, by="jake"))
-    link.queue(Stop(by="sam"))
+    link.queue(SetParameter(name="fix_hold", value=0.4, by=Box("jake")))
+    link.queue(Stop(by=Box("sam")))
 
     thread, give_up = _awaiting(session)
     try:
@@ -2224,7 +2225,9 @@ def test_after_the_loop_a_parameter_or_a_stop_is_refused_not_applied(tmp_path):
         give_up.set()
         thread.join(timeout=2)
 
-    assert [(n, b) for n, b, _ in session.refusals] == [("fix_hold", "jake"), ("stop", "sam")]
+    assert [(n, b) for n, b, _ in session.refusals] == [
+        ("fix_hold", Box("jake")), ("stop", Box("sam"))
+    ]
     assert all("waiting for the animal's return" in why for _, _, why in session.refusals)
     assert session.staged == ()
     assert session.stop_kind == "completed", "a late stop changes nothing"
@@ -2258,7 +2261,7 @@ def test_a_fault_skipped_the_release_and_the_return_can_still_land(tmp_path):
     thread, give_up = _awaiting(session)
     try:
         assert _until(lambda: session.welfare.released_wall_at is not None)
-        session.returned_to_cage(at=WALL_NOW, by="jake")
+        session.returned_to_cage(at=WALL_NOW, by=Box("jake"))
         assert _until(lambda: session.phase == "closed")
     finally:
         give_up.set()
@@ -2682,13 +2685,13 @@ def test_a_malformed_setting_is_refused_and_the_session_runs_on(tmp_path, name, 
     refused with a sentence rather than raising `TypeError` out of `bounds._finite`,
     which `run()`'s fault handler turned into the end of the session."""
     link = Simulated()
-    link.queue(SetParameter(name=name, value=value, by="jake"))
+    link.queue(SetParameter(name=name, value=value, by=Box("jake")))
     session = _session(_spec(tmp_path, trials=5), link=link)
 
     session.run()
 
     assert session.stop_kind == "completed"
-    assert [(n, b) for n, b, _ in session.refusals] == [(name, "jake")]
+    assert [(n, b) for n, b, _ in session.refusals] == [(name, Box("jake"))]
     assert said in session.refusals[0][2]
 
 
@@ -2702,14 +2705,14 @@ def test_a_type_error_in_a_setting_is_a_refusal_not_a_fault(tmp_path, monkeypatc
 
     monkeypatch.setattr(Session, "set", raises)
     link = Simulated()
-    link.queue(SetParameter(name="fix_hold", value=[0.4], by="jake"))
+    link.queue(SetParameter(name="fix_hold", value=[0.4], by=Box("jake")))
     session = _session(_spec(tmp_path, trials=5), link=link)
 
     session.run()
 
     assert session.stop_kind == "completed"
     (refusal,) = session.refusals
-    assert refusal[:2] == ("fix_hold", "jake")
+    assert refusal[:2] == ("fix_hold", Box("jake"))
     assert "could not be checked" in refusal[2]
     assert "must be real number, not list" in refusal[2]
 
@@ -2718,7 +2721,7 @@ def test_a_malformed_ceiling_write_is_recorded_as_asked(tmp_path):
     """A refused write to a welfare ceiling goes to the session record (PI,
     2026-09-19), a malformed one included, with what was asked written as it came."""
     link = Simulated()
-    link.queue(SetParameter(name="reward_correct", value="lots", by="jake"))
+    link.queue(SetParameter(name="reward_correct", value="lots", by=Box("jake")))
     session = _session(_spec(tmp_path, trials=3), link=link)
 
     session.run()
@@ -2726,7 +2729,7 @@ def test_a_malformed_ceiling_write_is_recorded_as_asked(tmp_path):
     (row,) = _refusal_rows(session)
     assert row["name"] == "reward_correct"
     assert row["asked"] == "lots"
-    assert row["by"] == "jake"
+    assert row["by"] == {"kind": "box", "name": "jake"}
 
 
 def test_a_command_the_session_does_not_act_on_is_refused_not_a_fault(tmp_path):
@@ -2737,18 +2740,22 @@ def test_a_command_the_session_does_not_act_on_is_refused_not_a_fault(tmp_path):
     class Recenter:
         KIND = "recenter"
 
-        def __init__(self, by: str) -> None:
+        def __init__(self, by: Box) -> None:
             self.by = by
 
     link = Simulated()
-    link.queue(Recenter(by="jake"))
+    link.queue(Recenter(by=Box("jake")))
     session = _session(_spec(tmp_path, trials=3), link=link)
 
     session.run()
 
     assert session.stop_kind == "completed"
     assert session.refusals == [
-        ("recenter", "jake", "a 'recenter' command is not one this session acts on, so it is refused")
+        (
+            "recenter",
+            Box("jake"),
+            "a 'recenter' command is not one this session acts on, so it is refused",
+        )
     ]
 
 
@@ -2841,8 +2848,8 @@ def test_a_pause_holds_the_session_at_a_boundary_and_resume_continues(tmp_path):
     """Spec §5.1: at the next trial boundary the loop holds -- no trial runs -- and
     resume continues. Both are strobed so the recording shows the gap, and nothing
     else is strobed inside it."""
-    link = _Scripted(script={3: [Resume(by="sam")]}, step=30.0)
-    link.queue(Pause(by="jake"))
+    link = _Scripted(script={3: [Resume(by=Box("sam"))]}, step=30.0)
+    link.queue(Pause(by=Box("jake")))
     session, wall = _walled(tmp_path, link)
     link.wall = wall
 
@@ -2865,16 +2872,20 @@ def test_pause_and_resume_are_recorded_with_who_and_when(tmp_path):
     """Spec §5.1: every control is written to the session record with who sent it and
     when -- the instant on the session's anchored clock, as a number and as a clock
     time."""
-    link = _Scripted(script={3: [Resume(by="sam")]}, step=30.0)
-    link.queue(Pause(by="jake"))
+    link = _Scripted(script={3: [Resume(by=Box("sam"))]}, step=30.0)
+    link.queue(Pause(by=Box("jake")))
     session, wall = _walled(tmp_path, link)
     link.wall = wall
 
     session.run()
 
     pause, resume = _controls_rows(session)
-    assert (pause["kind"], pause["by"], pause["trial_index"]) == ("pause", "jake", 0)
-    assert (resume["kind"], resume["by"], resume["trial_index"]) == ("resume", "sam", 0)
+    assert (pause["kind"], pause["by"], pause["trial_index"]) == (
+        "pause", {"kind": "box", "name": "jake"}, 0
+    )
+    assert (resume["kind"], resume["by"], resume["trial_index"]) == (
+        "resume", {"kind": "box", "name": "sam"}, 0
+    )
     assert resume["paused_s"] == pytest.approx(90.0)
     assert resume["at"] - pause["at"] == pytest.approx(90.0)
     assert pause["at_local"].endswith("local")
@@ -2884,15 +2895,17 @@ def test_a_stop_is_recorded_with_who_and_when(tmp_path):
     """Spec §5.1: every control is written to the session record with who sent it and
     when. A console's stop was in telemetry and at the terminal and nowhere on disk."""
     link = Simulated()
-    link.queue(Stop(by="sam"))
+    link.queue(Stop(by=Box("sam")))
     session = _session(_spec(tmp_path, trials=5), link=link)
 
     session.run()
 
     (row,) = _controls_rows(session)
-    assert (row["kind"], row["by"], row["trial_index"]) == ("stop", "sam", 0)
+    assert (row["kind"], row["by"], row["trial_index"]) == (
+        "stop", {"kind": "box", "name": "sam"}, 0
+    )
     assert row["at"] == WALL_NOW
-    assert session.controls[0][3] == "stopped by sam"
+    assert session.controls[0][3] == "stopped by sam (box, unverified)"
 
 
 def test_nothing_is_rewarded_while_paused(tmp_path):
@@ -2908,7 +2921,7 @@ def test_nothing_is_rewarded_while_paused(tmp_path):
     `seen[0]` and pass unseen by `seen` alone (review item 2)."""
     seen: list = []
     before: list = []
-    link = _Scripted(script={4: [Resume(by="jake")]}, step=10.0)
+    link = _Scripted(script={4: [Resume(by=Box("jake"))]}, step=10.0)
     session, wall = _walled(tmp_path, link, trials=9)
     link.wall = wall
     link.each = lambda: seen.append(
@@ -2930,7 +2943,7 @@ def test_nothing_is_rewarded_while_paused(tmp_path):
                     len(session.pump.delivered),
                 )
             )
-            link.queue(Pause(by="jake"))
+            link.queue(Pause(by=Box("jake")))
 
     session.observe = pause_after_six
 
@@ -2947,7 +2960,7 @@ def test_the_out_of_cage_limit_still_ends_a_paused_session(tmp_path):
     paused, and `welfare.must_stop` still ends the session on it, exactly as between
     trials. The wall moves five minutes per wait; `_bounds()`' limit is 800 s."""
     link = _Scripted(step=300.0)
-    link.queue(Pause(by="jake"))
+    link.queue(Pause(by=Box("jake")))
     session, wall = _walled(tmp_path, link)
     link.wall = wall
 
@@ -2969,9 +2982,9 @@ def test_the_limit_still_ends_a_paused_session_with_refused_commands_on_the_way(
     an undeclared parameter -- refused, changing nothing -- drained on every pass on
     the way to the limit still lets it land on the same wait as with no commands at
     all (`test_the_out_of_cage_limit_still_ends_a_paused_session`)."""
-    refuse = [SetParameter(name="not_a_parameter", value=1.0, by="jake")]
+    refuse = [SetParameter(name="not_a_parameter", value=1.0, by=Box("jake"))]
     link = _Scripted(script={1: refuse, 2: refuse, 3: refuse}, step=300.0)
-    link.queue(Pause(by="jake"))
+    link.queue(Pause(by=Box("jake")))
     session, wall = _walled(tmp_path, link)
     link.wall = wall
 
@@ -2998,7 +3011,7 @@ def test_the_limit_still_ends_a_paused_session_with_a_mark_stamped_on_every_wait
     # loop before `Pause` is even drained; 1-5 are `_hold`'s waits, a new mark number
     # on each -- more than the three this run needs.
     link.marks = [0, 1, 2, 3, 4, 5]
-    link.queue(Pause(by="jake"))
+    link.queue(Pause(by=Box("jake")))
     session, wall = _walled(tmp_path, link)
     link.wall = wall
 
@@ -3018,8 +3031,8 @@ def test_the_limit_still_ends_a_paused_session_when_a_resume_lands_the_same_pass
     `paused_at` and strobes `RESUME`, then `_hold` asks `_ends` before it loops back
     to check `paused_at` again, so the limit still ends the session on that same
     pass and `run()` never reaches a trial."""
-    link = _Scripted(script={3: [Resume(by="jake")]}, step=300.0)
-    link.queue(Pause(by="jake"))
+    link = _Scripted(script={3: [Resume(by=Box("jake"))]}, step=300.0)
+    link.queue(Pause(by=Box("jake")))
     session, wall = _walled(tmp_path, link)
     link.wall = wall
 
@@ -3036,9 +3049,9 @@ def test_a_setting_staged_while_paused_applies_when_trials_resume(tmp_path):
     """Spec §5.1: settings staged while paused apply when trials resume -- at the top
     of the pass that runs the next trial, recorded and strobed there."""
     link = _Scripted(
-        script={1: [SetParameter(name="fix_hold", value=0.4, by="sam")], 3: [Resume(by="jake")]}
+        script={1: [SetParameter(name="fix_hold", value=0.4, by=Box("sam"))], 3: [Resume(by=Box("jake"))]}
     )
-    link.queue(Pause(by="jake"))
+    link.queue(Pause(by=Box("jake")))
     session, wall = _walled(tmp_path, link, trials=3)
     link.wall = wall
 
@@ -3050,24 +3063,24 @@ def test_a_setting_staged_while_paused_applies_when_trials_resume(tmp_path):
 
 
 def test_stop_while_paused_ends_the_session(tmp_path):
-    link = _Scripted(script={2: [Stop(by="sam")]})
-    link.queue(Pause(by="jake"))
+    link = _Scripted(script={2: [Stop(by=Box("sam"))]})
+    link.queue(Pause(by=Box("jake")))
     session, wall = _walled(tmp_path, link)
     link.wall = wall
 
     session.run()
 
     assert session.stop_kind == "operator"
-    assert session.stopped_because == "stopped by sam"
+    assert session.stopped_because == "stopped by sam (box, unverified)"
     assert len(link.waits) == 2
 
 
 def test_a_second_pause_and_a_resume_with_nothing_paused_are_refused(tmp_path):
     """A double click sends two pauses; the second is said, not stacked, and a stray
     resume is said too. Neither strobes."""
-    link = _Scripted(script={2: [Resume(by="jake"), Resume(by="jake")]})
-    link.queue(Pause(by="jake"))
-    link.queue(Pause(by="jake"))
+    link = _Scripted(script={2: [Resume(by=Box("jake")), Resume(by=Box("jake"))]})
+    link.queue(Pause(by=Box("jake")))
+    link.queue(Pause(by=Box("jake")))
     session, wall = _walled(tmp_path, link, trials=2)
     link.wall = wall
 
@@ -3086,18 +3099,18 @@ def test_a_pause_pressed_after_a_stop_is_refused_and_the_session_ends(tmp_path):
     one drain; the stop ends the session at that boundary, and the pause is refused
     with a sentence rather than holding a session that is ending."""
     link = _Scripted()
-    link.queue(Stop(by="sam"))
-    link.queue(Pause(by="jake"))
+    link.queue(Stop(by=Box("sam")))
+    link.queue(Pause(by=Box("jake")))
     session, wall = _walled(tmp_path, link)
     link.wall = wall
 
     session.run()
 
-    assert session.stopped_because == "stopped by sam"
+    assert session.stopped_because == "stopped by sam (box, unverified)"
     assert link.waits == [], "a stopping session never held"
     ((name, by, why),) = session.refusals
-    assert (name, by) == ("pause", "jake")
-    assert "the session is stopping (stopped by sam)" in why
+    assert (name, by) == ("pause", Box("jake"))
+    assert "the session is stopping (stopped by sam (box, unverified))" in why
     assert PAUSE_CODE not in session.card.codes
 
 
@@ -3108,8 +3121,8 @@ def test_a_resume_pressed_after_a_stop_is_refused_and_the_session_ends(tmp_path)
     sentence -- mirroring `_pause`'s guard -- rather than strobing `RESUME`, writing
     a "resumed" row for a pause that never ended, and clearing `paused_at` on a
     session whose own field contract says a stop keeps it set."""
-    link = _Scripted(script={2: [Stop(by="sam"), Resume(by="jake")]})
-    link.queue(Pause(by="jake"))
+    link = _Scripted(script={2: [Stop(by=Box("sam")), Resume(by=Box("jake"))]})
+    link.queue(Pause(by=Box("jake")))
     session, wall = _walled(tmp_path, link)
     link.wall = wall
 
@@ -3118,10 +3131,10 @@ def test_a_resume_pressed_after_a_stop_is_refused_and_the_session_ends(tmp_path)
     assert RESUME_CODE not in session.card.codes
     assert [row["kind"] for row in _controls_rows(session)] == ["pause", "stop"]
     ((name, by, why),) = session.refusals
-    assert (name, by) == ("resume", "jake")
+    assert (name, by) == ("resume", Box("jake"))
     assert "the session is already stopping" in why
     assert session.paused_at is not None, "a stop keeps paused_at, as the field says"
-    assert session.stopped_because == "stopped by sam"
+    assert session.stopped_because == "stopped by sam (box, unverified)"
     assert session.stop_kind == "operator"
 
 
@@ -3131,7 +3144,7 @@ def test_a_pause_is_refused_when_the_allocation_cannot_mark_it(tmp_path):
     from dataclasses import replace
 
     link = _Scripted()
-    link.queue(Pause(by="jake"))
+    link.queue(Pause(by=Box("jake")))
     session, wall = _walled(tmp_path, link, trials=2)
     link.wall = wall
     session.allocation = replace(
@@ -3153,8 +3166,8 @@ def test_a_pause_is_refused_when_the_allocation_cannot_mark_it(tmp_path):
 
 
 def test_the_paused_loop_waits_one_housekeeping_interval_at_a_time(tmp_path):
-    link = _Scripted(script={2: [Resume(by="jake")]})
-    link.queue(Pause(by="jake"))
+    link = _Scripted(script={2: [Resume(by=Box("jake"))]})
+    link.queue(Pause(by=Box("jake")))
     session, wall = _walled(tmp_path, link, trials=1)
     link.wall = wall
 
@@ -3166,8 +3179,8 @@ def test_the_paused_loop_waits_one_housekeeping_interval_at_a_time(tmp_path):
 def test_after_the_loop_a_pause_or_a_resume_is_refused_not_applied(tmp_path):
     link, wall = Simulated(), _Wall(WALL_NOW)
     session = _fixed_and_run(tmp_path, link, wall)
-    link.queue(Pause(by="jake"))
-    link.queue(Resume(by="sam"))
+    link.queue(Pause(by=Box("jake")))
+    link.queue(Resume(by=Box("sam")))
 
     thread, give_up = _awaiting(session)
     try:
@@ -3176,7 +3189,7 @@ def test_after_the_loop_a_pause_or_a_resume_is_refused_not_applied(tmp_path):
         give_up.set()
         thread.join(timeout=2)
 
-    assert [(n, b) for n, b, _ in session.refusals] == [("pause", "jake"), ("resume", "sam")]
+    assert [(n, b) for n, b, _ in session.refusals] == [("pause", Box("jake")), ("resume", Box("sam"))]
     assert session.paused_at is None
 
 
@@ -3186,10 +3199,10 @@ def test_the_control_feed_keeps_the_newest_and_counts_what_fell_off(tmp_path):
     pairs = CONTROL_HISTORY // 2 + 10
     # Resumed and paused again in one drain, so the loop stays held, and resumed for
     # good on the last wait: `pairs` pauses and `pairs` resumes.
-    script = {n: [Resume(by="jake"), Pause(by="jake")] for n in range(1, pairs)}
-    script[pairs] = [Resume(by="jake")]
+    script = {n: [Resume(by=Box("jake")), Pause(by=Box("jake"))] for n in range(1, pairs)}
+    script[pairs] = [Resume(by=Box("jake"))]
     link = _Scripted(script=script, budget=2 * pairs)
-    link.queue(Pause(by="jake"))
+    link.queue(Pause(by=Box("jake")))
     session, wall = _walled(tmp_path, link, trials=1)
     link.wall = wall
 
@@ -3288,8 +3301,8 @@ def test_a_mark_while_paused_is_stamped_when_it_arrives(tmp_path):
             super().idle(timeout)
             return 9 if len(self.waits) == 2 else 0
 
-    link = _MarkWhilePaused(script={3: [Resume(by="jake")]})
-    link.queue(Pause(by="jake"))
+    link = _MarkWhilePaused(script={3: [Resume(by=Box("jake"))]})
+    link.queue(Pause(by=Box("jake")))
     session, wall = _walled(tmp_path, link, trials=1)
     link.wall = wall
 
@@ -3314,7 +3327,7 @@ def test_a_note_joins_its_stamp_with_the_three_instants_and_their_gaps(tmp_path)
         Mark(
             mark=5,
             note="reward line bubble",
-            by="jake (box, unverified)",
+            by=Box("jake"),
             pressed_at=WALL_NOW - 2.0,
             received_at=WALL_NOW - 1.5,
         )
@@ -3324,7 +3337,7 @@ def test_a_note_joins_its_stamp_with_the_three_instants_and_their_gaps(tmp_path)
     session.run()
 
     stamp, note = _controls_rows(session)
-    assert note["kind"] == "note" and note["by"] == "jake (box, unverified)"
+    assert note["kind"] == "note" and note["by"] == {"kind": "box", "name": "jake"}
     assert (note["mark"], note["number"], note["note"]) == (5, 1, "reward line bubble")
     assert note["pressed_at"] == WALL_NOW - 2.0
     assert note["received_at"] == WALL_NOW - 1.5
@@ -3333,7 +3346,7 @@ def test_a_note_joins_its_stamp_with_the_three_instants_and_their_gaps(tmp_path)
     assert note["stamped_after_received_s"] == pytest.approx(1.5)
     assert (note["stamped_in_trial"], note["frame"]) == (0, None)
     assert session.controls[1][1:] == (
-        "jake (box, unverified)", session.controls[1][2], 'mark 1: "reward line bubble"'
+        Box("jake"), session.controls[1][2], 'mark 1: "reward line bubble"'
     )
 
 
@@ -3342,7 +3355,7 @@ def test_a_note_left_bare_and_a_note_whose_instants_are_unknown_still_record(tmp
     note knows no instants. Both are recorded as they are, never filled in."""
     link = Simulated()
     link.marks.append(5)
-    link.queue(Mark(mark=5, note="", by="jake", pressed_at=None, received_at=None))
+    link.queue(Mark(mark=5, note="", by=Box("jake"), pressed_at=None, received_at=None))
     session = _session(_spec(tmp_path, trials=1), link=link)
 
     session.run()
@@ -3356,7 +3369,7 @@ def test_a_note_left_bare_and_a_note_whose_instants_are_unknown_still_record(tmp
 
 def test_a_note_for_a_mark_this_session_never_stamped_says_so(tmp_path):
     link = Simulated()
-    link.queue(Mark(mark=99, note="lost?", by="jake", pressed_at=None, received_at=None))
+    link.queue(Mark(mark=99, note="lost?", by=Box("jake"), pressed_at=None, received_at=None))
     session = _session(_spec(tmp_path, trials=1), link=link)
 
     session.run()
@@ -3509,31 +3522,31 @@ def test_a_stop_after_n_trials_ends_the_session_there_with_its_reason(tmp_path):
     shown as the target trial number. It stops the session like the stop button --
     `stop_kind` `operator` -- with the reason *scheduled stop (...) set by NAME*."""
     link = Simulated()
-    link.queue(ScheduleStop(kind="trials", value=3, by="jake"))
+    link.queue(ScheduleStop(kind="trials", value=3, by=Box("jake")))
     session = _session(_spec(tmp_path, trials=50), link=link)
 
     session.run()
 
     assert _trials_run(session) == 3
     assert session.stop_kind == "operator"
-    assert session.stopped_because == "scheduled stop (after trial 3) set by jake"
+    assert session.stopped_because == "scheduled stop (after trial 3) set by jake (box, unverified)"
     assert session.scheduled_stop is None, "a stop that has happened is spent"
     assert link.published[-1].scheduled_stop is None
     rows = _controls_rows(session)
     assert [row["kind"] for row in rows] == ["schedule", "scheduled_stop"]
     assert (rows[0]["stop"], rows[0]["target"], rows[0]["said"]) == ("trials", 3.0, "after trial 3")
-    assert rows[1]["by"] == "jake"
+    assert rows[1]["by"] == {"kind": "box", "name": "jake"}
 
 
 def test_after_n_trials_counts_from_when_the_schedule_is_accepted(tmp_path):
     link = Simulated()
     session = _session(_spec(tmp_path, trials=50), link=link)
-    _scheduled_at_trial(link, session, 2, ScheduleStop(kind="trials", value=3, by="jake"))
+    _scheduled_at_trial(link, session, 2, ScheduleStop(kind="trials", value=3, by=Box("jake")))
 
     session.run()
 
     assert _trials_run(session) == 5
-    assert session.stopped_because == "scheduled stop (after trial 5) set by jake"
+    assert session.stopped_because == "scheduled stop (after trial 5) set by jake (box, unverified)"
 
 
 def test_a_stop_at_a_clock_time_is_read_on_the_sessions_clock(tmp_path, utc):
@@ -3541,12 +3554,12 @@ def test_a_stop_at_a_clock_time_is_read_on_the_sessions_clock(tmp_path, utc):
     that time, on the session's anchored clock -- `wall_now`, which here follows the
     frames from `WALL_NOW` (22:13:20) -- so 22:14 is forty seconds in."""
     link = Simulated()
-    link.queue(ScheduleStop(kind="clock", value="22:14", by="jake"))
+    link.queue(ScheduleStop(kind="clock", value="22:14", by=Box("jake")))
     session = _session(_spec(tmp_path, trials=500), link=link)
 
     session.run()
 
-    assert session.stopped_because == "scheduled stop (at 22:14) set by jake"
+    assert session.stopped_because == "scheduled stop (at 22:14) set by jake (box, unverified)"
     (schedule, fired) = _controls_rows(session)
     assert schedule["target"] == WALL_NOW + 40.0
     assert fired["at"] >= WALL_NOW + 40.0
@@ -3566,7 +3579,7 @@ def test_a_clock_time_already_past_or_exactly_now_is_tomorrows(tmp_path, utc):
     assert _next_occurrence("00:00", WALL_NOW) == WALL_NOW + 6_400.0
 
     link = Simulated()
-    link.queue(ScheduleStop(kind="clock", value="22:13", by="jake"))
+    link.queue(ScheduleStop(kind="clock", value="22:13", by=Box("jake")))
     session = _session(_spec(tmp_path, trials=3), link=link)
 
     session.run()
@@ -3580,12 +3593,12 @@ def test_a_stop_after_fluid_reads_welfares_session_fluid(tmp_path):
     """After X mL this session, read from `welfare`'s session fluid (spec §5.1) --
     `session_total()`, the figure the console shows -- and nothing else."""
     link = Simulated()
-    link.queue(ScheduleStop(kind="fluid", value=0.3, by="jake"))
+    link.queue(ScheduleStop(kind="fluid", value=0.3, by=Box("jake")))
     session = _session(_spec(tmp_path, trials=200), link=link)
 
     session.run()
 
-    assert session.stopped_because == "scheduled stop (after 0.3 mL this session) set by jake"
+    assert session.stopped_because == "scheduled stop (after 0.3 mL this session) set by jake (box, unverified)"
     assert session.welfare.session_total() >= 0.3
     before_last = [frame.fluid_session_ml for frame in link.published][-3]
     assert before_last < 0.3, "it stopped at the first boundary at or past 0.3 mL"
@@ -3593,21 +3606,21 @@ def test_a_stop_after_fluid_reads_welfares_session_fluid(tmp_path):
 
 def test_a_new_schedule_replaces_the_old_and_says_so(tmp_path):
     link = Simulated()
-    link.queue(ScheduleStop(kind="trials", value=2, by="jake"))
-    link.queue(ScheduleStop(kind="trials", value=4, by="sam"))
+    link.queue(ScheduleStop(kind="trials", value=2, by=Box("jake")))
+    link.queue(ScheduleStop(kind="trials", value=4, by=Box("sam")))
     session = _session(_spec(tmp_path, trials=50), link=link)
 
     session.run()
 
     assert _trials_run(session) == 4
-    assert session.stopped_because == "scheduled stop (after trial 4) set by sam"
+    assert session.stopped_because == "scheduled stop (after trial 4) set by sam (box, unverified)"
     assert session.controls[1][3] == "scheduled stop after trial 4, replacing after trial 2"
 
 
 def test_cancel_removes_the_scheduled_stop(tmp_path):
     link = Simulated()
-    link.queue(ScheduleStop(kind="trials", value=2, by="jake"))
-    link.queue(CancelScheduledStop(by="sam"))
+    link.queue(ScheduleStop(kind="trials", value=2, by=Box("jake")))
+    link.queue(CancelScheduledStop(by=Box("sam")))
     session = _session(_spec(tmp_path, trials=5), link=link)
 
     session.run()
@@ -3615,18 +3628,20 @@ def test_cancel_removes_the_scheduled_stop(tmp_path):
     assert session.stop_kind == "completed"
     assert session.scheduled_stop is None
     cancel = _controls_rows(session)[1]
-    assert (cancel["kind"], cancel["by"], cancel["cancelled"]) == ("cancel", "sam", "after trial 2")
+    assert (cancel["kind"], cancel["by"], cancel["cancelled"]) == (
+        "cancel", {"kind": "box", "name": "sam"}, "after trial 2"
+    )
 
 
 def test_cancel_with_nothing_scheduled_is_refused(tmp_path):
     link = Simulated()
-    link.queue(CancelScheduledStop(by="sam"))
+    link.queue(CancelScheduledStop(by=Box("sam")))
     session = _session(_spec(tmp_path, trials=2), link=link)
 
     session.run()
 
     assert session.refusals == [
-        ("cancel", "sam", "there is no scheduled stop to cancel; nothing changed")
+        ("cancel", Box("sam"), "there is no scheduled stop to cancel; nothing changed")
     ]
 
 
@@ -3634,13 +3649,13 @@ def test_a_malformed_schedule_that_never_crossed_the_wire_is_refused(tmp_path):
     """`link.check_schedule` is asked again of a schedule that reached the session
     without the wire, so one rule holds on both paths."""
     link = Simulated()
-    link.queue(ScheduleStop(kind="clock", value="25:00", by="jake"))
+    link.queue(ScheduleStop(kind="clock", value="25:00", by=Box("jake")))
     session = _session(_spec(tmp_path, trials=2), link=link)
 
     session.run()
 
     ((name, by, why),) = session.refusals
-    assert (name, by) == ("schedule", "jake")
+    assert (name, by) == ("schedule", Box("jake"))
     assert "HH:MM" in why and why.endswith("so it is refused")
     assert session.scheduled_stop is None
 
@@ -3648,14 +3663,14 @@ def test_a_malformed_schedule_that_never_crossed_the_wire_is_refused(tmp_path):
 def test_a_scheduled_stop_ends_a_paused_session(tmp_path, utc):
     """Checked at each trial boundary *and while paused* (spec §5.1)."""
     link = _Scripted(step=30.0)
-    link.queue(Pause(by="jake"))
-    link.queue(ScheduleStop(kind="clock", value="22:14", by="sam"))
+    link.queue(Pause(by=Box("jake")))
+    link.queue(ScheduleStop(kind="clock", value="22:14", by=Box("sam")))
     session, wall = _walled(tmp_path, link)
     link.wall = wall
 
     session.run()
 
-    assert session.stopped_because == "scheduled stop (at 22:14) set by sam"
+    assert session.stopped_because == "scheduled stop (at 22:14) set by sam (box, unverified)"
     assert len(link.waits) == 2, "22:14 passed on the second thirty-second wait"
 
 
@@ -3663,8 +3678,8 @@ def test_the_limit_wins_when_it_and_a_schedule_fall_due_together(tmp_path, utc):
     """Both at one check: the out-of-cage limit is asked first, and a session that
     reached it ends as `limit`, never as an operator's stop."""
     link = _Scripted(step=900.0)
-    link.queue(Pause(by="jake"))
-    link.queue(ScheduleStop(kind="clock", value="22:14", by="sam"))
+    link.queue(Pause(by=Box("jake")))
+    link.queue(ScheduleStop(kind="clock", value="22:14", by=Box("sam")))
     session, wall = _walled(tmp_path, link)
     link.wall = wall
 
@@ -3680,8 +3695,8 @@ def test_the_limit_wins_when_it_and_a_schedule_fall_due_together(tmp_path, utc):
 
 def _stopped_by_the_operator(tmp_path):
     link = Simulated()
-    link.queue(ScheduleStop(kind="trials", value=1000, by="jake"))
-    link.queue(Stop(by="sam"))
+    link.queue(ScheduleStop(kind="trials", value=1000, by=Box("jake")))
+    link.queue(Stop(by=Box("sam")))
     session = _session(_spec(tmp_path, trials=50), link=link)
     session.run()
     return session, link
@@ -3689,13 +3704,13 @@ def _stopped_by_the_operator(tmp_path):
 
 def _stopped_by_the_limit(tmp_path):
     link = _Scripted(step=900.0)
-    link.queue(Pause(by="jake"))
+    link.queue(Pause(by=Box("jake")))
     # A "trials" target far past anything this session reaches: due only on
     # `index`, never on the wall the paused wait moves, so it stays unspent when
     # the limit ends the session -- the case this fix guards, not
     # `test_the_limit_wins_when_it_and_a_schedule_fall_due_together`'s "both due at
     # once", which asks a different question.
-    link.queue(ScheduleStop(kind="trials", value=1000, by="sam"))
+    link.queue(ScheduleStop(kind="trials", value=1000, by=Box("sam")))
     session, wall = _walled(tmp_path, link)
     link.wall = wall
     session.run()
@@ -3704,7 +3719,7 @@ def _stopped_by_the_limit(tmp_path):
 
 def _stopped_by_completion(tmp_path):
     link = Simulated()
-    link.queue(ScheduleStop(kind="trials", value=1000, by="jake"))
+    link.queue(ScheduleStop(kind="trials", value=1000, by=Box("jake")))
     session = _session(_spec(tmp_path, trials=3), link=link)
     session.run()
     return session, link
@@ -3749,14 +3764,14 @@ def test_after_fluid_ends_at_the_amount_not_one_reward_past_it(tmp_path):
     1.0 -- so "after 1 mL" must not wait for an eleventh reward before it stops.
     `FLUID_TOLERANCE_ML` is what keeps it at ten rather than eleven."""
     link = Simulated()
-    link.queue(ScheduleStop(kind="fluid", value=1.0, by="jake"))
+    link.queue(ScheduleStop(kind="fluid", value=1.0, by=Box("jake")))
     session = _session(
         _spec(tmp_path, trials=400, bounds=_bounds(reward_correct=0.1)), link=link
     )
 
     session.run()
 
-    assert session.stopped_because == "scheduled stop (after 1 mL this session) set by jake"
+    assert session.stopped_because == "scheduled stop (after 1 mL this session) set by jake (box, unverified)"
     assert session.welfare.deliveries == 10, "ten deliveries of 0.1 mL, not eleven"
 
 
@@ -3776,7 +3791,7 @@ def test_a_fluid_schedule_at_or_below_the_current_total_is_refused(tmp_path):
     def queue_once_five_delivered(condition, values, result) -> None:
         if not queued[0] and session.welfare.deliveries >= 5:
             queued[0] = True
-            link.queue(ScheduleStop(kind="fluid", value=0.5, by="jake"))
+            link.queue(ScheduleStop(kind="fluid", value=0.5, by=Box("jake")))
 
     session.observe = queue_once_five_delivered
 
@@ -3787,7 +3802,7 @@ def test_a_fluid_schedule_at_or_below_the_current_total_is_refused(tmp_path):
     schedules = [row for row in session.refusals if row[0] == "schedule"]
     assert len(schedules) == 1
     name, by, why = schedules[0]
-    assert by == "jake"
+    assert by == Box("jake")
     assert "0.50 mL" in why
     assert why.endswith("use Stop to end it now")
 
@@ -3798,8 +3813,8 @@ def test_a_schedule_queued_behind_a_stop_in_the_same_drain_is_refused(tmp_path):
     schedule is refused rather than held for an `_ends` check the session never
     reaches -- the session ends by the `Stop` alone."""
     link = Simulated()
-    link.queue(Stop(by="jake"))
-    link.queue(ScheduleStop(kind="trials", value=3, by="sam"))
+    link.queue(Stop(by=Box("jake")))
+    link.queue(ScheduleStop(kind="trials", value=3, by=Box("sam")))
     session = _session(_spec(tmp_path, trials=50), link=link)
 
     session.run()
@@ -3807,10 +3822,10 @@ def test_a_schedule_queued_behind_a_stop_in_the_same_drain_is_refused(tmp_path):
     schedules = [row for row in session.refusals if row[0] == "schedule"]
     assert len(schedules) == 1
     name, by, why = schedules[0]
-    assert by == "sam"
+    assert by == Box("sam")
     assert "a schedule is not applied" in why
     assert session.scheduled_stop is None
-    assert session.stopped_because == "stopped by jake"
+    assert session.stopped_because == "stopped by jake (box, unverified)"
     assert session.stop_kind == "operator"
 
 
@@ -3820,13 +3835,13 @@ def test_an_applied_setting_is_on_the_changes_feed_with_who_and_when(tmp_path):
     `set`, with the trial it applies from. The record already has it, in
     `parameter_changes.jsonl`, so no control row repeats it there."""
     link = Simulated()
-    link.queue(SetParameter(name="fix_hold", value=0.4, by="jake (box, unverified)"))
+    link.queue(SetParameter(name="fix_hold", value=0.4, by=Box("jake")))
     session = _session(_spec(tmp_path, trials=3), link=link)
 
     session.run()
 
     ((kind, by, at, said),) = session.controls
-    assert (kind, by) == ("set", "jake (box, unverified)")
+    assert (kind, by) == ("set", Box("jake"))
     assert said == "fix_hold 0.30 → 0.40, from trial 1"
     assert at >= WALL_NOW
     assert _controls_rows(session) == []
@@ -3869,7 +3884,7 @@ def test_a_manual_reward_while_paused_is_one_correct_trial_reward_through_the_ta
     reward takes: `commanded`, `deliveries` and `last_delivery_wall_at` count it,
     `MANUAL_REWARD` is strobed before the valve opens, `controls.jsonl` has one row, and
     the frame published in that pass, still paused, carries the new fluid total."""
-    link = _Scripted(script={1: [ManualReward(by="jake")], 2: [Resume(by="sam")]}, step=10.0)
+    link = _Scripted(script={1: [ManualReward(by=Box("jake"))], 2: [Resume(by=Box("sam"))]}, step=10.0)
     session, wall = _walled(tmp_path, link, trials=6)
     link.wall = wall
     pump = _Watched(session.card)
@@ -3883,7 +3898,7 @@ def test_a_manual_reward_while_paused_is_one_correct_trial_reward_through_the_ta
             session.welfare.last_delivery_wall_at,
         )
     )
-    _scheduled_at_trial(link, session, 3, Pause(by="jake"))
+    _scheduled_at_trial(link, session, 3, Pause(by=Box("jake")))
 
     session.run()
 
@@ -3896,7 +3911,7 @@ def test_a_manual_reward_while_paused_is_one_correct_trial_reward_through_the_ta
     assert codes.count(REWARD_CODE) == 1
     assert codes.index(PAUSE_CODE) + 1 == codes.index(REWARD_CODE) == codes.index(RESUME_CODE) - 1
     (row,) = _manual_rows(session)
-    assert (row["by"], row["trial_index"]) == ("jake", 3)
+    assert (row["by"], row["trial_index"]) == ({"kind": "box", "name": "jake"}, 3)
     assert (row["ml"], row["entry"]) == (0.15, "reward_correct")
     assert row.get("where") == "given while paused before trial 3", "the record says where"
     assert row["at"] == last
@@ -3916,20 +3931,20 @@ def test_a_manual_reward_while_paused_is_one_correct_trial_reward_through_the_ta
 @pytest.mark.parametrize(
     ("first", "script", "said"),
     [
-        ([ManualReward(by="jake")], {}, "the session is not paused"),
+        ([ManualReward(by=Box("jake"))], {}, "the session is not paused"),
         (
-            [Pause(by="jake"), ManualReward(by="jake")],
-            {1: [Resume(by="sam")]},
+            [Pause(by=Box("jake")), ManualReward(by=Box("jake"))],
+            {1: [Resume(by=Box("sam"))]},
             "the session's pause has not begun holding yet",
         ),
         (
-            [Pause(by="jake")],
-            {1: [Stop(by="sam"), ManualReward(by="jake")]},
-            "the session is stopping (stopped by sam)",
+            [Pause(by=Box("jake"))],
+            {1: [Stop(by=Box("sam")), ManualReward(by=Box("jake"))]},
+            "the session is stopping (stopped by sam (box, unverified))",
         ),
         (
-            [Pause(by="jake")],
-            {1: [Resume(by="sam"), ManualReward(by="jake")]},
+            [Pause(by=Box("jake"))],
+            {1: [Resume(by=Box("sam")), ManualReward(by=Box("jake"))]},
             "the session is not paused",
         ),
     ],
@@ -3952,7 +3967,7 @@ def test_a_manual_reward_at_any_other_time_is_refused_and_nothing_is_given(
     session.run()
 
     ((name, by, why),) = [r for r in session.refusals if r[0] == "reward"]
-    assert (name, by) == ("reward", "jake")
+    assert (name, by) == ("reward", Box("jake"))
     assert said in why and "no reward was given" in why
     assert REWARD_CODE not in session.card.codes
     assert _manual_rows(session) == []
@@ -3965,7 +3980,7 @@ def test_after_the_loop_a_manual_reward_is_refused_and_nothing_is_given(tmp_path
     link, wall = Simulated(), _Wall(WALL_NOW)
     session = _fixed_and_run(tmp_path, link, wall)
     given = (session.welfare.commanded, session.welfare.deliveries)
-    link.queue(ManualReward(by="jake"))
+    link.queue(ManualReward(by=Box("jake")))
 
     thread, give_up = _awaiting(session)
     try:
@@ -3975,7 +3990,7 @@ def test_after_the_loop_a_manual_reward_is_refused_and_nothing_is_given(tmp_path
         thread.join(timeout=2)
 
     ((name, by, why),) = session.refusals
-    assert (name, by) == ("reward", "jake")
+    assert (name, by) == ("reward", Box("jake"))
     assert "the session has ended" in why
     assert "XC-184" in why, "wlx run's session after its run: its own item"
     assert (session.welfare.commanded, session.welfare.deliveries) == given
@@ -3996,15 +4011,15 @@ def test_a_manual_reward_with_no_reward_correct_in_the_bounded_config_is_refused
         },
         minima={"daily_fluid": Floor(value=250.0, unit="mL")},
     )
-    link = _Scripted(script={1: [ManualReward(by="jake")], 2: [Stop(by="jake")]})
-    link.queue(Pause(by="jake"))
+    link = _Scripted(script={1: [ManualReward(by=Box("jake"))], 2: [Stop(by=Box("jake"))]})
+    link.queue(Pause(by=Box("jake")))
     session, wall = _walled(tmp_path, link, bounds=bounds)
     link.wall = wall
 
     session.run()
 
     ((name, by, why),) = session.refusals
-    assert (name, by) == ("reward", "jake")
+    assert (name, by) == ("reward", Box("jake"))
     assert "has no 'reward_correct' entry" in why
     assert "never taken from another entry" in why
     assert session.welfare.deliveries == 0 and session.pump.delivered == []
@@ -4017,8 +4032,8 @@ def test_a_manual_reward_is_refused_when_the_allocation_cannot_mark_it(tmp_path)
     panel press."""
     from dataclasses import replace
 
-    link = _Scripted(script={1: [ManualReward(by="jake")], 2: [Resume(by="jake")]})
-    link.queue(Pause(by="jake"))
+    link = _Scripted(script={1: [ManualReward(by=Box("jake"))], 2: [Resume(by=Box("jake"))]})
+    link.queue(Pause(by=Box("jake")))
     session, wall = _walled(tmp_path, link, trials=2)
     link.wall = wall
     session.allocation = replace(
@@ -4045,16 +4060,16 @@ def test_a_manual_reward_that_reaches_a_fluid_stop_ends_the_paused_session_in_th
     toward "stop after X mL". `_hold` gives it in its drain and asks `_ends` before the
     pass is over -- the pass that asks the out-of-cage limit -- so the session ends
     there, as a scheduled stop, without waiting for a resume."""
-    link = _Scripted(script={1: [ManualReward(by="jake")]})
-    link.queue(ScheduleStop(kind="fluid", value=0.15, by="sam"))
-    link.queue(Pause(by="jake"))
+    link = _Scripted(script={1: [ManualReward(by=Box("jake"))]})
+    link.queue(ScheduleStop(kind="fluid", value=0.15, by=Box("sam")))
+    link.queue(Pause(by=Box("jake")))
     session, wall = _walled(tmp_path, link)
     link.wall = wall
 
     session.run()
 
     assert session.stop_kind == "operator"
-    assert session.stopped_because == "scheduled stop (after 0.15 mL this session) set by sam"
+    assert session.stopped_because == "scheduled stop (after 0.15 mL this session) set by sam (box, unverified)"
     assert len(link.waits) == 1, "it ended in the pass that gave the reward"
     assert session.welfare.session_total() == pytest.approx(0.15)
     assert [row["kind"] for row in _controls_rows(session)] == [
@@ -4072,12 +4087,12 @@ def test_a_reward_size_staged_while_paused_is_not_a_manual_rewards_until_trials_
     `reward_correct` -- and the staged size is the next trial's."""
     link = _Scripted(
         script={
-            1: [SetParameter(name="reward_correct", value=0.3, by="sam")],
-            2: [ManualReward(by="jake")],
-            3: [Resume(by="jake")],
+            1: [SetParameter(name="reward_correct", value=0.3, by=Box("sam"))],
+            2: [ManualReward(by=Box("jake"))],
+            3: [Resume(by=Box("jake"))],
         }
     )
-    link.queue(Pause(by="jake"))
+    link.queue(Pause(by=Box("jake")))
     session, wall = _walled(tmp_path, link, trials=1)
     link.wall = wall
 
@@ -4098,8 +4113,8 @@ def test_a_pump_that_fails_a_manual_reward_faults_the_session_as_a_tasks_would(t
         def deliver(self, ml: float) -> None:
             raise RuntimeError("the pump did not answer")
 
-    link = _Scripted(script={1: [ManualReward(by="jake")]})
-    link.queue(Pause(by="jake"))
+    link = _Scripted(script={1: [ManualReward(by=Box("jake"))]})
+    link.queue(Pause(by=Box("jake")))
     session, wall = _walled(tmp_path, link)
     link.wall = wall
     session.welfare.pump = _Broken()
@@ -4124,23 +4139,23 @@ def test_a_second_manual_reward_in_the_same_drain_as_one_that_reaches_a_fluid_st
     stop; the second, drained in the same pass, finds it already due and is refused
     before any strobe or delivery -- exactly one delivery, and the session ends by
     the schedule, as one press alone does."""
-    link = _Scripted(script={1: [ManualReward(by="jake"), ManualReward(by="jake")]})
-    link.queue(ScheduleStop(kind="fluid", value=0.15, by="sam"))
-    link.queue(Pause(by="jake"))
+    link = _Scripted(script={1: [ManualReward(by=Box("jake")), ManualReward(by=Box("jake"))]})
+    link.queue(ScheduleStop(kind="fluid", value=0.15, by=Box("sam")))
+    link.queue(Pause(by=Box("jake")))
     session, wall = _walled(tmp_path, link)
     link.wall = wall
 
     session.run()
 
     assert session.stop_kind == "operator"
-    assert session.stopped_because == "scheduled stop (after 0.15 mL this session) set by sam"
+    assert session.stopped_because == "scheduled stop (after 0.15 mL this session) set by sam (box, unverified)"
     assert session.welfare.session_total() == pytest.approx(0.15), "exactly one delivery"
     assert session.welfare.deliveries == 1
     assert session.card.codes.count(REWARD_CODE) == 1, "nothing strobed for the refused press"
     (reward_row,) = _manual_rows(session)
-    assert reward_row["by"] == "jake"
+    assert reward_row["by"] == {"kind": "box", "name": "jake"}
     ((name, by, why),) = [r for r in session.refusals if r[0] == "reward"]
-    assert (name, by) == ("reward", "jake")
+    assert (name, by) == ("reward", Box("jake"))
     assert why == (
         "the session has reached its scheduled stop after 0.15 mL this session, so no "
         "reward is given; it ends at this pass"
@@ -4217,7 +4232,7 @@ def test_a_service_session_runs_only_between_runs_and_only_a_run_it_is_given(tmp
 
     with pytest.raises(ValueError, match="names no task"):
         session.run()
-    session.end_runs("jake")
+    session.end_runs(Box("jake"))
     with pytest.raises(RuntimeError, match="between runs"):
         session.run(_run_spec(trials=1))
 
@@ -4228,7 +4243,7 @@ def test_a_service_session_ended_without_a_run_still_builds_its_frames(tmp_path)
     10's block and task are `None` before a first run, and the frame builds."""
     link = Simulated()
     session = _service_session(tmp_path, link=link)
-    session.end_runs("jake")
+    session.end_runs(Box("jake"))
 
     session.publish()
 
@@ -4245,8 +4260,8 @@ def test_a_change_staged_as_a_service_run_ends_is_dropped_and_said(tmp_path):
     spec §6)."""
     link = Simulated()
     session = _service_session(tmp_path, link=link)
-    link.queue(SetParameter(name="fix_hold", value=0.5, by="jake"))
-    link.queue(Stop(by="jake"))
+    link.queue(SetParameter(name="fix_hold", value=0.5, by=Box("jake")))
+    link.queue(Stop(by=Box("jake")))
 
     session.run(_run_spec(trials=5))
 
@@ -4271,8 +4286,8 @@ def test_a_between_runs_page_names_one_run_in_every_pane(tmp_path):
     link = Simulated()
     session = _service_session(tmp_path, link=link)
     session.run(_run_spec(trials=2))
-    link.queue(SetParameter(name="fix_hold", value=0.5, by="jake"))
-    link.queue(Stop(by="jake"))
+    link.queue(SetParameter(name="fix_hold", value=0.5, by=Box("jake")))
+    link.queue(Stop(by=Box("jake")))
     session.run(_run_spec(trials=5))
     session.publish()
 
@@ -4293,10 +4308,10 @@ def test_a_between_runs_page_names_one_run_in_every_pane(tmp_path):
 def test_between_runs_a_command_for_a_run_is_refused_and_a_mark_is_stamped_and_noted(tmp_path):
     session = _service_session(tmp_path)
 
-    session.receive(Pause(by="jake"))
+    session.receive(Pause(by=Box("jake")))
     session.stamp(9)
     session.receive(
-        Mark(mark=9, note="restless", by="jake", pressed_at=None, received_at=None)
+        Mark(mark=9, note="restless", by=Box("jake"), pressed_at=None, received_at=None)
     )
 
     assert "no run is in progress" in session.refusals[-1][2]
@@ -4310,18 +4325,18 @@ def test_each_phase_of_a_service_session_refuses_a_command_in_its_own_words(tmp_
     Before the first run and between runs, no run is in progress -- never "ended"."""
     session = _service_session(tmp_path)
 
-    session.receive(SetParameter(name="fix_hold", value=0.5, by="jake"))
-    session.receive(Stop(by="jake"))
+    session.receive(SetParameter(name="fix_hold", value=0.5, by=Box("jake")))
+    session.receive(Stop(by=Box("jake")))
     before_first = [why for _, _, why in session.refusals]
     session.run(_run_spec(trials=1))
-    session.receive(SetParameter(name="fix_hold", value=0.5, by="jake"))
+    session.receive(SetParameter(name="fix_hold", value=0.5, by=Box("jake")))
     between = session.refusals[-1][2]
-    session.end_runs("jake")
-    session.receive(SetParameter(name="fix_hold", value=0.5, by="jake"))
+    session.end_runs(Box("jake"))
+    session.receive(SetParameter(name="fix_hold", value=0.5, by=Box("jake")))
     awaiting = session.refusals[-1][2]
-    session.returned_to_cage(session.wall_now(), by="jake", how="the page")
+    session.returned_to_cage(session.wall_now(), by=Box("jake"), how="the page")
     session.close(how="wlx taskd")
-    session.receive(Stop(by="jake"))
+    session.receive(Stop(by=Box("jake")))
     closed = session.refusals[-1][2]
 
     for why in [*before_first, between]:
@@ -4339,7 +4354,7 @@ def test_a_run_session_keeps_the_terminal_sentence_after_its_loop(tmp_path):
     session.run()
     session.phase = "awaiting_return"  # what `await_return` sets, without its heartbeat loop
 
-    session.receive(SetParameter(name="fix_hold", value=0.5, by="jake"))
+    session.receive(SetParameter(name="fix_hold", value=0.5, by=Box("jake")))
 
     assert "marked at wlx run's terminal" in session.refusals[-1][2]
 
@@ -4361,22 +4376,22 @@ def test_between_runs_past_the_limit_the_warning_says_the_animal_must_come_back(
 def test_ending_the_runs_releases_the_head_once_and_waits_for_the_return(tmp_path):
     session = _service_session(tmp_path)
 
-    session.end_runs("jake")
+    session.end_runs(Box("jake"))
 
     assert session.phase == "awaiting_return"
     assert session.welfare.released_wall_at is not None
     assert session.card.codes.count(4129) == 1
     assert session.stop_kind == "operator"
-    assert session.stopped_because == "session ended by jake, before any run"
+    assert session.stopped_because == "session ended by jake (box, unverified), before any run"
     with pytest.raises(RuntimeError):
-        session.end_runs("jake")
+        session.end_runs(Box("jake"))
 
 
 def test_ending_the_runs_after_a_run_keeps_how_the_run_ended(tmp_path):
     session = _service_session(tmp_path)
     session.run(_run_spec(trials=2))
 
-    session.end_runs("jake")
+    session.end_runs(Box("jake"))
 
     assert (session.stop_kind, session.stopped_because) == ("completed", "every block is finished")
 
@@ -4386,11 +4401,11 @@ def test_closing_needs_the_return_then_ends_the_session_with_one_closed_frame(tm
     session = _service_session(tmp_path, link=link, deployment=Deployment.RIG_CHAIRED)
     # One run first: until Task 4, a frame needs a run's scheduler to be built from.
     session.run(_run_spec(trials=1))
-    session.end_runs("jake")
+    session.end_runs(Box("jake"))
 
     with pytest.raises(RuntimeError, match="not home"):
         session.close(how="wlx taskd")
-    session.returned_to_cage(session.wall_now(), by="jake", how="the page")
+    session.returned_to_cage(session.wall_now(), by=Box("jake"), how="the page")
     session.close(how="wlx taskd")
 
     assert session.phase == "closed" and session.ended_wall_at is not None
@@ -4409,7 +4424,7 @@ def test_closing_is_refused_unless_a_service_session_is_awaiting_its_return(tmp_
     unless the session is a service session awaiting its return; `wlx run`'s own close is
     `await_return`'s, never this."""
     chaired = _service_session(tmp_path / "chaired", deployment=Deployment.RIG_CHAIRED)
-    chaired.returned_to_cage(chaired.wall_now(), by="jake", how="the page")
+    chaired.returned_to_cage(chaired.wall_now(), by=Box("jake"), how="the page")
 
     with pytest.raises(RuntimeError, match="awaiting its animal's return"):
         chaired.close(how="wlx taskd")
@@ -4418,7 +4433,7 @@ def test_closing_is_refused_unless_a_service_session_is_awaiting_its_return(tmp_
     run = _session(_spec(tmp_path / "run", trials=1))
     run.run()
     run.phase = "awaiting_return"  # what `await_return` sets, without its heartbeat loop
-    run.returned_to_cage(run.wall_now(), by="jake", how="terminal")
+    run.returned_to_cage(run.wall_now(), by=Box("jake"), how="terminal")
     with pytest.raises(RuntimeError, match="a service session"):
         run.close(how="wlx taskd")
     assert run.ended_wall_at is None
@@ -4428,11 +4443,11 @@ def test_a_closed_service_session_says_its_return_is_recorded_not_awaited(tmp_pa
     """Task 3's review, carried to Task 7: the `closed` phase answered a late command
     with "is waiting for the animal's return" after the return was recorded."""
     session = _service_session(tmp_path, deployment=Deployment.RIG_CHAIRED)
-    session.end_runs("jake")
-    session.returned_to_cage(session.wall_now(), by="jake", how="the page")
+    session.end_runs(Box("jake"))
+    session.returned_to_cage(session.wall_now(), by=Box("jake"), how="the page")
     session.close(how="wlx taskd")
 
-    session.receive(Stop(by="jake"))
+    session.receive(Stop(by=Box("jake")))
 
     closed = session.refusals[-1][2]
     assert "the session has ended" in closed and "return to its cage is recorded" in closed
@@ -4453,13 +4468,13 @@ def test_between_runs_a_hand_reward_is_one_correct_trial_reward_through_the_task
     session.welfare.pump = pump
     commanded, deliveries = session.welfare.commanded, session.welfare.deliveries
 
-    session.receive(ManualReward(by="jake"))
+    session.receive(ManualReward(by=Box("jake")))
 
     assert session.welfare.commanded == pytest.approx(commanded + 0.15)
     assert session.welfare.deliveries == deliveries + 1
     assert (pump.delivered, pump.strobed_before) == ([0.15], [REWARD_CODE])
     (row,) = _manual_rows(session)
-    assert (row["by"], row["ml"], row["entry"]) == ("jake", 0.15, "reward_correct")
+    assert (row["by"], row["ml"], row["entry"]) == ({"kind": "box", "name": "jake"}, 0.15, "reward_correct")
     assert row.get("where") == "given between runs", "the record says where, as the feed does"
     assert row["at"] == session.welfare.last_delivery_wall_at
     assert session.controls[-1][3] == "0.15 mL of reward_correct, given between runs"
@@ -4469,9 +4484,9 @@ def test_between_runs_a_hand_reward_is_one_correct_trial_reward_through_the_task
 def test_after_a_run_and_while_the_return_is_awaited_a_hand_reward_is_given_and_said_so(tmp_path):
     session = _service_session(tmp_path)
     session.run(_run_spec(trials=1))
-    session.receive(ManualReward(by="jake"))
-    session.end_runs("jake")
-    session.receive(ManualReward(by="jake"))
+    session.receive(ManualReward(by=Box("jake")))
+    session.end_runs(Box("jake"))
+    session.receive(ManualReward(by=Box("jake")))
 
     assert [row["run"] for row in _manual_rows(session)] == [0, 0]
     assert [row.get("where") for row in _manual_rows(session)] == [
@@ -4487,15 +4502,15 @@ def test_after_a_run_and_while_the_return_is_awaited_a_hand_reward_is_given_and_
 
 def test_a_closed_session_refuses_a_hand_reward_and_gives_nothing(tmp_path):
     session = _service_session(tmp_path)
-    session.end_runs("jake")
-    session.returned_to_cage(session.wall_now(), by="jake", how="the page")
+    session.end_runs(Box("jake"))
+    session.returned_to_cage(session.wall_now(), by=Box("jake"), how="the page")
     session.close(how="wlx taskd")
     given = session.welfare.deliveries
 
-    session.receive(ManualReward(by="jake"))
+    session.receive(ManualReward(by=Box("jake")))
 
     ((name, by, why),) = [r for r in session.refusals if r[0] == "reward"]
-    assert (name, by) == ("reward", "jake")
+    assert (name, by) == ("reward", Box("jake"))
     assert "the session has ended" in why and "no reward was given" in why
     assert session.welfare.deliveries == given and REWARD_CODE not in session.card.codes
 
@@ -4513,7 +4528,7 @@ def test_a_pump_that_fails_a_hand_reward_between_runs_is_not_caught(tmp_path):
     session.welfare.pump = _Broken()
 
     with pytest.raises(RuntimeError, match="solenoid did not answer"):
-        session.receive(ManualReward(by="jake"))
+        session.receive(ManualReward(by=Box("jake")))
     assert session.welfare.deliveries == 1, "charged before the valve"
 
 
@@ -4524,14 +4539,14 @@ def test_a_fluid_stop_left_from_the_last_run_does_not_refuse_a_reward_between_ru
     and is given, as the first was."""
     link = Simulated()
     session = _service_session(tmp_path, link=link)
-    link.queue(ScheduleStop(kind="fluid", value=0.15, by="sam"))
-    link.queue(Stop(by="sam"))
+    link.queue(ScheduleStop(kind="fluid", value=0.15, by=Box("sam")))
+    link.queue(Stop(by=Box("sam")))
     session.run(_run_spec(trials=2))
     assert session.scheduled_stop[3] == "after 0.15 mL this session", "left from the run"
     assert session.welfare.session_total() == 0.0
 
-    session.receive(ManualReward(by="jake"))
-    session.receive(ManualReward(by="jake"))
+    session.receive(ManualReward(by=Box("jake")))
+    session.receive(ManualReward(by=Box("jake")))
 
     assert session.welfare.session_total() == pytest.approx(0.30)
     assert session.card.codes.count(REWARD_CODE) == 2
@@ -4540,9 +4555,9 @@ def test_a_fluid_stop_left_from_the_last_run_does_not_refuse_a_reward_between_ru
 
 def _outside_a_run_presses(session: Session) -> None:
     """One press between runs, and one after *End session* while the return is awaited."""
-    session.receive(ManualReward(by="jake"))
-    session.end_runs("jake")
-    session.receive(ManualReward(by="jake"))
+    session.receive(ManualReward(by=Box("jake")))
+    session.end_runs(Box("jake"))
+    session.receive(ManualReward(by=Box("jake")))
 
 
 def test_outside_a_run_a_config_without_reward_correct_refuses_the_reward(tmp_path):
@@ -4737,12 +4752,12 @@ def test_nothing_is_strobed_inside_a_trial_numbers_escape(tmp_path):
     and the block's four words go out whole, straight before that trial's
     `TRIAL_START`. **And the run's** (XC-205): its four words go out whole, straight
     after `RUN_START` and before the first boundary's mark."""
-    link = _Scripted(script={1: [ManualReward(by="jake")], 2: [Resume(by="sam")]}, step=10.0)
+    link = _Scripted(script={1: [ManualReward(by=Box("jake"))], 2: [Resume(by=Box("sam"))]}, step=10.0)
     link.marks.extend([5] * 100_000)
-    link.queue(SetParameter(name="fix_hold", value=0.4, by="jake"))
+    link.queue(SetParameter(name="fix_hold", value=0.4, by=Box("jake")))
     session, wall = _walled(tmp_path, link, trials=3)
     link.wall = wall
-    _scheduled_at_trial(link, session, 2, Pause(by="jake"))
+    _scheduled_at_trial(link, session, 2, Pause(by=Box("jake")))
 
     session.run()
 
@@ -4885,7 +4900,7 @@ def test_a_sessions_stream_assembles_in_wl_preproc_into_its_trials_numbered_acro
     session = _service_session(tmp_path)
     session.run(_run_spec(trials=3))
     session.run(_run_spec(trials=40, seed=5))
-    session.end_runs("jake")
+    session.end_runs(Box("jake"))
 
     stream = [(i * 0.001, word) for i, word in enumerate(session.card.codes)]
     assembly = their_assemble(their_events.decode_stream(stream))
@@ -5019,7 +5034,7 @@ def test_every_line_carries_its_position_across_runs_blocks_and_tasks(tmp_path):
     session.run(_levels_run(blocks=_plan("X", "Y", "X")))
     session.run(_other_run(tmp_path, _plan("C", each=1)))
     session.run(_levels_run(blocks=_plan("X", "Y")))
-    session.end_runs("jake")
+    session.end_runs(Box("jake"))
 
     lines = _trial_rows(session)
     last = lines[-1]
@@ -5065,7 +5080,7 @@ def test_a_runs_start_row_places_it_in_the_session(tmp_path):
     session.run(_levels_run(blocks=_plan("X")))
     session.run(_levels_run(blocks=_plan("X")))
     session.run(_other_run(tmp_path, _plan("C", each=1)))
-    session.end_runs("jake")
+    session.end_runs(Box("jake"))
 
     starts = [row for row in _runs(session) if row["event"] == "start"]
     assert [(r["run_in_session"], r["run_in_task"], r["task_in_session"]) for r in starts] == [
@@ -5114,7 +5129,7 @@ def _block_words(codes):
 def test_each_block_is_opened_and_closed_in_the_stream(tmp_path):
     session = _service_session(tmp_path)
     session.run(_levels_run(blocks=_plan("X", "Y", "X")))
-    session.end_runs("jake")
+    session.end_runs(Box("jake"))
 
     assert _block_words(session.card.codes) == [
         ("run", 1), ("start", 1), "end", ("start", 2), "end", ("start", 3), "end", "run end",
@@ -5124,7 +5139,7 @@ def test_each_block_is_opened_and_closed_in_the_stream(tmp_path):
 def test_a_block_opens_just_before_its_first_trial_and_closes_after_its_last(tmp_path):
     session = _service_session(tmp_path)
     session.run(_levels_run(blocks=_plan("X")))
-    session.end_runs("jake")
+    session.end_runs(Box("jake"))
 
     codes = session.card.codes
     first = codes.index(TRIAL_START_CODE)
@@ -5144,7 +5159,7 @@ def test_every_run_opens_and_closes_in_the_stream(tmp_path):
     session = _service_session(tmp_path)
     session.run(_levels_run(blocks=_plan("X")))
     session.run(_levels_run(blocks=_plan("X", "Y")))
-    session.end_runs("jake")
+    session.end_runs(Box("jake"))
 
     codes = session.card.codes
     assert _block_words(codes) == [
@@ -5189,11 +5204,11 @@ def test_a_run_ended_by_a_scheduled_stop_closes_its_open_block_first(tmp_path):
     block gets its `BLOCK_END`, then `RUN_END` (the session-levels final review, M9)."""
     link = Simulated()
     session = _session(_spec(tmp_path, trials=50), link=link)
-    _scheduled_at_trial(link, session, 2, ScheduleStop(kind="trials", value=3, by="jake"))
+    _scheduled_at_trial(link, session, 2, ScheduleStop(kind="trials", value=3, by=Box("jake")))
 
     session.run()
 
-    assert session.stopped_because == "scheduled stop (after trial 5) set by jake"
+    assert session.stopped_because == "scheduled stop (after trial 5) set by jake (box, unverified)"
     assert _block_words(session.card.codes) == [("run", 1), ("start", 1), "end", "run end"]
     assert _closes_its_block_before_run_end(session.card.codes)
 
@@ -5207,10 +5222,10 @@ def test_a_run_stopped_before_its_first_trial_marks_no_block(tmp_path):
     with its `RUN_END` marker, with no block between, and the next run is run 2."""
     link = Simulated()
     session = _service_session(tmp_path, link=link)
-    link.queue(Stop(by="jake"))
+    link.queue(Stop(by=Box("jake")))
     session.run(_levels_run(blocks=_plan("X")))
     session.run(_levels_run(blocks=_plan("X")))
-    session.end_runs("jake")
+    session.end_runs(Box("jake"))
 
     codes = session.card.codes
     assert _block_words(codes) == [
@@ -5244,7 +5259,7 @@ def test_a_faulted_run_leaves_its_block_open_and_the_next_takes_the_next_number(
     with pytest.raises(RuntimeError, match="the display went away"):
         session.run(_levels_run(blocks=_plan("X", each=3)))
     session.run(_levels_run(blocks=_plan("X")))
-    session.end_runs("jake")
+    session.end_runs(Box("jake"))
 
     # The faulted run opened in wl-preproc's terms and sent no `RUN_END` marker; the next
     # takes run number 2 (XC-205).
@@ -5263,10 +5278,10 @@ def test_a_faulted_run_leaves_its_block_open_and_the_next_takes_the_next_number(
 
 def test_a_pause_inside_a_block_keeps_one_block(tmp_path):
     """Review Focus 3: paused after the second of three trials, then resumed; one block."""
-    link = _Scripted(script={1: [Resume(by="sam")]}, step=10.0)
+    link = _Scripted(script={1: [Resume(by=Box("sam"))]}, step=10.0)
     session, wall = _walled(tmp_path, link, trials=3)
     link.wall = wall
-    _scheduled_at_trial(link, session, 2, Pause(by="jake"))
+    _scheduled_at_trial(link, session, 2, Pause(by=Box("jake")))
 
     session.run()
 
@@ -5282,11 +5297,11 @@ def test_a_sessions_blocks_and_trials_assemble_in_wl_preproc(tmp_path):
     its line names; and every line's ten numbers are spec §3's."""
     link = Simulated()
     session = _service_session(tmp_path, link=link)
-    _scheduled_at_trial(link, session, 8, Stop(by="jake"))
+    _scheduled_at_trial(link, session, 8, Stop(by=Box("jake")))
     session.run(_levels_run(blocks=_plan("X", "Y", "X")))
     session.run(_other_run(tmp_path, _plan("C", each=1)))
     session.run(_levels_run(blocks=_plan("X", "Y")))
-    session.end_runs("jake")
+    session.end_runs(Box("jake"))
 
     stream = [(i * 0.001, word) for i, word in enumerate(session.card.codes)]
     events = their_events.decode_stream(stream)
@@ -5404,7 +5419,7 @@ def test_the_frames_a_session_publishes_carry_its_performance(tmp_path):
 def _stage_bounded(session: Session, name: str, value: float) -> None:
     """Set a welfare-bounded value as a console does: queued on the link, drained at
     the run's first boundary and applied at the next."""
-    session.link.queue(SetParameter(name=name, value=value, by="jake"))
+    session.link.queue(SetParameter(name=name, value=value, by=Box("jake")))
 
 
 def _resumed(tmp_path, first: Session, **spec) -> Session:
@@ -5424,7 +5439,7 @@ def _resumed(tmp_path, first: Session, **spec) -> Session:
     # taken afresh at the resume would differ from the one restored.
     later = first.now() + 60.0
     again.wall_clock = lambda: WALL_NOW + later + again.now()
-    again.resume(restoration, by="jake", how="test")
+    again.resume(restoration, by=Box("jake"), how="test")
     return again
 
 
@@ -5502,10 +5517,10 @@ def test_resume_refuses_an_opened_session_and_a_non_service_one(tmp_path):
     first.run(_levels_run(blocks=_plan("X", each=2)))
     restoration = resume.read(first.directory, first.welfare.left_cage_wall_at)
     with pytest.raises(RuntimeError, match="opened or resumed once"):
-        first.resume(restoration, by="jake", how="test")
+        first.resume(restoration, by=Box("jake"), how="test")
     terminal = _session(_spec(tmp_path))
     with pytest.raises(RuntimeError, match="only a wlx taskd session"):
-        terminal.resume(restoration, by="jake", how="test")
+        terminal.resume(restoration, by=Box("jake"), how="test")
 
 
 def test_the_session_resumed_row_names_the_person_and_the_records_last_write(tmp_path):
@@ -5521,5 +5536,5 @@ def test_the_session_resumed_row_names_the_person_and_the_records_last_write(tmp
         for line in (again.directory / "welfare_notes.jsonl").read_text().splitlines()
     ]
     (row,) = [r for r in rows if r["kind"] == "session resumed"]
-    assert row["by"] == "jake" and row["how"] == "test"
+    assert row["by"] == {"kind": "box", "name": "jake"} and row["how"] == "test"
     assert _local(written) in row["reason"]

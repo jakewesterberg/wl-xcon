@@ -34,6 +34,7 @@ from _zmq_release import _every_zmq_context_released  # noqa: F401
 from _frames import idle
 from wl_xcon import cli
 from wl_xcon import link as _link
+from wl_xcon.actor import Box
 from wl_xcon.bounds import Exceeded
 from wl_xcon.cli import (
     _RETURN_PROMPT,
@@ -811,7 +812,7 @@ def test_wlx_run_with_link_lets_a_real_console_attach(tmp_path, zmq_cleanup):
             first = console.receive()
             assert first.session_id == "2027-01-14_04"
 
-            console.send(SetParameter(name="fix_hold", value=0.4, by="jake"))
+            console.send(SetParameter(name="fix_hold", value=0.4, by=Box("jake")))
 
             seen_staged = False
             applied = False
@@ -827,13 +828,13 @@ def test_wlx_run_with_link_lets_a_real_console_attach(tmp_path, zmq_cleanup):
             assert seen_staged, "the console's SetParameter was never drained"
             assert applied, "fix_hold was staged but never observed applied"
 
-            console.send(Stop(by="jake"))
+            console.send(Stop(by=Box("jake")))
             stopped = None
             for _ in range(2000):
                 stopped = console.receive().stopped_because
                 if stopped:
                     break
-            assert stopped == "stopped by jake", stopped
+            assert stopped == "stopped by jake (box, unverified)", stopped
     finally:
         runner_thread.join(timeout=15)
     assert not runner_thread.is_alive(), "wlx run did not finish on its own"
@@ -845,7 +846,7 @@ def test_wlx_run_with_link_lets_a_real_console_attach(tmp_path, zmq_cleanup):
     changes = [json.loads(line) for line in changes_path.read_text().splitlines()]
     fix_hold_changes = [c for c in changes if c["name"] == "fix_hold"]
     assert fix_hold_changes, "the console's SetParameter never reached the record"
-    assert fix_hold_changes[0]["by"] == "jake"
+    assert fix_hold_changes[0]["by"] == {"kind": "box", "name": "jake"}
     assert fix_hold_changes[0]["now"] == 0.4
 
     # P4d-2a spec §10, Task 8: no terminal, so the interval closes at once rather
@@ -1068,7 +1069,7 @@ def test_console_shows_staged_changes_with_who_staged_them():
     change already accepted and waiting for the next trial boundary from everybody
     who did not stage it themselves."""
     frame = _telemetry(
-        staged=(Staged(name="fix_hold", was=0.3, now=0.4, by="jake", bounded=False),)
+        staged=(Staged(name="fix_hold", was=0.3, now=0.4, by=Box("jake"), bounded=False),)
     )
 
     rendered = render(frame)
@@ -1088,7 +1089,7 @@ def test_console_labels_a_staged_welfare_ceiling_change_distinctly():
     label as an ordinary task parameter; the two have very different stakes."""
     frame = _telemetry(
         staged=(
-            Staged(name="reward_correct", was=0.05, now=0.08, by="jake", bounded=True),
+            Staged(name="reward_correct", was=0.05, now=0.08, by=Box("jake"), bounded=True),
         )
     )
 
@@ -1113,13 +1114,13 @@ def test_console_says_a_staged_change_of_either_kind_is_still_pending():
     bounded = render(
         _telemetry(
             staged=(
-                Staged(name="reward_correct", was=0.15, now=0.3, by="jake", bounded=True),
+                Staged(name="reward_correct", was=0.15, now=0.3, by=Box("jake"), bounded=True),
             )
         )
     )
     ordinary = render(
         _telemetry(
-            staged=(Staged(name="fix_hold", was=0.3, now=0.4, by="jake", bounded=False),)
+            staged=(Staged(name="fix_hold", was=0.3, now=0.4, by=Box("jake"), bounded=False),)
         )
     )
 
@@ -1139,8 +1140,8 @@ def test_console_prints_a_staged_volume_to_the_same_decimals_as_every_other_flui
     rendered = render(
         _telemetry(
             staged=(
-                Staged(name="reward_correct", was=0.15, now=0.3, by="jake", bounded=True),
-                Staged(name="fix_hold", was=None, now=0.4, by="jake", bounded=False),
+                Staged(name="reward_correct", was=0.15, now=0.3, by=Box("jake"), bounded=True),
+                Staged(name="fix_hold", was=None, now=0.4, by=Box("jake"), bounded=False),
             )
         )
     )
@@ -1172,7 +1173,7 @@ def test_console_shows_refusals_so_a_mistyped_write_is_not_silent():
     prior fix round removed from `Session.refusals`/`Telemetry.refusals` (fix round
     1, Ruling R17c); the console has to be the thing that actually surfaces it."""
     frame = _telemetry(
-        refusals=(Refused(name="fx_hold", by="jake", why="not declared"),)
+        refusals=(Refused(name="fx_hold", by=Box("jake"), why="not declared"),)
     )
 
     rendered = render(frame)
@@ -1200,7 +1201,7 @@ def test_console_renders_a_refusal_that_actually_crossed_the_wire():
         refusals=(
             Refused(
                 name="reward_correct",
-                by="jake",
+                by=Box("jake"),
                 why="'reward_correct' may not exceed 0.4 mL",
             ),
         )
@@ -1210,6 +1211,16 @@ def test_console_renders_a_refusal_that_actually_crossed_the_wire():
 
     assert "refused: reward_correct by jake" in rendered
     assert "may not exceed 0.4 mL" in rendered
+
+
+def test_console_names_no_one_for_a_refusal_from_nobody():
+    """b2b spec §6: a refusal with no readable sender carries `None`, and the terminal
+    names no one, as it does for a mark's stamp -- never `by :` or `by None`."""
+    frame = _telemetry(refusals=(Refused("<transport>", None, "could not decode command"),))
+
+    rendered = render(decode(encode(frame)))
+
+    assert "  refused: <transport>: could not decode command" in rendered.splitlines()
 
 
 def test_console_says_when_older_refusals_were_dropped():
@@ -1223,7 +1234,7 @@ def test_console_says_when_older_refusals_were_dropped():
     bottom that everything above was a tail is learning it too late."""
     rendered = render(
         _telemetry(
-            refusals=(Refused(name="fx_hold", by="jake", why="not declared"),),
+            refusals=(Refused(name="fx_hold", by=Box("jake"), why="not declared"),),
             refusals_dropped=400,
         )
     )
@@ -1242,7 +1253,7 @@ def test_console_says_nothing_about_dropped_refusals_when_none_were_dropped():
     it."""
     rendered = render(
         _telemetry(
-            refusals=(Refused(name="fx_hold", by="jake", why="not declared"),),
+            refusals=(Refused(name="fx_hold", by=Box("jake"), why="not declared"),),
             refusals_dropped=0,
         )
     )
@@ -2337,7 +2348,7 @@ def test_an_interactive_run_can_amend_the_time_with_a_reason_and_a_name(
         "session ended",
     ]
     assert rows[2]["reason"] == "typed 08:45 for 18:45"
-    assert rows[2]["by"] == "jake"
+    assert rows[2]["by"] == {"kind": "box", "name": "jake"}
     assert rows[2]["was"] != rows[2]["now"]
 
 
@@ -2349,7 +2360,7 @@ def test_the_departure_row_says_who_gave_it_and_how(tmp_path, monkeypatch):
     the terminal and that they did."""
     assert main(_run_args(tmp_path, "--out-of-cage-at", _hhmm(), "--as", "jake")) == 0
     departure = next(row for row in _notes(tmp_path) if row["kind"] == "departure")
-    assert (departure["by"], departure["how"]) == ("jake", "--out-of-cage-at")
+    assert (departure["by"], departure["how"]) == ({"kind": "box", "name": "jake"}, "--out-of-cage-at")
 
     amended = tmp_path / "amended"
     amended.mkdir()
@@ -2359,7 +2370,7 @@ def test_the_departure_row_says_who_gave_it_and_how(tmp_path, monkeypatch):
 
     assert main(_run_args(amended, "--out-of-cage-at", _hours_ago(5))) == 0
     departure = next(row for row in _notes(amended) if row["kind"] == "departure")
-    assert (departure["by"], departure["how"]) == ("sam", "amended at the terminal")
+    assert (departure["by"], departure["how"]) == ({"kind": "box", "name": "sam"}, "amended at the terminal")
 
 
 def test_an_amendment_can_be_made_without_a_terminal_too(tmp_path):
@@ -3419,7 +3430,7 @@ def test_console_says_a_finite_instant_this_host_cannot_show_is_unknown(at):
 def test_console_names_the_scheduled_stop_and_who_set_it():
     rendered = render(
         _telemetry(
-            scheduled_stop=ScheduledStop("trials", 48.0, "jake (box, unverified)", "after trial 48")
+            scheduled_stop=ScheduledStop("trials", 48.0, Box("jake"), "after trial 48")
         )
     ).splitlines()
 
@@ -3430,8 +3441,8 @@ def test_console_lists_control_events_and_counts_what_fell_off_before_them():
     rendered = render(
         _telemetry(
             controls=(
-                Control("mark", "", 1_700_000_001.0, "mark 1 stamped in trial 3, frame 10"),
-                Control("note", "jake", 1_700_000_002.0, 'mark 1: "bubble"'),
+                Control("mark", None, 1_700_000_001.0, "mark 1 stamped in trial 3, frame 10"),
+                Control("note", Box("jake"), 1_700_000_002.0, 'mark 1: "bubble"'),
             ),
             controls_dropped=4,
         )
@@ -3442,7 +3453,7 @@ def test_console_lists_control_events_and_counts_what_fell_off_before_them():
         "kept (link.CONTROL_HISTORY)"
     )
     stamp = rendered.index("  control: mark: mark 1 stamped in trial 3, frame 10")
-    note = rendered.index('  control: note by jake: mark 1: "bubble"')
+    note = rendered.index('  control: note by jake (box, unverified): mark 1: "bubble"')
     assert dropped < stamp < note
 
 
@@ -3456,12 +3467,12 @@ def test_console_strips_control_characters_from_wire_text():
             controls=(
                 Control(
                     "mark",
-                    "\x1b]0;x\x07",
+                    Box("\x1b]0;x\x07"),
                     1_700_000_001.0,
                     "\x1b[2J\x1b[H\nSTOPPED: forged",
                 ),
             ),
-            refusals=(Refused("reward_correct", "jake", "exceeds ceiling\x1b[31m"),),
+            refusals=(Refused("reward_correct", Box("jake"), "exceeds ceiling\x1b[31m"),),
         )
     )
     lines = rendered.splitlines()
@@ -3484,7 +3495,7 @@ def test_the_terminal_console_says_no_session_is_open_and_what_is_stranded():
     shown = render(
         idle(
             stranded=(Stranded("2027-01-13_01", "B\x1b[2J", 1_700_000_000.0), Stranded("2027-01-13_02", "", None)),
-            refusals=(Refused("open", "jake", "no session opens while <b>"),),
+            refusals=(Refused("open", Box("jake"), "no session opens while <b>"),),
         )
     )
 
@@ -3492,7 +3503,7 @@ def test_the_terminal_console_says_no_session_is_open_and_what_is_stranded():
     assert "STRANDED: B\ufffd[2J, session 2027-01-13_01, left its cage at" in shown
     assert "session 2027-01-13_02: its welfare record cannot be read" in shown
     assert "animals: A, B" in shown and "tasks offered: fixation_detection.py" in shown
-    assert "refused: open by jake: no session opens while <b>" in shown
+    assert "refused: open by jake (box, unverified): no session opens while <b>" in shown
 
 
 def test_the_terminal_console_reads_an_idle_frame_carrying_a_closed_summary():
@@ -3523,7 +3534,7 @@ def test_the_terminal_console_strips_control_characters_from_an_idle_frames_text
     shown = render(
         idle(
             question=Question("departure", "2027-01-14_01", 1.0, "far\x1b[2J", ("confirm", "am\rend")),
-            refusals=(Refused("open\x1b", "ja\nke", "why\x07"),),
+            refusals=(Refused("open\x1b", Box("ja\nke"), "why\x07"),),
         )
     )
 

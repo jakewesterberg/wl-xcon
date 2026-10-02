@@ -11,6 +11,7 @@ import pytest
 
 from _sessions import WALL, session, typed
 from wl_xcon import cli, marks
+from wl_xcon.actor import Box
 from wl_xcon.bounds import Exceeded
 from wl_xcon.welfare import CONFIRM_MARK_WITHIN
 
@@ -34,7 +35,7 @@ def _departed(tmp_path):
     marks.depart(
         made,
         marks.decide_departure(
-            made, WALL - 3 * 3600, marks.Confirm(by="jake", how="t"), by="jake", how="t"
+            made, WALL - 3 * 3600, marks.Confirm(by=Box("jake"), how="t"), by=Box("jake"), how="t"
         ),
     )
     return made
@@ -50,12 +51,12 @@ def test_the_terminal_and_the_page_read_a_time_with_one_parser():
 def test_a_near_departure_is_taken_as_given_and_writes_no_confirmation(tmp_path):
     made = session(tmp_path)
 
-    decision = marks.decide_departure(made, WALL - 60, None, by="jake", how="--out-of-cage-at")
+    decision = marks.decide_departure(made, WALL - 60, None, by=Box("jake"), how="--out-of-cage-at")
     marks.depart(made, decision)
     marks.record_departure(made, decision)
 
     assert (decision.at, decision.confirmed, decision.note) == (WALL - 60, False, None)
-    assert (decision.by, decision.how) == ("jake", "--out-of-cage-at")
+    assert (decision.by, decision.how) == (Box("jake"), "--out-of-cage-at")
     assert made.welfare.left_cage_wall_at == WALL - 60
     assert _kinds(made) == ["departure"]
 
@@ -64,7 +65,7 @@ def test_a_far_departure_with_no_answer_is_owed_and_nothing_is_marked(tmp_path):
     made = session(tmp_path)
 
     with pytest.raises(marks.Owed) as owed:
-        marks.decide_departure(made, WALL - FAR, None, by="jake", how="typed on the page")
+        marks.decide_departure(made, WALL - FAR, None, by=Box("jake"), how="typed on the page")
 
     assert (owed.value.mark, owed.value.at) == ("departure", WALL - FAR)
     assert owed.value.answers == ("confirm", "amend")
@@ -79,8 +80,8 @@ def test_a_far_departure_a_person_confirmed_is_marked_confirmed_with_its_row(tmp
     decision = marks.decide_departure(
         made,
         WALL - FAR,
-        marks.Confirm(by="jake", how="confirmed on the page"),
-        by="jake",
+        marks.Confirm(by=Box("jake"), how="confirmed on the page"),
+        by=Box("jake"),
         how="typed on the page",
     )
     marks.depart(made, decision)
@@ -99,8 +100,8 @@ def test_an_amendment_is_its_own_confirmation_and_marks_the_corrected_time(tmp_p
     decision = marks.decide_departure(
         made,
         typed_at,
-        marks.Amend(at=corrected, reason="typed 08:45 for 18:45", by="sam", how="amended on the page"),
-        by="jake",
+        marks.Amend(at=corrected, reason="typed 08:45 for 18:45", by=Box("sam"), how="amended on the page"),
+        by=Box("jake"),
         how="typed on the page",
     )
     marks.depart(made, decision)
@@ -109,14 +110,16 @@ def test_an_amendment_is_its_own_confirmation_and_marks_the_corrected_time(tmp_p
     assert decision.confirmed and made.welfare.left_cage_wall_at == corrected
     departed = _rows(made)[0]
     assert (departed["kind"], departed["by"], departed["how"]) == (
-        "departure", "sam", "amended on the page"
+        "departure", {"kind": "box", "name": "sam"}, "amended on the page"
     )
     note = _rows(made)[1]
     assert (note["kind"], note["was"], note["now"]) == ("departure amended", typed_at, corrected)
-    assert (note["reason"], note["by"]) == ("typed 08:45 for 18:45", "sam")
+    assert (note["reason"], note["by"]) == ("typed 08:45 for 18:45", {"kind": "box", "name": "sam"})
 
 
-@pytest.mark.parametrize(("reason", "by", "said"), [("", "sam", "no reason"), ("typo", "", "by nobody")])
+@pytest.mark.parametrize(
+    ("reason", "by", "said"), [("", Box("sam"), "no reason"), ("typo", Box(""), "by nobody")]
+)
 def test_an_amendment_without_a_reason_or_a_name_is_refused(tmp_path, reason, by, said):
     made = session(tmp_path)
 
@@ -125,7 +128,7 @@ def test_an_amendment_without_a_reason_or_a_name_is_refused(tmp_path, reason, by
             made,
             WALL - 5 * 3600,
             marks.Amend(at=WALL - 600, reason=reason, by=by, how="amended on the page"),
-            by="jake",
+            by=Box("jake"),
             how="typed on the page",
         )
 
@@ -139,8 +142,8 @@ def test_an_amendment_meets_every_refusal_the_original_would(tmp_path):
     decision = marks.decide_departure(
         made,
         WALL - 5 * 3600,
-        marks.Amend(at=WALL + 3600, reason="typo", by="sam", how="amended on the page"),
-        by="jake",
+        marks.Amend(at=WALL + 3600, reason="typo", by=Box("sam"), how="amended on the page"),
+        by=Box("jake"),
         how="typed on the page",
     )
 
@@ -154,7 +157,7 @@ def test_a_departure_past_the_ceiling_is_refused_and_never_asked_about(tmp_path)
     """The band has two edges and only one of them asks (`welfare`'s rule)."""
     made = session(tmp_path, out_of_cage=3600.0)
 
-    decision = marks.decide_departure(made, WALL - 7200, None, by="jake", how="t")
+    decision = marks.decide_departure(made, WALL - 7200, None, by=Box("jake"), how="t")
 
     assert decision.note is None
     with pytest.raises(Exceeded, match="at or outside the limit"):
@@ -164,7 +167,7 @@ def test_a_departure_past_the_ceiling_is_refused_and_never_asked_about(tmp_path)
 def test_a_near_return_is_taken_and_written(tmp_path):
     made = _departed(tmp_path)
 
-    marks.take_return(made, WALL - 60, confirmed=False, by="jake", how="the page")
+    marks.take_return(made, WALL - 60, confirmed=False, by=Box("jake"), how="the page")
 
     assert made.welfare.returned_wall_at == WALL - 60
     assert _kinds(made)[-1] == "returned"
@@ -175,7 +178,7 @@ def test_a_far_return_nobody_confirmed_is_owed_confirm_or_retype(tmp_path):
     made = _departed(tmp_path)
 
     with pytest.raises(marks.Owed) as owed:
-        marks.take_return(made, WALL - 2 * 3600, confirmed=False, by="jake", how="the page")
+        marks.take_return(made, WALL - 2 * 3600, confirmed=False, by=Box("jake"), how="the page")
 
     assert (owed.value.mark, owed.value.answers) == ("return", ("confirm", "re-type"))
     assert made.welfare.returned_wall_at is None
@@ -184,7 +187,7 @@ def test_a_far_return_nobody_confirmed_is_owed_confirm_or_retype(tmp_path):
 def test_a_far_return_a_person_confirmed_is_taken_with_its_row(tmp_path):
     made = _departed(tmp_path)
 
-    marks.take_return(made, WALL - 2 * 3600, confirmed=True, by="jake", how="the page")
+    marks.take_return(made, WALL - 2 * 3600, confirmed=True, by=Box("jake"), how="the page")
 
     assert _kinds(made)[-2:] == ["returned", "return confirmed"]
 
@@ -196,7 +199,7 @@ def test_a_return_meets_every_welfare_refusal(tmp_path, before_wall, said):
     made = _departed(tmp_path)
 
     with pytest.raises(Exceeded, match=said):
-        marks.take_return(made, WALL - before_wall, confirmed=True, by="jake", how="the page")
+        marks.take_return(made, WALL - before_wall, confirmed=True, by=Box("jake"), how="the page")
 
 
 def test_the_pages_departure_is_read_by_the_terminals_parser(tmp_path):
@@ -206,25 +209,25 @@ def test_the_pages_departure_is_read_by_the_terminals_parser(tmp_path):
         answer=None,
         amend_to=None,
         amend_reason="",
-        by="jake (box, unverified)",
+        by=Box("jake"),
     )
 
     assert decision.at == pytest.approx(WALL - 60, abs=1.0)
-    assert (decision.by, decision.how) == ("jake (box, unverified)", "typed on the page")
+    assert (decision.by, decision.how) == (Box("jake"), "typed on the page")
 
 
 def test_the_pages_answers_are_the_terminals(tmp_path):
     confirmed = marks.page_departure(
         session(tmp_path / "a"), departure=typed(3 * 3600), answer="confirm",
-        amend_to=None, amend_reason="", by="jake",
+        amend_to=None, amend_reason="", by=Box("jake"),
     )
     amended = marks.page_departure(
         session(tmp_path / "b"), departure=typed(5 * 3600), answer="amend",
-        amend_to=typed(600), amend_reason="typo", by="jake",
+        amend_to=typed(600), amend_reason="typo", by=Box("jake"),
     )
 
     assert (confirmed.confirmed, confirmed.how) == (True, "confirmed on the page")
-    assert (amended.how, amended.by, amended.confirmed) == ("amended on the page", "jake", True)
+    assert (amended.how, amended.by, amended.confirmed) == ("amended on the page", Box("jake"), True)
     assert amended.at == pytest.approx(WALL - 600, abs=1.0)
 
 
@@ -248,7 +251,7 @@ def test_a_page_time_that_is_not_one_is_refused_in_the_terminals_words(tmp_path,
 
     with pytest.raises(argparse.ArgumentTypeError, match="is not a clock time") as refused:
         marks.page_departure(
-            made, departure=text, answer=None, amend_to=None, amend_reason="", by="jake",
+            made, departure=text, answer=None, amend_to=None, amend_reason="", by=Box("jake"),
         )
 
     assert repr(text) in str(refused.value) and marks.TIME_FORMATS in str(refused.value)
@@ -264,7 +267,7 @@ def test_an_amended_time_the_host_cannot_place_is_refused_in_the_terminals_words
     with pytest.raises(argparse.ArgumentTypeError, match="is not a clock time"):
         marks.page_departure(
             made, departure=typed(5 * 3600), answer="amend", amend_to=text,
-            amend_reason="typo", by="jake",
+            amend_reason="typo", by=Box("jake"),
         )
 
     assert made.welfare.left_cage_wall_at is None
@@ -277,7 +280,7 @@ def test_a_return_time_the_host_cannot_place_is_refused_in_the_terminals_words(
     made = _departed(tmp_path)
 
     with pytest.raises(argparse.ArgumentTypeError, match="is not a clock time"):
-        marks.page_return(made, returned=text, confirm=True, by="jake")
+        marks.page_return(made, returned=text, confirm=True, by=Box("jake"))
 
     assert made.welfare.returned_wall_at is None
 
@@ -295,7 +298,7 @@ def test_a_departure_in_the_calendars_last_minute_is_refused_on_any_host(
     with pytest.raises(REFUSED, match=REFUSED_AS):
         decision = marks.page_departure(
             made, departure=departure, answer=answer, amend_to=amend_to,
-            amend_reason=amend_reason, by="jake",
+            amend_reason=amend_reason, by=Box("jake"),
         )
         marks.depart(made, decision)
 
@@ -306,7 +309,7 @@ def test_a_return_in_the_calendars_last_minute_is_refused_on_any_host(tmp_path):
     made = _departed(tmp_path)
 
     with pytest.raises(REFUSED, match=REFUSED_AS):
-        marks.page_return(made, returned=LAST_MINUTE, confirm=True, by="jake")
+        marks.page_return(made, returned=LAST_MINUTE, confirm=True, by=Box("jake"))
 
     assert made.welfare.returned_wall_at is None
 
@@ -321,7 +324,7 @@ def test_an_answer_the_page_does_not_know_is_refused_not_read_as_none(tmp_path, 
     with pytest.raises(argparse.ArgumentTypeError, match="is none of them") as refused:
         marks.page_departure(
             made, departure=typed(60), answer=answer, amend_to=typed(600),
-            amend_reason="typo", by="jake",
+            amend_reason="typo", by=Box("jake"),
         )
 
     assert repr(answer) in str(refused.value)
@@ -346,7 +349,7 @@ def test_an_amendment_sent_without_amend_is_refused_not_dropped(
     with pytest.raises(argparse.ArgumentTypeError, match="without the answer amend") as refused:
         marks.page_departure(
             made, departure=typed(60), answer=answer, amend_to=corrected,
-            amend_reason=amend_reason, by="jake",
+            amend_reason=amend_reason, by=Box("jake"),
         )
 
     assert named in str(refused.value)
@@ -361,7 +364,7 @@ def test_the_pages_return_confirmation_is_strictly_a_bool(tmp_path, confirm):
     made = _departed(tmp_path)
 
     with pytest.raises(argparse.ArgumentTypeError, match="true or false"):
-        marks.page_return(made, returned=typed(2 * 3600), confirm=confirm, by="jake")
+        marks.page_return(made, returned=typed(2 * 3600), confirm=confirm, by=Box("jake"))
 
     assert made.welfare.returned_wall_at is None
 
@@ -370,14 +373,14 @@ def test_an_amendment_from_the_page_needs_its_corrected_time(tmp_path):
     with pytest.raises(argparse.ArgumentTypeError, match="corrected departure time"):
         marks.page_departure(
             session(tmp_path), departure=typed(5 * 3600), answer="amend",
-            amend_to=None, amend_reason="typo", by="jake",
+            amend_to=None, amend_reason="typo", by=Box("jake"),
         )
 
 
 def test_the_pages_return_takes_now_on_the_sessions_clock(tmp_path):
     made = _departed(tmp_path)
 
-    marks.page_return(made, returned="now", confirm=False, by="jake")
+    marks.page_return(made, returned="now", confirm=False, by=Box("jake"))
 
     assert made.welfare.returned_wall_at == WALL
     assert _rows(made)[-1]["how"] == "the page"

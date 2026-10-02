@@ -21,6 +21,7 @@ import pytest
 
 from _ports import endpoints as free_endpoints
 from _rig import DIRECT, STEREOSCOPE
+from wl_xcon.actor import Box
 from wl_xcon.bounds import Bounds, Ceiling, Floor
 from wl_xcon.link import (
     MARK_BYTES,
@@ -284,12 +285,12 @@ def test_absent_publishes_nowhere_and_yields_no_commands():
 
 def test_simulated_keeps_what_was_published_and_returns_queued_commands():
     link = Simulated()
-    link.queue(SetParameter(name="fix_hold", value=0.4, by="jake"))
+    link.queue(SetParameter(name="fix_hold", value=0.4, by=Box("jake")))
 
     link.publish(_telemetry())
 
     assert len(link.published) == 1
-    assert link.drain() == [SetParameter(name="fix_hold", value=0.4, by="jake")]
+    assert link.drain() == [SetParameter(name="fix_hold", value=0.4, by=Box("jake"))]
     assert link.drain() == [], "a command is delivered once, not every boundary"
 
 
@@ -302,13 +303,53 @@ def test_telemetry_survives_the_wire_unchanged():
     """A golden round-trip, which ADR-0003 requires of every message schema
     ("schema-versioned messages ... version field from day one"). A field that
     silently changes type on the wire is a console rendering something other than
-    what the session meant."""
-    original = _telemetry(fluid_today_ml=None, shortfall_ml=None)
+    what the session meant.
+
+    **Every kind of `by`** (b2b spec §6): a wl.works member, a box name, and nobody, in
+    each row that names who."""
+    from wl_xcon.actor import Member
+
+    member = Member(
+        name="Jake Westerberg", account="u-1", issuer="https://wl.works/api/auth", token_id="j-1"
+    )
+    original = _telemetry(
+        fluid_today_ml=None,
+        shortfall_ml=None,
+        staged=(Staged(name="fix_hold", was=0.3, now=0.4, by=member, bounded=False),),
+        refusals=(
+            Refused(name="reward_correct", by=member, why="may not exceed 0.4 mL"),
+            Refused(name="<transport>", by=None, why="could not decode command"),
+        ),
+        scheduled_stop=ScheduledStop("trials", 48.0, Box("jake"), "after trial 48"),
+        controls=(
+            Control("mark", None, 1_700_000_101.5, "mark 1 stamped while paused, before trial 40"),
+            Control("note", member, 1_700_000_102.0, 'mark 1: "bubble"'),
+        ),
+    )
 
     restored = decode(encode(original))
 
     assert restored == original
     assert restored.fluid_today_ml is None, "None must not become 0.0 on the wire"
+    assert restored.staged[0].by == member
+    assert restored.refusals[0].by == member and restored.refusals[1].by is None
+    assert restored.controls[0].by is None, "nobody must not become a name on the wire"
+
+
+def test_a_frame_whose_by_is_no_actor_is_refused_as_a_frame():
+    """b2b spec §6: a `by` that is neither a box name nor a member, as a map, is a
+    frame that cannot be shown -- `FrameError`, caught where frames are read -- never
+    a control rendered with a guessed sender."""
+    import msgpack
+
+    data = msgpack.unpackb(
+        encode(_telemetry(controls=(Control("pause", Box("jake"), 1.0, "paused at trial 0"),))),
+        raw=False,
+    )
+    data["controls"][0]["by"] = {"kind": "admin"}
+
+    with pytest.raises(FrameError):
+        decode(msgpack.packb(data, use_bin_type=True))
 
 
 def test_a_cage_side_sessions_absent_duration_clock_survives_the_wire_as_none():
@@ -389,10 +430,10 @@ def test_staged_and_refused_rows_come_back_as_objects_not_raw_dicts():
     looks, since it would still hold for anything that compared equal to the
     original tuple."""
     original = _telemetry(
-        staged=(Staged(name="fix_hold", was=0.3, now=0.4, by="jake", bounded=False),),
+        staged=(Staged(name="fix_hold", was=0.3, now=0.4, by=Box("jake"), bounded=False),),
         refusals=(
-            Refused(name="reward_correct", by="jake", why="may not exceed 0.4 mL"),
-            Refused(name="fx_hold", by="sam", why="not a parameter this task declares"),
+            Refused(name="reward_correct", by=Box("jake"), why="may not exceed 0.4 mL"),
+            Refused(name="fx_hold", by=Box("sam"), why="not a parameter this task declares"),
         ),
     )
 
@@ -401,7 +442,7 @@ def test_staged_and_refused_rows_come_back_as_objects_not_raw_dicts():
     assert restored == original
     assert [type(r) for r in restored.refusals] == [Refused, Refused]
     assert [r.name for r in restored.refusals] == ["reward_correct", "fx_hold"]
-    assert [r.by for r in restored.refusals] == ["jake", "sam"]
+    assert [r.by for r in restored.refusals] == [Box("jake"), Box("sam")]
     assert restored.refusals[0].why == "may not exceed 0.4 mL"
     assert [type(s) for s in restored.staged] == [Staged]
     assert restored.staged[0].name == "fix_hold"
@@ -467,11 +508,11 @@ def test_a_console_and_a_session_talk_over_a_real_socket(zmq_cleanup):
     link = zmq_cleanup(ZmqLink(pub_endpoint="tcp://127.0.0.1:0", rep_endpoint="tcp://127.0.0.1:0"))
     console = zmq_cleanup(ZmqConsole(link.pub_endpoint, link.rep_endpoint))
 
-    console.send(SetParameter(name="fix_hold", value=0.4, by="jake"))
+    console.send(SetParameter(name="fix_hold", value=0.4, by=Box("jake")))
     commands = _drain_until(link)
     link.publish(_telemetry())
 
-    assert commands == [SetParameter(name="fix_hold", value=0.4, by="jake")]
+    assert commands == [SetParameter(name="fix_hold", value=0.4, by=Box("jake"))]
     assert console.receive().session_id == _telemetry().session_id
 
 
@@ -490,14 +531,14 @@ def test_a_console_can_send_a_sequence_of_commands(zmq_cleanup):
     link = zmq_cleanup(ZmqLink(pub_endpoint="tcp://127.0.0.1:0", rep_endpoint="tcp://127.0.0.1:0"))
     console = zmq_cleanup(ZmqConsole(link.pub_endpoint, link.rep_endpoint))
 
-    console.send(SetParameter(name="fix_hold", value=0.4, by="jake"))
+    console.send(SetParameter(name="fix_hold", value=0.4, by=Box("jake")))
     first = _drain_until(link)
 
-    console.send(Stop(by="jake"))
+    console.send(Stop(by=Box("jake")))
     second = _drain_until(link)
 
-    assert first == [SetParameter(name="fix_hold", value=0.4, by="jake")]
-    assert second == [Stop(by="jake")]
+    assert first == [SetParameter(name="fix_hold", value=0.4, by=Box("jake"))]
+    assert second == [Stop(by=Box("jake"))]
 
 
 def test_an_undecodable_command_is_refused_not_raised(zmq_cleanup):
@@ -534,9 +575,9 @@ def test_an_undecodable_command_is_refused_not_raised(zmq_cleanup):
     assert "pause" in link.refused[0].why
 
     # The other half of CRITICAL 2: the channel must still work afterwards.
-    console.send(SetParameter(name="fix_hold", value=0.4, by="jake"))
+    console.send(SetParameter(name="fix_hold", value=0.4, by=Box("jake")))
     commands = _drain_until(link)
-    assert commands == [SetParameter(name="fix_hold", value=0.4, by="jake")]
+    assert commands == [SetParameter(name="fix_hold", value=0.4, by=Box("jake"))]
 
 
 def test_a_link_refuses_to_bind_where_other_hosts_can_reach_it():
@@ -749,7 +790,7 @@ def test_telemetry_caps_the_refusal_feed_and_counts_what_it_dropped():
         for n in range(REFUSAL_HISTORY + 3)
     )
     session.link = Simulated(
-        refused=[Refused(name="<transport>", by="<unknown>", why="newest")],
+        refused=[Refused(name="<transport>", by=None, why="newest")],
         refused_dropped=7,
     )
 
@@ -836,11 +877,11 @@ def test_the_system_still_works_with_no_settle_delay(zmq_cleanup):
     """
     with zmq_cleanup(ZmqLink(pub_endpoint="tcp://127.0.0.1:0", rep_endpoint="tcp://127.0.0.1:0")) as link:
         with zmq_cleanup(ZmqConsole(link.pub_endpoint, link.rep_endpoint, settle_s=0)) as console:
-            console.send(SetParameter(name="fix_hold", value=0.4, by="jake"))
+            console.send(SetParameter(name="fix_hold", value=0.4, by=Box("jake")))
             commands = _drain_until(link)
             link.publish(_telemetry())
 
-            assert commands == [SetParameter(name="fix_hold", value=0.4, by="jake")]
+            assert commands == [SetParameter(name="fix_hold", value=0.4, by=Box("jake"))]
             assert console.receive().session_id == _telemetry().session_id
         assert console._sub.closed and console._req.closed, "__exit__ must close the console"
     assert link._pub.closed and link._rep.closed, "__exit__ must close the link"
@@ -1112,7 +1153,7 @@ def test_a_returned_command_is_refused_through_the_unknown_kind_path(zmq_cleanup
 
     console._req.send(
         msgpack.packb(
-            {"kind": "returned", "at": 1_700_000_123.5, "by": "jake", "confirmed": True},
+            {"kind": "returned", "at": 1_700_000_123.5, "by": JAKE, "confirmed": True},
             use_bin_type=True,
         )
     )
@@ -1125,9 +1166,9 @@ def test_a_returned_command_is_refused_through_the_unknown_kind_path(zmq_cleanup
     assert "returned" in link.refused[0].why
 
     # The other half: the channel must still work afterwards.
-    console.send(SetParameter(name="fix_hold", value=0.4, by="jake"))
+    console.send(SetParameter(name="fix_hold", value=0.4, by=Box("jake")))
     commands = _drain_until(link)
-    assert commands == [SetParameter(name="fix_hold", value=0.4, by="jake")]
+    assert commands == [SetParameter(name="fix_hold", value=0.4, by=Box("jake"))]
 
 
 # ---------------------------------------------------------------------------
@@ -1294,6 +1335,11 @@ def test_a_frame_error_with_no_message_names_only_the_exception_type():
 # ---------------------------------------------------------------------------
 
 
+#: "jake" typed at the box, as a hand-built packet carries it: an actor's map (b2b spec
+#: §6), never the bare string the wire refuses.
+JAKE = {"kind": "box", "name": "jake"}
+
+
 def _packed(**fields) -> bytes:
     import msgpack
 
@@ -1313,10 +1359,10 @@ def test_a_setting_that_is_not_a_real_number_or_a_word_is_refused_where_it_is_de
     categorical parameter; anything else is refused here, naming the parameter and
     the sender, so the refusal a console shows says whose write it was."""
     with pytest.raises(CommandRefused) as refused:
-        _decode_command(_packed(kind="set", name="fix_hold", value=value, by="jake"))
+        _decode_command(_packed(kind="set", name="fix_hold", value=value, by=JAKE))
 
     assert refused.value.name == "fix_hold"
-    assert refused.value.by == "jake"
+    assert refused.value.by == Box("jake")
     assert "'fix_hold' was sent" in refused.value.why
     assert "the session runs on" in refused.value.why
 
@@ -1325,15 +1371,17 @@ def test_a_whole_number_decodes_as_a_float_and_a_word_as_itself():
     """A browser's JSON gives `1` for one and `0.5` for a half; both are numbers. A
     categorical choice travels as its word, and `Session.set` checks it against the
     task's `choices`."""
-    whole = _decode_command(_packed(kind="set", name="fix_window", value=2, by="jake"))
-    word = _decode_command(_packed(kind="set", name="shape", value="penguin", by="jake"))
+    whole = _decode_command(_packed(kind="set", name="fix_window", value=2, by=JAKE))
+    word = _decode_command(_packed(kind="set", name="shape", value="penguin", by=JAKE))
 
-    assert whole == SetParameter(name="fix_window", value=2.0, by="jake")
+    assert whole == SetParameter(name="fix_window", value=2.0, by=Box("jake"))
     assert type(whole.value) is float
-    assert word == SetParameter(name="shape", value="penguin", by="jake")
+    assert word == SetParameter(name="shape", value="penguin", by=Box("jake"))
 
 
-@pytest.mark.parametrize("by", [None, "", "   ", 7])
+@pytest.mark.parametrize(
+    "by", [None, {"kind": "box", "name": ""}, {"kind": "box", "name": "   "}, 7]
+)
 def test_a_command_that_does_not_say_who_sent_it_is_refused(by):
     """S9a §6: every write records its actor. A packet with no usable `by` is refused
     by name rather than recorded as written by nobody."""
@@ -1345,13 +1393,32 @@ def test_a_command_that_does_not_say_who_sent_it_is_refused(by):
         _decode_command(_packed(**fields))
 
     assert refused.value.name == "fix_hold"
-    assert refused.value.by == "<unknown>"
+    assert refused.value.by is None
     assert "who sent it" in refused.value.why
+
+
+def test_a_string_by_on_the_wire_is_refused_naming_the_rule():
+    """b2b spec §6: a name with nothing to say what kind it is is not an actor."""
+    import msgpack
+    from wl_xcon.link import CommandRefused, _decode_command
+
+    with pytest.raises(CommandRefused) as refused:
+        _decode_command(msgpack.packb({"kind": "stop", "by": "jake"}, use_bin_type=True))
+    assert refused.value.by is None
+    assert "a box name or a wl.works member" in refused.value.why
+
+
+def test_a_member_survives_the_wire_and_a_frame():
+    from wl_xcon.actor import Member
+    from wl_xcon.link import Pause, _decode_command, _encode_command
+
+    member = Member(name="Jake Westerberg", account="u-1", issuer="https://wl.works/api/auth", token_id="j-1")
+    assert _decode_command(_encode_command(Pause(by=member))) == Pause(by=member)
 
 
 def test_a_setting_with_no_parameter_name_is_refused():
     with pytest.raises(CommandRefused) as refused:
-        _decode_command(_packed(kind="set", name="", value=0.4, by="jake"))
+        _decode_command(_packed(kind="set", name="", value=0.4, by=JAKE))
 
     assert refused.value.name == "<transport>"
     assert "no parameter name" in refused.value.why
@@ -1368,15 +1435,15 @@ def test_a_malformed_setting_over_the_wire_is_a_refusal_naming_it_and_the_link_g
 
     # `True`, not a word: a word is a categorical choice on the wire, and whether it
     # is one of this parameter's choices is `Session.set`'s to say.
-    console._req.send(_packed(kind="set", name="fix_hold", value=True, by="jake"))
+    console._req.send(_packed(kind="set", name="fix_hold", value=True, by=JAKE))
     console._awaiting_reply = True
     commands = _drain_until(link)
 
     assert commands == []
-    assert [(r.name, r.by) for r in link.refused] == [("fix_hold", "jake")]
+    assert [(r.name, r.by) for r in link.refused] == [("fix_hold", Box("jake"))]
 
-    console.send(SetParameter(name="fix_hold", value=0.4, by="jake"))
-    assert _drain_until(link) == [SetParameter(name="fix_hold", value=0.4, by="jake")]
+    console.send(SetParameter(name="fix_hold", value=0.4, by=Box("jake")))
+    assert _drain_until(link) == [SetParameter(name="fix_hold", value=0.4, by=Box("jake"))]
 
 
 # ---------------------------------------------------------------------------
@@ -1392,7 +1459,7 @@ def test_a_refusal_sentence_quotes_at_most_text_limit_characters_of_a_huge_value
     around the quoted value, not on the value itself."""
     huge = [0.4] * 100_000
     with pytest.raises(CommandRefused) as refused:
-        _decode_command(_packed(kind="set", name="fix_hold", value=huge, by="jake"))
+        _decode_command(_packed(kind="set", name="fix_hold", value=huge, by=JAKE))
 
     why = refused.value.why
     assert len(why) < 2 * TEXT_LIMIT + 200
@@ -1404,7 +1471,7 @@ def test_a_setting_with_an_over_long_name_is_refused_without_quoting_all_of_it()
     `TEXT_LIMIT` exists for. `_quoted` truncates it too."""
     long_name = "x" * (TEXT_LIMIT + 1)
     with pytest.raises(CommandRefused) as refused:
-        _decode_command(_packed(kind="set", name=long_name, value=0.4, by="jake"))
+        _decode_command(_packed(kind="set", name=long_name, value=0.4, by=JAKE))
 
     assert long_name not in refused.value.why
 
@@ -1415,7 +1482,7 @@ def test_an_unknown_kind_is_quoted_within_text_limit():
     carries. `_quoted` bounds it as it bounds the rest."""
     kind = "x" * 100_000
     with pytest.raises(ValueError) as refused:
-        _decode_command(_packed(kind=kind, by="jake"))
+        _decode_command(_packed(kind=kind, by=JAKE))
 
     assert len(str(refused.value)) < TEXT_LIMIT + 100
     assert kind not in str(refused.value)
@@ -1424,17 +1491,19 @@ def test_an_unknown_kind_is_quoted_within_text_limit():
 @pytest.mark.parametrize(
     ("by", "expected"),
     [
-        ("jake", "jake"),
-        ("", "<unknown>"),
-        ("   ", "<unknown>"),
-        (7, "<unknown>"),
-        ("x" * (TEXT_LIMIT + 1), "<unknown>"),
+        (JAKE, Box("jake")),
+        ({"kind": "box", "name": ""}, None),
+        ({"kind": "box", "name": "   "}, None),
+        ("jake", None),
+        (7, None),
+        ({"kind": "box", "name": "x" * (TEXT_LIMIT + 1)}, None),
     ],
 )
 def test_the_no_name_refusal_records_by_under_the_same_rule_as_actor(by, expected):
     """The no-name refusal used to take `data["by"]` unbounded and unchecked for
-    blank, unlike `_actor`. It now records the sender only when it is a name
-    `_actor` would also accept, and `"<unknown>"` otherwise."""
+    blank, unlike `_actor`. It now records the sender only when it is an actor
+    `_actor` would also accept -- since b2b a map, never a bare string -- and `None`
+    otherwise."""
     with pytest.raises(CommandRefused) as refused:
         _decode_command(_packed(kind="set", name="", value=0.4, by=by))
 
@@ -1445,7 +1514,7 @@ def test_the_no_name_refusal_records_unknown_when_by_is_missing_entirely():
     with pytest.raises(CommandRefused) as refused:
         _decode_command(_packed(kind="set", name="", value=0.4))
 
-    assert refused.value.by == "<unknown>"
+    assert refused.value.by is None
 
 
 # ---------------------------------------------------------------------------
@@ -1453,15 +1522,15 @@ def test_the_no_name_refusal_records_unknown_when_by_is_missing_entirely():
 # ---------------------------------------------------------------------------
 
 _CONTROLS = [
-    Pause(by="jake (box, unverified)"),
-    Resume(by="jake (box, unverified)"),
-    Mark(mark=7, note="reward line bubble", by="jake (box, unverified)",
+    Pause(by=Box("jake")),
+    Resume(by=Box("jake")),
+    Mark(mark=7, note="reward line bubble", by=Box("jake"),
          pressed_at=1_700_000_000.25, received_at=1_700_000_000.5),
-    Mark(mark=2**64 - 1, note="", by="jake", pressed_at=None, received_at=None),
-    ScheduleStop(kind="clock", value="14:30", by="jake"),
-    ScheduleStop(kind="trials", value=40, by="jake"),
-    ScheduleStop(kind="fluid", value=12.5, by="jake"),
-    CancelScheduledStop(by="jake"),
+    Mark(mark=2**64 - 1, note="", by=Box("jake"), pressed_at=None, received_at=None),
+    ScheduleStop(kind="clock", value="14:30", by=Box("jake")),
+    ScheduleStop(kind="trials", value=40, by=Box("jake")),
+    ScheduleStop(kind="fluid", value=12.5, by=Box("jake")),
+    CancelScheduledStop(by=Box("jake")),
 ]
 
 
@@ -1499,26 +1568,26 @@ def test_each_command_names_its_kind():
     ("fields", "name", "said"),
     [
         ({"kind": "pause"}, "pause", "who sent it"),
-        ({"kind": "resume", "by": ""}, "resume", "who sent it"),
+        ({"kind": "resume", "by": {"kind": "box", "name": ""}}, "resume", "who sent it"),
         ({"kind": "cancel", "by": 3}, "cancel", "who sent it"),
-        ({"kind": "mark", "mark": 0, "note": "", "by": "jake"}, "mark", "mark number"),
-        ({"kind": "mark", "mark": -1, "note": "", "by": "jake"}, "mark", "mark number"),
-        ({"kind": "mark", "mark": True, "note": "", "by": "jake"}, "mark", "mark number"),
-        ({"kind": "mark", "mark": "3", "note": "", "by": "jake"}, "mark", "mark number"),
-        ({"kind": "mark", "mark": 3, "note": None, "by": "jake"}, "mark", "note"),
-        ({"kind": "mark", "mark": 3, "note": "x" * 501, "by": "jake"}, "mark", "note"),
-        ({"kind": "mark", "mark": 3, "note": "", "by": "jake", "pressed_at": "now"}, "mark", "pressed_at"),
-        ({"kind": "mark", "mark": 3, "note": "", "by": "jake", "received_at": float("nan")}, "mark", "received_at"),
-        ({"kind": "schedule", "stop": "blocks", "value": 3, "by": "jake"}, "schedule", "clock, trials or fluid"),
-        ({"kind": "schedule", "stop": "clock", "value": "25:00", "by": "jake"}, "schedule", "HH:MM"),
-        ({"kind": "schedule", "stop": "clock", "value": "9:05", "by": "jake"}, "schedule", "HH:MM"),
-        ({"kind": "schedule", "stop": "clock", "value": 1430, "by": "jake"}, "schedule", "HH:MM"),
-        ({"kind": "schedule", "stop": "trials", "value": 0, "by": "jake"}, "schedule", "whole number of trials"),
-        ({"kind": "schedule", "stop": "trials", "value": 2.5, "by": "jake"}, "schedule", "whole number of trials"),
-        ({"kind": "schedule", "stop": "trials", "value": True, "by": "jake"}, "schedule", "whole number of trials"),
-        ({"kind": "schedule", "stop": "fluid", "value": 0, "by": "jake"}, "schedule", "mL"),
-        ({"kind": "schedule", "stop": "fluid", "value": float("inf"), "by": "jake"}, "schedule", "mL"),
-        ({"kind": "schedule", "stop": "fluid", "value": "5", "by": "jake"}, "schedule", "mL"),
+        ({"kind": "mark", "mark": 0, "note": "", "by": JAKE}, "mark", "mark number"),
+        ({"kind": "mark", "mark": -1, "note": "", "by": JAKE}, "mark", "mark number"),
+        ({"kind": "mark", "mark": True, "note": "", "by": JAKE}, "mark", "mark number"),
+        ({"kind": "mark", "mark": "3", "note": "", "by": JAKE}, "mark", "mark number"),
+        ({"kind": "mark", "mark": 3, "note": None, "by": JAKE}, "mark", "note"),
+        ({"kind": "mark", "mark": 3, "note": "x" * 501, "by": JAKE}, "mark", "note"),
+        ({"kind": "mark", "mark": 3, "note": "", "by": JAKE, "pressed_at": "now"}, "mark", "pressed_at"),
+        ({"kind": "mark", "mark": 3, "note": "", "by": JAKE, "received_at": float("nan")}, "mark", "received_at"),
+        ({"kind": "schedule", "stop": "blocks", "value": 3, "by": JAKE}, "schedule", "clock, trials or fluid"),
+        ({"kind": "schedule", "stop": "clock", "value": "25:00", "by": JAKE}, "schedule", "HH:MM"),
+        ({"kind": "schedule", "stop": "clock", "value": "9:05", "by": JAKE}, "schedule", "HH:MM"),
+        ({"kind": "schedule", "stop": "clock", "value": 1430, "by": JAKE}, "schedule", "HH:MM"),
+        ({"kind": "schedule", "stop": "trials", "value": 0, "by": JAKE}, "schedule", "whole number of trials"),
+        ({"kind": "schedule", "stop": "trials", "value": 2.5, "by": JAKE}, "schedule", "whole number of trials"),
+        ({"kind": "schedule", "stop": "trials", "value": True, "by": JAKE}, "schedule", "whole number of trials"),
+        ({"kind": "schedule", "stop": "fluid", "value": 0, "by": JAKE}, "schedule", "mL"),
+        ({"kind": "schedule", "stop": "fluid", "value": float("inf"), "by": JAKE}, "schedule", "mL"),
+        ({"kind": "schedule", "stop": "fluid", "value": "5", "by": JAKE}, "schedule", "mL"),
     ],
 )
 def test_a_malformed_control_is_refused_by_name_where_it_is_decoded(fields, name, said):
@@ -1674,13 +1743,13 @@ def test_idle_wakes_for_a_command_and_leaves_it_for_drain(zmq_cleanup):
     link = _marked_link(zmq_cleanup)
     console = zmq_cleanup(ZmqConsole(link.pub_endpoint, link.rep_endpoint, settle_s=0))
 
-    console.send(Resume(by="jake"))
+    console.send(Resume(by=Box("jake")))
     started = time.monotonic()
     mark = link.idle(5.0)
 
     assert mark == 0
     assert time.monotonic() - started < 4.0, "idle waited out its timeout with a command waiting"
-    assert _drain_until(link) == [Resume(by="jake")]
+    assert _drain_until(link) == [Resume(by=Box("jake"))]
 
 
 def test_idle_with_nothing_arriving_waits_its_timeout_and_answers_zero(zmq_cleanup):
@@ -1816,7 +1885,7 @@ def test_the_refusal_cap_also_bounds_a_repeatedly_malformed_setting(zmq_cleanup)
     for _ in range(sent):
         console._req.send(
             msgpack.packb(
-                {"kind": "set", "name": "fix_hold", "value": True, "by": "jake"},
+                {"kind": "set", "name": "fix_hold", "value": True, "by": JAKE},
                 use_bin_type=True,
             )
         )
@@ -1861,10 +1930,10 @@ def test_a_command_is_delivered_once_the_rig_acknowledges_it(zmq_cleanup):
     commands = zmq_cleanup(ZmqCommands(link.rep_endpoint, reply_timeout_s=5.0))
     thread, got = _draining(link)
 
-    commands.deliver(Pause(by="jake (box, unverified)"))
+    commands.deliver(Pause(by=Box("jake")))
     thread.join(timeout=10)
 
-    assert got == [Pause(by="jake (box, unverified)")]
+    assert got == [Pause(by=Box("jake"))]
 
 
 def test_with_no_rig_connected_a_command_is_not_delivered(zmq_cleanup):
@@ -1876,7 +1945,7 @@ def test_with_no_rig_connected_a_command_is_not_delivered(zmq_cleanup):
 
     started = time.monotonic()
     with pytest.raises(NotDelivered, match="no rig is connected"):
-        commands.deliver(Stop(by="jake"))
+        commands.deliver(Stop(by=Box("jake")))
     assert time.monotonic() - started < 10.0, "it waited out the reply timeout"
 
 
@@ -1890,19 +1959,19 @@ def test_a_rig_that_never_acknowledges_is_not_delivered_and_the_socket_is_reset(
     first = commands._req
 
     with pytest.raises(NotDelivered, match="did not acknowledge it within 0.2 s"):
-        commands.deliver(Pause(by="jake"))
+        commands.deliver(Pause(by=Box("jake")))
 
     assert first.closed, "the timed-out socket was not closed"
     assert commands._req is not first
     assert commands._sockets == [commands._req], "a reset must not grow the release list"
 
-    thread, got = _draining(link, until=Resume(by="jake"))
-    commands.deliver(Resume(by="jake"))
+    thread, got = _draining(link, until=Resume(by=Box("jake")))
+    commands.deliver(Resume(by=Box("jake")))
     thread.join(timeout=10)
     # The first command was already on the rig's side of the wire, so it may still be
     # drained: a timed-out command is *not acknowledged*, not unsent, which is why
     # the page is told to watch the feed (serve.NOT_DELIVERED).
-    assert Resume(by="jake") in got
+    assert Resume(by=Box("jake")) in got
 
 
 def test_an_unclosed_command_sender_is_released_by_the_collector(zmq_cleanup):
@@ -1940,7 +2009,7 @@ def test_a_console_built_to_read_only_has_no_command_socket(zmq_cleanup):
     assert console._req is None
     assert len(console._sockets) == 1
     with pytest.raises(RuntimeError, match="no command endpoint"):
-        console.send(Stop(by="jake"))
+        console.send(Stop(by=Box("jake")))
     link.publish(_telemetry())
     console.close()
     assert console._sub.closed and console._ctx.closed
@@ -1957,23 +2026,23 @@ def test_schema_8_reads_the_pause_the_schedule_and_the_feed_from_the_session():
     each read from the `Session` the record is written from."""
     session = _session_with(delivered_ml=1.0, already_today=None)
     session.paused_at = 1_700_000_100.0
-    session.scheduled_stop = ("trials", 48.0, "jake (box, unverified)", "after trial 48")
+    session.scheduled_stop = ("trials", 48.0, Box("jake"), "after trial 48")
     session.controls = (
-        ("pause", "jake (box, unverified)", 1_700_000_100.0, "paused at trial 40"),
-        ("mark", "", 1_700_000_101.5, "mark 1 stamped while paused, before trial 40"),
+        ("pause", Box("jake"), 1_700_000_100.0, "paused at trial 40"),
+        ("mark", None, 1_700_000_101.5, "mark 1 stamped while paused, before trial 40"),
     )
     session.controls_dropped = 3
 
     telemetry = Telemetry.of(session, Tally(), _scheduler(), index=40)
 
-    assert telemetry.schema == SCHEMA == 13
+    assert telemetry.schema == SCHEMA == 14
     assert telemetry.paused_at == 1_700_000_100.0
     assert telemetry.scheduled_stop == ScheduledStop(
-        kind="trials", target=48.0, by="jake (box, unverified)", said="after trial 48"
+        kind="trials", target=48.0, by=Box("jake"), said="after trial 48"
     )
     assert telemetry.controls == (
-        Control("pause", "jake (box, unverified)", 1_700_000_100.0, "paused at trial 40"),
-        Control("mark", "", 1_700_000_101.5, "mark 1 stamped while paused, before trial 40"),
+        Control("pause", Box("jake"), 1_700_000_100.0, "paused at trial 40"),
+        Control("mark", None, 1_700_000_101.5, "mark 1 stamped while paused, before trial 40"),
     )
     assert telemetry.controls_dropped == 3
     assert telemetry.view == "direct" and telemetry.half_ipd_cm is None
@@ -2004,10 +2073,10 @@ def test_schema_8_survives_the_wire_with_its_absences_intact():
     field at its absence."""
     populated = _telemetry(
         paused_at=1_700_000_100.0,
-        scheduled_stop=ScheduledStop("clock", 1_700_003_600.0, "jake", "at 14:30"),
+        scheduled_stop=ScheduledStop("clock", 1_700_003_600.0, Box("jake"), "at 14:30"),
         controls=(
-            Control("note", "jake", 1_700_000_102.0, 'mark 1: "<b>bubble</b>"'),
-            Control("resume", "sam", 1_700_000_200.0, "resumed after 1:40 paused"),
+            Control("note", Box("jake"), 1_700_000_102.0, 'mark 1: "<b>bubble</b>"'),
+            Control("resume", Box("sam"), 1_700_000_200.0, "resumed after 1:40 paused"),
         ),
         controls_dropped=7,
     )
@@ -2029,15 +2098,15 @@ def test_a_frame_carries_the_setup_the_session_runs_in():
     assert decode(encode(stereo)).view == "stereoscope"
     assert decode(encode(stereo)).half_ipd_cm == 1.6
     assert decode(encode(_telemetry())).half_ipd_cm is None
-    assert SCHEMA == 13
+    assert SCHEMA == 14
 
 
-def test_a_schema_7_frame_is_refused_by_a_schema_13_reader():
-    """§3's schema rule: a reader built for 13 refuses 7 by name, before touching a
+def test_a_schema_7_frame_is_refused_by_a_schema_14_reader():
+    """§3's schema rule: a reader built for 14 refuses 7 by name, before touching a
     field (`SchemaMismatch`), and says which it reads."""
     old = encode(replace(_telemetry(), schema=7))
 
-    with pytest.raises(SchemaMismatch, match="carried schema 7 and this console reads schema 13"):
+    with pytest.raises(SchemaMismatch, match="carried schema 7 and this console reads schema 14"):
         decode(old)
 
 
@@ -2051,7 +2120,7 @@ def test_a_manual_reward_crosses_the_wire_as_one_press_with_who_pressed_it(zmq_c
     pressed it and nothing else -- the size is the bounded config's `reward_correct`,
     read by the rig, so nothing a console sends can set it -- and it crosses a real
     socket like every other control."""
-    command = ManualReward(by="jake (box, unverified)")
+    command = ManualReward(by=Box("jake"))
     link = zmq_cleanup(ZmqLink(pub_endpoint="tcp://127.0.0.1:0", rep_endpoint="tcp://127.0.0.1:0"))
     console = zmq_cleanup(ZmqConsole(link.pub_endpoint, link.rep_endpoint))
 
@@ -2062,7 +2131,7 @@ def test_a_manual_reward_crosses_the_wire_as_one_press_with_who_pressed_it(zmq_c
     assert _drain_until(link) == [command]
 
 
-@pytest.mark.parametrize("by", [None, "", 3])
+@pytest.mark.parametrize("by", [None, {"kind": "box", "name": ""}, 3])
 def test_a_manual_reward_that_does_not_say_who_pressed_it_is_refused(by):
     """S9a §6, as for every command: a reward nobody pressed is refused by its kind."""
     fields = {"kind": "reward"}
@@ -2090,9 +2159,9 @@ def test_a_command_the_rig_took_and_never_acknowledged_is_told_from_one_never_se
     never = zmq_cleanup(ZmqCommands(gone, reply_timeout_s=30.0, connect_timeout_s=0.1))
 
     with pytest.raises(Unacknowledged, match="did not acknowledge it within 0.2 s"):
-        took.deliver(ManualReward(by="jake"))
+        took.deliver(ManualReward(by=Box("jake")))
     with pytest.raises(NotDelivered, match="no rig is connected") as not_sent:
-        never.deliver(ManualReward(by="jake"))
+        never.deliver(ManualReward(by=Box("jake")))
 
     assert issubclass(Unacknowledged, NotDelivered)
     assert not isinstance(not_sent.value, Unacknowledged)
@@ -2131,7 +2200,7 @@ def test_schema_10_survives_the_wire_with_its_absences_intact():
         assert decode(encode(original)) == original
     assert type(decode(encode(populated)).preflight.items[0]) is PreflightItem
     assert type(decode(encode(populated)).question) is Question
-    assert SCHEMA == 13
+    assert SCHEMA == 14
 
 
 def test_a_session_before_its_first_run_has_no_block_task_or_counts():
@@ -2155,7 +2224,7 @@ def test_an_idle_frame_is_its_own_shape_and_survives_the_wire():
         wall_at=1_700_000_000.0,
         stranded=(Stranded("2027-01-13_01", "B", 1_699_990_000.0), Stranded("2027-01-13_02", "", None)),
         question=replace(QUESTION, mark="departure", answers=("confirm", "amend")),
-        refusals=(Refused(name="open", by="jake", why="a session is open"),),
+        refusals=(Refused(name="open", by=Box("jake"), why="a session is open"),),
         refusals_dropped=0,
         animals=("A", "B"),
         offered_tasks=("fixation_detection.py",),
@@ -2187,7 +2256,7 @@ def test_an_idle_frame_carries_the_last_closed_sessions_summary_across_the_wire(
     assert type(restored.closed) is Telemetry and restored.closed.phase == "closed"
     assert (restored.closed.fluid_today_ml, restored.closed.shortfall_ml) == (None, None)
     assert decode(encode(replace(idle, closed=None))).closed is None
-    assert SCHEMA == 13
+    assert SCHEMA == 14
 
 
 def test_idle_of_carries_what_it_is_given_as_the_closed_summary():
@@ -2204,19 +2273,19 @@ def test_idle_of_carries_what_it_is_given_as_the_closed_summary():
 def test_an_idle_frame_of_another_schema_is_refused_by_name():
     old = encode(
         Idle(
-            schema=12, phase="idle", wall_at=1.0, stranded=(), question=None,
+            schema=13, phase="idle", wall_at=1.0, stranded=(), question=None,
             refusals=(), refusals_dropped=0, animals=(), offered_tasks=(),
         )
     )
 
-    with pytest.raises(SchemaMismatch, match="carried schema 12 and this console reads schema 13"):
+    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 14"):
         decode(old)
 
 
 def test_an_idle_frame_carries_the_links_refusals_too_capped_and_counted():
     link = Simulated()
-    link.refused.extend(Refused("<transport>", "<unknown>", f"bad {i}") for i in range(3))
-    mine = [Refused("open", "jake", f"refused {i}") for i in range(REFUSAL_HISTORY)]
+    link.refused.extend(Refused("<transport>", None, f"bad {i}") for i in range(3))
+    mine = [Refused("open", Box("jake"), f"refused {i}") for i in range(REFUSAL_HISTORY)]
 
     idle = Idle.of(
         wall_at=1.0, stranded=(), question=None, refusals=mine, refusals_dropped=4,
@@ -2230,17 +2299,17 @@ def test_an_idle_frame_carries_the_links_refusals_too_capped_and_counted():
 
 SERVICE_COMMANDS = (
     OpenSession(
-        by="jake (box, unverified)", session_id="2027-01-14_01", animal="A",
+        by=Box("jake"), session_id="2027-01-14_01", animal="A",
         deployment="rig_fixed", view="direct", departure="09:30", delivered_today=12.5,
         answer="amend", amend_to="08:45", amend_reason="typed 09:30 for 08:45",
     ),
-    CheckRun(by="jake", task="fixation_detection.py", values={"fix_hold": 0.3, "looks": "circle"}),
+    CheckRun(by=Box("jake"), task="fixation_detection.py", values={"fix_hold": 0.3, "looks": "circle"}),
     StartRun(
-        by="jake", task="fixation_detection.py", values={"fix_hold": 0.3}, trials=100,
+        by=Box("jake"), task="fixation_detection.py", values={"fix_hold": 0.3}, trials=100,
         acknowledged=("pump calibration", "eye tracker"),
     ),
-    EndSession(by="jake", session_id=None, returned="now", confirm=True),
-    ResumeSession(by="jake", session_id="2027-01-13_01"),
+    EndSession(by=Box("jake"), session_id=None, returned="now", confirm=True),
+    ResumeSession(by=Box("jake"), session_id="2027-01-13_01"),
 )
 
 
@@ -2284,14 +2353,14 @@ def test_a_service_command_with_a_malformed_field_is_refused_before_it_exists(fi
     command, the refusal naming what it could of the command and its sender."""
     base = {
         "open": {
-            "by": "jake", "session_id": "2027-01-14_01", "animal": "A",
+            "by": JAKE, "session_id": "2027-01-14_01", "animal": "A",
             "deployment": "rig_fixed", "view": "direct", "departure": "09:30",
             "delivered_today": None, "answer": None, "amend_to": None, "amend_reason": "",
         },
-        "check": {"by": "jake", "task": "t.py", "values": {}},
-        "start": {"by": "jake", "task": "t.py", "values": {}, "trials": 3, "acknowledged": []},
-        "end": {"by": "jake", "session_id": None, "returned": None, "confirm": False},
-        "resume_session": {"by": "jake", "session_id": "2027-01-13_01"},
+        "check": {"by": JAKE, "task": "t.py", "values": {}},
+        "start": {"by": JAKE, "task": "t.py", "values": {}, "trials": 3, "acknowledged": []},
+        "end": {"by": JAKE, "session_id": None, "returned": None, "confirm": False},
+        "resume_session": {"by": JAKE, "session_id": "2027-01-13_01"},
     }[fields["kind"]]
 
     with pytest.raises(CommandRefused) as refused:
@@ -2305,7 +2374,7 @@ def test_an_end_command_whose_confirm_is_not_a_bool_is_never_coerced():
     """Task 1's carry: `marks.page_return` refuses a `confirm` that is not exactly
     `True` or `False`, so the wire refuses a `1`, a `"true"` and a missing-typed value
     before an `EndSession` exists, and an absent one is `False`."""
-    base = {"kind": "end", "by": "jake", "session_id": None, "returned": None}
+    base = {"kind": "end", "by": JAKE, "session_id": None, "returned": None}
 
     for bad in (1, 0, "true", [True], 1.0):
         with pytest.raises(CommandRefused, match="confirm"):
@@ -2338,7 +2407,7 @@ def test_the_strips_levels_and_the_return_survive_the_wire():
     assert decode(encode(original)) == original
     # 12 added `performance` (the strip's session, task, run and block counts) and
     # `returned_at` (the recorded return).
-    assert SCHEMA == 13
+    assert SCHEMA == 14
 
 
 def test_a_frame_between_runs_carries_the_session_alone():
@@ -2408,7 +2477,7 @@ def test_the_instant_a_session_was_resumed_survives_the_wire_and_none_stays_none
     assert decode(encode(resumed)).resumed_at == 1_700_000_050.0
     assert decode(encode(_telemetry())).resumed_at is None
     # 13 added `Stranded.resumable` and `why`, and `Telemetry.resumed_at`.
-    assert SCHEMA == 13
+    assert SCHEMA == 14
 
 
 def test_the_frame_reads_the_resume_from_the_session():
@@ -2422,24 +2491,26 @@ def test_the_frame_reads_the_resume_from_the_session():
     assert Telemetry.of(session, Tally(), _scheduler(), index=0).resumed_at == 1_700_000_050.0
 
 
-def test_a_schema_12_frame_is_refused_by_name():
-    with pytest.raises(SchemaMismatch, match="carried schema 12 and this console reads schema 13"):
-        decode(encode(replace(_telemetry(), schema=12)))
+def test_a_schema_13_frame_is_refused_by_name():
+    """b2b (schema 14): a frame whose `by`s are strings is refused by its schema, by
+    name, before any `by` is read."""
+    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 14"):
+        decode(encode(replace(_telemetry(), schema=13)))
 
 
 def test_a_resume_session_command_names_its_session_or_is_refused():
     """XC-026 spec §8a item 5: kind `resume_session`, since `resume` is the pause's. A
     resume naming no session is refused before a command exists, naming the field."""
-    assert _command_from({"kind": "resume_session", "by": "jake", "session_id": "2027-01-13_01"}) == (
-        ResumeSession(by="jake", session_id="2027-01-13_01")
+    assert _command_from({"kind": "resume_session", "by": JAKE, "session_id": "2027-01-13_01"}) == (
+        ResumeSession(by=Box("jake"), session_id="2027-01-13_01")
     )
     assert ResumeSession.KIND == "resume_session"
 
-    for missing in ({"kind": "resume_session", "by": "jake"},
-                    {"kind": "resume_session", "by": "jake", "session_id": None}):
+    for missing in ({"kind": "resume_session", "by": JAKE},
+                    {"kind": "resume_session", "by": JAKE, "session_id": None}):
         with pytest.raises(CommandRefused) as refused:
             _command_from(missing)
-        assert (refused.value.name, refused.value.by) == ("resume_session", "jake")
+        assert (refused.value.name, refused.value.by) == ("resume_session", Box("jake"))
         assert "session_id" in refused.value.why
     with pytest.raises(CommandRefused, match="'resume_session' command must say who sent it"):
         _command_from({"kind": "resume_session", "session_id": "2027-01-13_01"})

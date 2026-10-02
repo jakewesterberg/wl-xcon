@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import pytest
 
+from wl_xcon.actor import Box
 from wl_xcon.bounds import (
     Bounds,
     Ceiling,
@@ -77,7 +78,7 @@ def test_a_console_offering_a_value_that_is_not_a_number_is_refused_when_it_asks
 def test_a_console_may_move_a_value_within_its_ceiling():
     bounds = _bounds()
 
-    bounds.set("reward_correct", 0.25, by="console")
+    bounds.set("reward_correct", 0.25, by=Box("console"))
 
     assert bounds.value("reward_correct") == 0.25
 
@@ -89,7 +90,7 @@ def test_a_console_cannot_exceed_a_ceiling():
     bounds = _bounds()
 
     with pytest.raises(Exceeded, match="reward_correct"):
-        bounds.set("reward_correct", 0.9, by="console")
+        bounds.set("reward_correct", 0.9, by=Box("console"))
 
     assert bounds.value("reward_correct") == 0.15, "and the old value stands"
 
@@ -100,7 +101,7 @@ def test_a_name_with_no_ceiling_is_refused_rather_than_created():
     bounds = _bounds()
 
     with pytest.raises(Exceeded, match="no ceiling"):
-        bounds.set("rewrd_correct", 0.2, by="console")
+        bounds.set("rewrd_correct", 0.2, by=Box("console"))
 
 
 def test_a_days_shortfall_is_what_still_has_to_be_supplemented():
@@ -208,7 +209,7 @@ def test_set_refuses_through_validate_so_the_rule_cannot_drift():
     asked = []
     bounds.validate = lambda name, value: asked.append((name, value))
 
-    bounds.set("reward_correct", 0.25, by="console")
+    bounds.set("reward_correct", 0.25, by=Box("console"))
 
     assert asked == [("reward_correct", 0.25)], "set did not go through validate"
     assert bounds.value("reward_correct") == 0.25

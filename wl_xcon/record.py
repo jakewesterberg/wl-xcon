@@ -22,6 +22,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, TextIO
 
+from wl_xcon import actor as actors
+from wl_xcon.actor import Actor
+
 if TYPE_CHECKING:
     # For the annotation only: `levels` imports the simulator (for `Tally`), which a
     # record has no use for at run time, and `trial` needs only `as_record`.
@@ -123,7 +126,7 @@ def welfare_note(
     was: float,
     now: float,
     reason: str,
-    by: str,
+    by: Actor,
     how: str,
     recorded_at: float,
 ) -> None:
@@ -162,7 +165,7 @@ def welfare_note(
                     "now": now,
                     "now_local": _local(now),
                     "reason": reason,
-                    "by": by,
+                    "by": actors.to_map(by),
                     "how": how,
                     "recorded_at": recorded_at,
                     "recorded_at_local": _local(recorded_at),
@@ -295,7 +298,10 @@ class SessionRecord:
     def run_row(self, event: str, run: int, at: float, **fields: object) -> None:
         """One row of `RUNS`: `event` `"start"` or `"end"`, the run's index, the instant
         on the session's anchored clock with its local time and zone, and the run's own
-        fields, written as given."""
+        fields, written as given -- but a `by` among them, an `Actor`, written as
+        `actor.to_map`'s map (b2b spec §6)."""
+        if "by" in fields:
+            fields["by"] = actors.to_map(fields["by"])
         with (self.directory / RUNS).open("a", encoding="utf-8") as handle:
             handle.write(
                 json.dumps(
@@ -311,7 +317,7 @@ class SessionRecord:
         name: str,
         was: object,
         now: object,
-        by: str,
+        by: Actor,
         run: int | None = None,
     ) -> None:
         """One live parameter change, joined to the recording by `sequence`.
@@ -336,7 +342,7 @@ class SessionRecord:
                         "name": name,
                         "was": was,
                         "now": now,
-                        "by": by,
+                        "by": actors.to_map(by),
                         "run": run,
                     },
                     sort_keys=True,
@@ -345,7 +351,7 @@ class SessionRecord:
             )
 
     def control(
-        self, kind: str, by: str, at: float, trial_index: int, **detail: object
+        self, kind: str, by: Actor | None, at: float, trial_index: int, **detail: object
     ) -> None:
         """One console control, as it happened (P4d-2b spec §5.1).
 
@@ -360,7 +366,7 @@ class SessionRecord:
                 json.dumps(
                     {
                         "kind": kind,
-                        "by": by,
+                        "by": actors.to_map_or_none(by),
                         "at": at,
                         "at_local": _local(at),
                         "trial_index": trial_index,
@@ -375,7 +381,7 @@ class SessionRecord:
         self,
         name: str,
         asked: float,
-        by: str,
+        by: Actor | None,
         why: str,
         trial_index: int,
         session_seconds: float,
@@ -426,7 +432,7 @@ class SessionRecord:
                     {
                         "name": name,
                         "asked": asked,
-                        "by": by,
+                        "by": actors.to_map_or_none(by),
                         "why": why,
                         "trial_index": trial_index,
                         "session_seconds": session_seconds,

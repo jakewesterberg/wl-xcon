@@ -64,6 +64,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Protocol
 
+from wl_xcon.actor import Actor
 from wl_xcon.bounds import (
     Bounds,
     Exceeded,
@@ -465,7 +466,7 @@ class Welfare:
         _magnitude("the delivered-line fluid figure", delivered)
         self.delivered = delivered
 
-    def confirm_already_today(self, total: float, by: str) -> None:
+    def confirm_already_today(self, total: float, by: Actor) -> None:
         """A human supplying the day's prior total, making the day countable again.
 
         Recorded with its actor: a figure someone typed and one the ELN pushed are
@@ -738,7 +739,7 @@ class Welfare:
         )
 
     def amend_mark(
-        self, what: str, original: float, amended: float, reason: str, by: str
+        self, what: str, original: float, amended: float, reason: str, by: Actor
     ) -> None:
         """A person changing one of the two marks before it is taken (PI, 2026-09-20).
 
@@ -774,7 +775,7 @@ class Welfare:
                 f"a row that says a welfare clock was moved and not why answers "
                 f"nothing anyone will ask it"
             )
-        if not by.strip():
+        if not by.name.strip():
             raise Exceeded(
                 f"the {what} time for subject {self.bounds.subject!r} was amended "
                 f"by nobody, so it is refused; the clock this session is bounded by "

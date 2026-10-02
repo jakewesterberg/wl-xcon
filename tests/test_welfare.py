@@ -26,6 +26,7 @@ import time
 import pytest
 
 from wl_xcon import welfare as welfare_module
+from wl_xcon.actor import Box
 from wl_xcon.bounds import Bounds, Ceiling, Exceeded, Floor
 from wl_xcon.dio import Simulated as Card
 from wl_xcon.welfare import Absent, Deployment, Rig, Simulated, Welfare
@@ -177,7 +178,7 @@ def test_a_human_confirming_a_figure_makes_the_day_countable_again():
     welfare = _welfare(already=None)
     welfare.deliver("reward_correct", wall_now=WALL_NOW)
 
-    welfare.confirm_already_today(12.0, by="jake")
+    welfare.confirm_already_today(12.0, by=Box("jake"))
 
     assert welfare.total_today() == pytest.approx(12.15)
     assert welfare.shortfall() == pytest.approx(237.85)
@@ -1297,7 +1298,7 @@ def test_an_amendment_carries_a_reason_and_an_actor_into_the_record():
         original=WALL_NOW - 18_900.0,
         amended=WALL_NOW - 900.0,
         reason="typed 08:45 for 18:45",
-        by="jake",
+        by=Box("jake"),
     )
 
     assert welfare.notes == [
@@ -1307,7 +1308,7 @@ def test_an_amendment_carries_a_reason_and_an_actor_into_the_record():
             WALL_NOW - 18_900.0,
             WALL_NOW - 900.0,
             "typed 08:45 for 18:45",
-            "jake",
+            Box("jake"),
         )
     ]
 
@@ -1322,7 +1323,7 @@ def test_an_amendment_with_no_reason_is_refused_rather_than_recorded_blank():
             original=WALL_NOW - 18_900.0,
             amended=WALL_NOW - 900.0,
             reason="   ",
-            by="jake",
+            by=Box("jake"),
         )
 
 
@@ -1336,7 +1337,7 @@ def test_an_amendment_with_no_actor_is_refused_like_a_console_write_with_no_as()
             original=WALL_NOW - 18_900.0,
             amended=WALL_NOW - 900.0,
             reason="typed 08:45 for 18:45",
-            by="",
+            by=Box(""),
         )
 
 
@@ -1352,7 +1353,7 @@ def test_an_amendment_is_refused_before_it_touches_the_mark():
             original=WALL_NOW - 18_900.0,
             amended=WALL_NOW - 900.0,
             reason="x",
-            by="",
+            by=Box(""),
         )
 
     assert welfare.left_cage_wall_at is None
@@ -1475,7 +1476,7 @@ def test_an_amendment_names_which_mark_it_changed():
         original=WALL_NOW,
         amended=WALL_NOW - 60.0,
         reason="marked before the animal was actually in",
-        by="jake",
+        by=Box("jake"),
     )
 
     assert welfare.notes[0][:2] == ("mark amended", "return")
@@ -1730,7 +1731,7 @@ ENTRY_POINTS = {
     ),
     "Bounds.set.value": (
         MAGNITUDE,
-        lambda v: _bounds().set("reward_correct", v, by="jake"),
+        lambda v: _bounds().set("reward_correct", v, by=Box("jake")),
     ),
     "Bounds.shortfall.delivered_today": (
         MAGNITUDE,
@@ -1770,7 +1771,7 @@ ENTRY_POINTS = {
     ),
     "Welfare.confirm_already_today.total": (
         MAGNITUDE,
-        lambda v: _welfare().confirm_already_today(v, by="jake"),
+        lambda v: _welfare().confirm_already_today(v, by=Box("jake")),
     ),
     "Welfare.reconcile.delivered": (MAGNITUDE, lambda v: _welfare().reconcile(v)),
     # --- welfare: the clocks -------------------------------------------------
@@ -1831,13 +1832,13 @@ ENTRY_POINTS = {
     "Welfare.amend_mark.original": (
         INSTANT,
         lambda v: _welfare().amend_mark(
-            "departure", original=v, amended=WALL_NOW, reason="typo", by="jake"
+            "departure", original=v, amended=WALL_NOW, reason="typo", by=Box("jake")
         ),
     ),
     "Welfare.amend_mark.amended": (
         INSTANT,
         lambda v: _welfare().amend_mark(
-            "departure", original=WALL_NOW, amended=v, reason="typo", by="jake"
+            "departure", original=WALL_NOW, amended=v, reason="typo", by=Box("jake")
         ),
     ),
     # A wall-clock instant since 2026-09-20 (PI, ruling 4), with the wall clock it is

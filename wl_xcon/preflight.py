@@ -29,6 +29,8 @@ import math
 from collections.abc import Collection
 from pathlib import Path
 
+from wl_xcon import actor as actors
+from wl_xcon.actor import Actor, Box, Member
 from wl_xcon.bounds import Exceeded
 from wl_xcon.check import check, parameters_used
 from wl_xcon.cli import _load_bounds, _load_subject_settings, _load_trial, _setup_words
@@ -373,7 +375,7 @@ def gate(preflight: Preflight, acknowledged: Collection[str]) -> str | None:
     return None
 
 
-def rows(preflight: Preflight, by: str, acknowledged: Collection[str]) -> list[dict]:
+def rows(preflight: Preflight, by: Actor | None, acknowledged: Collection[str]) -> list[dict]:
     """The pre-flight as `runs.jsonl` records it: every item, and **who acknowledged
     each unknown one** -- `by`, for exactly the unknowns named in `acknowledged` (what
     was sent, not what the result implies). Acknowledging with no one to name is
@@ -382,7 +384,7 @@ def rows(preflight: Preflight, by: str, acknowledged: Collection[str]) -> list[d
         raise ValueError("the acknowledgement must be a collection of item names, not a string")
     named = frozenset(acknowledged)
     signed = [i for i in preflight.items if i.result == UNKNOWN and i.name in named]
-    if signed and not (isinstance(by, str) and by.strip()):
+    if signed and not (isinstance(by, (Box, Member)) and by.name.strip()):
         raise ValueError(
             f"{len(signed)} unknown item(s) are acknowledged but the record has no name "
             f"for who acknowledged them"
@@ -392,7 +394,7 @@ def rows(preflight: Preflight, by: str, acknowledged: Collection[str]) -> list[d
             "name": item.name,
             "result": item.result,
             "said": item.said,
-            "acknowledged_by": by if item in signed else None,
+            "acknowledged_by": actors.to_map(by) if item in signed else None,
         }
         for item in preflight.items
     ]

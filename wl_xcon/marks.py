@@ -40,6 +40,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
+from wl_xcon.actor import Actor
 from wl_xcon.bounds import Exceeded
 from wl_xcon.record import welfare_note
 
@@ -173,7 +174,7 @@ class Confirm:
     """A person's *confirm* on a far departure: who, when a name was given, and how --
     `--confirm-out-of-cage`, at the terminal, or on the page."""
 
-    by: str
+    by: Actor
     how: str
 
 
@@ -184,7 +185,7 @@ class Amend:
 
     at: float
     reason: str
-    by: str
+    by: Actor
     how: str
 
 
@@ -194,7 +195,7 @@ class Departure:
     `departure` row's), and the confirmation's or amendment's row, or `None`."""
 
     at: float
-    by: str
+    by: Actor
     how: str
     note: dict | None
 
@@ -220,7 +221,7 @@ class Owed(Exception):
 
 
 def decide_departure(
-    session, at: float, answer: Confirm | Amend | None, *, by: str, how: str
+    session, at: float, answer: Confirm | Amend | None, *, by: Actor, how: str
 ) -> Departure:
     """What a departure typed as `at` is marked with, given a person's answer.
 
@@ -243,7 +244,7 @@ def decide_departure(
     """
     warning = session.departure_needs_confirmation(at)
 
-    def note(kind: str, now: float, reason: str, who: str, said: str) -> dict:
+    def note(kind: str, now: float, reason: str, who: Actor, said: str) -> dict:
         return {
             "kind": kind,
             "subject": session.spec.subject,
@@ -293,7 +294,7 @@ def record_departure(session, decision: Departure) -> None:
         welfare_note(session.directory, **decision.note)
 
 
-def take_return(target, at: float, *, confirmed: bool, by: str, how: str) -> None:
+def take_return(target, at: float, *, confirmed: bool, by: Actor, how: str) -> None:
     """Mark the return at `at`, or raise `Owed` for a far one nobody confirmed.
 
     **The confirmation is asked first**, before `welfare`'s other refusals -- the
@@ -342,7 +343,7 @@ def page_departure(
     answer: str | None,
     amend_to: str | None,
     amend_reason: str,
-    by: str,
+    by: Actor,
 ) -> Departure:
     """A departure as a console sent it (P4d-2b spec §6.2): the text as typed, read by
     the terminal's own parser, and the page's answer -- `None`, `"confirm"` or
@@ -391,7 +392,7 @@ def page_departure(
 
 
 def page_return(
-    target, *, returned: str, confirm: bool, by: str, how: str = "the page"
+    target, *, returned: str, confirm: bool, by: Actor, how: str = "the page"
 ) -> None:
     """A return as a console sent it: the text as typed, or `now` on the session's own
     clock, read by the terminal's parser, then `take_return`.

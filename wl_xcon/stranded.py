@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from wl_xcon import resume as _resume
+from wl_xcon.actor import Actor, Box
 from wl_xcon.bounds import Bounds, Exceeded
 from wl_xcon.link import Stranded
 from wl_xcon.record import WELFARE_NOTES, XCON_DIRNAME, welfare_note
@@ -97,7 +98,7 @@ class Restored:
         return self.welfare.return_needs_confirmation(at, wall_now=self.wall_now())
 
     def returned_to_cage(
-        self, at: float, confirmed: bool = False, by: str = "", how: str = ""
+        self, at: float, confirmed: bool = False, by: Actor = Box(""), how: str = ""
     ) -> None:
         """`Session.returned_to_cage`'s shape: the far question asked before the mark,
         so a `return confirmed` row is written when one was owed; the rows only after

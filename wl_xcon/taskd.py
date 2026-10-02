@@ -45,6 +45,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from wl_xcon import link as _link
+from wl_xcon.actor import Actor, Box
 from wl_xcon.bounds import Bounds, Exceeded, _finite
 from wl_xcon.check import check
 from wl_xcon.cli import _clock, _load_allocation, _load_trial, _shown
@@ -333,7 +334,8 @@ class Session:
     allocation: Allocation = field(init=False)
     #: Why the session ended. Empty until it has.
     stopped_because: str = field(init=False, default="")
-    #: Console commands refused rather than applied: `(name, by, why)`. See
+    #: Console commands refused rather than applied: `(name, by, why)`, `by` an
+    #: `Actor`, or `None` when nobody readable sent it (b2b spec §6). See
     #: `_command` -- a person mistyping a parameter name is not a fault of the rig,
     #: and the session records the refusal and runs on rather than ending over it.
     #: **Capped at `link.REFUSAL_HISTORY`, newest kept**, for the same reason
@@ -356,6 +358,8 @@ class Session:
     #: The task files `wlx taskd` offers this session's runs, for a console's form.
     offered_tasks: tuple = field(init=False, default=())
     _elapsed: float = field(init=False, default=0.0, repr=False)
+    #: Accepted changes not yet applied: `(name, was, now, by, bounded)`, `by` an
+    #: `Actor` -- see `staged`.
     _staged: list = field(init=False, default_factory=list, repr=False)
     _sequence: int = field(init=False, default=0, repr=False)
     #: **Where each trial sits in the session at every level** (session-levels spec
@@ -413,7 +417,8 @@ class Session:
     #: Minor 3). Published as `Telemetry.paused_at`.
     paused_at: float | None = field(init=False, default=None)
     #: The consoles' changes feed: the last `link.CONTROL_HISTORY` control events as
-    #: `(kind, by, at, said)`, oldest first -- see `controls`.
+    #: `(kind, by, at, said)`, oldest first, `by` an `Actor`, or `None` for a mark's
+    #: stamp -- see `controls`.
     _controls: deque = field(
         init=False,
         default_factory=lambda: deque(maxlen=_link.CONTROL_HISTORY),
@@ -423,9 +428,9 @@ class Session:
     #: `Telemetry.controls_dropped`, so a cap can never read as a quiet session.
     controls_dropped: int = field(init=False, default=0)
     #: The scheduled stop, held here so a closed page cannot lose it (P4d-2b spec
-    #: §5.1): `(kind, target, by, said)`, or `None`. `target` is an instant on the
-    #: session's anchored clock (`clock`), a trial count (`trials`) or mL this
-    #: session (`fluid`); `said` is its words, used by the feed, the strip and the
+    #: §5.1): `(kind, target, by, said)` with `by` an `Actor`, or `None`. `target` is an
+    #: instant on the session's anchored clock (`clock`), a trial count (`trials`) or mL
+    #: this session (`fluid`); `said` is its words, used by the feed, the strip and the
     #: stop reason alike. One at a time: a new schedule replaces it.
     scheduled_stop: tuple | None = field(init=False, default=None)
     #: `OPERATOR_MARK`'s code, looked up once when `run()` starts so the frame never
@@ -538,7 +543,7 @@ class Session:
 
     # --- out of cage, and restraint ---------------------------------------
 
-    def _note(self, kind: str, at: float, by: str, how: str, reason: str = "") -> None:
+    def _note(self, kind: str, at: float, by: Actor, how: str, reason: str = "") -> None:
         """One mark row in `welfare_notes.jsonl` (P4d-2a spec §3).
 
         Written by the mark methods themselves, so every caller leaves the same row
@@ -610,7 +615,7 @@ class Session:
                 "session with no way to say which opened_wall_at is meant"
             )
         self.opened_wall_at = self.wall_now()
-        self._note("session opened", self.opened_wall_at, "", how)
+        self._note("session opened", self.opened_wall_at, Box(""), how)
         # The record lives for the session (P4d-2b spec §6.3): its folder and what is
         # fixed for the session, written as it opens.
         self._record = SessionRecord.open(
@@ -620,7 +625,7 @@ class Session:
         if self.service:
             self.phase = "between_runs"
 
-    def resume(self, restoration, *, by: str, how: str) -> None:
+    def resume(self, restoration, *, by: Actor, how: str) -> None:
         """Reopen a stranded session from its record (XC-026 spec §3): its departure, its
         fluid so far, its numbers and the bounded values it last ran with. It comes back
         between runs, its record appended to and `config.json` left as written at open.
@@ -642,7 +647,7 @@ class Session:
         self.welfare.restore_departure(restoration.departure)
         self.welfare.restore_fluid(restoration.commanded, restoration.last_reward_at)
         for name, value in restoration.bounded.items():
-            self.spec.bounds.set(name, value, by=f"{by}, restored on resume")
+            self.spec.bounds.set(name, value, by=by)
         self._levels = restoration.levels
         self.run_index = restoration.run_index
         self._sequence = restoration.sequence
@@ -723,7 +728,7 @@ class Session:
                 "session with no way to say which ended_wall_at is meant"
             )
         self.ended_wall_at = self.wall_now()
-        self._note("session ended", self.ended_wall_at, "", how)
+        self._note("session ended", self.ended_wall_at, Box(""), how)
         if self._record is not None:
             self._record.close()
             self._record = None
@@ -731,7 +736,7 @@ class Session:
     # --- out of cage, and restraint ---------------------------------------
 
     def left_cage(
-        self, at: float, confirmed: bool = False, by: str = "", how: str = "terminal"
+        self, at: float, confirmed: bool = False, by: Actor = Box(""), how: str = "terminal"
     ) -> None:
         """The action that starts the clock bounding this session.
 
@@ -787,7 +792,7 @@ class Session:
         return self.welfare.return_needs_confirmation(at, wall_now=self.wall_now())
 
     def amend_mark(
-        self, what: str, original: float, amended: float, reason: str, by: str
+        self, what: str, original: float, amended: float, reason: str, by: Actor
     ) -> None:
         """The action that goes with the confirmations above, called through
         `marks.decide_departure` from `wlx run`'s terminal (`cli._settle_departure`) and
@@ -805,7 +810,7 @@ class Session:
         )
 
     def returned_to_cage(
-        self, at: float, confirmed: bool = False, by: str = "", how: str = "terminal"
+        self, at: float, confirmed: bool = False, by: Actor = Box(""), how: str = "terminal"
     ) -> None:
         """The animal is home. **`at` is a wall-clock instant** (PI, 2026-09-20).
 
@@ -847,7 +852,7 @@ class Session:
         A process killed outright cannot write this, and then the missing `returned`
         row is the signal; every other way of ending without a return says why.
         """
-        self._note("return not recorded", self.wall_now(), "", how, reason=why)
+        self._note("return not recorded", self.wall_now(), Box(""), how, reason=why)
 
     def head_fixed(self, at: float) -> None:
         """The action S8 §5.2 requires before a `RIG_FIXED` session starts, taken by the
@@ -880,7 +885,7 @@ class Session:
 
     # --- the live parameter path ------------------------------------------
 
-    def set(self, name: str, value: float, by: str) -> None:
+    def set(self, name: str, value: float, by: Actor) -> None:
         """The one validated write path, whatever the origin (S8 §3.3).
 
         **Validated now, applied at the next trial boundary -- every name alike**
@@ -1079,7 +1084,7 @@ class Session:
     def _control(
         self,
         kind: str,
-        by: str,
+        by: Actor | None,
         feed: str,
         index: int,
         at: float | None = None,
@@ -1097,7 +1102,7 @@ class Session:
             self._record.control(kind, by, at, index, run=self.run_index, **detail)
         return at
 
-    def _feed(self, kind: str, by: str, at: float, said: str) -> None:
+    def _feed(self, kind: str, by: Actor | None, at: float, said: str) -> None:
         """One row onto the changes feed, counting what the cap pushes off -- see
         `controls_dropped`. `_control` adds the record row; an applied setting,
         which `parameter_changes.jsonl` already records, comes here alone."""
@@ -1115,7 +1120,7 @@ class Session:
         except KeyError:
             return None
 
-    def _pause(self, by: str, index: int) -> None:
+    def _pause(self, by: Actor, index: int) -> None:
         """Hold the session at this boundary (P4d-2b spec §5.1): `run()` enters
         `_hold` before the next trial. Strobed now, so the recording shows where the
         gap begins.
@@ -1153,7 +1158,7 @@ class Session:
         self.card.emit(codes["PAUSE"])
         self.paused_at = self._control("pause", by, f"paused at trial {index}", index)
 
-    def _resume(self, by: str, index: int) -> None:
+    def _resume(self, by: Actor, index: int) -> None:
         """End the pause: `_hold` returns and `run()` goes back to the top of its
         loop, which applies whatever was staged while paused before the next trial
         runs (spec §5.1). Strobed, so the recording shows where the gap ends.
@@ -1219,7 +1224,7 @@ class Session:
                     "event code"
                 )
             self._control(
-                "mark", "", said, index, at=at,
+                "mark", None, said, index, at=at,
                 mark=mark, number=number, frame=frame, strobed=strobed,
             )
             self._stamped[mark] = (number, index, frame, at)
@@ -1334,7 +1339,7 @@ class Session:
             replaced=replaced[3] if replaced else None,
         )
 
-    def _cancel(self, by: str, index: int) -> None:
+    def _cancel(self, by: Actor, index: int) -> None:
         """Remove the scheduled stop (spec §5.1), or say there is none."""
         if self.scheduled_stop is None:
             self._refuse("cancel", by, "there is no scheduled stop to cancel; nothing changed")
@@ -1428,7 +1433,7 @@ class Session:
                 publish()
                 return
 
-    def _manual_reward(self, by: str, index: int, held: bool) -> None:
+    def _manual_reward(self, by: Actor, index: int, held: bool) -> None:
         """**A manual reward** (PI, 2026-09-28: "I want to be able to give manual rewards
         during pause"; 2026-09-29: "whenever the console is up, the manual reward should
         work", P4d-2b spec §6.0). Asked how much one press gives: "Same as a correct
@@ -1557,7 +1562,7 @@ class Session:
             where=where,
         )
 
-    def _refuse(self, name: str, by: str, why: str) -> None:
+    def _refuse(self, name: str, by: Actor | None, why: str) -> None:
         """One refusal onto the capped list -- see `refusals`."""
         self.refusals.append((name, by, why))
         if len(self.refusals) > _link.REFUSAL_HISTORY:
@@ -1820,7 +1825,7 @@ class Session:
 
         return make
 
-    def end_runs(self, by: str) -> None:
+    def end_runs(self, by: Actor) -> None:
         """No further run in this session (P4d-2b spec §6.2, *End session*; the b3a-1
         plan, decision 6): it stops taking runs, its head is released, and it waits for
         its animal's return, as `wlx run`'s does after its one run.
@@ -1878,7 +1883,7 @@ class Session:
         self._stamp(mark, None)
         self._settle_stamps(self._index)
 
-    def refuse(self, name: str, by: str, why: str) -> None:
+    def refuse(self, name: str, by: Actor | None, why: str) -> None:
         """One refusal onto this session's feed from outside its trial loop: a console
         command `wlx taskd` could not act on. See `refusals`."""
         self._refuse(name, by, why)
@@ -1927,7 +1932,7 @@ class Session:
         run: RunSpec | None = None,
         *,
         preflight_rows: list | None = None,
-        by: str = "",
+        by: Actor = Box(""),
     ) -> Census:
         """One run: open the in-session clock if nothing has, check, require the marks,
         then run, then record.

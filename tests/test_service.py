@@ -23,6 +23,7 @@ from _rig import RIG
 from _sessions import WALL, malformed_task, typed, whole_point_task
 from _zmq_release import _every_zmq_context_released  # noqa: F401
 from wl_xcon import preflight, resume, stranded
+from wl_xcon.actor import Box
 from wl_xcon.cli import _load_allocation, main
 from wl_xcon.bounds import Exceeded
 from wl_xcon.link import (
@@ -78,7 +79,9 @@ ALLOCATION = "tasks/allocation.py"
 EIGHT_HOURS = Path("tasks/eight_hour_bounds.py")
 TEN_MINUTES = Path("tasks/reference_bounds.py")
 TASK = "fixation_detection.py"
-BY = "jake (box, unverified)"
+BY = Box("jake")
+#: `BY` as the record writes it: `actor.to_map`'s map (b2b spec §6).
+BY_MAP = {"kind": "box", "name": "jake"}
 
 
 class _Wall:
@@ -167,7 +170,7 @@ def _strand(root, session_id="2027-01-13_01", left_at=WALL - 3600, *also):
     directory.mkdir(parents=True)
     for kind in ("departure", *also):
         welfare_note(directory, kind=kind, subject="REFERENCE", was=left_at, now=left_at,
-                     reason="", by="jake", how="t", recorded_at=left_at)
+                     reason="", by=Box("jake"), how="t", recorded_at=left_at)
     return directory
 
 
@@ -303,7 +306,7 @@ def test_a_far_departure_is_asked_confirm_or_amend_and_opens_once_confirmed(tmp_
     assert opened.phase == "between_runs" and opened.question is None
     rows = _rows(service.root)
     assert [r["kind"] for r in rows] == ["departure", "departure confirmed", "session opened"]
-    assert (rows[1]["how"], rows[1]["by"]) == ("confirmed on the page", BY)
+    assert (rows[1]["how"], rows[1]["by"]) == ("confirmed on the page", BY_MAP)
 
 
 def test_an_answered_question_is_gone_from_the_idle_frame_after_its_session(tmp_path):
@@ -804,7 +807,7 @@ def test_a_stranded_record_whose_animal_is_no_folder_name_runs_nothing_outside_s
     directory = folders[2] / "2027-01-13_01" / "xcon"
     directory.mkdir(parents=True)
     welfare_note(directory, kind="departure", subject=subject, was=WALL - 3600,
-                 now=WALL - 3600, reason="", by="jake", how="t", recorded_at=WALL - 3600)
+                 now=WALL - 3600, reason="", by=Box("jake"), how="t", recorded_at=WALL - 3600)
     service = _made(folders)
 
     refused = _step(service, _end(session_id="2027-01-13_01"))
@@ -1057,9 +1060,9 @@ def test_an_acknowledged_run_starts_records_who_acknowledged_what_and_ends_betwe
     start, end = _runs(service.root)
     assert {r["name"]: r["acknowledged_by"] for r in start["preflight"]} == {
         "task checks": None, "starting values": None, "bounded config": None,
-        "out of cage": None, "pump calibration": BY, "eye tracker": BY,
+        "out of cage": None, "pump calibration": BY_MAP, "eye tracker": BY_MAP,
     }
-    assert (start["by"], start["seed"], start["trials"]) == (BY, 7, 3)
+    assert (start["by"], start["seed"], start["trials"]) == (BY_MAP, 7, 3)
     assert "unplanned" not in start, "retired by the PI, 2026-10-01 (P4d-2b spec §4.0)"
     assert end["stop_kind"] == "completed"
     codes = service.session.card.codes
@@ -1290,7 +1293,7 @@ def test_a_service_sessions_frames_carry_the_links_own_refusals(tmp_path):
     link = Simulated()
     service = _service(tmp_path, link=link)
     _step(service, _open())
-    link.refused.append(Refused(name="set", by="<unknown>", why="not a command"))
+    link.refused.append(Refused(name="set", by=None, why="not a command"))
     link.refused_dropped = 2
 
     frame = _step(service)
@@ -2187,7 +2190,7 @@ def _out_of_cage_changed_to(value):
     def damage(directory) -> None:
         with (directory / "parameter_changes.jsonl").open("a") as handle:
             handle.write(json.dumps({"sequence": 1, "name": "out_of_cage", "was": 28800.0,
-                                     "now": value, "by": BY, "run": 0}) + "\n")
+                                     "now": value, "by": BY_MAP, "run": 0}) + "\n")
     return damage
 
 
@@ -2498,9 +2501,9 @@ def test_two_crashes_and_their_resumes_repeat_no_number_in_one_recording(tmp_pat
         "departure", "session opened", "session resumed", "session resumed", "returned",
         "session ended",
     ]
-    assert {(row["by"], row["how"]) for row in _rows(folders[2]) if row["kind"] == "session resumed"} == {
-        (BY, "wlx taskd"),
-    }
+    assert [(row["by"], row["how"]) for row in _rows(folders[2]) if row["kind"] == "session resumed"] == [
+        (BY_MAP, "wlx taskd"),
+    ] * 2
 
 
 # --- wlx taskd -----------------------------------------------------------------
@@ -2702,7 +2705,7 @@ class _Rig:
     def __exit__(self, *exc_info) -> None:
         if self.thread.is_alive():
             try:
-                self.send(Stop(by="e2e-cleanup"))
+                self.send(Stop(by=Box("e2e-cleanup")))
             except Exception:  # noqa: BLE001 -- best-effort: a run left going is stopped
                 pass
         self.stop.set()
@@ -2823,7 +2826,7 @@ def test_e2e_an_unknown_preflight_item_is_acknowledged_by_name_and_found_in_runs
     assert [i.result for i in shown.preflight.items if i.name in UNKNOWN] == ["unknown", "unknown"]
     start = _runs(rig.folders[2])[0]
     assert {r["name"]: r["acknowledged_by"] for r in start["preflight"] if r["result"] == "unknown"} == {
-        "pump calibration": BY, "eye tracker": BY,
+        "pump calibration": BY_MAP, "eye tracker": BY_MAP,
     }
 
 
@@ -2886,7 +2889,7 @@ def test_e2e_an_amendment_with_no_reason_or_no_sender_is_refused_and_marks_nothi
         rig.seen(lambda f: isinstance(f, Idle) and f.question is not None)
         rig.send(_open(amend_reason="", **amend))
         no_reason = rig.seen(lambda f: isinstance(f, Idle) and any("no reason" in r.why for r in f.refusals))
-        rig.send(_open(by="  ", amend_reason="typed 09:30 for 17:30", **amend))
+        rig.send(_open(by=Box("  "), amend_reason="typed 09:30 for 17:30", **amend))
         no_sender = rig.seen(lambda f: isinstance(f, Idle) and any("must say who sent it" in r.why for r in f.refusals))
         assert no_reason.question is not None and no_sender.question is not None
         assert list(rig.folders[2].iterdir()) == []
