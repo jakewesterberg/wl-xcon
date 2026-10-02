@@ -126,7 +126,7 @@ def welfare_note(
     was: float,
     now: float,
     reason: str,
-    by: Actor,
+    by: Actor | None,
     how: str,
     recorded_at: float,
 ) -> None:
@@ -149,9 +149,10 @@ def welfare_note(
     Uncapped, unlike `refusal`: the party generating these is an operator typing at a
     prompt, not a console peer looping on a rejected volume.
 
-    `reason` and `by` are written as given. **`welfare.amend_mark` is what refuses a
-    blank pair**, so the rule has one home and the console path that P4d-2 adds cannot
-    reach the record around it.
+    `reason` is written as given, and `by` as `actor.to_map`'s map, or null for the
+    process's own rows, which nobody typed (b2b spec §6). **`welfare.amend_mark` is what
+    refuses a blank pair**, so the rule has one home and the console path that P4d-2
+    adds cannot reach the record around it.
     """
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / WELFARE_NOTES).open("a", encoding="utf-8") as handle:
@@ -165,7 +166,7 @@ def welfare_note(
                     "now": now,
                     "now_local": _local(now),
                     "reason": reason,
-                    "by": actors.to_map(by),
+                    "by": actors.to_map_or_none(by),
                     "how": how,
                     "recorded_at": recorded_at,
                     "recorded_at_local": _local(recorded_at),
@@ -298,10 +299,11 @@ class SessionRecord:
     def run_row(self, event: str, run: int, at: float, **fields: object) -> None:
         """One row of `RUNS`: `event` `"start"` or `"end"`, the run's index, the instant
         on the session's anchored clock with its local time and zone, and the run's own
-        fields, written as given -- but a `by` among them, an `Actor`, written as
-        `actor.to_map`'s map (b2b spec §6)."""
+        fields, written as given -- but a `by` among them, an `Actor` or `None` for
+        nobody (`wlx run`'s start row), written as `actor.to_map`'s map or null (b2b spec
+        §6)."""
         if "by" in fields:
-            fields["by"] = actors.to_map(fields["by"])
+            fields["by"] = actors.to_map_or_none(fields["by"])
         with (self.directory / RUNS).open("a", encoding="utf-8") as handle:
             handle.write(
                 json.dumps(

@@ -300,7 +300,8 @@ def test_a_session_writes_its_record_and_its_config(tmp_path):
 
 def test_the_run_a_session_spec_describes_is_run_0_in_every_file_it_writes(tmp_path):
     """Spec §6.3: a row per run -- as a start and an end (Plan decision 4) -- and every
-    trial row names its run. `wlx run`'s one run is run 0, with no pre-flight taken."""
+    trial row names its run. `wlx run`'s one run is run 0, with no pre-flight taken and
+    nobody named as starting it (b2b spec §6: null, never a blank box name)."""
     session = _session(_spec(tmp_path, trials=5))
     session.set("fix_hold", 0.5, by=Box("console"))
 
@@ -316,7 +317,7 @@ def test_the_run_a_session_spec_describes_is_run_0_in_every_file_it_writes(tmp_p
     assert start["resolved"]["fix_hold"] == 0.3, "what it started with, before the staged 0.5"
     assert start["layers"] == {"task": FIXATION_STARTS, "run": start["resolved"]}
     assert start["bounded"] == {"reward_correct": 0.15}
-    assert (start["preflight"], start["trials"], start["seed"]) == (None, 5, 1)
+    assert (start["preflight"], start["by"], start["trials"], start["seed"]) == (None, None, 5, 1)
     assert "unplanned" not in start, "retired by the PI, 2026-10-01 (P4d-2b spec §4.0)"
     assert (end["stop_kind"], end["trials"], end["strobed"]) == ("completed", 5, True)
     assert {row["run"] for row in _trial_rows(session)} == {0}

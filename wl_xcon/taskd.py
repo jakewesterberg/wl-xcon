@@ -45,7 +45,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from wl_xcon import link as _link
-from wl_xcon.actor import Actor, Box
+from wl_xcon.actor import Actor
 from wl_xcon.bounds import Bounds, Exceeded, _finite
 from wl_xcon.check import check
 from wl_xcon.cli import _clock, _load_allocation, _load_trial, _shown
@@ -543,7 +543,9 @@ class Session:
 
     # --- out of cage, and restraint ---------------------------------------
 
-    def _note(self, kind: str, at: float, by: Actor, how: str, reason: str = "") -> None:
+    def _note(
+        self, kind: str, at: float, by: Actor | None, how: str, reason: str = ""
+    ) -> None:
         """One mark row in `welfare_notes.jsonl` (P4d-2a spec §3).
 
         Written by the mark methods themselves, so every caller leaves the same row
@@ -555,7 +557,9 @@ class Session:
         `EndSession`, through `marks.py`, and the service itself for the same three
         rows). The wl-works ELN's marks will reach this box through the lab-host
         protocol, not `link.py`. `was` and `now` are both the mark's instant: nothing
-        was amended, so there is one value to record.
+        was amended, so there is one value to record. **`by` is `None` for the process's
+        own three rows** (b2b spec §6, Ruling 4): nobody typed them, and a blank box name
+        is a terminal confirmation given without `--as`.
 
         **Called only after `welfare` has accepted the mark, never before**, so a mark
         that never happened cannot be logged as having happened. That ordering has a
@@ -615,7 +619,7 @@ class Session:
                 "session with no way to say which opened_wall_at is meant"
             )
         self.opened_wall_at = self.wall_now()
-        self._note("session opened", self.opened_wall_at, Box(""), how)
+        self._note("session opened", self.opened_wall_at, None, how)
         # The record lives for the session (P4d-2b spec §6.3): its folder and what is
         # fixed for the session, written as it opens.
         self._record = SessionRecord.open(
@@ -728,7 +732,7 @@ class Session:
                 "session with no way to say which ended_wall_at is meant"
             )
         self.ended_wall_at = self.wall_now()
-        self._note("session ended", self.ended_wall_at, Box(""), how)
+        self._note("session ended", self.ended_wall_at, None, how)
         if self._record is not None:
             self._record.close()
             self._record = None
@@ -736,7 +740,11 @@ class Session:
     # --- out of cage, and restraint ---------------------------------------
 
     def left_cage(
-        self, at: float, confirmed: bool = False, by: Actor = Box(""), how: str = "terminal"
+        self,
+        at: float,
+        confirmed: bool = False,
+        by: Actor | None = None,
+        how: str = "terminal",
     ) -> None:
         """The action that starts the clock bounding this session.
 
@@ -810,7 +818,11 @@ class Session:
         )
 
     def returned_to_cage(
-        self, at: float, confirmed: bool = False, by: Actor = Box(""), how: str = "terminal"
+        self,
+        at: float,
+        confirmed: bool = False,
+        by: Actor | None = None,
+        how: str = "terminal",
     ) -> None:
         """The animal is home. **`at` is a wall-clock instant** (PI, 2026-09-20).
 
@@ -852,7 +864,7 @@ class Session:
         A process killed outright cannot write this, and then the missing `returned`
         row is the signal; every other way of ending without a return says why.
         """
-        self._note("return not recorded", self.wall_now(), Box(""), how, reason=why)
+        self._note("return not recorded", self.wall_now(), None, how, reason=why)
 
     def head_fixed(self, at: float) -> None:
         """The action S8 §5.2 requires before a `RIG_FIXED` session starts, taken by the
@@ -1932,7 +1944,7 @@ class Session:
         run: RunSpec | None = None,
         *,
         preflight_rows: list | None = None,
-        by: Actor = Box(""),
+        by: Actor | None = None,
     ) -> Census:
         """One run: open the in-session clock if nothing has, check, require the marks,
         then run, then record.
@@ -1942,7 +1954,8 @@ class Session:
         each of a `wlx taskd` session's (P4d-2b spec §6.1). `preflight_rows` are the
         pre-flight's items as `runs.jsonl` records them, with who acknowledged each
         unknown one (`preflight.rows`), and `by` who started the run; `wlx run` takes no
-        pre-flight (the b3a-1 plan, decision 13), and its start row says `null`.
+        pre-flight (the b3a-1 plan, decision 13) and names nobody as starting its run, and
+        its start row says `null` for both.
 
         **In that order, and it is load-bearing.** A malformed task is refused before
         anything else happens, and a session whose welfare marks are missing is refused

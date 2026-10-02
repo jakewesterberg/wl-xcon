@@ -2248,6 +2248,10 @@ def test_the_flag_is_the_non_interactive_confirmation_and_says_so(tmp_path):
         "return not recorded", "session ended",
     ]
     assert rows[2]["how"] == "--confirm-out-of-cage, with no terminal attached"
+    # b2b spec §6: a confirmation given without `--as` is a blank box name, the one
+    # place one is allowed; the process's own rows name nobody, as null (Ruling 4).
+    assert [row["by"] for row in rows[1:3]] == [{"kind": "box", "name": ""}] * 2
+    assert [rows[i]["by"] for i in (0, 3, 4)] == [None, None, None]
 
 
 def test_a_near_departure_asks_nothing_and_writes_no_confirmation(tmp_path):
@@ -2260,6 +2264,9 @@ def test_a_near_departure_asks_nothing_and_writes_no_confirmation(tmp_path):
     assert _kinds(tmp_path) == [
         "session opened", "departure", "return not recorded", "session ended",
     ]
+    # b2b spec §6: a departure given at the terminal without `--as` is a blank box name.
+    (departure,) = [row for row in _notes(tmp_path) if row["kind"] == "departure"]
+    assert departure["by"] == {"kind": "box", "name": ""}
 
 
 def test_an_interactive_run_asks_and_a_person_can_confirm(tmp_path, monkeypatch):
@@ -2279,6 +2286,7 @@ def test_an_interactive_run_asks_and_a_person_can_confirm(tmp_path, monkeypatch)
         "return not recorded", "session ended",
     ]
     assert rows[2]["how"] == "confirmed at the terminal"
+    assert rows[2]["by"] == {"kind": "box", "name": ""}, "confirmed at the terminal without --as"
 
 
 def test_an_interactive_run_stops_when_the_person_does_not_confirm(
