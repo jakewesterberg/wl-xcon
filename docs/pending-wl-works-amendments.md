@@ -209,6 +209,15 @@ credential lifecycle.
 
 ## Signing in from a rig's page: what b2b needs (new, 2026-09-29)
 
+> **BUILT AND DEPLOYED BY wl-works ON 2026-10-02** (`4eb2c568`, merged that morning; their
+> `HANDOVER-wl-expcontroller.md`, "wl.works' answer — signing in at a rig's page"). Read from
+> their source the same day for b2b's design (`docs/superpowers/specs/2026-10-02-p4d2b-b2b-remote-signin-design.md`):
+> `RIG_PAGES` entries `name=https://page/`, client `wl-works-rig-<name>`, **`scope=offline_access`
+> alone** (their ruling 5 of 2026-10-01: with `openid` the `aud` becomes a list of two), `aud` the
+> page's origin as a single string, a `name` claim, `typ: at+jwt`, RS256, one hour, renewal for 24
+> hours from the sign-in at the rig. **No rig is in `RIG_PAGES` yet**: that waits on our XC-151
+> (names and certificates) and XC-152 (the list). Backlog XC-102 and XC-147 to XC-149 closed.
+
 > **ANSWERED 2026-09-29: yes to all four, with two conditions and three asks of us.** wl-works
 > designed it with the PI the same day (wl-works `docs/superpowers/specs/2026-09-29-rig-sign-in-design.md`
 > §8, approved in `e057946b` and the commit after; told to this repository by that

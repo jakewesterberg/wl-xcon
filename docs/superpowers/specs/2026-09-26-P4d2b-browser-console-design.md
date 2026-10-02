@@ -517,6 +517,12 @@ Welfare-critical by CLAUDE.md, given to the PI as numbered items in plain terms:
 
 ### 5.7 b2b, remote sign-in: decided so far (PI, 2026-09-27)
 
+> **Designed in full on 2026-10-02, in its own file:**
+> `2026-10-02-p4d2b-b2b-remote-signin-design.md`, after wl-works deployed rig sign-in that day
+> (`4eb2c568`). Where the two differ, that file is the design; this section is kept as the record
+> of what was decided before it. It extends §5.0's "every control" to b3a's session controls (the
+> PI, 2026-10-02: "Everything"), and names the actor types `Box` and `Member`.
+
 Designed in full as its own section when b2a has shipped. Decided now:
 
 - **Who:** people signed in to wl-works, with every b2 control (§5.0). **The manual reward
