@@ -54,6 +54,7 @@ PACKAGE = "wl_xcon"
 #: See `mutate.mutate`'s docstring; these values are the ones the workflow used
 #: when the list lived in YAML.
 RETURNS: dict[str, str] = {
+    "actor": "None",
     "check": "[]",
     "encode": "[]",
     "calibration": "[]",
