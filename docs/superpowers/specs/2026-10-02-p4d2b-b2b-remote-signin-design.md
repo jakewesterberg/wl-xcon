@@ -333,8 +333,11 @@ bare string `by` is refused, as `link._actor` refuses a missing one today.
   (its `jwt/api_jwt.py`, read 2026-10-02), but 2.10.0's issuer check is the substring one in §5.
   An extra, imported only by `serve --https`, so a rig that takes no remote control installs
   neither, as `console` keeps transport off a terminal-only rig.
-- **`dev` gains `playwright`** (Apache-2.0; PyPI, 1.63.0, read 2026-10-02) for §8's browser
-  test, and CI installs headless Chromium for it. Never installed on a rig.
+- **~~`dev` gains~~ A `browser` extra holds `playwright`** (Apache-2.0; PyPI, 1.63.0, read
+  2026-10-02) for §8's browser test, and CI's pytest job installs headless Chromium for it.
+  Never installed on a rig. *(Amended 2026-10-02 by the plan, its Ruling 6: all three CI jobs
+  install `dev`, and only the pytest job needs a browser, so its own extra keeps the mutation
+  jobs from downloading it.)*
 - TLS is the standard library's `ssl`; the OAuth exchange runs in the browser. Nothing else.
 
 ## 10. Human review before merge

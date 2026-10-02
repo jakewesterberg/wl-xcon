@@ -349,7 +349,7 @@ figure was one low. In order:
 
 ## What moved on 2026-10-02: b2b designed
 
-**Resume here (state at 2026-10-02, afternoon):** on branch `b2b-remote-signin`, not pushed.
+**Resume here (state at 2026-10-02, afternoon):** on branch `b2b-remote-signin`, not pushed. The plan is written: `docs/superpowers/plans/2026-10-02-p4d2b-b2b-remote-signin.md`, awaiting the PI's review and choice of execution.
 wl-works merged and deployed rig sign-in that morning (`4eb2c568`), the trigger this file named
 for b2b. The design is written and **approved by the PI** ("Approve, write the plan"):
 `docs/superpowers/specs/2026-10-02-p4d2b-b2b-remote-signin-design.md`. **Next:** its
