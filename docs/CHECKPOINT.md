@@ -9,7 +9,9 @@ distrust the reasoning. Numbers go stale, arguments do not.
 > written with**, `wl-expcontroller` and `wl_expcontroller/…` paths included, as the PI
 > ruled for dated documents; read `wl_expcontroller/taskd.py` there as `wl_xcon/taskd.py`.
 >
-> **This file describes `main`.** The newest entry, "What moved on 2026-10-02: XC-026, a stranded
+> **This file describes `main`, except its newest entry**, "What moved on 2026-10-02: b2b
+> designed", which is on branch `b2b-remote-signin` until it fast-forwards. Below it, "What moved
+> on 2026-10-02: XC-026, a stranded
 > session resumed", lets a crashed `wlx taskd` session be resumed from its record with its numbers,
 > its out-of-cage clock and its fluid carried on (on `main` by fast-forward once its CI read green).
 > Below it, "What moved on 2026-10-01: run markers, and the
@@ -344,6 +346,35 @@ figure was one low. In order:
   a path outside the workspace, and no credentials for it.
 
 ---
+
+## What moved on 2026-10-02: b2b designed
+
+**Resume here (state at 2026-10-02, afternoon):** on branch `b2b-remote-signin`, not pushed.
+wl-works merged and deployed rig sign-in that morning (`4eb2c568`), the trigger this file named
+for b2b. The design is written and **approved by the PI** ("Approve, write the plan"):
+`docs/superpowers/specs/2026-10-02-p4d2b-b2b-remote-signin-design.md`. **Next:** its
+implementation plan (two slices, spec §13: the `Box`/`Member` actor types first, then signing
+in), brought to the PI before any code.
+
+- **Rulings, asked in the UI:** signed-in members get every control, sessions included
+  ("Everything"); sign-in at a rig's page goes straight through for a browser already signed in to
+  wl.works, with the name always shown ("Straight through"); `wlx serve` checks each token and the
+  record carries a typed actor ("1: typed who").
+- **Read from wl-works' source and its live documents, 2026-10-02** (spec §3-§5): client
+  `wl-works-rig-<name>` from a `RIG_PAGES` entry, `scope=offline_access` alone, `aud` the page's
+  origin as one string, a `name` claim, `typ: at+jwt`, RS256 (four 2048-bit keys at
+  `https://wl.works/api/auth/jwks`), issuer `https://wl.works/api/auth`. No rig is in `RIG_PAGES`
+  yet; that waits on XC-151 and XC-152.
+- **Learned, and worth the next session's time:**
+  - **PyJWT 2.10.0 checks a string issuer as a substring** (`payload["iss"] not in issuer`, read
+    from its wheel): the spec's floor is 2.10.1 and `signin.py` compares `iss` itself too.
+  - **`by` is a string in about 470 places** and reaches `welfare`, `bounds`, `marks` and
+    `stranded`; `resume.py` reads it back from records, which keep their old string form.
+  - **wl.works' token endpoint answers rig origins on every response, refused or not**
+    (`rig-cors.ts`'s `withRigCors`), so a refused renewal's `error_description` is readable;
+    its revocation endpoint answers no rig origin.
+- **Backlog:** XC-102 and XC-147 to XC-149 closed (built by wl-works); XC-015 points at the spec;
+  XC-216 filed (the session summary S9a §6 asks for).
 
 ## What moved on 2026-10-02: XC-026, a stranded session resumed
 

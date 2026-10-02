@@ -2,7 +2,8 @@
 
 - **Status:** designed in conversation on 2026-10-02. The PI answered each question in the UI
   (quoted in §2) and approved the design in three parts ("Looks right" to each: serving and
-  signing in, checking and recording, failures and testing and review).
+  signing in, checking and recording, failures and testing and review), then the written spec
+  ("Approve, write the plan"), all 2026-10-02.
 - **Date:** 2026-10-02
 - **Closes:** XC-015 (b2b) and XC-186 (a browser-driven test for the page's script).
 - **Parents:**
