@@ -41,6 +41,7 @@ from dataclasses import dataclass
 from importlib import resources
 
 from wl_xcon import health as _health
+from wl_xcon.actor import Actor, Member
 from wl_xcon.cli import _clock, _moment, _setup_words
 from wl_xcon.link import RECENT_OUTCOMES, Counts, Idle, Question, Telemetry
 from wl_xcon.task import Family, Outcome
@@ -274,6 +275,17 @@ def _presence(view: View) -> str:
 # --- the strip --------------------------------------------------------------------
 
 
+def _who(by: Actor | None) -> str:
+    """Who sent a control, as the page shows it (b2b spec §6): a member as *NAME
+    (wl.works)*, a box name set apart as *NAME (box, unverified)*, so a typed name
+    dressed as a member's still reads as typed; nothing for nobody."""
+    if by is None:
+        return ""
+    if isinstance(by, Member):
+        return f'<span class="who-m">{_e(by.name)} <span class="nm">(wl.works)</span></span>'
+    return f'<span class="who-b">{_e(by.name)} <span class="nm">(box, unverified)</span></span>'
+
+
 def _cell(
     label: str,
     value: str,
@@ -467,7 +479,7 @@ def _scheduled(frame: Telemetry, view: View) -> str:
         f'<button type="button" class="btn small" data-cmd="cancel"{_off(view)}>'
         f"cancel</button>"
     )
-    return _cell("Scheduled", f"stop {_e(stop.said)}", sub=f"set by {_e(stop.by)} {cancel}")
+    return _cell("Scheduled", f"stop {_e(stop.said)}", sub=f"set by {_who(stop.by)} {cancel}")
 
 
 def _strip(frame: Telemetry | None, view: View) -> str:
@@ -920,10 +932,10 @@ def _changes(frame: Telemetry | None) -> str:
         rows.append(
             f'<div class="ev staged"><span class="kind">staged</span><span>'
             f"{_e(change.name)} {_e(_num(change.was))} → {_e(_num(change.now))} "
-            f"by {_e(change.by)} ({kind}, applies at the next trial)</span></div>"
+            f"by {_who(change.by)} ({kind}, applies at the next trial)</span></div>"
         )
     for control in reversed(frame.controls):
-        who = f" · {_e(control.by)}" if control.by else ""
+        who = f" · {_who(control.by)}" if control.by is not None else ""
         rows.append(
             f'<div class="ev ctl"><span class="kind">{_e(control.kind)}</span><span>'
             f"{_clock_time(control.at)} · {_e(control.said)}{who}</span></div>"
@@ -942,7 +954,7 @@ def _changes(frame: Telemetry | None) -> str:
         )
     for refusal in frame.refusals:
         # Nobody (`None`, b2b spec §6) names no one, where a placeholder name stood.
-        who = "" if refusal.by is None else f" by {_e(refusal.by)}"
+        who = "" if refusal.by is None else f" by {_who(refusal.by)}"
         rows.append(
             f'<div class="ev refused"><span class="kind">refused</span><span>'
             f"{_e(refusal.name)}{who}: {_e(refusal.why)}</span></div>"
@@ -1035,7 +1047,7 @@ def _params(frame: Telemetry | None, view: View) -> str:
         mark = (
             ""
             if change is None
-            else f'<span class="stg">staged → {_e(_num(change.now))} by {_e(change.by)}</span>'
+            else f'<span class="stg">staged → {_e(_num(change.now))} by {_who(change.by)}</span>'
         )
         refusal = refused.get(row.name)
         said = (
@@ -1255,7 +1267,7 @@ def _idle_refusals(frame: Idle) -> str:
         )
     for refusal in frame.refusals:
         # Nobody (`None`, b2b spec §6) names no one, where a placeholder name stood.
-        who = "" if refusal.by is None else f" by {_e(refusal.by)}"
+        who = "" if refusal.by is None else f" by {_who(refusal.by)}"
         rows.append(
             f'<div class="ev refused"><span class="kind">refused</span><span>'
             f"{_e(refusal.name)}{who}: {_e(refusal.why)}</span></div>"
@@ -1445,6 +1457,7 @@ h2 { font-family: var(--cond); font-weight: 700; font-size: 12px; letter-spacing
 h3 { margin: 0; font-family: var(--cond); font-weight: 600; font-size: 11.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
 .sub { font-size: 12.5px; color: var(--muted); }
 .nm { color: var(--muted); font-style: italic; }
+.who-b { font-style: italic; }
 .later { font-size: 11px; color: var(--mock); font-family: var(--cond); letter-spacing: 0.05em; text-transform: uppercase; font-weight: 600; }
 .glass { background: var(--surface); border: 1px solid var(--edge); border-radius: 8px; box-shadow: var(--shadow); }
 .head { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; padding: 8px 14px; }

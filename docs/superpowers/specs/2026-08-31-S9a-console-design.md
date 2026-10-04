@@ -176,6 +176,10 @@ token id)` and `Local(box credential)`. Different types for the reason `Floor` a
 know who" can never render as a name. A forgeable name is worse than no name, because it
 is believed.
 
+*Built 2026-10-02 (b2b slice 1) as `actor.Box` and `actor.Member`; `Local(box credential)`
+became `Box(name)`, a name typed at the rig PC, since the box has no credential of its own
+beyond being the rig PC.*
+
 **The degradation is loud.** The console header states its mode. Every welfare-affecting
 action records its actor type, and a session whose welfare actions were unattributed says
 so in its summary. The local path is not prevented — preventing it defeats its purpose —

@@ -3635,3 +3635,12 @@ def test_the_terminal_console_says_a_session_was_resumed_and_when():
 
     assert f"resumed after its process stopped, at {_time_of_day(at)[:5]}" in shown
     assert "resumed after" not in render(_telemetry())
+
+
+def test_render_keeps_a_box_name_typed_like_a_members_a_box_name():
+    """b2b Review Focus 2: the suffix is the actor's own, so a typed name cannot drop it."""
+    frame = _telemetry(
+        controls=(Control("pause", Box("Jake Westerberg (wl.works)"), 1_700_000_000.0, "paused"),)
+    )
+
+    assert "by Jake Westerberg (wl.works) (box, unverified)" in render(frame)

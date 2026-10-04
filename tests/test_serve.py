@@ -4343,3 +4343,54 @@ def test_a_resume_command_from_the_page_is_the_one_the_wire_would_decode_and_is_
 
     assert server.dispatch(expected) == (200, {"status": "sent", "said": SERVICE_SENT})
     assert sender.sent == [expected]
+
+
+def test_page_e2e_no_record_in_a_session_holds_a_string_actor(tmp_path, monkeypatch, zmq_cleanup):
+    """b2b slice 1, the path proved: open from the page, run with a pause, a setting, a
+    mark and its note, a hand reward and a stop, then end it -- and no `by` or
+    `acknowledged_by` anywhere in the session folder is a bare string. A row the process
+    writes itself is `by: null`; every other is an actor's map."""
+    with _Taskd(tmp_path, monkeypatch, zmq_cleanup) as taskd:
+        taskd.post(_open_body())
+        taskd.seen(_between)
+        assert taskd.post({"kind": "reward"})[0] == 200
+        taskd.seen(lambda f: _between(f) and any(c.kind == "reward" for c in f.controls))
+        taskd.post({"kind": "check", "task": TASK, "values": {}})
+        taskd.seen(lambda f: _between(f) and f.preflight is not None)
+        assert taskd.post(_start_body(trials=300))[0] == 200
+        taskd.seen(lambda f: isinstance(f, Telemetry) and f.phase == "running" and f.trial_index >= 2)
+        status, signal = taskd.post({"kind": "mark", "pressed_at": time.time()})
+        assert (status, signal["status"]) == (200, "signaled")
+        taskd.seen(lambda f: any(c.kind == "mark" for c in f.controls))
+        assert taskd.post({"kind": "pause"})[0] == 200
+        taskd.seen(lambda f: isinstance(f, Telemetry) and f.paused_at is not None)
+        assert taskd.post({"kind": "note", "mark": signal["mark"], "note": "sneeze"})[0] == 200
+        assert taskd.post({"kind": "set", "name": "fix_hold", "value": 0.4})[0] == 200
+        taskd.seen(lambda f: isinstance(f, Telemetry) and any(c.kind == "note" for c in f.controls))
+        assert taskd.post({"kind": "resume"})[0] == 200
+        # The setting is applied at the next trial, and only then is it in the record.
+        taskd.seen(lambda f: isinstance(f, Telemetry) and any(
+            p.name == "fix_hold" and p.value == 0.4 for p in f.params))
+        assert taskd.post({"kind": "stop"})[0] == 200
+        taskd.seen(lambda f: _between(f) and f.run_index == 0)
+        assert taskd.post(_end_body())[0] == 200
+        taskd.seen(lambda f: isinstance(f, Idle))
+
+    folder = taskd.folders[2] / "2027-01-14_01"
+    files = sorted(folder.rglob("*.jsonl"))
+    assert {path.name for path in files} >= {
+        "controls.jsonl", "runs.jsonl", "welfare_notes.jsonl", "parameter_changes.jsonl",
+    }
+    maps = 0
+    for path in files:
+        for line in path.read_text().splitlines():
+            row = json.loads(line)
+            for key in ("by", "acknowledged_by"):
+                assert not isinstance(row.get(key), str), (path.name, key, row.get(key))
+                maps += isinstance(row.get(key), dict)
+            for item in row.get("preflight") or ():
+                assert not isinstance(item.get("acknowledged_by"), str), (path.name, item)
+    assert maps, "the page's commands were recorded as actors' maps"
+    controls = _record(taskd.folders[2], "controls.jsonl")
+    assert {"reward", "mark", "pause", "note", "resume", "stop"} <= {row["kind"] for row in controls}
+    assert {row["by"]["name"] for row in controls if row["by"]} == {"jake"}

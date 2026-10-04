@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 from _frames import frame, idle, view
-from wl_xcon.actor import Box
+from wl_xcon.actor import Box, Member
 from wl_xcon.cli import _clock, _local
 from wl_xcon.link import Control, Counts, ParamRow, Performance, Preflight, PreflightItem, Question, Refused, ScheduledStop, Staged, Stranded
 from wl_xcon.web import (
@@ -39,6 +39,7 @@ from wl_xcon.web import (
     font_bytes,
     fragments,
     page,
+    _who,
 )
 
 LIMIT = "out_of_cage: subject 'A' has been out of its cage 28801 s against a ceiling of 28800"
@@ -214,7 +215,7 @@ def test_a_finite_instant_this_host_cannot_show_is_a_dash_not_a_crash(at):
     assert parts["state"] == (
         '<span class="pill warn" data-state="paused">paused · since —</span>'
     )
-    assert "— · paused before trial 3 · jake" in parts["rt-changes"]
+    assert f"— · paused before trial 3 · {_who(Box('jake'))}" in parts["rt-changes"]
     assert tuple(parts) == FRAGMENT_IDS
 
 
@@ -619,7 +620,7 @@ def test_parameters_show_value_range_ceiling_and_what_is_staged():
 
     assert params.count('<div class="param') == 5
     assert '<div class="param staged">' in params
-    assert "staged → 0.40 by jake" in params
+    assert f"staged → 0.40 by {_who(Box('jake'))}" in params
     assert '<span class="ceil">ceiling</span>' in params
     # Review fix round 1: the ceiling keeps its own decimals (`_significant`), unlike
     # `_num`'s two-decimal `staged →` figure just above -- 0.4, not 0.40.
@@ -1029,7 +1030,7 @@ def test_the_strip_shows_a_scheduled_stop_with_who_set_it_and_a_cancel():
     )["strip"]
 
     assert '<span class="lab">Scheduled</span><span class="val">stop at 14:30</span>' in strip
-    assert "set by jake (box, unverified)" in strip
+    assert f"set by {_who(Box('jake'))}" in strip
     assert '<button type="button" class="btn small" data-cmd="cancel">cancel</button>' in strip
 
 
@@ -1075,8 +1076,8 @@ def test_the_feed_lists_control_events_newest_first_with_who_and_counts_the_rest
         view(),
     )["rt-changes"]
 
-    set_row = changes.index(f"{clock} · fix_hold 0.30 → 0.40, from trial 4 · sam")
-    note_row = changes.index(f"{clock} · mark 1: &quot;bubble&quot; · jake")
+    set_row = changes.index(f"{clock} · fix_hold 0.30 → 0.40, from trial 4 · {_who(Box('sam'))}")
+    note_row = changes.index(f"{clock} · mark 1: &quot;bubble&quot; · {_who(Box('jake'))}")
     mark_row = changes.index(f"{clock} · mark 1 stamped in trial 3, frame 10</span>")
     dropped = changes.index("5 earlier control event(s) not shown")
     assert set_row < note_row < mark_row < dropped
@@ -2233,3 +2234,56 @@ def test_the_pages_script_posts_resume_session_for_a_click_on_resume():
         'post({ kind: "resume_session", session_id: resuming.getAttribute("data-resume") })'
     ) in handler
     assert handler.index("[data-resume]") < handler.index("[data-return]")
+
+
+_MEMBER = Member(name="Jake Westerberg", account="u", issuer="https://wl.works/api/auth", token_id="j")
+
+
+def test_a_member_and_a_box_name_render_apart():
+    assert 'class="who-m"' in _who(_MEMBER) and "(wl.works)" in _who(_MEMBER)
+    assert 'class="who-b"' in _who(Box("jake")) and "(box, unverified)" in _who(Box("jake"))
+    assert _who(None) == ""
+
+
+def test_a_box_name_typed_to_look_like_a_member_still_renders_as_a_box():
+    """b2b Review Focus 2: a typed name dressed as a member's still reads as typed."""
+    shown = _who(Box("Jake Westerberg (wl.works)"))
+
+    assert 'class="who-b"' in shown and 'class="who-m"' not in shown
+    assert shown.endswith('<span class="nm">(box, unverified)</span></span>')
+
+
+def test_a_box_name_is_escaped_where_a_who_is_built():
+    assert "<b>" not in _who(Box("<b>x</b>")) and "&lt;b&gt;" in _who(Box("<b>x</b>"))
+
+
+def _apart(html_: str) -> None:
+    assert 'class="who-m"' in html_ and 'class="who-b"' in html_, html_
+
+
+def test_every_pane_that_names_who_shows_a_member_and_a_box_apart():
+    """One frame per site, so a site left printing a bare name fails alone."""
+    at = 1_700_000_000.0
+    other = Member(name="Sam", account="v", issuer="https://wl.works/api/auth", token_id="k")
+    # The feed's control lines.
+    _apart(fragments(frame(controls=(
+        Control("pause", _MEMBER, at, "paused"), Control("resume", Box("sam"), at, "resumed"),
+    )), view())["rt-changes"])
+    # The feed's staged lines.
+    _apart(fragments(frame(staged=(
+        Staged("fix_hold", 0.3, 0.4, _MEMBER, False), Staged("reward_correct", 0.1, 0.2, Box("sam"), True),
+    )), view())["rt-changes"])
+    # The feed's refusal lines.
+    _apart(fragments(frame(refusals=(
+        Refused("reward", _MEMBER, "no"), Refused("pause", Box("sam"), "no"),
+    )), view())["rt-changes"])
+    # The idle page's refusals.
+    _apart(fragments(idle(refusals=(Refused("start", _MEMBER, "no"), Refused("end", Box("sam"), "no"))), view())["rt-changes"])
+    # The parameter card's staged line.
+    for who in (_MEMBER, Box("sam")):
+        card = fragments(frame(staged=(Staged("fix_hold", 0.3, 0.4, who, False),)), view())["params"]
+        assert f"by {_who(who)}" in card
+    # The scheduled-stop cell.
+    for who in (other, Box("sam")):
+        strip = fragments(frame(scheduled_stop=ScheduledStop("clock", at + 3600, who, "at 14:30")), view())["strip"]
+        assert f"set by {_who(who)}" in strip

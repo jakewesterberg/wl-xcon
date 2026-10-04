@@ -324,6 +324,14 @@ display layer that per-trial scenes do not reset.
 - **Browser** (browser <-> console): HTTP, with server-sent events carrying rendered HTML
   fragments to the page (P4d-2b spec §1). WebSockets are deferred to the replica pane, if
   V11 shows a browser can carry it at display rate.
+- **Who did it, in the record** (P4d-2b b2b slice 1, 2026-10-02): every row that names who
+  (`controls.jsonl`, `welfare_notes.jsonl`, `runs.jsonl` and its pre-flight
+  acknowledgments, `parameter_changes.jsonl`) holds `by` as an actor's map
+  (`actor.to_map`): `{"kind": "box", "name": …}` for a name typed at the rig PC, or
+  `{"kind": "member", …}` for a wl.works member. A row the process writes itself, and a
+  mark's stamp, holds `null`. **A string is a name recorded before b2b**; readers take
+  it as written (`actor.read`), and no record is rewritten. The page shows the two kinds
+  apart (`web._who`), so a box name typed to look like a member's still reads as typed.
 - **Hardware truth:** every trial event gets a strobed word into the recorders and a JSONL
   record carrying the word, frame index and monotonic time. **Each trial is framed in the
   stream** (XC-155): `TRIAL_START` (32) and its `TRIAL_NUMBER` escape (`0x8001`, four
