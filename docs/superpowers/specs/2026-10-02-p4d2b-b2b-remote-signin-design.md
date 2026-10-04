@@ -242,7 +242,7 @@ restart of `wlx serve` forgets it, and the browser that signed out has already d
 
 ## 6. Who: two actor types, through the wire, the record and the page
 
-**Two types in `link`**, as S9a §6 designed them, frozen:
+**Two types in `link`** (*amended 2026-10-04: built in `wl_xcon/actor.py`, which `link` imports; plan Ruling 1, so `bounds` stays pure*), as S9a §6 designed them, frozen:
 
 - `Box(name)` — a name typed at the rig PC's page, `wlx console --as`, or a `wlx run`/`wlx
   taskd` terminal's `--as`. Its empty name stays allowed exactly where the terminal's rules allow

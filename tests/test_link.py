@@ -1405,7 +1405,8 @@ def test_a_string_by_on_the_wire_is_refused_naming_the_rule():
     with pytest.raises(CommandRefused) as refused:
         _decode_command(msgpack.packb({"kind": "stop", "by": "jake"}, use_bin_type=True))
     assert refused.value.by is None
-    assert "a box name or a wl.works member" in refused.value.why
+    assert "as an actor" in refused.value.why
+    assert "a bare name is not one since b2b" in refused.value.why
 
 
 def test_a_member_survives_the_wire_and_a_frame():

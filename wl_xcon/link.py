@@ -1602,8 +1602,9 @@ def _actor(by: object, name: str) -> Actor:
         raise CommandRefused(
             name,
             None,
-            f"a {name!r} command must say who sent it (`by`: a box name or a wl.works "
-            f"member; S9a §6), and this one did not, so it is refused",
+            f"a {name!r} command must say who sent it as an actor (`by`: a box or "
+            f"wl.works member map; S9a §6; a bare name is not one since b2b), and "
+            f"this one did not, so it is refused",
         )
     return who
 

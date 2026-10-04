@@ -274,6 +274,6 @@ without a preflight this server never approves (spec §2); **every** request, re
 included, is answered only when its `Host` names this console, so a rebound name gets a
 421 and no page (spec §5.3); and behind both, `taskd` validates every command as it
 decodes it (M8) and `bounds` holds every ceiling whoever asks. The actor recorded from the
-box is `NAME (box, unverified)`, because a forgeable name that looks verified is worse
+box is the box's map (`{"kind": "box", "name": …}`), shown as `NAME (box, unverified)`, because a forgeable name that looks verified is worse
 than none (S9a §6). Signed-in writes from other machines are b2b's, and bring their own
 token checks.

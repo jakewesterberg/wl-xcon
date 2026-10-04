@@ -36,6 +36,7 @@
    - `Refused.by` is `None` where `"<unknown>"` stands today: a packet that named no readable sender, a malformed mark signal, a mark with no session.
    - `Control.by` is `None` where `""` stands today: a mark's stamp, whose sender arrives with its note.
    - `CommandRefused.by` is `Actor | None`. Every other `by` is an `Actor`.
+   - *Amended 2026-10-04:* built as the controller's option A. The rows a process writes itself (`session opened`, `session ended`, `return not recorded`, and `wlx run`'s start row) record `by: null`. `Box("")` exists only at `cli`'s terminal sites, for a mark given without `--as`.
 5. **Telemetry carries the actor's whole map**, the member's account and token id included. Neither is a secret: the token id names a token without being one, and the page shows only the name.
 6. **The browser test's dependency is its own extra, `browser`, not `dev`** (a deviation from spec §9's wording, same intent). The three CI jobs install `dev`, and only the pytest job needs Playwright, so the mutation jobs neither download nor run it. It is dev-only all the same: never installed on a rig.
 7. **The page's sign-in state is the script's, and the greying stays Python's.** Python renders a control that only needs a sign-in as `disabled data-signin`. The script sets `disabled` on every `[data-signin]` element from whether it holds a sign-in, after every fragment swap. A control greyed for its own reason (paused-only reward, no mark endpoint) never carries `data-signin`. `web._gate` replaces `web._off` for this.
@@ -430,6 +431,7 @@ def _refused_in(r: dict) -> Refused:
 
 - [ ] **Step 3: The service, `wl_xcon/service.py`.** R1 throughout. `_mark`'s `self._refuse("mark", "<unknown>", …)` becomes `self._refuse("mark", None, …)`, and `_refuse`'s `by` is `Actor | None`.
 
+- **Amended 2026-10-04 (Ruling 4, as built):** the process's own rows (`session opened`, `session ended`, `return not recorded`, `wlx run`'s start row) record `by: null`; `Box("")` exists only at `cli`'s terminal sites, for a mark given without `--as`.
 - [ ] **Step 4: The welfare modules** (welfare-critical; the type and the written form change, never a rule).
   - `bounds.py`: `Bounds.set(self, name: str, value: float, by: Actor)`, importing `from wl_xcon.actor import Actor`.
   - `welfare.py`: `confirm_already_today(..., by: Actor)`; `amend_mark(..., by: Actor)`, whose blank check becomes `if not by.name.strip():` with its sentence unchanged.

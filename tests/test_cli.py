@@ -1643,6 +1643,12 @@ def test_console_reports_a_second_commands_timeout_cleanly(monkeypatch, capsys):
     )
 
     assert len(calls) == 2, "both commands should have been attempted"
+    # Who sent them: the terminal's `--as` is a box name, an actor, never a bare string
+    # (b2b spec §6; `to_map` refuses a string, so a bare one would die on the wire).
+    assert calls == [
+        _link.SetParameter(name="fix_hold", value=0.4, by=Box("jake")),
+        _link.Stop(by=Box("jake")),
+    ]
     assert code == 1
     err = capsys.readouterr().err
     assert "console:" in err, f"expected the one-line console: ... message, got: {err!r}"
