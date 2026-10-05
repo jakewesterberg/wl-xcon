@@ -370,6 +370,18 @@ Welfare-critical by CLAUDE.md (who can command reward and the out-of-cage marks,
 > the same, but it is not the record. Items 1-4 are slice 2's, asked at its review. The
 > welfare list is unchanged.
 
+> **Slice 2 answered 2026-10-05.** Items 1-4 went to the PI as four plain items, as built after
+> slice 2's final review: members with `control-rigs` act from the lab network's https page,
+> each act recorded under their account, every ceiling unchanged (the review's drive had a
+> 10.5 mL request refused under the member); nothing changes without a valid token for this
+> rig; sign-out on the page stops its token at once, otherwise the hour plus a minute's
+> leeway, and on a shared iPad the page says wl.works is still signed in; no token problem
+> and no wl.works outage stops or pauses a session, the page signs itself out at its token's
+> lapse during an outage, and one exception named: a broken https setup at a restart refuses
+> all of `wlx serve`, the rig PC's page included, until it is restarted without the https
+> flags (XC-226). He approved all four ("Approve all four"), and ruled that XC-226 is fixed
+> before any rig switches its https page on. The welfare list is unchanged.
+
 ## 11. Outside this repository
 
 - **wl-works**, when b2b is built: that the rig side exists, and that its page asks for
