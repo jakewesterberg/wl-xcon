@@ -2,6 +2,12 @@
 this process, and never collected by pytest itself (its name does not match
 `test_*.py`).
 
+**What is blocked, and why.** `zmq` and `msgpack` (the console transport, ADR-0003) and
+`jwt` and `cryptography` (the `signin` extra: `signin.py` is the only module that imports
+PyJWT, and `wlx serve` imports `signin` only when `--https` is given). Each self-check
+below must be refused *for its own name*: `import jwt` raises through `cryptography`
+too, so a bare "it raised" could not tell a missing `jwt` entry from a present one.
+
 **Why a subprocess at all.** Once `zmq` or `msgpack` has been imported anywhere in a
 process, `sys.modules` caches it, and every later `import zmq` returns the cached
 module without ever consulting `sys.meta_path` again. By the time this repository's
@@ -46,15 +52,16 @@ for _mod in ("zmq", "msgpack", "jwt", "cryptography"):
 
 
 class _Blocker:
-    """A meta-path finder that raises for `zmq`/`msgpack` and defers to the next
-    finder for everything else. `find_spec`, never `find_module` -- see the module
+    """A meta-path finder that raises for `zmq`, `msgpack`, `jwt` and `cryptography`
+    and defers to the next finder for everything else. The raised `ImportError` carries
+    `name`, so a caller can tell which module was refused. `find_spec`, never `find_module` -- see the module
     docstring above."""
 
     blocked = {"zmq", "msgpack", "jwt", "cryptography"}
 
     def find_spec(self, name, path, target=None):
         if name.split(".")[0] in self.blocked:
-            raise ImportError(f"simulated absence: {name} is not installed")
+            raise ImportError(f"simulated absence: {name} is not installed", name=name)
         return None
 
 
@@ -66,7 +73,14 @@ for _mod in ("zmq", "msgpack", "jwt", "cryptography"):
     try:
         __import__(_mod)
     except ImportError as exc:
-        print(f"BLOCKED: import {_mod} raised ({exc})")
+        # The refusal must be of THIS name. `import jwt` also raises when only
+        # `cryptography` is blocked (PyJWT imports it), so a bare "it raised" would
+        # pass for `jwt` with `jwt` missing from the blocked set.
+        if exc.name != _mod:
+            print(f"NOT BLOCKED: import {_mod} raised for {exc.name!r}, not for itself")
+            _failed_to_block.append(_mod)
+        else:
+            print(f"BLOCKED: import {_mod} raised ({exc})")
     else:
         print(f"NOT BLOCKED: import {_mod} succeeded -- the blocker did not engage")
         _failed_to_block.append(_mod)
@@ -88,11 +102,10 @@ import wl_xcon.taskd as _taskd  # noqa: E402
 # would first drag `zmq`/`msgpack` in behind it, and this check would miss that
 # regression entirely if `cli` were never added here.
 import wl_xcon.cli as _cli  # noqa: E402
-# P4d-2b b2b: `serve` imports `signin` (the only module that imports `jwt`) only when
-# `--https` is given, so it must import with `jwt` and `cryptography` absent too.
-# P4d-2b b1: the browser console's three modules. `serve` reaches `zmq` only through
-# `link.ZmqConsole`, inside its telemetry thread, so importing it -- or `web` and
-# `health`, which it renders with -- must acquire no transport.
+# P4d-2b b1 and b2b: the browser console's three modules. `serve` reaches `zmq` only
+# through `link.ZmqConsole`, inside its telemetry thread, and reaches `jwt` only through
+# `signin`, which it imports only when `--https` is given; so importing it -- or `web`
+# and `health`, which it renders with -- must acquire no transport and no sign-in library.
 import wl_xcon.health as _health  # noqa: E402
 import wl_xcon.serve as _serve  # noqa: E402
 import wl_xcon.web as _web  # noqa: E402
