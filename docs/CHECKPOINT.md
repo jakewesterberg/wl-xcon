@@ -404,7 +404,15 @@ spec §10 items 1 to 4. Its ledger is
     `link` `decode`, `deliver`, `publish`, `receive` and `_telemetry_from`, `serve` `offer`,
     `start` and `_send_frame`, `service.step`, and `taskd` `publish` and `_publish`; and run
     markers' `taskd._ends`). The other three are `actor`'s, new, and confirmed locally above.
-- **CI on `main` after the fast-forward**: to be read.
+- **CI on `main` after the fast-forward** (push run `37285423596`, on `444006f`; its gate diffs
+  against the previous `main`, so it re-swept every module the branch changed), read job by job:
+  pytest `2278 passed` on 3.11-3.13; **388 caught, 0 survived**, `welfare.emit` the known NOT
+  MUTABLE stub, every baseline and restore at `2278 passed`. Its twenty timeouts: nineteen known
+  (the branch run's list less `taskd._ends`, which finished this time, `25 failed` in 292 s, plus
+  `link._encode_command`, XC-140's), and **`cli._load_bounds`, new**: `216 failed` in 293 s in the
+  branch's gate, past 300 s here, so rerun locally with no limit, stopping at the first failure:
+  `test_wlx_run_says_which_setup_it_is_holding_the_session_to`, `1 failed, 110 passed in 5.51s`, a
+  real catch. XC-140 now names it.
 
 ## What moved on 2026-10-02: b2b designed
 
