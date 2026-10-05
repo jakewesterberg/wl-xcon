@@ -4464,7 +4464,8 @@ def test_the_return_from_wl_works_serves_the_page_and_never_echoes_its_code(tmp_
         other = _https(port, context, "GET", "/events?code=SECRETCODE")[0]
     finally:
         _stop_page(server, thread, hub)
-    assert status == 200 and b"SECRETCODE" not in body
+    leaked = b"SECRETCODE" in body  # a bool first: pytest prints both operands of `in`
+    assert status == 200 and not leaked, "the page echoed the code"
     assert other == 404
 
 
@@ -4520,7 +4521,8 @@ def test_the_request_log_never_carries_a_query_string(tmp_path, capsys):
     logged = capsys.readouterr().err
     assert 'GET / HTTP' not in logged  # the request line is `"GET /" 200`, as `log_request` writes it
     assert '"GET /" 200' in logged
-    assert "SECRETCODE" not in logged
+    leaked = "SECRETCODE" in logged
+    assert not leaked, "the request log carried the code"
 
 
 def test_a_stalled_handshake_does_not_stop_another_client(tmp_path):
@@ -4593,8 +4595,9 @@ def _from_page(port, context, page, path, body=None, token=None, *, headers=None
     payload = raw if raw is not None else json.dumps({} if body is None else body).encode("utf-8")
     status, answer_headers, answer = _https(port, context, "POST", path, sent, payload)
     if token is not None:
-        assert token.encode() not in answer, "an answer carried the token"
-        assert token not in repr(answer_headers), "an answer's headers carried the token"
+        # Bools first: pytest prints both operands of an `in`, even with a message.
+        leaked = token.encode() in answer or token in repr(answer_headers)
+        assert not leaked, "an answer carried the token"
     return status, json.loads(answer)
 
 
@@ -4642,6 +4645,49 @@ def test_a_refused_token_answers_401_with_its_reason_and_dispatches_nothing(tmp_
     assert status == 401
     assert (answer["status"], answer["reason"]) == ("refused", reason)
     assert answer["said"]
+    assert dispatch.seen == []
+
+
+def test_a_wrong_host_and_an_unlisted_path_on_https_read_their_answers_with_a_body_sent(tmp_path):
+    hub = _hub()
+    server, thread, port, page, issuer, context = _page_served(tmp_path, hub)
+    token = issuer.mint(aud=page.origin)
+    body = b'{"kind": "pause"}' * 400
+    sent = {"Origin": page.origin, "Content-Type": "application/json", "Authorization": _bearer(token)}
+    try:
+        foreign = _https(port, context, "POST", "/commands", {**sent, "Host": "rig-4.wl.works"}, body)
+        unlisted = _https(port, context, "POST", "/commands?x=1", sent, body)
+        after = _https(port, context, "GET", "/")[0]
+    finally:
+        _stop_page(server, thread, hub)
+    assert (foreign[0], unlisted[0], after) == (421, 404, 200)
+
+
+@pytest.mark.parametrize("how", ["no_keys", "clock", "not_accepted"])
+def test_the_refusals_a_rig_without_keys_a_bad_clock_or_a_foreign_key_gives_are_401s(tmp_path, how):
+    from _issuer import Issuer
+    from wl_xcon import signin
+
+    dispatch = _Dispatch()
+    hub = _hub()
+    if how == "no_keys":
+        issuer = Issuer()
+        issuer.down = True  # wl.works unreachable: the checker never loads
+        server, thread, port, page, issuer, context = _page_served(tmp_path, hub, dispatch=dispatch, issuer=issuer)
+        token = issuer.mint(aud="https://127.0.0.1:1")
+        said = signin.NO_KEYS
+    else:
+        server, thread, port, page, issuer, context = _page_served(tmp_path, hub, dispatch=dispatch)
+        if how == "clock":
+            token, said = issuer.mint(aud=page.origin, iat_in=3600, exp_in=7200), signin.CLOCK
+        else:
+            token, said = Issuer().mint(aud=page.origin), signin.NOT_ACCEPTED
+    try:
+        status, answer = _from_page(port, context, page, "/commands", {"kind": "pause"}, token)
+    finally:
+        _stop_page(server, thread, hub)
+    assert status == 401
+    assert (answer["reason"], answer["said"]) == (how, said)
     assert dispatch.seen == []
 
 
@@ -4745,7 +4791,7 @@ def test_a_keep_alive_connection_stays_in_step_across_whoami_and_signout(tmp_pat
     connection = http.client.HTTPSConnection("127.0.0.1", port, timeout=5, context=context)
     try:
         statuses = []
-        for path in ("/whoami", "/whoami", "/signout"):
+        for path in ("/whoami", "/whoami", "/signout", "/whoami"):
             body = b'{"padding": "' + b"x" * 50 + b'"}'
             connection.putrequest("POST", path, skip_host=True)
             for name, value in {
@@ -4756,16 +4802,16 @@ def test_a_keep_alive_connection_stays_in_step_across_whoami_and_signout(tmp_pat
             connection.putheader("Content-Length", str(len(body)))
             connection.endheaders(body)
             response = connection.getresponse()
-            response.read()
-            statuses.append(response.status)
+            statuses.append((response.status, json.loads(response.read()).get("reason")))
     finally:
         connection.close()
         _stop_page(server, thread, hub)
-    assert statuses == [200, 200, 200]
+    # The `/whoami` after `/signout` reads its own request, not the sign-out's leftover body.
+    assert statuses == [(200, None), (200, None), (200, None), (401, "signed_out")]
 
 
 @contextmanager
-def _remote_console(tmp_path, taskd, capfd=None):
+def _remote_console(tmp_path, taskd):
     """A second `wlx serve` on `taskd`'s session -- a second console is ordinary: the REP
     socket answers each REQ peer in turn -- with an https listener and a fake wl.works
     behind its checker, as `_page_served` builds one. Yields `(port, context, page, issuer)`
@@ -4787,8 +4833,8 @@ def _remote_console(tmp_path, taskd, capfd=None):
         https=("127.0.0.1", port), tls=tls_context(tls["cert"], tls["key"]),
         remote=Remote(page, checker),
     )
-    server.start()
     try:
+        server.start()
         yield port, client_context(tls["ca"]), page, issuer
     finally:
         server.close()
@@ -4808,6 +4854,20 @@ def _every_by(folder):
                 if "acknowledged_by" in item:
                     found.append((path.name, "acknowledged_by", item["acknowledged_by"]))
     return found
+
+
+def _null_rows(folder):
+    """The `(file, kind or event)` of each row whose `by` or `acknowledged_by` is null, and
+    `(file, "preflight item")` for each pre-flight item whose `acknowledged_by` is."""
+    rows = set()
+    for path in sorted(folder.rglob("*.jsonl")):
+        for line in path.read_text().splitlines():
+            row = json.loads(line)
+            if any(key in row and row[key] is None for key in ("by", "acknowledged_by")):
+                rows.add((path.name, row.get("kind") or row.get("event")))
+            if any(item.get("acknowledged_by", 0) is None for item in row.get("preflight") or ()):
+                rows.add((path.name, "preflight item"))
+    return rows
 
 
 def test_page_e2e_a_signed_in_member_runs_a_session_and_the_token_is_written_nowhere(
@@ -4857,6 +4917,12 @@ def test_page_e2e_a_signed_in_member_runs_a_session_and_the_token_is_written_now
     assert {name for name, _key in named} >= {"controls.jsonl", "runs.jsonl", "welfare_notes.jsonl"}
     assert ("runs.jsonl", "acknowledged_by") in named
     assert [item for item in found if item[2] not in (member, None)] == [], "every other by is nobody's"
+    assert ("parameter_changes.jsonl", "by") in named
+    # Only what the process writes itself, or what nobody acknowledged, is null (Ruling 4).
+    assert _null_rows(folder) == {
+        ("controls.jsonl", "mark"), ("welfare_notes.jsonl", "session opened"),
+        ("welfare_notes.jsonl", "session ended"), ("runs.jsonl", "preflight item"),
+    }
     controls = _record(taskd.folders[2], "controls.jsonl")
     assert {"reward", "mark", "pause", "note", "resume", "schedule"} <= {row["kind"] for row in controls}
     # A mark's stamp is `by: null` (its sender arrives with its note, Ruling 4); the rest are the member's.
@@ -4866,10 +4932,12 @@ def test_page_e2e_a_signed_in_member_runs_a_session_and_the_token_is_written_now
     for path in sorted(folder.rglob("*")):
         if path.is_file():
             text = path.read_text(errors="replace")
-            assert token not in text, f"{path.name} holds the token"
-            assert "THECODE" not in text, f"{path.name} holds the code"
+            holds_token, holds_code = token in text, "THECODE" in text
+            assert not holds_token, f"{path.name} holds the token"
+            assert not holds_code, f"{path.name} holds the code"
     logged = capfd.readouterr().err
-    assert token not in logged and "THECODE" not in logged
+    leaked = token in logged or "THECODE" in logged
+    assert not leaked, "wlx serve's stderr holds the token or the code"
 
 
 def test_page_e2e_a_stranded_session_resumed_from_the_page_is_the_members(
@@ -4901,7 +4969,8 @@ def test_page_e2e_a_stranded_session_resumed_from_the_page_is_the_members(
     member = {"kind": "member", "name": "Jake Westerberg", "account": "user-1", "issuer": ISSUER, "token_id": "jti-resume"}
     (resumed,) = [r for r in _record(folders[2], "welfare_notes.jsonl") if r["kind"] == "session resumed"]
     assert resumed["by"] == member
-    assert token not in (folders[2] / "2027-01-14_01" / "xcon" / "welfare_notes.jsonl").read_text()
+    leaked = token in (folders[2] / "2027-01-14_01" / "xcon" / "welfare_notes.jsonl").read_text()
+    assert not leaked, "the record holds the token"
 
 
 _SIX = (
@@ -4985,7 +5054,7 @@ def test_a_large_post_to_the_https_listener_still_reads_its_refusal(tmp_path, si
     finally:
         _stop_page(server, thread, hub)
     assert status == 401 and "sign in with wl.works" in json.loads(body)["said"]
-    assert foreign[0] == 403 and "this rig's page" in json.loads(foreign[2])["said"]
+    assert foreign[0] == 403 and "from this rig's page" in json.loads(foreign[2])["said"]
 
 
 def test_a_junk_record_or_a_reset_after_the_handshake_prints_nothing(tmp_path, capsys):

@@ -318,11 +318,11 @@ _FONTS = {f"/fonts/{font.file}": font for font in _web.FONTS}
 # listener (b2b spec §3). Task 9 of the b2b plan routes them on https.
 _ROUTES = frozenset({"/", "/events", "/health", "/commands", *_FONTS})
 #: What a command carrying a token to the plain-http listener is told (b2b spec §3).
-#: What the https page hears for a write that did not come from its own page, and for a
-#: sign-out (b2b spec §3, §4).
-FROM_THE_PAGE = "a command must come from this rig's page"
-SIGNED_OUT_HERE = "signed out at this rig"
 TOKEN_OVER_HTTP = "sign-in works only on the rig's https page"
+#: What the https page hears for a write that did not come from its own page (b2b spec §3).
+FROM_THE_PAGE = "a request must come from this rig's page"
+#: What `POST /signout` answers (b2b spec §4).
+SIGNED_OUT_HERE = "signed out at this rig"
 _UNAUTHORIZED = {"error": "unauthorized"}
 #: What a request whose `Host` does not name this console is answered (P4d-2b spec
 #: §5.3): a JSON 421 and no page. It names no host, echoing nothing it was sent.
@@ -1078,15 +1078,19 @@ def make_handler(
         do_TRACE = _refuse_method
 
         def do_POST(self) -> None:
+            # On the https page a refusal reads the request's body first, so the client
+            # reads the answer and not a reset (`_refuse_after_reading`).
+            refuse = self._send_json if self._remote is None else self._refuse_after_reading
             if not self._host_ok():
-                self._send_json(421, _MISDIRECTED)
+                refuse(421, _MISDIRECTED)
                 return
             if self.path == "/commands":
                 self._command()
             elif self._remote is not None and self.path in ("/whoami", "/signout"):
                 self._account(self.path)
             else:
-                self._refuse_method()
+                code = 405 if self.path in _ROUTES else 404
+                refuse(code, _ERRORS[code])
 
         def _from_the_page(self) -> bool:
             """The https page's write checks before the token's (b2b spec §3): `Origin` is
