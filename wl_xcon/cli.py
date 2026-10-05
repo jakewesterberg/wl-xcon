@@ -1430,6 +1430,37 @@ def main(argv: list[str] | None = None) -> int:
         "/health says degraded. Omitted uses 30, a display choice (P4d-2b spec §3), "
         "not a measurement",
     )
+    server_parser.add_argument(
+        "--https",
+        metavar="HOST:PORT",
+        help="also serve the rig's page over https here, for people signed in to "
+        "wl.works (b2b spec §3). Needs the five flags below as well",
+    )
+    server_parser.add_argument(
+        "--tls-cert", type=Path, metavar="PATH",
+        help="the https page's certificate chain, PEM",
+    )
+    server_parser.add_argument(
+        "--tls-key", type=Path, metavar="PATH",
+        help="the https page's private key, PEM. Keep it outside this repository",
+    )
+    server_parser.add_argument(
+        "--rig-page",
+        metavar="NAME=URL",
+        help="this rig's entry in wl.works' RIG_PAGES, copied verbatim",
+    )
+    server_parser.add_argument(
+        "--wl-works-issuer",
+        metavar="URL",
+        help="wl.works' issuer address: https://wl.works/api/auth for the lab",
+    )
+    server_parser.add_argument(
+        "--wl-works-cache",
+        type=Path,
+        metavar="PATH",
+        help="where to keep wl.works' discovery document and keys, so a rig starts "
+        "while wl.works is unreachable",
+    )
 
     service_parser = sub.add_parser(
         "taskd",

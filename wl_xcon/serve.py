@@ -54,6 +54,7 @@ import math
 import queue
 import secrets
 import socket
+import ssl
 import sys
 import threading
 import time
@@ -63,6 +64,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from wl_xcon import actor as actors
 from wl_xcon import health as _health
@@ -70,6 +72,9 @@ from wl_xcon import link as _link
 from wl_xcon import web as _web
 from wl_xcon import welfare as _welfare
 from wl_xcon.actor import Actor, Box
+
+if TYPE_CHECKING:  # `signin` imports `jwt`; `serve` must import without it.
+    from wl_xcon import signin as _signin
 
 #: Seconds without a frame, while more are due, before the page greys and `/health`
 #: says `degraded`. A display choice (spec §3), not a measurement.
@@ -309,7 +314,9 @@ REQUEST_TIMEOUT_S = 30.0
 #: Each bundled font by the exact path the page asks for it at (`web.FONTS`). A request
 #: is looked up here, never joined onto a directory, so there is no path to traverse.
 _FONTS = {f"/fonts/{font.file}": font for font in _web.FONTS}
-_ROUTES = frozenset({"/", "/events", "/health", "/commands", *_FONTS})
+_ROUTES = frozenset({"/", "/events", "/health", "/commands", "/whoami", "/signout", *_FONTS})
+#: What a command carrying a token to the plain-http listener is told (b2b spec §3).
+TOKEN_OVER_HTTP = "sign-in works only on the rig's https page"
 _UNAUTHORIZED = {"error": "unauthorized"}
 #: What a request whose `Host` does not name this console is answered (P4d-2b spec
 #: §5.3): a JSON 421 and no page. It names no host, echoing nothing it was sent.
@@ -408,14 +415,16 @@ def event(payload: dict) -> bytes:
     return b"event: frame\ndata: " + json.dumps(payload).encode("utf-8") + b"\n\n"
 
 
-def _csp(nonce: str) -> str:
+def _csp(nonce: str, connect: str = "") -> str:
     """The page's Content-Security-Policy: its one script by nonce, inline styles (the
     bar widths), its bundled fonts and the event stream from this origin, and nothing
     else -- no request leaves the box from this page. Defense beneath `web._e`, not
-    instead of it."""
+    instead of it. `connect` is one more origin the page may `fetch`: on the https page,
+    wl.works' token endpoint (b2b spec §3)."""
+    sources = f"'self' {connect}" if connect else "'self'"
     return (
         f"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'unsafe-inline'; "
-        f"font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; "
+        f"font-src 'self'; connect-src {sources}; base-uri 'none'; form-action 'none'; "
         f"frame-ancestors 'none'"
     )
 
@@ -794,6 +803,51 @@ def _rewarded(command: _link.ManualReward) -> Callable[[object], tuple[int, dict
     return work
 
 
+@dataclass(frozen=True)
+class Remote:
+    """The https page's sign-in (b2b spec §3-§5): this rig's page entry, and the checker
+    every command from the network goes through."""
+
+    page: "_signin.RigPage"
+    checker: "_signin.Checker"
+
+
+def tls_context(cert: Path, key: Path) -> ssl.SSLContext:
+    """The https listener's TLS, server side, TLS 1.2 at least (spec §3). Raises
+    `SystemExit` with a sentence that names the flags and never the key's contents or path."""
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    try:
+        context.load_cert_chain(certfile=cert, keyfile=key)
+    except (OSError, ssl.SSLError) as exc:
+        raise SystemExit(
+            f"refused: --tls-cert and --tls-key could not be loaded as a certificate chain "
+            f"and its private key ({type(exc).__name__})"
+        ) from None
+    return context
+
+
+class _PageServer(ThreadingHTTPServer):
+    """The https listener (spec §3). **The TLS handshake runs on the connection's own
+    thread** (`finish_request`), never on the thread that accepts, so one slow or stalled
+    client cannot stop others connecting."""
+
+    def __init__(self, address, handler, context: ssl.SSLContext) -> None:
+        self._context = context
+        super().__init__(address, handler)
+
+    def finish_request(self, request, client_address) -> None:
+        request.settimeout(REQUEST_TIMEOUT_S)
+        try:
+            tls = self._context.wrap_socket(request, server_side=True)
+        except (ssl.SSLError, OSError):
+            return  # a failed handshake asked nothing, so there is nothing to answer
+        try:
+            self.RequestHandlerClass(tls, client_address, self)
+        finally:
+            tls.close()
+
+
 def make_handler(
     hub: Hub,
     *,
@@ -802,6 +856,7 @@ def make_handler(
     keepalive_s: float = KEEPALIVE_S,
     hosts: frozenset[str] = LOOPBACK_NAMES,
     dispatch: Callable[[object], tuple[int, dict]] | None = None,
+    remote: Remote | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     """A handler class closing over `hub` and the token, built the way wl-preproc's
     `make_handler` is and for its reason: `BaseHTTPRequestHandler` handles the whole
@@ -829,6 +884,7 @@ def make_handler(
         _stale_after_s = stale_after_s
         _keepalive_s = keepalive_s
         _hosts = hosts
+        _remote = remote
         # A function stored on a class becomes a method; `staticmethod` keeps it the
         # plain callable it was given.
         _dispatch = None if dispatch is None else staticmethod(dispatch)
@@ -857,6 +913,18 @@ def make_handler(
             and stay missing from the streamed one (F3)."""
             self.send_header("Cache-Control", cache)
             self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "no-referrer")
+
+        def _path(self) -> str:
+            """The request's path without its query string (b2b spec §3): the page's
+            return from wl.works carries an authorization code in it."""
+            # A request line too malformed to parse has no `path` yet, and is still logged.
+            return getattr(self, "path", "-").partition("?")[0]
+
+        def log_request(self, code="-", size="-") -> None:
+            """The stdlib's request line without its query string (the plan's Ruling 10):
+            the page's return from wl.works carries an authorization code there."""
+            self.log_message('"%s %s" %s', self.command, self._path(), str(code))
 
         def _write(
             self,
@@ -879,13 +947,22 @@ def make_handler(
             self._write(status, json.dumps(payload).encode("utf-8"), "application/json")
 
         def _host_ok(self) -> bool:
-            """Whether this request's `Host` names this console (spec §2, §5.3)."""
-            return host_name(self.headers.get("Host")) in self._hosts
+            """Whether this request's `Host` names this console (spec §2, §5.3). On the
+            https page that is this rig's own page host, exactly, and nothing else."""
+            return self._names_this_console(self.headers.get("Host"))
+
+        def _names_this_console(self, given: str | None) -> bool:
+            if self._remote is not None:
+                return (given or "").strip().lower() == self._remote.page.host
+            return host_name(given) in self._hosts
 
         def may_write(self) -> bool:
             """Spec §2's first two checks -- a loopback peer, and a `Host` naming
             loopback -- which are what a page's controls are greyed by. `POST
-            /commands` adds the other two, `Origin` and `Content-Type`."""
+            /commands` adds the other two, `Origin` and `Content-Type`. **Never on
+            the https page** (b2b spec §3): the box's checks do not apply there."""
+            if self._remote is not None:
+                return False
             return on_box(self.client_address[0]) and names_loopback(
                 host_name(self.headers.get("Host"))
             )
@@ -924,7 +1001,7 @@ def make_handler(
             """
             if code == 501:
                 given = self.headers.get("Host") if self.headers else None
-                if given is not None and host_name(given) not in self._hosts:
+                if given is not None and not self._names_this_console(given):
                     self._send_json(421, _MISDIRECTED)
                     return
                 code = 405 if getattr(self, "path", None) in _ROUTES else 404
@@ -951,6 +1028,11 @@ def make_handler(
             if not self._host_ok():
                 self._send_json(421, _MISDIRECTED)
                 return
+            if self.path in ("/whoami", "/signout"):
+                # Not on the plain-http listener (b2b spec §3); on https they are
+                # Task 9's (sign-in checking, not wired yet), so 404 there until then.
+                self._send_json(404, _ERRORS[404])
+                return
             if self.path != "/commands":
                 self._refuse_method()
                 return
@@ -959,7 +1041,24 @@ def make_handler(
         def _command(self) -> None:
             """`POST /commands` (spec §5.3): one JSON command, from the box, checked
             and validated before anything is queued, then sent and answered *sent*,
-            *not delivered* or *busy*."""
+            *not delivered* or *busy*.
+
+            **A token never reaches the box's checks** (b2b spec §3): on the plain-http
+            listener a request carrying `Authorization` is refused first of all. On
+            the https listener every command is refused until sign-in checking is wired
+            (Task 9 of the b2b plan)."""
+            if self._remote is None and self.headers.get("Authorization") is not None:
+                self._send_json(403, {"status": "refused", "said": TOKEN_OVER_HTTP})
+                return
+            if self._remote is not None:
+                from wl_xcon import signin  # loaded already: a `Remote` exists
+
+                # Read what was sent, so closing on it does not reset the answer.
+                length = self.headers.get("Content-Length") or ""
+                if length.isascii() and length.isdecimal() and int(length) <= BODY_LIMIT:
+                    self.rfile.read(int(length))
+                self._send_json(403, {"status": "refused", "said": signin.NO_TOKEN})
+                return
             if not self._from_the_box():
                 self._send_json(
                     403, {"status": "refused", "said": _web.CONTROLS_AT_THE_BOX}
@@ -1010,17 +1109,22 @@ def make_handler(
             if not self._host_ok():
                 self._send_json(421, _MISDIRECTED)
                 return
-            if self.path == "/":
+            path = self._path()
+            if path == "/":
                 self._page()
-            elif self.path == "/events":
+            elif "?" in self.path:
+                self._refuse_method()  # only the page takes a query string
+            elif path == "/events":
                 self._events()
-            elif self.path == "/health":
+            elif path == "/health":
                 if not self._authorized():
                     self._send_json(401, _UNAUTHORIZED)
                     return
                 self._health()
-            elif self.path in _FONTS:
-                self._font(_FONTS[self.path])
+            elif path in _FONTS:
+                self._font(_FONTS[path])
+            elif path in ("/whoami", "/signout"):
+                self._send_json(404, _ERRORS[404])  # Task 9's on https; never on http
             else:
                 # 405 for a known path that takes another method -- `/commands`,
                 # since b2a -- and 404 for anything else.
@@ -1047,11 +1151,15 @@ def make_handler(
                 nonce=nonce,
                 can_write=can_write,
             )
+            connect = ""
+            if self._remote is not None:
+                discovery = self._remote.checker.discovery
+                connect = "" if discovery is None else discovery.token_origin
             self._write(
                 200,
                 body.encode("utf-8"),
                 "text/html; charset=utf-8",
-                (("Content-Security-Policy", _csp(nonce)),),
+                (("Content-Security-Policy", _csp(nonce, connect)),),
             )
 
         def _health(self) -> None:
@@ -1187,6 +1295,9 @@ class Server:
         allow_hosts: tuple[str, ...] = (),
         reply_timeout_s: float = _link.REPLY_TIMEOUT_S,
         connect_timeout_s: float = _link.CONNECT_TIMEOUT_S,
+        https: tuple[str, int] | None = None,
+        tls: ssl.SSLContext | None = None,
+        remote: Remote | None = None,
     ) -> None:
         self.hub = Hub(endpoint=sub, marks=mark is not None)
         self._sub = sub
@@ -1245,6 +1356,29 @@ class Server:
         self._web = threading.Thread(
             target=self._http.serve_forever, name="wlx-serve-http", daemon=True
         )
+        try:
+            self._page_http = (
+                None
+                if https is None
+                else _PageServer(
+                    https,
+                    make_handler(
+                        self.hub, token=token, stale_after_s=stale_after_s,
+                        keepalive_s=keepalive_s, dispatch=self.dispatch, remote=remote,
+                    ),
+                    tls,
+                )
+            )
+        except OSError:
+            self._http.server_close()  # the second bind failed: free the first
+            raise
+        self._page_web = None if self._page_http is None else threading.Thread(
+            target=self._page_http.serve_forever, name="wlx-serve-https", daemon=True
+        )
+        self._keys = None if remote is None or remote.checker.ready else threading.Thread(
+            target=remote.checker.retry_until_ready, args=(self._stop,),
+            name="wlx-serve-keys", daemon=True,
+        )
         self._telemetry = threading.Thread(
             target=self._listen, name="wlx-serve-telemetry", daemon=True
         )
@@ -1257,6 +1391,14 @@ class Server:
         host, port = self._http.server_address[:2]
         return host, port
 
+    @property
+    def page_address(self) -> tuple[str, int] | None:
+        """`(host, port)` of the https listener as bound; `None` without one."""
+        if self._page_http is None:
+            return None
+        host, port = self._page_http.server_address[:2]
+        return host, port
+
     def start(self) -> None:
         self._started = True
         self._telemetry.start()
@@ -1264,6 +1406,10 @@ class Server:
         if self._marks is not None:
             self._marks.start()
         self._web.start()
+        if self._keys is not None:
+            self._keys.start()
+        if self._page_web is not None:
+            self._page_web.start()
 
     def dispatch(self, request) -> tuple[int, dict]:
         """Send one parsed command (`parse_command`) and say what became of it.
@@ -1421,8 +1567,16 @@ class Server:
         if web_started:
             self._http.shutdown()
         self._http.server_close()
+        if self._page_http is not None:
+            if self._page_web.ident is not None:
+                self._page_http.shutdown()
+            self._page_http.server_close()
         if web_started:
             self._web.join(timeout=5)
+        if self._page_web is not None and self._page_web.ident is not None:
+            self._page_web.join(timeout=5)
+        if self._keys is not None and self._keys.ident is not None:
+            self._keys.join(timeout=5)
         if telemetry_started:
             self._telemetry.join(timeout=5)
         # The outboxes stop on `_stop` too, answering anything still queued, and
@@ -1644,6 +1798,43 @@ def run(args) -> int:
             f"refused: --stale-after must be a positive number of seconds, got "
             f"{args.stale_after!r}"
         )
+    listener: dict = {}
+    remote_flags = {
+        "--https": args.https,
+        "--tls-cert": args.tls_cert,
+        "--tls-key": args.tls_key,
+        "--rig-page": args.rig_page,
+        "--wl-works-issuer": args.wl_works_issuer,
+        "--wl-works-cache": args.wl_works_cache,
+    }
+    page = None
+    if any(value is not None for value in remote_flags.values()):
+        missing = [flag for flag, value in remote_flags.items() if value is None]
+        if missing:
+            raise SystemExit(
+                f"refused: the https page needs all six of --https, --tls-cert, --tls-key, "
+                f"--rig-page, --wl-works-issuer and --wl-works-cache together; missing "
+                f"{', '.join(missing)}"
+            )
+        try:
+            from wl_xcon import signin  # only here: it imports `jwt`, which a rig without
+            # the `signin` extra does not have, and `serve` must run without
+        except ImportError:
+            raise SystemExit(
+                "refused: --https needs the signin extra (PyJWT with cryptography), which "
+                "is not installed"
+            ) from None
+        try:
+            page = signin.parse_rig_page(args.rig_page)
+        except ValueError as exc:
+            raise SystemExit(f"refused: {exc}") from None
+        https = parse_http(args.https)
+        tls = tls_context(args.tls_cert, args.tls_key)
+        checker = signin.Checker(
+            page=page, issuer=args.wl_works_issuer, cache=args.wl_works_cache
+        )
+        print(f"wlx serve: {checker.load()}", flush=True)
+        listener = {"https": https, "tls": tls, "remote": Remote(page, checker)}
     try:
         server = Server(
             sub=sub,
@@ -1653,6 +1844,7 @@ def run(args) -> int:
             stale_after_s=stale_after,
             mark=mark,
             allow_hosts=tuple(args.allow_host),
+            **listener,
         )
     except OSError as exc:
         raise SystemExit(f"refused: cannot serve on {host}:{port}: {exc}") from exc
@@ -1668,7 +1860,13 @@ def run(args) -> int:
             f"{sub}, sending commands to {req} and marks to "
             f"{mark or 'nowhere (no MARK endpoint given)'}; controls work only from "
             f"this box's own browser at http://127.0.0.1:{bound_port}/; GET /health "
-            f"needs the bearer token",
+            f"needs the bearer token"
+            + (
+                ""
+                if page is None
+                else f"; the rig's https page is at {page.page}, where people signed in "
+                f"to wl.works may use the controls"
+            ),
             flush=True,
         )
         _wait(server)

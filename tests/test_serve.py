@@ -4394,3 +4394,252 @@ def test_page_e2e_no_record_in_a_session_holds_a_string_actor(tmp_path, monkeypa
     controls = _record(taskd.folders[2], "controls.jsonl")
     assert {"reward", "mark", "pause", "note", "resume", "stop"} <= {row["kind"] for row in controls}
     assert {row["by"]["name"] for row in controls if row["by"]} == {"jake"}
+
+
+# --- b2b: the https listener --------------------------------------------------------
+
+def _page_served(tmp_path, hub, *, dispatch=None, issuer=None):
+    """`make_handler` with a `Remote`, on a real loopback TLS socket: the rig's https
+    page as a browser reaches it, with a fake wl.works behind its checker."""
+    pytest.importorskip("jwt")
+    from _issuer import ISSUER, Issuer
+    from _tls import client_context, material
+    from wl_xcon import signin
+    from wl_xcon.serve import Remote, _PageServer, tls_context
+
+    tls = material(tmp_path)
+    port = int(free_endpoints(1)[0].rsplit(":", 1)[1])
+    page = signin.parse_rig_page(f"rig-3=https://127.0.0.1:{port}/")
+    issuer = issuer or Issuer()
+    checker = signin.Checker(page=page, issuer=ISSUER, cache=tmp_path / "wl-works.json", fetch=issuer.fetch)
+    checker.load()
+    server = _PageServer(
+        ("127.0.0.1", port),
+        make_handler(hub, token=TOKEN, stale_after_s=30.0, dispatch=dispatch, remote=Remote(page, checker)),
+        tls_context(tls["cert"], tls["key"]),
+    )
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
+    thread.start()
+    return server, thread, port, page, issuer, client_context(tls["ca"])
+
+
+def _stop_page(server, thread, hub) -> None:
+    hub.close()
+    server.shutdown()
+    server.server_close()
+    thread.join(timeout=5)
+
+
+def _https(port, context, method, path, headers=None, body=b""):
+    connection = http.client.HTTPSConnection("127.0.0.1", port, timeout=5, context=context)
+    try:
+        connection.putrequest(method, path, skip_host=True)
+        for name, value in {"Host": f"127.0.0.1:{port}", **(headers or {})}.items():
+            connection.putheader(name, value)
+        connection.putheader("Content-Length", str(len(body)))
+        connection.endheaders(body)
+        response = connection.getresponse()
+        return response.status, dict(response.getheaders()), response.read()
+    finally:
+        connection.close()
+
+
+def test_https_get_root_answers_the_page_over_tls(tmp_path):
+    hub = _hub()
+    server, thread, port, _page, _issuer, context = _page_served(tmp_path, hub)
+    try:
+        status, headers, body = _https(port, context, "GET", "/")
+    finally:
+        _stop_page(server, thread, hub)
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert b"<html" in body.lower()
+
+
+def test_the_return_from_wl_works_serves_the_page_and_never_echoes_its_code(tmp_path):
+    hub = _hub()
+    server, thread, port, _page, _issuer, context = _page_served(tmp_path, hub)
+    try:
+        status, _headers, body = _https(port, context, "GET", "/?code=SECRETCODE&state=S")
+        other = _https(port, context, "GET", "/events?code=SECRETCODE")[0]
+    finally:
+        _stop_page(server, thread, hub)
+    assert status == 200 and b"SECRETCODE" not in body
+    assert other == 404
+
+
+def test_every_response_on_both_listeners_says_no_referrer(tmp_path):
+    hub = _hub()
+    server, thread, port, _page, _issuer, context = _page_served(tmp_path, hub)
+    try:
+        https_headers = [
+            _https(port, context, "GET", "/")[1],
+            _https(port, context, "GET", "/nowhere")[1],
+        ]
+    finally:
+        _stop_page(server, thread, hub)
+    with _served(_hub()) as http_port:
+        http_headers = [_request(http_port, "GET", "/")[1], _request(http_port, "GET", "/nowhere")[1]]
+    for headers in https_headers + http_headers:
+        assert headers["Referrer-Policy"] == "no-referrer"
+
+
+def test_the_https_page_may_fetch_wl_works_token_endpoint_and_the_http_page_may_not(tmp_path):
+    hub = _hub()
+    server, thread, port, _page, _issuer, context = _page_served(tmp_path, hub)
+    try:
+        csp = _https(port, context, "GET", "/")[1]["Content-Security-Policy"]
+    finally:
+        _stop_page(server, thread, hub)
+    assert "connect-src 'self' https://wl.works;" in csp
+    with _served(_hub()) as http_port:
+        assert "connect-src 'self';" in _request(http_port, "GET", "/")[1]["Content-Security-Policy"]
+
+
+def test_the_https_page_answers_only_to_its_own_host(tmp_path):
+    hub = _hub()
+    server, thread, port, _page, _issuer, context = _page_served(tmp_path, hub)
+    try:
+        foreign = _https(port, context, "GET", "/", {"Host": "rig-4.wl.works"})[0]
+        unknown_method = _https(port, context, "BREW", "/", {"Host": "rig-4.wl.works"})[0]
+        own = _https(port, context, "GET", "/")[0]
+    finally:
+        _stop_page(server, thread, hub)
+    assert (foreign, unknown_method, own) == (421, 421, 200)
+
+
+def test_the_request_log_never_carries_a_query_string(tmp_path, capsys):
+    hub = _hub()
+    server, thread, port, _page, _issuer, context = _page_served(tmp_path, hub)
+    try:
+        _https(port, context, "GET", "/?code=SECRETCODE&state=S")
+    finally:
+        _stop_page(server, thread, hub)
+    with _served(_hub()) as http_port:
+        _request(http_port, "GET", "/?code=SECRETCODE")
+    logged = capsys.readouterr().err
+    assert 'GET / HTTP' not in logged  # the request line is `"GET /" 200`, as `log_request` writes it
+    assert '"GET /" 200' in logged
+    assert "SECRETCODE" not in logged
+
+
+def test_a_stalled_handshake_does_not_stop_another_client(tmp_path):
+    hub = _hub()
+    server, thread, port, _page, _issuer, context = _page_served(tmp_path, hub)
+    stalled = socket.create_connection(("127.0.0.1", port), timeout=5)
+    try:
+        # Connected, and sending nothing: its handshake never starts.
+        status = _https(port, context, "GET", "/")[0]
+    finally:
+        stalled.close()
+        _stop_page(server, thread, hub)
+    assert status == 200
+
+
+def test_a_token_sent_to_the_plain_http_listener_is_refused_and_dispatches_nothing():
+    seen: list = []
+
+    def dispatch(request):
+        seen.append(request)
+        return 200, {"status": "sent"}
+
+    with _served(_hub(), dispatch=dispatch) as port:
+        status, _headers, body = _request(
+            port, "POST", "/commands",
+            {
+                "Authorization": "Bearer not-a-real-token",
+                "Content-Type": "application/json",
+                "Origin": f"http://127.0.0.1:{port}",
+                "Content-Length": "2",
+            },
+        )
+    assert status == 403
+    assert json.loads(body)["said"] == serve.TOKEN_OVER_HTTP
+    assert seen == []
+
+
+@pytest.mark.parametrize("method, path", [("GET", "/whoami"), ("POST", "/signout"), ("POST", "/whoami"), ("GET", "/signout")])
+def test_whoami_and_signout_do_not_exist_on_the_http_listener(method, path):
+    with _served(_hub()) as port:
+        assert _request(port, method, path)[0] == 404
+
+
+def test_the_https_listener_refuses_a_command_until_sign_in_checking_is_wired(tmp_path):
+    seen: list = []
+    hub = _hub()
+    server, thread, port, _page, _issuer, context = _page_served(
+        tmp_path, hub, dispatch=lambda request: seen.append(request) or (200, {})
+    )
+    try:
+        status, _headers, body = _https(
+            port, context, "POST", "/commands", {"Content-Type": "application/json"}, b"{}"
+        )
+    finally:
+        _stop_page(server, thread, hub)
+    assert status == 403 and "sign in with wl.works" in json.loads(body)["said"]
+    assert seen == []
+
+
+_SIX = (
+    ("--https", "127.0.0.1:0"),
+    ("--tls-cert", "cert.pem"),
+    ("--tls-key", "key.pem"),
+    ("--rig-page", "rig-3=https://rig-3.wl.works/"),
+    ("--wl-works-issuer", "https://wl.works/api/auth"),
+    ("--wl-works-cache", "wl-works.json"),
+)
+
+
+@pytest.mark.parametrize("given", range(len(_SIX)))
+def test_each_https_flag_alone_is_refused_naming_the_others(tmp_path, given):
+    flag, value = _SIX[given]
+    with pytest.raises(SystemExit) as refused:
+        _main_uninterrupted(_serve_args(tmp_path, extra=(flag, value)))
+    said = str(refused.value)
+    assert said.startswith("refused:")
+    for other, _ in _SIX:
+        assert (other in said.split("missing")[1]) == (other != flag), (flag, other, said)
+
+
+def test_https_without_its_certificate_names_the_missing_flag(tmp_path):
+    extra = tuple(part for flag, value in _SIX if flag != "--tls-cert" for part in (flag, value))
+    with pytest.raises(SystemExit) as refused:
+        _main_uninterrupted(_serve_args(tmp_path, extra=extra))
+    assert str(refused.value).endswith("missing --tls-cert")
+
+
+def test_a_rig_page_that_is_not_https_is_refused_with_its_own_sentence(tmp_path):
+    pytest.importorskip("jwt")
+    from wl_xcon import signin
+
+    with pytest.raises(ValueError) as why:
+        signin.parse_rig_page("rig3=http://x/")
+    extra = tuple(
+        part for flag, value in _SIX for part in (flag, "rig3=http://x/" if flag == "--rig-page" else value)
+    )
+    with pytest.raises(SystemExit) as refused:
+        _main_uninterrupted(_serve_args(tmp_path, extra=extra))
+    assert str(refused.value) == f"refused: {why.value}"
+
+
+def test_a_tls_key_that_is_not_a_key_is_refused_without_its_contents_or_path(tmp_path):
+    pytest.importorskip("jwt")
+    from _tls import material
+
+    tls = material(tmp_path)
+    junk = tmp_path / "not-a-key-SECRETNAME.pem"
+    junk.write_text("SECRETCONTENTS\n", encoding="utf-8")
+    values = {
+        "--https": "127.0.0.1:0",
+        "--tls-cert": str(tls["cert"]),
+        "--tls-key": str(junk),
+        "--rig-page": "rig-3=https://rig-3.wl.works/",
+        "--wl-works-issuer": "https://wl.works/api/auth",
+        "--wl-works-cache": str(tmp_path / "wl-works.json"),
+    }
+    extra = tuple(part for pair in values.items() for part in pair)
+    with pytest.raises(SystemExit) as refused:
+        _main_uninterrupted(_serve_args(tmp_path, extra=extra))
+    said = str(refused.value)
+    assert "--tls-key" in said
+    assert "SECRETCONTENTS" not in said and "SECRETNAME" not in said and str(tmp_path) not in said
