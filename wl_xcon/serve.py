@@ -1,6 +1,7 @@
-"""`wlx serve` -- the browser console's process (P4d-2b slices b1 and b2a).
+"""`wlx serve` -- the browser console's process (P4d-2b slices b1, b2a, b3a-2 and b2b).
 
-Spec: `docs/superpowers/specs/2026-09-26-P4d2b-browser-console-design.md` §1-§5.
+Specs: `docs/superpowers/specs/2026-09-26-P4d2b-browser-console-design.md` §1-§5, and for
+the rig's https page `docs/superpowers/specs/2026-10-02-p4d2b-b2b-remote-signin-design.md`.
 
 **Its own process, beside `taskd` and never inside it** (S9a §7: the hot loop never
 serves a request). It holds one `link.ZmqConsole`, keeps the latest frame, and serves
@@ -15,15 +16,23 @@ already runs, so no new dependency:
   before any -- which the page's stale timer runs on (Ruling 12, 2026-09-27).
 - `GET /health` -- `health.py`'s body for wl-works, behind a bearer token.
 
-- `POST /commands` (P4d-2b b2a, spec §5.3) -- one JSON command from the box's own
-  page, accepted only under spec §2's four checks and validated before anything is
-  queued (`parse_command`); answered *sent*, *not delivered* or *busy*, the truth
-  about delivery. Since P4d-2b b3a-2 it also takes `wlx taskd`'s own four -- `open`,
-  `check`, `start`, `end` -- built by the wire's own rules (`link._command_from`).
+- `POST /commands` (P4d-2b b2a, spec §5.3) -- one JSON command, validated before
+  anything is queued (`parse_command`) and answered *sent*, *not delivered* or *busy*,
+  the truth about delivery. On the plain-http listener it comes from the box's own page,
+  under spec §2's four checks, and a command carrying a token is refused there. Since
+  P4d-2b b3a-2 it also takes `wlx taskd`'s own four -- `open`, `check`, `start`, `end`
+  -- built by the wire's own rules (`link._command_from`).
+
+**The rig's https page (b2b, `--https` and its five companion flags).** A second
+listener, TLS, serves the same routes plus `POST /whoami` and `POST /signout`. A command
+there is accepted from this rig's page (`Origin`, `Content-Type`) with a wl.works
+member's token that `signin.Checker` accepts, offline, and is sent as that member's.
+Without the flags there is no second listener and `signin` is never imported.
 
 Everything else is 404 or 405, as JSON, never the stdlib's HTML page. **Every request
-is answered only when its `Host` names this console** (spec §2, §5.3): loopback, the
-box's own names and addresses, and `--allow-host` names (`box_names`); anything else
+is answered only when its `Host` names this console** (spec §2, §5.3): on the plain-http
+listener, loopback, the box's own names and addresses, and `--allow-host` names
+(`box_names`); on the https listener, the rig page's own host, exactly. Anything else
 gets a JSON 421 and no page, which closes DNS rebinding on the LAN-open reads too.
 
 **Restarting it changes nothing in `taskd`** (spec §2): it reads the PUB socket, and
@@ -36,7 +45,11 @@ socket. The command thread (an `Outbox`) owns a `ZmqCommands`, the REQ socket, a
 takes commands from a bounded queue. The mark thread (another `Outbox`) owns a
 `ZmqMarks`, the PUSH socket to the session's mark endpoint, so a mark's signal goes
 ahead of any command waiting on the rig's acknowledgment (spec §5.3). Each browser's
-`/events` and each `POST` runs on the HTTP server's thread for that connection.
+`/events` and each `POST` runs on the HTTP server's thread for that connection. With
+`--https`, the https listener has a thread of its own, and each of its connections does
+its TLS handshake on that connection's thread (`_PageServer`); while wl.works' keys have
+not been read, the keys thread (`signin.Checker.retry_until_ready`) tries again every
+`signin.RETRY_EVERY_S`, and ends once it has them.
 
 **No timing claim is made here.** `DEFAULT_STALE_AFTER_S` is a display choice (spec
 §3); `QUEUE_DEPTH`, `RATE_SAMPLE_S`, `KEEPALIVE_S`, `REQUEST_TIMEOUT_S`, `RETRY_MS`,
@@ -432,9 +445,10 @@ def event(payload: dict) -> bytes:
 def _csp(nonce: str, connect: str = "") -> str:
     """The page's Content-Security-Policy: its one script by nonce, inline styles (the
     bar widths), its bundled fonts and the event stream from this origin, and nothing
-    else -- no request leaves the box from this page. Defense beneath `web._e`, not
-    instead of it. `connect` is one more origin the page may `fetch`: on the https page,
-    wl.works' token endpoint (b2b spec §3)."""
+    else. Defense beneath `web._e`, not instead of it. `connect` is one more origin the
+    page may `fetch`: on the https page, wl.works' token endpoint (b2b spec §3), the one
+    place a request from that page goes besides this rig. From the box's own page, no
+    request leaves the box."""
     sources = f"'self' {connect}" if connect else "'self'"
     return (
         f"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'unsafe-inline'; "
@@ -1937,10 +1951,61 @@ def _wait(server: Server) -> None:
         pass
 
 
+#: How every refusal the https setup causes ends (the final review, M2). They come before
+#: anything binds, so the rig PC's page is refused with them; this says how to have it back.
+WITHOUT_HTTPS = (
+    "the rig PC's page is not served either: restart wlx serve without the six https flags "
+    "to bring it back"
+)
+
+
+def _https_refused(said: str) -> SystemExit:
+    """A refusal the https setup caused: `said`, then how to have the rig PC's page back."""
+    return SystemExit(f"{said}; {WITHOUT_HTTPS}")
+
+
+def _https_setup(args, flags: dict) -> tuple:
+    """The https listener's page, address, TLS and sign-in, from the six flags (b2b spec §3),
+    as `(page, listener)`. Every refusal is a `SystemExit` sentence, raised before anything
+    binds; `run` adds `WITHOUT_HTTPS` to each."""
+    missing = [flag for flag, value in flags.items() if value is None]
+    if missing:
+        raise SystemExit(
+            f"refused: the https page needs all six of --https, --tls-cert, --tls-key, "
+            f"--rig-page, --wl-works-issuer and --wl-works-cache together; missing "
+            f"{', '.join(missing)}"
+        )
+    needs_extra = (
+        "refused: --https needs the signin extra (PyJWT with cryptography), which "
+        "is not installed"
+    )
+    try:
+        import jwt  # only in this branch: a rig without the `signin` extra runs `serve`
+    except ImportError as exc:
+        if exc.name != "jwt":
+            raise
+        raise SystemExit(needs_extra) from None
+    if not jwt.algorithms.has_crypto:
+        # PyJWT imports without `cryptography`, and then skips every RSA key.
+        raise SystemExit(needs_extra)
+    from wl_xcon import signin
+    try:
+        page = signin.parse_rig_page(args.rig_page)
+        issuer = signin.parse_issuer(args.wl_works_issuer)
+    except ValueError as exc:
+        raise SystemExit(f"refused: {exc}") from None
+    https = parse_http(args.https, "--https")
+    tls = tls_context(args.tls_cert, args.tls_key)
+    checker = signin.Checker(page=page, issuer=issuer, cache=args.wl_works_cache)
+    print(f"wlx serve: {checker.load()}", flush=True)
+    return page, {"https": https, "tls": tls, "remote": Remote(page, checker)}
+
+
 def run(args) -> int:
     """`wlx serve`: check everything, bind, serve until interrupted (spec §2).
 
-    Every refusal is a sentence, and all of them happen before anything binds.
+    Every refusal is a sentence, and all of them happen before anything binds. One the
+    https setup causes also says how to have the rig PC's page back (`WITHOUT_HTTPS`).
     Ctrl-C ends it with 130, as `wlx console` does, and says what it did not stop.
     A telemetry thread that cannot go on ends it too (fix round 1, I1): `_wait`
     returns on its own rather than raising, so it is distinguished from Ctrl-C by
@@ -1970,38 +2035,10 @@ def run(args) -> int:
     }
     page = None
     if any(value is not None for value in remote_flags.values()):
-        missing = [flag for flag, value in remote_flags.items() if value is None]
-        if missing:
-            raise SystemExit(
-                f"refused: the https page needs all six of --https, --tls-cert, --tls-key, "
-                f"--rig-page, --wl-works-issuer and --wl-works-cache together; missing "
-                f"{', '.join(missing)}"
-            )
-        needs_extra = (
-            "refused: --https needs the signin extra (PyJWT with cryptography), which "
-            "is not installed"
-        )
         try:
-            import jwt  # only in this branch: a rig without the `signin` extra runs `serve`
-        except ImportError as exc:
-            if exc.name != "jwt":
-                raise
-            raise SystemExit(needs_extra) from None
-        if not jwt.algorithms.has_crypto:
-            # PyJWT imports without `cryptography`, and then skips every RSA key.
-            raise SystemExit(needs_extra)
-        from wl_xcon import signin
-        try:
-            page = signin.parse_rig_page(args.rig_page)
-        except ValueError as exc:
-            raise SystemExit(f"refused: {exc}") from None
-        https = parse_http(args.https, "--https")
-        tls = tls_context(args.tls_cert, args.tls_key)
-        checker = signin.Checker(
-            page=page, issuer=args.wl_works_issuer, cache=args.wl_works_cache
-        )
-        print(f"wlx serve: {checker.load()}", flush=True)
-        listener = {"https": https, "tls": tls, "remote": Remote(page, checker)}
+            page, listener = _https_setup(args, remote_flags)
+        except SystemExit as refused:
+            raise _https_refused(str(refused.code)) from None
     try:
         server = Server(
             sub=sub,
@@ -2014,7 +2051,7 @@ def run(args) -> int:
             **listener,
         )
     except _HttpsBindError as exc:
-        raise SystemExit(
+        raise _https_refused(
             f"refused: cannot serve https on {exc.address[0]}:{exc.address[1]}: {exc}"
         ) from exc
     except OSError as exc:
@@ -2026,18 +2063,18 @@ def run(args) -> int:
     try:
         server.start()
         bound_host, bound_port = server.address
+        box = f"this box's own browser at http://127.0.0.1:{bound_port}/"
+        controls = (
+            f"controls work only from {box}"
+            if page is None
+            else f"controls work from {box}, and from the rig's https page at {page.page} "
+            f"for people signed in to wl.works"
+        )
         print(
             f"wlx serve: the console is at http://{bound_host}:{bound_port}/, reading "
             f"{sub}, sending commands to {req} and marks to "
-            f"{mark or 'nowhere (no MARK endpoint given)'}; controls work only from "
-            f"this box's own browser at http://127.0.0.1:{bound_port}/; GET /health "
-            f"needs the bearer token"
-            + (
-                ""
-                if page is None
-                else f"; the rig's https page is at {page.page}, where people signed in "
-                f"to wl.works may use the controls"
-            ),
+            f"{mark or 'nowhere (no MARK endpoint given)'}; {controls}; GET /health "
+            f"needs the bearer token",
             flush=True,
         )
         _wait(server)

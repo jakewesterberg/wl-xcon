@@ -48,11 +48,49 @@ def test_a_page_with_a_port_keeps_it_in_the_origin_and_the_host_and_443_does_not
         ("rig-3=not a url", "absolute https address"),
         ("rig-3=https://rig-3.wl.works:abc/", "port"),
         ("rig-3=https://rig-3.wl.works:99999/", "port"),
+        # wl.works takes a path; `wlx serve` serves the page at the root only (the final
+        # review, M1).
+        ("rig-3=https://rig-3.wl.works/console", "has a path"),
+        ("rig-3=https://rig-3.wl.works/console/", "has a path"),
     ],
 )
 def test_a_rig_page_wl_works_would_refuse_is_refused_here(text, says):
     with pytest.raises(ValueError) as refused:
         signin.parse_rig_page(text)
+    assert says in str(refused.value)
+
+
+def test_a_rig_page_at_its_root_is_taken_with_or_without_a_slash_or_a_query():
+    assert signin.parse_rig_page("rig-3=https://rig-3.wl.works").origin == "https://rig-3.wl.works"
+    assert signin.parse_rig_page("rig-3=https://rig-3.wl.works/?lab=1").page == "https://rig-3.wl.works/?lab=1"
+
+
+@pytest.mark.parametrize("issuer", [ISSUER, "https://wl.works", "https://127.0.0.1:8443/api/auth"])
+def test_an_issuer_with_a_path_or_a_port_is_taken_as_given(issuer):
+    assert signin.parse_issuer(issuer) == issuer
+
+
+@pytest.mark.parametrize(
+    "issuer, says",
+    [
+        ("http://wl.works/api/auth", "absolute https address"),
+        ("wl.works/api/auth", "absolute https address"),
+        ("https:///api/auth", "absolute https address"),
+        ("https://u:p@wl.works/api/auth", "user name"),
+        ("https://wl.works/api/auth?x=1", "query"),
+        ("https://wl.works/api/auth?", "query"),
+        ("https://wl.works/api/auth#x", "fragment"),
+        ("https://wl.works/api/auth/", 'ends in "/"'),
+        ("https://wl.works/", 'ends in "/"'),
+        ("https://wl.works:99999/api/auth", "port"),
+        ("https://wl.works:abc/api/auth", "port"),
+    ],
+)
+def test_an_issuer_discovery_could_never_name_is_refused(issuer, says):
+    """The final review, M3: discovery's issuer is compared exactly, so each of these would
+    leave the rig with no keys and no word why."""
+    with pytest.raises(ValueError) as refused:
+        signin.parse_issuer(issuer)
     assert says in str(refused.value)
 
 
@@ -103,8 +141,30 @@ def test_a_discovery_naming_another_issuer_is_refused_and_not_cached(tmp_path):
         fetch=lambda url: issuer.discovery() if "openid" in url else issuer.jwks(),
     )
     said = checker.load()
-    assert not checker.ready and signin.NO_KEYS in said
+    assert not checker.ready
     assert not (tmp_path / "wl-works.json").exists()
+    # Its own sentence, naming both, not "the rig has not reached wl.works" (the final
+    # review, M3): wl.works was reached, and the flag is what is wrong.
+    assert said == (
+        f"wl.works' discovery document names the issuer 'https://wl.works', not "
+        f"--wl-works-issuer's {ISSUER!r}; no sign-in can be checked until the two are the same"
+    )
+
+
+def test_a_discovery_naming_another_issuer_is_not_stood_in_for_by_the_cache(tmp_path):
+    """The cache stands in for a wl.works out of reach (spec §5); one that answers with
+    another issuer has answered, and its answer is not used (OpenID Connect Discovery 1.0
+    §4.3), nor is an older document in its place."""
+    _checker(tmp_path, Issuer()).load()  # a good cache, from an earlier start
+    other = Issuer(issuer="https://wl.works")
+    checker = signin.Checker(
+        page=signin.parse_rig_page(f"rig-3={PAGE}"),
+        issuer=ISSUER,
+        cache=tmp_path / "wl-works.json",
+        fetch=lambda url: other.discovery() if "openid" in url else other.jwks(),
+    )
+    said = checker.load()
+    assert not checker.ready and "names the issuer 'https://wl.works'" in said
 
 
 @pytest.mark.parametrize(

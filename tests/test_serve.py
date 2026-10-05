@@ -5016,7 +5016,7 @@ def test_each_https_flag_alone_is_refused_naming_the_others(tmp_path, given):
     with pytest.raises(SystemExit) as refused:
         _main_uninterrupted(_serve_args(tmp_path, extra=(flag, value)))
     said = str(refused.value)
-    assert said.startswith("refused:")
+    assert said.startswith("refused:") and said.endswith(f"; {serve.WITHOUT_HTTPS}")
     for other, _ in _SIX:
         assert (other in said.split("missing")[1]) == (other != flag), (flag, other, said)
 
@@ -5025,7 +5025,7 @@ def test_https_without_its_certificate_names_the_missing_flag(tmp_path):
     extra = tuple(part for flag, value in _SIX if flag != "--tls-cert" for part in (flag, value))
     with pytest.raises(SystemExit) as refused:
         _main_uninterrupted(_serve_args(tmp_path, extra=extra))
-    assert str(refused.value).endswith("missing --tls-cert")
+    assert str(refused.value).endswith(f"missing --tls-cert; {serve.WITHOUT_HTTPS}")
 
 
 def test_a_rig_page_that_is_not_https_is_refused_with_its_own_sentence(tmp_path):
@@ -5039,7 +5039,26 @@ def test_a_rig_page_that_is_not_https_is_refused_with_its_own_sentence(tmp_path)
     )
     with pytest.raises(SystemExit) as refused:
         _main_uninterrupted(_serve_args(tmp_path, extra=extra))
-    assert str(refused.value) == f"refused: {why.value}"
+    assert str(refused.value) == f"refused: {why.value}; {serve.WITHOUT_HTTPS}"
+
+
+@pytest.mark.parametrize(
+    "issuer", ["https://wl.works/api/auth/", "http://wl.works/api/auth", "https://wl.works/api/auth?x=1"]
+)
+def test_an_issuer_discovery_could_never_name_is_refused_at_start(tmp_path, issuer):
+    """The final review, M3: refused before anything binds, with its own sentence and how to
+    have the rig PC's page back (M2)."""
+    pytest.importorskip("jwt")
+    from wl_xcon import signin
+
+    with pytest.raises(ValueError) as why:
+        signin.parse_issuer(issuer)
+    extra = tuple(
+        part for flag, value in _SIX for part in (flag, issuer if flag == "--wl-works-issuer" else value)
+    )
+    with pytest.raises(SystemExit) as refused:
+        _main_uninterrupted(_serve_args(tmp_path, extra=extra))
+    assert str(refused.value) == f"refused: {why.value}; {serve.WITHOUT_HTTPS}"
 
 
 def test_a_tls_key_that_is_not_a_key_is_refused_without_its_contents_or_path(tmp_path):
@@ -5063,6 +5082,8 @@ def test_a_tls_key_that_is_not_a_key_is_refused_without_its_contents_or_path(tmp
     said = str(refused.value)
     assert "--tls-key" in said
     assert "SECRETCONTENTS" not in said and "SECRETNAME" not in said and str(tmp_path) not in said
+    # The whole process is refused, the rig PC's page with it: say how to have it back (M2).
+    assert said.endswith(f"; {serve.WITHOUT_HTTPS}")
 
 
 @pytest.mark.parametrize("size", [2, 10_000, 60_000])
@@ -5127,6 +5148,7 @@ def test_a_bad_https_value_names_https_and_a_busy_https_port_names_its_own_addre
     said = str(bad.value)
     assert said.startswith("refused: --https expects HOST:PORT") and "--http expects" not in said
     assert "127.0.0.1:8080" not in said
+    assert said.endswith(f"; {serve.WITHOUT_HTTPS}")
 
     from wl_xcon import signin
 
@@ -5146,6 +5168,7 @@ def test_a_bad_https_value_names_https_and_a_busy_https_port_names_its_own_addre
             _main_uninterrupted(args(f"127.0.0.1:{port}"))
     said = str(refused.value)
     assert said.startswith(f"refused: cannot serve https on 127.0.0.1:{port}:")
+    assert said.endswith(f"; {serve.WITHOUT_HTTPS}")
 
 
 @pytest.mark.parametrize("which", ["missing", "no_crypto"])
@@ -5161,6 +5184,7 @@ def test_https_without_pyjwt_or_its_cryptography_is_refused_with_the_extra_named
     with pytest.raises(SystemExit) as refused:
         _main_uninterrupted(_serve_args(tmp_path, extra=extra))
     assert "needs the signin extra" in str(refused.value)
+    assert str(refused.value).endswith(f"; {serve.WITHOUT_HTTPS}")
 
 
 def test_a_failed_https_bind_frees_the_http_port(tmp_path):
@@ -5256,7 +5280,7 @@ def test_an_import_failure_that_is_not_pyjwt_is_not_reported_as_the_missing_extr
 
 def test_a_body_over_the_drain_limit_changes_nothing_and_the_listener_goes_on_serving(tmp_path):
     """Past `REFUSAL_DRAIN_LIMIT` the request is answered and closed unread, so the client
-    may see a reset in place of the 403 (the PI-facing page never sends such a body; only a
+    may see a reset in place of the 403 (the rig's https page never sends such a body; only a
     misbehaving client does). What must hold: nothing was dispatched, and the next request
     on a fresh connection is answered."""
     seen: list = []

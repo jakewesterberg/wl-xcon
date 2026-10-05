@@ -86,6 +86,11 @@ def parse_rig_page(text: str) -> RigPage:
         raise ValueError(f"{shape}; its address carries a user name or password")
     if parts.fragment or "#" in page:
         raise ValueError(f"{shape}; its address has a fragment (#)")
+    # wl.works' `parseRigPages` takes a path (`src/lib/rigs.ts`, read 2026-10-05 at
+    # e37847f4), but `wlx serve` serves the page, `/whoami` and `/events` at the root only, so
+    # a sign-in would come back to a page that is not there (the final review, M1).
+    if parts.path not in ("", "/"):
+        raise ValueError(f"{shape}; its address has a path, and the page is served only at the root of its address")
     host = parts.hostname.lower()
     if ":" in host:
         host = f"[{host}]"
@@ -95,6 +100,33 @@ def parse_rig_page(text: str) -> RigPage:
         raise ValueError(f"{shape}; its port is not a number from 0 to 65535") from None
     netloc = host if port in (None, 443) else f"{host}:{port}"
     return RigPage(name, page, f"https://{netloc}", CLIENT_PREFIX + name, netloc)
+
+
+def parse_issuer(text: str) -> str:
+    """`--wl-works-issuer`, refused unless wl.works' discovery could name it: discovery's
+    `issuer` is compared with it exactly (spec §5), and an issuer is an https address with
+    no query or fragment (OpenID Connect Discovery 1.0 §3, read 2026-10-05). A path is
+    allowed, since an issuer may have one (wl.works' does), but not a trailing "/" (the
+    final review, M3). Raises `ValueError` with a sentence; returns `text` unchanged."""
+    shape = '--wl-works-issuer takes wl.works\' issuer exactly, such as "https://wl.works/api/auth"'
+    parts = urlsplit(text)
+    if parts.scheme != "https" or not parts.hostname:
+        raise ValueError(f"{shape}; {text!r} is not an absolute https address with a host")
+    if parts.username is not None or parts.password is not None:
+        raise ValueError(f"{shape}; it carries a user name or password")
+    if parts.query or "?" in text:
+        raise ValueError(f"{shape}; it has a query (?)")
+    if parts.fragment or "#" in text:
+        raise ValueError(f"{shape}; it has a fragment (#)")
+    if text.endswith("/"):
+        raise ValueError(f'{shape}; it ends in "/", and wl.works\' issuer does not')
+    try:
+        port = parts.port
+    except ValueError:
+        port = -1
+    if port is not None and not 0 <= port <= 65535:
+        raise ValueError(f"{shape}; its port is not a number from 0 to 65535")
+    return text
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,11 +150,23 @@ class Discovery:
 _NETLOC = re.compile(r"[A-Za-z0-9.-]+(:[0-9]{1,5})?")
 
 
+class OtherIssuer(ValueError):
+    """wl.works' discovery document names an issuer other than `--wl-works-issuer`."""
+
+
 def _discovery(data: object, issuer: str) -> Discovery:
     """The document's four fields, checked. **Its issuer must be the configured one,
-    exactly** (OpenID Connect Discovery 1.0 §4.3). Raises `ValueError`."""
-    if not isinstance(data, dict) or data.get("issuer") != issuer:
-        raise ValueError(f"wl.works' discovery document does not name the issuer {issuer!r}")
+    exactly** (OpenID Connect Discovery 1.0 §4.3), or `OtherIssuer` names both. Raises
+    `ValueError`."""
+    if not isinstance(data, dict):
+        raise ValueError("wl.works' discovery document is not a JSON object")
+    found = data.get("issuer")
+    if found != issuer:
+        named = f"the issuer {found[:200]!r}" if isinstance(found, str) else "no issuer"
+        raise OtherIssuer(
+            f"wl.works' discovery document names {named}, not --wl-works-issuer's {issuer!r}; "
+            f"no sign-in can be checked until the two are the same"
+        )
     fields = ("authorization_endpoint", "token_endpoint", "jwks_uri")
     for field in fields:
         value = data.get(field)
@@ -293,6 +337,11 @@ class Checker:
             keys = _keys(jwks)
             if not keys:
                 raise ValueError("wl.works' key set holds no RS256 signing key")
+        except OtherIssuer as other:
+            # wl.works answered, and not as configured: its document is not used (OpenID
+            # Connect Discovery 1.0 §4.3), and nor is the cache, which stands in for a
+            # wl.works out of reach (spec §5). Its own sentence (the final review, M3).
+            return str(other)
         except (OSError, ValueError, http.client.HTTPException) as live:
             return self._from_cache(f"{type(live).__name__}: {live}")
         with self._lock:
