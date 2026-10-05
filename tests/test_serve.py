@@ -5220,6 +5220,31 @@ def test_server_takes_https_tls_and_remote_together_or_not_at_all(given):
         Server(sub=pub, req=rep, http=("127.0.0.1", 0), token=TOKEN, **{k: parts[k] for k in given})
 
 
+def test_page_address_is_the_https_listeners_bound_address_and_none_without_one(tmp_path, server_cleanup):
+    pytest.importorskip("jwt")
+    from _issuer import ISSUER, Issuer
+    from _tls import material
+    from wl_xcon import signin
+    from wl_xcon.serve import Remote, tls_context
+
+    pub, rep = free_endpoints(2)
+    plain = server_cleanup(Server(sub=pub, req=rep, http=("127.0.0.1", 0), token=TOKEN))
+    assert plain.page_address is None
+
+    tls = material(tmp_path)
+    port = int(free_endpoints(1)[0].rsplit(":", 1)[1])
+    page = signin.parse_rig_page(f"rig-3=https://127.0.0.1:{port}/")
+    checker = signin.Checker(page=page, issuer=ISSUER, cache=tmp_path / "c.json", fetch=Issuer().fetch)
+    pub, rep = free_endpoints(2)
+    secure = server_cleanup(Server(
+        sub=pub, req=rep, http=("127.0.0.1", 0), token=TOKEN,
+        https=("127.0.0.1", port), tls=tls_context(tls["cert"], tls["key"]),
+        remote=Remote(page, checker),
+    ))
+    assert secure.page_address == ("127.0.0.1", port)
+    assert secure.page_address != secure.address
+
+
 def test_tls_context_pins_tls_1_2_and_refuses_a_passphrase_key_without_prompting(tmp_path, monkeypatch):
     pytest.importorskip("jwt")
     import ssl
