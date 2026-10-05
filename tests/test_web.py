@@ -2500,3 +2500,27 @@ def test_a_control_with_its_own_reason_must_be_a_greying_one():
         _gate(_https_view(), ' title="only a title"')
     with pytest.raises(ValueError):
         _gate(view(), "x")
+
+
+def test_a_sign_out_stands_against_a_renewal_or_a_sign_in_still_in_flight():
+    assert "var generation = 0;" in _SCRIPT
+    forget = _script_between("  function forget() {", "  // /whoami with")
+    assert "generation += 1;" in forget
+    assert "generation += 1;" in _script_between("  function keep(answer) {", "  function forget() {")
+    # Each answer is dropped, before anything is kept, stored or shown, if the sign-in it
+    # began from is gone.
+    who = _script_between("  function whoami(mayRenew) {", "  // Resolves true when")
+    assert who.index("var mine = generation;") < who.index("if (mine !== generation) { return false; }")
+    assert who.index("if (mine !== generation)") < who.index("signin.name = answer.name;")
+    finish = _script_between("  function finishSignIn() {", "  // Every caller shares")
+    assert finish.index("if (mine !== generation)") < finish.index("keep(result.answer);")
+    renew = _script_between("  function renewNow() {", "  function scheduleRenew() {")
+    assert renew.index("if (mine !== generation)") < renew.index("keep(result.answer);")
+
+
+def test_a_renewed_pair_is_stored_before_the_rig_confirms_it():
+    renew = _script_between("  function renewNow() {", "  function scheduleRenew() {")
+    assert renew.index("keep(result.answer);") < renew.index("writeStore(SIGNIN_KEY, {")
+    assert renew.index("writeStore(SIGNIN_KEY, {") < renew.index("whoami(false)")
+    assert "nothing answered" not in _SCRIPT
+    assert "wl.works renewed this sign-in, but this rig could not confirm it" in _SCRIPT

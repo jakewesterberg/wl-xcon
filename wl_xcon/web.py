@@ -1760,6 +1760,10 @@ _SCRIPT = """
   // The one renewal in flight, or null: every caller shares it, because a second use of
   // the same renewal token is a reuse to wl.works, which ends every sign-in of the member.
   var renewing = null;
+  // Bumped by every `forget()` and every new sign-in (`keep`): an answer that arrives
+  // after it changed belongs to a sign-in this tab no longer holds, and is dropped
+  // without being kept, stored or shown. A sign-out must stand against a renewal in flight.
+  var generation = 0;
   function applySignIn() {
     if (!signinPage) { return; }
     body.setAttribute("data-signed-in", signedIn() ? "1" : "0");
@@ -1816,6 +1820,7 @@ _SCRIPT = """
     });
   }
   function keep(answer) {
+    generation += 1;
     signin = {
       access: answer.access_token,
       refresh: answer.refresh_token || (signin && signin.refresh) || null,
@@ -1825,6 +1830,7 @@ _SCRIPT = """
     };
   }
   function forget() {
+    generation += 1;
     signin = null;
     confirmed = false;
     writeStore(SIGNIN_KEY, null);
@@ -1836,12 +1842,14 @@ _SCRIPT = """
   // just renewed is not expired), `clock` and `no_keys` keep the sign-in and say why,
   // and the rest end it.
   function whoami(mayRenew) {
+    var mine = generation;
     return fetch("/whoami", {
       method: "POST",
       cache: "no-store",
       headers: { "Content-Type": "application/json", "Authorization": "Bearer " + signin.access },
       body: "{}"
     }).then(function (response) { return response.json(); }).then(function (answer) {
+      if (mine !== generation) { return false; }
       if (answer.status === "signed_in") {
         signin.name = answer.name;
         signin.shown = answer.shown;
@@ -1881,6 +1889,7 @@ _SCRIPT = """
       tell("not signed in: this sign-in was not started from this page", "crit");
       return Promise.resolve(false);
     }
+    var mine = generation;
     return tokenRequest({
       grant_type: "authorization_code",
       code: params.get("code"),
@@ -1888,6 +1897,7 @@ _SCRIPT = """
       client_id: body.getAttribute("data-client"),
       code_verifier: kept.verifier
     }).then(function (result) {
+      if (mine !== generation) { return false; }
       if (!result.ok || !result.answer.access_token) {
         tell("not signed in: " + (result.answer.error_description || "wl.works did not sign you in"), "crit");
         return false;
@@ -1904,8 +1914,10 @@ _SCRIPT = """
     if (renewing) { return renewing; }
     renewing = renewNow().then(function (ok) { renewing = null; return ok; }, function () {
       renewing = null;
-      tell("could not renew this sign-in: nothing answered", "crit");
-      return signedIn() && signin.expires > Date.now();
+      // Only the rig's confirmation can reject here: wl.works answered, and the new pair
+      // is already stored (`renewNow`).
+      tell("wl.works renewed this sign-in, but this rig could not confirm it: reload to try again", "crit");
+      return false;
     });
     return renewing;
   }
@@ -1916,17 +1928,27 @@ _SCRIPT = """
       if (held) { tell("signed out: this sign-in has lapsed and cannot be renewed", "crit"); }
       return Promise.resolve(false);
     }
+    var mine = generation;
+    var prior = signin;
     return tokenRequest({
       grant_type: "refresh_token",
       refresh_token: signin.refresh,
       client_id: body.getAttribute("data-client")
     }).then(function (result) {
+      if (mine !== generation) { return false; }
       if (!result.ok || !result.answer.access_token) {
         forget();
         tell("signed out: " + (result.answer.error_description || "wl.works did not renew this sign-in"), "crit");
         return false;
       }
       keep(result.answer);
+      // The renewal token just presented is spent: the new pair is stored now, not once
+      // the rig has confirmed it, or a reload would present the spent one. The controls
+      // stay tied to /whoami (`confirmed`).
+      writeStore(SIGNIN_KEY, {
+        access: signin.access, refresh: signin.refresh, expires: signin.expires,
+        name: prior.name, shown: prior.shown
+      });
       return whoami(false).then(function () { return signedIn(); });
     }, function () {
       tell("could not reach wl.works to renew this sign-in", "crit");
