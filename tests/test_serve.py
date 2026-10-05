@@ -4398,7 +4398,7 @@ def test_page_e2e_no_record_in_a_session_holds_a_string_actor(tmp_path, monkeypa
 
 # --- b2b: the https listener --------------------------------------------------------
 
-def _page_served(tmp_path, hub, *, dispatch=None, issuer=None):
+def _page_served(tmp_path, hub, *, dispatch=None, issuer=None, load=True):
     """`make_handler` with a `Remote`, on a real loopback TLS socket: the rig's https
     page as a browser reaches it, with a fake wl.works behind its checker."""
     pytest.importorskip("jwt")
@@ -4412,7 +4412,8 @@ def _page_served(tmp_path, hub, *, dispatch=None, issuer=None):
     page = signin.parse_rig_page(f"rig-3=https://127.0.0.1:{port}/")
     issuer = issuer or Issuer()
     checker = signin.Checker(page=page, issuer=ISSUER, cache=tmp_path / "wl-works.json", fetch=issuer.fetch)
-    checker.load()
+    if load:
+        checker.load()
     server = _PageServer(
         ("127.0.0.1", port),
         make_handler(hub, token=TOKEN, stale_after_s=30.0, dispatch=dispatch, remote=Remote(page, checker)),
@@ -4467,6 +4468,19 @@ def test_the_https_page_is_the_sign_in_page_with_wl_works_addresses_on_its_body(
     assert f'data-client="{page.client_id}"' in body
     assert f'data-page="{page.page}"' in body and f'data-resource="{page.origin}"' in body
     assert 'data-authorize="https://' in body and 'data-token-endpoint="https://' in body
+
+
+def test_a_rig_whose_checker_never_loaded_serves_the_no_keys_page(tmp_path):
+    hub = _hub()
+    server, thread, port, _page, _issuer, context = _page_served(tmp_path, hub, load=False)
+    try:
+        body = _https(port, context, "GET", "/")[2].decode("utf-8")
+    finally:
+        _stop_page(server, thread, hub)
+    from wl_xcon import signin
+
+    assert signin.NO_KEYS in body
+    assert 'id="signin"' not in body and 'data-token-endpoint=""' in body
 
 
 def test_the_return_from_wl_works_serves_the_page_and_never_echoes_its_code(tmp_path):
@@ -5263,3 +5277,29 @@ def test_a_body_over_the_drain_limit_changes_nothing_and_the_listener_goes_on_se
         assert _https(port, context, "GET", "/")[0] == 200
     finally:
         _stop_page(server, thread, hub)
+
+
+def test_a_write_the_box_refuses_names_the_https_page_only_when_there_is_one():
+    from wl_xcon.web import CONTROLS_ELSEWHERE
+
+    answers = []
+    for https_page in (False, True):
+        server = ThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            make_handler(
+                _hub(), token=TOKEN, stale_after_s=30.0, dispatch=_Dispatch(),
+                https_page=https_page,
+            ),
+        )
+        thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
+        thread.start()
+        try:
+            port = server.server_address[1]
+            answers.append(
+                _post(port, {"kind": "stop"}, {"Origin": "http://evil.example"})[1]["said"]
+            )
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+    assert answers == [CONTROLS_AT_THE_BOX, CONTROLS_ELSEWHERE]

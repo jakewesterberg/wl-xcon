@@ -495,6 +495,8 @@ def _gate(view: View, other: str = "") -> str:
     greyed, or nothing. On the box's page, `other`. On the https page, `other`, or, when
     it has none, greyed until the script holds a sign-in (`data-signin`). Everywhere else,
     greyed saying where controls work."""
+    if other and not other.startswith(" disabled"):
+        raise ValueError("a control's own reason must grey it: it starts with ' disabled'")
     if view.can_write:
         return other
     if view.signin:
@@ -1752,13 +1754,31 @@ _SCRIPT = """
     return btoa(text).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
   }
   function random(n) { var bytes = new Uint8Array(n); crypto.getRandomValues(bytes); return b64url(bytes); }
+  // Whether /whoami has confirmed the sign-in this tab holds. A sign-in read back from
+  // sessionStorage enables nothing until it has been.
+  var confirmed = false;
+  // The one renewal in flight, or null: every caller shares it, because a second use of
+  // the same renewal token is a reuse to wl.works, which ends every sign-in of the member.
+  var renewing = null;
   function applySignIn() {
     if (!signinPage) { return; }
     body.setAttribute("data-signed-in", signedIn() ? "1" : "0");
     var member = el("member");
     if (member) { member.textContent = signedIn() ? signin.shown : ""; }
+    var usable = signedIn() && confirmed;
     Array.prototype.forEach.call(document.querySelectorAll("[data-signin]"), function (node) {
-      node.disabled = !signedIn();
+      // A reward button held until its answer stays held, signed in or not.
+      if (node.hasAttribute("data-held")) { return; }
+      node.disabled = !usable;
+      if (usable) {
+        if (node.hasAttribute("title")) {
+          node.setAttribute("data-signin-title", node.getAttribute("title"));
+          node.removeAttribute("title");
+        }
+      } else if (node.hasAttribute("data-signin-title")) {
+        node.setAttribute("title", node.getAttribute("data-signin-title"));
+        node.removeAttribute("data-signin-title");
+      }
     });
   }
   function startSignIn() {
@@ -1766,7 +1786,8 @@ _SCRIPT = """
     var state = random(16);
     crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)).then(function (digest) {
       writeStore(PKCE_KEY, { verifier: verifier, state: state });
-      var query = new URLSearchParams({
+      var url = new URL(body.getAttribute("data-authorize"));
+      var fields = {
         response_type: "code",
         client_id: body.getAttribute("data-client"),
         redirect_uri: body.getAttribute("data-page"),
@@ -1775,8 +1796,9 @@ _SCRIPT = """
         code_challenge: b64url(new Uint8Array(digest)),
         code_challenge_method: "S256",
         state: state
-      });
-      window.location.assign(body.getAttribute("data-authorize") + "?" + query.toString());
+      };
+      Object.keys(fields).forEach(function (key) { url.searchParams.set(key, fields[key]); });
+      window.location.assign(url.toString());
     });
   }
   function tokenRequest(fields) {
@@ -1804,11 +1826,16 @@ _SCRIPT = """
   }
   function forget() {
     signin = null;
+    confirmed = false;
     writeStore(SIGNIN_KEY, null);
     clearTimeout(renewTimer);
     applySignIn();
   }
-  function whoami() {
+  // /whoami with the held token. Answers true when it confirms the sign-in. A refusal
+  // is read by its reason word (the plan's Ruling 8): `expired` renews (once: a token
+  // just renewed is not expired), `clock` and `no_keys` keep the sign-in and say why,
+  // and the rest end it.
+  function whoami(mayRenew) {
     return fetch("/whoami", {
       method: "POST",
       cache: "no-store",
@@ -1818,28 +1845,41 @@ _SCRIPT = """
       if (answer.status === "signed_in") {
         signin.name = answer.name;
         signin.shown = answer.shown;
+        confirmed = true;
         writeStore(SIGNIN_KEY, signin);
         scheduleRenew();
         applySignIn();
-      } else {
-        forget();
-        tell("not signed in: " + answer.said, "crit");
+        return true;
       }
+      if (answer.reason === "expired" && mayRenew) { return renew(); }
+      if (answer.reason === "clock" || answer.reason === "no_keys") {
+        tell("signed in, but not usable now: " + answer.said, "crit");
+        applySignIn();
+        return false;
+      }
+      forget();
+      tell("not signed in: " + answer.said, "crit");
+      return false;
     });
   }
+  // Resolves true when it exchanged a code and /whoami has already run for it.
   function finishSignIn() {
     var params = new URLSearchParams(window.location.search);
-    if (!params.has("code") && !params.has("error")) { return Promise.resolve(); }
+    if (!params.has("code") && !params.has("error")) { return Promise.resolve(false); }
     window.history.replaceState(null, "", window.location.pathname);
     var kept = readStore(PKCE_KEY);
     writeStore(PKCE_KEY, null);
     if (params.has("error")) {
       tell("not signed in: " + (params.get("error_description") || params.get("error")), "crit");
-      return Promise.resolve();
+      return Promise.resolve(false);
+    }
+    if (!body.getAttribute("data-token-endpoint")) {
+      tell(el("mode") ? el("mode").textContent : "not signed in: this rig cannot check sign-ins", "crit");
+      return Promise.resolve(false);
     }
     if (!kept || kept.state !== params.get("state")) {
       tell("not signed in: this sign-in was not started from this page", "crit");
-      return Promise.resolve();
+      return Promise.resolve(false);
     }
     return tokenRequest({
       grant_type: "authorization_code",
@@ -1850,14 +1890,32 @@ _SCRIPT = """
     }).then(function (result) {
       if (!result.ok || !result.answer.access_token) {
         tell("not signed in: " + (result.answer.error_description || "wl.works did not sign you in"), "crit");
-        return;
+        return false;
       }
       keep(result.answer);
-      return whoami();
+      return whoami(false).then(function () { return true; });
+    }, function () {
+      tell("not signed in: could not reach wl.works to finish signing in", "crit");
+      return false;
     });
   }
+  // Every caller shares the one renewal in flight (`renewing`). Never rejects.
   function renew() {
-    if (!signin || !signin.refresh) { forget(); return Promise.resolve(false); }
+    if (renewing) { return renewing; }
+    renewing = renewNow().then(function (ok) { renewing = null; return ok; }, function () {
+      renewing = null;
+      tell("could not renew this sign-in: nothing answered", "crit");
+      return signedIn() && signin.expires > Date.now();
+    });
+    return renewing;
+  }
+  function renewNow() {
+    if (!signin || !signin.refresh) {
+      var held = !!signin;
+      forget();
+      if (held) { tell("signed out: this sign-in has lapsed and cannot be renewed", "crit"); }
+      return Promise.resolve(false);
+    }
     return tokenRequest({
       grant_type: "refresh_token",
       refresh_token: signin.refresh,
@@ -1869,7 +1927,7 @@ _SCRIPT = """
         return false;
       }
       keep(result.answer);
-      return whoami().then(function () { return signedIn(); });
+      return whoami(false).then(function () { return signedIn(); });
     }, function () {
       tell("could not reach wl.works to renew this sign-in", "crit");
       return signedIn() && signin.expires > Date.now();
@@ -1965,15 +2023,17 @@ _SCRIPT = """
     var chosen = node && node.tagName === "SELECT" ? node.value : null;
     if (node) { node.innerHTML = html; }
     if (chosen !== null) { choose(node, chosen); }
+    // Before the hooks: `holdReward` must see a button as the sign-in leaves it.
+    applySignIn();
     if (id === "controls") { holdReward(); }
     if (id === "preflight") { restoreAcks(); }
     if (id === "end-actions") { settleOpen(); }
-    applySignIn();
   }
   function release() {
     if (heldParams !== null && !busy()) {
       el("params").innerHTML = heldParams;
       heldParams = null;
+      applySignIn();
     }
   }
   function choose(select, value) {
@@ -2058,6 +2118,9 @@ _SCRIPT = """
       fresh().then(function (ok) {
         if (!ok) { tell("not sent: sign in with wl.works to use the controls", "crit"); done(); return; }
         deliver(command, { "Authorization": "Bearer " + signin.access }, then, done);
+      }, function () {
+        tell("not sent: this sign-in could not be renewed", "crit");
+        done();
       });
       return;
     }
@@ -2085,7 +2148,11 @@ _SCRIPT = """
     }).then(function (answer) {
       tell(answer.said, answer.status === "sent" || answer.status === "signaled" ? "ok" : "crit");
       // A refusal for the token (the plan's Ruling 8): never re-sent; renew, or sign out.
-      if (answer.reason === "expired") { renew(); }
+      if (answer.reason === "expired") {
+        renew().then(function (ok) {
+          if (ok) { tell("this sign-in was renewed; the command was not sent: send it again", "ok"); }
+        });
+      }
       else if (answer.reason === "signed_out" || answer.reason === "other_rig" ||
                answer.reason === "not_accepted" || answer.reason === "no_token") { forget(); }
       if (then) { then(answer); }
@@ -2172,6 +2239,7 @@ _SCRIPT = """
       rewarding = false;
       var held = el("controls").querySelector('[data-cmd="reward"][data-held]');
       if (held) { held.removeAttribute("data-held"); held.disabled = false; }
+      applySignIn();
     });
   }
   // P4d-2b b3a-2 (spec §6.2): a run, a session and the two marks, from the page. Every
@@ -2404,9 +2472,13 @@ _SCRIPT = """
       if (!document.hidden && signin && signin.expires - Date.now() < RENEW_BEFORE_MS) { renew(); }
     });
     applySignIn();
-    finishSignIn().then(function () {
-      if (signin && signin.access && !signin.name) { return whoami(); }
-      if (signedIn()) { return whoami(); }
+    finishSignIn().then(function (exchanged) {
+      if (exchanged || !signin) { return; }
+      // A tab reloaded after its hour renews first; the stored token is not asked about.
+      if (signin.expires - Date.now() < FRESH_FOR_MS) { return renew(); }
+      return whoami(true);
+    }).catch(function () {
+      tell("could not reach this rig to confirm the sign-in", "crit");
     }).then(applySignIn);
   }
   showName();

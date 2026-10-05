@@ -1188,9 +1188,8 @@ def make_handler(
                     return
                 member = accepted.member
             if self._remote is None and not self._from_the_box():
-                self._send_json(
-                    403, {"status": "refused", "said": _web.CONTROLS_AT_THE_BOX}
-                )
+                said = _web.CONTROLS_ELSEWHERE if self._https_page else _web.CONTROLS_AT_THE_BOX
+                self._send_json(403, {"status": "refused", "said": said})
                 return
             length = self.headers.get("Content-Length") or ""
             if not length.isascii() or not length.isdecimal():

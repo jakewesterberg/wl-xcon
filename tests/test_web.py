@@ -817,8 +817,8 @@ def test_the_right_column_is_honest_placeholders():
 
 def test_the_page_writes_only_by_posting_json_to_commands():
     """Spec §4.2, as amended by §5.2: the page's writes are the controls, and every
-    one goes through the script's one `fetch` -- a JSON `POST` to `/commands` -- and
-    never a form (the Content-Security-Policy's `form-action 'none'` refuses one
+    one goes through the script's one command `fetch` (`deliver`) -- a JSON `POST` to
+    `/commands`; the other three are the sign-in's -- and never a form (the Content-Security-Policy's `form-action 'none'` refuses one
     anyway). Its radio inputs still only choose a tab."""
     document = _document()
 
@@ -1246,8 +1246,8 @@ def test_the_script_pins_the_box_only_write_guard():
     refuses to send anything when it says this page may not write, before it does
     anything else. Welfare-critical review round 1 (2026-09-28): a plain `in`
     passed with the guard moved below `tell("sending...")`, so this pins its
-    position again -- the guard is the first thing `post` does, right after `done`
-    is resolved."""
+    position again. Since b2b the https page's branch comes first and returns on its own;
+    the box's guard follows it, still before anything asks a name or sends."""
     assert 'var canWrite = body.getAttribute("data-can-write") === "1";' in _SCRIPT
     post_body = re.search(
         r"function post\(command, then, after\) \{(.*?)\n  \}", _SCRIPT, re.S
@@ -2432,3 +2432,71 @@ def test_the_sign_in_script_uses_pkce_and_keeps_its_tokens_in_session_storage_on
     # The authorization code leaves the address bar before anything else is done with it.
     assert _SCRIPT.index("history.replaceState") < _SCRIPT.index("tokenRequest({")
     assert "document.cookie" not in _SCRIPT
+
+
+# --- Task 10 fix round 1: the script's structure, pinned as the file's other script tests do
+
+
+def _script_between(start: str, end: str) -> str:
+    return _SCRIPT.split(start, 1)[1].split(end, 1)[0]
+
+
+def test_every_renewal_is_the_one_in_flight_so_a_token_is_never_presented_twice():
+    renew = _script_between("  function renew() {", "  function renewNow() {")
+    assert "var renewing = null;" in _SCRIPT
+    assert "if (renewing) { return renewing; }" in renew
+    assert "renewing = renewNow()" in renew and "renewing = null;" in renew
+    # Only `renew` starts a renewal; every caller goes through it.
+    assert _SCRIPT.count("renewNow()") == 2  # its call and its definition
+    assert _SCRIPT.count('grant_type: "refresh_token"') == 1
+
+
+def test_a_held_reward_stays_held_through_a_sign_in_state_change():
+    applied = _script_between("  function applySignIn() {", "  function startSignIn() {")
+    assert 'if (node.hasAttribute("data-held")) { return; }' in applied
+    assert applied.index("data-held") < applied.index("node.disabled")
+    swap = _script_between("  function swap(id, html) {", "  function release() {")
+    assert swap.index("applySignIn();") < swap.index("holdReward();")
+    # The held button is released through `applySignIn`, which disables it if signed out.
+    released = _script_between("  function reward() {", "  // P4d-2b b3a-2 (spec §6.2): a run")
+    assert released.index("held.disabled = false;") < released.index("applySignIn();")
+    assert "applySignIn();" in _script_between("  function release() {", "  function choose(")
+
+
+def test_a_lapsed_tab_renews_on_load_and_whoami_reads_the_reason_word():
+    init = _SCRIPT.split('if (el("signin")) {', 1)[1]
+    assert "signin.expires - Date.now() < FRESH_FOR_MS) { return renew(); }" in init
+    assert init.index("return renew();") < init.index("return whoami(true);")
+    who = _script_between("  function whoami(mayRenew) {", "  // Resolves true when it exchanged")
+    assert 'answer.reason === "expired" && mayRenew' in who
+    assert 'answer.reason === "clock" || answer.reason === "no_keys"' in who
+    assert who.index('"clock"') < who.index("forget();")
+    # After a renewal the new token is not asked to renew again.
+    assert _SCRIPT.count("whoami(false)") == 2 and _SCRIPT.count("whoami(true)") == 1
+
+
+def test_the_script_says_what_failed_and_does_not_fetch_a_missing_endpoint():
+    post = _script_between("  function post(command, then, after) {", "  function deliver(")
+    assert "this sign-in could not be renewed" in post and "done();" in post
+    finish = _script_between("  function finishSignIn() {", "  // Every caller shares")
+    assert finish.index('data-token-endpoint")) {') < finish.index("tokenRequest({")
+    assert "could not reach wl.works to finish signing in" in finish
+    assert "new URL(body.getAttribute(\"data-authorize\"))" in _SCRIPT
+    assert "searchParams.set" in _SCRIPT
+    assert "this sign-in was renewed; the command was not sent" in _SCRIPT
+    applied = _script_between("  function applySignIn() {", "  function startSignIn() {")
+    assert 'removeAttribute("title")' in applied and 'setAttribute("title"' in applied
+    assert "var usable = signedIn() && confirmed;" in applied
+
+
+def test_a_command_is_delivered_only_where_it_is_today():
+    # `deliver` is its definition and two call sites (the https page's, the box's); a
+    # renew-then-resend would add a third, and has to be argued for.
+    assert _SCRIPT.count("deliver(") == 3
+
+
+def test_a_control_with_its_own_reason_must_be_a_greying_one():
+    with pytest.raises(ValueError):
+        _gate(_https_view(), ' title="only a title"')
+    with pytest.raises(ValueError):
+        _gate(view(), "x")
