@@ -71,7 +71,7 @@ from wl_xcon import health as _health
 from wl_xcon import link as _link
 from wl_xcon import web as _web
 from wl_xcon import welfare as _welfare
-from wl_xcon.actor import Actor, Box
+from wl_xcon.actor import Actor, Box, Member
 
 if TYPE_CHECKING:  # `signin` imports `jwt`; `serve` must import without it.
     from wl_xcon import signin as _signin
@@ -318,6 +318,10 @@ _FONTS = {f"/fonts/{font.file}": font for font in _web.FONTS}
 # listener (b2b spec §3). Task 9 of the b2b plan routes them on https.
 _ROUTES = frozenset({"/", "/events", "/health", "/commands", *_FONTS})
 #: What a command carrying a token to the plain-http listener is told (b2b spec §3).
+#: What the https page hears for a write that did not come from its own page, and for a
+#: sign-out (b2b spec §3, §4).
+FROM_THE_PAGE = "a command must come from this rig's page"
+SIGNED_OUT_HERE = "signed out at this rig"
 TOKEN_OVER_HTTP = "sign-in works only on the rig's https page"
 _UNAUTHORIZED = {"error": "unauthorized"}
 #: What a request whose `Host` does not name this console is answered (P4d-2b spec
@@ -592,7 +596,7 @@ def _person(by: object) -> Box:
     return Box(by.strip())
 
 
-def parse_command(data: object):
+def parse_command(data: object, actor: Member | None = None):
     """One `POST /commands` body -- a JSON object with a `kind` and the person's
     name, `by` -- as what `Server.dispatch` sends: a `link` command, a `MarkSignal`
     or a `MarkNote`. **Validated before anything is queued** (spec §5.3), with the
@@ -601,7 +605,10 @@ def parse_command(data: object):
     and the rig never sees what it would refuse on type. Raises `BadCommand`.
 
     A field a kind does not take is refused, not ignored: a page that sent one has a
-    bug a person should see."""
+    bug a person should see.
+
+    **From a signed-in page (b2b spec §3)** `actor` is the member `signin` named, and
+    the body carries no `by`: who sent it is the sign-in's, never what a page wrote."""
     if not isinstance(data, dict):
         raise BadCommand("a command is one JSON object")
     kind = data.get("kind")
@@ -611,8 +618,17 @@ def parse_command(data: object):
     # that membership test ever runs.
     if not isinstance(kind, str) or kind not in _SHAPES:
         raise BadCommand(f"{kind!r} is not a command this console sends")
-    by = _person(data.get("by"))
-    extra = set(data) - {"kind", "by"} - _SHAPES[kind]
+    if actor is None:
+        by = _person(data.get("by"))
+        allowed = {"kind", "by"}
+    else:
+        if "by" in data:
+            raise BadCommand(
+                "a command from a signed-in page takes no by; who sent it is the sign-in's"
+            )
+        by = actor
+        allowed = {"kind"}
+    extra = set(data) - allowed - _SHAPES[kind]
     if extra:
         raise BadCommand(f"a {kind} command takes no {', '.join(sorted(extra))}")
     if kind in _SERVICE_KINDS:
@@ -1065,50 +1081,115 @@ def make_handler(
             if not self._host_ok():
                 self._send_json(421, _MISDIRECTED)
                 return
-            if self.path != "/commands":
+            if self.path == "/commands":
+                self._command()
+            elif self._remote is not None and self.path in ("/whoami", "/signout"):
+                self._account(self.path)
+            else:
                 self._refuse_method()
+
+        def _from_the_page(self) -> bool:
+            """The https page's write checks before the token's (b2b spec §3): `Origin` is
+            exactly the page's origin, and `Content-Type: application/json`."""
+            origin = (self.headers.get("Origin") or "").strip().lower()
+            content = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            return origin == self._remote.page.origin and content == "application/json"
+
+        def _signed_in(self):
+            """The `signin.Accepted` this request's token names, or `None` after answering
+            its 401 (the body read first, so the client can read the answer). The token
+            is never written to the answer or the log."""
+            from wl_xcon import signin  # loaded already: a `Remote` exists
+
+            try:
+                return self._remote.checker.check(self.headers.get("Authorization"))
+            except signin.Refused as refused:
+                self._refuse_after_reading(
+                    401, {"status": "refused", "reason": refused.reason, "said": refused.said}
+                )
+                return None
+
+        def _discard_body(self) -> bool:
+            """Read and drop a request's body of at most `BODY_LIMIT` bytes, so a keep-alive
+            connection stays in step. `False` after answering a body it would not take."""
+            length = self.headers.get("Content-Length") or ""
+            if not length.isascii() or not length.isdecimal():
+                self._refuse_after_reading(
+                    400, {"status": "refused", "said": "a request needs a Content-Length"}
+                )
+                return False
+            if int(length) > BODY_LIMIT:
+                self._refuse_after_reading(
+                    413, {"status": "refused", "said": f"a request is at most {BODY_LIMIT} bytes"}
+                )
+                return False
+            self.rfile.read(int(length))
+            return True
+
+        def _account(self, path: str) -> None:
+            """`POST /whoami` and `POST /signout` on the https page (b2b spec §4)."""
+            if not self._from_the_page():
+                self._refuse_after_reading(403, {"status": "refused", "said": FROM_THE_PAGE})
                 return
-            self._command()
+            if path == "/signout":
+                if self._discard_body():
+                    self._remote.checker.sign_out(self.headers.get("Authorization"))
+                    self._send_json(200, {"status": "signed_out", "said": SIGNED_OUT_HERE})
+                return
+            accepted = self._signed_in()
+            if accepted is None or not self._discard_body():
+                return
+            self._send_json(
+                200,
+                {
+                    "status": "signed_in",
+                    "name": accepted.member.name,
+                    "shown": str(accepted.member),
+                    "expires_at": accepted.expires_at,
+                },
+            )
 
         def _command(self) -> None:
-            """`POST /commands` (spec §5.3): one JSON command, from the box, checked
-            and validated before anything is queued, then sent and answered *sent*,
-            *not delivered* or *busy*.
+            """`POST /commands` (spec §5.3): one JSON command, checked and validated before
+            anything is queued, then sent and answered *sent*, *not delivered* or *busy*.
 
             **A token never reaches the box's checks** (b2b spec §3): on the plain-http
-            listener a request carrying `Authorization` is refused first of all. On
-            the https listener every command is refused until sign-in checking is wired
-            (Task 9 of the b2b plan)."""
+            listener a request carrying `Authorization` is refused first of all. On the
+            https listener the command is the signed-in member's: the page's `Origin` and
+            `Content-Type`, then the token, then the body, which takes no `by`. Every https
+            refusal before the body is read reads it first (`_refuse_after_reading`)."""
             if self._remote is None and self.headers.get("Authorization") is not None:
                 self._send_json(403, {"status": "refused", "said": TOKEN_OVER_HTTP})
                 return
+            member = None
+            early = self._send_json
             if self._remote is not None:
-                from wl_xcon import signin  # loaded already: a `Remote` exists
-
-                self._refuse_after_reading(
-                    403, {"status": "refused", "said": signin.NO_TOKEN}
-                )
-                return
-            if not self._from_the_box():
+                early = self._refuse_after_reading
+                if not self._from_the_page():
+                    early(403, {"status": "refused", "said": FROM_THE_PAGE})
+                    return
+                accepted = self._signed_in()
+                if accepted is None:
+                    return
+                member = accepted.member
+            if self._remote is None and not self._from_the_box():
                 self._send_json(
                     403, {"status": "refused", "said": _web.CONTROLS_AT_THE_BOX}
                 )
                 return
             length = self.headers.get("Content-Length") or ""
             if not length.isascii() or not length.isdecimal():
-                self._send_json(
-                    400, {"status": "refused", "said": "a command needs a Content-Length"}
-                )
+                early(400, {"status": "refused", "said": "a command needs a Content-Length"})
                 return
             if int(length) > BODY_LIMIT:
-                self._send_json(
+                early(
                     413,
                     {"status": "refused", "said": f"a command is at most {BODY_LIMIT} bytes"},
                 )
                 return
             try:
                 data = json.loads(self.rfile.read(int(length)).decode("utf-8"))
-                request = parse_command(data)
+                request = parse_command(data, actor=member)
             except (UnicodeDecodeError, ValueError) as exc:
                 # `BadCommand` is a `ValueError`, and so is `json`'s own error.
                 said = str(exc) if isinstance(exc, BadCommand) else "a command is one JSON object"

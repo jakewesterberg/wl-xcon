@@ -4565,21 +4565,343 @@ def test_whoami_and_signout_do_not_exist_on_the_http_listener(method, path):
         assert _request(port, method, path)[0] == 404
 
 
-def test_the_https_listener_refuses_a_command_until_sign_in_checking_is_wired(tmp_path):
-    seen: list = []
+class _Header(str):
+    """An `Authorization` value that prints as `'Bearer <token>'`, so a pytest traceback
+    (locals, arguments, `-vv`) never shows a token (`tests/test_signin.py`'s `_Header`)."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "'Bearer <token>'"
+
+
+def _bearer(token: str) -> str:
+    __tracebackhide__ = True
+    return _Header(f"Bearer {token}")
+
+
+def _from_page(port, context, page, path, body=None, token=None, *, headers=None, raw=None):
+    """One POST as the https page sends it: its own `Origin`, JSON, and a Bearer token
+    unless `token` is `None`. Returns `(status, parsed body)`, after asserting that the
+    answer never holds the token -- with a message that does not echo the body."""
+    __tracebackhide__ = True
+    sent = {"Origin": page.origin, "Content-Type": "application/json"}
+    if token is not None:
+        sent["Authorization"] = _bearer(token)
+    sent.update(headers or {})
+    sent = {name: value for name, value in sent.items() if value is not None}
+    payload = raw if raw is not None else json.dumps({} if body is None else body).encode("utf-8")
+    status, answer_headers, answer = _https(port, context, "POST", path, sent, payload)
+    if token is not None:
+        assert token.encode() not in answer, "an answer carried the token"
+        assert token not in repr(answer_headers), "an answer's headers carried the token"
+    return status, json.loads(answer)
+
+
+def test_a_pause_with_a_good_token_is_dispatched_as_the_member_the_token_names(tmp_path):
+    from _issuer import ISSUER
+    from wl_xcon.actor import Member
+
+    dispatch = _Dispatch()
     hub = _hub()
-    server, thread, port, _page, _issuer, context = _page_served(
-        tmp_path, hub, dispatch=lambda request: seen.append(request) or (200, {})
-    )
+    server, thread, port, page, issuer, context = _page_served(tmp_path, hub, dispatch=dispatch)
+    token = issuer.mint(aud=page.origin, jti="jti-1")
     try:
-        status, _headers, body = _https(
-            port, context, "POST", "/commands", {"Content-Type": "application/json"},
-            json.dumps({"kind": "pause", "by": "jake"}).encode("utf-8"),
-        )
+        status, answer = _from_page(port, context, page, "/commands", {"kind": "pause"}, token)
     finally:
         _stop_page(server, thread, hub)
-    assert status == 403 and "sign in with wl.works" in json.loads(body)["said"]
-    assert seen == []
+    assert (status, answer["status"]) == (200, "sent")
+    assert dispatch.seen == [Pause(by=Member("Jake Westerberg", "user-1", ISSUER, "jti-1"))]
+
+
+def _refusals(issuer, page):
+    """The tokens a rig refuses, as `(label, token or None, reason)`."""
+    return [
+        ("no token", None, "no_token"),
+        ("expired", issuer.mint(aud=page.origin, exp_in=-3600, iat_in=-7200), "expired"),
+        ("another rig", issuer.mint(aud="https://rig-9.wl.works"), "other_rig"),
+    ]
+
+
+@pytest.mark.parametrize("which", ["no token", "expired", "another rig", "signed out"])
+@pytest.mark.parametrize("path", ["/commands", "/whoami"])
+def test_a_refused_token_answers_401_with_its_reason_and_dispatches_nothing(tmp_path, which, path):
+    dispatch = _Dispatch()
+    hub = _hub()
+    server, thread, port, page, issuer, context = _page_served(tmp_path, hub, dispatch=dispatch)
+    try:
+        if which == "signed out":
+            token = issuer.mint(aud=page.origin)
+            assert _from_page(port, context, page, "/signout", None, token)[0] == 200
+            reason = "signed_out"
+        else:
+            (token, reason), = [(t, r) for label, t, r in _refusals(issuer, page) if label == which]
+        status, answer = _from_page(port, context, page, path, {"kind": "pause"}, token)
+    finally:
+        _stop_page(server, thread, hub)
+    assert status == 401
+    assert (answer["status"], answer["reason"]) == ("refused", reason)
+    assert answer["said"]
+    assert dispatch.seen == []
+
+
+def test_a_body_by_beside_a_good_token_is_refused_and_dispatches_nothing(tmp_path):
+    """Review Focus 3: who sent a command from the page is the sign-in's, never its body's."""
+    dispatch = _Dispatch()
+    hub = _hub()
+    server, thread, port, page, issuer, context = _page_served(tmp_path, hub, dispatch=dispatch)
+    token = issuer.mint(aud=page.origin)
+    try:
+        status, answer = _from_page(port, context, page, "/commands", {"kind": "pause", "by": "jake"}, token)
+    finally:
+        _stop_page(server, thread, hub)
+    assert status == 400
+    assert answer["said"] == (
+        "not sent: a command from a signed-in page takes no by; who sent it is the sign-in's"
+    )
+    assert dispatch.seen == []
+
+
+def test_a_box_command_with_no_token_on_https_is_refused_and_dispatches_nothing(tmp_path):
+    """Review Focus 3: the box's own form -- a typed `by`, no token -- is not accepted here."""
+    dispatch = _Dispatch()
+    hub = _hub()
+    server, thread, port, page, _issuer, context = _page_served(tmp_path, hub, dispatch=dispatch)
+    try:
+        status, answer = _from_page(port, context, page, "/commands", {"kind": "pause", "by": "jake"})
+    finally:
+        _stop_page(server, thread, hub)
+    assert (status, answer["reason"]) == (401, "no_token")
+    assert dispatch.seen == []
+
+
+@pytest.mark.parametrize("path", ["/commands", "/whoami", "/signout"])
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Origin": "https://evil.example"},
+        {"Origin": None},
+        {"Content-Type": None},
+        {"Content-Type": "text/plain"},
+    ],
+    ids=["foreign origin", "no origin", "no content type", "plain text"],
+)
+def test_a_write_not_from_the_rigs_page_is_refused_403_and_dispatches_nothing(tmp_path, path, headers):
+    dispatch = _Dispatch()
+    hub = _hub()
+    server, thread, port, page, issuer, context = _page_served(tmp_path, hub, dispatch=dispatch)
+    token = issuer.mint(aud=page.origin)
+    try:
+        status, answer = _from_page(port, context, page, path, {"kind": "pause"}, token, headers=headers)
+        # The control: the same write from the page is accepted.
+        accepted = _from_page(port, context, page, path, {"kind": "pause"}, token)[0]
+    finally:
+        _stop_page(server, thread, hub)
+    assert (status, answer["status"]) == (403, "refused")
+    assert accepted == 200
+    assert len(dispatch.seen) == (1 if path == "/commands" else 0)
+
+
+def test_whoami_names_the_member_and_an_expired_token_is_refused(tmp_path):
+    hub = _hub()
+    server, thread, port, page, issuer, context = _page_served(tmp_path, hub)
+    good = issuer.mint(aud=page.origin)
+    old = issuer.mint(aud=page.origin, exp_in=-3600, iat_in=-7200)
+    try:
+        status, answer = _from_page(port, context, page, "/whoami", None, good)
+        expired = _from_page(port, context, page, "/whoami", None, old)
+    finally:
+        _stop_page(server, thread, hub)
+    assert status == 200
+    assert (answer["status"], answer["name"], answer["shown"]) == (
+        "signed_in", "Jake Westerberg", "Jake Westerberg (wl.works)",
+    )
+    assert isinstance(answer["expires_at"], float) and answer["expires_at"] > time.time()
+    assert expired[0] == 401 and expired[1]["reason"] == "expired"
+
+
+@pytest.mark.parametrize("token_kind", ["good", "none", "junk"])
+def test_signout_answers_200_whatever_the_token_and_then_the_token_is_signed_out(tmp_path, token_kind):
+    hub = _hub()
+    server, thread, port, page, issuer, context = _page_served(tmp_path, hub)
+    good = issuer.mint(aud=page.origin)
+    token = {"good": good, "none": None, "junk": "junk"}[token_kind]
+    try:
+        status, answer = _from_page(port, context, page, "/signout", None, token)
+        after = _from_page(port, context, page, "/whoami", None, good)
+    finally:
+        _stop_page(server, thread, hub)
+    assert (status, answer) == (200, {"status": "signed_out", "said": "signed out at this rig"})
+    if token_kind == "good":
+        assert after[0] == 401 and after[1]["reason"] == "signed_out"
+    else:
+        assert after[0] == 200, "a sign-out that names no good token signs nobody out"
+
+
+def test_a_keep_alive_connection_stays_in_step_across_whoami_and_signout(tmp_path):
+    hub = _hub()
+    server, thread, port, page, issuer, context = _page_served(tmp_path, hub)
+    token = issuer.mint(aud=page.origin)
+    connection = http.client.HTTPSConnection("127.0.0.1", port, timeout=5, context=context)
+    try:
+        statuses = []
+        for path in ("/whoami", "/whoami", "/signout"):
+            body = b'{"padding": "' + b"x" * 50 + b'"}'
+            connection.putrequest("POST", path, skip_host=True)
+            for name, value in {
+                "Host": f"127.0.0.1:{port}", "Origin": page.origin,
+                "Content-Type": "application/json", "Authorization": _bearer(token),
+            }.items():
+                connection.putheader(name, value)
+            connection.putheader("Content-Length", str(len(body)))
+            connection.endheaders(body)
+            response = connection.getresponse()
+            response.read()
+            statuses.append(response.status)
+    finally:
+        connection.close()
+        _stop_page(server, thread, hub)
+    assert statuses == [200, 200, 200]
+
+
+@contextmanager
+def _remote_console(tmp_path, taskd, capfd=None):
+    """A second `wlx serve` on `taskd`'s session -- a second console is ordinary: the REP
+    socket answers each REQ peer in turn -- with an https listener and a fake wl.works
+    behind its checker, as `_page_served` builds one. Yields `(port, context, page, issuer)`
+    and closes the server, on failure too."""
+    pytest.importorskip("jwt")
+    from _issuer import ISSUER, Issuer
+    from _tls import client_context, material
+    from wl_xcon import signin
+    from wl_xcon.serve import Remote, tls_context
+
+    tls = material(tmp_path)
+    port = int(free_endpoints(1)[0].rsplit(":", 1)[1])
+    page = signin.parse_rig_page(f"rig-3=https://127.0.0.1:{port}/")
+    issuer = Issuer()
+    checker = signin.Checker(page=page, issuer=ISSUER, cache=tmp_path / "wl-works.json", fetch=issuer.fetch)
+    checker.load()
+    server = Server(
+        sub=taskd.pub, req=taskd.rep, mark=taskd.mark, http=("127.0.0.1", 0), token=TOKEN,
+        https=("127.0.0.1", port), tls=tls_context(tls["cert"], tls["key"]),
+        remote=Remote(page, checker),
+    )
+    server.start()
+    try:
+        yield port, client_context(tls["ca"]), page, issuer
+    finally:
+        server.close()
+
+
+def _every_by(folder):
+    """Each `by` and `acknowledged_by` in a session folder's `*.jsonl` files, as
+    `(file, key, value)`, the preflight rows' own `acknowledged_by` included."""
+    found = []
+    for path in sorted(folder.rglob("*.jsonl")):
+        for line in path.read_text().splitlines():
+            row = json.loads(line)
+            for key in ("by", "acknowledged_by"):
+                if key in row:
+                    found.append((path.name, key, row[key]))
+            for item in row.get("preflight") or ():
+                if "acknowledged_by" in item:
+                    found.append((path.name, "acknowledged_by", item["acknowledged_by"]))
+    return found
+
+
+def test_page_e2e_a_signed_in_member_runs_a_session_and_the_token_is_written_nowhere(
+    tmp_path, monkeypatch, zmq_cleanup, capfd
+):
+    """Review Focus 4, the path proved: through the https page and a member's token, open a
+    session, run, pause, change a setting, give a hand reward, mark with a note, schedule a
+    stop, resume and end it. Every row the page's commands wrote names the member; no file in
+    the session folder holds the token; and `wlx serve`'s stderr holds neither the token nor
+    the code a return from wl.works carries."""
+    from _issuer import ISSUER
+
+    with _Taskd(tmp_path, monkeypatch, zmq_cleanup) as taskd:
+        with _remote_console(tmp_path, taskd) as (port, context, page, issuer):
+            token = issuer.mint(aud=page.origin, jti="jti-e2e")
+
+            def post(body):
+                __tracebackhide__ = True
+                return _from_page(port, context, page, "/commands", body, token)
+
+            # The page is loaded as wl.works returns to it, with its code in the query.
+            assert _https(port, context, "GET", "/?code=THECODE&state=S")[0] == 200
+            assert post(_open_body(departure=_typed()))[0] == 200
+            taskd.seen(_between)
+            assert post({"kind": "check", "task": TASK, "values": {}})[0] == 200
+            taskd.seen(lambda f: _between(f) and f.preflight is not None)
+            assert post(_start_body(trials=300))[0] == 200
+            taskd.seen(lambda f: isinstance(f, Telemetry) and f.phase == "running" and f.trial_index >= 2)
+            status, signal = post({"kind": "mark", "pressed_at": time.time()})
+            assert (status, signal["status"]) == (200, "signaled")
+            assert post({"kind": "pause"})[0] == 200
+            taskd.seen(lambda f: isinstance(f, Telemetry) and f.paused_at is not None)
+            assert post({"kind": "set", "name": "reward_correct", "value": 0.1})[0] == 200
+            assert post({"kind": "reward"})[0] == 200
+            assert post({"kind": "note", "mark": signal["mark"], "note": "sneeze"})[0] == 200
+            assert post({"kind": "schedule", "trials": 2})[0] == 200
+            taskd.seen(lambda f: isinstance(f, Telemetry) and f.scheduled_stop is not None)
+            assert post({"kind": "resume"})[0] == 200
+            taskd.seen(lambda f: _between(f) and f.run_index == 0)
+            assert post(_end_body())[0] == 200
+            taskd.seen(lambda f: isinstance(f, Idle))
+
+    member = {"kind": "member", "name": "Jake Westerberg", "account": "user-1", "issuer": ISSUER, "token_id": "jti-e2e"}
+    folder = taskd.folders[2] / "2027-01-14_01"
+    found = _every_by(folder)
+    named = [(name, key) for name, key, value in found if value == member]
+    assert {name for name, _key in named} >= {"controls.jsonl", "runs.jsonl", "welfare_notes.jsonl"}
+    assert ("runs.jsonl", "acknowledged_by") in named
+    assert [item for item in found if item[2] not in (member, None)] == [], "every other by is nobody's"
+    controls = _record(taskd.folders[2], "controls.jsonl")
+    assert {"reward", "mark", "pause", "note", "resume", "schedule"} <= {row["kind"] for row in controls}
+    # A mark's stamp is `by: null` (its sender arrives with its note, Ruling 4); the rest are the member's.
+    assert [row["kind"] for row in controls if row["by"] != member] == ["mark"]
+    (departure,) = [row for row in _record(taskd.folders[2], "welfare_notes.jsonl") if row["kind"] == "departure"]
+    assert departure["by"] == member
+    for path in sorted(folder.rglob("*")):
+        if path.is_file():
+            text = path.read_text(errors="replace")
+            assert token not in text, f"{path.name} holds the token"
+            assert "THECODE" not in text, f"{path.name} holds the code"
+    logged = capfd.readouterr().err
+    assert token not in logged and "THECODE" not in logged
+
+
+def test_page_e2e_a_stranded_session_resumed_from_the_page_is_the_members(
+    tmp_path, monkeypatch, zmq_cleanup
+):
+    """b2b spec §8: a crash strands the session; a member's resume through the https page
+    writes its `session resumed` row under the member's map."""
+    from _issuer import ISSUER
+
+    folders = _service_folders(tmp_path, EIGHT_HOURS, ("B", "REFERENCE"))
+    with _Taskd(tmp_path, monkeypatch, zmq_cleanup, folders=folders) as first:
+        first.post(_open_body())
+        first.seen(_between)
+        first.crash = True
+
+    with _Taskd(tmp_path, monkeypatch, zmq_cleanup, folders=folders) as second:
+        second.seen(lambda f: isinstance(f, Idle) and f.stranded)
+        with _remote_console(tmp_path, second) as (port, context, page, issuer):
+            token = issuer.mint(aud=page.origin, jti="jti-resume")
+            status, _answer = _from_page(
+                port, context, page, "/commands",
+                {"kind": "resume_session", "session_id": "2027-01-14_01"}, token,
+            )
+            assert status == 200
+            second.seen(lambda f: _between(f) and f.session_id == "2027-01-14_01")
+            assert _from_page(port, context, page, "/commands", _end_body(), token)[0] == 200
+            second.seen(lambda f: isinstance(f, Idle))
+
+    member = {"kind": "member", "name": "Jake Westerberg", "account": "user-1", "issuer": ISSUER, "token_id": "jti-resume"}
+    (resumed,) = [r for r in _record(folders[2], "welfare_notes.jsonl") if r["kind"] == "session resumed"]
+    assert resumed["by"] == member
+    assert token not in (folders[2] / "2027-01-14_01" / "xcon" / "welfare_notes.jsonl").read_text()
 
 
 _SIX = (
@@ -4650,14 +4972,20 @@ def test_a_tls_key_that_is_not_a_key_is_refused_without_its_contents_or_path(tmp
 @pytest.mark.parametrize("size", [2, 10_000, 60_000])
 def test_a_large_post_to_the_https_listener_still_reads_its_refusal(tmp_path, size):
     hub = _hub()
-    server, thread, port, _page, _issuer, context = _page_served(tmp_path, hub)
+    server, thread, port, page, _issuer, context = _page_served(tmp_path, hub)
     try:
         status, _headers, body = _https(
-            port, context, "POST", "/commands", {"Content-Type": "application/json"}, b"x" * size
+            port, context, "POST", "/commands",
+            {"Content-Type": "application/json", "Origin": page.origin}, b"x" * size,
+        )
+        foreign = _https(
+            port, context, "POST", "/commands",
+            {"Content-Type": "application/json", "Origin": "https://evil.example"}, b"x" * size,
         )
     finally:
         _stop_page(server, thread, hub)
-    assert status == 403 and "sign in with wl.works" in json.loads(body)["said"]
+    assert status == 401 and "sign in with wl.works" in json.loads(body)["said"]
+    assert foreign[0] == 403 and "this rig's page" in json.loads(foreign[2])["said"]
 
 
 def test_a_junk_record_or_a_reset_after_the_handshake_prints_nothing(tmp_path, capsys):
