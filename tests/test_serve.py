@@ -4526,12 +4526,14 @@ def test_the_request_log_never_carries_a_query_string(tmp_path, capsys):
 def test_a_stalled_handshake_does_not_stop_another_client(tmp_path):
     hub = _hub()
     server, thread, port, _page, _issuer, context = _page_served(tmp_path, hub)
-    stalled = socket.create_connection(("127.0.0.1", port), timeout=5)
+    stalled = None
     try:
         # Connected, and sending nothing: its handshake never starts.
+        stalled = socket.create_connection(("127.0.0.1", port), timeout=5)
         status = _https(port, context, "GET", "/")[0]
     finally:
-        stalled.close()
+        if stalled is not None:
+            stalled.close()
         _stop_page(server, thread, hub)
     assert status == 200
 
@@ -4543,22 +4545,21 @@ def test_a_token_sent_to_the_plain_http_listener_is_refused_and_dispatches_nothi
         seen.append(request)
         return 200, {"status": "sent"}
 
+    command = {"kind": "pause", "by": "jake"}
     with _served(_hub(), dispatch=dispatch) as port:
-        status, _headers, body = _request(
-            port, "POST", "/commands",
-            {
-                "Authorization": "Bearer not-a-real-token",
-                "Content-Type": "application/json",
-                "Origin": f"http://127.0.0.1:{port}",
-                "Content-Length": "2",
-            },
-        )
-    assert status == 403
-    assert json.loads(body)["said"] == serve.TOKEN_OVER_HTTP
-    assert seen == []
+        status, answer = _post(port, command, {"Authorization": "Bearer not-a-real-token"})
+        assert status == 403, answer
+        assert answer["said"] == serve.TOKEN_OVER_HTTP
+        assert seen == []
+        # The control: the same command without the header is delivered.
+        assert _post(port, command)[0] == 200
+        assert len(seen) == 1
 
 
-@pytest.mark.parametrize("method, path", [("GET", "/whoami"), ("POST", "/signout"), ("POST", "/whoami"), ("GET", "/signout")])
+@pytest.mark.parametrize(
+    "method, path",
+    [(m, p) for p in ("/whoami", "/signout") for m in ("GET", "POST", "PUT", "DELETE", "OPTIONS", "BREW")],
+)
 def test_whoami_and_signout_do_not_exist_on_the_http_listener(method, path):
     with _served(_hub()) as port:
         assert _request(port, method, path)[0] == 404
@@ -4572,7 +4573,8 @@ def test_the_https_listener_refuses_a_command_until_sign_in_checking_is_wired(tm
     )
     try:
         status, _headers, body = _https(
-            port, context, "POST", "/commands", {"Content-Type": "application/json"}, b"{}"
+            port, context, "POST", "/commands", {"Content-Type": "application/json"},
+            json.dumps({"kind": "pause", "by": "jake"}).encode("utf-8"),
         )
     finally:
         _stop_page(server, thread, hub)
@@ -4643,3 +4645,166 @@ def test_a_tls_key_that_is_not_a_key_is_refused_without_its_contents_or_path(tmp
     said = str(refused.value)
     assert "--tls-key" in said
     assert "SECRETCONTENTS" not in said and "SECRETNAME" not in said and str(tmp_path) not in said
+
+
+@pytest.mark.parametrize("size", [2, 10_000, 60_000])
+def test_a_large_post_to_the_https_listener_still_reads_its_refusal(tmp_path, size):
+    hub = _hub()
+    server, thread, port, _page, _issuer, context = _page_served(tmp_path, hub)
+    try:
+        status, _headers, body = _https(
+            port, context, "POST", "/commands", {"Content-Type": "application/json"}, b"x" * size
+        )
+    finally:
+        _stop_page(server, thread, hub)
+    assert status == 403 and "sign in with wl.works" in json.loads(body)["said"]
+
+
+def test_a_junk_record_or_a_reset_after_the_handshake_prints_nothing(tmp_path, capsys):
+    hub = _hub()
+    server, thread, port, _page, _issuer, context = _page_served(tmp_path, hub)
+    try:
+        for junk in (True, False):
+            with socket.create_connection(("127.0.0.1", port), timeout=5) as raw:
+                with context.wrap_socket(raw, server_hostname="127.0.0.1") as tls:
+                    if junk:
+                        raw_socket = socket.socket(fileno=os.dup(tls.fileno()))
+                        raw_socket.sendall(b"\x17\x03\x03\x00\x05junk!")  # not a valid record
+                        raw_socket.detach()
+                    else:
+                        tls.sendall(b"GET / HTTP/1.1\r\nHost: 127.0.0.1:%d\r\n" % port)
+                        tls.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, b"\x01\x00\x00\x00\x00\x00\x00\x00")
+            time.sleep(0.3)
+        assert _https(port, context, "GET", "/")[0] == 200
+    finally:
+        _stop_page(server, thread, hub)
+    assert "Traceback" not in capsys.readouterr().err
+
+
+def test_a_bad_https_value_names_https_and_a_busy_https_port_names_its_own_address(tmp_path, monkeypatch):
+    pytest.importorskip("jwt")
+    from _tls import material
+
+    tls = material(tmp_path)
+
+    def args(https):
+        values = {
+            "--https": https,
+            "--tls-cert": str(tls["cert"]),
+            "--tls-key": str(tls["key"]),
+            "--rig-page": "rig-3=https://rig-3.wl.works/",
+            "--wl-works-issuer": "https://wl.works/api/auth",
+            "--wl-works-cache": str(tmp_path / "wl-works.json"),
+        }
+        return _serve_args(tmp_path, extra=tuple(part for pair in values.items() for part in pair))
+
+    with pytest.raises(SystemExit) as bad:
+        _main_uninterrupted(args("not-an-address"))
+    said = str(bad.value)
+    assert said.startswith("refused: --https expects HOST:PORT") and "--http expects" not in said
+    assert "127.0.0.1:8080" not in said
+
+    from wl_xcon import signin
+
+    class Down:
+        ready = True
+        discovery = None
+
+        def load(self):
+            return "loaded"
+
+    monkeypatch.setattr(signin, "Checker", lambda **kw: Down())
+    with socket.socket() as busy:
+        busy.bind(("127.0.0.1", 0))
+        busy.listen()
+        port = busy.getsockname()[1]
+        with pytest.raises(SystemExit) as refused:
+            _main_uninterrupted(args(f"127.0.0.1:{port}"))
+    said = str(refused.value)
+    assert said.startswith(f"refused: cannot serve https on 127.0.0.1:{port}:")
+
+
+@pytest.mark.parametrize("which", ["missing", "no_crypto"])
+def test_https_without_pyjwt_or_its_cryptography_is_refused_with_the_extra_named(tmp_path, monkeypatch, which):
+    pytest.importorskip("jwt")
+    import jwt
+
+    if which == "missing":
+        monkeypatch.setitem(sys.modules, "jwt", None)
+    else:
+        monkeypatch.setattr(jwt.algorithms, "has_crypto", False)
+    extra = tuple(part for flag, value in _SIX for part in (flag, value))
+    with pytest.raises(SystemExit) as refused:
+        _main_uninterrupted(_serve_args(tmp_path, extra=extra))
+    assert "needs the signin extra" in str(refused.value)
+
+
+def test_a_failed_https_bind_frees_the_http_port(tmp_path):
+    pytest.importorskip("jwt")
+    from _issuer import ISSUER, Issuer
+    from _tls import material
+    from wl_xcon import signin
+    from wl_xcon.serve import Remote, tls_context
+
+    tls = material(tmp_path)
+    page = signin.parse_rig_page("rig-3=https://rig-3.wl.works/")
+    checker = signin.Checker(page=page, issuer=ISSUER, cache=tmp_path / "c.json", fetch=Issuer().fetch)
+    http_port = int(free_endpoints(1)[0].rsplit(":", 1)[1])
+    with socket.socket() as busy:
+        busy.bind(("127.0.0.1", 0))
+        busy.listen()
+        pub, rep = free_endpoints(2)
+        with pytest.raises(OSError):
+            Server(
+                sub=pub, req=rep, http=("127.0.0.1", http_port), token=TOKEN,
+                https=busy.getsockname()[:2], tls=tls_context(tls["cert"], tls["key"]),
+                remote=Remote(page, checker),
+            )
+    with socket.socket() as again:
+        again.bind(("127.0.0.1", http_port))
+
+
+@pytest.mark.parametrize("given", [("https",), ("tls",), ("remote",), ("https", "tls"), ("tls", "remote")])
+def test_server_takes_https_tls_and_remote_together_or_not_at_all(given):
+    pub, rep = free_endpoints(2)
+    parts = {"https": ("127.0.0.1", 0), "tls": object(), "remote": object()}
+    with pytest.raises(ValueError, match="go together"):
+        Server(sub=pub, req=rep, http=("127.0.0.1", 0), token=TOKEN, **{k: parts[k] for k in given})
+
+
+def test_tls_context_pins_tls_1_2_and_refuses_a_passphrase_key_without_prompting(tmp_path, monkeypatch):
+    pytest.importorskip("jwt")
+    import ssl
+
+    from cryptography.hazmat.primitives import serialization
+    from _tls import material
+    from wl_xcon.serve import tls_context
+
+    tls = material(tmp_path)
+    assert tls_context(tls["cert"], tls["key"]).minimum_version == ssl.TLSVersion.TLSv1_2
+    # The context is given a passphrase callback that refuses, so OpenSSL never prompts.
+    seen: dict = {}
+
+    original = ssl.SSLContext.load_cert_chain
+
+    def spy(self, certfile, keyfile=None, password=None):
+        seen["password"] = password
+        return original(self, certfile, keyfile, password)
+
+    monkeypatch.setattr(ssl.SSLContext, "load_cert_chain", spy)
+    tls_context(tls["cert"], tls["key"])
+    with pytest.raises(ssl.SSLError):
+        seen["password"]()
+    monkeypatch.undo()
+    key = serialization.load_pem_private_key(tls["key"].read_bytes(), password=None)
+    locked = tmp_path / "locked.pem"
+    locked.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.BestAvailableEncryption(b"hunter2"),
+        )
+    )
+    with pytest.raises(SystemExit) as refused:
+        tls_context(tls["cert"], locked)
+    assert "no passphrase" in str(refused.value) and "hunter2" not in str(refused.value)

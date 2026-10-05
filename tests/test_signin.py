@@ -107,6 +107,24 @@ def test_a_discovery_naming_another_issuer_is_refused_and_not_cached(tmp_path):
     assert not (tmp_path / "wl-works.json").exists()
 
 
+@pytest.mark.parametrize(
+    "endpoint",
+    ["https://wl.works;img-src */x/token", "https://wl.works img-src/x", "https://u@wl.works/x", "https:///x"],
+)
+def test_a_discovery_endpoint_with_more_than_a_host_and_a_port_is_refused(tmp_path, endpoint):
+    issuer = Issuer()
+    document = {**issuer.discovery(), "token_endpoint": endpoint}
+    checker = signin.Checker(
+        page=signin.parse_rig_page(f"rig-3={PAGE}"),
+        issuer=ISSUER,
+        cache=tmp_path / "wl-works.json",
+        fetch=lambda url: document if "openid" in url else issuer.jwks(),
+    )
+    said = checker.load()
+    assert not checker.ready and checker.discovery is None and signin.NO_KEYS in said
+    assert not (tmp_path / "wl-works.json").exists()
+
+
 def test_a_cache_naming_another_issuer_is_not_used(tmp_path):
     (tmp_path / "wl-works.json").write_text(
         json.dumps({"discovery": {**Issuer().discovery(), "issuer": "https://elsewhere"}, "jwks": Issuer().jwks()})

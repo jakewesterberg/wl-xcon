@@ -314,7 +314,9 @@ REQUEST_TIMEOUT_S = 30.0
 #: Each bundled font by the exact path the page asks for it at (`web.FONTS`). A request
 #: is looked up here, never joined onto a directory, so there is no path to traverse.
 _FONTS = {f"/fonts/{font.file}": font for font in _web.FONTS}
-_ROUTES = frozenset({"/", "/events", "/health", "/commands", "/whoami", "/signout", *_FONTS})
+# `/whoami` and `/signout` are not here: they answer 404 to every method on the http
+# listener (b2b spec §3). Task 9 of the b2b plan routes them on https.
+_ROUTES = frozenset({"/", "/events", "/health", "/commands", *_FONTS})
 #: What a command carrying a token to the plain-http listener is told (b2b spec §3).
 TOKEN_OVER_HTTP = "sign-in works only on the rig's https page"
 _UNAUTHORIZED = {"error": "unauthorized"}
@@ -434,6 +436,9 @@ def _csp(nonce: str, connect: str = "") -> str:
 #: The largest body `POST /commands` reads, in bytes. One command is a few hundred;
 #: a longer body is refused before it is read. Housekeeping, not a measurement.
 BODY_LIMIT = 4096
+#: The most a refusal on the https page reads and discards of a body it will not use.
+#: Housekeeping, not a measurement.
+REFUSAL_DRAIN_LIMIT = 65536
 #: The longest name a person may give at the box's prompt (spec §5.2).
 NAME_LIMIT = 64
 #: The largest mark number `wlx serve` hands a browser: 2**53 - 1, JavaScript's
@@ -812,19 +817,31 @@ class Remote:
     checker: "_signin.Checker"
 
 
+def _no_passphrase() -> str:
+    raise ssl.SSLError("the key has a passphrase")  # never prompt on the terminal
+
+
 def tls_context(cert: Path, key: Path) -> ssl.SSLContext:
     """The https listener's TLS, server side, TLS 1.2 at least (spec §3). Raises
     `SystemExit` with a sentence that names the flags and never the key's contents or path."""
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     try:
-        context.load_cert_chain(certfile=cert, keyfile=key)
+        context.load_cert_chain(certfile=cert, keyfile=key, password=_no_passphrase)
     except (OSError, ssl.SSLError) as exc:
         raise SystemExit(
             f"refused: --tls-cert and --tls-key could not be loaded as a certificate chain "
-            f"and its private key ({type(exc).__name__})"
+            f"and its private key, which must have no passphrase ({type(exc).__name__})"
         ) from None
     return context
+
+
+class _HttpsBindError(OSError):
+    """The https listener could not bind; `address` is the one that failed."""
+
+    def __init__(self, exc: OSError, address: tuple[str, int]) -> None:
+        super().__init__(exc.errno, exc.strerror)
+        self.address = address
 
 
 class _PageServer(ThreadingHTTPServer):
@@ -844,6 +861,8 @@ class _PageServer(ThreadingHTTPServer):
             return  # a failed handshake asked nothing, so there is nothing to answer
         try:
             self.RequestHandlerClass(tls, client_address, self)
+        except (ssl.SSLError, ConnectionError):
+            pass  # a junk record or a reset after the handshake: the client left, say nothing
         finally:
             tls.close()
 
@@ -908,7 +927,7 @@ def make_handler(
             )
 
         def _security_headers(self, *, cache: str) -> None:
-            """The two headers every response carries, `/events` included -- written
+            """The three headers every response carries, `/events` included -- written
             here once so a header added later cannot land in `_write`'s responses
             and stay missing from the streamed one (F3)."""
             self.send_header("Cache-Control", cache)
@@ -925,6 +944,20 @@ def make_handler(
             """The stdlib's request line without its query string (the plan's Ruling 10):
             the page's return from wl.works carries an authorization code there."""
             self.log_message('"%s %s" %s', self.command, self._path(), str(code))
+
+        def _refuse_after_reading(self, status: int, payload: dict) -> None:
+            """Answer a refusal on the https page after reading the request's body, so
+            closing the connection on unread bytes does not reset the answer away (the
+            client would see a reset, never the sentence). Reads and discards at most
+            `REFUSAL_DRAIN_LIMIT` bytes; a body longer than that gets its answer and
+            then a closed connection."""
+            length = self.headers.get("Content-Length") or ""
+            if length.isascii() and length.isdecimal():
+                wanted = int(length)
+                self.rfile.read(min(wanted, REFUSAL_DRAIN_LIMIT))
+                if wanted > REFUSAL_DRAIN_LIMIT:
+                    self.close_connection = True
+            self._send_json(status, payload)
 
         def _write(
             self,
@@ -1028,11 +1061,6 @@ def make_handler(
             if not self._host_ok():
                 self._send_json(421, _MISDIRECTED)
                 return
-            if self.path in ("/whoami", "/signout"):
-                # Not on the plain-http listener (b2b spec §3); on https they are
-                # Task 9's (sign-in checking, not wired yet), so 404 there until then.
-                self._send_json(404, _ERRORS[404])
-                return
             if self.path != "/commands":
                 self._refuse_method()
                 return
@@ -1053,11 +1081,9 @@ def make_handler(
             if self._remote is not None:
                 from wl_xcon import signin  # loaded already: a `Remote` exists
 
-                # Read what was sent, so closing on it does not reset the answer.
-                length = self.headers.get("Content-Length") or ""
-                if length.isascii() and length.isdecimal() and int(length) <= BODY_LIMIT:
-                    self.rfile.read(int(length))
-                self._send_json(403, {"status": "refused", "said": signin.NO_TOKEN})
+                self._refuse_after_reading(
+                    403, {"status": "refused", "said": signin.NO_TOKEN}
+                )
                 return
             if not self._from_the_box():
                 self._send_json(
@@ -1123,8 +1149,6 @@ def make_handler(
                 self._health()
             elif path in _FONTS:
                 self._font(_FONTS[path])
-            elif path in ("/whoami", "/signout"):
-                self._send_json(404, _ERRORS[404])  # Task 9's on https; never on http
             else:
                 # 405 for a known path that takes another method -- `/commands`,
                 # since b2a -- and 404 for anything else.
@@ -1299,6 +1323,11 @@ class Server:
         tls: ssl.SSLContext | None = None,
         remote: Remote | None = None,
     ) -> None:
+        if (https is None) != (tls is None) or (https is None) != (remote is None):
+            raise ValueError(
+                "https, tls and remote go together: the https listener needs its address, "
+                "its TLS context and its sign-in, or none of them"
+            )
         self.hub = Hub(endpoint=sub, marks=mark is not None)
         self._sub = sub
         # `req` is not kept on `self`: nothing reads it after this constructor --
@@ -1369,9 +1398,9 @@ class Server:
                     tls,
                 )
             )
-        except OSError:
+        except OSError as exc:
             self._http.server_close()  # the second bind failed: free the first
-            raise
+            raise _HttpsBindError(exc, https) from exc
         self._page_web = None if self._page_http is None else threading.Thread(
             target=self._page_http.serve_forever, name="wlx-serve-https", daemon=True
         )
@@ -1724,8 +1753,9 @@ def _refuse_unless_tcp_endpoint(endpoint: str, whole: str) -> None:
         )
 
 
-def parse_http(text: str) -> tuple[str, int]:
-    """`HOST:PORT`, IPv4 or a name: the stdlib server here binds IPv4 only."""
+def parse_http(text: str, flag: str = "--http") -> tuple[str, int]:
+    """`HOST:PORT`, IPv4 or a name: the stdlib server here binds IPv4 only. `flag` names
+    the option in the refusal."""
     host, sep, port = text.rpartition(":")
     if (
         not sep
@@ -1741,6 +1771,11 @@ def parse_http(text: str) -> tuple[str, int]:
         or not port.isdecimal()
         or int(port) > 65535
     ):
+        if flag != "--http":
+            raise SystemExit(
+                f"refused: {flag} expects HOST:PORT with an IPv4 address or a name, "
+                f"such as 0.0.0.0:8443 -- got {text!r}"
+            )
         raise SystemExit(
             f"refused: --http expects HOST:PORT with an IPv4 address or a name -- "
             f"127.0.0.1:8080 for this box only, 0.0.0.0:8080 to let the lab network "
@@ -1816,19 +1851,25 @@ def run(args) -> int:
                 f"--rig-page, --wl-works-issuer and --wl-works-cache together; missing "
                 f"{', '.join(missing)}"
             )
+        needs_extra = (
+            "refused: --https needs the signin extra (PyJWT with cryptography), which "
+            "is not installed"
+        )
         try:
-            from wl_xcon import signin  # only here: it imports `jwt`, which a rig without
-            # the `signin` extra does not have, and `serve` must run without
-        except ImportError:
-            raise SystemExit(
-                "refused: --https needs the signin extra (PyJWT with cryptography), which "
-                "is not installed"
-            ) from None
+            import jwt  # only in this branch: a rig without the `signin` extra runs `serve`
+        except ImportError as exc:
+            if exc.name != "jwt":
+                raise
+            raise SystemExit(needs_extra) from None
+        if not jwt.algorithms.has_crypto:
+            # PyJWT imports without `cryptography`, and then skips every RSA key.
+            raise SystemExit(needs_extra)
+        from wl_xcon import signin
         try:
             page = signin.parse_rig_page(args.rig_page)
         except ValueError as exc:
             raise SystemExit(f"refused: {exc}") from None
-        https = parse_http(args.https)
+        https = parse_http(args.https, "--https")
         tls = tls_context(args.tls_cert, args.tls_key)
         checker = signin.Checker(
             page=page, issuer=args.wl_works_issuer, cache=args.wl_works_cache
@@ -1846,6 +1887,10 @@ def run(args) -> int:
             allow_hosts=tuple(args.allow_host),
             **listener,
         )
+    except _HttpsBindError as exc:
+        raise SystemExit(
+            f"refused: cannot serve https on {exc.address[0]}:{exc.address[1]}: {exc}"
+        ) from exc
     except OSError as exc:
         raise SystemExit(f"refused: cannot serve on {host}:{port}: {exc}") from exc
     # fix round 1, M5: `server.start()` and the startup print used to sit after this

@@ -113,6 +113,11 @@ class Discovery:
         return f"{parts.scheme}://{parts.netloc}"
 
 
+#: A discovery endpoint's network location: a host name and an optional port, nothing
+#: else, since `token_origin` reaches the page's Content-Security-Policy.
+_NETLOC = re.compile(r"[A-Za-z0-9.-]+(:[0-9]{1,5})?")
+
+
 def _discovery(data: object, issuer: str) -> Discovery:
     """The document's four fields, checked. **Its issuer must be the configured one,
     exactly** (OpenID Connect Discovery 1.0 §4.3). Raises `ValueError`."""
@@ -123,6 +128,10 @@ def _discovery(data: object, issuer: str) -> Discovery:
         value = data.get(field)
         if not isinstance(value, str) or urlsplit(value).scheme != "https":
             raise ValueError(f"wl.works' discovery document's {field} is not an https address")
+        if not _NETLOC.fullmatch(urlsplit(value).netloc):
+            raise ValueError(
+                f"wl.works' discovery document's {field} names more than a host and a port"
+            )
     return Discovery(issuer, *(data[field] for field in fields))
 
 
