@@ -55,6 +55,7 @@ PACKAGE = "wl_xcon"
 #: when the list lived in YAML.
 RETURNS: dict[str, str] = {
     "actor": "None",
+    "signin": "None",
     "check": "[]",
     "encode": "[]",
     "calibration": "[]",
