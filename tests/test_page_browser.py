@@ -308,17 +308,41 @@ def test_neither_the_code_nor_the_token_reaches_the_page_server_log(rig, capfd):
     assert leaked == 0  # a count: never the values
 
 
+#: Counts, in the page, the renewals it asks wl.works for and the clicks it has handled. A
+#: listener on `window` runs after the page's own on `document`, so a count of clicks there
+#: means the page's handler for that click has finished.
+_COUNTS = """
+window.__renewals = 0;
+window.__clicks = 0;
+(function () {
+  var real = window.fetch;
+  window.fetch = function (url, init) {
+    if (init && typeof init.body === "string" && init.body.indexOf("grant_type=refresh_token") >= 0) {
+      window.__renewals += 1;
+    }
+    return real.apply(this, arguments);
+  };
+})();
+window.addEventListener("click", function () { window.__clicks += 1; });
+"""
+
+
 def test_overlapping_renewal_triggers_present_one_renewal_token(rig):
     rig.fake.expires_in = 4  # housekeeping: a renewal is due as soon as the page is signed in
-    rig.fake.renewal_delay = 0.6  # housekeeping: long enough that the two triggers overlap
+    rig.fake.renewal_gate = threading.Event()  # wl.works holds the first renewal until released
     page = rig.browser_page()
+    page.add_init_script(_COUNTS)
     _sign_in(page)
     page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
-    page.click(PAUSE)
+    rig.wait_for(lambda: rig.fake.renewals >= 1)  # the first renewal is at wl.works, held
+    page.click(PAUSE)  # under a minute left: the click's `fresh()` renews first
+    _until(page, "window.__clicks >= 1")  # the click's handler has run
+    asked = page.evaluate("window.__renewals")
+    assert asked == 1  # the click joined the renewal in flight and asked for none of its own
+    rig.fake.renewal_gate.set()
     rig.wait_for(lambda: _pauses(rig))
-    presented = list(rig.fake.presented)
-    assert len(presented) >= 1
-    assert len(set(presented)) == len(presented)
+    assert rig.fake.renewals == 1
+    assert len(rig.fake.presented) == 1  # a count: never the renewal token itself
     assert page.inner_text("#member") == "Jake Westerberg (wl.works)"
     assert _has_signin(page)
 

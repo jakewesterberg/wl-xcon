@@ -240,15 +240,18 @@ def test_retry_until_ready_loads_once_wl_works_answers(tmp_path, monkeypatch):
 
 
 @contextlib.contextmanager
-def _loopback(tmp_path, status=200, body=None):
+def _loopback(tmp_path, status=200, body=None, location=None):
     """A real https server on 127.0.0.1 (certificate from `_tls`); yields (url, material).
-    Answers `status` with `body` (bytes; default a small JSON object)."""
+    Answers `status` with `body` (bytes; default a small JSON object), and a `Location`
+    header when `location` is given."""
     material = _tls.material(tmp_path)
     payload = json.dumps({"issuer": ISSUER, "n": 1}).encode() if body is None else body
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 -- the stdlib's name
             self.send_response(status)
+            if location is not None:
+                self.send_header("Location", location)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
@@ -274,6 +277,40 @@ def _loopback(tmp_path, status=200, body=None):
 def test_fetch_json_reads_a_document_over_a_real_loopback_https_server(tmp_path):
     with _loopback(tmp_path) as (url, material):
         assert signin.fetch_json(url, context=_tls.client_context(material["ca"])) == {"issuer": ISSUER, "n": 1}
+
+
+def test_fetch_json_refuses_a_redirect_and_never_fetches_where_it_points(tmp_path):
+    """A redirect could leave https (`_NoRedirect`; the final review, M7). The target is a
+    plain-http server that would answer a good document, and is never asked."""
+    asked: list = []
+
+    class Target(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 -- the stdlib's name
+            asked.append(self.path)
+            payload = json.dumps({"issuer": ISSUER, "n": 2}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *args):
+            pass
+
+    target = http.server.HTTPServer(("127.0.0.1", 0), Target)
+    thread = threading.Thread(target=target.serve_forever, daemon=True)
+    thread.start()
+    try:
+        away = f"http://127.0.0.1:{target.server_address[1]}/doc"
+        with _loopback(tmp_path, status=302, body=b"", location=away) as (url, material):
+            with pytest.raises(urllib.error.HTTPError) as refused:
+                signin.fetch_json(url, context=_tls.client_context(material["ca"]))
+    finally:
+        target.shutdown()
+        target.server_close()
+        thread.join(5)
+    assert refused.value.code == 302
+    assert asked == []
 
 
 def _reason(err: BaseException) -> BaseException:
