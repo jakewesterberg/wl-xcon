@@ -13,9 +13,12 @@ import pytest
 
 pytest.importorskip("jwt")
 
+import jwt
+
 import _tls
 from _issuer import CLIENT, ISSUER, ORIGIN, PAGE, Issuer
 from wl_xcon import signin
+from wl_xcon.actor import Member
 
 
 def test_a_rig_page_entry_is_read_as_wl_works_reads_it():
@@ -256,3 +259,177 @@ def test_a_cache_that_cannot_be_written_does_not_lose_the_live_keys(tmp_path):
     )
     said = checker.load()
     assert checker.ready and "not cached" in said and "from wl.works" in said
+
+
+def _ready(tmp_path, issuer=None):
+    issuer = issuer or Issuer()
+    checker = _checker(tmp_path, issuer)
+    checker.load()
+    return checker, issuer
+
+
+def _bearer(token: str) -> str:
+    return f"Bearer {token}"
+
+
+def test_a_good_token_names_its_member(tmp_path):
+    checker, issuer = _ready(tmp_path)
+    accepted = checker.check(_bearer(issuer.mint(jti="j-1")))
+    assert accepted.member == Member(name="Jake Westerberg", account="user-1", issuer=ISSUER, token_id="j-1")
+    assert accepted.expires_at > 0
+
+
+def _refused(checker, header) -> signin.Refused:
+    with pytest.raises(signin.Refused) as refused:
+        checker.check(header)
+    return refused.value
+
+
+@pytest.mark.parametrize(
+    "header",
+    [None, "", "Basic abc", "Bearer", "Bearer " + "x" * 9000],
+    ids=["absent", "empty", "basic", "no-token", "over-the-limit"],
+)
+def test_no_token_is_refused_asking_for_a_sign_in(tmp_path, header):
+    checker, _ = _ready(tmp_path)
+    refused = _refused(checker, header)
+    assert (refused.reason, refused.said) == ("no_token", signin.NO_TOKEN)
+
+
+@pytest.mark.parametrize(
+    "mint, reason",
+    [
+        (dict(exp_in=-120), "expired"),
+        (dict(iat_in=600), "clock"),
+        (dict(aud="https://rig-4.wl.works"), "other_rig"),
+        (dict(aud=[ORIGIN, "https://wl.works/api/auth/oauth2/userinfo"]), "other_rig"),
+        (dict(azp="wl-works-rig-rig-4"), "other_rig"),
+        (dict(iss="https://wl.works"), "not_accepted"),
+        (dict(iss="https://wl.works/api/auth/"), "not_accepted"),
+        (dict(typ="JWT"), "not_accepted"),
+        (dict(kid="nobody"), "not_accepted"),
+        (dict(drop=("jti",)), "not_accepted"),
+        (dict(drop=("sub",)), "not_accepted"),
+        (dict(name=""), "not_accepted"),
+        (dict(name=None), "not_accepted"),
+        (dict(name="x" * 201), "not_accepted"),
+    ],
+)
+def test_each_check_refuses_on_its_own(tmp_path, mint, reason):
+    checker, issuer = _ready(tmp_path)
+    assert _refused(checker, _bearer(issuer.mint(**mint))).reason == reason
+
+
+def test_a_token_signed_by_another_key_is_refused(tmp_path):
+    checker, issuer = _ready(tmp_path)
+    forger = Issuer()
+    assert _refused(checker, _bearer(forger.mint(kid=issuer.kid))).reason == "not_accepted"
+
+
+def _hs256(claims: dict, secret: bytes, kid: str) -> str:
+    """An HS256 token built by hand: PyJWT itself refuses to use a PEM public key as an
+    HMAC secret, so the attack has to be assembled the way an attacker would."""
+    import base64
+    import hashlib
+    import hmac
+
+    def b64(raw: bytes) -> bytes:
+        return base64.urlsafe_b64encode(raw).rstrip(b"=")
+
+    head = b64(json.dumps({"alg": "HS256", "typ": "at+jwt", "kid": kid}).encode())
+    body = b64(json.dumps(claims).encode())
+    signature = b64(hmac.new(secret, head + b"." + body, hashlib.sha256).digest())
+    return (head + b"." + body + b"." + signature).decode("ascii")
+
+
+def test_alg_none_and_hs256_keyed_on_the_public_key_are_refused(tmp_path):
+    """The algorithm-confusion attacks: an unsigned token, and an HMAC whose secret is
+    the published public key."""
+    from cryptography.hazmat.primitives import serialization
+
+    checker, issuer = _ready(tmp_path)
+    public = issuer.key.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+    claims = jwt.decode(issuer.mint(), options={"verify_signature": False})
+    unsigned = jwt.encode(claims, None, algorithm="none", headers={"typ": "at+jwt", "kid": issuer.kid})
+    assert _refused(checker, _bearer(unsigned)).reason == "not_accepted"
+    assert _refused(checker, _bearer(_hs256(claims, public, issuer.kid))).reason == "not_accepted"
+
+
+def test_an_unknown_key_id_fetches_the_key_set_again_at_most_once_a_minute(tmp_path, monkeypatch):
+    checker, issuer = _ready(tmp_path)
+    fetched = len(issuer.fetched)
+    _refused(checker, _bearer(issuer.mint(kid="new")))
+    _refused(checker, _bearer(issuer.mint(kid="newer")))
+    assert len(issuer.fetched) == fetched + 1
+
+
+def test_a_key_wl_works_rotated_in_is_picked_up(tmp_path):
+    checker, issuer = _ready(tmp_path)
+    issuer.kid = "rotated"
+    accepted = checker.check(_bearer(issuer.mint()))
+    assert accepted.member.name == "Jake Westerberg"
+
+
+def test_a_rotated_in_key_set_is_cached_beside_the_discovery_document(tmp_path):
+    checker, issuer = _ready(tmp_path)
+    issuer.kid = "rotated"
+    checker.check(_bearer(issuer.mint()))
+    cached = json.loads((tmp_path / "wl-works.json").read_text())
+    assert [key["kid"] for key in cached["jwks"]["keys"]] == ["rotated"]
+    assert cached["discovery"]["issuer"] == ISSUER
+    # A restart with wl.works unreachable finds the rotated key in the cache.
+    issuer.down = True
+    restarted = _checker(tmp_path, issuer)
+    restarted.load()
+    assert restarted.key_ids() == {"rotated"}
+
+
+def test_a_rotated_in_key_is_kept_when_the_cache_cannot_be_written(tmp_path):
+    issuer = Issuer()
+    blocker = tmp_path / "a-file"
+    blocker.write_text("")
+    checker = signin.Checker(
+        page=signin.parse_rig_page(f"rig-3={PAGE}"), issuer=ISSUER,
+        cache=blocker / "wl-works.json", fetch=issuer.fetch,
+    )
+    assert "not cached" in checker.load()
+    issuer.kid = "rotated"
+    accepted = checker.check(_bearer(issuer.mint(jti="j-9")))
+    assert accepted.member.token_id == "j-9"
+    assert checker.key_ids() == {"rotated"}
+
+
+def test_a_signed_out_token_is_refused_here_and_another_is_not(tmp_path):
+    checker, issuer = _ready(tmp_path)
+    first, second = issuer.mint(jti="j-1"), issuer.mint(jti="j-2")
+    checker.sign_out(_bearer(first))
+    assert _refused(checker, _bearer(first)).reason == "signed_out"
+    accepted = checker.check(_bearer(second))
+    assert accepted.member.token_id == "j-2"
+
+
+def test_signing_out_a_token_that_does_not_check_out_does_nothing(tmp_path):
+    checker, issuer = _ready(tmp_path)
+    checker.sign_out("Bearer junk")
+    checker.sign_out(None)
+    accepted = checker.check(_bearer(issuer.mint()))
+    assert accepted.member.name == "Jake Westerberg"
+
+
+def test_with_no_keys_every_token_is_refused_saying_so(tmp_path):
+    issuer = Issuer()
+    issuer.down = True
+    checker = _checker(tmp_path, issuer)
+    checker.load()
+    refused = _refused(checker, _bearer(issuer.mint()))
+    assert (refused.reason, refused.said) == ("no_keys", signin.NO_KEYS)
+
+
+def test_no_refusal_echoes_the_token(tmp_path):
+    checker, issuer = _ready(tmp_path)
+    token = issuer.mint(exp_in=-120)
+    refused = _refused(checker, _bearer(token))
+    leaked = token in refused.said or token in str(refused)
+    assert not leaked

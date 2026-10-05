@@ -200,6 +200,9 @@ class Checker:
         self._fetch = fetch
         self._lock = threading.Lock()
         self._discovery: Discovery | None = None
+        #: The discovery document as accepted (live or cached), so a key set fetched
+        #: again later can be cached beside it.
+        self._document: dict | None = None
         self._keys: dict = {}
         self._last_refetch = float("-inf")
         #: Signed-out token ids and when each token expires (spec §5). Memory only.
@@ -232,7 +235,7 @@ class Checker:
         except (OSError, ValueError, http.client.HTTPException) as live:
             return self._from_cache(f"{type(live).__name__}: {live}")
         with self._lock:
-            self._discovery, self._keys = discovery, keys
+            self._discovery, self._keys, self._document = discovery, keys, document
         try:
             _save(self.cache, document, jwks)
         except OSError as err:
@@ -250,10 +253,155 @@ class Checker:
         if not keys:
             return f"{NO_KEYS} (wl.works: {why}; the cache holds no key)"
         with self._lock:
-            self._discovery, self._keys = discovery, keys
+            self._discovery, self._keys, self._document = discovery, keys, cached["discovery"]
         return f"sign-in keys from the cache, {len(keys)} (wl.works: {why})"
 
     def retry_until_ready(self, stop: threading.Event) -> None:
         """Every `RETRY_EVERY_S`, load again, until there are keys or `stop` is set."""
         while not self.ready and not stop.wait(RETRY_EVERY_S):
             self.load()
+
+    def check(self, authorization: str | None) -> Accepted:
+        """Spec §5's checks, in its order. Raises `Refused`."""
+        token = _bearer(authorization)
+        with self._lock:
+            discovery = self._discovery
+            ready = discovery is not None and bool(self._keys)
+        if not ready:
+            raise Refused("no_keys", NO_KEYS)
+        try:
+            head = jwt.get_unverified_header(token)
+        except jwt.exceptions.PyJWTError:
+            raise Refused("not_accepted", NOT_ACCEPTED) from None
+        typ = head.get("typ")
+        if head.get("alg") != "RS256" or not isinstance(typ, str) or typ.lower() not in ACCESS_TOKEN_TYPES:
+            raise Refused("not_accepted", NOT_ACCEPTED)
+        key = self._key(head.get("kid"))
+        try:
+            claims = jwt.decode(
+                token,
+                key,
+                algorithms=["RS256"],
+                audience=self.page.origin,
+                issuer=discovery.issuer,
+                leeway=LEEWAY_S,
+                options={"require": ["exp", "iat", "sub", "aud", "iss", "jti"], "strict_aud": True},
+            )
+        except jwt.exceptions.ExpiredSignatureError:
+            raise Refused("expired", EXPIRED) from None
+        except jwt.exceptions.ImmatureSignatureError:
+            raise Refused("clock", CLOCK) from None
+        except jwt.exceptions.InvalidAudienceError:
+            raise Refused("other_rig", OTHER_RIG) from None
+        except jwt.exceptions.PyJWTError:
+            raise Refused("not_accepted", NOT_ACCEPTED) from None
+        # Again, exactly: PyJWT 2.10.0 compared a string issuer as a substring (spec §5).
+        if claims.get("iss") != discovery.issuer:
+            raise Refused("not_accepted", NOT_ACCEPTED)
+        if claims.get("azp") != self.page.client_id or claims.get("client_id", self.page.client_id) != self.page.client_id:
+            raise Refused("other_rig", OTHER_RIG)
+        member = actors.Member(
+            name=_claim(claims, "name"),
+            account=_claim(claims, "sub"),
+            issuer=claims["iss"],
+            token_id=_claim(claims, "jti"),
+        )
+        now = time.time()
+        with self._lock:
+            self._signed_out = {jti: until for jti, until in self._signed_out.items() if until + LEEWAY_S > now}
+            if member.token_id in self._signed_out:
+                raise Refused("signed_out", SIGNED_OUT)
+        return Accepted(member, float(claims["exp"]))
+
+    def _key(self, kid: object):
+        """The key `kid` names; an unknown one fetches the key set again, at most once
+        every `REFETCH_EVERY_S`, so a key wl.works rotated in is found and junk ids cannot
+        make the rig fetch on every request."""
+        if not isinstance(kid, str):
+            raise Refused("not_accepted", NOT_ACCEPTED)
+        with self._lock:
+            key = self._keys.get(kid)
+            due = time.monotonic() - self._last_refetch >= REFETCH_EVERY_S
+            if key is None and due:
+                self._last_refetch = time.monotonic()
+            discovery, document = self._discovery, self._document
+        if key is None and due and discovery is not None:
+            try:
+                jwks = self._fetch(discovery.jwks_uri)
+                keys = _keys(jwks)
+            except (OSError, ValueError, http.client.HTTPException):
+                keys = {}
+            if keys:
+                with self._lock:
+                    self._keys = keys
+                key = keys.get(kid)
+                if document is not None:
+                    try:
+                        _save(self.cache, document, jwks)
+                    except OSError:
+                        pass  # New keys are good whether or not they can be kept.
+        if key is None:
+            raise Refused("not_accepted", NOT_ACCEPTED)
+        return key
+
+    def sign_out(self, authorization: str | None) -> None:
+        """Refuse this token here for the rest of its hour (spec §4, §5). A token that
+        does not check out needs no signing out."""
+        try:
+            accepted = self.check(authorization)
+        except Refused:
+            return
+        with self._lock:
+            self._signed_out[accepted.member.token_id] = accepted.expires_at
+
+
+#: Seconds of clock leeway on `exp` and `iat`. Housekeeping (spec §5), not a
+#: measurement: the rig keeps time from wl-works' NTP server (ADR-0009).
+LEEWAY_S = 60
+#: The longest `Authorization` value read, in bytes. A bound on one header's reach,
+#: not a rule about wl.works: its tokens are about a kilobyte.
+TOKEN_LIMIT = 8192
+#: wl.works' access-token type (`JWT_ACCESS_TOKEN_TYPE`), and RFC 9068 §2.1's long form.
+ACCESS_TOKEN_TYPES = frozenset({"at+jwt", "application/at+jwt"})
+
+#: The refusals (spec §5): each a sentence for the page, and a word for its script.
+NO_TOKEN = "sign in with wl.works to use the controls"
+SIGNED_OUT = "this sign-in was signed out here; sign in again"
+EXPIRED = "your sign-in has expired; sign in again"
+OTHER_RIG = "this sign-in is for another rig"
+CLOCK = "the rig's clock and this sign-in disagree; check the rig's time"
+NOT_ACCEPTED = "this is not a wl.works sign-in the rig accepts"
+
+
+class Refused(Exception):
+    """A token this rig does not accept: `said` for a person, `reason` for the page's
+    script (the plan's Ruling 8). Never carries the token."""
+
+    def __init__(self, reason: str, said: str) -> None:
+        super().__init__(said)
+        self.reason = reason
+        self.said = said
+
+
+@dataclass(frozen=True, slots=True)
+class Accepted:
+    """A token that checked out: who it names, and when it expires (POSIX seconds)."""
+
+    member: actors.Member
+    expires_at: float
+
+
+def _bearer(authorization: str | None) -> str:
+    if not authorization or len(authorization) > TOKEN_LIMIT:
+        raise Refused("no_token", NO_TOKEN)
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise Refused("no_token", NO_TOKEN)
+    return token.strip()
+
+
+def _claim(claims: dict, name: str) -> str:
+    value = claims.get(name)
+    if not isinstance(value, str) or not value.strip() or len(value) > actors.TEXT_LIMIT or not value.isprintable():
+        raise Refused("not_accepted", NOT_ACCEPTED)
+    return value
