@@ -1987,7 +1987,9 @@ _SCRIPT = """
     renewTimer = setTimeout(renew, Math.max(left / 2, left - RENEW_BEFORE_MS));
   }
   function fresh() {
-    if (!signedIn()) { return Promise.resolve(false); }
+    // Between a renewal's new pair (`keep`) and the rig's confirmation of it, the sign-in
+    // has no name yet: a press then waits for that renewal rather than being refused.
+    if (!signedIn()) { return renewing || Promise.resolve(false); }
     if (signin.expires - Date.now() > FRESH_FOR_MS) { return Promise.resolve(true); }
     return renew();
   }

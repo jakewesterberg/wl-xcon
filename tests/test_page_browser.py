@@ -419,6 +419,43 @@ def test_a_press_after_the_tokens_end_with_wl_works_out_of_reach_says_why_and_se
     assert _signed_out_by_the_page(page)
 
 
+def test_a_press_while_the_rig_confirms_a_renewal_waits_for_it_and_is_sent(rig, monkeypatch):
+    # Between a renewal's new pair and /whoami's answer the sign-in has no name yet (`keep`),
+    # while the controls stay live. A press then was refused with "sign in with wl.works";
+    # found when the test below failed on a slow run of the suite. The rig holds its checks
+    # here, so the press lands in that window every time.
+    checks = threading.Event()
+    checks.set()
+    real = signin.Checker.check
+
+    def held(self, authorization):
+        checks.wait(timeout=20.0)  # bounded: a failing test must not hang its teardown
+        return real(self, authorization)
+
+    monkeypatch.setattr(signin.Checker, "check", held)
+    rig.fake.expires_in = 4  # housekeeping: a renewal is due as soon as the page is signed in
+    page = rig.browser_page()
+    page.add_init_script(_COUNTS)
+    _sign_in(page)
+    page.evaluate("window.__first = JSON.parse(window.sessionStorage.getItem('wlx-signin')).access; 0")
+    checks.clear()  # the rig holds every check from here
+    page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+    # wl.works has renewed, and the rig has not yet confirmed the new token. A bool: never a token.
+    _until(page, "JSON.parse(window.sessionStorage.getItem('wlx-signin')).access !== window.__first")
+    page.click(PAUSE)
+    _until(page, "window.__clicks >= 1")  # the click's handler has run
+    told = page.inner_text("#sent")
+    assert not told.startswith("not sent")  # the press waits for the renewal, refused by nothing
+    checks.set()
+
+    def paused() -> bool:
+        return bool(_pauses(rig))
+
+    rig.wait_for(paused)
+    assert _pauses(rig)[-1].by.name == "Jake Westerberg"
+    page.wait_for_selector("#sent:has-text('sent: test')")
+
+
 def test_an_outage_shorter_than_the_token_leaves_the_sign_in_standing(rig, monkeypatch):
     monkeypatch.setattr(signin, "LEEWAY_S", 0)
     rig.fake.expires_in = 8  # housekeeping: renewed at half of it, tried again at its end
