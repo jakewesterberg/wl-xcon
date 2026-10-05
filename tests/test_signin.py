@@ -213,7 +213,7 @@ def test_fetch_json_refuses_a_certificate_from_an_authority_it_does_not_trust(tm
 @pytest.mark.parametrize(
     "status, body, says",
     [
-        (404, b"{}", "answered 404"),
+        (201, b"{}", "answered 201"),
         (200, b"not json", None),
         (200, b"[1, 2]", "did not answer a JSON object"),
         (200, b" " * (signin.FETCH_LIMIT + 1), "more than"),
@@ -222,11 +222,6 @@ def test_fetch_json_refuses_a_certificate_from_an_authority_it_does_not_trust(tm
 def test_fetch_json_refuses_what_is_not_one_small_json_object(tmp_path, status, body, says):
     with _loopback(tmp_path, status=status, body=body) as (url, material):
         context = _tls.client_context(material["ca"])
-        if status == 404:
-            # urllib raises HTTPError for a 4xx before `fetch_json` sees the status.
-            with pytest.raises(urllib.error.HTTPError):
-                signin.fetch_json(url, context=context)
-            return
         with pytest.raises(ValueError) as refused:  # json.JSONDecodeError is a ValueError
             signin.fetch_json(url, context=context)
         if says:
