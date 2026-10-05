@@ -4808,3 +4808,71 @@ def test_tls_context_pins_tls_1_2_and_refuses_a_passphrase_key_without_prompting
     with pytest.raises(SystemExit) as refused:
         tls_context(tls["cert"], locked)
     assert "no passphrase" in str(refused.value) and "hunter2" not in str(refused.value)
+
+
+def test_an_import_failure_that_is_not_pyjwt_is_not_reported_as_the_missing_extra(tmp_path, monkeypatch):
+    pytest.importorskip("jwt")
+
+    class Broken:
+        """A finder that makes `import jwt` fail the way a broken dependency would."""
+
+        @staticmethod
+        def find_spec(name, path=None, target=None):
+            if name == "jwt":
+                raise ImportError("a dependency of jwt is broken", name="something_else")
+            return None
+
+    monkeypatch.delitem(sys.modules, "jwt")
+    monkeypatch.setattr(sys, "meta_path", [Broken, *sys.meta_path])
+    extra = tuple(part for flag, value in _SIX for part in (flag, value))
+    with pytest.raises(ImportError) as raised:
+        _main_uninterrupted(_serve_args(tmp_path, extra=extra))
+    assert raised.value.name == "something_else"
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="FINDING (Task 8 fix round 2): past REFUSAL_DRAIN_LIMIT the server closes on unread "
+    "bytes, the TCP reset reaches the client first, and it reads nothing, not even the 403, "
+    "though it was reading while it wrote. Seen on macOS loopback. Fix when decided: a "
+    "lingering close (answer, shut the write side, discard until EOF or the request timeout). "
+    "strict, so the fix fails this until the marker is removed.",
+)
+def test_a_post_over_the_drain_limit_still_gets_its_refusal_read(tmp_path):
+    """A client that reads while it writes (as a browser does) sees the 403 even when the
+    body is past what the refusal drains; the server then closes."""
+    hub = _hub()
+    server, thread, port, _page, _issuer, context = _page_served(tmp_path, hub)
+    size = serve.REFUSAL_DRAIN_LIMIT * 4
+    head = (
+        f"POST /commands HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
+        f"Content-Type: application/json\r\nContent-Length: {size}\r\n\r\n"
+    ).encode("ascii")
+    sender = None
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as raw:
+            with context.wrap_socket(raw, server_hostname="127.0.0.1") as tls:
+
+                def send() -> None:
+                    try:
+                        tls.sendall(head + b"x" * size)
+                    except OSError:
+                        pass  # the server closed on a body it will not read
+
+                sender = threading.Thread(target=send, daemon=True)
+                sender.start()
+                received = b""
+                try:
+                    while b"\r\n\r\n" not in received or b"sign in" not in received:
+                        chunk = tls.recv(4096)
+                        if not chunk:
+                            break
+                        received += chunk
+                except OSError:
+                    pass
+    finally:
+        _stop_page(server, thread, hub)
+        if sender is not None:
+            sender.join(timeout=5)
+    assert received.startswith(b"HTTP/1.1 403"), received[:80]
+    assert b"sign in with wl.works" in received
