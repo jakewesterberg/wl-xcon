@@ -1699,17 +1699,19 @@ _LOGO = (
 #: the stream is lost, so without this a red *stream lost* banner sat over
 #: full-color numbers nothing was updating. The next frame's `check()` clears it.
 #:
-#: **The controls (P4d-2b b2a).** Only the box's own page may write (`data-can-write`
-#: on `<body>`, from `View.can_write`); elsewhere every control is disabled in the
-#: HTML and `post` sends nothing. The name is asked once, kept in `localStorage` --
-#: inside `try`, since a private window may refuse it -- and a prompt refused or
-#: cleared sends nothing. An arrow steps its input and the change is sent
-#: `debounceMs` after the last click; while an input has focus or a change is
-#: pending, a new parameters fragment is held and swapped in afterwards, so a frame
-#: never replaces an input under a person's hands. P and M do nothing in a text box
-#: or when held. A mark sends its signal at once with `pressed_at` -- the browser's
-#: clock, and the only `Date.now()` here -- then opens the note box: Enter attaches
-#: the note, Esc leaves the mark bare, and a second mark leaves the first bare.
+#: **The controls (P4d-2b b2a).** The box's own page may write (`data-can-write` on
+#: `<body>`, from `View.can_write`), and since b2b so may the rig's https page while a
+#: wl.works member is signed in there (`data-signin`, the sign-in's block below);
+#: everywhere else every control is disabled in the HTML and `post` sends nothing. The
+#: name is asked once, kept in `localStorage` -- inside `try`, since a private window
+#: may refuse it -- and a prompt refused or cleared sends nothing. An arrow steps its
+#: input and the change is sent `debounceMs` after the last click; while an input has
+#: focus or a change is pending, a new parameters fragment is held and swapped in
+#: afterwards, so a frame never replaces an input under a person's hands. P and M do
+#: nothing in a text box or when held. A mark sends its signal at once with
+#: `pressed_at` -- the browser's clock, and the only `Date.now()` outside the sign-in's
+#: block, which reads it for its tokens' expiry -- then opens the note box: Enter
+#: attaches the note, Esc leaves the mark bare, and a second mark leaves the first bare.
 #:
 #: **Sessions from the page (P4d-2b b3a-2).** Choosing a task between runs, or pressing the
 #: pre-flight pill, takes the pre-flight (`check`); *start run* sends the task of the
@@ -1736,6 +1738,11 @@ _SCRIPT = """
   // and renew first before a command when less than this is left.
   var RENEW_BEFORE_MS = 5 * 60 * 1000;
   var FRESH_FOR_MS = 60 * 1000;
+  // Housekeeping too: while wl.works cannot be reached, a renewal is tried again this
+  // often, and at the token's lapse when that comes first (spec §7; the final review, I1).
+  var RETRY_MS = 30 * 1000;
+  // Why the page signs itself out when the token lapses with wl.works still out of reach.
+  var UNREACHED = "wl.works could not be reached to renew this sign-in; the rig PC's page keeps every control";
   var renewTimer = null;
   function readStore(key) {
     try { return JSON.parse(window.sessionStorage.getItem(key) || "null"); } catch (e) { return null; }
@@ -1764,6 +1771,9 @@ _SCRIPT = """
   // after it changed belongs to a sign-in this tab no longer holds, and is dropped
   // without being kept, stored or shown. A sign-out must stand against a renewal in flight.
   var generation = 0;
+  // Why the page last signed itself out, so a press that finds it signed out says so
+  // (`post`). Empty after a sign-out someone asked for, and after a new sign-in.
+  var signedOutFor = "";
   function applySignIn() {
     if (!signinPage) { return; }
     body.setAttribute("data-signed-in", signedIn() ? "1" : "0");
@@ -1821,6 +1831,7 @@ _SCRIPT = """
   }
   function keep(answer) {
     generation += 1;
+    signedOutFor = "";
     signin = {
       access: answer.access_token,
       refresh: answer.refresh_token || (signin && signin.refresh) || null,
@@ -1829,13 +1840,19 @@ _SCRIPT = """
       shown: null
     };
   }
-  function forget() {
+  function forget(why) {
     generation += 1;
     signin = null;
     confirmed = false;
+    signedOutFor = why || "";
     writeStore(SIGNIN_KEY, null);
     clearTimeout(renewTimer);
     applySignIn();
+  }
+  // The page signs itself out, saying why now and on any press after (`post`).
+  function dropSignIn(why) {
+    forget(why);
+    tell("signed out: " + why, "crit");
   }
   // /whoami with the held token. Answers true when it confirms the sign-in. A refusal
   // is read by its reason word (the plan's Ruling 8): `expired` renews (once: a token
@@ -1865,7 +1882,7 @@ _SCRIPT = """
         applySignIn();
         return false;
       }
-      forget();
+      forget(answer.said);
       tell("not signed in: " + answer.said, "crit");
       return false;
     });
@@ -1923,9 +1940,7 @@ _SCRIPT = """
   }
   function renewNow() {
     if (!signin || !signin.refresh) {
-      var held = !!signin;
-      forget();
-      if (held) { tell("signed out: this sign-in has lapsed and cannot be renewed", "crit"); }
+      if (signin) { dropSignIn("this sign-in has lapsed and cannot be renewed"); } else { forget(); }
       return Promise.resolve(false);
     }
     var mine = generation;
@@ -1937,8 +1952,7 @@ _SCRIPT = """
     }).then(function (result) {
       if (mine !== generation) { return false; }
       if (!result.ok || !result.answer.access_token) {
-        forget();
-        tell("signed out: " + (result.answer.error_description || "wl.works did not renew this sign-in"), "crit");
+        dropSignIn(result.answer.error_description || "wl.works did not renew this sign-in");
         return false;
       }
       keep(result.answer);
@@ -1951,8 +1965,19 @@ _SCRIPT = """
       });
       return whoami(false).then(function () { return signedIn(); });
     }, function () {
-      tell("could not reach wl.works to renew this sign-in", "crit");
-      return signedIn() && signin.expires > Date.now();
+      if (mine !== generation) { return false; }
+      // wl.works could not be reached. The token works at the rig until it lapses (the
+      // check is offline): keep the sign-in and try again, at the lapse at the latest. Once
+      // it has lapsed, the page signs itself out (spec §7; the final review, I1).
+      var left = signin.expires - Date.now();
+      if (left > 0) {
+        tell("could not reach wl.works to renew this sign-in; trying again before it lapses", "crit");
+        clearTimeout(renewTimer);
+        renewTimer = setTimeout(renew, Math.min(left, RETRY_MS));
+        return signedIn();
+      }
+      dropSignIn(UNREACHED);
+      return false;
     });
   }
   function scheduleRenew() {
@@ -1969,7 +1994,12 @@ _SCRIPT = """
   function signOut() {
     var held = signin;
     forget();
-    tell("signed out at this rig", "ok");
+    // wl.works itself stays signed in, so the next sign-in here goes straight through as
+    // the same member (spec §2): on a shared browser, the next person must sign out there.
+    tell(held && held.name
+      ? "signed out at this rig; wl.works is still signed in as " + held.name +
+        ", so anyone else using this browser must sign out of wl.works there first"
+      : "signed out at this rig", "ok");
     if (!held) { return; }
     fetch("/signout", {
       method: "POST",
@@ -2138,7 +2168,11 @@ _SCRIPT = """
     var done = after || function () {};
     if (signinPage) {
       fresh().then(function (ok) {
-        if (!ok) { tell("not sent: sign in with wl.works to use the controls", "crit"); done(); return; }
+        if (!ok) {
+          tell("not sent: " + (signedOutFor || "sign in with wl.works to use the controls"), "crit");
+          done();
+          return;
+        }
         deliver(command, { "Authorization": "Bearer " + signin.access }, then, done);
       }, function () {
         tell("not sent: this sign-in could not be renewed", "crit");

@@ -2470,7 +2470,7 @@ def test_a_lapsed_tab_renews_on_load_and_whoami_reads_the_reason_word():
     who = _script_between("  function whoami(mayRenew) {", "  // Resolves true when it exchanged")
     assert 'answer.reason === "expired" && mayRenew' in who
     assert 'answer.reason === "clock" || answer.reason === "no_keys"' in who
-    assert who.index('"clock"') < who.index("forget();")
+    assert who.index('"clock"') < who.index("forget(answer.said);")
     # After a renewal the new token is not asked to renew again.
     assert _SCRIPT.count("whoami(false)") == 2 and _SCRIPT.count("whoami(true)") == 1
 
@@ -2504,7 +2504,7 @@ def test_a_control_with_its_own_reason_must_be_a_greying_one():
 
 def test_a_sign_out_stands_against_a_renewal_or_a_sign_in_still_in_flight():
     assert "var generation = 0;" in _SCRIPT
-    forget = _script_between("  function forget() {", "  // /whoami with")
+    forget = _script_between("  function forget(why) {", "  // The page signs itself out")
     assert "generation += 1;" in forget
     assert "generation += 1;" in _script_between("  function keep(answer) {", "  function forget() {")
     # Each answer is dropped, before anything is kept, stored or shown, if the sign-in it
@@ -2516,6 +2516,9 @@ def test_a_sign_out_stands_against_a_renewal_or_a_sign_in_still_in_flight():
     assert finish.index("if (mine !== generation)") < finish.index("keep(result.answer);")
     renew = _script_between("  function renewNow() {", "  function scheduleRenew() {")
     assert renew.index("if (mine !== generation)") < renew.index("keep(result.answer);")
+    # wl.works out of reach (the final review, I1): a sign-out during that renewal stands too.
+    unreached = renew.split("    }, function () {\n", 1)[1]
+    assert unreached.index("if (mine !== generation)") < unreached.index("dropSignIn(UNREACHED);")
 
 
 def test_a_renewed_pair_is_stored_before_the_rig_confirms_it():

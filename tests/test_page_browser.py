@@ -187,6 +187,18 @@ def _post(rig, path: str, access: str):
         connection.close()
 
 
+def _until(page, expression: str, seconds: float = WAIT_S) -> None:
+    """Wait until `expression` is true in the page, asking it again every 50 ms (housekeeping).
+    Not `wait_for_function`: its polling evaluates a string with `eval`, which the page's
+    Content-Security-Policy refuses."""
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if page.evaluate(expression):
+            return
+        page.wait_for_timeout(50)  # lets Playwright answer the page's routed requests meanwhile
+    pytest.fail(f"timed out after {seconds:g} s waiting for {expression}")
+
+
 def _pauses(rig) -> list:
     return [seen for seen in rig.dispatch.seen if isinstance(seen, Pause)]
 
@@ -253,6 +265,12 @@ def test_sign_out_makes_the_rig_refuse_the_old_token(rig):
     _sign_in(page)
     access = _stored(page)["access"]
     page.click("#signout")
+    # wl.works stays signed in, and the next sign-in goes straight through as the same member
+    # (spec §2): the sentence says so, for a shared browser (the final review, M6).
+    assert page.inner_text("#sent") == (
+        "signed out at this rig; wl.works is still signed in as Jake Westerberg, so anyone "
+        "else using this browser must sign out of wl.works there first"
+    )
     seen: list = []
 
     def refused() -> bool:
@@ -303,6 +321,100 @@ def test_overlapping_renewal_triggers_present_one_renewal_token(rig):
     assert len(set(presented)) == len(presented)
     assert page.inner_text("#member") == "Jake Westerberg (wl.works)"
     assert _has_signin(page)
+
+
+#: The page's own sentence once the token has lapsed with wl.works out of reach (the final
+#: review, I1).
+UNREACHED = "wl.works could not be reached to renew this sign-in; the rig PC's page keeps every control"
+#: Counts, in the page, every command it sends to the rig.
+_COMMANDS = """
+window.__commands = 0;
+(function () {
+  var real = window.fetch;
+  window.fetch = function (url) {
+    if (String(url).indexOf("/commands") >= 0) { window.__commands += 1; }
+    return real.apply(this, arguments);
+  };
+})();
+"""
+
+
+def _signed_out_by_the_page(page) -> bool:
+    return (
+        page.evaluate("document.body.getAttribute('data-signed-in')") == "0"
+        and page.inner_text("#member") == ""
+        and page.is_visible("#signin")
+        and not _has_signin(page)
+    )
+
+
+def test_an_outage_past_the_tokens_end_signs_the_page_out_on_its_own_and_a_press_sends_nothing(rig, monkeypatch):
+    # Spec §7, row 1: the sign-in works until its hour ends, then the page signs out with the
+    # reason. None of the rig's minute of leeway, so a lapsed token would be refused there too.
+    monkeypatch.setattr(signin, "LEEWAY_S", 0)
+    rig.fake.expires_in = 8  # housekeeping: renewed at half of it, tried again at its end
+    page = rig.browser_page()
+    _sign_in(page)
+    rig.fake.stop()  # wl.works goes down, and stays down
+    # The renewal fails with time left: the sign-in stands, and the page will try again.
+    page.wait_for_selector("#sent:has-text('trying again before it lapses')")
+    assert page.evaluate("document.body.getAttribute('data-signed-in')") == "1"
+    assert _has_signin(page)
+    # At the token's end, with no press, the page signs itself out and says why.
+    _until(page, "document.body.getAttribute('data-signed-in') === '0'", rig.fake.expires_in + WAIT_S)
+    assert _signed_out_by_the_page(page)
+    assert page.inner_text("#sent") == "signed out: " + UNREACHED
+    # A press then sends nothing, and the reason stays on the page.
+    page.evaluate(_COMMANDS)
+    page.click(PAUSE, force=True)  # a click on the greyed button
+    page.keyboard.press("p")
+    sent = page.evaluate("window.__commands")  # after both presses' handlers have run
+    assert sent == 0
+    assert len(_pauses(rig)) == 0
+    assert page.inner_text("#sent") == "signed out: " + UNREACHED
+
+
+def test_a_press_after_the_tokens_end_with_wl_works_out_of_reach_says_why_and_sends_nothing(rig):
+    # A tab whose timers have not run (a background tab's are held back) is pressed after its
+    # token's end: the press finds the lapse itself, and says so instead of "sign in".
+    page = rig.browser_page()
+    page.clock.install()  # the page's clock is the test's from here, the sign-in's return included
+    _sign_in(page)
+    rig.fake.stop()  # wl.works goes down
+    now = page.evaluate("Date.now()") / 1000
+    page.clock.pause_at(now + 1)  # no timer fires after this
+    page.clock.set_system_time(now + rig.fake.expires_in + 60)  # past the hour, by the page's clock
+    assert page.evaluate("document.body.getAttribute('data-signed-in')") == "1"
+    page.evaluate(_COMMANDS)
+    page.click(PAUSE)
+    page.wait_for_selector("#sent:has-text('not sent:')")
+    assert page.inner_text("#sent") == "not sent: " + UNREACHED
+    sent = page.evaluate("window.__commands")
+    assert sent == 0
+    assert len(_pauses(rig)) == 0
+    assert _signed_out_by_the_page(page)
+
+
+def test_an_outage_shorter_than_the_token_leaves_the_sign_in_standing(rig, monkeypatch):
+    monkeypatch.setattr(signin, "LEEWAY_S", 0)
+    rig.fake.expires_in = 8  # housekeeping: renewed at half of it, tried again at its end
+    page = rig.browser_page()
+    _sign_in(page)
+    page.evaluate("window.__first = JSON.parse(window.sessionStorage.getItem('wlx-signin')).access; 0")
+    page.route("**/oauth2/token", lambda route: route.abort())  # wl.works out of reach
+    page.wait_for_selector("#sent:has-text('trying again before it lapses')")
+    page.unroute("**/oauth2/token")  # and back, before the token's end
+    renewed = (
+        "(function () { var held = JSON.parse(window.sessionStorage.getItem('wlx-signin') || 'null');"
+        " return !!held && held.access !== window.__first && document.body.getAttribute('data-signed-in') === '1'"
+        " && !document.querySelector('" + PAUSE + "').disabled; })()"
+    )
+    _until(page, renewed, rig.fake.expires_in + WAIT_S)  # a bool from the page: never the token
+    assert rig.fake.renewals == 1  # the retry, on its own: the aborted one never reached wl.works
+    assert page.inner_text("#member") == "Jake Westerberg (wl.works)"
+    page.click(PAUSE)
+    rig.wait_for(lambda: _pauses(rig))
+    assert _pauses(rig)[-1].by.name == "Jake Westerberg"
 
 
 def test_a_held_reward_stays_held_while_frames_arrive(rig):
