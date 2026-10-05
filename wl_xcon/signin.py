@@ -89,7 +89,10 @@ def parse_rig_page(text: str) -> RigPage:
     host = parts.hostname.lower()
     if ":" in host:
         host = f"[{host}]"
-    port = parts.port
+    try:
+        port = parts.port
+    except ValueError:
+        raise ValueError(f"{shape}; its port is not a number from 0 to 65535") from None
     netloc = host if port in (None, 443) else f"{host}:{port}"
     return RigPage(name, page, f"https://{netloc}", CLIENT_PREFIX + name, netloc)
 
@@ -228,9 +231,13 @@ class Checker:
                 raise ValueError("wl.works' key set holds no RS256 signing key")
         except (OSError, ValueError, http.client.HTTPException) as live:
             return self._from_cache(f"{type(live).__name__}: {live}")
-        _save(self.cache, document, jwks)
         with self._lock:
             self._discovery, self._keys = discovery, keys
+        try:
+            _save(self.cache, document, jwks)
+        except OSError as err:
+            # Live keys are good whether or not they can be kept; say why they were not.
+            return f"sign-in keys from wl.works ({len(keys)}); not cached: {type(err).__name__} {err.strerror or ''}".rstrip()
         return f"sign-in keys from wl.works ({len(keys)})"
 
     def _from_cache(self, why: str) -> str:
