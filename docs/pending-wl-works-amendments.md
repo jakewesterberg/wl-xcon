@@ -222,6 +222,20 @@ credential lifecycle.
 > Its page asks for `offline_access` alone, with no `prompt`. Nothing is configured in
 > `RIG_PAGES` until XC-151 and XC-152.
 
+> **TWO ASKS FROM THE RIG SIDE, 2026-10-05** (b2b slice 2's final review).
+> - **A small `refreshTokenReuseInterval`** (backlog XC-225). wl.works sets none
+>   (`@better-auth/oauth-provider` 1.7.1, read 2026-10-05), so a renewal whose answer is
+>   lost in transit, by a network drop or a 5xx without CORS headers, is followed by the
+>   page presenting the same renewal token again, which wl.works takes as a reuse and which
+>   revokes that member's renewal tokens for that rig. A small reuse interval would let
+>   that second presentation through. The page renews once at a time and stores each
+>   new pair at once (b2b spec §4; `web._SCRIPT`'s `renew`), so only a lost answer reaches this.
+> - **Refuse a rig page with a path.** `parseRigPages` (`src/lib/rigs.ts:95-104`, read
+>   2026-10-05 at `e37847f4`) accepts an address with a path, such as
+>   `https://rig-3.wl.works/console`. The rig refuses one in `--rig-page`, because `wlx serve`
+>   serves its page at the root of the address only, so a sign-in returning to that path
+>   would find no page. wl.works might refuse one too, so that the two cannot disagree.
+
 > **ANSWERED 2026-09-29: yes to all four, with two conditions and three asks of us.** wl-works
 > designed it with the PI the same day (wl-works `docs/superpowers/specs/2026-09-29-rig-sign-in-design.md`
 > §8, approved in `e057946b` and the commit after; told to this repository by that

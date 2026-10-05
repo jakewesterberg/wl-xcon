@@ -75,6 +75,14 @@ is the authority.**
    > `bounds` is the welfare boundary and a lock would only buy coordination — at the cost
    > of an animal waiting while somebody's laptop is asleep. Visibility replaces it. See
    > S9a §8.
+
+   > **Amended 2026-10-05 (items 2 and 3).** Since b2b slice 2, wl.works authenticates
+   > members at a rig's https page, and its `control-rigs` permission decides who may act
+   > on the rig from the network. The box checks each member's token itself, offline,
+   > against wl.works' published keys, and keeps every ceiling and every refusal; authority
+   > over the session stays on the box, and the rig PC's own page keeps every control. No
+   > welfare-affecting action becomes a lab-host-protocol action. See the b2b spec,
+   > `docs/superpowers/specs/2026-10-02-p4d2b-b2b-remote-signin-design.md` §2-§5.
 4. **LAN-only** (PI, 2026-09-19: *"off-site is not necessary. at least now it isn't"*).
    The browser reaches the box directly; nothing bridges. A `wl-works` outage therefore
    cannot cost an operator the console mid-session — which matters because S13 §4.1
