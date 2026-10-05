@@ -76,6 +76,10 @@ class FakeWlWorks:
         self.renewal_delay = 0.0
         self.renewal_gate: threading.Event | None = None
         self.renewals = 0
+        #: Every request to the token endpoint, whatever its grant or outcome.
+        self.attempts = 0
+        #: Renewal answers fully written to the page, so a test can wait for the late one.
+        self.replied = 0
         self.exchanges = 0
         #: Why each refused authorize request was refused. Never a token.
         self.refused: list[str] = []
@@ -142,8 +146,15 @@ class FakeWlWorks:
                     return
                 length = int(self.headers.get("Content-Length") or 0)
                 form = {k: v[0] for k, v in parse_qs(self.rfile.read(length).decode("utf-8")).items()}
+                with fake._lock:
+                    fake.attempts += 1
                 status, body = fake._token(form)
-                self._send(status, body, self._cors() + (("Cache-Control", "no-store"),))
+                try:
+                    self._send(status, body, self._cors() + (("Cache-Control", "no-store"),))
+                finally:
+                    if form.get("grant_type") == "refresh_token":
+                        with fake._lock:
+                            fake.replied += 1
 
         self.server = _PageServer(("127.0.0.1", port), Handler, tls_context(tls["cert"], tls["key"]))
         self._thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
@@ -154,7 +165,8 @@ class FakeWlWorks:
     def stop(self) -> None:
         if self.renewal_gate is not None:
             self.renewal_gate.set()  # a handler held by a test that failed must end
-        self.server.shutdown()
+        if self._thread.is_alive():  # `shutdown` waits for a loop that never ran
+            self.server.shutdown()
         self.server.server_close()
         self._thread.join(timeout=5)
 

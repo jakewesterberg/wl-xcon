@@ -15,13 +15,18 @@ from __future__ import annotations
 import json
 import threading
 import time
-from dataclasses import replace
 
 import pytest
 
-pytest.importorskip("jwt")
-
 from _browser import REQUIRED, FakeWlWorks, chromium  # noqa: E402
+
+try:
+    import jwt  # noqa: F401
+except ImportError:
+    if REQUIRED:
+        raise
+    pytest.skip("PyJWT is not installed (the signin extra)", allow_module_level=True)
+
 from _frames import ENDPOINT, frame  # noqa: E402
 from _issuer import Issuer  # noqa: E402
 from _ports import endpoints as free_endpoints  # noqa: E402
@@ -30,7 +35,6 @@ from wl_xcon import signin  # noqa: E402
 from wl_xcon.link import ManualReward, Pause  # noqa: E402
 from wl_xcon.serve import Hub, Remote, _PageServer, make_handler, tls_context  # noqa: E402
 
-_ = REQUIRED  # imported so a missing browser's failure mode is read from one place
 TOKEN = "t0ken-for-tests"
 #: Housekeeping, not measurements: how long a wait may take before the test fails.
 WAIT_S = 10.0
@@ -64,37 +68,41 @@ class _Rig:
     def __init__(self, tmp_path, browser) -> None:
         self._browser = browser
         self._contexts: list = []
-        self._pages: list = []
-        tls = material(tmp_path)
-        self.tls = tls
-        self.context = client_context(tls["ca"])
-        rig_port, fake_port = (int(item.rsplit(":", 1)[1]) for item in free_endpoints(2))
-        self.port = rig_port
-        self.page_url = f"https://127.0.0.1:{rig_port}/"
-        self.origin = f"https://127.0.0.1:{rig_port}"
-        self.issuer = Issuer(issuer=f"https://127.0.0.1:{fake_port}/api/auth")
-        self.fake = FakeWlWorks(self.issuer, self.page_url, self.origin, tls, fake_port)
+        self._thread = None
+        self.fake = None
         self.dispatch = _Dispatch()
         self.hub = Hub(steady=_Clock(), endpoint=ENDPOINT)
-        self.hub.offer(frame())
-        rig_page = signin.parse_rig_page(f"rig-3={self.page_url}")
-        self.checker = signin.Checker(
-            page=rig_page, issuer=self.issuer.issuer, cache=tmp_path / "wl-works.json", fetch=self.issuer.fetch
-        )
-        self.checker.load()
-        self.server = _PageServer(
-            ("127.0.0.1", rig_port),
-            make_handler(
-                self.hub, token=TOKEN, stale_after_s=30.0, dispatch=self.dispatch,
-                remote=Remote(rig_page, self.checker),
-            ),
-            tls_context(tls["cert"], tls["key"]),
-        )
-        self._thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
-
-    def start(self) -> None:
-        self.fake.start()
-        self._thread.start()
+        try:
+            tls = material(tmp_path)
+            self.context = client_context(tls["ca"])
+            rig_port, fake_port = (int(item.rsplit(":", 1)[1]) for item in free_endpoints(2))
+            self.port = rig_port
+            self.page_url = f"https://127.0.0.1:{rig_port}/"
+            self.origin = f"https://127.0.0.1:{rig_port}"
+            self.issuer = Issuer(issuer=f"https://127.0.0.1:{fake_port}/api/auth")
+            self.fake = FakeWlWorks(self.issuer, self.page_url, self.origin, tls, fake_port)
+            self.fake.start()
+            self.hub.offer(frame())
+            rig_page = signin.parse_rig_page(f"rig-3={self.page_url}")
+            self.checker = signin.Checker(
+                page=rig_page, issuer=self.issuer.issuer, cache=tmp_path / "wl-works.json", fetch=self.issuer.fetch
+            )
+            self.checker.load()
+            self.server = _PageServer(
+                ("127.0.0.1", rig_port),
+                make_handler(
+                    self.hub, token=TOKEN, stale_after_s=30.0, dispatch=self.dispatch,
+                    remote=Remote(rig_page, self.checker),
+                ),
+                tls_context(tls["cert"], tls["key"]),
+            )
+            self._thread = threading.Thread(
+                target=self.server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
+            )
+            self._thread.start()
+        except BaseException:
+            self.close()
+            raise
 
     def browser_page(self):
         """A Playwright page, in a context of its own, already at the rig's page."""
@@ -102,7 +110,6 @@ class _Rig:
         self._contexts.append(context)
         page = context.new_page()
         page.set_default_timeout(WAIT_S * 1000)
-        self._pages.append(page)
         page.goto(self.page_url)
         assert page.evaluate("window.isSecureContext"), "the page is not a secure context"
         return page
@@ -116,32 +123,31 @@ class _Rig:
         pytest.fail(f"timed out after {seconds:g} s waiting for {getattr(predicate, '__name__', 'a condition')}")
 
     def close(self) -> None:
-        for page in self._pages:
-            try:
-                page.unroute_all(behavior="ignoreErrors")
-            except Exception:  # noqa: BLE001
-                pass
+        """Everything this rig opened, each step guarded so one failure leaves the rest."""
         for context in self._contexts:
             try:
                 context.close()
             except Exception:  # noqa: BLE001
                 pass
-        if self.dispatch.gate is not None:
-            self.dispatch.gate.set()
-        self.hub.close()
         try:
-            self.server.shutdown()
-            self.server.server_close()
+            if self.dispatch.gate is not None:
+                self.dispatch.gate.set()
+            self.hub.close()
         finally:
-            self._thread.join(timeout=5)
-            self.fake.stop()
+            try:
+                if self._thread is not None:
+                    self.server.shutdown()
+                    self.server.server_close()
+                    self._thread.join(timeout=5)
+            finally:
+                if self.fake is not None:
+                    self.fake.stop()
 
 
 @pytest.fixture
 def rig(tmp_path):
     with chromium() as browser:
-        made = _Rig(tmp_path, browser)
-        made.start()
+        made = _Rig(tmp_path, browser)  # closes what it opened itself if it fails
         try:
             yield made
         finally:
@@ -150,6 +156,11 @@ def rig(tmp_path):
 
 def _stored(page) -> dict | None:
     return page.evaluate("JSON.parse(window.sessionStorage.getItem('wlx-signin') || 'null')")
+
+
+def _has_signin(page) -> bool:
+    """Whether sessionStorage holds a sign-in. A bool, never the record: it holds tokens."""
+    return page.evaluate("window.sessionStorage.getItem('wlx-signin') !== null")
 
 
 def _sign_in(page) -> None:
@@ -188,7 +199,8 @@ def test_a_member_signs_in_and_a_pause_reaches_the_rig_as_theirs(rig):
     page = rig.browser_page()
     page.click("#signin")
     page.wait_for_selector(SIGNED_IN, timeout=10_000)
-    assert "code=" not in page.url
+    no_code = "code=" not in page.url  # a bool: a failing assert would print the URL
+    assert no_code
     page.click(PAUSE)
     rig.wait_for(lambda: rig.dispatch.seen)
     assert isinstance(rig.dispatch.seen[-1], Pause)
@@ -203,19 +215,25 @@ def test_a_state_that_was_not_started_here_is_refused(rig):
     )
     page.goto(rig.page_url + "?code=X&state=forged")
     page.wait_for_selector("#sent:has-text('this sign-in was not started from this page')")
+    assert rig.fake.attempts == 0  # the page never even asked wl.works
     assert rig.fake.exchanges == 0
     assert page.inner_text("#member") == ""
-    assert _stored(page) is None
+    assert not _has_signin(page)
 
 
 def test_a_short_token_is_renewed_before_a_command(rig):
-    rig.fake.expires_in = 4  # housekeeping: short enough that a renewal is due at once
+    # Housekeeping, from web.py's `FRESH_FOR_MS` (60 s) and `scheduleRenew` (half of what
+    # is left, when under `RENEW_BEFORE_MS`): 64 s at sign-in, 6 s waited, so about 58 s
+    # are left -- inside the 60 s a command renews for -- while the tab's own timer, at
+    # about 32 s, is far off. Only the command's `fresh()` can renew here.
+    rig.fake.expires_in = 64
     page = rig.browser_page()
     _sign_in(page)
-    time.sleep(3)  # housekeeping
+    time.sleep(6)
+    assert rig.fake.renewals == 0
     page.click(PAUSE)
     rig.wait_for(lambda: _pauses(rig))
-    assert rig.fake.renewals >= 1
+    assert rig.fake.renewals == 1
     assert page.inner_text("#member") == "Jake Westerberg (wl.works)"
 
 
@@ -227,7 +245,7 @@ def test_a_refused_renewal_signs_the_page_out_with_wl_works_sentence(rig):
     page.wait_for_selector("#sent:has-text('24 hours old')")
     assert page.is_disabled(PAUSE)
     assert page.inner_text("#member") == ""
-    assert _stored(page) is None
+    assert not _has_signin(page)
 
 
 def test_sign_out_makes_the_rig_refuse_the_old_token(rig):
@@ -255,7 +273,7 @@ def test_a_reward_refused_for_its_token_is_not_sent_again(rig):
     page.click(REWARD)
     page.wait_for_selector("#sent:has-text('signed out here')")
     time.sleep(2)  # housekeeping: long enough for a wrong second send to arrive
-    assert _rewards(rig) == []
+    assert len(_rewards(rig)) == 0  # a count: a failing assert would print the actor's token id
     assert page.inner_text("#member") == ""
 
 
@@ -268,8 +286,8 @@ def test_neither_the_code_nor_the_token_reaches_the_page_server_log(rig, capfd):
     rig.wait_for(lambda: _pauses(rig))
     logged = capfd.readouterr().err
     assert rig.fake.codes
-    leaked = [code for code in rig.fake.codes if code in logged] + [t for t in (access, refresh) if t in logged]
-    assert leaked == []
+    leaked = sum(1 for secret in (*rig.fake.codes, access, refresh) if secret in logged)
+    assert leaked == 0  # a count: never the values
 
 
 def test_overlapping_renewal_triggers_present_one_renewal_token(rig):
@@ -284,7 +302,7 @@ def test_overlapping_renewal_triggers_present_one_renewal_token(rig):
     assert len(presented) >= 1
     assert len(set(presented)) == len(presented)
     assert page.inner_text("#member") == "Jake Westerberg (wl.works)"
-    assert _stored(page) is not None
+    assert _has_signin(page)
 
 
 def test_a_held_reward_stays_held_while_frames_arrive(rig):
@@ -312,7 +330,7 @@ def test_a_held_reward_stays_held_while_frames_arrive(rig):
     time.sleep(0.5)  # housekeeping: room for a wrong second send to arrive
     assert len(_rewards(rig)) == 1
     rig.dispatch.gate.set()
-    rig.wait_for(lambda: page.inner_text("#sent") != "sending…")
+    rig.wait_for(lambda: page.inner_text("#sent") == "sent: test")
     assert len(_rewards(rig)) == 1
 
 
@@ -321,11 +339,11 @@ def test_a_reload_with_a_lapsed_token_renews_and_stays_signed_in(rig, monkeypatc
     # seconds is a lapse. The page is told the token lasts an hour, as a page whose
     # token ran out sooner than said would be: it asks the rig, which says `expired`.
     monkeypatch.setattr(signin, "LEEWAY_S", 0)
-    rig.fake.expires_in = 3
+    rig.fake.expires_in = 5  # housekeeping: long enough to outlive the sign-in's own /whoami
     rig.fake.told_expires_in = 3600
     page = rig.browser_page()
     _sign_in(page)
-    time.sleep(4)  # housekeeping: past the token's own end
+    time.sleep(6)  # housekeeping: past the token's own end
     page.reload()
     page.wait_for_selector(SIGNED_IN)
     assert rig.fake.renewals >= 1
@@ -343,11 +361,36 @@ def test_a_sign_out_during_a_renewal_stands(rig):
     rig.wait_for(lambda: rig.fake.renewals >= 1)
     page.click("#signout")
     rig.fake.renewal_gate.set()
-    time.sleep(0.5)  # housekeeping: the late answer has arrived by now
+    rig.wait_for(lambda: rig.fake.replied >= 1)  # wl.works has answered, late
+    page.evaluate("new Promise(function (done) { setTimeout(done, 250); })")  # housekeeping: the page reads it
 
     def signed_out() -> bool:
-        return page.inner_text("#member") == "" and page.is_disabled(PAUSE) and _stored(page) is None
+        return page.inner_text("#member") == "" and page.is_disabled(PAUSE) and not _has_signin(page)
 
     assert signed_out()
-    time.sleep(1.5)
+    time.sleep(1.5)  # housekeeping: nothing may bring the sign-in back later either
     assert signed_out()
+
+
+def test_a_reload_with_little_time_left_renews_before_asking_the_rig(rig, monkeypatch):
+    asked: list = []
+    real = signin.Checker.check
+
+    def recording(self, authorization):
+        asked.append(authorization)
+        return real(self, authorization)
+
+    monkeypatch.setattr(signin.Checker, "check", recording)
+    rig.fake.expires_in = 40  # housekeeping: under the 60 s `FRESH_FOR_MS`, over the sign-in's own needs
+    page = rig.browser_page()
+    _sign_in(page)
+    old = "Bearer " + _stored(page)["access"]
+    before = len(asked)
+    page.reload()
+    page.wait_for_selector(SIGNED_IN)
+    rig.wait_for(lambda: rig.fake.renewals >= 1)
+    rig.wait_for(lambda: len(asked) > before)
+    after_reload = asked[before:]
+    old_was_sent = any(sent == old for sent in after_reload)  # a bool: never the token
+    assert not old_was_sent
+    assert len(after_reload) >= 1  # the renewed token was checked
