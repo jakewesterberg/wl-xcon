@@ -155,7 +155,8 @@ script read out of the token itself.
    `history.replaceState`, and drops the verifier and `state`.
 4. The access token, the renewal token and the access token's expiry (from `expires_in`) are
    kept in `sessionStorage`: they survive a reload of that tab, die with the tab, and are never
-   shared with another tab.
+   shared with another tab. (2026-10-05: a duplicated tab does copy `sessionStorage`
+   (Chromium; UNVERIFIED for Safari), so two tabs could hold one renewal token; XC-224.)
 5. `POST /whoami` with the token: the rig checks it (§5) and answers the name it will record, or
    the refusal's sentence. Only a token the rig accepts turns the controls on.
 

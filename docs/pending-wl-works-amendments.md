@@ -218,6 +218,10 @@ credential lifecycle.
 > hours from the sign-in at the rig. **No rig is in `RIG_PAGES` yet**: that waits on our XC-151
 > (names and certificates) and XC-152 (the list). Backlog XC-102 and XC-147 to XC-149 closed.
 
+> **RIG SIDE BUILT 2026-10-05** (b2b slice 2: `wlx serve --https`, `wl_xcon/signin.py`).
+> Its page asks for `offline_access` alone, with no `prompt`. Nothing is configured in
+> `RIG_PAGES` until XC-151 and XC-152.
+
 > **ANSWERED 2026-09-29: yes to all four, with two conditions and three asks of us.** wl-works
 > designed it with the PI the same day (wl-works `docs/superpowers/specs/2026-09-29-rig-sign-in-design.md`
 > §8, approved in `e057946b` and the commit after; told to this repository by that

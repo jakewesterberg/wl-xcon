@@ -9,8 +9,9 @@ wl.works vouched for, and so "we do not know who" can never print as a name.
 
 - `Box` is a name typed at the rig PC: its page, `wlx console --as`, or a terminal's
   `--as`. Unverified, and it says so whenever it is printed.
-- `Member` is a person wl.works signed in. **Will be made only by `wlx serve`**,
-  after a wl.works token checks out (b2b slice 2); nothing makes one before then.
+- `Member` is a person wl.works signed in. **`wlx serve` makes one** from a wl.works
+  token it has checked offline (b2b slice 2, built 2026-10-05), and only it does so on
+  purpose; `from_map` still makes one from any member map that reaches `taskd` (XC-218).
 
 **No dependencies**, so `bounds` stays pure and `welfare` imports no transport.
 

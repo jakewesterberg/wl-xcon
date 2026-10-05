@@ -2220,8 +2220,8 @@ class ZmqLink:
         (CLAUDE.md: a "not yet" must name what it is waiting for). S9a §6 designs it:
         the box as an OAuth2 client of `wl-works`, `Actor` as `Verified(person,
         issuer, token id)` or `Local(box credential)`. The actor types exist since b2b
-        (`actor.py`), and a `Member` will be made only by `wlx serve`, after a wl.works
-        token checks out (b2b slice 2); on this socket, a `by` is still whatever the local
+        (`actor.py`), and `wlx serve` makes a `Member` from a wl.works token it has
+        checked (b2b slice 2, built 2026-10-05); on this socket, a `by` is still whatever the local
         sender wrote, so the loopback-only bind remains what makes that acceptable. Grep
         `P4d-3` when that authentication lands.
 

@@ -40,7 +40,7 @@
   Each browser gets a bounded queue that drops its oldest frames when it falls behind.
   Restarting `wlx serve` changes nothing in `taskd`.
 - **Reads are open to the LAN; writes from the box in b2a, and from people signed in to
-  wl-works in b2b** (PI, 2026-09-26; amended 2026-09-27, when the PI asked that "folks that
+  wl-works in b2b** (built 2026-10-05; see the b2b spec) (PI, 2026-09-26; amended 2026-09-27, when the PI asked that "folks that
   are logged into wl-works" be able to write too — which replaces this bullet's earlier
   "until P4d-3"; see §5.7). A write from the box — `POST /commands` without a wl-works
   token — is accepted only when all hold: loopback peer; `Host` names loopback (against
