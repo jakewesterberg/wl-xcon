@@ -359,6 +359,16 @@ Welfare-critical by CLAUDE.md (who can command reward and the out-of-cage marks,
 5. In the welfare-critical modules and functions, `by` changes from a name to one of the two
    actor types and is written as its map; no rule changes. The lines are listed for him.
 
+> **Slice 1 answered 2026-10-05.** Item 5 went to the PI as seven plain items: the two kinds of
+> actor, and that nothing signs a member in before slice 2; no welfare rule changes (26 lines,
+> type, written form and one default only); a blank name still refused for an amendment, in
+> the same words; the process's own rows record nobody; a bare-text `by` refused, changing
+> nothing; records from before b2b read back, resume and end with their names as written; a
+> typed name never shown as a member. He approved all seven ("Approve all seven"). He was first
+> asked on 2026-10-04 by a question that pointed at a list it never showed. His answer then was
+> the same, but it is not the record. Items 1-4 are slice 2's, asked at its review. The
+> welfare list is unchanged.
+
 ## 11. Outside this repository
 
 - **wl-works**, when b2b is built: that the rig side exists, and that its page asks for
