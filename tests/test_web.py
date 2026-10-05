@@ -28,6 +28,7 @@ from wl_xcon.web import (
     _SCRIPT,
     _clock_time,
     CONTROLS_AT_THE_BOX,
+    CONTROLS_ELSEWHERE,
     DEBOUNCE_MS,
     END_CONFIRM,
     FONTS,
@@ -36,6 +37,9 @@ from wl_xcon.web import (
     NO_MARK_ENDPOINT,
     REWARD_ONLY_PAUSED,
     RUN_TRIALS,
+    SIGN_IN_FIRST,
+    SignIn,
+    _gate,
     font_bytes,
     fragments,
     page,
@@ -819,10 +823,14 @@ def test_the_page_writes_only_by_posting_json_to_commands():
     document = _document()
 
     assert "<form" not in document and "<textarea" not in document
-    assert _SCRIPT.count("fetch(") == 1
-    assert 'fetch("/commands", {' in _SCRIPT
+    # b2b spec §4: the other three are the sign-in's (the token endpoint, `/whoami`,
+    # `/signout`); only `/commands` carries a command.
+    assert _SCRIPT.count("fetch(") == 4
+    assert _SCRIPT.count('fetch("/commands", {') == 1
+    assert 'fetch(body.getAttribute("data-token-endpoint")' in _SCRIPT
+    assert 'fetch("/whoami", {' in _SCRIPT and 'fetch("/signout", {' in _SCRIPT
     assert 'method: "POST"' in _SCRIPT
-    assert 'headers: { "Content-Type": "application/json" }' in _SCRIPT
+    assert "var headers = { \"Content-Type\": \"application/json\" };" in _SCRIPT
     radios = re.findall(r'<input type="radio"[^>]*>', document)
     assert len(radios) == 4
 
@@ -872,7 +880,11 @@ def test_the_stale_timer_runs_from_the_frames_age_not_from_arrival():
     assert "Date.now()" not in timer
     # The one `Date.now()` is the mark's `pressed_at`, the browser's clock, sent as
     # such (spec §5.1) and never read against the stream.
-    assert _SCRIPT.count("Date.now()") == 1
+    # (The sign-in's own `Date.now()`s, its tokens' expiry, are in its block.)
+    head, rest = _SCRIPT.split("  var signinPage", 1)
+    _, tail = rest.split("  function signOut()", 1)
+    tail = tail.split('  if (signinPage) {\n    if (el("signin"))', 1)[0]
+    assert (head + tail).count("Date.now()") == 1
     assert "pressed_at: Date.now() / 1000" in _SCRIPT
     assert (
         "baseline = payload.age === null ? null : performance.now() - payload.age * 1000;"
@@ -958,9 +970,7 @@ def test_everywhere_but_the_box_the_controls_are_greyed_with_the_sentence():
     assert buttons and inputs
     assert all(" disabled" in tag for tag in buttons + inputs)
     assert CONTROLS_AT_THE_BOX in parts["controls"]
-    assert CONTROLS_AT_THE_BOX == (
-        "controls work only at the rig PC until remote sign-in arrives"
-    )
+    assert CONTROLS_AT_THE_BOX == "controls work only at the rig PC"
 
 
 def test_a_console_without_the_mark_endpoint_greys_mark_alone():
@@ -1112,9 +1122,12 @@ def test_the_page_tells_its_script_whether_it_may_write_and_the_debounce():
     assert DEBOUNCE_MS == 600
     assert '<body data-stale-after="30" data-can-write="1" data-debounce-ms="600">' in box
     assert '<body data-stale-after="30" data-can-write="0" data-debounce-ms="600">' in lan
-    for control in ('id="sched-kind"', 'id="sched-value"', 'id="sched-set"', 'id="rename"'):
+    for control in ('id="sched-kind"', 'id="sched-value"', 'id="sched-set"'):
         assert re.search(control + r"[^>]* disabled", lan), control
         assert not re.search(control + r"[^>]* disabled", box), control
+    # The name is the box's alone: a LAN viewer reads `read-only`, with no way to rename.
+    assert re.search(r'id="rename"[^>]*>change', box) and 'id="rename"' not in lan
+    assert "read-only" in lan
 
 
 def test_the_page_holds_the_stop_confirm_and_the_mark_note_hidden():
@@ -1239,9 +1252,15 @@ def test_the_script_pins_the_box_only_write_guard():
     post_body = re.search(
         r"function post\(command, then, after\) \{(.*?)\n  \}", _SCRIPT, re.S
     ).group(1)
+    # b2b spec §4: the https page's branch comes first and returns on its own; the box's
+    # guard follows it and still precedes anything that asks a name or sends.
     assert post_body.strip().startswith(
-        "var done = after || function () {};\n    if (!canWrite) { done(); return; }"
+        "var done = after || function () {};\n    if (signinPage) {"
     )
+    after_signin = post_body.split("      return;\n    }\n", 1)[1]
+    assert after_signin.startswith("    if (!canWrite) { done(); return; }")
+    assert post_body.index("if (!canWrite)") < post_body.index("askName()")
+    assert post_body.index("if (!canWrite)") < post_body.rindex("deliver(")
 
 
 # --- P4d-2b b2a, amended 2026-09-28 (PI): a manual reward during a pause -------------
@@ -1318,7 +1337,7 @@ def test_the_script_sends_one_reward_per_click_and_holds_the_button_until_its_an
     assert "if (rewarding && button && !button.disabled) {" in _SCRIPT
     assert """el("controls").querySelector('[data-cmd="reward"][data-held]')""" in _SCRIPT
     assert "}).then(done);" in _SCRIPT
-    assert _SCRIPT.count("fetch(") == 1
+    assert _SCRIPT.count('fetch("/commands"') == 1
     assert (
         "unknown: this page lost wlx serve's answer, so whether the reward was given is "
         "not known, and it was not sent again; check the session's fluid total before "
@@ -2287,3 +2306,129 @@ def test_every_pane_that_names_who_shows_a_member_and_a_box_apart():
     for who in (other, Box("sam")):
         strip = fragments(frame(scheduled_stop=ScheduledStop("clock", at + 3600, who, "at 14:30")), view())["strip"]
         assert f"set by {_who(who)}" in strip
+
+
+# --- P4d-2b b2b slice 2, Task 10: the https page's modes, gating and script ----------
+
+_SIGNIN = SignIn(
+    authorize="https://wl.works/oauth/authorize?x=1&y=2",
+    token_endpoint="https://wl.works/oauth/token",
+    client_id="rig<1>",
+    page="https://rig.lab:8443/",
+    resource="https://rig.lab:8443",
+)
+_NO_KEYS = SignIn(
+    authorize=None,
+    token_endpoint=None,
+    client_id="rig1",
+    page="https://rig.lab:8443/",
+    resource="https://rig.lab:8443",
+    unavailable="the rig has not reached wl.works to check sign-ins; use the rig PC",
+)
+
+
+def _markup(document: str) -> str:
+    """The page without its script, which names `data-signin` to find those controls."""
+    return re.sub(r"<script.*?</script>", "", document, flags=re.S)
+
+
+def _https_view(**overrides):
+    return view(can_write=False, on_box=False, signin=True, **overrides)
+
+
+def test_gate_leaves_the_boxs_own_reason_alone_and_greys_the_rest_by_mode():
+    own = ' disabled title="its own reason"'
+    assert _gate(view(), own) == own and _gate(view()) == ""
+    assert _gate(_https_view(), own) == own
+    assert _gate(_https_view()) == (
+        f' disabled data-signin title="{SIGN_IN_FIRST}"'
+    )
+    assert SIGN_IN_FIRST == "sign in with wl.works to use the controls"
+    lan = view(can_write=False, on_box=False)
+    assert _gate(lan) == f' disabled title="{CONTROLS_AT_THE_BOX}"'
+    assert _gate(replace(lan, https_page=True)) == (
+        f' disabled title="{html.escape(CONTROLS_ELSEWHERE)}"'
+    )
+    assert "data-signin" not in _gate(lan)
+    assert CONTROLS_ELSEWHERE == (
+        "controls work at the rig PC, or signed in on this rig's https page"
+    )
+
+
+def test_on_the_https_page_a_control_greyed_for_its_own_reason_never_carries_data_signin():
+    controls = fragments(frame(), _https_view())["controls"]
+    reward = re.search(r"<button[^>]*data-cmd=\"reward\"[^>]*>", controls).group(0)
+    pause = re.search(r"<button[^>]*data-cmd=\"pause\"[^>]*>", controls).group(0)
+
+    assert REWARD_ONLY_PAUSED in reward and "data-signin" not in reward
+    assert "data-signin" in pause and " disabled" in pause
+    # Nothing on the https page says controls work only at the rig PC.
+    assert CONTROLS_AT_THE_BOX not in controls
+
+
+def test_the_https_page_carries_its_sign_in_on_body_and_renders_sign_in_and_out():
+    document = page(
+        fragments(frame(), _https_view()),
+        stale_after_s=30.0,
+        nonce="n0nce",
+        signin=_SIGNIN,
+    )
+
+    assert 'data-signin="1"' in document
+    assert 'data-authorize="https://wl.works/oauth/authorize?x=1&amp;y=2"' in document
+    assert 'data-token-endpoint="https://wl.works/oauth/token"' in document
+    assert 'data-client="rig&lt;1&gt;"' in document
+    assert 'data-page="https://rig.lab:8443/"' in document
+    assert 'data-resource="https://rig.lab:8443"' in document
+    assert 'id="signin"' in document and 'id="signout"' in document
+    assert 'id="rename"' not in document and 'id="who"' not in document
+    for control in ('id="sched-kind"', 'id="task-sel"', 'id="amend-yes"', 'id="dn-ok"'):
+        assert re.search(control + r"[^>]* disabled data-signin", document), control
+
+
+def test_a_rig_without_keys_says_so_and_offers_no_sign_in():
+    document = page(
+        fragments(frame(), _https_view()),
+        stale_after_s=30.0,
+        nonce="n0nce",
+        signin=_NO_KEYS,
+    )
+
+    assert "the rig has not reached wl.works to check sign-ins; use the rig PC" in document
+    assert 'id="signin"' not in document and 'id="signout"' not in document
+
+
+def test_the_box_page_is_unchanged_by_the_https_page_existing():
+    document = page(
+        fragments(frame(), view()), stale_after_s=30.0, nonce="n0nce", can_write=True
+    )
+
+    assert 'id="who"' in document and 'id="rename"' in document
+    assert "data-signin" not in _markup(document)
+
+
+def test_a_lan_page_says_where_else_controls_work_only_when_an_https_page_exists():
+    lan = view(can_write=False, on_box=False)
+    without = page(fragments(frame(), lan), stale_after_s=30.0, nonce="n0nce")
+    with_https = page(
+        fragments(frame(), replace(lan, https_page=True)),
+        stale_after_s=30.0,
+        nonce="n0nce",
+        https_page=True,
+    )
+
+    assert CONTROLS_AT_THE_BOX in without and CONTROLS_ELSEWHERE not in without
+    assert CONTROLS_ELSEWHERE in with_https
+    assert "data-signin" not in _markup(without) + _markup(with_https)
+
+
+def test_the_sign_in_script_uses_pkce_and_keeps_its_tokens_in_session_storage_only():
+    assert '"offline_access"' in _SCRIPT and '"S256"' in _SCRIPT
+    assert 'credentials: "omit"' in _SCRIPT
+    assert "sessionStorage" in _SCRIPT and "Authorization" in _SCRIPT
+    # The box's name keeps its `localStorage`; the sign-in never touches it.
+    assert _SCRIPT.count("localStorage") == 2
+    assert "console.log" not in _SCRIPT
+    # The authorization code leaves the address bar before anything else is done with it.
+    assert _SCRIPT.index("history.replaceState") < _SCRIPT.index("tokenRequest({")
+    assert "document.cookie" not in _SCRIPT

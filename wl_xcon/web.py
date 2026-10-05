@@ -84,6 +84,27 @@ class View:
     #: Whether this console has the session's mark endpoint (`wlx serve --link
     #: PUB,REP,MARK`); without it the mark control is greyed with `NO_MARK_ENDPOINT`.
     can_mark: bool = False
+    #: Whether this is the https page, whose controls work once the script holds a
+    #: sign-in (b2b spec §4): a control that needs only that renders `disabled
+    #: data-signin` (`_gate`).
+    signin: bool = False
+    #: Whether this is the plain-http page of a rig that also has an https page (b2b
+    #: spec §3): a LAN viewer's greyed controls then say where else controls work.
+    https_page: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SignIn:
+    """What the https page needs to sign a member in (b2b spec §4), from `wlx serve`.
+    `web` must not import `signin`, which imports `jwt`: `unavailable` is the sentence
+    for a rig with no keys yet, and `authorize` and `token_endpoint` are `None` then."""
+
+    authorize: str | None
+    token_endpoint: str | None
+    client_id: str
+    page: str
+    resource: str
+    unavailable: str | None = None
 
 
 #: Every fragment `fragments` renders, in page order. Each is the inner HTML of the
@@ -118,9 +139,13 @@ LEGEND = tuple((family.name.lower(), family.value) for family in Family) + (
     ("other", "unknown outcome"),
 )
 
-#: What a refused write says, and what every greyed control says (P4d-2b spec §2):
-#: until remote sign-in arrives (b2b), writes come from the box alone.
-CONTROLS_AT_THE_BOX = "controls work only at the rig PC until remote sign-in arrives"
+#: What a refused write says, and what a LAN viewer's greyed controls say on the
+#: plain-http page (P4d-2b spec §2, b2b spec §3): the first without an https page
+#: configured, the second with one.
+CONTROLS_AT_THE_BOX = "controls work only at the rig PC"
+CONTROLS_ELSEWHERE = "controls work at the rig PC, or signed in on this rig's https page"
+#: What a control says on the https page to a browser not signed in (b2b spec §4).
+SIGN_IN_FIRST = "sign in with wl.works to use the controls"
 #: Why the mark control is greyed on a console started without the mark endpoint.
 NO_MARK_ENDPOINT = (
     "this console was started without the session's mark endpoint: give wlx serve "
@@ -465,10 +490,26 @@ def _performance(frame: Telemetry, view: View) -> str:
     return _cell("Correct / trials", "", after=_lines(rows))
 
 
-def _off(view: View, why: str = CONTROLS_AT_THE_BOX) -> str:
-    """The attributes that grey a control this page may not use, saying why; nothing
-    for the box's own page."""
-    return "" if view.can_write else f' disabled title="{_e(why)}"'
+def _gate(view: View, other: str = "") -> str:
+    """A control's attributes (the plan's Ruling 7). `other` is its own reason to be
+    greyed, or nothing. On the box's page, `other`. On the https page, `other`, or, when
+    it has none, greyed until the script holds a sign-in (`data-signin`). Everywhere else,
+    greyed saying where controls work."""
+    if view.can_write:
+        return other
+    if view.signin:
+        return other or f' disabled data-signin title="{_e(SIGN_IN_FIRST)}"'
+    why = CONTROLS_ELSEWHERE if view.https_page else CONTROLS_AT_THE_BOX
+    return f' disabled title="{_e(why)}"'
+
+
+def _note(view: View) -> str:
+    """The words beside a control bar greyed away from where controls work: nothing on
+    the box's page, and nothing on the https page, whose header says it."""
+    if view.can_write or view.signin:
+        return ""
+    why = CONTROLS_ELSEWHERE if view.https_page else CONTROLS_AT_THE_BOX
+    return f'<span class="nm">{why}</span>'
 
 
 def _scheduled(frame: Telemetry, view: View) -> str:
@@ -476,7 +517,7 @@ def _scheduled(frame: Telemetry, view: View) -> str:
     14:30 · set by jake*, in the rig's own words, with a cancel button."""
     stop = frame.scheduled_stop
     cancel = (
-        f'<button type="button" class="btn small" data-cmd="cancel"{_off(view)}>'
+        f'<button type="button" class="btn small" data-cmd="cancel"{_gate(view)}>'
         f"cancel</button>"
     )
     return _cell("Scheduled", f"stop {_e(stop.said)}", sub=f"set by {_who(stop.by)} {cancel}")
@@ -610,7 +651,9 @@ def _pf_pill(frame: Telemetry | Idle | None, view: View) -> str:
     (the b3a-2 plan, decision 7); otherwise the words alone."""
     if isinstance(frame, Telemetry) and frame.service and frame.phase == "between_runs":
         tone, said = _pf_state(frame)
-        off = _off(view) or ' title="take the pre-flight for the task chosen"'
+        # Greyed like any control, with this title when nothing else is said (a title
+        # alone would leave it enabled on the https page before a sign-in).
+        off = _gate(view) or ' title="take the pre-flight for the task chosen"'
         return (
             f'<button type="button" class="pill {tone}" data-cmd="check"{off}>'
             f"{_e(said)}</button>"
@@ -628,7 +671,7 @@ def _pf_row(item, view: View) -> str:
     that acknowledges it, carrying its exact name and never ticked here (decision 9)."""
     acknowledge = (
         f'<label class="chk"><input type="checkbox" data-ack="{_e(item.name)}" '
-        f'aria-label="acknowledge {_e(item.name)}"{_off(view)}> acknowledge</label>'
+        f'aria-label="acknowledge {_e(item.name)}"{_gate(view)}> acknowledge</label>'
         if item.result == "unknown"
         else "<span></span>"
     )
@@ -690,7 +733,7 @@ def _reward_button(frame: Telemetry, view: View) -> str:
     a click is one command, and the script holds the button until that command's
     answer."""
     live = _hand_reward_now(frame)
-    off = _off(view) or ("" if live else f' disabled title="{_e(REWARD_ONLY_PAUSED)}"')
+    off = _gate(view, "" if live else f' disabled title="{_e(REWARD_ONLY_PAUSED)}"')
     return f'<button type="button" class="btn" data-cmd="reward"{off}>give reward</button>'
 
 
@@ -714,7 +757,7 @@ def _reward_answer(frame: Telemetry) -> str:
 
 def _mark_button(view: View) -> str:
     """*mark (M)*: greyed on its own when this console has no mark endpoint."""
-    off = _off(view) or ("" if view.can_mark else f' disabled title="{_e(NO_MARK_ENDPOINT)}"')
+    off = _gate(view, "" if view.can_mark else f' disabled title="{_e(NO_MARK_ENDPOINT)}"')
     return f'<button type="button" class="btn" data-cmd="mark"{off}>mark (M)</button>'
 
 
@@ -731,7 +774,7 @@ def _start_button(frame: Telemetry, view: View) -> str:
         failing = [i.name for i in preflight.items if i.result not in ("pass", "unknown")]
         why = f"pre-flight: {', '.join(failing)} failing" if failing else None
     task = "" if preflight is None else preflight.task
-    off = _off(view) or ("" if why is None else f' disabled title="{_e(why)}"')
+    off = _gate(view, "" if why is None else f' disabled title="{_e(why)}"')
     return (
         f'<button type="button" class="btn go" data-cmd="start" data-task="{_e(task)}"'
         f"{off}>start run</button>"
@@ -773,7 +816,7 @@ def _outside_a_run(frame: Telemetry, view: View) -> str:
         + _e("session ended · waiting for the animal's return")
         + "</span>"
     )
-    note = "" if view.can_write else f'<span class="nm">{CONTROLS_AT_THE_BOX}</span>'
+    note = _note(view)
     return (
         lead + _reward_button(frame, view) + _mark_button(view) + _reward_answer(frame)
         + _session_refused(frame.refusals) + note
@@ -798,9 +841,9 @@ def _controls(frame: Telemetry | None, view: View) -> str:
         return _outside_a_run(frame, view)
     if frame.stop_kind is not None:
         return '<span class="nm">controls · the session has ended</span>'
-    off = _off(view)
+    off = _gate(view)
     cmd, label = ("resume", "resume (P)") if frame.paused_at is not None else ("pause", "pause (P)")
-    note = "" if view.can_write else f'<span class="nm">{CONTROLS_AT_THE_BOX}</span>'
+    note = _note(view)
     return (
         f'<button type="button" class="btn" data-cmd="{cmd}"{off}>{label}</button>'
         f"{_mark_button(view)}"
@@ -1002,7 +1045,7 @@ def _field(row, view: View) -> str:
     decimals and carries the step and the declared range for the script's arrows,
     which clamp to it; a categorical value is a word, with no arrows. Greyed away
     from the box."""
-    off = _off(view)
+    off = _gate(view)
     name = _e(row.name)
     if isinstance(row.value, str):
         return (
@@ -1155,7 +1198,7 @@ def _question_banner(question: Question, view: View) -> str:
     buttons = "".join(
         f'<button type="button" class="btn small" data-answer="{_e(answer)}" '
         f'data-mark="{_e(question.mark)}" data-session="{_e(question.session_id)}"'
-        f'{_off(view)}>{_e(answer)}{"…" if answer == "amend" else ""}</button>'
+        f'{_gate(view)}>{_e(answer)}{"…" if answer == "amend" else ""}</button>'
         for answer in question.answers
     )
     return _banner(
@@ -1169,7 +1212,7 @@ def _question_banner(question: Question, view: View) -> str:
 
 def _new_session_button(view: View, why: str | None = None) -> str:
     """*new session* (the mockup's `a-new`): opens the page's *New session* dialog."""
-    off = _off(view) or ("" if why is None else f' disabled title="{_e(why)}"')
+    off = _gate(view, "" if why is None else f' disabled title="{_e(why)}"')
     return f'<button type="button" class="btn small primary" data-cmd="new"{off}>new session</button>'
 
 
@@ -1194,7 +1237,7 @@ def _idle_banners(frame: Idle, view: View) -> str:
         else:
             resume = (
                 f'<button type="button" class="btn small" '
-                f'data-resume="{_e(found.session_id)}"{_off(view)}>resume session</button> '
+                f'data-resume="{_e(found.session_id)}"{_gate(view)}>resume session</button> '
                 if found.resumable
                 else ""
             )
@@ -1205,7 +1248,7 @@ def _idle_banners(frame: Idle, view: View) -> str:
                 f"session opens until it is resumed or its return recorded.{cannot} "
                 f"{resume}"
                 f'<button type="button" class="btn small danger" '
-                f'data-return="{_e(found.session_id)}"{_off(view)}>end session…</button>'
+                f'data-return="{_e(found.session_id)}"{_gate(view)}>end session…</button>'
             )
         out.append(_banner("crit", "Stranded", text))
     if frame.question is not None:
@@ -1247,12 +1290,12 @@ def _end_actions(frame: Telemetry | Idle | None, view: View) -> str:
     if frame.phase in ("between_runs", "running"):
         return (
             '<span class="pill neutral">open</span><button type="button" class="btn small '
-            f'danger" data-cmd="end" data-session="{session}"{_off(view)}>end session</button>'
+            f'danger" data-cmd="end" data-session="{session}"{_gate(view)}>end session</button>'
         )
     if frame.phase == "awaiting_return":
         return (
             '<span class="pill warn">ended · awaiting the return</span><button type="button" '
-            f'class="btn small danger" data-return="{session}"{_off(view)}>record return…</button>'
+            f'class="btn small danger" data-return="{session}"{_gate(view)}>record return…</button>'
         )
     return '<span class="pill ok">ended</span>'
 
@@ -1571,6 +1614,7 @@ h3 { margin: 0; font-family: var(--cond); font-weight: 600; font-size: 11.5px; l
 .btn:disabled, .field:disabled, .arrows button:disabled, select:disabled { opacity: 0.45; cursor: not-allowed; }
 .who { font-size: 12.5px; color: var(--muted); }
 .who b { color: var(--ink); font-weight: 600; }
+body:not([data-signed-in="1"]) .si{display:none} body[data-signed-in="1"] .so{display:none}
 .sent { font-size: 12.5px; }
 .sent.ok { color: var(--ok); } .sent.crit { color: var(--crit); }
 .inline { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 6px 12px; border-radius: 6px; font-size: 13px; background: var(--surface-2); }
@@ -1681,6 +1725,179 @@ _SCRIPT = """
   var canWrite = body.getAttribute("data-can-write") === "1";
   var debounceMs = Number(body.getAttribute("data-debounce-ms"));
   var NAME_KEY = "wlx-console-name";
+  // P4d-2b b2b (spec §4): signing a member in on the rig's https page. The tokens live
+  // in this tab's sessionStorage only; Python renders every word a person reads.
+  var signinPage = body.getAttribute("data-signin") === "1";
+  var SIGNIN_KEY = "wlx-signin";
+  var PKCE_KEY = "wlx-signin-pkce";
+  // Housekeeping, not measurements (spec §4): renew this long before the hour is up,
+  // and renew first before a command when less than this is left.
+  var RENEW_BEFORE_MS = 5 * 60 * 1000;
+  var FRESH_FOR_MS = 60 * 1000;
+  var renewTimer = null;
+  function readStore(key) {
+    try { return JSON.parse(window.sessionStorage.getItem(key) || "null"); } catch (e) { return null; }
+  }
+  function writeStore(key, value) {
+    try {
+      if (value === null) { window.sessionStorage.removeItem(key); }
+      else { window.sessionStorage.setItem(key, JSON.stringify(value)); }
+    } catch (e) { /* this tab's memory only, then */ }
+  }
+  var signin = signinPage ? readStore(SIGNIN_KEY) : null;
+  function signedIn() { return !!(signin && signin.name); }
+  function b64url(bytes) {
+    var text = "";
+    for (var i = 0; i < bytes.length; i++) { text += String.fromCharCode(bytes[i]); }
+    return btoa(text).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
+  }
+  function random(n) { var bytes = new Uint8Array(n); crypto.getRandomValues(bytes); return b64url(bytes); }
+  function applySignIn() {
+    if (!signinPage) { return; }
+    body.setAttribute("data-signed-in", signedIn() ? "1" : "0");
+    var member = el("member");
+    if (member) { member.textContent = signedIn() ? signin.shown : ""; }
+    Array.prototype.forEach.call(document.querySelectorAll("[data-signin]"), function (node) {
+      node.disabled = !signedIn();
+    });
+  }
+  function startSignIn() {
+    var verifier = random(32);
+    var state = random(16);
+    crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)).then(function (digest) {
+      writeStore(PKCE_KEY, { verifier: verifier, state: state });
+      var query = new URLSearchParams({
+        response_type: "code",
+        client_id: body.getAttribute("data-client"),
+        redirect_uri: body.getAttribute("data-page"),
+        scope: "offline_access",
+        resource: body.getAttribute("data-resource"),
+        code_challenge: b64url(new Uint8Array(digest)),
+        code_challenge_method: "S256",
+        state: state
+      });
+      window.location.assign(body.getAttribute("data-authorize") + "?" + query.toString());
+    });
+  }
+  function tokenRequest(fields) {
+    return fetch(body.getAttribute("data-token-endpoint"), {
+      method: "POST",
+      credentials: "omit",
+      cache: "no-store",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(fields).toString()
+    }).then(function (response) {
+      return response.json().then(
+        function (answer) { return { ok: response.ok, answer: answer }; },
+        function () { return { ok: false, answer: {} }; }
+      );
+    });
+  }
+  function keep(answer) {
+    signin = {
+      access: answer.access_token,
+      refresh: answer.refresh_token || (signin && signin.refresh) || null,
+      expires: Date.now() + Number(answer.expires_in) * 1000,
+      name: null,
+      shown: null
+    };
+  }
+  function forget() {
+    signin = null;
+    writeStore(SIGNIN_KEY, null);
+    clearTimeout(renewTimer);
+    applySignIn();
+  }
+  function whoami() {
+    return fetch("/whoami", {
+      method: "POST",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + signin.access },
+      body: "{}"
+    }).then(function (response) { return response.json(); }).then(function (answer) {
+      if (answer.status === "signed_in") {
+        signin.name = answer.name;
+        signin.shown = answer.shown;
+        writeStore(SIGNIN_KEY, signin);
+        scheduleRenew();
+        applySignIn();
+      } else {
+        forget();
+        tell("not signed in: " + answer.said, "crit");
+      }
+    });
+  }
+  function finishSignIn() {
+    var params = new URLSearchParams(window.location.search);
+    if (!params.has("code") && !params.has("error")) { return Promise.resolve(); }
+    window.history.replaceState(null, "", window.location.pathname);
+    var kept = readStore(PKCE_KEY);
+    writeStore(PKCE_KEY, null);
+    if (params.has("error")) {
+      tell("not signed in: " + (params.get("error_description") || params.get("error")), "crit");
+      return Promise.resolve();
+    }
+    if (!kept || kept.state !== params.get("state")) {
+      tell("not signed in: this sign-in was not started from this page", "crit");
+      return Promise.resolve();
+    }
+    return tokenRequest({
+      grant_type: "authorization_code",
+      code: params.get("code"),
+      redirect_uri: body.getAttribute("data-page"),
+      client_id: body.getAttribute("data-client"),
+      code_verifier: kept.verifier
+    }).then(function (result) {
+      if (!result.ok || !result.answer.access_token) {
+        tell("not signed in: " + (result.answer.error_description || "wl.works did not sign you in"), "crit");
+        return;
+      }
+      keep(result.answer);
+      return whoami();
+    });
+  }
+  function renew() {
+    if (!signin || !signin.refresh) { forget(); return Promise.resolve(false); }
+    return tokenRequest({
+      grant_type: "refresh_token",
+      refresh_token: signin.refresh,
+      client_id: body.getAttribute("data-client")
+    }).then(function (result) {
+      if (!result.ok || !result.answer.access_token) {
+        forget();
+        tell("signed out: " + (result.answer.error_description || "wl.works did not renew this sign-in"), "crit");
+        return false;
+      }
+      keep(result.answer);
+      return whoami().then(function () { return signedIn(); });
+    }, function () {
+      tell("could not reach wl.works to renew this sign-in", "crit");
+      return signedIn() && signin.expires > Date.now();
+    });
+  }
+  function scheduleRenew() {
+    clearTimeout(renewTimer);
+    if (!signin) { return; }
+    var left = signin.expires - Date.now();
+    renewTimer = setTimeout(renew, Math.max(left / 2, left - RENEW_BEFORE_MS));
+  }
+  function fresh() {
+    if (!signedIn()) { return Promise.resolve(false); }
+    if (signin.expires - Date.now() > FRESH_FOR_MS) { return Promise.resolve(true); }
+    return renew();
+  }
+  function signOut() {
+    var held = signin;
+    forget();
+    tell("signed out at this rig", "ok");
+    if (!held) { return; }
+    fetch("/signout", {
+      method: "POST",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + held.access },
+      body: "{}"
+    }).catch(function () { /* the tab has forgotten it either way */ });
+  }
   // Housekeeping -- a double click's span with margin -- not a measurement: keeps a
   // double click, or a re-render's fresh button under the second click of one, from
   // toggling a pause or resume the first click already sent (spec §5.2: "never a
@@ -1751,6 +1968,7 @@ _SCRIPT = """
     if (id === "controls") { holdReward(); }
     if (id === "preflight") { restoreAcks(); }
     if (id === "end-actions") { settleOpen(); }
+    applySignIn();
   }
   function release() {
     if (heldParams !== null && !busy()) {
@@ -1814,6 +2032,7 @@ _SCRIPT = """
   }
   var name = storedName();
   function showName() {
+    if (!el("who")) { return; }
     el("who").textContent = name ? name + " (box, unverified)" : "not given yet";
   }
   function askName() {
@@ -1835,6 +2054,13 @@ _SCRIPT = """
   }
   function post(command, then, after) {
     var done = after || function () {};
+    if (signinPage) {
+      fresh().then(function (ok) {
+        if (!ok) { tell("not sent: sign in with wl.works to use the controls", "crit"); done(); return; }
+        deliver(command, { "Authorization": "Bearer " + signin.access }, then, done);
+      });
+      return;
+    }
     if (!canWrite) { done(); return; }
     var by = name || askName();
     if (!by) {
@@ -1843,16 +2069,25 @@ _SCRIPT = """
       return;
     }
     command.by = by;
+    deliver(command, {}, then, done);
+  }
+  function deliver(command, extra, then, done) {
     tell("sending…", "");
+    var headers = { "Content-Type": "application/json" };
+    Object.keys(extra).forEach(function (key) { headers[key] = extra[key]; });
     fetch("/commands", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: headers,
       body: JSON.stringify(command),
       cache: "no-store"
     }).then(function (response) {
       return response.json();
     }).then(function (answer) {
       tell(answer.said, answer.status === "sent" || answer.status === "signaled" ? "ok" : "crit");
+      // A refusal for the token (the plan's Ruling 8): never re-sent; renew, or sign out.
+      if (answer.reason === "expired") { renew(); }
+      else if (answer.reason === "signed_out" || answer.reason === "other_rig" ||
+               answer.reason === "not_accepted" || answer.reason === "no_token") { forget(); }
       if (then) { then(answer); }
     }).catch(function () {
       tell(command.kind === "reward" ? REWARD_LOST : "not delivered: this page could not reach wlx serve", "crit");
@@ -2111,7 +2346,7 @@ _SCRIPT = """
     post({ kind: "stop" });
   });
   el("stop-no").addEventListener("click", function () { el("stop-confirm").hidden = true; });
-  el("rename").addEventListener("click", function () { askName(); });
+  if (el("rename")) { el("rename").addEventListener("click", function () { askName(); }); }
   el("sched-set").addEventListener("click", function () {
     var kind = el("sched-kind").value;
     var raw = el("sched-value").value.trim();
@@ -2162,6 +2397,18 @@ _SCRIPT = """
     if (source) { source.close(); }
     open();
   });
+  if (signinPage) {
+    if (el("signin")) { el("signin").addEventListener("click", startSignIn); }
+    if (el("signout")) { el("signout").addEventListener("click", signOut); }
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden && signin && signin.expires - Date.now() < RENEW_BEFORE_MS) { renew(); }
+    });
+    applySignIn();
+    finishSignIn().then(function () {
+      if (signin && signin.access && !signin.name) { return whoami(); }
+      if (signedIn()) { return whoami(); }
+    }).then(applySignIn);
+  }
   showName();
   open();
 })();
@@ -2169,7 +2416,13 @@ _SCRIPT = """
 
 
 def page(
-    parts: dict[str, str], *, stale_after_s: float, nonce: str, can_write: bool = False
+    parts: dict[str, str],
+    *,
+    stale_after_s: float,
+    nonce: str,
+    can_write: bool = False,
+    signin: SignIn | None = None,
+    https_page: bool = False,
 ) -> str:
     """The whole document, every pane already rendered into it, so it reads before
     its stream has opened (spec §4.3).
@@ -2191,9 +2444,45 @@ def page(
     confirmation, the return and the amendment are static too, and so is the run's
     trial count; only the task and subject selects' options are fragments (the b3a-2
     plan, decision 11).
+    **The https page (b2b spec §4)**: with `signin`, the static controls carry `disabled
+    data-signin` for the script to enable, the name is replaced by the sign-in and sign-out
+    buttons, and the sign-in's addresses ride on `<body>`. `https_page` is for the plain-http
+    page of a rig that has one: a LAN viewer's greyed controls say where else they work.
     """
     p = {key: parts[key] for key in FRAGMENT_IDS}
-    off = "" if can_write else f' disabled title="{_e(CONTROLS_AT_THE_BOX)}"'
+    if can_write:
+        off = ""
+        attrs = ""
+        who = (
+            '<span class="who">name <b id="who">not given yet</b> <button class="btn small" '
+            'id="rename" type="button">change</button></span>'
+        )
+    elif signin is not None:
+        off = f' disabled data-signin title="{_e(SIGN_IN_FIRST)}"'
+        attrs = (
+            f' data-signin="1" data-authorize="{_e(signin.authorize or "")}"'
+            f' data-token-endpoint="{_e(signin.token_endpoint or "")}"'
+            f' data-client="{_e(signin.client_id)}" data-page="{_e(signin.page)}"'
+            f' data-resource="{_e(signin.resource)}"'
+        )
+        if signin.token_endpoint is None:
+            who = (
+                '<span class="who" id="mode">read-only · <span class="nm">'
+                + _e(signin.unavailable or "")
+                + "</span></span>"
+            )
+        else:
+            who = (
+                '<span class="who" id="mode"><span class="so">read-only · <button class="btn small '
+                'primary" id="signin" type="button">sign in with wl.works</button></span><span '
+                'class="si">controls act as <b id="member"></b> · <button class="btn small" '
+                'id="signout" type="button">not you? sign out</button></span></span>'
+            )
+    else:
+        why = CONTROLS_ELSEWHERE if https_page else CONTROLS_AT_THE_BOX
+        off = f' disabled title="{_e(why)}"'
+        attrs = ""
+        who = f'<span class="who">read-only · <span class="nm">{_e(why)}</span></span>'
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -2202,7 +2491,7 @@ def page(
 <title>xcon console</title>
 <style>{_FONT_FACES}{_CSS}</style>
 </head>
-<body data-stale-after="{stale_after_s:g}" data-can-write="{int(can_write)}" data-debounce-ms="{DEBOUNCE_MS}">
+<body data-stale-after="{stale_after_s:g}" data-can-write="{int(can_write)}" data-debounce-ms="{DEBOUNCE_MS}"{attrs}>
 <div class="wrap">
   <header class="head glass">
     <span class="logo">{_LOGO}<span class="app">xcon</span></span>
@@ -2223,7 +2512,7 @@ def page(
     <span class="sep" aria-hidden="true"></span>
     <div class="ctlrow" id="controls">{p['controls']}</div>
     <span class="spacer"></span>
-    <span class="who">name <b id="who">not given yet</b> <button class="btn small" id="rename" type="button"{off}>change</button></span>
+    {who}
     <span class="sent" id="sent" role="status"></span>
   </section>
   <div class="inline crit" id="stop-confirm" role="alertdialog" aria-label="confirm stop" hidden><span>stop at a trial boundary, after any commands already sent?</span><button class="btn danger" id="stop-yes" type="button">stop</button><button class="btn" id="stop-no" type="button">cancel</button></div>

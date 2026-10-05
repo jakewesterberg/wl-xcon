@@ -225,7 +225,13 @@ class Hub:
             return self._rate()
 
     def snapshot(
-        self, *, on_box: bool, stale_after_s: float, can_write: bool = False
+        self,
+        *,
+        on_box: bool,
+        stale_after_s: float,
+        can_write: bool = False,
+        signin: bool = False,
+        https_page: bool = False,
     ) -> tuple[_link.Telemetry | _link.Idle | None, _web.View]:
         """The latest frame and the `View` a render of it needs, read together. The
         frame's age is on `steady` alone (ledger Ruling 1). `can_write` is the
@@ -248,6 +254,8 @@ class Hub:
             endpoint=self._endpoint,
             can_write=can_write,
             can_mark=self._marks,
+            signin=signin,
+            https_page=https_page,
         )
 
     def subscribe(self, *, on_box: bool) -> queue.Queue:
@@ -892,6 +900,7 @@ def make_handler(
     hosts: frozenset[str] = LOOPBACK_NAMES,
     dispatch: Callable[[object], tuple[int, dict]] | None = None,
     remote: Remote | None = None,
+    https_page: bool = False,
 ) -> type[BaseHTTPRequestHandler]:
     """A handler class closing over `hub` and the token, built the way wl-preproc's
     `make_handler` is and for its reason: `BaseHTTPRequestHandler` handles the whole
@@ -920,6 +929,8 @@ def make_handler(
         _keepalive_s = keepalive_s
         _hosts = hosts
         _remote = remote
+        #: Whether a rig's plain-http page has an https page beside it (b2b spec §3).
+        _https_page = https_page
         # A function stored on a class becomes a method; `staticmethod` keeps it the
         # plain callable it was given.
         _dispatch = None if dispatch is None else staticmethod(dispatch)
@@ -1250,12 +1261,32 @@ def make_handler(
                 200, _web.font_bytes(font), "font/woff2", cache="max-age=86400"
             )
 
+        def _sign_in(self) -> "_web.SignIn | None":
+            """What the https page needs to sign a member in, or `None` on the box's
+            page. Without keys yet (no discovery), the page says so (`NO_KEYS`)."""
+            if self._remote is None:
+                return None
+            from wl_xcon import signin  # loaded already: a `Remote` exists
+
+            discovery = self._remote.checker.discovery
+            page = self._remote.page
+            return _web.SignIn(
+                authorize=None if discovery is None else discovery.authorization_endpoint,
+                token_endpoint=None if discovery is None else discovery.token_endpoint,
+                client_id=page.client_id,
+                page=page.page,
+                resource=page.origin,
+                unavailable=signin.NO_KEYS if discovery is None else None,
+            )
+
         def _page(self) -> None:
             can_write = self.may_write()
             latest, view = self._hub.snapshot(
                 on_box=on_box(self.client_address[0]),
                 stale_after_s=self._stale_after_s,
                 can_write=can_write,
+                signin=self._remote is not None,
+                https_page=self._https_page,
             )
             nonce = secrets.token_urlsafe(16)
             body = _web.page(
@@ -1263,6 +1294,8 @@ def make_handler(
                 stale_after_s=self._stale_after_s,
                 nonce=nonce,
                 can_write=can_write,
+                signin=self._sign_in(),
+                https_page=self._https_page,
             )
             connect = ""
             if self._remote is not None:
@@ -1356,7 +1389,11 @@ def make_handler(
             is sent, never a stale value carried in from `take`.
             """
             latest, view = self._hub.snapshot(
-                on_box=box, stale_after_s=self._stale_after_s, can_write=can_write
+                on_box=box,
+                stale_after_s=self._stale_after_s,
+                can_write=can_write,
+                signin=self._remote is not None,
+                https_page=self._https_page,
             )
             parts = _web.fragments(latest, view)
             changed = {key: html for key, html in parts.items() if sent.get(key) != html}
@@ -1469,6 +1506,7 @@ class Server:
                 keepalive_s=keepalive_s,
                 hosts=box_names(allow_hosts),
                 dispatch=self.dispatch,
+                https_page=remote is not None,
             ),
         )
         self._web = threading.Thread(

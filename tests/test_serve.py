@@ -4456,6 +4456,19 @@ def test_https_get_root_answers_the_page_over_tls(tmp_path):
     assert b"<html" in body.lower()
 
 
+def test_the_https_page_is_the_sign_in_page_with_wl_works_addresses_on_its_body(tmp_path):
+    hub = _hub()
+    server, thread, port, page, _issuer, context = _page_served(tmp_path, hub)
+    try:
+        body = _https(port, context, "GET", "/")[2].decode("utf-8")
+    finally:
+        _stop_page(server, thread, hub)
+    assert 'data-signin="1"' in body and 'id="signin"' in body and 'id="rename"' not in body
+    assert f'data-client="{page.client_id}"' in body
+    assert f'data-page="{page.page}"' in body and f'data-resource="{page.origin}"' in body
+    assert 'data-authorize="https://' in body and 'data-token-endpoint="https://' in body
+
+
 def test_the_return_from_wl_works_serves_the_page_and_never_echoes_its_code(tmp_path):
     hub = _hub()
     server, thread, port, _page, _issuer, context = _page_served(tmp_path, hub)
