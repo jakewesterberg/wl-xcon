@@ -362,6 +362,18 @@ window.__commands = 0;
 })();
 """
 
+#: Counts, in the page, every sign-out it sends to the rig.
+_SIGNOUTS = """
+window.__signouts = 0;
+(function () {
+  var real = window.fetch;
+  window.fetch = function (url) {
+    if (String(url).indexOf("/signout") >= 0) { window.__signouts += 1; }
+    return real.apply(this, arguments);
+  };
+})();
+"""
+
 
 def _signed_out_by_the_page(page) -> bool:
     return (
@@ -378,16 +390,19 @@ def test_an_outage_past_the_tokens_end_signs_the_page_out_on_its_own_and_a_press
     monkeypatch.setattr(signin, "LEEWAY_S", 0)
     rig.fake.expires_in = 8  # housekeeping: renewed at half of it, tried again at its end
     page = rig.browser_page()
+    page.add_init_script(_SIGNOUTS)
     _sign_in(page)
     rig.fake.stop()  # wl.works goes down, and stays down
     # The renewal fails with time left: the sign-in stands, and the page will try again.
-    page.wait_for_selector("#sent:has-text('trying again before it lapses')")
+    page.wait_for_selector("#sent:has-text('trying again until it lapses')")
     assert page.evaluate("document.body.getAttribute('data-signed-in')") == "1"
     assert _has_signin(page)
     # At the token's end, with no press, the page signs itself out and says why.
     _until(page, "document.body.getAttribute('data-signed-in') === '0'", rig.fake.expires_in + WAIT_S)
     assert _signed_out_by_the_page(page)
     assert page.inner_text("#sent") == "signed out: " + UNREACHED
+    signouts = page.evaluate("window.__signouts")  # a lapsed token is never sent to /signout
+    assert signouts == 0
     # A press then sends nothing, and the reason stays on the page.
     page.evaluate(_COMMANDS)
     page.click(PAUSE, force=True)  # a click on the greyed button
@@ -438,6 +453,7 @@ def test_a_press_while_the_rig_confirms_a_renewal_waits_for_it_and_is_sent(rig, 
     page.add_init_script(_COUNTS)
     _sign_in(page)
     page.evaluate("window.__first = JSON.parse(window.sessionStorage.getItem('wlx-signin')).access; 0")
+    page.evaluate(_COMMANDS)
     checks.clear()  # the rig holds every check from here
     page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
     # wl.works has renewed, and the rig has not yet confirmed the new token. A bool: never a token.
@@ -446,6 +462,10 @@ def test_a_press_while_the_rig_confirms_a_renewal_waits_for_it_and_is_sent(rig, 
     _until(page, "window.__clicks >= 1")  # the click's handler has run
     told = page.inner_text("#sent")
     assert not told.startswith("not sent")  # the press waits for the renewal, refused by nothing
+    # ...and sends nothing until the rig has confirmed the new token: the rig's held check
+    # would hold a command too, so the page's own count is what tells the two apart.
+    sent = page.evaluate("window.__commands")
+    assert sent == 0
     checks.set()
 
     def paused() -> bool:
@@ -463,7 +483,7 @@ def test_an_outage_shorter_than_the_token_leaves_the_sign_in_standing(rig, monke
     _sign_in(page)
     page.evaluate("window.__first = JSON.parse(window.sessionStorage.getItem('wlx-signin')).access; 0")
     page.route("**/oauth2/token", lambda route: route.abort())  # wl.works out of reach
-    page.wait_for_selector("#sent:has-text('trying again before it lapses')")
+    page.wait_for_selector("#sent:has-text('trying again until it lapses')")
     page.unroute("**/oauth2/token")  # and back, before the token's end
     renewed = (
         "(function () { var held = JSON.parse(window.sessionStorage.getItem('wlx-signin') || 'null');"

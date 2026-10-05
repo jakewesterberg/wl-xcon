@@ -2506,7 +2506,7 @@ def test_a_sign_out_stands_against_a_renewal_or_a_sign_in_still_in_flight():
     assert "var generation = 0;" in _SCRIPT
     forget = _script_between("  function forget(why) {", "  // The page signs itself out")
     assert "generation += 1;" in forget
-    assert "generation += 1;" in _script_between("  function keep(answer) {", "  function forget() {")
+    assert "generation += 1;" in _script_between("  function keep(answer) {", "  function forget(why) {")
     # Each answer is dropped, before anything is kept, stored or shown, if the sign-in it
     # began from is gone.
     who = _script_between("  function whoami(mayRenew) {", "  // Resolves true when")

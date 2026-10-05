@@ -1772,7 +1772,8 @@ _SCRIPT = """
   // without being kept, stored or shown. A sign-out must stand against a renewal in flight.
   var generation = 0;
   // Why the page last signed itself out, so a press that finds it signed out says so
-  // (`post`). Empty after a sign-out someone asked for, and after a new sign-in.
+  // (`post`). Empty after every other sign-out (one someone asked for, or the rig's
+  // refusal of the token in `deliver`) and after a new sign-in.
   var signedOutFor = "";
   function applySignIn() {
     if (!signinPage) { return; }
@@ -1971,7 +1972,7 @@ _SCRIPT = """
       // it has lapsed, the page signs itself out (spec §7; the final review, I1).
       var left = signin.expires - Date.now();
       if (left > 0) {
-        tell("could not reach wl.works to renew this sign-in; trying again before it lapses", "crit");
+        tell("could not reach wl.works to renew this sign-in; trying again until it lapses", "crit");
         clearTimeout(renewTimer);
         renewTimer = setTimeout(renew, Math.min(left, RETRY_MS));
         return signedIn();

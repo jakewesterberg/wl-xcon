@@ -87,6 +87,9 @@ is the authority.**
    The browser reaches the box directly; nothing bridges. A `wl-works` outage therefore
    cannot cost an operator the console mid-session — which matters because S13 §4.1
    already carries "wl-works sees silence" as an unsolved residual.
+   > **Amended 2026-10-05.** On a rig's https page (b2b slice 2), a wl.works outage that
+   > outlasts a member's token signs that page out when the token lapses (the b2b spec §7).
+   > The rig PC's own page is unaffected, and so is the session.
 5. **One surface for both deployments.** The rig and the kiosk run the same console.
 
 ## Alternatives considered
