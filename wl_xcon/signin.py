@@ -189,6 +189,58 @@ def _save(path: Path, discovery: dict, jwks: dict) -> None:
         raise
 
 
+#: Seconds of clock leeway on `exp` and `iat`. Housekeeping (spec §5), not a
+#: measurement: the rig keeps time from wl-works' NTP server (ADR-0009).
+LEEWAY_S = 60
+#: The longest `Authorization` value read, in bytes. A bound on one header's reach,
+#: not a rule about wl.works: its tokens are about a kilobyte.
+TOKEN_LIMIT = 8192
+#: wl.works' access-token type (`JWT_ACCESS_TOKEN_TYPE`), and RFC 9068 §2.1's long form.
+ACCESS_TOKEN_TYPES = frozenset({"at+jwt", "application/at+jwt"})
+
+#: The refusals (spec §5): each a sentence for the page, and a word for its script.
+NO_TOKEN = "sign in with wl.works to use the controls"
+SIGNED_OUT = "this sign-in was signed out here; sign in again"
+EXPIRED = "your sign-in has expired; sign in again"
+OTHER_RIG = "this sign-in is for another rig"
+CLOCK = "the rig's clock and this sign-in disagree; check the rig's time"
+NOT_ACCEPTED = "this is not a wl.works sign-in the rig accepts"
+
+
+class Refused(Exception):
+    """A token this rig does not accept: `said` for a person, `reason` for the page's
+    script (the plan's Ruling 8). Never carries the token."""
+
+    def __init__(self, reason: str, said: str) -> None:
+        super().__init__(said)
+        self.reason = reason
+        self.said = said
+
+
+@dataclass(frozen=True, slots=True)
+class Accepted:
+    """A token that checked out: who it names, and when it expires (POSIX seconds)."""
+
+    member: actors.Member
+    expires_at: float
+
+
+def _bearer(authorization: str | None) -> str:
+    if not authorization or len(authorization) > TOKEN_LIMIT:
+        raise Refused("no_token", NO_TOKEN)
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise Refused("no_token", NO_TOKEN)
+    return token.strip()
+
+
+def _claim(claims: dict, name: str) -> str:
+    value = claims.get(name)
+    if not isinstance(value, str) or not value.strip() or len(value) > actors.TEXT_LIMIT or not value.isprintable():
+        raise Refused("not_accepted", NOT_ACCEPTED)
+    return value
+
+
 class Checker:
     """This rig's view of wl.works: its discovery, its keys, and the tokens signed out
     here (spec §5). Thread-safe: every HTTP thread of `wlx serve` checks through one."""
@@ -353,55 +405,3 @@ class Checker:
             return
         with self._lock:
             self._signed_out[accepted.member.token_id] = accepted.expires_at
-
-
-#: Seconds of clock leeway on `exp` and `iat`. Housekeeping (spec §5), not a
-#: measurement: the rig keeps time from wl-works' NTP server (ADR-0009).
-LEEWAY_S = 60
-#: The longest `Authorization` value read, in bytes. A bound on one header's reach,
-#: not a rule about wl.works: its tokens are about a kilobyte.
-TOKEN_LIMIT = 8192
-#: wl.works' access-token type (`JWT_ACCESS_TOKEN_TYPE`), and RFC 9068 §2.1's long form.
-ACCESS_TOKEN_TYPES = frozenset({"at+jwt", "application/at+jwt"})
-
-#: The refusals (spec §5): each a sentence for the page, and a word for its script.
-NO_TOKEN = "sign in with wl.works to use the controls"
-SIGNED_OUT = "this sign-in was signed out here; sign in again"
-EXPIRED = "your sign-in has expired; sign in again"
-OTHER_RIG = "this sign-in is for another rig"
-CLOCK = "the rig's clock and this sign-in disagree; check the rig's time"
-NOT_ACCEPTED = "this is not a wl.works sign-in the rig accepts"
-
-
-class Refused(Exception):
-    """A token this rig does not accept: `said` for a person, `reason` for the page's
-    script (the plan's Ruling 8). Never carries the token."""
-
-    def __init__(self, reason: str, said: str) -> None:
-        super().__init__(said)
-        self.reason = reason
-        self.said = said
-
-
-@dataclass(frozen=True, slots=True)
-class Accepted:
-    """A token that checked out: who it names, and when it expires (POSIX seconds)."""
-
-    member: actors.Member
-    expires_at: float
-
-
-def _bearer(authorization: str | None) -> str:
-    if not authorization or len(authorization) > TOKEN_LIMIT:
-        raise Refused("no_token", NO_TOKEN)
-    scheme, _, token = authorization.partition(" ")
-    if scheme.lower() != "bearer" or not token.strip():
-        raise Refused("no_token", NO_TOKEN)
-    return token.strip()
-
-
-def _claim(claims: dict, name: str) -> str:
-    value = claims.get(name)
-    if not isinstance(value, str) or not value.strip() or len(value) > actors.TEXT_LIMIT or not value.isprintable():
-        raise Refused("not_accepted", NOT_ACCEPTED)
-    return value

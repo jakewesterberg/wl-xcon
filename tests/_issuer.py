@@ -70,6 +70,7 @@ class Issuer:
         *,
         aud: object = ORIGIN,
         azp: str = CLIENT,
+        client_id: object | None = None,
         name: object = "Jake Westerberg",
         sub: object = "user-1",
         jti: object | None = None,
@@ -84,7 +85,7 @@ class Issuer:
     ) -> str:
         now = time.time()
         claims = {
-            "sub": sub, "aud": aud, "client_id": azp, "azp": azp, "scope": "offline_access",
+            "sub": sub, "aud": aud, "client_id": azp if client_id is None else client_id, "azp": azp, "scope": "offline_access",
             "iss": self.issuer if iss is None else iss, "iat": int(now + iat_in),
             "exp": int(now + exp_in), "jti": jti or secrets.token_hex(16), "name": name,
         }

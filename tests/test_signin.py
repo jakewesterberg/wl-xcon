@@ -268,8 +268,19 @@ def _ready(tmp_path, issuer=None):
     return checker, issuer
 
 
+class _Header(str):
+    """An `Authorization` value that prints as `'Bearer <token>'`, so a pytest traceback
+    (locals, arguments, `-vv`) never shows a token."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "'Bearer <token>'"
+
+
 def _bearer(token: str) -> str:
-    return f"Bearer {token}"
+    __tracebackhide__ = True
+    return _Header(f"Bearer {token}")
 
 
 def test_a_good_token_names_its_member(tmp_path):
@@ -280,6 +291,7 @@ def test_a_good_token_names_its_member(tmp_path):
 
 
 def _refused(checker, header) -> signin.Refused:
+    __tracebackhide__ = True
     with pytest.raises(signin.Refused) as refused:
         checker.check(header)
     return refused.value
@@ -313,6 +325,11 @@ def test_no_token_is_refused_asking_for_a_sign_in(tmp_path, header):
         (dict(name=""), "not_accepted"),
         (dict(name=None), "not_accepted"),
         (dict(name="x" * 201), "not_accepted"),
+        (dict(name="Jake\x00Westerberg"), "not_accepted"),
+        (dict(client_id="wl-works-rig-rig-4"), "other_rig"),
+        (dict(drop=("azp",)), "other_rig"),
+        (dict(drop=("exp",)), "not_accepted"),
+        (dict(drop=("iat",)), "not_accepted"),
     ],
 )
 def test_each_check_refuses_on_its_own(tmp_path, mint, reason):
@@ -357,7 +374,7 @@ def test_alg_none_and_hs256_keyed_on_the_public_key_are_refused(tmp_path):
     assert _refused(checker, _bearer(_hs256(claims, public, issuer.kid))).reason == "not_accepted"
 
 
-def test_an_unknown_key_id_fetches_the_key_set_again_at_most_once_a_minute(tmp_path, monkeypatch):
+def test_an_unknown_key_id_fetches_the_key_set_again_at_most_once_a_minute(tmp_path):
     checker, issuer = _ready(tmp_path)
     fetched = len(issuer.fetched)
     _refused(checker, _bearer(issuer.mint(kid="new")))
@@ -433,3 +450,14 @@ def test_no_refusal_echoes_the_token(tmp_path):
     refused = _refused(checker, _bearer(token))
     leaked = token in refused.said or token in str(refused)
     assert not leaked
+
+
+def test_a_signed_out_token_stays_refused_through_the_leeway_after_its_expiry(tmp_path):
+    """`exp` 30 s ago is inside `LEEWAY_S`, so PyJWT still accepts it; the signed-out
+    entry must outlive `exp` by the same leeway or the sign-out would lapse early."""
+    checker, issuer = _ready(tmp_path)
+    token = _bearer(issuer.mint(jti="j-1", exp_in=-30))
+    accepted = checker.check(token)
+    assert accepted.member.token_id == "j-1"
+    checker.sign_out(token)
+    assert _refused(checker, token).reason == "signed_out"
