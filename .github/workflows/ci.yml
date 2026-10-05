@@ -74,10 +74,12 @@ jobs:
         with:
           repository: jakewesterberg/wl-preproc
           path: wl-preproc
-      - run: pip install -e ".[dev,contract,console]"
+      - run: pip install -e ".[dev,contract,console,signin,browser]"
+      - run: python -m playwright install --with-deps chromium
       - run: pytest -q
         env:
           WLX_REQUIRE_PREPROC: "1"
+          WLX_REQUIRE_BROWSER: "1"
 
   mutation:
     # A green suite proves the tests pass. This proves they can fail: every function
@@ -137,7 +139,7 @@ jobs:
         with:
           repository: jakewesterberg/wl-preproc
           path: wl-preproc
-      - run: pip install -e ".[dev,contract,console]"
+      - run: pip install -e ".[dev,contract,console,signin]"
       - name: Mutation gate (changed modules only, function shard ${{ matrix.shard }}/12)
         # WLX_REQUIRE_PREPROC applies to every sweep now, not just the two that named
         # it: each sweep runs the whole suite as its baseline, and a baseline with the
@@ -195,7 +197,7 @@ jobs:
         with:
           repository: jakewesterberg/wl-preproc
           path: wl-preproc
-      - run: pip install -e ".[dev,contract,console]"
+      - run: pip install -e ".[dev,contract,console,signin]"
       - name: Mutation gate (function shard ${{ matrix.shard }}/12)
         env:
           WLX_REQUIRE_PREPROC: "1"

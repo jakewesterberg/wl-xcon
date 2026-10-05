@@ -47,6 +47,17 @@ contract = ["pyyaml>=6"]
 # (`zmq/backend/cython/_zmq.py`'s `recv_into`, `.. versionadded:: 26.4`, read in
 # pyzmq 27.2.0 on 2026-09-27).
 console = ["pyzmq>=26.4", "msgpack>=1"]
+# What `wlx serve --https` needs to check a wl.works sign-in (P4d-2b b2b spec §5, §9):
+# PyJWT verifies the RS256 access token, and its `crypto` extra brings `cryptography`.
+# **2.10.1, not 2.8**: 2.10.0 compared a string issuer as a substring
+# (`payload["iss"] not in issuer`, its `jwt/api_jwt.py`, read 2026-10-02). An extra, and
+# imported only by `signin.py`, which `serve` imports only when `--https` is given, so a
+# rig that takes no remote control installs neither (`tests/test_no_transport_leak.py`).
+signin = ["pyjwt[crypto]>=2.10.1"]
+# The page's script driven in a real browser (b2b spec §8; closes XC-186). Tests only:
+# never installed on a rig. Its own extra so the mutation jobs, which install `dev`,
+# neither download it nor a browser. After installing: `python -m playwright install chromium`.
+browser = ["playwright>=1.63"]
 
 [tool.setuptools.packages.find]
 include = ["wl_xcon*"]

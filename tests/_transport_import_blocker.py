@@ -41,7 +41,7 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
-for _mod in ("zmq", "msgpack"):
+for _mod in ("zmq", "msgpack", "jwt", "cryptography"):
     assert _mod not in sys.modules, f"{_mod} already imported before the blocker was installed"
 
 
@@ -50,7 +50,7 @@ class _Blocker:
     finder for everything else. `find_spec`, never `find_module` -- see the module
     docstring above."""
 
-    blocked = {"zmq", "msgpack"}
+    blocked = {"zmq", "msgpack", "jwt", "cryptography"}
 
     def find_spec(self, name, path, target=None):
         if name.split(".")[0] in self.blocked:
@@ -62,7 +62,7 @@ sys.meta_path.insert(0, _Blocker())
 
 # Prove the blocker can fail before trusting anything it appears to protect.
 _failed_to_block = []
-for _mod in ("zmq", "msgpack"):
+for _mod in ("zmq", "msgpack", "jwt", "cryptography"):
     try:
         __import__(_mod)
     except ImportError as exc:
@@ -88,6 +88,8 @@ import wl_xcon.taskd as _taskd  # noqa: E402
 # would first drag `zmq`/`msgpack` in behind it, and this check would miss that
 # regression entirely if `cli` were never added here.
 import wl_xcon.cli as _cli  # noqa: E402
+# P4d-2b b2b: `serve` imports `signin` (the only module that imports `jwt`) only when
+# `--https` is given, so it must import with `jwt` and `cryptography` absent too.
 # P4d-2b b1: the browser console's three modules. `serve` reaches `zmq` only through
 # `link.ZmqConsole`, inside its telemetry thread, so importing it -- or `web` and
 # `health`, which it renders with -- must acquire no transport.

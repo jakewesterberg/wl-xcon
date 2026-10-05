@@ -26,7 +26,7 @@ _BLOCKER_SCRIPT = Path(__file__).resolve().parent / "_transport_import_blocker.p
 _REPO_ROOT = _BLOCKER_SCRIPT.parent.parent
 
 
-def test_link_taskd_cli_health_serve_and_web_import_with_zmq_and_msgpack_unavailable():
+def test_link_taskd_cli_health_serve_and_web_import_with_transport_and_signin_unavailable():
     """Runs the blocker **in a subprocess, on purpose.** By the time this test runs,
     `tests/test_link.py` has almost certainly already imported real `zmq`/`msgpack`
     into this pytest process's `sys.modules` -- and once a module is cached there,
@@ -56,6 +56,9 @@ def test_link_taskd_cli_health_serve_and_web_import_with_zmq_and_msgpack_unavail
     # trusted -- ...
     assert "BLOCKED: import zmq raised" in result.stdout, result.stdout
     assert "BLOCKED: import msgpack raised" in result.stdout, result.stdout
+    # P4d-2b b2b: nor does anything but `signin.py` need PyJWT or `cryptography`.
+    assert "BLOCKED: import jwt raised" in result.stdout, result.stdout
+    assert "BLOCKED: import cryptography raised" in result.stdout, result.stdout
     # ...and only then did the six modules under test import successfully, from
     # this worktree specifically (R9).
     assert "PASS: wl_xcon.link imported" in result.stdout, result.stdout
