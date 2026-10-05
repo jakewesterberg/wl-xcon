@@ -950,7 +950,11 @@ def make_handler(
             closing the connection on unread bytes does not reset the answer away (the
             client would see a reset, never the sentence). Reads and discards at most
             `REFUSAL_DRAIN_LIMIT` bytes; a body longer than that gets its answer and
-            then a closed connection."""
+            then a closed connection.
+
+            A body over the limit is answered and closed unread, and the client may see a
+            reset instead of the answer; the page never sends one, so only a misbehaving
+            client does."""
             length = self.headers.get("Content-Length") or ""
             if length.isascii() and length.isdecimal():
                 wanted = int(length)

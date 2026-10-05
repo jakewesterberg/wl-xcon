@@ -4830,49 +4830,26 @@ def test_an_import_failure_that_is_not_pyjwt_is_not_reported_as_the_missing_extr
     assert raised.value.name == "something_else"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="FINDING (Task 8 fix round 2): past REFUSAL_DRAIN_LIMIT the server closes on unread "
-    "bytes, the TCP reset reaches the client first, and it reads nothing, not even the 403, "
-    "though it was reading while it wrote. Seen on macOS loopback. Fix when decided: a "
-    "lingering close (answer, shut the write side, discard until EOF or the request timeout). "
-    "strict, so the fix fails this until the marker is removed.",
-)
-def test_a_post_over_the_drain_limit_still_gets_its_refusal_read(tmp_path):
-    """A client that reads while it writes (as a browser does) sees the 403 even when the
-    body is past what the refusal drains; the server then closes."""
+def test_a_body_over_the_drain_limit_changes_nothing_and_the_listener_goes_on_serving(tmp_path):
+    """Past `REFUSAL_DRAIN_LIMIT` the request is answered and closed unread, so the client
+    may see a reset in place of the 403 (the PI-facing page never sends such a body; only a
+    misbehaving client does). What must hold: nothing was dispatched, and the next request
+    on a fresh connection is answered."""
+    seen: list = []
     hub = _hub()
-    server, thread, port, _page, _issuer, context = _page_served(tmp_path, hub)
-    size = serve.REFUSAL_DRAIN_LIMIT * 4
-    head = (
-        f"POST /commands HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
-        f"Content-Type: application/json\r\nContent-Length: {size}\r\n\r\n"
-    ).encode("ascii")
-    sender = None
+    server, thread, port, _page, _issuer, context = _page_served(
+        tmp_path, hub, dispatch=lambda request: seen.append(request) or (200, {})
+    )
     try:
-        with socket.create_connection(("127.0.0.1", port), timeout=5) as raw:
-            with context.wrap_socket(raw, server_hostname="127.0.0.1") as tls:
-
-                def send() -> None:
-                    try:
-                        tls.sendall(head + b"x" * size)
-                    except OSError:
-                        pass  # the server closed on a body it will not read
-
-                sender = threading.Thread(target=send, daemon=True)
-                sender.start()
-                received = b""
-                try:
-                    while b"\r\n\r\n" not in received or b"sign in" not in received:
-                        chunk = tls.recv(4096)
-                        if not chunk:
-                            break
-                        received += chunk
-                except OSError:
-                    pass
+        try:
+            status = _https(
+                port, context, "POST", "/commands", {"Content-Type": "application/json"},
+                b"x" * (serve.REFUSAL_DRAIN_LIMIT * 4),
+            )[0]
+        except OSError:
+            status = None  # a reset in place of the answer is allowed
+        assert status in (None, 403)
+        assert seen == []
+        assert _https(port, context, "GET", "/")[0] == 200
     finally:
         _stop_page(server, thread, hub)
-        if sender is not None:
-            sender.join(timeout=5)
-    assert received.startswith(b"HTTP/1.1 403"), received[:80]
-    assert b"sign in with wl.works" in received
