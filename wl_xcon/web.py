@@ -1922,10 +1922,11 @@ _SCRIPT = """
     forget(why);
     tell("signed out: " + why, "crit");
   }
-  // What a page served while this rig could not check sign-ins says of itself (`#mode`,
-  // which Python renders with no token endpoint).
+  // What a page served while this rig could not check sign-ins says of itself: the sentence
+  // in `#mode`, which Python renders with no token endpoint.
   function unavailable() {
-    return el("mode") ? el("mode").textContent : "not signed in: this rig cannot check sign-ins";
+    var said = el("mode") ? el("mode").querySelector(".nm") : null;
+    return said ? said.textContent : "not signed in: this rig cannot check sign-ins";
   }
   // Every sign-in ends at its access token's lapse unless a renewal has replaced that token
   // by then, whatever is in flight (b2b-ready §4.1). A renewal begun before the lapse ends
@@ -1977,9 +1978,9 @@ _SCRIPT = """
   }
   // /whoami with the held token. Answers true when it confirms the sign-in. A refusal
   // is read by its reason word (the plan's Ruling 8): `expired` renews (once: a token
-  // just renewed is not expired), `clock` and `no_keys` keep the sign-in, say why and
-  // ask again every RETRY_MS (a restart's window without keys passes, b2b-ready §3.2),
-  // and the rest end it. A rig out of reach keeps it too, greyed, asked again every
+  // just renewed is not expired), `clock` and `no_keys` keep the sign-in, say why and,
+  // on a page that can renew, ask again every RETRY_MS (a restart's window without keys
+  // passes, b2b-ready §3.2), and the rest end it. A rig out of reach keeps it too, greyed, asked again every
   // RETRY_MS until the lapse (b2b-ready §4.3).
   function whoami(mayRenew) {
     var mine = generation;
@@ -2008,7 +2009,10 @@ _SCRIPT = """
         unusableFor = answer.said;
         tell("signed in, but not usable now: " + answer.said, "crit");
         applySignIn();
-        confirmTimer = setTimeout(function () { if (signin) { whoami(false); } }, RETRY_MS);
+        // A page without a token endpoint waits for b2b-ready §4.6's reload, which confirms it.
+        if (body.getAttribute("data-token-endpoint")) {
+          confirmTimer = setTimeout(function () { if (signin) { whoami(false); } }, RETRY_MS);
+        }
         return false;
       }
       forget(answer.said);

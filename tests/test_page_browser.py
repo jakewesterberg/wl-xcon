@@ -903,7 +903,7 @@ def test_a_page_served_without_keys_never_asks_for_a_renewal_and_signs_out_at_th
     # `wlx serve` restarted holds a few seconds of its token: the start-up renews it, a
     # wake-up renews it, and so does the lapse.
     rig = rig_without_keys
-    access = rig.issuer.mint(aud=rig.origin, exp_in=5)
+    access = rig.issuer.mint(aud=rig.origin, exp_in=5)  # housekeeping: a few seconds, so the lapse comes soon
     page = rig.browser_page()
     grants: list = []
     page.on(
@@ -913,18 +913,17 @@ def test_a_page_served_without_keys_never_asks_for_a_renewal_and_signs_out_at_th
     stored = (
         "{id: 'tab-1', access: " + json.dumps(access) + ", refresh: 'r-1', expires: Date.now() + 5000,"
         " name: 'Jake Westerberg', shown: 'Jake Westerberg (wl.works)'}"
-    )
+    )  # housekeeping: the page counts the token's own 5 s
     page.add_init_script(f"window.sessionStorage.setItem('wlx-signin', JSON.stringify({stored}));")
     page.goto(rig.page_url)
-    unavailable = page.inner_text("#mode")
-    assert unavailable == "read-only · " + signin.NO_KEYS
+    assert page.inner_text("#mode") == "read-only · " + signin.NO_KEYS
     page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
     page.wait_for_timeout(1000)  # housekeeping: room for a wrong renewal to be sent
     assert len(grants) == 0  # a count: never the request, which would carry the renewal token
     assert page.evaluate("document.body.getAttribute('data-signed-in')") == "1"
     assert page.inner_text("#sent") == ""  # kept, with nothing said and nothing tried again
     _until(page, "document.body.getAttribute('data-signed-in') === '0'", 5 + WAIT_S)
-    assert page.inner_text("#sent") == "signed out: " + unavailable
+    assert page.inner_text("#sent") == "signed out: " + signin.NO_KEYS  # the sentence, not the read-only mark
     assert not _has_signin(page)
     assert len(grants) == 0
 
@@ -1006,7 +1005,7 @@ def _held(page, held: list) -> None:
     while not held:
         if time.monotonic() >= end:
             pytest.fail(f"timed out after {WAIT_S:g} s waiting for a held request")
-        page.wait_for_timeout(50)
+        page.wait_for_timeout(50)  # housekeeping: lets Playwright run the route's handler meanwhile
 
 
 def test_the_rigs_expired_for_a_token_already_renewed_neither_renews_again_nor_signs_out(rig, monkeypatch):
@@ -1014,7 +1013,7 @@ def test_the_rigs_expired_for_a_token_already_renewed_neither_renews_again_nor_s
     # command sent with the old token after a renewal has replaced it. That answer is about a
     # token the page no longer holds, and the renewal token it holds now is not spent on it.
     monkeypatch.setattr(signin, "LEEWAY_S", 0)
-    rig.fake.expires_in = 5
+    rig.fake.expires_in = 5  # housekeeping: the token's own end at the rig, passed below
     rig.fake.told_expires_in = 120  # the page counts two minutes; the rig, five seconds
     page = rig.browser_page()
     _sign_in(page)
@@ -1038,3 +1037,55 @@ def test_the_rigs_expired_for_a_token_already_renewed_neither_renews_again_nor_s
     assert rig.fake.renewals == 1
     assert page.evaluate("document.body.getAttribute('data-signed-in')") == "1"
     assert page.inner_text("#member") == "Jake Westerberg (wl.works)" and _has_signin(page)
+
+
+#: Keeps a sign-in in a tab's first document only, numbers each document, and records in
+#: sessionStorage whether the pause button was ever live in each, so the record outlives a
+#: reload. `%s` is the stored sign-in, as a JavaScript object.
+_LIVE_BY_DOCUMENT = """
+(function () {
+  var number = Number(window.sessionStorage.getItem('test-documents') || '0') + 1;
+  window.sessionStorage.setItem('test-documents', String(number));
+  if (number === 1) { window.sessionStorage.setItem('wlx-signin', JSON.stringify(%s)); }
+  new MutationObserver(function () {
+    var pause = document.querySelector('[data-cmd="pause"]');
+    if (pause && !pause.disabled) { window.sessionStorage.setItem('test-live-in-' + number, '1'); }
+  }).observe(document, { attributes: true, childList: true, subtree: true });
+})();
+"""
+
+
+def test_a_page_without_keys_keeps_a_stored_sign_in_grayed_until_its_reload(rig_without_keys, monkeypatch):
+    # The fix wave's re-review, Minor 1: on a page without keys, a confirmation retry could
+    # confirm a stored sign-in once the rig had keys and make the controls live, and §4.6's
+    # reload could then cut off a press in flight. Such a page waits for the reload instead.
+    rig = rig_without_keys
+    monkeypatch.setattr(web, "KEYS_RECHECK_MS", 5000)  # housekeeping: the §4.6 reload comes late,
+    monkeypatch.setattr(web, "SIGNIN_RETRY_MS", 300)  # housekeeping: and a retry, were there one, early
+    access = rig.issuer.mint(aud=rig.origin, exp_in=120)  # housekeeping: over a minute, so it is asked about
+    page = rig.browser_page()
+    stored = (
+        "{id: 'tab-1', access: " + json.dumps(access) + ", refresh: 'r-1',"
+        " expires: Date.now() + 120000, name: 'Jake Westerberg', shown: 'Jake Westerberg (wl.works)'}"
+    )  # housekeeping: the page counts the token's own 120 s
+    page.add_init_script(_LIVE_BY_DOCUMENT % stored)
+    page.goto(rig.page_url)
+    loads = []
+    page.on("load", lambda *_: loads.append(1))
+    grayed = (
+        "document.querySelector('" + PAUSE + "').disabled && document.getElementById('sent').textContent === "
+        + json.dumps("signed in, but not usable now: " + signin.NO_KEYS)
+    )
+    _until(page, grayed)  # the rig cannot check the stored sign-in yet
+    rig.checker.load()  # what the keys thread does once wl.works answers
+
+    def reloaded_and_live() -> bool:
+        return not page.is_disabled(PAUSE) and bool(loads)  # Playwright first: it delivers `load`
+
+    rig.wait_for(reloaded_and_live)
+    assert len(loads) == 1
+    live_before_the_reload = page.evaluate("window.sessionStorage.getItem('test-live-in-1') !== null")
+    assert not live_before_the_reload
+    page.click(PAUSE)
+    rig.wait_for(lambda: _pauses(rig))
+    assert _pauses(rig)[-1].by.name == "Jake Westerberg"
