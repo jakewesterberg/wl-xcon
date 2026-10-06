@@ -5305,9 +5305,9 @@ def test_an_import_failure_that_is_not_pyjwt_is_not_reported_as_the_missing_extr
 
 def test_a_body_over_the_drain_limit_changes_nothing_and_the_listener_goes_on_serving(tmp_path):
     """Past `REFUSAL_DRAIN_LIMIT` the request is answered and closed unread, so the client
-    may see a reset in place of the 403 (the rig's https page never sends such a body; only a
-    misbehaving client does). What must hold: nothing was dispatched, and the next request
-    on a fresh connection is answered."""
+    may see a reset in place of the 403 or partway through its body (the rig's https page
+    never sends such a body; only a misbehaving client does). What must hold: nothing was
+    dispatched, and the next request on a fresh connection is answered."""
     seen: list = []
     hub = _hub()
     server, thread, port, _page, _issuer, context = _page_served(
@@ -5319,8 +5319,8 @@ def test_a_body_over_the_drain_limit_changes_nothing_and_the_listener_goes_on_se
                 port, context, "POST", "/commands", {"Content-Type": "application/json"},
                 b"x" * (serve.REFUSAL_DRAIN_LIMIT * 4),
             )[0]
-        except OSError:
-            status = None  # a reset in place of the answer is allowed
+        except (OSError, http.client.IncompleteRead):
+            status = None  # a reset in place of the answer, or partway through it, is allowed
         assert status in (None, 403)
         assert seen == []
         assert _https(port, context, "GET", "/")[0] == 200
