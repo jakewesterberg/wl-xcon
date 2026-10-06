@@ -734,3 +734,34 @@ def test_a_press_while_the_rig_cannot_check_sign_ins_keeps_the_sign_in(rig, monk
     page.click(PAUSE)
     rig.wait_for(lambda: _pauses(rig))
     assert _pauses(rig)[-1].by.name == "Jake Westerberg"
+
+
+def test_the_rigs_expired_while_a_renewal_is_held_makes_a_later_press_wait_for_it(rig, monkeypatch):
+    # Review fix 1: `expired` acts on the token the rig refused, so a renewal already held at
+    # wl.works is joined by the next press, never sent past with the refused token.
+    monkeypatch.setattr(signin, "LEEWAY_S", 0)
+    monkeypatch.setattr(web, "SIGNIN_RETRY_MS", 3000)  # housekeeping: the held renewal's lapse allowance
+    rig.fake.expires_in = 5
+    rig.fake.told_expires_in = 120  # the page counts two minutes; the rig, five seconds
+    page = rig.browser_page()
+    _sign_in(page)
+    time.sleep(6)  # housekeeping: past the token's own end at the rig
+    rig.fake.renewal_gate = threading.Event()
+    page.add_init_script(_COUNTS)
+    page.evaluate(_COUNTS)
+    page.evaluate(_COMMANDS)
+    page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")  # under five minutes by its count
+    rig.wait_for(lambda: rig.fake.renewals >= 1)  # held at wl.works
+    page.click(PAUSE)  # the page counts two minutes: sent, and the rig refuses it as expired
+    page.wait_for_selector("#sent:has-text('expired')")
+    page.wait_for_timeout(1100)  # housekeeping: past the page's `TOGGLE_HOLD_MS`
+    page.click(PAUSE)
+    _until(page, "window.__clicks >= 2")
+    sent = page.evaluate("window.__commands")
+    assert sent == 1  # the second press joined the held renewal and sent nothing
+    assert len(_pauses(rig)) == 0
+    rig.fake.renewal_gate.set()
+    rig.wait_for(lambda: _pauses(rig))
+    assert _pauses(rig)[-1].by.name == "Jake Westerberg"
+    sent = page.evaluate("window.__commands")
+    assert sent == 2

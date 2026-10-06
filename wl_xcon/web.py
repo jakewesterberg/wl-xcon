@@ -2084,16 +2084,17 @@ _SCRIPT = """
     if (signin.expires - Date.now() > FRESH_FOR_MS) { return Promise.resolve(true); }
     return renew();
   }
-  // The rig refused a command as `expired` (b2b-ready §4.4): its offline check is the
-  // authority, so the token has lapsed whatever the page counted. Resolves true only when
-  // a renewal brought a new token.
-  function expiredAtTheRig() {
+  // The rig refused a command as `expired` (b2b-ready §4.4), the token it carried being
+  // `refused`: the rig's offline check is the authority, so that token has lapsed whatever
+  // the page counted. Acts on that token only: a newer one already held is not clamped or
+  // renewed again. Resolves true only when the page holds a token newer than `refused`.
+  function expiredAtTheRig(refused) {
     if (!signin) { return Promise.resolve(false); }
-    var before = signin.access;
-    if (!renewing) { signin.expires = Math.min(signin.expires, Date.now()); }
+    if (signin.access !== refused) { return Promise.resolve(true); }
+    signin.expires = Math.min(signin.expires, renewing ? renewStarted : Date.now());
     var renewal = renew();
     armLapse();
-    return renewal.then(function (ok) { return ok && !!signin && signin.access !== before; });
+    return renewal.then(function (ok) { return ok && !!signin && signin.access !== refused; });
   }
   function signOut() {
     var held = signin;
@@ -2298,6 +2299,7 @@ _SCRIPT = """
     tell("sending…", "");
     var headers = { "Content-Type": "application/json" };
     Object.keys(extra).forEach(function (key) { headers[key] = extra[key]; });
+    var carried = String(headers["Authorization"] || "").replace("Bearer ", "");
     fetch("/commands", {
       method: "POST",
       headers: headers,
@@ -2309,7 +2311,7 @@ _SCRIPT = """
       tell(answer.said, answer.status === "sent" || answer.status === "signaled" ? "ok" : "crit");
       // A refusal for the token (the plan's Ruling 8): never re-sent; renew, or sign out.
       if (answer.reason === "expired") {
-        expiredAtTheRig().then(function (renewed) {
+        expiredAtTheRig(carried).then(function (renewed) {
           if (renewed) { tell("this sign-in was renewed; the command was not sent: send it again", "ok"); }
         });
       }
