@@ -1,6 +1,6 @@
 # Where this build actually is
 
-**Last updated 2026-10-05**, at the commit this file was committed in. Check
+**Last updated 2026-10-06**, at the commit this file was committed in. Check
 `git log --oneline -1`; if it has moved far, distrust the numbers here before you
 distrust the reasoning. Numbers go stale, arguments do not.
 
@@ -9,10 +9,12 @@ distrust the reasoning. Numbers go stale, arguments do not.
 > written with**, `wl-expcontroller` and `wl_expcontroller/…` paths included, as the PI
 > ruled for dated documents; read `wl_expcontroller/taskd.py` there as `wl_xcon/taskd.py`.
 >
-> **This file describes `main`.** Its newest entry, "What moved on 2026-10-05: b2b slice 1, who
-> did it is an actor", makes every `by` a typed name from the box or a wl.works member (on `main`
-> by fast-forward once its push run read green); slice 2, signing in, is next on a branch of its
-> own. Below it, "What moved on 2026-10-02: b2b designed", is the design both slices build. Below
+> **This file describes `main`.** Its newest entry, "What moved on 2026-10-06: b2b slice 2,
+> signing in with wl.works", lets a wl.works member sign in at a rig's https page and act as
+> themselves (on `main` by fast-forward once its push run read green). The page stays switched off
+> until XC-226, XC-151 and XC-152 are done. Below it, "What moved on 2026-10-05: b2b slice 1, who
+> did it is an actor", makes every `by` a typed name from the box or a wl.works member. Below
+> that, "What moved on 2026-10-02: b2b designed", is the design both slices build. Below
 > that, "What moved on 2026-10-02: XC-026, a stranded
 > session resumed", lets a crashed `wlx taskd` session be resumed from its record with its numbers,
 > its out-of-cage clock and its fluid carried on (on `main` by fast-forward once its CI read green).
@@ -349,6 +351,119 @@ figure was one low. In order:
   a path outside the workspace, and no credentials for it.
 
 ---
+
+## What moved on 2026-10-06: b2b slice 2, signing in with wl.works
+
+**Resume here (state at 2026-10-06):** slice 2 is on `main` (branch `b2b-signin`, a
+fast-forward once its push run read green). The PI approved its four-item welfare summary
+("Approve all four", 2026-10-05; spec §10, "Slice 2 answered"). The PI also ruled that **XC-226
+is fixed before any rig switches its https page on**. The welfare-critical list is unchanged.
+The https page ships switched off: `wlx serve` serves it only when given the six https flags,
+and no rig has a certificate or a name yet. **Next, before any rig uses it:**
+1. XC-226: today a bad https setup at a restart takes the rig PC's page down with it.
+2. XC-151: a certificate and a name for each rig.
+3. XC-152: the rig list sent to wl-works.
+
+XC-223 follows them; it is the one check that needs a live wl.works. wl-works was told on
+2026-10-06, with two asks: XC-225's `refreshTokenReuseInterval`, and that `parseRigPages`
+refuse a path.
+
+- **What was built** (plan `docs/superpowers/plans/2026-10-02-p4d2b-b2b-remote-signin.md`,
+  Tasks 5 to 12; spec `docs/superpowers/specs/2026-10-02-p4d2b-b2b-remote-signin-design.md`):
+  - **The rig's https page.** `wlx serve --https HOST:PORT --tls-cert --tls-key --rig-page
+    NAME=URL --wl-works-issuer URL --wl-works-cache FILE` serves it beside the rig PC's own
+    page. The six flags go together or not at all. The rig PC's http page is unchanged.
+  - **Signing in.** The page signs a member in with wl.works:
+    - authorization code with PKCE S256 and `state`;
+    - client `rig-NAME`, with `resource` set to the page's address;
+    - scope `offline_access`.
+
+    It renews one at a time before the hour ends, and signs out at the rig. During a wl.works
+    outage a signed-in page keeps working and keeps retrying. When its token lapses, the page
+    signs itself out, with a sentence that sends people to the rig PC.
+  - **The check at the rig.** `wl_xcon/signin.py` checks each access token offline against
+    wl.works' keys:
+    - RS256 only; `iss`, `aud`, `azp`/`client_id`, and `exp` with 60 s leeway;
+    - the keys are fetched with the discovery document at startup and cached;
+    - an unknown `kid` refetches the keys at most once a minute;
+    - a token signed out here is refused for the rest of its life.
+  - **What a member can do.** A signed-in member with `control-rigs` has every control from the
+    https page, **the reward and the out-of-cage marks included**. Each act is recorded as a
+    `Member` under the member's account. Every ceiling and refusal is unchanged. A command needs
+    the page's `Origin` and a valid token, and the body takes no `by`. Over http, a request that
+    carries a token is refused before any of the box's checks.
+  - **Startup refusals.** `wlx serve` refuses at startup, each in its own sentence:
+    - a `--rig-page` with a path;
+    - an issuer that is not a bare https address;
+    - a discovery document that names another issuer.
+
+    Every refusal caused by the https setup also says how to get the rig PC's page back.
+  - **Docs.** ADR-0008 is amended (items 2-4, 2026-10-05). Two asks are in
+    `docs/pending-wl-works-amendments.md`.
+  - **Browser tests.** `tests/test_page_browser.py` drives the real page against a fake
+    wl.works. It uses Playwright with Chromium, from the `browser` extra, and
+    `WLX_REQUIRE_BROWSER=1` makes a missing browser fail rather than skip.
+- **Welfare-critical code: none changed.** The parser confirms `link._setting`, `_command_from`
+  and `web._hand_reward_now` are identical to slice 1's `main`. `taskd`, `welfare` and `bounds`
+  are untouched. `serve.parse_command`, which calls `_setting`, now takes the member from the
+  sign-in, not from the body. The PI reviewed the behavior as spec §10 items 1-4.
+- **Learned, and worth the next session's time**:
+  - **A local sweep can time out on tests that CI's mutation jobs never run.** All 21 of the
+    sweep's timeouts came from the browser tests. With those tests excluded, each mutant failed a
+    named `test_serve.py` test in 25-92 s. CI's mutation jobs install no browser. They timed
+    out on 4 of the 21. They also timed out on `make_handler`, which the sweep caught by name,
+    and on `_answer`, which slice 2 did not change. Rerun a sweep's timeouts
+    without `test_page_browser.py` to see what CI will see.
+  - **A test that allows a connection reset must allow it at any point.** The over-limit test
+    caught a reset only as `OSError`. On 3.11, CI's reset landed after the headers and cut off
+    the body, which raises `http.client.IncompleteRead`. In 20 local runs, macOS reset before
+    the headers 13 times and sent the whole 403 seven times; it never showed CI's case.
+  - **This worktree's Python is `.superpowers/venv`.** It is git-ignored and has `pyjwt`,
+    `cryptography`, Playwright 1.63 and Chromium. Never `pip install -e` from a worktree, and
+    never into the base interpreter: either would repoint the shared install at the worktree.
+  - **The browser tests run Chromium only, and the PI uses Safari.** XC-224's copied
+    `sessionStorage` is still UNVERIFIED in Safari.
+- **Backlog**:
+  - XC-015 and XC-186 closed.
+  - XC-222 to XC-232 filed. XC-223 is the live check, XC-225 is an ask of wl-works, and XC-226 is
+    ruled to come before any rig uses the page.
+  - XC-152 now also waits on XC-226.
+  - XC-140 widened with the two new CI timeouts and the browser tests' timeouts.
+- **Proof, local**:
+  - Suite: `2483 passed` three runs in a row at `677d23c` (193-199 s), with
+    `WLX_REQUIRE_PREPROC=1 WLX_REQUIRE_BROWSER=1`. `2484 passed` at `a19ac5c`.
+  - Sweep of every new and changed function: 71 in 5 modules (`signin` 20, `serve` 33, `web` 16,
+    `cli.main`, `link.__init__`). 69 caught: 48 by a named failure, and 21 timeouts, each
+    confirmed by an unbounded rerun stopping at the first failure.
+  - One survivor, `serve.page_address`, now has a test (`4cac91c`). One inert,
+    `signin.redirect_request`: its body is already `return None`.
+- **Proof, CI on the branch's pushes**, read job by job:
+  - **Run `37384787021` on `1932574`: red.**
+    - pytest on 3.11: `1 failed, 2483 passed`. The failure was the over-limit test above,
+      fixed in `a19ac5c`. 3.12 and 3.13 were cancelled with it.
+    - Mutation: 12 shards, 248 functions in 6 modules. **247 caught, 0 survived**;
+      `signin.redirect_request` inert. Every baseline and restore at
+      `2468 passed, 16 skipped` (the 16 are the browser tests).
+    - Its 16 timeouts: 14 known and confirmed before. Slice 1 listed `link` `decode`,
+      `deliver`, `publish`, `receive` and `_telemetry_from`; `serve` `offer`, `start` and
+      `_send_frame`; `actor` `to_map`, `_text` and `from_map`; and `cli._load_bounds`. The sweep
+      above found `serve` `_host_ok` and `_names_this_console`.
+    - **Two were new:** `serve.make_handler` and `serve._answer`. Each was rerun locally with no
+      limit and without the browser tests, stopping at the first failure:
+      - `make_handler`: `test_the_page_is_served_with_every_pane_and_its_own_nonce`,
+        `1 failed, 1180 passed in 26.08s`;
+      - `_answer`: `test_an_outbox_builds_its_sender_on_its_own_thread_and_answers_each_job`,
+        `1 failed, 1352 passed in 49.49s`.
+
+      Both are real catches. XC-140 now names them.
+  - **Run `37394112473` on `a19ac5c`: green.**
+    - pytest `2484 passed` on 3.11-3.13, with `WLX_REQUIRE_PREPROC` and `WLX_REQUIRE_BROWSER`.
+    - Mutation: the gate diffed against `1932574`, so it swept only `serve`, whose test file
+      had changed. 75 functions, **75 caught, 0 survived**; every baseline and restore at
+      `2468 passed, 16 skipped`.
+    - Its 7 timeouts were all known and confirmed: `start`, `_send_frame` and `offer`
+      (2026-10-01), `_listen` (XC-140), `_names_this_console` (the sweep above), and
+      `_answer` and `make_handler` (above).
 
 ## What moved on 2026-10-05: b2b slice 1, who did it is an actor
 
