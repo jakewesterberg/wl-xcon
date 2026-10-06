@@ -162,8 +162,10 @@ answered without a token and without refusing it (`NOT_RENEWED`): "wl.works did 
 sign-in before it lapsed; the rig PC's page keeps every control". Until then the page keeps the
 sign-in and says (`BUSY`): "wl.works could not renew this sign-in just now; trying again until it
 lapses". A page served without keys (§4.6) has no token endpoint and never asks for a renewal: it
-keeps a stored sign-in, saying nothing, while its token has time left, and at the lapse signs out
-with the line it shows in place of the sign-in.)*
+keeps a stored sign-in while its token has time left, its controls grayed, and waits for §4.6's
+reload to confirm it. A token with more than a minute left is asked about once at load, and the
+page then says "signed in, but not usable now: " and the rig's sentence. At the lapse it signs out
+with the sentence it shows in place of the sign-in.)*
 
 Trying again after a server error presents the same renewal token, which wl.works may already
 have spent. With wl.works' reuse interval at 0 (XC-225, asked of wl-works 2026-10-06), the next
@@ -183,6 +185,11 @@ sign-in's and a reload's too.)*
 It asks the rig again every 30 s (the script's `RETRY_MS`, not `serve.RETRY_MS`, which is the
 event stream's). A press in that state sends nothing and says that
 sentence. Confirmation brings the controls back. The lapse (§4.1) bounds the wait.
+
+*(Amended 2026-10-06, the final review: a confirmation the rig answers `no_keys` or `clock`, as in
+a restart's window without keys (§3.2), keeps the sign-in, grays the controls with "signed in, but
+not usable now: " and the rig's sentence, and is asked again every `RETRY_MS` too, on a page that
+can renew. A page served without keys waits instead for §4.6's reload.)*
 
 ### 4.4 The rig's word on expiry wins (XC-231)
 
