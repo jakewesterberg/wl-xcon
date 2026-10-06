@@ -810,6 +810,29 @@ def test_a_duplicated_tab_forgets_its_copy_and_the_first_tab_keeps_working(rig):
     rig.wait_for(lambda: not first.is_disabled(PAUSE))
 
 
+def test_a_duplicate_is_inert_while_it_waits_for_the_lock_and_never_signs_out_the_original(rig, monkeypatch):
+    # The copy shows a signed-in view for the whole wait; a sign-out pressed then must not
+    # reach the rig with the copied token, which would end the first tab's sign-in.
+    monkeypatch.setattr(web, "SIGNIN_LOCK_WAIT_MS", 3000)  # housekeeping: holds the window open
+    first = rig.browser_page()
+    _sign_in(first)
+    copied = first.evaluate("window.sessionStorage.getItem('wlx-signin')")  # never asserted on
+    second = first.context.new_page()
+    second.set_default_timeout(WAIT_S * 1000)
+    second.add_init_script(f"window.sessionStorage.setItem('wlx-signin', {json.dumps(copied)});")
+    second.add_init_script(_SIGNOUTS)
+    second.goto(rig.page_url)
+    second.click("#signout")  # the wait is still running
+    second.wait_for_selector("#sent:has-text('signed out')")
+    assert second.evaluate("document.body.getAttribute('data-signed-in')") == "0"
+    second.wait_for_timeout(3500)  # housekeeping: past the wait, where the lock request gives up
+    signouts = second.evaluate("window.__signouts")
+    assert signouts == 0
+    first.click(PAUSE)  # the first tab's sign-in stands
+    rig.wait_for(lambda: _pauses(rig))
+    assert _pauses(rig)[-1].by.name == "Jake Westerberg"
+
+
 def test_a_reload_of_a_signed_in_tab_is_never_taken_for_a_duplicate(rig):
     # Review Focus 5: a reloading tab's old document gives its lock up as it goes.
     page = rig.browser_page()
@@ -827,12 +850,16 @@ def test_a_page_made_before_the_rig_had_keys_reloads_into_the_sign_in_once_it_ha
     rig = rig_without_keys
     monkeypatch.setattr(web, "KEYS_RECHECK_MS", 300)  # housekeeping: ask again soon
     page = rig.browser_page()
+    loads = []
+    page.on("load", lambda *_: loads.append(1))
     assert page.inner_text("#mode") == "read-only · " + signin.NO_KEYS
     assert page.query_selector("#signin") is None
     page.wait_for_timeout(1000)  # housekeeping: several asks, while the rig still has no keys
     assert page.query_selector("#signin") is None
+    assert len(loads) == 0  # asking again is not reloading
     rig.checker.load()  # what the keys thread does once wl.works answers
     page.wait_for_selector("#signin")
+    assert len(loads) == 1
     _sign_in(page)
     page.click(PAUSE)
     rig.wait_for(lambda: _pauses(rig))

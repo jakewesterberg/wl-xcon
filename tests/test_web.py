@@ -39,6 +39,7 @@ from wl_xcon.web import (
     RUN_TRIALS,
     SIGN_IN_FIRST,
     KEYS_RECHECK_MS,
+    SIGNIN_LOCK_WAIT_MS,
     SIGNIN_RETRY_MS,
     SignIn,
     _gate,
@@ -2558,5 +2559,7 @@ def test_the_https_page_tells_its_script_how_often_to_try_again():
 def test_the_https_page_tells_its_script_how_often_to_ask_for_keys_again():
     document = page(fragments(frame(), _https_view()), stale_after_s=30.0, nonce="n0nce", signin=_NO_KEYS)
     assert f'data-recheck-ms="{KEYS_RECHECK_MS}"' in document and KEYS_RECHECK_MS == 60_000
-    recheck = _SCRIPT.split('if (!body.getAttribute("data-token-endpoint")) {', 1)[1]
-    assert 'answer.reason === "no_token"' in recheck and "window.location.reload()" in recheck
+    recheck = _SCRIPT.split("var recheck = function () {", 1)[1].split("setTimeout(recheck, RECHECK_MS);\n    }", 1)[0]
+    assert 'if (answer.reason === "no_token") { window.location.reload(); return; }' in recheck
+    assert recheck.count("window.location.reload()") == 1
+    assert f'data-lock-wait-ms="{SIGNIN_LOCK_WAIT_MS}"' in document and SIGNIN_LOCK_WAIT_MS == 1000

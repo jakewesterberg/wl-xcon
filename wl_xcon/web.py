@@ -155,6 +155,10 @@ SIGNIN_RETRY_MS = 30_000
 #: check one (b2b-ready §4.6), the keys thread's own interval: housekeeping, not a
 #: measurement. Rendered on `<body>`, so a test can shorten it.
 KEYS_RECHECK_MS = 60_000
+#: How long the https page waits for a stored sign-in's lock before taking the sign-in for
+#: another tab's copy (b2b-ready §4.5): housekeeping, not a measurement. Rendered on
+#: `<body>`, so a test can lengthen it.
+SIGNIN_LOCK_WAIT_MS = 1_000
 #: What a control says on the https page to a browser not signed in (b2b spec §4).
 SIGN_IN_FIRST = "sign in with wl.works to use the controls"
 #: Why the mark control is greyed on a console started without the mark endpoint.
@@ -1760,10 +1764,15 @@ _SCRIPT = """
   // and with it the renewal token. The tab holding a sign-in holds a lock named by its id
   // while it is open, and a tab that finds its stored sign-in's lock held elsewhere is a
   // duplicate. Housekeeping, not a measurement: how long a page waits for that lock, which
-  // a reloading tab's old document gives up as it goes.
-  var LOCK_WAIT_MS = 1000;
+  // a reloading tab's old document gives up as it goes. Rendered by Python
+  // (`web.SIGNIN_LOCK_WAIT_MS`).
+  var LOCK_WAIT_MS = Number(body.getAttribute("data-lock-wait-ms")) || 1000;
   var DUPLICATE = "this sign-in is in use in another tab; use that tab, or sign in again here";
   var releaseLock = null;
+  // True while this tab holds its sign-in's lock, or cannot tell (no Web Locks). Until then
+  // the stored sign-in may be another tab's copy: it is neither renewed nor signed out at
+  // the rig, either of which would end the original's.
+  var lockHeld = false;
   // Why the page signs itself out at a lapse (b2b-ready §4.1): wl.works out of reach (the
   // final review, I1), wl.works answering without a token, or this rig never confirming.
   var UNREACHED = "wl.works could not be reached to renew this sign-in; the rig PC's page keeps every control";
@@ -1901,6 +1910,7 @@ _SCRIPT = """
     unusableFor = "";
     signedOutFor = why || "";
     if (releaseLock) { releaseLock(); releaseLock = null; }
+    lockHeld = false;
     writeStore(SIGNIN_KEY, null);
     clearTimeout(renewTimer);
     clearTimeout(lapseTimer);
@@ -1942,13 +1952,19 @@ _SCRIPT = """
   // Resolves true when this tab holds the lock of sign-in `id`, false when another tab
   // does. A browser without Web Locks cannot tell, and is let through (b2b-ready §4.5).
   function holdLock(id) {
-    if (!id || !navigator.locks) { return Promise.resolve(true); }
     if (releaseLock) { releaseLock(); releaseLock = null; }
+    lockHeld = false;
+    if (!id || !navigator.locks) { lockHeld = true; return Promise.resolve(true); }
     return new Promise(function (resolve) {
       var abort = new AbortController();
       var timer = setTimeout(function () { abort.abort(); }, LOCK_WAIT_MS);
       navigator.locks.request("wlx-signin:" + id, { signal: abort.signal }, function () {
         clearTimeout(timer);
+        // The sign-in was forgotten or replaced during the wait: nothing here is to be
+        // held. Resolves true, not false, so the caller does not take it for a duplicate;
+        // it finds its sign-in gone or changed and stops.
+        if (!signin || signin.id !== id) { resolve(true); return undefined; }
+        lockHeld = true;
         resolve(true);
         return new Promise(function (release) { releaseLock = release; });
       }).catch(function () { resolve(false); });
@@ -2035,7 +2051,7 @@ _SCRIPT = """
         return false;
       }
       keep(result.answer, null);
-      return holdLock(signin.id).then(function () { return whoami(false); }).then(function () { return true; });
+      return holdLock(signin.id).then(function () { return signin ? whoami(false) : false; }).then(function () { return true; });
     }, function () {
       tell("not signed in: could not reach wl.works to finish signing in", "crit");
       return false;
@@ -2130,6 +2146,7 @@ _SCRIPT = """
   }
   function signOut() {
     var held = signin;
+    var post = lockHeld;  // a copy still waiting for its lock is forgotten, never signed out
     forget();
     // wl.works itself stays signed in, so the next sign-in here goes straight through as
     // the same member (spec §2): on a shared browser, the next person must sign out there.
@@ -2137,7 +2154,7 @@ _SCRIPT = """
       ? "signed out at this rig; wl.works is still signed in as " + held.name +
         ", so anyone else using this browser must sign out of wl.works there first"
       : "signed out at this rig", "ok");
-    if (!held) { return; }
+    if (!held || !post) { return; }
     fetch("/signout", {
       method: "POST",
       cache: "no-store",
@@ -2663,13 +2680,15 @@ _SCRIPT = """
     if (el("signin")) { el("signin").addEventListener("click", startSignIn); }
     if (el("signout")) { el("signout").addEventListener("click", signOut); }
     document.addEventListener("visibilitychange", function () {
-      if (!document.hidden && signin && signin.expires - Date.now() < RENEW_BEFORE_MS) { renew(); }
+      if (!document.hidden && signin && lockHeld && signin.expires - Date.now() < RENEW_BEFORE_MS) { renew(); }
     });
     applySignIn();
     finishSignIn().then(function (exchanged) {
       if (exchanged || !signin) { return; }
       if (!signin.id) { signin.id = random(16); writeStore(SIGNIN_KEY, signin); }
-      return holdLock(signin.id).then(function (mine) {
+      var id = signin.id;
+      return holdLock(id).then(function (mine) {
+        if (!signin || signin.id !== id) { return; }  // signed out, or in again, during the wait
         if (!mine) {
           // A copy of another tab's sign-in: forgotten here and never signed out, which
           // would end it in the tab it belongs to (b2b-ready §4.5).
@@ -2759,7 +2778,7 @@ def page(
             f' data-token-endpoint="{_e(signin.token_endpoint or "")}"'
             f' data-client="{_e(signin.client_id)}" data-page="{_e(signin.page)}"'
             f' data-resource="{_e(signin.resource)}" data-retry-ms="{SIGNIN_RETRY_MS}"'
-            f' data-recheck-ms="{KEYS_RECHECK_MS}"'
+            f' data-recheck-ms="{KEYS_RECHECK_MS}" data-lock-wait-ms="{SIGNIN_LOCK_WAIT_MS}"'
         )
         if signin.token_endpoint is None:
             who = (
