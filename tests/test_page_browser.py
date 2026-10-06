@@ -885,3 +885,96 @@ def test_a_page_made_before_the_rig_had_keys_reloads_into_the_sign_in_once_it_ha
     page.click(PAUSE)
     rig.wait_for(lambda: _pauses(rig))
     assert _pauses(rig)[-1].by.name == "Jake Westerberg"
+
+
+# --- b2b-ready's final review -----------------------------------------------------------
+
+#: The page's sentence at a lapse the rig never confirmed (b2b-ready §4.1), as `web._SCRIPT`
+#: holds it.
+NEVER_CONFIRMED = "this rig did not confirm the sign-in before it lapsed; the rig PC's page keeps every control"
+
+
+def test_a_page_served_without_keys_never_asks_for_a_renewal_and_signs_out_at_the_lapse_with_its_own_sentence(
+    rig_without_keys,
+):
+    # The final review, I1: a page whose `data-token-endpoint` is empty posted the renewal
+    # token to its own `/`, and blamed wl.works for the rig's 405. Here a tab signed in before
+    # `wlx serve` restarted holds a few seconds of its token: the start-up renews it, a
+    # wake-up renews it, and so does the lapse.
+    rig = rig_without_keys
+    access = rig.issuer.mint(aud=rig.origin, exp_in=5)
+    page = rig.browser_page()
+    grants: list = []
+    page.on(
+        "request",
+        lambda request: grants.append(1) if "grant_type" in (request.post_data or "") else None,
+    )
+    stored = (
+        "{id: 'tab-1', access: " + json.dumps(access) + ", refresh: 'r-1', expires: Date.now() + 5000,"
+        " name: 'Jake Westerberg', shown: 'Jake Westerberg (wl.works)'}"
+    )
+    page.add_init_script(f"window.sessionStorage.setItem('wlx-signin', JSON.stringify({stored}));")
+    page.goto(rig.page_url)
+    unavailable = page.inner_text("#mode")
+    assert unavailable == "read-only · " + signin.NO_KEYS
+    page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+    page.wait_for_timeout(1000)  # housekeeping: room for a wrong renewal to be sent
+    assert len(grants) == 0  # a count: never the request, which would carry the renewal token
+    assert page.evaluate("document.body.getAttribute('data-signed-in')") == "1"
+    assert page.inner_text("#sent") == ""  # kept, with nothing said and nothing tried again
+    _until(page, "document.body.getAttribute('data-signed-in') === '0'", 5 + WAIT_S)
+    assert page.inner_text("#sent") == "signed out: " + unavailable
+    assert not _has_signin(page)
+    assert len(grants) == 0
+
+
+def test_a_renewal_the_rig_never_confirms_signs_out_at_the_lapse_saying_so(rig):
+    # The final review, M1: wl.works renewed and the rig's /whoami never answered. Spec §4.1
+    # names this lapse's reason: the rig did not confirm, not wl.works out of reach.
+    rig.fake.expires_in = 6  # housekeeping: the renewed token lapses this long after it is kept
+    page = rig.browser_page()
+    _sign_in(page)
+    held: list = []
+    page.route("**/whoami", lambda route: held.append(route))  # kept, never fulfilled
+    page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+    _until(page, "document.body.getAttribute('data-signed-in') === '0'", rig.fake.expires_in + WAIT_S)
+    assert len(held) == 1  # the renewal's confirmation, held to the end
+    assert rig.fake.renewals == 1
+    assert page.inner_text("#sent") == "signed out: " + NEVER_CONFIRMED
+    assert _signed_out_by_the_page(page)
+
+
+def test_a_renewal_the_rig_cannot_check_yet_is_asked_again_and_comes_back(rig, monkeypatch):
+    # The final review, M2: a renewal's confirmation that lands in a restart's window without
+    # keys (b2b-ready §3.2) greys the controls with that sentence, and is asked again every
+    # RETRY_MS, not left greyed until the lapse.
+    monkeypatch.setattr(web, "SIGNIN_RETRY_MS", 2000)  # housekeeping: ask the rig again soon
+    rig.fake.expires_in = 120  # housekeeping: under five minutes, so a wake-up renews
+    page = rig.browser_page()
+    _sign_in(page)
+    real = signin.Checker.check
+    once: list = []
+
+    def no_keys_once(self, authorization):
+        if not once:
+            once.append(1)
+            raise signin.Refused("no_keys", signin.NO_KEYS)
+        return real(self, authorization)
+
+    monkeypatch.setattr(signin.Checker, "check", no_keys_once)
+    page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+    greyed = (
+        "document.querySelector('" + PAUSE + "').disabled && document.getElementById('sent').textContent === "
+        + json.dumps("signed in, but not usable now: " + signin.NO_KEYS)
+    )
+    _until(page, greyed)
+    assert rig.fake.renewals == 1
+    assert page.inner_text("#member") == "Jake Westerberg (wl.works)" and _has_signin(page)
+
+    def confirmed_again() -> bool:
+        return not page.is_disabled(PAUSE)
+
+    rig.wait_for(confirmed_again)
+    page.click(PAUSE)
+    rig.wait_for(lambda: _pauses(rig))
+    assert _pauses(rig)[-1].by.name == "Jake Westerberg"

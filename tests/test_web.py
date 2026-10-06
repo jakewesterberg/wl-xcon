@@ -2493,8 +2493,9 @@ def test_a_lapsed_tab_renews_on_load_and_whoami_reads_the_reason_word():
     assert 'answer.reason === "expired" && mayRenew' in who
     assert 'answer.reason === "clock" || answer.reason === "no_keys"' in who
     assert who.index('"clock"') < who.index("forget(answer.said);")
-    # After a renewal the new token is not asked to renew again.
-    assert _SCRIPT.count("whoami(false)") == 3 and _SCRIPT.count("whoami(true)") == 1
+    # After a renewal the new token is not asked to renew again, nor by either retry (the rig
+    # out of reach, and since the final review's M2 `clock` or `no_keys`).
+    assert _SCRIPT.count("whoami(false)") == 4 and _SCRIPT.count("whoami(true)") == 1
 
 
 def test_the_script_says_what_failed_and_does_not_fetch_a_missing_endpoint():

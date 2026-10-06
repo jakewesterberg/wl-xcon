@@ -1922,6 +1922,11 @@ _SCRIPT = """
     forget(why);
     tell("signed out: " + why, "crit");
   }
+  // What a page served while this rig could not check sign-ins says of itself (`#mode`,
+  // which Python renders with no token endpoint).
+  function unavailable() {
+    return el("mode") ? el("mode").textContent : "not signed in: this rig cannot check sign-ins";
+  }
   // Every sign-in ends at its access token's lapse unless a renewal has replaced that token
   // by then, whatever is in flight (b2b-ready §4.1). A renewal begun before the lapse ends
   // with it; one begun at or after it (a tab whose timers were held back, the rig's
@@ -1946,7 +1951,7 @@ _SCRIPT = """
       return;
     }
     var end = endRenewal;
-    dropSignIn(trouble || UNREACHED);
+    dropSignIn(trouble || (confirming ? NEVER_CONFIRMED : UNREACHED));
     if (end) { end(); }
   }
   // Resolves true when this tab holds the lock of sign-in `id`, false when another tab
@@ -1972,7 +1977,8 @@ _SCRIPT = """
   }
   // /whoami with the held token. Answers true when it confirms the sign-in. A refusal
   // is read by its reason word (the plan's Ruling 8): `expired` renews (once: a token
-  // just renewed is not expired), `clock` and `no_keys` keep the sign-in and say why,
+  // just renewed is not expired), `clock` and `no_keys` keep the sign-in, say why and
+  // ask again every RETRY_MS (a restart's window without keys passes, b2b-ready §3.2),
   // and the rest end it. A rig out of reach keeps it too, greyed, asked again every
   // RETRY_MS until the lapse (b2b-ready §4.3).
   function whoami(mayRenew) {
@@ -2002,6 +2008,7 @@ _SCRIPT = """
         unusableFor = answer.said;
         tell("signed in, but not usable now: " + answer.said, "crit");
         applySignIn();
+        confirmTimer = setTimeout(function () { if (signin) { whoami(false); } }, RETRY_MS);
         return false;
       }
       forget(answer.said);
@@ -2030,7 +2037,7 @@ _SCRIPT = """
       return Promise.resolve(false);
     }
     if (!body.getAttribute("data-token-endpoint")) {
-      tell(el("mode") ? el("mode").textContent : "not signed in: this rig cannot check sign-ins", "crit");
+      tell(unavailable(), "crit");
       return Promise.resolve(false);
     }
     if (!kept || kept.state !== params.get("state")) {
@@ -2072,6 +2079,13 @@ _SCRIPT = """
   function renewNow() {
     if (!signin || !signin.refresh) {
       if (signin) { dropSignIn("this sign-in has lapsed and cannot be renewed"); } else { forget(); }
+      return Promise.resolve(false);
+    }
+    if (!body.getAttribute("data-token-endpoint")) {
+      // No token endpoint to ask; b2b-ready §4.6's recheck reloads into a page that has one.
+      trouble = unavailable();
+      if (signin.expires - Date.now() > 0) { return Promise.resolve(signedIn()); }
+      dropSignIn(trouble);
       return Promise.resolve(false);
     }
     var mine = generation;
