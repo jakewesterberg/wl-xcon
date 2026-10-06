@@ -1,7 +1,7 @@
 """The rig's https page, driven in a real browser (b2b spec §8; closes XC-186).
 
 The page's script was tested by reading its text, which let two of b3a-2's defects
-through. These tests run it: Chromium signs in against a fake wl.works served over https
+through. These tests run it: a real browser (Chromium; `WLX_BROWSER=webkit` for WebKit) signs in against a fake wl.works served over https
 (`_browser.FakeWlWorks`), and the rig is a real `_PageServer` with a real
 `signin.Checker`; only the dispatch behind `/commands` is a stand-in.
 
@@ -18,7 +18,7 @@ import time
 
 import pytest
 
-from _browser import REQUIRED, FakeWlWorks, chromium  # noqa: E402
+from _browser import REQUIRED, FakeWlWorks, browser  # noqa: E402
 
 try:
     import jwt  # noqa: F401
@@ -31,7 +31,7 @@ from _frames import ENDPOINT, frame  # noqa: E402
 from _issuer import Issuer  # noqa: E402
 from _ports import endpoints as free_endpoints  # noqa: E402
 from _tls import client_context, material  # noqa: E402
-from wl_xcon import signin  # noqa: E402
+from wl_xcon import signin, web  # noqa: E402
 from wl_xcon.link import ManualReward, Pause  # noqa: E402
 from wl_xcon.serve import Hub, Remote, _PageServer, make_handler, tls_context  # noqa: E402
 
@@ -146,8 +146,8 @@ class _Rig:
 
 @pytest.fixture
 def rig(tmp_path):
-    with chromium() as browser:
-        made = _Rig(tmp_path, browser)  # closes what it opened itself if it fails
+    with browser() as launched:
+        made = _Rig(tmp_path, launched)  # closes what it opened itself if it fails
         try:
             yield made
         finally:
@@ -587,3 +587,150 @@ def test_a_reload_with_little_time_left_renews_before_asking_the_rig(rig, monkey
     old_was_sent = any(sent == old for sent in after_reload)  # a bool: never the token
     assert not old_was_sent
     assert len(after_reload) >= 1  # the renewed token was checked
+
+
+# --- b2b-ready §4.1-§4.4 ----------------------------------------------------------------
+
+#: The page's sentences (b2b-ready §4), as `web._SCRIPT` holds them.
+UNCONFIRMED = "this rig has not confirmed the sign-in; trying again"
+BUSY = "wl.works could not renew this sign-in just now; trying again until it lapses"
+
+
+def test_a_renewal_that_hangs_signs_the_page_out_at_the_lapse_and_a_waiting_press_sends_nothing(rig, monkeypatch):
+    # XC-229: wl.works takes the renewal and does not answer until the test lets it.
+    monkeypatch.setattr(signin, "LEEWAY_S", 0)
+    rig.fake.expires_in = 6  # housekeeping: renewed at half of it, so held from about 3 s
+    rig.fake.renewal_gate = threading.Event()
+    page = rig.browser_page()
+    page.add_init_script(_SIGNOUTS)
+    _sign_in(page)
+    rig.wait_for(lambda: rig.fake.renewals >= 1)  # the renewal is at wl.works, held
+    page.evaluate(_COMMANDS)
+    page.click(PAUSE)  # under a minute left: the press joins the renewal and waits
+    _until(page, "document.body.getAttribute('data-signed-in') === '0'", rig.fake.expires_in + WAIT_S)
+    assert _signed_out_by_the_page(page)
+    page.wait_for_selector("#sent:has-text('not sent:')")
+    assert page.inner_text("#sent") == "not sent: " + UNREACHED
+    sent = page.evaluate("window.__commands")
+    assert sent == 0
+    assert len(_pauses(rig)) == 0
+    signouts = page.evaluate("window.__signouts")
+    assert signouts == 0
+    rig.fake.renewal_gate.set()  # wl.works answers, late
+    rig.wait_for(lambda: rig.fake.replied >= 1)
+    page.wait_for_timeout(500)  # housekeeping: the page reads the late answer
+    assert _signed_out_by_the_page(page)  # dropped: the sign-in stays ended
+
+
+def test_a_server_error_or_a_body_that_is_not_json_keeps_the_sign_in_and_is_tried_again(rig, monkeypatch):
+    # XC-230: only wl.works' own refusal, 400 or 401 with an OAuth error, ends a sign-in.
+    monkeypatch.setattr(web, "SIGNIN_RETRY_MS", 500)  # housekeeping: try again soon
+    rig.fake.expires_in = 120  # housekeeping: under five minutes, so a wake-up renews
+    page = rig.browser_page()
+    _sign_in(page)
+    page.evaluate("window.__first = JSON.parse(window.sessionStorage.getItem('wlx-signin')).access; 0")
+    cors = {"Access-Control-Allow-Origin": rig.origin}
+    answers = [
+        {"status": 503, "headers": {**cors, "Content-Type": "application/json"},
+         "body": '{"error": "temporarily_unavailable"}'},
+        {"status": 502, "headers": {**cors, "Content-Type": "text/html"}, "body": "<html>bad gateway</html>"},
+    ]
+
+    def answer(route) -> None:
+        if answers:
+            route.fulfill(**answers.pop(0))
+        else:
+            route.continue_()
+
+    page.route("**/oauth2/token", answer)
+    page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+    page.wait_for_selector("#sent:has-text('could not renew this sign-in just now')")
+    assert page.inner_text("#sent") == BUSY
+    assert page.evaluate("document.body.getAttribute('data-signed-in')") == "1"
+    assert _has_signin(page)
+    renewed = (
+        "(function () { var held = JSON.parse(window.sessionStorage.getItem('wlx-signin') || 'null');"
+        " return !!held && held.access !== window.__first && document.body.getAttribute('data-signed-in') === '1'"
+        " && !document.querySelector('" + PAUSE + "').disabled; })()"
+    )
+    _until(page, renewed)  # a bool from the page: never the token
+    assert not answers  # both were answered before wl.works renewed
+    assert rig.fake.renewals == 1  # only the last try reached wl.works
+    page.click(PAUSE)
+    rig.wait_for(lambda: _pauses(rig))
+    assert _pauses(rig)[-1].by.name == "Jake Westerberg"
+
+
+def test_a_renewal_the_rig_cannot_confirm_greys_the_controls_and_a_waiting_press_says_so(rig, monkeypatch):
+    # XC-231: wl.works renews, and /whoami cannot reach the rig. Ruling 1: one sentence for
+    # every confirmation the rig cannot give.
+    monkeypatch.setattr(web, "SIGNIN_RETRY_MS", 500)  # housekeeping: ask the rig again soon
+    rig.fake.expires_in = 50  # housekeeping: under a minute, so a press renews first
+    rig.fake.renewal_gate = threading.Event()
+    page = rig.browser_page()
+    page.add_init_script(_COUNTS)
+    _sign_in(page)
+    page.route("**/whoami", lambda route: route.abort())  # the rig, out of the page's reach
+    page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+    rig.wait_for(lambda: rig.fake.renewals >= 1)  # held at wl.works
+    page.evaluate(_COMMANDS)
+    page.click(PAUSE)  # joins the renewal
+    _until(page, "window.__clicks >= 1")
+    rig.fake.renewal_gate.set()
+    page.wait_for_selector("#sent:has-text('not sent:')")
+    assert page.inner_text("#sent") == "not sent: " + UNCONFIRMED
+    assert page.inner_text("#member") == "Jake Westerberg (wl.works)"  # still signed in
+    assert page.is_disabled(PAUSE)
+    sent = page.evaluate("window.__commands")
+    assert sent == 0
+    assert len(_pauses(rig)) == 0
+    page.unroute("**/whoami")  # the rig is back: the next try confirms
+    rig.wait_for(lambda: not page.is_disabled(PAUSE))
+    page.wait_for_timeout(1100)  # housekeeping: past the page's `TOGGLE_HOLD_MS` since the first click
+    page.click(PAUSE)
+    rig.wait_for(lambda: _pauses(rig))
+    assert _pauses(rig)[-1].by.name == "Jake Westerberg"
+
+
+def test_the_rigs_expired_with_wl_works_out_of_reach_signs_out_and_never_says_renewed(rig, monkeypatch):
+    # XC-231 (b2b-ready §4.4): the rig's word on expiry wins over the page's count.
+    monkeypatch.setattr(signin, "LEEWAY_S", 0)
+    rig.fake.expires_in = 5
+    rig.fake.told_expires_in = 3600  # the page counts an hour; the rig, five seconds
+    page = rig.browser_page()
+    _sign_in(page)
+    time.sleep(6)  # housekeeping: past the token's own end at the rig
+    page.route("**/oauth2/token", lambda route: route.abort())  # wl.works out of reach
+    page.evaluate(_COMMANDS)
+    page.click(PAUSE)
+    _until(page, "document.body.getAttribute('data-signed-in') === '0'")
+    assert _signed_out_by_the_page(page)
+    assert page.inner_text("#sent") == "signed out: " + UNREACHED
+    assert len(_pauses(rig)) == 0
+    sent = page.evaluate("window.__commands")
+    assert sent == 1  # the one the rig refused as expired, never sent again
+
+
+def test_a_press_while_the_rig_cannot_check_sign_ins_keeps_the_sign_in(rig, monkeypatch):
+    # Review Focus 1: the seconds after `wlx serve` restarts, before its keys thread has
+    # loaded (b2b-ready §3.2). Refused with that sentence; the sign-in stays.
+    page = rig.browser_page()
+    _sign_in(page)
+    real = signin.Checker.check
+    once: list = []
+
+    def no_keys_once(self, authorization):
+        if not once:
+            once.append(1)
+            raise signin.Refused("no_keys", signin.NO_KEYS)
+        return real(self, authorization)
+
+    monkeypatch.setattr(signin.Checker, "check", no_keys_once)
+    page.click(PAUSE)
+    page.wait_for_selector("#sent:has-text('has not reached wl.works')")
+    assert page.inner_text("#member") == "Jake Westerberg (wl.works)" and _has_signin(page)
+    assert len(_pauses(rig)) == 0
+    page.wait_for_timeout(1100)  # housekeeping: past the page's `TOGGLE_HOLD_MS`
+    page.click(PAUSE)
+    rig.wait_for(lambda: _pauses(rig))
+    assert _pauses(rig)[-1].by.name == "Jake Westerberg"

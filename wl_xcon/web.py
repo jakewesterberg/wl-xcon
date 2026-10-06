@@ -147,6 +147,10 @@ CONTROLS_ELSEWHERE = "controls work at the rig PC, or signed in on this rig's ht
 #: What the rig PC's page and `wlx serve`'s terminal say, with the reason, when the rig's
 #: https page could not be set up (b2b-ready §3.1).
 HTTPS_OFF = "the rig's https page is off"
+#: How often the https page tries a renewal or a confirmation again while wl.works or this
+#: rig cannot be reached (b2b-ready §4.2-§4.3): housekeeping, not a measurement. Rendered
+#: on `<body>`, so a test can shorten it.
+SIGNIN_RETRY_MS = 30_000
 #: What a control says on the https page to a browser not signed in (b2b spec §4).
 SIGN_IN_FIRST = "sign in with wl.works to use the controls"
 #: Why the mark control is greyed on a console started without the mark endpoint.
@@ -1741,12 +1745,23 @@ _SCRIPT = """
   // and renew first before a command when less than this is left.
   var RENEW_BEFORE_MS = 5 * 60 * 1000;
   var FRESH_FOR_MS = 60 * 1000;
-  // Housekeeping too: while wl.works cannot be reached, a renewal is tried again this
-  // often, and at the token's lapse when that comes first (spec §7; the final review, I1).
-  var RETRY_MS = 30 * 1000;
-  // Why the page signs itself out when the token lapses with wl.works still out of reach.
+  // Housekeeping too, rendered by Python (`web.SIGNIN_RETRY_MS`): while wl.works or this
+  // rig cannot be reached, a renewal or a confirmation is tried again this often, and a
+  // renewal at the token's lapse when that comes first (spec §7; b2b-ready §4.1-§4.3).
+  var RETRY_MS = Number(body.getAttribute("data-retry-ms")) || 30 * 1000;
+  // Why the page signs itself out at a lapse (b2b-ready §4.1): wl.works out of reach (the
+  // final review, I1), wl.works answering without a token, or this rig never confirming.
   var UNREACHED = "wl.works could not be reached to renew this sign-in; the rig PC's page keeps every control";
+  var NOT_RENEWED = "wl.works did not renew this sign-in before it lapsed; the rig PC's page keeps every control";
+  var NEVER_CONFIRMED = "this rig did not confirm the sign-in before it lapsed; the rig PC's page keeps every control";
+  // What the page says while it keeps a sign-in it is trying to renew or confirm.
+  var RETRYING = "could not reach wl.works to renew this sign-in; trying again until it lapses";
+  var BUSY = "wl.works could not renew this sign-in just now; trying again until it lapses";
+  var UNCONFIRMED = "this rig has not confirmed the sign-in; trying again";
+  var NO_SIGNIN = "sign in with wl.works to use the controls";
   var renewTimer = null;
+  var lapseTimer = null;
+  var confirmTimer = null;
   function readStore(key) {
     try { return JSON.parse(window.sessionStorage.getItem(key) || "null"); } catch (e) { return null; }
   }
@@ -1778,6 +1793,18 @@ _SCRIPT = """
   // (`post`). Empty after every other sign-out (one someone asked for, or the rig's
   // refusal of the token in `deliver`) and after a new sign-in.
   var signedOutFor = "";
+  // Why the sign-in this tab holds would end, were its lapse now: empty while nothing has
+  // gone wrong since wl.works last renewed it and this rig last confirmed it.
+  var trouble = "";
+  // Why the sign-in this tab holds cannot act now though it is held (this rig has not
+  // confirmed it, cannot check sign-ins, or disagrees on the time); empty when it can.
+  var unusableFor = "";
+  // From a renewal's new pair (`keep`) until this rig has answered /whoami for it: a press
+  // then waits for that renewal (`fresh`), never sending a token the rig has not seen.
+  var confirming = false;
+  // When the renewal in flight began, and how the lapse ends it (`lapse`).
+  var renewStarted = 0;
+  var endRenewal = null;
   function applySignIn() {
     if (!signinPage) { return; }
     body.setAttribute("data-signed-in", signedIn() ? "1" : "0");
@@ -1828,29 +1855,39 @@ _SCRIPT = """
       body: new URLSearchParams(fields).toString()
     }).then(function (response) {
       return response.json().then(
-        function (answer) { return { ok: response.ok, answer: answer }; },
-        function () { return { ok: false, answer: {} }; }
+        function (answer) { return { ok: response.ok, status: response.status, answer: answer || {} }; },
+        function () { return { ok: false, status: response.status, answer: {} }; }
       );
     });
   }
-  function keep(answer) {
+  // A new pair from wl.works. `prior` is the sign-in a renewal replaces, whose member it
+  // keeps; `null` for a new sign-in.
+  function keep(answer, prior) {
     generation += 1;
     signedOutFor = "";
+    trouble = "";
+    unusableFor = "";
     signin = {
       access: answer.access_token,
-      refresh: answer.refresh_token || (signin && signin.refresh) || null,
+      refresh: answer.refresh_token || (prior && prior.refresh) || null,
       expires: Date.now() + Number(answer.expires_in) * 1000,
-      name: null,
-      shown: null
+      name: prior ? prior.name : null,
+      shown: prior ? prior.shown : null
     };
+    armLapse();
   }
   function forget(why) {
     generation += 1;
     signin = null;
     confirmed = false;
+    confirming = false;
+    trouble = "";
+    unusableFor = "";
     signedOutFor = why || "";
     writeStore(SIGNIN_KEY, null);
     clearTimeout(renewTimer);
+    clearTimeout(lapseTimer);
+    clearTimeout(confirmTimer);
     applySignIn();
   }
   // The page signs itself out, saying why now and on any press after (`post`).
@@ -1858,12 +1895,41 @@ _SCRIPT = """
     forget(why);
     tell("signed out: " + why, "crit");
   }
+  // Every sign-in ends at its access token's lapse unless a renewal has replaced that token
+  // by then, whatever is in flight (b2b-ready §4.1). A renewal begun before the lapse ends
+  // with it; one begun at or after it (a tab whose timers were held back, the rig's
+  // `expired`) is given RETRY_MS (the plan's Ruling 2).
+  function deadline() {
+    if (renewing && renewStarted >= signin.expires) { return renewStarted + RETRY_MS; }
+    return signin.expires;
+  }
+  function armLapse() {
+    clearTimeout(lapseTimer);
+    if (signin) { lapseTimer = setTimeout(lapse, Math.max(0, deadline() - Date.now())); }
+  }
+  function lapse() {
+    if (!signin) { return; }
+    if (deadline() > Date.now()) { armLapse(); return; }
+    if (!renewing && trouble !== NEVER_CONFIRMED) {
+      // No renewal in flight at the lapse: one more, within RETRY_MS of its own. A tab whose
+      // timers were held back renews here, and so does a retry due at the lapse itself;
+      // wl.works still out of reach then signs the page out (`notRenewed`).
+      renew();
+      armLapse();
+      return;
+    }
+    var end = endRenewal;
+    dropSignIn(trouble || UNREACHED);
+    if (end) { end(); }
+  }
   // /whoami with the held token. Answers true when it confirms the sign-in. A refusal
   // is read by its reason word (the plan's Ruling 8): `expired` renews (once: a token
   // just renewed is not expired), `clock` and `no_keys` keep the sign-in and say why,
-  // and the rest end it.
+  // and the rest end it. A rig out of reach keeps it too, greyed, asked again every
+  // RETRY_MS until the lapse (b2b-ready §4.3).
   function whoami(mayRenew) {
     var mine = generation;
+    clearTimeout(confirmTimer);
     return fetch("/whoami", {
       method: "POST",
       cache: "no-store",
@@ -1875,6 +1941,8 @@ _SCRIPT = """
         signin.name = answer.name;
         signin.shown = answer.shown;
         confirmed = true;
+        trouble = "";
+        unusableFor = "";
         writeStore(SIGNIN_KEY, signin);
         scheduleRenew();
         applySignIn();
@@ -1882,12 +1950,23 @@ _SCRIPT = """
       }
       if (answer.reason === "expired" && mayRenew) { return renew(); }
       if (answer.reason === "clock" || answer.reason === "no_keys") {
+        confirmed = false;
+        unusableFor = answer.said;
         tell("signed in, but not usable now: " + answer.said, "crit");
         applySignIn();
         return false;
       }
       forget(answer.said);
       tell("not signed in: " + answer.said, "crit");
+      return false;
+    }, function () {
+      if (mine !== generation || !signin) { return false; }
+      confirmed = false;
+      unusableFor = UNCONFIRMED;
+      trouble = NEVER_CONFIRMED;
+      tell(UNCONFIRMED, "crit");
+      applySignIn();
+      confirmTimer = setTimeout(function () { if (signin) { whoami(false); } }, RETRY_MS);
       return false;
     });
   }
@@ -1923,23 +2002,23 @@ _SCRIPT = """
         tell("not signed in: " + (result.answer.error_description || "wl.works did not sign you in"), "crit");
         return false;
       }
-      keep(result.answer);
+      keep(result.answer, null);
       return whoami(false).then(function () { return true; });
     }, function () {
       tell("not signed in: could not reach wl.works to finish signing in", "crit");
       return false;
     });
   }
-  // Every caller shares the one renewal in flight (`renewing`). Never rejects.
+  // Every caller shares the one renewal in flight (`renewing`). Never rejects. The lapse
+  // can end it early (`endRenewal`); its late answer is then dropped (`generation`).
   function renew() {
     if (renewing) { return renewing; }
-    renewing = renewNow().then(function (ok) { renewing = null; return ok; }, function () {
-      renewing = null;
-      // Only the rig's confirmation can reject here: wl.works answered, and the new pair
-      // is already stored (`renewNow`).
-      tell("wl.works renewed this sign-in, but this rig could not confirm it: reload to try again", "crit");
-      return false;
+    renewStarted = Date.now();
+    renewing = new Promise(function (resolve) {
+      endRenewal = function () { resolve(false); };
+      renewNow().then(resolve, function () { resolve(false); });
     });
+    renewing.then(function () { renewing = null; endRenewal = null; });
     return renewing;
   }
   function renewNow() {
@@ -1955,34 +2034,41 @@ _SCRIPT = """
       client_id: body.getAttribute("data-client")
     }).then(function (result) {
       if (mine !== generation) { return false; }
-      if (!result.ok || !result.answer.access_token) {
+      if (result.ok && result.answer.access_token) {
+        keep(result.answer, prior);
+        // The renewal token just presented is spent: the new pair is stored now, not once
+        // the rig has confirmed it, or a reload would present the spent one. The controls
+        // stay tied to /whoami (`confirmed`), and a press waits for it (`confirming`).
+        writeStore(SIGNIN_KEY, signin);
+        confirming = true;
+        return whoami(false).then(function (ok) { confirming = false; return ok; });
+      }
+      // Only wl.works' own refusal ends the sign-in (b2b-ready §4.2): 400 or 401 with an
+      // OAuth error. Any other answer without a token is no answer.
+      if ((result.status === 400 || result.status === 401) && typeof result.answer.error === "string") {
         dropSignIn(result.answer.error_description || "wl.works did not renew this sign-in");
         return false;
       }
-      keep(result.answer);
-      // The renewal token just presented is spent: the new pair is stored now, not once
-      // the rig has confirmed it, or a reload would present the spent one. The controls
-      // stay tied to /whoami (`confirmed`).
-      writeStore(SIGNIN_KEY, {
-        access: signin.access, refresh: signin.refresh, expires: signin.expires,
-        name: prior.name, shown: prior.shown
-      });
-      return whoami(false).then(function () { return signedIn(); });
+      return notRenewed(NOT_RENEWED, BUSY);
     }, function () {
       if (mine !== generation) { return false; }
-      // wl.works could not be reached. The token works at the rig until it lapses (the
-      // check is offline): keep the sign-in and try again, at the lapse at the latest. Once
-      // it has lapsed, the page signs itself out (spec §7; the final review, I1).
-      var left = signin.expires - Date.now();
-      if (left > 0) {
-        tell("could not reach wl.works to renew this sign-in; trying again until it lapses", "crit");
-        clearTimeout(renewTimer);
-        renewTimer = setTimeout(renew, Math.min(left, RETRY_MS));
-        return signedIn();
-      }
-      dropSignIn(UNREACHED);
-      return false;
+      return notRenewed(UNREACHED, RETRYING);
     });
+  }
+  // wl.works did not renew, and did not refuse. The token works at the rig until it lapses
+  // (the check is offline): keep the sign-in and try again, at the lapse at the latest.
+  // Once it has lapsed, the page signs itself out with `why` (spec §7; b2b-ready §4.1-§4.2).
+  function notRenewed(why, now) {
+    trouble = why;
+    var left = signin.expires - Date.now();
+    if (left > 0) {
+      tell(now, "crit");
+      clearTimeout(renewTimer);
+      renewTimer = setTimeout(renew, Math.min(left, RETRY_MS));
+      return signedIn();
+    }
+    dropSignIn(why);
+    return false;
   }
   function scheduleRenew() {
     clearTimeout(renewTimer);
@@ -1991,11 +2077,23 @@ _SCRIPT = """
     renewTimer = setTimeout(renew, Math.max(left / 2, left - RENEW_BEFORE_MS));
   }
   function fresh() {
-    // Between a renewal's new pair (`keep`) and the rig's confirmation of it, the sign-in
-    // has no name yet: a press then waits for that renewal rather than being refused.
-    if (!signedIn()) { return renewing || Promise.resolve(false); }
+    // Between a renewal's new pair and the rig's confirmation of it, a press waits for that
+    // renewal rather than being sent with a token the rig has not yet seen (`confirming`).
+    if (confirming) { return renewing || Promise.resolve(false); }
+    if (!signedIn() || unusableFor) { return Promise.resolve(false); }
     if (signin.expires - Date.now() > FRESH_FOR_MS) { return Promise.resolve(true); }
     return renew();
+  }
+  // The rig refused a command as `expired` (b2b-ready §4.4): its offline check is the
+  // authority, so the token has lapsed whatever the page counted. Resolves true only when
+  // a renewal brought a new token.
+  function expiredAtTheRig() {
+    if (!signin) { return Promise.resolve(false); }
+    var before = signin.access;
+    if (!renewing) { signin.expires = Math.min(signin.expires, Date.now()); }
+    var renewal = renew();
+    armLapse();
+    return renewal.then(function (ok) { return ok && !!signin && signin.access !== before; });
   }
   function signOut() {
     var held = signin;
@@ -2175,7 +2273,7 @@ _SCRIPT = """
     if (signinPage) {
       fresh().then(function (ok) {
         if (!ok) {
-          tell("not sent: " + (signedOutFor || "sign in with wl.works to use the controls"), "crit");
+          tell("not sent: " + (unusableFor || signedOutFor || NO_SIGNIN), "crit");
           done();
           return;
         }
@@ -2211,8 +2309,8 @@ _SCRIPT = """
       tell(answer.said, answer.status === "sent" || answer.status === "signaled" ? "ok" : "crit");
       // A refusal for the token (the plan's Ruling 8): never re-sent; renew, or sign out.
       if (answer.reason === "expired") {
-        renew().then(function (ok) {
-          if (ok) { tell("this sign-in was renewed; the command was not sent: send it again", "ok"); }
+        expiredAtTheRig().then(function (renewed) {
+          if (renewed) { tell("this sign-in was renewed; the command was not sent: send it again", "ok"); }
         });
       }
       else if (answer.reason === "signed_out" || answer.reason === "other_rig" ||
@@ -2536,6 +2634,7 @@ _SCRIPT = """
     applySignIn();
     finishSignIn().then(function (exchanged) {
       if (exchanged || !signin) { return; }
+      armLapse();
       // A tab reloaded after its hour renews first; the stored token is not asked about.
       if (signin.expires - Date.now() < FRESH_FOR_MS) { return renew(); }
       return whoami(true);
@@ -2600,7 +2699,7 @@ def page(
             f' data-signin="1" data-authorize="{_e(signin.authorize or "")}"'
             f' data-token-endpoint="{_e(signin.token_endpoint or "")}"'
             f' data-client="{_e(signin.client_id)}" data-page="{_e(signin.page)}"'
-            f' data-resource="{_e(signin.resource)}"'
+            f' data-resource="{_e(signin.resource)}" data-retry-ms="{SIGNIN_RETRY_MS}"'
         )
         if signin.token_endpoint is None:
             who = (

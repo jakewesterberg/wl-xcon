@@ -1,7 +1,7 @@
 """A real browser, and a fake wl.works served over https, for the page's script (b2b spec
 §8; closes XC-186). Imported by `test_page_browser.py`; never collected.
 
-`chromium()` skips when Playwright or its Chromium is missing, and fails instead under
+`browser()` skips when Playwright or its `WLX_BROWSER` engine (Chromium unless set) is missing, and fails instead under
 `WLX_REQUIRE_BROWSER=1`, so CI cannot pass by skipping. `FakeWlWorks` answers the two
 endpoints the page uses, with the checks wl.works' own would make (`rig-sign-in.ts`,
 `rig-cors.ts`), and never writes a token anywhere: it keeps only counters, the renewal
@@ -23,7 +23,10 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 import pytest
 
 REQUIRED = os.environ.get("WLX_REQUIRE_BROWSER") == "1"
-INSTALL = "python -m playwright install chromium"
+#: Which engine runs the browser tests (b2b-ready §7): `chromium`, the default and CI's, or
+#: `webkit`, the engine Safari is built on, for a run by hand.
+ENGINE = os.environ.get("WLX_BROWSER", "chromium")
+INSTALL = f"python -m playwright install {ENGINE}"
 
 #: wl-works `rig-sign-in.ts`'s words for a renewal it will not give.
 OLD_SIGN_IN = "This sign-in at the rig is 24 hours old. Sign in again at the rig."
@@ -36,8 +39,10 @@ def _unavailable(why: str):
 
 
 @contextmanager
-def chromium():
-    """A Playwright `Browser`, closed (and Playwright stopped) on the way out."""
+def browser():
+    """A Playwright `Browser` of `ENGINE`, closed (and Playwright stopped) on the way out."""
+    if ENGINE not in ("chromium", "webkit"):
+        raise AssertionError(f"WLX_BROWSER must be chromium or webkit, not {ENGINE!r}")
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as exc:
@@ -45,13 +50,13 @@ def chromium():
     playwright = sync_playwright().start()
     try:
         try:
-            browser = playwright.chromium.launch()
+            launched = getattr(playwright, ENGINE).launch()
         except Exception as exc:  # noqa: BLE001 - Playwright's own error type is not stable
-            _unavailable(f"Chromium would not launch ({type(exc).__name__}); run {INSTALL}")
+            _unavailable(f"{ENGINE} would not launch ({type(exc).__name__}); run {INSTALL}")
         try:
-            yield browser
+            yield launched
         finally:
-            browser.close()
+            launched.close()
     finally:
         playwright.stop()
 

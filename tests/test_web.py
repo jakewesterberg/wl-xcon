@@ -38,6 +38,7 @@ from wl_xcon.web import (
     REWARD_ONLY_PAUSED,
     RUN_TRIALS,
     SIGN_IN_FIRST,
+    SIGNIN_RETRY_MS,
     SignIn,
     _gate,
     font_bytes,
@@ -2461,7 +2462,8 @@ def test_every_renewal_is_the_one_in_flight_so_a_token_is_never_presented_twice(
     renew = _script_between("  function renew() {", "  function renewNow() {")
     assert "var renewing = null;" in _SCRIPT
     assert "if (renewing) { return renewing; }" in renew
-    assert "renewing = renewNow()" in renew and "renewing = null;" in renew
+    assert "renewNow().then(resolve, function () { resolve(false); });" in renew
+    assert "renewing = null;" in renew
     # Only `renew` starts a renewal; every caller goes through it.
     assert _SCRIPT.count("renewNow()") == 2  # its call and its definition
     assert _SCRIPT.count('grant_type: "refresh_token"') == 1
@@ -2488,7 +2490,7 @@ def test_a_lapsed_tab_renews_on_load_and_whoami_reads_the_reason_word():
     assert 'answer.reason === "clock" || answer.reason === "no_keys"' in who
     assert who.index('"clock"') < who.index("forget(answer.said);")
     # After a renewal the new token is not asked to renew again.
-    assert _SCRIPT.count("whoami(false)") == 2 and _SCRIPT.count("whoami(true)") == 1
+    assert _SCRIPT.count("whoami(false)") == 3 and _SCRIPT.count("whoami(true)") == 1
 
 
 def test_the_script_says_what_failed_and_does_not_fetch_a_missing_endpoint():
@@ -2522,24 +2524,29 @@ def test_a_sign_out_stands_against_a_renewal_or_a_sign_in_still_in_flight():
     assert "var generation = 0;" in _SCRIPT
     forget = _script_between("  function forget(why) {", "  // The page signs itself out")
     assert "generation += 1;" in forget
-    assert "generation += 1;" in _script_between("  function keep(answer) {", "  function forget(why) {")
+    assert "generation += 1;" in _script_between("  function keep(answer, prior) {", "  function forget(why) {")
     # Each answer is dropped, before anything is kept, stored or shown, if the sign-in it
     # began from is gone.
     who = _script_between("  function whoami(mayRenew) {", "  // Resolves true when")
     assert who.index("var mine = generation;") < who.index("if (mine !== generation) { return false; }")
     assert who.index("if (mine !== generation)") < who.index("signin.name = answer.name;")
     finish = _script_between("  function finishSignIn() {", "  // Every caller shares")
-    assert finish.index("if (mine !== generation)") < finish.index("keep(result.answer);")
+    assert finish.index("if (mine !== generation)") < finish.index("keep(result.answer, null);")
     renew = _script_between("  function renewNow() {", "  function scheduleRenew() {")
-    assert renew.index("if (mine !== generation)") < renew.index("keep(result.answer);")
+    assert renew.index("if (mine !== generation)") < renew.index("keep(result.answer, prior);")
     # wl.works out of reach (the final review, I1): a sign-out during that renewal stands too.
     unreached = renew.split("    }, function () {\n", 1)[1]
-    assert unreached.index("if (mine !== generation)") < unreached.index("dropSignIn(UNREACHED);")
+    assert unreached.index("if (mine !== generation)") < unreached.index("return notRenewed(UNREACHED, RETRYING);")
 
 
 def test_a_renewed_pair_is_stored_before_the_rig_confirms_it():
     renew = _script_between("  function renewNow() {", "  function scheduleRenew() {")
-    assert renew.index("keep(result.answer);") < renew.index("writeStore(SIGNIN_KEY, {")
-    assert renew.index("writeStore(SIGNIN_KEY, {") < renew.index("whoami(false)")
+    assert renew.index("keep(result.answer, prior);") < renew.index("writeStore(SIGNIN_KEY, signin);")
+    assert renew.index("writeStore(SIGNIN_KEY, signin);") < renew.index("whoami(false)")
     assert "nothing answered" not in _SCRIPT
-    assert "wl.works renewed this sign-in, but this rig could not confirm it" in _SCRIPT
+    assert 'var UNCONFIRMED = "this rig has not confirmed the sign-in; trying again";' in _SCRIPT
+
+
+def test_the_https_page_tells_its_script_how_often_to_try_again():
+    document = page(fragments(frame(), _https_view()), stale_after_s=30.0, nonce="n0nce", signin=_SIGNIN)
+    assert f'data-retry-ms="{SIGNIN_RETRY_MS}"' in document and SIGNIN_RETRY_MS == 30_000
