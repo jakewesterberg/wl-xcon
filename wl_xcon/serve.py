@@ -1433,10 +1433,13 @@ RECEIVE_TIMEOUT_S = 0.5
 class Server:
     """`wlx serve`'s whole process, as an object a test can start and stop.
 
-    Binds the HTTP port on construction -- so `address` is known, and a port in use
-    is refused before anything else happens -- and starts its threads in `start`: the
-    telemetry thread (`_listen`), the command thread and, given a mark endpoint, the
-    mark thread (each an `Outbox`, P4d-2b b2a), and the HTTP server's loop.
+    Binds the HTTP port on construction, first -- so `address` is known, and a port in
+    use is refused before anything else happens -- then the https listener, if asked for:
+    one that will not bind turns the https page off (`https_off`), never the rig PC's
+    page. It starts its threads in `start`: the telemetry thread (`_listen`), the command
+    thread and, given a mark endpoint, the mark thread (each an `Outbox`, P4d-2b b2a),
+    the HTTP server's loop, the https listener's loop and the keys thread, which asks
+    wl.works only then (b2b-ready §3.2).
 
     `mark` is the session's mark endpoint, `--link`'s third; `None` without one, and
     then a mark is answered *not delivered* and the page greys its control.
@@ -1516,6 +1519,21 @@ class Server:
         #: Why the rig's https page is off, or `None` while it serves or was never asked
         #: for (b2b-ready §3.1): from `run`'s setup, or set here when its port will not bind.
         self._https_off = https_off
+        # The rig PC's page binds first: a port in use is refused before anything else
+        # happens, and no https address can take it from the page (b2b-ready §3.1).
+        self._http = ThreadingHTTPServer(
+            http,
+            make_handler(
+                self.hub,
+                token=token,
+                stale_after_s=stale_after_s,
+                keepalive_s=keepalive_s,
+                hosts=box_names(allow_hosts),
+                dispatch=self.dispatch,
+                https_page=https is not None,
+                https_off=https_off,
+            ),
+        )
         page_http = None
         if https is not None:
             try:
@@ -1530,24 +1548,10 @@ class Server:
             except OSError as exc:
                 self._https_off = f"cannot serve https on {https[0]}:{https[1]}: {exc}"
                 remote = None
-        try:
-            self._http = ThreadingHTTPServer(
-                http,
-                make_handler(
-                    self.hub,
-                    token=token,
-                    stale_after_s=stale_after_s,
-                    keepalive_s=keepalive_s,
-                    hosts=box_names(allow_hosts),
-                    dispatch=self.dispatch,
-                    https_page=page_http is not None,
-                    https_off=self._https_off,
-                ),
-            )
-        except OSError:
-            if page_http is not None:
-                page_http.server_close()  # the rig PC page's own bind failed: free the https one
-            raise
+                # `make_handler` builds a fresh class per call and nothing is served before
+                # `start`, so the rig PC page's class can still learn the https page is off.
+                self._http.RequestHandlerClass._https_page = False
+                self._http.RequestHandlerClass._https_off = self._https_off
         self._page_http = page_http
         self._web = threading.Thread(
             target=self._http.serve_forever, name="wlx-serve-http", daemon=True
@@ -2017,7 +2021,8 @@ def _https_setup(args, flags: dict) -> tuple:
 def run(args) -> int:
     """`wlx serve`: check everything, bind, serve until interrupted (spec §2).
 
-    The rig PC page's own setup is refused before anything binds, each refusal a sentence.
+    The rig PC page's own setup is refused before anything else binds (its port is bound
+    first), each refusal a sentence.
     The https page's never is: a setup that cannot be completed turns the https page off,
     says why in the terminal and on the rig PC's page, and the rig PC's page serves
     regardless (b2b-ready §3.1).

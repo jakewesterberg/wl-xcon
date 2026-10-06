@@ -5140,7 +5140,9 @@ def test_a_tls_key_that_is_not_a_key_is_off_without_its_contents_or_path(tmp_pat
         assert "SECRETCONTENTS" not in told and "SECRETNAME" not in told and str(tmp_path) not in told
 
 
-def test_a_bad_https_value_names_https_and_a_busy_https_port_names_its_own_address(tmp_path, monkeypatch, capsys):
+def test_a_bad_https_value_names_https_and_a_busy_https_port_names_its_own_address(
+    tmp_path, monkeypatch, capsys, wl_works
+):
     pytest.importorskip("jwt")
     extra, _tls, _port = _six(tmp_path, {"--https": "not-an-address"})
     seen = _served_run(tmp_path, monkeypatch, capsys, extra)
@@ -5156,6 +5158,7 @@ def test_a_bad_https_value_names_https_and_a_busy_https_port_names_its_own_addre
         seen = _served_run(tmp_path, monkeypatch, capsys, extra)
     _off(seen)
     assert seen.https_off.startswith(f"cannot serve https on 127.0.0.1:{port}:")
+    assert wl_works.fetched == []  # no https page, so nothing asks wl.works
 
 
 @pytest.mark.parametrize("which", ["missing", "no_crypto"])
@@ -5201,9 +5204,9 @@ def test_a_failed_https_bind_leaves_the_rig_pc_page_serving(tmp_path):
             server.close()
 
 
-def test_a_failed_http_bind_frees_the_https_port_and_is_still_refused(tmp_path):
-    """Review Focus 3: the rig PC page's own setup still refuses (b2b-ready §3.1), and the
-    https listener bound before it is freed."""
+def test_a_failed_http_bind_is_refused_and_leaves_no_listener_behind(tmp_path):
+    """The rig PC page's own bind still refuses (b2b-ready §3.1), and being first it leaves
+    nothing bound: the https port is free for the next start."""
     pytest.importorskip("jwt")
     from _issuer import ISSUER, Issuer
     from _tls import material
@@ -5218,17 +5221,43 @@ def test_a_failed_http_bind_frees_the_https_port_and_is_still_refused(tmp_path):
         busy.bind(("127.0.0.1", 0))
         busy.listen()
         pub, rep = free_endpoints(2)
-        with pytest.raises(OSError) as refused:
+        with pytest.raises(OSError):
             Server(
                 sub=pub, req=rep, http=busy.getsockname()[:2], token=TOKEN,
                 https=("127.0.0.1", https_port), tls=tls_context(tls["cert"], tls["key"]),
                 remote=Remote(page, checker),
             )
-    # `refused` holds the failed constructor's frame, and with it the https socket, until
-    # the end: the port is free because `Server` freed it, not because garbage was collected.
     with socket.socket() as again:
         again.bind(("127.0.0.1", https_port))
-    assert refused.value is not None
+
+
+def test_an_https_address_that_is_the_http_port_turns_only_the_https_page_off(tmp_path):
+    """The https flags are never a refusal (b2b-ready §3.1): an https address that takes
+    the rig PC page's port leaves the page serving and says the https listener failed."""
+    pytest.importorskip("jwt")
+    from _issuer import ISSUER, Issuer
+    from _tls import material
+    from wl_xcon import signin
+    from wl_xcon.serve import Remote, tls_context
+
+    tls = material(tmp_path)
+    page = signin.parse_rig_page("rig-3=https://rig-3.wl.works/")
+    checker = signin.Checker(page=page, issuer=ISSUER, cache=tmp_path / "c.json", fetch=Issuer().fetch)
+    port = int(free_endpoints(1)[0].rsplit(":", 1)[1])
+    pub, rep = free_endpoints(2)
+    server = Server(
+        sub=pub, req=rep, http=("127.0.0.1", port), token=TOKEN,
+        https=("127.0.0.1", port), tls=tls_context(tls["cert"], tls["key"]),
+        remote=Remote(page, checker),
+    )
+    server.start()
+    try:
+        assert server.https_off.startswith(f"cannot serve https on 127.0.0.1:{port}:")
+        assert server.page_address is None
+        assert _request(port, "GET", "/")[0] == 200
+        assert _post(port, {"kind": "stop"}, {"Origin": "http://evil.example"})[1]["said"] == CONTROLS_AT_THE_BOX
+    finally:
+        server.close()
 
 
 def test_wl_works_is_asked_only_once_both_pages_are_served(tmp_path, monkeypatch, capsys):
