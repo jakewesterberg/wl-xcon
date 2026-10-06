@@ -646,6 +646,8 @@ def test_a_server_error_or_a_body_that_is_not_json_keeps_the_sign_in_and_is_trie
         {"status": 503, "headers": {**cors, "Content-Type": "application/json"},
          "body": '{"error": "temporarily_unavailable"}'},
         {"status": 502, "headers": {**cors, "Content-Type": "text/html"}, "body": "<html>bad gateway</html>"},
+        # A 400 without an OAuth `error` is no answer either: only wl.works' own refusal ends it.
+        {"status": 400, "headers": {**cors, "Content-Type": "text/html"}, "body": "<html>bad request</html>"},
     ]
 
     def answer(route) -> None:
@@ -666,7 +668,7 @@ def test_a_server_error_or_a_body_that_is_not_json_keeps_the_sign_in_and_is_trie
         " && !document.querySelector('" + PAUSE + "').disabled; })()"
     )
     _until(page, renewed)  # a bool from the page: never the token
-    assert not answers  # both were answered before wl.works renewed
+    assert not answers  # all three were answered before wl.works renewed
     assert rig.fake.renewals == 1  # only the last try reached wl.works
     page.click(PAUSE)
     rig.wait_for(lambda: _pauses(rig))
@@ -752,7 +754,6 @@ def test_the_rigs_expired_while_a_renewal_is_held_makes_a_later_press_wait_for_i
     # Review fix 1: `expired` acts on the token the rig refused, so a renewal already held at
     # wl.works is joined by the next press, never sent past with the refused token.
     monkeypatch.setattr(signin, "LEEWAY_S", 0)
-    monkeypatch.setattr(web, "SIGNIN_RETRY_MS", 3000)  # housekeeping: the held renewal's lapse allowance
     rig.fake.expires_in = 5
     rig.fake.told_expires_in = 120  # the page counts two minutes; the rig, five seconds
     page = rig.browser_page()
@@ -978,3 +979,62 @@ def test_a_renewal_the_rig_cannot_check_yet_is_asked_again_and_comes_back(rig, m
     page.click(PAUSE)
     rig.wait_for(lambda: _pauses(rig))
     assert _pauses(rig)[-1].by.name == "Jake Westerberg"
+
+
+#: Counts, in the page, every /whoami the rig answers `signed_in`: the page's own reading of
+#: the answer runs beside this one, on a copy of the response.
+_CONFIRMS = """
+window.__confirms = 0;
+(function () {
+  var real = window.fetch;
+  window.fetch = function (url) {
+    var sent = real.apply(this, arguments);
+    if (String(url).indexOf("/whoami") >= 0) {
+      sent.then(function (response) { return response.clone().json(); }).then(function (answer) {
+        if (answer && answer.status === "signed_in") { window.__confirms += 1; }
+      }, function () {});
+    }
+    return sent;
+  };
+})();
+"""
+
+
+def _held(page, held: list) -> None:
+    """Wait until a route has held a request, letting Playwright run its handler meanwhile."""
+    end = time.monotonic() + WAIT_S
+    while not held:
+        if time.monotonic() >= end:
+            pytest.fail(f"timed out after {WAIT_S:g} s waiting for a held request")
+        page.wait_for_timeout(50)
+
+
+def test_the_rigs_expired_for_a_token_already_renewed_neither_renews_again_nor_signs_out(rig, monkeypatch):
+    # `expiredAtTheRig`'s guard (the Task 3 review's case c): the rig answers `expired` for a
+    # command sent with the old token after a renewal has replaced it. That answer is about a
+    # token the page no longer holds, and the renewal token it holds now is not spent on it.
+    monkeypatch.setattr(signin, "LEEWAY_S", 0)
+    rig.fake.expires_in = 5
+    rig.fake.told_expires_in = 120  # the page counts two minutes; the rig, five seconds
+    page = rig.browser_page()
+    _sign_in(page)
+    time.sleep(6)  # housekeeping: past the token's own end at the rig
+    page.evaluate("window.__first = JSON.parse(window.sessionStorage.getItem('wlx-signin')).access; 0")
+    page.evaluate(_CONFIRMS)
+    held: list = []
+    page.route("**/commands", lambda route: held.append(route))  # kept until the renewal is done
+    page.click(PAUSE)  # the page counts time left: sent with the old token, and held on the way
+    _held(page, held)
+    page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")  # under five minutes by its count
+    renewed = (
+        "window.__confirms >= 1 && JSON.parse(window.sessionStorage.getItem('wlx-signin')).access"
+        " !== window.__first"
+    )
+    _until(page, renewed)  # a bool from the page: never the token
+    page.wait_for_timeout(300)  # housekeeping: the page finishes the renewal the rig confirmed
+    held[0].continue_()  # the rig refuses the old token as expired
+    page.wait_for_selector("#sent:has-text('this sign-in was renewed')")
+    page.wait_for_timeout(500)  # housekeeping: room for a wrong second renewal to arrive
+    assert rig.fake.renewals == 1
+    assert page.evaluate("document.body.getAttribute('data-signed-in')") == "1"
+    assert page.inner_text("#member") == "Jake Westerberg (wl.works)" and _has_signin(page)
