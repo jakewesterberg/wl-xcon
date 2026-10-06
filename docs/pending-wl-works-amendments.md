@@ -236,6 +236,23 @@ credential lifecycle.
 >   serves its page at the root of the address only, so a sign-in returning to that path
 >   would find no page. wl.works might refuse one too, so that the two cannot disagree.
 
+> **ANSWERED 2026-10-06: yes to both** (the PI's rulings in wl-works, its rig sign-in spec §11
+> at `7ddf97be`, told to this repository by its session that day). Both are built as the first
+> task of wl-works' 16a-1b, which was not yet planned or deployed that day. What follows is
+> wl-works' reading of its own source, not checked here.
+> - **The reuse grace.** The first ask's premise was half wrong: wl.works calls `mcp()`, and
+>   `@better-auth/mcp` 1.7.1 sets `refreshTokenReuseInterval` to 30 s (its `dist/index.mjs:170`),
+>   so the provider's 0 never applied. The page's retry 30 s after a failed renewal still lands
+>   just past that. **Ruled: 120 s**, for every client (the option is global). Inside it, a
+>   renewal token presented again gets the stored answer of the renewal already made; outside
+>   it, a reuse still ends that client's renewals for the member (XC-225).
+> - **The path.** `parseRigPages` refuses any address not written as its origin, optionally with
+>   a final `/`, compared as written (so `/.` and `/%2e` are refused too). That is stricter than
+>   `signin.parse_rig_page`, which also takes a query, an upper-case host and a spelled-out
+>   `:443` (XC-240). wl.works refuses such an entry at boot.
+> - **A suggestion, for us to weigh:** the page's renewal `fetch` has no timeout; an
+>   `AbortController` would bound a connection dropped without an answer (XC-241).
+
 > **ANSWERED 2026-09-29: yes to all four, with two conditions and three asks of us.** wl-works
 > designed it with the PI the same day (wl-works `docs/superpowers/specs/2026-09-29-rig-sign-in-design.md`
 > §8, approved in `e057946b` and the commit after; told to this repository by that

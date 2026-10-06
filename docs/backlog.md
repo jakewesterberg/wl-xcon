@@ -15,7 +15,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 **Finding one.** Grep the ID, a package (`P9`, `b3`), a repository (`wl-sync`) or a file. The sections: brainstorms the PI asked to have later; features no plan covers yet; defects and review findings deliberately not fixed; debt (cleanup, stale wording, test hygiene); anything that needs the rig or other hardware, measurements included; and asks of, or waits on, other repositories.
 
-**Next free ID: XC-240.**
+**Next free ID: XC-242.**
 
 ## Brainstorms queued for the PI
 
@@ -64,6 +64,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 - **XC-035** S12's swap check: whether it needs a task, or a signal generator suffices. — 2026-08-31, [S12 §5 item 2](superpowers/specs/2026-08-31-S12-parity-and-swap-design.md#5-open-items) — waits on: nothing (roadmap M10)
 - **XC-159** `wlx run` takes no pre-flight: its run starts on `Session.run`'s two refusals alone and its start row records `preflight: null`, while every `wlx taskd` run passes S9a §10's gate. — 2026-09-29, [b3a-1 plan](superpowers/plans/2026-09-29-p4d2b-b3a1-session-service.md#plan-decisions) (decision 13) — waits on: nothing
 - **XC-121** Let a Stop jump the command queue instead of landing up to one trial boundary per queued command late, as part of b2b's pipelining. — 2026-09-28, [S9a §7](superpowers/specs/2026-08-31-S9a-console-design.md#7-processes-and-protocol); `c0d0ba4` — waits on: nothing
+- **XC-241** The page's renewal `fetch` has no timeout, so on a connection dropped without an answer it waits until the browser gives up (the lapse bounds it, b2b-ready §4.1); once wl.works' 120 s grace is deployed, a renewal bounded by an `AbortController` could be tried again inside it (wl-works' suggestion). — 2026-10-06, [pending-wl-works-amendments.md](pending-wl-works-amendments.md#signing-in-from-a-rigs-page-what-b2b-needs-new-2026-09-29), wl-works' answer of that day — waits on: XC-225
 
 ## Deferred defects
 
@@ -127,6 +128,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 - **XC-236** `holdLock` treats any rejection of the lock request as "held by another tab", though only an `AbortError` means that; another error, such as a `SecurityError`, would show the duplicate sentence with no other tab open. — 2026-10-06, [b2b-ready plan](superpowers/plans/2026-10-06-b2b-ready.md), its final review — waits on: nothing
 - **XC-237** At start-up, a stored sign-in that the rig answers `expired` renews without b2b-ready §4.4's clamp, so with wl.works out of reach the page says "trying again until it lapses" by its own clock; reaching this needs more than about 2 minutes of clock skew; and an `expired` answer to a confirmation retry (`whoami(false)`) signs out rather than renewing (the rejection branch's retry already did). — 2026-10-06, [b2b-ready plan](superpowers/plans/2026-10-06-b2b-ready.md), its final review — waits on: nothing
 - **XC-239** A non-`ImportError` raised while importing `jwt` (for example pyo3's `PanicException`, a `BaseException`, from a broken `cryptography` build; UNVERIFIED on the Windows rig PCs) still stops `wlx serve`, against b2b-ready §2; and "not installed" would be exact as `isinstance(exc, ModuleNotFoundError) and exc.name == "jwt"`. — 2026-10-06, [b2b-ready plan](superpowers/plans/2026-10-06-b2b-ready.md), its final fix wave's re-review — waits on: nothing
+- **XC-240** `signin.parse_rig_page` takes a query, an upper-case host and a spelled-out `:443`, which wl.works' `parseRigPages` refuses at boot from its 16a-1b on (it takes only the origin, optionally with a final `/`, compared as written), so a `--rig-page` could name an entry wl.works would never serve; refuse the same at the rig. — 2026-10-06, [pending-wl-works-amendments.md](pending-wl-works-amendments.md#signing-in-from-a-rigs-page-what-b2b-needs-new-2026-09-29), wl-works' answer of that day — waits on: nothing
 
 ## Debt
 
@@ -236,4 +238,4 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 - **XC-108** Move `tasks/` and the provisional allocation to wl-xtasks. — 2026-08-31, [CHECKPOINT, "What exists"](CHECKPOINT.md#what-exists) — waits on: wl-xtasks having a library to load
 - **XC-110** wl-juicer: carry the three renames (wl-xcon, wl-xviz, wl-xtasks) into its current code and docs once it is back on `main`. — 2026-09-28, [wl-orchestrator `d8b9ccb`](https://github.com/jakewesterberg/wl-orchestrator/commit/d8b9ccb) — waits on: wl-juicer's branch `wl-juicer-build` merging
 - **XC-111** wl-trajectortree: carry the three renames into its current code and docs once it is back on `main`. — 2026-09-28, [wl-orchestrator `d8b9ccb`](https://github.com/jakewesterberg/wl-orchestrator/commit/d8b9ccb) — waits on: wl-trajectortree's branch `polish-the-last-five` merging
-- **XC-225** wl.works sets no `refreshTokenReuseInterval` (`@better-auth/oauth-provider` 1.7.1, read 2026-10-05), so a renewal whose answer is lost in transit, by a network drop or a 5xx without CORS headers, is followed by a reuse, which revokes that member's renewal tokens for that rig; a small reuse interval in wl.works would cover it. — 2026-10-05, [b2b spec §4](superpowers/specs/2026-10-02-p4d2b-b2b-remote-signin-design.md#4-signing-in-on-the-page) — waits on: wl-works
+- **XC-225** wl.works' grace for a renewal token presented twice was 30 s (`@better-auth/mcp` 1.7.1's default, by wl-works' reading of 2026-10-06; this line first read the provider's 0 and missed the `mcp()` wrapper), so the page's retry 30 s after a renewal whose answer was lost in transit lands just past it and revokes that member's renewal tokens for the rig; wl.works ruled a 120 s grace on 2026-10-06 (its 16a-1b, not yet deployed), which covers it, and nothing changes here until then. — 2026-10-05, [b2b spec §4](superpowers/specs/2026-10-02-p4d2b-b2b-remote-signin-design.md#4-signing-in-on-the-page) — waits on: wl-works deploying its 16a-1b
