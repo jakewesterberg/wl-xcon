@@ -833,6 +833,27 @@ def test_a_duplicate_is_inert_while_it_waits_for_the_lock_and_never_signs_out_th
     assert _pauses(rig)[-1].by.name == "Jake Westerberg"
 
 
+def test_a_duplicate_woken_during_its_wait_never_renews_with_the_originals_token(rig, monkeypatch):
+    # A renewal by the copy is a reuse at wl.works, which ends every sign-in of the member.
+    monkeypatch.setattr(web, "SIGNIN_LOCK_WAIT_MS", 3000)  # housekeeping: holds the window open
+    rig.fake.expires_in = 200  # housekeeping: under RENEW_BEFORE_MS, so a wake-up would renew
+    first = rig.browser_page()
+    _sign_in(first)
+    copied = first.evaluate("window.sessionStorage.getItem('wlx-signin')")  # never asserted on
+    second = first.context.new_page()
+    second.set_default_timeout(WAIT_S * 1000)
+    second.add_init_script(f"window.sessionStorage.setItem('wlx-signin', {json.dumps(copied)});")
+    second.goto(rig.page_url)
+    second.evaluate("document.dispatchEvent(new Event('visibilitychange'))")  # the wait is running
+    second.wait_for_selector("#sent:has-text('in use in another tab')")
+    assert second.evaluate("document.body.getAttribute('data-signed-in')") == "0"
+    renewals = rig.fake.renewals
+    assert renewals == 0
+    first.click(PAUSE)  # the first tab's sign-in stands
+    rig.wait_for(lambda: _pauses(rig))
+    assert _pauses(rig)[-1].by.name == "Jake Westerberg"
+
+
 def test_a_reload_of_a_signed_in_tab_is_never_taken_for_a_duplicate(rig):
     # Review Focus 5: a reloading tab's old document gives its lock up as it goes.
     page = rig.browser_page()
