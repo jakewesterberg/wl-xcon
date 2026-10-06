@@ -1,6 +1,7 @@
 # P4d-2b b2b-ready: the rig's https page, ready to switch on
 
 **Status:** designed 2026-10-06, both halves approved by the PI in conversation ("Looks right");
+built on branch `b2b-ready`, 2026-10-06;
 this written spec is for the PI's review. It builds on
 [the b2b spec](2026-10-02-p4d2b-b2b-remote-signin-design.md) (slices 1 and 2, on `main` since
 2026-10-06) and amends it where §6 below says.
@@ -132,6 +133,10 @@ itself out at the lapse, on its own, with the reason that applies:
 - wl.works was not reached (`UNREACHED`, as today);
 - or the rig did not confirm the renewed sign-in.
 
+*(Amended 2026-10-06 by the plan's Ruling 2: a renewal begun at or after the lapse is given
+`RETRY_MS`, and a lapse with no renewal in flight renews once more first, unless the rig never
+confirmed the sign-in.)*
+
 A press waiting on a renewal gets its answer at the lapse at the latest. The renewal's late
 answer, if one comes, is dropped (`generation`). **The renewal token is not presented again**
 after a hang, so a lapse never risks the reuse XC-225 describes.
@@ -157,7 +162,10 @@ truthfully.
 When wl.works renews but `/whoami` cannot reach the rig, the page keeps the new pair (already
 stored, b2b) and the member's name in its header. It greys the controls with:
 
-> this rig has not confirmed the renewed sign-in; trying again
+> this rig has not confirmed the sign-in; trying again
+
+*(Amended 2026-10-06 by the plan's Ruling 1: covers every confirmation the rig cannot give, a fresh
+sign-in's and a reload's too.)*
 
 It asks the rig again every 30 s (the script's `RETRY_MS`, not `serve.RETRY_MS`, which is the
 event stream's). A press in that state sends nothing and says that

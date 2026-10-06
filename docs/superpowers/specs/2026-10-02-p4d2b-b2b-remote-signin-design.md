@@ -79,8 +79,9 @@ PC's own page with b2a's four box checks for writes, and reads open to the lab n
 --wl-works-cache FILE      where the discovery document and keys are kept
 ```
 
-Any of them without the rest is refused at start, naming what is missing. Without any of them,
-`wlx serve` is exactly what it is today, and remote sign-in is off.
+Any of them without the rest is refused at start, naming what is missing. *(Amended 2026-10-06 by
+b2b-ready, its §3.1: the https page is off instead, naming it, and the rig PC's page serves.)*
+Without any of them, `wlx serve` is exactly what it is today, and remote sign-in is off.
 
 - **`--rig-page` is copied from wl.works' configuration, not re-typed.** wl.works keys a rig on a
   short name and its page's address (`RIG_PAGES="rig-3=https://rig-3.wl.works/"`), derives the
@@ -157,6 +158,8 @@ script read out of the token itself.
    kept in `sessionStorage`: they survive a reload of that tab, die with the tab, and are never
    shared with another tab. (2026-10-05: a duplicated tab does copy `sessionStorage`
    (Chromium; UNVERIFIED for Safari), so two tabs could hold one renewal token; XC-224.)
+   *(Amended 2026-10-06 by b2b-ready, its §4.5: a duplicated tab now finds the sign-in's lock held
+   and forgets its copy.)*
 5. `POST /whoami` with the token: the rig checks it (§5) and answers the name it will record, or
    the refusal's sentence. Only a token the rig accepts turns the controls on.
 
@@ -168,7 +171,9 @@ the token endpoint and keeps the new pair (wl.works rotates the renewal token). 
 any command it renews first if the token has less than a minute left, and on waking a tab whose
 token has lapsed. **A refused renewal** — the sign-in at the rig is 24 hours old, the wl.works
 sign-in ended, the permission was removed — shows wl.works' own `error_description` when the
-response is readable, and the page returns to signed out.
+response is readable, and the page returns to signed out. *(Amended 2026-10-06 by b2b-ready, its
+§4.2: a refused renewal is wl.works' own refusal, 400 or 401 with an OAuth error; any other
+answer without a token is no answer, and the page keeps the sign-in until its lapse.)*
 
 **A command refused for its token is never re-sent.** The rig refuses it before queueing it, so
 nothing happened; the page renews if it can and says so, and the person presses again. This keeps
@@ -185,7 +190,9 @@ whether a revocation worked, and the renewal token is gone with the storage that
 
 A new module, `wl_xcon/signin.py`, used only by `wlx serve` and only when `--https` is given.
 
-**Discovery and keys.** At start it reads `<issuer>/.well-known/openid-configuration` and
+**Discovery and keys.** At start it reads `<issuer>/.well-known/openid-configuration` *(amended
+2026-10-06 by b2b-ready, its §3.2-§3.3: the keys thread reads it once `wlx serve` has bound, and
+fetches the key set again every 15 minutes)* and
 requires its `issuer` to equal `--wl-works-issuer` exactly (OpenID Connect Discovery 1.0 §4.3).
 It takes `authorization_endpoint`, `token_endpoint` and `jwks_uri`, each of which must be https,
 and reads the keys. Both documents are written to `--wl-works-cache` (whole-file replace, so a
@@ -197,7 +204,9 @@ crash mid-write leaves the old cache). Read live on 2026-10-02: issuer
 - **wl.works unreachable at start:** the cache is used, and its `issuer` must equal the flag's.
 - **No cache either:** every command from the network is refused with *the rig has not reached
   wl.works to check sign-ins; use the rig PC*, and a background thread retries every 60 s
-  (housekeeping) until the keys arrive. The rig PC's page is unaffected.
+  (housekeeping) until the keys arrive. The rig PC's page is unaffected. *(Amended 2026-10-06 by
+  b2b-ready, its §3.4-§3.5: an issuer mismatch has its own sentence, `OTHER_ISSUER`, and "the
+  rig cannot check sign-ins" comes before the token is read.)*
 - **Keys used:** RSA keys whose `use` is absent or `sig` and whose `alg` is absent or `RS256`.
   Anything else in the set is ignored.
 - **Outbound requests** go only to the discovery document and the key set, over https with the
@@ -288,6 +297,8 @@ bare string `by` is refused, as `link._actor` refuses a missing one today.
 | The rig's clock is off by more than the leeway | Tokens refused as expired, or with the clock sentence; ADR-0009's NTP keeps it right. |
 | `wlx serve` restarts | Signed-out tokens forgotten (§5); pages reconnect their event streams as today and keep their tokens; `taskd` unaffected. |
 | The certificate expires | Browsers refuse the https page; the rig PC's http page is unaffected. Renewing it is XC-151's. |
+
+*(Amended 2026-10-06 by b2b-ready: its §5 has the rows for what it changed here.)*
 
 ## 8. Testing (sim first, no network)
 

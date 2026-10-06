@@ -339,7 +339,10 @@ display layer that per-trial scenes do not reset.
   also serves the rig's page over https on the lab network. A member signs in there with
   wl.works (PKCE); the browser holds the tokens in `sessionStorage`. `wlx serve` checks
   each Bearer token offline against wl.works' keys (`signin.py`, imported only when
-  `--https` is given) and dispatches the command as that token's `actor.Member`. The rig
+  `--https` is given) and dispatches the command as that token's `actor.Member`. A broken https setup never
+  stops `wlx serve`: the https page is off, the terminal and the rig PC's page say why, and
+  the rig PC's page serves. wl.works is asked after binding, and its key set is fetched again
+  every 15 minutes (b2b-ready, 2026-10-06). The rig
   PC's plain-http page is unchanged: a box name, loopback only. **`taskd`'s REP socket
   still trusts a member map from any local sender** (`actor.from_map`; XC-218), so
   loopback remains what bounds it. The welfare-critical list below is not widened.
