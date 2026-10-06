@@ -9,10 +9,12 @@ distrust the reasoning. Numbers go stale, arguments do not.
 > written with**, `wl-expcontroller` and `wl_expcontroller/…` paths included, as the PI
 > ruled for dated documents; read `wl_expcontroller/taskd.py` there as `wl_xcon/taskd.py`.
 >
-> **This file describes `main`.** Its newest entry, "What moved on 2026-10-06: b2b slice 2,
-> signing in with wl.works", lets a wl.works member sign in at a rig's https page and act as
-> themselves (on `main` by fast-forward once its push run read green). The page stays switched off
-> until XC-226, XC-151 and XC-152 are done. Below it, "What moved on 2026-10-05: b2b slice 1, who
+> **This file describes `main`.** Its newest entry, "What moved on 2026-10-06: b2b-ready, the
+> https page safe to switch on", makes nothing about the https page able to stop `wlx serve`, and
+> ends every stuck sign-in at its lapse, with one sign-in per tab (on `main` by fast-forward once
+> its push run read green). The page stays switched off until XC-151 and XC-152 are done. Below
+> it, "What moved on 2026-10-06: b2b slice 2, signing in with wl.works", lets a wl.works member
+> sign in at a rig's https page and act as themselves. Below that, "What moved on 2026-10-05: b2b slice 1, who
 > did it is an actor", makes every `by` a typed name from the box or a wl.works member. Below
 > that, "What moved on 2026-10-02: b2b designed", is the design both slices build. Below
 > that, "What moved on 2026-10-02: XC-026, a stranded
@@ -352,9 +354,103 @@ figure was one low. In order:
 
 ---
 
+## What moved on 2026-10-06: b2b-ready, the https page safe to switch on
+
+**Resume here (state at 2026-10-06, evening):** b2b-ready is on `main` (branch `b2b-ready`, a
+fast-forward once its push run read green). It closes the eight items slice 2's review left open
+(XC-224, XC-226 to XC-232). The PI approved its four-item summary ("Approve all four"; spec
+`docs/superpowers/specs/2026-10-06-b2b-ready-design.md` §8). The welfare-critical list is
+unchanged. The https page still ships switched off. **Next, before any rig uses it:**
+1. XC-151: a certificate and a name for each rig.
+2. XC-152: the rig list sent to wl-works. It now waits on XC-151 alone.
+3. XC-223: the one live check. It includes two checks by hand in Safari: *Duplicate Tab*, and
+   a tab navigated away and back.
+
+wl.works' own side, its 16a-1b, is not yet deployed. It holds the answers to the two asks
+(below), and XC-225, XC-240 and XC-241 follow it. The plan:
+`docs/superpowers/plans/2026-10-06-b2b-ready.md`.
+
+- **The server half** (`wl_xcon/serve.py`, `wl_xcon/signin.py`):
+  - **Nothing about the https page can stop `wlx serve`.** The PI chose this of three designs:
+    "Always start the rig PC page". The http listener binds first. The https page is turned off,
+    with its reason in the terminal and on the rig PC's page, by any of:
+    - a missing flag;
+    - the `signin` extra missing, or installed and broken;
+    - a bad `--rig-page` or `--wl-works-issuer`;
+    - a bad certificate or key;
+    - a busy https port.
+  - **wl.works is asked only after binding**, by the keys thread (`signin.Checker.keep_keys`).
+    It retries every 60 s until it has keys, then fetches the key set again every 15 minutes
+    (`KEY_REFRESH_S`), so a key wl.works withdraws stops being trusted.
+  - **The rig says why it cannot check a sign-in** before it reads any token: wl.works was not
+    reached (`NO_KEYS`), or answered as another issuer (`OTHER_ISSUER`).
+- **The page half** (`web._SCRIPT`'s sign-in block, spec §4):
+  - Every stuck sign-in ends at its token's lapse, with one last try, and sends nothing.
+  - Only wl.works' own OAuth refusal ends a renewal. A server error is no answer.
+  - The rig's `expired` acts on the token it refused.
+  - A renewal the rig cannot confirm grays the controls and is asked about again every 30 s.
+  - **One sign-in per tab:** a Web Lock is named by each sign-in's id. A duplicated tab's copy
+    stays inert during its 1 s wait, then is forgotten, never signed out.
+  - A page served without keys never renews; it asks the rig again every minute and reloads into
+    the sign-in.
+  - The three intervals are rendered by Python (`web.SIGNIN_RETRY_MS`, `KEYS_RECHECK_MS`,
+    `SIGNIN_LOCK_WAIT_MS`), so tests shorten them.
+- **The two asks to wl-works, answered 2026-10-06** (`docs/pending-wl-works-amendments.md`):
+  yes to both, in its 16a-1b.
+  - A 120 s grace for a renewal token presented twice. wl.works had already had a 30 s grace,
+    through `@better-auth/mcp`; XC-225 is corrected to say so.
+  - `parseRigPages` refuses any address that is not an origin. This is stricter than our
+    `parse_rig_page` (XC-240).
+- **Welfare-critical code: none changed.** `taskd`, `welfare`, `bounds`, `link._setting` and
+  `web._hand_reward_now` are untouched, and what a member can do is exactly as approved on
+  2026-10-05.
+- **Learned, and worth the next session's time**:
+  - **`tools/mutate.py` cannot reach `web._SCRIPT`,** which is a string. The page's rules are
+    pinned by browser tests, each proven by a break by hand, in both engines.
+  - **With the browser tests, the suite takes 250-305 s,** against `mutate.py`'s fixed 300 s
+    limit. So the local sweep ran as CI's mutation jobs do:
+    - each lane in a `git archive` copy;
+    - `PLAYWRIGHT_BROWSERS_PATH` set to an empty directory, so the 32 browser tests skip;
+    - about 165 s a run.
+  - **WebKit is a setting.** `WLX_BROWSER=webkit` runs the browser tests in WebKit (Playwright
+    1.63's WebKit 26.6, installed in this machine's Playwright cache). It went green at every
+    change to the page. Safari's own *Duplicate Tab* and its back/forward cache stay checks by
+    hand (XC-223).
+  - **A plan's order can break its spec.** The plan bound https before http, so an https port
+    that overlapped the http one refused `wlx serve`. A task review caught it, and also caught a
+    dead test fixture and a mis-aimed test pin. Tasks 2, 3 and 4 each needed fix rounds. The
+    final review then found two more gaps:
+    - a page without keys posting the renewal token to the rig;
+    - a broken `signin` extra still crashing `wlx serve`.
+- **Backlog**:
+  - XC-224 and XC-226 to XC-232 closed.
+  - XC-233 to XC-239 filed: the final review's deferred defects, one line of test hygiene, and
+    a non-`ImportError` from `jwt`.
+  - XC-240 and XC-241 filed, from wl-works' answer.
+  - XC-223 widened. XC-225 corrected. XC-152 waits on XC-151 alone.
+  - XC-140 widened with the push gate's one new timeout, `serve.host_name`.
+- **Proof, local**:
+  - `2512 passed` at `c9c53c1` (about 290 s, `WLX_REQUIRE_PREPROC=1 WLX_REQUIRE_BROWSER=1`).
+  - WebKit: `test_page_browser.py` 31 passed (162 s), and with `test_web.py` 228 passed.
+  - A sweep of the 17 changed functions caught all 17 by a named failure, with none surviving
+    and none timing out (`serve` 7, `cli.main`, `signin` 8, `web.page`). Every baseline and
+    restore read `2480 passed, 32 skipped`.
+- **Proof, CI on the branch's push** (run `37474027448`, on `e9e3325`), read job by job: green.
+  - pytest `2512 passed` on 3.11-3.13, with `WLX_REQUIRE_PREPROC` and `WLX_REQUIRE_BROWSER`.
+  - Mutation: a first push, so the gate diffed against `origin/main` and swept `cli`, `serve`,
+    `signin` and `web` whole. 12 shards, 196 functions. **195 caught, 0 survived**;
+    `signin.redirect_request` inert. Every baseline and restore at `2480 passed, 32 skipped`.
+  - Its 9 timeouts: 8 known and confirmed before (`serve` `offer`, `start`, `_send_frame`,
+    `_listen`, `_answer` and `_host_ok`; `cli` `_load_trial` and `_load_bounds`).
+  - **One was new:** `serve.host_name`. It was rerun locally with no limit and without the
+    browser tests, stopping at the first failure:
+    `test_the_page_is_served_with_every_pane_and_its_own_nonce`,
+    `1 failed, 1180 passed, 32 skipped in 31.19s`. A real catch; XC-140 now names it.
+
 ## What moved on 2026-10-06: b2b slice 2, signing in with wl.works
 
-**Resume here (state at 2026-10-06):** slice 2 is on `main` (branch `b2b-signin`, a
+**State at 2026-10-06, afternoon (the b2b-ready entry above supersedes it; XC-226 is closed):**
+slice 2 is on `main` (branch `b2b-signin`, a
 fast-forward once its push run read green). The PI approved its four-item welfare summary
 ("Approve all four", 2026-10-05; spec §10, "Slice 2 answered"). The PI also ruled that **XC-226
 is fixed before any rig switches its https page on**. The welfare-critical list is unchanged.
