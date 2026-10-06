@@ -446,6 +446,15 @@ wl.works' own side, its 16a-1b, is not yet deployed. It holds the answers to the
     browser tests, stopping at the first failure:
     `test_the_page_is_served_with_every_pane_and_its_own_nonce`,
     `1 failed, 1180 passed, 32 skipped in 31.19s`. A real catch; XC-140 now names it.
+- **CI on `main` after the fast-forward** (push run `37484916099`, on `76fcbff`), read job by
+  job: green. Its gate diffed against the previous `main`, `652d5d2`, so it swept the same four
+  modules.
+  - pytest `2512 passed` on 3.11-3.13, with `WLX_REQUIRE_PREPROC` and `WLX_REQUIRE_BROWSER`.
+  - Mutation: 12 shards, 196 functions. **195 caught, 0 survived**; `signin.redirect_request`
+    inert. Every baseline and restore at `2480 passed, 32 skipped`.
+  - Its 8 timeouts were all known and confirmed: `serve` `offer`, `start`, `_send_frame`,
+    `_listen`, `_answer` and `make_handler`; `cli` `_load_trial` and `_load_bounds`.
+    `host_name` and `_host_ok` finished inside the limit this time.
 
 ## What moved on 2026-10-06: b2b slice 2, signing in with wl.works
 
