@@ -1997,9 +1997,16 @@ def _https_setup(args, flags: dict) -> tuple:
     try:
         import jwt  # only in this branch: a rig without the `signin` extra runs `serve`
     except ImportError as exc:
-        if exc.name != "jwt":
-            raise
-        raise _HttpsOff(needs_extra) from None
+        if exc.name == "jwt":
+            raise _HttpsOff(needs_extra) from None
+        # Installed but broken, which is never called "not installed" (b2b slice 2): PyJWT
+        # 2.10.1 catches only `ModuleNotFoundError` around its `cryptography` import, so a
+        # `cryptography` that is there and will not load arrives here. Named by its type and
+        # module, never by its text, which may carry a path.
+        source = f" from {exc.name}" if exc.name else ""
+        raise _HttpsOff(
+            f"the signin extra is installed but could not be loaded ({type(exc).__name__}{source})"
+        ) from None
     if not jwt.algorithms.has_crypto:
         # PyJWT imports without `cryptography`, and then skips every RSA key.
         raise _HttpsOff(needs_extra)

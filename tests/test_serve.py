@@ -5440,7 +5440,10 @@ def test_tls_context_pins_tls_1_2_and_refuses_a_passphrase_key_without_prompting
     assert "no passphrase" in str(refused.value) and "hunter2" not in str(refused.value)
 
 
-def test_an_import_failure_that_is_not_pyjwt_is_not_reported_as_the_missing_extra(tmp_path, monkeypatch):
+def test_an_import_failure_that_is_not_pyjwt_is_not_reported_as_the_missing_extra(tmp_path, monkeypatch, capsys):
+    # A broken install is never called "not installed" (b2b slice 2), and since b2b-ready's
+    # final review (I2) it no longer stops `wlx serve` either: the https page is off, naming
+    # the error's type and module.
     pytest.importorskip("jwt")
 
     class Broken:
@@ -5455,9 +5458,10 @@ def test_an_import_failure_that_is_not_pyjwt_is_not_reported_as_the_missing_extr
     monkeypatch.delitem(sys.modules, "jwt")
     monkeypatch.setattr(sys, "meta_path", [Broken, *sys.meta_path])
     extra = tuple(part for flag, value in _SIX for part in (flag, value))
-    with pytest.raises(ImportError) as raised:
-        _main_uninterrupted(_serve_args(tmp_path, extra=extra))
-    assert raised.value.name == "something_else"
+    seen = _served_run(tmp_path, monkeypatch, capsys, extra)
+    _off(seen)
+    assert seen.https_off == "the signin extra is installed but could not be loaded (ImportError from something_else)"
+    assert "not installed" not in seen.https_off
 
 
 def test_a_body_over_the_drain_limit_changes_nothing_and_the_listener_goes_on_serving(tmp_path):
