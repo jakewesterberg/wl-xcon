@@ -47,8 +47,14 @@ FETCH_TIMEOUT_S = 5.0
 FETCH_LIMIT = 65536
 REFETCH_EVERY_S = 60.0
 RETRY_EVERY_S = 60.0
+#: How often the keys thread fetches the key set again once it holds one (b2b-ready §3.3):
+#: housekeeping, not a measurement. It bounds how long a key wl.works withdraws is trusted.
+KEY_REFRESH_S = 900.0
 #: The refusal a rig with no keys gives a command from the network (spec §5).
 NO_KEYS = "the rig has not reached wl.works to check sign-ins; use the rig PC"
+#: Why the rig holds no keys when wl.works answered as an issuer other than
+#: `--wl-works-issuer` (b2b-ready §3.4; XC-232): wl.works was reached, so `NO_KEYS` is untrue.
+OTHER_ISSUER = "this rig's wl.works setting does not match wl.works; use the rig PC"
 
 
 @dataclass(frozen=True, slots=True)
@@ -310,6 +316,9 @@ class Checker:
         self._document: dict | None = None
         self._keys: dict = {}
         self._last_refetch = float("-inf")
+        #: Why no sign-in can be checked while the rig holds no keys (b2b-ready §3.4):
+        #: `NO_KEYS`, or `OTHER_ISSUER` after wl.works answered as another issuer.
+        self._unready = NO_KEYS
         #: Signed-out token ids and when each token expires (spec §5). Memory only.
         self._signed_out: dict[str, float] = {}
 
@@ -322,6 +331,15 @@ class Checker:
     def ready(self) -> bool:
         with self._lock:
             return self._discovery is not None and bool(self._keys)
+
+    @property
+    def unavailable(self) -> str | None:
+        """The sentence for the https page and every refusal while the rig cannot check a
+        sign-in, or `None` once it can (b2b-ready §3.4)."""
+        with self._lock:
+            if self._discovery is not None and self._keys:
+                return None
+            return self._unready
 
     def key_ids(self) -> set[str]:
         with self._lock:
@@ -340,7 +358,10 @@ class Checker:
         except OtherIssuer as other:
             # wl.works answered, and not as configured: its document is not used (OpenID
             # Connect Discovery 1.0 §4.3), and nor is the cache, which stands in for a
-            # wl.works out of reach (spec §5). Its own sentence (the final review, M3).
+            # wl.works out of reach (spec §5). Its own sentence (the final review, M3), on
+            # the terminal here and on the page and in each refusal (b2b-ready §3.4).
+            with self._lock:
+                self._unready = OTHER_ISSUER
             return str(other)
         except (OSError, ValueError, http.client.HTTPException) as live:
             return self._from_cache(f"{type(live).__name__}: {live}")
@@ -359,8 +380,12 @@ class Checker:
             discovery = _discovery(cached["discovery"], self.issuer)
             keys = _keys(cached["jwks"])
         except (OSError, ValueError, KeyError, TypeError):
+            with self._lock:
+                self._unready = NO_KEYS
             return f"{NO_KEYS} (wl.works: {why}; no usable cache at {self.cache})"
         if not keys:
+            with self._lock:
+                self._unready = NO_KEYS
             return f"{NO_KEYS} (wl.works: {why}; the cache holds no key)"
         with self._lock:
             self._discovery, self._keys, self._document = discovery, keys, cached["discovery"]
@@ -371,14 +396,58 @@ class Checker:
         while not self.ready and not stop.wait(RETRY_EVERY_S):
             self.load()
 
+    def refresh(self) -> bool:
+        """Fetch the key set again (b2b-ready §3.3). A set with a usable key replaces the
+        held one and is cached beside the held discovery document. A failure, or a set
+        with none, keeps the held keys: an outage changes nothing (spec §7). True when it
+        replaced them."""
+        with self._lock:
+            discovery, document = self._discovery, self._document
+        if discovery is None:
+            return False
+        try:
+            jwks = self._fetch(discovery.jwks_uri)
+            keys = _keys(jwks)
+        except (OSError, ValueError, http.client.HTTPException):
+            return False
+        if not keys:
+            return False
+        with self._lock:
+            self._keys = keys
+        if document is not None:
+            try:
+                _save(self.cache, document, jwks)
+            except OSError:
+                pass  # New keys are good whether or not they can be kept.
+        return True
+
+    def keep_keys(self, stop: threading.Event, say) -> None:
+        """The keys thread (b2b-ready §3.2-§3.3). It loads at once, then again every
+        `RETRY_EVERY_S` until the rig holds keys, then fetches the key set every
+        `KEY_REFRESH_S`, until `stop` is set. `say` gets the first load's sentence, and the
+        sentence of a later load that brings the keys. A refresh never drops the keys, so
+        the rig never goes back to none."""
+        say(self.load())
+        held = self.ready
+        while not stop.wait(KEY_REFRESH_S if held else RETRY_EVERY_S):
+            if held:
+                self.refresh()
+                continue
+            said = self.load()
+            if self.ready:
+                say(said)
+                held = True
+
     def check(self, authorization: str | None) -> Accepted:
-        """Spec §5's checks, in its order. Raises `Refused`."""
-        token = _bearer(authorization)
+        """Spec §5's checks, in its order, after one: a rig that cannot check a sign-in
+        says so before it looks at the token (b2b-ready §3.5). Raises `Refused`."""
         with self._lock:
             discovery = self._discovery
             ready = discovery is not None and bool(self._keys)
+            unready = self._unready
         if not ready:
-            raise Refused("no_keys", NO_KEYS)
+            raise Refused("no_keys", unready)
+        token = _bearer(authorization)
         try:
             head = jwt.get_unverified_header(token)
         except jwt.exceptions.PyJWTError:
@@ -434,22 +503,10 @@ class Checker:
             due = time.monotonic() - self._last_refetch >= REFETCH_EVERY_S
             if key is None and due:
                 self._last_refetch = time.monotonic()
-            discovery, document = self._discovery, self._document
-        if key is None and due and discovery is not None:
-            try:
-                jwks = self._fetch(discovery.jwks_uri)
-                keys = _keys(jwks)
-            except (OSError, ValueError, http.client.HTTPException):
-                keys = {}
-            if keys:
-                with self._lock:
-                    self._keys = keys
-                key = keys.get(kid)
-                if document is not None:
-                    try:
-                        _save(self.cache, document, jwks)
-                    except OSError:
-                        pass  # New keys are good whether or not they can be kept.
+            discovery = self._discovery
+        if key is None and due and discovery is not None and self.refresh():
+            with self._lock:
+                key = self._keys.get(kid)
         if key is None:
             raise Refused("not_accepted", NOT_ACCEPTED)
         return key

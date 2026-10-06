@@ -7,6 +7,7 @@ import http.server
 import json
 import ssl
 import threading
+import time
 import urllib.error
 
 import pytest
@@ -576,3 +577,119 @@ def test_a_signed_out_token_stays_refused_through_the_leeway_after_its_expiry(tm
     assert accepted.member.token_id == "j-1"
     checker.sign_out(token)
     assert _refused(checker, token).reason == "signed_out"
+
+
+# --- b2b-ready (spec 2026-10-06): why no keys, the answer first, the keys thread ----------
+
+def _eventually(condition, seconds: float = 5.0) -> None:
+    """Wait for `condition`, asking every 20 ms (housekeeping); fail by name after `seconds`."""
+    __tracebackhide__ = True
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if condition():
+            return
+        time.sleep(0.02)
+    pytest.fail(f"timed out after {seconds:g} s")
+
+
+def test_with_no_keys_a_request_without_a_token_is_told_the_rig_cannot_check_one(tmp_path):
+    """b2b-ready §3.5: the unavailable answer comes before the token is looked at, so a page
+    can ask whether the rig can check sign-ins yet without holding one (§4.6)."""
+    issuer = Issuer()
+    issuer.down = True
+    checker = _checker(tmp_path, issuer)
+    checker.load()
+    refused = _refused(checker, None)
+    assert (refused.reason, refused.said) == ("no_keys", signin.NO_KEYS)
+
+
+def test_unavailable_names_why_until_the_rig_holds_keys(tmp_path):
+    issuer = Issuer()
+    issuer.down = True
+    checker = _checker(tmp_path, issuer)
+    assert checker.unavailable == signin.NO_KEYS  # before any load
+    checker.load()
+    assert checker.unavailable == signin.NO_KEYS
+    issuer.down = False
+    checker.load()
+    assert checker.unavailable is None
+
+
+def test_an_issuer_mismatch_has_its_own_sentence_on_every_refusal_until_it_is_fixed(tmp_path):
+    """XC-232: wl.works was reached, so "the rig has not reached wl.works" would be untrue."""
+    other = Issuer(issuer="https://wl.works")
+    reachable = [True]
+
+    def fetch(url):
+        if not reachable[0]:
+            raise OSError("wl.works is unreachable (test)")
+        return other.discovery() if "openid" in url else other.jwks()
+
+    checker = signin.Checker(
+        page=signin.parse_rig_page(f"rig-3={PAGE}"), issuer=ISSUER,
+        cache=tmp_path / "wl-works.json", fetch=fetch,
+    )
+    checker.load()
+    assert checker.unavailable == signin.OTHER_ISSUER
+    for header in (None, _bearer(other.mint())):
+        refused = _refused(checker, header)
+        assert (refused.reason, refused.said) == ("no_keys", signin.OTHER_ISSUER)
+    reachable[0] = False  # later, wl.works out of reach and no cache: the other reason
+    checker.load()
+    assert checker.unavailable == signin.NO_KEYS
+
+
+def test_a_refresh_replaces_the_key_set_so_a_withdrawn_key_is_refused(tmp_path):
+    """XC-228: a key wl.works withdraws is refused once the set is fetched again."""
+    checker, issuer = _ready(tmp_path)
+    old = _bearer(issuer.mint(jti="j-old"))
+    assert checker.check(old).member.token_id == "j-old"
+    issuer.kid = "rotated"  # wl.works' set now holds only the new key
+    assert checker.refresh()
+    assert checker.key_ids() == {"rotated"}
+    assert _refused(checker, old).reason == "not_accepted"
+    cached = json.loads((tmp_path / "wl-works.json").read_text())
+    assert [key["kid"] for key in cached["jwks"]["keys"]] == ["rotated"]
+
+
+def test_a_failed_refresh_or_a_set_with_no_usable_key_keeps_the_held_keys(tmp_path):
+    checker, issuer = _ready(tmp_path)
+    issuer.down = True
+    assert not checker.refresh()
+    issuer.down = False
+    issuer.jwks = lambda *extra: {"keys": [{"kty": "EC", "kid": "ec-1", "alg": "ES256"}]}
+    assert not checker.refresh()
+    assert checker.key_ids() == {"test-key-1"}
+    assert checker.check(_bearer(issuer.mint(jti="j-1"))).member.token_id == "j-1"
+
+
+def test_the_keys_thread_loads_at_once_retries_then_refreshes_and_says_only_the_changes(tmp_path, monkeypatch):
+    """b2b-ready §3.2-§3.3: the first load as soon as it starts, again every RETRY_EVERY_S
+    until the keys arrive, then the key set every KEY_REFRESH_S. The terminal hears the first
+    outcome and the arrival, never a retry or a refresh that changes nothing."""
+    monkeypatch.setattr(signin, "RETRY_EVERY_S", 0.05)
+    monkeypatch.setattr(signin, "KEY_REFRESH_S", 0.05)
+    issuer = Issuer()
+    issuer.down = True
+    checker = _checker(tmp_path, issuer)
+    said: list[str] = []
+    stop = threading.Event()
+    thread = threading.Thread(target=checker.keep_keys, args=(stop, said.append), daemon=True)
+    thread.start()
+    try:
+        _eventually(lambda: len(said) == 1)
+        assert signin.NO_KEYS in said[0]
+        fetched = len(issuer.fetched)
+        _eventually(lambda: len(issuer.fetched) > fetched + 1)  # tried again while down
+        issuer.down = False
+        _eventually(lambda: checker.ready)
+        _eventually(lambda: len(said) == 2)
+        assert "from wl.works" in said[1]
+        issuer.kid = "rotated"
+        _eventually(lambda: checker.key_ids() == {"rotated"})  # a refresh, on its own
+        stop.wait(0.3)  # housekeeping: several more refreshes
+        assert len(said) == 2
+    finally:
+        stop.set()
+        thread.join(5)
+    assert not thread.is_alive()
