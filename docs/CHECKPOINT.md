@@ -464,6 +464,19 @@ refuse a path.
     - Its 7 timeouts were all known and confirmed: `start`, `_send_frame` and `offer`
       (2026-10-01), `_listen` (XC-140), `_names_this_console` (the sweep above), and
       `_answer` and `make_handler` (above).
+- **CI on `main` after the fast-forward** (push run `37396974648`, on `05be792`), read job by job.
+  Its gate diffs against the previous `main`, so it re-swept every module the branch changed.
+  - pytest `2484 passed` on 3.11-3.13.
+  - Mutation: 248 functions, **247 caught, 0 survived**; `signin.redirect_request` inert. Every
+    baseline and restore at `2468 passed, 16 skipped`.
+  - Its 18 timeouts: 16 known, and **two new**, `link._word` and `cli._load_trial`. The
+    branch's first gate had caught `_load_trial` with `373 failed` in 290 s. Each was rerun
+    locally with no limit and without the browser tests, stopping at the first failure:
+    - `_word`: `test_the_services_commands_cross_a_real_socket_intact[open]`,
+      `1 failed, 759 passed in 17.44s`;
+    - `_load_trial`: `test_a_clean_task_exits_zero`, `1 failed, 102 passed in 5.02s`.
+
+    Both are real catches. XC-140 now names them.
 
 ## What moved on 2026-10-05: b2b slice 1, who did it is an actor
 
