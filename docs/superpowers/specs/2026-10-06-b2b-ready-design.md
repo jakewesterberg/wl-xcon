@@ -306,6 +306,20 @@ can do stays exactly as approved on 2026-10-05, the PI gets a short plain summar
 3. one sign-in per tab;
 4. nothing a member can do, and no limit, changes.
 
+> **Answered 2026-10-06.** The four items went to the PI in plain terms, as built after the final
+> review and its fix wave, while the mutation sweep ran:
+> 1. Whatever goes wrong with the https page, the rig PC's page still serves, and the terminal
+>    and the rig PC's page say why. The causes named were a bad certificate, a busy port, a typo,
+>    a missing or broken sign-in library, and wl.works out of reach.
+> 2. A stuck sign-in ends at its token's lapse, after at most one last try, and says why. No
+>    command goes out with a token the rig has not confirmed, a wl.works server error signs no
+>    one out early, and the rig's word on expiry wins.
+> 3. A duplicated tab drops its copy without signing the original out.
+> 4. Members keep exactly the controls approved on 2026-10-05, and reward, the out-of-cage clock
+>    and every ceiling are untouched.
+>
+> The PI approved all four ("Approve all four"). The welfare list is unchanged.
+
 ## 9. Out of scope
 
 - Certificates and names for the rig pages (XC-151), the list sent to wl-works (XC-152), and the
