@@ -947,8 +947,8 @@ def test_a_renewal_the_rig_never_confirms_signs_out_at_the_lapse_saying_so(rig):
 
 def test_a_renewal_the_rig_cannot_check_yet_is_asked_again_and_comes_back(rig, monkeypatch):
     # The final review, M2: a renewal's confirmation that lands in a restart's window without
-    # keys (b2b-ready §3.2) greys the controls with that sentence, and is asked again every
-    # RETRY_MS, not left greyed until the lapse.
+    # keys (b2b-ready §3.2) grays the controls with that sentence, and is asked again every
+    # RETRY_MS, not left grayed until the lapse.
     monkeypatch.setattr(web, "SIGNIN_RETRY_MS", 2000)  # housekeeping: ask the rig again soon
     rig.fake.expires_in = 120  # housekeeping: under five minutes, so a wake-up renews
     page = rig.browser_page()
@@ -964,11 +964,11 @@ def test_a_renewal_the_rig_cannot_check_yet_is_asked_again_and_comes_back(rig, m
 
     monkeypatch.setattr(signin.Checker, "check", no_keys_once)
     page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
-    greyed = (
+    grayed = (
         "document.querySelector('" + PAUSE + "').disabled && document.getElementById('sent').textContent === "
         + json.dumps("signed in, but not usable now: " + signin.NO_KEYS)
     )
-    _until(page, greyed)
+    _until(page, grayed)
     assert rig.fake.renewals == 1
     assert page.inner_text("#member") == "Jake Westerberg (wl.works)" and _has_signin(page)
 

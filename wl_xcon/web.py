@@ -2813,7 +2813,7 @@ def page(
         attrs = ""
         who = f'<span class="who">read-only · <span class="nm">{_e(why)}</span></span>'
     off_line = (
-        f'\n  <div class="banner" id="https-off" role="status">{_e(HTTPS_OFF)}: {_e(https_off)}</div>'
+        f'\n  <div class="banner warn" id="https-off" role="status">{_e(HTTPS_OFF)}: {_e(https_off)}</div>'
         if can_write and https_off is not None
         else ""
     )

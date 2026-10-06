@@ -70,6 +70,11 @@ rig PC's page exactly as without the six flags, and says so:
 `WITHOUT_HTTPS` and `_https_refused` go: no refusal needs them. A busy https port is not retried;
 it is off until the next restart, like every other reason.
 
+*(Amended 2026-10-06, the final review: check 2 has a second sentence, for an extra that is
+installed and will not load, which slice 2 let stop `wlx serve` rather than call it not
+installed: "the signin extra is installed but could not be loaded (`<error type>` from
+`<module>`)".)*
+
 ### 3.2 wl.works is asked after binding (XC-226)
 
 `_https_setup` no longer calls `Checker.load()`. The https page binds and serves at once, and
@@ -151,6 +156,14 @@ body whose `error` is a string** (RFC 6749 §5.2's error response). Then the pag
 - JSON without a token or an `error`.
 
 The sign-in stays, and the renewal is tried again until the lapse (§4.1, b2b spec §7).
+
+*(Amended 2026-10-06, the final review: §4.1's lapse has a third reason, a renewal wl.works
+answered without a token and without refusing it (`NOT_RENEWED`): "wl.works did not renew this
+sign-in before it lapsed; the rig PC's page keeps every control". Until then the page keeps the
+sign-in and says (`BUSY`): "wl.works could not renew this sign-in just now; trying again until it
+lapses". A page served without keys (§4.6) has no token endpoint and never asks for a renewal: it
+keeps a stored sign-in, saying nothing, while its token has time left, and at the lapse signs out
+with the line it shows in place of the sign-in.)*
 
 Trying again after a server error presents the same renewal token, which wl.works may already
 have spent. With wl.works' reuse interval at 0 (XC-225, asked of wl-works 2026-10-06), the next

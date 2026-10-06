@@ -1458,8 +1458,8 @@ def main(argv: list[str] | None = None) -> int:
         "--wl-works-cache",
         type=Path,
         metavar="PATH",
-        help="where to keep wl.works' discovery document and keys, so a rig starts "
-        "while wl.works is unreachable",
+        help="where to keep wl.works' discovery document and keys, so the rig can check "
+        "sign-ins while wl.works is unreachable",
     )
 
     service_parser = sub.add_parser(
