@@ -217,29 +217,6 @@ def test_fetch_json_refuses_plain_http():
         signin.fetch_json("http://wl.works/api/auth/jwks")
 
 
-def test_retry_until_ready_loads_once_wl_works_answers(tmp_path, monkeypatch):
-    monkeypatch.setattr(signin, "RETRY_EVERY_S", 0.05)
-    issuer = Issuer()
-    issuer.down = True
-    checker = _checker(tmp_path, issuer)
-    checker.load()
-    assert not checker.ready
-    stop = threading.Event()
-    thread = threading.Thread(target=checker.retry_until_ready, args=(stop,), daemon=True)
-    thread.start()
-    try:
-        issuer.down = False
-        for _ in range(100):
-            if checker.ready:
-                break
-            stop.wait(0.05)
-        assert checker.ready
-    finally:
-        stop.set()
-        thread.join(5)
-    assert not thread.is_alive()
-
-
 @contextlib.contextmanager
 def _loopback(tmp_path, status=200, body=None, location=None):
     """A real https server on 127.0.0.1 (certificate from `_tls`); yields (url, material).

@@ -391,11 +391,6 @@ class Checker:
             self._discovery, self._keys, self._document = discovery, keys, cached["discovery"]
         return f"sign-in keys from the cache, {len(keys)} (wl.works: {why})"
 
-    def retry_until_ready(self, stop: threading.Event) -> None:
-        """Every `RETRY_EVERY_S`, load again, until there are keys or `stop` is set."""
-        while not self.ready and not stop.wait(RETRY_EVERY_S):
-            self.load()
-
     def refresh(self) -> bool:
         """Fetch the key set again (b2b-ready §3.3). A set with a usable key replaces the
         held one and is cached beside the held discovery document. A failure, or a set

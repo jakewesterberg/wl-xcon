@@ -2407,6 +2407,22 @@ def test_the_box_page_is_unchanged_by_the_https_page_existing():
     assert "data-signin" not in _markup(document)
 
 
+def test_the_rig_pc_page_says_why_the_https_page_is_off_and_no_other_page_does():
+    """b2b-ready §3.1: the box's own page says why; a lab-network viewer is told only where
+    controls work (`CONTROLS_AT_THE_BOX`), and nothing is said while the https page serves."""
+    why = "cannot serve https on 0.0.0.0:8443: [Errno 48] Address already in use"
+    box = page(fragments(frame(), view()), stale_after_s=30.0, nonce="n0nce", can_write=True, https_off=why)
+    lan = page(
+        fragments(frame(), view(can_write=False, on_box=False)),
+        stale_after_s=30.0, nonce="n0nce", https_off=why,
+    )
+    serving = page(fragments(frame(), view()), stale_after_s=30.0, nonce="n0nce", can_write=True)
+
+    assert 'id="https-off"' in box
+    assert html.unescape(box).count(f"the rig's https page is off: {why}") == 1
+    assert 'id="https-off"' not in lan and 'id="https-off"' not in serving
+
+
 def test_a_lan_page_says_where_else_controls_work_only_when_an_https_page_exists():
     lan = view(can_write=False, on_box=False)
     without = page(fragments(frame(), lan), stale_after_s=30.0, nonce="n0nce")

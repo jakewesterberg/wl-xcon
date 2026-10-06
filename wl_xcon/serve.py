@@ -47,9 +47,11 @@ takes commands from a bounded queue. The mark thread (another `Outbox`) owns a
 ahead of any command waiting on the rig's acknowledgment (spec §5.3). Each browser's
 `/events` and each `POST` runs on the HTTP server's thread for that connection. With
 `--https`, the https listener has a thread of its own, and each of its connections does
-its TLS handshake on that connection's thread (`_PageServer`); while wl.works' keys have
-not been read, the keys thread (`signin.Checker.retry_until_ready`) tries again every
-`signin.RETRY_EVERY_S`, and ends once it has them.
+its TLS handshake on that connection's thread (`_PageServer`), and the keys thread
+(`signin.Checker.keep_keys`) asks wl.works once `wlx serve` has bound, again every
+`signin.RETRY_EVERY_S` until it has keys, then fetches the key set every
+`signin.KEY_REFRESH_S` (b2b-ready §3.2-§3.3). A https setup that cannot be completed never
+stops `wlx serve`: the https page is off, saying why (§3.1).
 
 **No timing claim is made here.** `DEFAULT_STALE_AFTER_S` is a display choice (spec
 §3); `QUEUE_DEPTH`, `RATE_SAMPLE_S`, `KEEPALIVE_S`, `REQUEST_TIMEOUT_S`, `RETRY_MS`,
@@ -874,14 +876,6 @@ def tls_context(cert: Path, key: Path) -> ssl.SSLContext:
     return context
 
 
-class _HttpsBindError(OSError):
-    """The https listener could not bind; `address` is the one that failed."""
-
-    def __init__(self, exc: OSError, address: tuple[str, int]) -> None:
-        super().__init__(exc.errno, exc.strerror)
-        self.address = address
-
-
 class _PageServer(ThreadingHTTPServer):
     """The https listener (spec §3). **The TLS handshake runs on the connection's own
     thread** (`finish_request`), never on the thread that accepts, so one slow or stalled
@@ -915,6 +909,7 @@ def make_handler(
     dispatch: Callable[[object], tuple[int, dict]] | None = None,
     remote: Remote | None = None,
     https_page: bool = False,
+    https_off: str | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     """A handler class closing over `hub` and the token, built the way wl-preproc's
     `make_handler` is and for its reason: `BaseHTTPRequestHandler` handles the whole
@@ -927,7 +922,8 @@ def make_handler(
     **P4d-2b b2a.** `hosts` is every name a request's `Host` may give (`box_names`);
     anything else is a JSON 421. `dispatch` sends a parsed command and says what
     became of it (`Server.dispatch`); a handler given none answers every command
-    *not delivered*.
+    *not delivered*. `https_off` is why the rig's https page is off, shown on the box's own
+    page (b2b-ready §3.1).
     """
     if not token or not token.isascii():
         raise ValueError(
@@ -945,6 +941,8 @@ def make_handler(
         _remote = remote
         #: Whether a rig's plain-http page has an https page beside it (b2b spec §3).
         _https_page = https_page
+        #: Why the rig's https page is off, for the box's own page (b2b-ready §3.1).
+        _https_off = https_off
         # A function stored on a class becomes a method; `staticmethod` keeps it the
         # plain callable it was given.
         _dispatch = None if dispatch is None else staticmethod(dispatch)
@@ -1276,12 +1274,13 @@ def make_handler(
 
         def _sign_in(self) -> "_web.SignIn | None":
             """What the https page needs to sign a member in, or `None` on the box's
-            page. Without keys yet (no discovery), the page says so (`NO_KEYS`)."""
+            page. While the rig cannot check a sign-in, the page says why
+            (`Checker.unavailable`: b2b-ready §3.4) and offers none."""
             if self._remote is None:
                 return None
-            from wl_xcon import signin  # loaded already: a `Remote` exists
-
-            discovery = self._remote.checker.discovery
+            checker = self._remote.checker
+            unavailable = checker.unavailable
+            discovery = None if unavailable is not None else checker.discovery
             page = self._remote.page
             return _web.SignIn(
                 authorize=None if discovery is None else discovery.authorization_endpoint,
@@ -1289,7 +1288,7 @@ def make_handler(
                 client_id=page.client_id,
                 page=page.page,
                 resource=page.origin,
-                unavailable=signin.NO_KEYS if discovery is None else None,
+                unavailable=unavailable,
             )
 
         def _page(self) -> None:
@@ -1309,6 +1308,7 @@ def make_handler(
                 can_write=can_write,
                 signin=self._sign_in(),
                 https_page=self._https_page,
+                https_off=self._https_off,
             )
             connect = ""
             if self._remote is not None:
@@ -1461,12 +1461,15 @@ class Server:
         https: tuple[str, int] | None = None,
         tls: ssl.SSLContext | None = None,
         remote: Remote | None = None,
+        https_off: str | None = None,
     ) -> None:
         if (https is None) != (tls is None) or (https is None) != (remote is None):
             raise ValueError(
                 "https, tls and remote go together: the https listener needs its address, "
                 "its TLS context and its sign-in, or none of them"
             )
+        if https is not None and https_off is not None:
+            raise ValueError("an https page cannot be both given and off")
         self.hub = Hub(endpoint=sub, marks=mark is not None)
         self._sub = sub
         # `req` is not kept on `self`: nothing reads it after this constructor --
@@ -1510,26 +1513,13 @@ class Server:
         #: an unfamiliar hub bug needs, and `_fatal_reason` alone was not going to
         #: be enough for that.
         self._fatal_traceback: str | None = None
-        self._http = ThreadingHTTPServer(
-            http,
-            make_handler(
-                self.hub,
-                token=token,
-                stale_after_s=stale_after_s,
-                keepalive_s=keepalive_s,
-                hosts=box_names(allow_hosts),
-                dispatch=self.dispatch,
-                https_page=remote is not None,
-            ),
-        )
-        self._web = threading.Thread(
-            target=self._http.serve_forever, name="wlx-serve-http", daemon=True
-        )
-        try:
-            self._page_http = (
-                None
-                if https is None
-                else _PageServer(
+        #: Why the rig's https page is off, or `None` while it serves or was never asked
+        #: for (b2b-ready §3.1): from `run`'s setup, or set here when its port will not bind.
+        self._https_off = https_off
+        page_http = None
+        if https is not None:
+            try:
+                page_http = _PageServer(
                     https,
                     make_handler(
                         self.hub, token=token, stale_after_s=stale_after_s,
@@ -1537,15 +1527,38 @@ class Server:
                     ),
                     tls,
                 )
+            except OSError as exc:
+                self._https_off = f"cannot serve https on {https[0]}:{https[1]}: {exc}"
+                remote = None
+        try:
+            self._http = ThreadingHTTPServer(
+                http,
+                make_handler(
+                    self.hub,
+                    token=token,
+                    stale_after_s=stale_after_s,
+                    keepalive_s=keepalive_s,
+                    hosts=box_names(allow_hosts),
+                    dispatch=self.dispatch,
+                    https_page=page_http is not None,
+                    https_off=self._https_off,
+                ),
             )
-        except OSError as exc:
-            self._http.server_close()  # the second bind failed: free the first
-            raise _HttpsBindError(exc, https) from exc
-        self._page_web = None if self._page_http is None else threading.Thread(
-            target=self._page_http.serve_forever, name="wlx-serve-https", daemon=True
+        except OSError:
+            if page_http is not None:
+                page_http.server_close()  # the rig PC page's own bind failed: free the https one
+            raise
+        self._page_http = page_http
+        self._web = threading.Thread(
+            target=self._http.serve_forever, name="wlx-serve-http", daemon=True
         )
-        self._keys = None if remote is None or remote.checker.ready else threading.Thread(
-            target=remote.checker.retry_until_ready, args=(self._stop,),
+        self._page_web = None if page_http is None else threading.Thread(
+            target=page_http.serve_forever, name="wlx-serve-https", daemon=True
+        )
+        # wl.works is asked once `wlx serve` has bound, never before (b2b-ready §3.2).
+        self._keys = None if remote is None else threading.Thread(
+            target=remote.checker.keep_keys,
+            args=(self._stop, lambda said: print(f"wlx serve: {said}", flush=True)),
             name="wlx-serve-keys", daemon=True,
         )
         self._telemetry = threading.Thread(
@@ -1559,6 +1572,12 @@ class Server:
         """`(host, port)` as bound: the port the OS chose when `http` asked for 0."""
         host, port = self._http.server_address[:2]
         return host, port
+
+    @property
+    def https_off(self) -> str | None:
+        """Why the rig's https page is off (b2b-ready §3.1); `None` while it serves or
+        when it was never asked for."""
+        return self._https_off
 
     @property
     def page_address(self) -> tuple[str, int] | None:
@@ -1951,61 +1970,57 @@ def _wait(server: Server) -> None:
         pass
 
 
-#: How every refusal the https setup causes ends (the final review, M2). They come before
-#: anything binds, so the rig PC's page is refused with them; this says how to have it back.
-WITHOUT_HTTPS = (
-    "the rig PC's page is not served either: restart wlx serve without the six https flags "
-    "to bring it back"
-)
-
-
-def _https_refused(said: str) -> SystemExit:
-    """A refusal the https setup caused: `said`, then how to have the rig PC's page back."""
-    return SystemExit(f"{said}; {WITHOUT_HTTPS}")
+class _HttpsOff(Exception):
+    """Why the rig's https page is off: one sentence, never a refusal of `wlx serve`
+    (b2b-ready §3.1)."""
 
 
 def _https_setup(args, flags: dict) -> tuple:
-    """The https listener's page, address, TLS and sign-in, from the six flags (b2b spec §3),
-    as `(page, listener)`. Every refusal is a `SystemExit` sentence, raised before anything
-    binds; `run` adds `WITHOUT_HTTPS` to each."""
+    """The https listener's page, address, TLS and sign-in, from the six flags (b2b spec
+    §3), as `(page, listener)`. A setup that cannot be completed raises `_HttpsOff` with
+    its sentence: the https page is off, and the rig PC's page serves regardless
+    (b2b-ready §3.1). wl.works is not asked here: the keys thread asks it once `wlx
+    serve` has bound (§3.2)."""
     missing = [flag for flag, value in flags.items() if value is None]
     if missing:
-        raise SystemExit(
-            f"refused: the https page needs all six of --https, --tls-cert, --tls-key, "
-            f"--rig-page, --wl-works-issuer and --wl-works-cache together; missing "
-            f"{', '.join(missing)}"
+        raise _HttpsOff(
+            f"it needs all six of --https, --tls-cert, --tls-key, --rig-page, "
+            f"--wl-works-issuer and --wl-works-cache together; missing {', '.join(missing)}"
         )
     needs_extra = (
-        "refused: --https needs the signin extra (PyJWT with cryptography), which "
-        "is not installed"
+        "--https needs the signin extra (PyJWT with cryptography), which is not installed"
     )
     try:
         import jwt  # only in this branch: a rig without the `signin` extra runs `serve`
     except ImportError as exc:
         if exc.name != "jwt":
             raise
-        raise SystemExit(needs_extra) from None
+        raise _HttpsOff(needs_extra) from None
     if not jwt.algorithms.has_crypto:
         # PyJWT imports without `cryptography`, and then skips every RSA key.
-        raise SystemExit(needs_extra)
+        raise _HttpsOff(needs_extra)
     from wl_xcon import signin
     try:
         page = signin.parse_rig_page(args.rig_page)
         issuer = signin.parse_issuer(args.wl_works_issuer)
     except ValueError as exc:
-        raise SystemExit(f"refused: {exc}") from None
-    https = parse_http(args.https, "--https")
-    tls = tls_context(args.tls_cert, args.tls_key)
+        raise _HttpsOff(str(exc)) from None
+    try:
+        https = parse_http(args.https, "--https")
+        tls = tls_context(args.tls_cert, args.tls_key)
+    except SystemExit as refused:
+        raise _HttpsOff(str(refused.code).removeprefix("refused: ")) from None
     checker = signin.Checker(page=page, issuer=issuer, cache=args.wl_works_cache)
-    print(f"wlx serve: {checker.load()}", flush=True)
     return page, {"https": https, "tls": tls, "remote": Remote(page, checker)}
 
 
 def run(args) -> int:
     """`wlx serve`: check everything, bind, serve until interrupted (spec §2).
 
-    Every refusal is a sentence, and all of them happen before anything binds. One the
-    https setup causes also says how to have the rig PC's page back (`WITHOUT_HTTPS`).
+    The rig PC page's own setup is refused before anything binds, each refusal a sentence.
+    The https page's never is: a setup that cannot be completed turns the https page off,
+    says why in the terminal and on the rig PC's page, and the rig PC's page serves
+    regardless (b2b-ready §3.1).
     Ctrl-C ends it with 130, as `wlx console` does, and says what it did not stop.
     A telemetry thread that cannot go on ends it too (fix round 1, I1): `_wait`
     returns on its own rather than raising, so it is distinguished from Ctrl-C by
@@ -2034,11 +2049,12 @@ def run(args) -> int:
         "--wl-works-cache": args.wl_works_cache,
     }
     page = None
+    https_off = None
     if any(value is not None for value in remote_flags.values()):
         try:
             page, listener = _https_setup(args, remote_flags)
-        except SystemExit as refused:
-            raise _https_refused(str(refused.code)) from None
+        except _HttpsOff as off:
+            https_off = str(off)
     try:
         server = Server(
             sub=sub,
@@ -2048,12 +2064,9 @@ def run(args) -> int:
             stale_after_s=stale_after,
             mark=mark,
             allow_hosts=tuple(args.allow_host),
+            https_off=https_off,
             **listener,
         )
-    except _HttpsBindError as exc:
-        raise _https_refused(
-            f"refused: cannot serve https on {exc.address[0]}:{exc.address[1]}: {exc}"
-        ) from exc
     except OSError as exc:
         raise SystemExit(f"refused: cannot serve on {host}:{port}: {exc}") from exc
     # fix round 1, M5: `server.start()` and the startup print used to sit after this
@@ -2066,10 +2079,12 @@ def run(args) -> int:
         box = f"this box's own browser at http://127.0.0.1:{bound_port}/"
         controls = (
             f"controls work only from {box}"
-            if page is None
+            if server.page_address is None
             else f"controls work from {box}, and from the rig's https page at {page.page} "
             f"for people signed in to wl.works"
         )
+        if server.https_off is not None:
+            print(f"wlx serve: {_web.HTTPS_OFF}: {server.https_off}", flush=True)
         print(
             f"wlx serve: the console is at http://{bound_host}:{bound_port}/, reading "
             f"{sub}, sending commands to {req} and marks to "

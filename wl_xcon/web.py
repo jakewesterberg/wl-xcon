@@ -144,6 +144,9 @@ LEGEND = tuple((family.name.lower(), family.value) for family in Family) + (
 #: configured, the second with one.
 CONTROLS_AT_THE_BOX = "controls work only at the rig PC"
 CONTROLS_ELSEWHERE = "controls work at the rig PC, or signed in on this rig's https page"
+#: What the rig PC's page and `wlx serve`'s terminal say, with the reason, when the rig's
+#: https page could not be set up (b2b-ready §3.1).
+HTTPS_OFF = "the rig's https page is off"
 #: What a control says on the https page to a browser not signed in (b2b spec §4).
 SIGN_IN_FIRST = "sign in with wl.works to use the controls"
 #: Why the mark control is greyed on a console started without the mark endpoint.
@@ -2554,6 +2557,7 @@ def page(
     can_write: bool = False,
     signin: SignIn | None = None,
     https_page: bool = False,
+    https_off: str | None = None,
 ) -> str:
     """The whole document, every pane already rendered into it, so it reads before
     its stream has opened (spec §4.3).
@@ -2579,6 +2583,8 @@ def page(
     data-signin` for the script to enable, the name is replaced by the sign-in and sign-out
     buttons, and the sign-in's addresses ride on `<body>`. `https_page` is for the plain-http
     page of a rig that has one: a LAN viewer's greyed controls say where else they work.
+    `https_off` is why the rig's https page is off (b2b-ready §3.1), shown on the box's own
+    page only.
     """
     p = {key: parts[key] for key in FRAGMENT_IDS}
     if can_write:
@@ -2614,6 +2620,11 @@ def page(
         off = f' disabled title="{_e(why)}"'
         attrs = ""
         who = f'<span class="who">read-only · <span class="nm">{_e(why)}</span></span>'
+    off_line = (
+        f'\n  <div class="banner" id="https-off" role="status">{_e(HTTPS_OFF)}: {_e(https_off)}</div>'
+        if can_write and https_off is not None
+        else ""
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -2633,7 +2644,7 @@ def page(
     <button class="xbtn" id="close" type="button" aria-label="close this page's stream" title="close this page's stream · the session keeps running on the box"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
   </header>
   <div class="strip glass" role="region" aria-label="animal" id="strip">{p['strip']}</div>
-  <div class="banner" id="stream" role="status" hidden></div>
+  <div class="banner" id="stream" role="status" hidden></div>{off_line}
   <div class="banners" id="banners">{p['banners']}</div>
   <div class="inline info" id="amend-form" role="dialog" aria-label="amend the departure" hidden><span>amend the departure · the corrected time</span><input id="amend-to" autocomplete="off" placeholder="HH:MM, or 2027-01-13T22:40" aria-label="the corrected departure"{off}><span>why</span><input id="amend-why" maxlength="500" autocomplete="off" aria-label="why it is amended"{off}><span class="nm">your name is recorded with it</span><button class="btn small primary" id="amend-yes" type="button"{off}>send amendment</button><button class="btn small" id="amend-no" type="button">cancel</button></div>
   <section class="controlbar glass" aria-label="controls">

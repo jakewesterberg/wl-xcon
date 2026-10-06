@@ -5010,25 +5010,94 @@ _SIX = (
 )
 
 
+@pytest.fixture
+def wl_works(monkeypatch):
+    """A fake wl.works behind every `signin.Checker` that `wlx serve` builds: sim first, no
+    network. The keys thread would otherwise ask the real one (b2b-ready §3.2)."""
+    pytest.importorskip("jwt")
+    from _issuer import Issuer
+    from wl_xcon import signin
+
+    issuer = Issuer()
+    real = signin.Checker
+    monkeypatch.setattr(signin, "Checker", lambda **kw: real(fetch=issuer.fetch, **kw))
+    return issuer
+
+
+def _six(tmp_path, override: dict | None = None):
+    """The six flags, valid and served from loopback, with `override`'s values in their
+    place (a `None` drops a flag), as `(extra, tls, port)`. The rig page names the https
+    port, so its `Host` rule takes `127.0.0.1:PORT`."""
+    from _tls import material
+
+    tls = material(tmp_path)
+    port = int(free_endpoints(1)[0].rsplit(":", 1)[1])
+    values = {
+        "--https": f"127.0.0.1:{port}",
+        "--tls-cert": str(tls["cert"]),
+        "--tls-key": str(tls["key"]),
+        "--rig-page": f"rig-3=https://127.0.0.1:{port}/",
+        "--wl-works-issuer": "https://wl.works/api/auth",
+        "--wl-works-cache": str(tmp_path / "wl-works.json"),
+        **(override or {}),
+    }
+    extra = tuple(part for flag, value in values.items() if value is not None for part in (flag, value))
+    return extra, tls, port
+
+
+def _served_run(tmp_path, monkeypatch, capsys, extra: tuple, during=None) -> SimpleNamespace:
+    """`wlx serve` with `extra`, once serving, then interrupted. It records whether the rig
+    PC's page answered and what it showed, what a lab-network write was told, the https
+    page's state, and what the terminal said. `during(server)` runs while it serves."""
+    seen = SimpleNamespace()
+    pub, rep = free_endpoints(2)
+
+    def interrupted(server: Server) -> None:
+        seen.https_off = server.https_off
+        seen.page_address = server.page_address
+        port = server.address[1]
+        seen.status, _headers, body = _request(port, "GET", "/")
+        seen.box_page = html.unescape(body.decode("utf-8"))
+        seen.lan_said = _post(port, {"kind": "stop"}, {"Origin": "http://evil.example"})[1]["said"]
+        if during is not None:
+            during(server)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(serve, "_wait", interrupted)
+    assert _main_uninterrupted(_serve_args(tmp_path, link=f"{pub},{rep}", extra=extra)) == 130
+    seen.out = capsys.readouterr().out
+    return seen
+
+
+def _off(seen) -> None:
+    """What every off reason shares (b2b-ready §3.1): the rig PC's page served and saying
+    why, the terminal saying why, and a lab-network viewer told only the rig PC acts."""
+    __tracebackhide__ = True
+    assert seen.status == 200 and seen.page_address is None
+    assert f"the rig's https page is off: {seen.https_off}" in seen.box_page
+    assert f"wlx serve: the rig's https page is off: {seen.https_off}" in seen.out
+    assert "controls work only from this box's own browser" in seen.out
+    assert seen.lan_said == CONTROLS_AT_THE_BOX
+
+
 @pytest.mark.parametrize("given", range(len(_SIX)))
-def test_each_https_flag_alone_is_refused_naming_the_others(tmp_path, given):
+def test_each_https_flag_alone_turns_the_https_page_off_naming_the_others(tmp_path, monkeypatch, capsys, given):
     flag, value = _SIX[given]
-    with pytest.raises(SystemExit) as refused:
-        _main_uninterrupted(_serve_args(tmp_path, extra=(flag, value)))
-    said = str(refused.value)
-    assert said.startswith("refused:") and said.endswith(f"; {serve.WITHOUT_HTTPS}")
+    seen = _served_run(tmp_path, monkeypatch, capsys, (flag, value))
+    _off(seen)
+    assert seen.https_off.startswith("it needs all six of --https")
     for other, _ in _SIX:
-        assert (other in said.split("missing")[1]) == (other != flag), (flag, other, said)
+        assert (other in seen.https_off.split("missing")[1]) == (other != flag), (flag, other, seen.https_off)
 
 
-def test_https_without_its_certificate_names_the_missing_flag(tmp_path):
+def test_https_without_its_certificate_is_off_naming_the_missing_flag(tmp_path, monkeypatch, capsys):
     extra = tuple(part for flag, value in _SIX if flag != "--tls-cert" for part in (flag, value))
-    with pytest.raises(SystemExit) as refused:
-        _main_uninterrupted(_serve_args(tmp_path, extra=extra))
-    assert str(refused.value).endswith(f"missing --tls-cert; {serve.WITHOUT_HTTPS}")
+    seen = _served_run(tmp_path, monkeypatch, capsys, extra)
+    _off(seen)
+    assert seen.https_off.endswith("missing --tls-cert")
 
 
-def test_a_rig_page_that_is_not_https_is_refused_with_its_own_sentence(tmp_path):
+def test_a_rig_page_that_is_not_https_turns_the_https_page_off_with_its_own_sentence(tmp_path, monkeypatch, capsys):
     pytest.importorskip("jwt")
     from wl_xcon import signin
 
@@ -5037,17 +5106,15 @@ def test_a_rig_page_that_is_not_https_is_refused_with_its_own_sentence(tmp_path)
     extra = tuple(
         part for flag, value in _SIX for part in (flag, "rig3=http://x/" if flag == "--rig-page" else value)
     )
-    with pytest.raises(SystemExit) as refused:
-        _main_uninterrupted(_serve_args(tmp_path, extra=extra))
-    assert str(refused.value) == f"refused: {why.value}; {serve.WITHOUT_HTTPS}"
+    seen = _served_run(tmp_path, monkeypatch, capsys, extra)
+    _off(seen)
+    assert seen.https_off == str(why.value)
 
 
 @pytest.mark.parametrize(
     "issuer", ["https://wl.works/api/auth/", "http://wl.works/api/auth", "https://wl.works/api/auth?x=1"]
 )
-def test_an_issuer_discovery_could_never_name_is_refused_at_start(tmp_path, issuer):
-    """The final review, M3: refused before anything binds, with its own sentence and how to
-    have the rig PC's page back (M2)."""
+def test_an_issuer_discovery_could_never_name_turns_the_https_page_off(tmp_path, monkeypatch, capsys, issuer):
     pytest.importorskip("jwt")
     from wl_xcon import signin
 
@@ -5056,34 +5123,181 @@ def test_an_issuer_discovery_could_never_name_is_refused_at_start(tmp_path, issu
     extra = tuple(
         part for flag, value in _SIX for part in (flag, issuer if flag == "--wl-works-issuer" else value)
     )
-    with pytest.raises(SystemExit) as refused:
-        _main_uninterrupted(_serve_args(tmp_path, extra=extra))
-    assert str(refused.value) == f"refused: {why.value}; {serve.WITHOUT_HTTPS}"
+    seen = _served_run(tmp_path, monkeypatch, capsys, extra)
+    _off(seen)
+    assert seen.https_off == str(why.value)
 
 
-def test_a_tls_key_that_is_not_a_key_is_refused_without_its_contents_or_path(tmp_path):
+def test_a_tls_key_that_is_not_a_key_is_off_without_its_contents_or_path(tmp_path, monkeypatch, capsys):
     pytest.importorskip("jwt")
-    from _tls import material
-
-    tls = material(tmp_path)
     junk = tmp_path / "not-a-key-SECRETNAME.pem"
     junk.write_text("SECRETCONTENTS\n", encoding="utf-8")
-    values = {
-        "--https": "127.0.0.1:0",
-        "--tls-cert": str(tls["cert"]),
-        "--tls-key": str(junk),
-        "--rig-page": "rig-3=https://rig-3.wl.works/",
-        "--wl-works-issuer": "https://wl.works/api/auth",
-        "--wl-works-cache": str(tmp_path / "wl-works.json"),
-    }
-    extra = tuple(part for pair in values.items() for part in pair)
-    with pytest.raises(SystemExit) as refused:
-        _main_uninterrupted(_serve_args(tmp_path, extra=extra))
-    said = str(refused.value)
-    assert "--tls-key" in said
-    assert "SECRETCONTENTS" not in said and "SECRETNAME" not in said and str(tmp_path) not in said
-    # The whole process is refused, the rig PC's page with it: say how to have it back (M2).
-    assert said.endswith(f"; {serve.WITHOUT_HTTPS}")
+    extra, _tls, _port = _six(tmp_path, {"--tls-key": str(junk)})
+    seen = _served_run(tmp_path, monkeypatch, capsys, extra)
+    _off(seen)
+    assert "--tls-key" in seen.https_off
+    for told in (seen.https_off, seen.box_page, seen.out):
+        assert "SECRETCONTENTS" not in told and "SECRETNAME" not in told and str(tmp_path) not in told
+
+
+def test_a_bad_https_value_names_https_and_a_busy_https_port_names_its_own_address(tmp_path, monkeypatch, capsys):
+    pytest.importorskip("jwt")
+    extra, _tls, _port = _six(tmp_path, {"--https": "not-an-address"})
+    seen = _served_run(tmp_path, monkeypatch, capsys, extra)
+    _off(seen)
+    assert seen.https_off.startswith("--https expects HOST:PORT") and "--http expects" not in seen.https_off
+    assert "127.0.0.1:8080" not in seen.https_off
+
+    with socket.socket() as busy:
+        busy.bind(("127.0.0.1", 0))
+        busy.listen()
+        port = busy.getsockname()[1]
+        extra, _tls, _port = _six(tmp_path, {"--https": f"127.0.0.1:{port}"})
+        seen = _served_run(tmp_path, monkeypatch, capsys, extra)
+    _off(seen)
+    assert seen.https_off.startswith(f"cannot serve https on 127.0.0.1:{port}:")
+
+
+@pytest.mark.parametrize("which", ["missing", "no_crypto"])
+def test_https_without_pyjwt_or_its_cryptography_is_off_with_the_extra_named(tmp_path, monkeypatch, capsys, which):
+    pytest.importorskip("jwt")
+    import jwt
+
+    if which == "missing":
+        monkeypatch.setitem(sys.modules, "jwt", None)
+    else:
+        monkeypatch.setattr(jwt.algorithms, "has_crypto", False)
+    extra = tuple(part for flag, value in _SIX for part in (flag, value))
+    seen = _served_run(tmp_path, monkeypatch, capsys, extra)
+    _off(seen)
+    assert "needs the signin extra" in seen.https_off
+
+
+def test_a_failed_https_bind_leaves_the_rig_pc_page_serving(tmp_path):
+    pytest.importorskip("jwt")
+    from _issuer import ISSUER, Issuer
+    from _tls import material
+    from wl_xcon import signin
+    from wl_xcon.serve import Remote, tls_context
+
+    tls = material(tmp_path)
+    page = signin.parse_rig_page("rig-3=https://rig-3.wl.works/")
+    checker = signin.Checker(page=page, issuer=ISSUER, cache=tmp_path / "c.json", fetch=Issuer().fetch)
+    with socket.socket() as busy:
+        busy.bind(("127.0.0.1", 0))
+        busy.listen()
+        pub, rep = free_endpoints(2)
+        server = Server(
+            sub=pub, req=rep, http=("127.0.0.1", 0), token=TOKEN,
+            https=busy.getsockname()[:2], tls=tls_context(tls["cert"], tls["key"]),
+            remote=Remote(page, checker),
+        )
+        server.start()
+        try:
+            assert server.https_off.startswith("cannot serve https on 127.0.0.1:")
+            assert server.page_address is None
+            assert _request(server.address[1], "GET", "/")[0] == 200
+        finally:
+            server.close()
+
+
+def test_a_failed_http_bind_frees_the_https_port_and_is_still_refused(tmp_path):
+    """Review Focus 3: the rig PC page's own setup still refuses (b2b-ready §3.1), and the
+    https listener bound before it is freed."""
+    pytest.importorskip("jwt")
+    from _issuer import ISSUER, Issuer
+    from _tls import material
+    from wl_xcon import signin
+    from wl_xcon.serve import Remote, tls_context
+
+    tls = material(tmp_path)
+    page = signin.parse_rig_page("rig-3=https://rig-3.wl.works/")
+    checker = signin.Checker(page=page, issuer=ISSUER, cache=tmp_path / "c.json", fetch=Issuer().fetch)
+    https_port = int(free_endpoints(1)[0].rsplit(":", 1)[1])
+    with socket.socket() as busy:
+        busy.bind(("127.0.0.1", 0))
+        busy.listen()
+        pub, rep = free_endpoints(2)
+        with pytest.raises(OSError) as refused:
+            Server(
+                sub=pub, req=rep, http=busy.getsockname()[:2], token=TOKEN,
+                https=("127.0.0.1", https_port), tls=tls_context(tls["cert"], tls["key"]),
+                remote=Remote(page, checker),
+            )
+    # `refused` holds the failed constructor's frame, and with it the https socket, until
+    # the end: the port is free because `Server` freed it, not because garbage was collected.
+    with socket.socket() as again:
+        again.bind(("127.0.0.1", https_port))
+    assert refused.value is not None
+
+
+def test_wl_works_is_asked_only_once_both_pages_are_served(tmp_path, monkeypatch, capsys):
+    """b2b-ready §3.2 (XC-226): binding never waits on wl.works. While its first answer is
+    held, the rig PC's page answers and the https page is served in its keys-unavailable
+    mode; once wl.works answers, the https page offers the sign-in."""
+    pytest.importorskip("jwt")
+    from _issuer import Issuer
+    from _tls import client_context
+    from wl_xcon import signin
+
+    issuer = Issuer()
+    asked = threading.Event()
+    answer = threading.Event()
+
+    def held(url):
+        asked.set()
+        answer.wait(timeout=20.0)  # bounded: a failing test must not hang
+        return issuer.fetch(url)
+
+    real = signin.Checker
+    monkeypatch.setattr(signin, "Checker", lambda **kw: real(fetch=held, **kw))
+    extra, tls, port = _six(tmp_path)
+    pages: list[str] = []
+
+    def during(server) -> None:
+        context = client_context(tls["ca"])
+        assert asked.wait(5.0)  # the keys thread has asked wl.works, which has not answered
+        pages.append(html.unescape(_https(port, context, "GET", "/")[2].decode("utf-8")))
+        answer.set()
+        end = time.monotonic() + 5.0
+        while time.monotonic() < end:
+            page = html.unescape(_https(port, context, "GET", "/")[2].decode("utf-8"))
+            if 'id="signin"' in page:
+                pages.append(page)
+                return
+            time.sleep(0.05)
+
+    seen = _served_run(tmp_path, monkeypatch, capsys, extra, during)
+    assert seen.status == 200 and seen.https_off is None and seen.page_address == ("127.0.0.1", port)
+    assert signin.NO_KEYS in pages[0] and 'id="signin"' not in pages[0]
+    assert len(pages) == 2, "the https page never offered the sign-in once wl.works answered"
+    assert "wlx serve: sign-in keys from wl.works (1)" in seen.out
+    assert "controls work from this box's own browser" in seen.out
+
+
+def test_an_issuer_mismatch_is_said_on_the_https_page_and_in_each_refusal(tmp_path):
+    """XC-232, the page's half: the https page and a network refusal give `OTHER_ISSUER`."""
+    pytest.importorskip("jwt")
+    from _issuer import Issuer
+    from wl_xcon import signin
+
+    other = Issuer(issuer="https://wl.works")
+    answering = SimpleNamespace(fetch=lambda url: other.discovery() if "openid" in url else other.jwks())
+    hub = _hub()
+    server, thread, port, page, _issuer, context = _page_served(tmp_path, hub, issuer=answering)
+    try:
+        shown = html.unescape(_https(port, context, "GET", "/")[2].decode("utf-8"))
+        status, _headers, body = _https(
+            port, context, "POST", "/commands",
+            {"Content-Type": "application/json", "Origin": page.origin,
+             "Authorization": "Bearer " + other.mint()},
+            b'{"kind": "pause"}',
+        )
+    finally:
+        _stop_page(server, thread, hub)
+    assert signin.OTHER_ISSUER in shown and signin.NO_KEYS not in shown
+    answer = json.loads(body)
+    assert status == 401 and (answer["reason"], answer["said"]) == ("no_keys", signin.OTHER_ISSUER)
 
 
 @pytest.mark.parametrize("size", [2, 10_000, 60_000])
@@ -5124,92 +5338,6 @@ def test_a_junk_record_or_a_reset_after_the_handshake_prints_nothing(tmp_path, c
     finally:
         _stop_page(server, thread, hub)
     assert "Traceback" not in capsys.readouterr().err
-
-
-def test_a_bad_https_value_names_https_and_a_busy_https_port_names_its_own_address(tmp_path, monkeypatch):
-    pytest.importorskip("jwt")
-    from _tls import material
-
-    tls = material(tmp_path)
-
-    def args(https):
-        values = {
-            "--https": https,
-            "--tls-cert": str(tls["cert"]),
-            "--tls-key": str(tls["key"]),
-            "--rig-page": "rig-3=https://rig-3.wl.works/",
-            "--wl-works-issuer": "https://wl.works/api/auth",
-            "--wl-works-cache": str(tmp_path / "wl-works.json"),
-        }
-        return _serve_args(tmp_path, extra=tuple(part for pair in values.items() for part in pair))
-
-    with pytest.raises(SystemExit) as bad:
-        _main_uninterrupted(args("not-an-address"))
-    said = str(bad.value)
-    assert said.startswith("refused: --https expects HOST:PORT") and "--http expects" not in said
-    assert "127.0.0.1:8080" not in said
-    assert said.endswith(f"; {serve.WITHOUT_HTTPS}")
-
-    from wl_xcon import signin
-
-    class Down:
-        ready = True
-        discovery = None
-
-        def load(self):
-            return "loaded"
-
-    monkeypatch.setattr(signin, "Checker", lambda **kw: Down())
-    with socket.socket() as busy:
-        busy.bind(("127.0.0.1", 0))
-        busy.listen()
-        port = busy.getsockname()[1]
-        with pytest.raises(SystemExit) as refused:
-            _main_uninterrupted(args(f"127.0.0.1:{port}"))
-    said = str(refused.value)
-    assert said.startswith(f"refused: cannot serve https on 127.0.0.1:{port}:")
-    assert said.endswith(f"; {serve.WITHOUT_HTTPS}")
-
-
-@pytest.mark.parametrize("which", ["missing", "no_crypto"])
-def test_https_without_pyjwt_or_its_cryptography_is_refused_with_the_extra_named(tmp_path, monkeypatch, which):
-    pytest.importorskip("jwt")
-    import jwt
-
-    if which == "missing":
-        monkeypatch.setitem(sys.modules, "jwt", None)
-    else:
-        monkeypatch.setattr(jwt.algorithms, "has_crypto", False)
-    extra = tuple(part for flag, value in _SIX for part in (flag, value))
-    with pytest.raises(SystemExit) as refused:
-        _main_uninterrupted(_serve_args(tmp_path, extra=extra))
-    assert "needs the signin extra" in str(refused.value)
-    assert str(refused.value).endswith(f"; {serve.WITHOUT_HTTPS}")
-
-
-def test_a_failed_https_bind_frees_the_http_port(tmp_path):
-    pytest.importorskip("jwt")
-    from _issuer import ISSUER, Issuer
-    from _tls import material
-    from wl_xcon import signin
-    from wl_xcon.serve import Remote, tls_context
-
-    tls = material(tmp_path)
-    page = signin.parse_rig_page("rig-3=https://rig-3.wl.works/")
-    checker = signin.Checker(page=page, issuer=ISSUER, cache=tmp_path / "c.json", fetch=Issuer().fetch)
-    http_port = int(free_endpoints(1)[0].rsplit(":", 1)[1])
-    with socket.socket() as busy:
-        busy.bind(("127.0.0.1", 0))
-        busy.listen()
-        pub, rep = free_endpoints(2)
-        with pytest.raises(OSError):
-            Server(
-                sub=pub, req=rep, http=("127.0.0.1", http_port), token=TOKEN,
-                https=busy.getsockname()[:2], tls=tls_context(tls["cert"], tls["key"]),
-                remote=Remote(page, checker),
-            )
-    with socket.socket() as again:
-        again.bind(("127.0.0.1", http_port))
 
 
 @pytest.mark.parametrize("given", [("https",), ("tls",), ("remote",), ("https", "tls"), ("tls", "remote")])
