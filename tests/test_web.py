@@ -38,6 +38,7 @@ from wl_xcon.web import (
     REWARD_ONLY_PAUSED,
     RUN_TRIALS,
     SIGN_IN_FIRST,
+    KEYS_RECHECK_MS,
     SIGNIN_RETRY_MS,
     SignIn,
     _gate,
@@ -819,14 +820,16 @@ def test_the_right_column_is_honest_placeholders():
 def test_the_page_writes_only_by_posting_json_to_commands():
     """Spec §4.2, as amended by §5.2: the page's writes are the controls, and every
     one goes through the script's one command `fetch` (`deliver`) -- a JSON `POST` to
-    `/commands`; the other three are the sign-in's -- and never a form (the Content-Security-Policy's `form-action 'none'` refuses one
+    `/commands`; the other four are the sign-in's -- and never a form (the Content-Security-Policy's `form-action 'none'` refuses one
     anyway). Its radio inputs still only choose a tab."""
     document = _document()
 
     assert "<form" not in document and "<textarea" not in document
-    # b2b spec §4: the other three are the sign-in's (the token endpoint, `/whoami`,
-    # `/signout`); only `/commands` carries a command.
-    assert _SCRIPT.count("fetch(") == 4
+    # b2b spec §4: the other four are the sign-in's (the token endpoint, `/whoami`,
+    # `/signout`) and the page's recheck, `POST /whoami` with no token (b2b-ready §4.6);
+    # only `/commands` carries a command.
+    assert _SCRIPT.count("fetch(") == 5
+    assert _SCRIPT.count('fetch("/whoami", {') == 2
     assert _SCRIPT.count('fetch("/commands", {') == 1
     assert 'fetch(body.getAttribute("data-token-endpoint")' in _SCRIPT
     assert 'fetch("/whoami", {' in _SCRIPT and 'fetch("/signout", {' in _SCRIPT
@@ -2550,3 +2553,10 @@ def test_a_renewed_pair_is_stored_before_the_rig_confirms_it():
 def test_the_https_page_tells_its_script_how_often_to_try_again():
     document = page(fragments(frame(), _https_view()), stale_after_s=30.0, nonce="n0nce", signin=_SIGNIN)
     assert f'data-retry-ms="{SIGNIN_RETRY_MS}"' in document and SIGNIN_RETRY_MS == 30_000
+
+
+def test_the_https_page_tells_its_script_how_often_to_ask_for_keys_again():
+    document = page(fragments(frame(), _https_view()), stale_after_s=30.0, nonce="n0nce", signin=_NO_KEYS)
+    assert f'data-recheck-ms="{KEYS_RECHECK_MS}"' in document and KEYS_RECHECK_MS == 60_000
+    recheck = _SCRIPT.split('if (!body.getAttribute("data-token-endpoint")) {', 1)[1]
+    assert 'answer.reason === "no_token"' in recheck and "window.location.reload()" in recheck

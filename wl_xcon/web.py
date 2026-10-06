@@ -151,6 +151,10 @@ HTTPS_OFF = "the rig's https page is off"
 #: rig cannot be reached (b2b-ready §4.2-§4.3): housekeeping, not a measurement. Rendered
 #: on `<body>`, so a test can shorten it.
 SIGNIN_RETRY_MS = 30_000
+#: How often a https page that could offer no sign-in asks this rig again whether it can
+#: check one (b2b-ready §4.6), the keys thread's own interval: housekeeping, not a
+#: measurement. Rendered on `<body>`, so a test can shorten it.
+KEYS_RECHECK_MS = 60_000
 #: What a control says on the https page to a browser not signed in (b2b spec §4).
 SIGN_IN_FIRST = "sign in with wl.works to use the controls"
 #: Why the mark control is greyed on a console started without the mark endpoint.
@@ -1749,6 +1753,17 @@ _SCRIPT = """
   // rig cannot be reached, a renewal or a confirmation is tried again this often, and a
   // renewal at the token's lapse when that comes first (spec §7; b2b-ready §4.1-§4.3).
   var RETRY_MS = Number(body.getAttribute("data-retry-ms")) || 30 * 1000;
+  // How often a page that could offer no sign-in asks this rig again (b2b-ready §4.6),
+  // rendered by Python (`web.KEYS_RECHECK_MS`); housekeeping.
+  var RECHECK_MS = Number(body.getAttribute("data-recheck-ms")) || 60 * 1000;
+  // One sign-in per tab (b2b-ready §4.5; XC-224). A duplicated tab copies sessionStorage,
+  // and with it the renewal token. The tab holding a sign-in holds a lock named by its id
+  // while it is open, and a tab that finds its stored sign-in's lock held elsewhere is a
+  // duplicate. Housekeeping, not a measurement: how long a page waits for that lock, which
+  // a reloading tab's old document gives up as it goes.
+  var LOCK_WAIT_MS = 1000;
+  var DUPLICATE = "this sign-in is in use in another tab; use that tab, or sign in again here";
+  var releaseLock = null;
   // Why the page signs itself out at a lapse (b2b-ready §4.1): wl.works out of reach (the
   // final review, I1), wl.works answering without a token, or this rig never confirming.
   var UNREACHED = "wl.works could not be reached to renew this sign-in; the rig PC's page keeps every control";
@@ -1868,6 +1883,7 @@ _SCRIPT = """
     trouble = "";
     unusableFor = "";
     signin = {
+      id: prior ? prior.id : random(16),
       access: answer.access_token,
       refresh: answer.refresh_token || (prior && prior.refresh) || null,
       expires: Date.now() + Number(answer.expires_in) * 1000,
@@ -1884,6 +1900,7 @@ _SCRIPT = """
     trouble = "";
     unusableFor = "";
     signedOutFor = why || "";
+    if (releaseLock) { releaseLock(); releaseLock = null; }
     writeStore(SIGNIN_KEY, null);
     clearTimeout(renewTimer);
     clearTimeout(lapseTimer);
@@ -1921,6 +1938,21 @@ _SCRIPT = """
     var end = endRenewal;
     dropSignIn(trouble || UNREACHED);
     if (end) { end(); }
+  }
+  // Resolves true when this tab holds the lock of sign-in `id`, false when another tab
+  // does. A browser without Web Locks cannot tell, and is let through (b2b-ready §4.5).
+  function holdLock(id) {
+    if (!id || !navigator.locks) { return Promise.resolve(true); }
+    if (releaseLock) { releaseLock(); releaseLock = null; }
+    return new Promise(function (resolve) {
+      var abort = new AbortController();
+      var timer = setTimeout(function () { abort.abort(); }, LOCK_WAIT_MS);
+      navigator.locks.request("wlx-signin:" + id, { signal: abort.signal }, function () {
+        clearTimeout(timer);
+        resolve(true);
+        return new Promise(function (release) { releaseLock = release; });
+      }).catch(function () { resolve(false); });
+    });
   }
   // /whoami with the held token. Answers true when it confirms the sign-in. A refusal
   // is read by its reason word (the plan's Ruling 8): `expired` renews (once: a token
@@ -2003,7 +2035,7 @@ _SCRIPT = """
         return false;
       }
       keep(result.answer, null);
-      return whoami(false).then(function () { return true; });
+      return holdLock(signin.id).then(function () { return whoami(false); }).then(function () { return true; });
     }, function () {
       tell("not signed in: could not reach wl.works to finish signing in", "crit");
       return false;
@@ -2636,13 +2668,38 @@ _SCRIPT = """
     applySignIn();
     finishSignIn().then(function (exchanged) {
       if (exchanged || !signin) { return; }
-      armLapse();
-      // A tab reloaded after its hour renews first; the stored token is not asked about.
-      if (signin.expires - Date.now() < FRESH_FOR_MS) { return renew(); }
-      return whoami(true);
+      if (!signin.id) { signin.id = random(16); writeStore(SIGNIN_KEY, signin); }
+      return holdLock(signin.id).then(function (mine) {
+        if (!mine) {
+          // A copy of another tab's sign-in: forgotten here and never signed out, which
+          // would end it in the tab it belongs to (b2b-ready §4.5).
+          dropSignIn(DUPLICATE);
+          return;
+        }
+        armLapse();
+        // A tab reloaded after its hour renews first; the stored token is not asked about.
+        if (signin.expires - Date.now() < FRESH_FOR_MS) { return renew(); }
+        return whoami(true);
+      });
     }).catch(function () {
       tell("could not reach this rig to confirm the sign-in", "crit");
     }).then(applySignIn);
+    if (!body.getAttribute("data-token-endpoint")) {
+      // No sign-in could be offered: this rig could not check one when the page was made.
+      // Ask it again until it can, then reload into the sign-in (b2b-ready §4.6).
+      var recheck = function () {
+        fetch("/whoami", {
+          method: "POST",
+          cache: "no-store",
+          headers: { "Content-Type": "application/json" },
+          body: "{}"
+        }).then(function (response) { return response.json(); }).then(function (answer) {
+          if (answer.reason === "no_token") { window.location.reload(); return; }
+          setTimeout(recheck, RECHECK_MS);
+        }, function () { setTimeout(recheck, RECHECK_MS); });
+      };
+      setTimeout(recheck, RECHECK_MS);
+    }
   }
   showName();
   open();
@@ -2702,6 +2759,7 @@ def page(
             f' data-token-endpoint="{_e(signin.token_endpoint or "")}"'
             f' data-client="{_e(signin.client_id)}" data-page="{_e(signin.page)}"'
             f' data-resource="{_e(signin.resource)}" data-retry-ms="{SIGNIN_RETRY_MS}"'
+            f' data-recheck-ms="{KEYS_RECHECK_MS}"'
         )
         if signin.token_endpoint is None:
             who = (

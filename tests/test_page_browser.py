@@ -65,7 +65,7 @@ class _Dispatch:
 
 
 class _Rig:
-    def __init__(self, tmp_path, browser) -> None:
+    def __init__(self, tmp_path, browser, *, keys: bool = True) -> None:
         self._browser = browser
         self._contexts: list = []
         self._thread = None
@@ -87,7 +87,8 @@ class _Rig:
             self.checker = signin.Checker(
                 page=rig_page, issuer=self.issuer.issuer, cache=tmp_path / "wl-works.json", fetch=self.issuer.fetch
             )
-            self.checker.load()
+            if keys:
+                self.checker.load()
             self.server = _PageServer(
                 ("127.0.0.1", rig_port),
                 make_handler(
@@ -148,6 +149,17 @@ class _Rig:
 def rig(tmp_path):
     with browser() as launched:
         made = _Rig(tmp_path, launched)  # closes what it opened itself if it fails
+        try:
+            yield made
+        finally:
+            made.close()
+
+
+@pytest.fixture
+def rig_without_keys(tmp_path):
+    """A rig whose checker has not loaded: the page it serves first can offer no sign-in."""
+    with browser() as launched:
+        made = _Rig(tmp_path, launched, keys=False)
         try:
             yield made
         finally:
@@ -538,8 +550,8 @@ def test_a_reload_with_a_lapsed_token_renews_and_stays_signed_in(rig, monkeypatc
     _sign_in(page)
     time.sleep(6)  # housekeeping: past the token's own end
     page.reload()
-    page.wait_for_selector(SIGNED_IN)
-    assert rig.fake.renewals >= 1
+    page.wait_for_selector(SIGNED_IN)  # the stored name shows before anything is asked
+    rig.wait_for(lambda: rig.fake.renewals >= 1)  # the lock is taken first, so not at once
     page.click(PAUSE)
     rig.wait_for(lambda: _pauses(rig))
     assert _pauses(rig)[-1].by.name == "Jake Westerberg"
@@ -765,3 +777,63 @@ def test_the_rigs_expired_while_a_renewal_is_held_makes_a_later_press_wait_for_i
     assert _pauses(rig)[-1].by.name == "Jake Westerberg"
     sent = page.evaluate("window.__commands")
     assert sent == 2
+
+
+# --- b2b-ready §4.5-§4.6 ----------------------------------------------------------------
+
+DUPLICATE = "this sign-in is in use in another tab; use that tab, or sign in again here"
+
+
+def test_a_duplicated_tab_forgets_its_copy_and_the_first_tab_keeps_working(rig):
+    # XC-224: a duplicated tab copies sessionStorage, and with it the renewal token.
+    first = rig.browser_page()
+    _sign_in(first)
+    copied = first.evaluate("window.sessionStorage.getItem('wlx-signin')")  # never asserted on
+    second = first.context.new_page()  # a tab of the same browser
+    second.set_default_timeout(WAIT_S * 1000)
+    second.add_init_script(f"window.sessionStorage.setItem('wlx-signin', {json.dumps(copied)});")
+    second.add_init_script(_SIGNOUTS)
+    second.goto(rig.page_url)
+    second.wait_for_selector("#sent:has-text('in use in another tab')")
+    assert second.inner_text("#sent") == "signed out: " + DUPLICATE
+    assert second.evaluate("document.body.getAttribute('data-signed-in')") == "0"
+    signouts = second.evaluate("window.__signouts")  # a copy is never signed out: it would
+    assert signouts == 0                             # end the first tab's sign-in too
+    first.click(PAUSE)  # the first tab still acts
+    rig.wait_for(lambda: _pauses(rig))
+    assert _pauses(rig)[-1].by.name == "Jake Westerberg"
+    # Review Focus 4: the second tab signs in on its own, and both act.
+    second.click("#signin")
+    second.wait_for_selector(SIGNED_IN)
+    assert rig.fake.exchanges == 2
+    rig.wait_for(lambda: not second.is_disabled(PAUSE))
+    rig.wait_for(lambda: not first.is_disabled(PAUSE))
+
+
+def test_a_reload_of_a_signed_in_tab_is_never_taken_for_a_duplicate(rig):
+    # Review Focus 5: a reloading tab's old document gives its lock up as it goes.
+    page = rig.browser_page()
+    _sign_in(page)
+    for _ in range(3):
+        page.reload()
+        page.wait_for_selector(SIGNED_IN)
+        rig.wait_for(lambda: not page.is_disabled(PAUSE))
+        assert "in use in another tab" not in page.inner_text("#sent")
+        assert _has_signin(page)
+
+
+def test_a_page_made_before_the_rig_had_keys_reloads_into_the_sign_in_once_it_has_them(rig_without_keys, monkeypatch):
+    # XC-227 (b2b-ready §4.6).
+    rig = rig_without_keys
+    monkeypatch.setattr(web, "KEYS_RECHECK_MS", 300)  # housekeeping: ask again soon
+    page = rig.browser_page()
+    assert page.inner_text("#mode") == "read-only · " + signin.NO_KEYS
+    assert page.query_selector("#signin") is None
+    page.wait_for_timeout(1000)  # housekeeping: several asks, while the rig still has no keys
+    assert page.query_selector("#signin") is None
+    rig.checker.load()  # what the keys thread does once wl.works answers
+    page.wait_for_selector("#signin")
+    _sign_in(page)
+    page.click(PAUSE)
+    rig.wait_for(lambda: _pauses(rig))
+    assert _pauses(rig)[-1].by.name == "Jake Westerberg"
