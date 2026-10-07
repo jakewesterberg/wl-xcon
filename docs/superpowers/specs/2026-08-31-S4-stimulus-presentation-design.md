@@ -55,8 +55,11 @@ makes stereo cost nothing to keep available (D6).
 
 > **Note, 2026-10-07 (engine build A1).** Positions, angles, disparity's sign, the per-eye formula
 > and the vergence offset are as the engine spec §5 states them and `wl_xcon/screen.py`'s
-> `resolve` computes them; check 8 measures each eye after the offset. What a stimulus looks like under these conventions,
-> and the color and luminance conventions of engine spec §7, is defined by `wl_xcon/exact.py`.
+> `resolve` computes them; check 8 measures each eye after the offset. What a stimulus looks like under these conventions
+> is defined by `wl_xcon/exact.py`. Of engine spec §7's color and luminance conventions it defines only what A1 draws:
+> the absolute lights (`Gray`, `xyY`, in CIE XYZ at cd/m²) and the Weber and Michelson contrasts. The rest of §7 (cone
+> fundamentals, cone contrast and DKL, their conversion and realizability, and the panel's output levels through a
+> calibration) is engine build A2's.
 
 ---
 

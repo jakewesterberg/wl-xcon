@@ -440,11 +440,14 @@ framebuffer**, in cyclopean coordinates with disparity as a stimulus property. A
 disparity or per-eye content is the zero-disparity case of the same path, and runs in either
 setup.
 
-Per-eye viewport geometry (center, folded optical path length, deg/pixel) is measured, not
-derived. Mirror angles set vergence, so alignment is a calibrated parameter with a real
-alignment procedure. Photodiode patches sit outside both viewports, at a bottom corner, and
-under the sensors' housings in direct view. Panel left/right nonuniformity is by construction
-an interocular mismatch and is photometered in V1.
+Per-eye viewport geometry (center, folded optical path length, deg/pixel) is computed from
+the rig file (`geometry.py`, `viewport.py`) until V9 measures it. **Vergence is not set by
+angling the mirrors** (optics drawing §6 rules that out): each eye's image is moved by a
+software offset, `atan(E/D)` from the rig file's half-IPD `E` and path `D`
+(`Geometry.vergence_half_deg`, engine build A1), computed, not measured. Photodiode patches
+sit outside both viewports, at a bottom corner, and under the sensors' housings in direct
+view. Panel left/right nonuniformity is by construction an interocular mismatch and is
+photometered in V1.
 
 The **screen description** (`wl_xcon/screen.py`) and the **exact drawer** (`wl_xcon/exact.py`, with
 `look.py` and `viewport.py`) exist since engine build A1 (2026-10-07). Nothing in a session calls them
