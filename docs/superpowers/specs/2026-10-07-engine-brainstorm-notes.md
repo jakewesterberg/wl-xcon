@@ -457,3 +457,13 @@ allocation inside a frame (CLAUDE.md).
   next).
 - **vstimd** — "Yes": read its source as prior art (license, upkeep, how it drives the display and
   paces frames); nothing adopted without asking.
+
+**Batch 3, the compiled core** (asked 2026-10-07; the PI answered the first question and stopped
+to clarify the rest):
+
+- **The core's language** — "Rust".
+- **vstimd, read** (`docs/research/2026-10-07-vstimd-prior-art.md`): Rust on `ash`, alpha, one
+  maintainer; the daemon AGPL-3.0-only and its Python client LGPL-3.0-only, so nothing is reused,
+  only ideas; trigger-driven over ZMQ rather than per-frame lockstep; direct display through
+  `VK_KHR_display`, FIFO, paced by a post-flip vblank wait; 8-bit sRGB only, no LUT, no stereo, one
+  photodiode patch; no committed timing measurement.
