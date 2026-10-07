@@ -90,3 +90,13 @@ nothing is computed inside a frame.
   contrast, color, speed...; every live value recorded frame by frame.
 - **Contrast** — "Always written explicitly": every contrast is given with its convention (e.g.
   `contrast=Weber(0.3)`, Michelson, RMS); nothing implied.
+
+**Batch 2, patterned fills** (asked 2026-10-07):
+
+- **Noise** — white, binary, pink (1/f), band-pass, and (the PI's addition) **color noise**.
+- **RF mapping** — all four: sparse noise; dense noise or m-sequence; flashed and swept bars;
+  subspace (Ringach/Hartley) gratings.
+- **Moving dots' noise rule** — "Declared per task": the task names the rule (re-plotted
+  positions, a random direction per dot, a random walk), since each changes what a coherence
+  level means.
+- **What defines a figure against its ground** — all four: orientation, motion, color, disparity.
