@@ -220,6 +220,25 @@ class Geometry:
     def _stopped(self, degrees: float) -> float:
         return degrees if self.mask_deg is None else min(degrees, self.mask_deg)
 
+    @property
+    def vergence_half_deg(self) -> float:
+        """Each eye's share of the vergence offset, `atan(E/D)` in degrees.
+
+        Through the stereoscope the axes leave parallel, so a stimulus drawn at the same
+        place in both viewports sits at optical infinity; moving the left eye's image
+        right and the right eye's left by `atan(E/D)` puts zero disparity at the
+        screen's optical distance (optics drawing §6: `2·atan(E/D)` = 2.9° at `E` = 1.6
+        cm). Computed, not measured. Zero in direct view, where both eyes see one screen.
+        """
+        if self.view == "direct":
+            return 0.0
+        if self.half_ipd_cm is None:
+            raise ValueError(
+                "the vergence offset is atan(E/D), and this stereoscope geometry has no "
+                "half-IPD E; build it with Geometry.stereoscope or Rig.stereoscope"
+            )
+        return math.degrees(math.atan(self.half_ipd_cm / self.viewing_distance_cm))
+
     def pixels_per_degree(self, horizontal_pixels: int) -> float:
         """S0 §5.2's mean across one viewport, so `horizontal_pixels` is the viewport's:
         half the panel through the stereoscope, all of it in direct view. Across the

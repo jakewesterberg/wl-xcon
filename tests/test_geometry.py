@@ -403,3 +403,17 @@ def test_the_reference_subject_is_the_reference_bounds_subject():
     from tasks.reference_subject import SETTINGS
 
     assert SETTINGS.subject == BOUNDS.subject == "REFERENCE"
+
+
+def test_the_vergence_offset_is_atan_e_over_d_per_eye_and_none_in_direct_view():
+    stereo = RIG.stereoscope(half_ipd_cm=1.6)
+    assert stereo.vergence_half_deg == pytest.approx(
+        math.degrees(math.atan(1.6 / stereo.viewing_distance_cm)))
+    assert 2 * stereo.vergence_half_deg == pytest.approx(2.9, abs=0.01)  # optics drawing §6
+    assert DIRECT.vergence_half_deg == 0.0
+
+
+def test_a_stereoscope_with_no_half_ipd_has_no_vergence_offset_to_give():
+    bare = Geometry(panel_width_cm=58.997, panel_height_cm=33.293, viewing_distance_cm=63.15)
+    with pytest.raises(ValueError, match="half-IPD"):
+        bare.vergence_half_deg

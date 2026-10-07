@@ -306,13 +306,15 @@ def test_disparity_can_push_one_eye_off_screen_from_a_legal_cyclopean_position()
         states=[
             State(
                 "show",
-                enter=[Show(Stimulus("s", at=(11.5, 0.0), disparity=2.0, looks=LIT))],
+                enter=[Show(Stimulus("s", at=(10.0, 0.0), disparity=-2.0, looks=LIT))],
                 go=[On(After(1.0), Outcome.CORRECT)],
             ),
         ],
     )
 
-    assert GEOMETRY.can_show(11.5, 0.0), "the cyclopean position is legal"
+    assert GEOMETRY.can_show(10.0 + GEOMETRY.vergence_half_deg, 0.0), (
+        "both eyes' images are legal without disparity"
+    )
 
     findings = check(trial, geometry=GEOMETRY)
 
@@ -420,7 +422,7 @@ def test_a_position_parameter_whose_range_leaves_the_field_is_refused():
 def test_a_position_parameter_whose_range_stays_inside_the_field_is_accepted():
     trial = Trial(
         start="show",
-        params=[Param("ecc", unit="deg", low=-11.5, high=11.5)],
+        params=[Param("ecc", unit="deg", low=-10.5, high=10.5)],
         states=[
             State(
                 "show",
@@ -486,14 +488,14 @@ def test_direct_view_shows_what_the_stereoscopes_mask_stops():
 
 
 def test_the_mask_refuses_what_the_bare_viewport_would_show():
-    """Held to the rig's field, not the optics': 12.5° is inside the viewport's ±13.15°
-    and behind the mask, so an animal would never see it."""
+    """Held to the rig's field, not the optics': 11.5° puts the left eye's image at
+    12.95°: inside the viewport's ±13.15° and behind the mask."""
     viewport = Geometry.stereoscope(
         panel_width_cm=58.997, panel_height_cm=33.293, screen_distance_cm=50.0, half_ipd_cm=1.6
     )
 
-    assert check(_showing((12.5, 0.0)), geometry=viewport) == []
-    assert [f.code for f in check(_showing((12.5, 0.0)), geometry=GEOMETRY)] == [
+    assert check(_showing((11.5, 0.0)), geometry=viewport) == []
+    assert [f.code for f in check(_showing((11.5, 0.0)), geometry=GEOMETRY)] == [
         "stimulus-off-screen"
     ]
 
@@ -518,7 +520,7 @@ def test_a_whole_position_parameter_is_checked_at_every_point_it_offers():
     assert _off(_showing(P("pos"), near)) == []
     (finding,) = _off(_showing(P("pos"), far))
     assert "pos" in finding.detail
-    assert "30.0" in finding.detail
+    assert f"{30.0 + GEOMETRY.vergence_half_deg:.1f}" in finding.detail
 
 
 def test_a_whole_position_parameter_that_offers_no_points_is_refused():
@@ -537,7 +539,7 @@ def test_a_coordinate_declared_by_choices_is_checked_at_every_choice():
     field contains, so a choice of 30 degrees passed."""
     assert _off(_showing((P("x"), 0.0), [Param("x", unit="deg", choices=(0.0, 5.0))])) == []
     (finding,) = _off(_showing((P("x"), 0.0), [Param("x", unit="deg", choices=(0.0, 30.0))]))
-    assert "30.0" in finding.detail
+    assert f"{30.0 + GEOMETRY.vergence_half_deg:.1f}" in finding.detail
 
 
 def test_a_coordinate_with_no_two_sided_range_is_refused_rather_than_read_as_zero():
@@ -550,12 +552,13 @@ def test_a_coordinate_with_no_two_sided_range_is_refused_rather_than_read_as_zer
 
 
 def test_a_disparity_declared_by_choices_is_checked_at_every_choice():
-    """XC-038's disparity half. 2 degrees at 11.5 puts one eye's image past the mask."""
+    """XC-038's disparity half. 3 degrees of near disparity at 10 puts the left eye's
+    image past the mask."""
     safe = [Param("d", unit="deg", choices=(0.0, 0.4))]
-    wide = [Param("d", unit="deg", choices=(0.0, 2.0))]
+    wide = [Param("d", unit="deg", choices=(0.0, -3.0))]
 
-    assert _off(_showing((11.5, 0.0), safe, disparity=P("d"))) == []
-    assert len(_off(_showing((11.5, 0.0), wide, disparity=P("d")))) == 1
+    assert _off(_showing((10.0, 0.0), safe, disparity=P("d"))) == []
+    assert len(_off(_showing((10.0, 0.0), wide, disparity=P("d")))) == 1
 
 
 def test_an_array_radius_declared_by_choices_is_checked_at_every_choice():
@@ -640,11 +643,11 @@ def test_an_update_that_turns_a_stimulus_into_a_wide_ring_is_refused():
 
 
 def test_two_updates_that_are_each_safe_are_checked_together():
-    """Moving to 11.5 is legal and so is adding 2 degrees of disparity at the centre;
-    after both, one eye is past the mask. An update leaves every property it does not
+    """Moving to 10 is legal and so is 2 degrees of near disparity at the centre; after
+    both, the left eye's image is past the mask. An update leaves every property it does not
     set as an earlier `Show` or `Update` left it, so each is checked against those."""
-    move = Update("s", at=(11.5, 0.0))
-    deepen = Update("s", disparity=2.0)
+    move = Update("s", at=(10.0, 0.0))
+    deepen = Update("s", disparity=-2.0)
 
     assert _off(_updating(move)) == []
     assert _off(_updating(deepen)) == []

@@ -69,6 +69,8 @@ def check(
         + _unreachable_timeouts(trial)
         + _crowded_arrays(trial)
         + _view_faults(trial, geometry)
+        + _placement_faults(trial)
+        + _trial_display_faults(trial)
     )
 
 
@@ -259,6 +261,16 @@ def _undeclared_parameters(trial: Trial) -> list[Finding]:
                         f"{ref.name!r}, which the task does not declare",
                     )
                 )
+    for attr in ("background", "background_left", "background_right"):
+        for ref in _iter_param_refs(getattr(trial, attr)):
+            if ref.name not in declared:
+                findings.append(
+                    Finding(
+                        "undeclared-parameter",
+                        f"the trial's {attr.replace('_', ' ')} references parameter "
+                        f"{ref.name!r}, which the task does not declare",
+                    )
+                )
     return findings
 
 
@@ -382,30 +394,30 @@ def _form_reach(patch: RDS, params: dict[str, Param]) -> tuple[float, float]:
 
 
 def _reachable(
-    stimulus: Stimulus, params: dict[str, Param]
+    stimulus: Stimulus, params: dict[str, Param], vergence: float = 0.0
 ) -> list[tuple[float, float]]:
-    """Every point one eye's image of a stimulus can reach, per eye, after disparity.
+    """Every point one eye's image of a stimulus can reach, in that eye's own degrees:
+    after disparity and, through the stereoscope, the vergence offset.
+
+    The left eye's image sits at `x − d/2 + v` and the right eye's at `x + d/2 − v`,
+    `v = atan(E/D)` (engine spec §5.4; optics drawing §6), so straight ahead at 11° the
+    left eye's image is at 12.45°, behind a ±12° mask. Per-eye positions are already
+    each eye's own direction. Only the eyes that see the stimulus are measured.
 
     Raises `_Unbounded` when a property it depends on cannot be bounded.
     """
-    points = _points(stimulus.at, params)
+    if stimulus.at_left is not None and stimulus.at_right is not None:
+        bases = {-1.0: _points(stimulus.at_left, params), 1.0: _points(stimulus.at_right, params)}
+        shift = 0.0
+    else:
+        points = _points(stimulus.at, params)
+        bases = {-1.0: points, 1.0: points}
+        shift = vergence
+    signs = {"left": (-1.0,), "right": (1.0,)}.get(stimulus.eye, (-1.0, 1.0))
     halves = _numbers(stimulus.disparity, params)
     reached: list[tuple[float, float]] = []
     for looks in _domain(stimulus.looks, params):
-        centres = points
         half = halves
-        if isinstance(looks, Array):
-            # An array's items sit on a ring around the stimulus position, so the
-            # thing that can leave the field is an *item*, never the centre. The
-            # extreme is the widest legal radius: with n a parameter too, every
-            # smaller set is a subset of those positions.
-            widest = max(_numbers(looks.radius, params))
-            centres = [
-                (x + dx, y + dy)
-                for x, y in points
-                for dx in (widest, -widest, 0.0)
-                for dy in (widest, -widest, 0.0)
-            ]
         if isinstance(looks, RDS) and looks.form is not None:
             # A disparity *field* has no single value to displace by, so the
             # extremes of the form are added to the stimulus's own disparity: a
@@ -413,8 +425,23 @@ def _reachable(
             # the extreme of its corrugation, and only that eye's.
             low, high = _form_reach(looks, params)
             half = [value + reach for value in halves for reach in (low, high)]
-        offsets = (min(half) / 2, -min(half) / 2, max(half) / 2, -max(half) / 2)
-        reached.extend((x + offset, y) for x, y in centres for offset in offsets)
+        for sign in signs:
+            centres = bases[sign]
+            if isinstance(looks, Array):
+                # An array's items sit on a ring around the stimulus position, so the
+                # thing that can leave the field is an *item*, never the centre. The
+                # extreme is the widest legal radius: with n a parameter too, every
+                # smaller set is a subset of those positions.
+                widest = max(_numbers(looks.radius, params))
+                centres = [
+                    (x + dx, y + dy)
+                    for x, y in centres
+                    for dx in (widest, -widest, 0.0)
+                    for dy in (widest, -widest, 0.0)
+                ]
+            reached.extend(
+                (x + sign * (d / 2 - shift), y) for x, y in centres for d in (min(half), max(half))
+            )
     return reached
 
 
@@ -446,15 +473,19 @@ def _as_updated(trial: Trial) -> dict[int, list[Stimulus]]:
                 if prop in sets
                 else [getattr(s, prop) for s in shown]
                 + [other.changes()[prop] for other in these if prop in other.changes()]
-                for prop in ("at", "looks", "disparity")
+                for prop in ("at", "looks", "disparity", "at_left", "at_right")
             }
             # The first `Show` supplies what check 8 does not measure (its name and
             # eye); every property it does measure comes from `options`.
             result[id(update)] = [
-                dataclasses.replace(shown[0], at=at, looks=looks, disparity=disparity)
+                dataclasses.replace(
+                    shown[0], at=at, looks=looks, disparity=disparity, at_left=left, at_right=right
+                )
                 for at in options["at"]
                 for looks in options["looks"]
                 for disparity in options["disparity"]
+                for left in options["at_left"]
+                for right in options["at_right"]
             ]
     return result
 
@@ -467,6 +498,10 @@ def _offscreen_stimuli(trial: Trial, geometry: Geometry | None) -> list[Finding]
     the field can still put one eye's image outside it -- and only that eye's. On a
     split-screen stereoscope that is a stimulus the animal fuses on one side and loses
     on the other, a far stranger failure than simply not seeing it.
+
+    **And after the vergence offset** through the stereoscope (engine build A1): the
+    drawer moves each eye's image by `atan(E/D)`, so the check measures where the
+    image is drawn.
 
     **Against the setup's own field** (direct-view spec §2, §4): the whole panel less
     the light sensors' housings in direct view, the mask through the stereoscope. A
@@ -487,10 +522,12 @@ def _offscreen_stimuli(trial: Trial, geometry: Geometry | None) -> list[Finding]
         return []
     params = {p.name: p for p in trial.params}
     updated = _as_updated(trial)
+    vergence = geometry.vergence_half_deg
     field = (
         f"the \u00b1{geometry.half_field_h_deg:.1f}\u00b0 \u00d7 "
         f"\u00b1{geometry.half_field_v_deg:.1f}\u00b0 {geometry.view} field"
         + (", less the light sensors' housings" if geometry.housings else "")
+        + (f", each eye's image after the {vergence:.2f}\u00b0 vergence offset" if vergence else "")
     )
     findings: list[Finding] = []
     for name, action in actions_of(trial):
@@ -506,7 +543,7 @@ def _offscreen_stimuli(trial: Trial, geometry: Geometry | None) -> list[Finding]
             bad = [
                 point
                 for stimulus in stimuli
-                for point in _reachable(stimulus, params)
+                for point in _reachable(stimulus, params, vergence)
                 if not geometry.can_show(*point)
             ]
         except _Unbounded as unbounded:
@@ -1370,6 +1407,104 @@ def _crowded_arrays(trial: Trial) -> list[Finding]:
 
 #: What `Trial.view` may say (direct-view spec §3): one setup, or either.
 TRIAL_VIEWS = (*VIEWS, "either")
+
+
+def _nonzero(value) -> bool:
+    """Whether a disparity can be other than zero: a parameter can."""
+    return isinstance(value, P) or bool(_literal(value))
+
+
+def _modulates(looks) -> bool:
+    """Whether a stimulus can multiply the contrast below it: a pattern, or a flat Weber
+    contrast (a gain of 1 + c). An absolute light names no gain."""
+    from wl_xcon.photometry import Weber
+
+    light = None if isinstance(looks, P) else _light(looks)
+    if light is None:
+        return True  # chosen per trial, or a later build's fill: checked where defined
+    kind, color, contrast, _ = light
+    return kind == "grating" or (color is None and isinstance(contrast, Weber))
+
+
+def _placement_faults(trial: Trial) -> list[Finding]:
+    """How a stimulus is placed and layered, as the drawer needs it (engine spec §4.4,
+    §5.4): opacity in [0, 1], a whole-number layer, a known combination, and per-eye
+    positions given in pairs, never with a disparity, and only on the stereoscope."""
+    from wl_xcon.task import COMBINE, Show, Update
+
+    findings: list[Finding] = []
+
+    def refuse(code: str, detail: str) -> None:
+        findings.append(Finding(code, detail))
+
+    shown: dict[str, list[Stimulus]] = {}
+    for _, action in actions_of(trial):
+        if isinstance(action, Show):
+            shown.setdefault(action.stimulus.name, []).append(action.stimulus)
+
+    for _, action in actions_of(trial):
+        if isinstance(action, Show):
+            s = action.stimulus
+            name, looks = s.name, s.looks
+            sets = {"opacity": s.opacity, "layer": s.layer, "combine": s.combine,
+                    "disparity": s.disparity}
+            sets.update({k: v for k, v in (("at_left", s.at_left), ("at_right", s.at_right))
+                         if v is not None})
+        elif isinstance(action, Update):
+            name, looks, sets = action.stimulus, None, action.changes()
+            for earlier in shown.get(name, []):
+                if _nonzero(sets.get("disparity", 0.0)) and earlier.at_left is not None:
+                    refuse("per-eye-misused", (
+                        f"an update gives {name!r} a disparity, and it is shown with per-eye "
+                        f"positions; they are two ways to say one thing (engine spec §5.4)"))
+                if ("at_left" in sets or "at_right" in sets) and _nonzero(earlier.disparity):
+                    refuse("per-eye-misused", (
+                        f"an update gives {name!r} per-eye positions, and it is shown with a "
+                        f"disparity; they are two ways to say one thing (engine spec §5.4)"))
+        else:
+            continue
+        opacity = _literal(sets.get("opacity"))
+        if opacity is not None and not 0.0 <= opacity <= 1.0:
+            refuse("bad-placement", f"{name!r}'s opacity {opacity:g} is outside [0, 1]")
+        layer = sets.get("layer", 0)
+        if isinstance(layer, bool) or not isinstance(layer, int):
+            refuse("bad-placement", f"{name!r}'s layer {layer!r} is not a whole number")
+        if "combine" in sets:
+            if sets["combine"] not in COMBINE:
+                refuse("bad-placement", (
+                    f"{name!r} combines as {sets['combine']!r}; one of {', '.join(COMBINE)}"))
+            elif sets["combine"] == "multiply" and not _modulates(looks):
+                refuse("multiply-needs-modulation", (
+                    f"{name!r} multiplies the contrast below it by its own modulation, and "
+                    f"an absolute light has none; give it a Weber contrast or a pattern"))
+        if ("at_left" in sets) != ("at_right" in sets):
+            refuse("per-eye-misused", f"{name!r} gives one eye's position without the other's")
+        if "at_left" in sets or "at_right" in sets:
+            if _nonzero(sets.get("disparity", 0.0)):
+                refuse("per-eye-misused", (
+                    f"{name!r} gives per-eye positions and a disparity; they are two ways "
+                    f"to say one thing (engine spec §5.4)"))
+            if trial.view != "stereoscope":
+                refuse("per-eye-misused", (
+                    f"{name!r} gives per-eye positions in a task written for "
+                    f"{trial.view!r}; only the stereoscope shows each eye its own image"))
+    return findings
+
+
+def _trial_display_faults(trial: Trial) -> list[Finding]:
+    from wl_xcon.task import PERIPHERY
+
+    findings: list[Finding] = []
+    if trial.periphery not in PERIPHERY:
+        findings.append(Finding("bad-periphery", (
+            f"periphery {trial.periphery!r} is not one of {', '.join(PERIPHERY)}")))
+    if trial.view != "stereoscope" and (
+        trial.background_left is not None or trial.background_right is not None
+    ):
+        findings.append(Finding("per-eye-background", (
+            f"a per-eye background in a task written for {trial.view!r}; only the "
+            f"stereoscope shows each eye its own")))
+    return findings
 
 
 def _view_faults(trial: Trial, geometry: Geometry | None) -> list[Finding]:

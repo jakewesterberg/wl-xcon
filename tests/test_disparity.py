@@ -134,8 +134,8 @@ def test_form_disparity_counts_toward_the_off_screen_check():
 
     # The rig's stereoscope at `E` = 1.6 cm, stopped by its ±12° mask.
     geometry = RIG.stereoscope(half_ipd_cm=1.6)
-    safe = a_task(RDS(form=Corrugation(sf=0.5, amplitude=0.2)), at=(11.5, 0.0))
-    extreme = a_task(RDS(form=Corrugation(sf=0.5, amplitude=8.0)), at=(11.5, 0.0))
+    safe = a_task(RDS(form=Corrugation(sf=0.5, amplitude=0.2)), at=(10.0, 0.0))
+    extreme = a_task(RDS(form=Corrugation(sf=0.5, amplitude=8.0)), at=(10.0, 0.0))
 
     assert "stimulus-off-screen" not in codes(safe, geometry=geometry)
     assert "stimulus-off-screen" in codes(extreme, geometry=geometry)

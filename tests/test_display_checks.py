@@ -9,6 +9,7 @@ finds it without the author having coupled anything.
 
 import pytest
 
+from _rig import STEREOSCOPE
 from wl_xcon import look
 from wl_xcon.check import check
 from wl_xcon.photometry import RMS, Gray, Michelson, Weber
@@ -282,3 +283,94 @@ def test_a_degenerate_block_inside_an_array_member_is_reported_once():
     items = Array(looks=Disc(size=0.0, color=Gray(40.0)), among=Disc(color=Gray(40.0)))
     findings = [f.code for f in check(_one(items, background=GRAY_BG)) if f.blocking]
     assert findings.count("bad-block") == 1
+
+
+LIT = Disc(color=Gray(40.0))
+
+
+def _placed(*, view="stereoscope", looks=LIT, background=None, at=(0.0, 0.0), **fields) -> Trial:
+    return Trial(
+        start="on",
+        view=view,
+        background=background,
+        windows=[Window("w", at=(0.0, 0.0), radius=2.0, on="s")],
+        states=[
+            State(
+                "on",
+                enter=[Show(Stimulus("s", at=at, looks=looks, **fields))],
+                go=[On(After(1.0), Outcome.ABORT)],
+            )
+        ],
+    )
+
+
+@pytest.mark.parametrize("fields, code", [
+    ({"opacity": 1.5}, "bad-placement"),
+    ({"opacity": -0.1}, "bad-placement"),
+    ({"layer": 1.5}, "bad-placement"),
+    ({"combine": "blend"}, "bad-placement"),
+    ({"combine": "multiply"}, "multiply-needs-modulation"),
+    ({"at_left": (1.0, 0.0)}, "per-eye-misused"),
+    ({"at_left": (1.0, 0.0), "at_right": (-1.0, 0.0), "disparity": 0.1}, "per-eye-misused"),
+])
+def test_a_placement_the_drawer_cannot_honor_is_refused(fields, code):
+    assert code in _refused(_placed(**fields))
+
+
+@pytest.mark.parametrize("view", ["direct", "either"])
+def test_per_eye_positions_need_a_task_written_for_the_stereoscope(view):
+    assert "per-eye-misused" in _refused(_placed(view=view, at_left=(1.0, 0.0), at_right=(-1.0, 0.0)))
+
+
+def test_what_the_drawer_can_honor_is_accepted():
+    assert _refused(_placed(at_left=(1.0, 0.0), at_right=(-1.0, 0.0), layer=2, opacity=0.5)) == set()
+    gain = _placed(looks=Disc(contrast=Weber(-0.5)), background=GRAY_BG, combine="multiply")
+    assert _refused(gain) == set()
+
+
+def test_an_update_cannot_mix_per_eye_positions_with_disparity():
+    def updating(show, update):
+        return Trial(
+            start="a", view="stereoscope",
+            states=[
+                State("a", enter=[Show(show)], go=[On(After(0.5), "b")]),
+                State("b", enter=[update], go=[On(After(0.5), Outcome.ABORT)]),
+            ],
+        )
+    per_eye = Stimulus("s", at=(0.0, 0.0), looks=LIT, at_left=(1.0, 0.0), at_right=(-1.0, 0.0))
+    deep = Stimulus("s", at=(0.0, 0.0), looks=LIT, disparity=0.2)
+    assert "per-eye-misused" in _refused(updating(per_eye, Update("s", disparity=0.3)))
+    assert "per-eye-misused" in _refused(
+        updating(deep, Update("s", at_left=(1.0, 0.0), at_right=(0.0, 0.0))))
+    assert "per-eye-misused" in _refused(updating(per_eye, Update("s", at_left=(2.0, 0.0))))
+
+
+def test_an_unknown_periphery_and_a_per_eye_background_off_the_stereoscope_are_refused():
+    assert "bad-periphery" in _refused(_one(LIT, periphery="curved"))
+    assert "per-eye-background" in _refused(_one(LIT, view="direct", background_left=GRAY_BG))
+
+
+def test_a_background_s_parameter_must_be_declared():
+    assert "undeclared-parameter" in _refused(_one(LIT, background=Gray(P("bg"))))
+
+
+def _off(trial, geometry=STEREOSCOPE) -> list:
+    return [f for f in check(trial, geometry=geometry) if f.code == "stimulus-off-screen"]
+
+
+def test_the_vergence_offset_can_carry_one_eye_s_image_behind_the_mask():
+    # Straight ahead at 11°, the left eye's image is at 11 + 1.45 = 12.45°: behind ±12°.
+    (finding,) = _off(_placed(at=(11.0, 0.0)))
+    assert "vergence" in finding.detail
+    assert _off(_placed(at=(10.5, 0.0))) == []
+
+
+def test_only_the_eyes_that_see_a_stimulus_are_measured():
+    # The right eye's image of 11° is at 11 − 1.45 = 9.55°.
+    assert _off(_placed(at=(11.0, 0.0), eye="right")) == []
+
+
+def test_per_eye_positions_are_measured_as_given():
+    # Already each eye's own direction: no vergence offset is added to them.
+    assert _off(_placed(at_left=(11.9, 0.0), at_right=(-11.9, 0.0))) == []
+    assert len(_off(_placed(at_left=(12.5, 0.0), at_right=(0.0, 0.0)))) == 1
