@@ -323,7 +323,9 @@ declared non-black background (§7.5).
    and is deterministic so the exact drawer models it.
 9. **Cone fundamentals**: one lab-wide default, **Stockman & Sharpe's 10° (CIE 2006)**; a task may name
    the 2° set for foveal work (N§R5). No standard macaque set was found to prefer: macaque and human L and
-   M cone spectra are "virtually identical" (Baylor, Nunn & Schnapf; checked 2026-10-07). The
+   M cone spectra are "virtually identical" (Schnapf, Kraft, Nunn & Baylor 1988, Vis Neurosci 1:255-261;
+   checked 2026-10-07, attribution corrected 2026-10-08 — Baylor, Nunn & Schnapf 1987 is the macaque
+   single-cone paper; `docs/research/2026-10-08-engine-a2-color-research.md` §0, §5). The
    spectroradiometer's spectra are stored in each calibration, so any named set converts from them.
 10. **A calibration never expires** but carries its age; past 30 days it is a warning.
 

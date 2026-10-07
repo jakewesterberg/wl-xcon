@@ -863,7 +863,8 @@ owed), several misleading defaults, and gaps against the code. The PI's decision
 
 - **The lab-wide cone default** — the 10° standard (Stockman & Sharpe, CIE 2006), "unless there is a
   better macaque alternative". Checked 2026-10-07: macaque and human L and M cone spectra are
-  "virtually identical" (Baylor, Nunn & Schnapf, single-cone recordings; Cambridge abstract,
+  "virtually identical" (Schnapf, Kraft, Nunn & Baylor 1988 — attributed here to "Baylor, Nunn &
+  Schnapf" until 2026-10-08, whose 1987 paper is the macaque single-cone recordings; Cambridge abstract,
   https://www.cambridge.org/core/journals/visual-neuroscience/article/spectral-sensitivity-of-primate-photoreceptors/3C54998B7E9FE7C3CC1A6A8C5B060CB0),
   and the CIE-sanctioned standard is Stockman & Sharpe's (PMC10946592); no standard macaque set found.
   Lens and macular-pigment differences between the species are UNVERIFIED in size. A task may name the
