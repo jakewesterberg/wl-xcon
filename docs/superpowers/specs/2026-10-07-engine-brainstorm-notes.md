@@ -245,3 +245,16 @@ the authority; the panel runs 240 Hz (4.17 ms), with 120 Hz available.
   https://www.blurbusters.com/understanding-display-scanout-lag-with-high-speed-video/, read
   2026-10-07; general, UNVERIFIED for the PG27UCDM until V1). Both setups put the light sensors at
   the bottom, so they report a frame near the end of its scan. Re-asked below.
+
+**Batch 2** (asked 2026-10-07):
+
+- **Onset** — "Frame start + height": the record holds each frame's start and each stimulus's
+  vertical position; analysis adds the scan delay for that height from V1's measurement of this
+  panel (V1 places test patches top and bottom). Nothing estimated is written as fact.
+- **Rapid sequences** — "Both": a sequence stimulus (items and timing in one declaration, or drawn
+  per trial from a seed, with events such as "item 7 shown" for the states to react to), or one
+  state per item, as the task prefers.
+- **Motion paths** — all four: straight sweeps; pursuit targets (step-ramp, sinusoidal, circular,
+  Lissajous); waypoint paths; seeded random walks.
+- **Refresh rate** — "Any rate": times in seconds, converted at the session's rate (240 or 120
+  Hz) under the tolerance rule; a task may declare a required rate.
