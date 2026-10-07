@@ -347,6 +347,9 @@ def test_an_update_cannot_mix_per_eye_positions_with_disparity():
     assert "per-eye-misused" in _refused(updating(per_eye, Update("s", disparity=0.3)))
     assert "per-eye-misused" in _refused(
         updating(deep, Update("s", at_left=(1.0, 0.0), at_right=(0.0, 0.0))))
+    # What an update sets replaces what was shown: a disparity it zeroes is not mixed in.
+    flat = Update("s", disparity=0.0, at_left=(1.0, 0.0), at_right=(-1.0, 0.0))
+    assert _refused(updating(deep, flat)) == set()
 
 
 # --- Per-eye positions in an update (the A1 follow-ups, XC-259, XC-260) -------------
@@ -372,11 +375,33 @@ def test_an_update_of_at_on_a_stimulus_with_per_eye_positions_is_refused():
                 if f.code == "per-eye-misused"]
     assert len(findings) == 1
     assert "so `at` is not used; update `at_left` and `at_right`" in findings[0].detail
+    # And the form that does move it to `at`, which the next test accepts.
+    assert "or set both to None in the same update to draw it at `at`" in findings[0].detail
     both = Update("s", at=(2.0, 0.0), at_left=(3.0, 0.0), at_right=(1.0, 0.0))
     assert "per-eye-misused" in _refused(_shown_then(both, PER_EYE))
     # Refused when any `Show` of it has them: there `at` is ignored without a word.
     assert "per-eye-misused" in _refused(_shown_then(Update("s", at=(2.0, 0.0)), PLAIN, PER_EYE))
     assert _refused(_shown_then(Update("s", at=(2.0, 0.0)), PLAIN)) == set()
+
+
+CLEARS = "clears a per-eye position without giving `at`"
+
+
+@pytest.mark.parametrize("cleared", [
+    {"at_left": None, "at_right": None},
+    {"at_left": None},
+    {"at_left": (2.0, 0.0), "at_right": None},
+])
+def test_an_update_that_clears_a_per_eye_position_without_at_is_refused(cleared):
+    # It would be drawn at the `at` it was shown with, which XC-259's refusal calls unused.
+    details = [f.detail for f in check(_shown_then(Update("s", **cleared), PER_EYE))
+               if f.code == "per-eye-misused"]
+    assert any(CLEARS in detail for detail in details)
+
+
+def test_an_update_that_clears_both_per_eye_positions_with_at_is_accepted():
+    revert = Update("s", at=(2.0, 0.0), at_left=None, at_right=None)
+    assert _refused(_shown_then(revert, PER_EYE)) == set()
 
 
 def test_an_update_of_one_eye_s_position_keeps_the_other_s():

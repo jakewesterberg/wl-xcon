@@ -62,14 +62,14 @@ def _guard_label(guard: Guard) -> str:
     timed from photodiode onset rather than state entry is a different experiment,
     so `since` appears whenever it is there.
     """
-    fields = [
+    given = [
         (name, getattr(guard, name))
         for name in guard.__slots__
         if getattr(guard, name) is not None
     ]
     rendered = [
         _value_label(value) if name != "since" else f"since={_guard_label(value)}"
-        for name, value in fields
+        for name, value in given
     ]
     label = f"{type(guard).__name__}({', '.join(rendered)})"
     if isinstance(guard, After) and isinstance(guard.seconds, float):
@@ -79,8 +79,10 @@ def _guard_label(guard: Guard) -> str:
 
 
 def _point_label(at: object) -> str:
-    """A position: a pair coordinate by coordinate, or one parameter by its name."""
-    if isinstance(at, tuple):
+    """A position: a pair coordinate by coordinate, or one parameter by its name. Anything
+    else is shown as written: a position's shape is not checked at load (XC-272), and an
+    artifact that raises shows nothing at all."""
+    if isinstance(at, tuple) and len(at) == 2:
         return f"({_value_label(at[0])}, {_value_label(at[1])})"
     return _value_label(at)
 
@@ -268,13 +270,18 @@ def render(trial: Trial, allocation_names: dict[int, str] | None = None) -> str:
         for name, action in actions_of(trial)
         if isinstance(action, Show)
     ]
-    if stimuli:
-        # Everything the drawer places and combines by (engine spec §4.4, §5.4), as each
-        # `Show` declares it: a table of position and disparity alone left the rest of the
-        # screen unreviewed (XC-259).
-        lines += ["## Stimuli", "", f"Background: {_background_label(trial)}", "",
-                  "| State | Stimulus | Position° | Disparity° | Eye | Layer | Combination "
-                  "| Opacity |",
+    # Everything the drawer places and combines by (engine spec §4.4, §5.4), as each `Show`
+    # declares it: a table of position and disparity alone left the rest of the screen
+    # unreviewed (XC-259). The background is stated with or without a `Show`: a blank
+    # screen is still one the animal sees.
+    lines += ["## Stimuli", "", f"Background: {_background_label(trial)}", ""]
+    if not stimuli:
+        lines += ["Nothing is shown: no state has a `Show`.", ""]
+    else:
+        # On the stereoscope a cyclopean position is drawn at ± the vergence offset; an
+        # L / R row is already each eye's own direction (engine spec §5.4).
+        lines += ["| State | Stimulus | Position° (cyclopean, or each eye's) | Disparity° | Eye "
+                  "| Layer | Combination | Opacity |",
                   "|---|---|---|---|---|---|---|---|"]
         for name, stimulus in stimuli:
             lines.append(

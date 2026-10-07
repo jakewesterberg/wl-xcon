@@ -1920,7 +1920,8 @@ def _placement_faults(trial: Trial) -> list[Finding]:
     """How a stimulus is placed and layered, as the drawer needs it (engine spec §4.4,
     §5.4): opacity in [0, 1], a whole-number layer, a known combination, and per-eye
     positions given in pairs (an update may move one eye of a stimulus that has both),
-    never with a disparity or an updated `at`, and only on the stereoscope."""
+    never with a disparity or an updated `at`, cleared only with an `at`, and only on the
+    stereoscope."""
     from wl_xcon.task import COMBINE, Show, Update
 
     params = {p.name: p for p in trial.params}
@@ -1974,7 +1975,17 @@ def _placement_faults(trial: Trial) -> list[Finding]:
             if "at" in sets and any(c.at_left is not None or c.at_right is not None for c in left):
                 refuse("per-eye-misused", (
                     f"an update of {name!r} sets `at`, but {name!r} has per-eye positions, so "
-                    f"`at` is not used; update `at_left` and `at_right`"))
+                    f"`at` is not used; update `at_left` and `at_right`, or set both to None in "
+                    f"the same update to draw it at `at`"))
+            # Clearing a per-eye position draws the stimulus at `at` again, so the update that
+            # clears one says where (the A1 follow-ups, Task 4's ruling): an `at` left from the
+            # `Show` is the one XC-259's refusal tells the author is not used.
+            if "at" not in sets and any(eye in sets and sets[eye] is None
+                                        for eye in ("at_left", "at_right")):
+                refuse("per-eye-misused", (
+                    f"an update of {name!r} clears a per-eye position without giving `at`, so "
+                    f"it would be drawn at the `at` it was shown with; give `at` in the same "
+                    f"update"))
             # One eye's position alone keeps the other eye's (XC-260), so the other must be
             # there whatever it was shown and updated with. (One never shown at all is
             # `absent-stimulus`.)

@@ -182,8 +182,8 @@ def test_the_stimuli_table_shows_how_each_stimulus_is_placed_and_combined():
     )
     artifact = render(trial)
 
-    assert "| State | Stimulus | Position° | Disparity° | Eye | Layer | Combination | Opacity |" \
-        in artifact
+    assert ("| State | Stimulus | Position° (cyclopean, or each eye's) | Disparity° | Eye | Layer "
+            "| Combination | Opacity |") in artifact
     assert "| `on` | `pair` | L (2, 0) / R (-2, 0.5) | 0 | both | 0 | cover | 1 |" in artifact
     # A parameter by its name, as everywhere else in the report.
     assert "| `on` | `glow` | (ecc, 1) | 0 | both | 2 | add | 0.5 |" in artifact
@@ -195,6 +195,24 @@ def test_the_stimuli_table_shows_how_each_stimulus_is_placed_and_combined():
 
 def test_an_unset_background_is_said_to_be_black():
     assert "Background: black (default)" in render(TRIAL)
+
+
+def test_a_trial_that_shows_nothing_still_states_its_background():
+    from wl_xcon.photometry import Gray
+
+    blank = Trial(start="wait", background=Gray(20.0),
+                  states=[State("wait", go=[On(After(1.0), Outcome.ABORT)])])
+    artifact = render(blank)
+    assert "Background: Gray(20)" in artifact
+    assert "Nothing is shown: no state has a `Show`." in artifact
+
+
+def test_a_position_that_is_not_a_pair_is_shown_as_written():
+    # Its shape is not checked at load (XC-272); the artifact must still render.
+    odd = Trial(start="on", states=[
+        State("on", enter=[Show(Stimulus("odd", at=(1.0,), looks=Disc(size=1.0)))],
+              go=[On(After(1.0), Outcome.ABORT)])])
+    assert "| `on` | `odd` | (1.0,) |" in render(odd)
 
 
 def test_each_eye_s_own_background_is_shown_where_one_is_declared():
