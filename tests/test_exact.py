@@ -238,3 +238,94 @@ def test_a_grating_without_a_declared_mean_sits_on_what_is_behind_it():
     seam = (angles > 2.1) & (angles < 2.5)
     assert seam.any()
     assert np.abs(image[..., 1][seam] - 40.0).max() < 0.01  # seamless onto the disc
+
+
+def _patch(name, x, lum, size=4.0, **fields):
+    return Stimulus(name, at=(x, 0.0), looks=Disc(size=size, color=Gray(lum)), **fields)
+
+
+def _at_center(image, vp):
+    return image[_pixel(vp, 0.0, 0.0)][1]
+
+
+def test_cover_puts_the_later_stimulus_on_top_within_a_layer():
+    # Review Focus 3.
+    image, vp = _draw([_patch("a", 0.0, 10.0), _patch("b", 0.0, 40.0)])
+    assert _at_center(image, vp) == pytest.approx(40.0)
+    image, vp = _draw([_patch("b", 0.0, 40.0), _patch("a", 0.0, 10.0)])
+    assert _at_center(image, vp) == pytest.approx(10.0)
+
+
+def test_a_higher_layer_covers_a_lower_one_whatever_the_order_shown():
+    image, vp = _draw([_patch("top", 0.0, 40.0, layer=2), _patch("low", 0.0, 10.0)])
+    assert _at_center(image, vp) == pytest.approx(40.0)
+
+
+def test_opacity_mixes_with_what_is_below():
+    image, vp = _draw([_patch("a", 0.0, 10.0), _patch("b", 0.0, 40.0, opacity=0.25)])
+    assert _at_center(image, vp) == pytest.approx(10.0 + 0.25 * 30.0)
+
+
+def test_add_adds_light_beyond_the_background():
+    image, vp = _draw([_patch("a", 0.0, 30.0), _patch("b", 0.0, 25.0, combine="add")], trial=_gray20())
+    assert _at_center(image, vp) == pytest.approx(30.0 + (25.0 - 20.0))
+
+
+def test_two_gratings_added_are_a_plaid_about_the_background():
+    def grating(name, m, combine):
+        return Stimulus(name, at=(0.0, 0.0), combine=combine,
+                        looks=look.Look(shape=look.Circle(size=6.0),
+                                        fill=look.SineGrating(sf=1.0, phase=90.0, contrast=Michelson(m))))
+    image, vp = _draw([grating("one", 0.3, "cover"), grating("two", 0.2, "add")], trial=_gray20(),
+                      pixels=(1920, 1080), region=GABOR_REGION)
+    assert image[_pixel(vp, 0.0, 0.0, GABOR_REGION)][1] == pytest.approx(20.0 * (1 + 0.3 + 0.2), rel=0.01)
+
+
+def test_a_window_shows_what_is_below_only_inside_it():
+    window = _patch("w", 0.0, 1.0, size=1.0, combine="window", layer=1)
+    image, vp = _draw([_patch("big", 0.0, 40.0), window], trial=_gray20())
+    assert _at_center(image, vp) == pytest.approx(40.0)
+    assert image[_pixel(vp, 1.5, 0.0)][1] == pytest.approx(20.0)
+
+
+def test_a_scotoma_hides_what_is_below_inside_it():
+    scotoma = _patch("s", 0.0, 1.0, size=1.0, combine="scotoma", layer=1)
+    image, vp = _draw([_patch("big", 0.0, 40.0), scotoma], trial=_gray20())
+    assert _at_center(image, vp) == pytest.approx(20.0)
+    assert image[_pixel(vp, 1.5, 0.0)][1] == pytest.approx(40.0)
+
+
+def test_multiply_scales_the_contrast_below():
+    gain = Stimulus("m", at=(0.0, 0.0), looks=Disc(size=1.0, contrast=Weber(-0.5)), combine="multiply", layer=1)
+    image, vp = _draw([_patch("big", 0.0, 30.0), gain], trial=_gray20())
+    assert _at_center(image, vp) == pytest.approx(20.0 + (30.0 - 20.0) * 0.5)
+    assert image[_pixel(vp, 1.5, 0.0)][1] == pytest.approx(30.0)
+
+
+def test_multiply_by_an_absolute_light_is_refused_not_guessed():
+    with pytest.raises(ValueError, match="gain"):
+        _draw([_patch("big", 0.0, 30.0), _patch("m", 0.0, 10.0, combine="multiply")], trial=_gray20())
+
+
+def test_each_eye_sees_its_own_stimuli_moved_by_the_vergence_offset():
+    left_only = _patch("l", 0.0, 40.0, eye="left")
+    left, vp = _draw([left_only], geometry=STEREOSCOPE, eye=0)
+    right, _ = _draw([left_only], geometry=STEREOSCOPE, eye=1)
+    assert left[..., 1].max() == pytest.approx(40.0) and right[..., 1].max() == 0.0
+    cols = np.nonzero(left[left.shape[0] // 2, :, 1] > 20.0)[0]
+    assert (cols.min() + cols.max() + 1) / 2 > vp.width_px / 2  # right of center, in the left eye
+
+
+def test_a_stimulus_past_one_eye_s_viewport_is_clipped_there_and_whole_in_the_other():
+    # Review Focus 4: check 8 refuses this at load; drawn anyway, it clips without error.
+    edge = _patch("e", 11.5, 40.0)
+    left, _ = _draw([edge], geometry=STEREOSCOPE, eye=0)
+    right, _ = _draw([edge], geometry=STEREOSCOPE, eye=1)
+    assert right[..., 1].sum() > left[..., 1].sum() > 0.0
+
+
+def test_each_eye_has_its_own_background():
+    trial = Trial(start="s", states=[], background=Gray(20.0), background_right=Gray(10.0))
+    left, _ = _draw([], geometry=STEREOSCOPE, trial=trial, eye=0)
+    right, _ = _draw([], geometry=STEREOSCOPE, trial=trial, eye=1)
+    assert (left[0, 0, 1], right[0, 0, 1]) == pytest.approx((20.0, 10.0))

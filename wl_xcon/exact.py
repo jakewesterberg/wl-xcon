@@ -176,13 +176,45 @@ def _light(fill, mean, background, envelope, w, item, screen):
     raise NotYetDrawable(f"{type(fill).__name__} is drawn in engine build A3")
 
 
+def _gain(fill, envelope, w, item, screen):
+    """The factor a multiplying item applies to the contrast below it: `1 + c` for a flat
+    Weber contrast, `1 + m·sin·envelope` for a grating. An absolute light has none."""
+    if isinstance(fill, ResolvedFlat):
+        if fill.xyz is not None:
+            raise ValueError(
+                f"{item.name!r} multiplies by an absolute light, which names no gain; "
+                f"the checker refuses this at load (multiply-needs-modulation)"
+            )
+        return 1.0 + fill.weber
+    if isinstance(fill, ResolvedGrating):
+        return (1.0 + fill.michelson * np.sin(_phase(fill, w, item, screen)) * envelope)[..., None]
+    raise NotYetDrawable(f"{type(fill).__name__} is drawn in engine build A3")
+
+
 def _compose(item, below, background, a, envelope, w, screen):
     """How an item meets what is below it (engine spec §4.4); `a` is its weight at each
-    sample, `background` the eye's background."""
+    sample, `background` the eye's background, the reference for contrast."""
     a3 = a[..., None]
     if item.combine == "cover":
-        return below + a3 * (_light(item.fill, below, background, envelope, w, item, screen) - below)
-    raise NotYetDrawable(f"combining by {item.combine!r} is drawn in Task 10 of engine build A1")
+        # Front covers back; a pattern's mean is what is below it.
+        light = _light(item.fill, below, background, envelope, w, item, screen)
+        return below + a3 * (light - below)
+    if item.combine == "add":
+        # Its light beyond the background adds; a pattern's mean is the background, so
+        # two gratings make a plaid about it.
+        light = _light(item.fill, background, background, envelope, w, item, screen)
+        return below + a3 * (light - background)
+    if item.combine == "window":
+        # What is below shows only inside it.
+        return background + (below - background) * a3
+    if item.combine == "scotoma":
+        # What is below is hidden inside it.
+        return below + a3 * (background - below)
+    if item.combine == "multiply":
+        # One shapes another: a gain on the contrast below.
+        g = _gain(item.fill, envelope, w, item, screen)
+        return background + (below - background) * (1.0 + a3 * (g - 1.0))
+    raise ValueError(f"{item.name!r} combines as {item.combine!r}, which is no combination")
 
 
 def draw(screen, vp, *, region=None, supersample=SUPERSAMPLE):
