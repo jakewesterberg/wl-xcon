@@ -113,3 +113,14 @@ nothing is computed inside a frame.
 - **Movie frames to refreshes** — "Whole refreshes only": each movie frame held a whole number of
   refreshes (30 fps = 8 at 240 Hz, 24 fps = 10); a rate that does not divide the display rate is
   refused until the movie is re-timed beforehand; every frame's timing exact and recorded.
+
+**Batch 4, generated images, text, curves, outlines** (asked 2026-10-07; all as recommended):
+
+- **Where generated images are made** — "Another machine": a GPU server on the lab network makes
+  each image between trials and sends it; the rig checks, records and shows it; the rig's GPU
+  stays the display's.
+- **Text** — "Letters, digits, symbols": one or a few bundled fonts, glyph height in degrees,
+  rendered to exact pixels.
+- **Curve-tracing curves** — "Both": a fixed path written in the task, or a reviewed procedure
+  generating curves between trials from a seed, saved in the record.
+- **Outlines** — "Yes, on any shape": an outline width and color separate from the fill.
