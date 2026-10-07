@@ -100,3 +100,16 @@ nothing is computed inside a frame.
   positions, a random direction per dot, a random walk), since each changes what a coherence
   level means.
 - **What defines a figure against its ground** — all four: orientation, motion, color, disparity.
+
+**Batch 3, images and movies** (asked 2026-10-07; all as recommended):
+
+- **A photograph's colors** — "As the photo intends": the file is read as standard sRGB and
+  converted through the rig's calibration (measured or default); the record names the
+  calibration.
+- **Matching image sets** — "When a task asks": a declared preparation step (mean luminance, RMS
+  contrast, optionally the amplitude spectrum), recorded with the set; off unless named.
+- **Image size** — "Declared per stimulus": degrees (resampled with a stated filter) or pixel for
+  pixel (no resampling).
+- **Movie frames to refreshes** — "Whole refreshes only": each movie frame held a whole number of
+  refreshes (30 fps = 8 at 240 Hz, 24 fps = 10); a rate that does not divide the display rate is
+  refused until the movie is re-timed beforehand; every frame's timing exact and recorded.
