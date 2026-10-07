@@ -868,7 +868,8 @@ def _colors(trial: Trial, params: dict[str, Param]):
     """Every color a trial can put on screen, with what carries it: each appearance's,
     each block's (a flat fill, a grating's mean, an outline), and the backgrounds. A color
     that is a parameter is each of its choices; one offering none to read is refused by
-    `_light_faults`, so it is not one here."""
+    `_light_faults`, and a value that is not a color by `_block_faults`, so neither is one
+    here."""
     from wl_xcon import look
 
     def each(what, color):
@@ -877,7 +878,7 @@ def _colors(trial: Trial, params: dict[str, Param]):
         except _Unbounded:
             return
         for choice in choices:
-            if choice is not None:
+            if isinstance(choice, Color):
                 yield (what if choice is color
                        else f"{what} (a choice of parameter {color.name!r})"), choice
 
@@ -959,6 +960,15 @@ def _one_color(what: str, color, panel: Calibration | None) -> list[Finding]:
 #: Block fields that are full widths in degrees, so must be positive (spec §5.2).
 _SIZES = ("size", "width", "height", "length", "thickness", "outer", "sigma", "aperture")
 
+#: Block fields that hold a number or a parameter (XC-245): every size, the rest the drawer
+#: reads as one, a contrast's `value` and a `Gray`'s `cd_m2`. `None` is a value of one only
+#: where its block's own default is `None` (a grating's `direction`).
+_NUMBERS = (*_SIZES, "inner", "sides", "sf", "phase", "tf", "direction", "orientation", "value",
+            "cd_m2")
+
+#: Block fields that hold a light: a `Color`, `None`, or a parameter offering those (XC-264).
+_LIGHTS = ("color", "mean")
+
 
 def _light(looks) -> tuple | None:
     """What lights a stimulus, as `(kind, color, contrast, mean)`: kind `"flat"` for one
@@ -986,13 +996,17 @@ def _backgrounds(trial: Trial) -> list:
     return [trial.background]
 
 
-def _black(color, params: dict[str, Param]) -> bool:
+def _black(color, params: dict[str, Param], inside: frozenset[str] = frozenset()) -> bool:
     """Whether a background can be black: the default, a zero luminance, or a parameter
     whose choices or range reach one. One that cannot be read or bounded can, failing
-    closed."""
+    closed. A parameter met again inside its own choices adds none: they are being read
+    already, and it is refused as referring to itself (`_self_referring`)."""
     try:
         if isinstance(color, P):
-            return any(_black(choice, params) for choice in _options(color, params))
+            if color.name in inside:
+                return False
+            return any(_black(choice, params, inside | {color.name})
+                       for choice in _options(color, params))
         if color is None:
             return True
         if isinstance(color, Gray):
@@ -1132,19 +1146,23 @@ def _light_faults(trial: Trial) -> list[Finding]:
     return findings
 
 
-def _parts(value, params: dict[str, Param]) -> list:
+def _parts(value, params: dict[str, Param], inside: frozenset[str] = frozenset()) -> list:
     """`value` and every block inside it, depth first, **a parameter's choices included**.
     It stops at an `Array` and at an appearance a parameter offers: `_appearances` yields
-    both as appearances of their own, so descending would report a fault in one twice."""
+    both as appearances of their own, so descending would report a fault in one twice. It
+    stops too at a parameter it is already inside, whose choices it is walking already;
+    `_self_referring` refuses that parameter, once (XC-263)."""
     from wl_xcon.task import Appearance
 
     if isinstance(value, P):
+        if value.name in inside:
+            return []
         param = params.get(value.name)
         return [
             part
             for choice in (param.choices if param is not None else ())
             if not isinstance(choice, Appearance)
-            for part in _parts(choice, params)
+            for part in _parts(choice, params, inside | {value.name})
         ]
     if not dataclasses.is_dataclass(value):
         return []
@@ -1152,8 +1170,41 @@ def _parts(value, params: dict[str, Param]) -> list:
     if isinstance(value, Array):
         return found
     for f in dataclasses.fields(value):
-        found.extend(_parts(getattr(value, f.name), params))
+        found.extend(_parts(getattr(value, f.name), params, inside))
     return found
+
+
+def _self_referring(params: dict[str, Param]) -> list[str]:
+    """Every parameter whose choices name it, directly or through other parameters'
+    choices (XC-263). It has no value a trial could bind, since each would hold itself, and
+    a walk that follows a parameter into its choices would follow it round forever: those
+    walks stop where they meet a name they are inside, and it is refused here."""
+    named = {name: {ref.name for ref in _iter_param_refs(param.choices)}
+             for name, param in params.items()}
+    found = []
+    for name in named:
+        seen: set[str] = set()
+        frontier = list(named[name])
+        while frontier:
+            other = frontier.pop()
+            if other == name:
+                found.append(name)
+                break
+            if other not in seen:
+                seen.add(other)
+                frontier.extend(named.get(other, ()))
+    return found
+
+
+def _area(points) -> float | None:
+    """The area a closed outline through `points` encloses (the shoelace formula), or
+    `None` when a point is not a pair of literal numbers."""
+    if not all(isinstance(point, (tuple, list)) and len(point) == 2
+               and all(_is_number(c) for c in point) for point in points):
+        return None
+    ring = list(points)
+    return abs(sum(x0 * y1 - x1 * y0
+                   for (x0, y0), (x1, y1) in zip(ring, ring[1:] + ring[:1]))) / 2.0
 
 
 def _block_faults(trial: Trial) -> list[Finding]:
@@ -1164,10 +1215,16 @@ def _block_faults(trial: Trial) -> list[Finding]:
 
     **Each rule holds at every value a parameter can take**, each choice or both ends of its
     range, as check 8 measures a position; a parameter in one of these fields that offers
-    neither cannot be bounded, and is refused rather than passed (engine A1 final review)."""
+    neither cannot be bounded, and is refused rather than passed (engine A1 final review).
+
+    **And every value is of its field's kind** (XC-245, XC-264, XC-265): a number where a
+    number belongs, a color where a light does, an appearance where a stimulus's looks do,
+    each choice of a parameter included where a light or an appearance is one. A value of
+    another kind passed every rule above unread, and `resolve` met it first. A parameter
+    whose choices name it is refused too (XC-263)."""
     from wl_xcon import look
     from wl_xcon.photometry import Michelson, Weber
-    from wl_xcon.task import Annulus, Polygon
+    from wl_xcon.task import Annulus, Appearance, Polygon
 
     params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
@@ -1199,15 +1256,54 @@ def _block_faults(trial: Trial) -> list[Finding]:
                 bad(said)
                 return
 
+    def kind(what: str, raw, fits, noun: str) -> None:
+        """Refuse the first value `raw` can hold that is not `noun`: a literal, or each
+        choice of a parameter (one offering none is refused where the field is read)."""
+        if isinstance(raw, P):
+            offered = params[raw.name].choices if raw.name in params else ()
+            pairs = [(c, f"{what} can be {c!r} (parameter {raw.name!r})") for c in offered]
+        else:
+            pairs = [(raw, f"{what} is {raw!r}")]
+        first([(v, f"{said}, not {noun}") for v, said in pairs], lambda v: not fits(v))
+
+    def light(v) -> bool:
+        return v is None or isinstance(v, Color)
+
+    def shown(what: str, looks) -> None:
+        """An appearance: a parameter offering none is refused, as one of another kind is."""
+        if isinstance(looks, P) and not (looks.name in params and params[looks.name].choices):
+            bad(f"{what} is parameter {looks.name!r}, which offers no appearances as choices")
+        else:
+            kind(what, looks, lambda v: isinstance(v, Appearance), "an appearance")
+
+    for circular in _self_referring(params):
+        bad(f"parameter {circular!r} refers to itself: one of its choices names it, directly or "
+            f"through another parameter's choices, so it has no value a trial could bind")
+    for _, action in actions_of(trial):
+        if isinstance(action, Show):
+            shown(f"{action.stimulus.name!r}'s appearance", action.stimulus.looks)
+        elif isinstance(action, Update) and "looks" in action.changes():
+            shown(f"{action.stimulus!r}'s appearance", action.looks)
     blocks = [part for looks in _appearances(trial) for part in _parts(looks, params)]
     for attr in ("background", "background_left", "background_right"):
         blocks += _parts(getattr(trial, attr), params)
+        kind(f"the trial's {attr.replace('_', ' ')}", getattr(trial, attr), light, "a color")
     for part in blocks:
         name = type(part).__name__
         for f in dataclasses.fields(part):
+            raw = getattr(part, f.name)
+            if f.name in _NUMBERS and not (
+                _is_number(raw) or isinstance(raw, P) or (raw is None and f.default is None)
+            ):
+                bad(f"{name}.{f.name} is {raw!r}, not a number")
+            if f.name in _LIGHTS:
+                kind(f"{name}.{f.name}", raw, light, "a color")
             if f.name in _SIZES:
                 first([(v, f"{said}; a size is a positive full width in degrees")
                        for v, said in values(part, f.name)], lambda v: v <= 0.0)
+        if isinstance(part, Array):
+            for attr in ("looks", "among"):
+                shown(f"Array.{attr}", getattr(part, attr))
         if isinstance(part, Michelson):
             first([(v, f"{said}, outside [0, 1]") for v, said in values(part, "value")],
                   lambda v: not 0.0 <= v <= 1.0)
@@ -1226,8 +1322,12 @@ def _block_faults(trial: Trial) -> list[Finding]:
         if isinstance(part, (look.RegularPolygon, Polygon)):
             first([(v, f"{said}; a polygon has at least 3 sides")
                    for v, said in values(part, "sides")], lambda v: v < 3)
-        if isinstance(part, look.Vertices) and len(part.points) < 3:
-            bad(f"Vertices has {len(part.points)} points; a polygon has at least 3")
+        if isinstance(part, look.Vertices):
+            if len(part.points) < 3:
+                bad(f"Vertices has {len(part.points)} points; a polygon has at least 3")
+            elif (area := _area(part.points)) is not None and area < 1e-12:
+                bad(f"Vertices through {part.points} encloses no area: its points lie on one "
+                    f"line, or its outline goes back over itself")
         if isinstance(part, look.Path) and len(part.points) < 2:
             bad(f"Path has {len(part.points)} point; a line has at least 2")
         if isinstance(part, look.Edge) and part.applies not in (None, *look.EDGE_APPLIES):
@@ -1608,11 +1708,13 @@ def _nonzero(value) -> bool:
     return isinstance(value, P) or bool(_literal(value))
 
 
-def _modulates(looks, params: dict[str, Param]) -> bool:
+def _modulates(looks, params: dict[str, Param], inside: frozenset[str] = frozenset()) -> bool:
     """Whether a stimulus can multiply the contrast below it, for every value it can take:
     a pattern, or a flat Weber contrast (a gain of 1 + c). An absolute light names no gain.
     An `Array` modulates only if each of its items does, and a parameter only if each of
-    its choices does; one with no choices to read is `_Unbounded`, naming it."""
+    its choices does; one with no choices to read is `_Unbounded`, naming it. One met again
+    inside its own choices adds nothing: they are being read already, and it is refused as
+    referring to itself (`_self_referring`)."""
     from wl_xcon.photometry import Weber
 
     def options(value, field: str) -> list:
@@ -1622,9 +1724,12 @@ def _modulates(looks, params: dict[str, Param]) -> bool:
             raise _Unbounded(unbounded.args[0], field) from None
 
     if isinstance(looks, P):
-        return all(_modulates(choice, params) for choice in options(looks, "appearance"))
+        if looks.name in inside:
+            return True
+        return all(_modulates(choice, params, inside | {looks.name})
+                   for choice in options(looks, "appearance"))
     if isinstance(looks, Array):
-        return _modulates(looks.looks, params) and _modulates(looks.among, params)
+        return _modulates(looks.looks, params, inside) and _modulates(looks.among, params, inside)
     light = _light(looks)
     if light is None:
         return True  # a fill engine build A3 defines: checked where it is defined
@@ -1688,6 +1793,8 @@ def _placement_faults(trial: Trial) -> list[Finding]:
             continue
         # At every value a parameter can take, as `_block_faults` holds a block's values.
         opacity = sets.get("opacity")
+        if "opacity" in sets and not (_is_number(opacity) or isinstance(opacity, P)):
+            refuse("bad-placement", f"{name!r}'s opacity is {opacity!r}, not a number")
         try:
             outside = [v for v in _reach(opacity, params) if not 0.0 <= v <= 1.0]
         except _Unbounded as unbounded:

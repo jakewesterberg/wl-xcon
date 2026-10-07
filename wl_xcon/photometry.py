@@ -82,10 +82,20 @@ def to_xyz(color: "xyY | Gray") -> tuple[float, float, float]:
     """CIE XYZ of an absolute color, Y in cd/m^2.
 
     Only an absolute color names a light by itself. `DKL` is a modulation relative to
-    the background and converts through cone fundamentals (engine build A2).
+    the background and converts through cone fundamentals (engine build A2). A `Gray`
+    whose luminance is still a parameter names none until it is bound.
     """
     if isinstance(color, Gray):
-        return _XYZ(xyY(D65[0], D65[1], float(color.cd_m2)))
+        cd_m2 = color.cd_m2
+        if not isinstance(cd_m2, (int, float)):
+            from wl_xcon.task import P  # `task` imports this module
+
+            if isinstance(cd_m2, P):
+                raise TypeError(
+                    f"Gray's luminance is parameter {cd_m2.name!r}: bind it to a number "
+                    f"first, as `screen.resolve` binds a task's parameters"
+                )
+        return _XYZ(xyY(D65[0], D65[1], float(cd_m2)))
     if isinstance(color, xyY):
         return _XYZ(color)
     raise TypeError(

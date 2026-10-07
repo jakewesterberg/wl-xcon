@@ -14,7 +14,7 @@ import pytest
 from _rig import STEREOSCOPE
 from wl_xcon import look
 from wl_xcon.check import check
-from wl_xcon.photometry import RMS, Gray, Michelson, Weber
+from wl_xcon.photometry import RMS, Gray, Michelson, Weber, xyY
 from wl_xcon.task import (
     REMEMBERED,
     After,
@@ -674,3 +674,121 @@ def test_a_parameter_fill_is_held_to_the_drift_rule_at_each_choice():
     fine = _fill_choices(_good_fill(), look.SineGrating(direction=270.0, contrast=Michelson(0.5)))
     assert _refused(_one(direct, params=fine, background=GRAY_BG)) == set()
     assert _refused(_one(items, params=fine, background=GRAY_BG)) == set()
+
+
+# --- Values of the wrong kind, and parameters that refer to themselves (A1 follow-ups) --
+#
+# `screen.resolve` binds and converts what the checker passed, so a value of the wrong kind
+# that loads is met first by the drawer, with the drawer's message rather than the task's
+# (XC-245, XC-264, XC-265, XC-267); and a parameter whose choices name it has no value to
+# bind at all, and sent the walks that follow choices round it forever (XC-263).
+
+
+def _says(trial: Trial, said: str) -> bool:
+    return any(said in detail for detail in _blocks(trial))
+
+
+@pytest.mark.parametrize("looks, said", [
+    (look.Look(shape=look.Circle(size="big"), fill=look.Flat(color=Gray(40.0))),
+     "Circle.size is 'big', not a number"),
+    (Gabor(sf="2", contrast=Michelson(0.5)), "Gabor.sf is '2', not a number"),
+    (Disc(size=True, color=Gray(40.0)), "Disc.size is True, not a number"),
+    (_drifting(direction="up"), "SineGrating.direction is 'up', not a number"),
+    (look.Look(fill=look.Flat(color=Gray(40.0)), orientation="45"),
+     "Look.orientation is '45', not a number"),
+    (Disc(contrast=Weber("0.5")), "Weber.value is '0.5', not a number"),
+    (Disc(color=Gray("40")), "Gray.cd_m2 is '40', not a number"),
+])
+def test_a_number_field_that_holds_no_number_is_refused(looks, said):
+    assert _says(_one(looks, background=GRAY_BG), said)
+
+
+def test_an_opacity_that_is_no_number_is_refused():
+    shown = _placed(opacity="half")
+    updated = _two_updates(Stimulus("s", at=(0.0, 0.0), looks=LIT), Update("s", layer=1),
+                           Update("s", opacity="half"))
+    for trial in (shown, updated):
+        found = [f.detail for f in check(trial) if f.blocking and f.code == "bad-placement"]
+        assert len(found) == 1 and "'s''s opacity is 'half', not a number" in found[0], found
+
+
+@pytest.mark.parametrize("looks, background, params, said", [
+    (Disc(color=10.0), GRAY_BG, (), "Disc.color is 10.0, not a color"),
+    (Disc(color=P("c")), GRAY_BG, [Param("c", unit="cd/m2", choices=(10.0, 20.0))],
+     "Disc.color can be 10.0 (parameter 'c'), not a color"),
+    (look.Look(fill=look.SineGrating(contrast=Michelson(0.5), mean=20.0)), GRAY_BG, (),
+     "SineGrating.mean is 20.0, not a color"),
+    (look.Look(fill=look.Flat(color=Gray(10.0)), outline=look.Outline(color="white")), GRAY_BG, (),
+     "Outline.color is 'white', not a color"),
+    (LIT, 20.0, (), "the trial's background is 20.0, not a color"),
+    (LIT, P("c"), [Param("c", unit="color", choices=(GRAY_BG, 20.0))],
+     "the trial's background can be 20.0 (parameter 'c'), not a color"),
+])
+def test_a_color_field_that_holds_no_color_is_refused(looks, background, params, said):
+    trial = _one(looks, params=params, background=background)
+    assert _refused(trial) == {"bad-block"} and _says(trial, said)
+
+
+def test_a_color_whose_parts_are_parameters_is_still_a_color():
+    # Checked under a calibration with Task 2 (XC-261); here it is a color, as a literal is.
+    params = [Param("Y", unit="cd/m2", low=0.0, high=10.0)]
+    assert _refused(_one(Disc(color=xyY(0.3, 0.3, P("Y"))), params=params,
+                         background=GRAY_BG)) == {"uncalibrated-color"}
+
+
+@pytest.mark.parametrize("trial", [
+    _one(P("l"), params=[Param("l", unit="appearance", low=0, high=1)], background=GRAY_BG),
+    dataclasses.replace(
+        _two_updates(Stimulus("s", at=(0.0, 0.0), looks=LIT), Update("s", layer=1),
+                     Update("s", looks=P("l"))),
+        params=[Param("l", unit="appearance", low=0, high=1)], background=GRAY_BG),
+])
+def test_an_appearance_parameter_that_offers_no_appearances_is_refused(trial):
+    assert _says(trial, "'s''s appearance is parameter 'l', which offers no appearances as choices")
+
+
+@pytest.mark.parametrize("looks, params, said", [
+    (Array(looks=P("l"), among=LIT), [Param("l", unit="appearance", low=0, high=1)],
+     "Array.looks is parameter 'l', which offers no appearances as choices"),
+    (P("l"), [Param("l", unit="appearance", choices=(LIT, 5.0))],
+     "'s''s appearance can be 5.0 (parameter 'l'), not an appearance"),
+    ("disc", (), "'s''s appearance is 'disc', not an appearance"),
+])
+def test_an_appearance_of_the_wrong_kind_is_refused(looks, params, said):
+    assert _says(_one(looks, params=params, background=GRAY_BG), said)
+
+
+@pytest.mark.parametrize("points", [
+    ((0.0, 0.0), (1.0, 1.0), (2.0, 2.0)),
+    ((0.0, 0.0), (1.0, 0.0), (0.0, 0.0), (1.0, 0.0)),
+])
+def test_vertices_that_enclose_no_area_are_refused(points):
+    shape = look.Look(shape=look.Vertices(points=points), fill=look.Flat(color=Gray(40.0)))
+    assert _says(_one(shape, background=GRAY_BG), "encloses no area")
+
+
+def test_vertices_that_enclose_an_area_are_accepted():
+    shape = look.Vertices(points=((0.0, 0.0), (1.0, 0.0), (0.0, 1.0)))
+    assert _refused(_one(look.Look(shape=shape, fill=look.Flat(color=Gray(40.0))),
+                         background=GRAY_BG)) == set()
+
+
+@pytest.mark.parametrize("looks, background, params, combine", [
+    # An appearance whose light is the parameter that offers it.
+    (P("a"), GRAY_BG, [Param("a", unit="appearance", choices=(Disc(color=Gray(P("a"))),))],
+     "cover"),
+    # A fill whose light is itself.
+    (look.Look(fill=P("a")), GRAY_BG,
+     [Param("a", unit="fill", choices=(look.Flat(color=Gray(P("a"))),))], "cover"),
+    # A background that is itself, directly and through another parameter.
+    (LIT, P("a"), [Param("a", unit="color", choices=(P("a"),))], "cover"),
+    (LIT, P("a"), [Param("a", unit="color", choices=(P("b"),)),
+                   Param("b", unit="color", choices=(Gray(P("a")),))], "cover"),
+    # An array, multiplying, whose items are the parameter that offers it.
+    (P("a"), GRAY_BG, [Param("a", unit="appearance", choices=(Array(looks=P("a"), among=WEBER),))],
+     "multiply"),
+])
+def test_a_parameter_whose_choices_name_it_is_refused_not_followed(looks, background, params,
+                                                                     combine):
+    trial = _placed(looks=looks, background=background, params=params, combine=combine)
+    assert _says(trial, "parameter 'a' refers to itself")

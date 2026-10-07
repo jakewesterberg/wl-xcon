@@ -210,3 +210,25 @@ def test_a_color_parameter_s_choices_are_each_checked_against_the_panel():
 def test_a_luminance_parameter_that_cannot_be_bounded_is_refused_not_raised():
     trial = replace(a_task(Disc(color=Gray(P("lum")))), params=[Param("lum", unit="cd/m2")])
     assert "bad-block" in codes(trial)
+
+
+def test_a_number_where_a_color_belongs_is_refused_not_passed_to_the_drawer():
+    """With a calibration this loaded, and `resolve` then called it a cone contrast for a
+    later build to draw (XC-264)."""
+    assert "bad-block" in codes(a_task(Disc(color=10.0)))
+    offering = replace(a_task(Disc(color=P("c"))),
+                       params=[Param("c", unit="cd/m2", choices=(10.0, 20.0))])
+    assert "bad-block" in codes(offering)
+
+
+def test_a_color_written_as_a_parameter_still_loads():
+    ranged = replace(a_task(Disc(color=Gray(P("lum")))),
+                     params=[Param("lum", unit="cd/m2", low=0.0, high=100.0)])
+    offered = replace(a_task(Disc(color=P("c"))),
+                      params=[Param("c", unit="color", choices=(Gray(10.0), xyY(0.5, 0.4, 30.0)))])
+    assert codes(ranged) == set() and codes(offered) == set()
+
+
+def test_a_luminance_still_a_parameter_must_be_bound_before_it_converts():
+    with pytest.raises(TypeError, match="bind"):
+        to_xyz(Gray(P("x")))
