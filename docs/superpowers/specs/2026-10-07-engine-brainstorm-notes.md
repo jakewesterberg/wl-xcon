@@ -499,3 +499,27 @@ restarts, and its own real-time priority):
 - **The screen during a pause** — "Declared per task", and in the PI's words "default is black":
   black unless the task declares what stays up. Changes V12 item 3's plan (background during a
   pause). The flip patch still alternates during a pause (S4 §7).
+
+**Batch 2** (asked 2026-10-07):
+
+- **Checking the screen and its mode** — "Warn on a mismatch": the rig file names the panel,
+  resolution, refresh rate and bit depth; a difference goes on the warnings list (offered against:
+  refuse).
+- **A windowed display** — "Simulations only": labeled "development: not timing-valid", for
+  simulations, demo mode and tests; a real animal's session needs the rig's panel in exclusive
+  full-screen mode.
+- **After a change to the display software or graphics driver** — "A warning until re-measured":
+  the rig records what V1 measured with (core version, driver, kernel, mode); while no V1 matches
+  the current setup, the warnings list says so (offered against: refuse animal sessions).
+- **The OLED's own maintenance cycle** — "Scheduled, never in a session": triggered by the rig
+  outside sessions and recorded if the panel allows it; otherwise a session refuses to open while
+  the panel says maintenance is due. Whether the PG27UCDM allows either is UNVERIFIED (S0 §5.1).
+
+**Element 8 is discussed.**
+
+## 9. Calibration procedures and test screens
+
+Settled before the element: S4 §10's test screens (per-eye alignment, required at every session
+start on the stereoscope; geometry grid; gamma ramp; photodiode patch test; frame-timing pattern;
+disparity verification); one color calibration for the panel, sRGB by default, 30-day warning;
+XC-002 (automated color calibration in the rig) whose instrument choice was never asked.
