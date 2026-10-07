@@ -719,3 +719,25 @@ Settled before the element: declared parameters with ranges and a live flag (S8 
 deployment → rig → subject → task → session → live edits, and live edits now over conditions
 (element 11); staged and applied at a trial boundary (S8 §3.2); one validated write path, the
 actor recorded; several writers with visibility instead of a lock (S9a §8).
+
+**Batch 1** (asked 2026-10-07):
+
+- **When a live edit takes effect** — "Next trial; 'instant' if declared": at the next trial boundary,
+  except a parameter the task declares instant, which changes on the next frame, recorded with it.
+- **An animal's starting values at a new session** (XC-018) — "Operator chooses each time": at session
+  open the console asks whether to start from the animal's last values, the task's defaults, or a
+  saved preset (offered against: the animal's last values, recommended).
+- **Presets** — "Yes, per animal and task": the current values saved as a named preset for an animal
+  and a task, applied with one click as one recorded change, kept in the animal's folder.
+- **Edit history** — "Yes, with revert": every edit listed with who, when, old and new; any earlier
+  state restored in one action, itself recorded.
+
+**Element 14 is discussed.**
+
+## 15. Recording and review
+
+Settled before the element: per-trial full values, block and condition names, the ten position
+numbers (`trials.jsonl`); conditions numbered fixed per task in the recording (element 11);
+automatic stimulus on/off/changed codes and the screen log with live values and seeds (element 5);
+ADR-0006's review artifact (diagram, code table, timeline) plus the PI's example frames per state
+(element 1).
