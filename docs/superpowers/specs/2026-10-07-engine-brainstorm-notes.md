@@ -523,3 +523,23 @@ Settled before the element: S4 §10's test screens (per-eye alignment, required 
 start on the stereoscope; geometry grid; gamma ramp; photodiode patch test; frame-timing pattern;
 disparity verification); one color calibration for the panel, sRGB by default, 30-day warning;
 XC-002 (automated color calibration in the rig) whose instrument choice was never asked.
+
+**Batch 1** (asked 2026-10-07):
+
+- **The instrument for color calibration** (a scientific choice; buying it stays the PI's) — "A
+  spectroradiometer": full spectra, so luminance and cone contrasts for any observer, macaque
+  included, and any cone fundamentals named later (XC-002's fork).
+- **Who runs it** — "Automated, from the console": with the instrument at the eye point, the rig
+  shows the patches, reads the instrument, fits the table and writes a dated calibration record.
+- **Checks before every session** — the quick frame-timing check (ten seconds of flips timed by the
+  sensor; a warning past a rig-set late-frame rate) and the light-sensor (photodiode) test. The PI
+  asked whether "eye alignment" meant the eye tracker's calibration: it did not (S4 §10 item 1 is
+  the stereoscope's per-eye alignment target, already required every session there), and the
+  vague "direct view" option offered was dropped.
+- **The eye tracker's calibration at session start** — "Full calibration, every session", as S5 §7
+  planned: the thirteen-target constellation before any task runs; no first task without a
+  validated map; calibration epochs inside tasks keep tracking drift. (S5's "planned by wl.works"
+  was retired 2026-10-01; this is now the rig's rule.)
+- **Where calibration and timing records live** — "Committed per rig": under
+  `docs/measurements/<rig>/`, each with an id; the rig file names the calibration in force; every
+  session records the id.
