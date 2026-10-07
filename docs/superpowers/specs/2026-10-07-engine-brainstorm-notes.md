@@ -124,3 +124,17 @@ nothing is computed inside a frame.
 - **Curve-tracing curves** — "Both": a fixed path written in the task, or a reviewed procedure
   generating curves between trials from a seed, saved in the record.
 - **Outlines** — "Yes, on any shape": an outline width and color separate from the fill.
+
+**Batch 5, masks, Mondrians, background, the field's edge** (asked 2026-10-07):
+
+- **Masks** — all four (noise masks; pattern masks; metacontrast; object substitution, four dots
+  outlasting the target) and, the PI's addition, a **full screen mask**. Each built from blocks;
+  any that cannot be becomes a reviewed extension.
+- **Mondrians** — all four materials: colored rectangles, grayscale rectangles, mixed shapes,
+  image fragments.
+- **The background** — "Yes, as the bottom layer": layer 0, its color and luminance changeable
+  during a trial like any stimulus. DKL colors are defined against the background, so the record
+  says which background each color was set against.
+- **Off the field** — "Only when declared": a stimulus may extend past the field's edge only if
+  the task says so (a sweep entering from off-screen, a scene cropped by the mask); otherwise
+  refused at load, as today.
