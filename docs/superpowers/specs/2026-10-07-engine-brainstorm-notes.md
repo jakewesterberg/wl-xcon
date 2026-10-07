@@ -391,3 +391,15 @@ Settled before the element (S4 §6, §8; V7): sounds are declared assets, reside
 with `AUDIO_ON`/`AUDIO_OFF` codes and their onset measured by a tap into a misc analog input;
 images and movies resident before an epoch, within a budgeted memory, each set versioned and
 recorded per trial.
+
+**Batch 1** (asked 2026-10-07):
+
+- **What plays sounds** — "The NI card's analog output": waveforms played by the recording card,
+  sample-accurate on the recording's own clock, through an amplifier.
+- **Speakers** — "Two, left and right": stereo for lateralized sounds; a centered sound plays on
+  both. Consequence: two analog outputs on the NI card, part of S6's I/O allocation (the card is
+  the PI's purchase).
+- **Movie soundtracks** — "Optional per movie": when played, kept in step with the frames and their
+  timing recorded.
+- **Image formats** — "Any common format": JPEG allowed, with a warning (offered against: lossless
+  only).
