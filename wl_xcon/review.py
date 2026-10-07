@@ -12,6 +12,8 @@ at 8am.
 
 from __future__ import annotations
 
+from dataclasses import fields, is_dataclass
+
 from wl_xcon.task import (
     arrays_of,
     After,
@@ -24,6 +26,7 @@ from wl_xcon.task import (
     ItemWindows,
     Reward,
     Show,
+    Stimulus,
     Trial,
     Update,
     actions_of,
@@ -73,6 +76,45 @@ def _guard_label(guard: Guard) -> str:
         head, _, tail = label.partition(f"{guard.seconds:g}")
         label = f"{head}{guard.seconds:g}s{tail}"
     return label
+
+
+def _point_label(at: object) -> str:
+    """A position: a pair coordinate by coordinate, or one parameter by its name."""
+    if isinstance(at, tuple):
+        return f"({_value_label(at[0])}, {_value_label(at[1])})"
+    return _value_label(at)
+
+
+def _position_label(stimulus: Stimulus) -> str:
+    """Where a stimulus is drawn: each eye's own position when it has them, which are
+    drawn in place of `at` (engine spec §5.4)."""
+    if stimulus.at_left is not None or stimulus.at_right is not None:
+        return f"L {_point_label(stimulus.at_left)} / R {_point_label(stimulus.at_right)}"
+    return _point_label(stimulus.at)
+
+
+def _light_label(color: object) -> str:
+    """A background as the source declares it, its parameters by name. Unset is said:
+    the drawer puts black there, and a blank would read as nothing declared. Something
+    that is not a color is shown as written: `wlx review` checks nothing first, and an
+    artifact that raises shows nothing at all."""
+    if color is None:
+        return "black (default)"
+    if isinstance(color, P) or not is_dataclass(color):
+        return _value_label(color)
+    values = ", ".join(_value_label(getattr(color, f.name)) for f in fields(color))
+    return f"{type(color).__name__}({values})"
+
+
+def _background_label(trial: Trial) -> str:
+    """The trial's background; each eye's on the stereoscope, where each can have its own
+    (`screen.resolve`: an eye's own, else the trial's, else black)."""
+    per_eye = trial.background_left is not None or trial.background_right is not None
+    if trial.view == "stereoscope" or per_eye:
+        left = trial.background if trial.background_left is None else trial.background_left
+        right = trial.background if trial.background_right is None else trial.background_right
+        return f"left eye {_light_label(left)}; right eye {_light_label(right)}"
+    return _light_label(trial.background)
 
 
 def _scores_label(on: object) -> str:
@@ -190,13 +232,8 @@ def render(trial: Trial, allocation_names: dict[int, str] | None = None) -> str:
                     f"| {window.eye} |"
                 )
                 continue
-            centre = (
-                f"({_value_label(window.at[0])}, {_value_label(window.at[1])})"
-                if isinstance(window.at, tuple)
-                else _value_label(window.at)
-            )
             lines.append(
-                f"| `{window.name}` | {centre} | {_value_label(window.radius)} "
+                f"| `{window.name}` | {_point_label(window.at)} | {_value_label(window.radius)} "
                 f"| {_scores_label(window.on)} | {window.eye} |"
             )
         lines.append("")
@@ -232,10 +269,20 @@ def render(trial: Trial, allocation_names: dict[int, str] | None = None) -> str:
         if isinstance(action, Show)
     ]
     if stimuli:
-        lines += ["## Stimuli", "", "| State | Position (cyclopean°) | Disparity° |",
-                  "|---|---|---|"]
+        # Everything the drawer places and combines by (engine spec §4.4, §5.4), as each
+        # `Show` declares it: a table of position and disparity alone left the rest of the
+        # screen unreviewed (XC-259).
+        lines += ["## Stimuli", "", f"Background: {_background_label(trial)}", "",
+                  "| State | Stimulus | Position° | Disparity° | Eye | Layer | Combination "
+                  "| Opacity |",
+                  "|---|---|---|---|---|---|---|---|"]
         for name, stimulus in stimuli:
-            lines.append(f"| `{name}` | {stimulus.at} | {stimulus.disparity} |")
+            lines.append(
+                f"| `{name}` | `{stimulus.name}` | {_position_label(stimulus)} "
+                f"| {_value_label(stimulus.disparity)} | {stimulus.eye} "
+                f"| {_value_label(stimulus.layer)} | {stimulus.combine} "
+                f"| {_value_label(stimulus.opacity)} |"
+            )
         lines.append("")
 
     return "\n".join(lines)

@@ -12,9 +12,10 @@ import dataclasses
 import pytest
 
 from _rig import STEREOSCOPE
-from wl_xcon import look
+from wl_xcon import look, screen
 from wl_xcon.check import check
 from wl_xcon.photometry import RMS, Gray, Michelson, Weber, xyY
+from wl_xcon.run import Quiet, run_trial
 from wl_xcon.task import (
     REMEMBERED,
     After,
@@ -346,7 +347,72 @@ def test_an_update_cannot_mix_per_eye_positions_with_disparity():
     assert "per-eye-misused" in _refused(updating(per_eye, Update("s", disparity=0.3)))
     assert "per-eye-misused" in _refused(
         updating(deep, Update("s", at_left=(1.0, 0.0), at_right=(0.0, 0.0))))
-    assert "per-eye-misused" in _refused(updating(per_eye, Update("s", at_left=(2.0, 0.0))))
+
+
+# --- Per-eye positions in an update (the A1 follow-ups, XC-259, XC-260) -------------
+
+PER_EYE = Stimulus("s", at=(0.0, 0.0), looks=LIT, at_left=(1.0, 0.0), at_right=(-1.0, 0.0))
+PLAIN = Stimulus("s", at=(0.0, 0.0), looks=LIT)
+
+
+def _shown_then(update, *shows) -> Trial:
+    """Each of `shows` in turn, taken down before the next, and then `update`."""
+    states = []
+    for i, show in enumerate(shows):
+        last = i == len(shows) - 1
+        states.append(State(f"show{i}", enter=[Show(show)], go=[On(After(0.5), f"then{i}")]))
+        states.append(State(f"then{i}", enter=[update] if last else [Hide("s")],
+                            go=[On(After(0.5), Outcome.ABORT if last else f"show{i + 1}")]))
+    return Trial(start="show0", view="stereoscope", states=states)
+
+
+def test_an_update_of_at_on_a_stimulus_with_per_eye_positions_is_refused():
+    # Its per-eye positions are what is drawn, so `at` would change nothing on the screen.
+    findings = [f for f in check(_shown_then(Update("s", at=(2.0, 0.0)), PER_EYE))
+                if f.code == "per-eye-misused"]
+    assert len(findings) == 1
+    assert "so `at` is not used; update `at_left` and `at_right`" in findings[0].detail
+    both = Update("s", at=(2.0, 0.0), at_left=(3.0, 0.0), at_right=(1.0, 0.0))
+    assert "per-eye-misused" in _refused(_shown_then(both, PER_EYE))
+    # Refused when any `Show` of it has them: there `at` is ignored without a word.
+    assert "per-eye-misused" in _refused(_shown_then(Update("s", at=(2.0, 0.0)), PLAIN, PER_EYE))
+    assert _refused(_shown_then(Update("s", at=(2.0, 0.0)), PLAIN)) == set()
+
+
+def test_an_update_of_one_eye_s_position_keeps_the_other_s():
+    assert _refused(_shown_then(Update("s", at_right=(-2.0, 0.0)), PER_EYE)) == set()
+    assert _refused(_shown_then(Update("s", at_left=(2.0, 0.0)), PER_EYE, PER_EYE)) == set()
+
+
+def test_an_update_of_one_eye_s_position_draws_the_other_where_the_show_put_it():
+    """The path, not the piece: what `check` accepts, the trial loop applies and
+    `screen.resolve` draws."""
+    trial = _shown_then(Update("s", at_left=(2.0, 0.0)), PER_EYE)
+    assert _refused(trial) == set()
+    seen = []
+
+    class Watching(Quiet):
+        def display(self, visible, frame):
+            seen.append(dict(visible))
+
+    run_trial(trial, Watching(), frame_period=0.01)
+    (item,) = screen.resolve(seen[-1], {}, trial, STEREOSCOPE, frame_period=0.01).items
+    assert (item.at_left, item.at_right) == ((2.0, 0.0), (-1.0, 0.0))
+
+
+def test_an_update_of_one_eye_s_position_is_refused_where_a_show_gives_neither():
+    # The other eye would be left with no position of its own.
+    assert "per-eye-misused" in _refused(_shown_then(Update("s", at_left=(2.0, 0.0)), PLAIN))
+    assert "per-eye-misused" in _refused(
+        _shown_then(Update("s", at_left=(2.0, 0.0)), PER_EYE, PLAIN))
+
+
+def test_an_update_of_one_eye_s_position_is_measured_with_the_other_s_old_one():
+    # `_as_updated` varies each property on its own: the left eye's new 12.5° (behind the
+    # ±12° mask) with the right eye's -1° from the `Show`.
+    (finding,) = _off(_shown_then(Update("s", at_left=(12.5, 0.0)), PER_EYE))
+    assert "updates stimulus 's'" in finding.detail and "12.5, 0.0" in finding.detail
+    assert _off(_shown_then(Update("s", at_left=(11.9, 0.0)), PER_EYE)) == []
 
 
 def test_an_unknown_periphery_and_a_per_eye_background_off_the_stereoscope_are_refused():

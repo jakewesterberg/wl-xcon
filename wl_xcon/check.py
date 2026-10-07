@@ -1919,7 +1919,8 @@ def _declares_mean(looks, params: dict[str, Param], inside: frozenset[str] = fro
 def _placement_faults(trial: Trial) -> list[Finding]:
     """How a stimulus is placed and layered, as the drawer needs it (engine spec §4.4,
     §5.4): opacity in [0, 1], a whole-number layer, a known combination, and per-eye
-    positions given in pairs, never with a disparity, and only on the stereoscope."""
+    positions given in pairs (an update may move one eye of a stimulus that has both),
+    never with a disparity or an updated `at`, and only on the stereoscope."""
     from wl_xcon.task import COMBINE, Show, Update
 
     params = {p.name: p for p in trial.params}
@@ -1968,6 +1969,21 @@ def _placement_faults(trial: Trial) -> list[Finding]:
                 refuse("bad-placement", (
                     f"an update of {name!r} can leave it a grating that multiplies the contrast "
                     f"below by its modulation, so its declared mean would be ignored; remove it"))
+            # Per-eye positions are drawn in place of `at` (`screen._eyes`), so an `at` that
+            # can meet them changes nothing on the screen (XC-259).
+            if "at" in sets and any(c.at_left is not None or c.at_right is not None for c in left):
+                refuse("per-eye-misused", (
+                    f"an update of {name!r} sets `at`, but {name!r} has per-eye positions, so "
+                    f"`at` is not used; update `at_left` and `at_right`"))
+            # One eye's position alone keeps the other eye's (XC-260), so the other must be
+            # there whatever it was shown and updated with. (One never shown at all is
+            # `absent-stimulus`.)
+            if ("at_left" in sets) != ("at_right" in sets) and any(
+                    (c.at_left is None) != (c.at_right is None) for c in left):
+                refuse("per-eye-misused", (
+                    f"an update of {name!r} gives one eye's position, and {name!r} can be on the "
+                    f"display without the other's; give `at_left` and `at_right` together, or "
+                    f"show it with both"))
         else:
             continue
         # At every value a parameter can take, as `_block_faults` holds a block's values.
@@ -2000,7 +2016,7 @@ def _placement_faults(trial: Trial) -> list[Finding]:
                 refuse("bad-placement", (
                     f"{name!r} is a grating that multiplies the contrast below by its "
                     f"modulation, so its declared mean would be ignored; remove it"))
-        if ("at_left" in sets) != ("at_right" in sets):
+        if isinstance(action, Show) and ("at_left" in sets) != ("at_right" in sets):
             refuse("per-eye-misused", f"{name!r} gives one eye's position without the other's")
         if "at_left" in sets or "at_right" in sets:
             if _nonzero(sets.get("disparity", 0.0)):

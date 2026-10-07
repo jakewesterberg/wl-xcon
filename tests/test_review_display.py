@@ -163,3 +163,62 @@ def test_a_window_coupled_to_nothing_is_called_out_rather_than_left_blank():
     )
     row = _window_row(render(trial), "orphan")
     assert "nothing declared" in row
+
+
+def test_the_stimuli_table_shows_how_each_stimulus_is_placed_and_combined():
+    """XC-259: per-eye positions, layer, combination, opacity and the background are what
+    the drawer draws from, so a table of `at` and disparity alone left half of it unreviewed."""
+    from wl_xcon.photometry import Gray
+    from wl_xcon.task import P, Param
+
+    pair = Stimulus("pair", at=(0.0, 0.0), looks=Disc(size=1.0, color=Gray(40.0)),
+                    at_left=(2.0, 0.0), at_right=(-2.0, 0.5))
+    glow = Stimulus("glow", at=(P("ecc"), 1.0), looks=Disc(size=1.0, color=Gray(10.0)),
+                    layer=2, combine="add", opacity=0.5)
+    trial = Trial(
+        start="on", view="stereoscope", background=Gray(20.0),
+        params=[Param("ecc", unit="deg", low=-4.0, high=4.0)],
+        states=[State("on", enter=[Show(pair), Show(glow)], go=[On(After(1.0), Outcome.ABORT)])],
+    )
+    artifact = render(trial)
+
+    assert "| State | Stimulus | Position° | Disparity° | Eye | Layer | Combination | Opacity |" \
+        in artifact
+    assert "| `on` | `pair` | L (2, 0) / R (-2, 0.5) | 0 | both | 0 | cover | 1 |" in artifact
+    # A parameter by its name, as everywhere else in the report.
+    assert "| `on` | `glow` | (ecc, 1) | 0 | both | 2 | add | 0.5 |" in artifact
+    # Once, above the table, each eye's on the stereoscope.
+    assert artifact.count("Background:") == 1
+    assert "Background: left eye Gray(20); right eye Gray(20)" in artifact
+    assert artifact.index("Background:") < artifact.index("| State | Stimulus |")
+
+
+def test_an_unset_background_is_said_to_be_black():
+    assert "Background: black (default)" in render(TRIAL)
+
+
+def test_each_eye_s_own_background_is_shown_where_one_is_declared():
+    from wl_xcon.photometry import Gray
+
+    own = Trial(start="on", view="stereoscope", background=Gray(20.0), background_right=Gray(30.0),
+                states=[State("on", enter=[Show(FIX)], go=[On(After(1.0), Outcome.ABORT)])])
+    assert "Background: left eye Gray(20); right eye Gray(30)" in render(own)
+    # Off the stereoscope too, where the checker refuses it: the artifact shows what is declared.
+    direct = Trial(start="on", view="direct", background_left=Gray(5.0),
+                   states=[State("on", enter=[Show(FIX)], go=[On(After(1.0), Outcome.ABORT)])])
+    assert "Background: left eye Gray(5); right eye black (default)" in render(direct)
+
+
+def test_a_background_s_parameters_print_as_their_names_and_a_non_color_still_renders():
+    from wl_xcon.photometry import Gray
+    from wl_xcon.task import P
+
+    def shown(**background) -> str:
+        return render(Trial(start="on", **background, states=[
+            State("on", enter=[Show(FIX)], go=[On(After(1.0), Outcome.ABORT)])]))
+
+    assert "Background: Gray(bg_lum)" in shown(background=Gray(P("bg_lum")))
+    assert "Background: bg" in shown(background=P("bg"))
+    # The checker refuses it, but `wlx review` checks nothing first, and an artifact that
+    # raises shows nothing at all.
+    assert "Background: 20" in shown(background=20.0)
