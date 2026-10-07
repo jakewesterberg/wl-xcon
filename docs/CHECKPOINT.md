@@ -401,11 +401,17 @@ had ordered just before:
   the session re-ran the ones that changed the design before acting on them.
 - **Backlog**: XC-242 filed (nothing calls a task's between-trial procedure); XC-013 now waits on
   the order above.
-- **XC-240 closed** the same day (branch `xc240`): `signin.parse_rig_page` refuses any rig-page
-  address that is not its origin as written, with or without a final `/`, exactly as wl.works'
-  `parseRigPages` does since its 16a-1b (`src/lib/rigs.ts:113` at `637007a7`): a query, an
-  upper-case scheme or host, a spelled-out `:443`, a port with a leading zero, a non-standard IP
-  address and a non-ASCII name are refused (`signin._canonical_host`).
+- **wl.works deployed its 16a-1b** on 2026-10-07 (its commit `637007a7`, as its session reported):
+  the 120 s renewal grace and the stricter rig-page addresses are live. XC-225 closed; XC-241 no
+  longer waits.
+- **XC-240 closed** the same day (branch `xc240`, on `main` at `21a9400`): `signin.parse_rig_page`
+  refuses any rig-page address that is not its origin as written, with or without a final `/`,
+  exactly as wl.works' `parseRigPages` does since its 16a-1b (`src/lib/rigs.ts:113` at
+  `637007a7`): a query, an upper-case scheme or host, a spelled-out `:443`, a port with a leading
+  zero, a non-standard IP address and a non-ASCII name are refused (`signin._canonical_host`).
+  CI read job by job, on the branch (run `37605236320`) and on `main` (run `37609443120`): pytest
+  `2523 passed` on 3.11-3.13; the gate swept `signin`, 22 caught, 0 survived, no timeouts,
+  `redirect_request` inert, every baseline and restore at `2491 passed, 32 skipped`.
 
 ## What moved on 2026-10-06: b2b-ready, the https page safe to switch on
 
