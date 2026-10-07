@@ -815,3 +815,192 @@ def test_a_parameter_whose_choices_name_it_is_refused_not_followed(looks, backgr
                                                                      combine):
     trial = _placed(looks=looks, background=background, params=params, combine=combine)
     assert _says(trial, "parameter 'a' refers to itself")
+
+
+# --- What each combination needs from a stimulus's light (A1 follow-ups) -------------
+#
+# A window or a scotoma shows or hides what is below it and never draws its own light, so
+# it needs none (call 3, XC-257); a multiplying grating draws its modulation alone, so its
+# mean is never used and one it declares would be ignored (call 1, XC-253, XC-256); a flat
+# light's edge fades its light, never a contrast it does not have (call 2, XC-249).
+
+NO_LIGHT = Disc(size=1.0)
+BIG = Stimulus("big", at=(0.0, 0.0), looks=Disc(size=6.0, color=Gray(40.0)))
+
+
+def _over_lit(looks, combine, *, params=(), background=None, view="direct") -> Trial:
+    """A lit disc, and over it a stimulus `s` that combines as `combine`."""
+    return Trial(
+        start="on", view=view, background=background, params=list(params),
+        windows=[Window("w", at=(0.0, 0.0), radius=2.0, on="s")],
+        states=[State("on", enter=[Show(BIG), Show(Stimulus("s", at=(0.0, 0.0), looks=looks,
+                                                             combine=combine, layer=1))],
+                      go=[On(After(1.0), Outcome.ABORT)])],
+    )
+
+
+@pytest.mark.parametrize("combine", ["window", "scotoma"])
+def test_a_window_or_a_scotoma_needs_no_light(combine):
+    assert _refused(_over_lit(NO_LIGHT, combine)) == set()
+
+
+@pytest.mark.parametrize("combine", ["window", "scotoma"])
+@pytest.mark.parametrize("looks", [
+    Disc(size=1.0, contrast=Weber(0.5)),                        # weber-on-black, if it covered
+    Disc(size=1.0, contrast=Michelson(0.5)),                    # contrast-convention
+    Disc(size=1.0, color=Gray(40.0), contrast=Weber(0.2)),      # overspecified-color
+    Gabor(sigma=0.5),                                           # a grating with no contrast
+    Gabor(sigma=0.5, contrast=Michelson(0.5)),                  # a grating's mean on black
+])
+def test_a_window_or_a_scotoma_s_light_is_held_to_no_light_rule(looks, combine):
+    assert _refused(_over_lit(looks, combine)) == set()
+
+
+def test_a_light_less_disc_that_covers_is_still_refused_unlit():
+    assert "unlit" in _refused(_over_lit(NO_LIGHT, "cover"))
+    assert "unlit" in _refused(_over_lit(NO_LIGHT, "add"))
+
+
+def test_an_appearance_some_stimulus_shows_lit_is_held_to_the_light_rules():
+    """Only an appearance *every* stimulus showing it shows as a window or a scotoma is
+    exempt: the same light-less disc covering in another stimulus needs a light."""
+    trial = _over_lit(NO_LIGHT, "window")
+    covering = Show(Stimulus("c", at=(3.0, 0.0), looks=NO_LIGHT))
+    trial = dataclasses.replace(trial, states=[dataclasses.replace(
+        trial.states[0], enter=[*trial.states[0].enter, covering])])
+    assert "unlit" in _refused(trial)
+
+
+def test_a_window_s_outline_is_drawn_so_needs_a_light_and_its_contrast_a_convention():
+    outlined = look.Look(shape=look.Circle(size=1.0), outline=look.Outline(width=0.1))
+    assert "unlit" in _refused(_over_lit(outlined, "window"))
+    assert "bare-contrast" in _refused(_over_lit(Disc(size=1.0, contrast=0.5), "scotoma"))
+
+
+def test_a_window_s_degenerate_shape_is_still_refused():
+    assert "bad-block" in _refused(_over_lit(Disc(size=0.0), "window"))
+    ring = look.Look(shape=look.Ring(inner=2.0, outer=1.0))
+    assert "bad-block" in _refused(_over_lit(ring, "scotoma"))
+
+
+def test_a_window_s_appearance_parameter_and_array_need_no_light():
+    choices = [Param("l", unit="appearance", choices=(NO_LIGHT, Disc(size=2.0)))]
+    assert _refused(_over_lit(P("l"), "window", params=choices)) == set()
+    assert _refused(_over_lit(Array(looks=NO_LIGHT, among=NO_LIGHT), "scotoma")) == set()
+    # Covering, each choice is held to the rule.
+    assert "unlit" in _refused(_over_lit(P("l"), "cover", params=choices))
+
+
+def _updated_to(looks, combine) -> Trial:
+    """A stimulus shown lit as `combine`, then updated to `looks`."""
+    return Trial(
+        start="a", view="direct",
+        states=[
+            State("a", enter=[Show(BIG), Show(Stimulus("s", at=(0.0, 0.0), looks=LIT, combine=combine,
+                                                       layer=1))],
+                  go=[On(After(0.5), "b")]),
+            State("b", enter=[Update("s", looks=looks)], go=[On(After(0.5), Outcome.ABORT)]),
+        ],
+    )
+
+
+def test_an_update_of_a_window_s_looks_needs_no_light_and_of_a_cover_s_does():
+    assert _refused(_updated_to(NO_LIGHT, "window")) == set()
+    assert "unlit" in _refused(_updated_to(NO_LIGHT, "cover"))
+    # An update of a name nothing shows has no combination to exempt it.
+    ghost = Trial(start="a", view="direct", states=[State(
+        "a", enter=[Show(Stimulus("big", at=(0.0, 0.0), looks=LIT)), Update("ghost", looks=NO_LIGHT)],
+        go=[On(After(0.5), Outcome.ABORT)])])
+    assert "unlit" in _refused(ghost)
+
+
+def test_a_multiplying_grating_needs_no_mean_on_black():
+    gabor = Gabor(sf=1.0, sigma=1.0, contrast=Michelson(0.5))
+    assert _refused(_over_lit(gabor, "multiply")) == set()
+    # Covering, its mean is what is behind it, which can be black.
+    assert "unlit" in _refused(_over_lit(gabor, "cover"))
+    # Only a grating every stimulus showing it multiplies is exempt.
+    trial = _over_lit(gabor, "multiply")
+    covering = Show(Stimulus("c", at=(3.0, 0.0), looks=gabor))
+    trial = dataclasses.replace(trial, states=[dataclasses.replace(
+        trial.states[0], enter=[*trial.states[0].enter, covering])])
+    assert "unlit" in _refused(trial)
+
+
+def test_a_multiplying_grating_that_declares_a_mean_is_refused():
+    grating = look.Look(shape=look.Circle(size=4.0),
+                        fill=look.SineGrating(contrast=Michelson(0.5), mean=Gray(20.0)))
+    said = ("multiplies the contrast below by its modulation, so its declared mean would be ignored; "
+            "remove it")
+    found = [f.detail for f in check(_over_lit(grating, "multiply", background=GRAY_BG))
+             if f.blocking and f.code == "bad-placement"]
+    assert len(found) == 1 and said in found[0], found
+    # Through a parameter's choices, and through an update.
+    means = [Param("m", unit="color", choices=(None, Gray(20.0)))]
+    chosen = look.Look(shape=look.Circle(size=4.0),
+                       fill=look.SineGrating(contrast=Michelson(0.5), mean=P("m")))
+    assert "bad-placement" in _refused(_over_lit(chosen, "multiply", params=means, background=GRAY_BG))
+    looks = [Param("l", unit="appearance", choices=(Gabor(contrast=Michelson(0.5)), grating))]
+    assert "bad-placement" in _refused(_over_lit(P("l"), "multiply", params=looks, background=GRAY_BG))
+    items = Array(looks=Gabor(contrast=Michelson(0.5)), among=grating)
+    assert "bad-placement" in _refused(_over_lit(items, "multiply", background=GRAY_BG))
+    gain = Stimulus("s", at=(0.0, 0.0), looks=Gabor(contrast=Michelson(0.5)), combine="multiply")
+    trial = dataclasses.replace(_two_updates(gain, Update("s", layer=1), Update("s", looks=grating)),
+                                background=GRAY_BG)
+    assert "bad-placement" in _refused(trial)
+    # Covering, a declared mean is the grating's mean.
+    assert _refused(_over_lit(grating, "cover", background=GRAY_BG)) == set()
+
+
+def test_a_flat_light_s_edge_applies_to_its_opacity_not_a_contrast():
+    def flat(applies):
+        return look.Look(shape=look.Circle(size=4.0), fill=look.Flat(color=Gray(40.0)),
+                         edge=look.RaisedCosine(width=0.1, applies=applies))
+    said = ("a flat light's edge fades its light, so `applies` is \"opacity\" (or left unset); "
+            "\"contrast\" applies to a pattern")
+    assert _says(_one(flat("contrast"), background=GRAY_BG), said)
+    assert _refused(_one(flat("opacity"), background=GRAY_BG)) == set()
+    assert _refused(_one(flat(None), background=GRAY_BG)) == set()
+    pattern = look.Look(shape=look.Circle(size=4.0), fill=look.SineGrating(contrast=Michelson(0.5)),
+                        edge=look.RaisedCosine(width=0.1, applies="contrast"))
+    assert _refused(_one(pattern, background=GRAY_BG)) == set()
+
+
+def _advice(trial: Trial) -> str:
+    return " ".join(f.detail for f in check(trial) if f.code == "weber-on-black")
+
+
+WEBER_DISC = Disc(contrast=Weber(0.5))
+
+
+def test_the_background_advice_names_every_parameter_that_can_make_one_black():
+    reach = [Param("a", unit="cd/m2", low=0.0, high=40.0), Param("b", unit="cd/m2", low=0.0, high=40.0)]
+    said = _advice(_one(WEBER_DISC, params=reach, view="stereoscope",
+                        background_left=Gray(P("a")), background_right=Gray(P("b"))))
+    assert "parameter 'a'" in said and "parameter 'b'" in said, said
+    assert "declare the" not in said, said
+    # One that cannot be bounded can be black too (failing closed), and says so.
+    said = _advice(_one(WEBER_DISC, params=[Param("bg", unit="cd/m2", low=10.0)],
+                        background=Gray(P("bg"))))
+    assert "bound parameter 'bg' above 0" in said, said
+    said = _advice(_one(WEBER_DISC, params=[Param("x", unit="color")], background=P("x")))
+    assert "give parameter 'x' lit colors as its choices" in said, said
+
+
+def test_the_background_advice_names_a_parameter_whose_choices_can_be_black():
+    said = _advice(_one(WEBER_DISC, params=_choices(GRAY_BG, Gray(0.0)), background=P("x")))
+    assert "remove Gray(cd_m2=0.0) from parameter 'x''s choices" in said, said
+    said = _advice(_one(WEBER_DISC, params=_choices(GRAY_BG, None), background=P("x")))
+    assert "remove None from parameter 'x''s choices" in said, said
+    lum = [Param("lum", unit="cd/m2", choices=(0.0, 20.0))]
+    said = _advice(_one(WEBER_DISC, params=lum, background=Gray(P("lum"))))
+    assert "remove 0 from parameter 'lum''s choices" in said, said
+
+
+def test_the_background_advice_names_the_eye_whose_background_is_black():
+    said = _advice(_one(WEBER_DISC, view="stereoscope", background_left=GRAY_BG))
+    assert "declare the right eye's background" in said and "left eye" not in said, said
+    said = _advice(_one(WEBER_DISC, view="stereoscope", background=GRAY_BG, background_left=Gray(0.0)))
+    assert "the left eye's background" in said and "right eye" not in said, said
+    said = _advice(_one(WEBER_DISC, background=Gray(0.0)))
+    assert "declare the trial's background lit: as written it is black" in said, said

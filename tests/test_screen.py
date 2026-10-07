@@ -1,9 +1,11 @@
 """The screen description (engine spec §3.3; build A1)."""
 
+import math
+
 import pytest
 
-from _rig import DIRECT, STEREOSCOPE
-from wl_xcon import look, screen
+from _rig import DIRECT, RIG, STEREOSCOPE
+from wl_xcon import exact, look, screen, viewport
 from wl_xcon.photometry import RMS, Gray, Michelson, Weber, to_xyz
 from wl_xcon.task import Array, Bar, Blank, Disc, Gabor, Noise, P, Square, Stimulus, Trial
 
@@ -192,3 +194,42 @@ def test_a_direction_not_across_the_bars_or_a_negative_speed_is_refused():
         _drift(0.0, 0.0)
     with pytest.raises(ValueError, match="a speed"):
         _drift(None, 0.0, tf=-1.0)
+
+
+def _seen(image, vp, x_deg):
+    """The luminance of the pixel at (x°, 0°) in a direct-view image."""
+    col = vp.width_px / 2 + (vp.distance_cm * math.tan(math.radians(x_deg)) + vp.ahead_cm[0]) / vp.pitch_cm[0]
+    row = vp.height_px / 2 - vp.ahead_cm[1] / vp.pitch_cm[1]
+    return image[int(row), int(col)][1]
+
+
+@pytest.mark.parametrize("combine, inside, outside", [("window", 40.0, 0.0), ("scotoma", 0.0, 40.0)])
+def test_a_window_or_a_scotoma_with_no_light_shows_or_hides_what_is_below(combine, inside, outside):
+    """It draws none of its own light (call 3, XC-257): it resolves with none, and the drawer
+    shows what is below only inside a window, and hides it inside a scotoma."""
+    below = Stimulus("big", at=(0.0, 0.0), looks=Disc(size=6.0, color=Gray(40.0)))
+    hole = Stimulus("h", at=(0.0, 0.0), looks=Disc(size=1.0), combine=combine, layer=1)
+    s = screen.resolve({"big": below, "h": hole}, {}, TRIAL, DIRECT, frame_period=1 / 240)
+    assert s.items[1].fill == screen.ResolvedFlat(xyz=None, weber=None)
+    vp = viewport.viewports(RIG, DIRECT, pixels=(384, 216))[0]
+    image = exact.draw(s, vp)
+    assert (_seen(image, vp, 0.0), _seen(image, vp, 2.0)) == pytest.approx((inside, outside))
+
+
+@pytest.mark.parametrize("combine", ["cover", "add", "multiply"])
+def test_a_flat_fill_with_no_light_is_refused_unless_it_is_a_window_or_a_scotoma(combine):
+    with pytest.raises(ValueError, match="no light"):
+        _one(Stimulus("f", at=(0.0, 0.0), looks=Disc(size=1.0), combine=combine))
+
+
+def test_a_window_s_or_a_scotoma_s_declared_light_is_not_read():
+    """The checker holds it to no light rule, so `resolve` reads none it could refuse: a flat
+    fill resolves to no light, a grating to its bars alone, its edge as a grating's."""
+    for looks in (Disc(size=1.0, contrast=Michelson(0.5)), Disc(size=1.0, color=Gray(40.0))):
+        item = _one(Stimulus("w", at=(0.0, 0.0), looks=looks, combine="window")).items[0]
+        assert item.fill == screen.ResolvedFlat(xyz=None, weber=None)
+    for looks in (Gabor(sigma=0.5), Gabor(sigma=0.5, contrast=Michelson(0.5))):
+        item = _one(Stimulus("s", at=(0.0, 0.0), looks=looks, combine="scotoma")).items[0]
+        assert item.fill == screen.ResolvedGrating(sf=2.0, phase=0.0, tf=0.0, michelson=None,
+                                                   mean_xyz=None)
+        assert item.edge == look.GaussianEdge(sigma=0.5, applies="contrast")

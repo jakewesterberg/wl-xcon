@@ -857,6 +857,46 @@ def _appearances(trial: Trial):
     return seen
 
 
+def _combined(trial: Trial, params: dict[str, Param]) -> list[tuple[object, object]]:
+    """Each appearance a stimulus can show, paired with how that stimulus combines with what
+    is below it (engine spec §4.4), so a rule can ask what a combination needs of a light.
+
+    A `Show` pairs its looks with its own `combine`. An `Update` of `looks` pairs them with
+    the `combine` of each `Show` of that name, since an update cannot change one, or with
+    `None` when nothing shows that name, which no rule exempts. An `Array`'s items combine
+    as the array does, and a parameter's choices as the stimulus whose looks it is. An
+    appearance `_appearances` finds that this pairs with nothing (a parameter's choice no
+    stimulus shows) has no combination to exempt it from any rule."""
+    from wl_xcon.task import Appearance
+
+    shown: dict[str, list[str]] = {}
+    for _, action in actions_of(trial):
+        if isinstance(action, Show):
+            shown.setdefault(action.stimulus.name, []).append(action.stimulus.combine)
+    pairs: list[tuple[object, object]] = []
+
+    def walk(looks, how, inside: frozenset[str]) -> None:
+        if isinstance(looks, P):
+            if looks.name in inside:
+                return  # refused as referring to itself (`_self_referring`)
+            param = params.get(looks.name)
+            for choice in (param.choices if param is not None else ()):
+                walk(choice, how, inside | {looks.name})
+        elif isinstance(looks, Appearance):
+            pairs.append((looks, how))
+            if isinstance(looks, Array):
+                walk(looks.looks, how, inside)
+                walk(looks.among, how, inside)
+
+    for _, action in actions_of(trial):
+        if isinstance(action, Show):
+            walk(action.stimulus.looks, action.stimulus.combine, frozenset())
+        elif isinstance(action, Update) and "looks" in action.changes():
+            for how in shown.get(action.stimulus, [None]):
+                walk(action.looks, how, frozenset())
+    return pairs
+
+
 def _literal(value) -> float | None:
     """A literal number, or None for a parameter, a missing value or anything else."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -1042,16 +1082,73 @@ def _black(color, params: dict[str, Param], inside: frozenset[str] = frozenset()
 
 
 def _background_fix(backgrounds: list, params: dict[str, Param]) -> str:
-    """What to write so an eye's background is not black: raise the low end of a declared
-    range that reaches 0, otherwise declare the background."""
-    for background in backgrounds:
-        light = _luminance(background)
-        param = params.get(light.name) if isinstance(light, P) else None
-        if param is not None and param.low is not None and param.high is not None \
-                and param.low <= 0.0:
-            return (f"raise the low end of parameter {param.name!r}'s range, which the "
-                    f"background is, above 0")
-    return "declare the trial's background"
+    """What to write so no eye's background is black, for every way `_black` finds one can
+    be (XC-268): each parameter whose values reach black, named with what to change -- the
+    low end of its range, its black choices, or a bound it lacks -- and each eye whose
+    background is unset or written black, told to declare one (naming the eye on the
+    stereoscope when only one is). A parameter met again inside its own choices adds
+    nothing: `_self_referring` refuses it."""
+    fixes: list[str] = []
+    unset: list[int] = []
+    written: list[int] = []
+
+    def fix(said: str) -> None:
+        if said not in fixes:
+            fixes.append(said)
+
+    def dark(color) -> bool:
+        """Black as written: no light, or a literal luminance of 0."""
+        luminance = _literal(_luminance(color))
+        return color is None or (luminance is not None and luminance <= 0.0)
+
+    def walk(color, eye: int, inside: frozenset[str]) -> None:
+        if isinstance(color, P):
+            if color.name in inside:
+                return
+            param = params.get(color.name)
+            if param is None or not param.choices:
+                fix(f"give parameter {color.name!r} lit colors as its choices")
+                return
+            black = [choice for choice in param.choices if dark(choice)]
+            if black:
+                fix(f"remove {', '.join(map(repr, black))} from parameter {color.name!r}'s choices")
+            for choice in param.choices:
+                if not dark(choice):
+                    walk(choice, eye, inside | {color.name})
+            return
+        if color is None:
+            unset.append(eye)
+            return
+        light = _luminance(color)
+        try:
+            reached = [v for v in _reach(light, params) if v <= 0.0]
+        except _Unbounded:
+            fix(f"bound parameter {light.name!r} above 0: it has neither a two-sided range nor "
+                f"numeric choices, so it can be anything")
+            return
+        if not reached:
+            return
+        if not isinstance(light, P):
+            written.append(eye)
+        elif params[light.name].choices:
+            fix(f"remove {', '.join(f'{v:g}' for v in reached)} from parameter {light.name!r}'s "
+                f"choices")
+        else:
+            fix(f"raise the low end of parameter {light.name!r}'s range above 0")
+
+    for eye, background in enumerate(backgrounds):
+        walk(background, eye, frozenset())
+
+    def whose(eyes: list[int]) -> str:
+        if len(backgrounds) == 1 or len(eyes) == len(backgrounds):
+            return "the trial's"
+        return ("the left eye's", "the right eye's")[eyes[0]]
+
+    if unset:
+        fix(f"declare {whose(unset)} background")
+    if written:
+        fix(f"declare {whose(written)} background lit: as written it is black")
+    return " and ".join(fixes) or "declare the trial's background"
 
 
 def _bare(contrast, params: dict) -> bool:
@@ -1080,14 +1177,25 @@ def _light_faults(trial: Trial) -> list[Finding]:
 
     **A light written as a parameter is held to these rules at each of its choices**, and
     one that offers no choices to read is refused: a check that read only literals passed
-    exactly the lights the lab makes live."""
+    exactly the lights the lab makes live.
+
+    **What a light must be depends on how it is combined** (`_combined`), and an appearance
+    is exempt only when every stimulus that can show it is. A window or a scotoma draws
+    none of its own light (`screen.LIGHTLESS`; call 3, XC-257), so its light is held to
+    none of these rules; how it is written still is (`bare-contrast`, a parameter with no
+    choices to read), and its outline, which is drawn, still needs a light. A multiplying
+    grating draws only its modulation, so a mean it lacks is not a light it lacks on black
+    (the multiplying half of XC-256); one it declares is refused where the combination is
+    (`_placement_faults`)."""
     from wl_xcon import look
     from wl_xcon.photometry import Contrast, Michelson, Weber
+    from wl_xcon.screen import LIGHTLESS
 
     params = {p.name: p for p in trial.params}
     backgrounds = _backgrounds(trial)
     on_black = any(_black(b, params) for b in backgrounds)
     fix = _background_fix(backgrounds, params)
+    combined = _combined(trial, params)
     findings: list[Finding] = []
 
     def found(code: str, detail: str, blocking: bool = True) -> None:
@@ -1129,6 +1237,11 @@ def _light_faults(trial: Trial) -> list[Finding]:
         except _Unbounded as unbounded:
             unread(f"{what}'s light", unbounded.args[0])
             continue
+        # A list, not a set: a `combine` that is not a string is refused, not hashed.
+        how = [combine for shown, combine in combined if shown == looks]
+        if how and all(combine in LIGHTLESS for combine in how):
+            continue
+        multiplied = bool(how) and all(combine == "multiply" for combine in how)
         what += _through(color, contrast, mean)
         for color, contrast, mean in each:
             if kind == "flat":
@@ -1159,7 +1272,7 @@ def _light_faults(trial: Trial) -> list[Finding]:
                     f"{what} is a sine grating, drawn at a Michelson contrast in this build; "
                     f"{type(contrast).__name__} contrast for patterns arrives with the "
                     f"pattern fills (engine build A3)"))
-            if mean is None and on_black:
+            if mean is None and on_black and not multiplied:
                 found("unlit", (
                     f"{what}'s mean is whatever is behind it, and an eye's background is "
                     f"or can be black, so it may draw nothing; {fix}, or declare its mean"))
@@ -1375,6 +1488,13 @@ def _block_faults(trial: Trial) -> list[Finding]:
             for fill in fills:
                 if isinstance(fill, look.SineGrating) and fill.direction is not None:
                     _direction_faults(part, fill, params, bad)
+                # One light has no contrast of its own to fade, and the drawer would fade its
+                # opacity instead: the same light over the background, a different one over
+                # another stimulus (call 2, XC-249).
+                if isinstance(fill, look.Flat) and getattr(part.edge, "applies", None) == "contrast":
+                    bad(f"{type(part.edge).__name__}.applies is 'contrast' on a flat fill: a flat "
+                        f"light's edge fades its light, so `applies` is \"opacity\" (or left "
+                        f"unset); \"contrast\" applies to a pattern")
     return findings
 
 
@@ -1770,6 +1890,32 @@ def _modulates(looks, params: dict[str, Param], inside: frozenset[str] = frozens
     )
 
 
+def _declares_mean(looks, params: dict[str, Param], inside: frozenset[str] = frozenset()) -> bool:
+    """Whether a stimulus can be a grating that declares its own mean, at any value it can
+    take. Multiplying draws a grating's modulation alone (`exact._gain`), so a mean it
+    declares would be ignored without a word (call 1, XC-253). An `Array` can if either of
+    its items can, a parameter if any of its choices can, a mean parameter if any choice is
+    a light. One with no choices to read declares none here: it is refused where its light
+    or its modulation is read."""
+    if isinstance(looks, P):
+        if looks.name in inside:
+            return False
+        param = params.get(looks.name)
+        return any(_declares_mean(choice, params, inside | {looks.name})
+                   for choice in (param.choices if param is not None else ()))
+    if isinstance(looks, Array):
+        return (_declares_mean(looks.looks, params, inside)
+                or _declares_mean(looks.among, params, inside))
+    light = _light(looks)
+    if light is None or light[0] != "grating":
+        return False
+    mean = light[3]
+    if isinstance(mean, P):
+        param = params.get(mean.name)
+        return any(choice is not None for choice in (param.choices if param is not None else ()))
+    return mean is not None
+
+
 def _placement_faults(trial: Trial) -> list[Finding]:
     """How a stimulus is placed and layered, as the drawer needs it (engine spec §4.4,
     §5.4): opacity in [0, 1], a whole-number layer, a known combination, and per-eye
@@ -1818,6 +1964,10 @@ def _placement_faults(trial: Trial) -> list[Finding]:
                 refuse("multiply-needs-modulation", (
                     f"an update of {name!r} can leave it multiplying the contrast below it by "
                     f"its own modulation, and {why}; give it a Weber contrast or a pattern"))
+            if any(c.combine == "multiply" and _declares_mean(c.looks, params) for c in left):
+                refuse("bad-placement", (
+                    f"an update of {name!r} can leave it a grating that multiplies the contrast "
+                    f"below by its modulation, so its declared mean would be ignored; remove it"))
         else:
             continue
         # At every value a parameter can take, as `_block_faults` holds a block's values.
@@ -1846,6 +1996,10 @@ def _placement_faults(trial: Trial) -> list[Finding]:
                 refuse("multiply-needs-modulation", (
                     f"{name!r} multiplies the contrast below it by its own modulation, and "
                     f"{why}; give it a Weber contrast or a pattern"))
+            if sets["combine"] == "multiply" and _declares_mean(looks, params):
+                refuse("bad-placement", (
+                    f"{name!r} is a grating that multiplies the contrast below by its "
+                    f"modulation, so its declared mean would be ignored; remove it"))
         if ("at_left" in sets) != ("at_right" in sets):
             refuse("per-eye-misused", f"{name!r} gives one eye's position without the other's")
         if "at_left" in sets or "at_right" in sets:

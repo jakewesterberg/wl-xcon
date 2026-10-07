@@ -24,6 +24,12 @@ from wl_xcon.task import (
 SCHEMA = 1
 _BLACK = (0.0, 0.0, 0.0)
 
+#: The combinations that draw none of a stimulus's own light (engine spec §4.4): a window
+#: shows what is below it only inside it, a scotoma hides it there. Its fill's light is
+#: never read, so it may have none (the A1 follow-ups' call 3, XC-257); `check` holds it to
+#: no light rule either.
+LIGHTLESS = ("window", "scotoma")
+
 
 class NotYetDrawable(ValueError):
     """Something a later build of the engine draws, named with that build."""
@@ -31,7 +37,8 @@ class NotYetDrawable(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class ResolvedFlat:
-    """A flat fill's light: absolute, or a contrast against the eye's background."""
+    """A flat fill's light: absolute, or a contrast against the eye's background. Neither
+    on a window or a scotoma (`LIGHTLESS`), which draws no light of its own."""
 
     #: An absolute light.
     xyz: tuple[float, float, float] | None
@@ -46,8 +53,9 @@ class ResolvedGrating:
     sf: float
     phase: float
     tf: float
-    michelson: float
-    #: `None`: what is behind it.
+    #: `None` on a window or a scotoma (`LIGHTLESS`), which draws no light of its own.
+    michelson: float | None
+    #: `None`: what is behind it; and on a window or a scotoma, unread.
     mean_xyz: tuple[float, float, float] | None
 
 
@@ -218,20 +226,25 @@ def _drift(fill, values, orientation) -> float:
     return tf if math.cos(turn) > 0.0 else -tf
 
 
-def _fill(fill, values, orientation=0.0):
+def _fill(fill, values, orientation=0.0, lit=True):
+    """A fill with every parameter bound. `lit` is false on a window or a scotoma
+    (`LIGHTLESS`), which draws none of its own light: there its light is not read, so it may
+    have none, and a flat fill resolves to no light and a grating to its bars alone."""
     if isinstance(fill, look.Flat):
+        if not lit:
+            return ResolvedFlat(xyz=None, weber=None)
         resolved = ResolvedFlat(xyz=_color(fill.color, values),
                                 weber=_contrast(fill.contrast, Weber, values))
         if resolved.xyz is None and resolved.weber is None:
             raise ValueError("a flat fill with neither a color nor a contrast has no light")
         return resolved
     if isinstance(fill, look.SineGrating):
-        michelson = _contrast(fill.contrast, Michelson, values)
-        if michelson is None:
+        michelson = _contrast(fill.contrast, Michelson, values) if lit else None
+        if lit and michelson is None:
             raise ValueError("a grating with no contrast is its mean alone")
         return ResolvedGrating(sf=_num(fill.sf, values), phase=_num(fill.phase, values),
                                tf=_drift(fill, values, orientation), michelson=michelson,
-                               mean_xyz=_color(fill.mean, values))
+                               mean_xyz=_color(fill.mean, values) if lit else None)
     raise NotYetDrawable(f"{type(fill).__name__} is drawn in engine build A3")
 
 
@@ -265,7 +278,7 @@ def _eyes(stimulus, values, geometry, offset):
 def _item(stimulus, name, order, looks, offset, values, geometry, onset) -> Item:
     expanded = as_look(looks, values)
     orientation = _num(expanded.orientation, values)
-    fill = _fill(expanded.fill, values, orientation)
+    fill = _fill(expanded.fill, values, orientation, lit=stimulus.combine not in LIGHTLESS)
     edge = _bind(expanded.edge, values)
     if edge.applies is None:
         edge = replace(edge, applies="contrast" if isinstance(fill, ResolvedGrating) else "opacity")

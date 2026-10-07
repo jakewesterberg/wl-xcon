@@ -102,6 +102,12 @@ CASES = {
                                  {}, DIRECT, None),
     "multiply by a Gabor": (_shown(_big(), _s("m", GABOR, combine="multiply", layer=1), background=GRAY),
                             {}, DIRECT, None),
+    # It draws none of its own light, so it needs none (XC-257).
+    "a window with no light": (_shown(_big(40.0), _s("w", Disc(size=1.0), combine="window", layer=1)),
+                               {}, DIRECT, None),
+    # Its mean is never used, so the black default leaves nothing undrawn (XC-256).
+    "multiply by a Gabor on black": (_shown(_big(), _s("m", GABOR, combine="multiply", layer=1)),
+                                     {}, DIRECT, None),
     "per-eye positions on the stereoscope": (
         _shown(_s("r", LIT, at_left=(2.0, 0.0), at_right=(-2.0, 0.0)), view="stereoscope"),
         {}, STEREOSCOPE, None),
