@@ -894,3 +894,23 @@ owed), several misleading defaults, and gaps against the code. The PI's decision
   procedure state) on lab storage, synced to whichever rig runs the animal, one writer at a time.
 - **A warning appearing mid-run, unacceptable for the session's kind** — "Pause at the next trial": the
   operator accepts (recorded, the run resumes) or stops.
+
+**Batch R7, instant parameters and welfare:**
+
+- **Instant parameters** — "Instant allowed, never bounded": a task may declare ordinary stimulus
+  parameters instant (next frame), superseding the PI's 2026-09-19 "every name alike" for those; a
+  bounded setting (a reward size, anything in the bounded config) is never instant and changes only at
+  a trial boundary. On the welfare summary.
+
+**Taken without asking, from the reviews (engineering, in the spec's revision):** a task object holding
+several trial structures, plans and procedures; a block-sequence policy in place of a fixed list; the
+full value order (task start < run value < condition or drawn value, never both for one parameter <
+procedure < live edit); durations converted to frames once at load; the session's rate from the
+display's reported mode; the change definition (discrete onsets, offsets and declared updates toggle
+and code; live-driven and frame-dependent content go to the screen log); deterministic generators
+shared by the exact drawer and the core; a late frame repeats the previous content (the sequence slips
+by one refresh, recorded); an anchor code each second in the continuous mode; DKL defined in cone
+contrast with one normalization, a cone-contrast space added, realizability by full conversion; the
+tracker calibration moved to an early build; a transports ADR; presets, revert and carried values never
+carry bounded entries (the PI's b3a rule that a reward size lasts only for its session), flagged on the
+welfare summary.
