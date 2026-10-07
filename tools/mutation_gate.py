@@ -56,6 +56,7 @@ PACKAGE = "wl_xcon"
 RETURNS: dict[str, str] = {
     "actor": "None",
     "signin": "None",
+    "screen": "None",
     "check": "[]",
     "encode": "[]",
     "calibration": "[]",
