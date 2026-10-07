@@ -45,7 +45,8 @@ exist yet.
 The mapping inputs are per-rig and per-animal, and all of them are **measured, not derived**:
 each eye's folded optical path length, each viewport's centre, the vergence offset (a software
 constant, `2·atan(E/D)`: 2.9° at `E` = 1.6 cm, 2.7-3.5° over IPD 30-38 mm — optics drawing §6;
-`Geometry.vergence_half_deg`), and the display mode's deg/pixel. They live in the
+`Geometry.vergence_half_deg`), and the display mode's deg/pixel. Until V9 measures them, the
+vergence offset is computed from the rig file (`Geometry.vergence_half_deg`). They live in the
 session snapshot beside the gaze mapping version, and a change to any of them is a discontinuity
 of the same class as a parameter change (P16).
 

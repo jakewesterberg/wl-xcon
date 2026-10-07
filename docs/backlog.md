@@ -15,7 +15,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 **Finding one.** Grep the ID, a package (`P9`, `b3`), a repository (`wl-sync`) or a file. The sections: brainstorms the PI asked to have later; features no plan covers yet; defects and review findings deliberately not fixed; debt (cleanup, stale wording, test hygiene); anything that needs the rig or other hardware, measurements included; and asks of, or waits on, other repositories.
 
-**Next free ID: XC-261.**
+**Next free ID: XC-268.**
 
 ## Brainstorms queued for the PI
 
@@ -142,6 +142,13 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 - **XC-258** Spec §4.4's background is "changeable during a trial", but a `WholeScreen` cover does not move the reference Weber, add, window and scotoma read, so a Weber stimulus shown after one is computed against the trial's declared background. — 2026-10-07, [engine spec §4.4](superpowers/specs/2026-10-07-engine-design.md#44-combining-grouping-and-layouts), A1's final review — waits on: nothing
 - **XC-259** On a stimulus with per-eye positions `at` is ignored without a word, so an `Update(at=...)` changes nothing on the screen; and `wlx review`'s stimuli table shows only `at` and disparity, omitting per-eye positions, layer, combination, opacity and background. — 2026-10-07, [CHECKPOINT, engine build A1, its final review](CHECKPOINT.md#what-moved-on-2026-10-07-engine-build-a1-the-screen-description-and-the-exact-drawer) — waits on: nothing (before engine build E)
 - **XC-260** `Update("s", at_left=...)` alone is refused even when the stimulus already carries both per-eye positions (mild over-refusal). — 2026-10-07, [CHECKPOINT, engine build A1, its final review](CHECKPOINT.md#what-moved-on-2026-10-07-engine-build-a1-the-screen-description-and-the-exact-drawer) — waits on: nothing
+- **XC-261** `check()` with a calibration raises TypeError on an `xyY` whose component is a parameter (e.g. `xyY(0.3, 0.3, P("lum"))`), instead of checking it over the parameter's values, and the same route through a color parameter whose choice is an `xyY` holding a parameter (`_colors` to `_one_color` to `unrealizable`); pre-existing, reachable only with a calibration (build B). — 2026-10-07, [CHECKPOINT, engine build A1, Task 12](CHECKPOINT.md#what-moved-on-2026-10-07-engine-build-a1-the-screen-description-and-the-exact-drawer) — waits on: engine build B
+- **XC-262** A grating whose orientation is a per-trial parameter can drift only toward orientation + 90 degrees (`direction=None`): an absolute `direction` cannot follow the orientation, so drifting the other way under a varying orientation needs linked parameters or a relative direction; a question for the PI when a task needs it. — 2026-10-07, [CHECKPOINT, engine build A1, Task 12](CHECKPOINT.md#what-moved-on-2026-10-07-engine-build-a1-the-screen-description-and-the-exact-drawer) — waits on: a task that needs it
+- **XC-263** A parameter whose choices contain itself (or a cycle) makes `_parts`, `_modulates` and `_black` recurse until RecursionError, so `taskd`'s load would crash instead of refusing. — 2026-10-07, [CHECKPOINT, engine build A1, Task 12](CHECKPOINT.md#what-moved-on-2026-10-07-engine-build-a1-the-screen-description-and-the-exact-drawer) — waits on: nothing
+- **XC-264** A number in a color field (a literal `Disc(color=10.0)`, or a color parameter with numeric choices) loads with a calibration, and `resolve` then raises a false "drawn through cone fundamentals, in engine build A2". — 2026-10-07, [CHECKPOINT, engine build A1, Task 12](CHECKPOINT.md#what-moved-on-2026-10-07-engine-build-a1-the-screen-description-and-the-exact-drawer) — waits on: nothing
+- **XC-265** A `Show` whose `looks` is a range-only parameter loads, because `_appearances` ignores it. — 2026-10-07, [CHECKPOINT, engine build A1, Task 12](CHECKPOINT.md#what-moved-on-2026-10-07-engine-build-a1-the-screen-description-and-the-exact-drawer) — waits on: nothing
+- **XC-266** An `xyY` background whose `Y` parameter can reach 0 is not treated as black, unlike `Gray(P)`. — 2026-10-07, [CHECKPOINT, engine build A1, Task 12](CHECKPOINT.md#what-moved-on-2026-10-07-engine-build-a1-the-screen-description-and-the-exact-drawer) — waits on: nothing
+- **XC-267** A collinear `Vertices` loads and draws almost nothing. — 2026-10-07, [CHECKPOINT, engine build A1, Task 12](CHECKPOINT.md#what-moved-on-2026-10-07-engine-build-a1-the-screen-description-and-the-exact-drawer) — waits on: nothing
 
 ## Debt
 

@@ -418,8 +418,9 @@ untouched, and the display process (build E) and the screen log (build F) are th
     sample wide; narrower ones draw brighter than their area, by phase. Costs one function.
   - Added tests for the drift direction, a Gabor's mean over a disc, and the multiply-by-Gabor gain;
     the plan defined the conventions and omitted the tests. Free.
-  - A grating's drift is the sign of `tf` along orientation + 90 degrees, not a separate angle field as
-    spec §5.1 words it. Costs a `direction` field if A3's moving dots and plaids need one.
+  - A grating's drift direction is its own angle, `SineGrating.direction` (PI, 2026-10-07, "Its own
+    angle"), as spec §5.1 words it; `tf` is a speed. Task 12 replaced the first cut, which carried the
+    direction as the sign of `tf` (plan call 8).
   - The mutation sweep for Task 11 is CI's per-push shards plus one local rerun (below). Costs a full
     local sweep if a CI run turns out not to have covered a module.
   - The `mutate.py` sweep stays in Task 11 as planned (a whole-suite run per neutered function); a fix round
@@ -470,13 +471,22 @@ untouched, and the display process (build E) and the screen log (build F) are th
   `resolve` refuses an outline with no light and one eye in direct view, and a flat light's Michelson
   is a plain refusal rather than "a later build". `tests/test_engine_path.py` walks a table of accepted
   trials, and each reference task's first stimulus at its starting values, through `check`, `resolve`
-  and the exact drawer. The fail-closed rule refused no existing test or reference task. **The PI has
-  since ruled on a drifting grating's direction** ("Its own angle", the brainstorm notes' last entry):
-  spec §5.1 stands as written, and the code, which still carries the direction as the sign of `tf`
-  (the ruling above), does not follow it yet.
+  and the exact drawer. The fail-closed rule refused no existing test or reference task. **The PI
+  ruled on a drifting grating's direction** ("Its own angle"); Task 12 (below) follows it.
 - **Backlog.** XC-243 (`Gray` on the default calibration, waits on engine build B) and XC-244 (groups and
   layouts, waits on A3) filed during the build; the final review's leftovers are XC-245 to XC-260, and a
-  nested `Array` is appended to XC-244. Next free ID XC-261.
+  nested `Array` is appended to XC-244. Next free ID XC-268 (see Task 12, below).
+- **Task 12, 2026-10-07: a drifting grating's direction is its own angle.** `look.SineGrating` gained
+  `direction` (degrees in the screen's frame, 0 right and counter-clockwise; `None` means the grating's
+  orientation + 90); `tf` is a speed, never negative. `screen._drift` turns the two and the item's
+  orientation into the drawer's signed speed (`cos(direction - (orientation + 90)) > 0` is `+tf`), and
+  refuses a direction not across the bars (a sine of 1e-9 or more) and a negative `tf`; the drawer is
+  unchanged. `check` refuses both at load as `bad-block`, over every value a parameter can take: a
+  `direction` parameter must offer choices, and with an explicit direction so must a parameter
+  orientation (`_direction_faults`). Smaller fixes from the final review: `_modulates`' message names the
+  field it could not read (appearance, color or contrast); `weber-on-black` and the grating's `unlit`
+  say to raise the low end of a background parameter's range when that is the cause; the A3 comment in
+  `_modulates` names its build. Filed: XC-261 to XC-267.
 
 ## What moved on 2026-10-07: demo mode designed and parked, and the order changed
 
