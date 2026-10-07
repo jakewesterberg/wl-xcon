@@ -656,3 +656,18 @@ seeds recorded; today one condition per run; condition numbering for the recordi
 Settled before the element: ADR-0006 puts adaptive logic between trials in ordinary Python;
 `adaptive_detection.next_params` and its staircase are called by nothing (XC-242); the science
 review's finding 2: it moves only on correct versus wrong target, so misses never make it easier.
+
+**Batch 1** (asked 2026-10-07; all as recommended):
+
+- **Methods** — all four: up-down staircases (transformed rules, fixed or shrinking steps);
+  interleaved staircases; Bayesian methods (QUEST, QUEST+, Psi); training progressions (shaping).
+- **Where they are written** — "Library + task code": common procedures as a reviewed library a
+  task names and configures; anything new as between-trial Python in the task file (ADR-0006),
+  flagged for review in the task's report.
+- **What moves a staircase** — "Declared, with a default": each procedure declares it; the default
+  counts correct as success, wrong target and no response as failure, and ignores aborts. (Settles
+  the science review's finding 2 for the library; `adaptive_detection`'s own rule is revisited
+  when the reference tasks are made right.)
+- **Carrying state** — "Per animal, declared": a procedure declares whether its state carries;
+  carried state is stored per animal and per task, resumed at the next run or session, and
+  recorded whenever read or written.
