@@ -543,3 +543,10 @@ XC-002 (automated color calibration in the rig) whose instrument choice was neve
 - **Where calibration and timing records live** — "Committed per rig": under
   `docs/measurements/<rig>/`, each with an id; the rig file names the calibration in force; every
   session records the id.
+- **The stereoscope's per-eye alignment check** — the PI's method, in his words: "You do
+  monocular presentations of the 13-point calibration grid. Then you look at the alignment of eye
+  position between the presentations in each eye. If the the alignment is good, then the eye
+  positions should be the same between the each monocular grid. If they are not aligned well, the
+  eyes will be in different positions. this is something that the console can recognize and
+  quantify. We should have a tolerance that is acceptable for off-alignment." (Offered against: a
+  person with a camera at setup plus a tracker check, both, or either alone.)
