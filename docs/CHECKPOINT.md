@@ -430,7 +430,7 @@ untouched, and the display process (build E) and the screen log (build F) are th
   | b6673a8 | 6-7 | geometry, screen, viewport | red, shard 11: `viewport.directions` SURVIVED (2581 passed) because no caller existed until `exact.py` (Task 8); every other function caught |
   | 66497e7 | 8 | exact | green |
   | 324c9fa | 9 | exact | green |
-  | 0d7f71a | 10 | exact | in progress when Task 11 began; read its result before merging |
+  | 0d7f71a | 10 | exact | green: pytest on 3.11, 3.12 and 3.13, and all 12 mutation shards, sweeping `exact`; the full-sweep job was skipped as usual |
 
   The survivor was rerun locally on 2026-10-07 after `exact.py` existed, with `PLAYWRIGHT_BROWSERS_PATH`
   at an empty directory as CI runs: `python3 tools/mutate.py wl_xcon/viewport.py directions` read
