@@ -411,6 +411,11 @@ untouched, and the display process (build E) and the screen log (build F) are th
     spec §5.1 words it. Costs a `direction` field if A3's moving dots and plaids need one.
   - The mutation sweep for Task 11 is CI's per-push shards plus one local rerun (below). Costs a full
     local sweep if a CI run turns out not to have covered a module.
+  - The `mutate.py` sweep stays in Task 11 as planned (a whole-suite run per neutered function); a fix round
+    adds behavior tests for every gap the review named. Costs a later survivor surfacing in Task 11
+    instead of earlier.
+  - S4 §7 is the photodiode patches, so the pointer to `exact.py` lives in S4 §2's dated note and §7 is
+    unchanged. Free.
 - **What the reviews found that changed the code.** Check 8 now measures each eye after the vergence
   offset and an Update that widens `eye`; Update-to-Update placement is checked; a bad block in an
   Array member is reported once; the ellipse's distance is in degrees; zero-length polygon and path
@@ -442,7 +447,7 @@ untouched, and the display process (build E) and the screen log (build F) are th
   cross-repository asks the approved engine spec §21 lists (wl-preproc, wl-xtasks, wl-sync) are due
   and have not been sent; each is outward-facing and needs the PI's go-ahead. Stale remote branches
   `engine-design`, `demo-mode` and `xc240` await a decision to delete. Minor review findings deferred
-  past the fixes are in the build's ledger for the final whole-branch review.
+  past the fixes go to the final whole-branch review, which files any left open in `docs/backlog.md`.
 - **Backlog.** XC-243 (`Gray` on the default calibration, waits on engine build B) and XC-244 (groups and
   layouts, waits on A3) filed; next free ID XC-245.
 
