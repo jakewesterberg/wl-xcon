@@ -62,6 +62,61 @@ class DKL(Color):
         return max(abs(self.lum), abs(self.l_m), abs(self.s_lm))
 
 
+#: CIE 1931 chromaticity of D65, the white point of the sRGB standard (IEC 61966-2-1).
+D65 = (0.3127, 0.3290)
+
+
+@dataclass(frozen=True, slots=True)
+class Gray(Color):
+    """Achromatic light at an absolute luminance: D65 white at `cd_m2` cd/m^2.
+
+    The PI's rule for an achromatic stimulus that is not a contrast against a declared
+    background (2026-10-07, "Absolute cd/m²"): the same light on every calibrated rig.
+    `cd_m2` may be a parameter; `screen.resolve` binds it.
+    """
+
+    cd_m2: object
+
+
+def to_xyz(color: "xyY | Gray") -> tuple[float, float, float]:
+    """CIE XYZ of an absolute color, Y in cd/m^2.
+
+    Only an absolute color names a light by itself. `DKL` is a modulation relative to
+    the background and converts through cone fundamentals (engine build A2).
+    """
+    if isinstance(color, Gray):
+        return _XYZ(xyY(D65[0], D65[1], float(color.cd_m2)))
+    if isinstance(color, xyY):
+        return _XYZ(color)
+    raise TypeError(
+        f"{type(color).__name__} is relative to the background, not a light by itself; "
+        f"it converts through cone fundamentals (engine build A2)"
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class Contrast:
+    """A contrast written with its convention (the PI, 2026-10-07: "Always written
+    explicitly"). `value` may be a parameter."""
+
+    value: object
+
+
+@dataclass(frozen=True, slots=True)
+class Weber(Contrast):
+    """(L − L_background) / L_background: a patch against its background."""
+
+
+@dataclass(frozen=True, slots=True)
+class Michelson(Contrast):
+    """(L_max − L_min) / (L_max + L_min): a periodic pattern about its mean."""
+
+
+@dataclass(frozen=True, slots=True)
+class RMS(Contrast):
+    """The standard deviation of luminance over its mean: noise and images."""
+
+
 @dataclass(frozen=True, slots=True)
 class Calibration:
     """A display, as measured. Every field is an observation, not a setting.

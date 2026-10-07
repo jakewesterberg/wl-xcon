@@ -143,3 +143,30 @@ def test_an_absolute_colour_cannot_also_carry_a_contrast():
     assert "overspecified-color" in codes(
         a_task(Disc(color=xyY(0.500, 0.400, 30.0), contrast=0.5))
     )
+
+
+from wl_xcon.photometry import D65, RMS, Gray, Michelson, Weber, to_xyz
+
+
+def test_gray_is_d65_white_at_its_luminance():
+    X, Y, Z = to_xyz(Gray(40.0))
+    assert Y == 40.0
+    assert (round(X / (X + Y + Z), 4), round(Y / (X + Y + Z), 4)) == D65
+
+
+def test_an_xyy_color_converts_to_xyz_with_its_luminance():
+    X, Y, Z = to_xyz(xyY(0.64, 0.33, 21.26))
+    assert Y == 21.26
+    assert X == pytest.approx(0.64 / 0.33 * 21.26)
+    assert Z == pytest.approx((1 - 0.64 - 0.33) / 0.33 * 21.26)
+
+
+def test_a_color_relative_to_the_background_is_no_light_by_itself():
+    with pytest.raises(TypeError, match="relative to the background"):
+        to_xyz(DKL(lum=0.1))
+
+
+def test_each_contrast_names_its_convention():
+    assert [type(c).__name__ for c in (Weber(0.3), Michelson(0.5), RMS(0.2))] == [
+        "Weber", "Michelson", "RMS"]
+    assert Weber(0.3) != Michelson(0.3)
