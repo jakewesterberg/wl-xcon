@@ -844,3 +844,17 @@ owed), several misleading defaults, and gaps against the code. The PI's decision
 - **Sequence items and the task light sensor** — "Yes, each item": each item of an RSVP or rapid
   sequence toggles it. Live-driven and per-frame changes (a mouse-moved bar, drifting phase) neither
   toggle it nor send codes; they go to the screen log.
+
+**Batch R4, color:**
+
+- **The default calibration in recording sessions** — "Yes, from the task file": refused for any task
+  that specifies a color (DKL, cone contrast, xyY) or makes contrast a design factor or a
+  procedure-controlled value, read from the task file; training and piloting run on it with the
+  warning.
+- **Isoluminance in a recording session** — "A named observer is enough": against the calibration's
+  named observer, recorded as such (offered against: a per-animal measured null, recommended).
+- **Cone sensitivities** — asked again whether per task or per calibration, the PI answered: "Im not
+  sure I understand. I think we just have some deafults that are selected throughout?" Read as: one
+  lab-wide default set, used everywhere and recorded; which one is asked next.
+- **The eyes' balance on the stereoscope** — "Assume equal, as decided" (offered against: measure each
+  eye's mirror path, recommended; one calibration per eye).
