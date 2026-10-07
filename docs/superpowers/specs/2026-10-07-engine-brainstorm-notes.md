@@ -299,3 +299,18 @@ fill; low contrasts need fine steps.
   carry 10-bit at 4K/240 (unverified for this pairing); dithering as the fallback where not.
 - **The panel's transfer** — "A measured table": a lookup table per channel (and per eye's half on
   the stereoscope) from a photometer sweep; the default uses the sRGB curve.
+
+**Batch 2** (asked 2026-10-07):
+
+- **`visual_search` on the default calibration** — "A plain-color variant": the task keeps its
+  isoluminant colors and waits for a measured calibration; a training variant uses ordinary red
+  and green (no isoluminance claim) that loads on the default, with the warning shown.
+- **The panel's brightness limiter (ABL)** — "Stay below it": overall brightness capped so the
+  limiter never engages, at a level V9 measures; a display that would exceed it refused at load;
+  the record states the cap.
+- **The default background** — "Black". Consequence put to the PI next: DKL colors and Weber
+  contrasts are defined against the background and mean nothing against black.
+- **Accepting warnings** — "Once per session": listed in a console tab, written to the record,
+  acknowledged once when the session opens (a warning appearing later asks again); today's
+  pre-flight unknowns join the list under the PI's 2026-09-19 rule (proceed on a recorded
+  acknowledgment).
