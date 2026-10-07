@@ -444,3 +444,16 @@ allocation inside a frame (CLAUDE.md).
   features) or a compiled core; prior art: vstimd, a Rust Vulkan stimulus server driving displays
   directly with `VK_KHR_display` (maintainer and license not stated on the page read). On this Mac
   Vulkan runs through MoltenVK onto Metal: a spike here tests feasibility, never timing (P4a).
+
+**Batch 2, the Vulkan spike** (asked 2026-10-07):
+
+- **What the spike does now** — "Feasibility now, timing later": draw a Gabor, the light-sensor
+  patches and two eye viewports through Vulkan, render offscreen to compare with the slow exact
+  drawer, measure the code it takes, and check NVIDIA's documented support for direct display and
+  presentation timing; timing waits for Linux and an NVIDIA card.
+- **The route from Python** — "A compiled display core": a small Rust or C++ core owning the
+  display, called from Python (offered against: raw Python bindings, recommended; wgpu-py).
+- **A Linux machine with an NVIDIA GPU before January** — "Yes" (which, and how to reach it, asked
+  next).
+- **vstimd** — "Yes": read its source as prior art (license, upkeep, how it drives the display and
+  paces frames); nothing adopted without asking.
