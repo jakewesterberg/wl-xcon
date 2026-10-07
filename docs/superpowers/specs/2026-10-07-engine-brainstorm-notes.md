@@ -621,3 +621,19 @@ Settled before the element: a condition is a named set of values with a target (
 a block declares its order (`Shuffled`, `WithReplacement(weights)`, `Constrained(max_run, weights)`);
 seeds recorded; today one condition per run; condition numbering for the recording undecided
 (XC-197).
+
+**Batch 1** (asked 2026-10-07):
+
+- **Values that change trial to trial** — "Conditions + drawn values": named conditions for the
+  design's factors (counted, balanced, numbered in the recording), plus values drawn per trial
+  from declared distributions for nuisance variables (array rotation, jitter), recorded per trial
+  but not conditions.
+- **Factorial designs** — "Yes, with exclusions": factors and levels declared; the framework makes
+  the combinations minus declared exclusions, each named from its levels; hand-listed conditions
+  remain possible.
+- **Orderings** — all four: shuffled passes; weighted draws (e.g. 20% catch trials); limits on
+  repeats; sequence-balanced (each condition follows each other equally often, e.g. de Bruijn).
+- **A live edit to a value a condition sets** — "The live edit": the operator's value overrides
+  every condition's (S8 §3.4's layering) (offered against: the condition wins, recommended).
+  Consequence: the record marks each trial whose condition was overridden, since its name no longer
+  describes it.
