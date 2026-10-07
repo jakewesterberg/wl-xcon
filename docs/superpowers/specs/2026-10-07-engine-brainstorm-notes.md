@@ -819,3 +819,13 @@ owed), several misleading defaults, and gaps against the code. The PI's decision
   display was shown), is recorded either way.
 - **A repeat's drawn values** — in the PI's words, "declarable per task. it may be useful to be
   random, it may be necessary to repeat specific conditions.": fresh or the same, per task.
+
+**Batch R2, repeats' edge cases and overrides:**
+
+- **A repeat when its condition is the only one owed** — "Repeat it now, recorded".
+- **The repeat cap** — "Yes, shortfall recorded": the capped condition's remaining debt is forgiven; the
+  shortfall is recorded, shown and flagged as possible avoidance.
+- **An overridden trial** — "Yes": it counts toward its condition's target (offered against: no,
+  recommended); the record and the recording mark it.
+- **The override in the recording** — "Yes": the parameter-change code goes out and the trial table
+  carries an "overridden" flag that wl-preproc reads (an ask of wl-preproc).
