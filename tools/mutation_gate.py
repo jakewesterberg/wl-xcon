@@ -94,6 +94,7 @@ RETURNS: dict[str, str] = {
 EXEMPT: dict[str, str] = {
     "__init__": "package marker",
     "findings": "one frozen dataclass; no functions and no behaviour to neuter",
+    "look": "dataclass definitions only; no functions to neuter",
 }
 
 #: Changes that alter what every test sees, so reasoning about a subset is not

@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 import math
 from enum import Enum
 
-from wl_xcon.photometry import Color
+from wl_xcon.photometry import Color, Contrast
 
 
 class Family(Enum):
@@ -429,6 +429,14 @@ class Trial:
     #: stereoscope is held to its mask. Disparity, a random-dot stereogram
     #: or a stimulus shown to one eye needs `"stereoscope"`, and the checker says so.
     view: str = "either"
+    #: The bottom layer (engine spec §4.4, §7.5): an absolute color, or `None` for the
+    #: black default. A task using Weber contrast declares its own.
+    background: "Color | P | None" = None
+    #: Each eye's own background, stereoscope only; `None` is `background`.
+    background_left: "Color | P | None" = None
+    background_right: "Color | P | None" = None
+    #: One of `PERIPHERY`.
+    periphery: str = "true_angle"
 
 
 @dataclass(frozen=True, slots=True)
@@ -462,22 +470,22 @@ class Appearance:
 @dataclass(frozen=True, slots=True)
 class Disc(Appearance):
     size: "float | P" = 1.0
-    contrast: "float | P" = 1.0
-    #: Device-independent colour, or `None` for achromatic at `contrast`. On the
-    #: appearance rather than the stimulus because colour is a feature: "red among
-    #: green" and "circles among squares" are then the same kind of switch, and both
-    #: are values a parameter can carry (S1a §4).
+    contrast: "Contrast | P | None" = None
+    #: Device-independent colour, or `None` when the light is a `contrast` against the
+    #: trial's background. On the appearance rather than the stimulus because colour is
+    #: a feature: "red among green" and "circles among squares" are then the same kind of
+    #: switch, and both are values a parameter can carry (S1a §4).
     color: "Color | P | None" = None
 
 
 @dataclass(frozen=True, slots=True)
 class Square(Appearance):
     size: "float | P" = 1.0
-    contrast: "float | P" = 1.0
-    #: Device-independent colour, or `None` for achromatic at `contrast`. On the
-    #: appearance rather than the stimulus because colour is a feature: "red among
-    #: green" and "circles among squares" are then the same kind of switch, and both
-    #: are values a parameter can carry (S1a §4).
+    contrast: "Contrast | P | None" = None
+    #: Device-independent colour, or `None` when the light is a `contrast` against the
+    #: trial's background. On the appearance rather than the stimulus because colour is
+    #: a feature: "red among green" and "circles among squares" are then the same kind of
+    #: switch, and both are values a parameter can carry (S1a §4).
     color: "Color | P | None" = None
 
 
@@ -488,11 +496,11 @@ class Bar(Appearance):
     length: "float | P" = 4.0
     width: "float | P" = 0.5
     orientation: "float | P" = 0.0
-    contrast: "float | P" = 1.0
-    #: Device-independent colour, or `None` for achromatic at `contrast`. On the
-    #: appearance rather than the stimulus because colour is a feature: "red among
-    #: green" and "circles among squares" are then the same kind of switch, and both
-    #: are values a parameter can carry (S1a §4).
+    contrast: "Contrast | P | None" = None
+    #: Device-independent colour, or `None` when the light is a `contrast` against the
+    #: trial's background. On the appearance rather than the stimulus because colour is
+    #: a feature: "red among green" and "circles among squares" are then the same kind of
+    #: switch, and both are values a parameter can carry (S1a §4).
     color: "Color | P | None" = None
 
 
@@ -505,12 +513,12 @@ class Gabor(Appearance):
     sf: "float | P" = 2.0
     orientation: "float | P" = 0.0
     phase: "float | P" = 0.0
-    contrast: "float | P" = 1.0
+    contrast: "Contrast | P | None" = None
     sigma: "float | P" = 1.0
-    #: Device-independent colour, or `None` for achromatic at `contrast`. On the
-    #: appearance rather than the stimulus because colour is a feature: "red among
-    #: green" and "circles among squares" are then the same kind of switch, and both
-    #: are values a parameter can carry (S1a §4).
+    #: Device-independent colour, or `None` when the light is a `contrast` against the
+    #: trial's background. On the appearance rather than the stimulus because colour is
+    #: a feature: "red among green" and "circles among squares" are then the same kind of
+    #: switch, and both are values a parameter can carry (S1a §4).
     color: "Color | P | None" = None
 
 
@@ -536,11 +544,11 @@ class Dots(Appearance):
 class Annulus(Appearance):
     inner: "float | P" = 1.0
     outer: "float | P" = 2.0
-    contrast: "float | P" = 1.0
-    #: Device-independent colour, or `None` for achromatic at `contrast`. On the
-    #: appearance rather than the stimulus because colour is a feature: "red among
-    #: green" and "circles among squares" are then the same kind of switch, and both
-    #: are values a parameter can carry (S1a §4).
+    contrast: "Contrast | P | None" = None
+    #: Device-independent colour, or `None` when the light is a `contrast` against the
+    #: trial's background. On the appearance rather than the stimulus because colour is
+    #: a feature: "red among green" and "circles among squares" are then the same kind of
+    #: switch, and both are values a parameter can carry (S1a §4).
     color: "Color | P | None" = None
 
 
@@ -550,11 +558,11 @@ class Cross(Appearance):
 
     size: "float | P" = 0.5
     thickness: "float | P" = 0.1
-    contrast: "float | P" = 1.0
-    #: Device-independent colour, or `None` for achromatic at `contrast`. On the
-    #: appearance rather than the stimulus because colour is a feature: "red among
-    #: green" and "circles among squares" are then the same kind of switch, and both
-    #: are values a parameter can carry (S1a §4).
+    contrast: "Contrast | P | None" = None
+    #: Device-independent colour, or `None` when the light is a `contrast` against the
+    #: trial's background. On the appearance rather than the stimulus because colour is
+    #: a feature: "red among green" and "circles among squares" are then the same kind of
+    #: switch, and both are values a parameter can carry (S1a §4).
     color: "Color | P | None" = None
 
 
@@ -566,11 +574,11 @@ class Polygon(Appearance):
     sides: int = 3
     size: "float | P" = 1.0
     orientation: "float | P" = 0.0
-    contrast: "float | P" = 1.0
-    #: Device-independent colour, or `None` for achromatic at `contrast`. On the
-    #: appearance rather than the stimulus because colour is a feature: "red among
-    #: green" and "circles among squares" are then the same kind of switch, and both
-    #: are values a parameter can carry (S1a §4).
+    contrast: "Contrast | P | None" = None
+    #: Device-independent colour, or `None` when the light is a `contrast` against the
+    #: trial's background. On the appearance rather than the stimulus because colour is
+    #: a feature: "red among green" and "circles among squares" are then the same kind of
+    #: switch, and both are values a parameter can carry (S1a §4).
     color: "Color | P | None" = None
 
 
@@ -583,12 +591,12 @@ class Grating(Appearance):
     sf: "float | P" = 2.0
     orientation: "float | P" = 0.0
     phase: "float | P" = 0.0
-    contrast: "float | P" = 1.0
+    contrast: "Contrast | P | None" = None
     aperture: "float | P" = 5.0
-    #: Device-independent colour, or `None` for achromatic at `contrast`. On the
-    #: appearance rather than the stimulus because colour is a feature: "red among
-    #: green" and "circles among squares" are then the same kind of switch, and both
-    #: are values a parameter can carry (S1a §4).
+    #: Device-independent colour, or `None` when the light is a `contrast` against the
+    #: trial's background. On the appearance rather than the stimulus because colour is
+    #: a feature: "red among green" and "circles among squares" are then the same kind of
+    #: switch, and both are values a parameter can carry (S1a §4).
     color: "Color | P | None" = None
 
 
@@ -599,12 +607,12 @@ class Plaid(Appearance):
     sf: "float | P" = 2.0
     orientation: "float | P" = 0.0
     angle: "float | P" = 90.0
-    contrast: "float | P" = 1.0
+    contrast: "Contrast | P | None" = None
     aperture: "float | P" = 5.0
-    #: Device-independent colour, or `None` for achromatic at `contrast`. On the
-    #: appearance rather than the stimulus because colour is a feature: "red among
-    #: green" and "circles among squares" are then the same kind of switch, and both
-    #: are values a parameter can carry (S1a §4).
+    #: Device-independent colour, or `None` when the light is a `contrast` against the
+    #: trial's background. On the appearance rather than the stimulus because colour is
+    #: a feature: "red among green" and "circles among squares" are then the same kind of
+    #: switch, and both are values a parameter can carry (S1a §4).
     color: "Color | P | None" = None
 
 
@@ -613,12 +621,12 @@ class Checkerboard(Appearance):
     """RF mapping and evoked potentials."""
 
     check_size: "float | P" = 1.0
-    contrast: "float | P" = 1.0
+    contrast: "Contrast | P | None" = None
     aperture: "float | P" = 10.0
-    #: Device-independent colour, or `None` for achromatic at `contrast`. On the
-    #: appearance rather than the stimulus because colour is a feature: "red among
-    #: green" and "circles among squares" are then the same kind of switch, and both
-    #: are values a parameter can carry (S1a §4).
+    #: Device-independent colour, or `None` when the light is a `contrast` against the
+    #: trial's background. On the appearance rather than the stimulus because colour is
+    #: a feature: "red among green" and "circles among squares" are then the same kind of
+    #: switch, and both are values a parameter can carry (S1a §4).
     color: "Color | P | None" = None
 
 
@@ -628,14 +636,14 @@ class Noise(Appearance):
     trial reconstructs exactly; `refresh_hz` above zero makes it dynamic."""
 
     exponent: "float | P" = 1.0
-    contrast: "float | P" = 1.0
+    contrast: "Contrast | P | None" = None
     aperture: "float | P" = 5.0
     refresh_hz: "float | P" = 0.0
     seed: int = 0
-    #: Device-independent colour, or `None` for achromatic at `contrast`. On the
-    #: appearance rather than the stimulus because colour is a feature: "red among
-    #: green" and "circles among squares" are then the same kind of switch, and both
-    #: are values a parameter can carry (S1a §4).
+    #: Device-independent colour, or `None` when the light is a `contrast` against the
+    #: trial's background. On the appearance rather than the stimulus because colour is
+    #: a feature: "red among green" and "circles among squares" are then the same kind of
+    #: switch, and both are values a parameter can carry (S1a §4).
     color: "Color | P | None" = None
 
 
@@ -735,7 +743,7 @@ class RDS(Appearance):
     density: "float | P" = 1.0
     dot_size: "float | P" = 0.1
     aperture: "float | P" = 5.0
-    contrast: "float | P" = 1.0
+    contrast: "Contrast | P | None" = None
     seed: int = 0
     color: "Color | P | None" = None
 
@@ -871,6 +879,17 @@ class ItemWindows:
         }
 
 
+#: How a stimulus overlaps what is below it (engine spec §4.4): it covers it; its
+#: light beyond the background adds to it; what is below shows only inside it (a
+#: window) or is hidden inside it (a scotoma); it multiplies the contrast below (one
+#: shapes another).
+COMBINE = ("cover", "add", "window", "scotoma", "multiply")
+
+#: How sizes behave away from the center (engine spec §5.3): each stimulus subtends its
+#: declared degrees wherever it is, or every stimulus uses the screen center's scale.
+PERIPHERY = ("true_angle", "center_scale")
+
+
 @dataclass(frozen=True, slots=True)
 class Stimulus:
     """Something on the display: a position, an appearance, and how it is shown.
@@ -895,13 +914,20 @@ class Stimulus:
     #: interocular-suppression designs all need one viewport to carry what the other
     #: does not. Distinct from disparity, which shifts one stimulus in both eyes.
     eye: str = "both"
+    #: Drawing order: higher layers on top, ties in the order shown (engine spec §4.4).
+    layer: int = 0
+    #: One of `COMBINE`.
+    combine: str = "cover"
+    opacity: "float | P" = 1.0
+    #: Each eye's own direction in degrees, after the vergence offset (engine spec §5.4),
+    #: for dichoptic designs that place each eye's image themselves. Both or neither,
+    #: never with a disparity, and only on the stereoscope; the checker refuses the rest.
+    at_left: "tuple[float, float] | P | None" = None
+    at_right: "tuple[float, float] | P | None" = None
 
-    # No `per_eye()` here. Mapping a cyclopean position to two viewport positions
-    # needs the vergence offset and each eye's *measured* optical path (S4 §2,
-    # optics drawing §6), which live in the display module and not in a task. An
-    # earlier version of this class carried one; it was deleted when the mutation
-    # harness reported it as covered by nothing, having been left behind when
-    # check 8 moved to reasoning over parameter *ranges* rather than values.
+    # Mapping a cyclopean position to each eye's direction (disparity, then the vergence
+    # offset) is `screen.resolve`'s (engine build A1), from the session's `Geometry`; a
+    # task names degrees, never pixels.
 
 
 class Unchanged:
@@ -959,6 +985,10 @@ class Update(Action):
     looks: "Appearance | P | Unchanged" = UNCHANGED
     disparity: "float | P | Unchanged" = UNCHANGED
     eye: "str | Unchanged" = UNCHANGED
+    layer: "int | Unchanged" = UNCHANGED
+    opacity: "float | P | Unchanged" = UNCHANGED
+    at_left: "tuple[float, float] | P | Unchanged" = UNCHANGED
+    at_right: "tuple[float, float] | P | Unchanged" = UNCHANGED
 
     def changes(self) -> dict:
         """The properties this actually sets. Empty means the action does nothing,
@@ -970,6 +1000,10 @@ class Update(Action):
                 ("looks", self.looks),
                 ("disparity", self.disparity),
                 ("eye", self.eye),
+                ("layer", self.layer),
+                ("opacity", self.opacity),
+                ("at_left", self.at_left),
+                ("at_right", self.at_right),
             )
             if not isinstance(value, Unchanged)
         }

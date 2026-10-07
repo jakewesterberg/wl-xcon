@@ -814,7 +814,7 @@ def _color_faults(trial: Trial, panel: Calibration | None) -> list[Finding]:
                 )
             )
             continue
-        if isinstance(color, xyY) and getattr(looks, "contrast", 1.0) != 1.0:
+        if isinstance(color, xyY) and getattr(looks, "contrast", None) is not None:
             findings.append(
                 Finding(
                     "overspecified-color",
