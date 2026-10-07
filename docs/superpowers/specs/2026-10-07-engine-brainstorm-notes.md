@@ -696,3 +696,26 @@ block." The code differs (the runtime survey §5 item 1): a requeued condition g
 the current pass under `Shuffled` and is the very next trial under `WithReplacement`; and
 `scheduler.REQUEUED` also repeats no-fixation, target breaks, blink breaks, tracker loss and rig
 faults. What counts toward a target is declared per block (`Counting`).
+
+**Batch 1** (asked 2026-10-07):
+
+- **Where a repeated trial goes** — "Later, at a random point": reinserted at a random later position
+  in the block, never the very next trial. **This supersedes the PI's 2026-08-31 "end of block"
+  rule** (S8 §2, §8 item 3) — the anti-avoidance reasoning holds in part, since a repeat never
+  comes back at once.
+- **Repeated by default** — fixation breaks; no fixation; rig faults (tracker loss, a dropped
+  display, hardware). Not repeated: wrong target (as ruled 2026-08-31); target breaks and blink
+  breaks were not ticked. A block may override.
+- **What counts toward a target** — "Responded trials": correct or wrong; aborts do not count.
+- **A condition broken again and again** — "Cap per condition": after N repeats of a condition in a
+  block (task-set), it stops being repeated; its shortfall recorded and shown; the console flags
+  avoidance.
+
+**Element 13 is discussed.**
+
+## 14. Parameters and live control
+
+Settled before the element: declared parameters with ranges and a live flag (S8 §3.1); layers
+deployment → rig → subject → task → session → live edits, and live edits now over conditions
+(element 11); staged and applied at a trial boundary (S8 §3.2); one validated write path, the
+actor recorded; several writers with visibility instead of a lock (S9a §8).
