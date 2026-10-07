@@ -290,11 +290,13 @@ def test_a_degenerate_block_inside_an_array_member_is_reported_once():
 LIT = Disc(color=Gray(40.0))
 
 
-def _placed(*, view="stereoscope", looks=LIT, background=None, at=(0.0, 0.0), **fields) -> Trial:
+def _placed(*, view="stereoscope", looks=LIT, background=None, at=(0.0, 0.0), params=(),
+            **fields) -> Trial:
     return Trial(
         start="on",
         view=view,
         background=background,
+        params=list(params),
         windows=[Window("w", at=(0.0, 0.0), radius=2.0, on="s")],
         states=[
             State(
@@ -431,3 +433,168 @@ def test_an_update_after_an_update_is_checked_for_multiply_on_an_absolute_light(
     trial = _two_updates(gain, Update("s", layer=1), Update("s", looks=Disc(color=Gray(40.0))))
     trial = dataclasses.replace(trial, background=GRAY_BG)
     assert "multiply-needs-modulation" in _refused(trial)
+
+
+# --- What a parameter can make of a stimulus (engine A1, the final review) --------
+#
+# The lab writes live values as parameters, so a check that reads only literals passes
+# the tasks it most needs to see. Each rule a literal is held to holds at every value a
+# parameter can take: each choice, or both ends of its range; one it cannot read or
+# bound is refused, as check 8 fails closed.
+
+WEBER = Disc(contrast=Weber(-0.5))
+
+
+def _choices(*values) -> list[Param]:
+    return [Param("x", unit="value", choices=values)]
+
+
+def _multiplying(looks, params=()) -> Trial:
+    return _placed(looks=looks, background=GRAY_BG, combine="multiply", params=params)
+
+
+def test_multiply_reads_each_item_of_an_array():
+    assert "multiply-needs-modulation" in _refused(_multiplying(Array(looks=LIT, among=LIT)))
+    assert "multiply-needs-modulation" in _refused(_multiplying(Array(looks=WEBER, among=LIT)))
+    assert _refused(_multiplying(Array(looks=WEBER, among=WEBER))) == set()
+
+
+def test_multiply_reads_each_choice_of_an_appearance_parameter():
+    assert "multiply-needs-modulation" in _refused(_multiplying(P("x"), _choices(WEBER, LIT)))
+    assert _refused(_multiplying(P("x"), _choices(WEBER, Disc(contrast=Weber(0.5))))) == set()
+
+
+def test_multiply_refuses_an_appearance_parameter_it_cannot_read():
+    found = [f.detail for f in check(_multiplying(P("x"), [Param("x", unit="appearance")]))
+             if f.code == "multiply-needs-modulation"]
+    assert len(found) == 1 and "cannot be read" in found[0]
+
+
+def test_an_update_that_can_leave_an_array_of_absolute_lights_multiplying_is_refused():
+    gain = Stimulus("s", at=(0.0, 0.0), looks=WEBER, combine="multiply")
+    trial = _two_updates(gain, Update("s", layer=1), Update("s", looks=Array(looks=LIT, among=LIT)))
+    assert "multiply-needs-modulation" in _refused(dataclasses.replace(trial, background=GRAY_BG))
+
+
+@pytest.mark.parametrize("looks, choices, background, code", [
+    (Disc(contrast=P("x")), (Michelson(0.5),), GRAY_BG, "contrast-convention"),
+    (Disc(contrast=P("x")), (Weber(0.5),), None, "weber-on-black"),
+    (Gabor(contrast=P("x")), (RMS(0.2),), GRAY_BG, "contrast-convention"),
+    (Gabor(contrast=P("x")), (Michelson(1.5),), GRAY_BG, "bad-block"),
+    (Disc(color=P("x")), (Gray(40.0), None), GRAY_BG, "unlit"),
+    (Disc(color=P("x")), (Gray(-5.0),), GRAY_BG, "bad-block"),
+    (Disc(color=P("x"), contrast=Weber(0.2)), (Gray(40.0),), GRAY_BG, "overspecified-color"),
+    (look.Look(fill=look.SineGrating(contrast=Michelson(0.5), mean=P("x"))), (Gray(20.0), None),
+     None, "unlit"),
+    (look.Look(fill=look.Flat(color=Gray(10.0)), outline=look.Outline(color=P("x"))),
+     (Gray(10.0), None), GRAY_BG, "unlit"),
+])
+def test_a_light_written_as_a_parameter_is_held_to_each_choice(looks, choices, background, code):
+    assert code in _refused(_one(looks, params=_choices(*choices), background=background))
+
+
+@pytest.mark.parametrize("looks, choices", [
+    (Disc(contrast=P("x")), (Weber(0.2), Weber(-0.4))),
+    (Gabor(contrast=P("x")), (Michelson(0.2), Michelson(1.0))),
+    (Disc(color=P("x")), (Gray(10.0), Gray(40.0))),
+    (look.Look(fill=look.Flat(color=Gray(10.0)), outline=look.Outline(color=P("x"))), (Gray(40.0),)),
+])
+def test_a_light_parameter_whose_every_choice_is_sound_is_accepted(looks, choices):
+    assert _refused(_one(looks, params=_choices(*choices), background=GRAY_BG)) == set()
+
+
+@pytest.mark.parametrize("looks, background", [
+    (Disc(color=P("x")), GRAY_BG),
+    (look.Look(fill=look.Flat(color=Gray(10.0)), outline=look.Outline(color=P("x"))), GRAY_BG),
+    (LIT, P("x")),
+])
+def test_a_color_parameter_that_offers_no_colors_cannot_be_read(looks, background):
+    luminance = [Param("x", unit="cd/m2", low=0.0, high=100.0)]
+    found = [(f.code, f.detail) for f in check(_one(looks, params=luminance, background=background))
+             if f.blocking]
+    assert [code for code, _ in found] == ["bad-block"] and "cannot be read" in found[0][1]
+
+
+@pytest.mark.parametrize("looks, param", [
+    (Disc(size=P("x"), color=Gray(40.0)), Param("x", unit="deg", low=-1.0, high=1.0)),
+    (Disc(size=P("x"), color=Gray(40.0)), Param("x", unit="deg", choices=(1.0, 0.0))),
+    (look.Look(shape=look.Ring(inner=P("x"), outer=2.0), fill=look.Flat(color=Gray(40.0))),
+     Param("x", unit="deg", low=0.5, high=3.0)),
+    (look.Look(shape=look.RegularPolygon(sides=P("x")), fill=look.Flat(color=Gray(40.0))),
+     Param("x", unit="sides", choices=(2, 3))),
+    (Gabor(contrast=Michelson(P("x"))), Param("x", unit="fraction", low=0.0, high=3.0)),
+    (Disc(contrast=Weber(P("x"))), Param("x", unit="fraction", low=-3.0, high=1.0)),
+    (Disc(color=Gray(P("x"))), Param("x", unit="cd/m2", low=-50.0, high=100.0)),
+])
+def test_a_degenerate_value_a_parameter_can_reach_is_refused_at_load(looks, param):
+    assert "bad-block" in _refused(_one(looks, params=[param], background=GRAY_BG))
+
+
+@pytest.mark.parametrize("looks, param", [
+    (Disc(size=P("x"), color=Gray(40.0)), Param("x", unit="deg")),
+    (Disc(size=P("x"), color=Gray(40.0)), Param("x", unit="deg", low=0.5)),
+    (Disc(color=Gray(P("x"))), Param("x", unit="cd/m2")),
+    (Disc(contrast=Weber(P("x"))), Param("x", unit="fraction", high=1.0)),
+])
+def test_a_parameter_that_cannot_be_bounded_is_refused_where_a_literal_is_checked(looks, param):
+    found = [(f.code, f.detail) for f in check(_one(looks, params=[param], background=GRAY_BG))
+             if f.blocking]
+    assert [code for code, _ in found] == ["bad-block"] and "cannot be bounded" in found[0][1]
+
+
+def test_a_parameter_whose_every_value_is_sound_is_accepted():
+    params = [Param("s", unit="deg", low=0.1, high=2.0), Param("c", unit="fraction", low=-1.0, high=1.0),
+              Param("m", unit="fraction", choices=(0.0, 1.0)), Param("L", unit="cd/m2", low=0.0, high=100.0)]
+    looks = Array(looks=Disc(size=P("s"), contrast=Weber(P("c"))),
+                  among=Gabor(sigma=P("s"), contrast=Michelson(P("m"))))
+    # A background that can reach 0 cd/m² can be black, for each item.
+    assert _refused(_one(looks, params=params, background=Gray(P("L")))) == {"weber-on-black", "unlit"}
+    assert _refused(_one(looks, params=params, background=GRAY_BG)) == set()
+
+
+def test_negative_light_is_refused_in_a_stimulus_and_in_a_background():
+    assert "bad-block" in _refused(_one(Disc(color=Gray(-5.0)), background=GRAY_BG))
+    assert "bad-block" in _refused(_one(LIT, background=Gray(-5.0)))
+    reaches = [Param("bg", unit="cd/m2", low=-5.0, high=40.0)]
+    assert "bad-block" in _refused(_one(LIT, params=reaches, background=Gray(P("bg"))))
+    assert "bad-block" in _refused(_one(LIT, params=_choices(Gray(-5.0), GRAY_BG), background=P("x")))
+
+
+def test_a_background_that_a_parameter_can_make_black_is_black_for_weber():
+    weber = Disc(contrast=Weber(0.5))
+    reaches = [Param("bg", unit="cd/m2", low=0.0, high=40.0)]
+    lit = [Param("bg", unit="cd/m2", low=10.0, high=40.0)]
+    assert "weber-on-black" in _refused(_one(weber, params=reaches, background=Gray(P("bg"))))
+    assert _refused(_one(weber, params=lit, background=Gray(P("bg")))) == set()
+    assert "weber-on-black" in _refused(_one(weber, params=_choices(GRAY_BG, None), background=P("x")))
+    assert _refused(_one(weber, params=_choices(GRAY_BG, Gray(10.0)), background=P("x"))) == set()
+    unbounded = [Param("bg", unit="cd/m2", low=10.0)]  # can be anything below: black, failing closed
+    assert "weber-on-black" in _refused(_one(weber, params=unbounded, background=Gray(P("bg"))))
+
+
+@pytest.mark.parametrize("param", [
+    Param("o", unit="fraction", low=0.0, high=3.0),
+    Param("o", unit="fraction", choices=(0.5, -0.1)),
+    Param("o", unit="fraction"),
+])
+def test_an_opacity_a_parameter_can_take_outside_0_1_is_refused(param):
+    assert "bad-placement" in _refused(_placed(opacity=P("o"), params=[param]))
+    trial = _two_updates(Stimulus("s", at=(0.0, 0.0), looks=LIT), Update("s", layer=1),
+                         Update("s", opacity=P("o")))
+    assert "bad-placement" in _refused(dataclasses.replace(trial, params=[param]))
+
+
+def test_an_opacity_parameter_inside_0_1_is_accepted():
+    assert _refused(_placed(opacity=P("o"), params=[Param("o", unit="fraction", low=0.0, high=1.0)])) == set()
+
+
+def test_a_fault_a_parameter_s_choices_repeat_is_reported_once():
+    pattern = _choices(Michelson(0.3), Michelson(1.5))
+    twice = Array(looks=Gabor(contrast=P("x")), among=Gabor(contrast=P("x")))
+    assert [f.code for f in check(_one(twice, params=pattern, background=GRAY_BG))].count("bad-block") == 1
+    flat = [f.code for f in check(_one(Disc(contrast=P("x")), params=pattern, background=GRAY_BG))]
+    assert flat.count("contrast-convention") == 1
+
+
+def test_an_undeclared_light_parameter_cannot_be_read():
+    assert {"undeclared-parameter", "bad-block"} <= _refused(_one(Disc(color=P("col")), background=GRAY_BG))

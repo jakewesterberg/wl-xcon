@@ -13,13 +13,14 @@ from dataclasses import replace
 import pytest
 
 from wl_xcon.check import check
-from wl_xcon.photometry import DKL, Calibration, Gray, xyY
+from wl_xcon.photometry import D65, DKL, RMS, Calibration, Gray, Michelson, Weber, to_xyz, xyY
 from wl_xcon.task import (
     REMEMBERED,
     After,
     Disc,
     On,
     Outcome,
+    P,
     Param,
     Show,
     State,
@@ -148,8 +149,6 @@ def test_an_absolute_colour_cannot_also_carry_a_contrast():
     )
 
 
-from wl_xcon.photometry import D65, RMS, Gray, Michelson, Weber, to_xyz
-
 
 def test_gray_is_d65_white_at_its_luminance():
     X, Y, Z = to_xyz(Gray(40.0))
@@ -189,3 +188,25 @@ def test_a_look_s_colors_are_checked_too():
     looks = look.Look(fill=look.Flat(color=Gray(10.0)),
                       outline=look.Outline(width=0.1, color=xyY(0.72, 0.28, 40.0)))
     assert "unrealizable-color" in codes(a_task(looks))
+
+
+def test_a_luminance_parameter_is_checked_at_both_ends_of_its_range():
+    def ranging(low, high):
+        return replace(a_task(Disc(color=Gray(P("lum")))),
+                       params=[Param("lum", unit="cd/m2", low=low, high=high)])
+    assert "unrealizable-color" not in codes(ranging(0.0, 100.0))
+    assert "unrealizable-color" in codes(ranging(0.0, 900.0))
+    assert "unrealizable-color" in codes(ranging(-10.0, 50.0))
+
+
+def test_a_color_parameter_s_choices_are_each_checked_against_the_panel():
+    def offering(*choices):
+        return replace(a_task(Disc(color=P("c"))), params=[Param("c", unit="color", choices=choices)])
+    assert "unrealizable-color" in codes(offering(Gray(10.0), xyY(0.72, 0.28, 40.0)))
+    assert "uncalibrated-color" in codes(offering(xyY(0.500, 0.400, 30.0)), calibration=None)
+    assert codes(offering(Gray(10.0), xyY(0.500, 0.400, 30.0))) == set()
+
+
+def test_a_luminance_parameter_that_cannot_be_bounded_is_refused_not_raised():
+    trial = replace(a_task(Disc(color=Gray(P("lum")))), params=[Param("lum", unit="cd/m2")])
+    assert "bad-block" in codes(trial)

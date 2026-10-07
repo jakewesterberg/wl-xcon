@@ -359,6 +359,29 @@ def _is_number(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
+def _options(value: object, params: dict[str, Param]) -> list:
+    """Every value a field that is not a number can hold -- a light, a contrast, an
+    appearance: a literal is itself, a parameter **each of its choices**. A parameter that
+    offers none (undeclared, or a range of numbers where a light belongs) has nothing to
+    read, so it is `_Unbounded`, as check 8 fails closed."""
+    if not isinstance(value, P):
+        return [value]
+    param = params.get(value.name)
+    if param is None or not param.choices:
+        raise _Unbounded(value.name)
+    return list(param.choices)
+
+
+def _reach(value: object, params: dict[str, Param]) -> list[float]:
+    """Every number a field can hold, for a rule a literal is held to: a literal number is
+    itself, a parameter each choice or both ends of its range (`_numbers`, `_Unbounded`
+    when it offers neither), and anything else no number this rule reads."""
+    if isinstance(value, P):
+        return _numbers(value, params)
+    literal = _literal(value)
+    return [] if literal is None else [literal]
+
+
 def _points(at: object, params: dict[str, Param]) -> list[tuple[float, float]]:
     """Every centre a position can take.
 
@@ -841,25 +864,33 @@ def _literal(value) -> float | None:
     return float(value)
 
 
-def _colors(trial: Trial):
+def _colors(trial: Trial, params: dict[str, Param]):
     """Every color a trial can put on screen, with what carries it: each appearance's,
-    each block's (a flat fill, a grating's mean, an outline), and the backgrounds."""
+    each block's (a flat fill, a grating's mean, an outline), and the backgrounds. A color
+    that is a parameter is each of its choices; one offering none to read is refused by
+    `_light_faults`, so it is not one here."""
     from wl_xcon import look
+
+    def each(what, color):
+        try:
+            choices = _options(color, params)
+        except _Unbounded:
+            return
+        for choice in choices:
+            if choice is not None:
+                yield (what if choice is color
+                       else f"{what} (a choice of parameter {color.name!r})"), choice
 
     for looks in _appearances(trial):
         what = type(looks).__name__
         if isinstance(looks, look.Look):
             for part in (looks.fill, looks.outline):
                 for attr in ("color", "mean"):
-                    color = getattr(part, attr, None)
-                    if color is not None:
-                        yield f"{what}'s {type(part).__name__}", color
-        elif getattr(looks, "color", None) is not None:
-            yield what, looks.color
+                    yield from each(f"{what}'s {type(part).__name__}", getattr(part, attr, None))
+        else:
+            yield from each(what, getattr(looks, "color", None))
     for attr in ("background", "background_left", "background_right"):
-        color = getattr(trial, attr)
-        if color is not None:
-            yield f"the trial's {attr.replace('_', ' ')}", color
+        yield from each(f"the trial's {attr.replace('_', ' ')}", getattr(trial, attr))
 
 
 def _color_faults(trial: Trial, panel: Calibration | None) -> list[Finding]:
@@ -872,43 +903,54 @@ def _color_faults(trial: Trial, panel: Calibration | None) -> list[Finding]:
     luminance -- so an isoluminant pair stops being isoluminant and a chromatic
     experiment's control condition quietly becomes a luminance manipulation.
     """
+    params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
-    for what, color in _colors(trial):
-        if isinstance(color, P):
-            continue
+    for what, color in _colors(trial, params):
+        lights = [color]
         if isinstance(color, Gray):
             # Absolute luminance on the default calibration is a session warning, which
             # the warnings list carries (engine build B, XC-243); with a calibration it is
-            # checked like any light.
-            if panel is None or _literal(color.cd_m2) is None:
+            # checked like any light, at each luminance a parameter can take: both ends of
+            # its range, or each choice.
+            if panel is None:
                 continue
-            color = xyY(D65[0], D65[1], float(color.cd_m2))
-        if panel is None:
+            try:
+                lights = [xyY(D65[0], D65[1], v) for v in _reach(color.cd_m2, params)]
+            except _Unbounded:
+                continue  # refused as a bad block: it cannot be bounded
+        for light in lights:
+            findings += _one_color(what, light, panel)
+    return findings
+
+
+def _one_color(what: str, color, panel: Calibration | None) -> list[Finding]:
+    """One light against the calibration, or against its absence."""
+    if panel is None:
+        return [
+            Finding(
+                "uncalibrated-color",
+                f"{what} asks for {color}, but no display calibration was "
+                f"supplied; colour is a physical claim and this one is "
+                f"unmeasured",
+            )
+        ]
+    findings: list[Finding] = []
+    if isinstance(color, DKL) and color.lum == 0.0 and color.magnitude() > 0.0:
+        if not panel.observer:
             findings.append(
                 Finding(
-                    "uncalibrated-color",
-                    f"{what} asks for {color}, but no display calibration was "
-                    f"supplied; colour is a physical claim and this one is "
-                    f"unmeasured",
+                    "unstated-observer",
+                    f"{what} claims isoluminance, but the calibration measured "
+                    f"{panel.measured_on} does not say whose luminous efficiency "
+                    f"it used; a human V(lambda) makes a stimulus that is "
+                    f"isoluminant for nobody in the room",
                 )
             )
-            continue
-        if isinstance(color, DKL) and color.lum == 0.0 and color.magnitude() > 0.0:
-            if not panel.observer:
-                findings.append(
-                    Finding(
-                        "unstated-observer",
-                        f"{what} claims isoluminance, but the calibration measured "
-                        f"{panel.measured_on} does not say whose luminous efficiency "
-                        f"it used; a human V(lambda) makes a stimulus that is "
-                        f"isoluminant for nobody in the room",
-                    )
-                )
-        why = unrealizable(color, panel)
-        if why is not None:
-            findings.append(
-                Finding("unrealizable-color", f"{what} asks for {color}: {why}")
-            )
+    why = unrealizable(color, panel)
+    if why is not None:
+        findings.append(
+            Finding("unrealizable-color", f"{what} asks for {color}: {why}")
+        )
     return findings
 
 
@@ -944,12 +986,19 @@ def _backgrounds(trial: Trial) -> list:
     return [trial.background]
 
 
-def _black(color) -> bool:
-    """The black default, or a literal zero luminance."""
-    if color is None:
+def _black(color, params: dict[str, Param]) -> bool:
+    """Whether a background can be black: the default, a zero luminance, or a parameter
+    whose choices or range reach one. One that cannot be read or bounded can, failing
+    closed."""
+    try:
+        if isinstance(color, P):
+            return any(_black(choice, params) for choice in _options(color, params))
+        if color is None:
+            return True
+        if isinstance(color, Gray):
+            return any(v <= 0.0 for v in _reach(color.cd_m2, params))
+    except _Unbounded:
         return True
-    if isinstance(color, Gray):
-        return _literal(color.cd_m2) == 0.0
     return isinstance(color, xyY) and color.Y == 0.0
 
 
@@ -965,128 +1014,212 @@ def _bare(contrast, params: dict) -> bool:
     return False
 
 
+def _through(*values) -> str:
+    """How a finding names the parameters a value came through, if any."""
+    names = [repr(v.name) for v in values if isinstance(v, P)]
+    return f" (through parameter {', '.join(names)})" if names else ""
+
+
 def _light_faults(trial: Trial) -> list[Finding]:
     """Engine spec §4.12, §4.3, §7.5: every stimulus has a light, every contrast names its
     convention, and a light relative to the background has a background to be relative
     to. An invisible stimulus is not a rendering problem: the trial would score as a miss
-    indistinguishable from behavior."""
+    indistinguishable from behavior.
+
+    **A light written as a parameter is held to these rules at each of its choices**, and
+    one that offers no choices to read is refused: a check that read only literals passed
+    exactly the lights the lab makes live."""
     from wl_xcon import look
     from wl_xcon.photometry import Contrast, Michelson, Weber
 
     params = {p.name: p for p in trial.params}
     backgrounds = _backgrounds(trial)
-    on_black = any(_black(b) for b in backgrounds)
+    on_black = any(_black(b, params) for b in backgrounds)
     findings: list[Finding] = []
+
+    def found(code: str, detail: str, blocking: bool = True) -> None:
+        finding = Finding(code, detail, blocking=blocking)
+        if finding not in findings:  # one parameter's choices can repeat a finding
+            findings.append(finding)
+
+    def unread(what: str, name: str) -> None:
+        found("bad-block", (
+            f"{what} is parameter {name!r}, which offers no choices, so its light cannot be "
+            f"read; a light written as a parameter offers its lights as choices"))
+
+    for attr in ("background", "background_left", "background_right"):
+        try:
+            _options(getattr(trial, attr), params)
+        except _Unbounded as unbounded:
+            unread(f"the trial's {attr.replace('_', ' ')}", unbounded.args[0])
     for looks in _appearances(trial):
         what = type(looks).__name__
-        if isinstance(looks, look.Look) and looks.outline is not None and looks.outline.color is None:
-            findings.append(Finding("unlit", f"{what}'s outline has no color"))
+        if isinstance(looks, look.Look) and looks.outline is not None:
+            color = looks.outline.color
+            try:
+                if any(choice is None for choice in _options(color, params)):
+                    found("unlit", f"{what}'s outline has no color{_through(color)}")
+            except _Unbounded as unbounded:
+                unread(f"{what}'s outline color", unbounded.args[0])
         light = _light(looks)
         if light is None:
             continue
         kind, color, contrast, mean = light
         if _bare(contrast, params):
-            findings.append(Finding("bare-contrast", (
+            found("bare-contrast", (
                 f"{what} gives a contrast with no convention; write it as Weber(...), "
                 f"Michelson(...) or RMS(...), whose value may be a parameter (engine "
-                f"spec §4.12)")))
+                f"spec §4.12)"))
             continue
-        if kind == "flat":
-            if color is None and contrast is None:
-                findings.append(Finding("unlit", (
-                    f"{what} has no light: give it a color, such as Gray(40) for 40 "
-                    f"cd/m², or a Weber contrast against a declared background")))
-            if color is not None and contrast is not None:
-                findings.append(Finding("overspecified-color", (
-                    f"{what} sets an absolute colour and a contrast of {contrast}; both "
-                    f"claim to set the same physical quantity. Use one")))
-            if isinstance(contrast, Contrast) and not isinstance(contrast, Weber):
-                findings.append(Finding("contrast-convention", (
-                    f"{what} is one flat light, and {type(contrast).__name__} contrast "
-                    f"describes a pattern about its mean; a flat light takes a color or "
-                    f"a Weber contrast")))
-            if isinstance(contrast, Weber) and on_black:
-                findings.append(Finding("weber-on-black", (
-                    f"{what} is a Weber contrast against the background, and an eye's "
-                    f"background is black; declare the trial's background (engine "
-                    f"spec §7.5)")))
+        try:
+            each = list(itertools.product(*(_options(v, params) for v in (color, contrast, mean))))
+        except _Unbounded as unbounded:
+            unread(f"{what}'s light", unbounded.args[0])
             continue
-        if contrast is None:
-            findings.append(Finding("unlit", (
-                f"{what} has no contrast, so it is its mean alone; give it "
-                f"Michelson(...)")))
-        elif isinstance(contrast, Contrast) and not isinstance(contrast, Michelson):
-            findings.append(Finding("contrast-convention", (
-                f"{what} is a sine grating, drawn at a Michelson contrast in this build; "
-                f"{type(contrast).__name__} contrast for patterns arrives with the "
-                f"pattern fills (engine build A3)")))
-        if mean is None and on_black:
-            findings.append(Finding("unlit", (
-                f"{what}'s mean is whatever is behind it, and an eye's background is "
-                f"black, so it may draw nothing; declare the background or its mean")))
-        if mean is not None and not isinstance(mean, P) and any(mean != b for b in backgrounds):
-            findings.append(Finding("luminance-step", (
-                f"{what}'s mean {mean} differs from the background, so a luminance step "
-                f"sits under the pattern (engine spec §4.3: always a warning)"),
-                blocking=False))
+        what += _through(color, contrast, mean)
+        for color, contrast, mean in each:
+            if kind == "flat":
+                if color is None and contrast is None:
+                    found("unlit", (
+                        f"{what} has no light: give it a color, such as Gray(40) for 40 "
+                        f"cd/m², or a Weber contrast against a declared background"))
+                if color is not None and contrast is not None:
+                    found("overspecified-color", (
+                        f"{what} sets an absolute colour and a contrast of {contrast}; both "
+                        f"claim to set the same physical quantity. Use one"))
+                if isinstance(contrast, Contrast) and not isinstance(contrast, Weber):
+                    found("contrast-convention", (
+                        f"{what} is one flat light, and {type(contrast).__name__} contrast "
+                        f"describes a pattern about its mean; a flat light takes a color or "
+                        f"a Weber contrast"))
+                if isinstance(contrast, Weber) and on_black:
+                    found("weber-on-black", (
+                        f"{what} is a Weber contrast against the background, and an eye's "
+                        f"background is or can be black; declare the trial's background "
+                        f"(engine spec §7.5)"))
+                continue
+            if contrast is None:
+                found("unlit", (
+                    f"{what} has no contrast, so it is its mean alone; give it "
+                    f"Michelson(...)"))
+            elif isinstance(contrast, Contrast) and not isinstance(contrast, Michelson):
+                found("contrast-convention", (
+                    f"{what} is a sine grating, drawn at a Michelson contrast in this build; "
+                    f"{type(contrast).__name__} contrast for patterns arrives with the "
+                    f"pattern fills (engine build A3)"))
+            if mean is None and on_black:
+                found("unlit", (
+                    f"{what}'s mean is whatever is behind it, and an eye's background is "
+                    f"or can be black, so it may draw nothing; declare the background or "
+                    f"its mean"))
+            if mean is not None and not isinstance(mean, P) and any(mean != b for b in backgrounds):
+                found("luminance-step", (
+                    f"{what}'s mean {mean} differs from the background, so a luminance step "
+                    f"sits under the pattern (engine spec §4.3: always a warning)"),
+                    blocking=False)
     return findings
 
 
-def _parts(value) -> list:
-    """`value` and every block inside it, depth first. It stops at an `Array`:
-    `_appearances` yields an Array's `looks` and `among` as appearances of their own,
-    so descending would report a fault in one of them twice."""
-    if isinstance(value, P) or not dataclasses.is_dataclass(value):
+def _parts(value, params: dict[str, Param]) -> list:
+    """`value` and every block inside it, depth first, **a parameter's choices included**.
+    It stops at an `Array` and at an appearance a parameter offers: `_appearances` yields
+    both as appearances of their own, so descending would report a fault in one twice."""
+    from wl_xcon.task import Appearance
+
+    if isinstance(value, P):
+        param = params.get(value.name)
+        return [
+            part
+            for choice in (param.choices if param is not None else ())
+            if not isinstance(choice, Appearance)
+            for part in _parts(choice, params)
+        ]
+    if not dataclasses.is_dataclass(value):
         return []
     found = [value]
     if isinstance(value, Array):
         return found
     for f in dataclasses.fields(value):
-        found.extend(_parts(getattr(value, f.name)))
+        found.extend(_parts(getattr(value, f.name), params))
     return found
 
 
 def _block_faults(trial: Trial) -> list[Finding]:
     """Degenerate values in what is drawn, refused here so the drawer never meets them:
-    a size is a positive full width, a contrast stays inside its convention, a ring's
-    inside is inside it, a shape has enough points (engine spec §4.2, §5.2)."""
+    a size is a positive full width, a contrast stays inside its convention, a light is
+    not negative, a ring's inside is inside it, a shape has enough points (engine spec
+    §4.2, §5.2). In the stimuli and in the backgrounds.
+
+    **Each rule holds at every value a parameter can take**, each choice or both ends of its
+    range, as check 8 measures a position; a parameter in one of these fields that offers
+    neither cannot be bounded, and is refused rather than passed (engine A1 final review)."""
     from wl_xcon import look
     from wl_xcon.photometry import Michelson, Weber
     from wl_xcon.task import Annulus, Polygon
 
+    params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
 
     def bad(detail: str) -> None:
-        findings.append(Finding("bad-block", detail))
+        finding = Finding("bad-block", detail)
+        if finding not in findings:  # one parameter, or one block, met twice
+            findings.append(finding)
 
-    for looks in _appearances(trial):
-        for part in _parts(looks):
-            name = type(part).__name__
-            for f in dataclasses.fields(part):
-                value = _literal(getattr(part, f.name))
-                if f.name in _SIZES and value is not None and value <= 0.0:
-                    bad(f"{name}.{f.name} is {value:g}; a size is a positive full width in degrees")
-            value = _literal(getattr(part, "value", None))
-            if isinstance(part, Michelson) and value is not None and not 0.0 <= value <= 1.0:
-                bad(f"Michelson({value:g}) is outside [0, 1]")
-            if isinstance(part, Weber) and value is not None and value < -1.0:
-                bad(f"Weber({value:g}) asks for negative light")
-            if isinstance(part, (look.Ring, Annulus)):
-                inner, outer = _literal(part.inner), _literal(part.outer)
-                if inner is not None and inner < 0.0:
-                    bad(f"{name}.inner is {inner:g}")
-                if inner is not None and outer is not None and inner >= outer:
-                    bad(f"{name}'s inner diameter {inner:g} is not inside its outer {outer:g}")
-            if isinstance(part, (look.RegularPolygon, Polygon)):
-                sides = _literal(part.sides)
-                if sides is not None and sides < 3:
-                    bad(f"{name} has {sides:g} sides; a polygon has at least 3")
-            if isinstance(part, look.Vertices) and len(part.points) < 3:
-                bad(f"Vertices has {len(part.points)} points; a polygon has at least 3")
-            if isinstance(part, look.Path) and len(part.points) < 2:
-                bad(f"Path has {len(part.points)} point; a line has at least 2")
-            if isinstance(part, look.Edge) and part.applies not in (None, *look.EDGE_APPLIES):
-                bad(f"{name} applies to {part.applies!r}; one of {', '.join(look.EDGE_APPLIES)}")
+    def values(part, attr: str) -> list[tuple[float, str]]:
+        """Each number `part.attr` can be, with how to say it ("Disc.size is 0", "Disc.size
+        can be -1 (parameter 's')"); a parameter that cannot be bounded is refused here."""
+        raw = getattr(part, attr)
+        name = f"{type(part).__name__}.{attr}"
+        try:
+            reached = _reach(raw, params)
+        except _Unbounded as unbounded:
+            bad(f"{name} is parameter {unbounded.args[0]!r}, which has neither a two-sided "
+                f"range nor numeric choices, so it cannot be bounded")
+            return []
+        if isinstance(raw, P):
+            return [(v, f"{name} can be {v:g} (parameter {raw.name!r})") for v in reached]
+        return [(v, f"{name} is {v:g}") for v in reached]
+
+    def first(pairs, fails) -> None:
+        """Refuse the first value that fails, with what it says."""
+        for v, said in pairs:
+            if fails(v):
+                bad(said)
+                return
+
+    blocks = [part for looks in _appearances(trial) for part in _parts(looks, params)]
+    for attr in ("background", "background_left", "background_right"):
+        blocks += _parts(getattr(trial, attr), params)
+    for part in blocks:
+        name = type(part).__name__
+        for f in dataclasses.fields(part):
+            if f.name in _SIZES:
+                first([(v, f"{said}; a size is a positive full width in degrees")
+                       for v, said in values(part, f.name)], lambda v: v <= 0.0)
+        if isinstance(part, Michelson):
+            first([(v, f"{said}, outside [0, 1]") for v, said in values(part, "value")],
+                  lambda v: not 0.0 <= v <= 1.0)
+        if isinstance(part, Weber):
+            first([(v, f"{said}: below -1 asks for negative light")
+                   for v, said in values(part, "value")], lambda v: v < -1.0)
+        if isinstance(part, Gray):
+            first([(v, f"{said}: negative light") for v, said in values(part, "cd_m2")],
+                  lambda v: v < 0.0)
+        if isinstance(part, (look.Ring, Annulus)):
+            inner, outer = values(part, "inner"), values(part, "outer")
+            first(inner, lambda v: v < 0.0)
+            if inner and outer and max(inner)[0] >= min(outer)[0]:
+                bad(f"{name}'s inner diameter is not inside its outer: {max(inner)[1]}, "
+                    f"{min(outer)[1]}")
+        if isinstance(part, (look.RegularPolygon, Polygon)):
+            first([(v, f"{said}; a polygon has at least 3 sides")
+                   for v, said in values(part, "sides")], lambda v: v < 3)
+        if isinstance(part, look.Vertices) and len(part.points) < 3:
+            bad(f"Vertices has {len(part.points)} points; a polygon has at least 3")
+        if isinstance(part, look.Path) and len(part.points) < 2:
+            bad(f"Path has {len(part.points)} point; a line has at least 2")
+        if isinstance(part, look.Edge) and part.applies not in (None, *look.EDGE_APPLIES):
+            bad(f"{name} applies to {part.applies!r}; one of {', '.join(look.EDGE_APPLIES)}")
     return findings
 
 
@@ -1418,16 +1551,26 @@ def _nonzero(value) -> bool:
     return isinstance(value, P) or bool(_literal(value))
 
 
-def _modulates(looks) -> bool:
-    """Whether a stimulus can multiply the contrast below it: a pattern, or a flat Weber
-    contrast (a gain of 1 + c). An absolute light names no gain."""
+def _modulates(looks, params: dict[str, Param]) -> bool:
+    """Whether a stimulus can multiply the contrast below it, for every value it can take:
+    a pattern, or a flat Weber contrast (a gain of 1 + c). An absolute light names no gain.
+    An `Array` modulates only if each of its items does, and a parameter only if each of
+    its choices does; one with no choices to read is `_Unbounded`, naming it."""
     from wl_xcon.photometry import Weber
 
-    light = None if isinstance(looks, P) else _light(looks)
+    if isinstance(looks, P):
+        return all(_modulates(choice, params) for choice in _options(looks, params))
+    if isinstance(looks, Array):
+        return _modulates(looks.looks, params) and _modulates(looks.among, params)
+    light = _light(looks)
     if light is None:
-        return True  # chosen per trial, or a later build's fill: checked where defined
+        return True  # a later build's fill: checked where it is defined
     kind, color, contrast, _ = light
-    return kind == "grating" or (color is None and isinstance(contrast, Weber))
+    return kind == "grating" or all(
+        c is None and isinstance(k, Weber)
+        for c in _options(color, params)
+        for k in _options(contrast, params)
+    )
 
 
 def _placement_faults(trial: Trial) -> list[Finding]:
@@ -1436,10 +1579,19 @@ def _placement_faults(trial: Trial) -> list[Finding]:
     positions given in pairs, never with a disparity, and only on the stereoscope."""
     from wl_xcon.task import COMBINE, Show, Update
 
+    params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
 
     def refuse(code: str, detail: str) -> None:
         findings.append(Finding(code, detail))
+
+    def unmodulated(looks) -> str:
+        """Why `looks` cannot multiply the contrast below it, or "" if it can."""
+        try:
+            return "" if _modulates(looks, params) else "it can be an absolute light, which has none"
+        except _Unbounded as unbounded:
+            return (f"its appearance is parameter {unbounded.args[0]!r}, which offers no "
+                    f"choices, so its modulation cannot be read")
 
     updated = _as_updated(trial)
     for _, action in actions_of(trial):
@@ -1462,16 +1614,27 @@ def _placement_faults(trial: Trial) -> list[Finding]:
                     f"an update of {name!r} can leave it with both per-eye positions and a "
                     f"disparity, from the update itself or from what it was shown and "
                     f"updated with; they are two ways to say one thing (engine spec §5.4)"))
-            if any(c.combine == "multiply" and not _modulates(c.looks) for c in left):
+            why = next((w for c in left if c.combine == "multiply" and (w := unmodulated(c.looks))),
+                       "")
+            if why:
                 refuse("multiply-needs-modulation", (
-                    f"an update of {name!r} can leave it multiplying the contrast below it "
-                    f"with an absolute light, which has no modulation; give it a Weber "
-                    f"contrast or a pattern"))
+                    f"an update of {name!r} can leave it multiplying the contrast below it by "
+                    f"its own modulation, and {why}; give it a Weber contrast or a pattern"))
         else:
             continue
-        opacity = _literal(sets.get("opacity"))
-        if opacity is not None and not 0.0 <= opacity <= 1.0:
-            refuse("bad-placement", f"{name!r}'s opacity {opacity:g} is outside [0, 1]")
+        # At every value a parameter can take, as `_block_faults` holds a block's values.
+        opacity = sets.get("opacity")
+        try:
+            outside = [v for v in _reach(opacity, params) if not 0.0 <= v <= 1.0]
+        except _Unbounded as unbounded:
+            refuse("bad-placement", (
+                f"{name!r}'s opacity is parameter {unbounded.args[0]!r}, which has neither a "
+                f"two-sided range nor numeric choices, so it cannot be bounded to [0, 1]"))
+            outside = []
+        if outside:
+            said = (f"can be {outside[0]:g} (parameter {opacity.name!r})" if isinstance(opacity, P)
+                    else f"{outside[0]:g}")
+            refuse("bad-placement", f"{name!r}'s opacity {said} is outside [0, 1]")
         layer = sets.get("layer", 0)
         if isinstance(layer, bool) or not isinstance(layer, int):
             refuse("bad-placement", f"{name!r}'s layer {layer!r} is not a whole number")
@@ -1479,10 +1642,10 @@ def _placement_faults(trial: Trial) -> list[Finding]:
             if sets["combine"] not in COMBINE:
                 refuse("bad-placement", (
                     f"{name!r} combines as {sets['combine']!r}; one of {', '.join(COMBINE)}"))
-            elif sets["combine"] == "multiply" and not _modulates(looks):
+            elif sets["combine"] == "multiply" and (why := unmodulated(looks)):
                 refuse("multiply-needs-modulation", (
                     f"{name!r} multiplies the contrast below it by its own modulation, and "
-                    f"an absolute light has none; give it a Weber contrast or a pattern"))
+                    f"{why}; give it a Weber contrast or a pattern"))
         if ("at_left" in sets) != ("at_right" in sets):
             refuse("per-eye-misused", f"{name!r} gives one eye's position without the other's")
         if "at_left" in sets or "at_right" in sets:
@@ -1498,6 +1661,8 @@ def _placement_faults(trial: Trial) -> list[Finding]:
 
 
 def _trial_display_faults(trial: Trial) -> list[Finding]:
+    """The trial's own display settings: a known periphery (engine spec §5.3), and per-eye
+    backgrounds only on the stereoscope (§4.4)."""
     from wl_xcon.task import PERIPHERY
 
     findings: list[Finding] = []
