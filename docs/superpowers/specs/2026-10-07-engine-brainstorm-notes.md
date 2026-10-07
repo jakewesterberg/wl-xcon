@@ -569,3 +569,15 @@ Settled before the element: the PI's vocabulary of 2026-10-01 (session, task, ru
 block, condition, trial; the session-levels spec §2); `scheduler.py` (conditions with targets,
 blocks with criteria, counting, orders, requeue) built and driven every trial; but `taskd._plan`
 gives every run one block of one condition, and no task can declare a plan (XC-207).
+
+**Batch 1** (asked 2026-10-07):
+
+- **Where a task's plan lives** — "In the task file": beside its trial(s), one reviewable file; the
+  operator chooses at run start among the plans it declares.
+- **The operator's edits** — "Edit freely": at run start and during a run the operator may also add
+  or remove conditions and block types, each change recorded with its actor (offered against: pick
+  and adjust within declared ranges).
+- **Several kinds of trial in one task** — "Yes, chosen per condition": a task declares several
+  trial structures; each condition names its own; interleaving them in a block is ordinary.
+- **Interludes** — "Yes": a run steps aside (a recalibration, a quick RF map, a rest) and returns to
+  the same block with its counts and order; recorded as an interlude, not a new block (S8 §1).
