@@ -138,3 +138,14 @@ nothing is computed inside a frame.
 - **Off the field** — "Only when declared": a stimulus may extend past the field's edge only if
   the task says so (a sweep entering from off-screen, a scene cropped by the mask); otherwise
   refused at load, as today.
+
+**Batch 6, waveforms, randomness, layouts, item variety** (asked 2026-10-07):
+
+- **Grating waveforms** — sine, square, triangle, sawtooth.
+- **Random patterns** — "Seed, frames on request": every random pattern from a seed in the
+  record, rebuilt exactly by the slow drawer; a task may also ask for the frames it showed to be
+  saved (e.g. for reverse correlation on pixels).
+- **Layouts** — grid; listed positions; random with spacing rules (drawn between trials from a
+  seed); several rings or clusters.
+- **Item variety** — "Each item its own stimulus": a display is a list of items, each free in
+  shape, fill, color, orientation and size; target and distractor are roles, not appearances.
