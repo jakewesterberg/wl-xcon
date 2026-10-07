@@ -57,6 +57,7 @@ RETURNS: dict[str, str] = {
     "actor": "None",
     "signin": "None",
     "screen": "None",
+    "exact": "None",
     "check": "[]",
     "encode": "[]",
     "calibration": "[]",

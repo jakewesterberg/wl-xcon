@@ -1,0 +1,139 @@
+"""The exact drawer (engine spec §4.9; build A1). Previews of the real panel keep these
+fast: the same centimeters and degrees at fewer pixels, or a region of a larger grid."""
+
+import math
+
+import numpy as np
+import pytest
+
+from _rig import DIRECT, RIG, STEREOSCOPE
+from wl_xcon import exact, look, screen, viewport
+from wl_xcon.photometry import Gray, Michelson, Weber, to_xyz
+from wl_xcon.task import Bar, Disc, Gabor, Stimulus, Trial
+
+TRIAL = Trial(start="s", states=[])
+PREVIEW = (384, 216)
+
+
+def _draw(stimuli, geometry=DIRECT, trial=TRIAL, pixels=PREVIEW, eye=0, region=None,
+          frame=0, onsets=None):
+    s = screen.resolve({x.name: x for x in stimuli}, {}, trial, geometry, frame_period=1 / 240,
+                       frame=frame, onsets=onsets)
+    vp = viewport.viewports(RIG, geometry, pixels=pixels)[eye]
+    return exact.draw(s, vp, region=region), vp
+
+
+def _angles(vp, region, x_deg, y_deg):
+    """Each pixel's center, as degrees of visual angle from the direction (x°, y°)."""
+    x_cm, y_cm = viewport.sample_cm(vp, 1, region)
+    v = viewport.directions(x_cm, y_cm, vp.distance_cm)
+    return np.degrees(np.arccos(np.clip(v @ viewport.center(x_deg, y_deg), -1.0, 1.0)))
+
+
+def _pixel(vp, x_deg, y_deg, region=(0, 0)):
+    """(row, col) of the pixel at a direction, in an image whose region starts at
+    `region[:2]` (the whole viewport by default)."""
+    col = vp.width_px / 2 + (vp.distance_cm * math.tan(math.radians(x_deg)) + vp.ahead_cm[0]) / vp.pitch_cm[0]
+    row = vp.height_px / 2 - (vp.distance_cm * math.tan(math.radians(y_deg)) + vp.ahead_cm[1]) / vp.pitch_cm[1]
+    return int(row) - region[1], int(col) - region[0]
+
+
+def test_a_disc_is_drawn_at_its_light_and_nothing_else_is_lit():
+    image, vp = _draw([Stimulus("d", at=(0.0, 0.0), looks=Disc(size=4.0, color=Gray(40.0)))])
+    assert image[_pixel(vp, 0.0, 0.0)] == pytest.approx(np.asarray(to_xyz(Gray(40.0))))
+    assert image[0, 0].tolist() == [0.0, 0.0, 0.0]
+
+
+def test_a_disc_far_off_axis_subtends_its_declared_angle():
+    # Review Focus 1: 2° at 25° in direct view is 2° of visual angle.
+    region = (1650, 480, 1790, 600)
+    image, vp = _draw([Stimulus("d", at=(25.0, 0.0), looks=Disc(size=2.0, color=Gray(40.0)))],
+                      pixels=(1920, 1080), region=region)
+    angles = _angles(vp, region, 25.0, 0.0)
+    assert angles[image[..., 1] > 20.0].max() == pytest.approx(1.0, abs=0.04)
+    assert angles[image[..., 1] < 20.0].min() == pytest.approx(1.0, abs=0.04)
+
+
+def test_true_angle_and_center_scale_differ_off_axis():
+    disc = Stimulus("d", at=(25.0, 0.0), looks=Disc(size=2.0, color=Gray(40.0)))
+    region = (1650, 480, 1790, 600)
+    true, _ = _draw([disc], pixels=(1920, 1080), region=region)
+    flat, _ = _draw([disc], pixels=(1920, 1080), region=region,
+                    trial=Trial(start="s", states=[], periphery="center_scale"))
+    assert flat[..., 1].sum() < 0.9 * true[..., 1].sum()
+
+
+def test_a_bar_narrower_than_a_pixel_keeps_its_light():
+    # Review Focus 2: 0.02°, about 1.1 pixels at the panel's full resolution.
+    image, vp = _draw([Stimulus("b", at=(0.0, 0.0), looks=Bar(length=4.0, width=0.02, color=Gray(40.0)))],
+                      pixels=RIG.pixels, region=(1800, 960, 2040, 1200))
+    px = math.degrees(math.atan(vp.pitch_cm[0] / vp.distance_cm))
+    py = math.degrees(math.atan(vp.pitch_cm[1] / vp.distance_cm))
+    assert image[..., 1].sum() == pytest.approx(40.0 * 4.0 * 0.02 / (px * py), rel=0.02)
+
+
+def test_a_bar_turns_counter_clockwise_with_y_up():
+    # Spec §5.1: 0° right, counter-clockwise positive, +y up, pinned in the drawing.
+    image, vp = _draw([Stimulus("b", at=(0.0, 0.0),
+                                looks=Bar(length=6.0, width=0.6, orientation=45.0, color=Gray(40.0)))])
+    assert image[_pixel(vp, 1.5, 1.5)][1] == pytest.approx(40.0)
+    assert image[_pixel(vp, 1.5, -1.5)][1] == 0.0
+
+
+@pytest.mark.parametrize("shape, inside, outside", [
+    (look.Circle(size=2.0), (0.9, 0.0), (1.1, 0.0)),
+    (look.Ellipse(width=2.0, height=1.0), (0.0, 0.45), (0.0, 0.55)),
+    (look.Rect(width=2.0, height=1.0), (0.9, 0.4), (0.9, 0.6)),
+    (look.Cross(size=2.0, thickness=0.2), (0.9, 0.0), (0.5, 0.5)),
+    (look.RegularPolygon(sides=4, size=2.0), (0.0, 0.9), (0.9, 0.9)),
+    (look.Vertices(points=((0.0, 1.0), (-1.0, -1.0), (1.0, -1.0))), (0.0, 0.0), (0.0, 1.5)),
+    (look.Ring(inner=1.0, outer=2.0), (0.75, 0.0), (0.25, 0.0)),
+    (look.Path(points=((-1.0, 0.0), (1.0, 0.0)), width=0.2), (0.0, 0.09), (0.0, 0.11)),
+])
+def test_each_shape_is_negative_inside_and_positive_outside(shape, inside, outside):
+    d = exact.signed_distance(shape, np.array([inside[0], outside[0]]), np.array([inside[1], outside[1]]))
+    assert d[0] < 0 < d[1]
+
+
+def test_the_whole_screen_is_inside_everywhere():
+    assert (exact.signed_distance(look.WholeScreen(), np.zeros(3), np.array([0.0, 50.0, -50.0])) < 0).all()
+
+
+def test_coverage_is_a_sample_s_share_inside_from_its_distance_and_gradient():
+    d = np.array([[-1.5, -0.5, 0.0, 0.5, 1.5]])  # one sample apart
+    assert exact.coverage(d).ravel().tolist() == pytest.approx([1.0, 1.0, 0.5, 0.0, 0.0])
+    assert exact.coverage(np.full((2, 2), -1.0)).tolist() == [[1.0, 1.0], [1.0, 1.0]]
+
+
+def test_a_raised_cosine_ramps_from_the_boundary_inward():
+    p = exact.edge_profile(look.RaisedCosine(width=0.5), np.array([-1.0, -0.5, -0.25, 0.0, 0.1]),
+                           np.zeros(5), np.zeros(5))
+    assert p.tolist() == pytest.approx([1.0, 1.0, 0.5, 0.0, 0.0])
+
+
+def test_a_gaussian_edge_is_the_radial_envelope():
+    p = exact.edge_profile(look.GaussianEdge(sigma=1.0), np.array([-1.0, -1.0]),
+                           np.array([0.0, 1.0]), np.array([0.0, 0.0]))
+    assert p.tolist() == pytest.approx([1.0, math.exp(-0.5)])
+
+
+def test_an_outline_is_a_band_on_the_boundary_over_the_fill():
+    looks = look.Look(shape=look.Circle(size=4.0), fill=look.Flat(color=Gray(10.0)),
+                      outline=look.Outline(width=0.6, color=Gray(40.0)))
+    image, vp = _draw([Stimulus("o", at=(0.0, 0.0), looks=looks)])
+    assert image[_pixel(vp, 0.0, 0.0)][1] == pytest.approx(10.0)
+    assert image[_pixel(vp, 2.0, 0.0)][1] == pytest.approx(40.0)
+
+
+def test_weber_contrast_is_against_the_eye_s_background():
+    trial = Trial(start="s", states=[], background=Gray(20.0))
+    image, vp = _draw([Stimulus("w", at=(0.0, 0.0), looks=Disc(size=4.0, contrast=Weber(0.5)))], trial=trial)
+    assert image[_pixel(vp, 0.0, 0.0)][1] == pytest.approx(30.0)
+    assert image[0, 0, 1] == pytest.approx(20.0)
+
+
+def test_an_empty_screen_is_its_background():
+    s = screen.Screen(setup="direct", periphery="true_angle", background_left=(1.0, 2.0, 3.0),
+                      background_right=(0.0, 0.0, 0.0), items=(), frame=0, frame_period=1 / 240)
+    vp = viewport.viewports(RIG, DIRECT, pixels=(4, 4))[0]
+    assert exact.draw(s, vp).tolist() == [[[1.0, 2.0, 3.0]] * 4] * 4
