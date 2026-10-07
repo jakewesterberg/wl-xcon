@@ -218,3 +218,23 @@ def test_a_grating_with_a_declared_mean_sits_on_that_mean():
     image, vp = _draw([Stimulus("g", at=(0.0, 0.0), looks=looks)], trial=_gray20(), pixels=(1920, 1080),
                       region=GABOR_REGION)
     assert image[_pixel(vp, 0.0, 0.0, GABOR_REGION)][1] == pytest.approx(15.0, rel=0.01)  # 10·(1 + 0.5)
+
+
+def test_a_positive_tf_drifts_toward_local_plus_y():
+    looks = look.Look(shape=look.Circle(size=6.0),
+                      fill=look.SineGrating(sf=1.0, phase=0.0, tf=2.0, contrast=Michelson(0.5)))
+    image, vp = _draw([Stimulus("g", at=(0.0, 0.0), looks=looks)], trial=_gray20(), pixels=(1920, 1080),
+                      region=GABOR_REGION, frame=30)  # a quarter cycle at 1/240 s per frame
+    assert image[_pixel(vp, 0.0, 0.5, GABOR_REGION)][1] == pytest.approx(30.0, rel=0.02)  # the crest
+
+
+def test_a_grating_without_a_declared_mean_sits_on_what_is_behind_it():
+    disc = Stimulus("d", at=(0.0, 0.0), looks=Disc(size=9.0, color=Gray(40.0)))
+    gabor = Stimulus("g", at=(0.0, 0.0), layer=1,
+                     looks=Gabor(sf=1.0, sigma=0.5, phase=90.0, contrast=Michelson(0.5)))
+    image, vp = _draw([disc, gabor], trial=_gray20(), pixels=(1920, 1080), region=GABOR_REGION)
+    assert image[_pixel(vp, 0.0, 0.0, GABOR_REGION)][1] == pytest.approx(60.0, rel=0.01)  # 40·(1 + 0.5)
+    angles = _angles(vp, GABOR_REGION, 0.0, 0.0)
+    seam = (angles > 2.1) & (angles < 2.5)
+    assert seam.any()
+    assert np.abs(image[..., 1][seam] - 40.0).max() < 0.01  # seamless onto the disc
