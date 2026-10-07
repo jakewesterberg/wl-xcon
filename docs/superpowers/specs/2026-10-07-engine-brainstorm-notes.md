@@ -425,3 +425,22 @@ Settled before the element: our own thin GPU drawer built now (glfw and moderngl
 spike); the slow exact drawer is the definition and the GPU drawer is tested against it; thousands
 of elements per frame; 10-bit output with dithering as the fallback; a measured lookup table; no
 allocation inside a frame (CLAUDE.md).
+
+**Batch 1** (asked 2026-10-07):
+
+- **How closely the GPU drawer matches the exact definition** — "Within one output level": every
+  pixel within one of the 1024 levels, tested on reference scenes for every block and in
+  combinations.
+- **Edges between pixels** — "Smooth, sub-pixel": anti-aliased by coverage, so stimuli sit and move
+  in fractions of a pixel.
+- **Patterns near the pixel limit** (about 28-31 cycles/degree at the center in direct view) —
+  "Warned": allowed, with a warning naming the stimulus and the limit (offered against: refused).
+- **The graphics interface** — the PI: "can we spike vulkan to test? it seems like a better
+  long-term option". What the session found, 2026-10-07 (web, not verified on this hardware):
+  Vulkan offers direct-to-display (`VK_KHR_display`, no compositor in the path) and per-frame
+  presentation timing (`VK_EXT_present_timing`, newly standardized; Phoronix reports NVIDIA's
+  Linux driver supports it, UNVERIFIED for the RTX 5070 Ti and its driver); Python routes are raw
+  bindings (`vulkan`, realitix, last release 2024), wgpu-py (WebGPU over Vulkan, which hides both
+  features) or a compiled core; prior art: vstimd, a Rust Vulkan stimulus server driving displays
+  directly with `VK_KHR_display` (maintainer and license not stated on the page read). On this Mac
+  Vulkan runs through MoltenVK onto Metal: a spike here tests feasibility, never timing (P4a).
