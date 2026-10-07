@@ -934,3 +934,10 @@ reward size) and otherwise to approve or comment.
   with contrasts): achromatic is D65 white at a luminance in cd/m².
 - **The reference tasks' fixation points and targets** — "40 cd/m²", as the starting value of new
   live-editable luminance parameters, on the black default background.
+- **Asked with the A1 plan** (`docs/superpowers/plans/2026-10-07-engine-a1.md`):
+  - **How A1 is carried out** — "Helper per task, each checked (Recommended)" (offered against:
+    built in one session with one review at the end): subagent-driven, as earlier slices.
+  - **Groups** — "Move to A3 (Recommended)" (offered against: keep in A1, about two more tasks):
+    groups and layouts move to A3; A1 still draws an `Array` as its items (XC-244).
+  - **The luminance settings' upper bound until V9 measures the brightness cap** — "Up to 100
+    cd/m² (Recommended)" (offered against: up to 200 cd/m²).
