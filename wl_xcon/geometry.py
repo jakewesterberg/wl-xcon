@@ -289,7 +289,12 @@ class Rig:
     #: eye-separation table, IPD 30-38 mm (S0 §7.1.3). An animal outside it is refused
     #: rather than given a field nobody drew.
     half_ipd_range_cm: tuple[float, float]
+    #: The panel's pixels, horizontal and vertical (S0 §5.1).
+    pixels: tuple[int, int]
     housings: tuple[Housing, ...] = ()
+    #: Direct view's straight-ahead point, cm from the panel's center (x right, y up):
+    #: where (0°, 0°) falls (engine spec §5.1). The center unless measured otherwise.
+    straight_ahead_cm: tuple[float, float] = (0.0, 0.0)
 
     def direct(self) -> Geometry:
         return Geometry.direct(

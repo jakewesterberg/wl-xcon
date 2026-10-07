@@ -36,6 +36,8 @@ RIG = Rig(
     # The half-IPDs the stereoscope is built for: IPD 30-38 mm, the optics drawing's
     # eye-separation table (S0 §7.1.3). An animal outside it is refused.
     half_ipd_range_cm=(1.5, 1.9),
+    # The PG27UCDM's published resolution, 3840 × 2160 (S0 §5.1).
+    pixels=(3840, 2160),
     # NOT YET MEASURED: the light sensors' housings, each a rectangle with its margin,
     # measured at build from the real sensors (direct-view spec §4, §9 item 1). Until
     # then direct view refuses to exist on these settings.
