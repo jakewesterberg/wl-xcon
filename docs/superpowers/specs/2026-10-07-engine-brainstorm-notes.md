@@ -921,3 +921,16 @@ welfare summary.
 The revised spec (`6cefe32`), read as a doc on claude.ai, was approved by the PI on 2026-10-07: "approved",
 in answer to a message asking him to confirm §17.6 (presets, revert and carried-over values never carry a
 reward size) and otherwise to approve or comment.
+
+## Build A's plans (asked 2026-10-07, while planning)
+
+- **Build A split into four plans** — "Yes, four plans, A1 first": A1 the description and the
+  drawer's core (shapes, edges, outlines, layers, the four combinations, groups, degrees to pixels
+  for both setups and both eyes, flat xyY colors, contrast conventions and the reference tasks'
+  migration); A2 color (cone fundamentals, cone contrast, DKL, conversion, realizability); A3 the
+  pattern fills with their generators; A4 media, text, curves and the review report's frames.
+- **An achromatic stimulus that is not a contrast against a declared background** — "Absolute
+  cd/m²" (offered against: a fraction of the panel's capped white, recommended; a gray background
+  with contrasts): achromatic is D65 white at a luminance in cd/m².
+- **The reference tasks' fixation points and targets** — "40 cd/m²", as the starting value of new
+  live-editable luminance parameters, on the black default background.
