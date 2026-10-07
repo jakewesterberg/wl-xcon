@@ -360,3 +360,14 @@ hardware.
 - **What the record keeps about the screen** — "Changes + live values": every onset, offset and
   update with its frame and full resolved description; every live-driven value per frame; seeds
   for every random pattern; any frame rebuildable by the slow drawer.
+
+**Batch 2** (asked 2026-10-07):
+
+- **Codes for stimulus onsets and offsets** — "Automatic onset/offset codes": the framework strobes
+  a code for every stimulus onset and offset (offered against: only the task's codes). Needs codes
+  allocated; the event vocabulary is wl-preproc's (ADR-0007). Follow-ups asked next.
+- **Frame timing in the console** — "Yes, per trial": late frames per trial and a running count, a
+  warning past a rig-set rate, shown at trial boundaries.
+- **A frame-clock fault** (the sensor stops, or disagrees with the display's count) — "Warn and
+  mark": a console warning and a warnings-list entry, affected trials marked, the session goes on;
+  the operator decides whether to stop.
