@@ -371,3 +371,23 @@ hardware.
 - **A frame-clock fault** (the sensor stops, or disagrees with the display's count) — "Warn and
   mark": a console warning and a warnings-list entry, affected trials marked, the session goes on;
   the operator decides whether to stop.
+
+**Batch 3** (asked 2026-10-07; all as recommended):
+
+- **Where the automatic codes come from** — "Two framework codes": new framework escape codes,
+  "stimulus on" and "stimulus off", each followed by the stimulus's number within its trial (its
+  name in the record), asked of wl-preproc, which owns the vocabulary (ADR-0007), once the spec is
+  approved.
+- **In-place changes** — "Yes, a third code": "stimulus changed", with the stimulus's number; the
+  record says what changed.
+- **Groups** — "One code for the group": one "stimulus on" with the group's number; the record
+  lists its members.
+
+**Element 5 is discussed.**
+
+## 6. Media and sound
+
+Settled before the element (S4 §6, §8; V7): sounds are declared assets, resident before use,
+with `AUDIO_ON`/`AUDIO_OFF` codes and their onset measured by a tap into a misc analog input;
+images and movies resident before an epoch, within a budgeted memory, each set versioned and
+recorded per trial.
