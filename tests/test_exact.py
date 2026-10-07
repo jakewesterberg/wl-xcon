@@ -329,3 +329,18 @@ def test_each_eye_has_its_own_background():
     left, _ = _draw([], geometry=STEREOSCOPE, trial=trial, eye=0)
     right, _ = _draw([], geometry=STEREOSCOPE, trial=trial, eye=1)
     assert (left[0, 0, 1], right[0, 0, 1]) == pytest.approx((20.0, 10.0))
+
+
+def test_multiplying_by_a_gabor_scales_the_contrast_below_by_its_modulation_inside_its_cutoff():
+    def drawn(phase):
+        gain = Stimulus("m", at=(0.0, 0.0), combine="multiply", layer=1,
+                        looks=Gabor(sf=1.0, sigma=0.5, phase=phase, contrast=Michelson(0.5)))
+        return _draw([_patch("big", 0.0, 30.0, size=9.0), gain], trial=_gray20(),
+                     pixels=(1920, 1080), region=GABOR_REGION)
+    image, vp = drawn(90.0)
+    assert image[_pixel(vp, 0.0, 0.0, GABOR_REGION)][1] == pytest.approx(35.0, rel=0.01)  # 20 + 10·1.5
+    assert image[_pixel(vp, 3.0, 0.0, GABOR_REGION)][1] == pytest.approx(30.0, abs=0.01)  # past the cut-off
+    one_sigma = 20.0 + 10.0 * (1.0 + 0.5 * math.exp(-0.5))  # the envelope is e^-0.5 at x = sigma
+    assert image[_pixel(vp, 0.5, 0.0, GABOR_REGION)][1] == pytest.approx(one_sigma, rel=0.01)
+    image, vp = drawn(270.0)
+    assert image[_pixel(vp, 0.0, 0.0, GABOR_REGION)][1] == pytest.approx(25.0, rel=0.01)  # 20 + 10·0.5
