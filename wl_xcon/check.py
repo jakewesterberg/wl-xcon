@@ -445,6 +445,10 @@ def _reachable(
     return reached
 
 
+#: The properties an `Update` can change that the display checks measure.
+_UPDATED = ("at", "looks", "disparity", "at_left", "at_right", "eye", "combine")
+
+
 def _as_updated(trial: Trial) -> dict[int, list[Stimulus]]:
     """What each `Update` can leave on the display, keyed by the action's `id`.
 
@@ -468,24 +472,24 @@ def _as_updated(trial: Trial) -> dict[int, list[Stimulus]]:
             continue  # nothing to update: `_display_faults` reports that
         for update in these:
             sets = update.changes()
-            options = {
-                prop: [sets[prop]]
-                if prop in sets
-                else [getattr(s, prop) for s in shown]
-                + [other.changes()[prop] for other in these if prop in other.changes()]
-                for prop in ("at", "looks", "disparity", "at_left", "at_right")
-            }
-            # The first `Show` supplies what check 8 does not measure (its name and
-            # eye); every property it does measure comes from `options`.
-            result[id(update)] = [
-                dataclasses.replace(
-                    shown[0], at=at, looks=looks, disparity=disparity, at_left=left, at_right=right
+            options = {}
+            for prop in _UPDATED:
+                values = (
+                    [sets[prop]]
+                    if prop in sets
+                    else [getattr(s, prop) for s in shown]
+                    + [other.changes()[prop] for other in these if prop in other.changes()]
                 )
-                for at in options["at"]
-                for looks in options["looks"]
-                for disparity in options["disparity"]
-                for left in options["at_left"]
-                for right in options["at_right"]
+                unique: list = []
+                for value in values:  # by equality: values need not be hashable
+                    if not any(value == seen for seen in unique):
+                        unique.append(value)
+                options[prop] = unique
+            # The first `Show` supplies only the stimulus's name; every property
+            # that matters here comes from `options`.
+            result[id(update)] = [
+                dataclasses.replace(shown[0], **dict(zip(_UPDATED, combo)))
+                for combo in itertools.product(*(options[prop] for prop in _UPDATED))
             ]
     return result
 
@@ -1437,11 +1441,7 @@ def _placement_faults(trial: Trial) -> list[Finding]:
     def refuse(code: str, detail: str) -> None:
         findings.append(Finding(code, detail))
 
-    shown: dict[str, list[Stimulus]] = {}
-    for _, action in actions_of(trial):
-        if isinstance(action, Show):
-            shown.setdefault(action.stimulus.name, []).append(action.stimulus)
-
+    updated = _as_updated(trial)
     for _, action in actions_of(trial):
         if isinstance(action, Show):
             s = action.stimulus
@@ -1452,15 +1452,21 @@ def _placement_faults(trial: Trial) -> list[Finding]:
                          if v is not None})
         elif isinstance(action, Update):
             name, looks, sets = action.stimulus, None, action.changes()
-            for earlier in shown.get(name, []):
-                if _nonzero(sets.get("disparity", 0.0)) and earlier.at_left is not None:
-                    refuse("per-eye-misused", (
-                        f"an update gives {name!r} a disparity, and it is shown with per-eye "
-                        f"positions; they are two ways to say one thing (engine spec §5.4)"))
-                if ("at_left" in sets or "at_right" in sets) and _nonzero(earlier.disparity):
-                    refuse("per-eye-misused", (
-                        f"an update gives {name!r} per-eye positions, and it is shown with a "
-                        f"disparity; they are two ways to say one thing (engine spec §5.4)"))
+            # Every combination `_as_updated` says this update can leave on the
+            # display, so an update after another update is checked as well as one
+            # after a `Show`.
+            left = updated.get(id(action), [])
+            if any((c.at_left is not None or c.at_right is not None) and _nonzero(c.disparity)
+                   for c in left):
+                refuse("per-eye-misused", (
+                    f"an update of {name!r} can leave it with both per-eye positions and a "
+                    f"disparity, from the update itself or from what it was shown and "
+                    f"updated with; they are two ways to say one thing (engine spec §5.4)"))
+            if any(c.combine == "multiply" and not _modulates(c.looks) for c in left):
+                refuse("multiply-needs-modulation", (
+                    f"an update of {name!r} can leave it multiplying the contrast below it "
+                    f"with an absolute light, which has no modulation; give it a Weber "
+                    f"contrast or a pattern"))
         else:
             continue
         opacity = _literal(sets.get("opacity"))

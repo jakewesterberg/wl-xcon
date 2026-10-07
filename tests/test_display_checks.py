@@ -7,6 +7,8 @@ dynamically. Both, because a static check finds it without a subject and simulat
 finds it without the author having coupled anything.
 """
 
+import dataclasses
+
 import pytest
 
 from _rig import STEREOSCOPE
@@ -374,3 +376,58 @@ def test_per_eye_positions_are_measured_as_given():
     # Already each eye's own direction: no vergence offset is added to them.
     assert _off(_placed(at_left=(11.9, 0.0), at_right=(-11.9, 0.0))) == []
     assert len(_off(_placed(at_left=(12.5, 0.0), at_right=(0.0, 0.0)))) == 1
+
+
+def test_an_update_that_widens_the_eye_is_measured_for_the_eye_it_adds():
+    # Shown to the right eye alone, 11° is fine (9.55°); both eyes would put the left at 12.45°.
+    def widening(*enter, show_eye="right"):
+        return Trial(
+            start="a", view="stereoscope",
+            states=[
+                State("a", enter=[Show(Stimulus("s", at=(11.0, 0.0), looks=LIT, eye=show_eye))],
+                      go=[On(After(0.5), "b")]),
+                State("b", enter=list(enter), go=[On(After(0.5), Outcome.ABORT)]),
+            ],
+        )
+    assert _off(widening(Update("s", layer=1))) == []
+    assert len(_off(widening(Update("s", eye="both")))) == 1
+
+
+def test_a_second_show_with_a_wider_eye_is_measured_with_an_update_of_the_name():
+    trial = Trial(
+        start="a", view="stereoscope",
+        states=[
+            State("a", enter=[Show(Stimulus("s", at=(11.0, 0.0), looks=LIT, eye="right"))],
+                  go=[On(After(0.5), "b")]),
+            State("b", enter=[Show(Stimulus("s", at=(11.0, 0.0), looks=LIT, eye="both")),
+                              Update("s", layer=1)],
+                  go=[On(After(0.5), Outcome.ABORT)]),
+        ],
+    )
+    findings = _off(trial)
+    assert len(findings) >= 1 and any("updates" in f.detail for f in findings)
+
+
+def _two_updates(show, first, second) -> Trial:
+    return Trial(
+        start="a", view="stereoscope",
+        states=[
+            State("a", enter=[Show(show)], go=[On(After(0.5), "b")]),
+            State("b", enter=[first], go=[On(After(0.5), "c")]),
+            State("c", enter=[second], go=[On(After(0.5), Outcome.ABORT)]),
+        ],
+    )
+
+
+def test_an_update_after_an_update_is_checked_for_per_eye_positions_and_disparity():
+    plain = Stimulus("s", at=(0.0, 0.0), looks=LIT)
+    trial = _two_updates(plain, Update("s", disparity=0.3),
+                         Update("s", at_left=(1.0, 0.0), at_right=(-1.0, 0.0)))
+    assert "per-eye-misused" in _refused(trial)
+
+
+def test_an_update_after_an_update_is_checked_for_multiply_on_an_absolute_light():
+    gain = Stimulus("s", at=(0.0, 0.0), looks=Disc(contrast=Weber(-0.5)), combine="multiply")
+    trial = _two_updates(gain, Update("s", layer=1), Update("s", looks=Disc(color=Gray(40.0))))
+    trial = dataclasses.replace(trial, background=GRAY_BG)
+    assert "multiply-needs-modulation" in _refused(trial)

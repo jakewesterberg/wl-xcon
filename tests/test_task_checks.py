@@ -586,7 +586,7 @@ def test_a_corrugation_is_checked_at_both_ends_of_its_amplitude():
     lopsided = [Param("amp", unit="deg", low=-8.0, high=0.1)]
     patch = RDS(form=Corrugation(sf=0.5, amplitude=P("amp")))
 
-    assert len(_off(_showing((11.5, 0.0), lopsided, looks=patch))) == 1
+    assert len(_off(_showing((10.0, 0.0), lopsided, looks=patch))) == 1
 
 
 def test_a_corrugation_whose_amplitude_cannot_be_bounded_is_refused():
@@ -595,8 +595,8 @@ def test_a_corrugation_whose_amplitude_cannot_be_bounded_is_refused():
     unranged = [Param("amp", unit="deg")]
     patch = RDS(form=Corrugation(sf=0.5, amplitude=P("amp")))
 
-    assert len(_off(_showing((11.5, 0.0), chosen, looks=patch))) == 1
-    (finding,) = _off(_showing((11.5, 0.0), unranged, looks=patch))
+    assert len(_off(_showing((10.0, 0.0), chosen, looks=patch))) == 1
+    (finding,) = _off(_showing((10.0, 0.0), unranged, looks=patch))
     assert "cannot be bounded" in finding.detail
 
 
@@ -633,9 +633,9 @@ def test_an_update_over_a_parameter_is_checked_across_its_range():
 
 
 def test_an_update_that_adds_disparity_is_refused_when_it_takes_one_eye_off_screen():
-    """XC-037's disparity half: the same 2 degrees at 11.5 that a `Show` is refused
-    for, arriving by `Update`."""
-    assert len(_off(_updating(Update("s", disparity=2.0), at=(11.5, 0.0)))) == 1
+    """XC-037's disparity half: the same 2 degrees of near disparity at 10 that a `Show`
+    is refused for, arriving by `Update`."""
+    assert len(_off(_updating(Update("s", disparity=-2.0), at=(10.0, 0.0)))) == 1
 
 
 def test_an_update_that_turns_a_stimulus_into_a_wide_ring_is_refused():
