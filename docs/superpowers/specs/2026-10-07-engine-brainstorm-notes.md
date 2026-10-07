@@ -64,3 +64,16 @@ filled with something, seen through an edge profile, placed and layered; named k
 plaid) stay as shorthands; a new block is added once as reviewed framework code with its exact
 definition (the slow drawer), its GPU version and tests, and is then usable in any combination.
 Task files hold no drawing code (ADR-0006).
+
+**A first set of blocks** was put to the PI (shapes: circle and ellipse, rectangle and polygon,
+ring, line or curve, text, whole screen, an image's own outline; fills: flat color, grating,
+checkerboard, noise, sparse noise, moving dots, random-dot stereogram, texture field, Mondrian,
+image, movie; edges: hard, Gaussian, raised cosine; on every stimulus: position, orientation,
+size, eye, disparity, layer, contrast, opacity). Asked whether it was complete, he answered:
+"err on the side of asking me more questions, I want lots of questions to answer to help shape
+this". The questions that follow take the set apart block by block.
+
+**Image manipulations** (scrambling, filtering, cropping, recoloring) — "Between trials": a
+reviewed procedure, with its seed, makes the image before the trial that shows it; the result is
+uploaded and kept in the record; the same route the most-exciting-images generator needs;
+nothing is computed inside a frame.
