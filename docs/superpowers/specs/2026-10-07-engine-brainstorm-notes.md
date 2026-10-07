@@ -149,3 +149,20 @@ nothing is computed inside a frame.
   seed); several rings or clusters.
 - **Item variety** — "Each item its own stimulus": a display is a list of items, each free in
   shape, fill, color, orientation and size; target and distractor are roles, not appearances.
+
+**Batch 7, scale, review, per-eye backgrounds, groups** (asked 2026-10-07):
+
+- **The busiest display** — "Thousands of elements": dense line-element textures, large dot
+  fields, many-item free-viewing displays; the GPU drawer batches many small elements per frame.
+- **Who reviews a new block** — a lab member (the first option), and in the PI's words: "but we
+  create a simple, person readable report that shows example frames with stages of the task,
+  stimuli, etc." The slow exact drawer renders those frames; the same report serves a task's own
+  review (ADR-0006's artifact gains example frames of each state).
+- **Each eye its own background** on the stereoscope — "Yes"; the default is the same for both.
+- **Groups** — "Yes": a named group shows, hides, moves and changes a shared property as one, its
+  members still addressable on their own.
+
+**Element 1 is discussed.** What can be shown: shapes x fills x edges, placed and layered, with
+four ways to overlap, positions from four references, any numeric property drivable live,
+explicit contrast conventions, between-trial image procedures and generators off the rig, and
+reviewed extensions with a person-readable report.
