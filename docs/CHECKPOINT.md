@@ -359,8 +359,11 @@ figure was one low. In order:
 ## What moved on 2026-10-07: demo mode designed and parked, and the order changed
 
 **Resume here (state at 2026-10-07):** `main` is b2b-ready's tip plus this entry (branch
-`demo-mode`, docs only). **Next is the default color calibration and the warnings list**, the
-first of four builds the PI ordered:
+`demo-mode`, docs only). **Superseded the same day: the PI then asked to brainstorm "the engine for
+running tasks" first, the display engine and the task runtime as one design** (asked which
+engine: "Both, as one design"), on branch `engine-design`. The default color calibration and the
+warnings list (item 1 below) are expected to land inside that design. The four builds the PI
+had ordered just before:
 
 1. **A default color calibration, and a warnings list in the console.** The PI's words: "There
    should be a default color calibration/lut that is used when one isn't specified by the rig
