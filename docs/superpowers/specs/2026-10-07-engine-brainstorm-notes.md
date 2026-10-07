@@ -77,3 +77,16 @@ this". The questions that follow take the set apart block by block.
 reviewed procedure, with its seed, makes the image before the trial that shows it; the result is
 uploaded and kept in the record; the same route the most-exciting-images generator needs;
 nothing is computed inside a frame.
+
+**Batch 1, how stimuli combine and are placed** (asked 2026-10-07):
+
+- **Overlap** — all four: "Front covers back" (opaque or partly see-through by an opacity),
+  "Contrasts add" (plaids, signal in noise, transparent motion), "Window or scotoma" (a stimulus
+  reveals or hides others only inside its area), "One shapes another" (one stimulus multiplies
+  another, e.g. a contrast envelope).
+- **Position measured from** — all four: the screen's center, another stimulus, where the eye is
+  now, a live input (the operator's mouse, a joystick, a neural signal).
+- **What a live source may drive** — "Any numeric property": position, orientation, size,
+  contrast, color, speed...; every live value recorded frame by frame.
+- **Contrast** — "Always written explicitly": every contrast is given with its convention (e.g.
+  `contrast=Weber(0.3)`, Michelson, RMS); nothing implied.
