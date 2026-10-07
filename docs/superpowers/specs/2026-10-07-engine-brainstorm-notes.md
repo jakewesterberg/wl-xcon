@@ -403,3 +403,25 @@ recorded per trial.
   timing recorded.
 - **Image formats** — "Any common format": JPEG allowed, with a warning (offered against: lossless
   only).
+
+**Batch 2** (asked 2026-10-07; all as recommended):
+
+- **Where media live** — "Lab storage, by checksum": sets on the lab's storage (the NAS) with a
+  manifest of each file's checksum; a task names a set and version; the rig keeps a local copy,
+  checks every checksum before a session and records the set's identity; large media stay out of
+  git (backlog XC-027's question).
+- **When media are loaded** — "Per run, refused if too big": everything a run can show loaded before
+  it starts; a run whose sets do not fit is refused at its start with the numbers.
+- **Movie decoding** — "Declared per movie": short clips decoded into memory beforehand; long ones
+  streamed by a decoder thread that stays ahead, a missed frame recorded as late.
+- **Simple sounds** — "Made from parameters": tones, clicks, noise bursts and sweeps from their
+  parameters (and a seed), rebuilt from the record; files remain for recorded sounds.
+
+**Element 6 is discussed.**
+
+## 7. The drawer
+
+Settled before the element: our own thin GPU drawer built now (glfw and moderngl in the 2026-08-31
+spike); the slow exact drawer is the definition and the GPU drawer is tested against it; thousands
+of elements per frame; 10-bit output with dithering as the fallback; a measured lookup table; no
+allocation inside a frame (CLAUDE.md).
