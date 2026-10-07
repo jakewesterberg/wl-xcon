@@ -741,3 +741,23 @@ numbers (`trials.jsonl`); conditions numbered fixed per task in the recording (e
 automatic stimulus on/off/changed codes and the screen log with live values and seeds (element 5);
 ADR-0006's review artifact (diagram, code table, timeline) plus the PI's example frames per state
 (element 1).
+
+**Batch 1** (asked 2026-10-07):
+
+- **A task's review report contains** — the state diagram and codes; example frames per state (the
+  slow exact drawer, per eye on the stereoscope); the plan (block types, the factorial table with
+  exclusions, orders, repeat rules, targets, adaptive procedures); a simulation census per
+  condition and block; and, the PI's addition, **a timing diagram**.
+- **Simulation before an animal** — "Advised, not enforced": the report shows it; nothing refuses
+  (offered against: required before recording sessions, recommended).
+- **The simulated animal** — in the PI's words: "yes, declared functions with some defaults. e.g.,
+  perfect behavior, chance behavior, animal with incorrect strategy, normal performance (85%
+  accuracy), animal trying to break task, animal trying to exploit reward schedule". Psychometric
+  functions per parameter and response-time distributions, set in behavioral terms (XC-146's
+  direction), with these named profiles as defaults; the last two test whether a task can be
+  gamed.
+- **The report's life** — "Per task version, kept": generated whenever a task file changes, kept
+  beside that version, and on demand from the console; a session records its task's report
+  version.
+
+**Element 15 is discussed, and with it every element of the engine (2026-10-07).**
