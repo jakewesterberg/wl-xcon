@@ -94,3 +94,60 @@ def test_a_blank_draws_nothing_and_the_description_carries_its_frame():
     s = screen.resolve({"x": Stimulus("x", at=(0.0, 0.0), looks=Blank())}, {}, TRIAL, STEREOSCOPE,
                        frame_period=1 / 240, frame=7, onsets={"x": 3})
     assert (s.items, s.frame, s.frame_period, s.setup, s.schema) == ((), 7, 1 / 240, "stereoscope", 1)
+
+
+def test_an_onset_frame_is_the_stimulus_s_first_frame_and_zero_without_one():
+    x = Stimulus("x", at=(0.0, 0.0), looks=Disc(color=Gray(40.0)))
+    with_onset = screen.resolve({"x": x}, {}, TRIAL, STEREOSCOPE, frame_period=1 / 240,
+                                onsets={"x": 3})
+    assert with_onset.items[0].onset_frame == 3
+    assert _one(x).items[0].onset_frame == 0
+
+
+def test_an_outline_is_resolved_to_a_width_and_a_light():
+    looks = look.Look(outline=look.Outline(width=P("w"), color=Gray(40.0)),
+                      fill=look.Flat(color=Gray(40.0)))
+    item = _one(Stimulus("o", at=(0.0, 0.0), looks=looks), values={"w": 0.2}).items[0]
+    assert item.outline == screen.ResolvedOutline(width=0.2, xyz=to_xyz(Gray(40.0)))
+
+
+def test_a_grating_look_resolves_every_field_and_its_orientation():
+    looks = look.Look(fill=look.SineGrating(sf=P("sf"), phase=90.0, tf=2.0,
+                                            contrast=Michelson(0.5), mean=Gray(10.0)),
+                      orientation=P("o"))
+    item = _one(Stimulus("g", at=(0.0, 0.0), looks=looks), values={"sf": 3.0, "o": 45.0}).items[0]
+    assert item.fill == screen.ResolvedGrating(sf=3.0, phase=90.0, tf=2.0, michelson=0.5,
+                                               mean_xyz=to_xyz(Gray(10.0)))
+    assert item.orientation == 45.0
+
+
+def test_a_fill_that_cannot_be_drawn_is_refused():
+    with pytest.raises(screen.NotYetDrawable):
+        _one(Stimulus("m", at=(0.0, 0.0), looks=Disc(contrast=Michelson(0.5))))
+    with pytest.raises(ValueError, match="no light"):
+        _one(Stimulus("f", at=(0.0, 0.0), looks=look.Look(fill=look.Flat())))
+    with pytest.raises(ValueError, match="no contrast"):
+        _one(Stimulus("g", at=(0.0, 0.0), looks=look.Look(fill=look.SineGrating())))
+
+
+def test_direct_view_refuses_what_only_the_stereoscope_shows():
+    with pytest.raises(ValueError, match="disparity"):
+        _one(Stimulus("d", at=(0.0, 0.0), looks=Disc(color=Gray(40.0)), disparity=0.2),
+             geometry=DIRECT)
+    with pytest.raises(ValueError, match="per-eye"):
+        _one(Stimulus("r", at=(0.0, 0.0), looks=Disc(color=Gray(40.0)),
+                      at_left=(2.0, 0.0), at_right=(-2.0, 0.0)), geometry=DIRECT)
+
+
+def test_an_array_whose_appearance_is_a_parameter_is_bound_before_it_is_drawn():
+    array = Array(n=2, radius=8.0, target=0, looks=P("target"), among=Square(color=Gray(40.0)))
+    items = _one(Stimulus("s", at=(0.0, 0.0), looks=array), geometry=DIRECT,
+                 values={"target": Disc(size=0.7, color=Gray(40.0))}).items
+    assert isinstance(items[0].shape, look.Circle) and items[0].shape.size == 0.7
+    assert isinstance(items[1].shape, look.Rect)
+
+
+def test_a_left_eye_background_overrides_the_shared_one_for_that_eye_only():
+    t = Trial(start="s", states=[], background=Gray(20.0), background_left=Gray(5.0))
+    s = _one(Stimulus("x", at=(0.0, 0.0), looks=Disc(color=Gray(1.0))), trial=t)
+    assert (s.background_left, s.background_right) == (to_xyz(Gray(5.0)), to_xyz(Gray(20.0)))
