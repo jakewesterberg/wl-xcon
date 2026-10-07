@@ -144,7 +144,7 @@ def test_an_absolute_colour_cannot_also_carry_a_contrast():
     different things claim to set the same physical quantity, and which one wins is
     the sort of thing nobody discovers until the figures disagree."""
     assert "overspecified-color" in codes(
-        a_task(Disc(color=xyY(0.500, 0.400, 30.0), contrast=0.5))
+        a_task(Disc(color=xyY(0.500, 0.400, 30.0), contrast=Weber(0.5)))
     )
 
 

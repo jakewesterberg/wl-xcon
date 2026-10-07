@@ -7,16 +7,25 @@ dynamically. Both, because a static check finds it without a subject and simulat
 finds it without the author having coupled anything.
 """
 
+import pytest
+
+from wl_xcon import look
 from wl_xcon.check import check
+from wl_xcon.photometry import RMS, Gray, Michelson, Weber
 from wl_xcon.task import (
     REMEMBERED,
     After,
+    Annulus,
+    Array,
     Disc,
     Entered,
+    Gabor,
     Hide,
     Hold,
     On,
     Outcome,
+    P,
+    Param,
     Show,
     State,
     Stimulus,
@@ -181,3 +190,89 @@ def test_an_update_that_changes_nothing_is_refused():
         ],
     )
     assert "empty-update" in codes(trial)
+
+
+GRAY_BG = Gray(20.0)
+
+
+def _one(looks, *, params=(), **trial_fields) -> Trial:
+    """One stimulus, shown and held a second."""
+    return Trial(
+        start="on",
+        params=list(params),
+        windows=[Window("w", at=(0.0, 0.0), radius=2.0, on="s")],
+        states=[
+            State(
+                "on",
+                enter=[Show(Stimulus("s", at=(0.0, 0.0), looks=looks))],
+                go=[On(After(1.0), Outcome.ABORT)],
+            )
+        ],
+        **trial_fields,
+    )
+
+
+def _refused(trial: Trial) -> set[str]:
+    return {f.code for f in check(trial) if f.blocking}
+
+
+@pytest.mark.parametrize("looks, background, code", [
+    (Disc(contrast=0.5), GRAY_BG, "bare-contrast"),
+    (Disc(), None, "unlit"),
+    (Disc(contrast=Weber(0.5)), None, "weber-on-black"),
+    (Disc(contrast=Michelson(0.5)), GRAY_BG, "contrast-convention"),
+    (Disc(color=Gray(40.0), contrast=Weber(0.2)), GRAY_BG, "overspecified-color"),
+    (Gabor(), GRAY_BG, "unlit"),
+    (Gabor(contrast=Michelson(0.5)), None, "unlit"),
+    (Gabor(contrast=Weber(0.5)), GRAY_BG, "contrast-convention"),
+    (Gabor(contrast=RMS(0.2)), GRAY_BG, "contrast-convention"),
+    (look.Look(shape=look.Circle(size=1.0), fill=look.Flat(color=Gray(10.0)),
+               outline=look.Outline(width=0.1)), None, "unlit"),
+])
+def test_a_stimulus_without_a_light_the_drawer_can_honor_is_refused(looks, background, code):
+    assert code in _refused(_one(looks, background=background))
+
+
+@pytest.mark.parametrize("looks", [
+    Disc(size=0.0, color=Gray(40.0)),
+    look.Look(shape=look.Circle(size=-1.0), fill=look.Flat(color=Gray(40.0))),
+    Annulus(inner=2.0, outer=1.0, color=Gray(40.0)),
+    Gabor(contrast=Michelson(1.5)),
+    Disc(contrast=Weber(-1.5)),
+    look.Look(shape=look.Path(points=((0.0, 0.0),), width=0.1), fill=look.Flat(color=Gray(40.0))),
+    look.Look(shape=look.RegularPolygon(sides=2), fill=look.Flat(color=Gray(40.0))),
+    look.Look(shape=look.Vertices(points=((0.0, 0.0), (1.0, 0.0))), fill=look.Flat(color=Gray(40.0))),
+    look.Look(fill=look.Flat(color=Gray(40.0)), edge=look.GaussianEdge(applies="blend")),
+])
+def test_a_degenerate_block_is_refused_at_load(looks):
+    assert "bad-block" in _refused(_one(looks, background=GRAY_BG))
+
+
+def test_a_contrast_parameter_is_bare_unless_its_choices_name_their_convention():
+    bare = [Param("c", unit="fraction", low=0.0, high=1.0)]
+    named = [Param("c", unit="contrast", choices=(Weber(0.2), Weber(0.4)))]
+    assert "bare-contrast" in _refused(_one(Disc(contrast=P("c")), params=bare, background=GRAY_BG))
+    assert "bare-contrast" not in _refused(_one(Disc(contrast=P("c")), params=named, background=GRAY_BG))
+    assert "bare-contrast" not in _refused(
+        _one(Disc(contrast=Weber(P("c"))), params=bare, background=GRAY_BG))
+
+
+def test_weber_against_a_declared_background_is_accepted():
+    assert _refused(_one(Disc(contrast=Weber(0.5)), background=GRAY_BG)) == set()
+
+
+def test_weber_is_on_black_if_either_eye_s_background_is():
+    trial = _one(Disc(contrast=Weber(0.5)), view="stereoscope", background_left=GRAY_BG)
+    assert "weber-on-black" in _refused(trial)
+
+
+def test_a_grating_with_a_declared_mean_on_another_background_is_warned_not_refused():
+    grating = look.Look(shape=look.Circle(size=4.0),
+                        fill=look.SineGrating(contrast=Michelson(0.5), mean=Gray(30.0)))
+    findings = check(_one(grating, background=GRAY_BG))
+    assert [f.code for f in findings] == ["luminance-step"]
+    assert not findings[0].blocking
+
+
+def test_an_array_s_items_must_be_lit_too():
+    assert "unlit" in _refused(_one(Array(looks=Disc(color=Gray(40.0)))))

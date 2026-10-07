@@ -41,6 +41,9 @@ from _rig import DIRECT, STEREOSCOPE as GEOMETRY
 from wl_xcon.codes import PROVISIONAL, Allocation
 from wl_xcon.components import Registry
 from wl_xcon.geometry import Geometry
+from wl_xcon.photometry import Gray
+
+LIT = Disc(color=Gray(40.0))
 
 
 def test_a_state_no_transition_can_reach_is_reported():
@@ -279,7 +282,7 @@ def test_a_stimulus_outside_the_field_is_refused():
         states=[
             State(
                 "show",
-                enter=[Show(Stimulus("s", at=(30.0, 0.0)))],
+                enter=[Show(Stimulus("s", at=(30.0, 0.0), looks=LIT))],
                 go=[On(After(1.0), Outcome.CORRECT)],
             ),
         ],
@@ -303,7 +306,7 @@ def test_disparity_can_push_one_eye_off_screen_from_a_legal_cyclopean_position()
         states=[
             State(
                 "show",
-                enter=[Show(Stimulus("s", at=(11.5, 0.0), disparity=2.0))],
+                enter=[Show(Stimulus("s", at=(11.5, 0.0), disparity=2.0, looks=LIT))],
                 go=[On(After(1.0), Outcome.CORRECT)],
             ),
         ],
@@ -402,7 +405,7 @@ def test_a_position_parameter_whose_range_leaves_the_field_is_refused():
         states=[
             State(
                 "show",
-                enter=[Show(Stimulus("s", at=(P("ecc"), 0.0)))],
+                enter=[Show(Stimulus("s", at=(P("ecc"), 0.0), looks=LIT))],
                 go=[On(After(1.0), Outcome.CORRECT)],
             ),
         ],
@@ -421,7 +424,7 @@ def test_a_position_parameter_whose_range_stays_inside_the_field_is_accepted():
         states=[
             State(
                 "show",
-                enter=[Show(Stimulus("s", at=(P("ecc"), 0.0)))],
+                enter=[Show(Stimulus("s", at=(P("ecc"), 0.0), looks=LIT))],
                 go=[On(After(1.0), Outcome.CORRECT)],
             ),
         ],
@@ -443,7 +446,7 @@ def _showing(at, params=(), **fields) -> Trial:
         states=[
             State(
                 "show",
-                enter=[Show(Stimulus("s", at=at, **fields))],
+                enter=[Show(Stimulus("s", at=at, **{"looks": LIT, **fields}))],
                 go=[On(After(1.0), Outcome.CORRECT)],
             ),
         ],
@@ -567,8 +570,8 @@ def test_an_appearance_parameter_is_checked_at_each_appearance_it_offers():
     """An appearance is a parameter too (S1a §4), and one of its choices may be an
     item ring. Check 8 looked only at a literal `Array`, so a ring offered as a choice
     was never measured."""
-    looks = [Param("looks", unit="appearance", choices=(Disc(), Array(radius=20.0)))]
-    small = [Param("looks", unit="appearance", choices=(Disc(), Array(radius=4.0)))]
+    looks = [Param("looks", unit="appearance", choices=(LIT, Array(radius=20.0)))]
+    small = [Param("looks", unit="appearance", choices=(LIT, Array(radius=4.0)))]
 
     assert _off(_showing((0.0, 0.0), small, looks=P("looks"))) == []
     assert len(_off(_showing((0.0, 0.0), looks, looks=P("looks")))) == 1
@@ -604,7 +607,7 @@ def _updating(*updates, params=(), at=(0.0, 0.0)) -> Trial:
         states=[
             State(
                 name,
-                enter=[Show(Stimulus("s", at=at))] if name == "show" else [updates[i - 1]],
+                enter=[Show(Stimulus("s", at=at, looks=LIT))] if name == "show" else [updates[i - 1]],
                 go=[On(After(1.0), after)],
             )
             for i, (name, after) in enumerate(zip(names, nexts))
@@ -662,7 +665,7 @@ def _task(*enter, view="either", params=()) -> Trial:
         states=[
             State(
                 "show",
-                enter=[Show(Stimulus("s", at=(0.0, 0.0))), *enter],
+                enter=[Show(Stimulus("s", at=(0.0, 0.0), looks=LIT)), *enter],
                 go=[On(After(1.0), Outcome.CORRECT)],
             ),
         ],
@@ -735,8 +738,8 @@ def test_a_stereogram_inside_an_arrays_looks_or_among_needs_the_stereoscope():
     """Review I1(b): `_appearances` reports the `Array` itself, not the `RDS`
     nested in its `looks`/`among` -- so an array of stereograms in an "either" task
     must still be found, whichever slot carries the `RDS`."""
-    as_looks = _task(Show(Stimulus("arr", at=(0.0, 0.0), looks=Array(looks=RDS()))))
-    as_among = _task(Show(Stimulus("arr", at=(0.0, 0.0), looks=Array(among=RDS()))))
+    as_looks = _task(Show(Stimulus("arr", at=(0.0, 0.0), looks=Array(looks=RDS(), among=LIT))))
+    as_among = _task(Show(Stimulus("arr", at=(0.0, 0.0), looks=Array(looks=LIT, among=RDS()))))
 
     for trial in (as_looks, as_among):
         (finding,) = check(trial)
@@ -747,7 +750,7 @@ def test_a_stereogram_inside_an_arrays_looks_or_among_needs_the_stereoscope():
 def test_a_stimulus_shown_to_one_eye_needs_the_stereoscope():
     """Plan decision: an unmirrored screen shows both eyes one image, so a stimulus
     for one eye is the same impossibility as disparity -- by `Show` or by `Update`."""
-    left = _task(Show(Stimulus("left", at=(2.0, 0.0), eye="left")))
+    left = _task(Show(Stimulus("left", at=(2.0, 0.0), eye="left", looks=LIT)))
     right = _task(Update("s", eye="right"))
 
     assert [f.detail.split(",")[0] for f in check(left)] == [
@@ -803,7 +806,7 @@ def test_an_arrays_ring_reaching_a_housing_is_refused_even_though_its_centre_is_
     assert DIRECT.can_show(*centre), "the centre alone is legal"
     assert check(_showing(centre), geometry=DIRECT) == []
 
-    (finding,) = check(_showing(centre, looks=Array(radius=2.0)), geometry=DIRECT)
+    (finding,) = check(_showing(centre, looks=Array(radius=2.0, looks=LIT, among=LIT)), geometry=DIRECT)
 
     assert finding.code == "stimulus-off-screen"
     assert "direct field, less the light sensors' housings" in finding.detail

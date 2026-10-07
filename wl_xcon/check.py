@@ -60,6 +60,8 @@ def check(
         + _uncoupled_windows(trial)
         + _display_faults(trial)
         + _color_faults(trial, calibration)
+        + _light_faults(trial)
+        + _block_faults(trial)
         + _array_faults(trial)
         + _stereogram_faults(trial)
         + _eye_faults(trial)
@@ -785,6 +787,9 @@ def _appearances(trial: Trial):
             seen.append(looks)
     for param in trial.params:
         seen.extend(c for c in param.choices if isinstance(c, Appearance))
+    for looks in list(seen):
+        if isinstance(looks, Array):
+            seen.extend(m for m in (looks.looks, looks.among) if isinstance(m, Appearance))
     return seen
 
 
@@ -863,21 +868,180 @@ def _color_faults(trial: Trial, panel: Calibration | None) -> list[Finding]:
             findings.append(
                 Finding("unrealizable-color", f"{what} asks for {color}: {why}")
             )
-    if panel is not None:
-        for looks in _appearances(trial):
-            color = getattr(looks, "color", None)
-            if color is None or isinstance(color, P):
-                continue
-            if isinstance(color, xyY) and getattr(looks, "contrast", None) is not None:
-                findings.append(
-                    Finding(
-                        "overspecified-color",
-                        f"{type(looks).__name__} sets an absolute colour and a "
-                        f"contrast of {looks.contrast}; both claim to set the same "
-                        f"physical quantity. Use DKL for a modulation, or drop the "
-                        f"contrast",
-                    )
-                )
+    return findings
+
+
+# --- Light and contrast (engine build A1) ----------------------------------
+
+#: Block fields that are full widths in degrees, so must be positive (spec §5.2).
+_SIZES = ("size", "width", "height", "length", "thickness", "outer", "sigma", "aperture")
+
+
+def _light(looks) -> tuple | None:
+    """What lights a stimulus, as `(kind, color, contrast, mean)`: kind `"flat"` for one
+    light, `"grating"` for a sine grating about a mean; `None` for an appearance whose
+    light a later build of the engine defines (noise, dots, pictures, ...)."""
+    from wl_xcon import look
+    from wl_xcon.task import Annulus, Bar, Cross, Disc, Gabor, Grating, Polygon, Square
+
+    if isinstance(looks, (Disc, Square, Bar, Cross, Polygon, Annulus)):
+        return ("flat", looks.color, looks.contrast, None)
+    if isinstance(looks, (Gabor, Grating)):
+        return ("grating", looks.color, looks.contrast, None)
+    if isinstance(looks, look.Look) and isinstance(looks.fill, look.Flat):
+        return ("flat", looks.fill.color, looks.fill.contrast, None)
+    if isinstance(looks, look.Look) and isinstance(looks.fill, look.SineGrating):
+        return ("grating", None, looks.fill.contrast, looks.fill.mean)
+    return None
+
+
+def _backgrounds(trial: Trial) -> list:
+    """The background each eye sees: one in direct view, two through the stereoscope."""
+    if trial.view == "stereoscope":
+        return [trial.background_left or trial.background,
+                trial.background_right or trial.background]
+    return [trial.background]
+
+
+def _black(color) -> bool:
+    """The black default, or a literal zero luminance."""
+    if color is None:
+        return True
+    if isinstance(color, Gray):
+        return _literal(color.cd_m2) == 0.0
+    return isinstance(color, xyY) and color.Y == 0.0
+
+
+def _bare(contrast, params: dict) -> bool:
+    """A contrast with no convention: a number, or a parameter whose values are numbers."""
+    from wl_xcon.photometry import Contrast
+
+    if _literal(contrast) is not None:
+        return True
+    if isinstance(contrast, P) and contrast.name in params:
+        choices = params[contrast.name].choices
+        return not (choices and all(isinstance(c, Contrast) for c in choices))
+    return False
+
+
+def _light_faults(trial: Trial) -> list[Finding]:
+    """Engine spec §4.12, §4.3, §7.5: every stimulus has a light, every contrast names its
+    convention, and a light relative to the background has a background to be relative
+    to. An invisible stimulus is not a rendering problem: the trial would score as a miss
+    indistinguishable from behavior."""
+    from wl_xcon import look
+    from wl_xcon.photometry import Contrast, Michelson, Weber
+
+    params = {p.name: p for p in trial.params}
+    backgrounds = _backgrounds(trial)
+    on_black = any(_black(b) for b in backgrounds)
+    findings: list[Finding] = []
+    for looks in _appearances(trial):
+        what = type(looks).__name__
+        if isinstance(looks, look.Look) and looks.outline is not None and looks.outline.color is None:
+            findings.append(Finding("unlit", f"{what}'s outline has no color"))
+        light = _light(looks)
+        if light is None:
+            continue
+        kind, color, contrast, mean = light
+        if _bare(contrast, params):
+            findings.append(Finding("bare-contrast", (
+                f"{what} gives a contrast with no convention; write it as Weber(...), "
+                f"Michelson(...) or RMS(...), whose value may be a parameter (engine "
+                f"spec §4.12)")))
+            continue
+        if kind == "flat":
+            if color is None and contrast is None:
+                findings.append(Finding("unlit", (
+                    f"{what} has no light: give it a color, such as Gray(40) for 40 "
+                    f"cd/m², or a Weber contrast against a declared background")))
+            if color is not None and contrast is not None:
+                findings.append(Finding("overspecified-color", (
+                    f"{what} sets an absolute colour and a contrast of {contrast}; both "
+                    f"claim to set the same physical quantity. Use one")))
+            if isinstance(contrast, Contrast) and not isinstance(contrast, Weber):
+                findings.append(Finding("contrast-convention", (
+                    f"{what} is one flat light, and {type(contrast).__name__} contrast "
+                    f"describes a pattern about its mean; a flat light takes a color or "
+                    f"a Weber contrast")))
+            if isinstance(contrast, Weber) and on_black:
+                findings.append(Finding("weber-on-black", (
+                    f"{what} is a Weber contrast against the background, and an eye's "
+                    f"background is black; declare the trial's background (engine "
+                    f"spec §7.5)")))
+            continue
+        if contrast is None:
+            findings.append(Finding("unlit", (
+                f"{what} has no contrast, so it is its mean alone; give it "
+                f"Michelson(...)")))
+        elif isinstance(contrast, Contrast) and not isinstance(contrast, Michelson):
+            findings.append(Finding("contrast-convention", (
+                f"{what} is a sine grating, drawn at a Michelson contrast in this build; "
+                f"{type(contrast).__name__} contrast for patterns arrives with the "
+                f"pattern fills (engine build A3)")))
+        if mean is None and on_black:
+            findings.append(Finding("unlit", (
+                f"{what}'s mean is whatever is behind it, and an eye's background is "
+                f"black, so it may draw nothing; declare the background or its mean")))
+        if mean is not None and not isinstance(mean, P) and any(mean != b for b in backgrounds):
+            findings.append(Finding("luminance-step", (
+                f"{what}'s mean {mean} differs from the background, so a luminance step "
+                f"sits under the pattern (engine spec §4.3: always a warning)"),
+                blocking=False))
+    return findings
+
+
+def _parts(value) -> list:
+    """`value` and every block inside it, depth first."""
+    if isinstance(value, P) or not dataclasses.is_dataclass(value):
+        return []
+    found = [value]
+    for f in dataclasses.fields(value):
+        found.extend(_parts(getattr(value, f.name)))
+    return found
+
+
+def _block_faults(trial: Trial) -> list[Finding]:
+    """Degenerate values in what is drawn, refused here so the drawer never meets them:
+    a size is a positive full width, a contrast stays inside its convention, a ring's
+    inside is inside it, a shape has enough points (engine spec §4.2, §5.2)."""
+    from wl_xcon import look
+    from wl_xcon.photometry import Michelson, Weber
+    from wl_xcon.task import Annulus, Polygon
+
+    findings: list[Finding] = []
+
+    def bad(detail: str) -> None:
+        findings.append(Finding("bad-block", detail))
+
+    for looks in _appearances(trial):
+        for part in _parts(looks):
+            name = type(part).__name__
+            for f in dataclasses.fields(part):
+                value = _literal(getattr(part, f.name))
+                if f.name in _SIZES and value is not None and value <= 0.0:
+                    bad(f"{name}.{f.name} is {value:g}; a size is a positive full width in degrees")
+            value = _literal(getattr(part, "value", None))
+            if isinstance(part, Michelson) and value is not None and not 0.0 <= value <= 1.0:
+                bad(f"Michelson({value:g}) is outside [0, 1]")
+            if isinstance(part, Weber) and value is not None and value < -1.0:
+                bad(f"Weber({value:g}) asks for negative light")
+            if isinstance(part, (look.Ring, Annulus)):
+                inner, outer = _literal(part.inner), _literal(part.outer)
+                if inner is not None and inner < 0.0:
+                    bad(f"{name}.inner is {inner:g}")
+                if inner is not None and outer is not None and inner >= outer:
+                    bad(f"{name}'s inner diameter {inner:g} is not inside its outer {outer:g}")
+            if isinstance(part, (look.RegularPolygon, Polygon)):
+                sides = _literal(part.sides)
+                if sides is not None and sides < 3:
+                    bad(f"{name} has {sides:g} sides; a polygon has at least 3")
+            if isinstance(part, look.Vertices) and len(part.points) < 3:
+                bad(f"Vertices has {len(part.points)} points; a polygon has at least 3")
+            if isinstance(part, look.Path) and len(part.points) < 2:
+                bad(f"Path has {len(part.points)} point; a line has at least 2")
+            if isinstance(part, look.Edge) and part.applies not in (None, *look.EDGE_APPLIES):
+                bad(f"{name} applies to {part.applies!r}; one of {', '.join(look.EDGE_APPLIES)}")
     return findings
 
 
@@ -1251,18 +1415,10 @@ def _view_faults(trial: Trial, geometry: Geometry | None) -> list[Finding]:
 
 
 def _has_rds(looks) -> bool:
-    """Whether an appearance is a random-dot stereogram, or carries one.
-
-    `_appearances` reports an `Array` as itself -- it is an `Appearance`, so it
-    passes that check's `isinstance` test -- not as whatever is nested in its
-    `looks`/`among`. An array of stereograms is still stereo content (review I1(b)),
-    so this looks one level into an `Array` the way `_appearances` does not.
-    """
-    if isinstance(looks, RDS):
-        return True
-    if isinstance(looks, Array):
-        return isinstance(looks.looks, RDS) or isinstance(looks.among, RDS)
-    return False
+    """Whether an appearance is a random-dot stereogram. `_appearances` reports an
+    `Array`'s own `looks`/`among` as appearances of their own, so an array of
+    stereograms is found through them (review I1(b)), once."""
+    return isinstance(looks, RDS)
 
 
 def _disparity_is_zero(value, trial: Trial) -> bool:
