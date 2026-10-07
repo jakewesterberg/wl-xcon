@@ -249,7 +249,9 @@ credential lifecycle.
 > - **The path.** `parseRigPages` refuses any address not written as its origin, optionally with
 >   a final `/`, compared as written (so `/.` and `/%2e` are refused too). That is stricter than
 >   `signin.parse_rig_page`, which also takes a query, an upper-case host and a spelled-out
->   `:443` (XC-240). wl.works refuses such an entry at boot.
+>   `:443` (XC-240). wl.works refuses such an entry at boot. *(2026-10-07: XC-240 closed; `parse_rig_page`
+>   now refuses whatever is not the origin as written, with or without a final `/`, as
+>   `parseRigPages` does at wl-works' 637007a7.)*
 > - **A suggestion, for us to weigh:** the page's renewal `fetch` has no timeout; an
 >   `AbortController` would bound a connection dropped without an answer (XC-241).
 

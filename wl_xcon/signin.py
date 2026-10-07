@@ -18,6 +18,7 @@ until its hour ends; a sign-out at this page is refused here at once (`sign_out`
 from __future__ import annotations
 
 import http.client
+import ipaddress
 import json
 import os
 import re
@@ -92,20 +93,50 @@ def parse_rig_page(text: str) -> RigPage:
         raise ValueError(f"{shape}; its address carries a user name or password")
     if parts.fragment or "#" in page:
         raise ValueError(f"{shape}; its address has a fragment (#)")
-    # wl.works' `parseRigPages` takes a path (`src/lib/rigs.ts`, read 2026-10-05 at
-    # e37847f4), but `wlx serve` serves the page, `/whoami` and `/events` at the root only, so
-    # a sign-in would come back to a page that is not there (the final review, M1).
+    # `wlx serve` serves the page, `/whoami` and `/events` at the root only, so a sign-in
+    # would come back to a page that is not there (the final review, M1).
     if parts.path not in ("", "/"):
         raise ValueError(f"{shape}; its address has a path, and the page is served only at the root of its address")
-    host = parts.hostname.lower()
-    if ":" in host:
-        host = f"[{host}]"
     try:
         port = parts.port
     except ValueError:
         raise ValueError(f"{shape}; its port is not a number from 0 to 65535") from None
-    netloc = host if port in (None, 443) else f"{host}:{port}"
+    host = _canonical_host(parts.hostname)
+    netloc = None if host is None else host if port in (None, 443) else f"{host}:{port}"
+    # **The address must be its origin alone, as written** (XC-240): wl.works' `parseRigPages`
+    # refuses at start any entry that is neither `url.origin` nor `url.origin + "/"`, compared
+    # as written (`src/lib/rigs.ts:113`, read 2026-10-07 at 637007a7, its 16a-1b, deployed that
+    # day), so a query, an upper-case scheme or host, a spelled-out ":443" or a port with a
+    # leading zero names a page wl.works would never serve.
+    if netloc is None or page not in (f"https://{netloc}", f"https://{netloc}/"):
+        raise ValueError(
+            f'{shape}; its address must be its origin alone, written as wl.works compares it '
+            f'(lower case, no query, no ":443", no leading zero in the port, an IP address in '
+            f'its standard form, a non-ASCII name in its xn-- form), with or without a final "/"'
+        )
     return RigPage(name, page, f"https://{netloc}", CLIENT_PREFIX + name, netloc)
+
+
+def _canonical_host(hostname: str) -> str | None:
+    """The host as a WHATWG URL's origin writes it, or `None` when this cannot say: an
+    IPv6 address compressed in brackets, an IPv4 address in dotted decimal, a name in lower
+    case. `urlsplit` has already lower-cased `hostname`; whether the address wrote it that way
+    is the comparison `parse_rig_page` makes. A host whose last label is a number is an IPv4
+    address to the WHATWG parser, which rewrites `127.1` or `0x7f.0.0.1`, so one that is not
+    already standard dotted decimal is `None`, as is a non-ASCII name, which the parser turns
+    into its `xn--` form."""
+    if ":" in hostname:
+        try:
+            return f"[{ipaddress.IPv6Address(hostname).compressed}]"
+        except ValueError:
+            return None
+    last = hostname.rstrip(".").rpartition(".")[2]
+    if last.isdigit() or (last.startswith("0x") and all(c in "0123456789abcdef" for c in last[2:])):
+        try:
+            return str(ipaddress.IPv4Address(hostname))
+        except ValueError:
+            return None
+    return hostname if hostname.isascii() else None
 
 
 def parse_issuer(text: str) -> str:

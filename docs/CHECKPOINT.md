@@ -398,6 +398,11 @@ first of four builds the PI ordered:
   the session re-ran the ones that changed the design before acting on them.
 - **Backlog**: XC-242 filed (nothing calls a task's between-trial procedure); XC-013 now waits on
   the order above.
+- **XC-240 closed** the same day (branch `xc240`): `signin.parse_rig_page` refuses any rig-page
+  address that is not its origin as written, with or without a final `/`, exactly as wl.works'
+  `parseRigPages` does since its 16a-1b (`src/lib/rigs.ts:113` at `637007a7`): a query, an
+  upper-case scheme or host, a spelled-out `:443`, a port with a leading zero, a non-standard IP
+  address and a non-ASCII name are refused (`signin._canonical_host`).
 
 ## What moved on 2026-10-06: b2b-ready, the https page safe to switch on
 

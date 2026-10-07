@@ -29,10 +29,11 @@ def test_a_rig_page_entry_is_read_as_wl_works_reads_it():
     )
 
 
-def test_a_page_with_a_port_keeps_it_in_the_origin_and_the_host_and_443_does_not():
+def test_a_page_with_a_port_keeps_it_in_the_origin_and_the_host():
     assert signin.parse_rig_page("rig-3=https://127.0.0.1:8443/").origin == "https://127.0.0.1:8443"
     assert signin.parse_rig_page("rig-3=https://127.0.0.1:8443/").host == "127.0.0.1:8443"
-    assert signin.parse_rig_page("rig-3=https://Rig-3.WL.works:443/").origin == "https://rig-3.wl.works"
+    assert signin.parse_rig_page("rig-3=https://[::1]:8443/").origin == "https://[::1]:8443"
+    assert signin.parse_rig_page("rig-3=https://[::1]:8443/").host == "[::1]:8443"
 
 
 @pytest.mark.parametrize(
@@ -53,6 +54,19 @@ def test_a_page_with_a_port_keeps_it_in_the_origin_and_the_host_and_443_does_not
         # review, M1).
         ("rig-3=https://rig-3.wl.works/console", "has a path"),
         ("rig-3=https://rig-3.wl.works/console/", "has a path"),
+        # XC-240: wl.works' 16a-1b refuses anything but the origin as written, with or without
+        # a final "/" (`src/lib/rigs.ts:113` at 637007a7).
+        ("rig-3=https://rig-3.wl.works/?lab=1", "origin alone"),
+        ("rig-3=https://rig-3.wl.works?lab=1", "origin alone"),
+        ("rig-3=https://Rig-3.wl.works/", "origin alone"),
+        ("rig-3=HTTPS://rig-3.wl.works/", "origin alone"),
+        ("rig-3=https://rig-3.wl.works:443/", "origin alone"),
+        ("rig-3=https://rig-3.wl.works:08443/", "origin alone"),
+        ("rig-3=https://rig-3.wl.works:/", "origin alone"),
+        ("rig-3=https://127.1/", "origin alone"),
+        ("rig-3=https://0x7f.0.0.1/", "origin alone"),
+        ("rig-3=https://[0:0::1]:8443/", "origin alone"),
+        ("rig-3=https://b\u00fccher.example/", "origin alone"),
     ],
 )
 def test_a_rig_page_wl_works_would_refuse_is_refused_here(text, says):
@@ -61,9 +75,10 @@ def test_a_rig_page_wl_works_would_refuse_is_refused_here(text, says):
     assert says in str(refused.value)
 
 
-def test_a_rig_page_at_its_root_is_taken_with_or_without_a_slash_or_a_query():
+def test_a_rig_page_at_its_root_is_taken_with_or_without_a_slash():
     assert signin.parse_rig_page("rig-3=https://rig-3.wl.works").origin == "https://rig-3.wl.works"
-    assert signin.parse_rig_page("rig-3=https://rig-3.wl.works/?lab=1").page == "https://rig-3.wl.works/?lab=1"
+    assert signin.parse_rig_page("rig-3=https://rig-3.wl.works/").page == "https://rig-3.wl.works/"
+    assert signin.parse_rig_page("rig-3=https://xn--bcher-kva.example/").origin == "https://xn--bcher-kva.example"
 
 
 @pytest.mark.parametrize("issuer", [ISSUER, "https://wl.works", "https://127.0.0.1:8443/api/auth"])
