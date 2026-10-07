@@ -1236,18 +1236,25 @@ def _block_faults(trial: Trial) -> list[Finding]:
             first([(v, f"{said}; tf is a speed in cycles per second, and `direction` says "
                        f"which way the bars move (engine spec §5.1)")
                    for v, said in values(part, "tf")], lambda v: v < 0.0)
-        if (isinstance(part, look.Look) and isinstance(part.fill, look.SineGrating)
-                and part.fill.direction is not None):
-            _direction_faults(part, params, bad)
+        if isinstance(part, look.Look):
+            try:
+                fills = _options(part.fill, params)
+            except _Unbounded as unbounded:
+                bad(f"the Look's fill is parameter {unbounded.args[0]!r}, which offers no "
+                    f"choices, so its drift direction cannot be read")
+                fills = []
+            for fill in fills:
+                if isinstance(fill, look.SineGrating) and fill.direction is not None:
+                    _direction_faults(part, fill, params, bad)
     return findings
 
 
-def _direction_faults(looks, params: dict[str, Param], bad) -> None:
+def _direction_faults(looks, grating, params: dict[str, Param], bad) -> None:
     """A grating's drift `direction` is across its bars: orientation + 90 or + 270 degrees
     (engine spec §5.1; PI, 2026-10-07). Every (orientation, direction) pair the two fields
     can take is held to it. A range names directions that are not across the bars, and one
     cannot be checked against a fixed direction, so either must offer choices."""
-    direction, orientation = looks.fill.direction, looks.orientation
+    direction, orientation = grating.direction, looks.orientation
 
     def choices(value, what: str, why: str) -> list[float] | None:
         if not isinstance(value, P):

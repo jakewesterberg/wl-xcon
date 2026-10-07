@@ -650,3 +650,27 @@ def test_a_background_the_range_of_a_parameter_reaches_black_says_to_raise_the_r
     for trial in (_one(Disc(contrast=Weber(0.5))), _one(_drifting())):
         said = " ".join(f.detail for f in check(trial) if f.blocking)
         assert "declare the" in said and "raise the low end" not in said
+
+
+def _fill_choices(*fills):
+    return [Param("f", unit="fill", choices=fills)]
+
+
+def _bad_fill():
+    return look.SineGrating(direction=45.0, contrast=Michelson(0.5))
+
+
+def _good_fill():
+    return look.SineGrating(direction=90.0, contrast=Michelson(0.5))
+
+
+def test_a_parameter_fill_is_held_to_the_drift_rule_at_each_choice():
+    shape = look.Circle(size=4.0)
+    params = _fill_choices(_good_fill(), _bad_fill())
+    direct = look.Look(shape=shape, fill=P("f"), orientation=0.0)
+    assert _blocks(_one(direct, params=params, background=GRAY_BG))
+    items = Array(looks=direct, among=direct)
+    assert _blocks(_one(items, params=params, background=GRAY_BG))
+    fine = _fill_choices(_good_fill(), look.SineGrating(direction=270.0, contrast=Michelson(0.5)))
+    assert _refused(_one(direct, params=fine, background=GRAY_BG)) == set()
+    assert _refused(_one(items, params=fine, background=GRAY_BG)) == set()
