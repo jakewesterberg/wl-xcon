@@ -591,3 +591,14 @@ gives every run one block of one condition, and no task can declare a plan (XC-2
 - **It ends on** — all four: a declared duration; its media ending; an operator stop; a criterion.
 - **Its analysis** — "One epoch with timed events": every change, probe, reward and mark
   time-stamped on the recording clock; analysis cuts it as it likes.
+
+**Batch 3** (asked 2026-10-07):
+
+- **Block order within a run** — all four: a fixed sequence; repeating (Bt1, Bt2, Bt1, Bt2...);
+  randomized from a recorded seed, balanced; progression by criterion (training stages, shaping).
+- **What ends a block** — all four: a number of trials; every condition's target met; a
+  performance criterion; a time limit.
+- **Across a session** — "A program, free to deviate": a session program lists the runs in order;
+  the console offers the next; the operator may skip, repeat or insert runs, all recorded.
+- **What ends a run** — its plan done; an operator stop; a time limit. Disengagement (e.g. N
+  no-responses in a row) was offered and not chosen.
