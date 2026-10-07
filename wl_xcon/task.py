@@ -533,10 +533,10 @@ class Dots(Appearance):
     density: "float | P" = 1.0
     aperture: "float | P" = 5.0
     seed: int = 0
-    #: Device-independent colour, or `None` for achromatic at `contrast`. On the
-    #: appearance rather than the stimulus because colour is a feature: "red among
-    #: green" and "circles among squares" are then the same kind of switch, and both
-    #: are values a parameter can carry (S1a §4).
+    #: Device-independent colour, or `None` when the light is a `contrast` against the
+    #: trial's background. On the appearance rather than the stimulus because colour is
+    #: a feature: "red among green" and "circles among squares" are then the same kind of
+    #: switch, and both are values a parameter can carry (S1a §4).
     color: "Color | P | None" = None
 
 

@@ -47,6 +47,6 @@ def test_a_trial_defaults_to_black_and_true_angle():
 
 def test_no_appearance_implies_a_contrast_any_more():
     for name in ("Disc", "Square", "Bar", "Gabor", "Annulus", "Cross", "Polygon", "Grating",
-                 "Plaid", "Checkerboard", "Noise"):
+                 "Plaid", "Checkerboard", "Noise", "RDS"):
         fields = {f.name: f for f in dataclasses.fields(getattr(task, name))}
         assert fields["contrast"].default is None, name
