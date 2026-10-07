@@ -172,3 +172,49 @@ def test_a_line_just_over_a_sample_wide_keeps_its_light_at_every_phase(k):
     px = math.degrees(math.atan(vp.pitch_cm[0] / vp.distance_cm))
     py = math.degrees(math.atan(vp.pitch_cm[1] / vp.distance_cm))
     assert image[..., 1].sum() == pytest.approx(40.0 * 4.0 * 1.2 * s / (px * py), rel=0.02)
+
+
+GABOR_REGION = (820, 400, 1100, 680)  # ±4.9° about the center at 1920 × 1080
+
+
+def _gray20():
+    return Trial(start="s", states=[], background=Gray(20.0))
+
+
+def test_a_gabor_on_its_mean_is_the_textbook_formula_with_horizontal_bars():
+    g = Stimulus("g", at=(0.0, 0.0), looks=Gabor(sf=1.0, sigma=1.0, phase=90.0, contrast=Michelson(0.5)))
+    image, vp = _draw([g], trial=_gray20(), pixels=(1920, 1080), region=GABOR_REGION)
+    assert image[_pixel(vp, 0.0, 0.0, GABOR_REGION)][1] == pytest.approx(30.0, rel=0.01)  # 20·(1 + 0.5)
+    assert image[_pixel(vp, 0.5, 0.0, GABOR_REGION)][1] > 20.0                           # along a bar
+    assert image[_pixel(vp, 0.0, 0.5, GABOR_REGION)][1] < 20.0                           # across the bars
+    assert image[0, 0, 1] == pytest.approx(20.0)                                          # seamless
+
+
+def test_the_gabor_is_cut_where_its_envelope_is_negligible():
+    sigma = 0.5
+    g = Stimulus("g", at=(0.0, 0.0), looks=Gabor(sf=1.0, sigma=sigma, contrast=Michelson(1.0)))
+    image, vp = _draw([g], trial=_gray20(), pixels=(1920, 1080), region=GABOR_REGION)
+    angles = _angles(vp, GABOR_REGION, 0.0, 0.0)
+    cutoff = look.GABOR_CUTOFF_SIGMAS * sigma
+    assert np.all(image[..., 1][angles > cutoff + 0.05] == 20.0)
+    near = (angles > cutoff - 0.1 * sigma) & (angles <= cutoff)
+    # A pixel's samples reach half a pixel (0.025°) further in than its center.
+    assert np.abs(image[..., 1][near] - 20.0).max() < 20.0 * math.exp(-((cutoff - 0.15 * sigma) / sigma) ** 2 / 2)
+
+
+def test_a_drifting_grating_moves_with_the_frame_from_its_onset():
+    looks = look.Look(shape=look.Circle(size=6.0), fill=look.SineGrating(sf=1.0, tf=2.0, contrast=Michelson(0.5)))
+    g = Stimulus("g", at=(0.0, 0.0), looks=looks)
+    first, _ = _draw([g], trial=_gray20(), frame=0)
+    later, _ = _draw([g], trial=_gray20(), frame=30)
+    again, _ = _draw([g], trial=_gray20(), frame=10, onsets={"g": 10})
+    assert not np.allclose(first, later)
+    assert np.array_equal(first, again)
+
+
+def test_a_grating_with_a_declared_mean_sits_on_that_mean():
+    looks = look.Look(shape=look.Circle(size=6.0),
+                      fill=look.SineGrating(sf=1.0, phase=90.0, contrast=Michelson(0.5), mean=Gray(10.0)))
+    image, vp = _draw([Stimulus("g", at=(0.0, 0.0), looks=looks)], trial=_gray20(), pixels=(1920, 1080),
+                      region=GABOR_REGION)
+    assert image[_pixel(vp, 0.0, 0.0, GABOR_REGION)][1] == pytest.approx(15.0, rel=0.01)  # 10·(1 + 0.5)

@@ -156,6 +156,13 @@ def _sees(item, vp) -> bool:
     return vp.eye == "both" or item.eye in ("both", vp.eye)
 
 
+def _phase(fill, w, item, screen):
+    """A grating's phase at each sample: bars along local x, luminance along local y,
+    drifting toward +y at `tf` from the frame the item appeared (spec §4.3, §5.1)."""
+    t = (screen.frame - item.onset_frame) * screen.frame_period
+    return 2.0 * math.pi * (fill.sf * w - fill.tf * t) + math.radians(fill.phase)
+
+
 def _light(fill, mean, background, envelope, w, item, screen):
     """The light an item would be with nothing below it, at each sample; `mean` is what a
     pattern's mean is when it declares none."""
@@ -163,7 +170,10 @@ def _light(fill, mean, background, envelope, w, item, screen):
         if fill.xyz is not None:
             return np.asarray(fill.xyz, dtype=float)
         return background * (1.0 + fill.weber)
-    raise NotYetDrawable(f"{type(fill).__name__} is drawn in Task 9 of engine build A1")
+    if isinstance(fill, ResolvedGrating):
+        base = mean if fill.mean_xyz is None else np.asarray(fill.mean_xyz, dtype=float)
+        return base * (1.0 + fill.michelson * np.sin(_phase(fill, w, item, screen)) * envelope)[..., None]
+    raise NotYetDrawable(f"{type(fill).__name__} is drawn in engine build A3")
 
 
 def _compose(item, below, background, a, envelope, w, screen):
