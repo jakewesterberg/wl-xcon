@@ -550,3 +550,22 @@ XC-002 (automated color calibration in the rig) whose instrument choice was neve
   eyes will be in different positions. this is something that the console can recognize and
   quantify. We should have a tolerance that is acceptable for off-alignment." (Offered against: a
   person with a camera at setup plus a tracker check, both, or either alone.)
+
+**Batch 2** (asked 2026-10-07; as recommended, with the tightest tolerance):
+
+- **One procedure on the stereoscope** — "Yes": each eye's monocular grid fits that eye's map, and
+  comparing them gives the alignment; no separate binocular calibration there. Direct view keeps
+  the ordinary thirteen-point calibration.
+- **The tolerance between the eyes' grids** — "0.25°"; the console reports the mismatch at each
+  point and overall.
+- **Outside the tolerance** — "By session kind": a warning in training and piloting; refused in a
+  recording session until the mirrors are realigned and the check passes.
+
+**Element 9 is discussed, and with it the display engine (elements 1-9).**
+
+## 10. Structure
+
+Settled before the element: the PI's vocabulary of 2026-10-01 (session, task, run, block type,
+block, condition, trial; the session-levels spec §2); `scheduler.py` (conditions with targets,
+blocks with criteria, counting, orders, requeue) built and driven every trial; but `taskd._plan`
+gives every run one block of one condition, and no task can declare a plan (XC-207).
