@@ -276,3 +276,9 @@ def test_a_grating_with_a_declared_mean_on_another_background_is_warned_not_refu
 
 def test_an_array_s_items_must_be_lit_too():
     assert "unlit" in _refused(_one(Array(looks=Disc(color=Gray(40.0)))))
+
+
+def test_a_degenerate_block_inside_an_array_member_is_reported_once():
+    items = Array(looks=Disc(size=0.0, color=Gray(40.0)), among=Disc(color=Gray(40.0)))
+    findings = [f.code for f in check(_one(items, background=GRAY_BG)) if f.blocking]
+    assert findings.count("bad-block") == 1

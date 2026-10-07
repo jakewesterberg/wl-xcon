@@ -992,10 +992,14 @@ def _light_faults(trial: Trial) -> list[Finding]:
 
 
 def _parts(value) -> list:
-    """`value` and every block inside it, depth first."""
+    """`value` and every block inside it, depth first. It stops at an `Array`:
+    `_appearances` yields an Array's `looks` and `among` as appearances of their own,
+    so descending would report a fault in one of them twice."""
     if isinstance(value, P) or not dataclasses.is_dataclass(value):
         return []
     found = [value]
+    if isinstance(value, Array):
+        return found
     for f in dataclasses.fields(value):
         found.extend(_parts(getattr(value, f.name)))
     return found
