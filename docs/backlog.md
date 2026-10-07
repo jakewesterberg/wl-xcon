@@ -15,7 +15,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 **Finding one.** Grep the ID, a package (`P9`, `b3`), a repository (`wl-sync`) or a file. The sections: brainstorms the PI asked to have later; features no plan covers yet; defects and review findings deliberately not fixed; debt (cleanup, stale wording, test hygiene); anything that needs the rig or other hardware, measurements included; and asks of, or waits on, other repositories.
 
-**Next free ID: XC-243.**
+**Next free ID: XC-245.**
 
 ## Brainstorms queued for the PI
 
@@ -66,6 +66,8 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 - **XC-159** `wlx run` takes no pre-flight: its run starts on `Session.run`'s two refusals alone and its start row records `preflight: null`, while every `wlx taskd` run passes S9a §10's gate. — 2026-09-29, [b3a-1 plan](superpowers/plans/2026-09-29-p4d2b-b3a1-session-service.md#plan-decisions) (decision 13) — waits on: nothing
 - **XC-121** Let a Stop jump the command queue instead of landing up to one trial boundary per queued command late, as part of b2b's pipelining. — 2026-09-28, [S9a §7](superpowers/specs/2026-08-31-S9a-console-design.md#7-processes-and-protocol); `c0d0ba4` — waits on: nothing
 - **XC-241** The page's renewal `fetch` has no timeout, so on a connection dropped without an answer it waits until the browser gives up (the lapse bounds it, b2b-ready §4.1); once wl.works' 120 s grace is deployed, a renewal bounded by an `AbortController` could be tried again inside it (wl-works' suggestion). — 2026-10-06, [pending-wl-works-amendments.md](pending-wl-works-amendments.md#signing-in-from-a-rigs-page-what-b2b-needs-new-2026-09-29), wl-works' answer of that day — waits on: nothing (the 120 s grace is live since 2026-10-07)
+- **XC-243** Absolute luminance (`Gray`) on the default calibration is a session warning, carried by the warnings list (engine build B); until then a `Gray` without a calibration is not flagged per stimulus. — 2026-10-07, [engine A1 plan, call 5](superpowers/plans/2026-10-07-engine-a1.md) — waits on: engine build B
+- **XC-244** Groups (a named group shows, hides, moves and changes a property as one, its members addressable) and layouts, moved from A1 to A3 (PI, 2026-10-07). — 2026-10-07, [engine A1 plan, call 1](superpowers/plans/2026-10-07-engine-a1.md) — waits on: engine build A3
 
 ## Deferred defects
 

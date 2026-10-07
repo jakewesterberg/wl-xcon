@@ -9,6 +9,9 @@ distrust the reasoning. Numbers go stale, arguments do not.
 > written with**, `wl-expcontroller` and `wl_expcontroller/…` paths included, as the PI
 > ruled for dated documents; read `wl_expcontroller/taskd.py` there as `wl_xcon/taskd.py`.
 >
+> **On branch `engine-a1` (not yet on `main`) the newest entry is "What moved on 2026-10-07: engine build A1, the screen
+> description and the exact drawer"**, below the Status table and above the entry that follows.
+>
 > **This file describes `main`.** Its newest entry, "What moved on 2026-10-07: demo mode
 > designed and parked, and the order changed", sets the next four builds, the default color
 > calibration first. Below it, "What moved on 2026-10-06: b2b-ready, the
@@ -355,6 +358,93 @@ figure was one low. In order:
   a path outside the workspace, and no credentials for it.
 
 ---
+
+## What moved on 2026-10-07: engine build A1, the screen description and the exact drawer
+
+**Resume here (state at 2026-10-07, branch `engine-a1`, not yet on `main`):** engine build A1 is
+written and awaiting the whole-branch review and the PI's merge. Plan:
+`docs/superpowers/plans/2026-10-07-engine-a1.md`; spec: `docs/superpowers/specs/2026-10-07-engine-design.md`
+(approved by the PI the same day). **Nothing in a session calls any of it** (plan call 7): `run.py` is
+untouched, and the display process (build E) and the screen log (build F) are the first callers.
+
+- **What A1 built.** `wl_xcon/screen.py`, the screen description (`resolve`: positions, sizes, the two
+  peripheries, disparity, per-eye positions, the vergence offset, layers and the background as the
+  bottom layer); `wl_xcon/exact.py`, the slow exact drawer, with `look.py` (what a stimulus looks
+  like) and `viewport.py` (pixel-to-direction mapping): shapes, edges, outlines, four ways to overlap,
+  the Gabor for spike S. `check.py` gained the contrast and light refusals (`Weber`, `Michelson`, `RMS`;
+  a bare number is refused at load) and check 8 measures each eye after the vergence offset.
+  `photometry.to_xyz` and `Geometry.vergence_half_deg` are new. The four reference tasks are lit in
+  cd/m² (`Gray(40)` to start, bounded 0-100 until V9 measures the brightness cap).
+- **The PI's answers on the plan (2026-10-07).** Subagent-driven build; groups and layouts move to A3
+  (XC-244); luminance settings bounded at 100 cd/m² until V9 measures the cap.
+- **Calls taken in the plan** (each costs about one task to undo): (1) groups and layouts move to A3;
+  an `Array` is still drawn as its items. (2) "One shapes another" is a gain on the contrast below,
+  `C = B + (C - B)(1 + a(g - 1))`; an absolute light names no gain and is refused at load. (3) Each
+  sample's share of a shape comes from its signed distance and that distance's gradient across the
+  sample grid, not a point test (GPU drawers compute the same quantity with `fwidth`). (4) Positions are
+  each eye's own direction after the vergence offset, `v = atan(E/D)`; check 8 learns the same offset.
+  (5) `Gray` without a calibration is not flagged per stimulus (XC-243). (6) DKL "relative to black" is
+  refused in A2. (7) The trial loop does not call `resolve`. (8) A grating's `orientation` names its
+  bars (0 degrees is horizontal bars); positive `tf` drifts toward local +y. (9) `frame_period` has
+  no default in `resolve`.
+- **Rulings made during the build** (what was decided; what it costs if wrong):
+  - RDS's `contrast` default becomes None and "RDS" joins the no-appearance-implies-contrast test (spec
+    §4.12); nothing reads it before A3. Free.
+  - Task 5 does not import `replace` in `tests/test_display_checks.py`. Free.
+  - `screen`, `viewport` and `exact` are listed in `tools/mutation_gate.py`'s RETURNS as `"None"` in the
+    commit that adds each; `look` stays EXEMPT. A wrong listing fails CI at once.
+  - Two Array tests in `test_task_checks.py` light their members, since the Array descent now sees them.
+    Each keeps its intent. Free.
+  - Three hollowed tests re-pinned at (10.0, 0.0), the Update one with `disparity=-2.0` (near). Free.
+  - `_placement_faults` checks per-eye against disparity, and multiply against absolute light, over every
+    combination `_as_updated` yields for an Update (which now varies `eye` too). Costs a conservative
+    refusal of an odd task mixing them on paths that never meet.
+  - `_as_updated` de-duplicates each property's options by equality (131,072 combinations for 16 Shows
+    and 2 Updates before). Free.
+  - The ellipse returns the first-order distance in degrees, the center given `-min(a, b)`. Costs one formula.
+  - `_polygon` and `_segments` skip zero-length segments. Free.
+  - Coverage's slope per axis is the larger one-sided difference, exact for features at least one
+    sample wide; narrower ones draw brighter than their area, by phase. Costs one function.
+  - Added tests for the drift direction, a Gabor's mean over a disc, and the multiply-by-Gabor gain;
+    the plan defined the conventions and omitted the tests. Free.
+  - A grating's drift is the sign of `tf` along orientation + 90 degrees, not a separate angle field as
+    spec §5.1 words it. Costs a `direction` field if A3's moving dots and plaids need one.
+  - The mutation sweep for Task 11 is CI's per-push shards plus one local rerun (below). Costs a full
+    local sweep if a CI run turns out not to have covered a module.
+- **What the reviews found that changed the code.** Check 8 now measures each eye after the vergence
+  offset and an Update that widens `eye`; Update-to-Update placement is checked; a bad block in an
+  Array member is reported once; the ellipse's distance is in degrees; zero-length polygon and path
+  segments are skipped; coverage is exact for features at least one sample wide.
+- **The stereoscope's both-eyes field is +-10.55 degrees at `E` = 1.6 cm** (computed, not measured): a
+  stimulus straight ahead at 11 degrees is refused through the stereoscope (its left-eye image sits at
+  12.45 degrees, behind the +-12 degree mask). No reference task is affected; all four run in direct view.
+- **The sweep.** Every function the branch changed was swept by CI, whose per-push run is
+  `tools/mutation_gate.py --changed-only --shard k/12` over every function of the modules that push
+  changed (base = the previous push). The runs on `engine-a1`:
+
+  | Push | Tasks | Modules swept | Result |
+  |---|---|---|---|
+  | aeae3fe, 7299e7d | plan, notes | none | green |
+  | 50949fe | 1-4 | photometry, task, check, calibration (`look` EXEMPT) | green, all 12 shards |
+  | 772b0c4 | 5 | check, geometry | green |
+  | b6673a8 | 6-7 | geometry, screen, viewport | red, shard 11: `viewport.directions` SURVIVED (2581 passed) because no caller existed until `exact.py` (Task 8); every other function caught |
+  | 66497e7 | 8 | exact | green |
+  | 324c9fa | 9 | exact | green |
+  | 0d7f71a | 10 | exact | in progress when Task 11 began; read its result before merging |
+
+  The survivor was rerun locally on 2026-10-07 after `exact.py` existed, with `PLAYWRIGHT_BROWSERS_PATH`
+  at an empty directory as CI runs: `python3 tools/mutate.py wl_xcon/viewport.py directions` read
+  `caught directions  34 failed, 2597 passed, 32 skipped` (baseline and restore `2631 passed, 32 skipped`),
+  failing tests named in `tests/test_exact.py`. A real `N failed`, not an `N errors`.
+- **Next.** Plan A2: cone fundamentals, cone contrast, DKL's conversion and its refusal on a black
+  background, realizability by full conversion, and `visual_search`'s background. The Vulkan spike S
+  runs on the PI's Linux machine once he is home (it matches against `exact.py`'s Gabor). The
+  cross-repository asks the approved engine spec §21 lists (wl-preproc, wl-xtasks, wl-sync) are due
+  and have not been sent; each is outward-facing and needs the PI's go-ahead. Stale remote branches
+  `engine-design`, `demo-mode` and `xc240` await a decision to delete. Minor review findings deferred
+  past the fixes are in the build's ledger for the final whole-branch review.
+- **Backlog.** XC-243 (`Gray` on the default calibration, waits on engine build B) and XC-244 (groups and
+  layouts, waits on A3) filed; next free ID XC-245.
 
 ## What moved on 2026-10-07: demo mode designed and parked, and the order changed
 

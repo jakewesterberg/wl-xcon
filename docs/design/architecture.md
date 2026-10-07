@@ -446,6 +446,10 @@ alignment procedure. Photodiode patches sit outside both viewports, at a bottom 
 under the sensors' housings in direct view. Panel left/right nonuniformity is by construction
 an interocular mismatch and is photometered in V1.
 
+The **screen description** (`wl_xcon/screen.py`) and the **exact drawer** (`wl_xcon/exact.py`, with
+`look.py` and `viewport.py`) exist since engine build A1 (2026-10-07). Nothing in a session calls them
+yet: the display process (engine build E) and the screen log (engine build F) will.
+
 ## Neural plane and stimulation
 
 Both systems record; either may gate the loop; **Intan always stimulates.**

@@ -42,13 +42,19 @@ implement, and the field check 8 uses is the one it will draw into.
 
 The mapping inputs are per-rig and per-animal, and all of them are **measured, not derived**:
 each eye's folded optical path length, each viewport's centre, the vergence offset (a software
-constant, 3.2° nominal — optics drawing §6), and the display mode's deg/pixel. They live in the
+constant, `2·atan(E/D)`: 2.9° at `E` = 1.6 cm, 2.7-3.5° over IPD 30-38 mm — optics drawing §6;
+`Geometry.vergence_half_deg`), and the display mode's deg/pixel. They live in the
 session snapshot beside the gaze mapping version, and a change to any of them is a discontinuity
 of the same class as a parameter change (P16).
 
 **Disparity is a stimulus property**, applied as equal and opposite horizontal offsets about the
 cyclopean position. A monocular task is the zero-disparity case of the same path, which is what
 makes stereo cost nothing to keep available (D6).
+
+> **Note, 2026-10-07 (engine build A1).** Positions, angles, disparity's sign, the per-eye formula
+> and the vergence offset are as the engine spec §5 states them and `wl_xcon/screen.py`'s
+> `resolve` computes them; check 8 measures each eye after the offset. What a stimulus looks like under these conventions,
+> and the color and luminance conventions of engine spec §7, is defined by `wl_xcon/exact.py`.
 
 ---
 
