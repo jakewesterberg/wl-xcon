@@ -211,3 +211,15 @@ disparity as equal and opposite horizontal offsets; field limits checked at load
 - **Manual RF mapping's view** — "A live schematic": a drawing of the animal's screen in the
   console with the fixation point, the stimulus, the gaze dot and markers the operator drops,
   before the full replica (V11) exists.
+
+**Batch 4** (asked 2026-10-07; all as recommended):
+
+- **Default gaze rule for a gaze-anchored stimulus** — "Newest sample".
+- **What one size number means** — "Full width": diameter, side length, full bar length; each
+  block's definition states it.
+- **A position linked to another stimulus that moves** — "Declared per link": a live link (moves
+  with it) or placed once at onset.
+
+**Element 2 is discussed.**
+
+## 3. When
