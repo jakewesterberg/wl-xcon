@@ -467,3 +467,22 @@ to clarify the rest):
   only ideas; trigger-driven over ZMQ rather than per-frame lockstep; direct display through
   `VK_KHR_display`, FIFO, paced by a post-flip vblank wait; 8-bit sRGB only, no LUT, no stereo, one
   photodiode patch; no committed timing measurement.
+
+**Batch 3, continued** (re-asked 2026-10-07 after the PI asked "why did you recommend same
+thread?": the first recommendation was the same process with the core on its own native thread;
+reconsidered, a separate process wins on crash containment, keeping the screen up across rig-service
+restarts, and its own real-time priority):
+
+- **How Python and the core talk** — "Separate display process": the Rust core runs as its own
+  program with real-time priority and owns the screen; the rig service hands it each screen
+  description through shared memory and gets back the frame each change landed on; a driver crash
+  cannot take the session with it.
+- **Who reviews the core** — "Tests carry it": a person reviews the Python exact definitions and
+  the visual report; the core is held to them by the one-level match tests and V1; no core change
+  merges without them passing.
+- **The Linux NVIDIA machine** — SSH from this Mac, and in the PI's words: "it is not on at the
+  moment, and I am not at home to switch it on. we can revisit the spike when I am home".
+
+**Element 7 is discussed.**
+
+## 8. Lifecycle
