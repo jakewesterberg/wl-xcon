@@ -271,3 +271,16 @@ the authority; the panel runs 240 Hz (4.17 ms), with 120 Hz available.
 - **Delay from eye or neuron to screen** — "Measured, declared limit": each change records its
   delay (sample age plus the frame it landed on); a task may declare a maximum and trials past it
   are marked; V3's photodiode measurement gives the true end-to-end figure.
+
+**Batch 4** — **the cap on a single trial: "5 minutes"**; a trial still running at the cap ends
+as a fault; longer presentations use the continuous mode.
+
+**Element 3 is discussed.**
+
+## 4. Color and luminance
+
+Settled before the element: colors in xyY (absolute) or DKL (cone contrast about the
+background, `lum=0` isoluminant); a measured `photometry.Calibration` names its observer; an
+uncalibrated color refused today; the PI's 2026-10-07 ruling for a default calibration and a
+warnings list. Known hazards: a QD-OLED's transfer is not a power law; ABL dims the panel with
+fill; low contrasts need fine steps.
