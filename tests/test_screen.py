@@ -4,7 +4,7 @@ import pytest
 
 from _rig import DIRECT, STEREOSCOPE
 from wl_xcon import look, screen
-from wl_xcon.photometry import Gray, Michelson, Weber, to_xyz
+from wl_xcon.photometry import RMS, Gray, Michelson, Weber, to_xyz
 from wl_xcon.task import Array, Bar, Blank, Disc, Gabor, Noise, P, Square, Stimulus, Trial
 
 TRIAL = Trial(start="s", states=[])
@@ -122,12 +122,28 @@ def test_a_grating_look_resolves_every_field_and_its_orientation():
 
 
 def test_a_fill_that_cannot_be_drawn_is_refused():
-    with pytest.raises(screen.NotYetDrawable):
-        _one(Stimulus("m", at=(0.0, 0.0), looks=Disc(contrast=Michelson(0.5))))
     with pytest.raises(ValueError, match="no light"):
         _one(Stimulus("f", at=(0.0, 0.0), looks=look.Look(fill=look.Flat())))
     with pytest.raises(ValueError, match="no contrast"):
         _one(Stimulus("g", at=(0.0, 0.0), looks=look.Look(fill=look.SineGrating())))
+
+
+def test_a_flat_light_in_a_pattern_s_convention_is_refused_as_never_drawable():
+    # A flat light takes a color or a Weber contrast, in every build.
+    with pytest.raises(ValueError, match="color or a Weber") as refused:
+        _one(Stimulus("m", at=(0.0, 0.0), looks=Disc(contrast=Michelson(0.5))))
+    assert not isinstance(refused.value, screen.NotYetDrawable)
+
+
+def test_a_grating_s_rms_contrast_names_the_build_that_draws_it():
+    with pytest.raises(screen.NotYetDrawable, match="A3"):
+        _one(Stimulus("g", at=(0.0, 0.0), looks=Gabor(contrast=RMS(0.2))))
+
+
+def test_an_outline_that_resolves_to_no_light_is_refused():
+    looks = look.Look(fill=look.Flat(color=Gray(40.0)), outline=look.Outline(width=0.2, color=P("oc")))
+    with pytest.raises(ValueError, match="outline"):
+        _one(Stimulus("o", at=(0.0, 0.0), looks=looks), values={"oc": None})
 
 
 def test_direct_view_refuses_what_only_the_stereoscope_shows():
@@ -137,6 +153,8 @@ def test_direct_view_refuses_what_only_the_stereoscope_shows():
     with pytest.raises(ValueError, match="per-eye"):
         _one(Stimulus("r", at=(0.0, 0.0), looks=Disc(color=Gray(40.0)),
                       at_left=(2.0, 0.0), at_right=(-2.0, 0.0)), geometry=DIRECT)
+    with pytest.raises(ValueError, match="left eye"):
+        _one(Stimulus("l", at=(0.0, 0.0), looks=Disc(color=Gray(40.0)), eye="left"), geometry=DIRECT)
 
 
 def test_an_array_whose_appearance_is_a_parameter_is_bound_before_it_is_drawn():

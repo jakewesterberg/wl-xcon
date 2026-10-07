@@ -6,7 +6,8 @@ bound, named kinds expanded into `look` blocks, an `Array` into its items, each 
 direction computed (disparity, then the vergence offset), colors turned into CIE XYZ.
 Its consumers -- the exact drawer now; the display process (build E), the screen log
 (build F), the simulated animal (build C) and demo mode later -- read the `Screen` and
-nothing else. It is versioned like telemetry: `SCHEMA`, checked on read.
+nothing else. It is versioned like telemetry: `SCHEMA`, which the display process's
+reader (build E) checks; nothing reads a `Screen` across a process boundary before it.
 """
 
 from __future__ import annotations
@@ -127,14 +128,23 @@ def _color(color, values):
 
 
 def _contrast(contrast, kind, values):
+    """A contrast's value, in the convention `kind` its fill takes. A flat light takes a
+    color or a Weber contrast in every build; a pattern's other conventions arrive with
+    the pattern fills (engine build A3). The checker refuses both at load
+    (`contrast-convention`)."""
     if isinstance(contrast, P):
         contrast = _value(contrast, values)
     if contrast is None:
         return None
     if type(contrast) is not kind:
+        if kind is Weber:
+            raise ValueError(
+                f"a flat light takes a color or a Weber contrast, never "
+                f"{type(contrast).__name__}, which describes a pattern about its mean"
+            )
         raise NotYetDrawable(
-            f"{type(contrast).__name__} contrast here is drawn in a later engine build; "
-            f"this build draws {kind.__name__}"
+            f"{type(contrast).__name__} contrast on a sine grating is drawn with the pattern "
+            f"fills, in engine build A3; this build draws {kind.__name__}"
         )
     return _num(contrast.value, values)
 
@@ -216,6 +226,9 @@ def _eyes(stimulus, values, geometry, offset):
     given; otherwise the left eye at `x − d/2 + v` and the right at `x + d/2 − v`, `v`
     the vergence offset (zero in direct view)."""
     dx, dy = offset
+    if stimulus.eye != "both" and geometry.view != "stereoscope":
+        raise ValueError(f"{stimulus.name!r} is shown to the {stimulus.eye} eye only outside "
+                         f"the stereoscope")
     if stimulus.at_left is not None:
         if geometry.view != "stereoscope":
             raise ValueError(f"{stimulus.name!r} has per-eye positions outside the stereoscope")
@@ -239,6 +252,8 @@ def _item(stimulus, name, order, looks, offset, values, geometry, onset) -> Item
     if expanded.outline is not None:
         outline = ResolvedOutline(width=_num(expanded.outline.width, values),
                                   xyz=_color(expanded.outline.color, values))
+        if outline.xyz is None:
+            raise ValueError(f"{name!r}'s outline has no light; an outline is drawn in a color")
     at_left, at_right = _eyes(stimulus, values, geometry, offset)
     return Item(
         name=name, order=order, layer=stimulus.layer, combine=stimulus.combine,

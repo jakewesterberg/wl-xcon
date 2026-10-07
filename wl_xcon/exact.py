@@ -126,7 +126,8 @@ def signed_distance(shape, u, w):
         return _segments(u, w, shape.points) - shape.width / 2
     if isinstance(shape, look.WholeScreen):
         return np.full(np.shape(u), _EVERYWHERE)
-    raise NotYetDrawable(f"{type(shape).__name__} is drawn in a later engine build")
+    raise NotYetDrawable(
+        f"{type(shape).__name__} is drawn in engine build A3, or in A4 if it is text or a curve")
 
 
 def edge_profile(edge, d, u, w):
@@ -137,7 +138,7 @@ def edge_profile(edge, d, u, w):
         return 0.5 * (1.0 - np.cos(np.pi * np.clip(-d / edge.width, 0.0, 1.0)))
     if isinstance(edge, look.GaussianEdge):
         return np.exp(-(u * u + w * w) / (2.0 * edge.sigma ** 2))
-    raise NotYetDrawable(f"{type(edge).__name__} is drawn in a later engine build")
+    raise NotYetDrawable(f"{type(edge).__name__} is drawn in engine build A3")
 
 
 def _local(item, x_cm, y_cm, vp, periphery):
@@ -164,8 +165,9 @@ def _phase(fill, w, item, screen):
 
 
 def _light(fill, mean, background, envelope, w, item, screen):
-    """The light an item would be with nothing below it, at each sample; `mean` is what a
-    pattern's mean is when it declares none."""
+    """An item's own light at each sample, before it meets what is below it: a flat fill's
+    light, or a grating about its declared mean or, declaring none, about `mean`, which the
+    combination supplies (what is below it when it covers, the background when it adds)."""
     if isinstance(fill, ResolvedFlat):
         if fill.xyz is not None:
             return np.asarray(fill.xyz, dtype=float)

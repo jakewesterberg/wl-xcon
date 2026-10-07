@@ -95,6 +95,20 @@ def test_each_shape_is_negative_inside_and_positive_outside(shape, inside, outsi
     assert d[0] < 0 < d[1]
 
 
+def test_a_shape_or_an_edge_this_build_does_not_draw_names_the_build_that_will():
+    # Every block in `look` is drawn; these stand in for one a later build adds.
+    class Blob(look.Shape):
+        pass
+
+    class Feather(look.Edge):
+        pass
+
+    with pytest.raises(screen.NotYetDrawable, match="A3, or in A4 if it is text or a curve"):
+        exact.signed_distance(Blob(), np.zeros(1), np.zeros(1))
+    with pytest.raises(screen.NotYetDrawable, match="engine build A3"):
+        exact.edge_profile(Feather(), np.zeros(1), np.zeros(1), np.zeros(1))
+
+
 def test_the_whole_screen_is_inside_everywhere():
     assert (exact.signed_distance(look.WholeScreen(), np.zeros(3), np.array([0.0, 50.0, -50.0])) < 0).all()
 
@@ -187,7 +201,7 @@ def test_a_gabor_on_its_mean_is_the_textbook_formula_with_horizontal_bars():
     assert image[_pixel(vp, 0.0, 0.0, GABOR_REGION)][1] == pytest.approx(30.0, rel=0.01)  # 20·(1 + 0.5)
     assert image[_pixel(vp, 0.5, 0.0, GABOR_REGION)][1] > 20.0                           # along a bar
     assert image[_pixel(vp, 0.0, 0.5, GABOR_REGION)][1] < 20.0                           # across the bars
-    assert image[0, 0, 1] == pytest.approx(20.0)                                          # seamless
+    assert image[0, 0, 1] == pytest.approx(20.0)                                          # nothing outside the aperture
 
 
 def test_the_gabor_is_cut_where_its_envelope_is_negligible():
@@ -322,6 +336,7 @@ def test_a_stimulus_past_one_eye_s_viewport_is_clipped_there_and_whole_in_the_ot
     left, _ = _draw([edge], geometry=STEREOSCOPE, eye=0)
     right, _ = _draw([edge], geometry=STEREOSCOPE, eye=1)
     assert right[..., 1].sum() > left[..., 1].sum() > 0.0
+    assert left[:, -1, 1].any() and not right[:, -1, 1].any()  # cut at the edge in one eye only
 
 
 def test_each_eye_has_its_own_background():
@@ -344,3 +359,23 @@ def test_multiplying_by_a_gabor_scales_the_contrast_below_by_its_modulation_insi
     assert image[_pixel(vp, 0.5, 0.0, GABOR_REGION)][1] == pytest.approx(one_sigma, rel=0.01)
     image, vp = drawn(270.0)
     assert image[_pixel(vp, 0.0, 0.0, GABOR_REGION)][1] == pytest.approx(25.0, rel=0.01)  # 20 + 10·0.5
+
+
+def _column(image):
+    """The light's center along x, in pixels from the image's left edge."""
+    y = image[..., 1]
+    return (y.sum(axis=0) * (np.arange(y.shape[1]) + 0.5)).sum() / y.sum()
+
+
+@pytest.mark.parametrize("eye, side", [(0, 1.0), (1, -1.0)])
+def test_a_near_disparity_moves_the_left_eye_s_image_right_and_the_right_eye_s_left(eye, side):
+    # Spec §5.4, pinned in the drawing: d < 0 is near (crossed); the left eye's image is at
+    # x − d/2 + v and the right eye's at x + d/2 − v, so d = −1 moves each half a degree.
+    def drawn(d):
+        return _draw([Stimulus("d", at=(0.0, 0.0), looks=Disc(size=1.0, color=Gray(40.0)), disparity=d)],
+                     geometry=STEREOSCOPE, eye=eye)
+    (near, vp), (zero, _) = drawn(-1.0), drawn(0.0)
+    v = side * STEREOSCOPE.vergence_half_deg  # each eye's offset, toward the other eye's side
+    shift = vp.distance_cm * (math.tan(math.radians(v + side * 0.5)) - math.tan(math.radians(v))) / vp.pitch_cm[0]
+    assert side * shift > 3.0  # about half a degree at this preview's 0.14° pixels
+    assert _column(near) - _column(zero) == pytest.approx(shift, abs=0.05)
