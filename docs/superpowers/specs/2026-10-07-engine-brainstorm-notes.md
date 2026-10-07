@@ -882,3 +882,15 @@ owed), several misleading defaults, and gaps against the code. The PI's decision
 - **Stimulus codes** — "Task codes, as S2 planned": STIMULUS_ON, STIMULUS_OFF and STIMULUS_CHANGED
   allocated once in wl-xtasks; which stimulus is in the record by frame; no amendment to wl-preproc's
   frozen codec; tasks' own onset codes stay. Replaces N§5 batch 3's framework escapes.
+
+**Batch R6, wiring, long trials, two rigs, mid-run warnings:**
+
+- **Audio wiring** — "Ask wl-sync": two of the 6343's analog outputs brought to a line-out on the board,
+  beside the speaker tap.
+- **Inside long trials and the continuous mode** — "Checked every second": stop, pause and the welfare
+  limits checked about once a second off the frame path, with a console update, so a stop never waits
+  minutes.
+- **Animals on both rigs** — "Yes, sometimes": per-animal state (programs, presets, last values,
+  procedure state) on lab storage, synced to whichever rig runs the animal, one writer at a time.
+- **A warning appearing mid-run, unacceptable for the session's kind** — "Pause at the next trial": the
+  operator accepts (recorded, the run resumes) or stops.
