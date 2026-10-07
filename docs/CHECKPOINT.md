@@ -366,10 +366,10 @@ warnings list (item 1 below) are expected to land inside that design. **Where it
 (2026-10-07, evening):** all fifteen elements were discussed with the PI, well over a hundred
 questions in the UI, every answer recorded verbatim in
 `docs/superpowers/specs/2026-10-07-engine-brainstorm-notes.md`; the umbrella spec is written,
-`docs/superpowers/specs/2026-10-07-engine-design.md`, and two design reviews (science,
-feasibility) run on it before the PI reads it. **Next:** fold the reviews in (asking the PI what is
-his), the PI's review of the spec, then build A (the screen description and the slow exact
-drawer); the Vulkan spike (build S) runs on the PI's Linux machine over SSH once he is home to
+`docs/superpowers/specs/2026-10-07-engine-design.md`; two design reviews of its first draft
+(science 15 findings, feasibility 20; `docs/superpowers/reviews/2026-10-07-engine-*.md`) were folded
+in, the PI deciding his in seven batches (the notes' R1-R7) and the spec revised. **Next:** the PI's
+review of the revised spec, then build A (the screen description and the slow exact drawer); the Vulkan spike (build S) runs on the PI's Linux machine over SSH once he is home to
 switch it on. Surveys: `docs/research/2026-10-07-engine-*.md`, `2026-10-07-vstimd-prior-art.md`.
 The four builds the PI had ordered just before:
 
