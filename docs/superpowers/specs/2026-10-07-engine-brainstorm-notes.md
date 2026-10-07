@@ -671,3 +671,28 @@ review's finding 2: it moves only on correct versus wrong target, so misses neve
 - **Carrying state** — "Per animal, declared": a procedure declares whether its state carries;
   carried state is stored per animal and per task, resumed at the next run or session, and
   recorded whenever read or written.
+
+**Batch 2** (asked 2026-10-07; all as recommended):
+
+- **Adaptive reward** (welfare-related; goes on the welfare summary) — "Among named entries": a
+  procedure may choose which of the bounded config's named reward entries a trial pays (e.g.
+  `reward_streak` for a streak); every entry and ceiling still applies; each choice recorded; it
+  can never set an amount.
+- **A live value on a procedure-controlled parameter** — "Operator holds it": the procedure pauses
+  until the operator releases it, then resumes from its own state; both recorded.
+- **Training progressions** — "Both ways, by criteria": advance on one criterion, fall back on
+  another, as declared.
+- **What a procedure may read** — all four: outcomes and RTs; anything the trial recorded; gaze
+  traces; neural features (closed-loop selection such as most-exciting images).
+
+**Element 12 is discussed.**
+
+## 13. Aborts and repeats
+
+Settled before the element: the PI's ruling of 2026-08-31 (S8 §2, §8 item 3): "a fixation break is
+re-queued at the end of the block; a wrong choice is not ... End of block rather than immediately,
+so the animal cannot make an easy condition repeat by breaking on the hard one. Overridable per
+block." The code differs (the runtime survey §5 item 1): a requeued condition goes to the end of
+the current pass under `Shuffled` and is the very next trial under `WithReplacement`; and
+`scheduler.REQUEUED` also repeats no-fixation, target breaks, blink breaks, tracker loss and rig
+faults. What counts toward a target is declared per block (`Counting`).
