@@ -10,7 +10,7 @@ from wl_xcon.codes import PROVISIONAL, Allocation
 from wl_xcon.components import Registry
 from wl_xcon.findings import Finding
 from wl_xcon.geometry import VIEWS, Geometry
-from wl_xcon.photometry import DKL, Calibration, Color, unrealizable, xyY
+from wl_xcon.photometry import D65, DKL, Calibration, Color, Gray, unrealizable, xyY
 from wl_xcon.task import (
     RDS,
     After,
@@ -788,6 +788,34 @@ def _appearances(trial: Trial):
     return seen
 
 
+def _literal(value) -> float | None:
+    """A literal number, or None for a parameter, a missing value or anything else."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _colors(trial: Trial):
+    """Every color a trial can put on screen, with what carries it: each appearance's,
+    each block's (a flat fill, a grating's mean, an outline), and the backgrounds."""
+    from wl_xcon import look
+
+    for looks in _appearances(trial):
+        what = type(looks).__name__
+        if isinstance(looks, look.Look):
+            for part in (looks.fill, looks.outline):
+                for attr in ("color", "mean"):
+                    color = getattr(part, attr, None)
+                    if color is not None:
+                        yield f"{what}'s {type(part).__name__}", color
+        elif getattr(looks, "color", None) is not None:
+            yield what, looks.color
+    for attr in ("background", "background_left", "background_right"):
+        color = getattr(trial, attr)
+        if color is not None:
+            yield f"the trial's {attr.replace('_', ' ')}", color
+
+
 def _color_faults(trial: Trial, panel: Calibration | None) -> list[Finding]:
     """Colour checked against a display somebody measured.
 
@@ -799,11 +827,16 @@ def _color_faults(trial: Trial, panel: Calibration | None) -> list[Finding]:
     experiment's control condition quietly becomes a luminance manipulation.
     """
     findings: list[Finding] = []
-    for looks in _appearances(trial):
-        color = getattr(looks, "color", None)
-        if color is None or isinstance(color, P):
+    for what, color in _colors(trial):
+        if isinstance(color, P):
             continue
-        what = type(looks).__name__
+        if isinstance(color, Gray):
+            # Absolute luminance on the default calibration is a session warning, which
+            # the warnings list carries (engine build B, XC-243); with a calibration it is
+            # checked like any light.
+            if panel is None or _literal(color.cd_m2) is None:
+                continue
+            color = xyY(D65[0], D65[1], float(color.cd_m2))
         if panel is None:
             findings.append(
                 Finding(
@@ -814,15 +847,6 @@ def _color_faults(trial: Trial, panel: Calibration | None) -> list[Finding]:
                 )
             )
             continue
-        if isinstance(color, xyY) and getattr(looks, "contrast", None) is not None:
-            findings.append(
-                Finding(
-                    "overspecified-color",
-                    f"{what} sets an absolute colour and a contrast of "
-                    f"{looks.contrast}; both claim to set the same physical "
-                    f"quantity. Use DKL for a modulation, or drop the contrast",
-                )
-            )
         if isinstance(color, DKL) and color.lum == 0.0 and color.magnitude() > 0.0:
             if not panel.observer:
                 findings.append(
@@ -839,6 +863,21 @@ def _color_faults(trial: Trial, panel: Calibration | None) -> list[Finding]:
             findings.append(
                 Finding("unrealizable-color", f"{what} asks for {color}: {why}")
             )
+    if panel is not None:
+        for looks in _appearances(trial):
+            color = getattr(looks, "color", None)
+            if color is None or isinstance(color, P):
+                continue
+            if isinstance(color, xyY) and getattr(looks, "contrast", None) is not None:
+                findings.append(
+                    Finding(
+                        "overspecified-color",
+                        f"{type(looks).__name__} sets an absolute colour and a "
+                        f"contrast of {looks.contrast}; both claim to set the same "
+                        f"physical quantity. Use DKL for a modulation, or drop the "
+                        f"contrast",
+                    )
+                )
     return findings
 
 

@@ -91,6 +91,8 @@ VALUES = {
     "target_window": 3.0,
     "target_position": 10.0,
     "target_looks": None,
+    "fix_luminance": 40.0,
+    "target_luminance": 40.0,
 }
 
 #: `tasks/fixation_detection.py`'s own starting values (`Param.start`; the b3a-2 plan,
@@ -98,6 +100,7 @@ VALUES = {
 FIXATION_STARTS = {
     "fix_timeout": 4.0, "fix_hold": 0.3, "response_window": 0.6, "target_hold": 0.2,
     "fix_window": 2.0, "target_window": 3.0, "target_position": 10.0,
+    "fix_luminance": 40.0, "target_luminance": 40.0,
 }
 
 

@@ -24,6 +24,7 @@ the task that presents it does not exist yet: it is backlog item XC-005, not yet
 (`wlx run --view stereoscope` exists since direct view part 2.)
 """
 
+from wl_xcon.photometry import Gray
 from wl_xcon.task import (
     After,
     Disc,
@@ -44,7 +45,7 @@ from wl_xcon.task import (
 )
 
 TARGET = Stimulus(
-    "cal_target", at=(P("target_x"), P("target_y")), looks=Disc(size=0.3)
+    "cal_target", at=(P("target_x"), P("target_y")), looks=Disc(size=0.3, color=Gray(P("target_luminance")))
 )
 
 calibration = Trial(
@@ -74,6 +75,10 @@ calibration = Trial(
         Param("cal_window", unit="deg", low=1.0, high=8.0),
         Param("fix_timeout", unit="s", low=0.5, high=10.0),
         Param("cal_hold", unit="s", low=0.1, high=2.0),
+        # Absolute luminance, D65 white (the PI, 2026-10-07: "Absolute cd/m²", starting
+        # at "40 cd/m²"). Bounded at 100 until V9 measures the panel's brightness cap
+        # (engine spec §7.7).
+        Param("target_luminance", unit="cd/m2", low=0.0, high=100.0, start=40.0),
     ],
     states=[
         State(

@@ -290,8 +290,21 @@ def test_the_fixation_task_starts_from_the_values_the_console_mockup_shows():
     assert {param.name: param.start for param in params} == {
         "fix_timeout": 4.0, "fix_hold": 0.3, "response_window": 0.6, "target_hold": 0.2,
         "fix_window": 2.0, "target_window": 3.0, "target_position": 10.0,
-        "target_looks": None,
+        "target_looks": None, "fix_luminance": 40.0, "target_luminance": 40.0,
     }
     for param in params:
         if param.start is not None:
             assert param.low <= param.start <= param.high, param.name
+
+
+@pytest.mark.parametrize("module, attribute", [
+    ("fixation_detection", "detection"),
+    ("adaptive_detection", "adaptive_detection"),
+    ("visual_search", "search"),
+    ("calibration", "calibration"),
+])
+def test_each_reference_task_lights_its_achromatic_stimuli_at_40_cd_m2(module, attribute):
+    trial = _load(module, attribute)
+    luminances = [p for p in trial.params if p.unit == "cd/m2"]
+    assert luminances
+    assert all((p.low, p.high, p.start) == (0.0, 100.0, 40.0) for p in luminances)

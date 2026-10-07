@@ -17,7 +17,7 @@ which is a claim about photometry, so this task **will not load without a measur
 display calibration**. That is deliberate. No calibration for our panels exists yet.
 """
 
-from wl_xcon.photometry import DKL
+from wl_xcon.photometry import DKL, Gray
 from wl_xcon.task import (
     After,
     Array,
@@ -42,7 +42,7 @@ from wl_xcon.task import (
     Window,
 )
 
-FIX = Stimulus("fix", at=(0.0, 0.0), looks=Disc(size=0.3))
+FIX = Stimulus("fix", at=(0.0, 0.0), looks=Disc(size=0.3, color=Gray(P("fix_luminance"))))
 
 #: A red and a green of equal luminance, as cone contrasts from the background.
 #: Equal *by construction* rather than by arithmetic somebody did once: the whole
@@ -114,6 +114,10 @@ search = Trial(
             unit="appearance",
             choices=(Disc(size=1.0, color=GREEN), Disc(size=1.0, color=RED)),
         ),
+        # Absolute luminance, D65 white (the PI, 2026-10-07: "Absolute cd/m²", starting
+        # at "40 cd/m²"). Bounded at 100 until V9 measures the panel's brightness cap
+        # (engine spec §7.7).
+        Param("fix_luminance", unit="cd/m2", low=0.0, high=100.0, start=40.0),
     ],
     states=[
         State(

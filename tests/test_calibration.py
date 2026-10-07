@@ -499,7 +499,8 @@ def test_the_constellation_becomes_one_scheduler_condition_per_target():
     so this asserts the translation rather than the sequencing."""
     from wl_xcon.calibration import conditions
 
-    built = conditions(GEOMETRY, window_deg=3.0, hold_s=0.15, timeout_s=2.0, repeats=4)
+    built = conditions(GEOMETRY, window_deg=3.0, hold_s=0.15, timeout_s=2.0,
+                       luminance_cd_m2=40.0, repeats=4)
     targets = constellation(GEOMETRY)
 
     assert len(built) == len(targets) == 13
@@ -521,5 +522,6 @@ def test_every_condition_supplies_every_parameter_the_task_declares():
     from wl_xcon.calibration import conditions
 
     declared = {param.name for param in calibration_task.params}
-    for condition in conditions(GEOMETRY, window_deg=3.0, hold_s=0.15, timeout_s=2.0):
+    for condition in conditions(GEOMETRY, window_deg=3.0, hold_s=0.15, timeout_s=2.0,
+                                luminance_cd_m2=40.0):
         assert declared == set(condition.values), f"{condition.name} does not match"

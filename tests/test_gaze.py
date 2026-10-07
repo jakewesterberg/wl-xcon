@@ -522,7 +522,8 @@ def test_a_whole_calibration_block_produces_an_installed_map():
     block = Block(
         name="calibration",
         conditions=conditions(
-            GEOMETRY, window_deg=3.0, hold_s=0.1, timeout_s=1.0, repeats=2
+            GEOMETRY, window_deg=3.0, hold_s=0.1, timeout_s=1.0,
+            luminance_cd_m2=40.0, repeats=2
         ),
     )
     scheduler = Scheduler(blocks=[block], seed=11)
@@ -629,7 +630,8 @@ def _calibration_session(tmp_path, repeats: int = 2):
     block = Block(
         name="calibration",
         conditions=conditions(
-            GEOMETRY, window_deg=3.0, hold_s=0.1, timeout_s=1.0, repeats=repeats
+            GEOMETRY, window_deg=3.0, hold_s=0.1, timeout_s=1.0,
+            luminance_cd_m2=40.0, repeats=repeats
         ),
     )
     driver = Calibrating(
@@ -764,7 +766,8 @@ def test_the_fit_uses_the_hold_and_not_the_whole_trial(tmp_path):
             Block(
                 name="calibration",
                 conditions=conditions(
-                    GEOMETRY, window_deg=3.0, hold_s=hold_s, timeout_s=1.0, repeats=1
+                    GEOMETRY, window_deg=3.0, hold_s=hold_s, timeout_s=1.0,
+                    luminance_cd_m2=40.0, repeats=1
                 ),
             )
         ],

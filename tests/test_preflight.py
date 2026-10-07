@@ -334,6 +334,7 @@ def test_parameters_used_names_every_parameter_the_task_references():
     assert parameters_used(_load_trial(TASK)) == frozenset({
         "fix_hold", "fix_timeout", "fix_window", "response_window", "target_hold",
         "target_looks", "target_position", "target_window",
+        "fix_luminance", "target_luminance",
     })
 
 
@@ -341,7 +342,7 @@ def test_a_run_given_nothing_starts_from_the_tasks_own_values():
     """What the page sends (P4d-2b spec §6.2): no values, and the task's own pass."""
     item = preflight.values(_load_trial(TASK), {})
 
-    assert (item.result, item.said) == ("pass", "7 starting value(s), each declared and in range")
+    assert (item.result, item.said) == ("pass", "9 starting value(s), each declared and in range")
 
 
 def _starting(**starts):

@@ -8,10 +8,12 @@ distractors, isoluminant -- was unwritable in this vocabulary until now, and
 photometry, and a claim nobody measured is a claim that is usually false.
 """
 
+from dataclasses import replace
+
 import pytest
 
 from wl_xcon.check import check
-from wl_xcon.photometry import DKL, Calibration, xyY
+from wl_xcon.photometry import DKL, Calibration, Gray, xyY
 from wl_xcon.task import (
     REMEMBERED,
     After,
@@ -92,7 +94,8 @@ def test_colour_without_a_calibration_is_refused():
 
 
 def test_an_achromatic_task_needs_no_calibration():
-    assert codes(a_task(Disc(size=1.0)), calibration=None) == set()
+    # Absolute luminance on the default calibration is a session warning (engine build B, XC-243).
+    assert codes(a_task(Disc(size=1.0, color=Gray(40.0))), calibration=None) == set()
 
 
 def test_isoluminance_is_a_declared_measurement_not_a_default():
@@ -170,3 +173,19 @@ def test_each_contrast_names_its_convention():
     assert [type(c).__name__ for c in (Weber(0.3), Michelson(0.5), RMS(0.2))] == [
         "Weber", "Michelson", "RMS"]
     assert Weber(0.3) != Michelson(0.3)
+
+
+def test_an_absolute_luminance_the_panel_cannot_reach_is_refused():
+    assert "unrealizable-color" in codes(a_task(Disc(color=Gray(900.0))))
+
+
+def test_a_background_is_a_color_like_any_other():
+    trial = replace(a_task(Disc(color=Gray(10.0))), background=xyY(0.72, 0.28, 40.0))
+    assert "unrealizable-color" in codes(trial)
+
+
+def test_a_look_s_colors_are_checked_too():
+    from wl_xcon import look
+    looks = look.Look(fill=look.Flat(color=Gray(10.0)),
+                      outline=look.Outline(width=0.1, color=xyY(0.72, 0.28, 40.0)))
+    assert "unrealizable-color" in codes(a_task(looks))

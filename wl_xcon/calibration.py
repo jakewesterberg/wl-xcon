@@ -699,6 +699,7 @@ def conditions(
     window_deg: float,
     hold_s: float,
     timeout_s: float,
+    luminance_cd_m2: float,
     repeats: int = 1,
     targets: tuple[tuple[float, float], ...] | None = None,
 ) -> list["SchedulerCondition"]:
@@ -709,6 +710,9 @@ def conditions(
     simply leaves that condition short. Nothing about calibration needs a bespoke
     sequencer, which is the same finding as `tasks/calibration.py` being expressible
     in the ordinary task vocabulary.
+
+    `luminance_cd_m2` is the target's luminance, cd/m² (`tasks/calibration.py`'s
+    `target_luminance`).
 
     `repeats` is the target count per condition, not a number of fixations: more
     presentations of the same target is how a block buys down fixation noise, and the
@@ -728,6 +732,7 @@ def conditions(
                 "cal_window": window_deg,
                 "cal_hold": hold_s,
                 "fix_timeout": timeout_s,
+                "target_luminance": luminance_cd_m2,
             },
             target=repeats,
         )

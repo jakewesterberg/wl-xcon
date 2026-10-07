@@ -12,6 +12,7 @@ between trials, where it always belonged.
 
 from dataclasses import dataclass, field
 
+from wl_xcon.photometry import Gray
 from wl_xcon.task import (
     After,
     Bounded,
@@ -34,7 +35,7 @@ from wl_xcon.task import (
     Window,
 )
 
-FIX = Stimulus("fix", at=(0.0, 0.0), looks=Disc(size=0.3))
+FIX = Stimulus("fix", at=(0.0, 0.0), looks=Disc(size=0.3, color=Gray(P("fix_luminance"))))
 
 adaptive_detection = Trial(
     start="await_fix",
@@ -66,11 +67,19 @@ adaptive_detection = Trial(
         Param(
             "target_looks",
             unit="appearance",
-            choices=(Disc(size=1.0), Square(size=1.0)),
+            choices=(
+                Disc(size=1.0, color=Gray(P("target_luminance"))),
+                Square(size=1.0, color=Gray(P("target_luminance"))),
+            ),
         ),
         Param("contrast", unit="fraction", low=0.02, high=1.0),
         # Held eccentricity is |target_position|, so the same bound.
         Param("eccentricity", unit="deg", low=2.0, high=16.0),
+        # Absolute luminance, D65 white (the PI, 2026-10-07: "Absolute cd/m²", starting
+        # at "40 cd/m²"). Bounded at 100 until V9 measures the panel's brightness cap
+        # (engine spec §7.7).
+        Param("fix_luminance", unit="cd/m2", low=0.0, high=100.0, start=40.0),
+        Param("target_luminance", unit="cd/m2", low=0.0, high=100.0, start=40.0),
     ],
     states=[
         State(
