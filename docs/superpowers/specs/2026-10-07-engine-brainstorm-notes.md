@@ -486,3 +486,16 @@ restarts, and its own real-time priority):
 **Element 7 is discussed.**
 
 ## 8. Lifecycle
+
+**Batch 1** (asked 2026-10-07):
+
+- **When the display process starts** — "At boot, as a system service": it owns the stimulus
+  screen from power-on, restarts itself if it dies, and the rig service connects to it.
+- **The animal's screen with no session** — "Black": true OLED black; a session's background
+  appears only when it opens.
+- **The display process dying during a trial** — "Fault, restart, pause": the trial ends as a rig
+  fault, the display restarts on its own, and the session pauses at that boundary until the
+  operator resumes.
+- **The screen during a pause** — "Declared per task", and in the PI's words "default is black":
+  black unless the task declares what stays up. Changes V12 item 3's plan (background during a
+  pause). The flip patch still alternates during a pause (S4 §7).
