@@ -858,3 +858,27 @@ owed), several misleading defaults, and gaps against the code. The PI's decision
   lab-wide default set, used everywhere and recorded; which one is asked next.
 - **The eyes' balance on the stereoscope** — "Assume equal, as decided" (offered against: measure each
   eye's mirror path, recommended; one calibration per eye).
+
+**Batch R5, corrections and the stereoscope:**
+
+- **The lab-wide cone default** — the 10° standard (Stockman & Sharpe, CIE 2006), "unless there is a
+  better macaque alternative". Checked 2026-10-07: macaque and human L and M cone spectra are
+  "virtually identical" (Baylor, Nunn & Schnapf, single-cone recordings; Cambridge abstract,
+  https://www.cambridge.org/core/journals/visual-neuroscience/article/spectral-sensitivity-of-primate-photoreceptors/3C54998B7E9FE7C3CC1A6A8C5B060CB0),
+  and the CIE-sanctioned standard is Stockman & Sharpe's (PMC10946592); no standard macaque set found.
+  Lens and macular-pigment differences between the species are UNVERIFIED in size. A task may name the
+  2° set for foveal work.
+- **The stereoscope's alignment** — in the PI's words: "instead of having a threshold, let's report the
+  offset at each point and the experimenter can choose to accept". Replaces N§9's 0.25° tolerance and
+  its session-kind rule: the console shows each point's offset (the mirrors plus the animal's phoria),
+  and the experimenter's acceptance is recorded.
+- **Audio** (corrected: the option first offered called the NI card "the same card that records"; the
+  task PC's PCIe-6343 has 4 analog outputs, NI, read 2026-10-07, on its own clock; the recording card,
+  the PXIe-6353, is on the acquisition PC) — the task PC's card, two analog outputs, started by a
+  hardware trigger at the visual change's landing frame, the onset measured into the recording by the
+  speaker tap (V7). The PI asked: "do we need to then update the wl-sync board to output the AO from
+  the task machine?" Checked: the board's design brings out none of the 6343's analog outputs (its
+  misc BNCs are inputs by construction, wl-sync breakout spec §9.3 and item 7). Put to the PI next.
+- **Stimulus codes** — "Task codes, as S2 planned": STIMULUS_ON, STIMULUS_OFF and STIMULUS_CHANGED
+  allocated once in wl-xtasks; which stimulus is in the record by frame; no amendment to wl-preproc's
+  frozen codec; tasks' own onset codes stay. Replaces N§5 batch 3's framework escapes.
