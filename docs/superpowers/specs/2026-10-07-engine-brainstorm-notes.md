@@ -602,3 +602,22 @@ gives every run one block of one condition, and no task can declare a plan (XC-2
   the console offers the next; the operator may skip, repeat or insert runs, all recorded.
 - **What ends a run** — its plan done; an operator stop; a time limit. Disengagement (e.g. N
   no-responses in a row) was offered and not chosen.
+
+**Batch 4** (asked 2026-10-07):
+
+- **When the animal stops working** — an alert by default, and in the PI's words "with a checkbox in
+  the consle for 2. e.g., somewhere sensible there is a box that can be checked to auto-pause if
+  monkey does not engage for a number of trials that is set next to the checkbox": a console
+  checkbox turns on auto-pause after the number of non-engaged trials typed beside it.
+- **Where session programs live** — "Per animal": each animal's folder holds its current program,
+  updated as training moves on (offered against: the task library, recommended; built in the
+  console).
+
+**Element 10 is discussed.**
+
+## 11. Variation
+
+Settled before the element: a condition is a named set of values with a target (`scheduler.Condition`);
+a block declares its order (`Shuffled`, `WithReplacement(weights)`, `Constrained(max_run, weights)`);
+seeds recorded; today one condition per run; condition numbering for the recording undecided
+(XC-197).
