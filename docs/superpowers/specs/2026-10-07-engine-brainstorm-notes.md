@@ -798,3 +798,24 @@ and the reconstruction of any recorded frame.
   asks go out with the spec.
 - **Write-up** — "Umbrella spec + per-build plans": one spec for the whole engine, for the PI's
   review; each build then gets its own plan and the usual build-review-merge cycle.
+
+## The design reviews' questions (asked 2026-10-07)
+
+Two reviews of the spec at `8f9cb03` (`docs/superpowers/reviews/2026-10-07-engine-science-review.md`,
+15 findings; `...-engine-feasibility-review.md`, 20) found the counting and repeat rules unworkable
+as written (a detection block with catch trials never ends; "not repeated" breaks are redrawn as
+owed), several misleading defaults, and gaps against the code. The PI's decisions, by batch:
+
+**Batch R1, counting and repeats:**
+
+- **What counts toward a target where withholding is an answer** — "Every trial with an answer":
+  hits, misses, correct rejections, false alarms, correct and wrong choices; only trials ending
+  before the decision (breaks, no fixation, faults) do not count.
+- **Breaks chosen not to repeat** — in the PI's words, "selectable by task if repeats are active":
+  each task says whether such a trial is spent (counted as presented, marked an abort) or owed
+  (shown again later).
+- **Blocks whose order is the design** (priming, sequence-balanced) — "Declared per block": such blocks
+  default to no repeats; the realized sequence, aborted predecessors included (and whether their
+  display was shown), is recorded either way.
+- **A repeat's drawn values** — in the PI's words, "declarable per task. it may be useful to be
+  random, it may be necessary to repeat specific conditions.": fresh or the same, per task.
