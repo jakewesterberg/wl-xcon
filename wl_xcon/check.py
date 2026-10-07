@@ -907,21 +907,36 @@ def _color_faults(trial: Trial, panel: Calibration | None) -> list[Finding]:
     params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
     for what, color in _colors(trial, params):
-        lights = [color]
-        if isinstance(color, Gray):
-            # Absolute luminance on the default calibration is a session warning, which
-            # the warnings list carries (engine build B, XC-243); with a calibration it is
-            # checked like any light, at each luminance a parameter can take: both ends of
-            # its range, or each choice.
-            if panel is None:
-                continue
-            try:
-                lights = [xyY(D65[0], D65[1], v) for v in _reach(color.cd_m2, params)]
-            except _Unbounded:
-                continue  # refused as a bad block: it cannot be bounded
+        # Absolute luminance on the default calibration is a session warning, which the
+        # warnings list carries (engine build B, XC-243). Any other color with no
+        # calibration is unmeasured once, as written; with one, it is checked as each light
+        # it can be.
+        if panel is None and isinstance(color, Gray):
+            continue
+        try:
+            lights = [color] if panel is None else _lights(color, params)
+        except _Unbounded:
+            continue  # refused as a bad block: it cannot be bounded
         for light in lights:
             findings += _one_color(what, light, panel)
     return findings
+
+
+def _lights(color, params: dict[str, Param]) -> list:
+    """Each light `color` can be, for a calibration to test, at each value a parameter in it
+    can take (`_reach`: each choice, or both ends of a range): a `Gray` is D65 white at each
+    luminance, an `xyY` each combination of its `x`, `y` and `Y` (XC-261). A component that
+    is no number names no light; `_block_faults` refuses it.
+
+    The ends of the ranges are enough: the panel's gamut is convex, and xyY to XYZ maps a box
+    of values with y > 0 into the convex hull of its corners' images (projective in x and y,
+    linear in Y)."""
+    if isinstance(color, Gray):
+        return [xyY(D65[0], D65[1], v) for v in _reach(color.cd_m2, params)]
+    if isinstance(color, xyY):
+        return [xyY(x, y, Y) for x, y, Y in itertools.product(
+            *(_reach(v, params) for v in (color.x, color.y, color.Y)))]
+    return [color]
 
 
 def _one_color(what: str, color, panel: Calibration | None) -> list[Finding]:
@@ -961,10 +976,11 @@ def _one_color(what: str, color, panel: Calibration | None) -> list[Finding]:
 _SIZES = ("size", "width", "height", "length", "thickness", "outer", "sigma", "aperture")
 
 #: Block fields that hold a number or a parameter (XC-245): every size, the rest the drawer
-#: reads as one, a contrast's `value` and a `Gray`'s `cd_m2`. `None` is a value of one only
-#: where its block's own default is `None` (a grating's `direction`).
+#: reads as one, a contrast's `value`, a `Gray`'s `cd_m2` and an `xyY`'s `x`, `y` and `Y`.
+#: `None` is a value of one only where its block's own default is `None` (a grating's
+#: `direction`).
 _NUMBERS = (*_SIZES, "inner", "sides", "sf", "phase", "tf", "direction", "orientation", "value",
-            "cd_m2")
+            "cd_m2", "x", "y", "Y")
 
 #: Block fields that hold a light: a `Color`, `None`, or a parameter offering those (XC-264).
 _LIGHTS = ("color", "mean")
@@ -996,11 +1012,22 @@ def _backgrounds(trial: Trial) -> list:
     return [trial.background]
 
 
+def _luminance(color):
+    """A light's luminance as written, a number or a parameter: a `Gray`'s `cd_m2`, an
+    `xyY`'s `Y`; `None` for anything else."""
+    if isinstance(color, Gray):
+        return color.cd_m2
+    if isinstance(color, xyY):
+        return color.Y
+    return None
+
+
 def _black(color, params: dict[str, Param], inside: frozenset[str] = frozenset()) -> bool:
     """Whether a background can be black: the default, a zero luminance, or a parameter
-    whose choices or range reach one. One that cannot be read or bounded can, failing
-    closed. A parameter met again inside its own choices adds none: they are being read
-    already, and it is refused as referring to itself (`_self_referring`)."""
+    whose choices or range reach one, the background's own or its luminance's (a `Gray`'s
+    or an `xyY`'s, XC-266). One that cannot be read or bounded can, failing closed. A
+    parameter met again inside its own choices adds none: they are being read already, and
+    it is refused as referring to itself (`_self_referring`)."""
     try:
         if isinstance(color, P):
             if color.name in inside:
@@ -1009,18 +1036,16 @@ def _black(color, params: dict[str, Param], inside: frozenset[str] = frozenset()
                        for choice in _options(color, params))
         if color is None:
             return True
-        if isinstance(color, Gray):
-            return any(v <= 0.0 for v in _reach(color.cd_m2, params))
+        return any(v <= 0.0 for v in _reach(_luminance(color), params))
     except _Unbounded:
         return True
-    return isinstance(color, xyY) and color.Y == 0.0
 
 
 def _background_fix(backgrounds: list, params: dict[str, Param]) -> str:
     """What to write so an eye's background is not black: raise the low end of a declared
     range that reaches 0, otherwise declare the background."""
     for background in backgrounds:
-        light = background.cd_m2 if isinstance(background, Gray) else None
+        light = _luminance(background)
         param = params.get(light.name) if isinstance(light, P) else None
         if param is not None and param.low is not None and param.high is not None \
                 and param.low <= 0.0:
@@ -1313,6 +1338,10 @@ def _block_faults(trial: Trial) -> list[Finding]:
         if isinstance(part, Gray):
             first([(v, f"{said}: negative light") for v, said in values(part, "cd_m2")],
                   lambda v: v < 0.0)
+        if isinstance(part, xyY):
+            for attr in ("x", "y", "Y"):
+                # Bounded here; whether the panel makes each value is `_color_faults`' test.
+                values(part, attr)
         if isinstance(part, (look.Ring, Annulus)):
             inner, outer = values(part, "inner"), values(part, "outer")
             first(inner, lambda v: v < 0.0)

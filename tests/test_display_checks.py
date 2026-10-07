@@ -572,6 +572,27 @@ def test_a_background_that_a_parameter_can_make_black_is_black_for_weber():
     assert "weber-on-black" in _refused(_one(weber, params=unbounded, background=Gray(P("bg"))))
 
 
+def test_an_xyy_background_a_parameter_can_make_black_is_black_as_a_gray_one_is():
+    """XC-266: only a literal `Y` of 0 counted, so a range reaching 0 passed a Weber contrast
+    and a grating with no mean, each of which draws nothing on black."""
+    def reaching(low):
+        return [Param("bg", unit="cd/m2", low=low, high=40.0)]
+    dim = xyY(0.3127, 0.329, P("bg"))
+    weber = _one(Disc(contrast=Weber(0.5)), params=reaching(0.0), background=dim)
+    assert "weber-on-black" in _refused(weber)
+    said = " ".join(f.detail for f in check(weber) if f.code == "weber-on-black")
+    assert "raise the low end of parameter 'bg'" in said, said
+    assert "unlit" in _refused(_one(_drifting(), params=reaching(0.0), background=dim))
+    assert "weber-on-black" in _refused(_one(Disc(contrast=Weber(0.5)), params=reaching(0.0),
+                                             view="stereoscope", background=GRAY_BG,
+                                             background_right=dim))
+    # Lit at every value, it is only a color no calibration has measured.
+    assert _refused(_one(Disc(contrast=Weber(0.5)), params=reaching(5.0), background=dim)) == {
+        "uncalibrated-color"}
+    assert _refused(_one(_drifting(), params=reaching(5.0), background=dim)) == {
+        "uncalibrated-color"}
+
+
 @pytest.mark.parametrize("param", [
     Param("o", unit="fraction", low=0.0, high=3.0),
     Param("o", unit="fraction", choices=(0.5, -0.1)),
@@ -698,6 +719,7 @@ def _says(trial: Trial, said: str) -> bool:
      "Look.orientation is '45', not a number"),
     (Disc(contrast=Weber("0.5")), "Weber.value is '0.5', not a number"),
     (Disc(color=Gray("40")), "Gray.cd_m2 is '40', not a number"),
+    (Disc(color=xyY(0.3, "0.3", 10.0)), "xyY.y is '0.3', not a number"),
 ])
 def test_a_number_field_that_holds_no_number_is_refused(looks, said):
     assert _says(_one(looks, background=GRAY_BG), said)
@@ -730,7 +752,8 @@ def test_a_color_field_that_holds_no_color_is_refused(looks, background, params,
 
 
 def test_a_color_whose_parts_are_parameters_is_still_a_color():
-    # Checked under a calibration with Task 2 (XC-261); here it is a color, as a literal is.
+    # Here, with no calibration, it is a color as a literal is; under one it is checked at
+    # each value its parameter can take (test_color, XC-261).
     params = [Param("Y", unit="cd/m2", low=0.0, high=10.0)]
     assert _refused(_one(Disc(color=xyY(0.3, 0.3, P("Y"))), params=params,
                          background=GRAY_BG)) == {"uncalibrated-color"}

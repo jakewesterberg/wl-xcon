@@ -232,3 +232,59 @@ def test_a_color_written_as_a_parameter_still_loads():
 def test_a_luminance_still_a_parameter_must_be_bound_before_it_converts():
     with pytest.raises(TypeError, match="bind"):
         to_xyz(Gray(P("x")))
+
+
+# --- Colors with parameters inside, under a calibration (XC-261) ----------------------
+
+
+def _direct(color, params):
+    return replace(a_task(Disc(color=color)), params=list(params))
+
+
+def _chosen(color, params):
+    return replace(a_task(Disc(color=P("c"))),
+                   params=[*params, Param("c", unit="color", choices=(color,))])
+
+
+@pytest.mark.parametrize("written", [_direct, _chosen])
+def test_an_xyy_whose_luminance_is_a_parameter_is_checked_at_each_value_it_can_take(written):
+    """Under a calibration this raised TypeError, so `check()` neither loaded the task nor
+    refused it (XC-261). It is checked as `Gray(P(...))` is: at both ends of the range, or
+    at each choice; written directly, or as a color parameter's choice."""
+    red = xyY(0.64, 0.33, P("Y"))
+    assert codes(written(red, [Param("Y", unit="cd/m2", low=0.0, high=10.0)])) == set()
+    assert codes(written(red, [Param("Y", unit="cd/m2", low=0.0, high=900.0)])) == {
+        "unrealizable-color"}
+    assert codes(written(red, [Param("Y", unit="cd/m2", choices=(10.0, 900.0))])) == {
+        "unrealizable-color"}
+    # With no calibration it is unmeasured once, as written, as a literal is.
+    unmeasured = check(written(red, [Param("Y", unit="cd/m2", low=0.0, high=900.0)]))
+    assert [f.code for f in unmeasured] == ["uncalibrated-color"]
+    assert "Y=P(name='Y')" in unmeasured[0].detail
+    unbounded = check(written(red, [Param("Y", unit="cd/m2")]), calibration=PANEL)
+    assert [f.code for f in unbounded] == ["bad-block"]
+    assert "xyY.Y is parameter 'Y'" in unbounded[0].detail
+    assert "cannot be bounded" in unbounded[0].detail
+
+
+def test_an_xyy_is_checked_at_every_combination_of_its_parameters():
+    """Each value of one parameter with each value of the other: only the redder chromaticity
+    at the higher luminance is outside this panel, and pairing the values in order misses
+    it."""
+    def ranging(high):
+        return replace(a_task(Disc(color=xyY(P("x"), 0.33, P("Y")))),
+                       params=[Param("x", unit="chromaticity", choices=(0.64, 0.3127)),
+                               Param("Y", unit="cd/m2", low=10.0, high=high)])
+    assert codes(ranging(40.0)) == set()
+    assert codes(ranging(60.0)) == {"unrealizable-color"}
+
+
+def test_a_component_of_an_xyy_that_is_no_number_is_refused_not_raised():
+    """Under a calibration this raised TypeError from the gamut test (A1 follow-ups, Task 1's
+    review)."""
+    stringly = a_task(Disc(color=xyY(0.3, "0.3", 10.0)))
+    for calibration in (PANEL, None):
+        found = check(stringly, calibration=calibration)
+        assert any(f.code == "bad-block" and "xyY.y is '0.3', not a number" in f.detail
+                   for f in found), (calibration, found)
+    assert codes(stringly) == {"bad-block"}
