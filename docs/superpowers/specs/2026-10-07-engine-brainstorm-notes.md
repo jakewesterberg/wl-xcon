@@ -314,3 +314,17 @@ fill; low contrasts need fine steps.
   acknowledged once when the session opens (a warning appearing later asks again); today's
   pre-flight unknowns join the list under the PI's 2026-09-19 rule (proceed on a recorded
   acknowledgment).
+
+**Batch 3** (asked 2026-10-07):
+
+- **Background-relative colors and contrasts on the black default** — "It must declare one": a task
+  using DKL colors or Weber contrast sets its own non-black background, or is refused at load with
+  the reason; absolute colors (xyY) and Michelson contrast run on black.
+- **Sessions say what they are for** — "Yes": training, piloting or recording, chosen at session
+  open and recorded; each warning states the kinds it is acceptable in (e.g. the default color
+  calibration fine for training and piloting, refused for a recording task that declares color
+  part of its design).
+- **Calibration per eye's half on the stereoscope** — "One for the panel": the halves are assumed
+  equal. This changes S4 §9's plan of a transfer per panel half.
+- **A calibration's age** — in the PI's words: "never expires, but there is an age that is
+  associated with the calibration. A warning pops after 30 days."
