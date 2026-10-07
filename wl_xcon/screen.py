@@ -12,6 +12,7 @@ reader (build E) checks; nothing reads a `Screen` across a process boundary befo
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, fields, replace
 
 from wl_xcon import look
@@ -198,7 +199,26 @@ def as_look(looks, values) -> look.Look:
     raise NotYetDrawable(f"{type(looks).__name__} is drawn in engine build {later}")
 
 
-def _fill(fill, values):
+def _drift(fill, values, orientation) -> float:
+    """The drawer's signed speed: `fill.tf`, positive toward the bars' local +y (the
+    orientation + 90 degrees), negative the other way. `direction` must be across the bars
+    (spec §5.1; PI, 2026-10-07), and `check` refuses one that is not at load."""
+    tf = _num(fill.tf, values)
+    if tf < 0.0:
+        raise ValueError(f"a grating's tf is a speed, never negative (got {tf:g}); "
+                         f"`direction` says which way it drifts")
+    if fill.direction is None:
+        return tf
+    direction = _num(fill.direction, values)
+    turn = math.radians(direction - (orientation + 90.0))
+    if abs(math.sin(turn)) > 1e-9:
+        raise ValueError(f"a grating's drift direction {direction:g} degrees is not across the "
+                         f"bars: with orientation {orientation:g} it is "
+                         f"{orientation + 90.0:g} or {orientation + 270.0:g}")
+    return tf if math.cos(turn) > 0.0 else -tf
+
+
+def _fill(fill, values, orientation=0.0):
     if isinstance(fill, look.Flat):
         resolved = ResolvedFlat(xyz=_color(fill.color, values),
                                 weber=_contrast(fill.contrast, Weber, values))
@@ -210,7 +230,7 @@ def _fill(fill, values):
         if michelson is None:
             raise ValueError("a grating with no contrast is its mean alone")
         return ResolvedGrating(sf=_num(fill.sf, values), phase=_num(fill.phase, values),
-                               tf=_num(fill.tf, values), michelson=michelson,
+                               tf=_drift(fill, values, orientation), michelson=michelson,
                                mean_xyz=_color(fill.mean, values))
     raise NotYetDrawable(f"{type(fill).__name__} is drawn in engine build A3")
 
@@ -244,7 +264,8 @@ def _eyes(stimulus, values, geometry, offset):
 
 def _item(stimulus, name, order, looks, offset, values, geometry, onset) -> Item:
     expanded = as_look(looks, values)
-    fill = _fill(expanded.fill, values)
+    orientation = _num(expanded.orientation, values)
+    fill = _fill(expanded.fill, values, orientation)
     edge = _bind(expanded.edge, values)
     if edge.applies is None:
         edge = replace(edge, applies="contrast" if isinstance(fill, ResolvedGrating) else "opacity")
@@ -259,7 +280,7 @@ def _item(stimulus, name, order, looks, offset, values, geometry, onset) -> Item
         name=name, order=order, layer=stimulus.layer, combine=stimulus.combine,
         opacity=_num(stimulus.opacity, values), eye=stimulus.eye,
         at_left=at_left, at_right=at_right,
-        orientation=_num(expanded.orientation, values),
+        orientation=orientation,
         shape=_bind(expanded.shape, values), fill=fill, edge=edge, outline=outline,
         onset_frame=onset,
     )

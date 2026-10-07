@@ -112,13 +112,18 @@ class Flat(Fill):
 class SineGrating(Fill):
     """A sine-wave luminance grating. Its bars run along the local x axis, so the
     luminance varies along local y (a grating's orientation names its bars, spec §5.1):
-    `sf` cycles per degree, `phase` in degrees, drifting toward local +y at `tf` cycles
-    per second from the frame it appeared. `contrast` is `Michelson`, about `mean`: an
-    absolute color, or `None` for whatever is behind it (spec §4.3)."""
+    `sf` cycles per degree, `phase` in degrees, drifting at `tf` cycles per second (a
+    speed, never negative) from the frame it appeared. `direction` is the way the bars
+    move, in degrees in the screen's frame (0 is right, counter-clockwise, like every
+    angle) and must be across the bars; `None` means the grating's orientation + 90
+    degrees. A grating's orientation names its bars and its drift direction is a separate
+    angle (spec §5.1; the PI, 2026-10-07: "Its own angle"). `contrast` is `Michelson`,
+    about `mean`: an absolute color, or `None` for whatever is behind it (spec §4.3)."""
 
     sf: object = 2.0
     phase: object = 0.0
     tf: object = 0.0
+    direction: object = None
     contrast: object = None
     mean: object = None
 

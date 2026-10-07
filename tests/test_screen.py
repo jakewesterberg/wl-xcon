@@ -169,3 +169,26 @@ def test_a_left_eye_background_overrides_the_shared_one_for_that_eye_only():
     t = Trial(start="s", states=[], background=Gray(20.0), background_left=Gray(5.0))
     s = _one(Stimulus("x", at=(0.0, 0.0), looks=Disc(color=Gray(1.0))), trial=t)
     assert (s.background_left, s.background_right) == (to_xyz(Gray(5.0)), to_xyz(Gray(20.0)))
+
+
+def _drift(direction, orientation, tf=2.0):
+    looks = look.Look(shape=look.Circle(size=6.0),
+                      fill=look.SineGrating(sf=1.0, tf=tf, direction=direction,
+                                            contrast=Michelson(0.5)),
+                      orientation=orientation)
+    return _one(Stimulus("g", at=(0.0, 0.0), looks=looks)).items[0].fill.tf
+
+
+@pytest.mark.parametrize("direction, orientation, signed", [
+    (90.0, 0.0, 2.0), (270.0, 0.0, -2.0), (None, 0.0, 2.0), (120.0, 30.0, 2.0), (300.0, 30.0, -2.0),
+])
+def test_a_drift_direction_is_its_own_angle_and_the_drawer_reads_a_signed_speed(
+        direction, orientation, signed):
+    assert _drift(direction, orientation) == signed
+
+
+def test_a_direction_not_across_the_bars_or_a_negative_speed_is_refused():
+    with pytest.raises(ValueError, match="across the bars"):
+        _drift(0.0, 0.0)
+    with pytest.raises(ValueError, match="a speed"):
+        _drift(None, 0.0, tf=-1.0)

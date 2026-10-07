@@ -1002,6 +1002,19 @@ def _black(color, params: dict[str, Param]) -> bool:
     return isinstance(color, xyY) and color.Y == 0.0
 
 
+def _background_fix(backgrounds: list, params: dict[str, Param]) -> str:
+    """What to write so an eye's background is not black: raise the low end of a declared
+    range that reaches 0, otherwise declare the background."""
+    for background in backgrounds:
+        light = background.cd_m2 if isinstance(background, Gray) else None
+        param = params.get(light.name) if isinstance(light, P) else None
+        if param is not None and param.low is not None and param.high is not None \
+                and param.low <= 0.0:
+            return (f"raise the low end of parameter {param.name!r}'s range, which the "
+                    f"background is, above 0")
+    return "declare the trial's background"
+
+
 def _bare(contrast, params: dict) -> bool:
     """A contrast with no convention: a number, or a parameter whose values are numbers."""
     from wl_xcon.photometry import Contrast
@@ -1035,6 +1048,7 @@ def _light_faults(trial: Trial) -> list[Finding]:
     params = {p.name: p for p in trial.params}
     backgrounds = _backgrounds(trial)
     on_black = any(_black(b, params) for b in backgrounds)
+    fix = _background_fix(backgrounds, params)
     findings: list[Finding] = []
 
     def found(code: str, detail: str, blocking: bool = True) -> None:
@@ -1095,8 +1109,7 @@ def _light_faults(trial: Trial) -> list[Finding]:
                 if isinstance(contrast, Weber) and on_black:
                     found("weber-on-black", (
                         f"{what} is a Weber contrast against the background, and an eye's "
-                        f"background is or can be black; declare the trial's background "
-                        f"(engine spec §7.5)"))
+                        f"background is or can be black; {fix} (engine spec §7.5)"))
                 continue
             if contrast is None:
                 found("unlit", (
@@ -1110,8 +1123,7 @@ def _light_faults(trial: Trial) -> list[Finding]:
             if mean is None and on_black:
                 found("unlit", (
                     f"{what}'s mean is whatever is behind it, and an eye's background is "
-                    f"or can be black, so it may draw nothing; declare the background or "
-                    f"its mean"))
+                    f"or can be black, so it may draw nothing; {fix}, or declare its mean"))
             if mean is not None and not isinstance(mean, P) and any(mean != b for b in backgrounds):
                 found("luminance-step", (
                     f"{what}'s mean {mean} differs from the background, so a luminance step "
@@ -1220,7 +1232,45 @@ def _block_faults(trial: Trial) -> list[Finding]:
             bad(f"Path has {len(part.points)} point; a line has at least 2")
         if isinstance(part, look.Edge) and part.applies not in (None, *look.EDGE_APPLIES):
             bad(f"{name} applies to {part.applies!r}; one of {', '.join(look.EDGE_APPLIES)}")
+        if isinstance(part, look.SineGrating):
+            first([(v, f"{said}; tf is a speed in cycles per second, and `direction` says "
+                       f"which way the bars move (engine spec §5.1)")
+                   for v, said in values(part, "tf")], lambda v: v < 0.0)
+        if (isinstance(part, look.Look) and isinstance(part.fill, look.SineGrating)
+                and part.fill.direction is not None):
+            _direction_faults(part, params, bad)
     return findings
+
+
+def _direction_faults(looks, params: dict[str, Param], bad) -> None:
+    """A grating's drift `direction` is across its bars: orientation + 90 or + 270 degrees
+    (engine spec §5.1; PI, 2026-10-07). Every (orientation, direction) pair the two fields
+    can take is held to it. A range names directions that are not across the bars, and one
+    cannot be checked against a fixed direction, so either must offer choices."""
+    direction, orientation = looks.fill.direction, looks.orientation
+
+    def choices(value, what: str, why: str) -> list[float] | None:
+        if not isinstance(value, P):
+            return _reach(value, params)
+        offered = params[value.name].choices if value.name in params else ()
+        if not offered or not all(_is_number(c) for c in offered):
+            bad(f"{what} is parameter {value.name!r}, which offers no numeric choices; {why}")
+            return None
+        return [float(c) for c in offered]
+
+    directions = choices(direction, "SineGrating.direction", (
+        "a range names directions that are not across the bars, so offer choices such as "
+        "(orientation + 90, orientation + 270)"))
+    orientations = choices(orientation, "the grating's orientation", (
+        "a range cannot be checked against a fixed direction, so offer choices, or leave "
+        "`direction` out to drift toward orientation + 90"))
+    for o in orientations or []:
+        for d in directions or []:
+            if abs(math.sin(math.radians(d - (o + 90.0)))) > 1e-9:
+                bad(f"a grating with orientation {o:g} cannot drift toward {d:g} degrees: that is "
+                    f"not across its bars. Write direction={o + 90:g} or {o + 270:g}, or leave "
+                    f"`direction` out to drift toward {o + 90:g}")
+                return
 
 
 # --- Arrays ----------------------------------------------------------------
@@ -1558,18 +1608,24 @@ def _modulates(looks, params: dict[str, Param]) -> bool:
     its choices does; one with no choices to read is `_Unbounded`, naming it."""
     from wl_xcon.photometry import Weber
 
+    def options(value, field: str) -> list:
+        try:
+            return _options(value, params)
+        except _Unbounded as unbounded:
+            raise _Unbounded(unbounded.args[0], field) from None
+
     if isinstance(looks, P):
-        return all(_modulates(choice, params) for choice in _options(looks, params))
+        return all(_modulates(choice, params) for choice in options(looks, "appearance"))
     if isinstance(looks, Array):
         return _modulates(looks.looks, params) and _modulates(looks.among, params)
     light = _light(looks)
     if light is None:
-        return True  # a later build's fill: checked where it is defined
+        return True  # a fill engine build A3 defines: checked where it is defined
     kind, color, contrast, _ = light
     return kind == "grating" or all(
         c is None and isinstance(k, Weber)
-        for c in _options(color, params)
-        for k in _options(contrast, params)
+        for c in options(color, "color")
+        for k in options(contrast, "contrast")
     )
 
 
@@ -1590,7 +1646,8 @@ def _placement_faults(trial: Trial) -> list[Finding]:
         try:
             return "" if _modulates(looks, params) else "it can be an absolute light, which has none"
         except _Unbounded as unbounded:
-            return (f"its appearance is parameter {unbounded.args[0]!r}, which offers no "
+            field = unbounded.args[1] if len(unbounded.args) > 1 else "appearance"
+            return (f"its {field} is parameter {unbounded.args[0]!r}, which offers no "
                     f"choices, so its modulation cannot be read")
 
     updated = _as_updated(trial)

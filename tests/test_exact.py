@@ -242,6 +242,15 @@ def test_a_positive_tf_drifts_toward_local_plus_y():
     assert image[_pixel(vp, 0.0, 0.5, GABOR_REGION)][1] == pytest.approx(30.0, rel=0.02)  # the crest
 
 
+def test_a_direction_of_270_drifts_the_other_way():
+    looks = look.Look(shape=look.Circle(size=6.0),
+                      fill=look.SineGrating(sf=1.0, phase=0.0, tf=2.0, direction=270.0,
+                                            contrast=Michelson(0.5)))
+    image, vp = _draw([Stimulus("g", at=(0.0, 0.0), looks=looks)], trial=_gray20(), pixels=(1920, 1080),
+                      region=GABOR_REGION, frame=30)  # a quarter cycle, the other way
+    assert image[_pixel(vp, 0.0, 0.0, GABOR_REGION)][1] == pytest.approx(30.0, rel=0.02)
+
+
 def test_a_grating_without_a_declared_mean_sits_on_what_is_behind_it():
     disc = Stimulus("d", at=(0.0, 0.0), looks=Disc(size=9.0, color=Gray(40.0)))
     gabor = Stimulus("g", at=(0.0, 0.0), layer=1,

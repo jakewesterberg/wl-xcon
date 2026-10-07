@@ -598,3 +598,55 @@ def test_a_fault_a_parameter_s_choices_repeat_is_reported_once():
 
 def test_an_undeclared_light_parameter_cannot_be_read():
     assert {"undeclared-parameter", "bad-block"} <= _refused(_one(Disc(color=P("col")), background=GRAY_BG))
+
+
+def _drifting(*, tf=2.0, direction=None, orientation=0.0):
+    return look.Look(shape=look.Circle(size=4.0), orientation=orientation,
+                     fill=look.SineGrating(tf=tf, direction=direction, contrast=Michelson(0.5)))
+
+
+def _blocks(trial: Trial) -> list[str]:
+    return [f.detail for f in check(trial) if f.blocking and f.code == "bad-block"]
+
+
+@pytest.mark.parametrize("grating, params", [
+    (_drifting(direction=45.0), ()),                            # not across the bars
+    (_drifting(tf=-1.0), ()),                                   # a speed is not negative
+    (_drifting(tf=P("tf")), [Param("tf", unit="Hz", low=-1.0, high=4.0)]),
+    (_drifting(direction=P("d")), [Param("d", unit="deg", low=0.0, high=360.0)]),
+    (_drifting(direction=90.0, orientation=P("o")), [Param("o", unit="deg", low=0.0, high=180.0)]),
+    (_drifting(direction=P("d")), [Param("d", unit="deg", choices=(90.0, 180.0))]),
+    (_drifting(direction=90.0, orientation=P("o")), [Param("o", unit="deg", choices=(0.0, 45.0))]),
+])
+def test_a_drift_not_across_the_bars_is_refused_at_load(grating, params):
+    assert _blocks(_one(grating, params=params, background=GRAY_BG))
+
+
+def test_a_drift_across_the_bars_is_accepted():
+    both = [Param("d", unit="deg", choices=(90.0, 270.0))]
+    assert _refused(_one(_drifting(direction=P("d")), params=both, background=GRAY_BG)) == set()
+    ranged = [Param("o", unit="deg", low=0.0, high=180.0)]
+    assert _refused(_one(_drifting(orientation=P("o")), params=ranged, background=GRAY_BG)) == set()
+    assert _refused(_one(_drifting(direction=120.0, orientation=30.0), background=GRAY_BG)) == set()
+
+
+def test_an_unmodulated_message_names_the_field_it_could_not_read():
+    flat = [Param("c", unit="value", low=0.0, high=1.0)]
+    for looks, field in ((Disc(color=P("c")), "color"), (Disc(contrast=P("c")), "contrast"),
+                         (P("c"), "appearance")):
+        trial = _multiplying(looks, params=flat)
+        detail = " ".join(f.detail for f in check(trial) if f.blocking)
+        assert f"its {field} is parameter 'c'" in detail, (field, detail)
+
+
+def test_a_background_the_range_of_a_parameter_reaches_black_says_to_raise_the_range():
+    reaches = [Param("bg", unit="cd/m2", low=0.0, high=40.0)]
+    weber = _one(Disc(contrast=Weber(0.5)), params=reaches, background=Gray(P("bg")))
+    grating = _one(_drifting(), params=reaches, background=Gray(P("bg")))
+    for trial in (weber, grating):
+        said = " ".join(f.detail for f in check(trial) if f.blocking)
+        assert "raise the low end" in said and "'bg'" in said
+        assert "declare the" not in said
+    for trial in (_one(Disc(contrast=Weber(0.5))), _one(_drifting())):
+        said = " ".join(f.detail for f in check(trial) if f.blocking)
+        assert "declare the" in said and "raise the low end" not in said

@@ -50,3 +50,7 @@ def test_no_appearance_implies_a_contrast_any_more():
                  "Plaid", "Checkerboard", "Noise", "RDS"):
         fields = {f.name: f for f in dataclasses.fields(getattr(task, name))}
         assert fields["contrast"].default is None, name
+
+
+def test_a_grating_drifts_toward_its_orientation_plus_90_unless_a_direction_says_otherwise():
+    assert look.SineGrating().direction is None  # spec §5.1; PI, 2026-10-07: "Its own angle"
