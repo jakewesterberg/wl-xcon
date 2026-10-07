@@ -581,3 +581,13 @@ gives every run one block of one condition, and no task can declare a plan (XC-2
   trial structures; each condition names its own; interleaving them in a block is ordinary.
 - **Interludes** — "Yes": a run steps aside (a recalibration, a quick RF map, a rest) and returns to
   the same block with its counts and order; recorded as an interlude, not a new block (S8 §1).
+
+**Batch 2** (asked 2026-10-07):
+
+- **Edits at the rig** — "Yes, refused if not": checked exactly as the task file is (field, colors,
+  ranges); an edit that fails is not applied and the console says why.
+- **The continuous mode can** — all four: rewards (on a schedule, or for gaze on the screen or a
+  region); probes on a schedule; gaze- or neural-contingent changes; operator marks and pauses.
+- **It ends on** — all four: a declared duration; its media ending; an operator stop; a criterion.
+- **Its analysis** — "One epoch with timed events": every change, probe, reward and mark
+  time-stamped on the recording clock; analysis cuts it as it likes.
