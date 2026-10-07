@@ -258,3 +258,16 @@ the authority; the panel runs 240 Hz (4.17 ms), with 120 Hz available.
   Lissajous); waypoint paths; seeded random walks.
 - **Refresh rate** — "Any rate": times in seconds, converted at the session's rate (240 or 120
   Hz) under the tolerance rule; a task may declare a required rate.
+
+**Batch 3** (asked 2026-10-07):
+
+- **The longest trial** — "Minutes at most": a fixed cap of a few minutes for every task (the
+  number asked next).
+- **Continuous presentation** (a 20-minute movie with free viewing, long adaptation with probes) —
+  "Yes, as its own mode": a trial-less mode with its own record shape. Its details belong to
+  element 10 (structure) and are asked there.
+- **Between trials** — "Declared per task": the background by default; a task may keep stimuli up
+  across trials (a fixation point, a topped-up adapter) or show an ITI display of its own.
+- **Delay from eye or neuron to screen** — "Measured, declared limit": each change records its
+  delay (sample age plus the frame it landed on); a task may declare a maximum and trials past it
+  are marked; V3's photodiode measurement gives the true end-to-end figure.
