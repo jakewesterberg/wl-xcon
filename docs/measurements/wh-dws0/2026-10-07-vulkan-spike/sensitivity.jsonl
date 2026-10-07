@@ -1,0 +1,7 @@
+{"reference": "as given", "max_abs_dY": 2.542020724050076e-05, "max_in_steps": 0.0002600487200703228, "mean_abs_dY": 6.084480095022161e-07}
+{"reference": "phase 31 deg", "max_abs_dY": 0.17364350677275553, "max_in_steps": 1.7763730742852892, "mean_abs_dY": 0.0056232304233062675}
+{"reference": "orientation 30.5 deg", "max_abs_dY": 0.330761861163424, "max_in_steps": 3.3836938397018277, "mean_abs_dY": 0.014081142981689783}
+{"reference": "Michelson 0.505", "max_abs_dY": 0.09845835722366658, "max_in_steps": 1.0072289943981092, "mean_abs_dY": 0.0032218840576482507}
+{"reference": "sigma 0.505 deg", "max_abs_dY": 0.0731119414537389, "max_in_steps": 0.747935161071749, "mean_abs_dY": 0.006476969314300619}
+{"reference": "x + 0.005 deg (~0.36 px)", "max_abs_dY": 0.31266510191839814, "max_in_steps": 3.198563992625213, "mean_abs_dY": 0.01060142821759527}
+{"reference": "x + 0.014 deg (~1 px)", "max_abs_dY": 0.8749840690573087, "max_in_steps": 8.95108702645627, "mean_abs_dY": 0.02967399049216832}

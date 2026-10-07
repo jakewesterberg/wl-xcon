@@ -1,0 +1,327 @@
+{
+ "step_cd_m2_STAND_IN": 0.09775171065493646,
+ "background": 20.0,
+ "regions": [
+  {
+   "region": "gabor-left",
+   "eye": "left",
+   "eye_px": [
+    1015,
+    808,
+    1415,
+    1208
+   ],
+   "panel_cols": [
+    1015,
+    1414
+   ],
+   "panel_rows": [
+    808,
+    1207
+   ],
+   "max_abs_dY": 2.542020724050076e-05,
+   "max_at_panel_row_col": [
+    1003,
+    1227
+   ],
+   "exact_there": 21.843760161418178,
+   "gpu_there": 21.843734741210938,
+   "max_in_steps": 0.0002600487200703228,
+   "mean_abs_dY": 6.084480095022161e-07,
+   "mean_abs_dY_where_exact_is_not_background": 1.48717070500534e-06,
+   "mean_signed_dY": -3.2566593929139743e-09,
+   "pixels": 160000,
+   "pixels_not_background": 65461,
+   "pixels_exactly_equal": 94539,
+   "exact_border_all_background": true,
+   "exact_min_max": [
+    10.547195466166853,
+    29.845698772453243
+   ],
+   "exact_draw_seconds": 0.3
+  },
+  {
+   "region": "gabor-right",
+   "eye": "right",
+   "eye_px": [
+    792,
+    808,
+    1192,
+    1208
+   ],
+   "panel_cols": [
+    2712,
+    3111
+   ],
+   "panel_rows": [
+    808,
+    1207
+   ],
+   "max_abs_dY": 1.557803361151855e-05,
+   "max_at_panel_row_col": [
+    1013,
+    2910
+   ],
+   "exact_there": 19.093957581756428,
+   "gpu_there": 19.09397315979004,
+   "max_in_steps": 0.00015936328384583476,
+   "mean_abs_dY": 5.516307450569302e-07,
+   "mean_abs_dY_where_exact_is_not_background": 1.3557953149681076e-06,
+   "mean_signed_dY": -5.647167175459878e-09,
+   "pixels": 160000,
+   "pixels_not_background": 65099,
+   "pixels_exactly_equal": 94901,
+   "exact_border_all_background": true,
+   "exact_min_max": [
+    10.545781860900428,
+    29.848958659704387
+   ],
+   "exact_draw_seconds": 0.3
+  },
+  {
+   "region": "bg-left-top-left-corner",
+   "eye": "left",
+   "eye_px": [
+    0,
+    0,
+    64,
+    64
+   ],
+   "panel_cols": [
+    0,
+    63
+   ],
+   "panel_rows": [
+    0,
+    63
+   ],
+   "max_abs_dY": 0.0,
+   "max_at_panel_row_col": [
+    0,
+    0
+   ],
+   "exact_there": 20.0,
+   "gpu_there": 20.0,
+   "max_in_steps": 0.0,
+   "mean_abs_dY": 0.0,
+   "mean_abs_dY_where_exact_is_not_background": null,
+   "mean_signed_dY": 0.0,
+   "pixels": 4096,
+   "pixels_not_background": 0,
+   "pixels_exactly_equal": 4096,
+   "exact_border_all_background": true,
+   "exact_min_max": [
+    20.0,
+    20.0
+   ],
+   "exact_draw_seconds": 0.0
+  },
+  {
+   "region": "bg-left-center",
+   "eye": "left",
+   "eye_px": [
+    928,
+    1048,
+    992,
+    1112
+   ],
+   "panel_cols": [
+    928,
+    991
+   ],
+   "panel_rows": [
+    1048,
+    1111
+   ],
+   "max_abs_dY": 0.0,
+   "max_at_panel_row_col": [
+    1048,
+    928
+   ],
+   "exact_there": 20.0,
+   "gpu_there": 20.0,
+   "max_in_steps": 0.0,
+   "mean_abs_dY": 0.0,
+   "mean_abs_dY_where_exact_is_not_background": null,
+   "mean_signed_dY": 0.0,
+   "pixels": 4096,
+   "pixels_not_background": 0,
+   "pixels_exactly_equal": 4096,
+   "exact_border_all_background": true,
+   "exact_min_max": [
+    20.0,
+    20.0
+   ],
+   "exact_draw_seconds": 0.0
+  },
+  {
+   "region": "bg-left-at-seam",
+   "eye": "left",
+   "eye_px": [
+    1856,
+    1048,
+    1920,
+    1112
+   ],
+   "panel_cols": [
+    1856,
+    1919
+   ],
+   "panel_rows": [
+    1048,
+    1111
+   ],
+   "max_abs_dY": 0.0,
+   "max_at_panel_row_col": [
+    1048,
+    1856
+   ],
+   "exact_there": 20.0,
+   "gpu_there": 20.0,
+   "max_in_steps": 0.0,
+   "mean_abs_dY": 0.0,
+   "mean_abs_dY_where_exact_is_not_background": null,
+   "mean_signed_dY": 0.0,
+   "pixels": 4096,
+   "pixels_not_background": 0,
+   "pixels_exactly_equal": 4096,
+   "exact_border_all_background": true,
+   "exact_min_max": [
+    20.0,
+    20.0
+   ],
+   "exact_draw_seconds": 0.0
+  },
+  {
+   "region": "bg-right-at-seam",
+   "eye": "right",
+   "eye_px": [
+    0,
+    1048,
+    64,
+    1112
+   ],
+   "panel_cols": [
+    1920,
+    1983
+   ],
+   "panel_rows": [
+    1048,
+    1111
+   ],
+   "max_abs_dY": 0.0,
+   "max_at_panel_row_col": [
+    1048,
+    1920
+   ],
+   "exact_there": 20.0,
+   "gpu_there": 20.0,
+   "max_in_steps": 0.0,
+   "mean_abs_dY": 0.0,
+   "mean_abs_dY_where_exact_is_not_background": null,
+   "mean_signed_dY": 0.0,
+   "pixels": 4096,
+   "pixels_not_background": 0,
+   "pixels_exactly_equal": 4096,
+   "exact_border_all_background": true,
+   "exact_min_max": [
+    20.0,
+    20.0
+   ],
+   "exact_draw_seconds": 0.0
+  },
+  {
+   "region": "bg-right-upper-right",
+   "eye": "right",
+   "eye_px": [
+    1500,
+    300,
+    1564,
+    364
+   ],
+   "panel_cols": [
+    3420,
+    3483
+   ],
+   "panel_rows": [
+    300,
+    363
+   ],
+   "max_abs_dY": 0.0,
+   "max_at_panel_row_col": [
+    300,
+    3420
+   ],
+   "exact_there": 20.0,
+   "gpu_there": 20.0,
+   "max_in_steps": 0.0,
+   "mean_abs_dY": 0.0,
+   "mean_abs_dY_where_exact_is_not_background": null,
+   "mean_signed_dY": 0.0,
+   "pixels": 4096,
+   "pixels_not_background": 0,
+   "pixels_exactly_equal": 4096,
+   "exact_border_all_background": true,
+   "exact_min_max": [
+    20.0,
+    20.0
+   ],
+   "exact_draw_seconds": 0.0
+  },
+  {
+   "region": "bg-right-above-patch",
+   "eye": "right",
+   "eye_px": [
+    1720,
+    1896,
+    1784,
+    1960
+   ],
+   "panel_cols": [
+    3640,
+    3703
+   ],
+   "panel_rows": [
+    1896,
+    1959
+   ],
+   "max_abs_dY": 0.0,
+   "max_at_panel_row_col": [
+    1896,
+    3640
+   ],
+   "exact_there": 20.0,
+   "gpu_there": 20.0,
+   "max_in_steps": 0.0,
+   "mean_abs_dY": 0.0,
+   "mean_abs_dY_where_exact_is_not_background": null,
+   "mean_signed_dY": 0.0,
+   "pixels": 4096,
+   "pixels_not_background": 0,
+   "pixels_exactly_equal": 4096,
+   "exact_border_all_background": true,
+   "exact_min_max": [
+    20.0,
+    20.0
+   ],
+   "exact_draw_seconds": 0.0
+  }
+ ],
+ "patches": {
+  "left_all_100": true,
+  "right_all_100": true,
+  "ring_just_outside_all_background": true,
+  "pixels_equal_100_anywhere": 80000,
+  "expected": 80000
+ },
+ "rest_of_panel": {
+  "pixels": 7869824,
+  "all_exactly_background": true,
+  "max_abs_dY": 0.0
+ },
+ "gpu_panel": {
+  "finite": true,
+  "min": 10.545782089233398,
+  "max": 100.0
+ }
+}

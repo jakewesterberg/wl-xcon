@@ -1,0 +1,54 @@
+0spike v0.1.0 (/home/jakewesterberg/wl-spike-s/spike)
+1ash v0.38.0+1.3.281
+2libloading v0.8.9
+3cfg-if v1.0.5
+1naga v30.0.1
+2arrayvec v0.7.8
+2bit-set v0.10.0
+3bit-vec v0.9.1
+2bitflags v2.13.2
+2cfg-if v1.0.5
+2codespan-reporting v0.13.1
+3unicode-width v0.2.2
+2half v2.7.1
+3cfg-if v1.0.5
+3num-traits v0.2.19
+4libm v0.2.16
+4autocfg v1.5.1
+3zerocopy v0.8.61
+4zerocopy-derive v0.8.61 (proc-macro)
+5proc-macro2 v1.0.107
+6unicode-ident v1.0.26
+5quote v1.0.47
+6proc-macro2 v1.0.107 (*)
+5syn v2.0.119
+6proc-macro2 v1.0.107 (*)
+6quote v1.0.47 (*)
+6unicode-ident v1.0.26
+2hashbrown v0.17.1
+3foldhash v0.2.0
+2indexmap v2.14.2
+3equivalent v1.0.2
+3hashbrown v0.17.1 (*)
+2libm v0.2.16
+2log v0.4.34
+2naga-types v30.0.1
+3hashbrown v0.17.1 (*)
+3indexmap v2.14.2 (*)
+3rustc-hash v1.1.0
+3thiserror v2.0.21
+4thiserror-impl v2.0.21 (proc-macro)
+5proc-macro2 v1.0.107 (*)
+5quote v1.0.47 (*)
+5syn v3.0.6
+6proc-macro2 v1.0.107 (*)
+6quote v1.0.47 (*)
+6unicode-ident v1.0.26
+2num-traits v0.2.19 (*)
+2once_cell v1.21.4
+2rustc-hash v1.1.0
+2spirv v0.4.0+sdk-1.4.341.0
+3bitflags v2.13.2
+2thiserror v2.0.21 (*)
+2unicode-ident v1.0.26
+2cfg_aliases v0.2.2
