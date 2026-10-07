@@ -637,3 +637,22 @@ seeds recorded; today one condition per run; condition numbering for the recordi
   every condition's (S8 §3.4's layering) (offered against: the condition wins, recommended).
   Consequence: the record marks each trial whose condition was overridden, since its name no longer
   describes it.
+
+**Batch 2** (asked 2026-10-07):
+
+- **Condition numbers in the recording** (XC-197) — "Fixed per task": a condition's number stays the
+  same across runs, sessions and animals while it exists; one added at the rig takes the next
+  unused number; numbers never reused.
+- **Distributions for drawn values** — uniform range; a weighted set; normal, truncated to the
+  declared range; a prepared list; and, the PI's addition, "for e.g. timings, a nonaging
+  foreperiod function" (a constant-hazard foreperiod, so elapsed time does not predict onset).
+- **Repeatable runs** — "New seed, replayable": a fresh seed per run, recorded; any run replayed
+  exactly from its seed.
+
+**Element 11 is discussed.**
+
+## 12. Adaptivity
+
+Settled before the element: ADR-0006 puts adaptive logic between trials in ordinary Python;
+`adaptive_detection.next_params` and its staircase are called by nothing (XC-242); the science
+review's finding 2: it moves only on correct versus wrong target, so misses never make it easier.
