@@ -788,3 +788,13 @@ and the reconstruction of any recorded frame.
   said so). Supersedes the parked demo spec's schematic.
 - **A generated image not ready in time** — "Wait as long as it takes": the next trial waits; the
   welfare clocks run, the console says it is waiting, and the operator can pause or stop.
+
+## Build order and write-up (asked 2026-10-07)
+
+- **Order** — "Definition first, display by January": A (the screen description and the slow exact
+  drawer), then B (warnings, session kinds, default colors), then C with I (trials that vary, with
+  the report and simulation profiles), then E (the display process, after the Vulkan spike) in time
+  for January's V1; then D, F, G, H, J, K; then the reference tasks; then demo mode. The cross-repo
+  asks go out with the spec.
+- **Write-up** — "Umbrella spec + per-build plans": one spec for the whole engine, for the PI's
+  review; each build then gets its own plan and the usual build-review-merge cycle.
