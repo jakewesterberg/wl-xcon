@@ -761,3 +761,30 @@ ADR-0006's review artifact (diagram, code table, timeline) plus the PI's example
   version.
 
 **Element 15 is discussed, and with it every element of the engine (2026-10-07).**
+
+## How it fits (put to the PI 2026-10-07)
+
+Three programs on the rig PC: **the display process** (Rust, Vulkan, a system service from boot;
+owns the animal's screen, flips every refresh, both patches, black when idle; draws what it is
+handed; reports each change's landing frame and late frames); **the rig service** (`wlx taskd`:
+sessions, runs, plans, the trial loop in step with the display, welfare, the record, between-trial
+procedures); **the console** (`wlx serve`). Off the rig: lab storage (media by checksum) and a GPU
+server for generated images. A trial: the plan picks a condition, drawn values are sampled,
+procedures adjust, layers resolve, the condition names the trial structure; frame by frame the
+rig service reads gaze, runs the states, hands the display the next screen description, codes go
+out at the decision, the display reports landing; at the end the outcome, the record, procedures,
+repeats. Simulation and demo swap the display for a no-op or development window; the simulated
+animal reads the same description. The slow exact drawer is the definition, the report's frames,
+and the reconstruction of any recorded frame.
+
+**Where the pieces meet** (asked 2026-10-07):
+
+- **A live-driven position each frame** — "In the rig service": it reads gaze or the mouse, places the
+  stimulus and hands the display the finished description; no task behavior lives in the Rust core.
+- **Audiovisual timing** — "Started on the frame": the NI card starts a sound on a hardware trigger
+  from the frame the visual change lands on; a task may declare an offset.
+- **Demo mode's screen, when it returns** — "Real images, labeled": the browser shows frames from the
+  exact drawer (lower resolution, not at display speed, uncalibrated on the viewer's screen and
+  said so). Supersedes the parked demo spec's schematic.
+- **A generated image not ready in time** — "Wait as long as it takes": the next trial waits; the
+  welfare clocks run, the console says it is waiting, and the operator can pause or stop.
