@@ -829,3 +829,18 @@ owed), several misleading defaults, and gaps against the code. The PI's decision
   recommended); the record and the recording mark it.
 - **The override in the recording** — "Yes": the parameter-change code goes out and the trial table
   carries an "overridden" flag that wl-preproc reads (an ask of wl-preproc).
+
+**Batch R3, timing and luminance:**
+
+- **Durations that are design levels** (factor levels, a sequence's item period, a procedure-stepped
+  duration) — "Exact by default": whole frames at the session's rate or refused at load with the
+  nearest valid values listed; two levels landing on one frame count refused; staircases on time step
+  in frames.
+- **A patterned fill whose mean differs from what is behind it** (a luminance step under the pattern)
+  — "Always a warning", in every session kind (offered against: refused in recording). A patterned
+  fill's mean defaults to what is behind it.
+- **The pause screen for a task with a non-black background** — "The task's background"; black stays
+  the default for tasks on black. Refines N§8 batch 1.
+- **Sequence items and the task light sensor** — "Yes, each item": each item of an RSVP or rapid
+  sequence toggles it. Live-driven and per-frame changes (a mouse-moved bar, drifting phase) neither
+  toggle it nor send codes; they go to the screen log.
