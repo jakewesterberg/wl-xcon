@@ -941,3 +941,7 @@ reward size) and otherwise to approve or comment.
     groups and layouts move to A3; A1 still draws an `Array` as its items (XC-244).
   - **The luminance settings' upper bound until V9 measures the brightness cap** — "Up to 100
     cd/m² (Recommended)" (offered against: up to 200 cd/m²).
+- **A drifting grating's direction** (asked 2026-10-07, at A1's final review) — "Its own angle
+  (Recommended)" (offered against: a signed speed, which the build first used): the task writes the
+  bars' orientation and, separately, the direction of motion in degrees; a direction not across the
+  bars is refused at load. Spec §5.1 stands as written.
