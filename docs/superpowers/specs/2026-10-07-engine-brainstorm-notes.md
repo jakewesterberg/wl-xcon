@@ -284,3 +284,18 @@ background, `lum=0` isoluminant); a measured `photometry.Calibration` names its 
 uncalibrated color refused today; the PI's 2026-10-07 ruling for a default calibration and a
 warnings list. Known hazards: a QD-OLED's transfer is not a power law; ABL dims the panel with
 fill; low contrasts need fine steps.
+
+**Batch 1** (asked 2026-10-07):
+
+- **The default calibration** — "Standard sRGB": the panel set to its sRGB mode and the published
+  sRGB standard (primaries, D65 white, transfer curve) used when the rig file names no measured
+  calibration; how closely the panel's sRGB mode follows it is unknown until measured, and the
+  warnings list says so.
+- **Isoluminance on the default calibration** — "No": a task claiming isoluminance (DKL `lum=0`
+  with a chromatic component) needs a measured calibration with a stated observer, in every
+  session. Consequence put to the PI next: `visual_search`'s red and green are isoluminant DKL,
+  so it still does not load on the default.
+- **Bit depth** — "10-bit, verified at V1": 1024 levels per channel if the card, cable and panel
+  carry 10-bit at 4K/240 (unverified for this pairing); dithering as the fallback where not.
+- **The panel's transfer** — "A measured table": a lookup table per channel (and per eye's half on
+  the stereoscope) from a photometer sweep; the default uses the sRGB curve.
