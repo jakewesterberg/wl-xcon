@@ -914,3 +914,10 @@ contrast with one normalization, a cone-contrast space added, realizability by f
 tracker calibration moved to an early build; a transports ADR; presets, revert and carried values never
 carry bounded entries (the PI's b3a rule that a reward size lasts only for its session), flagged on the
 welfare summary.
+
+
+## Approval
+
+The revised spec (`6cefe32`), read as a doc on claude.ai, was approved by the PI on 2026-10-07: "approved",
+in answer to a message asking him to confirm §17.6 (presets, revert and carried-over values never carry a
+reward size) and otherwise to approve or comment.
