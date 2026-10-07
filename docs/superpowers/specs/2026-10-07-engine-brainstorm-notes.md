@@ -945,3 +945,16 @@ reward size) and otherwise to approve or comment.
   (Recommended)" (offered against: a signed speed, which the build first used): the task writes the
   bars' orientation and, separately, the direction of motion in degrees; a direction not across the
   bars is refused at load. Spec §5.1 stands as written.
+
+## Spike S (asked 2026-10-07, evening, the PI's desktop on)
+
+- **The machine** — wh-dws0 (100.116.116.4), the PI's Fedora 44 desktop; its GPU is an RTX 4080 SUPER
+  (driver 615.71.09), not the RTX 5070 Ti the spec names, and its only monitor is a Samsung Odyssey G8.
+- **Installing Rust there** — "Yes, home folder only (Recommended)" (offered against: ask before each
+  install).
+- **The timing test** — first "Do the timing test too" (offered against: off-screen now, timing at a
+  time the PI chooses); after the off-screen result, "Build it now; I log out when ready (Recommended)"
+  (offered against: wait for the rig's own panel).
+- **Keeping the spike** — "Report and source, labeled (Recommended)" (offered against: report only;
+  keep it out): the report and results under `docs/measurements/`, the source under `tools/`, marked
+  throwaway.

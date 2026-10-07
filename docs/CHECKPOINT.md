@@ -9,12 +9,12 @@ distrust the reasoning. Numbers go stale, arguments do not.
 > written with**, `wl-expcontroller` and `wl_expcontroller/…` paths included, as the PI
 > ruled for dated documents; read `wl_expcontroller/taskd.py` there as `wl_xcon/taskd.py`.
 >
-> **On branch `engine-a1` (not yet on `main`) the newest entry is "What moved on 2026-10-07: engine build A1, the screen
-> description and the exact drawer"**, below the Status table and above the entry that follows.
->
-> **This file describes `main`.** Its newest entry, "What moved on 2026-10-07: demo mode
+> **This file describes `main`.** Its newest entry, "What moved on 2026-10-07: engine build A1,
+> the screen description and the exact drawer", builds what is on the animal's screen as one resolved
+> description and the slow exact drawer that defines it (on `main` by fast-forward once its CI read
+> green); nothing in a session calls either yet. Below it, "What moved on 2026-10-07: demo mode
 > designed and parked, and the order changed", sets the next four builds, the default color
-> calibration first. Below it, "What moved on 2026-10-06: b2b-ready, the
+> calibration first. Below that, "What moved on 2026-10-06: b2b-ready, the
 > https page safe to switch on", makes nothing about the https page able to stop `wlx serve`, and
 > ends every stuck sign-in at its lapse, with one sign-in per tab (on `main` by fast-forward once
 > its push run read green). The page stays switched off until XC-151 and XC-152 are done. Below
@@ -371,9 +371,10 @@ figure was one low. In order:
 
 ## What moved on 2026-10-07: engine build A1, the screen description and the exact drawer
 
-**Resume here (state at 2026-10-07, branch `engine-a1`, not yet on `main`):** engine build A1 is
-written, its whole-branch review's fix wave is in, and it awaits that wave's re-review and the PI's
-merge. Plan:
+**Resume here (state at 2026-10-07):** engine build A1 is on `main` (branch `engine-a1`, by
+fast-forward once its CI read green): written, reviewed task by task and as a whole branch, the
+final review's fix wave re-reviewed, and Task 12 (the PI's answer on a grating's drift direction)
+reviewed. Plan:
 `docs/superpowers/plans/2026-10-07-engine-a1.md`; spec: `docs/superpowers/specs/2026-10-07-engine-design.md`
 (approved by the PI the same day). **Nothing in a session calls any of it** (plan call 7): `run.py` is
 untouched, and the display process (build E) and the screen log (build F) are the first callers.
@@ -455,7 +456,9 @@ untouched, and the display process (build E) and the screen log (build F) are th
   failing tests named in `tests/test_exact.py`. A real `N failed`, not an `N errors`.
 - **Next.** Plan A2: cone fundamentals, cone contrast, DKL's conversion and its refusal on a black
   background, realizability by full conversion, and `visual_search`'s background. The Vulkan spike S
-  runs on the PI's Linux machine once he is home (it matches against `exact.py`'s Gabor). The
+  ran its off-screen part on the PI's Linux desktop on 2026-10-07 (a Rust core matched `exact.py`'s
+  Gabor, two patches and both eye viewports; its report and source are recorded on their own branch,
+  `spike-s`), and its presentation-timing test is being built for the PI to run from a text console. The
   cross-repository asks the approved engine spec §21 lists (wl-preproc, wl-xtasks, wl-sync) are due
   and have not been sent; each is outward-facing and needs the PI's go-ahead. Stale remote branches
   `engine-design`, `demo-mode` and `xc240` await a decision to delete. The final whole-branch review's
