@@ -1,8 +1,9 @@
 # The engine: what runs a task, from its plan to the animal's screen
 
-**Status:** designed with the PI on 2026-10-07, element by element (fifteen elements, well over a
+**Status: approved by the PI on 2026-10-07 ("approved"), §17.6's reward-size rule included,
+after reading it as a doc.** Designed with the PI on 2026-10-07, element by element (fifteen elements, well over a
 hundred questions asked in the UI); then reviewed twice (science and feasibility, §26), the PI deciding
-every finding that was his (seven more batches) and the rest fixed here. This revision is for the PI's
+every finding that was his (seven more batches) and the rest fixed here. This revision was for the PI's
 review. Every decision is the PI's answer as recorded, verbatim, in
 [the brainstorm notes](2026-10-07-engine-brainstorm-notes.md), cited as **N§k** (the notes' element
 k) or **N§Rk** (the review batches). Where this spec says "recommended", the PI chose the option offered
