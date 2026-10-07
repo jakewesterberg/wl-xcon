@@ -223,3 +223,25 @@ disparity as equal and opposite horizontal offsets; field limits checked at load
 **Element 2 is discussed.**
 
 ## 3. When
+
+Settled before the element: a decision on frame N shows on frame N+1; motion is a function of
+the frame number; late frames are counted, never hidden, and the hardware frame clock (`PD2`) is
+the authority; the panel runs 240 Hz (4.17 ms), with 120 Hz available.
+
+**Batch 1** (asked 2026-10-07):
+
+- **Durations that are not whole frames** — "Declared tolerance": rounded to the nearest frame and
+  recorded as shown; a task may mark a duration exact, and an exact one that does not fit whole
+  frames at the session's rate is refused at load.
+- **A dropped or late frame during a trial** — "Always continue, mark": the trial continues; the
+  record marks each late frame for analysis to judge.
+- **Temporal frequencies that do not fit whole frames** — "Smooth ok, hard refused": sine
+  modulation sampled per frame at any frequency (recorded); square-wave flicker needs whole frames
+  per half-cycle or is refused at load.
+- **Onset and scan-out** — the PI asked: "These are oleds? I dont think there is a scan line
+  delay?" Checked: OLEDs remove slow pixel response, not the top-to-bottom refresh; a non-strobed
+  OLED lights rows as they arrive, so the bottom changes up to one frame period after the top
+  (Blur Busters, "Understanding Display Scan-Out Lag With High Speed Video",
+  https://www.blurbusters.com/understanding-display-scanout-lag-with-high-speed-video/, read
+  2026-10-07; general, UNVERIFIED for the PG27UCDM until V1). Both setups put the light sensors at
+  the bottom, so they report a frame near the end of its scan. Re-asked below.
