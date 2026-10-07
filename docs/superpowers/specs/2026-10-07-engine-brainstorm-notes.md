@@ -328,3 +328,21 @@ fill; low contrasts need fine steps.
   equal. This changes S4 §9's plan of a transfer per panel half.
 - **A calibration's age** — in the PI's words: "never expires, but there is an age that is
   associated with the calibration. A warning pops after 30 days."
+
+**Batch 4** (asked 2026-10-07; both as recommended):
+
+- **Cone sensitivities for DKL** — "Named in the calibration": each calibration names the cone
+  fundamentals it converts with (a human standard such as Stockman & Sharpe's 2°, or macaque
+  estimates once a source is chosen and cited); the default uses the human standard and says so.
+- **Color noise and colored Mondrians on the default** — "Yes, with the warning", in whatever
+  session kinds the session-kind rules accept.
+
+**Element 4 is discussed.**
+
+## 5. Sync and evidence
+
+Settled before the element (S4 §7, S3 §8, the direct-view spec §4): the flip patch alternates
+every refresh, unconditionally, a frame clock into the NI card (`PD2_COMP`); the task patch is
+driven by the display from the scene's own onset; event codes strobe at decision ("now, not on
+the next flip"); `Onscreen` advances on the sensor's evidence; dropped frames are detected in
+hardware.
