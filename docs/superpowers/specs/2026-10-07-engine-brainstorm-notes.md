@@ -346,3 +346,17 @@ every refresh, unconditionally, a frame clock into the NI card (`PD2_COMP`); the
 driven by the display from the scene's own onset; event codes strobe at decision ("now, not on
 the next flip"); `Onscreen` advances on the sensor's evidence; dropped frames are detected in
 hardware.
+
+**Batch 1** (asked 2026-10-07):
+
+- **What lights the task patch** — "Every change": any onset, offset or update toggles it; the
+  record's frame numbers say which change each edge was. (Offered against: close changes blur for
+  the sensor, which cannot itself tell changes apart.)
+- **When an onset's event code goes out** — "As now": at the decision; the light sensor gives the
+  exact time; codes never wait on the display.
+- **Matching frames to the recording** — "Count from each trial": flip-patch edges counted from each
+  trial's start code, checked against the trial's known length, so a missed edge shifts frames
+  within one trial at most.
+- **What the record keeps about the screen** — "Changes + live values": every onset, offset and
+  update with its frame and full resolved description; every live-driven value per frame; seeds
+  for every random pattern; any frame rebuildable by the slow drawer.
