@@ -1,6 +1,6 @@
 # Where this build actually is
 
-**Last updated 2026-10-06**, at the commit this file was committed in. Check
+**Last updated 2026-10-07**, at the commit this file was committed in. Check
 `git log --oneline -1`; if it has moved far, distrust the numbers here before you
 distrust the reasoning. Numbers go stale, arguments do not.
 
@@ -9,7 +9,9 @@ distrust the reasoning. Numbers go stale, arguments do not.
 > written with**, `wl-expcontroller` and `wl_expcontroller/…` paths included, as the PI
 > ruled for dated documents; read `wl_expcontroller/taskd.py` there as `wl_xcon/taskd.py`.
 >
-> **This file describes `main`.** Its newest entry, "What moved on 2026-10-06: b2b-ready, the
+> **This file describes `main`.** Its newest entry, "What moved on 2026-10-07: demo mode
+> designed and parked, and the order changed", sets the next four builds, the default color
+> calibration first. Below it, "What moved on 2026-10-06: b2b-ready, the
 > https page safe to switch on", makes nothing about the https page able to stop `wlx serve`, and
 > ends every stuck sign-in at its lapse, with one sign-in per tab (on `main` by fast-forward once
 > its push run read green). The page stays switched off until XC-151 and XC-152 are done. Below
@@ -353,6 +355,49 @@ figure was one low. In order:
   a path outside the workspace, and no credentials for it.
 
 ---
+
+## What moved on 2026-10-07: demo mode designed and parked, and the order changed
+
+**Resume here (state at 2026-10-07):** `main` is b2b-ready's tip plus this entry (branch
+`demo-mode`, docs only). **Next is the default color calibration and the warnings list**, the
+first of four builds the PI ordered:
+
+1. **A default color calibration, and a warnings list in the console.** The PI's words: "There
+   should be a default color calibration/lut that is used when one isn't specified by the rig
+   file. There should maybe also be a warnings tab in the console that lists all things that are
+   imperfect, such as this, but as acceptable. E.g., for a training session, having a perfect
+   color calibration is a nice to have, not a need to have." Today `check._color_faults` refuses
+   every declared color with no measured calibration (`uncalibrated-color`, blocking), so
+   `visual_search` loads nowhere, and the pre-flight's acknowledgeable unknowns (pump
+   calibration, eye tracker) are the nearest thing to that list. Not designed yet.
+2. **Trials that vary**: conditions, blocks and between-trial procedures declared by the task
+   (XC-207, XC-242). Today a run is one block of one condition (`taskd._plan`), so every trial is
+   the same trial, on a rig as in a demo, and nothing calls `adaptive_detection.next_params`.
+3. **The reference tasks made right**, with the PI's decisions on the science review's findings
+   2, 3 and 9: the staircase's rule (misses never move it; no catch trials), trials that never
+   vary, `visual_search`'s `item_window` and `calibration`'s `cal_hold`. **Ask them then**, in the
+   UI; they are not in the backlog because they are his.
+4. **Demo mode** (XC-013), from its parked spec.
+
+- **Demo mode was designed** with the PI on 2026-10-06, in three parts, each approved ("Looks
+  right"): a simulation session in `wlx taskd` for the test monkey alone, driven by a page's
+  mouse through the rig's own gaze path; the page's simulation screen; and `wlx demo`, which
+  starts a private `wlx taskd` and `wlx serve` and opens the browser on the task. His rulings:
+  both doors in one build, one engine behind them, `REFERENCE` alone, and `wlx demo` on
+  `tasks/eight_hour_bounds.py`.
+- **Two design reviews found 27 problems before any code was written**, kept as written in
+  `docs/superpowers/reviews/`. The science review asked where a person checking a task would be
+  misled; the feasibility review read the spec against the code. Among them: `visual_search`
+  loads nowhere; appearances cannot be set by any run; the page has no recenter and no reward
+  key; a still pointer gives the saccade detector no noise scale, and a one-report flick gives
+  it too few samples; a crashed simulation would resume as a live session; `REFERENCE`'s
+  ten-minute ceiling; a third PUB message kind breaks five readers. The spec's §14 lists every
+  change to make before it goes to the PI.
+- **Learned**: a domain review at the design milestone again found what no self-review would
+  have (the memory "domain reviewers find real bugs" holds). Read a review's claims as claims:
+  the session re-ran the ones that changed the design before acting on them.
+- **Backlog**: XC-242 filed (nothing calls a task's between-trial procedure); XC-013 now waits on
+  the order above.
 
 ## What moved on 2026-10-06: b2b-ready, the https page safe to switch on
 
