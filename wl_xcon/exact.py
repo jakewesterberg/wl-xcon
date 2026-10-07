@@ -10,8 +10,9 @@ frames come from it, and analysis rebuilds any recorded frame from it.
 1. Sample it on a regular `SUPERSAMPLE × SUPERSAMPLE` grid (`viewport.sample_cm`).
 2. For each item that eye sees, bottom layer first: put each sample in the item's local
    frame (true visual angle or center scale), turned by `−orientation`, and find its
-   signed distance `d` to the shape (negative inside; any function with the same zero set
-   and sign will do, since step 3 divides by its gradient).
+   signed distance `d` to the shape (negative inside). Coverage needs only the zero set
+   and the sign, since step 3 divides by the gradient, but edges and outlines read `d`
+   as degrees, so every shape's `d` is a distance in degrees at least to first order.
 3. Weigh the sample by its share inside the shape -- the box filter of one sample's
    width, `clip(0.5 − d / |∇d|, 0, 1)` with `∇d` across the sample grid (`coverage`) --
    times the edge's profile where the edge applies to opacity, times the item's opacity.
@@ -34,12 +35,27 @@ SUPERSAMPLE = 4
 _EVERYWHERE = -1e9
 
 
+def _slope(d, axis):
+    """How fast `d` changes across one sample along `axis`: the larger of the forward and
+    backward one-sided differences. For a straight edge that is the central difference;
+    at a ridge (a line's center, where |d| has a kink) it still reads the true slope."""
+    if d.ndim <= axis or d.shape[axis] < 2:
+        return np.zeros_like(d)
+    diff = np.abs(np.diff(d, axis=axis))
+    first = np.take(diff, [0], axis=axis)
+    last = np.take(diff, [-1], axis=axis)
+    forward = np.concatenate([diff, last], axis=axis)
+    backward = np.concatenate([first, diff], axis=axis)
+    return np.maximum(forward, backward)
+
+
 def coverage(d):
     """Each sample's share of its footprint inside the shape, from the signed distance
-    and its gradient across the sample grid (a sample's own width is one step)."""
-    gy = np.gradient(d, axis=0) if d.shape[0] > 1 else np.zeros_like(d)
-    gx = np.gradient(d, axis=1) if d.ndim > 1 and d.shape[1] > 1 else np.zeros_like(d)
-    g = np.hypot(gx, gy)
+    and its gradient across the sample grid (a sample's own width is one step).
+
+    Exact for features at least one sample wide. Narrower ones draw brighter than their
+    area, by an amount that depends on where they fall."""
+    g = np.hypot(_slope(d, 1), _slope(d, 0))
     soft = np.clip(0.5 - d / np.where(g > 0, g, 1.0), 0.0, 1.0)
     return np.where(g > 0, soft, (d <= 0).astype(float))
 
@@ -57,6 +73,8 @@ def _polygon(u, w, points):
     for i in range(len(pts)):
         a, b = pts[i], pts[i - 1]
         ex, ey = b - a
+        if ex * ex + ey * ey == 0.0:
+            continue  # adds no distance and no crossing
         wx, wy = u - a[0], w - a[1]
         t = np.clip((wx * ex + wy * ey) / (ex * ex + ey * ey), 0.0, 1.0)
         d = np.minimum(d, (wx - ex * t) ** 2 + (wy - ey * t) ** 2)
@@ -70,6 +88,8 @@ def _segments(u, w, points):
     d = np.full(np.shape(u), np.inf)
     for a, b in zip(pts[:-1], pts[1:]):
         ex, ey = b - a
+        if ex * ex + ey * ey == 0.0:
+            continue
         wx, wy = u - a[0], w - a[1]
         t = np.clip((wx * ex + wy * ey) / (ex * ex + ey * ey), 0.0, 1.0)
         d = np.minimum(d, np.hypot(wx - ex * t, wy - ey * t))
@@ -83,7 +103,11 @@ def signed_distance(shape, u, w):
         return np.hypot(u, w) - shape.size / 2
     if isinstance(shape, look.Ellipse):
         a, b = shape.width / 2, shape.height / 2
-        return (np.hypot(u / a, w / b) - 1.0) * min(a, b)
+        # First-order distance: (k - 1) over the gradient of k, k = hypot(u/a, w/b).
+        k = np.hypot(u / a, w / b)
+        grad = np.hypot(u / a ** 2, w / b ** 2)
+        safe = np.where(grad > 0, grad, 1.0)
+        return np.where(grad > 0, (k - 1.0) * k / safe, -min(a, b))
     if isinstance(shape, look.Rect):
         return _rect(u, w, shape.width / 2, shape.height / 2)
     if isinstance(shape, look.Cross):

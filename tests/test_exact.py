@@ -137,3 +137,38 @@ def test_an_empty_screen_is_its_background():
                       background_right=(0.0, 0.0, 0.0), items=(), frame=0, frame_period=1 / 240)
     vp = viewport.viewports(RIG, DIRECT, pixels=(4, 4))[0]
     assert exact.draw(s, vp).tolist() == [[[1.0, 2.0, 3.0]] * 4] * 4
+
+
+def test_an_outline_on_an_ellipse_is_as_wide_along_the_major_axis_as_anywhere():
+    # Pixels chosen from the preview's pitch: the panel is 384 px across at about 0.15 deg
+    # per pixel on axis. x = 2.0 deg is the boundary, so the band spans 1.8 to 2.2 deg
+    # (about 2.6 pixels), and the pixel containing 2.0 deg is wholly inside it; x = 2.4 deg
+    # is 0.2 deg past the band's outer edge, over a pixel away from both.
+    looks = look.Look(shape=look.Ellipse(width=4.0, height=1.0), fill=look.Flat(color=Gray(10.0)),
+                      outline=look.Outline(width=0.4, color=Gray(40.0)))
+    image, vp = _draw([Stimulus("e", at=(0.0, 0.0), looks=looks)])
+    assert image[_pixel(vp, 2.0, 0.0)][1] == pytest.approx(40.0)
+    assert image[_pixel(vp, 2.4, 0.0)][1] == pytest.approx(0.0)
+
+
+def test_a_closed_triangle_has_a_finite_distance():
+    closed = look.Vertices(points=((0.0, 1.0), (-1.0, -1.0), (1.0, -1.0), (0.0, 1.0)))
+    d = exact.signed_distance(closed, np.array([0.0, 0.0]), np.array([0.0, 1.5]))
+    assert np.isfinite(d).all() and d[0] < 0 < d[1]
+
+
+def test_a_path_with_a_doubled_point_has_a_finite_distance():
+    path = look.Path(points=((-1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (1.0, 0.0)), width=0.2)
+    d = exact.signed_distance(path, np.array([0.0, 0.0]), np.array([0.09, 0.11]))
+    assert np.isfinite(d).all() and d[0] < 0 < d[1]
+
+
+@pytest.mark.parametrize("k", range(8))
+def test_a_line_just_over_a_sample_wide_keeps_its_light_at_every_phase(k):
+    probe = viewport.viewports(RIG, DIRECT, pixels=RIG.pixels)[0]
+    s = math.degrees(math.atan(probe.pitch_cm[1] / exact.SUPERSAMPLE / probe.distance_cm))
+    image, vp = _draw([Stimulus("b", at=(0.0, k * s / 8), looks=Bar(length=4.0, width=1.2 * s, color=Gray(40.0)))],
+                      pixels=RIG.pixels, region=(1800, 960, 2040, 1200))
+    px = math.degrees(math.atan(vp.pitch_cm[0] / vp.distance_cm))
+    py = math.degrees(math.atan(vp.pitch_cm[1] / vp.distance_cm))
+    assert image[..., 1].sum() == pytest.approx(40.0 * 4.0 * 1.2 * s / (px * py), rel=0.02)
