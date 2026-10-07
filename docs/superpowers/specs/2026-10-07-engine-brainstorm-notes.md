@@ -166,3 +166,23 @@ nothing is computed inside a frame.
 four ways to overlap, positions from four references, any numeric property drivable live,
 explicit contrast conventions, between-trial image procedures and generators off the rig, and
 reviewed extensions with a person-readable report.
+
+## 2. Where
+
+Settled before the element (S4 §2-3, the direct-view spec, the optics drawing): positions in
+cyclopean degrees, never pixels; direct view one image at Z = 50 cm; the stereoscope two
+halves of one framebuffer, each eye's path measured, a software vergence offset, a ±12° mask;
+disparity as equal and opposite horizontal offsets; field limits checked at load.
+
+**Batch 1** (asked 2026-10-07):
+
+- **Sizes and patterns away from the center** — "Declared per task": either true visual angle
+  (every stimulus subtends its declared degrees wherever it sits; a grating keeps its cycles per
+  degree) or the screen center's scale; the record says which. (At 30° out in direct view a
+  degree covers 15-33% more screen than at the center.)
+- **Angles** — "Math convention": 0° points right, counter-clockwise positive, +y up, for
+  positions, motion directions and orientations alike (0° = horizontal bars); a grating's
+  orientation names its bars, its drift direction is a separate angle.
+- **Disparity sign** — "Near is negative": crossed negative, uncrossed positive, in degrees.
+- **(0°, 0°)** — "Straight ahead": the rig file records where straight ahead falls on the screen
+  (default its center).
