@@ -186,3 +186,15 @@ disparity as equal and opposite horizontal offsets; field limits checked at load
 - **Disparity sign** — "Near is negative": crossed negative, uncrossed positive, in degrees.
 - **(0°, 0°)** — "Straight ahead": the rig file records where straight ahead falls on the screen
   (default its center).
+
+**Batch 2** (asked 2026-10-07):
+
+- **Default away from the center** — "True visual angle", unless a task declares otherwise.
+- **Where the eye is, for a gaze-anchored stimulus** — "selectable between the three options":
+  the newest sample, a smoothed one, or one predicted to the frame's appearance, declared by the
+  task; each frame's sample age recorded.
+- **Gaze window shapes** — "Any shape": circles, ellipses, rectangles, polygons, or a stimulus's
+  own outline grown by a margin.
+- **Head-free chaired sessions** — "Nominal, recorded": nominal head position for positions and
+  windows; the record and the warnings list say the head was free; a task may declare it needs a
+  fixed head and is then refused in chaired sessions.
