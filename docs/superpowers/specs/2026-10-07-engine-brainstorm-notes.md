@@ -198,3 +198,16 @@ disparity as equal and opposite horizontal offsets; field limits checked at load
 - **Head-free chaired sessions** — "Nominal, recorded": nominal head position for positions and
   windows; the record and the warnings list say the head was free; a task may declare it needs a
   fixed head and is then refused in chaired sessions.
+
+**Batch 3** (asked 2026-10-07; all as recommended):
+
+- **A gaze-anchored stimulus when gaze is lost** — "Declared per task": hold its last position,
+  hide, or freeze the trial; every lost frame marked in the record.
+- **During a saccade** — "Declared per task": follow every frame, or update only when a saccade
+  lands (inside saccadic suppression).
+- **Per-eye positions on the stereoscope** — "Free per-eye positions": a stimulus may sit at a
+  different position in each eye (rivalry in non-corresponding places, nonius lines, fusion
+  tests); disparity stays the shorthand for the common case.
+- **Manual RF mapping's view** — "A live schematic": a drawing of the animal's screen in the
+  console with the fixation point, the stimulus, the gaze dot and markers the operator drops,
+  before the full replica (V11) exists.
