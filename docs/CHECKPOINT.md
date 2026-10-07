@@ -401,6 +401,9 @@ had ordered just before:
   the session re-ran the ones that changed the design before acting on them.
 - **Backlog**: XC-242 filed (nothing calls a task's between-trial procedure); XC-013 now waits on
   the order above.
+- **wl.works deployed its 16a-1b** on 2026-10-07 (its commit `637007a7`, as its session reported):
+  the 120 s renewal grace and the stricter rig-page addresses are live. XC-225 closed; XC-241 no
+  longer waits; XC-240 stands (our parser is still the looser one).
 
 ## What moved on 2026-10-06: b2b-ready, the https page safe to switch on
 

@@ -236,6 +236,13 @@ credential lifecycle.
 >   serves its page at the root of the address only, so a sign-in returning to that path
 >   would find no page. wl.works might refuse one too, so that the two cannot disagree.
 
+> **DEPLOYED 2026-10-07** (wl.works production, about 09:12 CEST, wl-works commit `637007a7`, its
+> stage 16a-1b; told to this repository by its session that day, not checked here): the renewal
+> grace is 120 s (`refreshTokenReuseInterval: 120` on `mcp()`), and each `RIG_PAGES` entry must be
+> the page's origin alone, with at most one trailing "/", a path, a query, an upper-case host or a
+> spelled-out `:443` refused when wl.works starts. `RIG_PAGES` is still unset there: adding a rig is
+> the step after XC-151 and XC-152. XC-225 closed; XC-241 no longer waits.
+
 > **ANSWERED 2026-10-06: yes to both** (the PI's rulings in wl-works, its rig sign-in spec §11
 > at `7ddf97be`, told to this repository by its session that day). Both are built as the first
 > task of wl-works' 16a-1b, which was not yet planned or deployed that day. What follows is
