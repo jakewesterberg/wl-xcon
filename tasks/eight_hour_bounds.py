@@ -16,7 +16,8 @@ the one welfare interaction an operator is asked to perform. Review found that; 
 closes it.
 
     wlx run tasks/fixation_detection.py --bounds tasks/eight_hour_bounds.py \\
-        --rig tests/_rig.py --view direct --allocation tasks/allocation.py \\
+        --rig tests/_rig.py --view direct --kind training --accept-warnings \\
+        --allocation tasks/allocation.py \\
         --root /tmp/dry-run --session-id 2027-01-14_01 --subject REFERENCE \\
         --out-of-cage-at YYYY-MM-DDTHH:MM --delivered-today 0 --trials 2
 

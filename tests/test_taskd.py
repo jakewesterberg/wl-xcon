@@ -36,7 +36,7 @@ from wl_xcon.cli import _load_trial
 from wl_xcon.codes import BLOCK_END
 from wl_xcon.dio import Simulated as Card
 from wl_xcon.encode import BLOCK_START, UNALLOCATED_TASK_CODE, words_for_block
-from wl_xcon.findings import NOT_RECORDING, SESSION_KINDS
+from wl_xcon.findings import NOT_RECORDING, SESSION_KINDS, Finding
 from wl_xcon.link import (
     CONTROL_HISTORY,
     RECENT_OUTCOMES,
@@ -2701,6 +2701,22 @@ def test_a_recording_session_refuses_a_task_its_kind_does_not_accept(tmp_path):
 
     with pytest.raises(SystemExit, match="color-on-default"):
         made.run()
+
+
+def test_a_run_refused_by_its_backstop_says_the_findings_through_the_terminal_guard(
+    tmp_path, monkeypatch
+):
+    """The backstop's refusal quotes the task, as `wlx run`'s does: through `_printable`."""
+    made = _sessions.session(tmp_path)
+    made.open()
+    monkeypatch.setattr("wl_xcon.taskd.check",
+                        lambda *a, **k: [Finding("E1", "forged\x1b[2J\nSTOPPED: forged")])
+
+    with pytest.raises(SystemExit) as refused:
+        made.run()
+
+    assert "\n  E1: forged\ufffd[2J\ufffdSTOPPED: forged" in str(refused.value)
+    assert "\x1b" not in str(refused.value)
 
 
 def test_a_session_with_no_calibration_runs_nothing(tmp_path):

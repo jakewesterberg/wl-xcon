@@ -48,7 +48,7 @@ from wl_xcon import link as _link
 from wl_xcon.actor import Actor
 from wl_xcon.bounds import Bounds, Exceeded, _finite
 from wl_xcon.check import check
-from wl_xcon.cli import _clock, _load_allocation, _load_trial, _shown
+from wl_xcon.cli import _clock, _load_allocation, _load_trial, _printable, _shown
 from wl_xcon.codes import BLOCK_END, RUN_END_MARKER, TRIAL_END, TRIAL_START, Allocation
 from wl_xcon.dio import Absent as NoCard
 from wl_xcon.encode import (
@@ -2077,7 +2077,7 @@ class Session:
         if blocking:
             raise SystemExit(
                 "task refused, session not started:\n"
-                + "\n".join(f"  {f.code}: {f.detail}" for f in blocking)
+                + "\n".join(f"  {_printable(f.code)}: {_printable(f.detail)}" for f in blocking)
             )
         self.welfare.preflight(self.wall_now())
         # **What the start accepted, written as the run starts** (engine spec §19.3; the

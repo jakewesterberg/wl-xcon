@@ -223,6 +223,38 @@ def test_wlx_check_refuses_a_calibration_record_that_will_not_load(tmp_path):
     assert "not JSON" in str(refused.value)
 
 
+def _dated_after_today(tmp_path) -> str:
+    """A rig naming a calibration record measured two days from now: its date or the host's
+    clock is wrong, and no session kind accepts it (call 20)."""
+    record = tmp_path / "cal.json"
+    record.write_text(json.dumps({
+        "id": "rig1", "measured_on": (datetime.now() + timedelta(days=2)).date().isoformat(),
+        "observer": OBSERVER, "primaries": PRIMARIES, "background": BACKGROUND,
+        "transfer": {c: [[0.0, 0.0], [1.0, 1.0]] for c in ("red", "green", "blue")},
+    }))
+    return str(naming(tmp_path / "rig", str(record)))
+
+
+def test_wlx_check_for_a_kind_lists_the_calibrations_own_warnings(capsys):
+    assert main(["check", GOOD, "--rig", RIG_FILE, "--allocation", ALLOCATION, "--view", "direct",
+                 "--kind", "training"]) == 0
+
+    out = capsys.readouterr().out
+    assert "warning  default calibration" in out and "(accepted in training, piloting, recording)" in out
+    assert "2 warning(s), each accepted only in the session kinds it names: the task loads" in out
+
+
+@pytest.mark.parametrize("kind", SESSION_KINDS)
+def test_wlx_check_for_a_kind_refuses_a_calibration_dated_after_today(kind, tmp_path, capsys):
+    """In every kind, as `wlx run` refuses it (call 20)."""
+    assert main(["check", GOOD, "--rig", _dated_after_today(tmp_path), "--allocation", ALLOCATION,
+                 "--view", "direct", "--kind", kind]) == 1
+
+    out = capsys.readouterr().out
+    assert "refused  calibration age" in out and "(accepted in no session kind)" in out
+    assert f"task refused in a {kind} session" in out
+
+
 def test_wlx_check_says_a_findings_sentence_through_the_terminal_guard(monkeypatch, capsys):
     """A finding's sentence quotes the task it was found in, so it reaches the terminal as
     `render` sends wire text: through `_printable`."""
@@ -2249,14 +2281,8 @@ def test_wlx_run_lists_its_warnings_and_starts_only_once_they_are_accepted(tmp_p
 def test_wlx_run_refuses_a_calibration_dated_after_today_before_anything_is_recorded(tmp_path):
     """Call 20: the one session-level warning no kind accepts, refused with or without the
     flag, before anything is recorded."""
-    record = tmp_path / "cal.json"
-    record.write_text(json.dumps({
-        "id": "rig1", "measured_on": (datetime.now() + timedelta(days=2)).date().isoformat(),
-        "observer": OBSERVER, "primaries": PRIMARIES, "background": BACKGROUND,
-        "transfer": {c: [[0.0, 0.0], [1.0, 1.0]] for c in ("red", "green", "blue")},
-    }))
     argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm())
-    argv[argv.index(RIG_FILE)] = str(naming(tmp_path / "rig", str(record)))
+    argv[argv.index(RIG_FILE)] = _dated_after_today(tmp_path)
 
     with pytest.raises(SystemExit) as refused:
         main(argv)
@@ -2275,12 +2301,39 @@ def test_wlx_run_records_the_warnings_its_flag_accepted(tmp_path):
         ("contrast-on-default", "--accept-warnings", {"kind": "box", "name": "jake"})]
 
 
+def test_wlx_run_accepts_its_warnings_before_the_departure_is_marked(tmp_path, monkeypatch):
+    """The plan review's minor: what the flag accepted is written first, inside the `try` whose
+    `finally` ends the session. A write that fails there leaves no departure on record, so no
+    return is owed for an animal this session never marked out of its cage."""
+    def full(*args, **kwargs):
+        raise OSError("no space left on the device")
+
+    monkeypatch.setattr("wl_xcon.record.SessionRecord.warning", full)
+
+    with pytest.raises(OSError, match="no space left"):
+        main(_run_args(tmp_path, "--out-of-cage-at", _hhmm()))
+
+    assert _kinds(tmp_path) == ["session opened", "session ended"]
+
+
+def test_wlx_run_says_a_refused_tasks_findings_through_the_terminal_guard(tmp_path, monkeypatch):
+    """The refusal before anything is recorded quotes the task too."""
+    monkeypatch.setattr(cli, "check", lambda *a, **k: [
+        Finding("bad\x9bcode", "forged\x1b[2J\nSTOPPED: forged")])
+
+    with pytest.raises(SystemExit) as refused:
+        main(_run_args(tmp_path, "--out-of-cage-at", _hhmm()))
+
+    assert "\n  bad\ufffdcode: forged\ufffd[2J\ufffdSTOPPED: forged" in str(refused.value)
+    assert "\x1b" not in str(refused.value) and "\x9b" not in str(refused.value)
+
+
 def test_wlx_run_says_its_warnings_through_the_terminal_guard(tmp_path, monkeypatch):
     """Its refusal quotes the task's warnings, so it reaches the terminal through
     `_printable`, as `wlx check`'s lines do."""
     monkeypatch.setattr(cli, "check", lambda *a, **k: [Finding(
         "contrast-on-default", "forged\x1b[2J", blocking=False, accepted_in=("training",))])
-    argv =[a for a in _run_args(tmp_path, "--out-of-cage-at", _hhmm()) if a != "--accept-warnings"]
+    argv = [a for a in _run_args(tmp_path, "--out-of-cage-at", _hhmm()) if a != "--accept-warnings"]
 
     with pytest.raises(SystemExit) as refused:
         main(argv)

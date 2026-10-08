@@ -1222,8 +1222,10 @@ def main(argv: list[str] | None = None) -> int:
         dest="session_kind",
         choices=SESSION_KINDS,
         default=None,
-        help="check as a session of this kind would: a warning it does not accept is refused. "
-        "Omitted, each warning is listed with the session kinds it is accepted in",
+        help="check as a session of this kind would: a warning it does not accept is refused, "
+        "the rig's calibration's own among them (a calibration dated after today is refused in "
+        "every kind, as wlx run refuses it). Omitted, each of the task's warnings is listed "
+        "with the session kinds it is accepted in",
     )
 
     reviewer = sub.add_parser(
@@ -1275,8 +1277,9 @@ def main(argv: list[str] | None = None) -> int:
     runner.add_argument(
         "--accept-warnings",
         action="store_true",
-        help="accept every warning this session lists, recorded as accepted by this flag with "
-        "--as's name, as --confirm-out-of-cage records its confirmation (engine spec §19.3). "
+        help="accept every warning this session lists, recorded as accepted by this flag under "
+        "--as's name, if given, as --confirm-out-of-cage records its confirmation (engine spec "
+        "§19.3). "
         "Refused without it while the list is not empty; and a warning the session's kind does "
         "not accept is refused with it",
     )
@@ -1349,7 +1352,8 @@ def main(argv: list[str] | None = None) -> int:
         help="the experimenter amending the departure time. Required by "
         "--amend-out-of-cage-to, for the reason `wlx console --as` is required by a "
         "write: an anonymous change to the clock a session is bounded by is worse "
-        "than none",
+        "than none. It also names who accepted the session's warnings with "
+        "--accept-warnings; omitted, they are recorded with no name",
     )
     runner.add_argument(
         "--deployment",
@@ -1632,7 +1636,7 @@ def main(argv: list[str] | None = None) -> int:
         if refusals:
             raise SystemExit(
                 "task refused, session not started, nothing recorded:\n"
-                + "\n".join(f"  {f.code}: {f.detail}" for f in refusals)
+                + "\n".join(f"  {_printable(f.code)}: {_printable(f.detail)}" for f in refusals)
             )
 
         # **The warnings this session runs with** (engine spec §19.2-19.3): the calibration's,
@@ -1657,7 +1661,7 @@ def main(argv: list[str] | None = None) -> int:
                 "session not started, nothing recorded: its warnings are "
                 + _printable(warnlist.sentence(warnings))
                 + ". Pass --accept-warnings to accept them for this session; they are recorded "
-                "with --as's name"
+                "under --as's name, if given"
             )
 
         # Once the check passes, one line, before the `--set` parsing, the link and
@@ -2117,7 +2121,21 @@ def main(argv: list[str] | None = None) -> int:
         for finding in check(trial, allocation, geometry=geometry, calibration=calibration):
             if finding not in findings:
                 findings.append(finding)
+    # **With a kind, the calibration's own warnings first**, as `wlx run` lists them (the
+    # engine B plan, call 20: one dated after today is accepted in no kind). Without one there
+    # is no session to judge them for. The deployment's are `wlx run`'s: a check names none.
+    rig_warnings = (
+        [] if args.session_kind is None
+        else warnlist.of_calibration(calibration, date.fromtimestamp(time.time()))
+    )
+    outside = (
+        [] if args.session_kind is None else warnlist.refused(rig_warnings, args.session_kind)
+    )
     # Each sentence through `_printable`: a finding quotes the task it was found in.
+    for entry in rig_warnings:
+        marker = "refused " if entry in outside else "warning "
+        print(f"{marker} {_printable(entry.code):28} {_printable(entry.detail)} "
+              f"(accepted in {', '.join(entry.accepted_in) or 'no session kind'})")
     for finding in findings:
         marker = (
             "refused " if finding.refuses(args.session_kind)
@@ -2127,14 +2145,14 @@ def main(argv: list[str] | None = None) -> int:
         kinds = f" (accepted in {', '.join(finding.accepted_in)})" if finding.is_warning else ""
         print(f"{marker} {_printable(finding.code):28} {_printable(finding.detail)}{kinds}")
 
-    refusing = [f for f in findings if f.refuses(args.session_kind)]
+    refusing = outside + [f for f in findings if f.refuses(args.session_kind)]
     if refusing:
         print(
             f"\n{len(refusing)} blocking finding(s): task refused"
             + ("" if args.session_kind is None else f" in a {args.session_kind} session")
         )
         return 1
-    warned = [f for f in findings if f.is_warning]
+    warned = rig_warnings + [f for f in findings if f.is_warning]
     notes = [f for f in findings if not f.is_warning]
     if warned:
         # The engine B plan, call 29.
