@@ -383,7 +383,7 @@ design). Three branches wait for the PI, each pushed:
 |---|---|---|---|
 | `a1-followups` (this file's branch) | `8bbe0f2`, then this entry | the defects A1's reviews filed, fixed | `check.py`, `screen.py`, `exact.py`, `review.py`, `photometry.py`, tests, backlog, this file |
 | `spike-s` | `996323b` | spike S's report, measurements and throwaway Rust source | `tools/spike_vulkan/`, `docs/measurements/wh-dws0/2026-10-07-vulkan-spike/`, ADR-0004 (two spike-only rows), spec §10.5 (a dated note), `.gitignore` |
-| `a2-prep` | `d2e7a5a` | build A2's color research; a cone citation corrected | `docs/research/2026-10-08-engine-a2-color-research.md`, spec §7.9 and the brainstorm notes (dated corrections) |
+| `a2-prep` | `e132994` | build A2's color research, checked independently and corrected; a cone citation corrected | `docs/research/2026-10-08-engine-a2-color-research.md`, spec §7.9 and the brainstorm notes (dated corrections) |
 
 None of them touches another's files except the engine spec, in different sections. Build B's plan is
 a **draft, not committed**: `.superpowers/drafts/2026-10-08-engine-b-plan.md` (git-ignored; `git clean
@@ -424,14 +424,18 @@ welfare items.
 - **A2's color research** (`a2-prep`): four ways to read a DKL number, XYZ→LMS transforms for the sRGB
   default with computed errors, the cone tables' licenses (CIE: CC BY-SA 4.0; cvrl.org states none), and
   five questions for the PI. "Virtually identical" is Schnapf, Kraft, Nunn & Baylor (1988), not Baylor,
-  Nunn & Schnapf (1987); corrected with dated notes.
+  Nunn & Schnapf (1987); corrected with dated notes. An independent check of its 79 claims (66 confirmed,
+  5 wrong, 7 unverified) corrected the note in `e132994`: its question on the matrix for cone colors on
+  the default is now a toss-up with the tie-breaker named, and its leak figures say they were computed
+  on two synthetic displays, not the lab's panel.
 - **Build B's plan draft:** 16 tasks; the PI's five questions (sRGB white 80 cd/m², which would lower the
   0-100 cd/m² luminance bound to 0-80; which tasks may record on the default; the training variant's
   red and green; the calibration file's format, an ADR; whether a session's kind may change between
   runs); four welfare items. Its review found that a calibration file that would not load stopped `wlx
   taskd` from starting — the only path that records a stranded animal's return — and the draft now
   never lets a calibration problem stop `wlx taskd` or refuse an open; each run's pre-flight fails
-  instead. Its backlog IDs are provisional (XC-276 to XC-278 at this tip).
+  instead. Its backlog IDs are provisional (XC-276 to XC-278 at this tip), and its code references
+  were refreshed against `66c61aa`.
 
 **Learned, and costly to rediscover:**
 - A finished subagent's test run can outlive it. Check `ps` for a stray `pytest` before dispatching
@@ -442,6 +446,12 @@ welfare items.
 - `gh` job logs can 404 (`BlobNotFound`); the job's metadata and annotations still read. A pytest job
   that hangs (85 minutes on 3.12 once) is cancelled and re-run, then read again.
 - macOS has no `timeout`.
+- **A worktree's `.superpowers/venv` imports `wl_xcon` from the main checkout** unless the current
+  directory or `PYTHONPATH` puts the worktree first, and `python -I` drops both; the shell's cwd also
+  resets to the main checkout between calls. A probe or a "prove it can fail" break run from the wrong
+  directory tests `main`. Run `cd <worktree> && …` in one call, and check with
+  `python -c "import wl_xcon; print(wl_xcon.__file__)"`. Two probes of build B's draft had tested `main`;
+  the ones its tasks rest on were re-verified at `66c61aa`.
 
 **Next:** the PI's morning: run the timing test; answer A2's five questions and B's five; approve B's
 four welfare items; rule on merging `a1-followups`, `spike-s` and `a2-prep`; XC-262 (a drifting
