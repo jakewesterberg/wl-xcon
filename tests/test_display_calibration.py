@@ -14,6 +14,7 @@ from wl_xcon.photometry import (
     SRGB,
     SRGB_TRANSFER,
     SRGB_WHITE_CD_M2,
+    RECORD_LIMIT,
     Transfer,
     read_calibration,
     unrealizable,
@@ -45,6 +46,9 @@ def test_the_default_is_the_srgb_standard_and_says_so():
     assert SRGB.age_days(date(2027, 1, 20)) is None
     assert [(p.x, p.y) for p in (SRGB.red, SRGB.green, SRGB.blue)] == [
         (0.64, 0.33), (0.30, 0.60), (0.15, 0.06)]
+    # Solved independently, in exact rational arithmetic (2026-10-08).
+    assert (SRGB.red.Y, SRGB.green.Y, SRGB.blue.Y) == pytest.approx(
+        (17.011120469720822, 57.213494301420475, 5.775385228858696), rel=1e-12)
     assert SRGB.max_cone_contrast is None
 
 
@@ -55,12 +59,12 @@ def test_full_drive_on_the_default_is_the_standards_white_and_no_brighter():
     assert unrealizable(xyY(*D65, SRGB_WHITE_CD_M2 + 0.01), SRGB) is not None
 
 
-
 def test_no_dkl_color_is_realizable_on_a_calibration_that_states_no_cone_contrast_limit():
     """The default states none, so even a faint DKL color is refused against it, by name,
     until build A2 converts DKL through cone fundamentals."""
     assert "states no cone-contrast limit" in unrealizable(DKL(l_m=0.01), SRGB)
     assert unrealizable(DKL(l_m=0.01), measured()) is None
+
 
 def test_the_default_transfer_is_the_srgb_curve_at_ten_bits():
     assert SRGB.transfer == (SRGB_TRANSFER,) * 3
@@ -108,6 +112,30 @@ def test_a_calibration_holds_three_transfers():
         measured(transfer=(LINEAR, LINEAR))
 
 
+@pytest.mark.parametrize("over, said", [
+    ({"red": xyY(0.68, 0.0, 45.0)}, "red primary"),
+    ({"green": xyY(-0.01, 0.69, 140.0)}, "green primary"),
+    ({"blue": xyY(0.6, 0.5, 12.0)}, "blue primary"),
+    ({"red": xyY(0.68, 0.31, 0.0)}, "red primary"),
+    ({"green": xyY(0.26, float("nan"), 140.0)}, "green primary"),
+    ({"background": xyY(0.3127, 0.0, 20.0)}, "background"),
+    ({"background": xyY(0.3127, 0.329, -1.0)}, "background"),
+    # On the line from the red primary to the blue one.
+    ({"green": xyY(0.41, 0.18, 140.0)}, "do not span a gamut"),
+])
+def test_a_calibration_whose_lights_no_display_makes_is_refused_naming_which(over, said):
+    with pytest.raises(ValueError, match=said):
+        measured(**over)
+
+
+def test_a_black_background_is_a_light_a_display_makes():
+    assert measured(background=xyY(0.3127, 0.329, 0.0)).background.Y == 0.0
+
+
+def test_a_color_whose_chromaticity_y_is_not_positive_is_refused_by_name():
+    assert "chromaticity y must be positive" in unrealizable(xyY(0.3, 0.0, 10.0), SRGB)
+
+
 def test_a_record_reads_back_as_the_calibration_it_describes(tmp_path):
     panel = read_calibration(_write(tmp_path, _record()))
 
@@ -117,6 +145,7 @@ def test_a_record_reads_back_as_the_calibration_it_describes(tmp_path):
     assert panel.transfer == (Transfer(levels=(0.0, 0.5, 1.0), fractions=(0.0, 0.2, 1.0)),) * 3
     assert panel.max_cone_contrast is None
     assert read_calibration(_write(tmp_path, _record(max_cone_contrast=0.2))).max_cone_contrast == 0.2
+    assert read_calibration(_write(tmp_path, _record(id="rig 1 (left)"))).id == "rig 1 (left)"
 
 
 @pytest.mark.parametrize("change, said", [
@@ -132,6 +161,11 @@ def test_a_record_reads_back_as_the_calibration_it_describes(tmp_path):
     ({"max_cone_contrast": -1}, "positive"),
     # Too large for a float: `math.isfinite` raises `OverflowError` on it, not a ValueError.
     ({"background": [0.3127, 0.329, 10**400]}, "three numbers"),
+    ({"primaries": {**PRIMARIES, "red": [0.68, 0.0, 45.0]}}, "red primary"),
+    ({"id": " rig1"}, "begins or ends with whitespace"),
+    ({"id": "rig1\n"}, "begins or ends with whitespace"),
+    ({"id": "rig\x1b[2Jone"}, "does not print"),
+    ({"id": "rig\u202eone"}, "does not print"),
 ])
 def test_a_record_that_is_not_one_is_refused_naming_what_is_wrong(tmp_path, change, said):
     with pytest.raises(ValueError, match=said):
@@ -147,10 +181,21 @@ def test_a_record_missing_a_field_is_refused_naming_it(tmp_path, field):
         read_calibration(_write(tmp_path, record))
 
 
-@pytest.mark.parametrize("text, said", [("{", "not JSON"), ("[1, 2]", "one JSON object")])
+@pytest.mark.parametrize("text, said", [
+    ("{", "not JSON"),
+    ("[1, 2]", "one JSON object"),
+    pytest.param("[" * 100_000 + "]" * 100_000, "not JSON", id="nested-100000-deep"),
+    ('{"id": "a", "id": "b"}', "'id' twice"),
+    ('{"primaries": {"red": [0.6, 0.3, 40.0], "red": [0.6, 0.3, 40.0]}}', "'red' twice"),
+])
 def test_a_file_that_is_no_record_is_refused(tmp_path, text, said):
     path = tmp_path / "cal.json"
     path.write_text(text)
 
     with pytest.raises(ValueError, match=said):
         read_calibration(path)
+
+
+def test_a_record_larger_than_a_mebibyte_is_refused(tmp_path):
+    with pytest.raises(ValueError, match="larger than 1048576 bytes"):
+        read_calibration(_write(tmp_path, _record(observer="x" * RECORD_LIMIT)))

@@ -222,6 +222,31 @@ class Calibration:
             and all(isinstance(t, Transfer) for t in self.transfer)
         ):
             raise ValueError("a calibration holds three transfers: red, green and blue")
+        # Lights a display can make: a primary at full drive gives light, the background may be
+        # black (spec §7.5), and x + y may pass 1 by `TOLERANCE`, for rounding alone.
+        for what, light in (
+            ("red primary", self.red),
+            ("green primary", self.green),
+            ("blue primary", self.blue),
+            ("background", self.background),
+        ):
+            least = "0 or above" if what == "background" else "above 0"
+            if not (
+                isinstance(light, xyY)
+                and all(_finite_number(v) for v in (light.x, light.y, light.Y))
+                and light.x >= 0.0
+                and light.y > 0.0
+                and light.x + light.y <= 1.0 + TOLERANCE
+                and (light.Y >= 0.0 if what == "background" else light.Y > 0.0)
+            ):
+                raise ValueError(
+                    f"the {what} is {light}, a light no display makes: its x is 0 or above, its "
+                    f"y above 0, x + y at most 1 and its luminance {least}, each a finite number"
+                )
+        if abs(_det3([[p.x, p.y, 1.0] for p in (self.red, self.green, self.blue)])) < 1e-12:
+            raise ValueError(
+                "the three primaries lie on one line in xy, so they do not span a gamut"
+            )
         if self.standard:
             return
         if not (isinstance(self.measured_on, str) and _ISO_DAY.fullmatch(self.measured_on)):
@@ -334,16 +359,28 @@ _CHANNELS = ("red", "green", "blue")
 #: open sends back (`link.NOTE_LIMIT`, Call 25), so it is bounded where it is read.
 ID_LIMIT = 64
 
+#: The largest record file read, in bytes: 1 MiB. A record holding the sRGB table at all 1024
+#: levels on each channel is 132,160 bytes (224,472 indented; computed 2026-10-08), and the
+#: bound keeps a mistaken path, a pipe or a device from being read without end.
+RECORD_LIMIT = 1024 * 1024
+
 
 def read_calibration(path) -> Calibration:
     """A measured calibration from its record (engine spec §12.6: "records committed per rig
     under docs/measurements/<rig>/, each with an id"). **Fills in nothing**: a missing field,
-    a field a record does not have, or a value that is not what its field holds raises
-    `ValueError` naming it; a file that cannot be read raises `OSError`. Reading it runs no
-    code, unlike the rig's and the animal's Python files."""
+    a field a record does not have or gives twice, or a value that is not what its field holds
+    raises `ValueError` naming it, as does a file over `RECORD_LIMIT` or nested too deep to
+    parse; a file that cannot be read raises `OSError`. Reading it runs no code, unlike the
+    rig's and the animal's Python files."""
+    with Path(path).open("rb") as file:
+        raw = file.read(RECORD_LIMIT + 1)
+    if len(raw) > RECORD_LIMIT:
+        raise ValueError(
+            f"it is larger than {RECORD_LIMIT} bytes (1 MiB), which no calibration record needs"
+        )
     try:
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
-    except json.JSONDecodeError as error:
+        data = json.loads(raw.decode("utf-8"), object_pairs_hook=_once_each)
+    except (json.JSONDecodeError, RecursionError) as error:
         raise ValueError(f"it is not JSON ({error})") from error
     if not isinstance(data, dict):
         raise ValueError("a calibration record is one JSON object")
@@ -360,6 +397,12 @@ def read_calibration(path) -> Calibration:
         raise ValueError("its id is empty")
     if len(data["id"]) > ID_LIMIT:
         raise ValueError(f"its id is at most {ID_LIMIT} characters, and this one is {len(data['id'])}")
+    # The terminal, the page and every frame quote the id: a control character or a stray
+    # space there garbles or misleads.
+    if data["id"] != data["id"].strip():
+        raise ValueError(f"its id {data['id']!r} begins or ends with whitespace")
+    if not data["id"].isprintable():
+        raise ValueError(f"its id {data['id']!r} holds a character that does not print")
     primaries = _channels(data["primaries"], "primaries")
     transfer = _channels(data["transfer"], "transfer")
     limit = data.get("max_cone_contrast")
@@ -376,6 +419,17 @@ def read_calibration(path) -> Calibration:
         id=data["id"],
         max_cone_contrast=None if limit is None else float(limit),
     )
+
+
+def _once_each(pairs: list) -> dict:
+    """A JSON object whose every name is given once, at every level: otherwise the last of two
+    `"id"`s or two `"red"`s would silently win."""
+    named: dict = {}
+    for name, value in pairs:
+        if name in named:
+            raise ValueError(f"it gives {name!r} twice, and a record gives each name once")
+        named[name] = value
+    return named
 
 
 def _channels(value: object, what: str) -> dict:
