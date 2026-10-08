@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from datetime import date
 
 import pytest
 
@@ -31,9 +32,10 @@ from _frames import ENDPOINT, frame, idle  # noqa: E402
 from _issuer import Issuer  # noqa: E402
 from _ports import endpoints as free_endpoints  # noqa: E402
 from _tls import client_context, material  # noqa: E402
-from wl_xcon import signin, web  # noqa: E402
+from wl_xcon import signin, warnlist, web  # noqa: E402
 from wl_xcon.findings import SESSION_KINDS  # noqa: E402
 from wl_xcon.link import ManualReward, OpenSession, Pause, WarningRow  # noqa: E402
+from wl_xcon.photometry import SRGB  # noqa: E402
 from wl_xcon.warnlist import HEAD_FREE  # noqa: E402
 from wl_xcon.serve import Hub, Remote, _PageServer, make_handler, tls_context  # noqa: E402
 
@@ -1098,10 +1100,16 @@ def test_a_member_opens_a_session_for_a_kind_and_accepts_the_warning_the_dialog_
     page's own script and `_command_from`. The rig's dispatch is a stand-in (there is no
     `taskd` behind this page, so no `warnings.jsonl` to read), so what is checked is the
     request that reached it: the kind chosen, and the warning with its sentence, signed by
-    the member."""
+    the member. **The default calibration's own sentence** (the engine B final review): its
+    "²", "§" and "'" go page, serve and `_command_from` and arrive as the `Entry.key` an open is
+    held to, character for character."""
+    (default,) = warnlist.of_calibration(SRGB, date.today())
+    assert {"²", "§", "'"} <= set(default.detail), "the sentence must hold what this tests"
     page = rig.browser_page()
     _sign_in(page)
-    rig.hub.offer(idle())
+    rig.hub.offer(idle(warnings=(
+        WarningRow.of(default.code, default.detail, default.accepted_in, None, None),
+    )))
     page.wait_for_selector('#dn-warnings [data-warn="default calibration"]', state="attached")
     page.click('[data-cmd="new"]')
     page.select_option("#dn-subject", "A")
@@ -1114,8 +1122,7 @@ def test_a_member_opens_a_session_for_a_kind_and_accepts_the_warning_the_dialog_
     opened = next(seen for seen in rig.dispatch.seen if isinstance(seen, OpenSession))
     assert opened.session_kind == "training"
     assert opened.by.name == "Jake Westerberg"
-    assert [pair[0] for pair in opened.accepted] == ["default calibration"]
-    assert opened.accepted[0][1] == "the sRGB standard's"
+    assert opened.accepted == (default.key,)
 
 
 def _opens(rig) -> list:

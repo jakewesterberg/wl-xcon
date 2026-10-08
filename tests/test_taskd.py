@@ -2693,14 +2693,21 @@ def test_a_session_for_something_else_is_refused_when_it_is_built(tmp_path):
 
 
 def test_a_recording_session_refuses_a_task_its_kind_does_not_accept(tmp_path):
-    """Review Focus 4, `Session.run`'s own backstop: the training variant names colors."""
+    """Review Focus 4, `Session.run`'s own backstop: the training variant names colors. **And
+    nothing of the run is strobed or written** (the engine B final review): the animal is out of
+    its cage, so the refusal is `run`'s alone, never `welfare.preflight`'s."""
     made = _sessions.session(tmp_path)
     made.spec.session_kind = "recording"
     made.spec.task = "tasks/visual_search_training.py"
     made.open()
+    made.left_cage(at=_sessions.WALL)
+    strobed = list(made.card.codes)
 
     with pytest.raises(SystemExit, match="color-on-default"):
         made.run()
+
+    assert made.card.codes == strobed
+    assert not (made.directory / "runs.jsonl").exists()
 
 
 def test_a_run_refused_by_its_backstop_says_the_findings_through_the_terminal_guard(
