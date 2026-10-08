@@ -3,7 +3,8 @@
 Status: current summary. Reasoning, sources and alternatives live in
 `docs/superpowers/specs/2026-08-31-controller-architecture-design.md`; this file is the
 orientation document CLAUDE.md sends you to first. Where the two disagree, the spec wins
-and this file is stale.
+and this file is stale. The papers behind science-facing choices, and which choice each
+supports, are in `docs/references/` (ADR-0010).
 
 Contracts here are proposals until frozen at milestone M0.
 
