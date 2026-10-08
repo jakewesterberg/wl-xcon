@@ -33,8 +33,8 @@ from the planner and quarantines on absence, so an unplanned block degrades the 
 tier. Changing condition weights or geometry within a task creates no block and is free;
 **changing task type mid-session does**, and is therefore a planning operation, not a live edit.
 
-Length rules: fixed N, or criterion-based (*"80% correct over the last 20 completed trials"*)
-[@asaad2008flexible]. Criterion transitions consume the same running statistics the console plots
+Length rules: fixed N, or criterion-based [@asaad2008flexible]
+(*"80% correct over the last 20 completed trials"*). Criterion transitions consume the same running statistics the console plots
 use, computed once.
 
 ---

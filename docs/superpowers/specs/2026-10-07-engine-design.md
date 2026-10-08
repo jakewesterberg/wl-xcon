@@ -565,7 +565,7 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    ones included, and whether their display was shown.
 5. **A repeat's drawn values** are fresh or the same, declared per task (N§R1).
 6. **A cap per condition**: past N repeats in a block, the condition's remaining debt is forgiven, its
-   shortfall recorded, shown and flagged as possible avoidance [@kiani2009representation] (N§R2).
+   shortfall recorded, shown and flagged as possible avoidance (N§R2).
 7. *Stated limitation*: conditions the animal breaks on more often drift toward the end of a block, so
    condition can covary with time in the block; position in the block is in the record.
 

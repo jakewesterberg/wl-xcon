@@ -96,7 +96,7 @@ each of which this section previously got wrong or left open:
   it, and then understates its own error by 3.0× against 1.5×. The acceptance criterion
   therefore gains a second clause — the constellation is compared against the eccentricity the
   session will actually test, and extrapolation beyond it is reported
-  (`constellation-inside-tested-region`) [@nystrom2013influence]. Reported, not refused: the
+  (`constellation-inside-tested-region`). Reported, not refused: the
   measurement supports "reach matters", and inventing a refusal threshold it does not support would
   be fabrication.
 

@@ -515,7 +515,7 @@ review, by number):
     taskd` session (F15).
 17. **Stated limits**, in §3.3 and on the key list: a hand takes a second or more from onset to a
     landing (a mouse positioned on text in a mean 1.29 s, SD 0.42, after 0.36 s of homing
-    [@card1977evaluation, Table 2, p. 11]) where a monkey's eye takes about 0.25 s (saccadic
+    [@card1977evaluation, Table 2, p. 10]) where a monkey's eye takes about 0.25 s (saccadic
     reaction times about 200 ms with no gap [@fischer1983saccadic]), so demo mode cannot judge any
     time window (S10); the pointer lands where it is put, so window sizes and holds cannot be
     judged (S9); both eyes are the pointer, so vergence is always zero, and each stimulus not

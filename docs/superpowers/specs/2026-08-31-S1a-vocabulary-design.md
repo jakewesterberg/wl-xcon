@@ -202,9 +202,9 @@ than being subclassed per shape.
 | Assets | `Picture`, `Movie` |
 | Nothing | `Blank` |
 
-`Gabor` and `Grating` are separate because the envelope differs — Gaussian against a
-hard aperture — and that changes edge artifacts and spatial-frequency bandwidth
-[@daugman1985uncertainty], which is why the field names them separately rather than
+`Gabor` and `Grating` are separate because the envelope differs — Gaussian
+[@daugman1985uncertainty] against a hard aperture — and that changes edge artifacts and
+spatial-frequency bandwidth, which is why the field names them separately rather than
 parameterising one.
 
 `Blank` is not the absence of a `Show`. A catch trial shows nothing *at the moment a

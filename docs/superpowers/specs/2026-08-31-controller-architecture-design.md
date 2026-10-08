@@ -203,8 +203,8 @@ vocabulary (P2's "second concrete use" test is already met).
 A session is a sequence of **blocks** and **interludes**, declared as data.
 
 - A **block** declares its condition set, parameter overrides, a length rule (fixed N, or
-  criterion-based such as "80% correct over the last 20 completed trials")
-  [@asaad2008flexible], and its transition. Mini-blocks of held stimulus parameters are the
+  criterion-based [@asaad2008flexible] such as "80% correct over the last 20 completed trials"),
+  and its transition. Mini-blocks of held stimulus parameters are the
   common case.
 - An **interlude** is a sub-task the session enters and leaves without ending — eye
   calibration being the motivating case (§9.3).
