@@ -164,30 +164,36 @@ def test_a_collision_suffix_needs_the_key_it_collided_with():
     assert _key_problems(pair) == []
 
 
-#: What each entry type needs beyond `COMMON`. A type not listed here is refused; add
-#: it, with what it needs, when the library first holds one.
+#: What each entry type needs beyond `COMMON`; `a/b` is met by either field. A type not
+#: listed here is refused; add it, with what it needs, when the library first holds one.
 REQUIRED = {
     "article": ("journal", "volume", "pages"),
     "incollection": ("booktitle", "publisher", "pages"),
     "inproceedings": ("booktitle", "pages"),
     "book": ("publisher",),
     "techreport": ("institution",),
+    # A standard, a data set, a preprint or a maker's web page: who issued it, in place of
+    # a journal, and like every entry a `doi` or `url`. Its author is often that body,
+    # written whole in braces (`{CIE}`), and its key is made from that name.
+    "misc": ("publisher/organization",),
 }
 COMMON = ("author", "title", "year", "note")
 DOI = re.compile(r"^10\.\d{4,9}/\S+$")
 
 
-def test_every_entry_has_the_fields_its_type_needs():
-    """Enough to find the paper again and to cite it in a methods section: author,
-    title, year, where it appeared, and a DOI (bare, `10.xxxx/...`, so the checker can
-    look it up) or a URL."""
+def _field_problems(entries) -> list[tuple[str, str]]:
+    """`(key, what is wrong)` for every entry missing what its type needs."""
     bad = []
-    for entry in _entries():
+    for entry in entries:
         if entry.type not in REQUIRED:
             bad.append((entry.key, f"type {entry.type!r} is not one of {sorted(REQUIRED)}"))
             continue
         needed = COMMON + REQUIRED[entry.type]
-        missing = [f for f in needed if not entry.fields.get(f, "").strip()]
+        missing = [
+            need
+            for need in needed
+            if not any(entry.fields.get(name, "").strip() for name in need.split("/"))
+        ]
         if missing:
             bad.append((entry.key, f"missing {missing}"))
         if not re.fullmatch(r"\d{4}", entry.fields.get("year", "")):
@@ -197,7 +203,41 @@ def test_every_entry_has_the_fields_its_type_needs():
             bad.append((entry.key, "neither doi nor url"))
         if doi and not DOI.match(doi):
             bad.append((entry.key, f"doi {doi!r} is not a bare 10.xxxx/... DOI"))
-    assert bad == [], bad
+    return bad
+
+
+def test_every_entry_has_the_fields_its_type_needs():
+    """Enough to find the paper again and to cite it in a methods section: author,
+    title, year, where it appeared, and a DOI (bare, `10.xxxx/...`, so the checker can
+    look it up) or a URL."""
+    assert _field_problems(_entries()) == []
+
+
+def test_a_document_that_is_not_a_paper_names_who_issued_it():
+    """A standard or a web page (`@misc`) has no journal, so who issued it stands in its
+    place, `publisher` or `organization`; with neither, or with no DOI or URL, it could
+    not be found again. A type the table does not know is still refused."""
+    entry = (
+        "@{type}{{cie2006fundamental,\n  author = {{{{CIE}}}},\n"
+        "  title = {{Fundamental chromaticity diagram}},\n  year = {{2006}},\n{extra}"
+        "  note = {{checked 2026-10-08: abstract}},\n}}\n"
+    )
+    url = "  url = {https://cie.co.at/publications},\n"
+    for extra in (
+        "  publisher = {CIE},\n" + url,
+        "  organization = {CIE},\n" + url,
+    ):
+        assert _field_problems(refs.parse(entry.format(type="misc", extra=extra))) == []
+    nobody = refs.parse(entry.format(type="misc", extra=url))
+    assert _field_problems(nobody) == [
+        ("cie2006fundamental", "missing ['publisher/organization']")
+    ]
+    nowhere = refs.parse(entry.format(type="misc", extra="  publisher = {CIE},\n"))
+    assert _field_problems(nowhere) == [("cie2006fundamental", "neither doi nor url")]
+    (manual,) = _field_problems(
+        refs.parse(entry.format(type="manual", extra="  publisher = {CIE},\n" + url))
+    )
+    assert manual[1].startswith("type 'manual' is not one of")
 
 
 NOTE = re.compile(r"^checked (?P<date>\d{4}-\d{2}-\d{2}): (?:full text|abstract)\b")

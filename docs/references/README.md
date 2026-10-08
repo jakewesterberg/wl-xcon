@@ -41,24 +41,27 @@ file is read as BibLaTeX, and the extension `.bibtex` forces BibTeX. The command
 
 ## Keys
 
-`<firstauthor><year><firstword>`, lowercase ASCII letters and the year: the first author's family
-name without particles or accents, and the title's first word that is not an article or a
-preposition. Schnapf, Kraft, Nunn & Baylor 1988, "Spectral sensitivity of primate photoreceptors", is
+`<firstauthor><year><firstword>`, lowercase ASCII letters and the year: the first author's family name
+without particles or accents, and the title's first word that is not an article or a preposition.
+Schnapf, Kraft, Nunn & Baylor 1988, "Spectral sensitivity of primate photoreceptors", is
 `schnapf1988spectral`; Stockman & Sharpe 2000, "The spectral sensitivities of ...", is
-`stockman2000spectral`. A second paper that would take the same key appends `b`, then `c`, and a
-suffixed key stands only beside the key it collided with. The test derives each key from its entry and
-fails one that disagrees, so a key never says 1987 for a 1988 paper.
+`stockman2000spectral`. A body that is the author, written whole in braces (`{CIE}`), is taken whole,
+letters only: CIE 170-1:2006 is `cie2006fundamental`. A second paper that would take the same key
+appends `b`, then `c`, and a suffixed key stands only beside the key it collided with. The test derives
+each key from its entry and fails one that disagrees, so a key never says 1987 for a 1988 paper.
 
 ## Adding a paper
 
 1. **Open it.** The full text if you can reach it, otherwise the publisher's abstract page or PubMed.
    Never enter a paper from another paper's reference list, and never a claim from a summary of it.
    If no source can be reached, do not enter it: list the claim for the PI as unsourced.
-2. **Enter it** in `library.bib`, in key order, in the format below: `author`, `title`, `year`, what
-   the type needs (`journal`, `volume`, `pages` for an article; `booktitle`, `publisher`, `pages` for a
-   chapter), a bare `doi` (`10.xxxx/...`) or else a `url`, and `note = {checked YYYY-MM-DD: full text
-   ...}` or `{checked YYYY-MM-DD: abstract ...}` followed by what you opened (PubMed ID, PMC ID, the
-   publisher's page, which table or page you read).
+2. **Enter it** in `library.bib`, in key order, in the format below: `author`, `title`, `year`, what the
+   type needs (`journal`, `volume`, `pages` for an article; `booktitle`, `publisher`, `pages` for a
+   chapter; `publisher` or `organization` for a standard, data set, preprint or web page, `@misc`, whose
+   author is often the issuing body written whole in braces, `{CIE}`), a bare `doi` (`10.xxxx/...`) or
+   else a `url`, and `note = {checked YYYY-MM-DD: full text ...}` or `{checked YYYY-MM-DD: abstract
+   ...}` followed by what you opened (PubMed ID, PMC ID, the publisher's page, which table or page you
+   read).
 3. **Add or extend the decision** in `decisions.md`: each key with the claim it supports and where in
    the paper (page, table, figure, or "abstract").
 4. **Run the test:** `python -m pytest -q tests/test_references.py`.
@@ -77,8 +80,8 @@ balanced, each field once; `}` alone on the line that closes the entry. The one 
 is `month` as one of BibTeX's twelve month macros (`month = mar`), which is how Zotero's stock exporter
 writes it. A value in quotes, any other bare value (`month = march`, `year = 1988`), a field running
 onto a second line, `@string` and `@comment` are refused with their line number. The entry types the
-test knows are `article`, `incollection`, `inproceedings`, `book` and `techreport`; another is added to
-the test with the fields it needs when the library first holds one.
+test knows are `article`, `incollection`, `inproceedings`, `book`, `techreport` and `misc`; another is
+added to the test with the fields it needs when the library first holds one.
 
 ## Zotero (optional)
 

@@ -145,9 +145,9 @@ its σ declared separately) (N§R3, the science review's finding 4).
 | Mondrian | colored rectangles, grayscale rectangles, mixed shapes, image fragments |
 | Masks (composed) | noise masks, pattern masks, metacontrast, object substitution, a full-screen mask |
 
-**A patterned fill has a mean luminance, defaulting to what is behind it.** One whose mean differs (a
-luminance step under the pattern, e.g. a grating on the black default) carries a warning naming the
-step, in every session kind (N§R3: "Always a warning").
+**A patterned fill has a mean luminance, defaulting to what is behind it.** [@brainard1996cone;
+@pelli2013measuring] One whose mean differs (a luminance step under the pattern, e.g. a grating on the
+black default) carries a warning naming the step, in every session kind (N§R3: "Always a warning").
 
 **Random content is deterministic**: each random block's generator is part of its definition (a
 counter-based function of the seed, the frame and the element, implemented identically in the exact
@@ -178,10 +178,11 @@ come from the exact drawer.
 
 - **A photograph's colors**: the file is read as standard sRGB and converted through the rig's
   calibration; **the luminance of the photo's white is declared** (under the brightness cap, §7.7);
-  the record names the calibration.
+  the record names the calibration [@stokes1996standard; @iec1999multimedia].
 - **Size**: declared per stimulus, degrees (resampled with a stated filter) or pixel for pixel.
 - **Matching a set** (mean luminance, RMS contrast, optionally the amplitude spectrum): a declared
-  preparation step when a task asks, **computed in linear luminance after the calibration**, recorded.
+  preparation step when a task asks, **computed in linear luminance after the calibration**, recorded
+  [@willenbockel2010controlling; @brainard2002display].
 - **Formats**: any common format; a lossy one carries a warning.
 - **Movies**: each movie frame held a whole number of refreshes; a rate that does not divide the display
   rate is refused until re-timed beforehand, and any re-timing is recorded in the set's manifest (a 25
@@ -224,10 +225,10 @@ function of parameters, seed and frame", and the record is what makes them recon
 
 ### 4.12 Contrast
 
-**Always written with its convention** (`Weber(0.3)`, Michelson, RMS). Today's appearances default
-`contrast=1.0` and the reference tasks rely on it; **build A migrates them and their tests**, after which
-a bare contrast is refused at load. A convention defined against the background (Weber) needs a
-declared non-black background (§7.5).
+**Always written with its convention** (`Weber(0.3)`, Michelson, RMS) [@pelli2013measuring]. Today's
+appearances default `contrast=1.0` and the reference tasks rely on it; **build A migrates them and their
+tests**, after which a bare contrast is refused at load. A convention defined against the background
+(Weber) needs a declared non-black background (§7.5) [@pelli2013measuring].
 
 ## 5. Where (N§2, N§R5)
 
@@ -297,37 +298,47 @@ declared non-black background (§7.5).
 ## 7. Color and luminance (N§4, N§R4, N§R5)
 
 1. **The default calibration is standard sRGB** (the panel in its sRGB mode; how closely it follows the
-   standard is UNVERIFIED until measured, and the warnings list says so).
-2. **In a recording session the default calibration is refused for any task that specifies a color
-   (DKL, cone contrast, xyY) or makes contrast a design factor or a procedure-controlled value**, read
-   from the task file (N§R4). Training and piloting run on it with the warning.
+   standard is UNVERIFIED until measured, and the warnings list says so) [@stokes1996standard;
+   @iec1999multimedia; @abuhaila2025recent].
+2. **In a recording session the default calibration is refused for any task that specifies a color (DKL,
+   cone contrast, xyY) or makes contrast a design factor or a procedure-controlled value**, read from
+   the task file (N§R4) [@brainard2002display; @abuhaila2025recent]. Training and piloting run on it
+   with the warning.
 3. **Isoluminance needs a measured calibration**; against the calibration's named observer that is
-   enough (N§R4; offered against: a per-animal measured null). `visual_search` keeps its isoluminant
-   colors and waits; a plain-color training variant loads on the default.
+   enough (N§R4; offered against: a per-animal measured null) [@cie2015fundamental; @sharpe2005luminous;
+   @gegenfurtner1994chromatic]. `visual_search` keeps its isoluminant colors and waits; a plain-color
+   training variant loads on the default.
 4. **Color spaces**: xyY (absolute); **cone contrast** (ΔL/L, ΔM/M, ΔS/S about the background, for
-   cone-isolating stimuli); **DKL, defined in cone-contrast terms with one stated normalization**.
+   cone-isolating stimuli); **DKL, defined in cone-contrast terms with one stated normalization**
+   [@cie2018colorimetry; @brainard1996cone; @derrington1984chromatic; @macleod1979chromaticity].
    **Realizability is tested by full conversion to primary weights in [0, 1]** for every space,
    replacing `photometry.unrealizable`'s `magnitude() <= max_cone_contrast` test for DKL, which passes
-   chromatic contrasts the panel cannot make.
+   chromatic contrasts the panel cannot make [@brainard2002display; @brainard1996cone].
 5. **The default background is black**; a task using DKL, cone contrast or Weber contrast declares its
-   own non-black background. The calibration is measured at a reference background; limits for a task's
-   own background come from the full conversion, not from a stored maximum.
-6. **The transfer is a measured table** per channel. **One calibration for the whole panel**; the
-   stereoscope's two eyes are assumed equal (N§R4, offered against: measuring each eye's mirror path).
-   *Stated limitation*: an imbalance between the eyes (panel halves, mirror losses, uneven OLED aging,
-   e.g. under one-eyed Mondrian masking) appears as an eye-dominance effect belonging to the rig;
-   dichoptic tasks should counterbalance the masked eye across sessions.
+   own non-black background [@brainard1996cone; @pelli2013measuring]. The calibration is measured at a
+   reference background; limits for a task's own background come from the full conversion, not from a
+   stored maximum [@brainard1996cone; @brainard2002display].
+6. **The transfer is a measured table** per channel [@brainard2002display]. **One calibration for the
+   whole panel**; the stereoscope's two eyes are assumed equal (N§R4, offered against: measuring each
+   eye's mirror path). *Stated limitation*: an imbalance between the eyes (panel halves, mirror losses,
+   uneven OLED aging, e.g. under one-eyed Mondrian masking) appears as an eye-dominance effect belonging
+   to the rig; dichoptic tasks should counterbalance the masked eye across sessions [@zhou2013effect].
 7. **The brightness limiter**: overall brightness capped so ABL never engages, at a level V9 measures,
-   including V9's cross-half test (one half's fill dimming the other); a display exceeding it is refused.
+   including V9's cross-half test (one half's fill dimming the other); a display exceeding it is refused
+   [@dimigen2026advantages; @abuhaila2025recent; @brainard2002display].
 8. **Output is 10-bit**, verified at V1; **dithering, if it is the fallback, is on the warnings list**
-   and is deterministic so the exact drawer models it.
+   and is deterministic so the exact drawer models it [@brainard2002display; @pelli1991accurate;
+   @tyler1997colour; @allard2008noisybit].
 9. **Cone fundamentals**: one lab-wide default, **Stockman & Sharpe's 10° (CIE 2006)**; a task may name
-   the 2° set for foveal work (N§R5). No standard macaque set was found to prefer: macaque and human L and
-   M cone spectra are "virtually identical" (Schnapf, Kraft, Nunn & Baylor 1988, Vis Neurosci 1:255-261;
+   the 2° set for foveal work (N§R5) [@stockman2000spectral; @cie2006fundamental;
+   @stockman2023formulae]. No standard macaque set was found to prefer: macaque and human L and M cone
+   spectra are "virtually identical" (Schnapf, Kraft, Nunn & Baylor 1988, Vis Neurosci 1:255-261;
    checked 2026-10-07, attribution corrected 2026-10-08 — Baylor, Nunn & Schnapf 1987 is the macaque
-   single-cone paper; `docs/research/2026-10-08-engine-a2-color-research.md` §0, §5). The
-   spectroradiometer's spectra are stored in each calibration, so any named set converts from them.
-10. **A calibration never expires** but carries its age; past 30 days it is a warning.
+   single-cone paper; `docs/research/2026-10-08-engine-a2-color-research.md` §0, §5)
+   [@schnapf1988spectral; @baylor1987spectral]. The spectroradiometer's spectra are stored in each
+   calibration, so any named set converts from them [@brainard2002display].
+10. **A calibration never expires** but carries its age [@brainard2002display; @dimigen2026advantages;
+    @spitschan2018method]; past 30 days it is a warning.
 
 ## 8. Sync and evidence (N§5, N§R3, N§R5)
 
@@ -416,7 +427,8 @@ declared non-black background (§7.5).
 
 ## 12. Calibration procedures and test screens (N§9, N§R5)
 
-1. **The color instrument is a spectroradiometer**; calibration is automated from the console (build J).
+1. **The color instrument is a spectroradiometer** [@brainard2002display]; calibration is automated from
+   the console (build J).
 2. **The eye tracker's calibration is required at every session start** (S5 §7): the thirteen-target
    constellation before any task; no first task without a validated map; calibration epochs inside tasks
    track drift. **It is its own early build (T)**, needing only the display and the tracker, before the

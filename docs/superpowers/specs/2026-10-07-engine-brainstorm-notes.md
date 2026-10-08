@@ -283,7 +283,10 @@ Settled before the element: colors in xyY (absolute) or DKL (cone contrast about
 background, `lum=0` isoluminant); a measured `photometry.Calibration` names its observer; an
 uncalibrated color refused today; the PI's 2026-10-07 ruling for a default calibration and a
 warnings list. Known hazards: a QD-OLED's transfer is not a power law; ABL dims the panel with
-fill; low contrasts need fine steps.
+fill; low contrasts need fine steps. (Note 2026-10-08: that a QD-OLED's transfer is not a power
+law is UNVERIFIED. The one QD-OLED measured, a Samsung TV in a chosen picture mode, fitted power
+functions with γ 2.29-2.30 after calibration [@abuhaila2025recent] (Results "Linearity and gamma
+function", Table 3). The measured per-channel table, engine spec §7 item 6, is right either way.)
 
 **Batch 1** (asked 2026-10-07):
 

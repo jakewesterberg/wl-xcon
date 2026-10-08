@@ -274,12 +274,14 @@ because otherwise the check is opt-in and the tasks likeliest to skip it are the
 written fastest.
 
 **Colour, device-independently.** `xyY` names a light absolutely; `DKL` is a
-modulation from the background along the cardinal cone-opponent axes, where `lum=0`
-is isoluminant by construction. Colour sits on the **appearance**, not the stimulus,
-so "red among green" and "circles among squares" are the same kind of switch and both
-are values a parameter can carry. Colour without a measured `Calibration` is refused,
-and a calibration that does not name whose luminous efficiency it used cannot carry an
-isoluminance claim — a macaque V(lambda) is not a human one.
+modulation from the background along the cardinal cone-opponent axes, where `lum=0` is
+isoluminant by construction [@cie2018colorimetry; @derrington1984chromatic;
+@brainard1996cone]. Colour sits on the **appearance**, not the stimulus, so "red among
+green" and "circles among squares" are the same kind of switch and both are values a
+parameter can carry. Colour without a measured `Calibration` is refused, and a
+calibration that does not name whose luminous efficiency it used cannot carry an
+isoluminance claim — a macaque V(lambda) is not a human one [@dobkins2000comparison;
+@horwitz2015what; @lindbloombrown2014spectral].
 
 **Set size as a value.** `Array` is an appearance, so an N-item search array is one
 named stimulus and the rest of the system needs to know nothing about arrays.

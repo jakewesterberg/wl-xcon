@@ -208,7 +208,8 @@ fundamentals, a 2° field and a (0.289, 0.315) background, so the agreement is a
 
 ## 3. Cone contrast to primary weights
 
-**The computation** (Brainard 1996 Part IV; Psychtoolbox `SensorToPrimary`, `MaximizeGamutContrast`):
+**The computation** (Brainard 1996 Part IV; Psychtoolbox `SensorToPrimary`, `MaximizeGamutContrast`)
+[@brainard1996cone; @brainard2002display]:
 
 1. M (3×3): column j is the cone excitation of primary j at full drive — with spectra
    M_ij = Σ_λ c̄_i(λ) P_j(λ) Δλ; without, M = T · [XYZ_R XYZ_G XYZ_B] for some XYZ-to-cone T.
@@ -223,7 +224,8 @@ fundamentals, a 2° field and a (0.289, 0.315) background, so the agreement is a
 
 Assumptions to state: channels add and are independent (Abu Haila et al. 2025 measure this for consumer
 OLEDs); ABL never engages; the screen is uniform; 10-bit quantization; three primaries cannot also
-silence rods or ipRGCs.
+silence rods or ipRGCs [@brainard2002display; @abuhaila2025recent; @dimigen2026advantages;
+@spitschan2018method; @estevez1982silent].
 
 **Achievable contrasts** (computed, not measured; mid-gray, D65 white). What the numbers were computed
 on (stated 2026-10-08; the original computation did not record the spectral shape, and these are the

@@ -244,8 +244,11 @@ small-window brightness, which is the number that will be advertised and is irre
 work — the ASUS ROG Swift OLED PG32UCDP (31.5" flat WOLED, 4K@240 / FHD@480,
 [ASUS product page](https://rog.asus.com/monitors/27-to-31-5-inches/rog-swift-oled-pg32ucdp/),
 read 2026-08-31) is the reference candidate — so that M1 and M2 are not blocked on a product
-launch. V1 and V9 must be re-run on any new panel regardless: the JOV authors state that
-performance "cannot be assumed or guaranteed" even across units of one model.
+launch. V1 and V9 must be re-run on any new panel regardless: Abu Haila, Kunst, Khanh and Wallis
+(2025) state that similar performance across identical models "cannot be assumed or guaranteed"
+[@abuhaila2025recent] ("Caveats and limitations"), and three units of one OLED model bought together
+each showed their own pattern of nonuniformity [@dimigen2026advantages] ("Spatial uniformity").
+*(Corrected 2026-10-08: this cited "the JOV authors", unnamed, for the first claim only.)*
 
 ### 5.2 Geometry, as a formula
 
@@ -347,13 +350,21 @@ Fold into **V9**. A panel that fails 1 or 2 is disqualified regardless of everyt
    walk the patch off its sensor. Ask the vendor before purchase; no review covers it.
 2. **ABL as interocular coupling.** Fill-factor sweep in one viewport, photometered in the
    other. On two displays ABL is a per-eye nonlinearity; **on one shared panel it is a
-   coupling** — a bright stimulus in the left eye's viewport dimming the right eye's. The JOV
-   paper found luminance "drops drastically" above ~40% fill factor on the panel it tested.
-   Report the fill-factor range within which no coupling is detectable; that range is a
-   stimulus-design constraint.
+   coupling** — a bright stimulus in the left eye's viewport dimming the right eye's. An earlier
+   study of a Sony PVM-2541 OLED, quoted in [@abuhaila2025recent] (Introduction), found
+   luminance "drops drastically" above ~40% fill factor; Abu Haila et al.'s own panels held
+   luminance across fill factor except the ASUS WOLED's green channel above 60% fill at values
+   over 900 of 1023 (Results, "Filling factor", Fig. 9), and an ASUS PG27AQDM showed ABL above
+   its 40% brightness setting (about 140 cd/m²) [@dimigen2026advantages] ("Auto-brightness
+   limiting behavior"). *(Corrected 2026-10-08: this credited the 40% figure to "the JOV paper",
+   on "the panel it tested".)* Report the fill-factor range within which no coupling is
+   detectable; that range is a stimulus-design constraint.
 3. **Per-half uniformity.** Photometer left and right halves separately. On a split screen,
-   left-right nonuniformity *is* an interocular mismatch. The IPS LCD in the JOV study showed
-   10.7% with the left side underperforming; the 27" OLED showed ~4%.
+   left-right nonuniformity *is* an interocular mismatch. In [@abuhaila2025recent] (Results,
+   "Luminance uniformity", Fig. 8) the IPS LCD differed from center by up to 10.7%, the 27-inch
+   ASUS OLED (a WOLED) by about 4% and the Samsung QD-OLED TV by about 7%, all three consumer
+   displays worse on their left half. *(Corrected 2026-10-08: this named neither the study nor the
+   27-inch OLED's kind, and left out the QD-OLED's 7%.)*
 4. **Gamma, additivity and channel independence**, per unit, after calibration.
 5. **Pixel response and onset**, photodiode-measured, in every mode.
 6. **Sustained full-field luminance at 100% APL**, which is the tandem claim that actually
