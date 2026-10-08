@@ -1,0 +1,17 @@
+timing run 20261008T175126Z
+display: Samsung Odyssey G8 (DP-0), mode 3840x2160 @ 120.000 Hz (nominal period 8.333333 ms), plane 0
+path: display-plane surface (no DRM acquire)
+swapchain: 3 images, B8G8R8A8_UNORM, FIFO; present timing on, present id2 on, vblank counter on
+swapchain time domains: DEVICE (id 0), SWAPCHAIN_LOCAL (id 1000208001), PRESENT_STAGE_LOCAL (id 1000208000)
+run: 1200 of 1200 frames presented in 10.040 s
+driver refresh: refreshDuration 8333333 ns, refreshInterval 8333333 ns (fixed rate)
+time domain: SWAPCHAIN_LOCAL (id 1000208001), calibrated to CLOCK_MONOTONIC: offset -1791391457698821536 ns (max deviation 3086 ns), drift over the run 4210 ns
+stages requested: QUEUE_OPERATIONS_END, IMAGE_FIRST_PIXEL_OUT; frames with a nonzero time: QUEUE_OPERATIONS_END 1200, IMAGE_FIRST_PIXEL_OUT 1200
+timing results: 1200 of 1200 frames (1200 complete)
+intervals between successive IMAGE_FIRST_PIXEL_OUT times (ms): n 1199, median 8.3333, min 8.3333, max 8.3336, p1 8.3333, p5 8.3333, p95 8.3336, p99 8.3336
+missed (interval > 1.5 periods = 12.500 ms): 0
+  QUEUE_OPERATIONS_END intervals (ms): n 1199, median 8.3313, min 0.0676, max 9.7393, p1 8.2483, p5 8.2596, p95 8.4511, p99 8.4685
+CPU present call -> IMAGE_FIRST_PIXEL_OUT (ms): n 1200, median 39.3754, min 16.5746, max 85.7734, p1 37.8726, p5 37.8938, p95 40.1511, p99 40.1627
+CPU present-call intervals (ms): n 1199, median 8.3317, min 0.0271, max 77.5321, p1 7.9437, p5 8.1928, p95 8.5325, p99 8.7178
+vblank counter: 2674277 at frame 4, 2675471 at frame 1199: 1194 vblanks over 1195 frames
+note: surface: presentTimingSupported 1, stages 0x5 (QUEUE_OPERATIONS_END, IMAGE_FIRST_PIXEL_OUT), presentId2Supported 1, vblank counter true, B8G8R8A8_UNORM (of 6 formats), images 2..8

@@ -1,4 +1,8 @@
-# Spike S, part 2: the presentation-timing program (built 2026-10-07; not yet run on the display)
+# Spike S, part 2: the presentation-timing program (built 2026-10-07; run 2026-10-08)
+
+> *Run 2026-10-08 by the PI at wh-dws0's text console: 1200 of 1200 frames, first-pixel-out intervals
+> median 8.3333 ms, 0 missed — driver timestamps, not light. Results and the files:
+> [`../2026-10-08-vulkan-timing/`](../2026-10-08-vulkan-timing/README.md).*
 
 Report by the agent that built it, saved here by the controller. The program is
 `~/wl-spike-s/timing/target/release/timing` on wh-dws0; instructions for the PI in
