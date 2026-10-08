@@ -513,10 +513,14 @@ review, by number):
     not a constant fitted to one panel (F14).
 16. **The tremor is drawn from the run's seed**, not the session's, which is 0 in every `wlx
     taskd` session (F15).
-17. **Stated limits**, in §3.3 and on the key list: a hand takes roughly 0.6-1 s from onset to a
-    landing where a monkey's eye takes about 0.25 s, so demo mode cannot judge any time window
-    (S10); the pointer lands where it is put, so window sizes and holds cannot be judged (S9);
-    both eyes are the pointer, so vergence is always zero, and each stimulus not shown to both
-    eyes is labeled L or R, with its disparity when nonzero (S11); the mouse is both the eye and
-    the hand (S8); a stimulus up for less than a page update may never be drawn, and no duration
-    can be judged from the drawing; +y is up, with a test (S12).
+17. **Stated limits**, in §3.3 and on the key list: a hand takes a second or more from onset to a
+    landing (a mouse positioned on text in a mean 1.29 s, SD 0.42, after 0.36 s of homing
+    [@card1977evaluation, Table 2, p. 11]) where a monkey's eye takes about 0.25 s (saccadic
+    reaction times about 200 ms with no gap [@fischer1983saccadic]), so demo mode cannot judge any
+    time window (S10); the pointer lands where it is put, so window sizes and holds cannot be
+    judged (S9); both eyes are the pointer, so vergence is always zero, and each stimulus not
+    shown to both eyes is labeled L or R, with its disparity when nonzero (S11); the mouse is both
+    the eye and the hand (S8); a stimulus up for less than a page update may never be drawn, and
+    no duration can be judged from the drawing; +y is up, with a test (S12). *(Corrected
+    2026-10-08: this said a hand takes "roughly 0.6-1 s" to land, a figure given without a
+    source.)*

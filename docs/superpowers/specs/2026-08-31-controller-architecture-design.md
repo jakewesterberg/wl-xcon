@@ -203,8 +203,9 @@ vocabulary (P2's "second concrete use" test is already met).
 A session is a sequence of **blocks** and **interludes**, declared as data.
 
 - A **block** declares its condition set, parameter overrides, a length rule (fixed N, or
-  criterion-based such as "80% correct over the last 20 completed trials"), and its
-  transition. Mini-blocks of held stimulus parameters are the common case.
+  criterion-based such as "80% correct over the last 20 completed trials")
+  [@asaad2008flexible], and its transition. Mini-blocks of held stimulus parameters are the
+  common case.
 - An **interlude** is a sub-task the session enters and leaves without ending — eye
   calibration being the motivating case (§9.3).
 - The **trial scheduler** owns condition selection, block progression and the counters.
@@ -274,8 +275,9 @@ what makes it work for model-authored tasks.
 
 ### 7.2 Application and provenance
 
-- **Staged, then applied atomically in the ITI.** Never mid-trial. If regenerating derived
-  stimuli overruns the ITI, **the ITI extends; frames are never dropped.**
+- **Staged, then applied atomically in the ITI.** Never mid-trial [@asaad2008flexible]. If
+  regenerating derived stimuli overruns the ITI, **the ITI extends; frames are never
+  dropped.**
 - **Every trial records a complete parameter snapshot**, not a pointer to "the config." A
   mid-session change is otherwise an undocumented discontinuity that surfaces during
   analysis months later. This is the single most likely way this feature does damage
@@ -716,12 +718,13 @@ widened to cover both neural paths, since only one of them has any published num
 Derived from the stated experimental program, not from MonkeyLogic's manual — which is used
 afterward only as a completeness check (P2).
 
-**The program:** saccadic choice mostly, sometimes joystick and touchscreen, sometimes
-passive fixation; gaze-contingent beyond fixation enforcement, with stimuli changing on eye
-movements; both free viewing of natural images and discrete trials; both working-memory
-delays and stimulus-locked designs; microstimulation during trial epochs, contingent on eye
-position or movement, and contingent on measured neural activity; auditory stimuli and
-auditory performance feedback, plus vocalization monitoring.
+**The program:** saccadic choice mostly [@bruce1985primate; @fuchs1967saccadic], sometimes
+joystick and touchscreen, sometimes passive fixation; gaze-contingent beyond fixation
+enforcement, with stimuli changing on eye movements; both free viewing of natural images and
+discrete trials; both working-memory delays [@funahashi1989mnemonic] and stimulus-locked
+designs; microstimulation during trial epochs, contingent on eye position or movement, and
+contingent on measured neural activity; auditory stimuli and auditory performance feedback,
+plus vocalization monitoring.
 
 | Capability | Driven by | v1 |
 |---|---|---|

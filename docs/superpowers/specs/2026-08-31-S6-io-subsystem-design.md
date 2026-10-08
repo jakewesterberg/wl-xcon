@@ -100,9 +100,9 @@ is the joystick.
 
 - **Eye analog is a recorded copy, not a control input** (S5 §3). We sample it so the eye PC's
   lag is measurable by cross-correlation; the UDP stream is what a decision uses.
-- **Joystick** needs calibration (range, centre, dead zone) per rig and per animal, a hold and
-  release discriminator, and its calibration identity in the session snapshot. It is a response
-  device, so its latency belongs in V2.
+- **Joystick** needs calibration [@asaad2008flexible] (range, centre, dead zone) per rig and per
+  animal, a hold and release discriminator, and its calibration identity in the session snapshot.
+  It is a response device, so its latency belongs in V2.
 - **Misc BNC ×3**, currently unassigned. S4 §8 proposes one for the **audio verification tap**;
   the assignment is `wl-sync`'s to confirm.
 

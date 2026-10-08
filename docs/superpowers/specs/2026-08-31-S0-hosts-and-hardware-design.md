@@ -381,9 +381,10 @@ Fold into **V9**. A panel that fails 1 or 2 is disqualified regardless of everyt
 
 **Burn-in mitigation may not touch the stimulus** (ruled 2026-08-31). Jittering the fixation
 point between trials was proposed here and **rejected**: microsaccade analyses, fixation-
-stability measures and receptive-field mapping all assume a fixed fixation point, and
-introducing a stimulus manipulation to solve a hardware problem trades a real experimental
-property for a panel's convenience.
+stability measures and receptive-field mapping all assume a fixed fixation point
+[@gur1997visual; @hafed2009neural; @engbert2003microsaccades], and introducing a stimulus
+manipulation to solve a hardware problem trades a real experimental property for a panel's
+convenience.
 
 So mitigation is entirely hardware-side, which **raises the stakes on the tandem panel**: its
 inherent burn-in resistance is now load-bearing rather than a bonus, and running well below

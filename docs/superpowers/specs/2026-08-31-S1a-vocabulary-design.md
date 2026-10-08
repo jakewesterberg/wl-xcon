@@ -84,7 +84,7 @@ All carry `at` (cyclopean degrees), `disparity`, and `eye`.
 | `Spot` | `size`, `contrast` — a plain disc |
 | `Gabor` | `sf`, `orientation`, `phase`, `contrast`, `sigma` |
 | `Grating` | `sf`, `orientation`, `phase`, `contrast`, `aperture` |
-| `Dots` | `coherence`, `direction`, `speed`, `density`, `aperture` — an RDK |
+| `Dots` | `coherence`, `direction`, `speed`, `density`, `aperture` — an RDK [@britten1992analysis] |
 | `Bar` | `length`, `width`, `orientation`, `contrast` — RF mapping |
 | `Image` | `asset`, `size` |
 | `Movie` | `asset`, `size` |
@@ -203,8 +203,9 @@ than being subclassed per shape.
 | Nothing | `Blank` |
 
 `Gabor` and `Grating` are separate because the envelope differs — Gaussian against a
-hard aperture — and that changes edge artifacts and spatial-frequency bandwidth,
-which is why the field names them separately rather than parameterising one.
+hard aperture — and that changes edge artifacts and spatial-frequency bandwidth
+[@daugman1985uncertainty], which is why the field names them separately rather than
+parameterising one.
 
 `Blank` is not the absence of a `Show`. A catch trial shows nothing *at the moment a
 stimulus would have appeared*, and making that explicit keeps catch and non-catch
@@ -270,10 +271,10 @@ than being scoped to its state — the original wording removed a fixation point
 exact frame the animal was asked to hold it, in a task that read correctly and passed
 all ten checks. Stimuli carry **names**; `Hide` and `Update` address them. `Update`
 changes a live stimulus without the offset transient `Hide`+`Show` inserts, which is
-the confound change detection exists to avoid. A `Window` names the stimulus it
-scores, or `REMEMBERED` when the location is deliberately blank; unset is refused,
-because otherwise the check is opt-in and the tasks likeliest to skip it are the ones
-written fastest.
+the confound change detection exists to avoid [@rensink1997see]. A `Window` names the
+stimulus it scores, or `REMEMBERED` when the location is deliberately blank; unset is
+refused, because otherwise the check is opt-in and the tasks likeliest to skip it are
+the ones written fastest.
 
 **Colour, device-independently.** `xyY` names a light absolutely; `DKL` is a
 modulation from the background along the cardinal cone-opponent axes, where `lum=0` is
@@ -315,10 +316,10 @@ alone, so every defect in this section simulated perfectly.
 Five outcomes, on the PI's decision after review.
 
 **`CORRECT_REJECT` and `FALSE_ALARM`.** Without all four cells of the matrix, d' and
-criterion are not computable — and not recoverable offline, because a correct
-rejection was previously indistinguishable from an animal that did nothing.
-`CORRECT_REJECT` marks `TRIAL_CORRECT`: it is the hit on the no-signal side, and an
-analysis counting correct trials should count it.
+criterion are not computable [@stanislaw1999calculation; @luo2015neuronal] — and not
+recoverable offline, because a correct rejection was previously indistinguishable from
+an animal that did nothing. `CORRECT_REJECT` marks `TRIAL_CORRECT`: it is the hit on
+the no-signal side, and an analysis counting correct trials should count it.
 
 **`FAULT` split from `ABORT`.** `ABORT` means the animal went somewhere that was
 neither target nor distractor. A dropped frame is not that, and mixing them makes a

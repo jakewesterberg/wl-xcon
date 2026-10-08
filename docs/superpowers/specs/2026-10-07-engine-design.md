@@ -29,10 +29,10 @@ What exists (the surveys `docs/research/2026-10-07-engine-display-state.md` and
   gives every run one block of one condition, so every trial of a run is the same trial, and no task
   can declare a plan (XC-207). Nothing calls a task's between-trial procedure (XC-242).
 
-What the engine must serve: the PI's thirty-four named paradigms (N§1), from RSVP and adaptation to
-most-exciting-image generation, gaze-contingent and closed-loop presentation, M/P/K mapping and manual
-RF mapping by mouse, "and probably many more over time!". **That last clause is the first
-requirement**: the engine grows by reviewed additions, never by rewrites.
+What the engine must serve: the PI's thirty-four named paradigms (N§1), from RSVP [@potter1976shortterm]
+and adaptation to most-exciting-image generation [@ponce2019evolving], gaze-contingent and closed-loop
+presentation, M/P/K mapping and manual RF mapping by mouse, "and probably many more over time!". **That
+last clause is the first requirement**: the engine grows by reviewed additions, never by rewrites.
 
 ## 2. Principles carried through every section
 
@@ -114,9 +114,10 @@ wl-xtasks, where tasks live (§21).
 ### 4.1 The stimulus model: building blocks and reviewed extensions
 
 A stimulus is **a shape, filled with something, seen through an edge profile, placed and layered**.
-Named kinds remain as shorthands (a Gabor is a circle with a grating fill and a Gaussian edge; a plaid
-is two gratings combined by adding; an array is items on a ring). A genuinely new block is added once,
-as reviewed framework code, and is then usable in any combination (§4.10).
+Named kinds remain as shorthands (a Gabor is a circle with a grating fill and a Gaussian edge
+[@daugman1985uncertainty]; a plaid is two gratings combined by adding; an array is items on a ring). A
+genuinely new block is added once, as reviewed framework code, and is then usable in any combination
+(§4.10).
 
 ### 4.2 The first set of blocks
 
@@ -137,42 +138,44 @@ its σ declared separately) (N§R3, the science review's finding 4).
 
 | Fill | Must support |
 |---|---|
-| Grating | sine, square, triangle and sawtooth waveforms; drift and counterphase (§6.4) |
-| Noise | white, binary, pink (1/f), band-pass (frequency and orientation), color noise |
-| RF mapping | sparse noise; dense noise or m-sequence; flashed and swept bars; subspace (Ringach/Hartley) gratings |
-| Moving dots | coherence, direction, speed, lifetime, size, density, aperture; the noise dots' rule declared per task |
-| Texture field | a figure defined against its ground by orientation, motion, color or disparity |
+| Grating | sine, square, triangle and sawtooth waveforms [@campbell1968application]; drift and counterphase (§6.4) |
+| Noise | white, binary, pink (1/f) [@field1987relations], band-pass (frequency and orientation), color noise |
+| RF mapping | sparse noise; dense noise or m-sequence [@reid1997use; @chichilnisky2001simple]; flashed and swept bars [@gur1997visual]; subspace (Ringach/Hartley) gratings [@ringach1997subspace] |
+| Moving dots | coherence [@britten1992analysis], direction, speed, lifetime, size, density, aperture; the noise dots' rule declared per task [@pilly2009what; @scase1996what] |
+| Texture field | a figure defined against its ground by orientation, motion [@lamme1995neurophysiology], color or disparity |
 | Mondrian | colored rectangles, grayscale rectangles, mixed shapes, image fragments |
-| Masks (composed) | noise masks, pattern masks, metacontrast, object substitution, a full-screen mask |
+| Masks (composed) | noise masks, pattern masks, metacontrast [@breitmeyer2000recent], object substitution [@dilollo2000competition], a full-screen mask |
 
 **A patterned fill has a mean luminance, defaulting to what is behind it.** [@brainard1996cone;
 @pelli2013measuring] One whose mean differs (a luminance step under the pattern, e.g. a grating on the
 black default) carries a warning naming the step, in every session kind (N§R3: "Always a warning").
 
 **Random content is deterministic**: each random block's generator is part of its definition (a
-counter-based function of the seed, the frame and the element, implemented identically in the exact
-drawer and the core, with frozen reference outputs committed), so a reconstruction never depends on a
-library's version. Seeds are recorded; a task may ask for its frames to be saved too, and those frames
-come from the exact drawer.
+counter-based function of the seed, the frame and the element [@salmon2011parallel], implemented
+identically in the exact drawer and the core, with frozen reference outputs committed), so a
+reconstruction never depends on a library's version. Seeds are recorded; a task may ask for its frames to
+be saved too, and those frames come from the exact drawer.
 
 ### 4.4 Combining, grouping and layouts
 
-- **Four ways to overlap**: front covers back (opacity); contrasts add (plaids, signal in noise,
-  transparent motion); a window or scotoma; one shapes another (multiplication).
+- **Four ways to overlap**: front covers back (opacity); contrasts add (plaids [@adelson1982phenomenal],
+  signal in noise, transparent motion [@snowden1991response]); a window or scotoma; one shapes another
+  (multiplication).
 - **The background is the bottom layer**, changeable during a trial; on the stereoscope each eye may
   have its own background.
 - **Groups**: a named group shows, hides, moves and changes a shared property as one; its members stay
   addressable. **Arrays and layouts are a group by default** (one code, §8.3).
 - **Layouts**: a ring; a grid; listed positions; positions drawn between trials from a seed with spacing
-  rules; several rings or clusters. **Each item is its own stimulus**: target and distractor are roles.
+  rules; several rings or clusters. **Each item is its own stimulus**: target and distractor are roles
+  [@westerberg2023feedforward].
 - **The busiest display is thousands of elements**; the GPU drawer batches them (§10).
 
 ### 4.5 Text and curves
 
 - **Text**: letters, digits and symbols, from one or a few bundled fonts, glyph height in degrees,
   rendered to exact pixels. Bundled fonts enter ADR-0004's inventory.
-- **Curves** (curve tracing): written in the task as fixed paths, or generated between trials from a
-  seed by a reviewed procedure, saved in the record.
+- **Curves** (curve tracing [@roelfsema1998objectbased]): written in the task as fixed paths, or
+  generated between trials from a seed by a reviewed procedure, saved in the record.
 
 ### 4.6 Images and movies
 
@@ -193,14 +196,16 @@ come from the exact drawer.
 ### 4.7 Image procedures between trials
 
 Scrambling, filtering, cropping and recoloring run between trials: a reviewed procedure, with its seed,
-makes the image before the trial that shows it; the result is uploaded and kept in the record.
+makes the image before the trial that shows it; the result is uploaded and kept in the record
+[@rainer2001nonmonotonic; @portilla2000parametric].
 
 ### 4.8 Generated images
 
 Made on another machine (a GPU server on the lab network) between trials; the rig checks, records and
-shows each one. **If the next image is not ready in time, the next trial waits as long as it takes**;
-the welfare clocks keep running, the console says what it is waiting for, the operator can pause or
-stop, and **each trial records how long it waited** (a closed-loop procedure may read it, §15.5).
+shows each one [@ponce2019evolving]. **If the next image is not ready in time, the next trial waits as
+long as it takes**; the welfare clocks keep running, the console says what it is waiting for, the
+operator can pause or stop, and **each trial records how long it waited** (a closed-loop procedure may
+read it, §15.5).
 
 ### 4.9 The slow exact drawer
 
@@ -263,8 +268,9 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
 9. **Head-free chaired sessions**: nominal head position, recorded and listed; a task may require a
    fixed head.
 10. **Manual RF mapping's view**: a live schematic in the console. Its markers lag the bar by the
-    neuron's latency plus the operator's reaction, so receptive fields are reconstructed from the
-    per-frame record, not from the markers.
+    neuron's latency [@schmolesky1998signal; @thompson1996perceptual] plus the operator's reaction, so
+    receptive fields are reconstructed from the per-frame record, not from the markers
+    [@ringach1997subspace; @chichilnisky2001simple].
 
 ## 6. When (N§3, N§R3)
 
@@ -286,8 +292,10 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    the light sensors at the bottom, so V1 measures the scan delay with patches top and bottom and
    analysis applies it across the stimulus's extent [@dimigen2026advantages; @saunders2014direct;
    @wang2011lcd; @elze2010misspecifications].
-6. **Sequences** (RSVP, predictive, masking streams): a sequence stimulus or one state per item.
-7. **Motion paths**: straight sweeps, pursuit targets, waypoint paths, seeded random walks.
+6. **Sequences** (RSVP [@potter1976shortterm], predictive, masking streams): a sequence stimulus or one
+   state per item.
+7. **Motion paths**: straight sweeps, pursuit targets [@fuchs1967saccadic], waypoint paths, seeded random
+   walks.
 8. **The longest trial is 5 minutes** (the loop's frame cap derived from 300 s at the session's rate); a
    trial reaching it is recorded as today's `"hang"` category, which `resume`, `health` and the page
    already read. Longer presentations use the continuous mode (§13.6). **Inside a long trial, stop,
@@ -299,10 +307,12 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
     exist, the figure is labeled a lower bound. A task may declare a maximum; trials past it are marked.
 11. **A non-aging foreperiod** declares its minimum, mean, maximum and tail rule; the review report's
     timing diagram plots the hazard it actually produces (a truncated exponential's hazard rises near
-    its maximum).
+    its maximum)
+    [@westerberg2020priming; @han2022revisiting; @janssen2005representation; @ghose2002attentional].
 12. **Every trial records the time since the last interruption** (pause, interlude, display restart,
     generator wait) and its realized interval before the stimulus; a block may declare what it does on
-    resuming after one (e.g. rerun an initial adaptation).
+    resuming after one (e.g. rerun an initial adaptation)
+    [@patterson2013distinct; @janssen2005representation].
 
 ## 7. Color and luminance (N§4, N§R4, N§R5)
 
@@ -477,16 +487,18 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    block. An interlude's trials keep the session's trial numbering but belong to no block, and record the
    task they ran.
 5. **Blocks follow a block-sequence policy** (replacing a fixed list): fixed, cyclic, seeded and
-   balanced, or by criterion with advance and fall-back. A block ends on a number of trials, every
-   condition's target met, a performance criterion, or a time limit. `taskd`'s guard against a spinning
-   plan becomes a per-advance progress check.
+   balanced, or by criterion with advance and fall-back
+   [@asaad2008flexible; @nimhmonkeylogic2026task; @berger2018standardized]. A block ends on a number of
+   trials, every condition's target met, a performance criterion, or a time limit. `taskd`'s guard
+   against a spinning plan becomes a per-advance progress check.
 6. **The continuous mode**: its own trial-less mode for long presentations. It can reward
    [@russ2015functional], insert probes on a schedule, change contingent on gaze or neural data,
    and take marks and pauses; it ends on a
    declared duration, its media ending, an operator stop or a criterion; it is analyzed as one epoch with
-   timed events. **Stop, pause and the welfare limits are checked about once a second inside it**, with a
-   console update; it strobes anchor codes (§8.4); it declares calibration probes, or the record states
-   the gaze map's age. Its record shape is designed in build K and asked of wl-preproc.
+   timed events [@russ2015functional]. **Stop, pause and the welfare limits are checked about once a
+   second inside it**, with a console update; it strobes anchor codes (§8.4); it declares calibration
+   probes, or the record states the gaze map's age. Its record shape is designed in build K and asked of
+   wl-preproc.
 7. **A session program** lists the runs; the console offers the next; the operator may deviate.
    **Per-animal state** (programs, presets, last values, procedure state) **lives on lab storage**,
    synced to whichever rig runs the animal (animals sometimes work on both, N§R6), one writer at a time,
@@ -497,12 +509,13 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
 
 ## 14. Variation (N§11, N§R1, N§R2)
 
-1. **Named conditions plus drawn values.** A parameter is set by a condition or drawn, never both (refused
-   at load).
+1. **Named conditions plus drawn values.** [@asaad2008flexible] A parameter is set by a condition or
+   drawn, never both (refused at load).
 2. **Factorial designs**: factors and levels, combinations minus exclusions, named from their levels.
-3. **Orderings**: shuffled passes; weighted draws; limits on repeats; sequence-balanced.
+3. **Orderings**: shuffled passes [@nimhmonkeylogic2026task]; weighted draws; limits on repeats;
+   sequence-balanced [@aguirre2011de; @brooks2012counterbalancing].
 4. **Distributions**: uniform; a weighted set; normal, truncated; a prepared list; a non-aging
-   foreperiod (§6.11).
+   foreperiod (§6.11) [@han2022revisiting].
 5. **Condition numbers are fixed per task** (XC-197): a condition keeps its number across runs, sessions,
    animals and both rigs; **numbers are assigned by the task's registry on lab storage** (one writer), a
    rig-added condition taking the next unused one; numbers never reused.
@@ -514,12 +527,14 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
 
 ## 15. Adaptivity (N§12)
 
-1. **Methods**: up-down staircases, interleaved staircases, Bayesian methods (QUEST, QUEST+, Psi),
-   training progressions that may step back.
+1. **Methods**: up-down staircases [@levitt1971transformed; @kaernbach1991simple], interleaved staircases
+   [@levitt1971transformed], Bayesian methods (QUEST [@watson1983quest], QUEST+ [@watson2017quest], Psi
+   [@kontsevich1999bayesian]), training progressions that may step back [@berger2018standardized].
 2. **A reviewed library plus task code** (between-trial Python, flagged for review).
 3. **What moves a staircase is declared per procedure**; the default reads the counting table (§16.1):
-   correct as success, wrong and miss as failure, trials ending before the decision ignored.
-4. **State carries per animal when declared** (§13.7).
+   correct as success, wrong and miss as failure, trials ending before the decision ignored
+   [@levitt1971transformed; @stanislaw1999calculation; @luo2015neuronal].
+4. **State carries per animal when declared** (§13.7) [@berger2018standardized].
 5. **What a procedure may read**: outcomes and reaction times; anything the trial recorded (the
    generator wait included); gaze traces; neural features.
 6. **A live value on a procedure-controlled parameter** holds and pauses the procedure until released.
@@ -531,21 +546,24 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
 1. **One table classifies every outcome**, per trial structure: whether it **counts** toward its
    condition's target, and whether it is **repeated**. **Counted by default: every trial with an
    answer** (N§R1): correct, wrong, early and late variants, and, where withholding is an answer (catch
-   trials, detection, go/no-go), misses, correct rejections and false alarms. **Not counted: trials that
-   end before the decision** (breaks, no fixation, faults).
+   trials, detection, go/no-go), misses, correct rejections and false alarms
+   [@stanislaw1999calculation; @luo2015neuronal]. **Not counted: trials that end before the decision**
+   (breaks, no fixation, faults).
 2. **Repeated by default**: `FIXATION_BREAK`, `NO_FIXATION`, `TRACKER_LOST`, `FAULT`. **For other breaks
    the task chooses, when repeats are active, whether such a trial is spent** (counted as presented and
-   marked an abort) **or owed** (shown again later) (N§R1). Not repeated: wrong targets (2026-08-31).
-3. **Where a repeat goes**: at a random later point in its block, never the very next trial
-   (superseding 2026-08-31's "end of the block") **unless it is the only condition still owed, when it
-   repeats at once, recorded** (N§R2). Build C defines "later" for each order type and for criterion- and
-   time-ended blocks.
-4. **Blocks whose order is the design** (priming, sequence-balanced) **declare their repeat rule**,
-   defaulting to no repeats; **the realized sequence is recorded either way**: each trial's actual
-   predecessor, aborted ones included, and whether their display was shown.
+   marked an abort) **or owed** (shown again later) (N§R1)
+   [@nimhmonkeylogic2026task; @asaad2008flexible]. Not repeated: wrong targets (2026-08-31).
+3. **Where a repeat goes**: at a random later point in its block [@nimhmonkeylogic2026task], never the
+   very next trial (superseding 2026-08-31's "end of the block") **unless it is the only condition still
+   owed, when it repeats at once, recorded** (N§R2). Build C defines "later" for each order type and for
+   criterion- and time-ended blocks.
+4. **Blocks whose order is the design** (priming [@bichot2002priming; @westerberg2020priming],
+   sequence-balanced [@brooks2012counterbalancing]) **declare their repeat rule**, defaulting to no
+   repeats; **the realized sequence is recorded either way**: each trial's actual predecessor, aborted
+   ones included, and whether their display was shown.
 5. **A repeat's drawn values** are fresh or the same, declared per task (N§R1).
 6. **A cap per condition**: past N repeats in a block, the condition's remaining debt is forgiven, its
-   shortfall recorded, shown and flagged as possible avoidance (N§R2).
+   shortfall recorded, shown and flagged as possible avoidance [@kiani2009representation] (N§R2).
 7. *Stated limitation*: conditions the animal breaks on more often drift toward the end of a block, so
    condition can covary with time in the block; position in the block is in the record.
 
@@ -574,9 +592,9 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    foreperiod's realized hazard, §6.11). Made for each task version and kept; a session records its
    task's report version.
 2. **Simulation is advised, not enforced.**
-3. **The simulated animal** follows declared functions with named profiles: perfect, chance, an
-   incorrect strategy, normal (85% correct), trying to break the task, trying to exploit the reward
-   schedule.
+3. **The simulated animal** follows declared functions [@wichmann2001psychometric; @carpenter1995neural]
+   with named profiles: perfect, chance, an incorrect strategy, normal (85% correct), trying to break the
+   task, trying to exploit the reward schedule.
 
 ## 19. Warnings, and what a session is for (N§4, N§R6)
 
