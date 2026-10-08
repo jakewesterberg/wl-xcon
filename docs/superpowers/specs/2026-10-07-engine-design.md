@@ -381,6 +381,12 @@ declared non-black background (§7.5).
    took, and checks NVIDIA's documented support; **timing waits for Linux and an NVIDIA card** (the PI's
    machine, over SSH, once it is on). On a Mac, Vulkan runs through MoltenVK and says nothing about
    timing (P4a).
+   *Spike S, 2026-10-07* (`docs/measurements/wh-dws0/2026-10-07-vulkan-spike/`): on the PI's desktop
+   (an RTX 4080 SUPER, driver 615.71.09 — not the RTX 5070 Ti, for which support stays UNVERIFIED) the
+   off-screen Rust core matched the exact drawer within 2.6e-5 cd/m² (about 0.0003 of a 10-bit step on
+   a stand-in 0-100 cd/m² scale), and the driver exposes VK_EXT_present_timing (presentAtAbsoluteTime
+   included) with IMAGE_FIRST_PIXEL_OUT on its display surface; the on-screen timing run waits for the
+   PI at a text console.
 6. **Prior art**: vstimd is AGPL-3.0-only; **no code is reused**, only ideas (direct display, a post-flip
    vblank wait, landing reports, a renderer-owned patch, a no-op renderer for CI).
 7. **ADR-0002**: our drawer is built now so V1 compares it with PsychoPy on day one; V1 chooses.

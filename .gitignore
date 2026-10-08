@@ -10,3 +10,6 @@
 .venv/
 /wl-preproc
 __pycache__/
+
+# Spike S (tools/spike_vulkan): cargo build output
+tools/spike_vulkan/*/target/

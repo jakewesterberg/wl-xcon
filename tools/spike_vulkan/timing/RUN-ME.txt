@@ -1,0 +1,25 @@
+SPIKE S, PART 2: presentation timing on the monitor (about 10 seconds)
+
+1. Save your work and log out of the desktop.
+2. At the login screen press Ctrl+Alt+F3 and log in on the text console.
+3. Type exactly this one line (nothing else needs setting up):
+
+   /home/jakewesterberg/wl-spike-s/timing/target/release/timing
+
+You will see a few lines of text, then the whole monitor turns a steady dark
+gray with one small square (about 100 x 100 px) in the bottom-left corner
+that flickers black/white every frame (it may just look gray). Nothing else
+moves. After about 10 s it stops by itself, the text console comes back and
+a short summary is printed. If the screen stays dark: Ctrl+Alt+F4, then F3.
+
+To stop early: press Ctrl+C once. It stops, releases the monitor and saves
+what it measured. If nothing happens, press Ctrl+C again to force it. It
+also ends by itself 60 s after it starts, whatever happens.
+
+If it prints "cannot take the display", the login screen still holds it:
+   sudo systemctl stop sddm      (then type the command above again)
+   sudo systemctl start sddm     (afterwards, to get the login screen back)
+
+Results: /home/jakewesterberg/wl-spike-s/timing/out/run-<UTC time>.csv
+         and the same name ending .txt (the summary).
+Afterwards: Ctrl+Alt+F1 (or F2) for the login screen; log in as usual.

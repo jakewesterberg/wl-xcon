@@ -1,0 +1,31 @@
+device: "NVIDIA GeForce RTX 4080 SUPER", driver 615.71.9
+VK_KHR_display: 1 display(s)
+  Samsung Odyssey G8 (DP-0): 3840x2160 px
+    mode 3840x2160 @ 60.000 Hz
+    mode 3840x2160 @ 59.940 Hz
+    mode 3840x2160 @ 29.970 Hz
+    mode 1920x1080 @ 59.940 Hz
+    mode 1920x1080 @ 50.000 Hz
+    mode 1920x1080 @ 119.880 Hz
+    mode 1280x720 @ 59.940 Hz
+    mode 720x480 @ 59.940 Hz
+    mode 3840x2160 @ 119.880 Hz
+    mode 2560x1440 @ 59.951 Hz
+    mode 2560x1440 @ 119.998 Hz
+    mode 1920x1080 @ 60.000 Hz
+    mode 3840x2160 @ 120.000 Hz
+    mode 1920x1080 @ 120.000 Hz
+    mode 1280x720 @ 60.000 Hz
+    mode 1280x800 @ 59.810 Hz
+    mode 1280x1024 @ 60.020 Hz
+    mode 1440x900 @ 59.887 Hz
+    mode 1600x900 @ 60.000 Hz
+    mode 1680x1050 @ 59.954 Hz
+    mode 640x480 @ 59.940 Hz
+    mode 800x600 @ 60.317 Hz
+    mode 1024x768 @ 60.004 Hz
+calibrateable time domains: Ok([DEVICE, CLOCK_MONOTONIC, CLOCK_MONOTONIC_RAW, 1000208001, 1000208000])
+output memory: type 4, DEVICE_LOCAL | HOST_VISIBLE | HOST_COHERENT
+dispatch, GPU timestamps, ms per run: 4.0054 3.6839 3.8981
+dispatch: runs 3, median 3.8981 ms, min 3.6839, max 4.0054
+wrote out/panel_y_validated.f32: 3840 x 2160 f32, row-major, top row first
