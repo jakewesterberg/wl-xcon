@@ -68,6 +68,7 @@ from wl_xcon.link import (
     decode,
     encode,
 )
+from wl_xcon.warnlist import HEAD_FREE
 
 TASKS = "tasks"
 GOOD = f"{TASKS}/fixation_detection.py"
@@ -242,6 +243,20 @@ def test_wlx_check_for_a_kind_lists_the_calibrations_own_warnings(capsys):
     out = capsys.readouterr().out
     assert "warning  default calibration" in out and "(accepted in training, piloting, recording)" in out
     assert "2 warning(s), each accepted only in the session kinds it names: the task loads" in out
+
+
+def test_wlx_check_says_no_findings_only_when_it_said_no_warning_either(monkeypatch, capsys):
+    """The engine B final review: a task with no findings, checked for a kind on the default
+    calibration, said "1 warning(s) ... the task loads" and then "no findings"."""
+    monkeypatch.setattr(cli, "check", lambda *a, **k: [])
+    argv = ["check", GOOD, "--rig", RIG_FILE, "--allocation", ALLOCATION, "--view", "direct"]
+
+    assert main([*argv, "--kind", "recording"]) == 0
+    out = capsys.readouterr().out
+    assert "\n1 warning(s), each accepted only in the session kinds it names: the task loads" in out
+    assert "no findings" not in out
+    assert main(argv) == 0
+    assert capsys.readouterr().out.splitlines()[-1] == "no findings"
 
 
 @pytest.mark.parametrize("kind", SESSION_KINDS)
@@ -2268,6 +2283,26 @@ def test_wlx_run_refuses_a_calibration_record_that_will_not_load_before_anything
     assert not (tmp_path / "2027-01-14_01").exists()
 
 
+def test_wlx_run_runs_its_rig_file_once(tmp_path):
+    """The engine B final review: `wlx run` ran the rig file twice, once for the setup and
+    once for the calibration. One load gives both."""
+    ran = tmp_path / "ran.txt"
+    rig = tmp_path / "rig" / "rig.py"
+    rig.parent.mkdir()
+    rig.write_text(
+        "from pathlib import Path\n"
+        f"with Path({str(ran)!r}).open('a', encoding='utf-8') as ran:\n"
+        "    ran.write('ran\\n')\n"
+        "from _rig import RIG\n",
+        encoding="utf-8",
+    )
+    argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm())
+    argv[argv.index(RIG_FILE)] = str(rig)
+
+    assert main(argv) == 0
+    assert ran.read_text(encoding="utf-8").splitlines() == ["ran"]
+
+
 def test_wlx_run_lists_its_warnings_and_starts_only_once_they_are_accepted(tmp_path):
     argv = [a for a in _run_args(tmp_path, "--out-of-cage-at", _hhmm()) if a != "--accept-warnings"]
 
@@ -3777,6 +3812,17 @@ def test_the_console_says_what_the_session_is_for_its_calibration_and_what_it_ac
     assert "  warnings accepted: default calibration" in shown
     assert "  color calibration: NONE LOADED" in render(_telemetry(calibration=None))
     assert "  an open asks to accept: default calibration" in render(idle())
+
+
+def test_the_console_says_a_free_head_is_asked_of_a_chaired_open_only():
+    """The engine B final review: the idle line listed the free head among what an open asks
+    to accept without saying that only a chaired open asks it, as the page's Warnings tab
+    does."""
+    head_free = WarningRow(HEAD_FREE, "the head is free", SESSION_KINDS, None, None)
+
+    shown = render(idle(warnings=idle().warnings + (head_free,)))
+
+    assert "  an open asks to accept: default calibration, head free (a chaired session's only)\n" in shown
 
 
 def test_the_console_prints_a_warnings_wire_text_safely():

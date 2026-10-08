@@ -227,12 +227,11 @@ def _setups(
     return geometries
 
 
-def _session_geometry(args) -> Geometry:
-    """The field a `wlx run` session is held to, from `--rig`, `--view` and
-    `--subject-settings` (direct-view spec §3; PI, 2026-09-29). Every refusal is a
-    sentence: an unmeasured rig, an animal the stereoscope is not built for, another
-    animal's file, or a file where none belongs."""
-    rig = _load_rig(args.rig)
+def _session_geometry(args, rig: Rig) -> Geometry:
+    """The field a `wlx run` session is held to, from `rig` (`--rig`'s, loaded once by the
+    caller), `--view` and `--subject-settings` (direct-view spec §3; PI, 2026-09-29). Every
+    refusal is a sentence: an unmeasured rig, an animal the stereoscope is not built for,
+    another animal's file, or a file where none belongs."""
     if args.view == "direct":
         if args.subject_settings is not None:
             raise SystemExit(_DIRECT_READS_NO_SETTINGS)
@@ -809,10 +808,13 @@ def _render_idle(frame: _link.Idle) -> str:
     lines.append(
         f"  tasks offered: {', '.join(_printable(t) for t in frame.offered_tasks) or 'none'}"
     )
-    lines.append(
-        "  an open asks to accept: "
-        + (", ".join(_printable(w.code) for w in frame.warnings if w.accepted_in) or "nothing")
-    )
+    # A chaired session's free head is asked of a chaired open alone: said so, as the page's
+    # Warnings tab says it (`web._warning_row`; the engine B final review).
+    asked = [
+        _printable(w.code) + (" (a chaired session's only)" if w.code == warnlist.HEAD_FREE else "")
+        for w in frame.warnings if w.accepted_in
+    ]
+    lines.append(f"  an open asks to accept: {', '.join(asked) or 'nothing'}")
     for refused in (w for w in frame.warnings if not w.accepted_in):
         # A listing fault is no warning (the second review's Minor 2): said as what it is.
         lines.append(
@@ -1615,7 +1617,10 @@ def main(argv: list[str] | None = None) -> int:
         # reads; the enum's own value is the underscored one that goes on the wire.
         deployment = Deployment(args.deployment.replace("-", "_"))
 
-        geometry = _session_geometry(args)
+        # The rig file is run once (the engine B final review): its geometry and its color
+        # calibration both come from this one load.
+        rig = _load_rig(args.rig)
+        geometry = _session_geometry(args, rig)
         # **Refused before anything is recorded** (direct-view spec §3, plan decision
         # 7): a task written for the other setup, or one the chosen field cannot show,
         # stops here -- before the session opens and before the departure is asked
@@ -1623,7 +1628,7 @@ def main(argv: list[str] | None = None) -> int:
         # not this command.
         # The rig's color calibration (engine spec §7.1): a record that will not load refuses
         # here, before anything is recorded (the engine B plan, call 20).
-        calibration = _load_calibration(_load_rig(args.rig), args.rig)
+        calibration = _load_calibration(rig, args.rig)
         findings = check(
             _load_trial(args.task),
             _load_allocation(args.allocation),
@@ -2160,7 +2165,9 @@ def main(argv: list[str] | None = None) -> int:
               f"the task loads")
     if notes:
         print(f"\n{len(notes)} non-blocking finding(s): task needs human review")
-    if not findings:
+    # Neither the task's findings nor the calibration's own warnings (the engine B final
+    # review): a check that has just said a warning is not one with nothing to say.
+    if not findings and not warned:
         print("no findings")
     return 0
 
