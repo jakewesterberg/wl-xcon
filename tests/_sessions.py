@@ -51,6 +51,7 @@ def session(
             already_delivered_today=0.0,
             deployment=deployment,
             geometry=DIRECT,
+            session_kind="training",
         ),
         card=Card(),
         pump=Pump(),

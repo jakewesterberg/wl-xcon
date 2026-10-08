@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from wl_xcon import actor as actors
+from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.levels import Levels, task_name
 from wl_xcon.record import CONTROLS, RUNS, TRIAL_STARTS
 from wl_xcon.simulate import Tally
@@ -34,6 +35,12 @@ PREDATES = (
     "fluid so far cannot be known; end it with its return instead"
 )
 
+#: Why a record written before engine build B cannot be resumed, said once, for the page.
+PREDATES_KINDS = (
+    "its record was written before sessions said what they are for (engine build B), so what "
+    "it is for is unknown; end it with its return instead"
+)
+
 
 class Unresumable(Exception):
     """A folder that cannot be resumed; its message says why, for the page."""
@@ -45,6 +52,7 @@ class Restoration:
     subject: str
     deployment: str
     view: str
+    session_kind: str
     subject_settings: str
     bounds_at_open: dict
     already_today: float | None
@@ -119,6 +127,14 @@ def _read(directory: Path, departure: float) -> Restoration:
         raise Unresumable(
             "its config.json does not hold the bounds it opened with, as ceilings and "
             "minima, so whether they have changed cannot be checked; end it instead"
+        )
+    session_kind = config.get("session_kind")
+    if session_kind is None:
+        raise Unresumable(PREDATES_KINDS)
+    if session_kind not in SESSION_KINDS:
+        raise Unresumable(
+            f"its config.json says the session is for {session_kind!r}, which is not training, "
+            f"piloting or recording; end it instead"
         )
     runs = _rows(directory, RUNS)
     run_rows = [row for row in runs if row["event"] == "start"]
@@ -208,6 +224,7 @@ def _read(directory: Path, departure: float) -> Restoration:
         subject=str(config["subject"]),
         deployment=str(config["deployment"]),
         view=str(config["setup"]["view"]),
+        session_kind=session_kind,
         subject_settings=str(config["versions"]["subject_settings"]),
         bounds_at_open=bounds,
         already_today=config["already_delivered_today"],

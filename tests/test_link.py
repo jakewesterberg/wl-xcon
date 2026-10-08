@@ -2301,8 +2301,9 @@ def test_an_idle_frame_carries_the_links_refusals_too_capped_and_counted():
 SERVICE_COMMANDS = (
     OpenSession(
         by=Box("jake"), session_id="2027-01-14_01", animal="A",
-        deployment="rig_fixed", view="direct", departure="09:30", delivered_today=12.5,
-        answer="amend", amend_to="08:45", amend_reason="typed 09:30 for 08:45",
+        deployment="rig_fixed", view="direct", session_kind="piloting", departure="09:30",
+        delivered_today=12.5, answer="amend", amend_to="08:45",
+        amend_reason="typed 09:30 for 08:45",
     ),
     CheckRun(by=Box("jake"), task="fixation_detection.py", values={"fix_hold": 0.3, "looks": "circle"}),
     StartRun(
@@ -2335,6 +2336,9 @@ def test_the_services_commands_cross_a_real_socket_intact(zmq_cleanup, command):
         ({"kind": "open", "delivered_today": float("nan")}, "delivered_today"),
         ({"kind": "open", "delivered_today": True}, "delivered_today"),
         ({"kind": "open", "amend_reason": "x" * 501}, "amend_reason"),
+        ({"kind": "open", "session_kind": "demo"}, "training, piloting or recording"),
+        ({"kind": "open", "session_kind": None}, "training, piloting or recording"),
+        ({"kind": "open", "session_kind": "Recording"}, "training, piloting or recording"),
         ({"kind": "start", "values": {"fix_hold": "x" * 201}}, "at most 200"),
         ({"kind": "start", "values": {"fix_hold": float("inf")}}, "not a real number"),
         ({"kind": "start", "values": {f"p{i}": 1.0 for i in range(65)}}, "at most 64"),
@@ -2355,8 +2359,9 @@ def test_a_service_command_with_a_malformed_field_is_refused_before_it_exists(fi
     base = {
         "open": {
             "by": JAKE, "session_id": "2027-01-14_01", "animal": "A",
-            "deployment": "rig_fixed", "view": "direct", "departure": "09:30",
-            "delivered_today": None, "answer": None, "amend_to": None, "amend_reason": "",
+            "deployment": "rig_fixed", "view": "direct", "session_kind": "training",
+            "departure": "09:30", "delivered_today": None, "answer": None, "amend_to": None,
+            "amend_reason": "",
         },
         "check": {"by": JAKE, "task": "t.py", "values": {}},
         "start": {"by": JAKE, "task": "t.py", "values": {}, "trials": 3, "acknowledged": []},

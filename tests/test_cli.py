@@ -2096,7 +2096,7 @@ def _hours_ago(hours: float) -> str:
 
 #: What every `wlx run` here runs in: the stand-in rig's direct view, which the
 #: reference tasks are written for.
-_SETUP = ("--rig", RIG_FILE, "--view", "direct")
+_SETUP = ("--rig", RIG_FILE, "--view", "direct", "--kind", "training")
 
 
 def _run_args(tmp_path, *extra: str) -> list:
@@ -2124,6 +2124,14 @@ def test_wlx_run_requires_the_setup(tmp_path, capsys):
         main(argv)
     assert exited.value.code == 2
     assert "--view" in capsys.readouterr().err
+
+
+def test_wlx_run_requires_what_the_session_is_for(tmp_path):
+    argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm())
+    at = argv.index("--kind")
+    with pytest.raises(SystemExit) as exited:
+        main(argv[:at] + argv[at + 2:])
+    assert exited.value.code == 2
 
 
 def test_wlx_run_refuses_a_task_written_for_the_other_setup_before_anything_is_recorded(tmp_path):

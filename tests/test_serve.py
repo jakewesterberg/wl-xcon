@@ -443,6 +443,7 @@ def test_a_host_clock_stepped_back_between_two_frames_leaves_the_reward_age_righ
             already_delivered_today=0.0,
             deployment=Deployment.RIG_CHAIRED,
             geometry=DIRECT,
+            session_kind="training",
         ),
         card=Card(),
         pump=Pump(),
@@ -1208,7 +1209,7 @@ GOOD = "tasks/fixation_detection.py"
 ALLOCATION = "tasks/allocation.py"
 #: What every `wlx run` here runs in: the stand-in rig's direct view, which the
 #: reference tasks are written for.
-_SETUP = ("--rig", RIG_FILE, "--view", "direct")
+_SETUP = ("--rig", RIG_FILE, "--view", "direct", "--kind", "training")
 #: The eight-hour reference config: a session under it runs until it is stopped.
 EIGHT_HOURS = "tasks/eight_hour_bounds.py"
 #: What the fixation task needs set to run headless (as in `test_cli.py`).
@@ -2464,8 +2465,9 @@ def test_a_parse_refusal_is_a_bad_command():
 #: The page's `open` body, every field as the *New session* dialog sends it.
 OPEN_BODY = {
     "kind": "open", "by": "jake", "session_id": "2027-01-14_01", "animal": "REFERENCE",
-    "deployment": "rig_fixed", "view": "direct", "departure": "09:30",
-    "delivered_today": 12, "answer": None, "amend_to": None, "amend_reason": "",
+    "deployment": "rig_fixed", "view": "direct", "session_kind": "training",
+    "departure": "09:30", "delivered_today": 12, "answer": None, "amend_to": None,
+    "amend_reason": "",
 }
 START_BODY = {
     "kind": "start", "by": "jake", "task": "fixation_detection.py", "values": {},
@@ -2480,14 +2482,14 @@ PAGE = Box("jake")
     [
         (OPEN_BODY, OpenSession(
             by=PAGE, session_id="2027-01-14_01", animal="REFERENCE", deployment="rig_fixed",
-            view="direct", departure="09:30", delivered_today=12.0, answer=None,
-            amend_to=None, amend_reason="",
+            view="direct", session_kind="training", departure="09:30", delivered_today=12.0,
+            answer=None, amend_to=None, amend_reason="",
         )),
         ({**OPEN_BODY, "answer": "amend", "amend_to": "09:10", "amend_reason": "typed 9:30"},
          OpenSession(
             by=PAGE, session_id="2027-01-14_01", animal="REFERENCE", deployment="rig_fixed",
-            view="direct", departure="09:30", delivered_today=12.0, answer="amend",
-            amend_to="09:10", amend_reason="typed 9:30",
+            view="direct", session_kind="training", departure="09:30", delivered_today=12.0,
+            answer="amend", amend_to="09:10", amend_reason="typed 9:30",
         )),
         ({"kind": "check", "by": "jake", "task": "fixation_detection.py", "values": {}},
          CheckRun(by=PAGE, task="fixation_detection.py", values={})),
@@ -3910,8 +3912,9 @@ def _open_body(**over) -> dict:
     """What the page's *New session* dialog sends (Task 6's `openSession`)."""
     body = {
         "kind": "open", "session_id": "2027-01-14_01", "animal": "REFERENCE",
-        "deployment": "rig_fixed", "view": "direct", "departure": _typed(),
-        "delivered_today": 0, "answer": None, "amend_to": None, "amend_reason": "",
+        "deployment": "rig_fixed", "view": "direct", "session_kind": "training",
+        "departure": _typed(), "delivered_today": 0, "answer": None, "amend_to": None,
+        "amend_reason": "",
     }
     body.update(over)
     return body

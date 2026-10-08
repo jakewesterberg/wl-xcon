@@ -526,6 +526,7 @@ class Service:
         session, _bounds = self._build(
             session_id=command.session_id, animal=command.animal,
             deployment=command.deployment, view=command.view,
+            session_kind=command.session_kind,
             delivered_today=command.delivered_today,
         )
         return session
@@ -537,6 +538,7 @@ class Service:
         animal: str,
         deployment: str,
         view: str,
+        session_kind: str,
         delivered_today: float | None,
     ) -> tuple[Session, Bounds]:
         """A session for `animal`, built from its files under `--subjects` and **not
@@ -592,6 +594,7 @@ class Service:
                 already_delivered_today=delivered_today,
                 deployment=Deployment(deployment),
                 geometry=geometry,
+                session_kind=session_kind,
                 bounds_config=str(bounds_path),
                 rig_config=self.rig_path,
                 subject_settings="" if settings_path is None else str(settings_path),
@@ -754,6 +757,7 @@ class Service:
         built = self._built(command.KIND, command.by, lambda: self._build(
             session_id=found.session_id, animal=restoration.subject,
             deployment=restoration.deployment, view=restoration.view,
+            session_kind=restoration.session_kind,
             delivered_today=restoration.already_today,
         ))
         if built is None:

@@ -57,6 +57,7 @@ from wl_xcon.simulate import Tally
 from wl_xcon.task import Outcome
 from wl_xcon.taskd import PAUSE_HOUSEKEEPING_S, RunSpec, Session, SessionSpec
 from wl_xcon.welfare import Deployment, Simulated as Pump
+import _sessions
 from _rig import DIRECT, STEREOSCOPE
 
 #: wl-preproc's decoder and trial assembler, for the test that runs a session's stream
@@ -148,6 +149,7 @@ def _spec(tmp_path, seed: int = 1, trials: int = 50, **kwargs) -> SessionSpec:
         already_delivered_today=0.0,
         deployment=Deployment.RIG_FIXED,
         geometry=DIRECT,
+        session_kind="training",
     )
     for name, value in kwargs.items():
         setattr(spec, name, value)
@@ -2667,6 +2669,21 @@ def test_the_config_snapshot_names_the_bounded_config_it_ran_under(tmp_path):
 
     config = json.loads((session.directory / "config.json").read_text())
     assert config["versions"]["bounds"] == "subjects/A/bounds.py"
+
+
+def test_a_sessions_config_says_what_it_is_for(tmp_path):
+    made = _sessions.session(tmp_path)
+    made.spec.session_kind = "recording"
+    made.open()
+
+    config = json.loads((made.directory / "config.json").read_text())
+    assert config["session_kind"] == "recording"
+
+
+def test_a_session_for_something_else_is_refused_when_it_is_built(tmp_path):
+    spec = _sessions.session(tmp_path).spec
+    with pytest.raises(ValueError, match="training, piloting or recording"):
+        Session(dataclasses.replace(spec, session_kind="demo"))
 
 
 # ---------------------------------------------------------------------------

@@ -33,7 +33,8 @@ def _config(directory, **over):
     with what `resume.read` reads of it."""
     config = {
         "session_id": directory.parent.name, "subject": "A", "service": True,
-        "deployment": "rig_chaired", "bounds": {"ceilings": {}, "minima": {}},
+        "deployment": "rig_chaired", "session_kind": "training",
+        "bounds": {"ceilings": {}, "minima": {}},
         "versions": {"bounds": "b.py", "rig": "r.py", "subject_settings": ""},
         "setup": {"view": "direct"}, "already_delivered_today": 40.0,
     }

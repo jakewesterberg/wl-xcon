@@ -26,6 +26,7 @@ from wl_xcon.marks import clock_or_now as _clock_or_now
 from wl_xcon.marks import clock_time as _wall_clock_time
 from wl_xcon.bounds import Bounds, Exceeded
 from wl_xcon.check import check
+from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.review import render as render_review
 from wl_xcon.codes import PROVISIONAL, Allocation
 from wl_xcon.geometry import VIEWS, Geometry, Rig, SubjectSettings
@@ -1224,6 +1225,14 @@ def main(argv: list[str] | None = None) -> int:
         "setup is refused before anything is recorded",
     )
     runner.add_argument(
+        "--kind",
+        dest="session_kind",
+        choices=SESSION_KINDS,
+        required=True,
+        help="what this session is for: training, piloting or recording (engine spec §19.1). "
+        "**Required, with no default**: which of its warnings refuse it depends on it",
+    )
+    runner.add_argument(
         "--subject-settings",
         type=Path,
         default=None,
@@ -1692,6 +1701,7 @@ def main(argv: list[str] | None = None) -> int:
                         # (S13 §6 item 2).
                         deployment=deployment,
                         geometry=geometry,
+                        session_kind=args.session_kind,
                         rig_config=str(args.rig),
                         subject_settings=(
                             "" if args.subject_settings is None else str(args.subject_settings)

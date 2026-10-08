@@ -131,8 +131,8 @@ def _service(tmp_path, *, bounds=EIGHT_HOURS, animals=("REFERENCE",), link=None,
 def _open(**over) -> OpenSession:
     fields = dict(
         by=BY, session_id="2027-01-14_01", animal="REFERENCE", deployment="rig_fixed",
-        view="direct", departure=typed(60), delivered_today=0.0, answer=None,
-        amend_to=None, amend_reason="",
+        view="direct", session_kind="training", departure=typed(60), delivered_today=0.0,
+        answer=None, amend_to=None, amend_reason="",
     )
     fields.update(over)
     return OpenSession(**fields)
@@ -226,6 +226,16 @@ def test_open_marks_the_departure_opens_the_session_and_waits_between_runs(tmp_p
     assert service.session.card.codes == [4128], "head fixed once, as the session opens"
     config = json.loads((service.root / "2027-01-14_01" / "xcon" / "config.json").read_text())
     assert config["service"] is True and config["subject"] == "REFERENCE"
+
+
+def test_an_opened_session_is_for_what_its_open_said(tmp_path):
+    service = _service(tmp_path)
+
+    _step(service, _open(session_kind="piloting"))
+
+    assert service.session.spec.session_kind == "piloting"
+    config = json.loads((service.root / "2027-01-14_01" / "xcon" / "config.json").read_text())
+    assert config["session_kind"] == "piloting"
 
 
 def test_a_session_id_or_animal_that_is_not_one_folder_name_is_refused_and_nothing_is_written(tmp_path):
@@ -1793,6 +1803,33 @@ def test_a_stranded_session_recorded_before_xc026_cannot_be_resumed_and_says_why
     assert (found.resumable, found.why) == (False, resume.PREDATES)
 
     assert _resume_refused(service, "2027-01-14_01") == resume.PREDATES
+
+
+def test_a_resumed_session_is_for_what_it_was_opened_for(tmp_path):
+    folders = _folders(tmp_path)
+    first = _made(folders)
+    _step(first, _open(session_kind="piloting"))
+    # the process stops: a second service over the same root, as the resume tests do
+    second = _made(folders)
+
+    _step(second, ResumeSession(by=BY, session_id="2027-01-14_01"))
+
+    assert second.session.spec.session_kind == "piloting"
+
+
+def test_a_record_written_before_sessions_said_what_they_are_for_is_not_resumable(tmp_path):
+    """Review Focus 5: as `test_a_stranded_session_recorded_before_xc026_cannot_be_resumed_and_says_why`."""
+    folders = _folders(tmp_path)
+    _crashed(folders, "2027-01-14_01", run=True)
+    path = folders[2] / "2027-01-14_01" / "xcon" / "config.json"
+    config = json.loads(path.read_text())
+    del config["session_kind"]
+    path.write_text(json.dumps(config))
+    service = _made(folders)
+
+    (found,) = _step(service).stranded
+    assert (found.resumable, found.why) == (False, resume.PREDATES_KINDS)
+    assert _resume_refused(service, "2027-01-14_01") == resume.PREDATES_KINDS
 
 
 def test_a_stranded_session_past_its_out_of_cage_limit_is_refused_with_welfares_sentence(tmp_path):

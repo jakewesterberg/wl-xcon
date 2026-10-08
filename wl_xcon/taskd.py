@@ -58,6 +58,7 @@ from wl_xcon.encode import (
     words_for_block,
     words_for_run,
 )
+from wl_xcon.findings import kind_named
 from wl_xcon.geometry import Geometry
 from wl_xcon.levels import Levels
 from wl_xcon.record import XCON_DIRNAME, SessionRecord, _local, welfare_note
@@ -198,6 +199,11 @@ class SessionSpec:
     #: with no default**, as `bounds` is: a session with no field is one whose check 8
     #: never ran, which is how every session ran before direct view part 2 (2026-09-29).
     geometry: Geometry
+    #: What the session is for: training, piloting or recording (engine spec §19.1),
+    #: chosen at its open and fixed for the session (the PI, 2026-10-08). **Required,
+    #: with no default**, as `deployment` is: which warnings refuse it depends on it
+    #: (`warnlist`), and a default would be a refusal lost by omission.
+    session_kind: str
     #: The session's plan. `None` means one block of `trials` trials, which is the
     #: same code path with one block in it.
     blocks: list[Block] | None = None
@@ -444,6 +450,7 @@ class Session:
     _stamped: dict = field(init=False, default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
+        kind_named(self.spec.session_kind)
         self._anchored = SessionClock()
         if self.spec.subject != self.spec.bounds.subject:
             # A dose error with a plausible-looking session behind it: every trial
@@ -688,6 +695,7 @@ class Session:
             "subject": self.spec.subject,
             "service": self.service,
             "deployment": self.spec.deployment.value,
+            "session_kind": self.spec.session_kind,
             "bounds": bounds_record(self.spec.bounds),
             "already_delivered_today": self.spec.already_delivered_today,
             "versions": {

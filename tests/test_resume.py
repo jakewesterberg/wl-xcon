@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from wl_xcon.resume import PREDATES, Unresumable, read
+from wl_xcon.resume import PREDATES, PREDATES_KINDS, Unresumable, read
 from wl_xcon.task import Outcome
 
 DEPARTURE = 1_700_000_000.0
@@ -52,6 +52,7 @@ def _config(**over):
     config = {
         "session_id": "2027-01-14_01", "subject": "REFERENCE", "service": True,
         "deployment": "rig_chaired",
+        "session_kind": "training",
         "bounds": {"ceilings": {"reward_correct": {"value": 0.05, "maximum": 10.0, "unit": "mL"}},
                    "minima": {"daily_fluid": {"value": 20.0, "unit": "mL"}}},
         "versions": {"bounds": "b.py", "rig": "r.py", "subject_settings": ""},
@@ -383,3 +384,22 @@ def test_a_config_whose_bounds_are_not_ceilings_and_minima_cannot_be_resumed(tmp
 
     with pytest.raises(Unresumable, match=r"config\.json"):
         read(directory, DEPARTURE)
+
+
+def test_a_record_that_does_not_say_what_its_session_was_for_cannot_be_resumed(tmp_path):
+    config = _config()
+    del config["session_kind"]
+
+    with pytest.raises(Unresumable) as refused:
+        read(_folder(tmp_path, config=config), DEPARTURE)
+
+    assert str(refused.value) == PREDATES_KINDS
+
+
+def test_a_record_whose_session_was_for_something_else_cannot_be_resumed(tmp_path):
+    with pytest.raises(Unresumable, match="'demo', which is not training, piloting or recording"):
+        read(_folder(tmp_path, config=_config(session_kind="demo")), DEPARTURE)
+
+
+def test_a_restoration_says_what_its_session_is_for(tmp_path):
+    assert read(_folder(tmp_path, config=_config(session_kind="piloting")), DEPARTURE).session_kind == "piloting"

@@ -50,6 +50,7 @@ from typing import ClassVar, Protocol
 
 from wl_xcon import actor as actors
 from wl_xcon.actor import Actor
+from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 
 #: Bumped whenever a field changes meaning or disappears. ADR-0003: "schema-versioned
@@ -1324,7 +1325,8 @@ class ManualReward:
 class OpenSession:
     """Open a session in `wlx taskd` (P4d-2b spec §6.2): who sends it, the session id,
     the animal (a folder under `--subjects`), the deployment (`rig_fixed` or
-    `rig_chaired`), the setup (`direct` or `stereoscope`), the departure **as typed**,
+    `rig_chaired`), the setup (`direct` or `stereoscope`), what the session is for,
+    training, piloting or recording (engine spec §19.1), the departure **as typed**,
     the fluid already given today or `None`, and the answer to a far departure --
     `None`, `"confirm"`, or `"amend"` with the corrected time as typed and a reason."""
 
@@ -1335,6 +1337,7 @@ class OpenSession:
     animal: str
     deployment: str
     view: str
+    session_kind: str
     departure: str
     delivered_today: float | None
     answer: str | None
@@ -1522,7 +1525,8 @@ def _encode_command(command: Command) -> bytes:
         payload = {
             "kind": "open", "by": actors.to_map(command.by), "session_id": command.session_id,
             "animal": command.animal, "deployment": command.deployment,
-            "view": command.view, "departure": command.departure,
+            "view": command.view, "session_kind": command.session_kind,
+            "departure": command.departure,
             "delivered_today": command.delivered_today, "answer": command.answer,
             "amend_to": command.amend_to, "amend_reason": command.amend_reason,
         }
@@ -1778,6 +1782,12 @@ def _command_from(data: dict) -> Command:
                 f"a session's setup is direct or stereoscope, and "
                 f"{_quoted(data.get('view'))} is neither, so it is refused",
             )
+        if data.get("session_kind") not in SESSION_KINDS:
+            raise CommandRefused(
+                "open", by,
+                f"a session is for training, piloting or recording, and "
+                f"{_quoted(data.get('session_kind'))} is none of them, so it is refused",
+            )
         if data.get("answer") not in (None, "confirm", "amend"):
             raise CommandRefused(
                 "open", by,
@@ -1814,6 +1824,7 @@ def _command_from(data: dict) -> Command:
             animal=_word(data, "animal", "open", by),
             deployment=data["deployment"],
             view=data["view"],
+            session_kind=data["session_kind"],
             departure=_word(data, "departure", "open", by),
             delivered_today=delivered,
             answer=data.get("answer"),
