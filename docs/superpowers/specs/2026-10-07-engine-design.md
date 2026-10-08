@@ -374,8 +374,8 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    `STIMULUS_CHANGED`, allocated once in wl-xtasks' range for every task; which stimulus each was is in
    the record by frame; a group is one code; no amendment to wl-preproc's frozen codec. Tasks' own
    onset codes (`FIX_ON`, `TARGET_ON`) stay.
-4. **Frames are matched to the recording** by counting flip-patch edges from each trial's start code,
-   checked against the trial's length [@siegle2021survey]. **The continuous mode strobes an
+4. **Frames are matched to the recording** [@siegle2021survey] by counting flip-patch edges from each
+   trial's start code, checked against the trial's length. **The continuous mode strobes an
    anchor code about once a
    second** and the screen log records the frame each was strobed on, so a miscount is confined to one
    interval and located.
@@ -386,8 +386,8 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    was** (the loop never skips a frame number); m-sequence and other reverse-correlation trials with any
    repeat are marked [@reid1997use].
 6. **The console shows frame timing per trial**, at boundaries.
-7. **A frame-clock fault**: a warning and a warnings-list entry, affected trials marked, the session
-   goes on (acceptable in every session kind) [@nwb2026nwb].
+7. **A frame-clock fault**: a warning and a warnings-list entry, affected trials marked [@nwb2026nwb], the session
+   goes on (acceptable in every session kind).
 
 ## 9. Media and sound (N§6, N§R5, N§R6)
 

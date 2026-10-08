@@ -82,7 +82,7 @@
   wl-sync since 2026-08-16):
   - the sync box does not trigger cameras;
   - the primary samples the sync box's barcode (`BARCODE_RAW`, on a camera-facing BNC) on an
-    input line **every frame** [@siegle2021survey];
+    input line **every frame**;
   - the camera group's `ExposureActive` goes to the sync box's behavior frame-time input
     (GPIO27);
   - every camera stamps each frame's number and exposure time into the frame (chunk data),

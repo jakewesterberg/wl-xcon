@@ -9,7 +9,10 @@
   [@nrc2003guidelines, p. 56]. Every "budget", "ceiling" and "refuses
   delivery" below that concerns *fluid* reads the wrong way round; the code
   (`bounds.Floor`, `Welfare.shortfall`) is correct and this text is not yet rewritten.
-  Chair time and trial count are genuine ceilings and are unaffected.
+  Chair time is recorded and bounds nothing, and there is no trial maximum (PI, 2026-09-19;
+  `max_trials` removed, §8 item 7): the one duration limit is out of the cage to back in it,
+  the institution's eight hours, per excursion (§4, §5.2 item 4). *(Corrected 2026-10-08: this
+  said "Chair time and trial count are genuine ceilings and are unaffected.")*
 - **Date:** 2026-08-31
 - **Parent:** `2026-08-31-controller-architecture-design.md` §5.5, §7
 - **Welfare-critical.** Most of this file requires human review before merge (CLAUDE.md).
@@ -99,7 +102,7 @@ ceilings the console cannot exceed and the task cannot touch.**
 | Bounded | Covers |
 |---|---|
 | Reward | Volume per delivery, rate. **Not a daily total** — see the correction at the head of this file: the daily fluid figure is a floor, and only the per-delivery volume is a ceiling |
-| Session | **Time out of the cage** — the one duration limit (§5.2), eight hours (the PI corrected the twelve recorded here on 2026-10-01). **Not maximum trials**: there is no session-length maximum (PI, 2026-09-19), and per-condition targets are a task's config, carried by `scheduler`. Mandatory breaks |
+| Session | **Time out of the cage** — the one duration limit (§5.2), eight hours (the PI corrected the twelve recorded here on 2026-10-01). **Not maximum trials**: there is no session-length maximum (PI, 2026-09-19), and per-condition targets are a task's config, carried by `scheduler`. *(Removed 2026-10-08: the PI confirmed no break rule exists; it was a leftover. The row ended "Mandatory breaks".)* |
 | Tokens | Token-to-fluid conversion, maximum accumulation [@seo2009behavioral] |
 | Stimulation | Amplitude, pulse width, frequency, train duration, duty cycle, charge per phase and charge density, refractory, deliveries per session [@mccreery1990charge; @shannon1992model; @rajan2015effects] |
 
