@@ -378,9 +378,9 @@ class Service:
         #: (`_route`).
         self.closed: _link.Telemetry | None = None
         #: The service's runs (the b3a-1 plan, decision 18): a run `_start` accepted
-        #: this pass and not started, `(RunSpec, rows, by)` with `by` an `Actor`; and an
-        #: `EndSession` that arrived during a run (`_Routed`), finished once the run
-        #: returns (`step`).
+        #: this pass and not started, `(RunSpec, rows, by, accepted)` with `by` an `Actor`
+        #: and `accepted` the warnings its start accepted; and an `EndSession` that arrived
+        #: during a run (`_Routed`), finished once the run returns (`step`).
         self._starting = None
         self._ending = None
         #: The idle frame's warnings and the calendar day they were listed on (the engine B
@@ -461,9 +461,9 @@ class Service:
         self.publish()
         if self._starting is None:
             return
-        run, rows, by = self._starting
+        run, rows, by, accepted = self._starting
         self._starting = None
-        self._run(run, rows, by)
+        self._run(run, rows, by, accepted)
         if self._ending is not None:
             ending, self._ending = self._ending, None
             self._end(ending)
@@ -994,7 +994,7 @@ class Service:
             return None
         return path
 
-    def _preflight(self, session: Session, task: Path, values: dict) -> _link.Preflight:
+    def _preflight(self, session: Session, task: Path, values: dict) -> tuple:
         """Spec §6.2's items, taken now, in order -- the out-of-cage item always among
         them, since `preflight.gate` refuses a pre-flight without it.
 
@@ -1002,17 +1002,49 @@ class Service:
         final review's ruling), under the item's own name, and the other items are
         still taken: a check or a start never ends the service through its pre-flight,
         whatever item a later change adds. The out-of-cage item keeps its name when its
-        own check raises, so the gate blocks on its fail, never on its absence."""
+        own check raises, so the gate blocks on its fail, never on its absence.
+
+        **It returns the run's warnings not yet accepted too**, for `_start` to hand to the
+        run."""
         settings = Path(session.spec.subject_settings) if session.spec.subject_settings else None
+        owed: list = []
         try:
-            item, trial = _preflight.task(task, self.allocation, session.spec.geometry)
+            item, trial, findings = _preflight.task(
+                task, self.allocation, session.spec.geometry, session.spec.calibration
+            )
             checked = (item,)
         except Exception as broken:  # noqa: BLE001 -- see the docstring
-            checked, trial = _unfinished((_preflight.TASK_CHECKS,), broken), None
+            checked, trial, findings = _unfinished((_preflight.TASK_CHECKS,), broken), None, []
+
+        def warned():
+            try:
+                rig = self.open_warnings(session.spec.deployment)
+            except Exception as broken:  # noqa: BLE001 -- the engine B plan, call 31
+                # The rig's warnings could not be listed: the item fails, saying so, until they
+                # list -- never a run started without them asked (call 31). Said through
+                # `_fault`, so a fault whose own `str()` raises is said by its type, and cut as
+                # the item's other sentences are (`preflight.warnings`).
+                return _link.PreflightItem(
+                    _preflight.WARNINGS, _preflight.FAIL,
+                    _link._cut(
+                        f"the warnings could not be listed: {_fault(broken)}; no run starts "
+                        f"until they can be",
+                        _link.NOTE_LIMIT,
+                    ),
+                )
+            item, found = _preflight.warnings(
+                rig + warnlist.of_findings(findings),
+                session.spec.session_kind,
+                session.accepted_keys(),
+            )
+            owed.extend(found)
+            return item
+
         return _link.Preflight(
             task=task.name,
             items=(
                 *checked,
+                *_contained((_preflight.WARNINGS,), warned),
                 *_contained(
                     (_preflight.STARTING_VALUES,), lambda: _preflight.values(trial, values)
                 ),
@@ -1032,7 +1064,7 @@ class Service:
                     lambda: _preflight.unmeasured(session.pump),
                 ),
             ),
-        )
+        ), owed
 
     def _check(self, command: _link.CheckRun) -> None:
         """Take a run's pre-flight and put it on the frame, starting nothing."""
@@ -1041,7 +1073,7 @@ class Service:
             return
         task = self._task(command.task, "check", command.by)
         if task is not None:
-            session.preflight = self._preflight(session, task, command.values)
+            session.preflight, _ = self._preflight(session, task, command.values)
 
     def _start(self, command: _link.StartRun) -> None:
         """**Welfare-critical.** Accept a run (spec §6.2): the pre-flight **taken now**,
@@ -1056,19 +1088,44 @@ class Service:
         (carried from Task 3): `Session.run` refuses none -- `welfare.preflight` checks no
         ceiling -- so it would strobe the start and write its row before `_ends` stopped
         it. The pre-flight's out-of-cage item fails once `welfare.must_stop` fires, and
-        a fail blocks whatever is acknowledged."""
+        a fail blocks whatever is acknowledged.
+
+        **Warnings, once a session** (engine build B): a run's new ones are its `warnings`
+        item, a fail when the session's kind does not accept one and otherwise an unknown
+        acknowledged by name; the pump calibration and the eye tracker, once acknowledged, are
+        carried to the session's later runs while their sentences hold, and each start row
+        says who acknowledged them. What a start accepts goes to the run with it, and is
+        written as the run starts."""
         session = self._between_runs("start", command.by)
         if session is None:
             return
         task = self._task(command.task, "start", command.by)
         if task is None:
             return
-        checked = self._preflight(session, task, command.values)
+        checked, owed = self._preflight(session, task, command.values)
         session.preflight = checked
-        why = _preflight.gate(checked, command.acknowledged)
+        # **Accepted once per session** (engine spec §19.3, §20.1): an unknown item accepted at
+        # an earlier run, with the same sentence, counts as acknowledged here, under the name of
+        # whoever accepted it. S9a §10's rule is `gate`'s, unchanged.
+        carried = session.carried(checked)
+        # `gate` is handed what was sent with the carried names added, never a set built from
+        # it, so its own refusal of a bare string still applies (the second review's Minor 4).
+        acknowledged = command.acknowledged
+        if not isinstance(acknowledged, (str, bytes)):
+            acknowledged = (*acknowledged, *carried)
+        why = _preflight.gate(checked, acknowledged)
         if why is not None:
             self._refuse("start", command.by, why)
             return
+        named = set(command.acknowledged)
+        # What this start accepts, **handed to the run, which writes it as it starts** (the
+        # engine B plan, call 23; `_start` writes nothing): the warnings item's list, when it
+        # was acknowledged, and each unknown named here for the first time.
+        newly = list(owed) if _preflight.WARNINGS in named else []
+        newly += warnlist.of_unknowns(
+            item for item in checked.items
+            if item.name in named and item.name not in carried and item.name != _preflight.WARNINGS
+        )
         self._starting = (
             RunSpec(
                 task=str(task),
@@ -1076,11 +1133,12 @@ class Service:
                 seed=self._seed(),
                 values=dict(command.values),
             ),
-            _preflight.rows(checked, command.by, command.acknowledged),
+            _preflight.rows(checked, command.by, command.acknowledged, carried),
             command.by,
+            newly,
         )
 
-    def _run(self, run: RunSpec, rows: list, by: Actor) -> None:
+    def _run(self, run: RunSpec, rows: list, by: Actor, accepted=()) -> None:
         """The run, to its end. **Its two backstop refusals** (`Session.run`'s blocking
         finding and `welfare.preflight`), raised before it starts, are refusals here.
         **Anything else is a fault, and contained** (the b3a-1 plan, decision 14): one
@@ -1091,11 +1149,14 @@ class Service:
         **One raised before the run started** (fix round 1 of Task 8) -- a task edited to
         fail between its pre-flight and its run -- goes to stderr too, and is a start
         refusal on the feed, so a page shows why no run started. Ctrl-C is not caught:
-        `wlx taskd` ends on it."""
+        `wlx taskd` ends on it. What the start accepted is written by `Session.run` as the run
+        starts, inside this containment (the engine B plan, call 23); a fault's sentence is
+        cut for the feed (`link.NOTE_LIMIT`), since `Session.accept`'s refusal joins every
+        sentence it refuses, and the traceback on stderr keeps every word."""
         session = self.session
         before = session.run_index
         try:
-            session.run(run, preflight_rows=rows, by=by)
+            session.run(run, preflight_rows=rows, by=by, accepted=accepted)
         except (SystemExit, Exception) as ended:  # noqa: BLE001 -- see the docstring
             if session.run_index != before:
                 traceback.print_exc(file=sys.stderr)
@@ -1103,9 +1164,9 @@ class Service:
                 session.refuse("start", by, _sentence(ended))
             else:
                 traceback.print_exc(file=sys.stderr)
-                session.refuse(
-                    "start", by, f"the run did not start: {type(ended).__name__}: {ended}"
-                )
+                session.refuse("start", by, _link._cut(
+                    f"the run did not start: {type(ended).__name__}: {ended}", _link.NOTE_LIMIT,
+                ))
 
     # --- ending ---------------------------------------------------------------------
 

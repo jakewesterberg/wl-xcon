@@ -2025,6 +2025,7 @@ class Session:
         *,
         preflight_rows: list | None = None,
         by: Actor | None = None,
+        accepted=(),
     ) -> Census:
         """One run: open the in-session clock if nothing has, check, require the marks,
         then run, then record.
@@ -2035,7 +2036,8 @@ class Session:
         pre-flight's items as `runs.jsonl` records them, with who acknowledged each
         unknown one (`preflight.rows`), and `by` who started the run; `wlx run` takes no
         pre-flight (the b3a-1 plan, decision 13) and names nobody as starting its run, and
-        its start row says `null` for both.
+        its start row says `null` for both. `accepted` are the warnings its start accepted
+        (`Service._start`), written once both refusals pass.
 
         **In that order, and it is load-bearing.** A malformed task is refused before
         anything else happens, and a session whose welfare marks are missing is refused
@@ -2078,6 +2080,13 @@ class Session:
                 + "\n".join(f"  {f.code}: {f.detail}" for f in blocking)
             )
         self.welfare.preflight(self.wall_now())
+        # **What the start accepted, written as the run starts** (engine spec §19.3; the
+        # engine B plan, call 23): after both refusals above, so a refused run leaves no row of
+        # a warning accepted for it, and before the run's numbers are taken, so a fault here is
+        # `Service._run`'s "the run did not start", never the service's end.
+        if accepted:
+            self.accept(accepted, by=by, how="start",
+                        run=0 if self.run_index is None else self.run_index + 1)
 
         # **A run of its own** (the b3a-1 plan, decision 2): what belongs to a run
         # starts afresh; the session's welfare, clocks, record, feeds and bounded

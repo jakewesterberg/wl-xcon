@@ -3882,8 +3882,9 @@ def test_an_idle_frame_is_held_and_derives_no_rate():
 TEN_MINUTES = "tasks/reference_bounds.py"
 #: The one task these services offer, copied into `--tasks`.
 TASK = "fixation_detection.py"
-#: What nothing measures yet, acknowledged by name to start a run.
-UNKNOWN = ["pump calibration", "eye tracker"]
+#: The unknowns a session's first run acknowledges by name to start: its warnings not yet
+#: accepted (the reference task's `contrast-on-default`) and what nothing measures yet.
+UNKNOWN = ["warnings", "pump calibration", "eye tracker"]
 #: Who the page's commands are recorded as (`serve._person`).
 BY = Box("jake")
 #: `BY` as the record writes it: `actor.to_map`'s map (b2b spec §6).
@@ -3928,7 +3929,7 @@ def _open_body(**over) -> dict:
 
 
 def _start_body(**over) -> dict:
-    """What *start run* sends: the task's own values, both unknowns acknowledged."""
+    """What *start run* sends: the task's own values, every unknown acknowledged."""
     body = {"kind": "start", "task": TASK, "values": {}, "trials": 3, "acknowledged": list(UNKNOWN)}
     body.update(over)
     return body
@@ -4105,8 +4106,10 @@ def test_page_e2e_open_a_session_run_it_twice_and_end_it(tmp_path, monkeypatch, 
     for start in (runs[0], runs[2]):
         assert start["by"] == BY_MAP and start["layers"]["run"] == {}
         assert start["layers"]["task"]["fix_hold"] == 0.3
+        # The second run's `warnings` item passes: the first run accepted its task's warning.
+        expected = UNKNOWN if start is runs[0] else [n for n in UNKNOWN if n != "warnings"]
         assert {r["name"]: r["acknowledged_by"] for r in start["preflight"] if r["result"] == "unknown"} == {
-            name: BY_MAP for name in UNKNOWN
+            name: BY_MAP for name in expected
         }
     (refusal,) = [r for r in twice.refusals if r.name == "start"]
     assert refusal.by == BY
@@ -4123,7 +4126,7 @@ def test_page_e2e_open_a_session_run_it_twice_and_end_it(tmp_path, monkeypatch, 
     assert "take the pre-flight first" in before["controls"]
     assert '<option value="fixation_detection.py">' in before["task-sel"]
     assert 'data-task="fixation_detection.py">start run</button>' in checked["controls"]
-    assert "pre-flight · 2 to acknowledge" in checked["pf-pill"]
+    assert "pre-flight · 3 to acknowledge" in checked["pf-pill"]
 
 
 def test_page_e2e_the_limit_reached_between_runs_refuses_a_run_and_the_page_asks_for_the_return(
@@ -4203,7 +4206,7 @@ def test_page_e2e_an_unknown_item_is_acknowledged_by_its_name_and_found_in_runs_
     tmp_path, monkeypatch, zmq_cleanup
 ):
     """Spec §6.5: the page shows each unknown with a box carrying its exact name; a start
-    that ticks none is refused naming them, and one that ticks both runs, the record
+    that ticks none is refused naming them, and one that ticks each runs, the record
     saying who acknowledged each."""
     with _Taskd(tmp_path, monkeypatch, zmq_cleanup) as taskd:
         taskd.post(_open_body())

@@ -16,8 +16,11 @@ from wl_xcon import preflight
 from wl_xcon.actor import Box
 from wl_xcon.check import parameters_used
 from wl_xcon.cli import _load_allocation, _load_trial
-from wl_xcon.link import Preflight, PreflightItem
+from wl_xcon.findings import NOT_RECORDING, SESSION_KINDS
+from wl_xcon.link import NOTE_LIMIT, Preflight, PreflightItem
+from wl_xcon.photometry import SRGB
 from wl_xcon.task import Param
+from wl_xcon.warnlist import Entry
 from wl_xcon.welfare import Absent, Deployment, Simulated
 
 ALLOCATION = _load_allocation(Path("tasks/allocation.py"))
@@ -25,14 +28,14 @@ TASK = Path("tasks/fixation_detection.py")
 
 
 def test_a_task_that_passes_its_checks_in_the_sessions_setup_passes():
-    item, trial = preflight.task(TASK, ALLOCATION, DIRECT)
+    item, trial, _ = preflight.task(TASK, ALLOCATION, DIRECT, SRGB)
 
     assert (item.name, item.result) == ("task checks", "pass")
     assert "direct view" in item.said and trial is not None
 
 
 def test_a_task_written_for_the_other_setup_fails_naming_the_finding():
-    item, _ = preflight.task(TASK, ALLOCATION, STEREOSCOPE)
+    item, _, _ = preflight.task(TASK, ALLOCATION, STEREOSCOPE, SRGB)
 
     assert item.result == "fail" and "wrong-setup" in item.said
 
@@ -45,7 +48,7 @@ def test_a_task_file_that_does_not_load_fails_rather_than_raising(tmp_path, text
     bad = tmp_path / "bad.py"
     bad.write_text(text)
 
-    item, trial = preflight.task(bad, ALLOCATION, DIRECT)
+    item, trial, _ = preflight.task(bad, ALLOCATION, DIRECT, SRGB)
 
     assert item.result == "fail" and said in item.said and trial is None
 
@@ -55,11 +58,60 @@ def test_a_task_whose_checks_raise_on_it_fails_rather_than_raising(tmp_path):
     raise on a shape it does not expect (XC-156). Its fault is this item's, as a failed
     load is, and never the caller's: the service reached this on every check and start,
     and nothing above it contained the exception."""
-    item, trial = preflight.task(_sessions.whole_point_task(tmp_path), ALLOCATION, DIRECT)
+    item, trial, _ = preflight.task(_sessions.whole_point_task(tmp_path), ALLOCATION, DIRECT, SRGB)
 
     assert (item.name, item.result) == ("task checks", "fail")
     assert item.said.startswith("whole_point.py's load-time checks did not finish: TypeError: ")
     assert trial is not None, "it loaded; its checks did not finish"
+
+
+def test_the_task_item_returns_its_findings_checked_against_the_calibration():
+    item, trial, findings = preflight.task(TASK, ALLOCATION, DIRECT, SRGB)
+
+    assert item.result == "pass" and trial is not None
+    assert [f.code for f in findings] == ["contrast-on-default"]
+
+
+A = Entry("a", "one", NOT_RECORDING)
+B = Entry("b", "two", SESSION_KINDS)
+
+
+def test_the_warnings_item_fails_on_one_the_kind_does_not_accept():
+    item, owed = preflight.warnings([A, B], "recording", frozenset())
+
+    assert (item.name, item.result, owed) == ("warnings", "fail", [])
+    assert item.said == "a recording session does not accept a: one"
+
+
+def test_the_warnings_item_is_an_unknown_listing_each_not_yet_accepted():
+    item, owed = preflight.warnings([A, B], "training", {A.key})
+
+    assert (item.result, owed) == ("unknown", [B])
+    assert "b: two" in item.said and "a: one" not in item.said
+
+
+def test_the_warnings_item_passes_when_each_was_accepted_or_there_are_none():
+    assert preflight.warnings([A, B], "training", {A.key, B.key})[0].result == "pass"
+    assert preflight.warnings([], "recording", frozenset())[0] == PreflightItem("warnings", "pass", "none")
+
+
+def test_the_warnings_items_sentence_is_cut_as_the_wire_cuts_and_each_warning_is_kept_whole():
+    """A task's `color-on-default` names every colored choice, and a record that will not load
+    is quoted with whatever its loader said, so nothing bounds the item's sentence where it is
+    made: it is cut to `link.NOTE_LIMIT` characters and "…", as a frame's warning rows are.
+    What the start accepts is the warnings themselves, never the sentence, so each keeps every
+    word for `warnings.jsonl`."""
+    long = Entry("long", "x" * 2_000, SESSION_KINDS)
+
+    item, owed = preflight.warnings([long], "training", frozenset())
+    assert (item.result, len(item.said)) == ("unknown", NOTE_LIMIT + 1)
+    assert item.said.startswith("1 not yet accepted this session: long: xxx") and item.said.endswith("…")
+    assert owed == [long] and owed[0].detail == "x" * 2_000
+
+    refused = Entry("refused", "y" * 2_000, ())
+    item, _ = preflight.warnings([refused], "training", frozenset())
+    assert (item.result, len(item.said)) == ("fail", NOTE_LIMIT + 1)
+    assert item.said.startswith("a training session does not accept refused: yyy")
 
 
 @pytest.mark.parametrize(
@@ -119,7 +171,7 @@ def test_a_bare_exit_from_a_task_or_bounds_file_still_says_something(tmp_path):
     bad = tmp_path / "bad.py"
     bad.write_text("import sys\nsys.exit()\n")
 
-    item, _ = preflight.task(bad, ALLOCATION, DIRECT)
+    item, _, _ = preflight.task(bad, ALLOCATION, DIRECT, SRGB)
     kept = preflight.files(bad, "A", None, RIG)[0]
 
     assert item.result == kept.result == "fail"
@@ -326,6 +378,26 @@ def test_a_blank_name_is_fine_when_nothing_was_acknowledged():
     rows = preflight.rows(_checked("pass", "unknown"), None, ())
 
     assert all(r["acknowledged_by"] is None for r in rows)
+
+
+def test_a_carried_acknowledgement_is_recorded_under_who_gave_it_and_marked_carried():
+    rows = preflight.rows(_checked("unknown", "unknown"), Box("ann"), ("item 1",),
+                          carried={"item 0": Box("jake")})
+
+    assert [(r["name"], r["acknowledged_by"], r["carried"]) for r in rows[:2]] == [
+        ("item 0", {"kind": "box", "name": "jake"}, True),
+        ("item 1", {"kind": "box", "name": "ann"}, False)]
+
+
+def test_only_an_unknown_nobody_named_here_is_recorded_as_carried():
+    """A name acknowledged here is this start's, whoever accepted it before; and a carried
+    name on an item that is not unknown carries nothing, as a pass needs no acknowledgement."""
+    rows = preflight.rows(_checked("unknown", "pass"), Box("ann"), ("item 0",),
+                          carried={"item 0": Box("jake"), "item 1": Box("jake")})
+
+    assert [(r["name"], r["acknowledged_by"], r["carried"]) for r in rows[:2]] == [
+        ("item 0", {"kind": "box", "name": "ann"}, False),
+        ("item 1", None, False)]
 
 
 def test_parameters_used_names_every_parameter_the_task_references():

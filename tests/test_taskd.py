@@ -2822,6 +2822,28 @@ def test_warnings_given_as_a_generator_are_each_accepted(tmp_path):
     assert made.accepted_keys() == {HEAD.key, COLOR.key}
 
 
+def test_what_a_start_accepted_is_written_as_its_run_starts(tmp_path):
+    session = _session(_spec(tmp_path, trials=1))
+
+    session.run(accepted=[Entry("pump calibration", "no pump calibration", SESSION_KINDS)], by=Box("jake"))
+
+    rows = [json.loads(line) for line in (session.directory / "warnings.jsonl").read_text().splitlines()]
+    assert [(r["code"], r["how"], r["run"], r["by"]) for r in rows] == [
+        ("pump calibration", "start", 0, {"kind": "box", "name": "jake"})]
+
+
+def test_a_run_refused_by_its_backstop_writes_no_accepted_warning(tmp_path):
+    """The engine B plan, call 23: the rows are written once both refusals pass."""
+    made = _sessions.session(tmp_path)
+    made.spec.session_kind = "recording"
+    made.spec.task = "tasks/visual_search_training.py"
+    made.open()
+
+    with pytest.raises(SystemExit):
+        made.run(accepted=[Entry("pump calibration", "no pump calibration", SESSION_KINDS)])
+    assert not (made.directory / "warnings.jsonl").exists()
+
+
 # ---------------------------------------------------------------------------
 # M8 (P4d-2b b2a): a malformed setting is refused and never ends the session
 # ---------------------------------------------------------------------------

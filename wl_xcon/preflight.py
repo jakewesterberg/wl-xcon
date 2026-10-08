@@ -6,9 +6,9 @@ acknowledgement, by name, written into the record (`runs.jsonl`); **pass** proce
 failure it is shaped against is a gate that cries wolf and gets clicked through, so it
 refuses only on evidence of a problem and records acceptance where evidence is merely
 absent. `gate` is the rule; the items are what it is asked about: the task's load-time
-checks in the session's setup, its starting values, the animal's bounded config and, in
-the stereoscope, its settings, the out-of-cage mark and limit, and the two things
-nothing measures yet.
+checks in the session's setup, the run's warnings not yet accepted this session (engine
+build B), its starting values, the animal's bounded config and, in the stereoscope, its
+settings, the out-of-cage mark and limit, and the two things nothing measures yet.
 
 **Welfare-critical: `out_of_cage` and `gate`** (`docs/design/architecture.md`). The first
 is what refuses a new run once the out-of-cage limit is reached between runs (spec §6.1);
@@ -30,6 +30,8 @@ from collections.abc import Collection
 from pathlib import Path
 
 from wl_xcon import actor as actors
+from wl_xcon import link as _link
+from wl_xcon import warnlist
 from wl_xcon.actor import Actor, Box, Member
 from wl_xcon.bounds import Exceeded
 from wl_xcon.check import check, parameters_used
@@ -43,6 +45,7 @@ PASS, UNKNOWN, FAIL = "pass", "unknown", "fail"
 
 #: The items' names, as a person acknowledges them.
 TASK_CHECKS = "task checks"
+WARNINGS = "warnings"
 STARTING_VALUES = "starting values"
 BOUNDED_CONFIG = "bounded config"
 SUBJECT_SETTINGS = "subject settings"
@@ -60,26 +63,32 @@ def _said(refused: SystemExit, path: Path) -> str:
     return f"{path.name} ended its own load without saying why (exit {code!r})"
 
 
-def task(path: Path, allocation, geometry) -> tuple[PreflightItem, Trial | None]:
+def task(path: Path, allocation, geometry, calibration) -> tuple[PreflightItem, Trial | None, list]:
     """The task's load-time checks in the session's setup: **fail** if it will not load,
     if its checks do not finish, or if any finding blocks. Returns the loaded `Trial`
     too, for `values`. **Nothing a task file does raises out of here**, nor out of
     `values`; and the service contains whatever any item's check raises
     (`Service._preflight`), since it takes a pre-flight on every check and start and a
-    raise there would end it."""
+    raise there would end it.
+
+    **Its findings come back too**, for the run's `warnings` item: a warning is never this
+    item's fail, whatever the session's kind; and `calibration` is the session's, or `None`
+    while the rig's record will not load (the engine B plan, call 19)."""
     try:
         trial = _load_trial(path)
     except SystemExit as refused:
-        return PreflightItem(TASK_CHECKS, FAIL, _said(refused, path)), None
+        return PreflightItem(TASK_CHECKS, FAIL, _said(refused, path)), None, []
     except Exception as broken:  # noqa: BLE001 -- a task file is code; its fault is this item's
         return (
             PreflightItem(
                 TASK_CHECKS, FAIL, f"{path.name} did not load: {type(broken).__name__}: {broken}"
             ),
             None,
+            [],
         )
     try:
-        blocking = [f for f in check(trial, allocation, geometry=geometry) if f.blocking]
+        findings = check(trial, allocation, geometry=geometry, calibration=calibration)
+        blocking = [f for f in findings if f.blocking]
     except Exception as broken:  # noqa: BLE001 -- the checks run on code; their fault is this item's
         # Fix round 1 of Task 8: `check` can raise on a task shape it does not expect
         # (XC-156), and a pre-flight that raised took `wlx taskd` down with the animal
@@ -92,6 +101,7 @@ def task(path: Path, allocation, geometry) -> tuple[PreflightItem, Trial | None]
                 f"{type(broken).__name__}: {broken}",
             ),
             trial,
+            [],
         )
     if blocking:
         return (
@@ -99,6 +109,7 @@ def task(path: Path, allocation, geometry) -> tuple[PreflightItem, Trial | None]
                 TASK_CHECKS, FAIL, "; ".join(f"{f.code}: {f.detail}" for f in blocking)
             ),
             trial,
+            findings,
         )
     return (
         PreflightItem(
@@ -108,7 +119,41 @@ def task(path: Path, allocation, geometry) -> tuple[PreflightItem, Trial | None]
             f"{_setup_words(geometry.view, geometry.half_ipd_cm)}",
         ),
         trial,
+        findings,
     )
+
+
+def warnings(entries, kind: str, accepted) -> tuple[PreflightItem, list]:
+    """The run's warnings (engine spec §19.2-19.3): the rig's calibration's, the deployment's
+    and its task's. **Fail** when the session's kind does not accept one -- among them a
+    calibration that will not load or is dated after today, which no kind accepts (the engine
+    B plan, call 19); **unknown**, acknowledged by name, when any is not yet accepted this
+    session -- returned, so the start that acknowledges them records each; **pass** when each
+    was.
+
+    **The item's sentence is cut to `link.NOTE_LIMIT` characters and "…"**, as a frame's
+    warning rows are (`link.WarningRow.of`): nothing bounds a warning's sentence where it is
+    made -- a task's `color-on-default` names every colored choice, and a record that will not
+    load is quoted with what its loader said. The warnings returned keep every word: they,
+    never this sentence, are what a start accepts and `warnings.jsonl` records."""
+    entries = list(entries)
+    outside = warnlist.refused(entries, kind)
+    if outside:
+        return PreflightItem(WARNINGS, FAIL, _link._cut(
+            f"a {kind} session does not accept {warnlist.sentence(outside)}", _link.NOTE_LIMIT,
+        )), []
+    owed = warnlist.owed(entries, accepted)
+    if owed:
+        return (
+            PreflightItem(WARNINGS, UNKNOWN, _link._cut(
+                f"{len(owed)} not yet accepted this session: {warnlist.sentence(owed)}",
+                _link.NOTE_LIMIT,
+            )),
+            owed,
+        )
+    return PreflightItem(
+        WARNINGS, PASS, f"{len(entries)} warning(s), each accepted this session" if entries else "none",
+    ), []
 
 
 def values(trial: Trial | None, given: dict) -> PreflightItem:
@@ -375,11 +420,15 @@ def gate(preflight: Preflight, acknowledged: Collection[str]) -> str | None:
     return None
 
 
-def rows(preflight: Preflight, by: Actor | None, acknowledged: Collection[str]) -> list[dict]:
+def rows(
+    preflight: Preflight, by: Actor | None, acknowledged: Collection[str], carried=None
+) -> list[dict]:
     """The pre-flight as `runs.jsonl` records it: every item, and **who acknowledged
     each unknown one** -- `by`, for exactly the unknowns named in `acknowledged` (what
     was sent, not what the result implies). Acknowledging with no one to name is
-    refused: a record that says an unknown was accepted by nobody is not a record."""
+    refused: a record that says an unknown was accepted by nobody is not a record.
+    **A carried acknowledgement** (`carried`, by item name: who accepted it at an earlier
+    run) is recorded under that name and marked carried."""
     if isinstance(acknowledged, (str, bytes)):
         raise ValueError("the acknowledgement must be a collection of item names, not a string")
     named = frozenset(acknowledged)
@@ -389,12 +438,22 @@ def rows(preflight: Preflight, by: Actor | None, acknowledged: Collection[str]) 
             f"{len(signed)} unknown item(s) are acknowledged but the record has no name "
             f"for who acknowledged them"
         )
+    carried = dict(carried or {})
     return [
         {
             "name": item.name,
             "result": item.result,
             "said": item.said,
-            "acknowledged_by": actors.to_map(by) if item in signed else None,
+            # Who acknowledged it: named here, or accepted at an earlier run of this session
+            # with the same sentence, and carried (engine spec §20.1; the engine B plan, call 6).
+            "acknowledged_by": (
+                actors.to_map(by)
+                if item in signed
+                else actors.to_map_or_none(carried[item.name])
+                if item.result == UNKNOWN and item.name in carried
+                else None
+            ),
+            "carried": item not in signed and item.result == UNKNOWN and item.name in carried,
         }
         for item in preflight.items
     ]

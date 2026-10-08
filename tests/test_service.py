@@ -1320,7 +1320,7 @@ VALUES = {
     "fix_timeout": 4.0, "fix_hold": 0.3, "response_window": 0.6, "target_hold": 0.2,
     "fix_window": 2.0, "target_window": 3.0, "target_position": 10.0,
 }
-UNKNOWN = ("pump calibration", "eye tracker")
+UNKNOWN = ("warnings", "pump calibration", "eye tracker")
 
 
 def _start(**over) -> StartRun:
@@ -1379,8 +1379,9 @@ def test_a_check_shows_the_runs_preflight_and_starts_nothing(tmp_path):
     assert (frame.phase, frame.run_index) == ("between_runs", None)
     assert frame.preflight.task == TASK
     assert [(i.name, i.result) for i in frame.preflight.items] == [
-        ("task checks", "pass"), ("starting values", "pass"), ("bounded config", "pass"),
-        ("out of cage", "pass"), ("pump calibration", "unknown"), ("eye tracker", "unknown"),
+        ("task checks", "pass"), ("warnings", "unknown"), ("starting values", "pass"),
+        ("bounded config", "pass"), ("out of cage", "pass"), ("pump calibration", "unknown"),
+        ("eye tracker", "unknown"),
     ]
     assert _runs(service.root) == [] and service.session.card.codes == [4128], "nothing ran"
 
@@ -1438,8 +1439,9 @@ def test_a_task_whose_declarations_are_malformed_fails_its_preflight_and_the_ser
 
 #: What a check of the reference task shows, item by item, when nothing raises.
 CHECKED = {
-    "task checks": "pass", "starting values": "pass", "bounded config": "pass",
-    "out of cage": "pass", "pump calibration": "unknown", "eye tracker": "unknown",
+    "task checks": "pass", "warnings": "unknown", "starting values": "pass",
+    "bounded config": "pass", "out of cage": "pass", "pump calibration": "unknown",
+    "eye tracker": "unknown",
 }
 
 
@@ -1447,6 +1449,7 @@ CHECKED = {
     ("builder", "names"),
     [
         ("task", ("task checks",)),
+        ("warnings", ("warnings",)),
         ("values", ("starting values",)),
         ("files", ("bounded config",)),
         ("out_of_cage", ("out of cage",)),
@@ -1479,7 +1482,7 @@ def test_an_item_whose_check_raises_fails_by_its_name_and_the_service_goes_on(
         assert shown[name].result == "fail"
         assert "RuntimeError: broken on purpose" in shown[name].said
     for name, result in CHECKED.items():
-        if name not in names and not (builder == "task" and name == "starting values"):
+        if name not in names and not (builder == "task" and name in ("starting values", "warnings")):
             assert shown[name].result == result, name
     assert (started.phase, started.run_index) == ("between_runs", None)
     assert f"pre-flight failed, so the run does not start: {names[0]}: " in _refused(started)[-1]
@@ -1491,7 +1494,7 @@ def test_a_run_whose_unknowns_nobody_acknowledged_does_not_start(tmp_path):
     service = _service(tmp_path)
     _step(service, _open())
 
-    frame = _step(service, _start(acknowledged=("pump calibration",)))
+    frame = _step(service, _start(acknowledged=("pump calibration", "warnings")))
 
     assert frame.run_index is None and _runs(service.root) == []
     assert "nobody has acknowledged: eye tracker" in _refused(frame)[-1]
@@ -1507,7 +1510,7 @@ def test_an_acknowledged_run_starts_records_who_acknowledged_what_and_ends_betwe
     assert (frame.phase, frame.run_index, frame.stop_kind) == ("between_runs", 0, "completed")
     start, end = _runs(service.root)
     assert {r["name"]: r["acknowledged_by"] for r in start["preflight"]} == {
-        "task checks": None, "starting values": None, "bounded config": None,
+        "task checks": None, "warnings": BY_MAP, "starting values": None, "bounded config": None,
         "out of cage": None, "pump calibration": BY_MAP, "eye tracker": BY_MAP,
     }
     assert (start["by"], start["seed"], start["trials"]) == (BY_MAP, 7, 3)
@@ -1539,6 +1542,246 @@ def test_a_run_with_a_failing_item_does_not_start_even_acknowledged(tmp_path, ov
 
     assert frame.run_index is None
     assert f"pre-flight failed, so the run does not start: {item}" in _refused(frame)[-1]
+
+
+# --- warnings, once a session (engine build B; welfare items 2 and 3) -------------------
+
+
+def test_the_unknowns_are_acknowledged_once_a_session(tmp_path):
+    service = _service(tmp_path)
+    _step(service, _open())
+    _step(service, _start())
+
+    _step(service, _start(acknowledged=()))
+
+    starts = [r for r in _runs(service.root) if r["event"] == "start"]
+    assert len(starts) == 2
+    second = {row["name"]: row for row in starts[1]["preflight"]}
+    for name in ("pump calibration", "eye tracker"):
+        assert (second[name]["acknowledged_by"], second[name]["carried"]) == (BY_MAP, True), name
+    assert second["warnings"]["result"] == "pass"
+    rows = _jsonl(service.root / "2027-01-14_01" / "xcon" / "warnings.jsonl")
+    assert [(r["code"], r["run"]) for r in rows if r["how"] == "start"] == [
+        ("contrast-on-default", 0), ("pump calibration", 0), ("eye tracker", 0)]
+
+
+def test_a_recording_session_refuses_a_run_whose_task_warning_recording_does_not_accept(tmp_path):
+    """Review Focus 4, the pre-flight's side."""
+    service = _service(tmp_path)
+    _step(service, _open(session_kind="recording"))
+
+    frame = _step(service, _start())
+
+    assert frame.run_index is None
+    (why,) = [r.why for r in frame.refusals if r.name == "start"]
+    assert "warnings: a recording session does not accept contrast-on-default" in why
+    assert not (service.root / "2027-01-14_01" / "xcon" / "runs.jsonl").exists()
+
+
+def test_a_run_whose_new_warnings_are_not_acknowledged_does_not_start(tmp_path):
+    service = _service(tmp_path)
+    _step(service, _open())
+
+    frame = _step(service, _start(acknowledged=("pump calibration", "eye tracker")))
+
+    assert frame.run_index is None
+    assert "warnings" in [r.why for r in frame.refusals if r.name == "start"][0]
+
+
+def test_a_calibration_problem_fails_every_runs_preflight_naming_it(tmp_path):
+    """The review's C1 (Review Focus 3): a record dated after today, or one that will not
+    load, is a warning no kind accepts. The open is taken, every run's pre-flight fails on
+    its `warnings` item with the sentence, and the session ends with its return."""
+    future = _calibration_record(tmp_path, date.fromtimestamp(WALL) + timedelta(days=1))
+    (tmp_path / "broken.json").write_text("{")
+
+    for name, record, said in (
+        ("future", future, "calibration age: calibration rig1 is dated"),
+        ("broken", tmp_path / "broken.json", "calibration record: refused: the calibration"),
+    ):
+        folders = _folders(tmp_path / name)
+        service = _made(folders, rig=dataclasses.replace(RIG, calibration=str(record)))
+        _step(service, _open())
+
+        refused = _step(service, _start())
+
+        assert refused.run_index is None and _runs(folders[2]) == [], name
+        assert (f"pre-flight failed, so the run does not start: warnings: a training session "
+                f"does not accept {said}") in _refused(refused)[-1], name
+        ended = _step(service, _end())
+        assert isinstance(ended, Idle) and _kinds(folders[2])[-2:] == ["returned", "session ended"], name
+
+
+def test_no_run_starts_while_the_warnings_cannot_be_listed_and_one_does_once_they_can(
+    tmp_path, monkeypatch
+):
+    """Call 31, the pre-flight's side: the open went ahead with none accepted (Task 11); each
+    run's `warnings` item fails, saying so, until the listing works, and then asks for the
+    rig's warnings as for any not yet accepted."""
+    service = _service(tmp_path)
+
+    def broken(self):
+        raise RuntimeError("broken on purpose")
+
+    monkeypatch.setattr(Service, "calibration_warnings", broken)
+    _step(service, _open(accepted=()))
+
+    refused = _step(service, _start())
+    assert ("pre-flight failed, so the run does not start: warnings: the warnings could not be "
+            "listed: RuntimeError: broken on purpose") in _refused(refused)[-1]
+    assert _runs(service.root) == []
+    monkeypatch.undo()
+
+    started = _step(service, _start())
+    assert started.run_index == 0
+    rows = _jsonl(service.root / "2027-01-14_01" / "xcon" / "warnings.jsonl")
+    assert [r["code"] for r in rows][:2] == ["default calibration", "contrast-on-default"]
+
+
+def test_a_fault_writing_what_a_start_accepted_is_the_runs_and_never_the_services(tmp_path, monkeypatch):
+    """The review's I3: `_start` writes nothing; the rows are written as the run starts,
+    inside `_run`'s containment, so a fault there is "the run did not start"."""
+    service = _service(tmp_path)
+    _step(service, _open())
+
+    def disk_full(self, entries, **_fields):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(Session, "accept", disk_full)
+
+    frame = _step(service, _start())
+
+    assert frame.run_index is None and frame.phase == "between_runs"
+    assert "the run did not start: OSError" in _refused(frame)[-1]
+    assert _runs(service.root) == [] and 4135 not in service.session.card.codes
+
+
+def test_a_calibration_that_turns_31_days_old_during_a_session_is_asked_at_the_next_run(tmp_path):
+    """Review Focus 1: opened at 23:50 local on a calibration's 30th day, a run, then a run
+    after midnight -- on a fixed wall, not this host's clock."""
+    at = datetime(2027, 1, 14, 23, 50).timestamp()
+    wall = _Wall()
+    wall.at = at
+    record = _calibration_record(tmp_path, date(2026, 12, 15))
+    service = _made(_folders(tmp_path), wall=wall, rig=dataclasses.replace(RIG, calibration=str(record)))
+    departure = datetime.fromtimestamp(at - 60).astimezone().isoformat()
+    _step(service, _open(departure=departure, accepted=()))
+    _step(service, _start())
+    wall.at = at + 20 * 60
+
+    refused = _step(service, _start(acknowledged=()))
+    assert "warnings" in [r.why for r in refused.refusals if r.name == "start"][-1]
+    item = {i.name: i for i in refused.preflight.items}["warnings"]
+    assert item.result == "unknown" and "calibration age" in item.said
+    _step(service, _start(acknowledged=("warnings",)))
+
+    starts = [r for r in _runs(service.root) if r["event"] == "start"]
+    assert len(starts) == 2
+    rows = _jsonl(service.root / "2027-01-14_01" / "xcon" / "warnings.jsonl")
+    assert [(r["code"], r["run"]) for r in rows if r["code"] == "calibration age"] == [("calibration age", 1)]
+
+
+def test_a_bare_string_acknowledgement_is_refused_though_every_unknown_is_carried(tmp_path):
+    """`gate` is handed what was sent, with the carried names added only to a collection: a
+    bare string is still refused by `gate`'s own rule (the second review's Minor 4), even at a
+    later run where nothing is left to acknowledge, so no start goes ahead on one."""
+    service = _service(tmp_path)
+    _step(service, _open())
+    _step(service, _start())
+
+    frame = _step(service, _start(acknowledged="warnings, pump calibration, eye tracker"))
+
+    assert frame.run_index == 0, "the second run did not start"
+    assert "the acknowledgement must be a collection of item names" in _refused(frame)[-1]
+    assert [r["run"] for r in _runs(service.root) if r["event"] == "start"] == [0]
+
+
+def test_a_listing_fault_that_cannot_be_said_fails_the_runs_warnings_item_and_the_service_goes_on(
+    tmp_path, monkeypatch
+):
+    """Call 31 for a fault whose own `str()` raises: the run's `warnings` item says it by its
+    type (`_fault`), as the open and the idle frame do, so saying it never becomes a second
+    fault that ends `wlx taskd` with the animal out. No run starts, and the return is taken."""
+    service = _service(tmp_path)
+
+    def broken(self):
+        raise _Unsayable
+
+    monkeypatch.setattr(Service, "calibration_warnings", broken)
+    _step(service, _open(accepted=()))
+
+    refused = _step(service, _start())
+    ended = _step(service, _end())
+
+    assert refused.run_index is None and _runs(service.root) == []
+    assert ("pre-flight failed, so the run does not start: warnings: the warnings could not be "
+            "listed: _Unsayable; no run starts until they can be") in _refused(refused)[-1]
+    assert isinstance(ended, Idle) and _kinds(service.root)[-2:] == ["returned", "session ended"]
+
+
+def test_a_listing_faults_sentence_is_cut_in_the_runs_warnings_item(tmp_path, monkeypatch):
+    """A fault's own message is anything: the `warnings` item says it cut to `link.NOTE_LIMIT`
+    characters and "…", as the idle frame's row for the same fault is cut."""
+    service = _service(tmp_path)
+    _step(service, _open())
+
+    def broken(self):
+        raise RuntimeError("y" * 2_000)
+
+    monkeypatch.setattr(Service, "calibration_warnings", broken)
+
+    checked = _step(service, CheckRun(by=BY, task=TASK, values=dict(VALUES)))
+
+    item = {i.name: i for i in checked.preflight.items}["warnings"]
+    assert (item.result, len(item.said)) == ("fail", NOTE_LIMIT + 1)
+    assert item.said.startswith("the warnings could not be listed: RuntimeError: yyy")
+
+
+def test_a_runs_warning_sentences_are_cut_on_the_frame_and_written_whole(tmp_path, monkeypatch):
+    """Nothing bounds a warning's sentence where it is made -- a task's `color-on-default`
+    names every colored choice, a record that will not load is quoted -- so the `warnings`
+    item's sentence is cut to `link.NOTE_LIMIT` characters and "…" on the frame and in a
+    refusal; the warning itself is never cut, and `warnings.jsonl` keeps every word."""
+    service = _service(tmp_path)
+    _step(service, _open())
+    long = Entry("calibration age", "x" * 2_000, SESSION_KINDS)
+    monkeypatch.setattr(Service, "calibration_warnings", lambda self: [long])
+
+    checked = _step(service, CheckRun(by=BY, task=TASK, values=dict(VALUES)))
+    item = {i.name: i for i in checked.preflight.items}["warnings"]
+    assert (item.result, len(item.said)) == ("unknown", NOTE_LIMIT + 1) and item.said.endswith("…")
+    _step(service, _start())
+    rows = _jsonl(service.root / "2027-01-14_01" / "xcon" / "warnings.jsonl")
+    assert [r["detail"] for r in rows if r["code"] == "calibration age"] == ["x" * 2_000]
+
+    monkeypatch.setattr(Service, "calibration_warnings",
+                        lambda self: [Entry("calibration record", "y" * 2_000, ())])
+    refused = _step(service, _start())
+    assert refused.run_index == 0, "the second run did not start"
+    why = _refused(refused)[-1]
+    assert "warnings: a training session does not accept calibration record: yyy" in why
+    assert len(why) < 2 * NOTE_LIMIT and "y" * (NOTE_LIMIT + 1) not in why
+
+
+def test_a_fault_before_a_run_starts_is_said_cut_on_the_feed(tmp_path, monkeypatch, capsys):
+    """`Session.accept`'s refusal joins every sentence it refuses, unbounded, and it reaches
+    the feed as the run's "did not start": cut there to `link.NOTE_LIMIT` characters and "…",
+    while the traceback on stderr keeps every word."""
+    service = _service(tmp_path)
+    _step(service, _open())
+
+    def refused(self, entries, **_fields):
+        raise ValueError("a training session does not accept " + "z" * 2_000)
+
+    monkeypatch.setattr(Session, "accept", refused)
+
+    frame = _step(service, _start())
+
+    assert frame.run_index is None and _runs(service.root) == []
+    why = _refused(frame)[-1]
+    assert why.startswith("the run did not start: ValueError: a training session does not accept zzz")
+    assert len(why) == NOTE_LIMIT + 1 and why.endswith("…")
+    assert "z" * 2_000 in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("task", ["missing.py", "../fixation_detection.py", "notes.txt"])
@@ -3477,10 +3720,10 @@ def test_e2e_an_unknown_preflight_item_is_acknowledged_by_name_and_found_in_runs
         rig.send(_start(acknowledged=UNKNOWN))
         rig.seen(lambda f: _between(f) and f.run_index == 0 and f.stop_kind == "completed")
 
-    assert [i.result for i in shown.preflight.items if i.name in UNKNOWN] == ["unknown", "unknown"]
+    assert [i.result for i in shown.preflight.items if i.name in UNKNOWN] == ["unknown"] * 3
     start = _runs(rig.folders[2])[0]
     assert {r["name"]: r["acknowledged_by"] for r in start["preflight"] if r["result"] == "unknown"} == {
-        "pump calibration": BY_MAP, "eye tracker": BY_MAP,
+        "warnings": BY_MAP, "pump calibration": BY_MAP, "eye tracker": BY_MAP,
     }
 
 
