@@ -13,17 +13,35 @@ from dataclasses import replace
 import pytest
 
 from _calibrations import LINEAR
+from wl_xcon import look
 from wl_xcon.check import check
-from wl_xcon.photometry import D65, DKL, RMS, Calibration, Gray, Michelson, Weber, to_xyz, xyY
+from wl_xcon.findings import NOT_RECORDING
+from wl_xcon.photometry import (
+    D65,
+    DKL,
+    RMS,
+    SRGB,
+    Calibration,
+    Gray,
+    Michelson,
+    Weber,
+    to_xyz,
+    xyY,
+)
 from wl_xcon.task import (
+    RDS,
     REMEMBERED,
     After,
+    Checkerboard,
     Disc,
+    Noise,
     On,
     Outcome,
     P,
     Param,
+    Plaid,
     Show,
+    Square,
     State,
     Stimulus,
     Trial,
@@ -289,3 +307,174 @@ def test_a_component_of_an_xyy_that_is_no_number_is_refused_not_raised():
         assert any(f.code == "bad-block" and "xyY.y is '0.3', not a number" in f.detail
                    for f in found), (calibration, found)
     assert codes(stringly) == {"bad-block"}
+
+
+# --- Colors and lights on the default calibration (engine build B) ---------------------
+
+
+def _found(trial, calibration=SRGB) -> dict:
+    return {f.code: f for f in check(trial, calibration=calibration)}
+
+
+def _choosing(*choices) -> Trial:
+    """One stimulus whose appearance is a parameter offering `choices`."""
+    return Trial(
+        start="on",
+        params=[Param("looks", unit="appearance", choices=choices)],
+        windows=[Window("w", at=(0.0, 0.0), radius=2.0, on="s")],
+        states=[State("on", enter=[Show(Stimulus("s", at=(0.0, 0.0), looks=P("looks")))],
+                      go=[On(After(1.0), Outcome.ABORT)])],
+    )
+
+
+#: A contrast parameter with a range, as a staircase or a live edit would move it.
+CONTRAST = Param("c", unit="contrast", low=0.1, high=0.9)
+
+
+def test_isoluminance_needs_a_measured_calibration_in_every_kind():
+    found = _found(a_task(Disc(color=DKL(lum=0.0, l_m=0.08))))
+
+    assert found["isoluminance-on-default"].blocking
+    assert "measured calibration" in found["isoluminance-on-default"].detail
+
+
+def test_a_dkl_color_on_the_default_waits_for_build_a2():
+    found = _found(a_task(Disc(color=DKL(lum=0.1))))
+
+    assert found["dkl-on-default"].blocking and "A2" in found["dkl-on-default"].detail
+    assert "isoluminance-on-default" not in found
+
+
+def test_a_dkl_color_with_a_parameter_inside_is_refused_on_the_default_never_raised():
+    """The review's I4: `DKL.magnitude()` raises on a parameter (XC-269), and from Task 8
+    every session, `wlx check` and `wlx run` check against the default."""
+    isoluminant = replace(a_task(Disc(color=DKL(lum=0.0, l_m=P("c")))),
+                          params=[Param("c", unit="contrast", low=-0.1, high=0.1)])
+    stepped = replace(a_task(Disc(color=DKL(lum=P("c"), l_m=0.05))),
+                      params=[Param("c", unit="contrast", low=-0.1, high=0.1)])
+
+    assert _found(isoluminant)["isoluminance-on-default"].blocking
+    assert _found(stepped)["dkl-on-default"].blocking
+    assert "isoluminance-on-default" not in _found(stepped)
+
+
+def test_a_named_color_on_the_default_is_refused_only_in_recording():
+    found = _found(a_task(Disc(color=xyY(0.64, 0.33, 10.0))))
+
+    assert set(found) == {"color-on-default"}
+    warning = found["color-on-default"]
+    assert (warning.blocking, warning.accepted_in) == (False, NOT_RECORDING)
+    assert "Disc" in warning.detail
+
+
+def test_a_light_a_parameter_sets_is_refused_only_in_recording_on_the_default():
+    trial = replace(a_task(Disc(color=Gray(P("lum")))),
+                    params=[Param("lum", unit="cd/m2", low=0.0, high=80.0)])
+
+    found = _found(trial)
+
+    assert set(found) == {"contrast-on-default"}
+    assert "'lum'" in found["contrast-on-default"].detail
+    assert found["contrast-on-default"].accepted_in == NOT_RECORDING
+
+
+def test_a_color_parameter_and_a_parameter_inside_its_choices_are_both_light_factors():
+    trial = replace(a_task(Disc(color=P("col"))),
+                    params=[Param("col", unit="color", choices=(Gray(P("lum")), Gray(10.0))),
+                            Param("lum", unit="cd/m2", low=0.0, high=80.0)])
+
+    detail = _found(trial)["contrast-on-default"].detail
+
+    assert "'col'" in detail and "'lum'" in detail
+
+
+@pytest.mark.parametrize("looks", [
+    Checkerboard(contrast=Michelson(P("c"))),
+    Plaid(contrast=Michelson(P("c"))),
+    Noise(contrast=RMS(P("c"))),
+    RDS(contrast=Michelson(P("c"))),
+], ids=["checkerboard", "plaid", "noise", "rds"])
+def test_a_patterns_contrast_a_parameter_sets_is_a_light_factor(looks):
+    """The review's I5: `_light` has no reading of these appearances' lights (a later
+    build defines them), so the walk reads their `contrast` field itself."""
+    trial = replace(a_task(looks), params=[CONTRAST], background=Gray(20.0))
+
+    assert "'c'" in _found(trial)["contrast-on-default"].detail
+
+
+def test_noise_choices_that_differ_only_in_contrast_are_a_light_factor():
+    """The review's I5: compared through `_light`, both choices read `None` and compared
+    equal."""
+    trial = replace(_choosing(Noise(contrast=RMS(0.1)), Noise(contrast=RMS(0.2))),
+                    background=Gray(20.0))
+
+    assert "'looks'" in _found(trial)["contrast-on-default"].detail
+
+
+def test_a_looks_fill_and_outline_are_read_for_light_factors():
+    choosing = _choosing(look.Look(fill=look.Flat(color=Gray(10.0))),
+                         look.Look(fill=look.Flat(color=Gray(20.0))))
+    outlined = replace(
+        a_task(look.Look(fill=look.Flat(color=Gray(10.0)),
+                         outline=look.Outline(width=0.1, color=Gray(P("lum"))))),
+        params=[Param("lum", unit="cd/m2", low=0.0, high=80.0)])
+
+    assert "'looks'" in _found(choosing)["contrast-on-default"].detail
+    assert "'lum'" in _found(outlined)["contrast-on-default"].detail
+
+
+def test_a_look_whose_whole_fill_is_a_parameter_is_a_light_factor_and_its_choices_are_read():
+    """XC-271's shape (a `Look` whose fill is a parameter gets no light check): this
+    finding does not inherit that blind spot."""
+    trial = replace(a_task(look.Look(fill=P("fill"))), params=[
+        Param("fill", unit="fill", choices=(look.Flat(color=Gray(10.0)),
+                                            look.Flat(color=Gray(P("lum"))))),
+        Param("lum", unit="cd/m2", low=0.0, high=80.0),
+    ])
+
+    detail = _found(trial)["contrast-on-default"].detail
+
+    assert "'fill'" in detail and "'lum'" in detail
+
+
+def test_a_looks_outline_of_another_kind_or_written_as_a_parameter_never_raises_on_the_default():
+    """A `Look` whose outline is not an `Outline` is refused (`bad-block`), and one written as
+    a parameter loads (XC-273); `check()` raises on neither since the A1 follow-ups' fix wave,
+    and asking either for its color here would raise again. A parameter that is a whole
+    outline counts, as a whole fill does, and its choices' colors are read; their widths are
+    no light."""
+    thin = a_task(look.Look(fill=look.Flat(color=Gray(10.0)), outline="thin"))
+    chosen = replace(a_task(look.Look(fill=look.Flat(color=Gray(10.0)), outline=P("o"))), params=[
+        Param("o", unit="outline", choices=(look.Outline(width=P("w"), color=Gray(P("lum"))),)),
+        Param("w", unit="deg", low=0.05, high=0.1),
+        Param("lum", unit="cd/m2", low=0.0, high=80.0),
+    ])
+
+    assert "bad-block" in _found(thin) and "contrast-on-default" not in _found(thin)
+    detail = _found(chosen)["contrast-on-default"].detail
+    assert "'o'" in detail and "'lum'" in detail and "'w'" not in detail
+
+
+def test_an_appearance_whose_choices_differ_in_light_is_a_factor_too():
+    found = _found(_choosing(Disc(size=1.0, color=Gray(10.0)), Disc(size=1.0, color=Gray(20.0))))
+
+    assert "'looks'" in found["contrast-on-default"].detail
+
+
+def test_an_appearance_whose_choices_differ_only_in_shape_is_not_a_light_factor():
+    assert "contrast-on-default" not in _found(
+        _choosing(Disc(size=1.0, color=Gray(10.0)), Square(size=1.0, color=Gray(10.0))))
+
+
+def test_a_literal_gray_on_the_default_is_the_sessions_warning_not_the_tasks():
+    """Absolute luminance on the default is the session's one warning
+    (`warnlist.of_calibration`), never a finding per stimulus."""
+    assert _found(a_task(Disc(size=1.0, color=Gray(40.0)))) == {}
+
+
+def test_a_gray_above_the_defaults_white_cannot_be_shown_on_it():
+    assert "unrealizable-color" in _found(a_task(Disc(size=1.0, color=Gray(80.5))))
+
+
+def test_a_measured_calibration_brings_none_of_the_defaults_findings():
+    assert _found(a_task(Disc(color=xyY(0.500, 0.400, 30.0))), calibration=PANEL) == {}

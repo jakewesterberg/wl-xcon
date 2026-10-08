@@ -8,7 +8,7 @@ import math
 
 from wl_xcon.codes import PROVISIONAL, Allocation
 from wl_xcon.components import Registry
-from wl_xcon.findings import SESSION_KINDS, Finding
+from wl_xcon.findings import NOT_RECORDING, SESSION_KINDS, Finding
 from wl_xcon.geometry import VIEWS, Geometry
 from wl_xcon.photometry import D65, DKL, Calibration, Color, Gray, unrealizable, xyY
 from wl_xcon.task import (
@@ -959,6 +959,8 @@ def _color_faults(trial: Trial, panel: Calibration | None) -> list[Finding]:
             continue  # refused as a bad block: it cannot be bounded
         for light in lights:
             findings += _one_color(what, light, panel)
+    if panel is not None and panel.standard:
+        findings += _default_faults(trial, params)
     return findings
 
 
@@ -990,6 +992,20 @@ def _one_color(what: str, color, panel: Calibration | None) -> list[Finding]:
                 f"unmeasured",
             )
         ]
+    if panel.standard and isinstance(color, DKL):
+        # Spec §7.3: "Isoluminance needs a measured calibration", in every session (N§4
+        # batch 1); any other DKL converts through cone fundamentals, which build A2 adds.
+        # **`magnitude()` is never asked here** (the engine B plan, call 9): a component that
+        # is a parameter makes it raise (XC-269), and every session checks against this
+        # calibration. A literal `lum` of 0 beside another component that is a parameter or
+        # not 0 claims isoluminance at some value; every DKL here is refused either way.
+        if _literal(color.lum) == 0.0 and any(_literal(v) != 0.0 for v in (color.l_m, color.s_lm)):
+            return [Finding("isoluminance-on-default", (
+                f"{what} claims isoluminance, which needs a measured calibration (engine spec "
+                f"§7.3); the default calibration is the sRGB standard, measured by nobody"))]
+        return [Finding("dkl-on-default", (
+            f"{what} is a DKL color, which converts through cone fundamentals (engine build "
+            f"A2); until then it loads only against a measured calibration"))]
     findings: list[Finding] = []
     if isinstance(color, DKL) and color.lum == 0.0 and color.magnitude() > 0.0:
         if not panel.observer:
@@ -1008,6 +1024,85 @@ def _one_color(what: str, color, panel: Calibration | None) -> list[Finding]:
             Finding("unrealizable-color", f"{what} asks for {color}: {why}")
         )
     return findings
+
+
+def _default_faults(trial: Trial, params: dict[str, Param]) -> list[Finding]:
+    """What a recording cannot carry on the default calibration (engine spec §7.2; N§R4: "Yes,
+    from the task file"): a task that names a color, or one a parameter of which sets a light
+    or a contrast -- this build's reading of "a design factor or a procedure-controlled value",
+    until build C lets a task declare its factors (Question 2). Each is one warning per task,
+    accepted in training and piloting."""
+    findings = []
+    named = sorted({what for what, color in _colors(trial, params) if isinstance(color, (xyY, DKL))})
+    if named:
+        findings.append(Finding("color-on-default", (
+            f"this task names colors ({'; '.join(named)}), and the default calibration is the sRGB "
+            f"standard, measured by nobody: a recording session refuses it until a measured "
+            f"calibration is in use (engine spec §7.2)"),
+            blocking=False, accepted_in=NOT_RECORDING))
+    set_by = _parameter_lights(trial, params)
+    if set_by:
+        findings.append(Finding("contrast-on-default", (
+            f"parameter(s) {', '.join(repr(name) for name in set_by)} set a light or a contrast, "
+            f"which this build counts as a design factor until a task can declare its own "
+            f"(engine build C): a recording session refuses them on the default calibration "
+            f"(engine spec §7.2)"),
+            blocking=False, accepted_in=NOT_RECORDING))
+    return findings
+
+
+def _parameter_lights(trial: Trial, params: dict[str, Param]) -> list[str]:
+    """The parameters that set a light or a contrast anywhere a trial can show, by name,
+    sorted (the engine B plan, call 24): every parameter inside what lights an appearance
+    (`_lit`) or a background, **and inside each choice such a parameter offers** -- so a
+    parameter that is a `Look`'s whole fill or outline counts and its fills or outlines are
+    read (XC-271's shape, and XC-273's outline) -- and an appearance parameter whose
+    choices differ in what lights them. A parameter met again inside its own choices adds
+    nothing more: `_self_referring` refuses it."""
+    from wl_xcon.task import Appearance
+
+    names: set[str] = set()
+
+    def walk(value, inside: frozenset[str]) -> None:
+        for ref in _iter_param_refs(value):
+            names.add(ref.name)
+            param = params.get(ref.name)
+            if param is None or ref.name in inside:
+                continue
+            for choice in param.choices:
+                walk(_lit(choice), inside | {ref.name})
+
+    for looks in _appearances(trial):
+        walk(_lit(looks), frozenset())
+    for attr in ("background", "background_left", "background_right"):
+        walk(getattr(trial, attr), frozenset())
+    for param in trial.params:
+        lit = [_lit(choice) for choice in param.choices if isinstance(choice, Appearance)]
+        if any(other != lit[0] for other in lit[1:]):
+            names.add(param.name)
+    return sorted(names)
+
+
+def _lit(value) -> list:
+    """What lights `value`, as written, for `_parameter_lights` (the review's I5): an
+    appearance's or a fill's `color`, `contrast` and `mean`, whichever it has -- read
+    generically, so a `Checkerboard`, `Plaid`, `Noise` or `RDS`, whose light `_light` leaves
+    to a later build, is read too -- a `Look`'s fill and its outline's color; anything else,
+    a color, a contrast or a parameter, is its own light. **A `Look`'s fill and outline are
+    read as written**: one that is a parameter is its own light, whose choices the walk
+    reads (XC-271, XC-273), and one of another kind, which `_block_faults` refuses, is never
+    asked for a color (`check()` raised AttributeError doing that until the A1 follow-ups'
+    fix wave)."""
+    from wl_xcon import look
+    from wl_xcon.task import Appearance
+
+    if isinstance(value, look.Look):
+        return [_lit(value.fill), _lit(value.outline)]
+    if isinstance(value, look.Outline):
+        return [value.color]
+    if isinstance(value, (Appearance, look.Fill)):
+        return [getattr(value, attr, None) for attr in ("color", "contrast", "mean")]
+    return [value]
 
 
 # --- Light and contrast (engine build A1) ----------------------------------

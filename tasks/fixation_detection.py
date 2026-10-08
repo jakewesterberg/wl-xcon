@@ -72,10 +72,11 @@ detection = Trial(
             ),
         ),
         # Absolute luminance, D65 white (the PI, 2026-10-07: "Absolute cd/m²", starting
-        # at "40 cd/m²"). Bounded at 100 until V9 measures the panel's brightness cap
-        # (engine spec §7.7).
-        Param("fix_luminance", unit="cd/m2", low=0.0, high=100.0, start=40.0),
-        Param("target_luminance", unit="cd/m2", low=0.0, high=100.0, start=40.0),
+        # at "40 cd/m²"). Bounded at 80, the default calibration's white (the sRGB
+        # standard's), until a measured calibration and V9's brightness cap say otherwise
+        # (engine spec §7.1, §7.7).
+        Param("fix_luminance", unit="cd/m2", low=0.0, high=80.0, start=40.0),
+        Param("target_luminance", unit="cd/m2", low=0.0, high=80.0, start=40.0),
     ],
     states=[
         State(

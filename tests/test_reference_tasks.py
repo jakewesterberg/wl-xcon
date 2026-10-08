@@ -17,7 +17,7 @@ from _rig import DIRECT, RIG
 from wl_xcon.calibration import constellation
 from wl_xcon.cli import _load_trial
 from wl_xcon.check import check
-from wl_xcon.photometry import Calibration, xyY
+from wl_xcon.photometry import SRGB, SRGB_WHITE_CD_M2, Calibration, xyY
 from wl_xcon.run import Recorded
 from wl_xcon.simulate import Subject, simulate
 from wl_xcon.task import (
@@ -308,4 +308,20 @@ def test_each_reference_task_lights_its_achromatic_stimuli_at_40_cd_m2(module, a
     trial = _load(module, attribute)
     luminances = [p for p in trial.params if p.unit == "cd/m2"]
     assert luminances
-    assert all((p.low, p.high, p.start) == (0.0, 100.0, 40.0) for p in luminances)
+    assert all((p.low, p.high, p.start) == (0.0, SRGB_WHITE_CD_M2, 40.0) for p in luminances)
+
+
+@pytest.mark.parametrize("name", sorted(REFERENCE))
+def test_on_the_default_every_reference_task_trains_but_the_search_task(name):
+    """Spec §7.2-7.3 on the four tasks: each runs in training on the default calibration, with
+    its warning, except the search task's isoluminant colors; none records on it (Q2-A)."""
+    found = check(_load(name, REFERENCE[name]), _load("allocation", "ALLOCATION"),
+                  geometry=GEOMETRY, calibration=SRGB)
+
+    in_training = {f.code for f in found if f.refuses("training")}
+    in_recording = {f.code for f in found if f.refuses("recording")}
+    if name == "visual_search":
+        assert in_training == {"isoluminance-on-default"}
+    else:
+        assert in_training == set()
+        assert in_recording == {"contrast-on-default"}
