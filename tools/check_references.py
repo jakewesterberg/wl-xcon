@@ -141,10 +141,23 @@ def parse(text: str) -> list[Entry]:
 
 def fold(text: str) -> str:
     """Lowercase ASCII words separated by single spaces: no accents, punctuation,
-    LaTeX braces or commands, or HTML tags (Crossref titles carry `<i>`)."""
+    LaTeX braces or commands, or HTML tags (Crossref titles carry `<i>`).
+
+    A brace protects case and is not a word break, so `{B}ehavioral` is "behavioral".
+    Punctuation is a word break whether it is ASCII or not: Crossref writes
+    "brain–computer" with an en dash and "Light‐Emitting" with U+2010 where an entry
+    writes a hyphen, and dropping the dash as a non-ASCII character made one word of
+    two on Crossref's side only.
+    """
     text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"\\[A-Za-z]+", " ", text)
-    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+    text = text.replace("{", "").replace("}", "")
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(
+        " " if ord(char) > 127 and unicodedata.category(char)[0] in "PSZ" else char
+        for char in text
+    )
+    text = text.encode("ascii", "ignore").decode()
     return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
 
 

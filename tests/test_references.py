@@ -110,13 +110,23 @@ SKIPPED = frozenset(
 KEY = re.compile(r"^(?P<author>[a-z0-9]+)(?P<year>[0-9]{4})(?P<word>[a-z]+)$")
 
 
+def _a_body_leads(entry) -> bool:
+    """The first author is written whole in braces -- `{CIE}`, or `{The International
+    Brain Laboratory} and Aguillon-Rodriguez, V. and ...` -- so it is a body, not a
+    person."""
+    authors = entry.fields.get("author", "").strip()
+    body = refs.first_author(authors)
+    return bool(body and re.match(r"\{" + re.escape(body) + r"\}(?:\s+and\s|$)", authors))
+
+
 def _expected_key(entry) -> str:
     """`<firstauthor><year><firstword>`: the first author's family name without
     particles, the year, and the title's first word that is not an article or a
     preposition, all lowercase ASCII letters. An organization that is the author
     (`{Video Electronics Standards Association}`) is cited by its usual short name,
     BibLaTeX's `shortauthor` (`{VESA}`), and that name, digits kept, is the author part
-    (docs/references/README.md, "Keys")."""
+    (docs/references/README.md, "Keys"). A `shortauthor` beside a person is refused
+    by `_key_problems` whatever key this gives."""
     short = entry.fields.get("shortauthor", "")
     if short:
         author = re.sub(r"[^a-z0-9]", "", refs.fold(short))
@@ -131,17 +141,22 @@ def _expected_key(entry) -> str:
 
 
 def _key_problems(entries) -> list[tuple[int, str, str]]:
-    """`(line, key, what is wrong)` for every key off the rule. A digit in the author
-    part comes only from a `shortauthor`. A suffix letter is a collision's, so it stands
-    only beside the unsuffixed key it collided with."""
+    """`(line, key, what is wrong)` for every key off the rule. A `shortauthor` names a
+    body written whole in braces and nothing else: beside a person it would key a paper
+    by any name at all (`Smith, J.` keyed as `jones`), so it is refused, not ignored. A
+    digit in the author part comes only from a `shortauthor`. A suffix letter is a
+    collision's, so it stands only beside the unsuffixed key it collided with."""
     keys = {entry.key for entry in entries}
     bad = []
     for entry in entries:
         expected = _expected_key(entry)
         parts = KEY.match(entry.key)
+        short = entry.fields.get("shortauthor")
         if not parts:
             bad.append((entry.line, entry.key, "not a lowercase author, a year, letters"))
-        elif not entry.fields.get("shortauthor") and not parts["author"].isalpha():
+        elif short and not _a_body_leads(entry):
+            bad.append((entry.line, entry.key, "a shortauthor, but no body in braces leads"))
+        elif not short and not parts["author"].isalpha():
             bad.append((entry.line, entry.key, "a digit in the author part, but no shortauthor"))
         elif entry.key == expected:
             continue
@@ -215,6 +230,30 @@ def test_an_organization_is_keyed_by_its_short_name():
     assert problems("nc3rs2012refining", *unnamed) == [
         "a digit in the author part, but no shortauthor"
     ]
+
+
+def test_a_short_name_keys_only_a_body_in_braces():
+    """A `shortauthor` beside people would let a paper be keyed by any name at all:
+    Smith and Doe's paper as `jones2020word`, a key that reads right and points
+    nowhere. It is refused whichever key the entry carries; a body in braces may lead
+    a list of people (the International Brain Laboratory's paper)."""
+    entry = (
+        "@article{{{key},\n  author = {{{author}}},\n  shortauthor = {{{short}}},\n"
+        "  title = {{Word for word}},\n  year = {{2020}},\n}}\n"
+    )
+
+    def problems(key, author, short):
+        text = entry.format(key=key, author=author, short=short)
+        return [problem for _, _, problem in _key_problems(refs.parse(text))]
+
+    people = "Smith, J. and Doe, A."
+    refused = ["a shortauthor, but no body in braces leads"]
+    assert problems("jones2020word", people, "Jones") == refused
+    assert problems("smith2020word", people, "Jones") == refused
+    assert problems("smith2020word", "{Smith}, J. and Doe, A.", "Jones") == refused
+    ibl = "{The International Brain Laboratory} and Doe, A."
+    assert problems("ibl2020word", ibl, "IBL") == []
+    assert problems("ibl2020word", "{International Brain Laboratory}", "IBL") == []
 
 
 #: What each entry type needs beyond `COMMON`; `a/b` is met by either field. A type not
@@ -293,6 +332,23 @@ def test_a_document_that_is_not_a_paper_names_who_issued_it():
         refs.parse(entry.format(type="manual", extra="  publisher = {CIE},\n" + url))
     )
     assert manual[1].startswith("type 'manual' is not one of")
+
+
+def test_an_article_names_its_volume_or_its_issue():
+    """An article is found again by its volume, or by the issue's `number` in a journal
+    that numbers only its issues (JoVE, `carmel2010how`); with neither it is refused."""
+    entry = (
+        "@article{{carmel2010how,\n  author = {{Carmel, David}},\n"
+        "  title = {{How to create and use binocular rivalry}},\n"
+        "  journal = {{Journal of Visualized Experiments}},\n  year = {{2010}},\n{extra}"
+        "  pages = {{e2030}},\n  doi = {{10.3791/2030}},\n"
+        "  note = {{checked 2026-10-08: full text}},\n}}\n"
+    )
+    for extra in ("  volume = {45},\n", "  number = {45},\n"):
+        assert _field_problems(refs.parse(entry.format(extra=extra))) == []
+    assert _field_problems(refs.parse(entry.format(extra=""))) == [
+        ("carmel2010how", "missing ['volume/number']")
+    ]
 
 
 NOTE = re.compile(r"^checked (?P<date>\d{4}-\d{2}-\d{2}): (?:full text|abstract)\b")
@@ -541,6 +597,27 @@ def test_the_checker_ignores_typography_but_not_words():
                       lambda doi: styled)[0] == refs.OK
     assert refs.check(_schnapf(title="Spectral sensitivity of primate rods"),
                       lambda doi: styled)[0] == refs.MISMATCH
+
+
+@pytest.mark.parametrize("dash", ["‐", "‑", "–", "—"])
+def test_the_checker_reads_a_unicode_dash_as_the_hyphen_it_stands_for(dash):
+    """Crossref writes U+2010, U+2011, an en dash or an em dash where an entry writes a
+    hyphen. Each is a word break on both sides, as the hyphen is; deleting it as a
+    non-ASCII character ran "brain–computer" into "braincomputer" on Crossref's side
+    only, and seven entries read MISMATCH for a dash (2026-10-08)."""
+    assert refs.fold(f"brain{dash}computer") == refs.fold("brain-computer") == "brain computer"
+    dashed = {**SCHNAPF, "title": [f"Spectral sensitivity of primate photo{dash}receptors"]}
+    entry = _schnapf(title="Spectral sensitivity of primate photo-receptors")
+    assert refs.check(entry, lambda doi: dashed)[0] == refs.OK
+
+
+def test_the_checker_reads_a_braced_capital_as_part_of_its_word():
+    """A brace protects a capital from a style's lowercasing; it is not a word break.
+    `{B}ehavioral` folded to "b ehavioral" against Crossref's "Behavioral"."""
+    assert refs.fold("{I}. {B}ehavioral comparisons") == "i behavioral comparisons"
+    capital = {**SCHNAPF, "title": ["Spectral sensitivity of Primate photoreceptors"]}
+    entry = _schnapf(title="Spectral sensitivity of {P}rimate photoreceptors")
+    assert refs.check(entry, lambda doi: capital)[0] == refs.OK
 
 
 @pytest.mark.parametrize(

@@ -235,8 +235,9 @@ class Window:
     #: `"both"`, `"left"` or `"right"`. The tracker is binocular (architecture
     #: §1: 500 Hz binocular dDPI), so a per-eye criterion is available and is the
     #: correct primitive on a stereoscope: under dichoptic presentation the
-    #: non-viewing eye deviates to its phoria, and scoring it against a conjugate
-    #: estimate scores an average of one eye doing the task and one eye doing nothing.
+    #: non-viewing eye deviates to its phoria rather than following the stimulus, and
+    #: scoring it against a conjugate estimate scores an average of one eye doing the
+    #: task and one eye not looking at the stimulus (S1a §12).
     eye: str = "both"
 
 

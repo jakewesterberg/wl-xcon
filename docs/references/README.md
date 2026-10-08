@@ -55,7 +55,10 @@ Compression is `vesa2026dsc`, and CIE 170-1:2006 (`{CIE}`, `shortauthor = {CIE}`
 digits just before the title word, so a digit in a short name does not move it, and a digit in a key's
 author part comes only from a `shortauthor`. Without `shortauthor` the author is taken whole, letters
 only. (The rule since 2026-10-08: VESA's name in full is a thirty-six-letter author part, no use in a
-sentence or a methods section.)
+sentence or a methods section.) `shortauthor` is for a body only: the first author must be written
+whole in braces, alone or leading a list of people (`{The International Brain Laboratory} and
+Aguillon-Rodriguez, Valeria and ...`). Beside a person it would let a paper by Smith be keyed `jones`,
+so the test refuses it.
 
 A second paper that would take the same key appends `b`, then `c`, and a suffixed key stands only
 beside the key it collided with. The test derives each key from its entry and fails one that
@@ -75,7 +78,11 @@ disagrees, so a key never says 1987 for a 1988 paper.
    YYYY-MM-DD: full text ...}` or `{checked YYYY-MM-DD: abstract ...}` followed by what you opened
    (PubMed ID, PMC ID, the publisher's page, which table or page you read).
 3. **Add or extend the decision** in `decisions.md`: each key with the claim it supports and where in
-   the paper (page, table, figure, or "abstract").
+   the paper (page, table, figure, or "abstract"). An entry is a `### ` heading that starts with its
+   id, then **Decided** (starting with its date), **Where** and **Basis**, which the test requires,
+   and a **Caveat** where there is one: what the literature says against or beside a decision that
+   was made knowing it. A new decision takes the next free id in its area (after COL-31, the next
+   color decision is COL-32); an id already given is never reused.
 4. **Run the test:** `python -m pytest -q tests/test_references.py`.
 5. **Run the checker** (it needs the network, so it is not part of the suite):
    `python3 tools/check_references.py`. One line per entry — `ok`, `MISMATCH` with what disagreed
@@ -127,9 +134,12 @@ and anything it changes comes back only through a commit that passes the test.
 4. **What Better BibTeX writes, unverified.** Its documentation, read 2026-10-08, does not say how it
    writes `month`, how it lays out fields, or what it does with a BibTeX `note` on import and export;
    its export preferences give `note` as an example of a field a user may choose to omit
-   (retorque.re/zotero-better-bibtex/preferences/export/, read 2026-10-08). The test is the check:
-   whatever the export changes shows in the diff, and whatever it writes outside the subset fails with
-   its line.
+   (retorque.re/zotero-better-bibtex/preferences/export/, read 2026-10-08). Whether it keeps
+   `shortauthor` and `howpublished` through an import and an export: UNVERIFIED (not looked up). A
+   lost `shortauthor` fails the test where the short name is not the name in full (`vesa2026dsc`,
+   `nc3rs2012refining`); elsewhere (`{CIE}`), like a lost `howpublished`, it shows only in the diff.
+   The test is the check: whatever the export changes shows in the diff, and whatever it writes
+   outside the subset fails with its line.
 
 **Without Better BibTeX** (Zotero's own BibTeX translator, `BibTeX.js` in github.com/zotero/translators
 at commit 6d4490d, read 2026-10-08; not tried in a running Zotero): on import it reads an entry's key
