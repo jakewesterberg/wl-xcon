@@ -23,6 +23,7 @@ from _ports import endpoints as free_endpoints
 from _rig import DIRECT, STEREOSCOPE
 from wl_xcon.actor import Box
 from wl_xcon.bounds import Bounds, Ceiling, Floor
+from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.link import (
     MARK_BYTES,
     REFUSAL_HISTORY,
@@ -37,6 +38,7 @@ from wl_xcon.link import (
     Idle,
     ManualReward,
     Mark,
+    NOTE_LIMIT,
     NotDelivered,
     OpenSession,
     ParamRow,
@@ -62,6 +64,7 @@ from wl_xcon.link import (
     TEXT_LIMIT,
     Telemetry,
     Unacknowledged,
+    WarningRow,
     ZmqCommands,
     ZmqConsole,
     ZmqLink,
@@ -72,6 +75,7 @@ from wl_xcon.link import (
     decode,
     encode,
 )
+from wl_xcon.photometry import SRGB
 from wl_xcon.scheduler import Block, Condition, Scheduler
 from wl_xcon.simulate import Tally
 from wl_xcon.welfare import Deployment, Simulated as Pump, Welfare
@@ -147,6 +151,9 @@ def _session_with(
             bounds_config="subjects/A/bounds.py",
             # Read by `Telemetry.of` since schema 9: the setup the session runs in.
             geometry=DIRECT,
+            # Read by `Telemetry.of` since schema 15: what the session is for, and its calibration.
+            session_kind="training",
+            calibration=SRGB,
         ),
         welfare=welfare,
         stopped_because="",
@@ -199,6 +206,8 @@ def _session_with(
         performance=Performance(Counts({}, 0), None, None, None, None, None, None, None, None),
         # `Session.resumed_at` (schema 13, XC-026): a session opened in this process.
         resumed_at=None,
+        # `Session.warnings` (schema 15): nothing accepted yet.
+        warnings=(),
     )
 
 
@@ -2036,7 +2045,7 @@ def test_schema_8_reads_the_pause_the_schedule_and_the_feed_from_the_session():
 
     telemetry = Telemetry.of(session, Tally(), _scheduler(), index=40)
 
-    assert telemetry.schema == SCHEMA == 14
+    assert telemetry.schema == SCHEMA == 15
     assert telemetry.paused_at == 1_700_000_100.0
     assert telemetry.scheduled_stop == ScheduledStop(
         kind="trials", target=48.0, by=Box("jake"), said="after trial 48"
@@ -2099,15 +2108,15 @@ def test_a_frame_carries_the_setup_the_session_runs_in():
     assert decode(encode(stereo)).view == "stereoscope"
     assert decode(encode(stereo)).half_ipd_cm == 1.6
     assert decode(encode(_telemetry())).half_ipd_cm is None
-    assert SCHEMA == 14
+    assert SCHEMA == 15
 
 
-def test_a_schema_7_frame_is_refused_by_a_schema_14_reader():
-    """§3's schema rule: a reader built for 14 refuses 7 by name, before touching a
+def test_a_schema_7_frame_is_refused_by_a_schema_15_reader():
+    """§3's schema rule: a reader built for 15 refuses 7 by name, before touching a
     field (`SchemaMismatch`), and says which it reads."""
     old = encode(replace(_telemetry(), schema=7))
 
-    with pytest.raises(SchemaMismatch, match="carried schema 7 and this console reads schema 14"):
+    with pytest.raises(SchemaMismatch, match="carried schema 7 and this console reads schema 15"):
         decode(old)
 
 
@@ -2201,7 +2210,7 @@ def test_schema_10_survives_the_wire_with_its_absences_intact():
         assert decode(encode(original)) == original
     assert type(decode(encode(populated)).preflight.items[0]) is PreflightItem
     assert type(decode(encode(populated)).question) is Question
-    assert SCHEMA == 14
+    assert SCHEMA == 15
 
 
 def test_a_session_before_its_first_run_has_no_block_task_or_counts():
@@ -2257,7 +2266,7 @@ def test_an_idle_frame_carries_the_last_closed_sessions_summary_across_the_wire(
     assert type(restored.closed) is Telemetry and restored.closed.phase == "closed"
     assert (restored.closed.fluid_today_ml, restored.closed.shortfall_ml) == (None, None)
     assert decode(encode(replace(idle, closed=None))).closed is None
-    assert SCHEMA == 14
+    assert SCHEMA == 15
 
 
 def test_idle_of_carries_what_it_is_given_as_the_closed_summary():
@@ -2279,7 +2288,7 @@ def test_an_idle_frame_of_another_schema_is_refused_by_name():
         )
     )
 
-    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 14"):
+    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 15"):
         decode(old)
 
 
@@ -2413,7 +2422,7 @@ def test_the_strips_levels_and_the_return_survive_the_wire():
     assert decode(encode(original)) == original
     # 12 added `performance` (the strip's session, task, run and block counts) and
     # `returned_at` (the recorded return).
-    assert SCHEMA == 14
+    assert SCHEMA == 15
 
 
 def test_a_frame_between_runs_carries_the_session_alone():
@@ -2483,7 +2492,7 @@ def test_the_instant_a_session_was_resumed_survives_the_wire_and_none_stays_none
     assert decode(encode(resumed)).resumed_at == 1_700_000_050.0
     assert decode(encode(_telemetry())).resumed_at is None
     # 13 added `Stranded.resumable` and `why`, and `Telemetry.resumed_at`.
-    assert SCHEMA == 14
+    assert SCHEMA == 15
 
 
 def test_the_frame_reads_the_resume_from_the_session():
@@ -2500,7 +2509,7 @@ def test_the_frame_reads_the_resume_from_the_session():
 def test_a_schema_13_frame_is_refused_by_name():
     """b2b (schema 14): a frame whose `by`s are strings is refused by its schema, by
     name, before any `by` is read."""
-    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 14"):
+    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 15"):
         decode(encode(replace(_telemetry(), schema=13)))
 
 
@@ -2520,3 +2529,69 @@ def test_a_resume_session_command_names_its_session_or_is_refused():
         assert "session_id" in refused.value.why
     with pytest.raises(CommandRefused, match="'resume_session' command must say who sent it"):
         _command_from({"kind": "resume_session", "session_id": "2027-01-13_01"})
+
+
+# ---------------------------------------------------------------------------
+# Schema 15 (engine build B): what a session is for, its calibration, and its warnings
+# ---------------------------------------------------------------------------
+
+
+def test_schema_15_carries_the_kind_the_calibration_and_the_warnings_both_ways():
+    row = WarningRow("head free", "the head is free", SESSION_KINDS, Box("jake"), 1_700_000_000.0)
+    sent = _telemetry(session_kind="piloting", warnings=(row,))
+    unloaded = _telemetry(calibration=None)
+    idle = Idle(
+        schema=SCHEMA, phase="idle", wall_at=1.0, stranded=(), question=None, refusals=(),
+        refusals_dropped=0, animals=(), offered_tasks=(),
+        warnings=(WarningRow("default calibration", "the standard's", SESSION_KINDS, None, None),),
+    )
+
+    assert (sent.schema, decode(encode(sent))) == (15, sent)
+    assert type(decode(encode(sent)).warnings[0]) is WarningRow
+    assert decode(encode(unloaded)).calibration is None
+    assert decode(encode(idle)) == idle
+
+
+def test_a_schema_14_frame_of_either_shape_is_refused_by_name():
+    """§3's schema rule, for both shapes (the review's minor ruling: the draft tested
+    `Telemetry` only)."""
+    idle = Idle(schema=14, phase="idle", wall_at=1.0, stranded=(), question=None, refusals=(),
+                refusals_dropped=0, animals=(), offered_tasks=())
+
+    for old in (replace(_telemetry(), schema=14), idle):
+        with pytest.raises(SchemaMismatch, match="carried schema 14 and this console reads schema 15"):
+            decode(encode(old))
+
+
+def test_a_frame_reads_the_kind_the_calibration_and_the_warnings_from_the_session():
+    session = _session_with(delivered_ml=1.0, already_today=None)
+    session.spec.session_kind = "piloting"
+    session.warnings = (("head free", "the head is free", SESSION_KINDS, Box("jake"), 1.0),)
+
+    built = Telemetry.of(session, Tally(), _scheduler(), index=0)
+
+    assert (built.session_kind, built.calibration) == ("piloting", "srgb-standard")
+    assert built.warnings == (WarningRow("head free", "the head is free", SESSION_KINDS, Box("jake"), 1.0),)
+    session.spec.calibration = None
+    assert Telemetry.of(session, Tally(), _scheduler(), index=0).calibration is None
+
+
+def test_a_frame_cuts_a_warnings_sentence_and_code_as_the_wire_cuts_its_other_text():
+    """Nothing bounds a warning's sentence where it is made -- a task's `color-on-default`
+    names every colored choice (408 characters for visual_search, counted 2026-10-08), and a
+    record that will not load is quoted -- while the frame is re-encoded at every trial
+    boundary. So a frame carries a sentence of at most `NOTE_LIMIT` characters and a code of
+    at most `TEXT_LIMIT`, cut with "…" as `_quoted` cuts a value; one at its limit is
+    carried whole, and `warnings.jsonl` keeps every word."""
+    session = _session_with(delivered_ml=1.0, already_today=None)
+    session.warnings = (
+        ("c" * (TEXT_LIMIT + 1), "x" * (NOTE_LIMIT + 1), SESSION_KINDS, Box("jake"), 1.0),
+        ("c" * TEXT_LIMIT, "y" * NOTE_LIMIT, SESSION_KINDS, Box("jake"), 2.0),
+    )
+
+    cut, whole = Telemetry.of(session, Tally(), _scheduler(), index=0).warnings
+
+    assert (cut.code, cut.detail) == ("c" * TEXT_LIMIT + "…", "x" * NOTE_LIMIT + "…")
+    assert (whole.code, whole.detail) == ("c" * TEXT_LIMIT, "y" * NOTE_LIMIT)
+    assert (cut.accepted_in, cut.by, cut.at) == (SESSION_KINDS, Box("jake"), 1.0)
+    assert WarningRow.of("c", "x" * 5_000, (), None, None).detail == "x" * NOTE_LIMIT + "…"

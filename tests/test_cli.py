@@ -44,6 +44,7 @@ from wl_xcon.cli import (
     main,
     render,
 )
+from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.link import (
     SCHEMA,
     Control,
@@ -60,6 +61,7 @@ from wl_xcon.link import (
     Stop,
     Stranded,
     Telemetry,
+    WarningRow,
     ZmqConsole,
     ZmqLink,
     decode,
@@ -932,7 +934,8 @@ def _telemetry(**overrides) -> Telemetry:
     empty, so a test that does not ask for either sees their *none yet* lines.
 
     Schema 8's (P4d-2b b2a) default to a running session that is not paused, has
-    nothing scheduled and no control yet -- the quiet case, as above.
+    nothing scheduled and no control yet -- the quiet case, as above. Schema 15's
+    `warnings` are empty -- nothing accepted -- for the same reason.
 
     `schema=SCHEMA`, not a stale literal (fix round 1, I3): `decode` now refuses any
     other value before touching a single other field (`link.SchemaMismatch`), and
@@ -1004,6 +1007,9 @@ def _telemetry(**overrides) -> Telemetry:
         ),
         returned_at=None,
         resumed_at=None,  # schema 13's, like `returned_at`'s `None`: opened here
+        session_kind="training",
+        calibration="srgb-standard",
+        warnings=(),
     )
     return replace(base, **overrides) if overrides else base
 
@@ -3600,7 +3606,53 @@ def test_the_terminal_console_strips_control_characters_from_an_idle_frames_text
     )
 
     assert "\x1b" not in shown and "\r" not in shown and "\x07" not in shown
-    assert len(shown.splitlines()) == 1 + 1 + 2 + 1
+    # the header, the question, the animals and tasks, what an open asks to accept (schema
+    # 15), and the refusal
+    assert len(shown.splitlines()) == 1 + 1 + 2 + 1 + 1
+
+
+def test_the_console_says_what_the_session_is_for_its_calibration_and_what_it_accepted():
+    row = WarningRow("default calibration", "the sRGB standard's", SESSION_KINDS, Box("jake"), 1.0)
+
+    shown = render(_telemetry(warnings=(row,)))
+
+    assert "  for: training" in shown and "  color calibration: srgb-standard" in shown
+    assert "  warnings accepted: default calibration" in shown
+    assert "  color calibration: NONE LOADED" in render(_telemetry(calibration=None))
+    assert "  an open asks to accept: default calibration" in render(idle())
+
+
+def test_the_console_prints_a_warnings_wire_text_safely():
+    """`render`'s rule (cli.py, "Every wire-sourced string is run through `_printable`"):
+    the review's minor ruling on the draft's new lines."""
+    row = WarningRow("bad\x1b[2Jcode", "x", ("training",), None, None)
+
+    shown = render(_telemetry(session_kind="train\x1b[2Jing", warnings=(row,)))
+
+    assert "\x1b" not in shown and "bad\ufffd[2Jcode" in shown
+
+
+def test_the_console_says_a_listing_fault_as_one_and_not_as_a_warning():
+    """The second review's Minor 2: the idle frame's fault row has no kinds, and is not a
+    warning every run refuses."""
+    fault = WarningRow("warnings", "the warnings an open asks to accept could not be listed: x",
+                       (), None, None)
+
+    shown = render(idle(warnings=(fault,)))
+
+    assert "  warnings could not be listed: the warnings an open asks" in shown
+    assert "every run refuses" not in shown
+
+
+def test_the_console_says_a_warning_no_kind_accepts_as_one_every_run_refuses():
+    """Call 21: a calibration record that will not load is listed on the idle frame with no
+    kinds, so nothing is asked of an open and every run's pre-flight fails on it."""
+    unloaded = WarningRow("calibration record", "refused: the record is not JSON", (), None, None)
+
+    shown = render(idle(warnings=(unloaded,)))
+
+    assert "  every run refuses: calibration record: refused: the record is not JSON" in shown
+    assert "  an open asks to accept: nothing" in shown
 
 
 def test_the_terminal_console_counts_runs_from_1():

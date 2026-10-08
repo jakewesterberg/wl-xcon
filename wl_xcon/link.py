@@ -144,7 +144,14 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: wl.works member (`actor.to_map`), where it was a string; a refusal's and a control's
 #: is null for nobody, where it was `"<unknown>"` or empty. A reader of 13 refuses 14 and
 #: 14 refuses 13, by name.
-SCHEMA = 14
+#:
+#: 15 (2026-10-08, engine build B): `Telemetry.session_kind`, what the session is for;
+#: `Telemetry.calibration`, the color calibration's id, or `None` while the rig's record will
+#: not load; `Telemetry.warnings`, the warnings the session accepted, each a `WarningRow`
+#: with who accepted it and when; and `Idle.warnings`, those an open will ask to accept,
+#: unaccepted. A row's code and sentence are cut to `TEXT_LIMIT` and `NOTE_LIMIT` characters
+#: (`WarningRow.of`). A reader of 14 refuses 15 and 15 refuses 14, by name, for both shapes.
+SCHEMA = 15
 
 #: How many refusals a session keeps, per source, and therefore how many one
 #: `Telemetry` frame can carry.
@@ -327,6 +334,33 @@ class Question:
 
 
 @dataclass(frozen=True, slots=True)
+class WarningRow:
+    """One warning on a frame (engine spec §19.2): its code and sentence (`detail`, as a
+    `Finding`'s is), the session kinds it is acceptable in, and who accepted it and when --
+    `None` for both on an idle frame, where it is one an open will ask to accept."""
+
+    code: str
+    detail: str
+    accepted_in: tuple
+    by: Actor | None
+    at: float | None
+
+    @classmethod
+    def of(
+        cls, code: str, detail: str, accepted_in, by: Actor | None, at: float | None
+    ) -> "WarningRow":
+        """One row for a frame, **its code cut to `TEXT_LIMIT` characters and its sentence to
+        `NOTE_LIMIT`**, each with "…", as `_quoted` cuts a value. Nothing bounds a warning's
+        sentence where it is made -- a task's `color-on-default` names every colored choice,
+        and a record that will not load is quoted with what its loader said -- and a frame is
+        re-encoded at every trial boundary. The record keeps every word (`warnings.jsonl`).
+        Every sentence an open can accept today is within `NOTE_LIMIT` (the engine B plan, call
+        25: the default calibration's, 270 characters, is the longest, counted 2026-10-08), so
+        an idle frame offers each whole, as the open's form must send it back."""
+        return cls(_cut(code, TEXT_LIMIT), _cut(detail, NOTE_LIMIT), tuple(accepted_in), by, at)
+
+
+@dataclass(frozen=True, slots=True)
 class Stranded:
     """A session found under `--root` with a departure and no return (P4d-2b spec §6.1):
     its id, its animal, and the departure's instant -- `None`, with an empty subject,
@@ -370,6 +404,9 @@ class Idle:
     #: and after a session that ended without one (stopped at the terminal, or found
     #: stranded). The page's End tab renders it as it renders any closed frame.
     closed: Telemetry | None = None
+    #: The warnings an open will ask to accept (schema 15), unaccepted: `WarningRow`s with no
+    #: `by` or `at`.
+    warnings: tuple = ()
 
     @classmethod
     def of(
@@ -384,10 +421,11 @@ class Idle:
         animals,
         offered_tasks,
         closed: Telemetry | None = None,
+        warnings=(),
     ) -> "Idle":
         """One idle frame: the service's refusals and the link's, capped at
         `REFUSAL_HISTORY` and counted, as `Telemetry.of` caps a session's; and the last
-        closed session's summary, as given."""
+        closed session's summary and the warnings an open asks to accept, as given."""
         combined = tuple(refusals) + tuple(link.refused)
         kept = combined[-REFUSAL_HISTORY:]
         return cls(
@@ -401,6 +439,7 @@ class Idle:
             animals=tuple(animals),
             offered_tasks=tuple(offered_tasks),
             closed=closed,
+            warnings=tuple(warnings),
         )
 
 
@@ -631,6 +670,14 @@ class Telemetry:
     #: (schema 13, XC-026 §8a item 4), or `None` for one opened here -- for the console's
     #: banner and the end-of-session line.
     resumed_at: float | None
+    #: `session.spec.session_kind`: what the session is for (schema 15; engine spec §19.1).
+    session_kind: str
+    #: `session.spec.calibration.id`: the color calibration colors are checked against, or
+    #: `None` while the rig's record will not load (the engine B plan, call 19).
+    calibration: str | None
+    #: `session.warnings`, as `WarningRow`s: every warning the session accepted, in order,
+    #: each cut for the frame (`WarningRow.of`).
+    warnings: tuple
 
     @classmethod
     def of(cls, session, tally, scheduler, index: int) -> "Telemetry":
@@ -790,6 +837,10 @@ class Telemetry:
             returned_at=session.welfare.returned_wall_at,
             # XC-026 (schema 13): the session's own.
             resumed_at=session.resumed_at,
+            # Engine build B (schema 15): the session's own.
+            session_kind=session.spec.session_kind,
+            calibration=None if session.spec.calibration is None else session.spec.calibration.id,
+            warnings=tuple(WarningRow.of(*row) for row in session.warnings),
         )
 
 
@@ -866,6 +917,19 @@ def _performance_in(data: dict) -> Performance:
     )
 
 
+def _warnings_out(rows) -> list:
+    return [{"code": w.code, "detail": w.detail, "accepted_in": list(w.accepted_in),
+             "by": actors.to_map_or_none(w.by), "at": w.at} for w in rows]
+
+
+def _warnings_in(data) -> tuple:
+    return tuple(
+        WarningRow(code=w["code"], detail=w["detail"], accepted_in=tuple(w["accepted_in"]),
+                   by=None if w["by"] is None else actors.from_map(w["by"]), at=w["at"])
+        for w in data
+    )
+
+
 def encode(telemetry: Telemetry | Idle) -> bytes:
     """`Telemetry` (or, while no session is open, `Idle`) to msgpack, the wire format ADR-0003 named alongside ZeroMQ.
 
@@ -904,6 +968,7 @@ def encode(telemetry: Telemetry | Idle) -> bytes:
                 "animals": list(telemetry.animals),
                 "offered_tasks": list(telemetry.offered_tasks),
                 "closed": None if telemetry.closed is None else _telemetry_out(telemetry.closed),
+                "warnings": _warnings_out(telemetry.warnings),
             },
             use_bin_type=True,
         )
@@ -990,6 +1055,9 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
         "performance": _performance_out(telemetry.performance),
         "returned_at": telemetry.returned_at,
         "resumed_at": telemetry.resumed_at,
+        "session_kind": telemetry.session_kind,
+        "calibration": telemetry.calibration,
+        "warnings": _warnings_out(telemetry.warnings),
     }
 
 
@@ -1115,6 +1183,7 @@ def _idle_from(data: dict) -> Idle:
         animals=tuple(data["animals"]),
         offered_tasks=tuple(data["offered_tasks"]),
         closed=None if data["closed"] is None else _telemetry_from(data["closed"]),
+        warnings=_warnings_in(data["warnings"]),
     )
 
 
@@ -1184,6 +1253,9 @@ def _telemetry_from(data: dict) -> Telemetry:
         performance=_performance_in(data["performance"]),
         returned_at=data["returned_at"],
         resumed_at=data["resumed_at"],
+        session_kind=data["session_kind"],
+        calibration=data["calibration"],
+        warnings=_warnings_in(data["warnings"]),
     )
 
 
@@ -1587,6 +1659,12 @@ def _quoted(value: object) -> str:
     if len(text) > TEXT_LIMIT:
         return text[:TEXT_LIMIT] + "…"
     return text
+
+
+def _cut(text: str, limit: int) -> str:
+    """`text`, cut to `limit` characters plus `"…"` when longer: `_quoted`'s bound, for text
+    a frame shows as it is rather than quotes (`WarningRow.of`)."""
+    return text[:limit] + "…" if len(text) > limit else text
 
 
 def _actor(by: object, name: str) -> Actor:

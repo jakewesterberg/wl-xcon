@@ -14,7 +14,7 @@ import shutil
 import threading
 import time
 import weakref
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -31,6 +31,7 @@ from wl_xcon.cli import _load_allocation, _load_rig, main
 from wl_xcon.bounds import Exceeded
 from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.link import (
+    NOTE_LIMIT,
     REFUSAL_HISTORY,
     CheckRun,
     EndSession,
@@ -57,7 +58,7 @@ from wl_xcon.service import Service, _fresh_seed
 from wl_xcon.task import Outcome
 from wl_xcon.taskd import Session
 from wl_xcon.warnlist import Entry
-from wl_xcon.welfare import Welfare
+from wl_xcon.welfare import Deployment, Welfare
 
 #: wl-preproc's decoder and trial assembler, for the path through two crashes (XC-026):
 #: `tests/test_taskd.py`'s guard. A missing checkout skips that test locally and fails
@@ -216,6 +217,113 @@ def test_with_no_session_a_run_command_or_a_mark_is_refused_and_said(tmp_path):
         ("mark", "no session is open, so the mark was not recorded"),
         ("pause", "no session is open, so a command for a run is not applied; open a session first"),
     ]
+
+
+def test_the_idle_frame_lists_what_an_open_will_ask_to_accept(tmp_path):
+    frame = _step(_service(tmp_path))
+
+    assert [(w.code, w.by) for w in frame.warnings] == [("default calibration", None), ("head free", None)]
+
+
+def test_the_idle_frames_warnings_are_listed_once_a_day_and_a_fault_never_stops_publishing(
+    tmp_path, monkeypatch
+):
+    """The review's minor ruling (Call 27): `publish` runs every pass, the stranded-return
+    path among them."""
+    service = _service(tmp_path)
+    asked = []
+    real = service.open_warnings
+    monkeypatch.setattr(service, "open_warnings", lambda deployment: asked.append(deployment) or real(deployment))
+    _step(service)
+    _step(service)
+    assert len(asked) == 1, "once a calendar day"
+
+    def broken(deployment):
+        raise RuntimeError("broken on purpose")
+
+    monkeypatch.setattr(service, "open_warnings", broken)
+    service.wall_clock.at += 86_400
+
+    (row,) = _step(service).warnings
+    assert (row.code, row.accepted_in) == ("warnings", ())
+    assert "RuntimeError: broken on purpose" in row.detail
+
+
+def test_an_open_lists_the_rigs_calibration_and_only_a_chaired_sessions_free_head(tmp_path):
+    service = _service(tmp_path)
+
+    assert [e.code for e in service.open_warnings(Deployment.RIG_FIXED)] == ["default calibration"]
+    assert [e.code for e in service.open_warnings(Deployment.RIG_CHAIRED)] == [
+        "default calibration", "head free",
+    ]
+
+
+def test_an_idle_frames_sentences_are_cut_as_the_wire_cuts_its_other_text(tmp_path, monkeypatch):
+    """Nothing bounds these where they are made: a record that will not load is quoted with
+    its path and whatever its loader said, and a fault's own message is anything. On the idle
+    frame each is cut to `link.NOTE_LIMIT` characters and "…" (`link.WarningRow.of`), as a
+    session's frame cuts the warnings it accepted; the code and the kinds are untouched."""
+    service = _service(tmp_path)
+    service.calibration, service.calibration_refused = None, "refused: " + "x" * 2_000
+
+    unloaded, head = _step(service).warnings
+
+    assert (unloaded.code, unloaded.accepted_in) == ("calibration record", ())
+    assert unloaded.detail == ("refused: " + "x" * 2_000)[:NOTE_LIMIT] + "…"
+    assert head.code == "head free" and not head.detail.endswith("…")
+
+    def broken(deployment):
+        raise RuntimeError("y" * 2_000)
+
+    monkeypatch.setattr(service, "open_warnings", broken)
+    service.wall_clock.at += 86_400
+
+    (row,) = _step(service).warnings
+    assert row.code == "warnings" and len(row.detail) == NOTE_LIMIT + 1
+    assert row.detail.startswith("the warnings an open asks to accept could not be listed: RuntimeError")
+
+
+@pytest.fixture
+def zone(monkeypatch):
+    """Sets the host's zone (`TZ`) for one test, and puts this host's back after."""
+
+    def to(name: str) -> None:
+        monkeypatch.setenv("TZ", name)
+        time.tzset()
+
+    yield to
+    monkeypatch.undo()
+    time.tzset()
+
+
+def test_a_calibrations_age_and_its_date_are_counted_on_the_rigs_local_calendar(tmp_path, zone):
+    """Task 6's review: `measured_on` carries no zone, so the day a calibration's age counts
+    to is the rig's own local date (`Service._today`), never UTC's. One instant,
+    2027-02-19 13:00 UTC, is 2027-02-20 fourteen hours east and still 2027-02-19 twelve
+    hours west: a record measured 2027-01-20 is 31 days old in the first and listed, 30 in
+    the second and not; one measured 2027-02-20 is today's in the first and dated after
+    today in the second, which no session kind accepts."""
+    instant = datetime(2027, 2, 19, 13, 0, tzinfo=timezone.utc).timestamp()
+    service = _service(tmp_path, wall=lambda: instant)
+    month_old = measured(measured_on="2027-01-20", id="rig1@2027-01-20")
+    east_today = measured(measured_on="2027-02-20", id="rig1@2027-02-20")
+
+    zone("EAST-14")
+    assert service._today() == date(2027, 2, 20)
+    service.calibration = month_old
+    assert [(e.code, e.accepted_in) for e in service.calibration_warnings()] == [
+        ("calibration age", SESSION_KINDS)
+    ]
+    service.calibration = east_today
+    assert service.calibration_warnings() == []
+
+    zone("WEST+12")
+    assert service._today() == date(2027, 2, 19)
+    service.calibration = month_old
+    assert service.calibration_warnings() == []
+    service.calibration = east_today
+    (future,) = service.calibration_warnings()
+    assert future.accepted_in == () and "after today (2027-02-19)" in future.detail
 
 
 # --- open -----------------------------------------------------------------------

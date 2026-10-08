@@ -65,6 +65,7 @@ import threading
 import time
 import traceback
 from collections.abc import Callable
+from datetime import date
 from pathlib import Path
 from typing import TypeVar
 
@@ -73,6 +74,7 @@ from wl_xcon import marks as _marks
 from wl_xcon import preflight as _preflight
 from wl_xcon import resume as _resume_mod
 from wl_xcon import stranded as _stranded
+from wl_xcon import warnlist
 from wl_xcon.actor import Actor
 from wl_xcon.bounds import Bounds, Exceeded
 from wl_xcon.cli import (
@@ -371,10 +373,60 @@ class Service:
         #: returns (`step`).
         self._starting = None
         self._ending = None
+        #: The idle frame's warnings and the calendar day they were listed on (the engine B
+        #: plan, call 27), or `None` before the first idle frame.
+        self._idle_listed: tuple | None = None
 
     def wall_now(self) -> float:
         """The service's wall: a test's, or its own `SessionClock`, anchored once."""
         return self.wall_clock() if self.wall_clock is not None else self._clock.now()
+
+    def _today(self) -> date:
+        """The service's calendar day, on its own wall: what a calibration's age counts to.
+        **This host's local date**, in the zone `wlx taskd` runs in (`date.fromtimestamp`): a
+        record's `measured_on` is a date with no zone, written on the rig's own calendar, so
+        its age and whether it is dated after today are counted on that calendar, never UTC's
+        -- a calibration turns 31 days old at the rig's local midnight."""
+        return date.fromtimestamp(self.wall_now())
+
+    def calibration_warnings(self) -> list:
+        """The rig's calibration on the warnings list (engine spec §7.1, §7.10): the default,
+        a measured one's age past 30 days, one dated after today -- or, while the record the
+        rig names will not load, that, which no session kind accepts (the engine B plan,
+        call 19)."""
+        if self.calibration is None:
+            return warnlist.of_unloaded(self.calibration_refused)
+        return warnlist.of_calibration(self.calibration, self._today())
+
+    def open_warnings(self, deployment: Deployment) -> list:
+        """The warnings an open lists (engine spec §19.3: "at open"): the rig's calibration's,
+        and a chaired session's free head -- known before any run."""
+        return self.calibration_warnings() + warnlist.of_deployment(deployment)
+
+    def _idle_warnings(self) -> tuple:
+        """What an idle frame lists, unaccepted: every warning an open can ask for, a chaired
+        session's included (`open_warnings`), which the dialog marks as a chaired session's.
+        **Listed once per calendar day of the service's wall** (the engine B plan, call 27),
+        not on every pass; and a fault listing them is one row saying so, never the end of
+        publishing -- an open lists them again itself. Each row is cut for the frame
+        (`link.WarningRow.of`): a record that will not load is quoted, and a fault says anything."""
+        try:
+            today = self._today()
+            if self._idle_listed is not None and self._idle_listed[0] == today:
+                return self._idle_listed[1]
+            rows = tuple(
+                _link.WarningRow.of(entry.code, entry.detail, entry.accepted_in, None, None)
+                for entry in self.open_warnings(Deployment.RIG_CHAIRED)
+            )
+        except Exception as broken:  # noqa: BLE001 -- see the docstring
+            return (_link.WarningRow.of(
+                warnlist.UNLISTED,
+                f"the warnings an open asks to accept could not be listed: "
+                f"{type(broken).__name__}: {broken}; an open lists them again itself",
+                (), None, None,
+            ),)
+        self._idle_listed = (today, rows)
+        return rows
 
     # --- the loop -----------------------------------------------------------------
 
@@ -421,6 +473,7 @@ class Service:
                 animals=self._animals(),
                 offered_tasks=self._tasks(),
                 closed=self.closed,
+                warnings=self._idle_warnings(),
             )
         )
 

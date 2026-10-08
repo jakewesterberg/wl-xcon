@@ -21,6 +21,7 @@ from pathlib import Path
 from wl_xcon import actor as actors
 from wl_xcon import link as _link
 from wl_xcon import marks as _marks
+from wl_xcon import warnlist
 from wl_xcon.marks import TIME_FORMATS as _TIME_FORMATS
 from wl_xcon.marks import clock_or_now as _clock_or_now
 from wl_xcon.marks import clock_time as _wall_clock_time
@@ -807,6 +808,17 @@ def _render_idle(frame: _link.Idle) -> str:
     lines.append(
         f"  tasks offered: {', '.join(_printable(t) for t in frame.offered_tasks) or 'none'}"
     )
+    lines.append(
+        "  an open asks to accept: "
+        + (", ".join(_printable(w.code) for w in frame.warnings if w.accepted_in) or "nothing")
+    )
+    for refused in (w for w in frame.warnings if not w.accepted_in):
+        # A listing fault is no warning (the second review's Minor 2): said as what it is.
+        lines.append(
+            f"  warnings could not be listed: {_printable(refused.detail)}"
+            if refused.code == warnlist.UNLISTED
+            else f"  every run refuses: {_printable(refused.code)}: {_printable(refused.detail)}"
+        )
     lines.extend(_refusal_lines(frame.refusals, frame.refusals_dropped))
     return "\n".join(lines)
 
@@ -919,6 +931,11 @@ def render(frame: _link.Telemetry | _link.Idle) -> str:
     **Schema 10 adds runs and the service** (P4d-2b b3a): the run, whether `wlx taskd`
     holds the session, the pre-flight of the run about to start, and a question owed; an
     `Idle` frame is `_render_idle`'s.
+
+    **Schema 15 adds what the session is for, its calibration and its accepted warnings**
+    (engine build B); an idle frame's warnings are those an open asks to accept, one no kind
+    accepts is said as what every run refuses, and a row saying they could not be listed is
+    said as that.
     """
     if isinstance(frame, _link.Idle):
         return _render_idle(frame)
@@ -931,6 +948,18 @@ def render(frame: _link.Telemetry | _link.Idle) -> str:
     # for different reasons, and a console that worked out which from the pattern of
     # `None`s would be computing -- see this function's second paragraph.
     lines.append(f"  deployment: {_printable(frame.deployment)}")
+    # Schema 15 (engine build B): what the session is for, its calibration, and the
+    # warnings it accepted -- wire text, so each through `_printable`.
+    lines.append(f"  for: {_printable(frame.session_kind)}")
+    lines.append(
+        "  color calibration: "
+        + ("NONE LOADED -- every run's pre-flight fails on it" if frame.calibration is None
+           else _printable(frame.calibration))
+    )
+    lines.append(
+        "  warnings accepted: "
+        + (", ".join(_printable(w.code) for w in frame.warnings) or "none")
+    )
     resumed = None if frame.resumed_at is None else _time_of_day(frame.resumed_at)
     if frame.resumed_at is not None:
         lines.append(

@@ -1,6 +1,7 @@
 """A complete `Telemetry` frame, at this build's `SCHEMA`, for the browser console's
 tests (P4d-2b b1; schema 8's fields since b2a, schema 9's since direct view part 2, schema 10's since b3a,
-schema 12's since session levels, schema 13's since XC-026).
+schema 12's since session levels, schema 13's since XC-026, schema 15's `session_kind`,
+`calibration` and `warnings` since engine build B).
 
 Imported by `test_health.py`, `test_web.py` and `test_serve.py` as
 `from _frames import frame`; never collected, because its name does not start with
@@ -20,7 +21,9 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from wl_xcon.link import SCHEMA, Counts, Idle, ParamRow, Performance, Stranded, Telemetry
+from wl_xcon.actor import Box
+from wl_xcon.findings import SESSION_KINDS
+from wl_xcon.link import SCHEMA, Counts, Idle, ParamRow, Performance, Stranded, Telemetry, WarningRow
 from wl_xcon.web import View
 
 
@@ -93,6 +96,11 @@ def frame(**overrides) -> Telemetry:
         ),
         returned_at=None,
         resumed_at=None,
+        session_kind="training",
+        calibration="srgb-standard",
+        warnings=(
+            WarningRow("default calibration", "the sRGB standard's", SESSION_KINDS, Box("jake"), 1_699_999_000.0),
+        ),
     )
     return replace(base, **overrides) if overrides else base
 
@@ -129,5 +137,6 @@ def idle(**overrides) -> Idle:
         refusals_dropped=0,
         animals=("A", "B"),
         offered_tasks=("fixation_detection.py",),
+        warnings=(WarningRow("default calibration", "the sRGB standard's", SESSION_KINDS, None, None),),
     )
     return replace(base, **overrides) if overrides else base
