@@ -3,12 +3,13 @@ standard and says so; a measured one carries its id, its date and a measured tra
 channel."""
 
 import json
+import os
 from datetime import date
 from pathlib import Path
 
 import pytest
 
-from _calibrations import BACKGROUND, LINEAR, OBSERVER, PRIMARIES, measured
+from _calibrations import BACKGROUND, LINEAR, OBSERVER, PRIMARIES, measured, promptly
 from _rig import PATH as RIG_FILE
 from _rig import RIG, naming
 from wl_xcon.cli import _load_calibration, _load_rig
@@ -203,6 +204,38 @@ def test_a_file_that_is_no_record_is_refused(tmp_path, text, said):
 def test_a_record_larger_than_a_mebibyte_is_refused(tmp_path):
     with pytest.raises(ValueError, match="larger than 1048576 bytes"):
         read_calibration(_write(tmp_path, _record(observer="x" * RECORD_LIMIT)))
+
+
+def test_a_record_of_exactly_a_mebibyte_loads_and_one_byte_more_is_refused(tmp_path):
+    """The bound is the largest file read, so a record at it loads (trailing whitespace is
+    JSON's own) and one byte past it does not."""
+    text = json.dumps(_record())
+    path = tmp_path / "cal.json"
+    path.write_text(text + " " * (RECORD_LIMIT - len(text)))
+    assert path.stat().st_size == RECORD_LIMIT
+
+    assert read_calibration(path).id == "rig1@2027-01-20"
+    path.write_text(text + " " * (RECORD_LIMIT + 1 - len(text)))
+    with pytest.raises(ValueError, match="larger than 1048576 bytes"):
+        read_calibration(path)
+
+
+def test_a_named_pipe_is_refused_without_waiting_for_a_writer(tmp_path):
+    """The engine B final review: opening a named pipe to read waits until something writes
+    to it, which held `wlx taskd` at its start. Refused as what it is, before a byte is read,
+    and at once: nothing ever writes to this one."""
+    pipe = tmp_path / "cal.json"
+    os.mkfifo(pipe)
+
+    with pytest.raises(ValueError, match=r"^it is a named pipe, not a regular file, so it was not read"):
+        promptly(lambda: read_calibration(pipe), pipe)
+
+
+def test_a_directory_is_refused_as_one(tmp_path):
+    (tmp_path / "cal.json").mkdir()
+
+    with pytest.raises(ValueError, match=r"^it is a directory, not a regular file, so it was not read"):
+        read_calibration(tmp_path / "cal.json")
 
 
 def test_a_rig_that_names_no_calibration_runs_on_the_default():

@@ -22,10 +22,11 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
+import stat
 from dataclasses import dataclass
 from datetime import date
-from pathlib import Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -361,8 +362,24 @@ ID_LIMIT = 64
 
 #: The largest record file read, in bytes: 1 MiB. A record holding the sRGB table at all 1024
 #: levels on each channel is 132,160 bytes (224,472 indented; computed 2026-10-08), and the
-#: bound keeps a mistaken path, a pipe or a device from being read without end.
+#: bound keeps a mistaken path to a large regular file from being read whole. A pipe, a device
+#: or a directory is never read at all (`_kind`): opening a named pipe to read waits for a
+#: writer, which no size bound reaches.
 RECORD_LIMIT = 1024 * 1024
+
+
+def _kind(mode: int) -> str:
+    """What a file that is not a regular file is, in words, for the refusal."""
+    for test, said in (
+        (stat.S_ISFIFO, "a named pipe"),
+        (stat.S_ISDIR, "a directory"),
+        (stat.S_ISCHR, "a character device"),
+        (stat.S_ISBLK, "a block device"),
+        (stat.S_ISSOCK, "a socket"),
+    ):
+        if test(mode):
+            return said
+    return "a special file"
 
 
 def read_calibration(path) -> Calibration:
@@ -371,8 +388,27 @@ def read_calibration(path) -> Calibration:
     a field a record does not have or gives twice, or a value that is not what its field holds
     raises `ValueError` naming it, as does a file over `RECORD_LIMIT` or nested too deep to
     parse; a file that cannot be read raises `OSError`. Reading it runs no code, unlike the
-    rig's and the animal's Python files."""
-    with Path(path).open("rb") as file:
+    rig's and the animal's Python files.
+
+    **Only a regular file is read** (the engine B final review): anything else -- a named
+    pipe, a directory, a device -- raises `ValueError` saying what it is, before a byte is
+    read. Opened without waiting (`O_NONBLOCK`) and asked through that descriptor, so a named
+    pipe with no writer never holds `wlx taskd` at its start, and the file checked is the file
+    read. Like every refusal here it leaves the path to its caller, which names it
+    (`cli._load_calibration`)."""
+    descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        mode = os.fstat(descriptor).st_mode
+        if not stat.S_ISREG(mode):
+            raise ValueError(
+                f"it is {_kind(mode)}, not a regular file, so it was not read; a calibration "
+                f"record is a JSON file"
+            )
+        file = os.fdopen(descriptor, "rb")
+    except BaseException:
+        os.close(descriptor)
+        raise
+    with file:
         raw = file.read(RECORD_LIMIT + 1)
     if len(raw) > RECORD_LIMIT:
         raise ValueError(

@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from _calibrations import BACKGROUND, LINEAR, OBSERVER, PRIMARIES, measured
+from _calibrations import BACKGROUND, LINEAR, OBSERVER, PRIMARIES, measured, promptly
 from _ports import endpoints as free_endpoints
 from _rig import PATH as RIG_FILE
 from _rig import RIG, naming
@@ -431,6 +431,23 @@ def test_a_calibration_record_that_will_not_load_never_stops_wlx_taskd_or_an_ope
     assert refused.refusals[-1].name == "start" and service.session.card.codes == [4128]
     ended = _step(service, _end())
     assert isinstance(ended, Idle) and _kinds(service.root)[-2:] == ["returned", "session ended"]
+
+
+def test_a_calibration_record_that_is_a_named_pipe_never_holds_wlx_taskd_at_its_start(tmp_path):
+    """The engine B final review, on call 19's promise: a rig naming a named pipe held the
+    service's start in its open until something wrote to the pipe. It starts at once, the
+    pipe refused by its path as every record that will not load is, and a session opens."""
+    pipe = tmp_path / "cal.json"
+    os.mkfifo(pipe)
+    folders = _folders(tmp_path)
+
+    service = promptly(lambda: _made(folders, rig=dataclasses.replace(RIG, calibration=str(pipe))), pipe)
+
+    assert service.calibration is None
+    assert service.calibration_refused.startswith(
+        f"refused: the calibration {RIG_FILE} names, {pipe}: it is a named pipe, not a regular file"
+    )
+    assert _step(service, _open()).phase == "between_runs"
 
 
 def test_a_stranded_sessions_return_is_taken_alike_when_the_calibration_record_will_not_load(tmp_path):
