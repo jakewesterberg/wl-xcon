@@ -225,8 +225,7 @@ Run from the console (S9), and one of them is required at every session start:
 | **V9** | Per-half photometry, per-eye optical paths, ABL interocular coupling, patch darkness |
 
 Dropped frames are detected in hardware, live, from `PD2_COMP` at the display surface — not from
-the engine's own frame-interval accounting (parent §11.5) [@bridges2020timing;
-@plant2004selfvalidating].
+the engine's own frame-interval accounting (parent §11.5) [@plant2004selfvalidating].
 
 ---
 

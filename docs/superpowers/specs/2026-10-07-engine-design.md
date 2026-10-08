@@ -146,8 +146,8 @@ its σ declared separately) (N§R3, the science review's finding 4).
 | Mondrian | colored rectangles, grayscale rectangles, mixed shapes, image fragments |
 | Masks (composed) | noise masks, pattern masks, metacontrast [@breitmeyer2000recent], object substitution [@dilollo2000competition], a full-screen mask |
 
-**A patterned fill has a mean luminance, defaulting to what is behind it.** [@brainard1996cone;
-@pelli2013measuring] One whose mean differs (a luminance step under the pattern, e.g. a grating on the
+**A patterned fill has a mean luminance, defaulting to what is behind it** [@brainard1996cone;
+@pelli2013measuring]. One whose mean differs (a luminance step under the pattern, e.g. a grating on the
 black default) carries a warning naming the step, in every session kind (N§R3: "Always a warning").
 
 **Random content is deterministic**: each random block's generator is part of its definition (a
@@ -407,7 +407,7 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
 ## 10. The drawer (N§7)
 
 1. **The GPU drawer matches the exact definition within one output level** per pixel.
-2. **Edges are smooth and sub-pixel.** [@bach1997antialiasing; @bach2001freiburg]
+2. **Edges are smooth and sub-pixel** [@bach1997antialiasing; @bach2001freiburg].
 3. **A pattern near the pixel limit** is allowed with a warning [@shannon1949communication;
    @merigan1990spatial].
 4. **The core is Rust**, a separate process (§3.1), held to the exact definitions by the match tests and

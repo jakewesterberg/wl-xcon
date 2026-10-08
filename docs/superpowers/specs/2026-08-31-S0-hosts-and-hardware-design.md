@@ -136,8 +136,7 @@ specified for more than two.
 ### 5.1 Panel class
 
 **27-inch-class 16:9 flat tandem QD-OLED at 4K/240** (changed from 32-inch-class on
-2026-09-27; see below) [@abuhaila2025recent; @dimigen2026advantages; @ito2013evaluation;
-@cooper2013assessment]. **QD-OLED is a requirement** (PI, 2026-09-26).
+2026-09-27; see below). **QD-OLED is a requirement** (PI, 2026-09-26).
 
 **Chosen (PI, 2026-09-27): the ASUS ROG Swift OLED PG27UCDM.** It replaces the PG32UCDM
 Gen 3 chosen the day before. **Why:** most experiments view the monitor directly, not
@@ -239,9 +238,9 @@ The ASUS PG32UCDP below is kept as history: ASUS lists its input as "DisplayPort
 read 2026-09-26), so it compresses 4K/240 whatever the GPU.
 
 Tandem is the right architecture for this application, and for a reason narrower than its
-marketing. Stacked emissive layers reach a given luminance at lower per-layer current, which
-buys **ABL headroom** and **burn-in resistance** — precisely the two risks §5.4 lists
-[@fung2016tandem]. The figure that matters is therefore **sustained full-field luminance at
+marketing. Stacked emissive layers reach a given luminance at lower per-layer current
+[@fung2016tandem], which buys **ABL headroom** and **burn-in resistance** — precisely the two
+risks §5.4 lists. The figure that matters is therefore **sustained full-field luminance at
 100% APL**, not peak small-window brightness, which is the number that will be advertised and
 is irrelevant here.
 

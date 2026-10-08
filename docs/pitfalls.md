@@ -199,10 +199,10 @@ screen and will not look at a stimulus that is not there.
 **P19 — A colour nobody measured.** RGB is a set of instructions to one panel, so a
 colour written in a task file is a different stimulus on every monitor and describes
 nothing reproducible in a methods section. The specific damage is quiet: a monitor
-asked for a colour outside its gamut clips, and a clipped colour has neither the
-requested chromaticity nor the requested luminance — so an isoluminant pair stops being
-isoluminant and a chromatic experiment's control condition becomes a luminance
-manipulation, in a task that runs and looks convincing [@brainard1996cone]. Mitigation:
+asked for a colour outside its gamut [@brainard1996cone, p. 572] clips, and a clipped
+colour has neither the requested chromaticity nor the requested luminance — so an
+isoluminant pair stops being isoluminant and a chromatic experiment's control condition
+becomes a luminance manipulation, in a task that runs and looks convincing. Mitigation:
 colour is specified in CIE xyY or DKL cone contrast, checked against a measured
 `Calibration`, and refused without one [@cie2018colorimetry; @derrington1984chromatic].
 The calibration must name **whose luminous efficiency** it was measured against,

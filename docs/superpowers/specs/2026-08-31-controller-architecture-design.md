@@ -123,7 +123,7 @@ turns two offline checks into online guarantees:
   months later.
 - **Frames**: drops are detected at the display surface, catching post-GPU drops that a
   vsync tap structurally cannot (breakout spec §3.1 makes this argument explicitly)
-  [@bridges2020timing; @plant2004selfvalidating].
+  [@plant2004selfvalidating].
 
 Both patches must sit **outside both eyes' viewports** on the split screen (§8.2), or
 the flip patch becomes a flickering distractor in one eye's field [@williams2004entrainment;
