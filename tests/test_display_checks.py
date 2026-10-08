@@ -816,6 +816,68 @@ def test_a_number_field_that_holds_no_number_is_refused(looks, said):
     assert _says(_one(looks, background=GRAY_BG), said)
 
 
+@pytest.mark.parametrize("looks, choices, said", [
+    (Gabor(sf=P("s"), contrast=Michelson(0.5)), ("big",), "Gabor.sf can be 'big' (parameter 's'), not a number"),
+    (Gabor(phase=P("s"), contrast=Michelson(0.5)), (0.0, "90deg"),
+     "Gabor.phase can be '90deg' (parameter 's'), not a number"),
+    (Gabor(orientation=P("s"), contrast=Michelson(0.5)), (P("t"),),
+     "Gabor.orientation can be P(name='t') (parameter 's'), not a number"),
+])
+def test_a_number_field_s_parameter_is_held_to_each_choice(looks, choices, said):
+    """A parameter in a number field passed whatever it offered (the final review's I2(a)),
+    and `resolve` met a choice that is no number first."""
+    params = [Param("s", unit="value", choices=choices), Param("t", unit="deg", choices=(0.0,))]
+    trial = _one(looks, params=params, background=GRAY_BG)
+    assert _refused(trial) == {"bad-block"} and _says(trial, said)
+
+
+@pytest.mark.parametrize("looks, said", [
+    (look.Look(shape="circle", fill=look.Flat(color=Gray(40.0))),
+     "Look.shape is 'circle', not a shape, such as look.Circle(size=1.0)"),
+    (look.Look(fill="flat"), "Look.fill is 'flat', not a fill, such as look.Flat(color=Gray(40.0))"),
+    (look.Look(fill=look.Flat(color=Gray(40.0)), edge="soft"),
+     "Look.edge is 'soft', not an edge, such as look.Hard()"),
+    # `resolve` reads an edge as a block, so None is no edge either.
+    (look.Look(fill=look.Flat(color=Gray(40.0)), edge=None),
+     "Look.edge is None, not an edge, such as look.Hard()"),
+    # Its outline's color was read before its kind, and `check()` raised AttributeError.
+    (look.Look(fill=look.Flat(color=Gray(40.0)), outline="thin"), "Look.outline is 'thin', not an outline"),
+])
+def test_a_look_s_blocks_are_each_of_their_kind(looks, said):
+    trial = _one(looks, background=GRAY_BG)
+    assert _refused(trial) == {"bad-block"} and _says(trial, said)
+
+
+def test_a_look_s_block_written_as_a_parameter_is_held_to_each_choice():
+    shapes = [Param("s", unit="shape", choices=(look.Circle(size=1.0), "circle"))]
+    trial = _one(look.Look(shape=P("s"), fill=look.Flat(color=Gray(40.0))), params=shapes,
+                 background=GRAY_BG)
+    assert _refused(trial) == {"bad-block"}
+    assert _says(trial, "Look.shape can be 'circle' (parameter 's'), not a shape")
+
+
+def test_a_look_whose_outline_is_none_or_an_outline_is_accepted():
+    for outline in (None, look.Outline(width=0.1, color=Gray(40.0))):
+        looks = look.Look(fill=look.Flat(color=Gray(40.0)), outline=outline)
+        assert _refused(_one(looks, background=GRAY_BG)) == set()
+
+
+@pytest.mark.parametrize("trial, said", [
+    (_placed(disparity="x"), "'s''s disparity is 'x', not a number of degrees"),
+    (_placed(disparity=P("d"), params=[Param("d", unit="deg", choices=(0.0, "near"))]),
+     "'s''s disparity can be 'near' (parameter 'd'), not a number of degrees"),
+    (_two_updates(Stimulus("s", at=(0.0, 0.0), looks=LIT), Update("s", layer=1),
+                  Update("s", disparity=None)),
+     "'s''s disparity is None, not a number of degrees"),
+])
+def test_a_disparity_that_is_no_number_is_refused(trial, said):
+    """`check()` itself raised ValueError reading one as a float (the final review's I2(e))."""
+    found = [f.detail for f in check(trial) if f.blocking]
+    assert found == [said], found
+    # In direct view too, where it is read for stereo content.
+    assert "bad-placement" in _refused(dataclasses.replace(trial, view="direct"))
+
+
 def test_an_opacity_that_is_no_number_is_refused():
     shown = _placed(opacity="half")
     updated = _two_updates(Stimulus("s", at=(0.0, 0.0), looks=LIT), Update("s", layer=1),

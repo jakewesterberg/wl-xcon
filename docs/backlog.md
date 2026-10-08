@@ -15,7 +15,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 **Finding one.** Grep the ID, a package (`P9`, `b3`), a repository (`wl-sync`) or a file. The sections: brainstorms the PI asked to have later; features no plan covers yet; defects and review findings deliberately not fixed; debt (cleanup, stale wording, test hygiene); anything that needs the rig or other hardware, measurements included; and asks of, or waits on, other repositories.
 
-**Next free ID: XC-273.**
+**Next free ID: XC-274.**
 
 ## Brainstorms queued for the PI
 
@@ -140,6 +140,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 - **XC-270** A multiplying flat disc with a `Weber` contrast on the black default is still refused `weber-on-black`, though `exact._gain` (1 + c) never reads the background; the same over-refusal follow-ups Task 3 closed for multiplying patterns. — 2026-10-08, [engine A1 follow-ups plan, Task 3](superpowers/plans/2026-10-08-engine-a1-followups.md#task-3-what-each-way-of-combining-needs-from-a-stimuluss-light) — waits on: nothing
 - **XC-271** A `Look` whose `fill` is a parameter gets no light check (`check._light`, `_modulates` and `_declares_mean` return early) and loads, then `resolve` raises "P is drawn in engine build A3": a misleading message, and A1's "refused at load" promise held only by accident; bind the fill parameter in `screen._fill`/`as_look`, or refuse it at load. — 2026-10-08, [engine A1 follow-ups plan, Task 3](superpowers/plans/2026-10-08-engine-a1-followups.md#task-3-what-each-way-of-combining-needs-from-a-stimuluss-light) — waits on: nothing
 - **XC-272** A stimulus's position (`at`, `at_left`, `at_right`) is not checked for its shape at load: `at=(1.0,)` passes `check()` without a geometry and raises `IndexError` in check 8 with one, `at=(1.0, 2.0, 3.0)` passes both, and a string raises `ValueError` in check 8 (A1's Review Focus 5: degenerate values are refused at load). — 2026-10-08, [engine A1 follow-ups plan, Task 4](superpowers/plans/2026-10-08-engine-a1-followups.md#task-4-per-eye-positions-in-updates-and-what-the-review-report-shows) — waits on: nothing
+- **XC-273** Values of the wrong kind still load, and `resolve` then fails on them or draws something else: the kinds of `Array.n`, `radius` and `target` are not checked at load (`Array(radius="far")` loads without a geometry, then `resolve` raises a bare ValueError); `Vertices` whose points come through parameters are not checked for area (collinear choices load, and draw a shape with no inside as a faint line, the coverage filter's share of it); `RegularPolygon(sides=3.5)` loads and draws a triangle; and a `Look`'s shape, edge or outline written as a parameter whose choices are of its kind loads, though `resolve` binds no parameter that stands for a whole block (XC-271 is the fill's), so it raises a misleading `NotYetDrawable` for a shape and a bare AttributeError for an edge or an outline, whose light no rule reads either. — 2026-10-08, [engine A1 follow-ups plan, Task 1](superpowers/plans/2026-10-08-engine-a1-followups.md#task-1-values-of-the-wrong-kind-and-parameters-that-refer-to-themselves), its final review — waits on: nothing
 
 ## Debt
 

@@ -1215,7 +1215,9 @@ def _light_faults(trial: Trial) -> list[Finding]:
             unread(f"the trial's {attr.replace('_', ' ')}", unbounded.args[0])
     for looks in _appearances(trial):
         what = type(looks).__name__
-        if isinstance(looks, look.Look) and looks.outline is not None:
+        # Only an `Outline` has a color to read: one of another kind is `_block_faults`' to
+        # refuse, and one written as a parameter is read by no rule yet (XC-273).
+        if isinstance(looks, look.Look) and isinstance(looks.outline, look.Outline):
             color = looks.outline.color
             try:
                 if any(choice is None for choice in _options(color, params)):
@@ -1357,9 +1359,9 @@ def _block_faults(trial: Trial) -> list[Finding]:
 
     **And every value is of its field's kind** (XC-245, XC-264, XC-265): a number where a
     number belongs, a color where a light does, an appearance where a stimulus's looks do,
-    each choice of a parameter included where a light or an appearance is one. A value of
-    another kind passed every rule above unread, and `resolve` met it first. A parameter
-    whose choices name it is refused too (XC-263)."""
+    and a shape, a fill, an edge or an outline where a `Look`'s are, each choice of a
+    parameter included. A value of another kind passed every rule above unread, and
+    `resolve` met it first. A parameter whose choices name it is refused too (XC-263)."""
     from wl_xcon import look
     from wl_xcon.photometry import Michelson, Weber
     from wl_xcon.screen import LIGHTLESS
@@ -1432,10 +1434,9 @@ def _block_faults(trial: Trial) -> list[Finding]:
         name = type(part).__name__
         for f in dataclasses.fields(part):
             raw = getattr(part, f.name)
-            if f.name in _NUMBERS and not (
-                _is_number(raw) or isinstance(raw, P) or (raw is None and f.default is None)
-            ):
-                bad(f"{name}.{f.name} is {raw!r}, not a number")
+            if f.name in _NUMBERS:
+                kind(f"{name}.{f.name}", raw,
+                     lambda v, f=f: _is_number(v) or (v is None and f.default is None), "a number")
             if f.name in _LIGHTS:
                 kind(f"{name}.{f.name}", raw, light, "a color")
             if f.name in _SIZES:
@@ -1481,6 +1482,16 @@ def _block_faults(trial: Trial) -> list[Finding]:
                        f"which way the bars move (engine spec §5.1)")
                    for v, said in values(part, "tf")], lambda v: v < 0.0)
         if isinstance(part, look.Look):
+            # A block where its block belongs: `resolve` reads each as one, and met a value of
+            # another kind first, as a bare TypeError (`check` itself, for an outline).
+            kind("Look.shape", part.shape, lambda v: isinstance(v, look.Shape),
+                 "a shape, such as look.Circle(size=1.0)")
+            kind("Look.fill", part.fill, lambda v: isinstance(v, look.Fill),
+                 "a fill, such as look.Flat(color=Gray(40.0))")
+            kind("Look.edge", part.edge, lambda v: isinstance(v, look.Edge),
+                 "an edge, such as look.Hard()")
+            kind("Look.outline", part.outline, lambda v: v is None or isinstance(v, look.Outline),
+                 "an outline, such as look.Outline(width=0.05, color=Gray(40.0)), or None")
             try:
                 fills = _options(part.fill, params)
             except _Unbounded as unbounded:
@@ -2021,6 +2032,16 @@ def _placement_faults(trial: Trial) -> list[Finding]:
             said = (f"can be {outside[0]:g} (parameter {opacity.name!r})" if isinstance(opacity, P)
                     else f"{outside[0]:g}")
             refuse("bad-placement", f"{name!r}'s opacity {said} is outside [0, 1]")
+        # A disparity is degrees, each choice of a parameter included: `_disparity_is_zero`
+        # and `screen._eyes` read it as a number.
+        if "disparity" in sets:
+            disparity = sets["disparity"]
+            offered = ([(c, f"can be {c!r} (parameter {disparity.name!r})")
+                        for c in (params[disparity.name].choices if disparity.name in params else ())]
+                       if isinstance(disparity, P) else [(disparity, f"is {disparity!r}")])
+            said = next((said for v, said in offered if not _is_number(v)), None)
+            if said is not None:
+                refuse("bad-placement", f"{name!r}'s disparity {said}, not a number of degrees")
         layer = sets.get("layer", 0)
         if isinstance(layer, bool) or not isinstance(layer, int):
             refuse("bad-placement", f"{name!r}'s layer {layer!r} is not a whole number")
@@ -2124,15 +2145,16 @@ def _has_rds(looks) -> bool:
 def _disparity_is_zero(value, trial: Trial) -> bool:
     """Whether a disparity value is provably zero (review I1(a)).
 
-    A literal is zero only at exactly `0.0`. A parameter is zero only if it is
-    *declared* and its whole domain is zero: every `choices` entry is `0.0`, or
-    `low == high == 0.0`. An undeclared parameter -- one `_ranges` cannot see because
-    it has neither a two-sided range nor `choices` -- is not provably anything, so it
-    counts as stereo content rather than failing open the way `_widest`'s `(0, 0)`
-    fallback did.
+    A literal is zero only at exactly `0.0`, and one that is no number is not provably
+    zero (`_placement_faults` refuses it; reading it as a float raised out of `check`). A
+    parameter is zero only if it is *declared* and its whole domain is zero: every
+    `choices` entry is `0.0`, or `low == high == 0.0`. An undeclared parameter -- one
+    `_ranges` cannot see because it has neither a two-sided range nor `choices` -- is not
+    provably anything, so it counts as stereo content rather than failing open the way
+    `_widest`'s `(0, 0)` fallback did.
     """
     if not isinstance(value, P):
-        return float(value) == 0.0
+        return _literal(value) == 0.0
     param = next((p for p in trial.params if p.name == value.name), None)
     if param is None:
         return False
