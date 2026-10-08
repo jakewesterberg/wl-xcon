@@ -77,7 +77,7 @@ CIE 10° L value at 390 nm is 0.000407615 where cvrl has 0.000407619 (9-sf 4.076
 5 nm entry agreeing to 6 significant figures. Both LMS datatable pages show stale MD5s (2° checked
 2026-10-08): 10° page c92c94a7…, file served c2e606fd…, matching metadata v2 (sha256 bd64f1f6…); 2° page
 27c74cc0…, file served dba2e9d1…, metadata sha256 f48160ed…. Whatever is bundled should record its
-source and the metadata JSON's sha256, not the page's MD5.
+source and the metadata JSON's sha256, not the page's MD5 [@cie2006cie; @cie2006cieb].
 
 **The LMS CSVs are 5 nm only** (checked 2026-10-08). One-nm values would be a derived table, made one of
 two ways (computed 2026-10-08): linear interpolation, the method the CIE metadata declares, which differs
@@ -92,7 +92,7 @@ error 2.4e-7).
   responsibility, with a copyright notice 1995-2026 (Color and Vision Research Labs). Nothing addresses
   redistribution: bundling cvrl tables is UNVERIFIED as permitted (contact a.stockman@ucl.ac.uk).
 - **CIE datasets: CC BY-SA 4.0**, per each dataset's metadata rights field (the HTML page shows a
-  recommended citation and "Copyright 2026 CIE").
+  recommended citation and "Copyright 2026 CIE") [@cie2006cie; @cie2006cieb].
 - **Creative Commons FAQ** (creativecommons.org/faq, paraphrased): CC material may sit in a collection
   whose license does not change it; CC 4.0 covers databases, including the EU database right (relevant at
   KU Leuven); attribution and share-alike bind only where copyright or database right restricts the use
@@ -105,7 +105,8 @@ error 2.4e-7).
 - **Precedent, not permission:** colour-science (BSD-3-Clause, develop 248121e3) bundles the Stockman &
   Sharpe 2° and 10° sets citing cvrl; Psychtoolbox bundles `T_cones_ss2.mat`, `T_cones_ss10.mat`,
   `T_xyzCIEPhys2.mat`, `T_xyzCIEPhys10.mat`; PsychoPy bundles Smith-Pokorny in `calibData.py`.
-- **Alternative to bundling:** Stockman & Rider (2023) give closed-form formulae (360-850 nm) that per
+- **Alternative to bundling:** Stockman & Rider (2023) [@stockman2023formulae] give closed-form
+  formulae (360-850 nm) that per
   their abstract reproduce the CIE 2° and 10° tables with little error, with a Python program whose
   license is UNVERIFIED (link stripped in the PMC text).
 
@@ -208,7 +209,8 @@ fundamentals, a 2° field and a (0.289, 0.315) background, so the agreement is a
 
 ## 3. Cone contrast to primary weights
 
-**The computation** (Brainard 1996 Part IV; Psychtoolbox `SensorToPrimary`, `MaximizeGamutContrast`):
+**The computation** (Brainard 1996 Part IV; Psychtoolbox `SensorToPrimary`, `MaximizeGamutContrast`)
+[@brainard1996cone; @brainard2002display]:
 
 1. M (3×3): column j is the cone excitation of primary j at full drive — with spectra
    M_ij = Σ_λ c̄_i(λ) P_j(λ) Δλ; without, M = T · [XYZ_R XYZ_G XYZ_B] for some XYZ-to-cone T.
@@ -223,7 +225,8 @@ fundamentals, a 2° field and a (0.289, 0.315) background, so the agreement is a
 
 Assumptions to state: channels add and are independent (Abu Haila et al. 2025 measure this for consumer
 OLEDs); ABL never engages; the screen is uniform; 10-bit quantization; three primaries cannot also
-silence rods or ipRGCs.
+silence rods or ipRGCs [@brainard2002display; @abuhaila2025recent; @dimigen2026advantages;
+@spitschan2018method; @estevez1982silent].
 
 **Achievable contrasts** (computed, not measured; mid-gray, D65 white). What the numbers were computed
 on (stated 2026-10-08; the original computation did not record the spectral shape, and these are the

@@ -96,7 +96,10 @@ so often that people route around it, at which point it protects nothing.
   item 8).
 - **Warning as the out-of-cage limit approaches** — `welfare.approaching_limit`, shown beside the
   stop reason, so a block can be finished deliberately rather than cut mid-sequence (PI,
-  2026-09-20). The threshold is configurable and its default is a proposal, not a settled figure.
+  2026-09-20). The threshold is configurable; its default, 30 minutes
+  (`welfare.WARN_WITHIN_DEFAULT`, 1,800 s), was accepted by the PI on 2026-09-20 as a starting
+  value (S8 §5.2 item 4) and is derived from no measurement. *(Corrected 2026-10-08: this said
+  its default "is a proposal, not a settled figure".)*
 - **Manual reward** commands through the normal path so it logs as commanded *and* delivered,
   distinguishable from a panel press (S6 §4).
 - **Generated parameter panel**, derived from the task's declaration — typed widgets, range

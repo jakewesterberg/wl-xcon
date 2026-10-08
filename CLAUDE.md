@@ -37,6 +37,10 @@ These conventions bind every session (human- or AI-driven) working in this repo.
 - **No fabrication.** If a fact about external software matters (API behavior,
   license, latency), verify against the primary source and cite it with an as-of
   date, or mark it UNVERIFIED.
+- **Cite the library for science-facing choices.** A choice that rests on the literature
+  names its papers by key from `docs/references/library.bib` and has an entry in
+  `docs/references/decisions.md`; one that rests on an institutional rule, a PI's decision
+  or an engineering default says so there instead. wl-xtasks cites the same library.
 - **Read the neighbouring repository's source before specifying against it.** Not its
   README, not its manifest. This session found the event codec already frozen in
   `wl-preproc` after `wl-exptasks`' manifest said nothing was allocated, found

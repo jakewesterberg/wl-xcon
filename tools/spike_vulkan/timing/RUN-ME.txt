@@ -17,9 +17,12 @@ what it measured. If nothing happens, press Ctrl+C again to force it. It
 also ends by itself 60 s after it starts, whatever happens.
 
 If it prints "cannot take the display", the login screen still holds it:
-   sudo systemctl stop sddm      (then type the command above again)
-   sudo systemctl start sddm     (afterwards, to get the login screen back)
+   sudo systemctl stop plasmalogin    (then type the command above again)
+   sudo systemctl start plasmalogin   (afterwards, to get the login screen back)
 
 Results: /home/jakewesterberg/wl-spike-s/timing/out/run-<UTC time>.csv
          and the same name ending .txt (the summary).
 Afterwards: Ctrl+Alt+F1 (or F2) for the login screen; log in as usual.
+
+(Corrected 2026-10-08: the login screen on wh-dws0 is plasmalogin.service, not sddm; checked with
+systemctl after the run, which did not need the fallback.)

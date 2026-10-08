@@ -38,9 +38,9 @@ Earlier the same day the PI had also decided the following. This spec uses them 
 
 ## 2. Geometry, per setup
 
-**The two setups share one screen at one place.** Both use the ASUS PG27UCDM's published
-active area, 589.97 × 332.93 mm (ASUS spec page, read 2026-09-28, S0 §5.1). Each setup
-differs only in the path from the eye to that screen.
+**The two setups share one screen at one place.** Both use the ASUS PG27UCDM's published active
+area, 589.97 × 332.93 mm (ASUS spec page, read 2026-09-28, S0 §5.1)
+[@asus2026rog]. Each setup differs only in the path from the eye to that screen.
 
 | | Direct view | Stereoscope |
 |---|---|---|
@@ -121,7 +121,7 @@ fixed, the sensors are mounted once and never moved.
   tall at the ±12° mask (optics drawing, reworked), so no eye sees it through the mirrors.
 - **In direct view**, each sensor's own opaque housing covers its patch. The animal sees a
   small dark shape at the panel's far lower corner, around (±30°, −18°), well outside the ±15°
-  where stimuli go, and never the flicker.
+  where stimuli go, and never the flicker [@williams2004entrainment; @yantis1984abrupt].
 
 **The housings are rectangles in the rig's settings**, in cm on the panel, each with a margin
 recorded beside it. They are measured at build from the real sensors. Whether both sensors fit
@@ -137,9 +137,11 @@ refuses one off the panel.
 ## 5. The eye camera and its light
 
 **One position, serving both setups**: directly below the screen, in the eye's own vertical
-plane, at the OpenIrisDPI paper's layout of camera at 35° and light at 25°. The paper's rule is
-that the illuminator sits about 10° shallower than the camera, to center P4 (Ressmeyer et al.
-2026, §3.1; panel comparison §4.1).
+plane, at the OpenIrisDPI paper's layout of camera at 35° and light at 25° (§2.2). The paper's rule
+is that the illuminator sits shallower than the camera, to center P4 (Ressmeyer et al. 2026, §3.1)
+[@ressmeyer2026openirisdpi]; taking its layout's 10° as the offset is ASSUMED (panel comparison
+§4.1). *(Corrected 2026-10-08: this gave "about 10° shallower" as the paper's rule; 10° is its
+layout, not its rule.)*
 
 At `Z` = 50 cm on the 27-inch (panel comparison §4.2, even border split ASSUMED):
 - the housing's bottom edge is 20.3° below the line of sight;
@@ -154,8 +156,9 @@ underside along the 35° and 25° lines. The mirrors themselves clear them (the 
 clearance rows); the enclosure and the divider are what could block them. This is a build
 requirement on the stereoscope device.
 
-Beyond P4's reach, which is about 10° in the paper's macaques (panel comparison §6), tracking
-falls back to pupil plus corneal reflection (PI, 2026-09-27; S5).
+Beyond P4's reach, which is about 10° in the paper's macaques [@ressmeyer2026openirisdpi]
+(panel comparison §6), tracking falls back to pupil plus corneal reflection (PI, 2026-09-27;
+S5).
 
 ---
 

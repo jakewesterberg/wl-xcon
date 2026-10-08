@@ -104,10 +104,11 @@ at all — the console and the external control API are the enabled writers.
 ## 5. The bake-off: two tasks
 
 **Task A — fixation → detection.** The M6 first real task. Fixate, hold, a target appears at
-one of six positions, saccade to it, hold, reward.
+one of six positions, saccade to it [@bruce1985primate; @fuchs1967saccadic], hold, reward.
 
-**Task B — adaptive difficulty.** Task A with contrast on a staircase and mini-blocks of held
-eccentricity — chosen because it is the case most often claimed to need imperative code.
+**Task B — adaptive difficulty.** Task A with contrast on a staircase [@levitt1971transformed]
+and mini-blocks of held eccentricity — chosen because it is the case most often claimed to need
+imperative code.
 
 ### 5.1 Task A, strict
 

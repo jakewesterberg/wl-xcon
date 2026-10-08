@@ -131,9 +131,9 @@ class Tracker:
     rather than in each world.
     """
 
-    #: How long a sample stays actionable. Default 50 ms: P6's **measured** worst
-    #: OpenIrisDPI frame time, so an ordinary stall is survived and a real dropout
-    #: is not.
+    #: How long a sample stays actionable. Default 50 ms: the OpenIrisDPI paper's
+    #: reported worst frame time, a placeholder until V3(a), so an ordinary stall is
+    #: survived and a real dropout is not.
     staleness: float = 0.05
     latest: Sample | None = None
     received: int = 0

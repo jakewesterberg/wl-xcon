@@ -60,10 +60,12 @@ prior design had digital input as an analysis convenience.
 - **Change detection on P0**, with the edge timestamped as close to the hardware as the driver
   allows. Polling in the frame loop adds a frame of latency and quantises the edge to the frame.
 - **`PD2_COMP` is counted continuously**, not sampled. A missing flip edge is a dropped frame,
-  detected at the display surface, reported live and logged per trial (parent §11.5).
-- **A missing `PD1_COMP` after a scene that should have produced one is a fault**, not a
-  silence — it emits `PHOTODIODE_MISSING` and the trial is marked (S2 §5.1). A trial that ran
-  with no stimulus must never look like a trial the animal failed.
+  detected at the display surface, reported live and logged per trial (parent §11.5)
+  [@plant2004selfvalidating].
+- **A missing `PD1_COMP` after a scene that should have produced one is a fault**, not a silence —
+  it emits `PHOTODIODE_MISSING` and the trial is marked (S2 §5.1) [@bridges2020timing;
+  @plant2004selfvalidating]. A trial that ran with no stimulus must never look like a trial the
+  animal failed.
 - **V2b measures edge-to-userspace latency** under idle and loaded conditions. It has no prior
   estimate; if it is worse than a frame, photodiode-gated progression needs rethinking rather
   than tuning.
@@ -80,7 +82,8 @@ output drives `wl-juicer` and is separately recorded as *delivered*.
   reward stays countable.
 - **Our commanded total is a lower bound on fluid delivered** (P17). Welfare accounting
   reconciles against the sync box's record of the delivered line, never against our intent.
-- **Volume is time**, so the pump calibration (ml per ms) is what makes the accounting mean
+- **Volume is time** [@calapai2017cagebased], so the pump calibration (ml per ms) is what
+  makes the accounting mean
   anything. It is measured per rig, re-measured on a schedule, and its identity is recorded in
   the session snapshot. An uncalibrated pump makes every fluid number fiction.
 - Reward actions name a bounded-config entry and never carry a magnitude (S1 §2.3).
@@ -97,9 +100,9 @@ is the joystick.
 
 - **Eye analog is a recorded copy, not a control input** (S5 §3). We sample it so the eye PC's
   lag is measurable by cross-correlation; the UDP stream is what a decision uses.
-- **Joystick** needs calibration (range, centre, dead zone) per rig and per animal, a hold and
-  release discriminator, and its calibration identity in the session snapshot. It is a response
-  device, so its latency belongs in V2.
+- **Joystick** needs calibration [@asaad2008flexible] (range, centre, dead zone) per rig and per
+  animal, a hold and release discriminator, and its calibration identity in the session snapshot.
+  It is a response device, so its latency belongs in V2.
 - **Misc BNC ×3**, currently unassigned. S4 §8 proposes one for the **audio verification tap**;
   the assignment is `wl-sync`'s to confirm.
 

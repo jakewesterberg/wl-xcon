@@ -71,9 +71,10 @@ odd on Linux.
 
 ### 2.4 What gets pinned, and re-validated
 
-Distribution, kernel, NVIDIA driver, and session type (X11 vs Wayland) are recorded in the
-rig config and in every measurement artifact. **Any change to any of them re-runs V1**
-(pitfalls P4). Screen sharing stays off during recording, for the same reason.
+Distribution, kernel, NVIDIA driver, and session type (X11 vs Wayland) are recorded in the rig
+config and in every measurement artifact. **Any change to any of them re-runs V1** (pitfalls P4)
+[@bridges2020timing; @plant2016reminder]. Screen sharing stays off during recording, for the
+same reason.
 
 ---
 
@@ -165,11 +166,13 @@ at KU Leuven. Per Dell's user guide and product page, read 2026-09-28: the **sam
 (Supports up to 3840 x 2160, 240 Hz, DSC, HDR)"**, so 4K/240 needs DSC (§5.3's rule is to avoid
 it). No QD-OLED generation or "tandem" is named; pixel refresh "is activated automatically when you
 have used the monitor for 4 hours" and "takes approximately 6 to 8 minutes", and the guide does not
-say whether it waits for standby (UNVERIFIED — a 12-hour session would meet it); no pixel shift or
-proximity sensor is mentioned. **Re-check Dell's lineup in January 2027, before purchase**, for a
+say whether it waits for standby (UNVERIFIED — any session past four hours would meet it); no pixel
+shift or proximity sensor is mentioned. *(Corrected 2026-10-08: this said "a 12-hour session
+would meet it".)* **Re-check Dell's lineup in January 2027, before purchase**, for a
 27-inch 4K QD-OLED with DisplayPort 2.1 UHBR20 (uncompressed 4K/240).
 
-ASUS lists, per the spec page and product page read 2026-09-27:
+ASUS lists, per the spec page and product page read 2026-09-27 [@asus2026rog;
+@asus2026rogb]:
 - a **26.5" Tandem QD-OLED**, "Latest 4th-gen QD-OLED", 3840 × 2160 at 240 Hz, 0.153 mm
   pixel pitch, 10-bit;
 - **"DisplayPort 2.1a UHBR20 (80Gbps full bandwidth)"**, carrying "4K at 240Hz ... without
@@ -235,17 +238,21 @@ The ASUS PG32UCDP below is kept as history: ASUS lists its input as "DisplayPort
 read 2026-09-26), so it compresses 4K/240 whatever the GPU.
 
 Tandem is the right architecture for this application, and for a reason narrower than its
-marketing. Stacked emissive layers reach a given luminance at lower per-layer current, which
-buys **ABL headroom** and **burn-in resistance** — precisely the two risks §5.4 lists. The
-figure that matters is therefore **sustained full-field luminance at 100% APL**, not peak
-small-window brightness, which is the number that will be advertised and is irrelevant here.
+marketing. Stacked emissive layers reach a given luminance at lower per-layer current
+[@fung2016tandem], which buys **ABL headroom** and **burn-in resistance** — precisely the two
+risks §5.4 lists. The figure that matters is therefore **sustained full-field luminance at
+100% APL**, not peak small-window brightness, which is the number that will be advertised and
+is irrelevant here.
 
 **Schedule mitigation.** A launch date is not a plan. Buy a known-good 4K OLED now for bench
 work — the ASUS ROG Swift OLED PG32UCDP (31.5" flat WOLED, 4K@240 / FHD@480,
 [ASUS product page](https://rog.asus.com/monitors/27-to-31-5-inches/rog-swift-oled-pg32ucdp/),
 read 2026-08-31) is the reference candidate — so that M1 and M2 are not blocked on a product
-launch. V1 and V9 must be re-run on any new panel regardless: the JOV authors state that
-performance "cannot be assumed or guaranteed" even across units of one model.
+launch. V1 and V9 must be re-run on any new panel regardless: Abu Haila, Kunst, Khanh and Wallis
+(2025) state that similar performance across identical models "cannot be assumed or guaranteed"
+[@abuhaila2025recent] ("Caveats and limitations"), and three units of one OLED model bought together
+each showed their own pattern of nonuniformity [@dimigen2026advantages] ("Spatial uniformity").
+*(Corrected 2026-10-08: this cited "the JOV authors", unnamed, for the first claim only.)*
 
 ### 5.2 Geometry, as a formula
 
@@ -266,8 +273,8 @@ half-extents are `0.2179 * L` and `0.2451 * L`, the form this section first used
 the PG27UCDM's active area as "589.97 x 332.93 mm"
 ([spec page](https://rog.asus.com/us/monitors/27-to-31-5-inches/rog-swift-oled-pg27ucdm/spec/),
 read 2026-09-28), which is 1.772:1 rather than 16:9, and its "26.5-inch viewable" is rounded (the
-area's own diagonal is 26.67 in). The diagonal form fed 26.5 in would put each edge 0.6–0.9%
-short.
+area's own diagonal is 26.67 in) [@asus2026rog]. The diagonal form fed 26.5 in would
+put each edge 0.6–0.9% short.
 
 **The screen is 50 cm from the eyes, physically, in both setups** (PI, 2026-09-28): "I want the
 screen to be the same physical distance from the animal in stereoscope and the direct viewing.
@@ -311,8 +318,10 @@ vertically, at 0.84 arcmin per pixel. (This paragraph said 1.2 arcmin before 202
 was the 31.5" panel's figure at 50 cm; at 57 cm it was 1.1.) The viewport is 8:9, so horizontal
 eccentricity is the binding dimension — the cost of 16:9, and not binding on anything in the
 stated program. Path lengths are **measured per eye**, not derived (V9): the two folded paths
-are equal only if the mirrors are, and mirror angles set vergence, so alignment is a
-calibrated parameter with a Nonius/vernier procedure rather than an assumed symmetry.
+are equal only if the mirrors are, so alignment is a calibrated parameter with a Nonius/vernier
+procedure rather than an assumed symmetry. Vergence itself is a constant software offset, not a
+mirror angle (optics drawing §6). *(Corrected 2026-10-08: this said "the mirrors are, and mirror
+angles set vergence, so alignment".)*
 
 ### 5.3 Mode is a rig configuration
 
@@ -324,46 +333,57 @@ which is why dual-mode panels offer both. That gives a real experimental trade:
 | 4K | 1920×2160, 73 px/deg | 4.2 ms @240, 8.3 ms @120 | Disparity, fine gratings, natural images |
 | FHD | 960×1080, 37 px/deg | **2.08 ms** | Saccade-contingent updates, fast timing |
 
-Consequences: **V1 runs in every mode the rig will use**; each mode carries its own
-calibration and deg/pixel; the mode is recorded in the session snapshot; and gaze-contingent
-code never assumes a frame period.
+Consequences: **V1 runs in every mode the rig will use**; each mode carries its own calibration
+and deg/pixel; the mode is recorded in the session snapshot; and gaze-contingent code never
+assumes a frame period [@bridges2020timing; @saunders2014direct; @elze2010misspecifications].
 
 **Compression is a purchase-time question.** 4K/240 at 10-bit is ~60 Gbps and exceeds
 DisplayPort 1.4's ~25.9 Gbps of data, so it requires DSC. 4K/120 and FHD/480 sit at ~30 Gbps —
 still over DP 1.4 at 10-bit, under it at 8-bit. DP 2.1 UHBR20 (~77 Gbps) carries all of them
 uncompressed. DSC is "visually lossless" by VESA's design intent, which is a claim about human
 subjective judgement on natural images, not about fine gratings, random-dot stereograms, or an
-animal's V1. **Prefer a GPU and panel that can avoid it; if DSC is unavoidable, its effect is
-measured, not assumed.**
+animal's V1 [@vesa2026dsc; @allison2018perspectives]. **Prefer a
+GPU and panel that can avoid it; if DSC is unavoidable, its effect is measured, not assumed.**
 
 ### 5.4 Panel acceptance test — written now, before the panel exists
 
 Fold into **V9**. A panel that fails 1 or 2 is disqualified regardless of everything else.
 
 1. **Burn-in protection is fully defeatable.** Pixel-shift, screen-move, logo dimming and
-   anti-flicker all off, and *verified* off. Pixel-shift translates the whole image
-   periodically: on a rig with a calibrated gaze-to-pixel mapping and a photodiode patch at a
-   fixed screen location, that is a silent, periodic corruption of the geometry, and it can
-   walk the patch off its sensor. Ask the vendor before purchase; no review covers it.
+   anti-flicker all off, and *verified* off [@dimigen2026advantages;
+   @asus2026rogb]. Pixel-shift translates the whole image periodically: on a rig
+   with a calibrated gaze-to-pixel mapping and a photodiode patch at a fixed screen location,
+   that is a silent, periodic corruption of the geometry, and it can walk the patch off its
+   sensor. Ask the vendor before purchase; no review covers it.
 2. **ABL as interocular coupling.** Fill-factor sweep in one viewport, photometered in the
    other. On two displays ABL is a per-eye nonlinearity; **on one shared panel it is a
-   coupling** — a bright stimulus in the left eye's viewport dimming the right eye's. The JOV
-   paper found luminance "drops drastically" above ~40% fill factor on the panel it tested.
-   Report the fill-factor range within which no coupling is detectable; that range is a
-   stimulus-design constraint.
+   coupling** — a bright stimulus in the left eye's viewport dimming the right eye's. An earlier
+   study of a Sony PVM-2541 OLED, quoted in [@abuhaila2025recent] (Introduction), found
+   luminance "drops drastically" above ~40% fill factor; Abu Haila et al.'s own panels held
+   luminance across fill factor except the ASUS WOLED's green channel above 60% fill at values
+   over 900 of 1023 (Results, "Filling factor", Fig. 9), and an ASUS PG27AQDM showed ABL above
+   its 40% brightness setting (about 140 cd/m²) [@dimigen2026advantages] ("Auto-brightness
+   limiting behavior"). *(Corrected 2026-10-08: this credited the 40% figure to "the JOV paper",
+   on "the panel it tested".)* Report the fill-factor range within which no coupling is
+   detectable; that range is a stimulus-design constraint.
 3. **Per-half uniformity.** Photometer left and right halves separately. On a split screen,
-   left-right nonuniformity *is* an interocular mismatch. The IPS LCD in the JOV study showed
-   10.7% with the left side underperforming; the 27" OLED showed ~4%.
-4. **Gamma, additivity and channel independence**, per unit, after calibration.
+   left-right nonuniformity *is* an interocular mismatch. In [@abuhaila2025recent] (Results,
+   "Luminance uniformity", Fig. 8) the IPS LCD differed from center by up to 10.7%, the 27-inch
+   ASUS OLED (a WOLED) by about 4% and the Samsung QD-OLED TV by about 7%, all three consumer
+   displays worse on their left half. *(Corrected 2026-10-08: this named neither the study nor the
+   27-inch OLED's kind, and left out the QD-OLED's 7%.)*
+4. **Gamma, additivity and channel independence**, per unit, after calibration [@brainard2002display;
+   @abuhaila2025recent; @cooper2013assessment].
 5. **Pixel response and onset**, photodiode-measured, in every mode.
 6. **Sustained full-field luminance at 100% APL**, which is the tandem claim that actually
    matters.
 
 **Burn-in mitigation may not touch the stimulus** (ruled 2026-08-31). Jittering the fixation
 point between trials was proposed here and **rejected**: microsaccade analyses, fixation-
-stability measures and receptive-field mapping all assume a fixed fixation point, and
-introducing a stimulus manipulation to solve a hardware problem trades a real experimental
-property for a panel's convenience.
+stability measures and receptive-field mapping all assume a fixed fixation point
+[@gur1997visual; @hafed2009neural; @engbert2003microsaccades], and introducing a stimulus
+manipulation to solve a hardware problem trades a real experimental property for a panel's
+convenience.
 
 So mitigation is entirely hardware-side, which **raises the stakes on the tandem panel**: its
 inherent burn-in resistance is now load-bearing rather than a bonus, and running well below
@@ -442,9 +462,9 @@ decisions bind.** What is still open says what it waits on.
 
 **What binds the lists** (PI, 2026-09-27):
 
-- **Two IR bands.** The eye tracker uses **940 ± 25 nm** and the behavior cameras use
-  **850 ± 25 nm**. Each group's band-pass filter rejects the other group's light. So the
-  behavior cameras have their own 850 nm lamps, and C20 is required.
+- **Two IR bands.** The eye tracker uses **940 ± 25 nm** [@ressmeyer2026openirisdpi] and the
+  behavior cameras use **850 ± 25 nm**. Each group's band-pass filter rejects the other group's
+  light. So the behavior cameras have their own 850 nm lamps, and C20 is required.
 - **The eye tracker.**
   - OpenIrisDPI stays live on **one tracker PC: Windows now, Linux later** (P10). There is
     no second purchase.
@@ -479,11 +499,11 @@ the list touches P10's method, which stays clean-room
 
 | # | Role | Requirement | Candidate (maker, model) | Qty | Source, read 2026-09-27 | Price (USD) | PI's decision; status |
 |---|---|---|---|---|---|---|---|
-| 1 | Tracker cameras | OpenIrisDPI's own frames: same sensor, 500 Hz at the paper's 720 × 450 ROI | Teledyne FLIR Blackfly S **BFS-U3-16S2M-CS**, bought from Edmund as **#11-507** | 2 | [Edmund #11-507](https://www.edmundoptics.com/p/bfs-u3-16s2m-cs-usb3-blackflyreg-s-monochrome-camera/40163/) (read 2026-09-28; 14 in stock); [Teledyne product page](https://www.teledynevisionsolutions.com/products/blackfly-s-usb3/?model=BFS-U3-16S2M-CS&vertical=machine%20vision&segment=iis) | 556.50 each (Edmund and Teledyne) | **Kept.** It is also P9's body, so the rig has one camera model. *Decided*. **Source: Edmund**, the same part at the same price |
+| 1 | Tracker cameras | OpenIrisDPI's own frames: same sensor, 500 Hz at the paper's 720 × 450 ROI [@ressmeyer2026openirisdpi] | Teledyne FLIR Blackfly S **BFS-U3-16S2M-CS**, bought from Edmund as **#11-507** | 2 | [Edmund #11-507](https://www.edmundoptics.com/p/bfs-u3-16s2m-cs-usb3-blackflyreg-s-monochrome-camera/40163/) (read 2026-09-28; 14 in stock); [Teledyne product page](https://www.teledynevisionsolutions.com/products/blackfly-s-usb3/?model=BFS-U3-16S2M-CS&vertical=machine%20vision&segment=iis) | 556.50 each (Edmund and Teledyne) | **Kept.** It is also P9's body, so the rig has one camera model. *Decided*. **Source: Edmund**, the same part at the same price |
 | 2 | Lenses | A C-mount machine-vision lens, NIR-coated, at about the reference's magnification (0.2×), focusing at the working distance, with a ring if needed (§7.1.1) | For about 45–50 cm: Edmund Optics **#74-054**, 75 mm C VIS-NIR. It has f/2.0–16, a 425–1000 nm BBAR coating, a 2/3" format, a 500 mm–∞ working distance, a **M43 × 0.75** filter thread, and measures Ø48 × 98.8 mm. For about 57–60 cm: Edmund **#27-555**, 100 mm C VIS-NIR. It has f/2.8–22, the same coating, a 4/3" format, 750 mm–∞, a **M46 × 0.75** thread, and measures Ø52 × 92.1 mm | 2 | [#74-054](https://www.edmundoptics.com/p/75mm-c-vis-nir-series-fixed-focal-length-lens/56588/); [#27-555](https://www.edmundoptics.com/p/100mm-c-vis-nir-series-fixed-focal-length-lens/53829/) | 690.00 each (9 in stock); 760.00 each ("contact us") | **Changed** from the Laowa macro to a C-mount lens. Which focal length *waits on* the direct-view working distance (§7.1.1) |
 | 3 | Spacer and ring | Put the C-mount lens on the CS body, and focus closer than the lens's minimum | Edmund **#03-618**, a 5 mm spacer (male CS, female C) that Edmund lists under Teledyne FLIR. It is needed: the C-mount flange distance is 17.526 mm and CS is 12.526 mm (Edmund). Alternative: Teledyne **ACC-01-5004** direct. Plus a C-mount extension ring where the eye is inside the lens's minimum working distance (§7.1.1): Edmund **#54-628** (5 mm), or the **#54-261** kit (0.5, 1, 2 × 5, 10, 15 and 40 mm) to fit it on the bench | 2 + 0–2 | [#03-618](https://www.edmundoptics.com/p/5mm-spacer-to-convert-cs-mount-cameras-to-c-mount/90/) (read 2026-09-28; 20+ in stock); [Teledyne spacer](https://www.teledynevisionsolutions.com/products/cs-to-c-mount-5mm-spacer-adapter/); [Edmund, lens mounts](https://www.edmundoptics.com/knowledge-center/application-notes/imaging/lens-mounts/); [#54-628](https://www.edmundoptics.com/p/5mm-length-c-mount-extension-tube/11303/); [#54-261](https://www.edmundoptics.com/p/c-mount-extension-tube-kit/11115/) | 29.00 each (Teledyne direct: 11.80); 33.25; 133.00 (kit, "contact us") | **The spacer is needed**; the EF adapter is gone. **Swapped to Edmund** (PI preference), at $17.20 more each. Edmund names no Teledyne part number, so that #03-618 is the ACC-01-5004 is INFERENCE. The ring *waits on* the working distance |
 | 4 | IR filter | 940 ± 25 nm band-pass, threaded straight onto the lens, no adapter | Edmund mounted machine-vision band-pass: **#28-792** (M43 × 0.75) on #74-054; **#28-793** (M46 × 0.75) on #27-555. 940 nm center, FWHM 55 nm, transmission 90% or more, blocking 350–900 and 1000–1100 nm; 7 mm thick with its thread. Alternative: MidOpt **BN940-43 / BN940-46** (useful range 928–955 nm, FWHM 55 nm, peak transmission 85% or more) | 2 | [#28-792](https://www.edmundoptics.com/p/bandpass-filter-940nm-m43-thread/52504/), [#28-793](https://www.edmundoptics.com/p/bandpass-filter-940nm-m46-thread/52505/) (read 2026-09-28); [MidOpt BN940](https://midopt.com/filters/bn940/); [MidOpt threads](https://midopt.com/mounting-solutions/threaded-mount/); Machine Vision Direct [BN940-43](https://machinevisiondirect.com/products/midopt-bn940-43), [BN940-46](https://machinevisiondirect.com/products/midopt-bn940-46) | 231.00 (3 in stock) / 252.00 (1 in stock). MidOpt through Machine Vision Direct: the same prices, built to order in 15 business days | **Changed** from the long-pass sheet. *Decided*; the size follows row 2. **Swapped to Edmund** (PI preference). Edmund's site finds no "MidOpt" or "BN940" and names no maker for these. Their center, width, threads and prices match MidOpt's BN940, so they may be MidOpt's (INFERENCE). The 55 nm FWHM is slightly wider than ±25 nm. Edmund's stated blocking covers the behavior lamps' 850 nm |
-| 5 | Light, per eye | One compact collimated 940 nm source per eye, riding on the IPD carriage. It sits 10° shallower than its camera (the paper's rule), with its current capped for eye safety (§7.1.2) | Thorlabs **M940L3** (940 nm; 800 mW minimum at 1000 mA; FWHM 37 nm) with a **SM1U25-B** adjustable collimation adapter, which has a Ø1" asphere, AR-coated 650–1050 nm. It replaces the reference's Ø2" SM2F + ACL50832U. Alternative: Mightex **LCS-0940-02-22**, an integrated collimator: 200 mW typical at 1000 mA, 22 mm aperture, 3.4° half-divergence | 2 | [Thorlabs mounted LEDs](https://www.thorlabs.com/mounted-leds?pn=M940L3); [SM1U25-B](https://www.thorlabs.com/item/SM1U25-B); [Mightex](https://www.mightexsystems.com/product/high-power-led-collimator-sources-22-mm-clear-aperture/) | 274.55 (lead time) + 338.29 = **612.84 per eye**; Mightex's price is not published | **Changed** (PI): one light per eye, on the IPD system. Edmund has no compact collimated 940 nm source (§7.1.2; rechecked 2026-09-28). Thorlabs or Mightex is the *PI's call* |
+| 5 | Light, per eye | One compact collimated 940 nm source per eye, riding on the IPD carriage. It sits 10° shallower than its camera (the paper's layout; its rule is only that the light sits shallower) [@ressmeyer2026openirisdpi], with its current capped for eye safety (§7.1.2). *(Corrected 2026-10-08: this called the 10° the paper's rule.)* | Thorlabs **M940L3** (940 nm; 800 mW minimum at 1000 mA; FWHM 37 nm) with a **SM1U25-B** adjustable collimation adapter, which has a Ø1" asphere, AR-coated 650–1050 nm. It replaces the reference's Ø2" SM2F + ACL50832U. Alternative: Mightex **LCS-0940-02-22**, an integrated collimator: 200 mW typical at 1000 mA, 22 mm aperture, 3.4° half-divergence | 2 | [Thorlabs mounted LEDs](https://www.thorlabs.com/mounted-leds?pn=M940L3); [SM1U25-B](https://www.thorlabs.com/item/SM1U25-B); [Mightex](https://www.mightexsystems.com/product/high-power-led-collimator-sources-22-mm-clear-aperture/) | 274.55 (lead time) + 338.29 = **612.84 per eye**; Mightex's price is not published | **Changed** (PI): one light per eye, on the IPD system. Edmund has no compact collimated 940 nm source (§7.1.2; rechecked 2026-09-28). Thorlabs or Mightex is the *PI's call* |
 | 5b | Light driver | Constant current, a modulation input (so the lights can later strobe with the exposures), and a current cap the operator cannot turn past | Thorlabs **LEDD1B** T-Cube: up to 1200 mA; modulation to 5 kHz; trigger mode to 1 kHz; a current limit adjustable from **0.2 to 1.2 A** by a trim pot. With a **KPS201** supply. One per eye | 2 + 2 | [LEDD1B family page](https://www.thorlabs.com/t-cube-tm-led-driver?pn=LEDD1B); [LEDD1B](https://www.thorlabs.com/item/LEDD1B); [KPS201](https://www.thorlabs.com/item/KPS201) | 380.04 + 43.15 each | **Two single-channel drivers, one per eye.** No two-channel driver with a modulation input was sensible (§7.1.2). **The LEDD1B's limit does not go below 200 mA**; the alternatives are compared in §7.10, and it stays the recommendation there with row 5c behind it. *PI's call*. Edmund has no constant-current driver for this LED (§7.10) |
 | 5c | Fixed attenuator, per eye | A physical cap on the light at the eye, whatever the driver does: sized at bring-up so the eye stays under the limit at the highest current the driver can deliver (§7.10) | Edmund Optics **TECHSPEC NIR ND**, Ø25 mm, reflective (metallic on fused silica), flat 700–1100 nm, OD tolerance ±10%, 3.00 mm thick; **#47-530** is OD 1.0, and the OD is chosen at bring-up. Held in the collimator's output by a Thorlabs **SM1A38** (external M34 × 0.5, internal SM1) and an Edmund **#35-763** SM1 retainer ring | 2 + 2 + 2 | [Edmund NIR ND family](https://www.edmundoptics.com/f/near-ir-nir-neutral-density-nd-filters/13025/); [#47-530](https://www.edmundoptics.com/p/10-od-25mm-dia-nir-nd-filter-/7611/); [SM1A38](https://www.thorlabs.com/item/SM1A38); [#35-763 (listed as an accessory)](https://www.edmundoptics.com/p/5mm-id1-lens-tube/33305/) | 126.00 (OD 1.0; other ODs not read) + 31.62 + 5.25 | **New; decided** (PI, 2026-09-28, §7.10). The OD is set at bring-up. Whether the SM1A38 is deep enough for a 3 mm filter and a ring is **UNVERIFIED** |
 | 6 | Lens clamps | — | Thorlabs VG100/M | — | — | — | **Dropped** (PI). A C-mount lens is held by the camera |
@@ -607,7 +627,7 @@ enforces a cap, are compared in §7.10.
 - **IEC 62471:2006 was not read.** IEC sells it, so its limit values are **UNVERIFIED** here.
 - **ICNIRP 2013** (*Health Physics* 105(1):74–96;
   [PDF](https://www.icnirp.org/cms/upload/publications/ICNIRPVisible_Infrared2013.pdf), read
-  2026-09-27) gives these limits:
+  2026-09-27) gives these limits [@icnirp2013icnirp]:
   - **The cornea and lens, 780 nm–3 µm** (its eqns 20–21):
     - 18 · t^−0.75 kW m⁻² for t under 1000 s;
     - **100 W m⁻² (10 mW cm⁻²) for 1000 s or longer.**
@@ -654,7 +674,7 @@ enforces a cap, are compared in §7.10.
 - **Rotation stability matters.**
   - DPI cancels head translation, but not camera rotation (PI).
   - A camera roll rotates the P1 − P4 vector. A turned collimated light moves the reflections
-    as an eye rotation would (INFERENCE).
+    as an eye rotation would (INFERENCE) [@wu2023highresolution].
   - So the brackets hold angle: stiff sections, short lever arms, and two fasteners or a keyed
     face at each joint, with no single-screw pivots.
   - Edmund publishes no angular deviation for the #16-716 (**UNVERIFIED**). The DTS25/M's is
@@ -665,7 +685,7 @@ enforces a cap, are compared in §7.10.
     steady-state (stage II) creep resistance, then PC, then PLA. PAHT-CF also had the highest
     flexural modulus (*J. Mater. Eng. Perform.*,
     [doi:10.1007/s11665-024-09144-9](https://link.springer.com/article/10.1007/s11665-024-09144-9),
-    abstract read 2026-09-27).
+    abstract read 2026-09-27) [@dimitrellou2024mechanical].
   - Whether the lab's printer can print either is the lab's check.
 - **Metal threaded inserts.** Every screwed joint that is adjusted, or that carries a camera
   or a light, goes into a heat-set or press-fit brass insert, never into printed thread.
@@ -704,7 +724,7 @@ enforces a cap, are compared in §7.10.
 | C13 | Motherboard | The GPU, two x4 USB cards and two NVMe drives, with no slot disabling another. ATX, for a rack case | ASUS **ProArt X870E-Creator WiFi**. From the CPU: 2 × PCIe 5.0 x16 slots (x16, x8/x8, or x8/x4/x4 with M.2_2) and M.2_1 and M.2_2 (PCIe 5.0 x4). From the chipset: a PCIe 4.0 x16 slot running at x4, and M.2_3 and M.2_4 (PCIe 4.0 x4). ATX, 30.5 × 24.4 cm; 10 GbE and 2.5 GbE | 1 | [ASUS spec](https://www.asus.com/motherboards-components/motherboards/proart/proart-x870e-creator-wifi/techspec/); [ASUS US](https://www.asus.com/us/motherboards-components/motherboards/proart/proart-x870e-creator-wifi/) | 549.99 (ASUS Store, showing "Notify me") | *Decided* for the list. The slot map is in §7.6. The 10 GbE is for the copy to wl-nas |
 | C14 | RAM | Acquisition buffers; no swapping; runs on AM5 | Corsair **Vengeance 32 GB (2 × 16 GB) DDR5-4800 CL40**, CMK32GX5M2A4800C40 | 1 kit | [Corsair DDR5 page](https://www.corsair.com/us/en/c/memory/ddr5-ram) | 399.99 (sale; list 505.99) | **Kept** (PI). It is a DDR5-4800 kit, under the 9700X's listed DDR5-5600. Whether it is on the board's qualified list is **UNVERIFIED** |
 | C15 | GPU | Two or more NVENC, within the 12-session cap (§7.5) | NVIDIA **GeForce RTX 5070 Ti**: 2 × ninth-generation NVENC; 300 W; NVIDIA asks for 750 W of system power | 1 | [NVIDIA 5070 family](https://www.nvidia.com/en-us/geforce/graphics-cards/50-series/rtx-5070-family/); [NVIDIA matrix](https://developer.nvidia.com/video-encode-and-decode-gpu-support-matrix-new) | from 749 (NVIDIA's "starting at"; partner boards vary) | **Kept, pending the encode measurement** (PI). For the rack case, a board of NVIDIA's SFF-Ready size (§7.6) |
-| C16 | Video NVMe | 4 cameras for 12 h at an ASSUMED 10:1 is 5.37 TB (§7.6) | 2 × Samsung **990 PRO 4 TB** (MZ-V9P4T0B/AM), 8 TB in all | 2 | [Samsung](https://www.samsung.com/us/memory-storage/nvme-ssd/990-pro-pcie-4-0-nvme-ssd-4tb-sku-mz-v9p4t0b-am/) | 1,099.99 each | **Two drives, decided** (PI). How many hours they hold *waits on* P9's measured bitrate |
+| C16 | Video NVMe | 4 cameras for 12 h (a margin over the eight-hour limit) at an ASSUMED 10:1 is 5.37 TB (§7.6) | 2 × Samsung **990 PRO 4 TB** (MZ-V9P4T0B/AM), 8 TB in all | 2 | [Samsung](https://www.samsung.com/us/memory-storage/nvme-ssd/990-pro-pcie-4-0-nvme-ssd-4tb-sku-mz-v9p4t0b-am/) | 1,099.99 each | **Two drives, decided** (PI). How many hours they hold *waits on* P9's measured bitrate |
 | C17 | Power supply | 750 W or more (NVIDIA) | Seasonic **CORE GX ATX 3.1 (2024), 850 W**: 80 PLUS Gold; fully modular; a native 12V-2x6 cable (up to 600 W); ATX 3.1 and PCIe 5.1; 140 × 150 × 86 mm; 7-year warranty. Retailers name it **CORE GX-850 ATX3** | 1 | [Seasonic](https://seasonic.com/core-gx-atx-3-2024/); [Newegg (the 1000 W sibling)](https://www.newegg.com/seasonic-usa-atx-3-1-1000-w-80-plus-gold-certified-power-supply-core-gx-1000-atx3/p/N82E16817151283) | **UNVERIFIED**. Newegg offered the 750 W at 114.99 and the 1000 W at 159.99, not the 850 W. Micro Center and B&H served bot checks | **Seasonic, decided** (PI). The model name is "CORE GX ATX 3.1" at 850 W. "Core" is the series and "Gold" its rating; no model is called "Core Gold" |
 | C18 | Case | Rack-mount | not chosen; constraints in §7.6 | 1 | — | — | **Rack-mount** (PI). The model is the *PI's call* |
 | C19 | CPU cooler | AM5; its height fits the case | a Noctua, not chosen; constraints in §7.6 | 1 | — | — | **Noctua** (PI), chosen with the case |
@@ -904,7 +924,7 @@ The demand, as arithmetic:
   P3 or faster. So the RTX 5070 Ti is the cheapest GeForce listed with two NVENC.
 - **The throughput for our input is UNVERIFIED**: mono, 1440 × 1080, at whichever preset
   proves visually lossless on our video. P9 requires measuring it on the box: 8 streams
-  for 12 hours (bring-up check 2).
+  for 12 hours (bring-up check 2; a margin over the eight-hour limit).
 
 ### 7.6 The camera box: AMD, rack-mounted, and the budget
 
@@ -914,6 +934,8 @@ The demand, as arithmetic:
   cameras and 2.488 GB/s for 8.
 - **ASSUMED compression 10:1.** This is a round number, not a measurement and not a
   published figure. P9 §5 requires the measured bitrate.
+- Twelve hours is a sizing margin over the eight-hour out-of-cage limit (PI correction,
+  2026-10-01), as is bring-up check 2's twelve-hour run. *(Added 2026-10-08.)*
 
 | Cameras | 5:1 | **10:1 (ASSUMED)** | 20:1 |
 |---|---|---|---|
@@ -1054,7 +1076,10 @@ The demand, as arithmetic:
     shorter than the primary's.
 - **A visible-cut filter on each emitter.** A MidOpt LP830 is cut to cover the LM75's
   emitting area (71 × 25.5 mm) and held in the lamp's bracket. It cuts the LED's shorter
-  wavelengths, which is where a faint red glow comes from (INFERENCE).
+  wavelengths, where part of a faint red glow comes from (INFERENCE). It passes 850 nm itself,
+  which the human fovea detects at sufficient power [@sliney1976visual], so the filter only
+  trims the tail; the darkness check at the eye position (below) is the safeguard. *(Corrected
+  2026-10-08: this said the shorter wavelengths are "where a faint red glow comes from".)*
   - Whether 850 nm light is visible to rhesus monkeys at these levels is **UNVERIFIED**.
   - Edmund has no equivalent (C20). SVL's 75 mm bar-light mount is Edmund
     [#90-438](https://www.edmundoptics.com/p/smart-vision-lights-75mm-bar-light-mount/57263/)
@@ -1099,7 +1124,8 @@ the cables cross it, and the layout decides it. This is what it implies:
     1. continuous cables through a gland or split grommet, with no connector in the run;
     2. active cables through the panel. Teledyne's suggested vendors are Icron (Spectra
        3001-15), Newnex (FireNEX-UL-8 and -12) and Alysium (A70-8403);
-    3. a USB3 bulkhead coupler, qualified by a 12-hour, 8-camera run with no drops (check 2).
+    3. a USB3 bulkhead coupler, qualified by a 12-hour, 8-camera run with no drops (check 2;
+       a margin over the eight-hour limit).
 - **GPIO and trigger lines.**
   - BNC bulkhead feedthroughs suit the barcode, ExposureActive and trigger lines, if the
     fan-out board's connectors are BNC as wl-sync's are (the design check picks them).
@@ -1122,7 +1148,8 @@ the cables cross it, and the layout decides it. This is what it implies:
   - sensitivity at 850 nm, since no NIR quantum efficiency is published, and whether the
     lamps are bright enough at the chosen exposure;
   - darkness at the eye position, and no change to P1 and P4 with the lamps on;
-  - 12 hours at 200 fps with no drops, on an AMD host, with ASPM off;
+  - 12 hours (a margin over the eight-hour limit) at 200 fps with no drops, on an AMD host,
+    with ASPM off;
   - no added neural noise.
 - **The tracker's light at the eye.** It is measured with a power meter, and the driver
   current is capped (§7.1.2). The attenuator's OD is chosen from that measurement (§7.10).
@@ -1224,8 +1251,8 @@ makers' own pages and manuals, read 2026-09-27 (UTC). Edmund was checked first.
 
 The agent's recommendation had been to keep the LEDD1B with the ND behind it. Per eye:
 
-1. **The ND's OD is chosen at bring-up**, so the eye stays under the limit at the highest
-   current the LEDD1B can deliver, 1200 mA, not at the setting.
+1. **The ND's OD is chosen at bring-up**, so the eye stays under the limit [@icnirp2013icnirp]
+   at the highest current the LEDD1B can deliver, 1200 mA, not at the setting.
    - The power meter reads the eye position with the filter in place and the LED at its
      1000 mA rating. So the filter's own tolerance is inside the reading.
    - The OD then carries at least a 1.2× margin for the driver's 1200 mA. This is ASSUMED:

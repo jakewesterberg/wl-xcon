@@ -110,12 +110,13 @@ three parts supplied:
   both of its properties: a still pointer produces no saccade, and a move that stops produces
   one.
 
-So a hold, a fixation break, the 50 ms staleness rule (`eye.Tracker.staleness`) and a saccade
-behave as they will with an animal. **A mouse is not an eye**, and two consequences are stated
-on the screen's key list rather than hidden: a saccade is the pointer moving and then stopping,
-landing where it stops; and a person with a mouse is slower than a monkey's eye, so a task's
-response window may need more time (`--set`, or the page's parameters panel). Demo mode never
-changes a task's numbers by itself.
+So a hold, a fixation break, the 50 ms staleness placeholder (`eye.Tracker.staleness`, the
+OpenIrisDPI paper's stall maximum until V3(a) sets ours) and a saccade behave as they will with
+an animal. **A mouse is not an eye**, and two consequences are stated on the screen's key list
+rather than hidden: a saccade is the pointer moving and then stopping, landing where it stops;
+and a person with a mouse is slower than a monkey's eye, so a task's response window may need
+more time (`--set`, or the page's parameters panel). Demo mode never changes a task's numbers by
+itself. *(Corrected 2026-10-08: this said "the 50 ms staleness rule".)*
 
 **Signal states.** While the page reports the pointer over its screen, `poll` returns a fresh
 sample every frame, stamped `at`, holding the last position. The page reports on every move (at
@@ -512,10 +513,14 @@ review, by number):
     not a constant fitted to one panel (F14).
 16. **The tremor is drawn from the run's seed**, not the session's, which is 0 in every `wlx
     taskd` session (F15).
-17. **Stated limits**, in §3.3 and on the key list: a hand takes roughly 0.6-1 s from onset to a
-    landing where a monkey's eye takes about 0.25 s, so demo mode cannot judge any time window
-    (S10); the pointer lands where it is put, so window sizes and holds cannot be judged (S9);
-    both eyes are the pointer, so vergence is always zero, and each stimulus not shown to both
-    eyes is labeled L or R, with its disparity when nonzero (S11); the mouse is both the eye and
-    the hand (S8); a stimulus up for less than a page update may never be drawn, and no duration
-    can be judged from the drawing; +y is up, with a test (S12).
+17. **Stated limits**, in §3.3 and on the key list: a hand takes a second or more from onset to a
+    landing (a mouse positioned on text in a mean 1.29 s, SD 0.42, after 0.36 s of homing
+    [@card1977evaluation, Table 2, p. 10]) where a monkey's eye takes about 0.25 s (saccadic
+    reaction times about 200 ms with no gap [@fischer1983saccadic]), so demo mode cannot judge any
+    time window (S10); the pointer lands where it is put, so window sizes and holds cannot be
+    judged (S9); both eyes are the pointer, so vergence is always zero, and each stimulus not
+    shown to both eyes is labeled L or R, with its disparity when nonzero (S11); the mouse is both
+    the eye and the hand (S8); a stimulus up for less than a page update may never be drawn, and
+    no duration can be judged from the drawing; +y is up, with a test (S12). *(Corrected
+    2026-10-08: this said a hand takes "roughly 0.6-1 s" to land, a figure given without a
+    source.)*

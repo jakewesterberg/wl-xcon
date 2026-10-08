@@ -57,10 +57,11 @@ recoverable situation rather than a crash.
   now gets a reduced sync module (§2, 2026-09-19), those two lines land where their own spec
   put them** rather than being faked by the host in software on the welfare-critical path.
   What the reduced module must carry is `wl-touchtrain`'s to specify (§6 item 2).
-- **An attached panel with a wired touch sensor** (PI, 2026-09-19), not a tablet. A touch
-  arriving over a wireless link cannot be strobed promptly, and the offline join against a
-  hardware tick is how RT is recovered — so the response path must not cross a network. A
-  tablet is the *experimenter's* window instead, which ADR-0008 provides for free.
+- **An attached panel with a wired touch sensor** (PI, 2026-09-19), not a tablet
+  [@pronk2020mental]. A touch arriving over a wireless link cannot be strobed promptly, and the
+  offline join against a hardware tick is how RT is recovered — so the response path must not
+  cross a network. A tablet is the *experimenter's* window instead, which ADR-0008 provides for
+  free.
 - **The same task model.** A task written for the rig runs here if its declared device
   requirements are met; one that needs gaze or stimulation does not, and says so at load.
 
@@ -110,7 +111,8 @@ as a rig session is (§4's shared daily figure, S8 §5.2b). Losing the duration 
 loosen the accounting.
 
 **Kiosk fluid counts toward the same daily figure as rig work** (PI, 2026-08-31; that figure is
-a **floor** rather than a budget — PI, 2026-09-06, see S8's head), so the two
+a **floor** rather than a budget — PI, 2026-09-06, see S8's head)
+[@calapai2017cagebased], so the two
 deployments share a total neither can see directly. wl-works holds the
 ledger and pushes the day's already-delivered figure in `prepare-session`; each deployment
 reports `floor − already_delivered_today − earned_here` as what is still to supplement

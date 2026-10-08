@@ -8,17 +8,19 @@ directly), the ETRA 2024 OpenIris paper, and the OpenIrisDPI paper.
 - **OpenIris** ([repo](https://github.com/ocular-motor-lab/OpenIris)): C#/.NET 4.8,
   **Windows-only**, AGPL-3.0. Plugin architecture (cameras, tracking pipelines,
   calibration). Paper: Sadeghi, Ressmeyer, Yates, Otero-Millan,
-  [ETRA 2024](https://doi.org/10.1145/3649902.3653348). Last commit 2025-08-18.
+  [ETRA 2024](https://doi.org/10.1145/3649902.3653348) [@sadeghi2024open]. Last
+  commit 2025-08-18.
 - **OpenIrisDPI plugin** ([repo](https://github.com/ryan-ressmeyer/OpenIrisDPI)):
   GPL-3.0, last commit 2026-04-14. Paper: Ressmeyer, Otero-Millan, Horwitz, Yates,
-  [J Neurosci Methods 2026](https://doi.org/10.1016/j.jneumeth.2026.110693).
-  Verified numbers from the paper:
+  [J Neurosci Methods 2026](https://doi.org/10.1016/j.jneumeth.2026.110693)
+  [@ressmeyer2026openirisdpi]. Verified numbers from the paper:
   - 500 Hz binocular on a consumer CPU (no GPU); FLIR BFS-U3-16S2M-CS cameras;
     complete system under $5,000.
   - In vivo (macaque) precision 0.39-0.44 arcmin (azimuth/elevation) vs 1.55-1.82
-    arcmin for P-CR on the same rig.
+    arcmin for P-CR on the same rig [@ressmeyer2026openirisdpi].
   - Frame processing 1.1 +/- 0.1 ms median — **but ~2% of frames take >= 10 ms
-    (max ~50 ms)** from OS preemption.
+    (max ~50 ms)**, likely from OS preemption [@ressmeyer2026openirisdpi]. *(Corrected
+    2026-10-08: the paper says "likely".)*
   - Validated in two rhesus macaques including Neuropixels NHP recordings (LGN).
 
 ## Output interfaces (verified in source/wiki)
@@ -31,8 +33,9 @@ directly), the ETRA 2024 OpenIris paper, and the OpenIrisDPI paper.
    (`GetCurrentData`, `StartRecording`, `RecordEvent`, settings, etc.).
 3. **Analog out** via companion OpenIrisDAC app + ACCES USB-AO16-8E DAC (6 channels:
    eye X/Y per eye + pupils). Adds ~3-4 ms; the paper notes this "may limit the use
-   of this signal for gaze-contingent applications." This is our **MonkeyLogic bridge
-   path** (drops into ML analog eye inputs or a NIDQ AI channel).
+   of this signal for gaze-contingent applications." [@ressmeyer2026openirisdpi] This
+   is our **MonkeyLogic bridge path** (drops into ML analog eye inputs or a NIDQ AI
+   channel).
 4. **Sync:** camera GPIO takes a shared digital sync line for lossless offline
    alignment. Offline reconstruction is the timing ground truth, always.
 5. No LSL, no ROS, no first-party bridges to any task controller (grep of both repos:

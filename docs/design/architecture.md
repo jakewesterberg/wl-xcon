@@ -3,7 +3,8 @@
 Status: current summary. Reasoning, sources and alternatives live in
 `docs/superpowers/specs/2026-08-31-controller-architecture-design.md`; this file is the
 orientation document CLAUDE.md sends you to first. Where the two disagree, the spec wins
-and this file is stale.
+and this file is stale. The papers behind science-facing choices, and which choice each
+supports, are in `docs/references/` (ADR-0010).
 
 Contracts here are proposals until frozen at milestone M0.
 
@@ -13,8 +14,9 @@ Contracts here are proposals until frozen at milestone M0.
    shared clocks.
 2. **The sync box defines session time.** `wl-sync` owns session identity, the barcode
    codec, the log format and event-code routing. We consume them; we do not mint them.
-3. Anything scientifically meaningful becomes an edge or word in a recorded stream.
-   Software timestamps are for control flow; hardware timestamps are for analysis.
+3. Anything scientifically meaningful becomes an edge or word in a recorded stream
+   [@hwang2019nimh; @rubel2022neurodata]. Software timestamps are for control flow; hardware
+   timestamps are for analysis [@plant2004selfvalidating; @siegle2021survey; @karsh2026sync].
 4. Hardware sits behind small interfaces; every interface has a simulator.
 5. The hot loop does bounded work: no allocation, no disk I/O, no unbounded queues, and
    it never renders a plot, serves a request, or holds a UI.
@@ -208,7 +210,8 @@ The split between the two is what keeps each reviewable. `bounds.py` is **pure**
 ceilings, the daily *floor*, and the arithmetic of whether a number is past one or short of
 it, with no clock, no hardware and no state outliving a question. **Fluid has a floor, not a
 ceiling** (PI, 2026-09-06): the daily figure is a minimum the animal must reach, supplemented
-by hand after the session, so a delivery is never refused on volume and `Floor` is a different
+by hand after the session [@nc3rs2012refining; @gray2016physiological], so a delivery is never
+refused on volume and `Floor` is a different
 type from `Ceiling` precisely so the two cannot be confused at a call site. **One ceiling ends
 a session, and it is time out of the cage** (PI, 2026-09-19): out of the home cage to back in
 it, eight hours (the PI corrected the twelve recorded here on 2026-10-01), which is the
@@ -434,11 +437,11 @@ direct view part 2, 2026-09-29): a task that does not pass in the chosen setup i
 the session opens. The setup is in the session record and in telemetry (schema 15; the setup
 since 9).
 
-Through the stereoscope each eye views one half of the panel through redirection mirrors.
-Therefore one window, one flip, one refresh clock, no genlock — **two viewports on one
-framebuffer**, in cyclopean coordinates with disparity as a stimulus property. A task without
-disparity or per-eye content is the zero-disparity case of the same path, and runs in either
-setup.
+Through the stereoscope each eye views one half of the panel through redirection mirrors
+[@wheatstone1838contributions; @cox2019temporal; @dougherty2021binocular]. Therefore one
+window, one flip, one refresh clock, no genlock — **two viewports on one framebuffer**, in
+cyclopean coordinates with disparity as a stimulus property. A task without disparity or
+per-eye content is the zero-disparity case of the same path, and runs in either setup.
 
 Per-eye viewport geometry (center, folded optical path length, deg/pixel) is computed from
 the rig file (`geometry.py`, `viewport.py`) until V9 measures it. **Vergence is not set by
@@ -447,7 +450,7 @@ software offset, `atan(E/D)` from the rig file's half-IPD `E` and path `D`
 (`Geometry.vergence_half_deg`, engine build A1), computed, not measured. Photodiode patches
 sit outside both viewports, at a bottom corner, and under the sensors' housings in direct
 view. Panel left/right nonuniformity is by construction an interocular mismatch and is
-photometered in V1.
+photometered in V9 (validation.md; V1 is display timing). *(Corrected 2026-10-08: this said V1.)*
 
 The **screen description** (`wl_xcon/screen.py`) and the **exact drawer** (`wl_xcon/exact.py`, with
 `look.py` and `viewport.py`) exist since engine build A1 (2026-10-07). Nothing in a session calls them
@@ -499,7 +502,8 @@ what changed: a system time daemon is a different layer from the AST-guarded
 application source, so the guardrail above is untouched; what is no longer unqualified
 is the routing claim itself, narrowed rather than reversed. NTP serves bookkeeping time
 only — which day it is, when a mark was made — never the timing record, which remains
-the sync box's hardware ticks and the strobed event words (S3). Application integration
+the sync box's hardware ticks and the strobed event words (S3) [@mills2010network;
+@karsh2026sync]. Application integration
 is otherwise still pull-based and reuses `wl-preproc`'s existing lab-host protocol, in three
 directions: wl-works pushes a `prepare-session` action carrying the ELN metadata bundle;
 live session state is exposed as **readings on `GET /health`**; and the finished session

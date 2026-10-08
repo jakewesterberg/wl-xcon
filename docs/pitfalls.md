@@ -68,22 +68,25 @@ deciding nothing.
 
 **P4 — Graphics stack.** X11-vs-Wayland, compositor bypass, and NVIDIA vsync behavior all
 move timing. Pin distro/driver/session type per rig, record it with every measurement, and
-re-run V1 after any change. OLED task displays additionally need luminance/persistence QA.
-**Screen sharing is part of this risk:** VNC/RDP/capture stacks hook the graphics pipeline
-on the machine whose whole job is frame-accurate presentation. Remote work uses a remote
-*console* (ZMQ telemetry), not remote pixels; remote desktop stays off during recording,
-and the flip patch will show it if someone forgets.
+re-run V1 after any change [@bridges2020timing; @plant2016reminder]. OLED task displays
+additionally need luminance/persistence QA [@abuhaila2025recent; @dimigen2026advantages;
+@elze2013evaluation]. **Screen sharing is part of this risk:** VNC/RDP/capture stacks hook
+the graphics pipeline on the machine whose whole job is frame-accurate presentation. Remote
+work uses a remote *console* (ZMQ telemetry), not remote pixels; remote desktop stays off
+during recording, and the flip patch will show it if someone forgets.
 
 **P5 — SpikeGLX gap.** The unmeasured regime (cross-machine, Python) is exactly where naive
 designs land. Design pins the fetch client to the acquisition PC (C++, loopback), ships
-features not raw data, and keeps the Open Ephys + Falcon path (published 9.241 ms median,
-384 ch) as the fallback and cross-check.
+features not raw data, and keeps the Open Ephys + Falcon path (published median 9.2 ms,
+maximum 13 ms, one probe, as read 2026-10-08 [@openephys2026falcon]) as the fallback and
+cross-check. *(Corrected 2026-10-08: this said "published 9.241 ms median, 384 ch".)*
 
 **P6 — Tracker stalls.** ~2% of OpenIrisDPI frames >= 10 ms (max ~50 ms) on the authors'
-hardware. **Raised to High** because the experimental program depends on saccade-triggered
-display changes landing inside saccadic suppression — a budget tighter than anything else
-in this project, and one a 50 ms stall destroys outright. Fixation logic uses hold-last with
-a staleness ceiling and grace periods; aborts require corroboration. V3 runs on our hardware
+hardware [@ressmeyer2026openirisdpi]. **Raised to High** because the experimental program
+depends on saccade-triggered display changes landing inside saccadic suppression
+[@ross2001changes; @diamond2000extraretinal] — a budget tighter than anything else in this
+project, and one a 50 ms stall destroys outright. Fixation logic uses hold-last with a
+staleness ceiling and grace periods; aborts require corroboration. V3 runs on our hardware
 before window parameters are frozen, and its result may force a design change rather than a
 parameter change.
 
@@ -154,7 +157,8 @@ design, not the reviewer.**
 must-have and is also the most likely way this system quietly damages a dataset: a change
 made at trial 300 is invisible at analysis time unless it was recorded. Mitigation: every
 trial carries a **complete** resolved parameter snapshot rather than a pointer to "the
-config"; every change emits an event code so the discontinuity is on the recording clock;
+config" [@asaad2008flexible]; every change emits an event code so the discontinuity is on
+the recording clock;
 changes are staged and applied atomically in the ITI so no trial runs on a half-applied
 set; and every write records its origin and actor through one validated path.
 
@@ -168,7 +172,8 @@ days are exactly when an unlogged one would become a silent confound.
 *Corrected 2026-09-06.* This note is titled "accounting floor" and meant it in the sense of a
 lower bound on a number. It is now a floor in the other sense too: the daily fluid figure is a
 **minimum the animal must reach**, supplemented by hand after the session, and there is no
-ceiling on earned reward (PI). The reconciliation matters just as much under a floor and in
+ceiling on earned reward (PI) [@nc3rs2012refining; @gray2016physiological]. The
+reconciliation matters just as much under a floor and in
 the same direction — a shortfall computed from what we *commanded* would ask for a top-up the
 animal has already had from the panel button.
 
@@ -194,14 +199,15 @@ screen and will not look at a stimulus that is not there.
 **P19 — A colour nobody measured.** RGB is a set of instructions to one panel, so a
 colour written in a task file is a different stimulus on every monitor and describes
 nothing reproducible in a methods section. The specific damage is quiet: a monitor
-asked for a colour outside its gamut clips, and a clipped colour has neither the
-requested chromaticity nor the requested luminance — so an isoluminant pair stops
-being isoluminant and a chromatic experiment's control condition becomes a luminance
-manipulation, in a task that runs and looks convincing. Mitigation: colour is
-specified in CIE xyY or DKL cone contrast, checked against a measured `Calibration`,
-and refused without one. The calibration must name **whose luminous efficiency** it
-was measured against, because a human V(lambda) makes a stimulus that is isoluminant
-for nobody in the room.
+asked for a colour outside its gamut [@brainard1996cone, p. 572] clips, and a clipped
+colour has neither the requested chromaticity nor the requested luminance — so an
+isoluminant pair stops being isoluminant and a chromatic experiment's control condition
+becomes a luminance manipulation, in a task that runs and looks convincing. Mitigation:
+colour is specified in CIE xyY or DKL cone contrast, checked against a measured
+`Calibration`, and refused without one [@cie2018colorimetry; @derrington1984chromatic].
+The calibration must name **whose luminous efficiency** it was measured against,
+because a human V(lambda) makes a stimulus that is isoluminant for nobody in the room
+[@dobkins2000comparison; @horwitz2015what; @lindbloombrown2014spectral].
 
 *As of 2026-09-01 no calibration for our panels exists.* Chromatic tasks will not
 load until a photometer measurement is committed under `docs/measurements/`.
