@@ -20,6 +20,7 @@ and then restored (2026-10-08).
 from __future__ import annotations
 
 import datetime
+import http.client
 import importlib.util
 import io
 import json
@@ -68,6 +69,10 @@ def test_the_library_parses_and_is_not_empty():
         ("@article{a2000b,\n  title = {T},\n  title = {U},\n}\n", 3),  # a field twice
         ("% a comment\n@article{a2000b,\n}\n", 1),  # text outside an entry
         ("@article{a2000b,\n  abstract = {one\n  two},\n}\n", 2),  # a field on two lines
+        ("@article{a2000b,\n  year = 2000,\n}\n", 2),  # a bare value outside `month`
+        ("@article{a2000b,\n  month = march,\n}\n", 2),  # not one of the twelve macros
+        ("@article{a2000b,\n  month = foo,\n}\n", 2),  # nor this
+        ("@article{a2000b,\n  note = mar,\n}\n", 2),  # a month macro, but not in `month`
     ],
 )
 def test_a_malformed_library_is_refused_at_its_line(text, line):
@@ -76,14 +81,19 @@ def test_a_malformed_library_is_refused_at_its_line(text, line):
 
 
 def test_the_subset_reads_both_this_repositorys_layout_and_zoteros():
-    """Zotero's stock exporter indents with a tab; ours with two spaces. Both are the
-    subset, and nested braces stay part of the value."""
+    """Ours indents with two spaces. Zotero's stock exporter indents with a tab and
+    writes `month` as a bare macro, `month = mar` (`BibTeX.js` at zotero/translators
+    6d4490d), the one unbraced value the subset allows. Nested braces stay part of the
+    value."""
     ours = "@article{a2000b,\n  title = {On {Macaca} cones},\n  year = {2000},\n}\n"
-    zotero = "@article{a2000b,\n\ttitle = {On {Macaca} cones},\n\tyear = {2000},\n}\n"
-    for text in (ours, zotero):
+    zotero = (
+        "@article{a2000b,\n\ttitle = {On {Macaca} cones},\n\tmonth = mar,\n"
+        "\tyear = {2000},\n}\n"
+    )
+    for text, extra in ((ours, {}), (zotero, {"month": "mar"})):
         (entry,) = refs.parse(text)
         assert (entry.type, entry.key, entry.line) == ("article", "a2000b", 1)
-        assert entry.fields == {"title": "On {Macaca} cones", "year": "2000"}
+        assert entry.fields == {"title": "On {Macaca} cones", "year": "2000", **extra}
 
 
 #: The words a key skips when it takes the title's first word: articles and
@@ -109,6 +119,24 @@ def _expected_key(entry) -> str:
     return f"{refs.letters(' '.join(words))}{entry.fields.get('year', '')}{first_word}"
 
 
+def _key_problems(entries) -> list[tuple[int, str, str]]:
+    """`(line, key, what is wrong)` for every key off the rule. A suffix letter is a
+    collision's, so it stands only beside the unsuffixed key it collided with."""
+    keys = {entry.key for entry in entries}
+    bad = []
+    for entry in entries:
+        expected = _expected_key(entry)
+        if not KEY.match(entry.key):
+            bad.append((entry.line, entry.key, "not lowercase letters, a year, letters"))
+        elif entry.key == expected:
+            continue
+        elif entry.key[:-1] != expected or entry.key[-1] not in "bcdefghijklmnopqrstuvwxyz":
+            bad.append((entry.line, entry.key, f"the rule gives {expected!r}"))
+        elif expected not in keys:
+            bad.append((entry.line, entry.key, f"a collision suffix, but no {expected!r}"))
+    return bad
+
+
 def test_keys_are_unique_and_follow_the_rule():
     """A key is what a document cites, so two entries with one key make every citation
     of it ambiguous, and a key that says 1987 for a 1988 paper is a citation that
@@ -116,16 +144,24 @@ def test_keys_are_unique_and_follow_the_rule():
     entries = _entries()
     keys = [e.key for e in entries]
     assert sorted({k for k in keys if keys.count(k) > 1}) == [], "keys used twice"
-    bad = []
-    for entry in entries:
-        expected = _expected_key(entry)
-        if not KEY.match(entry.key):
-            bad.append((entry.line, entry.key, "not lowercase letters, a year, letters"))
-        elif entry.key != expected and not (
-            entry.key[:-1] == expected and entry.key[-1] in "bcdefghijklmnopqrstuvwxyz"
-        ):
-            bad.append((entry.line, entry.key, f"the rule gives {expected!r}"))
-    assert bad == [], bad
+    assert _key_problems(entries) == []
+
+
+def test_a_collision_suffix_needs_the_key_it_collided_with():
+    """`baylor1987spectrall` alone is a typo that the suffix rule would otherwise wave
+    through; beside `baylor1987spectral` a `b` is the rule working."""
+    entry = (
+        "@article{{{key},\n  author = {{Baylor, D. A.}},\n"
+        "  title = {{Spectral cones}},\n  year = {{1987}},\n}}\n"
+    )
+    alone = refs.parse(entry.format(key="baylor1987spectrall"))
+    assert _key_problems(alone) == [
+        (1, "baylor1987spectrall", "a collision suffix, but no 'baylor1987spectral'")
+    ]
+    pair = refs.parse(
+        entry.format(key="baylor1987spectral") + "\n" + entry.format(key="baylor1987spectralb")
+    )
+    assert _key_problems(pair) == []
 
 
 #: What each entry type needs beyond `COMMON`. A type not listed here is refused; add
@@ -195,13 +231,15 @@ FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})")
 #: A code span may wrap a line but, as in CommonMark, never crosses a blank one: a stray
 #: backtick must not blank the rest of a file, and every citation in it, from the check.
 CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n).)+?(?<!`)\1(?!`)", re.DOTALL)
-BRACKETS = re.compile(r"\[([^\[\]]*)\]")
+#: What the scan stops at: a bracket, a blank line (brackets, like code spans, do not
+#: cross a paragraph), and an `@`.
+TOKENS = re.compile(r"\[|\]|\n[ \t]*\n|@")
 #: Pandoc's key: a letter, digit or `_`, then those and single internal punctuation
-#: (pandoc.org/MANUAL.html, "Citation syntax", read 2026-10-08). The `@` must start a
-#: word in the bracket, so `[mail a@b.org]` is not a citation.
-CITATION = re.compile(
-    r"(?<![^\s;])-?@([A-Za-z0-9_](?:[A-Za-z0-9_]|[:.#$%&+?<>~/-](?=[A-Za-z0-9_]))*)"
-)
+#: (pandoc.org/MANUAL.html, "Citation syntax", read 2026-10-08).
+PANDOC_KEY = re.compile(r"[A-Za-z0-9_](?:[A-Za-z0-9_]|[:.#$%&+?<>~/-](?=[A-Za-z0-9_]))*")
+#: Outside brackets only what looks like one of this library's keys is read, so a
+#: decorator (`@dataclass`) or a handle is not taken for a citation.
+LIBRARY_SHAPED = re.compile(r"[a-z]+[0-9]{4}[a-z]+(?![A-Za-z0-9_])")
 
 
 def prose(text: str) -> str:
@@ -224,14 +262,34 @@ def prose(text: str) -> str:
 
 
 def citations(text: str) -> list[tuple[int, str]]:
-    """`(line, key)` for every key cited in brackets in `text`'s prose: `[@key]`,
-    `[@key, p. 3]`, `[see @a; @b]`, `[-@key]`. Pandoc's author-in-text form, a bare
-    `@key`, is not read; docs/references/README.md says to use the bracketed forms."""
+    """`(line, key)` for every key cited in `text`'s prose.
+
+    Inside brackets, at any depth (`[@key]`, `[@key, p. 3]`, `[see @a; @b]`, `[-@key]`,
+    `[@a, p. 3 [sic]]`), every Pandoc key whose `@` starts a word, so `[mail a@b.org]`
+    is not one. Outside brackets, Pandoc's author-in-text form (`@key says`) and
+    anything else shaped like this library's keys, `@` not inside a word: failing
+    closed on a form the bracket scan would otherwise skip."""
     text = prose(text)
-    found = []
-    for group in BRACKETS.finditer(text):
-        for key in CITATION.finditer(group[1]):
-            found.append((text.count("\n", 0, group.start(1) + key.start()) + 1, key[1]))
+    found, depth = [], 0
+    for token in TOKENS.finditer(text):
+        if token[0] == "[":
+            depth += 1
+        elif token[0] == "]":
+            depth = max(0, depth - 1)
+        elif token[0] != "@":
+            depth = 0
+        else:
+            at = token.start()
+            start = at - 1 if depth and at and text[at - 1] == "-" else at
+            before = text[start - 1] if start else " "
+            if depth:
+                starts_word = before.isspace() or before in "[;"
+                key = PANDOC_KEY.match(text, at + 1) if starts_word else None
+            else:
+                inside_word = before.isalnum() or before in "_.@"
+                key = None if inside_word else LIBRARY_SHAPED.match(text, at + 1)
+            if key:
+                found.append((text.count("\n", 0, at) + 1, key[0]))
     return found
 
 
@@ -251,6 +309,10 @@ def test_citations_are_read_from_prose_only():
             "A stray ` backtick ends with its paragraph,",
             "",
             "so [@iota1998nine] after a blank line is read, before a later `code span`.",
+            "A bracket in a bracket [@kappa1999ten, p. 3 [sic]] is read, and so is",
+            "@lambda2000eleven says, in Pandoc's author-in-text form; not x@mu2001twelve.org,",
+            "nor @dataclass; [@nu2002thirteen] is, and `[@xi2003fourteen]` in code is not.",
+            "Any Pandoc key is read in brackets, after an inner one too: [see [sic] @Doe99].",
         ]
     )
     assert citations(text) == [
@@ -259,6 +321,10 @@ def test_citations_are_read_from_prose_only():
         (1, "gamma1992three"),
         (10, "theta1997eight"),
         (13, "iota1998nine"),
+        (14, "kappa1999ten"),
+        (15, "lambda2000eleven"),
+        (16, "nu2002thirteen"),
+        (17, "Doe99"),
     ]
 
 
@@ -404,6 +470,17 @@ def test_the_checker_takes_the_print_year_when_online_came_first():
     assert refs.check(_schnapf(), lambda doi: online_first)[0] == refs.OK
 
 
+def test_the_checker_compares_the_first_author_exactly():
+    """A suffix match would let "Smith" pass for "Goldsmith", or the reverse; case and
+    accents still fold, so "H{\\'a}rosi" is "Hárosi"."""
+    for ours, theirs in (("Smith, A.", "Goldsmith"), ("Goldsmith, A.", "Smith")):
+        record = {**SCHNAPF, "author": [{"family": theirs, "sequence": "first"}]}
+        verdict, line = refs.check(_schnapf(author=ours), lambda doi: record)
+        assert verdict == refs.MISMATCH and "first author" in line, (ours, theirs)
+    accented = {**SCHNAPF, "author": [{"family": "Hárosi", "sequence": "first"}]}
+    assert refs.check(_schnapf(author="H{\\'a}rosi, F. I."), lambda doi: accented)[0] == refs.OK
+
+
 def test_the_checker_reports_what_it_could_not_reach():
     def offline(doi):
         raise urllib.error.URLError("no route to host")
@@ -411,7 +488,11 @@ def test_the_checker_reports_what_it_could_not_reach():
     def unknown(doi):
         raise urllib.error.HTTPError(doi, 404, "Not Found", None, None)
 
+    def cut_short(doi):
+        raise http.client.IncompleteRead(b'{"message": {"tit')
+
     assert refs.check(_schnapf(), offline)[0] == refs.UNREACHABLE
+    assert refs.check(_schnapf(), cut_short)[0] == refs.UNREACHABLE
     verdict, line = refs.check(_schnapf(), unknown)
     assert verdict == refs.UNREACHABLE and "HTTP 404" in line
     no_doi = _schnapf()
@@ -444,22 +525,24 @@ def test_the_checker_exits_by_its_worst_line(tmp_path, capsys):
 
 def test_the_fetch_asks_crossref_for_the_quoted_doi_and_refuses_a_non_record(monkeypatch):
     """No network: `urlopen` is replaced. A DOI's parentheses are quoted, the request
-    names this tool, and a body that is not a Crossref work record is an error rather
-    than an empty record that would then mismatch on everything."""
+    carries one header, a neutral tool identifier with no personal detail in it (the
+    lab's rule from 2026-10-08), and a body that is not a Crossref work record is an
+    error rather than an empty record that would then mismatch on everything."""
     asked = []
 
     def answer(body):
         def urlopen(request, timeout):
-            asked.append((request.full_url, request.get_header("User-agent"), timeout))
+            asked.append((request.full_url, request.header_items(), timeout))
             return io.BytesIO(json.dumps(body).encode())
 
         return urlopen
 
     monkeypatch.setattr(refs.urllib.request, "urlopen", answer({"message": SCHNAPF}))
     assert refs.fetch("10.1016/S0042-6989(00)00021-3") == SCHNAPF
-    url, agent, timeout = asked[-1]
+    url, headers, timeout = asked[-1]
     assert url == "https://api.crossref.org/works/10.1016/S0042-6989%2800%2900021-3"
-    assert agent == refs.USER_AGENT and timeout == refs.TIMEOUT_SECONDS
+    assert headers == [("User-agent", "wl-xcon-check-references/1.0")]
+    assert timeout == refs.TIMEOUT_SECONDS
 
     monkeypatch.setattr(refs.urllib.request, "urlopen", answer({"status": "failed"}))
     with pytest.raises(ValueError):

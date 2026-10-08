@@ -10,8 +10,8 @@ for every entry that has a DOI and compares three things:
 - **the year**, against Crossref's `issued` year or its `published-print` year (a
   paper online in one year and in a volume the next is cited by the volume's year;
   a 1988 paper digitized online in 2009 still has `issued` 1988);
-- **the first author's family name**, folded to lowercase ASCII letters; one may end
-  with the other, so "van Norren" and "Norren" agree;
+- **the first author's family name**, exactly, after folding case and accents to
+  lowercase ASCII letters (so "Smith" does not pass for "Goldsmith");
 - **the title**, after folding case, accents, punctuation, LaTeX braces and
   Crossref's HTML tags, against Crossref's title (with its subtitle, when it has one).
 
@@ -35,9 +35,9 @@ reads and the file the test passes are read by one definition of the format.
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import re
-import sys
 import unicodedata
 import urllib.error
 import urllib.parse
@@ -49,7 +49,9 @@ from typing import Callable
 ROOT = Path(__file__).resolve().parents[1]
 LIBRARY = ROOT / "docs" / "references" / "library.bib"
 CROSSREF = "https://api.crossref.org/works/"
-USER_AGENT = "wl-xcon tools/check_references.py (https://github.com/jakewesterberg/wl-xcon)"
+#: A neutral tool identifier and nothing else: no person's name, address, account or
+#: user name goes into a network request (the lab's rule from 2026-10-08).
+USER_AGENT = "wl-xcon-check-references/1.0"
 TIMEOUT_SECONDS = 30
 
 # ---------------------------------------------------------------------------
@@ -60,6 +62,13 @@ TIMEOUT_SECONDS = 30
 ENTRY_START = re.compile(r"^@(?P<type>[A-Za-z]+)\{(?P<key>[^,\s{}]+),[ \t]*$")
 #: `<indent>field = {value},` on one line; the trailing comma is optional, as BibTeX's is.
 FIELD = re.compile(r"^[ \t]+(?P<name>[a-z][a-z0-9_-]*)[ \t]*=[ \t]*\{(?P<value>.*)\},?[ \t]*$")
+#: The one unbraced value allowed: `month` as one of BibTeX's twelve month macros, which
+#: is how Zotero's stock BibTeX exporter writes it (`month = mar`; `BibTeX.js` at
+#: zotero/translators 6d4490d, `writeField("month", months[date.month], true)`).
+MONTH = re.compile(
+    r"^[ \t]+(?P<name>month)[ \t]*=[ \t]*"
+    r"(?P<value>jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec),?[ \t]*$"
+)
 
 
 @dataclass(frozen=True)
@@ -88,11 +97,12 @@ def parse(text: str) -> list[Entry]:
 
     The subset: blank lines between entries; an entry opens with `@type{key,` alone on
     its line, has one `field = {value},` per line (indented, braces balanced, each
-    field once) and closes with `}` alone on its line. That is what the stock Zotero
-    exporter writes too (docs/references/README.md). Anything else -- a value quoted
-    with `"`, a field running onto a second line, `@string`, `@comment` -- is refused
-    rather than half-read, because a parser that skips what it does not understand
-    passes an entry it never looked at.
+    field once) and closes with `}` alone on its line. The one unbraced value is
+    `month` as a month macro (`month = mar`), which Zotero's stock exporter writes
+    (`MONTH`). Anything else -- a value quoted with `"`, any other bare value, a field
+    running onto a second line, `@string`, `@comment` -- is refused rather than
+    half-read, because a parser that skips what it does not understand passes an
+    entry it never looked at.
     """
     entries: list[Entry] = []
     current: tuple[str, str, dict[str, str], int] | None = None
@@ -111,7 +121,7 @@ def parse(text: str) -> list[Entry]:
             entries.append(Entry(*current))
             current = None
             continue
-        field = FIELD.match(line)
+        field = FIELD.match(line) or MONTH.match(line)
         if not field:
             raise Malformed(f"line {number}: expected `field = {{value}},` or `}}`, got {line!r}")
         if not _balanced(field["value"]):
@@ -195,7 +205,7 @@ def compare(entry: Entry, message: dict) -> list[str]:
         problems.append("Crossref lists no author")
     else:
         theirs = letters(lead.get("family") or lead.get("name") or "")
-        if not ours or not theirs or not (ours.endswith(theirs) or theirs.endswith(ours)):
+        if not ours or ours != theirs:
             problems.append(f"first author {ours!r}, Crossref {theirs!r}")
 
     titles = message.get("title") or [""]
@@ -209,7 +219,8 @@ def compare(entry: Entry, message: dict) -> list[str]:
 
 def fetch(doi: str, timeout: float = TIMEOUT_SECONDS) -> dict:
     """Crossref's `message` for `doi`. Raises `OSError` (`URLError`, `HTTPError`,
-    timeouts) or `ValueError` (a body that is not Crossref's JSON)."""
+    timeouts), `http.client.HTTPException` (a response cut short: `IncompleteRead`) or
+    `ValueError` (a body that is not Crossref's JSON)."""
     url = CROSSREF + urllib.parse.quote(doi, safe="/")
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -234,7 +245,7 @@ def check(entry: Entry, fetcher: Callable[[str], dict] = fetch) -> tuple[str, st
         if error.code == 404:
             why += " -- Crossref has no record of this DOI (registered elsewhere, or wrong)"
         return UNREACHABLE, f"{UNREACHABLE:<11} {entry.key} {doi}: {why}"
-    except (OSError, ValueError) as error:
+    except (OSError, http.client.HTTPException, ValueError) as error:
         return UNREACHABLE, f"{UNREACHABLE:<11} {entry.key} {doi}: {error}"
     problems = compare(entry, message)
     if problems:

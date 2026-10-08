@@ -15,8 +15,9 @@ on branch `engine-b`).
 No file held papers before this. Citations sat inline in specs and research notes, each written
 where it was needed, and nothing in the suite checked one. The cost showed the same week: engine spec
 §7.9 attributed "virtually identical" to Baylor, Nunn & Schnapf (1987) when the sentence is Schnapf,
-Kraft, Nunn & Baylor's (1988), and only an independent fact-check of the A2 research note found it
-(`docs/research/2026-10-08-engine-a2-color-research.md` §0).
+Kraft, Nunn & Baylor's (1988). The A2 research note found and corrected it
+(`docs/research/2026-10-08-engine-a2-color-research.md` §0), and the independent check of that note
+confirmed the correction.
 
 The library has two uses, and they pull in one direction: a reader checking a choice needs the claim
 next to the paper and where in the paper it is; someone writing a methods section needs the same
@@ -37,10 +38,13 @@ To the design then put to him in chat (the files and checks below), "Yes, and ru
 **What was verified about the tools, 2026-10-08** (sources in `docs/references/README.md`): Pandoc
 reads a `.bib` bibliography as BibLaTeX and renders `[@key]` citations with `--citeproc` (its manual;
 and pandoc 3.8, run on `docs/references/decisions.md`, rendered every citation); Zotero imports BibTeX
-and BibLaTeX (its documentation); Zotero's own BibTeX translator keeps an entry's key only if the
-item's Extra field carries `Citation Key: <key>`, and turns a BibTeX `note` into a child note that it
-exports as `annote` (its source, not tried in a running Zotero); Better BibTeX lets keys be fixed per
-item (its documentation), and whether it keeps a file's keys on import is UNVERIFIED.
+and BibLaTeX (its documentation); Zotero's own BibTeX translator does not store an imported entry's
+key, exports the key from a `Citation Key: <key>` line in the item's Extra field, else from the item's
+`citationKey` property, else makes a new one, writes `month` as a bare macro, and turns a BibTeX `note`
+into a child note that it exports as `annote` (its source, not tried in a running Zotero); Better
+BibTeX lets keys be fixed per item (its documentation), and that it pins a file's keys on import is
+said in a Zotero forum thread, not its documentation, so UNVERIFIED. After these answers the PI added
+that **the lab's Zotero runs Better BibTeX** (2026-10-08).
 
 ## Decision
 
@@ -58,9 +62,10 @@ item (its documentation), and whether it keeps a file's keys on import is UNVERI
   link in `decisions.md` names a file that exists, and every decision has its three lines.
 - `tools/check_references.py` compares each DOI with Crossref's record (year, first author, title),
   run by hand when papers are added; never in CI, since it needs the network.
-- **A Zotero group is optional**: the lab may import `library.bib` into one and export back to it, and
-  the file in this repository stays the record. An export comes back only through a commit that passes
-  the test.
+- **A Zotero group is optional**: the lab may import `library.bib` into one and export back to it
+  through Better BibTeX, which its Zotero runs, keys pinned on the way in and kept on the way out; the
+  file in this repository stays the record. An export comes back only through a commit that passes the
+  test.
 - No PDFs in the repository, which is public under Apache-2.0.
 - **No new dependency.** The test and the checker use Python's standard library; Pandoc and Zotero are
   programs a person runs, not imports of this package, so ADR-0004's inventory does not change.
