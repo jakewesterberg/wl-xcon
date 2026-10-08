@@ -34,6 +34,7 @@ error and one that understates it. See
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from dataclasses import dataclass
 from enum import StrEnum
@@ -687,8 +688,10 @@ class Collector:
                 self.fixations(which), tested_eccentricity_deg=tested_eccentricity_deg
             )
             maps.append(eye_map)
+            # Tagged by eye, every other field kept (the engine B final review): rebuilt from
+            # three of them, a warning lost the kinds it is accepted in.
             findings.extend(
-                Finding(f"{f.code}:{which}", f.detail, f.blocking) for f in eye_findings
+                dataclasses.replace(f, code=f"{f.code}:{which}") for f in eye_findings
             )
         return maps[0], maps[1], findings
 

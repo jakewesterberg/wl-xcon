@@ -30,6 +30,7 @@ from wl_xcon.calibration import (
 from wl_xcon.bounds import Bounds, Ceiling, Floor
 from wl_xcon.dio import Simulated as Card
 from wl_xcon.eye import Replay, Tracker, parse
+from wl_xcon.findings import NOT_RECORDING, Finding
 from wl_xcon.gaze import Calibrating, Tracked
 from wl_xcon.geometry import Geometry
 from wl_xcon.photometry import SRGB
@@ -393,6 +394,21 @@ def test_the_collector_fits_both_eyes_from_held_fixations():
     assert left.model is Model.SECOND_ORDER
     assert [f for f in findings if f.blocking] == []
     assert left.n_points == 13
+
+
+def test_the_collector_tags_each_finding_by_eye_and_keeps_every_other_field(monkeypatch):
+    """The engine B final review: the tag rebuilt each finding from its code, detail and
+    blocking, so a warning came out accepted in no session kind."""
+    said = "a warning fit_eye gives"
+    warned = Finding("a-stand-in", said, blocking=False, accepted_in=NOT_RECORDING)
+    monkeypatch.setattr("wl_xcon.calibration.fit_eye", lambda fixations, **_: (None, [warned]))
+
+    _, _, findings = Collector().fit()
+
+    assert findings == [
+        Finding("a-stand-in:left", said, blocking=False, accepted_in=NOT_RECORDING),
+        Finding("a-stand-in:right", said, blocking=False, accepted_in=NOT_RECORDING),
+    ]
 
 
 def test_a_target_worked_twice_still_counts_once():
