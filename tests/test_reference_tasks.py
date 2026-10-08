@@ -14,6 +14,7 @@ import pytest
 
 from _calibrations import LINEAR
 from _rig import DIRECT, RIG
+from wl_xcon import screen
 from wl_xcon.calibration import constellation
 from wl_xcon.cli import _load_trial
 from wl_xcon.check import check
@@ -366,3 +367,25 @@ def test_simulation_reaches_every_outcome_the_training_variant_declares(training
 
     assert census.hangs == 0
     assert census.uncovered(training) == set()
+
+
+def test_each_color_reads_its_own_luminance_setting_and_nothing_else(training):
+    """Q3: a person removes a brightness cue live, one color at a time. Red target among green
+    distractors, then the reverse; moving one setting moves only that color's light."""
+    choices = {p.name: p.choices for p in training.params}
+    array = _load("visual_search_training", "ARRAY")
+
+    def lights(target, among, red, green):
+        values = {**SEARCH_VALUES, "target_looks": choices["target_looks"][target],
+                  "distractors": choices["distractors"][among],
+                  "red_luminance": red, "green_luminance": green}
+        s = screen.resolve({"search": array}, values, training, GEOMETRY, frame_period=1 / 240)
+        by_index = {i.order[1]: i.fill.xyz[1] for i in s.items}
+        return by_index[SEARCH_VALUES["target_index"]], by_index[0]
+
+    # target_looks[0] is the red disc and distractors[0] the green one.
+    assert lights(0, 0, red=5.0, green=9.0) == pytest.approx((5.0, 9.0))
+    assert lights(0, 0, red=7.0, green=9.0) == pytest.approx((7.0, 9.0))
+    assert lights(0, 0, red=5.0, green=11.0) == pytest.approx((5.0, 11.0))
+    # And the other way about: green target, red distractors.
+    assert lights(1, 1, red=5.0, green=9.0) == pytest.approx((9.0, 5.0))
