@@ -116,7 +116,8 @@ def test_colour_without_a_calibration_is_refused():
 
 
 def test_an_achromatic_task_needs_no_calibration():
-    # Absolute luminance on the default calibration is a session warning (engine build B, XC-243).
+    # With no calibration a Gray is not flagged here; on the default calibration it is the
+    # session's one warning (`warnlist.of_calibration`, accepted at the open).
     assert codes(a_task(Disc(size=1.0, color=Gray(40.0))), calibration=None) == set()
 
 

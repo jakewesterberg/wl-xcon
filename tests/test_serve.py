@@ -33,6 +33,7 @@ import pytest
 from _frames import ENDPOINT, frame, idle
 from _ports import endpoints as free_endpoints
 from _rig import DIRECT, PATH as RIG_FILE, RIG
+from _sessions import OPEN_ACCEPTED
 # Autouse: every `ZmqLink`/`ZmqConsole` built here, `wlx serve`'s telemetry thread's and
 # `wlx run --link`'s included, has its context destroyed at teardown without `close()`.
 from _zmq_release import _every_zmq_context_released  # noqa: F401
@@ -2465,13 +2466,13 @@ def test_a_parse_refusal_is_a_bad_command():
 # --- P4d-2b b3a-2: the service's commands from the page ------------------------------
 
 #: The page's `open` body, every field as the *New session* dialog sends it -- **except
-#: `session_kind`, which the dialog (`web.openSession`) sends only from engine build B's
-#: Task 14**; until then an open from the real page is refused.
+#: `session_kind` and `accepted`, which the dialog (`web.openSession`) sends only from engine
+#: build B's Task 14**; until then an open from the real page is refused.
 OPEN_BODY = {
     "kind": "open", "by": "jake", "session_id": "2027-01-14_01", "animal": "REFERENCE",
     "deployment": "rig_fixed", "view": "direct", "session_kind": "training",
     "departure": "09:30", "delivered_today": 12, "answer": None, "amend_to": None,
-    "amend_reason": "",
+    "amend_reason": "", "accepted": [list(pair) for pair in OPEN_ACCEPTED],
 }
 START_BODY = {
     "kind": "start", "by": "jake", "task": "fixation_detection.py", "values": {},
@@ -2487,13 +2488,13 @@ PAGE = Box("jake")
         (OPEN_BODY, OpenSession(
             by=PAGE, session_id="2027-01-14_01", animal="REFERENCE", deployment="rig_fixed",
             view="direct", session_kind="training", departure="09:30", delivered_today=12.0,
-            answer=None, amend_to=None, amend_reason="",
+            answer=None, amend_to=None, amend_reason="", accepted=OPEN_ACCEPTED,
         )),
         ({**OPEN_BODY, "answer": "amend", "amend_to": "09:10", "amend_reason": "typed 9:30"},
          OpenSession(
             by=PAGE, session_id="2027-01-14_01", animal="REFERENCE", deployment="rig_fixed",
             view="direct", session_kind="training", departure="09:30", delivered_today=12.0,
-            answer="amend", amend_to="09:10", amend_reason="typed 9:30",
+            answer="amend", amend_to="09:10", amend_reason="typed 9:30", accepted=OPEN_ACCEPTED,
         )),
         ({"kind": "check", "by": "jake", "task": "fixation_detection.py", "values": {}},
          CheckRun(by=PAGE, task="fixation_detection.py", values={})),
@@ -3914,13 +3915,13 @@ def _typed(seconds_ago: float = 0.0) -> str:
 
 def _open_body(**over) -> dict:
     """What the page's *New session* dialog sends (Task 6's `openSession`) -- **except
-    `session_kind`, which the dialog sends only from engine build B's Task 14**; until
-    then an open from the real page is refused."""
+    `session_kind` and `accepted`, which the dialog sends only from engine build B's Task
+    14**; until then an open from the real page is refused."""
     body = {
         "kind": "open", "session_id": "2027-01-14_01", "animal": "REFERENCE",
         "deployment": "rig_fixed", "view": "direct", "session_kind": "training",
         "departure": _typed(), "delivered_today": 0, "answer": None, "amend_to": None,
-        "amend_reason": "",
+        "amend_reason": "", "accepted": [list(pair) for pair in OPEN_ACCEPTED],
     }
     body.update(over)
     return body

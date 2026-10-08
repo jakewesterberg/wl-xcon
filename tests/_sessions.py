@@ -5,10 +5,11 @@ name does not start with `test_`."""
 from __future__ import annotations
 
 import time
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from _rig import DIRECT
+from wl_xcon import warnlist
 from wl_xcon.bounds import Bounds, Ceiling, Floor
 from wl_xcon.dio import Simulated as Card
 from wl_xcon.photometry import SRGB
@@ -18,6 +19,17 @@ from wl_xcon.welfare import Deployment, Simulated as Pump
 #: The wall these sessions read: this host's clock when the module loaded, so a time
 #: typed from it (`typed`) names the same instant on this host's calendar.
 WALL = time.time()
+
+#: What an open accepts in these tests unless one says otherwise: every warning `wlx taskd`
+#: lists at an open on the stand-in rig, which names no calibration -- the default's, and a
+#: chaired session's free head -- each as its code and its sentence (the engine B plan, call
+#: 25). Accepting the chaired one for a head-fixed session is harmless: only what is offered
+#: is asked for.
+OPEN_ACCEPTED = tuple(
+    entry.key
+    for entry in warnlist.of_calibration(SRGB, date(2027, 1, 14))
+    + warnlist.of_deployment(Deployment.RIG_CHAIRED)
+)
 
 
 def bounds(subject: str = "A", out_of_cage: float = 28_800.0) -> Bounds:

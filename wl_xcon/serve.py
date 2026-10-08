@@ -577,7 +577,7 @@ _SHAPES = {
     # P4d-2b b3a-2: `wlx taskd`'s own, by the wire's field names (`link._command_from`).
     "open": frozenset({
         "session_id", "animal", "deployment", "view", "session_kind", "departure",
-        "delivered_today", "answer", "amend_to", "amend_reason",
+        "delivered_today", "answer", "amend_to", "amend_reason", "accepted",
     }),
     "check": frozenset({"task", "values"}),
     "start": frozenset({"task", "values", "trials", "acknowledged"}),

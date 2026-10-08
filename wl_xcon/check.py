@@ -956,10 +956,12 @@ def _color_faults(trial: Trial, panel: Calibration | None) -> list[Finding]:
     params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
     for what, color in _colors(trial, params):
-        # Absolute luminance on the default calibration is a session warning, which the
-        # warnings list carries (engine build B, XC-243). Any other color with no
-        # calibration is unmeasured once, as written; with one, it is checked as each light
-        # it can be.
+        # With no calibration at all -- `wlx taskd` while the rig's record will not load (the
+        # engine B plan, call 19), or a direct `check()` call -- an absolute luminance is not
+        # checked here, since every run's pre-flight fails on the missing calibration; on the
+        # default it is the session's one warning (`warnlist.of_calibration`, accepted at the
+        # open). Any other color with no calibration is unmeasured once, as written; with one,
+        # it is checked as each light it can be.
         if panel is None and isinstance(color, Gray):
             continue
         try:

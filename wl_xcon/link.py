@@ -1402,7 +1402,9 @@ class OpenSession:
     `rig_chaired`), the setup (`direct` or `stereoscope`), what the session is for,
     training, piloting or recording (engine spec §19.1), the departure **as typed**,
     the fluid already given today or `None`, and the answer to a far departure --
-    `None`, `"confirm"`, or `"amend"` with the corrected time as typed and a reason."""
+    `None`, `"confirm"`, or `"amend"` with the corrected time as typed and a reason --
+    and the warnings the person accepted for the session, each its code and its sentence
+    (engine spec §19.3; the engine B plan, call 25)."""
 
     KIND: ClassVar[str] = "open"
 
@@ -1417,6 +1419,7 @@ class OpenSession:
     answer: str | None
     amend_to: str | None
     amend_reason: str
+    accepted: tuple
 
 
 @dataclass(frozen=True, slots=True)
@@ -1603,6 +1606,7 @@ def _encode_command(command: Command) -> bytes:
             "departure": command.departure,
             "delivered_today": command.delivered_today, "answer": command.answer,
             "amend_to": command.amend_to, "amend_reason": command.amend_reason,
+            "accepted": [list(pair) for pair in command.accepted],
         }
     elif isinstance(command, (CheckRun, StartRun)):
         payload = {
@@ -1898,6 +1902,24 @@ def _command_from(data: dict) -> Command:
                 f"an amend_reason is text of at most {NOTE_LIMIT} characters, so this "
                 f"one is refused",
             )
+        accepted = data.get("accepted")
+        if (
+            not isinstance(accepted, (list, tuple))
+            or len(accepted) > ACKNOWLEDGED_LIMIT
+            or not all(
+                isinstance(pair, (list, tuple))
+                and len(pair) == 2
+                and isinstance(pair[0], str) and 0 < len(pair[0]) <= TEXT_LIMIT
+                and isinstance(pair[1], str) and 0 < len(pair[1]) <= NOTE_LIMIT
+                for pair in accepted
+            )
+        ):
+            raise CommandRefused(
+                "open", by,
+                f"a session's accepted warnings are at most {ACKNOWLEDGED_LIMIT}, each a code of "
+                f"at most {TEXT_LIMIT} characters and its sentence of at most {NOTE_LIMIT}, and "
+                f"{_quoted(accepted)} is not that, so it is refused",
+            )
         return OpenSession(
             by=by,
             session_id=_word(data, "session_id", "open", by),
@@ -1910,6 +1932,7 @@ def _command_from(data: dict) -> Command:
             answer=data.get("answer"),
             amend_to=_word(data, "amend_to", "open", by, optional=True),
             amend_reason=reason,
+            accepted=tuple((code, detail) for code, detail in accepted),
         )
     if kind in ("check", "start"):
         by = _actor(data.get("by"), kind)

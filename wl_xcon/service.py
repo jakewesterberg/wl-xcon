@@ -722,7 +722,14 @@ class Service:
         the terminal's own rules; and **nothing written until it is accepted**, so a
         refused or unanswered departure leaves no folder and its id free (the b3a-1
         plan, decision 11). A far departure with no answer puts the question on the idle
-        frame, with a refusal row saying what to send."""
+        frame, with a refusal row saying what to send.
+
+        **And its warnings** (engine build B): those the session's kind accepts, accepted on
+        the form by their sentences, or the open is refused before anything is marked; a
+        calibration problem is never one of them (it fails every run instead). If the
+        warnings cannot be listed, the open goes ahead with none offered, says so on the
+        session's feed, and no run starts until they can be (call 31). Each accepted one is
+        written once the service holds the session."""
         if self.session is not None:
             self._refuse(
                 "open",
@@ -757,6 +764,30 @@ class Service:
                 return
         session = self._built("open", command.by, lambda: self._session_for(command))
         if session is None:
+            return
+        # **The warnings this open asks to accept** (engine spec §19.3: "Accepted once per
+        # session, at open, recorded"): those the session's kind accepts, each by its code and
+        # its sentence (the engine B plan, calls 7 and 25), refused before anything is marked
+        # or written, as a refused departure is. One no kind accepts -- a calibration that will
+        # not load or is dated after today -- is not offered and never refuses an open: it
+        # fails every run's pre-flight (call 19). This is the open's only new refusal.
+        try:
+            listed, unlisted = self.open_warnings(Deployment(command.deployment)), None
+        except Exception as broken:  # noqa: BLE001 -- the engine B plan, call 31
+            # A fault listing them never refuses an open (call 31): nothing is offered, the
+            # fault is said on the session's feed once it opens, and every run's pre-flight
+            # fails on the same listing until it lists (`_preflight`). Said through `_fault`,
+            # so one whose own `str()` raises is said by its type and the open still goes ahead.
+            listed, unlisted = [], _fault(broken)
+        offered = [entry for entry in listed if command.session_kind in entry.accepted_in]
+        unaccepted = warnlist.owed(offered, set(command.accepted))
+        if unaccepted:
+            self._refuse(
+                "open", command.by,
+                f"a session opens once its warnings are accepted, and these are not, as they "
+                f"read now: {warnlist.sentence(unaccepted)}. Nothing was recorded: send it "
+                f"again accepting them",
+            )
             return
         try:
             decision = _marks.page_departure(
@@ -795,6 +826,17 @@ class Service:
             session.head_fixed(session.wall_now())
         session.offered_tasks = self._tasks()
         self.session = session
+        if unlisted is not None:
+            self._refuse(
+                "open", command.by,
+                f"the warnings an open asks to accept could not be listed ({unlisted}); the "
+                f"session opened with none accepted, and no run starts until they can be listed",
+            )
+        # Written once the service holds the session (the engine B plan, call 22). A fault
+        # here is not caught, as `record_departure`, `open` and `head_fixed` above are not: it
+        # reaches `wlx taskd`'s fault handler, which records a held session's return as not
+        # recorded and its end, so the next start finds it stranded.
+        session.accept(offered, by=command.by, how="open", run=None)
 
     def _resume(self, command: _link.ResumeSession) -> None:
         """**Not on the welfare-critical list** (the PI, 2026-10-02: "None of them"), though

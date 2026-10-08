@@ -23,9 +23,9 @@ from _calibrations import BACKGROUND, LINEAR, OBSERVER, PRIMARIES, measured
 from _ports import endpoints as free_endpoints
 from _rig import PATH as RIG_FILE
 from _rig import RIG, naming
-from _sessions import WALL, malformed_task, typed, whole_point_task
+from _sessions import OPEN_ACCEPTED, WALL, malformed_task, typed, whole_point_task
 from _zmq_release import _every_zmq_context_released  # noqa: F401
-from wl_xcon import preflight, resume, stranded
+from wl_xcon import preflight, resume, stranded, warnlist
 from wl_xcon.actor import Box
 from wl_xcon.cli import _load_allocation, _load_rig, main
 from wl_xcon.bounds import Exceeded
@@ -52,7 +52,7 @@ from wl_xcon.link import (
     ZmqConsole,
     ZmqLink,
 )
-from wl_xcon.photometry import ID_LIMIT, RECORD_FIELDS
+from wl_xcon.photometry import ID_LIMIT, RECORD_FIELDS, SRGB
 from wl_xcon.record import welfare_note
 from wl_xcon.scheduler import Block, Condition
 from wl_xcon.service import Service, _fresh_seed
@@ -141,7 +141,7 @@ def _open(**over) -> OpenSession:
     fields = dict(
         by=BY, session_id="2027-01-14_01", animal="REFERENCE", deployment="rig_fixed",
         view="direct", session_kind="training", departure=typed(60), delivered_today=0.0,
-        answer=None, amend_to=None, amend_reason="",
+        answer=None, amend_to=None, amend_reason="", accepted=OPEN_ACCEPTED,
     )
     fields.update(over)
     return OpenSession(**fields)
@@ -462,6 +462,152 @@ def test_a_stranded_sessions_return_is_taken_alike_when_the_calibration_record_w
 
     assert [row["kind"] for row in bad_rows] == ["departure", "session opened", "returned"]
     assert bad_rows == good_rows
+
+
+def _calibration_record(folder, measured_on: date) -> Path:
+    """A measured calibration record, dated `measured_on`, for a rig that names one."""
+    path = folder / "cal.json"
+    path.write_text(json.dumps({
+        "id": "rig1", "measured_on": measured_on.isoformat(), "observer": OBSERVER,
+        "primaries": PRIMARIES, "background": BACKGROUND,
+        "transfer": {c: [list(p) for p in zip(LINEAR.levels, LINEAR.fractions)]
+                     for c in ("red", "green", "blue")},
+    }))
+    return path
+
+
+def test_an_open_that_does_not_accept_its_warnings_is_refused_and_writes_nothing(tmp_path):
+    service = _service(tmp_path)
+
+    frame = _step(service, _open(accepted=()))
+
+    assert isinstance(frame, Idle) and service.session is None
+    (why,) = _refused(frame)
+    assert "default calibration" in why and "Nothing was recorded" in why
+    assert not (service.root / "2027-01-14_01").exists()
+
+
+def test_a_chaired_open_also_accepts_its_free_head(tmp_path):
+    service = _service(tmp_path)
+    (default,) = warnlist.of_calibration(SRGB, date(2027, 1, 14))
+
+    (why,) = _refused(_step(service, _open(deployment="rig_chaired", accepted=(default.key,))))
+
+    assert "head free" in why and service.session is None
+
+
+def test_an_open_that_accepted_an_older_sentence_is_refused(tmp_path):
+    """Call 7: the same code with another sentence is not what was accepted."""
+    service = _service(tmp_path)
+
+    (why,) = _refused(_step(service, _open(accepted=(("default calibration", "an older sentence"),))))
+
+    assert "default calibration: the rig names no measured calibration" in why
+    assert service.session is None
+
+
+def test_a_calibration_problem_never_refuses_an_open(tmp_path):
+    """The review's C1: a record dated after today, or one that will not load, is a warning no
+    kind accepts, so it is not offered at the open and never refuses it; every run's
+    pre-flight fails on it instead (Task 12)."""
+    future = _calibration_record(tmp_path, date.fromtimestamp(WALL) + timedelta(days=1))
+    (tmp_path / "broken.json").write_text("{")
+
+    for name, record in (("future", future), ("broken", tmp_path / "broken.json")):
+        folders = _folders(tmp_path / name)
+        service = _made(folders, rig=dataclasses.replace(RIG, calibration=str(record)))
+
+        frame = _step(service, _open(accepted=()))
+
+        assert frame.phase == "between_runs", name
+        assert _kinds(folders[2]) == ["departure", "session opened"], name
+        assert not (folders[2] / "2027-01-14_01" / "xcon" / "warnings.jsonl").exists(), name
+
+
+def test_an_open_records_each_warning_it_accepted_with_who_and_how(tmp_path):
+    service = _service(tmp_path)
+
+    _step(service, _open(deployment="rig_chaired"))
+
+    rows = _jsonl(service.root / "2027-01-14_01" / "xcon" / "warnings.jsonl")
+    assert [(r["code"], r["how"], r["by"], r["session_kind"], r["run"]) for r in rows] == [
+        ("default calibration", "open", BY_MAP, "training", None),
+        ("head free", "open", BY_MAP, "training", None)]
+
+
+def test_an_open_that_accepted_an_older_list_is_refused_naming_what_it_missed(tmp_path):
+    """Review Focus 2: a dialog drawn while the calibration was 30 days old, sent once it is
+    31 or more; the wall moves two days so a 25-hour day cannot hide the second."""
+    wall = _Wall()
+    record = _calibration_record(tmp_path, date.fromtimestamp(WALL) - timedelta(days=30))
+    service = _made(_folders(tmp_path), wall=wall, rig=dataclasses.replace(RIG, calibration=str(record)))
+    assert [w.code for w in _step(service).warnings] == ["head free"], "no age yet; the chaired one always"
+    wall.at += 2 * 86_400
+
+    (why,) = _refused(_step(service, _open(departure=typed(-2 * 86_400 + 60), accepted=())))
+
+    assert "calibration age" in why and service.session is None
+
+
+def test_a_fault_writing_the_opens_warnings_leaves_the_session_held_and_records_that_its_return_was_not(
+    tmp_path, monkeypatch
+):
+    """The review's I1: the rows are written once the service holds the session, and a fault
+    writing them is not caught in `_open`, as its other writes after the departure are not.
+    `wlx taskd`'s fault handler (`service.run`), which ends only a held session, then records
+    the return as not recorded and the session's end, and the next start finds the session
+    stranded and resumable."""
+    folders = _folders(tmp_path)
+    service = _made(folders)
+
+    def disk_full(self, entries, **_fields):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(Session, "accept", disk_full)
+
+    with pytest.raises(OSError, match="No space left on device"):
+        _step(service, _open())
+
+    assert service.session is not None and service.session.spec.session_id == "2027-01-14_01"
+    service.shutdown("wlx taskd stopped on a fault with the session open: OSError")
+    assert _kinds(folders[2]) == ["departure", "session opened", "return not recorded", "session ended"]
+    (found,) = _made(folders).stranded
+    assert (found.session_id, found.resumable) == ("2027-01-14_01", True)
+
+
+def test_a_fault_listing_the_warnings_never_refuses_an_open(tmp_path, monkeypatch):
+    """The second review's Minor 1, as ruled (Call 31): the open goes ahead with nothing
+    offered for acceptance and says so on the session's feed; every run's pre-flight then
+    fails on the same listing until it lists (Task 12)."""
+    service = _service(tmp_path)
+
+    def broken(self):
+        raise RuntimeError("broken on purpose")
+
+    monkeypatch.setattr(Service, "calibration_warnings", broken)
+
+    opened = _step(service, _open(accepted=()))
+
+    assert opened.phase == "between_runs"
+    assert _kinds(service.root) == ["departure", "session opened"]
+    assert "could not be listed (RuntimeError: broken on purpose)" in _refused(opened)[-1]
+    assert not (service.root / "2027-01-14_01" / "xcon" / "warnings.jsonl").exists()
+
+
+def test_a_listing_fault_that_cannot_be_said_never_refuses_an_open(tmp_path, monkeypatch):
+    """Call 31 again, for a fault whose own `str()` raises: said by its type (`_fault`), as the
+    idle frame says one, so saying it never becomes a second fault that stops `wlx taskd`."""
+    service = _service(tmp_path)
+
+    def broken(self):
+        raise _Unsayable
+
+    monkeypatch.setattr(Service, "calibration_warnings", broken)
+
+    opened = _step(service, _open(accepted=()))
+
+    assert opened.phase == "between_runs"
+    assert "could not be listed (_Unsayable)" in _refused(opened)[-1]
 
 
 def test_a_session_id_or_animal_that_is_not_one_folder_name_is_refused_and_nothing_is_written(tmp_path):
@@ -2089,14 +2235,14 @@ def test_a_resume_names_who_resumed_it_not_who_accepted_a_warning(tmp_path):
 
     _step(second, ResumeSession(by=BY, session_id="2027-01-14_01"))
 
-    assert [w[3] for w in second.session.warnings] == [Box("ann")]
+    assert [w[3] for w in second.session.warnings] == [BY, Box("ann")], "the open's, then ann's"
     (resumed,) = [row for row in _rows(folders[2]) if row["kind"] == "session resumed"]
     assert resumed["by"] == BY_MAP
 
 
 def _accepted_then_stopped(folders, wall, accepted_in=SESSION_KINDS) -> tuple:
-    """A session opened at `WALL`, a warning accepted by ann 5 s later, and its process
-    stopped: the warnings it gave while it ran."""
+    """A session opened at `WALL` accepting the default calibration, a warning accepted by ann
+    5 s later, and its process stopped: the warnings it gave while it ran."""
     first = _made(folders, wall=wall)
     _step(first, _open())
     wall.at = WALL + 5.0
@@ -2114,7 +2260,7 @@ def test_a_restored_warning_keeps_when_it_was_accepted(tmp_path):
     _step(second, ResumeSession(by=BY, session_id="2027-01-14_01"))
 
     assert second.session.resumed_at == WALL + 100.0
-    assert [w[4] for w in second.session.warnings] == [WALL + 5.0]
+    assert [w[4] for w in second.session.warnings] == [WALL, WALL + 5.0]
 
 
 def test_a_resumed_session_gives_the_warnings_the_live_one_gave(tmp_path):
@@ -2128,7 +2274,7 @@ def test_a_resumed_session_gives_the_warnings_the_live_one_gave(tmp_path):
     _step(second, ResumeSession(by=BY, session_id="2027-01-14_01"))
 
     assert second.session.warnings == live
-    assert live == (("head free", "the head is free", SESSION_KINDS, Box("ann"), WALL + 5.0),)
+    assert live[-1] == ("head free", "the head is free", SESSION_KINDS, Box("ann"), WALL + 5.0)
 
 
 def test_a_torn_warnings_file_is_not_resumable_and_its_return_is_still_taken(tmp_path):
