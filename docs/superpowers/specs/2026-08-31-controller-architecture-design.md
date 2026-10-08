@@ -301,8 +301,9 @@ chair time bounds nothing), token conversion, and every stimulation bound in §1
 
 **Fluid has a floor, not a ceiling** (PI, 2026-09-06; this paragraph said "daily fluid
 budget" until then). The daily figure is a *minimum* the animal must reach, supplemented
-by hand after the session — so no delivery is ever refused on volume, and only the
-per-delivery magnitude is bounded above. S8's head carries the full correction.
+by hand after the session [@nc3rs2012refining; @gray2016physiological] — so no delivery is
+ever refused on volume, and only the per-delivery magnitude is bounded above. S8's head
+carries the full correction.
 
 Precedence: **rig defaults -> subject defaults -> task defaults -> session overrides ->
 live edits**, with the bounded config as a ceiling over all of it. The resolved set is
@@ -516,8 +517,9 @@ Parameter handling:
 - **Read back after writing.** Query and confirm before any trial can trigger.
 - **Bounded by the rig/subject config**: amplitude, pulse width, frequency, train duration,
   duty cycle, charge per phase, charge density — ceilings the task cannot exceed and the
-  console cannot override.
-- **Charge balance is verified, not assumed.**
+  console cannot override [@mccreery1990charge; @shannon1992model; @merrill2005electrical;
+  @rajan2015effects].
+- **Charge balance is verified, not assumed.** [@cogan2008neural]
 - **Delivery is counted against the RHS stim-output line**, not against our intent. Session
   stim limits are enforced against deliveries actually observed — the difference between a
   limit and a hope.

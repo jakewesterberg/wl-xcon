@@ -209,7 +209,8 @@ The split between the two is what keeps each reviewable. `bounds.py` is **pure**
 ceilings, the daily *floor*, and the arithmetic of whether a number is past one or short of
 it, with no clock, no hardware and no state outliving a question. **Fluid has a floor, not a
 ceiling** (PI, 2026-09-06): the daily figure is a minimum the animal must reach, supplemented
-by hand after the session, so a delivery is never refused on volume and `Floor` is a different
+by hand after the session [@nc3rs2012refining; @gray2016physiological], so a delivery is never
+refused on volume and `Floor` is a different
 type from `Ceiling` precisely so the two cannot be confused at a call site. **One ceiling ends
 a session, and it is time out of the cage** (PI, 2026-09-19): out of the home cage to back in
 it, eight hours (the PI corrected the twelve recorded here on 2026-10-01), which is the

@@ -86,8 +86,8 @@ RHS. No software in the trigger path (S6 §2).
 
 Every bound in S8 §4 applies. Two are specific here:
 
-- **Charge balance is verified, not assumed.** A biphasic imbalance is not something to discover
-  from tissue.
+- **Charge balance is verified, not assumed.** [@cogan2008neural; @merrill2005electrical] A
+  biphasic imbalance is not something to discover from tissue.
 - **Deliveries are counted against the RHS stim-output line**, which returns to the task PC as a
   digital input — not against our intent. Session limits are therefore enforced against
   stimulation that **actually happened**, which is the difference between a limit and a hope.

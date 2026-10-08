@@ -170,7 +170,8 @@ days are exactly when an unlogged one would become a silent confound.
 *Corrected 2026-09-06.* This note is titled "accounting floor" and meant it in the sense of a
 lower bound on a number. It is now a floor in the other sense too: the daily fluid figure is a
 **minimum the animal must reach**, supplemented by hand after the session, and there is no
-ceiling on earned reward (PI). The reconciliation matters just as much under a floor and in
+ceiling on earned reward (PI) [@nc3rs2012refining; @gray2016physiological]. The
+reconciliation matters just as much under a floor and in
 the same direction — a shortfall computed from what we *commanded* would ask for a top-up the
 animal has already had from the panel button.
 

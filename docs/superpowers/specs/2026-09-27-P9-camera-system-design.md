@@ -16,7 +16,8 @@
 
 ## 1. What the PI decided (2026-09-27, asked in plain terms)
 
-- **An always-on view of the animal**, for sleepiness and general state, and **the lab's
+- **An always-on view of the animal**, for sleepiness and general state
+  [@chang2016tracking; @womelsdorf2021kiosk], and **the lab's
   behavioral cameras are the same cameras**: "there is no seperate monitoring vs
   behavioral. the behavioral ones become, in effect, the monitoring ones as well. dual
   purpose."
@@ -102,7 +103,8 @@
     most 5 ms, and the lamps' duty cycle is the exposure's. That means less light, heat and
     glow, and the lamps stay locked to the frames.
   - **Visibility, kept as a check.** An 850 nm lamp's faint red glow could be a stimulus in a
-    dark visual task. Whether rhesus monkeys see it at these levels is **UNVERIFIED**.
+    dark visual task [@sliney1976visual]. Whether rhesus monkeys see it at these levels is
+    **UNVERIFIED**.
     - Each emitter has a visible-cut filter (a MidOpt LP830 long-pass).
     - The lamps sit outside the animal's view.
     - **Darkness at the eye position is verified at bring-up**, as S4's photodiode patches
@@ -181,7 +183,8 @@
   - end to end: a simulated session, the simulated box and the console together.
 - **Bring-up checks on real hardware** (added to the verification list):
   1. All cameras' exposure stamps agree, and wl-preproc decodes the barcode from the primary.
-  2. 8 cameras at 200 fps for 12 hours with no drops, and the GPU encoder keeps up.
+  2. 8 cameras at 200 fps for 12 hours (a margin over the eight-hour limit, §5) with no drops,
+     and the GPU encoder keeps up.
   3. **Light.**
      - With the 850 nm lamps strobing at session settings, a dark-adapted observer at the
        eye position sees no glow, as S4's patch check requires.

@@ -167,8 +167,9 @@ at KU Leuven. Per Dell's user guide and product page, read 2026-09-28: the **sam
 (Supports up to 3840 x 2160, 240 Hz, DSC, HDR)"**, so 4K/240 needs DSC (§5.3's rule is to avoid
 it). No QD-OLED generation or "tandem" is named; pixel refresh "is activated automatically when you
 have used the monitor for 4 hours" and "takes approximately 6 to 8 minutes", and the guide does not
-say whether it waits for standby (UNVERIFIED — a 12-hour session would meet it); no pixel shift or
-proximity sensor is mentioned. **Re-check Dell's lineup in January 2027, before purchase**, for a
+say whether it waits for standby (UNVERIFIED — any session past four hours would meet it); no pixel
+shift or proximity sensor is mentioned. *(Corrected 2026-10-08: this said "a 12-hour session
+would meet it".)* **Re-check Dell's lineup in January 2027, before purchase**, for a
 27-inch 4K QD-OLED with DisplayPort 2.1 UHBR20 (uncompressed 4K/240).
 
 ASUS lists, per the spec page and product page read 2026-09-27 [@asus2026rog;
@@ -626,7 +627,7 @@ enforces a cap, are compared in §7.10.
 - **IEC 62471:2006 was not read.** IEC sells it, so its limit values are **UNVERIFIED** here.
 - **ICNIRP 2013** (*Health Physics* 105(1):74–96;
   [PDF](https://www.icnirp.org/cms/upload/publications/ICNIRPVisible_Infrared2013.pdf), read
-  2026-09-27) gives these limits:
+  2026-09-27) gives these limits [@icnirp2013icnirp]:
   - **The cornea and lens, 780 nm–3 µm** (its eqns 20–21):
     - 18 · t^−0.75 kW m⁻² for t under 1000 s;
     - **100 W m⁻² (10 mW cm⁻²) for 1000 s or longer.**
@@ -723,7 +724,7 @@ enforces a cap, are compared in §7.10.
 | C13 | Motherboard | The GPU, two x4 USB cards and two NVMe drives, with no slot disabling another. ATX, for a rack case | ASUS **ProArt X870E-Creator WiFi**. From the CPU: 2 × PCIe 5.0 x16 slots (x16, x8/x8, or x8/x4/x4 with M.2_2) and M.2_1 and M.2_2 (PCIe 5.0 x4). From the chipset: a PCIe 4.0 x16 slot running at x4, and M.2_3 and M.2_4 (PCIe 4.0 x4). ATX, 30.5 × 24.4 cm; 10 GbE and 2.5 GbE | 1 | [ASUS spec](https://www.asus.com/motherboards-components/motherboards/proart/proart-x870e-creator-wifi/techspec/); [ASUS US](https://www.asus.com/us/motherboards-components/motherboards/proart/proart-x870e-creator-wifi/) | 549.99 (ASUS Store, showing "Notify me") | *Decided* for the list. The slot map is in §7.6. The 10 GbE is for the copy to wl-nas |
 | C14 | RAM | Acquisition buffers; no swapping; runs on AM5 | Corsair **Vengeance 32 GB (2 × 16 GB) DDR5-4800 CL40**, CMK32GX5M2A4800C40 | 1 kit | [Corsair DDR5 page](https://www.corsair.com/us/en/c/memory/ddr5-ram) | 399.99 (sale; list 505.99) | **Kept** (PI). It is a DDR5-4800 kit, under the 9700X's listed DDR5-5600. Whether it is on the board's qualified list is **UNVERIFIED** |
 | C15 | GPU | Two or more NVENC, within the 12-session cap (§7.5) | NVIDIA **GeForce RTX 5070 Ti**: 2 × ninth-generation NVENC; 300 W; NVIDIA asks for 750 W of system power | 1 | [NVIDIA 5070 family](https://www.nvidia.com/en-us/geforce/graphics-cards/50-series/rtx-5070-family/); [NVIDIA matrix](https://developer.nvidia.com/video-encode-and-decode-gpu-support-matrix-new) | from 749 (NVIDIA's "starting at"; partner boards vary) | **Kept, pending the encode measurement** (PI). For the rack case, a board of NVIDIA's SFF-Ready size (§7.6) |
-| C16 | Video NVMe | 4 cameras for 12 h at an ASSUMED 10:1 is 5.37 TB (§7.6) | 2 × Samsung **990 PRO 4 TB** (MZ-V9P4T0B/AM), 8 TB in all | 2 | [Samsung](https://www.samsung.com/us/memory-storage/nvme-ssd/990-pro-pcie-4-0-nvme-ssd-4tb-sku-mz-v9p4t0b-am/) | 1,099.99 each | **Two drives, decided** (PI). How many hours they hold *waits on* P9's measured bitrate |
+| C16 | Video NVMe | 4 cameras for 12 h (a margin over the eight-hour limit) at an ASSUMED 10:1 is 5.37 TB (§7.6) | 2 × Samsung **990 PRO 4 TB** (MZ-V9P4T0B/AM), 8 TB in all | 2 | [Samsung](https://www.samsung.com/us/memory-storage/nvme-ssd/990-pro-pcie-4-0-nvme-ssd-4tb-sku-mz-v9p4t0b-am/) | 1,099.99 each | **Two drives, decided** (PI). How many hours they hold *waits on* P9's measured bitrate |
 | C17 | Power supply | 750 W or more (NVIDIA) | Seasonic **CORE GX ATX 3.1 (2024), 850 W**: 80 PLUS Gold; fully modular; a native 12V-2x6 cable (up to 600 W); ATX 3.1 and PCIe 5.1; 140 × 150 × 86 mm; 7-year warranty. Retailers name it **CORE GX-850 ATX3** | 1 | [Seasonic](https://seasonic.com/core-gx-atx-3-2024/); [Newegg (the 1000 W sibling)](https://www.newegg.com/seasonic-usa-atx-3-1-1000-w-80-plus-gold-certified-power-supply-core-gx-1000-atx3/p/N82E16817151283) | **UNVERIFIED**. Newegg offered the 750 W at 114.99 and the 1000 W at 159.99, not the 850 W. Micro Center and B&H served bot checks | **Seasonic, decided** (PI). The model name is "CORE GX ATX 3.1" at 850 W. "Core" is the series and "Gold" its rating; no model is called "Core Gold" |
 | C18 | Case | Rack-mount | not chosen; constraints in §7.6 | 1 | — | — | **Rack-mount** (PI). The model is the *PI's call* |
 | C19 | CPU cooler | AM5; its height fits the case | a Noctua, not chosen; constraints in §7.6 | 1 | — | — | **Noctua** (PI), chosen with the case |
@@ -923,7 +924,7 @@ The demand, as arithmetic:
   P3 or faster. So the RTX 5070 Ti is the cheapest GeForce listed with two NVENC.
 - **The throughput for our input is UNVERIFIED**: mono, 1440 × 1080, at whichever preset
   proves visually lossless on our video. P9 requires measuring it on the box: 8 streams
-  for 12 hours (bring-up check 2).
+  for 12 hours (bring-up check 2; a margin over the eight-hour limit).
 
 ### 7.6 The camera box: AMD, rack-mounted, and the budget
 
@@ -933,6 +934,8 @@ The demand, as arithmetic:
   cameras and 2.488 GB/s for 8.
 - **ASSUMED compression 10:1.** This is a round number, not a measurement and not a
   published figure. P9 §5 requires the measured bitrate.
+- Twelve hours is a sizing margin over the eight-hour out-of-cage limit (PI correction,
+  2026-10-01), as is bring-up check 2's twelve-hour run. *(Added 2026-10-08.)*
 
 | Cameras | 5:1 | **10:1 (ASSUMED)** | 20:1 |
 |---|---|---|---|
@@ -1073,7 +1076,10 @@ The demand, as arithmetic:
     shorter than the primary's.
 - **A visible-cut filter on each emitter.** A MidOpt LP830 is cut to cover the LM75's
   emitting area (71 × 25.5 mm) and held in the lamp's bracket. It cuts the LED's shorter
-  wavelengths, which is where a faint red glow comes from (INFERENCE).
+  wavelengths, where part of a faint red glow comes from (INFERENCE). It passes 850 nm itself,
+  which the human fovea detects at sufficient power [@sliney1976visual], so the filter only
+  trims the tail; the darkness check at the eye position (below) is the safeguard. *(Corrected
+  2026-10-08: this said the shorter wavelengths are "where a faint red glow comes from".)*
   - Whether 850 nm light is visible to rhesus monkeys at these levels is **UNVERIFIED**.
   - Edmund has no equivalent (C20). SVL's 75 mm bar-light mount is Edmund
     [#90-438](https://www.edmundoptics.com/p/smart-vision-lights-75mm-bar-light-mount/57263/)
@@ -1118,7 +1124,8 @@ the cables cross it, and the layout decides it. This is what it implies:
     1. continuous cables through a gland or split grommet, with no connector in the run;
     2. active cables through the panel. Teledyne's suggested vendors are Icron (Spectra
        3001-15), Newnex (FireNEX-UL-8 and -12) and Alysium (A70-8403);
-    3. a USB3 bulkhead coupler, qualified by a 12-hour, 8-camera run with no drops (check 2).
+    3. a USB3 bulkhead coupler, qualified by a 12-hour, 8-camera run with no drops (check 2;
+       a margin over the eight-hour limit).
 - **GPIO and trigger lines.**
   - BNC bulkhead feedthroughs suit the barcode, ExposureActive and trigger lines, if the
     fan-out board's connectors are BNC as wl-sync's are (the design check picks them).
@@ -1141,7 +1148,8 @@ the cables cross it, and the layout decides it. This is what it implies:
   - sensitivity at 850 nm, since no NIR quantum efficiency is published, and whether the
     lamps are bright enough at the chosen exposure;
   - darkness at the eye position, and no change to P1 and P4 with the lamps on;
-  - 12 hours at 200 fps with no drops, on an AMD host, with ASPM off;
+  - 12 hours (a margin over the eight-hour limit) at 200 fps with no drops, on an AMD host,
+    with ASPM off;
   - no added neural noise.
 - **The tracker's light at the eye.** It is measured with a power meter, and the driver
   current is capped (§7.1.2). The attenuator's OD is chosen from that measurement (§7.10).
@@ -1243,8 +1251,8 @@ makers' own pages and manuals, read 2026-09-27 (UTC). Edmund was checked first.
 
 The agent's recommendation had been to keep the LEDD1B with the ND behind it. Per eye:
 
-1. **The ND's OD is chosen at bring-up**, so the eye stays under the limit at the highest
-   current the LEDD1B can deliver, 1200 mA, not at the setting.
+1. **The ND's OD is chosen at bring-up**, so the eye stays under the limit [@icnirp2013icnirp]
+   at the highest current the LEDD1B can deliver, 1200 mA, not at the setting.
    - The power meter reads the eye position with the filter in place and the LED at its
      1000 mA rating. So the filter's own tolerance is inside the reading.
    - The OD then carries at least a 1.2× margin for the driver's 1200 mA. This is ASSUMED:

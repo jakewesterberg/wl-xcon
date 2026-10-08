@@ -82,7 +82,8 @@ output drives `wl-juicer` and is separately recorded as *delivered*.
   reward stays countable.
 - **Our commanded total is a lower bound on fluid delivered** (P17). Welfare accounting
   reconciles against the sync box's record of the delivered line, never against our intent.
-- **Volume is time**, so the pump calibration (ml per ms) is what makes the accounting mean
+- **Volume is time** [@calapai2017cagebased], so the pump calibration (ml per ms) is what
+  makes the accounting mean
   anything. It is measured per rig, re-measured on a schedule, and its identity is recorded in
   the session snapshot. An uncalibrated pump makes every fluid number fiction.
 - Reward actions name a bounded-config entry and never carry a magnitude (S1 §2.3).

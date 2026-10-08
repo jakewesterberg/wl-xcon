@@ -110,7 +110,8 @@ as a rig session is (§4's shared daily figure, S8 §5.2b). Losing the duration 
 loosen the accounting.
 
 **Kiosk fluid counts toward the same daily figure as rig work** (PI, 2026-08-31; that figure is
-a **floor** rather than a budget — PI, 2026-09-06, see S8's head), so the two
+a **floor** rather than a budget — PI, 2026-09-06, see S8's head)
+[@calapai2017cagebased; @womelsdorf2021kiosk], so the two
 deployments share a total neither can see directly. wl-works holds the
 ledger and pushes the day's already-delivered figure in `prepare-session`; each deployment
 reports `floor − already_delivered_today − earned_here` as what is still to supplement

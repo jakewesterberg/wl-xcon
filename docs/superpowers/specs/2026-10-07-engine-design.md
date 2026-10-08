@@ -475,8 +475,9 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    balanced, or by criterion with advance and fall-back. A block ends on a number of trials, every
    condition's target met, a performance criterion, or a time limit. `taskd`'s guard against a spinning
    plan becomes a per-advance progress check.
-6. **The continuous mode**: its own trial-less mode for long presentations. It can reward, insert probes
-   on a schedule, change contingent on gaze or neural data, and take marks and pauses; it ends on a
+6. **The continuous mode**: its own trial-less mode for long presentations. It can reward
+   [@russ2015functional], insert probes on a schedule, change contingent on gaze or neural data,
+   and take marks and pauses; it ends on a
    declared duration, its media ending, an operator stop or a criterion; it is analyzed as one epoch with
    timed events. **Stop, pause and the welfare limits are checked about once a second inside it**, with a
    console update; it strobes anchor codes (§8.4); it declares calibration probes, or the record states
