@@ -68,7 +68,7 @@ are detected at the display surface.
 
 | Component | Runs on | Language | Job | Simulator |
 |---|---|---|---|---|
-| `taskd` | Task PC (Linux) | Python | Trial execution, display, gaze logic, DIO, session record; since P4d-2b b3a also `wlx taskd`, the rig service that holds one animal's session across runs, opened, run and ended from a console (`service.py`) | Full headless run against replayed/synthetic inputs |
+| `taskd` | Task PC (Linux) | Python | Trial execution, display, gaze logic, DIO, session record; since P4d-2b b3a also `wlx taskd`, the rig service that holds one animal's session across runs, opened, run and ended from a console (`service.py`); and since engine build B, what a session is for and its warnings list: the imperfections it runs with, each acceptable in some session kinds, accepted once a session and recorded in `warnings.jsonl` (`warnlist.py`) | Full headless run against replayed/synthetic inputs |
 | `console` | The control box, in a browser on the LAN | Python server + web client | Experimenter UI, live plots, parameter writes, preflight, test screens. **The box authenticates and records the actor** — anybody attached has full access, with visibility rather than a lock (S9a §8); `wl-works` lists devices and links to them, and carries no welfare-affecting action (ADR-0008). **The link exists** (`wl_xcon/link.py`, P4d-1, 2026-09-19): `taskd` holds a `Link` port, drained and published once per trial boundary and never per frame, whose live implementation (`ZmqLink`) binds a ZMQ PUB socket for `Telemetry`, a REP socket for its commands — `SetParameter` and `Stop`, and since P4d-2b b2a `Pause`, `Resume`, `Mark` (a mark's note), `ScheduleStop`, `CancelScheduledStop` and `ManualReward` (a manual reward: while paused and, in a `wlx taskd` session, between runs and while the return is awaited), and since P4d-2b b3a `OpenSession`, `CheckRun`, `StartRun` and `EndSession`, and since XC-026 (2026-10-01) `ResumeSession` (wire kind `resume_session`: a stranded session resumed from its record), which `wlx taskd` acts on and a `wlx run` session refuses — which the page sends since b3a-2 — from its forms, and since XC-026 from the stranded banner's *resume session* button — through `POST /commands`, built by the wire's own rules (`link._command_from`), and whose closed session's summary `wlx taskd`'s idle frame carries until the next session opens (telemetry schema 15, `link.SCHEMA`; the summary since 11) — each checked where it is decoded — and, given a third endpoint, a PULL socket for an operator's mark signal, which the trial loop checks once per frame (ADR-0003's transport, untouched: a third socket on the same link). `ZmqConsole` is the other end. Reached today by `wlx run --link PUB,REP` or `wlx taskd --link PUB,REP` and a terminal client, `wlx console --sub PUB --req REP --as WHO`. **The browser console exists** (P4d-2b slice b1, 2026-09-26, read-only then; the box's writes since b2a and its session forms since b3a-2, below): `wlx serve --link PUB,REP --http HOST:PORT --health-token-file PATH` is its own process — a stdlib `ThreadingHTTPServer`, one `ZmqConsole` on a telemetry thread, server-sent events to each browser from a bounded queue, and every pane rendered in Python (`web.py`) so the page's script only swaps fragments. The wl-works fonts are bundled and served by the box, so the page never reaches the internet (PI, 2026-09-26). Reads are open to the LAN. **Writes come from the box** (P4d-2b slice b2a, 2026-09-28): `POST /commands` is accepted only from a loopback peer, with a `Host` naming loopback, the page's own `Origin` and `Content-Type: application/json` (spec §2), and recorded as the box's actor map (`{"kind": "box", "name": …}`) and shown as `NAME (box, unverified)`; every request is answered only when its `Host` names this console (`--allow-host` adds names). `wlx serve` owns each socket on one thread — a read-only telemetry thread, a command thread whose REQ socket waits for `taskd`'s acknowledgment (*sent*, *not delivered*, *busy*), and a mark thread that sends the signal ahead of every command. Writes from people signed in to wl-works are b2b slice 2, below | Runs against a fake `taskd` (`link.Simulated`), or a real one over loopback sockets |
 | `neurofeatd` | Acquisition PC | C++ | SpikeGLX `fetchLatest` on the filtered AP stream -> MUA features -> ZMQ PUB | Synthetic feature publisher |
 | `rhxfeatd` | Intan host | C++/Rust | RHX Spike Output socket -> features -> ZMQ PUB; bounded reader | Synthetic spike-raster publisher |
@@ -128,8 +128,12 @@ never re-taken, its fluid so far by `Welfare.restore_fluid`, its next run number
 every block and trial number continuing, its out-of-cage limit the one the session last had.
 It is refused, before anything is written: while a session is open; for an id that is not
 stranded, or one marked not resumable; when its record cannot carry it (written before XC-026,
-unreadable, a start row without its run numbers, or a `config.json` naming another session
-than its folder) or names two animals; when its animal's bounded config or settings will not
+or before engine build B, so what the session is for is unknown; unreadable; a start row without
+its run numbers; a `config.json` naming another session than its folder, or a session kind other
+than training, piloting or recording; or a damaged `warnings.jsonl` row: a field missing, a code
+or detail that is not text, an `accepted_in` that is not a list of those kinds, a `session_kind`
+other than `config.json`'s, an `at` that is not a finite number, or a `by` that is neither an
+actor's map nor null) or names two animals; when its animal's bounded config or settings will not
 load, or its bounds changed since it opened; when the animal is past its out-of-cage limit, on
 the recorded departure and that limit, after which the page offers only *end* for it; and when
 the record holds a value its animal's bounds or `welfare` refuse (a reward size over its
@@ -156,8 +160,23 @@ a file from outside `--subjects` on the return path, or from outside `--tasks` a
 is checked. **And `service.Service._start`** (P4d-2b b3a), which asks S9a §10's
 gate of a pre-flight taken as a run is started, never an earlier one, with the out-of-cage
 item always among its items — so a run past the limit is refused before `RUN_START`, since
-`Session.run` refuses none — and writes who acknowledged each unknown into the run's start
-row; a mistake in it starts a run that should not start.
+`Session.run` refuses none — and hands the run, for its start row, who acknowledged each
+unknown (since engine build B, the name of whoever acknowledged it at an earlier run of the
+session when it is carried, below), writing nothing itself; a mistake in it starts a run that
+should not start.
+
+**`Service._open` and `Service._start` and the warnings list** (engine build B: approved by the
+PI as planned on 2026-10-08, and as built on the day he approves its welfare summary): an open is
+refused, before anything is marked, until the warnings its session's kind accepts are accepted,
+each by its code and its sentence, and that is its only new refusal; a calibration problem never
+refuses an open and never stops `wlx taskd`, and fails every run instead, as a fault listing the
+warnings does; what an open accepted is written once the service holds the session. A run's
+pre-flight has a `warnings` item: a fail for a warning the session's kind does not accept (or for
+warnings that cannot be listed, or too many to name in the item), otherwise an unknown acknowledged by name while any is not yet
+accepted this session, and a pass once each is. The pre-flight's unknowns are acknowledged once a
+session and carried to its later runs while each one's sentence is unchanged, under the name of
+whoever acknowledged them; `_start` writes nothing, and what it accepted is written as the run
+starts, inside the run's containment.
 
 **The three `taskd` functions are `Session._ends`, `Session._hold` and
 `Session._manual_reward`** (P4d-2b b2a, 2026-09-28; the third since the PI's 2026-09-28
@@ -329,7 +348,8 @@ display layer that per-trial scenes do not reset.
   V11 shows a browser can carry it at display rate.
 - **Who did it, in the record** (P4d-2b b2b slice 1, 2026-10-02): every row that names who
   (`controls.jsonl`, `welfare_notes.jsonl`, `runs.jsonl` and its pre-flight
-  acknowledgments, `parameter_changes.jsonl`, `refusals.jsonl`) holds `by` as an actor's map
+  acknowledgments, `parameter_changes.jsonl`, `refusals.jsonl`, and since engine build B
+  `warnings.jsonl`, each of whose rows names who accepted its warning and when) holds `by` as an actor's map
   (`actor.to_map`): `{"kind": "box", "name": …}` for a name typed at the rig PC, or
   `{"kind": "member", …}` for a wl.works member (**`wlx serve` makes one** from a token it
   has checked, b2b slice 2, built 2026-10-05; see the console's second listener below). A row the process writes itself, and a

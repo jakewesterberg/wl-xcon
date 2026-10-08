@@ -985,7 +985,8 @@ reward size) and otherwise to approve or comment.
   primaries' colors, each with its own luminance setting starting at 15 cd/m².
 - **Build B's Q4: the calibration file's format** — "JSON data file (Recommended)" (offered against: a
   Python file like `rig.py`; YAML, like wl-preproc): one JSON file per calibration, never executed,
-  unknown fields refused; ADR-0010 accepted with this answer.
+  unknown fields refused; ADR-0011 accepted with this answer (*corrected 2026-10-08: this said
+  ADR-0010, the number the reference library's ADR took first*).
 - **Build B's four welfare items** — "Approve all four" (offered against: approve with changes; not
   yet). Build B is to start at once, "as A1 (Recommended)": subagent-driven, merged only after the PI
   approves the finished code.

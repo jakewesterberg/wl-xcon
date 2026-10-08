@@ -361,6 +361,17 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
 10. **A calibration never expires** but carries its age [@brainard2002display; @dimigen2026advantages;
     @spitschan2018method]; past 30 days it is a warning.
 
+*Engine build B, 2026-10-08* (plan `docs/superpowers/plans/2026-10-08-engine-b.md`): the default's
+white is the sRGB standard's 80 cd/m² (the PI's answer to the plan's Q1), so the reference tasks'
+luminance settings run 0-80 cd/m² until a panel is measured. **On the default, every DKL color is
+refused in every kind of session until build A2** (call 9): an isoluminant one as
+`isoluminance-on-default` (item 3), any other as `dkl-on-default`, since a DKL color becomes light
+only through the cone fundamentals A2 adds; this is stricter than item 2's training and piloting.
+Until build C, item 2's "makes contrast a design factor or a procedure-controlled value" is read as
+any light, contrast or opacity a parameter sets (Q2; call 24), so no reference task records on the
+default. A measured calibration is one JSON record, never executed (Q4; ADR-0011); "past 30 days"
+is an age of 31 calendar days or more (call 3).
+
 ## 8. Sync and evidence (N§5, N§R3, N§R5)
 
 1. **The flip patch** alternates every refresh. **The task patch toggles on every change** (§3.3):
@@ -603,15 +614,31 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
 1. **Sessions declare what they are for**: training, piloting or recording, chosen at session open and
    carried in `OpenSession`, the session spec, `config.json`, the restoration a resume reads, and
    telemetry (a schema bump).
+   *Engine build B, 2026-10-08*: chosen at session open and fixed for the session, as this item reads
+   (the PI's answer to the plan's Q5); the text is unchanged. On the wire and in the record the field
+   is `session_kind` (the plan's call 1); telemetry is schema 15.
 2. **The warnings list** gathers every imperfection a session runs with: the default calibration, a
    calibration past 30 days, dithering, a lossy image, a luminance step under a pattern, a pattern near
    the pixel limit, a screen, mode or care-feature mismatch, a timing record older than a graphics change,
    a head-free session, frame-clock faults, and today's pre-flight unknowns. **Each states the session
    kinds it is acceptable in**; outside them it refuses. Load-time check findings gain this severity
    ("a warning, accepted in kinds K") beside blocking.
+   *Engine build B, 2026-10-08*: a calibration that will not load, or one dated after today, is a
+   warning no kind accepts: in `wlx taskd` it never refuses an open nor stops the service, and fails
+   every run's pre-flight (the plan's calls 19-21); `wlx run` refuses both before anything is recorded,
+   and `wlx check` one that will not load, and, given `--kind`, one dated after today (call 20). This
+   build lists the default calibration, a calibration past 30 days, a chaired session's free head, a
+   task's warnings (`luminance-step`, `color-on-default`, `contrast-on-default`) and today's pre-flight
+   unknowns; the others wait on the builds that make them (`wl_xcon/warnlist.py`).
 3. **Accepted once per session**, at open, recorded. **A warning appearing during a run that its kinds do
    not accept pauses the run at the next trial**, for the operator to accept (recorded) or stop (N§R6).
    Today's unknowns keep the 2026-09-19 rule: proceed on a recorded acknowledgment.
+   *Engine build B, 2026-10-08*: the rig's warnings are accepted at the open; the pre-flight's unknowns
+   are accepted at the first run that asks, not at the open, which takes no pre-flight, and are carried
+   to the session's later runs while their sentences hold (call 6); a run's own new warnings are asked
+   in its pre-flight. A warning is its code and its sentence, so a reworded one is asked again (call 7).
+   The pause for a warning appearing during a run is not built: nothing in this build can appear
+   mid-run outside its kinds (XC-276, call 8).
 
 ## 20. Welfare
 
@@ -623,7 +650,15 @@ summary before its build merges:
    new run-start refusals (a warning outside its session kinds; a fixed-head task in a chaired session;
    no validated eye map; the stereoscope's alignment not accepted; a self-pausing run without
    `PAUSE`/`RESUME`).
+   *Engine build B, 2026-10-08*: the once-a-session acknowledgement and the refusal of a warning outside
+   its session kinds are built in `Service._start` and its pre-flight's `warnings` item;
+   `preflight.gate` is unchanged, byte for byte. A fixed-head task in a chaired session is not refused
+   yet: no task can say it needs a fixed head until build C (XC-277, the plan's call 5).
 2. **`Service._open`**: the session kind; a refusal while the OLED's maintenance is due.
+   *Engine build B, 2026-10-08*: the session kind is built (carried through `Service._session_for`),
+   with the open's one new refusal, the warnings its kind accepts left unaccepted. The refusal while
+   the OLED's maintenance is due is not built: whether the PG27UCDM allows a schedule is UNVERIFIED
+   and needs the panel (XC-278, call 16).
 3. **`Session.set`**: instant parameters, never a bounded setting; presets, revert and carried values
    never carry a bounded setting (§17.6).
 4. **`Session._ends` and `_hold`**: checked about once a second inside long trials and the continuous

@@ -197,6 +197,13 @@ defines it as the identity of a **stimulus calibration record** covering:
 input to it changes** — including a mirror-carriage move for a different animal. That is what
 makes the manifest field mean something rather than being a label.
 
+*Engine build B, 2026-10-08:* one color calibration for the whole panel (engine spec §7.6, N§R4),
+not per half; the color calibration's id is not this section's stimulus calibration id, which
+wl-preproc's `SessionManifest.stimulus_calibration_id` reserves (its
+`wl_preproc/contracts/manifest.py`, read 2026-10-08) and which waits on V1 and V9. The color
+calibration is a JSON record (ADR-0011) the rig file names by its path; its `id` is in each
+session's `config.json`, each run's start row and telemetry.
+
 ---
 
 ## 10. Test screens
