@@ -700,7 +700,8 @@ def _pf_row(item, view: View, accepted: dict | None = None) -> str:
         # Carried from an earlier run of this session (the engine B plan, call 30): who
         # accepted it and when, and no box, since it needs no new acknowledgement.
         acknowledge = (
-            f'<span class="sub">accepted earlier this session by {_who(earlier.by)} at '
+            f'<span class="sub">accepted earlier this session'
+            f'{"" if earlier.by is None else " by " + _who(earlier.by)} at '
             f"{_e(_clock_time(earlier.at))}</span>"
         )
     elif item.result == "unknown":
@@ -1442,8 +1443,8 @@ def _idle(frame: Idle, view: View) -> dict[str, str]:
     *no session open* beside the form that opens one"): every pane as before any frame,
     except the pill, the header, the banners, the controls, *wl-works sees* (`/health`
     as it would be sent for this frame, stranded animals included), the refusals, the
-    tasks offered, the Session panel and the dialog's animals -- **and the End tab**,
-    which shows the last closed session's summary, supplement owed first, until the next
+    tasks offered, the Session panel, the Warnings tab and the dialog's animals and warnings --
+    **and the End tab**, which shows the last closed session's summary, supplement owed first, until the next
     session opens (schema 11; spec §6.2: "The session then closes and the page shows its
     summary"; the b3a-2 final review, I2), rendered by `_end` as any closed frame is."""
     panes = fragments(None, view)
@@ -1715,7 +1716,8 @@ h3 { margin: 0; font-family: var(--cond); font-weight: 600; font-size: 11.5px; l
 .xbtn svg { width: 12px; height: 12px; }
 .btn { border: 1px solid var(--rule); background: var(--surface); color: inherit; border-radius: 5px; padding: 5px 12px; cursor: pointer; font-family: var(--cond); font-weight: 600; font-size: 14px; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
-.scrim { position: fixed; inset: 0; background: var(--bg); display: grid; place-items: center; padding: 16px; z-index: 30; }
+.scrim { position: fixed; inset: 0; background: var(--bg); display: grid; place-items: center; padding: 16px; z-index: 30; overflow-y: auto; }
+.scrim > .dialog { margin: auto; }
 .dialog { padding: 16px; width: min(520px, 100%); display: grid; gap: 12px; }
 .dialog h2 { font-size: 14px; color: var(--ink); }
 .dialog .actions { display: flex; justify-content: flex-end; }

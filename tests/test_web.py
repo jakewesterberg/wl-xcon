@@ -25,6 +25,7 @@ from wl_xcon.actor import Box, Member
 from wl_xcon.cli import _clock, _local
 from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.link import NOTE_LIMIT, Control, Counts, ParamRow, Performance, Preflight, PreflightItem, Question, Refused, ScheduledStop, Staged, Stranded, WarningRow
+from wl_xcon.warnlist import HEAD_FREE, UNLISTED
 from wl_xcon.web import (
     _CSS,
     _SCRIPT,
@@ -700,14 +701,25 @@ def test_every_telemetry_string_is_escaped():
         refusals=(Refused(EVIL, Box(EVIL), EVIL),),
         params=(ParamRow(EVIL, EVIL, None, None, EVIL, False),),
         performance=replace(frame().performance, task_name=EVIL, block_type=EVIL),
+        session_kind=EVIL,
+        calibration=EVIL,
+        warnings=(WarningRow(EVIL, EVIL, SESSION_KINDS, Box(EVIL), 1_700_000_000.0),),
     )
+    # The idle frame's three kinds of row (schema 15): one no kind accepts, the listing
+    # fault, and one a kind accepts, each with EVIL for its code and sentence.
+    evil_idle = idle(warnings=(
+        WarningRow(EVIL, EVIL, (), None, None),
+        WarningRow(UNLISTED, EVIL, (), None, None),
+        WarningRow(EVIL, EVIL, SESSION_KINDS, None, None),
+    ))
     # `phase` is EVIL above, so the reward's unit, which the strip shows only while a
     # run goes (`_per_correct`), needs a running frame of its own.
     paying = frame(params=(ParamRow("reward_correct", EVIL, 0.0, 0.4, 0.15, True),))
 
     text = "".join(fragments(evil, view(rejected=EVIL)).values()) + "".join(
         fragments(paying, view()).values()
-    )
+    ) + "".join(fragments(evil_idle, view()).values())
+    assert "no session kind accepts this" in text and "could not be listed" in text
 
     assert "<script" not in text
     assert EVIL not in text
@@ -2682,3 +2694,42 @@ def test_the_page_has_a_warnings_tab_and_its_panel_shows_when_chosen():
     assert '<div class="tabpanel" id="tp-warn">' in html
     assert '<div id="warnings">' in html and '<div id="dn-warnings">' in html
     assert "#t-warn:checked ~ .panels #tp-warn" in _CSS
+
+
+def _pf_frame(name_said, accepted_said):
+    pump = PreflightItem("pump calibration", "unknown", name_said)
+    return frame(
+        service=True, phase="between_runs",
+        preflight=Preflight("fixation_detection.py", (pump,)),
+        warnings=(WarningRow("pump calibration", accepted_said, SESSION_KINDS, Box("ann"), 1_700_000_000.0),),
+    )
+
+
+def test_an_unknown_whose_sentence_changed_is_not_carried_and_keeps_its_box():
+    """`taskd.Session.carried` matches name and sentence; a page that matched the name alone
+    would offer no box for an item the gate refuses, and no run could start."""
+    panes = fragments(_pf_frame("a new sentence", "the sentence accepted"), view())
+
+    assert 'data-ack="pump calibration"' in panes["preflight"]
+    assert "accepted earlier this session" not in panes["preflight"]
+    assert "pre-flight · 1 to acknowledge" in panes["pf-sum"]
+
+
+def test_a_head_free_row_no_one_accepted_yet_says_it_is_a_chaired_sessions():
+    row = WarningRow(HEAD_FREE, "the head is free", SESSION_KINDS, None, None)
+
+    assert " · a chaired session's" in fragments(idle(warnings=(row,)), view())["dn-warnings"]
+    accepted = WarningRow(HEAD_FREE, "the head is free", SESSION_KINDS, Box("ann"), 1_700_000_000.0)
+    assert "a chaired session" not in fragments(frame(warnings=(accepted,)), view())["warnings"]
+
+
+def test_a_carried_row_with_no_actor_does_not_say_by_nobody():
+    pump = PreflightItem("pump calibration", "unknown", "s")
+    shown = frame(
+        service=True, phase="between_runs", preflight=Preflight("t.py", (pump,)),
+        warnings=(WarningRow("pump calibration", "s", SESSION_KINDS, None, 1_700_000_000.0),),
+    )
+
+    pane = fragments(shown, view())["preflight"]
+
+    assert "accepted earlier this session at " in pane and "by  at" not in pane

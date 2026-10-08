@@ -32,7 +32,9 @@ from _issuer import Issuer  # noqa: E402
 from _ports import endpoints as free_endpoints  # noqa: E402
 from _tls import client_context, material  # noqa: E402
 from wl_xcon import signin, web  # noqa: E402
-from wl_xcon.link import ManualReward, OpenSession, Pause  # noqa: E402
+from wl_xcon.findings import SESSION_KINDS  # noqa: E402
+from wl_xcon.link import ManualReward, OpenSession, Pause, WarningRow  # noqa: E402
+from wl_xcon.warnlist import HEAD_FREE  # noqa: E402
 from wl_xcon.serve import Hub, Remote, _PageServer, make_handler, tls_context  # noqa: E402
 
 TOKEN = "t0ken-for-tests"
@@ -1114,3 +1116,43 @@ def test_a_member_opens_a_session_for_a_kind_and_accepts_the_warning_the_dialog_
     assert opened.by.name == "Jake Westerberg"
     assert [pair[0] for pair in opened.accepted] == ["default calibration"]
     assert opened.accepted[0][1] == "the sRGB standard's"
+
+
+def _opens(rig) -> list:
+    return [seen for seen in rig.dispatch.seen if isinstance(seen, OpenSession)]
+
+
+def _fill_open(page) -> None:
+    page.click('[data-cmd="new"]')
+    page.select_option("#dn-subject", "A")
+    page.select_option("#dn-kind", "training")
+    page.fill("#dn-id", "s-1")
+    page.fill("#dn-left", "07:30")
+
+
+def test_an_open_with_the_accept_box_unticked_accepts_nothing(rig):
+    page = rig.browser_page()
+    _sign_in(page)
+    rig.hub.offer(idle())
+    page.wait_for_selector('#dn-warnings [data-warn="default calibration"]', state="attached")
+    _fill_open(page)
+    assert not page.is_checked("#dn-accept")
+    page.click("#dn-ok")
+    rig.wait_for(lambda: _opens(rig))
+    assert _opens(rig)[0].accepted == ()
+
+
+def test_the_new_session_dialog_scrolls_to_its_button_in_a_short_window(rig):
+    page = rig.browser_page()
+    page.set_viewport_size({"width": 800, "height": 500})
+    _sign_in(page)
+    head_free = WarningRow(
+        HEAD_FREE, "a chaired session leaves the head free to move: " + "words " * 60, SESSION_KINDS, None, None
+    )
+    rig.hub.offer(idle(warnings=idle().warnings + (head_free,)))
+    page.wait_for_selector(f'#dn-warnings [data-warn="{HEAD_FREE}"]', state="attached")
+    _fill_open(page)
+    taller = page.evaluate('document.querySelector("#dlg-new .dialog").getBoundingClientRect().height > 500')
+    assert taller, "the dialog must be taller than the window for this to test scrolling"
+    page.click("#dn-ok")  # Playwright scrolls the button into view first
+    rig.wait_for(lambda: _opens(rig))
