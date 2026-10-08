@@ -59,11 +59,13 @@ record). `tasks/rig.py` names none until build J measures the panel.
 Every number is a finite JSON number, never `true` or `false`. **Nothing is filled in.** A record is
 refused, with a sentence naming why, when a field is missing, when it has any other field, when a name
 appears twice at any level, when a value is not what its field holds, when it is not JSON or not one
-object, when it is nested too deep to parse, and when the file is larger than
-`photometry.RECORD_LIMIT` (1 MiB). **A record the rig names and that will not load is never replaced
-by the default**: `wlx check` and `wlx run` refuse outright, and `wlx taskd` keeps the sentence, never
-stops on it, takes opens, ends and returns as before, and fails every run's pre-flight on it (the
-plan's calls 19-20).
+object, when it is nested too deep to parse, when the file is larger than
+`photometry.RECORD_LIMIT` (1 MiB), and when the path names anything but a regular file -- a named
+pipe, a directory, a device -- which is refused before a byte is read, so a pipe with no writer never
+holds `wlx taskd` at its start (the engine B final review). **A record the rig names and that will
+not load is never replaced by the default**: `wlx check` and `wlx run` refuse outright, and `wlx
+taskd` keeps the sentence, never stops on it, takes opens, ends and returns as before, and fails every
+run's pre-flight on it (the plan's calls 19-20).
 
 ## Alternatives considered
 
