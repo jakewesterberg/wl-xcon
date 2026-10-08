@@ -674,7 +674,7 @@ operator reads — and this table is the index into why each exists.
 ### 5.2b One fluid budget across rig and kiosk
 
 **Kiosk fluid counts toward the same daily figure as rig work** (PI, 2026-08-31)
-[@calapai2017cagebased; @womelsdorf2021kiosk]. Neither
+[@calapai2017cagebased]. Neither
 deployment can see the other's record, so a shared total has to live somewhere neither owns.
 
 > **Corrected 2026-09-19.** The reason given here was "the kiosk has no sync box at all",
