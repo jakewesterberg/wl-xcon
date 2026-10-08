@@ -167,12 +167,14 @@ should not start.
 
 **`Service._open` and `Service._start` and the warnings list** (engine build B: approved by the
 PI as planned on 2026-10-08, and as built on the day he approves its welfare summary): an open is
-refused, before anything is marked, until the warnings its session's kind accepts are accepted,
-each by its code and its sentence, and that is its only new refusal; a calibration problem never
-refuses an open and never stops `wlx taskd`, and fails every run instead, as a fault listing the
-warnings does; what an open accepted is written once the service holds the session. A run's
-pre-flight has a `warnings` item: a fail for a warning the session's kind does not accept (or for
-warnings that cannot be listed, or too many to name in the item), otherwise an unknown acknowledged by name while any is not yet
+refused, before anything is marked, until the warnings its session's kind accepts (the default
+calibration's, a calibration's age past 30 days, a chaired session's free head) are accepted, each
+by its code and its sentence, and that is its only new refusal; a calibration problem (a
+calibration that will not load or is dated after today) never refuses an open and never stops
+`wlx taskd`, and fails every run instead, as a fault listing the warnings does; what an open
+accepted is written once the service holds the session. A run's pre-flight has a `warnings` item:
+a fail for a warning the session's kind does not accept (or for warnings that cannot be listed, or
+too many to name in the item), otherwise an unknown acknowledged by name while any is not yet
 accepted this session, and a pass once each is. The pre-flight's unknowns are acknowledged once a
 session and carried to its later runs while each one's sentence is unchanged, under the name of
 whoever acknowledged them; `_start` writes nothing, and what it accepted is written as the run

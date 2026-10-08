@@ -286,6 +286,18 @@ calibration that does not name whose luminous efficiency it used cannot carry an
 isoluminance claim — a macaque V(lambda) is not a human one [@dobkins2000comparison;
 @horwitz2015what; @lindbloombrown2014spectral].
 
+*Engine build B, 2026-10-08 (XC-285):* colour without a measured calibration is no longer
+refused outright. A rig that names no calibration runs on the default, the sRGB standard,
+measured by nobody (engine spec §7.1), which loads a task that names a colour in training and
+piloting with a warning and refuses it in recording (the PI, 2026-10-07 and 2026-10-08; engine
+spec §7.2); isoluminance still needs a measured calibration (§7.3). The instrument is a
+spectroradiometer (engine spec §12 item 1), not a photometer. The observer is named, not the
+animal's: isoluminance is the CIE 10° standard observer's V_F,10 (the PI, 2026-10-08, A2's Q5),
+and a per-animal measured null was declined (2026-10-07). So the risk this paragraph names
+stays, as pitfall P19 now says: if human and monkey cone fundamentals differ substantially,
+"a stimulus that is equiluminant for a human may possess luminance contrast for a monkey"
+[@conway2014color, section "MT"], and a methods section states the observer.
+
 **Set size as a value.** `Array` is an appearance, so an N-item search array is one
 named stimulus and the rest of the system needs to know nothing about arrays.
 `ItemWindows` is one declaration that becomes n windows plus the aliases

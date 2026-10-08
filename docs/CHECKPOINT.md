@@ -122,7 +122,7 @@ figure was one low. In order:
 | Welfare-critical modules | **two modules, `bounds.py` and `welfare.py`, and since P4d-2a four functions in `cli.py`, plus one line inside a fifth, beside them.** `bounds` is pure limits — ceilings, and a daily **floor**; `welfare` holds the day's total, the two clocks (out-of-cage, which bounds the session; restraint, which is recorded), the wall they are read on (`SessionClock`, moved in from `taskd` by P4d-2a's final review because it decides the interval), the pump, and `Rig` — the object a task's `Reward` action actually reaches. **The four `cli` functions are `_wall_clock_time`, `_clock_or_now`, `_settle_return` and `_settle_departure`** (the last added in the residual fix round before the PI's welfare review): they parse the times an operator types into the instants that bound the out-of-cage interval, and `_settle_departure` also decides `confirmed=` for the departure, which `welfare._refuse_unconfirmed` trusts its caller on — so a plausible mistake there passes every refusal `welfare` has (`docs/design/architecture.md` has the list and why). **The fifth is `main` itself**, for its one line `session.left_cage(at=departure, confirmed=note is not None, ...)`, which carries `_settle_departure`'s decision into `welfare` unchanged. **All of it requires human review before merge** (CLAUDE.md, S8 §7). All of it moved in P4d-2a, which the PI approved on 2026-09-26. **P4d-2b b2a added, approved by the PI on 2026-09-28:** five `taskd` functions (`Session._ends`, `_hold`, `_manual_reward`, `set` and `_schedule`), two parts of `Session._command` (its `held` pass-through and one `except` line), and `link._setting` (`architecture.md` has why). **P4d-2b b3a-1 added, approved by the PI on 2026-09-30:** `marks.py` and `stranded.py` whole (the departure and return decisions moved out of `cli`, which keeps `_settle_departure`, `_settle_return` and `main`'s `_marks.depart` line), `Welfare.restore_departure`, `preflight.out_of_cage` and `preflight.gate`, and seven `service.py` functions (`Service._open`, `_end` with `_unended`, `_close_stranded`, `_start`, `_unasked`, `_folder_name`). `_Routed.drain` and `preflight.unmeasured` were proposed at its final review and **taken back off by the PI**. **P4d-2b b3a-2 changed, approved by the PI on 2026-09-30, and added nothing:** `taskd.Session._manual_reward` decides by phase (a hand reward between runs and while the return is awaited in a `wlx taskd` session; its phases are `taskd.OUTSIDE_A_RUN`, part of its rule), `Session._command`'s reward pass-through moved first (the line unchanged) and one sentence, and `welfare.Welfare._far_from_now`'s words for a far return. **b2b slice 1 changed, approved by the PI on 2026-10-05, and added nothing:** `by` in the listed functions is an actor (`actor.Box` or `actor.Member`) written as its map, and `stranded.Restored.returned_to_cage`'s default is `None`; no rule moved. **Engine build B changes two, approved by the PI as planned on 2026-10-08, and adds nothing:** `Service._open` refuses an open until the warnings its session's kind accepts are accepted, and writes them once the service holds the session; `Service._start`'s pre-flight has a `warnings` item, and the pump calibration and the eye tracker are acknowledged once a session. The code as built merges only on his approval of its welfare summary |
 | Fluid | **A floor, not a ceiling** (PI, 2026-09-06). The daily figure is a minimum the animal must reach, topped up by hand after the session; **no delivery is ever refused on volume**. Only the per-delivery magnitude is a ceiling. S8 §4–§5 were written the other way round and now carry the correction |
 | Session duration | **One limit: out of the cage to back in the cage, eight hours, the institution's** (the PI set the one limit on 2026-09-19, recorded then as twelve hours, and corrected it to eight on 2026-10-01). Chair time and a trial cap were the two ceilings until then; neither is a limit now — chair time is recorded by `HEAD_FIXED`/`HEAD_RELEASED` and there is no session-length maximum at all. A rig session is **refused** without its out-of-cage mark; a cage-side one declares `welfare.Deployment.CAGE_SIDE` and has no duration bound. Eight hours, the institution's limit, is documented (S8 §5.2 item 4, `welfare.py`) and carried by no constant; the twelve recorded until 2026-10-01 was wrong (PI, 2026-10-01). **Since 2026-09-20 (PI)** **both marks** are **clock times** (`--out-of-cage-at`, and the return). **With P4d-2a (spec §10, approved by the PI 2026-09-26 and on `main`), both ends of the interval are wall instants and every welfare duration is read on the wall**: `Session.wall_now()`, the wall read once when the session is created (`welfare.SessionClock`) and carried forward on a **steady clock that counts suspend** (`welfare.steady_seconds` — `CLOCK_BOOTTIME` on Linux, `CLOCK_MONOTONIC` on macOS, both documented to keep counting while the host sleeps; `time.monotonic()` elsewhere, which does not, and says so) rather than on plain `time.monotonic()`, since P4d-2a's final review (I1) found a suspend during a session undercounted the interval on the unsafe side. The frame clock times trials only, so the unchairing and the walk back are inside the limit with nothing mapped. **The return is taken at `wlx run`'s terminal, the stand-in until the wl-works ELN records both ends** (PI, 2026-09-26). With no terminal, linked or not, `wlx run` records `return not recorded (no terminal)` and exits. Both ends are rows in `welfare_notes.jsonl`, and the out-of-cage clock is published after the loop until the return. A separate **in-session clock** (session opened to session ended) is published and recorded, and bounds nothing. A mark **more than thirty minutes from now is confirmed by a person or amended with a reason and a name** (`welfare.CONFIRM_MARK_WITHIN`; `wlx run` refuses rather than proceeding when no terminal is attached), there are **three deployment kinds** — `RIG_FIXED`, `RIG_CHAIRED`, `CAGE_SIDE` — with restraint reported **absent rather than zero** where nothing marks it, and the session **warns** at `welfare.WARN_WITHIN_DEFAULT` (1,800 s, **accepted by the PI on 2026-09-20 as a starting value** and still derived from no measurement of this system) before the limit |
-| Reference tasks | `fixation_detection`, `adaptive_detection`, `visual_search` (colour pop-out, set size 2–12), `visual_search_training` (its training variant in plain red and green, engine build B), `calibration`; luminance settings 0-80 cd/m² since engine build B |
+| Reference tasks | `fixation_detection`, `adaptive_detection`, `visual_search` (colour pop-out, set size 2–12), `visual_search_training` (its training variant in plain red and green, engine build B), `calibration`; luminance settings 0-80 cd/m² since engine build B, and the training variant's red and green 0-17 and 0-57 cd/m², just under the sRGB primaries' reach |
 | Load-time checks | **9 of S1 §9's 10, plus S1a's window check, plus nine added after review 2026-08-31** (`uncoupled-window`, `nothing-to-look-at`, `absent-stimulus`, `duplicate-stimulus`, `empty-update`, `uncalibrated-color`, `unrealizable-color`, `overspecified-color`, `unstated-observer`, `target-outside-array`, `impossible-correlation`, `monocular-stereogram`, `unknown-eye`, `wrong-eye-criterion`).** **Plus direct view's three** (part 1, 2026-09-28): `needs-stereoscope`, `wrong-setup`, `unknown-view`; **and since part 2 (2026-09-29) check 8 and the setup check run against the session's own field** in `taskd` and `wlx check`, where before only the tests passed one. **Engine build A1 (2026-10-07, branch `engine-a1`) added eleven**: `bare-contrast`, `unlit`, `weber-on-black`, `contrast-convention`, `bad-block`, `bad-placement`, `multiply-needs-modulation`, `per-eye-misused`, `bad-periphery`, `per-eye-background`, and `luminance-step`, a warning that refuses nothing; each holds at every value a parameter can take and fails closed on one it cannot bound or read, and check 8 measures each eye after the vergence offset. Check 7 is enforced for reward and *not* for stimulation, because no `Stim` action exists yet. Corrected 2026-08-31 after review caught the count. **Engine build B (2026-10-08) added four for the default calibration**: `isoluminance-on-default` and `dkl-on-default`, refused in every kind, and `color-on-default` and `contrast-on-default`, warnings accepted in training and piloting; a finding now says which session kinds accept it, and `luminance-step` is accepted in every kind |
 | Cross-repo asks outstanding | **4 documents, 3 repos**; one blocking ask closed 2026-09-05 — see below |
 | Hardware verified | **none** |
@@ -455,8 +455,10 @@ written.
     the whole list or none, a warning accepted only once its row is written; restored on a resume, and
     a damaged row makes the record not resumable (architecture.md lists each way).
   - **Telemetry schema 15**: `session_kind`, `calibration` (`None` while the record will not load) and
-    `warnings`, each row cut for the frame (the record keeps every word); `Idle.warnings`, those an
-    open asks, listed once per calendar day of the service's wall. `wlx console` shows them.
+    `warnings`, each row cut for the frame (the record keeps every word); `Idle.warnings`, the rig's
+    warnings as a chaired open would list them (`open_warnings(RIG_CHAIRED)`): the free head listed
+    for every open and marked on the page as a chaired session's, and one no kind accepts listed and marked as
+    failing every run; listed once per calendar day of the service's wall. `wlx console` shows them.
   - **The open** (welfare-critical `Service._open`) is refused, before anything is marked, until the
     warnings its session's kind accepts are accepted, each by its code and its sentence: its one new
     refusal. What it accepted is written once the service holds the session.
@@ -474,8 +476,8 @@ written.
     the acceptance with no name** (an empty box name), as `--confirm-out-of-cage` records its
     confirmation.
   - **The page**: the New session dialog chooses what the session is for and accepts the warnings
-    (its box drawn only when a row can be accepted); a Warnings tab; the head and the Session panel
-    show the kind and the calibration; a carried pre-flight unknown shows who accepted it and when, with
+    (its box drawn only when a row can be accepted); a Warnings tab; the head shows the kind, and the
+    Session panel the kind and the calibration; a carried pre-flight unknown shows who accepted it and when, with
     no box. **The page can open a session again**: from Task 7 to Task 14, `_command_from` required
     `session_kind` and the page sent none; a browser test now drives the dialog's open end to end.
 
@@ -501,9 +503,12 @@ written.
 - **Rulings and findings during the build** (the plan's 31 calls are in the plan; what each ruling
   costs if wrong is in the ledger):
   - **No local mutation sweeps**: `tools/mutate.py`'s 300 s suite limit is below this machine's suite
-    time while two worktrees run (XC-275). CI swept each push's changed functions, and the build's sweep
-    is one CI run of the whole branch against `main` (above), since a push's gate sweeps only what
-    changed since the push before it, and one push's `service` was never swept (XC-296).
+    time while two worktrees run (XC-275). CI's gate swept each push's changed modules, every function
+    in them. The build's sweep is one CI run of the whole branch against `main` (above): one run to read
+    shard by shard instead of the branch's nineteen per-push runs so far, with XC-275's timeouts not
+    counted as caught. Nothing was left unswept for good: one push's shard 2 failed its `service`
+    baseline on a test's timeout, leaving three `service` functions unswept by that push, and the later
+    pushes that changed `service.py` swept every `service` function again (XC-296).
   - The shared test calibrations live once, in `tests/_calibrations.py` (XC-177 now names it).
   - A record whose primaries no display could have, and an id with a control character or surrounding
     whitespace, are refused at load now rather than filed (Task 2).
@@ -513,7 +518,7 @@ written.
     welfare note named whoever accepted the last warning. Fixed and pinned
     (`test_a_resume_names_who_resumed_it_not_who_accepted_a_warning`); dated notes in the plan.
   - A fault whose `str()` raises never stops the idle frame's publishing, and the startup line is
-    printable (Task 10, `service._fault`); the same pattern at five other places is XC-291, and the
+    printable (Task 10, `service._fault`); the same pattern in five other functions is XC-291, and the
     uncapped number of a frame's warning rows XC-292.
   - **`Service._open` says a listing fault through `_fault`**, not the plan's f-string, so even a fault
     that cannot say itself never refuses an open, as welfare item 1's approved wording says: the one
@@ -541,13 +546,17 @@ written.
   deferred: **XC-290** (a picture or a movie is unseen by the default calibration's recording
   findings, build A4), **XC-291** (a fault whose `str()` raises, formatted outside containment, stops
   `wlx taskd`), **XC-292** (a frame's warning rows are uncapped in number) and **XC-296** (a CI baseline
-  timeout in `test_serve`, a flake to watch); XC-177 gained `tests/_calibrations.py`. **Next free
-  XC-297.** Unblocked now: XC-285 (S1a §12, P19 and XC-071 reworded for the default calibration) and
-  XC-288's brainstorm.
-- **Held for the PI**, asked in the UI, not filed: the welfare summary of `_open` and `_start` as built,
-  and the question it raises: a warning that appears between the pre-flight a person looked at and
-  their pressing start is accepted by the `warnings` tick without being shown (closing it changes
-  `_start`).
+  timeout in `test_serve`, a flake to watch), and **XC-297** (a warning appearing between the pre-flight
+  shown and the start is accepted unseen; the PI's "later"); XC-177 gained `tests/_calibrations.py`.
+  **Closed XC-285** with this entry: pitfall P19, S1a §12 (a dated note) and XC-071 now say what
+  build B does with color on the default calibration, and P19 keeps its risk and its sources and
+  says a methods section states the observer. **Next free XC-298.** Unblocked now: XC-288's
+  brainstorm.
+- **Held for the PI**, asked in the UI, not filed: the welfare summary of `_open` and `_start` as built.
+  **The question it raised is answered** (the PI, 2026-10-08, through the question box): a warning
+  that appears between the pre-flight a person was shown and their pressing start is accepted by the
+  `warnings` tick without being shown; closing it changes `Service._start` and the start message, and
+  he chose "Later, as a backlog item": **XC-297**.
 - **For the whole-branch review**: the ledger's parked minors
   (`.superpowers/sdd/2026-10-08-engine-b/progress.md`, git-ignored) go to its fix wave, and whatever it
   defers goes into the backlog before the ledger is deleted; among them, `Entry` accepting a code with
@@ -560,10 +569,14 @@ written.
   kept in the scratchpad tests `main` however the shell's cwd is set; give it
   `PYTHONPATH=<worktree>`, or run it with `-m` from the worktree. (The worktree trap noted overnight
   covers `-I` and the cwd; this is its third door.)
-- **CI's per-push gate sweeps only the functions changed since the previous push** (its base is
-  `github.event.before`), so a push whose shard baseline fails leaves those functions unswept for
-  good; a new branch, whose `before` is all zeros, sweeps everything changed against `origin/main`,
-  which is how this build's sweep is run.
+- **CI's per-push gate sweeps whole modules, not changed functions.** `tools/mutation_gate.py
+  --changed-only` selects every module whose source or own test file changed since the previous push
+  (its base is `github.event.before`; a new branch's all-zero `before` falls back to `origin/main`),
+  and `--shard K/12` sweeps every function of those modules, cut twelve ways. A shard whose baseline
+  fails sweeps none of its part of that module for that push (run 37770387339's shard 2: `record`'s
+  four and `resume`'s three were swept, `service`'s `_folder_name`, `_fresh_seed` and `_sentence`
+  were not), and the next push that changes the module sweeps all of it again. Read each shard's
+  lines, not the job's color: that red shard held seven real catches.
 - **A plan's code can be wrong where its tests are silent.** Task 9's restore loop reused the name `by`
   and changed who a welfare note names, and no test in the plan would have caught it. An implementer
   reading what they paste found it.
@@ -684,7 +697,7 @@ alongside**. The design was put to him in chat and approved ("Yes, and run build
   before this entry, with `engine-b` at `77bc77a` conflicted only in `docs/backlog.md`: the Next free ID
   line and lines added at the same places; keep both sides' lines and the higher counter. Both branches edit
   the engine spec, which merged cleanly; build B's remaining tasks may yet touch the same sentences.
-  `engine-b`'s brainstorm notes call its calibration-record ADR "ADR-0010" ("The morning after"); its
+  `engine-b`'s brainstorm notes call its calibration-record ADR "ADR-0010" (ADR-0011 since engine build B; corrected 2026-10-08) ("The morning after"); its
   plan names it ADR-0011, and ADR-0010 is the library here. The checker flags
   `garciaperez1998forcedchoice` (Crossref spells the name with a dotless i), a known false alarm.
 

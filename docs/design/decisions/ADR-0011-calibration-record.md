@@ -1,6 +1,6 @@
 # ADR-0011: Display color calibration records are JSON files, one per calibration, never executed
 
-- Status: Accepted 2026-10-08 (accepted by the PI on 2026-10-08 (Q4))
+- Status: Accepted 2026-10-08, by the PI in his answer to the engine B plan's Q4
 - Date: 2026-10-08
 - Deciders: PI
 
@@ -14,7 +14,8 @@ for the whole panel** (§7.6); **a calibration never expires** but carries its a
 is a warning (§7.10); the instrument is a spectroradiometer, driven from the console in build J (§12.1);
 and **records are committed per rig under `docs/measurements/<rig>/`, each with an id** (§12.6), in the
 `<rig>/<YYYY-MM-DD>/` folders `docs/measurements/README.md` already asks for. Build J's tool will write
-these records and every session reads one. CLAUDE.md sends file-format decisions through an ADR.
+these records; a session reads the one its rig names, and a session on the default reads none.
+CLAUDE.md sends file-format decisions through an ADR.
 
 Before build B a `photometry.Calibration` existed only as Python built in tests, with a `gamma`
 exponent nothing read. The rig's other settings are Python files executed at load: `tasks/rig.py`, the
@@ -27,9 +28,10 @@ the plan's "Questions for the PI" and the engine brainstorm notes' "The morning 
   read with the standard library and never executed. Unknown fields are refused, so the field list
   grows with builds A2 and J.
 - **B: a Python file like `tasks/rig.py`.** As readable, but loading it runs it.
-- **C: YAML, as wl-preproc's eye calibration is.** Its reader would become a dependency of a running
-  session; PyYAML is only in this repository's optional `contract` extra today, there so the contract
-  tests can import wl-preproc's own YAML reader (`pyproject.toml`).
+- **C: YAML, as wl-preproc's eye calibration is.** As asked: "Adds a dependency to this repository
+  (PyYAML is wl-preproc's, not ours)." *Corrected here, not in the question as it was put:* PyYAML is
+  already in this repository's optional `contract` extra, there so the contract tests can import
+  wl-preproc's own YAML reader (`pyproject.toml`); C would make it a dependency of a running session.
 
 **His answer:** "JSON data file (Recommended)": A, one JSON file per calibration, never executed. In
 answering he accepted the choice, so this ADR is written as Accepted. B and C were declined.

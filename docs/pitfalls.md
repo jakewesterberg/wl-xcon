@@ -23,7 +23,7 @@ the moment it becomes someone's active job. Review this file at every milestone 
 | **P16** | **Live parameter change becomes an undocumented discontinuity** | **High** | Full per-trial parameter snapshot; event-coded changes; atomic ITI application; provenance on every write |
 | **P17** | **Our fluid total is a lower bound, not a total** | Medium | Reconcile against the sync box's record of the delivered line, never against commanded — under a floor this is what stops a top-up being asked for fluid already given by hand |
 | **P18** | **Correct graph, wrong experiment** | **High** | Gates must inspect different *objects*, not the same one three ways — see expanded note |
-| **P19** | **A colour nobody measured reaches a methods section** | **High** | Device-independent colour only; refuse it without a photometer calibration naming its observer |
+| **P19** | **A colour nobody measured reaches a methods section** | **High** | Device-independent colour only, checked against the rig's calibration; on the default sRGB calibration a warning, refused in recording; isoluminance against a named observer, which the methods section states — see expanded note |
 | **P20** | **Generated structure nobody reads** | Medium | Anything a parameter generates — array items, their windows — needs a check, because no author will ever look at it |
 | **P21** | **A guardrail nothing calls, behind a comment that went stale** | **High** | A safety component needs a *consumer* in the same commit, and a test that the consumer is on the only path — see expanded note |
 | **P22** | **A browser page that can write is a page any site can try to make write** | **High** | Spec §2's four checks on every write, the `Host` check on every request, the rig's own validation behind them — see expanded note |
@@ -203,14 +203,36 @@ asked for a colour outside its gamut [@brainard1996cone, p. 572] clips, and a cl
 colour has neither the requested chromaticity nor the requested luminance — so an
 isoluminant pair stops being isoluminant and a chromatic experiment's control condition
 becomes a luminance manipulation, in a task that runs and looks convincing. Mitigation:
-colour is specified in CIE xyY or DKL cone contrast, checked against a measured
-`Calibration`, and refused without one [@cie2018colorimetry; @derrington1984chromatic].
-The calibration must name **whose luminous efficiency** it was measured against,
-because a human V(lambda) makes a stimulus that is isoluminant for nobody in the room
-[@dobkins2000comparison; @horwitz2015what; @lindbloombrown2014spectral].
+colour is specified in CIE xyY or DKL cone contrast [@cie2018colorimetry;
+@derrington1984chromatic] and checked against the session's calibration: the measured
+record the rig names or, when it names none, **the default, the sRGB standard, measured by
+nobody** (engine spec §7.1; engine build B, 2026-10-08). On the default a task that names
+a colour or lets a setting change a light loads in training and piloting with a warning a
+person accepts and the record keeps, and is **refused in a recording session** (PI,
+2026-10-07 and 2026-10-08; engine spec §7.2); isoluminance needs a measured calibration in
+every session (§7.3), and every DKL colour is refused on the default until build A2. A
+measured calibration is taken with a **spectroradiometer** (engine spec §12 item 1),
+written as one JSON record (ADR-0011).
 
-*As of 2026-09-01 no calibration for our panels exists.* Chromatic tasks will not
-load until a photometer measurement is committed under `docs/measurements/`.
+**Whose luminous efficiency is still the risk.** Isoluminance is defined against a
+named observer, the CIE 10° standard observer's cone-based V_F,10 (PI, 2026-10-08, A2's
+Q5), and a per-animal measured null was declined (PI, 2026-10-07). Equiluminant for that
+observer need not be equiluminant for the animal: macaque red-green equiluminance points
+differ from humans', consistent with L:M cone ratios near 1:1 against 2:1
+[@dobkins2000comparison]; macaque flicker detection thresholds lie on a plane that differs
+from the formal definition of luminance [@horwitz2015what]; monkeys are more sensitive than
+humans to 15 Hz red-green isoluminant modulation in a way optics do not explain
+[@lindbloombrown2014spectral]; and if "human and monkey cone fundamentals are indeed
+substantially different", then "a stimulus that is equiluminant for a human may possess
+luminance contrast for a monkey" [@conway2014color, section "MT"]. So **a methods section
+states that its isoluminance is the standard observer's**, and a result that rests on it
+says so (`docs/references/decisions.md`, COL-03 and COL-17).
+
+*As of 2026-10-08 no calibration for our panels exists*: every session runs on the
+default with its warning, and no lab task records on it until build J measures the panel.
+*Reworded 2026-10-08 for engine build B (XC-285): until then this note said colour was
+refused without a measured calibration, that chromatic tasks waited on a photometer, and
+that a human V(lambda) made a stimulus "isoluminant for nobody in the room".*
 
 **P20 — Generated structure nobody reads.** The point of `Array` and `ItemWindows` is
 that set size is a value, so the individual items and their windows are never written
