@@ -276,6 +276,7 @@ def test_a_grating_with_a_declared_mean_on_another_background_is_warned_not_refu
     findings = check(_one(grating, background=GRAY_BG))
     assert [f.code for f in findings] == ["luminance-step"]
     assert not findings[0].blocking
+    assert findings[0].accepted_in == ("training", "piloting", "recording")
 
 
 def test_an_array_s_items_must_be_lit_too():

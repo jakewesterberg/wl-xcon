@@ -8,7 +8,7 @@ import math
 
 from wl_xcon.codes import PROVISIONAL, Allocation
 from wl_xcon.components import Registry
-from wl_xcon.findings import Finding
+from wl_xcon.findings import SESSION_KINDS, Finding
 from wl_xcon.geometry import VIEWS, Geometry
 from wl_xcon.photometry import D65, DKL, Calibration, Color, Gray, unrealizable, xyY
 from wl_xcon.task import (
@@ -1198,8 +1198,8 @@ def _light_faults(trial: Trial) -> list[Finding]:
     combined = _combined(trial, params)
     findings: list[Finding] = []
 
-    def found(code: str, detail: str, blocking: bool = True) -> None:
-        finding = Finding(code, detail, blocking=blocking)
+    def found(code: str, detail: str, blocking: bool = True, accepted_in: tuple = ()) -> None:
+        finding = Finding(code, detail, blocking=blocking, accepted_in=accepted_in)
         if finding not in findings:  # one parameter's choices can repeat a finding
             findings.append(finding)
 
@@ -1284,7 +1284,8 @@ def _light_faults(trial: Trial) -> list[Finding]:
                 found("luminance-step", (
                     f"{what}'s mean {mean} differs from the background, so a luminance step "
                     f"sits under the pattern (engine spec §4.3: always a warning)"),
-                    blocking=False)
+                    blocking=False,
+                    accepted_in=SESSION_KINDS)  # Always a warning, in every kind (N§R3).
     return findings
 
 

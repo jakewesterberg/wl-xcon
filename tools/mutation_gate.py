@@ -59,6 +59,7 @@ RETURNS: dict[str, str] = {
     "screen": "None",
     "exact": "None",
     "check": "[]",
+    "findings": "None",
     "encode": "[]",
     "calibration": "[]",
     "gaze": "[]",
@@ -96,7 +97,6 @@ RETURNS: dict[str, str] = {
 #: which is the point: the alternative is a module quietly absent from both lists.
 EXEMPT: dict[str, str] = {
     "__init__": "package marker",
-    "findings": "one frozen dataclass; no functions and no behaviour to neuter",
     "look": "dataclass definitions only; no functions to neuter",
 }
 
