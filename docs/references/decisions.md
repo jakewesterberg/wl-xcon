@@ -142,7 +142,7 @@ entry has its three lines, that every link names a file that exists, and that ev
 ### COL-25 — A patterned fill's mean luminance defaults to what is behind it; a fill whose mean differs (a luminance step under the pattern) is always a warning, in every session kind
 - **Decided:** 2026-10-07, the PI (Batch R3, "Always a warning", offered against refusing it in recording), on the science review's finding 4.
 - **Where:** [engine spec §4.3](../superpowers/specs/2026-10-07-engine-design.md#43-what-each-fill-must-do-n1-batches-2-5-6); the brainstorm notes, [Batch R3](../superpowers/specs/2026-10-07-engine-brainstorm-notes.md#the-design-reviews-questions-asked-2026-10-07).
-- **Basis:** PI decision, 2026-10-07. The default follows the usual definition of a contrast stimulus as a modulation of a uniform background: [@brainard1996cone] (pp. 563-564, Fig. A.4.1); [@pelli2013measuring] — contrast "quantifies its relative difference in luminance from the background" (Introduction). A warning rather than a refusal: the PI's.
+- **Basis:** PI decision, 2026-10-07. The default follows the usual definition of a contrast stimulus as a modulation of a uniform background: [@brainard1996cone] (pp. 563-564, Fig. A.4.1); [@pelli2013measuring] — contrast "quantifies its relative difference in luminance from the background" (the opening paragraph, which has no heading). A warning rather than a refusal: the PI's.
 
 ### COL-26 — Each edge block states whether it is a contrast envelope (the default for patterned fills) or an opacity ramp, and what size means for it (a Gaussian's cut-off and σ declared separately)
 - **Decided:** 2026-10-07, engineering, from the science review's finding 4; the PI ruled on its companion (Batch R3; COL-25).
