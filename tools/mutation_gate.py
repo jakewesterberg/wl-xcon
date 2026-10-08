@@ -91,6 +91,7 @@ RETURNS: dict[str, str] = {
     "levels": "None",
     "resume": "None",
     "viewport": "None",
+    "warnlist": "None",
 }
 
 #: Modules with nothing to neuter, and why. An entry here is a claim someone made,
