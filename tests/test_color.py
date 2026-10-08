@@ -455,6 +455,27 @@ def test_a_looks_outline_of_another_kind_or_written_as_a_parameter_never_raises_
     assert "'o'" in detail and "'lum'" in detail and "'w'" not in detail
 
 
+def test_a_background_a_parameter_sets_is_a_light_factor():
+    trial = replace(a_task(Disc(size=1.0, color=Gray(10.0))), background=Gray(P("bg")),
+                    params=[Param("bg", unit="cd/m2", low=0.0, high=20.0)])
+
+    assert "'bg'" in _found(trial)["contrast-on-default"].detail
+
+
+def test_a_light_parameter_undeclared_or_among_its_own_choices_is_refused_never_raised():
+    """From Task 8 every session checks against the default, so the walk's own guards are
+    what keep `check()` from raising on either: an undeclared parameter has no choices to
+    read, and one met again inside its own choices is `_self_referring`'s refusal."""
+    undeclared = a_task(Disc(color=Gray(P("lum"))))
+    itself = replace(a_task(Disc(color=P("col"))),
+                     params=[Param("col", unit="color", choices=(Gray(P("col")), Gray(10.0)))])
+
+    assert "undeclared-parameter" in _found(undeclared)
+    assert "'lum'" in _found(undeclared)["contrast-on-default"].detail
+    assert any("refers to itself" in f.detail for f in check(itself, calibration=SRGB))
+    assert "'col'" in _found(itself)["contrast-on-default"].detail
+
+
 def test_an_appearance_whose_choices_differ_in_light_is_a_factor_too():
     found = _found(_choosing(Disc(size=1.0, color=Gray(10.0)), Disc(size=1.0, color=Gray(20.0))))
 
