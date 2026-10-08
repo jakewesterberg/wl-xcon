@@ -235,8 +235,8 @@ class Window:
     #: `"both"`, `"left"` or `"right"`. The tracker is binocular (architecture
     #: §1: 500 Hz binocular dDPI), so a per-eye criterion is available and is the
     #: correct primitive on a stereoscope: under dichoptic presentation the
-    #: non-viewing eye drifts, and scoring it against a conjugate estimate scores
-    #: an average of one eye doing the task and one eye doing nothing.
+    #: non-viewing eye deviates to its phoria, and scoring it against a conjugate
+    #: estimate scores an average of one eye doing the task and one eye doing nothing.
     eye: str = "both"
 
 
@@ -398,10 +398,10 @@ class Tolerances:
 
     `blink` defaults to zero: a task that tolerates blinks says so, because the other
     way round a task inherits a tolerance nobody chose and reports holds that were
-    never observed. `tracker_lost` defaults to 50 ms, which is P6's **measured**
-    stall maximum for OpenIrisDPI (~2% of frames >= 10 ms, max ~50 ms) -- that is the
-    tracker's behaviour, not the animal's, and blaming the animal for it would cost
-    roughly one trial in every few.
+    never observed. `tracker_lost` defaults to 50 ms, which is the OpenIrisDPI paper's
+    reported stall maximum (~2% of frames >= 10 ms, max ~50 ms), a placeholder until
+    V3(a) -- that is the tracker's behaviour, not the animal's, and blaming the animal
+    for it would cost roughly one trial in every few.
 
     `None` switches enforcement off, explicitly: a joystick-only task has no gaze
     criterion to protect and should not abort because a camera nobody is using

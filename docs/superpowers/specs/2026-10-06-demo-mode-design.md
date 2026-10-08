@@ -110,12 +110,13 @@ three parts supplied:
   both of its properties: a still pointer produces no saccade, and a move that stops produces
   one.
 
-So a hold, a fixation break, the 50 ms staleness rule (`eye.Tracker.staleness`) and a saccade
-behave as they will with an animal. **A mouse is not an eye**, and two consequences are stated
-on the screen's key list rather than hidden: a saccade is the pointer moving and then stopping,
-landing where it stops; and a person with a mouse is slower than a monkey's eye, so a task's
-response window may need more time (`--set`, or the page's parameters panel). Demo mode never
-changes a task's numbers by itself.
+So a hold, a fixation break, the 50 ms staleness placeholder (`eye.Tracker.staleness`, the
+OpenIrisDPI paper's stall maximum until V3(a) sets ours) and a saccade behave as they will with
+an animal. **A mouse is not an eye**, and two consequences are stated on the screen's key list
+rather than hidden: a saccade is the pointer moving and then stopping, landing where it stops;
+and a person with a mouse is slower than a monkey's eye, so a task's response window may need
+more time (`--set`, or the page's parameters panel). Demo mode never changes a task's numbers by
+itself. *(Corrected 2026-10-08: this said "the 50 ms staleness rule".)*
 
 **Signal states.** While the page reports the pointer over its screen, `poll` returns a fresh
 sample every frame, stamped `at`, holding the last position. The page reports on every move (at

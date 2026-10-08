@@ -59,8 +59,8 @@ class World(Protocol):
         `eye` is `"both"` for an ordinary conjugate criterion, or `"left"`/`"right"`
         when a window scores one eye. The tracker is binocular, so this is a real
         primitive; and on a stereoscope it is the *correct* one, because under
-        dichoptic presentation the non-viewing eye drifts and a conjugate estimate
-        averages one eye doing the task with one eye doing nothing.
+        dichoptic presentation the non-viewing eye deviates to its phoria and a
+        conjugate estimate averages one eye doing the task with one eye doing nothing.
         """
 
     def happened(self, guard: Guard, state: str, frame: int) -> bool: ...

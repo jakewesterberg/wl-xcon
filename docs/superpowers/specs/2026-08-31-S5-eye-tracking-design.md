@@ -14,18 +14,19 @@ calibration, merged that same day.
 
 | Thing | Where | Shape |
 |---|---|---|
-| Raw signal | `eye/gaze.py::purkinje_vector` | **`(CR1X − CR4X, CR1Y − CR4Y)` per eye.** P1 in `CR1`, P4 in `CR4`; CR2/3/5 unused |
-| Model | `eye/calibration.py::CalibrationModel` | `AFFINE` = `[1, dx, dy]` (3 terms/axis); `SECOND_ORDER` = `[1, dx, dy, dx², dy², dx·dy]` (6 terms/axis). Taken from **OpenIrisDPI's own tutorial notebook** |
+| Raw signal | `eye/gaze.py::purkinje_vector` | **`(CR1X − CR4X, CR1Y − CR4Y)` per eye.** P1 in `CR1`, P4 in `CR4`; CR2/3/5 unused [@cornsweet1973accurate; @wu2023highresolution; @ressmeyer2026openirisdpi] |
+| Model | `eye/calibration.py::CalibrationModel` | `AFFINE` = `[1, dx, dy]` (3 terms/axis); `SECOND_ORDER` = `[1, dx, dy, dx², dy², dx·dy]` (6 terms/axis) [@ressmeyer2026openirisdpi; @kimmel2012tracking; @blignaut2014mapping]. Taken from **OpenIrisDPI's own tutorial notebook** |
 | Source ranking | `CalibrationSource` | `FITTED`, **`ONLINE`**, `CARRIED_FORWARD`, `REFUSED` |
 | Recorded file columns | `eye/ohdpi.py` | `LeftFrameNumber`, `LeftSeconds`, `Int0` (sync word, bit 0 on the reference rig), `LeftCR1X`, `LeftCR4X`, ~100 columns total |
 
 **Decided 2026-09-27, design pending: a pupil and corneal-reflection fallback beyond the
 DPI's reach** (PI). The OpenIrisDPI paper puts P4's visibility at about 10° of gaze in
-macaques. The lab's stimuli go to about 15°, and this spec's own calibration targets already
-reach 10.8–15.3° in direct view and 10.2–14.4° through the stereoscope's ±12° mask on the
-PG27UCDM with the screen at 50 cm (`calibration.constellation`, per setup since 2026-09-28,
-§2; 10.8–16.3° on the 31.5" panel, `docs/research/2026-09-27-panel-27-vs-32.md`). Where P4
-cannot be vouched for, gaze comes from `pupil − CR1` instead:
+macaques [@ressmeyer2026openirisdpi]. The lab's stimuli go to about 15°, and this spec's own
+calibration targets already reach 10.8–15.3° in direct view and 10.2–14.4° through the
+stereoscope's ±12° mask on the PG27UCDM with the screen at 50 cm (`calibration.constellation`,
+per setup since 2026-09-28, §2; 10.8–16.3° on the 31.5" panel,
+`docs/research/2026-09-27-panel-27-vs-32.md`). Where P4 cannot be vouched for, gaze comes from
+`pupil − CR1` instead:
 - the tracker already reports both;
 - the fallback has its own calibration map;
 - every sample carries which method produced it.
@@ -67,23 +68,24 @@ degenerate on the quadratic basis.** The reason is arithmetic rather than empiri
 circle satisfy `dx² + dy² = r²`, so the constant, `dx²` and `dy²` columns are linearly dependent
 and no amount of points on that circle separates them.
 
-**Consequence for the calibration procedure: present a grid, never a ring.** A ring is the
-intuitive pattern and it silently forecloses the second-order rung — which S3 §7 already
-established is what decides whether a session reaches second-order calibration at all. The
-procedure **computes conditioning online and refuses to advance on a degenerate constellation**
-rather than discovering it in preprocessing.
+**Consequence for the calibration procedure: present a grid, never a ring.**
+[@kimmel2012tracking; @ressmeyer2026openirisdpi; @blignaut2014mapping] A ring is the intuitive
+pattern and it silently forecloses the second-order rung — which S3 §7 already established is
+what decides whether a session reaches second-order calibration at all. The procedure **computes
+conditioning online and refuses to advance on a degenerate constellation** rather than
+discovering it in preprocessing.
 
 **Amended 2026-09-05**, against
 `docs/measurements/dev-machine/2026-09-05-calibration-constellation.md`. Three corrections,
 each of which this section previously got wrong or left open:
 
 - **The constellation is thirteen targets, not nine** — a 3×3 grid at 75% of the per-eye
-  field, plus four intermediates on the diagonals at half that. Coordinates in
-  `calibration.constellation`. At equal animal cost nine, thirteen and twenty-five targets are
-  indistinguishable for accuracy; what thirteen buys is **survival**. Nine points fitting six
-  parameters has three to spare, so losing four makes the second-order fit not
-  ill-conditioned but *impossible*, and the session drops to affine at roughly double the
-  error. Thirteen survive losing five, 95% of the time.
+  field, plus four intermediates on the diagonals at half that [@srresearch2020faqb;
+  @srresearch2020faq; @blignaut2014mapping]. Coordinates in `calibration.constellation`. At
+  equal animal cost nine, thirteen and twenty-five targets are indistinguishable for accuracy;
+  what thirteen buys is **survival**. Nine points fitting six parameters has three to spare, so
+  losing four makes the second-order fit not ill-conditioned but *impossible*, and the session
+  drops to affine at roughly double the error. Thirteen survive losing five, 95% of the time.
 - **A ring plus a centre is not an acceptable substitute**, and this section implied it was by
   ruling out only the bare ring. Ring-8 plus a centre scores **0.1697** — it passes the 0.10
   gate — while leaving the quadratic radial term resting on a single contrast between two
@@ -104,13 +106,13 @@ uses, and their leverage drags the quadratic away from where stimuli actually go
 
 **Amended 2026-09-28: the constellation is placed per setup** (`2026-09-28-direct-view-design.md`
 §6). The same 3×3 plus four intermediates, scaled to a **calibration region** rather than the
-field: **±15° × ±15° in direct view**, the stimulus range, since 75% of direct view's ±30.5°
-field would put targets beyond both the stimuli and P4; and **the mask's ±12° in the
-stereoscope**. `tools/calibration_design.py` was rerun for each, by 2026-09-05's method, and each
-setup has its own reach (`calibration.REACH`): **85% in direct view, 100% in the stereoscope**,
-inside the same 0.85 margin. **Both are close calls**: each won under three of the four optics
-assumptions and lost the fourth by 0.001°. The records are
-`docs/measurements/dev-machine/2026-09-28-calibration-constellation-direct.md` and
+field: **±15° × ±15° in direct view**, the stimulus range [@srresearch2020faq;
+@blignaut2014mapping], since 75% of direct view's ±30.5° field would put targets beyond both the
+stimuli and P4; and **the mask's ±12° in the stereoscope**. `tools/calibration_design.py` was
+rerun for each, by 2026-09-05's method, and each setup has its own reach (`calibration.REACH`):
+**85% in direct view, 100% in the stereoscope**, inside the same 0.85 margin. **Both are close
+calls**: each won under three of the four optics assumptions and lost the fourth by 0.001°. The
+records are `docs/measurements/dev-machine/2026-09-28-calibration-constellation-direct.md` and
 `…-stereoscope.md`; the 75% above is the 2026-09-05 record's, on the 31.5-inch stereoscope, and
 stands as written.
 
@@ -127,8 +129,9 @@ client ships in the OpenIrisDPI repo.
 - **Stamp arrival with `CLOCK_MONOTONIC` and compute staleness** — how old the sample is at the
   moment a decision uses it.
 - Treat every sample as *latest available*, never as a clocked stream.
-- The **ACCES analog copy is a recorded channel, not a control input** (parent §9.1). Its value
-  is making the eye PC's software and USB lag measurable by cross-correlation per session.
+- The **ACCES analog copy is a recorded channel, not a control input** (parent §9.1)
+  [@ressmeyer2026openirisdpi]. Its value is making the eye PC's software and USB lag measurable
+  by cross-correlation per session.
 - Drive OpenIris's remote API (`StartRecording`, `RecordEvent`) so the eye PC's own authoritative
   file is session-aligned by construction, not only by barcode.
 
@@ -140,12 +143,13 @@ word on bit 0 on the reference rig** — rig wiring, not format, and one constan
 ## 4. P6 — the stall problem, handled honestly
 
 The OpenIrisDPI paper reports frame **processing** of 1.1 ± 0.1 ms median with **~2% of frames
-≥10 ms (max ~50 ms)** from OS preemption, on the authors' hardware.
+≥10 ms (max ~50 ms)** from OS preemption, on the authors' hardware [@ressmeyer2026openirisdpi].
 
 **Processing time is not the quantity that hurts us.** What matters is *staleness at the moment
 we poll* — a different distribution, related to the first through camera rate, queueing and
-drop behaviour, and **not measured by anyone for our configuration**. V3 measures it. Nothing
-downstream may quote the paper's 2% as though it described our rig (P1).
+drop behaviour, and **not measured by anyone for our configuration**. V3 measures it
+[@saunders2014direct]. Nothing downstream may quote the paper's 2% as though it described our
+rig (P1).
 
 ### 4.1 The design that tolerates it
 
@@ -174,22 +178,22 @@ downstream may quote the paper's 2% as though it described our rig (P1).
 
 ### 4.2 Attack the source, not only the symptom
 
-The 2% is OS preemption on a Windows PC, and the paper measured *their* machine. Before treating
-it as a constant, the OpenIris PC gets tuned as a rig-configuration task with a **measured
-before-and-after**: real-time process priority, CPU affinity and isolation, power management
-disabled, no other software, no background scanning. If that moves the distribution materially,
-the whole class of saccade-contingent experiment gets easier — and if it does not, we have
-measured that rather than assumed it.
+The 2% is OS preemption on a Windows PC, and the paper measured *their* machine
+[@ressmeyer2026openirisdpi]. Before treating it as a constant, the OpenIris PC gets tuned as a
+rig-configuration task with a **measured before-and-after**: real-time process priority, CPU
+affinity and isolation, power management disabled, no other software, no background scanning. If
+that moves the distribution materially, the whole class of saccade-contingent experiment gets
+easier — and if it does not, we have measured that rather than assumed it.
 
 ---
 
 ## 5. Online saccade detection
 
 **Engbert–Kliegl** (PI, 2026-08-31): velocity-threshold in 2D velocity space with a per-trial
-adaptive threshold. Chosen for a reason beyond its own merits — it is **already in `wl-preproc`'s
-offline suite**, so online-versus-offline agreement measures staleness and latency rather than
-comparing two different algorithms. Picking anything else would have made the disagreement
-uninterpretable.
+adaptive threshold [@engbert2003microsaccades; @kimmel2012tracking]. Chosen for a reason beyond
+its own merits — it is **already in `wl-preproc`'s offline suite**, so online-versus-offline
+agreement measures staleness and latency rather than comparing two different algorithms. Picking
+anything else would have made the disagreement uninterpretable.
 
 A **versioned, tested component with logged parameters** — not per-task code, because its
 parameters affect results and a task that re-derives it makes two sessions incomparable.
@@ -209,8 +213,9 @@ contains a gap is **flagged, not silently reported** (§4.1 item 4).
   in a task may implement its own.
 
 The binding requirement is the parent's: a saccade-triggered display change should land inside
-saccadic suppression. That budget is measured end to end in V3(b), photodiode to photodiode, not
-computed from component latencies.
+saccadic suppression [@ross2001changes; @diamond2000extraretinal]. That budget is measured end
+to end in V3(b), photodiode to photodiode, not computed from component latencies
+[@saunders2014direct].
 
 ---
 
@@ -221,9 +226,10 @@ faces of one thing: **the map changes during a session.**
 
 - Session-scoped, versioned, with a change log.
 - **Every trial cites the mapping version in force.**
-- **Automatic drift correction never overwrites the raw signal.** Raw and corrected are both
-  recorded, every adjustment is logged, and the correction is reversible offline — a silent
-  correction is indistinguishable from an artifact.
+- **Automatic drift correction never overwrites the raw signal.** [@kimmel2012tracking;
+  @ressmeyer2026openirisdpi] Raw and corrected are both recorded, every adjustment is logged,
+  and the correction is reversible offline — a silent correction is indistinguishable from an
+  artifact.
 - Toggling drift correction is a logged parameter change.
 - **The optics are part of the mapping's validity.** S0's stereoscope is adjustable per animal
   (`a = E(1 + 1/tan θ)`, optics drawing §4), so a mirror-carriage change invalidates the map
@@ -321,7 +327,7 @@ the online fit is validated against `validate_map` before an animal depends on i
 | # | Item | Blocks |
 |---|---|---|
 | 1 | ~~`wl-preproc` accepting an online-calibration reader for our format~~ **Closed 2026-09-05: they built it** (`eye/expcontroller.py::read_expcontroller_map`, at `c3f6c5e`), and its source fixes the schema — see §8 | — |
-| 2 | Staleness ceiling and grace-period values | frozen only after V3(a) |
+| 2 | Staleness ceiling and grace-period values | frozen only after V3(a) [@saunders2014direct] |
 | 3 | ~~Stall policy inside a gaze-contingent epoch~~ **Answered: proceed and mark.** Remaining: whether the per-trial staleness summary reaches `wl-preproc`'s `EyeQuality` | wl-preproc |
 | 4 | ~~Independent per-eye maps or a cyclopean fit~~ **Answered in S4 §3: independent per-eye maps against a shared cyclopean target set at zero disparity** | — |
 | 5 | ~~Saccade-detection algorithm~~ **Answered: Engbert–Kliegl**, matching `wl-preproc`'s offline suite so agreement is interpretable. Remaining: its parameters, from V3(c) | V3(c) |

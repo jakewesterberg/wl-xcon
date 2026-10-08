@@ -139,7 +139,7 @@ refuses one off the panel.
 **One position, serving both setups**: directly below the screen, in the eye's own vertical
 plane, at the OpenIrisDPI paper's layout of camera at 35° and light at 25°. The paper's rule is
 that the illuminator sits about 10° shallower than the camera, to center P4 (Ressmeyer et al.
-2026, §3.1; panel comparison §4.1).
+2026, §3.1; panel comparison §4.1) [@ressmeyer2026openirisdpi].
 
 At `Z` = 50 cm on the 27-inch (panel comparison §4.2, even border split ASSUMED):
 - the housing's bottom edge is 20.3° below the line of sight;
@@ -154,8 +154,9 @@ underside along the 35° and 25° lines. The mirrors themselves clear them (the 
 clearance rows); the enclosure and the divider are what could block them. This is a build
 requirement on the stereoscope device.
 
-Beyond P4's reach, which is about 10° in the paper's macaques (panel comparison §6), tracking
-falls back to pupil plus corneal reflection (PI, 2026-09-27; S5).
+Beyond P4's reach, which is about 10° in the paper's macaques [@ressmeyer2026openirisdpi]
+(panel comparison §6), tracking falls back to pupil plus corneal reflection (PI, 2026-09-27;
+S5).
 
 ---
 

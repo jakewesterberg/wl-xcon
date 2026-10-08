@@ -247,10 +247,17 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    formula and the sign are pinned in the exact drawer's tests, and the sign is verified in an animal by
    its vergence response to a disparity step [@busettini1996shortlatency] (S4 §10 item 6, kept).
 5. **Linked positions**: declared per link, moving with the other stimulus or placed once at onset.
-6. **Gaze-anchored stimuli**: the gaze rule selectable (newest, default; smoothed; predicted), each
-   frame's sample age recorded; behavior when gaze is lost, and during a saccade, declared per task.
-   **A displacement meant to go unseen must land during the saccade**; one that lands after it is
-   readily seen (corrected from the notes' gloss; the science review's finding 12).
+6. **Gaze-anchored stimuli**: the gaze rule selectable (newest, default; smoothed; predicted)
+   [@santini2007eyeris; @crane1985generationv; @saunders2014direct], each frame's sample age recorded;
+   behavior when gaze is lost, and during a saccade, declared per task. **A displacement meant to go
+   unseen must land during the saccade** [@deubel1996postsaccadic; @cavanaugh2016saccadic]; one that
+   lands after it may be seen (corrected from the notes' gloss, the science review's finding 12; and on
+   2026-10-08 from the reference library: suppression of luminance contrast outlasts the saccade by
+   about 50 ms [@diamond2000extraretinal] and lessens within 5-25 ms of its end [@saunders2014direct],
+   so a change landing just after is neither safely hidden nor reliably seen; chromatic gratings show no
+   saccadic suppression [@diamond2000extraretinal], so an isoluminant change is not hidden by landing
+   inside a saccade; and trained monkeys did not show humans' benefit from a post-saccadic blank
+   [@joiner2013corollary], so human results on post-saccadic visibility do not transfer directly).
 7. **Gaze windows may be any shape**, including a stimulus's own outline grown by a margin.
 8. **Off the field**: only when declared; check 8 grows to test extents (XC-143, XC-144).
 9. **Head-free chaired sessions**: nominal head position, recorded and listed; a task may require a
@@ -437,10 +444,11 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
 
 1. **The color instrument is a spectroradiometer** [@brainard2002display]; calibration is automated from
    the console (build J).
-2. **The eye tracker's calibration is required at every session start** (S5 §7): the thirteen-target
-   constellation before any task; no first task without a validated map; calibration epochs inside tasks
-   track drift. **It is its own early build (T)**, needing only the display and the tracker, before the
-   first animal session; it does not wait on the spectroradiometer.
+2. **The eye tracker's calibration is required at every session start** (S5 §7) [@kimmel2012tracking]:
+   the thirteen-target constellation before any task; no first task without a validated map; calibration
+   epochs inside tasks track drift [@hornof2002cleaning]. **It is its own early build (T)**, needing
+   only the display and the tracker, before the first animal session; it does not wait on the
+   spectroradiometer.
 3. **On the stereoscope, the calibration is two monocular grids** (the PI's method) [@cox2019temporal;
    @mitchell2022stimulating; @dougherty2021binocular]: the grid shown to each eye in turn; each eye's
    map fitted from its own grid; and, from the covered eye recorded during the other eye's grid, **the

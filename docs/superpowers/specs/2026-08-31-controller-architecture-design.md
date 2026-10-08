@@ -406,10 +406,10 @@ video, so:
 
 **UDP (port 9003) is the control path; the ACCES analog copy is a recorded channel.**
 Settled by the science, not by preference: saccade-triggered display changes must land
-inside saccadic suppression to be invisible, and the analog path adds ~3–4 ms (OpenIrisDPI
+inside saccadic suppression to be invisible [@ross2001changes; @diamond2000extraretinal], and the analog path adds ~3–4 ms (OpenIrisDPI
 paper, via `docs/research/openiris-dpi.md`) on top of being capped at ~2 kHz delivered
 bandwidth by the ACCES DAC's 4 kHz conversion rate (breakout spec §12 item 10). The OpenIrisDPI paper states the analog signal "may limit the use of this signal for
-gaze-contingent applications."
+gaze-contingent applications." [@ressmeyer2026openirisdpi]
 
 The analog copy earns its channels by making the eye PC's software+USB lag measurable by
 cross-correlation per session.
@@ -424,9 +424,10 @@ parameters affect results. Tested against replayed OpenIrisDPI data.
 
 **The dominant risk to this whole class of experiment is tracker stalls.** The
 OpenIrisDPI paper reports frame processing of 1.1 ± 0.1 ms median but **~2% of frames
->= 10 ms (max ~50 ms)** on the authors' hardware. Gaze logic uses hold-last with a
-staleness ceiling and grace periods; a trial abort requires corroboration. Our own stall
-distribution is measured (V3) before window parameters are frozen.
+>= 10 ms (max ~50 ms)** on the authors' hardware [@ressmeyer2026openirisdpi]. Gaze logic
+uses hold-last with a staleness ceiling and grace periods; a trial abort requires
+corroboration. Our own stall distribution is measured (V3) before window parameters are
+frozen.
 
 ### 9.3 The gaze mapping is a versioned object
 
@@ -436,9 +437,10 @@ recalibration are one concept, not four: **the mapping changes during a session.
 - The mapping is session-scoped and versioned, with a change log.
 - **Every trial cites the mapping version in force.**
 - Calibration runs as an interlude (§5.5).
-- **Automatic drift correction never overwrites the raw signal.** Raw and corrected are
-  both recorded, every adjustment is logged, and the correction is reversible offline. A
-  silent correction is indistinguishable from an artifact.
+- **Automatic drift correction never overwrites the raw signal.** [@kimmel2012tracking;
+  @ressmeyer2026openirisdpi] Raw and corrected are both recorded, every adjustment is
+  logged, and the correction is reversible offline. A silent correction is
+  indistinguishable from an artifact.
 - Toggling drift correction is a logged parameter change like any other.
 
 ### 9.4 Other behavioral inputs

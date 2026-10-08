@@ -78,9 +78,10 @@ Per-eye maps are still fitted **independently** — each eye has its own raw Pur
 set**. That matches `wl-preproc`'s own shape, where `purkinje_vector(path, eye)` and `EyeQuality`
 are both keyed by eye while the target is not.
 
-**Consequence for the calibration block:** its 3×3 grid (S5 §2) is a cyclopean grid at zero
-disparity. Disparity is never calibrated by the gaze map; it is a rendering property verified
-separately (§10).
+**Consequence for the calibration block:** its thirteen-target constellation (S5 §2) is a
+cyclopean grid at zero disparity. Disparity is never calibrated by the gaze map; it is a
+rendering property verified separately (§10). *(Corrected 2026-10-08: this said "its 3×3
+grid".)*
 
 ---
 

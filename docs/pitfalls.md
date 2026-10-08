@@ -81,10 +81,11 @@ features not raw data, and keeps the Open Ephys + Falcon path (published 9.241 m
 384 ch) as the fallback and cross-check.
 
 **P6 — Tracker stalls.** ~2% of OpenIrisDPI frames >= 10 ms (max ~50 ms) on the authors'
-hardware. **Raised to High** because the experimental program depends on saccade-triggered
-display changes landing inside saccadic suppression — a budget tighter than anything else
-in this project, and one a 50 ms stall destroys outright. Fixation logic uses hold-last with
-a staleness ceiling and grace periods; aborts require corroboration. V3 runs on our hardware
+hardware [@ressmeyer2026openirisdpi]. **Raised to High** because the experimental program
+depends on saccade-triggered display changes landing inside saccadic suppression
+[@ross2001changes; @diamond2000extraretinal] — a budget tighter than anything else in this
+project, and one a 50 ms stall destroys outright. Fixation logic uses hold-last with a
+staleness ceiling and grace periods; aborts require corroboration. V3 runs on our hardware
 before window parameters are frozen, and its result may force a design change rather than a
 parameter change.
 

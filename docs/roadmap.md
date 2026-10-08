@@ -42,7 +42,8 @@ OpenIrisDPI streaming into `taskd` on-rig; calibration, recentering and drift co
 working with a versioned gaze mapping; protocol V3: stall distribution plus end-to-end
 gaze-step-to-display-change latency. Gate: measured latency distribution committed;
 **saccade-triggered updates demonstrated inside saccadic suppression**, or the design
-revised. Gaze-window grace parameters set from data, never from the paper's numbers.
+revised. Gaze-window grace parameters set from data, never from the paper's numbers
+[@saunders2014direct].
 
 ## M4 — I/O and sync fabric
 Reward command path to `wl-juicer`, event words, both photodiode comparators, chair-motion

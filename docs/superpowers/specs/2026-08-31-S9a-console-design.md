@@ -60,9 +60,10 @@ two-panel mode after all. It is the one case a cyclopean replica genuinely canno
 
 ML puts targets on the subject screen by clicking the corresponding place on the control
 screen. Adopt it: the replica is already in task coordinates, so clicking it *is* naming
-a position in degrees. The calibration grid (S5 §7, a 3×3 — never a ring) is then a
-sequence of clicks or one button, and drift correction is a click where the animal is
-actually looking.
+a position in degrees. The calibration constellation (S5 §2: thirteen targets, a 3×3 plus
+four intermediates, never a ring) is then a sequence of clicks or one button, and drift
+correction is a click where the animal is actually looking. *(Corrected 2026-10-08: this
+said "The calibration grid (S5 §7, a 3×3 — never a ring)".)*
 
 ---
 

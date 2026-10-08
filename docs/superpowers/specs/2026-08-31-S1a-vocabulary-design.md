@@ -296,9 +296,13 @@ index are both live.
 
 **Per-eye criteria.** `Window.eye` is honoured by the loop, which previously parsed
 and dropped it. The tracker is binocular, and on a stereoscope a per-eye criterion is
-the correct primitive: under dichoptic presentation the non-viewing eye drifts, so a
-conjugate estimate averages one eye doing the task with one eye doing nothing. A
-window scoring the eye its stimulus is not shown to is refused.
+the correct primitive: under dichoptic presentation the non-viewing eye deviates to
+its phoria [@gantz2020synchronization; @svede2015monocular] rather than following the
+stimulus (in a normal macaque it stays nearly as stable as the viewing eye, but not
+aligned with it [@pirdankar2016influence]), so a conjugate estimate averages one eye
+doing the task with one eye not looking at the stimulus. A window scoring the eye its
+stimulus is not shown to is refused. *(Corrected 2026-10-08: this said the non-viewing
+eye "drifts", and "one eye doing nothing".)*
 
 **The simulated animal sees the screen.** `World.display` is called every frame with
 what a real display would carry, and a subject will not acquire a window whose
@@ -324,12 +328,14 @@ to fix the animal or the camera.
 **`BLINK_BREAK` and `TRACKER_LOST`, with independent graces.** They look identical in
 the data — gaze leaves the window — and they are different events: a blink is the
 animal, tracker loss is the rig. `Tolerances(blink=0.0, tracker_lost=0.05)`: blinks
-are not tolerated unless a task says so, because the other way round a task inherits
-a tolerance nobody chose; tracker loss always gets a brief grace, defaulting to P6's
-**measured** stall maximum for OpenIrisDPI (~2% of frames >= 10 ms, max ~50 ms),
-which is the tracker's behaviour rather than the animal's. `None` switches
-enforcement off explicitly, for a joystick-only task with no gaze criterion to
-protect.
+are not tolerated unless a task says so [@kimmel2012tracking], because the other way
+round a task inherits a tolerance nobody chose; tracker loss always gets a brief
+grace, defaulting, as a placeholder until V3(a) measures ours (S5 §4), to the
+OpenIrisDPI paper's reported stall maximum on its authors' PC (~2% of frames >= 10 ms,
+max ~50 ms [@ressmeyer2026openirisdpi], §3.1), which is the tracker's behaviour rather
+than the animal's. `None` switches enforcement off explicitly, for a joystick-only
+task with no gaze criterion to protect. *(Corrected 2026-10-08: this called the
+default P6's **measured** stall maximum.)*
 
 An interruption inside its grace **freezes** the trial's view of gaze rather than
 lapsing it: the blind frames are not counted toward a hold, so a hold spanning a
