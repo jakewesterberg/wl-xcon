@@ -39,7 +39,7 @@ A window's `at` may itself be a parameter, which is what makes "move the array f
 | Term | Means | Why this word |
 |---|---|---|
 | `After(duration)` | elapsed since the state was entered | |
-| `AfterFrames(n)` | an exact frame count | Stimulus durations that must be frame-exact rather than time-approximate |
+| `AfterFrames(n)` | an exact frame count | Stimulus durations that must be frame-exact rather than time-approximate [@elze2010misspecifications] |
 | `Acquired(window)` | gaze entered and settled | ML's `acquirefix` / `acquiretarget` |
 | `Held(window, duration)` | continuously inside for a duration | ML's `holdfix`; restarts if gaze leaves |
 | `Broke(window)` | left after acquiring | "the animal broke fixation" |
@@ -49,7 +49,7 @@ A window's `at` may itself be a parameter, which is what makes "move the array f
 | `Touched(window)` | touchscreen contact inside a window | S13 |
 | `JoystickIn(window)` | joystick deflected into a region | |
 | `RateAbove(source, threshold)` | MUA feature over threshold | Tier-3 gating (S7) |
-| `Onscreen(patch)` | **photodiode-confirmed** stimulus onset | S6 §3 — physical, not believed |
+| `Onscreen(patch)` | **photodiode-confirmed** stimulus onset | S6 §3 — physical, not believed [@bridges2020timing; @plant2004selfvalidating] |
 | `ChairStill()` / `ChairMoving()` | `wl-shook`'s motion gate | |
 
 **`Onscreen` is the one worth arguing over.** It reads as a claim about the world
@@ -84,7 +84,7 @@ All carry `at` (cyclopean degrees), `disparity`, and `eye`.
 | `Spot` | `size`, `contrast` — a plain disc |
 | `Gabor` | `sf`, `orientation`, `phase`, `contrast`, `sigma` |
 | `Grating` | `sf`, `orientation`, `phase`, `contrast`, `aperture` |
-| `Dots` | `coherence`, `direction`, `speed`, `density`, `aperture` — an RDK |
+| `Dots` | `coherence`, `direction`, `speed`, `density`, `aperture` — an RDK [@britten1992analysis] |
 | `Bar` | `length`, `width`, `orientation`, `contrast` — RF mapping |
 | `Image` | `asset`, `size` |
 | `Movie` | `asset`, `size` |
@@ -99,7 +99,8 @@ model that has not seen a methods section.
 `eye="left" | "right" | "both"` (default `"both"`). On a split-screen stereoscope,
 **monocular and dichoptic presentation are first-class**: binocular rivalry, monocular
 RF mapping, and interocular-suppression designs all need one eye's viewport to carry
-something the other's does not.
+something the other's does not [@leopold1996activity; @hubel1968receptive;
+@dougherty2021binocular; @mitchell2022stimulating].
 
 Disparity and `eye` are different mechanisms and both are needed. Disparity shifts one
 stimulus in both eyes; `eye` puts different content in each.
@@ -201,9 +202,10 @@ than being subclassed per shape.
 | Assets | `Picture`, `Movie` |
 | Nothing | `Blank` |
 
-`Gabor` and `Grating` are separate because the envelope differs — Gaussian against a
-hard aperture — and that changes edge artifacts and spatial-frequency bandwidth,
-which is why the field names them separately rather than parameterising one.
+`Gabor` and `Grating` are separate because the envelope differs — Gaussian
+[@daugman1985uncertainty] against a hard aperture — and that changes edge artifacts and
+spatial-frequency bandwidth, which is why the field names them separately rather than
+parameterising one.
 
 `Blank` is not the absence of a `Show`. A catch trial shows nothing *at the moment a
 stimulus would have appeared*, and making that explicit keeps catch and non-catch
@@ -216,7 +218,7 @@ trials structurally identical, which is what makes them comparable.
 `Stimulus.disparity` shifts a whole stimulus in depth. That is not what a random-dot
 stereogram does: an RDS defines a **shape by disparity within the dot pattern**, so
 the figure is invisible monocularly and exists only in the correspondence between the
-two eyes' images. Cyclopean form, in the Julesz sense.
+two eyes' images. Cyclopean form, in the Julesz sense [@julesz1960binocular].
 
 The two are different mechanisms and the vocabulary currently has only the first.
 Adding it means either an `RDS` appearance carrying its own figure and disparity, or
@@ -226,18 +228,19 @@ displaced by it — which would also cover disparity-defined edges and surfaces.
 **Settled: both, split by what they describe.** `RDS` is an appearance carrying
 `correlation` — +1 correlated, 0 uncorrelated, **-1 anticorrelated** — because
 anticorrelation is not a shape at all and cannot be expressed as a displacement, and
-it is the control every disparity paper is asked for. Separately, `Form` is a
-disparity *field* across a patch (`Corrugation`, `Slant`), because a patch carrying
-one has no single disparity to be displaced by. A `Slant`'s extreme depends on how
-wide the patch is, so its range is answered against the aperture rather than quoted
-alone.
+it is the control every disparity paper is asked for [@cumming1997responses;
+@tanabe2004rejection]. Separately, `Form` is a disparity *field* across a patch
+(`Corrugation`, `Slant`) [@nienborg2004receptive; @nguyenkim2003disparitybased],
+because a patch carrying one has no single disparity to be displaced by. A `Slant`'s
+extreme depends on how wide the patch is, so its range is answered against the
+aperture rather than quoted alone.
 
 Check 8 adds a form's extremes to the stimulus's own disparity: a patch centred
 safely can still push one eye's image off the panel at the extreme of its
 corrugation, and only that eye's. A stereogram declared for one eye is refused —
-monocular presentation of one half is a field of random dots with no disparity, and
-it would still run, still record, and still appear in a figure as a disparity
-condition.
+monocular presentation of one half is a field of random dots with no disparity
+[@julesz1960binocular], and it would still run, still record, and still appear in a
+figure as a disparity condition.
 
 ## 11. Still open — the naming, which is the point
 
@@ -268,18 +271,20 @@ than being scoped to its state — the original wording removed a fixation point
 exact frame the animal was asked to hold it, in a task that read correctly and passed
 all ten checks. Stimuli carry **names**; `Hide` and `Update` address them. `Update`
 changes a live stimulus without the offset transient `Hide`+`Show` inserts, which is
-the confound change detection exists to avoid. A `Window` names the stimulus it
-scores, or `REMEMBERED` when the location is deliberately blank; unset is refused,
-because otherwise the check is opt-in and the tasks likeliest to skip it are the ones
-written fastest.
+the confound change detection exists to avoid [@rensink1997see]. A `Window` names the
+stimulus it scores, or `REMEMBERED` when the location is deliberately blank; unset is
+refused, because otherwise the check is opt-in and the tasks likeliest to skip it are
+the ones written fastest.
 
 **Colour, device-independently.** `xyY` names a light absolutely; `DKL` is a
-modulation from the background along the cardinal cone-opponent axes, where `lum=0`
-is isoluminant by construction. Colour sits on the **appearance**, not the stimulus,
-so "red among green" and "circles among squares" are the same kind of switch and both
-are values a parameter can carry. Colour without a measured `Calibration` is refused,
-and a calibration that does not name whose luminous efficiency it used cannot carry an
-isoluminance claim — a macaque V(lambda) is not a human one.
+modulation from the background along the cardinal cone-opponent axes, where `lum=0` is
+isoluminant by construction [@cie2018colorimetry; @derrington1984chromatic;
+@brainard1996cone]. Colour sits on the **appearance**, not the stimulus, so "red among
+green" and "circles among squares" are the same kind of switch and both are values a
+parameter can carry. Colour without a measured `Calibration` is refused, and a
+calibration that does not name whose luminous efficiency it used cannot carry an
+isoluminance claim — a macaque V(lambda) is not a human one [@dobkins2000comparison;
+@horwitz2015what; @lindbloombrown2014spectral].
 
 **Set size as a value.** `Array` is an appearance, so an N-item search array is one
 named stimulus and the rest of the system needs to know nothing about arrays.
@@ -292,9 +297,13 @@ index are both live.
 
 **Per-eye criteria.** `Window.eye` is honoured by the loop, which previously parsed
 and dropped it. The tracker is binocular, and on a stereoscope a per-eye criterion is
-the correct primitive: under dichoptic presentation the non-viewing eye drifts, so a
-conjugate estimate averages one eye doing the task with one eye doing nothing. A
-window scoring the eye its stimulus is not shown to is refused.
+the correct primitive: under dichoptic presentation the non-viewing eye deviates to
+its phoria [@gantz2020synchronization; @svede2015monocular] rather than following the
+stimulus (in a normal macaque it stays nearly as stable as the viewing eye
+[@pirdankar2016influence], but not aligned with it), so a conjugate estimate averages one eye
+doing the task with one eye not looking at the stimulus. A window scoring the eye its
+stimulus is not shown to is refused. *(Corrected 2026-10-08: this said the non-viewing
+eye "drifts", and "one eye doing nothing".)*
 
 **The simulated animal sees the screen.** `World.display` is called every frame with
 what a real display would carry, and a subject will not acquire a window whose
@@ -307,10 +316,10 @@ alone, so every defect in this section simulated perfectly.
 Five outcomes, on the PI's decision after review.
 
 **`CORRECT_REJECT` and `FALSE_ALARM`.** Without all four cells of the matrix, d' and
-criterion are not computable — and not recoverable offline, because a correct
-rejection was previously indistinguishable from an animal that did nothing.
-`CORRECT_REJECT` marks `TRIAL_CORRECT`: it is the hit on the no-signal side, and an
-analysis counting correct trials should count it.
+criterion are not computable [@stanislaw1999calculation; @luo2015neuronal] — and not
+recoverable offline, because a correct rejection was previously indistinguishable from
+an animal that did nothing. `CORRECT_REJECT` marks `TRIAL_CORRECT`: it is the hit on
+the no-signal side, and an analysis counting correct trials should count it.
 
 **`FAULT` split from `ABORT`.** `ABORT` means the animal went somewhere that was
 neither target nor distractor. A dropped frame is not that, and mixing them makes a
@@ -320,12 +329,14 @@ to fix the animal or the camera.
 **`BLINK_BREAK` and `TRACKER_LOST`, with independent graces.** They look identical in
 the data — gaze leaves the window — and they are different events: a blink is the
 animal, tracker loss is the rig. `Tolerances(blink=0.0, tracker_lost=0.05)`: blinks
-are not tolerated unless a task says so, because the other way round a task inherits
-a tolerance nobody chose; tracker loss always gets a brief grace, defaulting to P6's
-**measured** stall maximum for OpenIrisDPI (~2% of frames >= 10 ms, max ~50 ms),
-which is the tracker's behaviour rather than the animal's. `None` switches
-enforcement off explicitly, for a joystick-only task with no gaze criterion to
-protect.
+are not tolerated unless a task says so, because the other way
+round a task inherits a tolerance nobody chose; tracker loss always gets a brief
+grace, defaulting, as a placeholder until V3(a) measures ours (S5 §4), to the
+OpenIrisDPI paper's reported stall maximum on its authors' PC (~2% of frames >= 10 ms,
+max ~50 ms [@ressmeyer2026openirisdpi], §3.1), which is the tracker's behaviour rather
+than the animal's. `None` switches enforcement off explicitly, for a joystick-only
+task with no gaze criterion to protect. *(Corrected 2026-10-08: this called the
+default P6's **measured** stall maximum.)*
 
 An interruption inside its grace **freezes** the trial's view of gaze rather than
 lapsing it: the blind frames are not counted toward a hold, so a hold spanning a

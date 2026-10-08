@@ -70,6 +70,7 @@ that earns the hardware interfaces their generality.
 
 ```
 docs/research/           verified findings (landscape, OpenIrisDPI, SpikeGLX real-time)
+docs/references/         the papers science-facing choices rest on, and the decisions (ADR-0010)
 docs/design/             architecture + decisions/ (ADRs)
 docs/superpowers/specs/  design specs and the S0-S12 spec map
 docs/pitfalls.md         risk register with mitigations

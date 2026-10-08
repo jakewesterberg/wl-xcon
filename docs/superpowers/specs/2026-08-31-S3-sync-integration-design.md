@@ -25,7 +25,8 @@ PIO). So each code we emit exists in at least three places: the sync box log, th
 lines into SpikeGLX, and our own log.
 
 **Consequence, and it simplifies us:** our log is not the timing record and does not need to
-be. It carries *meaning* — parameters, decisions, task state — keyed to codes whose timing two
+be [@siegle2021survey; @karsh2026sync]. It carries *meaning* — parameters, decisions, task
+state — keyed to codes whose timing two
 other systems already hold. This is S2's identity-versus-content rule applied one level up.
 
 ---
@@ -88,7 +89,7 @@ Raised with `wl-sync` and `wl-preproc` as an amendment (§9).
 2. **Never emit a barcode**, and never derive time from one. We read event codes back only
    through analysis, never in the loop.
 3. **Mirror every scientifically meaningful decision as a code**, so the sync box's `W` record
-   and the NI record are both complete without our files.
+   and the NI record are both complete without our files [@hwang2019nimh].
 4. **Photodiode patches drawn correctly and continuously** — the flip patch must alternate on
    *every* refresh, because the sync box and our own dropped-frame detection both read it as a
    frame clock (S0 §5.4, parent §11.5).
@@ -189,7 +190,8 @@ Three consequences, and the third is the one that keeps flexibility:
 reach the recorders as edges plus analog copies.
 
 **Placement now has a geometric answer.** Both patches must sit outside both eyes' viewports,
-or the flip patch — alternating every refresh — is a flickering distractor in one eye's field.
+or the flip patch — alternating every refresh — is a flickering distractor in one eye's field
+[@williams2004entrainment; @yantis1984abrupt].
 Naively impossible, since two viewports tile the panel exactly. The answer is a **bottom strip
 the full panel width**, created by stopping the field vertically — vertical field is the
 surplus dimension, so it costs nothing that matters. Its height depends on the stop, which is
@@ -212,7 +214,8 @@ direct view refuses to exist. The flicker is checked invisible from the animal's
 setups at bring-up (V9).
 
 **Cameras** take the barcode as a timebase to record, not a trigger — they free-run, and the
-sync box captures their `ExposureActive` strobes on GPIO 26/27. **We do not trigger cameras and
+sync box captures their `ExposureActive` strobes on GPIO 26/27 [@siegle2021survey].
+**We do not trigger cameras and
 do not set their rate.**
 
 **Reconstruction (V6)** round-trips a synthetic multi-stream day: sync box `E`/`W`/`B` records,
@@ -244,6 +247,6 @@ question, from their side.
 |---|---|---|
 | 1 | How taskd learns the session id | every output path |
 | 2 | ~~Day versus subject-session~~ **Answered: two animals routinely, and `SessionManifest` carries one subject — so a subject change must mint `_02`.** Remaining: `wl-sync` implementing it, and being told when a subject changes | directory layout under two subjects |
-| 3 | Photodiode patch placement — **candidate found** (central strip from the nasal clip); confirm with `wl-sync` and verify dark at bring-up | rig build |
+| 3 | Photodiode patch placement — **decided**: the bottom strip the stereoscope's mask makes (3.22 cm at the ±12° mask), and in direct view under each sensor's housing (S3 §8, S4 §7, optics drawing §5, direct-view spec §4); the central strip is the fallback (optics drawing §8 items 3-4); confirm with `wl-sync` and verify dark at bring-up. *(Corrected 2026-10-08: this said "candidate found (central strip from the nasal clip)".)* | rig build |
 | 4 | ~~Calibration blocks versus in-task epochs~~ **Answered: both.** Remaining: wl.works planning a calibration block per session | S5, S8, wl-works |
 | 5 | Whether our synthetic generator feeds `wl-preproc`'s harness or its own | V6 |

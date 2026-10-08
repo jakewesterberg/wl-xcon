@@ -78,9 +78,10 @@ Per-eye maps are still fitted **independently** — each eye has its own raw Pur
 set**. That matches `wl-preproc`'s own shape, where `purkinje_vector(path, eye)` and `EyeQuality`
 are both keyed by eye while the target is not.
 
-**Consequence for the calibration block:** its 3×3 grid (S5 §2) is a cyclopean grid at zero
-disparity. Disparity is never calibrated by the gaze map; it is a rendering property verified
-separately (§10).
+**Consequence for the calibration block:** its thirteen-target constellation (S5 §2) is a
+cyclopean grid at zero disparity. Disparity is never calibrated by the gaze map; it is a
+rendering property verified separately (§10). *(Corrected 2026-10-08: this said "its 3×3
+grid".)*
 
 ---
 
@@ -93,8 +94,9 @@ Obligations, all of which are the reason the seam is narrow:
 
 1. **Flip-locked.** Everything scheduled for a frame is drawn before the flip; nothing is drawn
    between flips.
-2. **The frame period is never assumed.** S0's dual mode makes it 4.2, 8.3 or 2.08 ms, and S13's
-   kiosk something else again. Code that hardcodes a period is a bug the checker should catch.
+2. **The frame period is never assumed.** [@bridges2020timing; @saunders2014direct] S0's dual
+   mode makes it 4.2, 8.3 or 2.08 ms, and S13's kiosk something else again. Code that hardcodes
+   a period is a bug the checker should catch.
 3. **No allocation, no disk I/O, no logging inside a frame.** Assets are resident before an
    epoch begins.
 4. **Draws the photodiode patches every frame** (§7), unconditionally, on every code path.
@@ -147,8 +149,8 @@ every refresh and is therefore a frame clock. Both are fixed in copper (`wl-sync
   vertically. The stop is **a removable mask at the panel, starting at ±12°** (PI, 2026-09-28;
   optics drawing §5), which makes the strip 3.22 cm tall with the screen fixed 50 cm from the
   eyes: 1.90 cm with the mask at the full viewport's ±13.15°, 5.51 cm at the ±10° requirement.
-  Outside both viewports, so neither is visible to either eye. They sit at one bottom corner of
-  it, the place they keep in direct view.
+  Outside both viewports, so neither is visible to either eye [@williams2004entrainment;
+  @yantis1984abrupt]. They sit at one bottom corner of it, the place they keep in direct view.
 - **In direct view there is no strip**: each patch is covered by its sensor's opaque housing, a
   rectangle with a margin in the rig's settings that direct view's field excludes
   (`geometry.Housing`, `tasks/rig.py`; `2026-09-28-direct-view-design.md` §4).
@@ -184,11 +186,11 @@ defines it as the identity of a **stimulus calibration record** covering:
 
 | Component | Why |
 |---|---|
-| Per-mode gamma / luminance transfer, per half of the panel | On a split screen, left-right difference is an interocular mismatch (V9) |
+| Per-mode gamma / luminance transfer, per half of the panel | On a split screen, left-right difference is an interocular mismatch (V9) [@abuhaila2025recent] |
 | Measured deg/pixel per eye, per mode | From the measured optical paths, not the nominal |
 | Vergence offset in force | Software constant, per animal |
-| Panel identity, firmware, and the state of every "care" feature | Pixel-shift silently corrupts the geometry (S0 §5.4) |
-| ABL fill-factor limit measured as an interocular coupling | S0 §5.4 criterion 2 |
+| Panel identity, firmware, and the state of every "care" feature | Pixel-shift silently corrupts the geometry (S0 §5.4) [@dimigen2026advantages; @asus2026rogb] |
+| ABL fill-factor limit measured as an interocular coupling | S0 §5.4 criterion 2 [@dimigen2026advantages; @abuhaila2025recent; @brainard2002display] |
 | The V1 and V9 artifacts this was derived from | So the id resolves to measurements, not to a claim |
 
 **A session runs against exactly one stimulus calibration id, and the id changes whenever any
@@ -205,11 +207,12 @@ Run from the console (S9), and one of them is required at every session start:
    recorded. The optics are adjustable per animal, so this is the cheap test that catches a
    carriage that moved.
 2. Geometry and linearity grid, per eye.
-3. Gamma and luminance ramp, per half.
+3. Gamma and luminance ramp, per half [@abuhaila2025recent].
 4. Photodiode patch test — drive known sequences, confirm both comparator inputs.
 5. Frame-timing pattern for V1, per mode.
 6. **Disparity verification** — a target at known disparity, confirmed fused and at the intended
-   depth. Disparity is not covered by the gaze calibration (§3) and needs its own check.
+   depth [@wirth2017gazeinformed; @busettini1996shortlatency]. Disparity is
+   not covered by the gaze calibration (§3) and needs its own check.
 
 ---
 
@@ -222,7 +225,7 @@ Run from the console (S9), and one of them is required at every session start:
 | **V9** | Per-half photometry, per-eye optical paths, ABL interocular coupling, patch darkness |
 
 Dropped frames are detected in hardware, live, from `PD2_COMP` at the display surface — not from
-the engine's own frame-interval accounting (parent §11.5).
+the engine's own frame-interval accounting (parent §11.5) [@plant2004selfvalidating].
 
 ---
 

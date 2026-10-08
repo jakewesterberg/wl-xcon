@@ -4,11 +4,15 @@
 - **Corrected 2026-09-06 by the PI, and the correction is welfare-critical:** §4 and §5
   are written as though fluid had a ceiling. **It does not. Fluid has a floor** — the
   daily figure is a *minimum* the animal must reach, topped up by hand after the
-  session if the work did not earn it. There is no upper limit on earned reward and a
-  delivery is never refused on volume. Every "budget", "ceiling" and "refuses
+  session if the work did not earn it [@nc3rs2012refining; @gray2016physiological]. There
+  is no upper limit on earned reward and a delivery is never refused on volume
+  [@nrc2003guidelines, p. 56]. Every "budget", "ceiling" and "refuses
   delivery" below that concerns *fluid* reads the wrong way round; the code
   (`bounds.Floor`, `Welfare.shortfall`) is correct and this text is not yet rewritten.
-  Chair time and trial count are genuine ceilings and are unaffected.
+  Chair time is recorded and bounds nothing, and there is no trial maximum (PI, 2026-09-19;
+  `max_trials` removed, §8 item 7): the one duration limit is out of the cage to back in it,
+  the institution's eight hours, per excursion (§4, §5.2 item 4). *(Corrected 2026-10-08: this
+  said "Chair time and trial count are genuine ceilings and are unaffected.")*
 - **Date:** 2026-08-31
 - **Parent:** `2026-08-31-controller-architecture-design.md` §5.5, §7
 - **Welfare-critical.** Most of this file requires human review before merge (CLAUDE.md).
@@ -29,8 +33,9 @@ from the planner and quarantines on absence, so an unplanned block degrades the 
 tier. Changing condition weights or geometry within a task creates no block and is free;
 **changing task type mid-session does**, and is therefore a planning operation, not a live edit.
 
-Length rules: fixed N, or criterion-based (*"80% correct over the last 20 completed trials"*).
-Criterion transitions consume the same running statistics the console plots use, computed once.
+Length rules: fixed N, or criterion-based [@asaad2008flexible]
+(*"80% correct over the last 20 completed trials"*). Criterion transitions consume the same running statistics the console plots
+use, computed once.
 
 ---
 
@@ -63,7 +68,7 @@ code (ADR-0006).
 
 ### 3.2 Application
 
-- **Staged, then applied atomically in the ITI.** Never mid-trial.
+- **Staged, then applied atomically in the ITI.** Never mid-trial [@asaad2008flexible].
 - If regenerating derived stimuli overruns the ITI, **the ITI extends. Frames are never
   dropped.**
 - Values and structure are both live; **logic is not** — a task reload happens at a trial
@@ -71,7 +76,8 @@ code (ADR-0006).
 
 ### 3.3 Provenance
 
-- **Every trial records a complete resolved parameter snapshot**, not a pointer to "the config."
+- **Every trial records a complete resolved parameter snapshot** [@asaad2008flexible], not a
+  pointer to "the config."
 - Every change emits `PARAM_CHANGE` carrying a sequence number that joins to the change record
   (S2 §5.2). The pointer is on the recording clock; the content is in the session directory.
 - **One validated write path**, whatever the origin — console, external control API, or the task
@@ -96,9 +102,9 @@ ceilings the console cannot exceed and the task cannot touch.**
 | Bounded | Covers |
 |---|---|
 | Reward | Volume per delivery, rate. **Not a daily total** — see the correction at the head of this file: the daily fluid figure is a floor, and only the per-delivery volume is a ceiling |
-| Session | **Time out of the cage** — the one duration limit (§5.2), eight hours (the PI corrected the twelve recorded here on 2026-10-01). **Not maximum trials**: there is no session-length maximum (PI, 2026-09-19), and per-condition targets are a task's config, carried by `scheduler`. Mandatory breaks |
-| Tokens | Token-to-fluid conversion, maximum accumulation |
-| Stimulation | Amplitude, pulse width, frequency, train duration, duty cycle, charge per phase and charge density, refractory, deliveries per session |
+| Session | **Time out of the cage** — the one duration limit (§5.2), eight hours (the PI corrected the twelve recorded here on 2026-10-01). **Not maximum trials**: there is no session-length maximum (PI, 2026-09-19), and per-condition targets are a task's config, carried by `scheduler`. *(Removed 2026-10-08: the PI confirmed no break rule exists; it was a leftover. The row ended "Mandatory breaks".)* |
+| Tokens | Token-to-fluid conversion, maximum accumulation [@seo2009behavioral] |
+| Stimulation | Amplitude, pulse width, frequency, train duration, duty cycle, charge per phase and charge density, refractory, deliveries per session [@mccreery1990charge; @shannon1992model; @rajan2015effects] |
 
 Two structural properties, not conventions:
 
@@ -135,7 +141,8 @@ supplement afterwards — is then computed against a figure that describes half 
 3. ~~**If it cannot be reconstructed, reward is refused until a human confirms a figure.**~~
    **Reversed 2026-09-06.** That rule follows from a ceiling, and there is no ceiling. Under a
    floor the argument runs the other way: an unknown day leaves the *shortfall* unreportable, and
-   the one thing it must not do is stop paying an animal that is working. So the session
+   the one thing it must not do is stop paying an animal that is working [@nrc2003guidelines,
+   p. 59]. So the session
    delivers, reports the day as uncountable, and a human supplies the figure —
    `Welfare.shortfall()` answers `None` rather than zero, because a day nobody measured is not a
    day that went well.
@@ -567,7 +574,8 @@ number means.** Asked again, he answered:
 > reward."*
 
 So a zero-volume reward is **not an edge case being tolerated; it is a designed trial
-outcome** — a reward period that pays a **token** rather than fluid. Two things follow.
+outcome** — a reward period that pays a **token** rather than fluid [@seo2009behavioral].
+Two things follow.
 
 - **The case for the existing behaviour is stronger than the one above.** A policy refusal on
   zero would not merely remove an operational convenience; it would make a class of trial the
@@ -665,7 +673,8 @@ operator reads — and this table is the index into why each exists.
 
 ### 5.2b One fluid budget across rig and kiosk
 
-**Kiosk fluid counts toward the same daily figure as rig work** (PI, 2026-08-31). Neither
+**Kiosk fluid counts toward the same daily figure as rig work** (PI, 2026-08-31)
+[@calapai2017cagebased]. Neither
 deployment can see the other's record, so a shared total has to live somewhere neither owns.
 
 > **Corrected 2026-09-19.** The reason given here was "the kiosk has no sync box at all",

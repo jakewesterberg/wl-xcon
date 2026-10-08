@@ -58,7 +58,7 @@ the rest of this document works out their consequences.
 | D3 | **Interchangeability with MonkeyLogic is at the rig-contract and data layer only** — controller-agnostic event lines, reward path, analog inputs, photodiode patches and event vocabulary, owned by `wl-sync` and `wl-exptasks`. No shared task language. A dual-boot task PC buys the swap. | ADR-0001 |
 | D4 | **Tasks are primarily model-authored** under experimenter direction, so the task API optimizes for verifiability, simulatability and review-by-diagram rather than for authoring ergonomics. | — |
 | D5 | **Within-trial logic is declarative data; between-trial logic is ordinary Python.** Representation is Python declarations (dataclass/pydantic), plain-text and IDE-readable. | — |
-| D6 | **Split-screen mirror stereoscope on one panel.** Two viewports on one framebuffer, cyclopean coordinates, disparity as a stimulus property; the monocular v1 task is the zero-disparity case of the stereo path. **Amended 2026-09-28: direct view is the other setup, and the first.** One screen fixed at 50 cm serves both, the stereoscope is removable, the operator picks the setup at session start, and a task declares `Trial.view` (`2026-09-28-direct-view-design.md`). | architecture.md's display section |
+| D6 | **Split-screen mirror stereoscope on one panel.** [@wheatstone1838contributions; @cox2019temporal; @dougherty2021binocular; @mitchell2022stimulating; @carmel2010how] Two viewports on one framebuffer, cyclopean coordinates, disparity as a stimulus property; the monocular v1 task is the zero-disparity case of the stereo path. **Amended 2026-09-28: direct view is the other setup, and the first.** One screen fixed at 50 cm serves both, the stereoscope is removable, the operator picks the setup at session start, and a task declares `Trial.view` (`2026-09-28-direct-view-design.md`). | architecture.md's display section |
 | D7 | **SpikeGLX and Intan both record; either may gate the loop; Intan always stimulates.** Two ingest paths behind one feature interface. | architecture.md's single-source neural plane |
 | D8 | **Microstimulation in three tiers** — epoch-triggered, gaze-triggered, neural-triggered. Tiers 1 and 2 are v1, so stim welfare interlocks are v1 work. | roadmap M6 |
 | D9 | **Live parameter control is a must-have.** Values and structure both, applied atomically at trial boundaries, with a full per-trial parameter snapshot, through one validated write path. | — |
@@ -91,7 +91,7 @@ the rest of this document works out their consequences.
 
 The sync box defines session time. Every scientifically meaningful event becomes an
 edge or word recorded in at least one acquisition stream; network messages are never
-the timing record.
+the timing record [@hwang2019nimh; @siegle2021survey; @karsh2026sync].
 
 ### 3.2 The task PC's interface (from the breakout spec §3, §9.2)
 
@@ -118,13 +118,16 @@ Both reach us as digital edges, not only as analog waveforms recorded downstream
 turns two offline checks into online guarantees:
 
 - **Onset**: a state can wait for physical confirmation that a stimulus reached the
-  display before advancing (§5.4). A *missing* edge is then a detectable fault during
-  the session rather than a discovery months later.
+  display before advancing (§5.4) [@bridges2020timing; @plant2004selfvalidating]. A
+  *missing* edge is then a detectable fault during the session rather than a discovery
+  months later.
 - **Frames**: drops are detected at the display surface, catching post-GPU drops that a
-  vsync tap structurally cannot (breakout spec §3.1 makes this argument explicitly).
+  vsync tap structurally cannot (breakout spec §3.1 makes this argument explicitly)
+  [@plant2004selfvalidating].
 
 Both patches must sit **outside both eyes' viewports** on the split screen (§8.2), or
-the flip patch becomes a flickering distractor in one eye's field.
+the flip patch becomes a flickering distractor in one eye's field [@williams2004entrainment;
+@yantis1984abrupt].
 
 ---
 
@@ -200,8 +203,9 @@ vocabulary (P2's "second concrete use" test is already met).
 A session is a sequence of **blocks** and **interludes**, declared as data.
 
 - A **block** declares its condition set, parameter overrides, a length rule (fixed N, or
-  criterion-based such as "80% correct over the last 20 completed trials"), and its
-  transition. Mini-blocks of held stimulus parameters are the common case.
+  criterion-based [@asaad2008flexible] such as "80% correct over the last 20 completed trials"),
+  and its transition. Mini-blocks of held stimulus parameters are the
+  common case.
 - An **interlude** is a sub-task the session enters and leaves without ending — eye
   calibration being the motivating case (§9.3).
 - The **trial scheduler** owns condition selection, block progression and the counters.
@@ -271,8 +275,9 @@ what makes it work for model-authored tasks.
 
 ### 7.2 Application and provenance
 
-- **Staged, then applied atomically in the ITI.** Never mid-trial. If regenerating derived
-  stimuli overruns the ITI, **the ITI extends; frames are never dropped.**
+- **Staged, then applied atomically in the ITI.** Never mid-trial [@asaad2008flexible]. If
+  regenerating derived stimuli overruns the ITI, **the ITI extends; frames are never
+  dropped.**
 - **Every trial records a complete parameter snapshot**, not a pointer to "the config." A
   mid-session change is otherwise an undocumented discontinuity that surfaces during
   analysis months later. This is the single most likely way this feature does damage
@@ -298,8 +303,9 @@ chair time bounds nothing), token conversion, and every stimulation bound in §1
 
 **Fluid has a floor, not a ceiling** (PI, 2026-09-06; this paragraph said "daily fluid
 budget" until then). The daily figure is a *minimum* the animal must reach, supplemented
-by hand after the session — so no delivery is ever refused on volume, and only the
-per-delivery magnitude is bounded above. S8's head carries the full correction.
+by hand after the session [@nc3rs2012refining; @gray2016physiological] — so no delivery is
+ever refused on volume, and only the per-delivery magnitude is bounded above. S8's head
+carries the full correction.
 
 Precedence: **rig defaults -> subject defaults -> task defaults -> session overrides ->
 live edits**, with the bounded config as a ceiling over all of it. The resolved set is
@@ -354,8 +360,10 @@ mirrors. Consequences:
 - **Per-eye viewport geometry** — its own center, its own folded optical path length, its
   own deg/pixel. Path lengths are **measured, not derived** from the monitor's physical
   distance.
-- **Mirror angles set vergence**, so alignment is a calibrated rig parameter with a real
-  alignment procedure (Nonius/vernier), not an assumed symmetry.
+- **Vergence is a constant software offset, not a mirror angle** (optics drawing §6), and
+  mirror alignment is a calibrated rig parameter with a real alignment procedure
+  (Nonius/vernier), not an assumed symmetry. *(Corrected 2026-10-08: this began "**Mirror
+  angles set vergence**, so alignment is".)*
 - **Per-eye resolution and aspect are halved horizontally**, which constrains eccentricity
   and argues for horizontal resolution when selecting the panel.
 - **Photodiode patches sit outside both viewports** (§3.3).
@@ -401,10 +409,10 @@ video, so:
 
 **UDP (port 9003) is the control path; the ACCES analog copy is a recorded channel.**
 Settled by the science, not by preference: saccade-triggered display changes must land
-inside saccadic suppression to be invisible, and the analog path adds ~3–4 ms (OpenIrisDPI
+inside saccadic suppression to be invisible [@ross2001changes; @diamond2000extraretinal], and the analog path adds ~3–4 ms (OpenIrisDPI
 paper, via `docs/research/openiris-dpi.md`) on top of being capped at ~2 kHz delivered
 bandwidth by the ACCES DAC's 4 kHz conversion rate (breakout spec §12 item 10). The OpenIrisDPI paper states the analog signal "may limit the use of this signal for
-gaze-contingent applications."
+gaze-contingent applications." [@ressmeyer2026openirisdpi]
 
 The analog copy earns its channels by making the eye PC's software+USB lag measurable by
 cross-correlation per session.
@@ -419,9 +427,10 @@ parameters affect results. Tested against replayed OpenIrisDPI data.
 
 **The dominant risk to this whole class of experiment is tracker stalls.** The
 OpenIrisDPI paper reports frame processing of 1.1 ± 0.1 ms median but **~2% of frames
->= 10 ms (max ~50 ms)** on the authors' hardware. Gaze logic uses hold-last with a
-staleness ceiling and grace periods; a trial abort requires corroboration. Our own stall
-distribution is measured (V3) before window parameters are frozen.
+>= 10 ms (max ~50 ms)** on the authors' hardware [@ressmeyer2026openirisdpi]. Gaze logic
+uses hold-last with a staleness ceiling and grace periods; a trial abort requires
+corroboration. Our own stall distribution is measured (V3) before window parameters are
+frozen.
 
 ### 9.3 The gaze mapping is a versioned object
 
@@ -431,9 +440,10 @@ recalibration are one concept, not four: **the mapping changes during a session.
 - The mapping is session-scoped and versioned, with a change log.
 - **Every trial cites the mapping version in force.**
 - Calibration runs as an interlude (§5.5).
-- **Automatic drift correction never overwrites the raw signal.** Raw and corrected are
-  both recorded, every adjustment is logged, and the correction is reversible offline. A
-  silent correction is indistinguishable from an artifact.
+- **Automatic drift correction never overwrites the raw signal.** [@kimmel2012tracking;
+  @ressmeyer2026openirisdpi] Raw and corrected are both recorded, every adjustment is
+  logged, and the correction is reversible offline. A silent correction is
+  indistinguishable from an artifact.
 - Toggling drift correction is a logged parameter change like any other.
 
 ### 9.4 Other behavioral inputs
@@ -474,7 +484,8 @@ config time.
 - **Stim parameters are settable over the TCP command interface** — trigger, shape,
   magnitude, duration, per channel.
 - **Amp-settle is built into RHS headstages**, engaging around the pulse with configurable
-  pre/post duration; the guide suggests ~1 ms post as a starting point. RHD systems
+  pre/post duration; the guide suggests ~1 ms post as a starting point [@intan2026intan,
+  p. 24]. RHD systems
   additionally accept a digital blanking line at 4–5 sample periods of latency.
 - **No latency figure is published.** The guide names the sources (USB to host, TCP to
   client) and stops. This is a V4 measurement, not a citation.
@@ -509,8 +520,9 @@ Parameter handling:
 - **Read back after writing.** Query and confirm before any trial can trigger.
 - **Bounded by the rig/subject config**: amplitude, pulse width, frequency, train duration,
   duty cycle, charge per phase, charge density — ceilings the task cannot exceed and the
-  console cannot override.
-- **Charge balance is verified, not assumed.**
+  console cannot override [@mccreery1990charge; @shannon1992model; @merrill2005electrical;
+  @rajan2015effects].
+- **Charge balance is verified, not assumed.** [@cogan2008neural]
 - **Delivery is counted against the RHS stim-output line**, not against our intent. Session
   stim limits are enforced against deliveries actually observed — the difference between a
   limit and a hope.
@@ -673,7 +685,8 @@ the Windows side is unambiguously supported and D3 requires it anyway.
 
 Display panel and refresh target are an S0 decision. With one panel and no genlock, a high
 refresh rate is affordable; OLED requires luminance and persistence QA before visual-science
-use (P4).
+use (P4) [@abuhaila2025recent; @dimigen2026advantages; @elze2013evaluation;
+@cooper2013assessment].
 
 ---
 
@@ -683,15 +696,15 @@ Every row is a **budget or an external number, never a claim about this system.*
 
 | Path | Budget | Basis |
 |---|---|---|
-| Eye sample -> gaze decision | <= 1 display frame + staleness ceiling | OpenIrisDPI 1.1 ms median; ~2% >= 10 ms (paper) |
-| Saccade onset -> display change | **inside saccadic suppression** | The binding constraint for gaze-contingent work; tighter than anything previously written down |
-| Decision -> display change | next flip | engine flip-locked |
+| Eye sample -> gaze decision | <= 1 display frame + staleness ceiling | OpenIrisDPI 1.1 ms median; ~2% >= 10 ms (paper) [@ressmeyer2026openirisdpi] |
+| Saccade onset -> display change | **inside saccadic suppression** | The binding constraint for gaze-contingent work; tighter than anything previously written down [@ross2001changes; @saunders2014direct; @dimigen2026advantages] |
+| Decision -> display change | next flip | engine flip-locked [@saunders2014direct] |
 | Photodiode edge -> state transition | UNVERIFIED | New; NI DI change-detection latency (V2b) |
-| Neural event -> feature at `taskd` (SpikeGLX) | ~2–5 ms | vendor loopback histogram plus one hop (V4) |
+| Neural event -> feature at `taskd` (SpikeGLX) | ~2–5 ms | vendor loopback histogram plus one hop (V4) [@karsh2026spikeglxcppsdk] |
 | Neural event -> feature at `taskd` (RHX) | UNVERIFIED | No published figure exists (V4) |
 | Neural event -> stim TTL | ~3–6 ms | estimate (V4) |
 | Audio command -> sound onset | UNVERIFIED | New (V7) |
-| Fallback: Open Ephys + Falcon | ~9–13 ms | published plugin measurement |
+| Fallback: Open Ephys + Falcon | ~9–13 ms | published plugin measurement [@openephys2026falcon] |
 
 New protocols added to `docs/validation.md`: **V2b** digital-input read latency, **V7**
 audio onset timing and jitter, **V8** RHX backpressure headroom under closed-loop load, and
@@ -705,12 +718,13 @@ widened to cover both neural paths, since only one of them has any published num
 Derived from the stated experimental program, not from MonkeyLogic's manual — which is used
 afterward only as a completeness check (P2).
 
-**The program:** saccadic choice mostly, sometimes joystick and touchscreen, sometimes
-passive fixation; gaze-contingent beyond fixation enforcement, with stimuli changing on eye
-movements; both free viewing of natural images and discrete trials; both working-memory
-delays and stimulus-locked designs; microstimulation during trial epochs, contingent on eye
-position or movement, and contingent on measured neural activity; auditory stimuli and
-auditory performance feedback, plus vocalization monitoring.
+**The program:** saccadic choice mostly [@bruce1985primate; @fuchs1967saccadic], sometimes
+joystick and touchscreen, sometimes passive fixation; gaze-contingent beyond fixation
+enforcement, with stimuli changing on eye movements; both free viewing of natural images and
+discrete trials; both working-memory delays [@funahashi1989mnemonic] and stimulus-locked
+designs; microstimulation during trial epochs, contingent on eye position or movement, and
+contingent on measured neural activity; auditory stimuli and auditory performance feedback,
+plus vocalization monitoring.
 
 | Capability | Driven by | v1 |
 |---|---|---|
@@ -742,7 +756,7 @@ auditory performance feedback, plus vocalization monitoring.
 |---|---|---|---|
 | 1 | ~~Escape-hatch strictness in the within-trial layer~~ **Answered in S1**: typed seam, novelty promoted into reviewed framework code, tasks using one are flagged. The bake-off's permissive version contained two defects the author did not notice | S1 | — |
 | 2 | Touchscreen: second panel, rig mode, or deferred | PI | S4, S6 |
-| 3 | ~~Display panel, refresh target, panel technology~~ **Answered in S0**: 32-inch-class 16:9 flat OLED, tandem model deferred to late 2026, bench panel bought now, 57 cm build distance, mode as rig config. Remaining: whether burn-in protection is defeatable, and whether GPU + panel can avoid DSC | S0 | panel purchase only |
+| 3 | ~~Display panel, refresh target, panel technology~~ **Answered in S0**: 32-inch-class 16:9 flat OLED, tandem model deferred to late 2026, bench panel bought now, 57 cm build distance, mode as rig config. Remaining: whether burn-in protection is defeatable, and whether GPU + panel can avoid DSC (Superseded: the 26.5-inch PG27UCDM, PI 2026-09-27, at 50 cm in both setups, PI 2026-09-28; S0 §5.1-§5.2.) | S0 | panel purchase only |
 | 4 | Photodiode patch placement against the real optics | PI + `wl-sync` | rig build |
 | 5 | Misc BNC assignment for the audio verification tap | `wl-sync` agreement | S0 |
 | 6 | ~~Event-code vocabulary allocation~~ **Largely answered in S2**: the protocol exists and is frozen; ADR-0007 splits ownership. Remaining: `wl-preproc` agreeing that `TaskEvent` 256–4095 moves, and accepting one new escape | `wl-preproc` | allocation, then S1 |

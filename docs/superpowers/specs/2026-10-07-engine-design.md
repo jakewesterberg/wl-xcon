@@ -29,10 +29,10 @@ What exists (the surveys `docs/research/2026-10-07-engine-display-state.md` and
   gives every run one block of one condition, so every trial of a run is the same trial, and no task
   can declare a plan (XC-207). Nothing calls a task's between-trial procedure (XC-242).
 
-What the engine must serve: the PI's thirty-four named paradigms (N§1), from RSVP and adaptation to
-most-exciting-image generation, gaze-contingent and closed-loop presentation, M/P/K mapping and manual
-RF mapping by mouse, "and probably many more over time!". **That last clause is the first
-requirement**: the engine grows by reviewed additions, never by rewrites.
+What the engine must serve: the PI's thirty-four named paradigms (N§1), from RSVP [@potter1976shortterm]
+and adaptation to most-exciting-image generation [@ponce2019evolving], gaze-contingent and closed-loop
+presentation, M/P/K mapping and manual RF mapping by mouse, "and probably many more over time!". **That
+last clause is the first requirement**: the engine grows by reviewed additions, never by rewrites.
 
 ## 2. Principles carried through every section
 
@@ -114,9 +114,10 @@ wl-xtasks, where tasks live (§21).
 ### 4.1 The stimulus model: building blocks and reviewed extensions
 
 A stimulus is **a shape, filled with something, seen through an edge profile, placed and layered**.
-Named kinds remain as shorthands (a Gabor is a circle with a grating fill and a Gaussian edge; a plaid
-is two gratings combined by adding; an array is items on a ring). A genuinely new block is added once,
-as reviewed framework code, and is then usable in any combination (§4.10).
+Named kinds remain as shorthands (a Gabor is a circle with a grating fill and a Gaussian edge
+[@daugman1985uncertainty]; a plaid is two gratings combined by adding; an array is items on a ring). A
+genuinely new block is added once, as reviewed framework code, and is then usable in any combination
+(§4.10).
 
 ### 4.2 The first set of blocks
 
@@ -137,68 +138,74 @@ its σ declared separately) (N§R3, the science review's finding 4).
 
 | Fill | Must support |
 |---|---|
-| Grating | sine, square, triangle and sawtooth waveforms; drift and counterphase (§6.4) |
-| Noise | white, binary, pink (1/f), band-pass (frequency and orientation), color noise |
-| RF mapping | sparse noise; dense noise or m-sequence; flashed and swept bars; subspace (Ringach/Hartley) gratings |
-| Moving dots | coherence, direction, speed, lifetime, size, density, aperture; the noise dots' rule declared per task |
-| Texture field | a figure defined against its ground by orientation, motion, color or disparity |
+| Grating | sine, square, triangle and sawtooth waveforms [@campbell1968application]; drift and counterphase (§6.4) |
+| Noise | white, binary, pink (1/f) [@field1987relations], band-pass (frequency and orientation), color noise |
+| RF mapping | sparse noise; dense noise or m-sequence [@reid1997use; @chichilnisky2001simple]; flashed and swept bars [@gur1997visual]; subspace (Ringach/Hartley) gratings [@ringach1997subspace] |
+| Moving dots | coherence [@britten1992analysis], direction, speed, lifetime, size, density, aperture; the noise dots' rule declared per task [@pilly2009what; @scase1996what] |
+| Texture field | a figure defined against its ground by orientation, motion [@lamme1995neurophysiology], color or disparity |
 | Mondrian | colored rectangles, grayscale rectangles, mixed shapes, image fragments |
-| Masks (composed) | noise masks, pattern masks, metacontrast, object substitution, a full-screen mask |
+| Masks (composed) | noise masks, pattern masks, metacontrast [@breitmeyer2000recent], object substitution [@dilollo2000competition], a full-screen mask |
 
-**A patterned fill has a mean luminance, defaulting to what is behind it.** One whose mean differs (a
-luminance step under the pattern, e.g. a grating on the black default) carries a warning naming the
-step, in every session kind (N§R3: "Always a warning").
+**A patterned fill has a mean luminance, defaulting to what is behind it** [@brainard1996cone;
+@pelli2013measuring]. One whose mean differs (a luminance step under the pattern, e.g. a grating on the
+black default) carries a warning naming the step, in every session kind (N§R3: "Always a warning").
 
 **Random content is deterministic**: each random block's generator is part of its definition (a
-counter-based function of the seed, the frame and the element, implemented identically in the exact
-drawer and the core, with frozen reference outputs committed), so a reconstruction never depends on a
-library's version. Seeds are recorded; a task may ask for its frames to be saved too, and those frames
-come from the exact drawer.
+counter-based function of the seed, the frame and the element [@salmon2011parallel], implemented
+identically in the exact drawer and the core, with frozen reference outputs committed), so a
+reconstruction never depends on a library's version. Seeds are recorded; a task may ask for its frames to
+be saved too, and those frames come from the exact drawer.
 
 ### 4.4 Combining, grouping and layouts
 
-- **Four ways to overlap**: front covers back (opacity); contrasts add (plaids, signal in noise,
-  transparent motion); a window or scotoma; one shapes another (multiplication).
+- **Four ways to overlap**: front covers back (opacity); contrasts add (plaids [@adelson1982phenomenal],
+  signal in noise, transparent motion [@snowden1991response]); a window or scotoma; one shapes another
+  (multiplication).
 - **The background is the bottom layer**, changeable during a trial; on the stereoscope each eye may
   have its own background.
 - **Groups**: a named group shows, hides, moves and changes a shared property as one; its members stay
   addressable. **Arrays and layouts are a group by default** (one code, §8.3).
 - **Layouts**: a ring; a grid; listed positions; positions drawn between trials from a seed with spacing
-  rules; several rings or clusters. **Each item is its own stimulus**: target and distractor are roles.
+  rules; several rings or clusters. **Each item is its own stimulus**: target and distractor are roles
+  [@westerberg2023feedforward].
 - **The busiest display is thousands of elements**; the GPU drawer batches them (§10).
 
 ### 4.5 Text and curves
 
 - **Text**: letters, digits and symbols, from one or a few bundled fonts, glyph height in degrees,
   rendered to exact pixels. Bundled fonts enter ADR-0004's inventory.
-- **Curves** (curve tracing): written in the task as fixed paths, or generated between trials from a
-  seed by a reviewed procedure, saved in the record.
+- **Curves** (curve tracing [@roelfsema1998objectbased]): written in the task as fixed paths, or
+  generated between trials from a seed by a reviewed procedure, saved in the record.
 
 ### 4.6 Images and movies
 
 - **A photograph's colors**: the file is read as standard sRGB and converted through the rig's
   calibration; **the luminance of the photo's white is declared** (under the brightness cap, §7.7);
-  the record names the calibration.
+  the record names the calibration [@stokes1996standard; @iec1999multimedia].
 - **Size**: declared per stimulus, degrees (resampled with a stated filter) or pixel for pixel.
 - **Matching a set** (mean luminance, RMS contrast, optionally the amplitude spectrum): a declared
-  preparation step when a task asks, **computed in linear luminance after the calibration**, recorded.
-- **Formats**: any common format; a lossy one carries a warning.
-- **Movies**: each movie frame held a whole number of refreshes; a rate that does not divide the display
-  rate is refused until re-timed beforehand, and any re-timing is recorded in the set's manifest (a 25
-  fps source re-timed to 24 changes speeds and pitch by 4%). Decoded beforehand or streamed by a decoder
-  thread, declared per movie; a streamed frame that misses is recorded late.
+  preparation step when a task asks, **computed in linear luminance after the calibration**, recorded
+  [@willenbockel2010controlling; @brainard2002display].
+- **Formats**: any common format; a lossy one carries a warning [@ccitt1992information].
+- **Movies**: each movie frame held a whole number of refreshes [@elze2010misspecifications]; a rate
+  that does not divide the display rate is refused until re-timed beforehand, and any re-timing is
+  recorded in the set's manifest (a 25 fps source re-timed to 24 changes speeds and pitch by 4%).
+  Decoded beforehand or streamed by a decoder thread, declared per movie; a streamed frame that misses
+  is recorded late.
 
 ### 4.7 Image procedures between trials
 
 Scrambling, filtering, cropping and recoloring run between trials: a reviewed procedure, with its seed,
-makes the image before the trial that shows it; the result is uploaded and kept in the record.
+makes the image before the trial that shows it; the result is uploaded and kept in the record
+[@rainer2001nonmonotonic; @portilla2000parametric].
 
 ### 4.8 Generated images
 
 Made on another machine (a GPU server on the lab network) between trials; the rig checks, records and
-shows each one. **If the next image is not ready in time, the next trial waits as long as it takes**;
-the welfare clocks keep running, the console says what it is waiting for, the operator can pause or
-stop, and **each trial records how long it waited** (a closed-loop procedure may read it, §15.5).
+shows each one [@ponce2019evolving]. **If the next image is not ready in time, the next trial waits as
+long as it takes**; the welfare clocks keep running, the console says what it is waiting for, the
+operator can pause or stop, and **each trial records how long it waited** (a closed-loop procedure may
+read it, §15.5).
 
 ### 4.9 The slow exact drawer
 
@@ -224,10 +231,10 @@ function of parameters, seed and frame", and the record is what makes them recon
 
 ### 4.12 Contrast
 
-**Always written with its convention** (`Weber(0.3)`, Michelson, RMS). Today's appearances default
-`contrast=1.0` and the reference tasks rely on it; **build A migrates them and their tests**, after which
-a bare contrast is refused at load. A convention defined against the background (Weber) needs a
-declared non-black background (§7.5).
+**Always written with its convention** (`Weber(0.3)`, Michelson, RMS) [@pelli2013measuring]. Today's
+appearances default `contrast=1.0` and the reference tasks rely on it; **build A migrates them and their
+tests**, after which a bare contrast is refused at load. A convention defined against the background
+(Weber) needs a declared non-black background (§7.5) [@pelli2013measuring].
 
 ## 5. Where (N§2, N§R5)
 
@@ -236,98 +243,123 @@ declared non-black background (§7.5).
    positive, +y up; a bar's orientation 0° is horizontal; a grating's orientation names its bars, its
    drift direction is a separate angle. A test pins +y as up in the drawing.
 2. **Sizes**: one size number is the full width; each block's definition states it.
-3. **Away from the center**: true visual angle (default) or the screen center's scale, declared per
-   task.
-4. **Disparity**: in degrees, near negative. **The per-eye formula is pinned**: left eye at x − d/2,
-   right eye at x + d/2, so d < 0 shifts the left eye's image right (crossed, near). **A per-eye
-   position** is that eye's own direction in degrees (its viewport, after the vergence offset); a
-   stimulus carrying both per-eye positions and a disparity is refused. Both the formula and the sign
-   are pinned in the exact drawer's tests, and the sign is verified in an animal by its vergence
-   response to a disparity step (S4 §10 item 6, kept).
+3. **Away from the center**: true visual angle (default) or the screen center's
+   scale, declared per task.
+4. **Disparity**: in degrees, near negative [@tanabe2004rejection]. **The per-eye formula is pinned**:
+   left eye at x − d/2, right eye at x + d/2, so d < 0 shifts the left eye's image right (crossed,
+   near). **A per-eye position** is that eye's own direction in degrees (its viewport, after the
+   vergence offset); a stimulus carrying both per-eye positions and a disparity is refused. Both the
+   formula and the sign are pinned in the exact drawer's tests, and the sign is verified in an animal by
+   its vergence response to a disparity step [@busettini1996shortlatency] (S4 §10 item 6, kept).
 5. **Linked positions**: declared per link, moving with the other stimulus or placed once at onset.
-6. **Gaze-anchored stimuli**: the gaze rule selectable (newest, default; smoothed; predicted), each
-   frame's sample age recorded; behavior when gaze is lost, and during a saccade, declared per task.
-   **A displacement meant to go unseen must land during the saccade**; one that lands after it is
-   readily seen (corrected from the notes' gloss; the science review's finding 12).
+6. **Gaze-anchored stimuli**: the gaze rule selectable (newest, default; smoothed; predicted)
+   [@santini2007eyeris; @crane1985generationv; @saunders2014direct], each frame's sample age recorded;
+   behavior when gaze is lost, and during a saccade, declared per task. **A displacement meant to go
+   unseen must land during the saccade** [@deubel1996postsaccadic; @cavanaugh2016saccadic]; one that
+   lands after it may be seen (corrected from the notes' gloss, the science review's finding 12; and on
+   2026-10-08 from the reference library: suppression of luminance contrast outlasts the saccade by
+   about 50 ms [@diamond2000extraretinal], so a change landing just after is neither safely hidden nor
+   reliably seen; flashed low-frequency chromatic gratings showed no saccadic suppression of contrast
+   threshold [@diamond2000extraretinal], so an isoluminant change may not be hidden by landing inside a
+   saccade (change detection itself was not tested); and trained monkeys did not show humans' benefit
+   from a post-saccadic blank [@joiner2013corollary], so human results on post-saccadic visibility do
+   not transfer directly. A clause that suppression "lessens within 5-25 ms" of the saccade's end,
+   cited to Saunders & Woods, was left out: it is their summary of other studies).
 7. **Gaze windows may be any shape**, including a stimulus's own outline grown by a margin.
 8. **Off the field**: only when declared; check 8 grows to test extents (XC-143, XC-144).
 9. **Head-free chaired sessions**: nominal head position, recorded and listed; a task may require a
    fixed head.
 10. **Manual RF mapping's view**: a live schematic in the console. Its markers lag the bar by the
-    neuron's latency plus the operator's reaction, so receptive fields are reconstructed from the
-    per-frame record, not from the markers.
+    neuron's latency [@schmolesky1998signal; @thompson1996perceptual] plus the operator's reaction, so
+    receptive fields are reconstructed from the per-frame record, not from the markers
+    [@ringach1997subspace; @chichilnisky2001simple].
 
 ## 6. When (N§3, N§R3)
 
 1. **The session's rate** comes from the display's reported mode, checked against the rig file, and is
-   carried in the session and in the load-time checks; a task file is checked at each rate it may run
-   at (240 and 120 Hz) or at its declared required rate.
+   carried in the session and in the load-time checks; a task file is checked at each rate it may run at
+   (240 and 120 Hz) or at its declared required rate [@bridges2020timing; @elze2010misspecifications].
 2. **Durations are converted to frames once, at load**, and the loop compares frame counts (today it
-   compares elapsed seconds, which rounds up and drifts with a measured period). An ordinary duration
-   rounds to the nearest frame, recorded as shown. **A duration that is a design level** (a factor
-   level, a sequence's item period, a procedure-stepped duration) **is exact by default**: whole frames
-   at the session's rate, or refused at load with the nearest valid values listed; two levels landing
-   on one frame count are refused; procedures on time step in frames. A sequence declares whether it
-   rounds per item or on cumulative onsets.
-3. **A late frame never stops a trial**; the record marks it.
+   compares elapsed seconds, which rounds up and drifts with a measured period)
+   [@elze2010misspecifications]. An ordinary duration rounds to the nearest frame, recorded as shown.
+   **A duration that is a design level** (a factor level, a sequence's item period, a procedure-stepped
+   duration) **is exact by default**: whole frames at the session's rate, or refused at load with the
+   nearest valid values listed; two levels landing on one frame count are refused; procedures on time
+   step in frames. A sequence declares whether it rounds per item or on cumulative onsets.
+3. **A late frame never stops a trial**; the record marks it [@bridges2020timing].
 4. **Temporal modulation**: sine at any frequency, sampled per frame; square-wave flicker needs whole
-   frames per half-cycle.
+   frames per half-cycle [@elze2010misspecifications].
 5. **Onset**: the record holds each frame's start and each stimulus's **vertical extent**. The screen
    scans top to bottom (Blur Busters, read 2026-10-07; UNVERIFIED for this panel), and both setups put
    the light sensors at the bottom, so V1 measures the scan delay with patches top and bottom and
-   analysis applies it across the stimulus's extent.
-6. **Sequences** (RSVP, predictive, masking streams): a sequence stimulus or one state per item.
-7. **Motion paths**: straight sweeps, pursuit targets, waypoint paths, seeded random walks.
+   analysis applies it across the stimulus's extent [@dimigen2026advantages; @saunders2014direct;
+   @wang2011lcd; @elze2010misspecifications].
+6. **Sequences** (RSVP [@potter1976shortterm], predictive, masking streams): a sequence stimulus or one
+   state per item.
+7. **Motion paths**: straight sweeps, pursuit targets [@fuchs1967saccadic], waypoint paths, seeded random
+   walks.
 8. **The longest trial is 5 minutes** (the loop's frame cap derived from 300 s at the session's rate); a
    trial reaching it is recorded as today's `"hang"` category, which `resume`, `health` and the page
    already read. Longer presentations use the continuous mode (§13.6). **Inside a long trial, stop,
    pause and the welfare limits are checked about once a second**, off the frame path (N§R6).
 9. **Between trials**: what the task declares (the background by default).
 10. **Contingent changes record their delay**: decision time minus the sample's capture time (on the eye
-    PC's clock once aligned), plus the frame's start, plus V1's scan delay at the stimulus's height, plus
-    the panel latency V1 measures. Until V1 and V3 exist, the figure is labeled a lower bound. A task may
-    declare a maximum; trials past it are marked.
+    PC's clock once aligned), plus the frame's start, plus V1's scan delay at the stimulus's height,
+    plus the panel latency V1 measures [@saunders2014direct; @dimigen2026advantages]. Until V1 and V3
+    exist, the figure is labeled a lower bound. A task may declare a maximum; trials past it are marked.
 11. **A non-aging foreperiod** declares its minimum, mean, maximum and tail rule; the review report's
     timing diagram plots the hazard it actually produces (a truncated exponential's hazard rises near
-    its maximum).
+    its maximum)
+    [@westerberg2020priming; @han2022revisiting; @janssen2005representation; @ghose2002attentional].
 12. **Every trial records the time since the last interruption** (pause, interlude, display restart,
     generator wait) and its realized interval before the stimulus; a block may declare what it does on
-    resuming after one (e.g. rerun an initial adaptation).
+    resuming after one (e.g. rerun an initial adaptation)
+    [@patterson2013distinct; @janssen2005representation].
 
 ## 7. Color and luminance (N§4, N§R4, N§R5)
 
 1. **The default calibration is standard sRGB** (the panel in its sRGB mode; how closely it follows the
-   standard is UNVERIFIED until measured, and the warnings list says so).
-2. **In a recording session the default calibration is refused for any task that specifies a color
-   (DKL, cone contrast, xyY) or makes contrast a design factor or a procedure-controlled value**, read
-   from the task file (N§R4). Training and piloting run on it with the warning.
+   standard is UNVERIFIED until measured, and the warnings list says so) [@stokes1996standard;
+   @iec1999multimedia; @abuhaila2025recent].
+2. **In a recording session the default calibration is refused for any task that specifies a color (DKL,
+   cone contrast, xyY) or makes contrast a design factor or a procedure-controlled value**, read from
+   the task file (N§R4) [@brainard2002display; @abuhaila2025recent]. Training and piloting run on it
+   with the warning.
 3. **Isoluminance needs a measured calibration**; against the calibration's named observer that is
-   enough (N§R4; offered against: a per-animal measured null). `visual_search` keeps its isoluminant
-   colors and waits; a plain-color training variant loads on the default.
+   enough (N§R4; offered against: a per-animal measured null) [@cie2015fundamental; @sharpe2005luminous;
+   @gegenfurtner1994chromatic]. `visual_search` keeps its isoluminant colors and waits; a plain-color
+   training variant loads on the default.
 4. **Color spaces**: xyY (absolute); **cone contrast** (ΔL/L, ΔM/M, ΔS/S about the background, for
-   cone-isolating stimuli); **DKL, defined in cone-contrast terms with one stated normalization**.
+   cone-isolating stimuli); **DKL, defined in cone-contrast terms with one stated normalization**
+   [@cie2018colorimetry; @brainard1996cone; @derrington1984chromatic; @macleod1979chromaticity].
    **Realizability is tested by full conversion to primary weights in [0, 1]** for every space,
    replacing `photometry.unrealizable`'s `magnitude() <= max_cone_contrast` test for DKL, which passes
-   chromatic contrasts the panel cannot make.
+   chromatic contrasts the panel cannot make [@brainard2002display; @brainard1996cone].
 5. **The default background is black**; a task using DKL, cone contrast or Weber contrast declares its
-   own non-black background. The calibration is measured at a reference background; limits for a task's
-   own background come from the full conversion, not from a stored maximum.
-6. **The transfer is a measured table** per channel. **One calibration for the whole panel**; the
-   stereoscope's two eyes are assumed equal (N§R4, offered against: measuring each eye's mirror path).
-   *Stated limitation*: an imbalance between the eyes (panel halves, mirror losses, uneven OLED aging,
-   e.g. under one-eyed Mondrian masking) appears as an eye-dominance effect belonging to the rig;
-   dichoptic tasks should counterbalance the masked eye across sessions.
+   own non-black background [@brainard1996cone; @pelli2013measuring]. The calibration is measured at a
+   reference background; limits for a task's own background come from the full conversion, not from a
+   stored maximum [@brainard1996cone; @brainard2002display].
+6. **The transfer is a measured table** per channel [@brainard2002display]. **One calibration for the
+   whole panel**; the stereoscope's two eyes are assumed equal (N§R4, offered against: measuring each
+   eye's mirror path). *Stated limitation*: an imbalance between the eyes (panel halves, mirror losses,
+   uneven OLED aging, e.g. under one-eyed Mondrian masking) appears as an eye-dominance effect belonging
+   to the rig; dichoptic tasks should counterbalance the masked eye across sessions [@zhou2013effect].
 7. **The brightness limiter**: overall brightness capped so ABL never engages, at a level V9 measures,
-   including V9's cross-half test (one half's fill dimming the other); a display exceeding it is refused.
+   including V9's cross-half test (one half's fill dimming the other); a display exceeding it is refused
+   [@dimigen2026advantages; @abuhaila2025recent; @brainard2002display].
 8. **Output is 10-bit**, verified at V1; **dithering, if it is the fallback, is on the warnings list**
-   and is deterministic so the exact drawer models it.
+   and is deterministic so the exact drawer models it [@brainard2002display; @pelli1991accurate;
+   @tyler1997colour; @allard2008noisybit].
 9. **Cone fundamentals**: one lab-wide default, **Stockman & Sharpe's 10° (CIE 2006)**; a task may name
-   the 2° set for foveal work (N§R5). No standard macaque set was found to prefer: macaque and human L and
-   M cone spectra are "virtually identical" (Schnapf, Kraft, Nunn & Baylor 1988, Vis Neurosci 1:255-261;
+   the 2° set for foveal work (N§R5) [@stockman2000spectral; @cie2006fundamental;
+   @stockman2023formulae]. No standard macaque set was found to prefer: macaque and human L and M cone
+   spectra are "virtually identical" (Schnapf, Kraft, Nunn & Baylor 1988, Vis Neurosci 1:255-261;
    checked 2026-10-07, attribution corrected 2026-10-08 — Baylor, Nunn & Schnapf 1987 is the macaque
-   single-cone paper; `docs/research/2026-10-08-engine-a2-color-research.md` §0, §5). The
-   spectroradiometer's spectra are stored in each calibration, so any named set converts from them.
-10. **A calibration never expires** but carries its age; past 30 days it is a warning.
+   single-cone paper; `docs/research/2026-10-08-engine-a2-color-research.md` §0, §5)
+   [@schnapf1988spectral; @baylor1987spectral]. The spectroradiometer's spectra are stored in each
+   calibration, so any named set converts from them [@brainard2002display].
+10. **A calibration never expires** but carries its age [@brainard2002display; @dimigen2026advantages;
+    @spitschan2018method]; past 30 days it is a warning.
 
 ## 8. Sync and evidence (N§5, N§R3, N§R5)
 
@@ -336,32 +368,37 @@ declared non-black background (§7.5).
    live-driven values or frame-dependent content. The record's frame numbers say which change each edge
    was, and a per-trial check matches task-patch edges against logged changes, as §8.4 does for the flip
    patch.
-2. **Event codes go out at the decision**; the light sensor gives the exact time.
+2. **Event codes go out at the decision**; the light sensor gives the exact time [@hwang2019nimh;
+   @bridges2020timing; @elze2010achieving; @ibl2021standardized].
 3. **Stimulus codes are task codes, as S2 §5.1 planned** (N§R5): `STIMULUS_ON`, `STIMULUS_OFF` and
    `STIMULUS_CHANGED`, allocated once in wl-xtasks' range for every task; which stimulus each was is in
    the record by frame; a group is one code; no amendment to wl-preproc's frozen codec. Tasks' own
    onset codes (`FIX_ON`, `TARGET_ON`) stay.
-4. **Frames are matched to the recording** by counting flip-patch edges from each trial's start code,
-   checked against the trial's length. **The continuous mode strobes an anchor code about once a
+4. **Frames are matched to the recording** [@siegle2021survey] by counting flip-patch edges from each
+   trial's start code, checked against the trial's length. **The continuous mode strobes an
+   anchor code about once a
    second** and the screen log records the frame each was strobed on, so a miscount is confined to one
    interval and located.
 5. **The screen log**: every change with its frame and full resolved description; every live-driven
-   value per frame; seeds; and **the display's per-refresh report of which content it showed**. **A late
+   value per frame; seeds; and **the display's per-refresh report of which content it showed**
+   [@asaad2008flexible]. **A late
    frame repeats the previous content for one refresh, and the sequence then continues from where it
    was** (the loop never skips a frame number); m-sequence and other reverse-correlation trials with any
-   repeat are marked.
+   repeat are marked [@reid1997use].
 6. **The console shows frame timing per trial**, at boundaries.
-7. **A frame-clock fault**: a warning and a warnings-list entry, affected trials marked, the session
+7. **A frame-clock fault**: a warning and a warnings-list entry, affected trials marked [@nwb2026nwb], the session
    goes on (acceptable in every session kind).
 
 ## 9. Media and sound (N§6, N§R5, N§R6)
 
 1. **Sounds play through two of the task PC's PCIe-6343 analog outputs** (4 on the card, NI, read
-   2026-10-07; the card runs on its own clock, not the recording's). **The wl-sync board is asked to
+   2026-10-07; the card runs on its own clock, not the recording's) [@hwang2019nimh]. **The wl-sync
+   board is asked to
    bring them to a line-out** beside the existing speaker tap (§21). The output is armed at the decision
    and **started by the task patch's next edge**, which marks the frame the visual change lands on (at
    the bottom of the screen); a task may declare an offset, including the scan delay to the stimulus's
-   height. **The actual onset is measured into the recording by the speaker tap** (V7). Speaker-to-ear
+   height. **The actual onset is measured into the recording by the speaker tap** (V7)
+   [@babjack2015reducing; @bridges2020timing]. Speaker-to-ear
    delay is acoustic and not in V7.
 2. **Simple sounds are made from parameters**, rebuilt from the record; files remain for recorded sounds.
 3. **Movie soundtracks** play when a task asks, in step with the frames.
@@ -372,8 +409,9 @@ declared non-black background (§7.5).
 ## 10. The drawer (N§7)
 
 1. **The GPU drawer matches the exact definition within one output level** per pixel.
-2. **Edges are smooth and sub-pixel.**
-3. **A pattern near the pixel limit** is allowed with a warning.
+2. **Edges are smooth and sub-pixel** [@bach1997antialiasing; @bach2001freiburg].
+3. **A pattern near the pixel limit** is allowed with a warning [@shannon1949communication;
+   @merigan1990spatial].
 4. **The core is Rust**, a separate process (§3.1), held to the exact definitions by the match tests and
    V1; **tests carry its review**.
 5. **Graphics interface**: Vulkan offers direct-to-display (`VK_KHR_display`) and presentation timing
@@ -391,7 +429,8 @@ declared non-black background (§7.5).
    PI at a text console.
 6. **Prior art**: vstimd is AGPL-3.0-only; **no code is reused**, only ideas (direct display, a post-flip
    vblank wait, landing reports, a renderer-owned patch, a no-op renderer for CI).
-7. **ADR-0002**: our drawer is built now so V1 compares it with PsychoPy on day one; V1 chooses.
+7. **ADR-0002**: our drawer is built now so V1 compares it with PsychoPy on day one; V1 chooses
+   [@bridges2020timing; @peirce2019psychopy].
 
 ## 11. Lifecycle (N§8, N§R3)
 
@@ -409,27 +448,35 @@ declared non-black background (§7.5).
    one**, black otherwise (N§R3). The flip patch still alternates.
 6. **The screen and its mode are checked** against the rig file: panel identity, resolution, refresh,
    bit depth, **and the panel's care features** (pixel shift, its brightness mode, the proximity sensor,
-   variable refresh, which must be off), recorded at bring-up; a mismatch is a warning.
-7. **After a graphics change**, the warnings list says so until a matching V1 exists.
+   variable refresh, which must be off) [@asus2026rogb; @asus2026rog;
+   @dimigen2026advantages; @poth2018ultrahigh; @saunders2014direct], recorded at bring-up; a mismatch is
+   a warning.
+7. **After a graphics change**, the warnings list says so until a matching V1 exists [@bridges2020timing;
+   @plant2016reminder].
 8. **The OLED's own maintenance** is scheduled outside sessions, or a session refuses to open while it
-   is due (UNVERIFIED whether the PG27UCDM allows either).
+   is due [@dimigen2026advantages; @asus2026rogb] (UNVERIFIED whether the PG27UCDM allows
+   either).
 
 ## 12. Calibration procedures and test screens (N§9, N§R5)
 
-1. **The color instrument is a spectroradiometer**; calibration is automated from the console (build J).
-2. **The eye tracker's calibration is required at every session start** (S5 §7): the thirteen-target
-   constellation before any task; no first task without a validated map; calibration epochs inside tasks
-   track drift. **It is its own early build (T)**, needing only the display and the tracker, before the
-   first animal session; it does not wait on the spectroradiometer.
-3. **On the stereoscope, the calibration is two monocular grids** (the PI's method): the grid shown to
-   each eye in turn; each eye's map fitted from its own grid; and, from the covered eye recorded during
-   the other eye's grid, **the offset between the eyes at each point is reported** (mirror misalignment
-   plus the animal's phoria). **No threshold: the experimenter accepts or not, and the acceptance is
+1. **The color instrument is a spectroradiometer** [@brainard2002display]; calibration is automated from
+   the console (build J).
+2. **The eye tracker's calibration is required at every session start** (S5 §7) [@kimmel2012tracking]:
+   the thirteen-target constellation before any task; no first task without a validated map; calibration
+   epochs inside tasks track drift [@hornof2002cleaning]. **It is its own early build (T)**, needing
+   only the display and the tracker, before the first animal session; it does not wait on the
+   spectroradiometer.
+3. **On the stereoscope, the calibration is two monocular grids** (the PI's method) [@cox2019temporal;
+   @mitchell2022stimulating; @dougherty2021binocular]: the grid shown to each eye in turn; each eye's
+   map fitted from its own grid; and, from the covered eye recorded during the other eye's grid, **the
+   offset between the eyes at each point is reported** (mirror misalignment plus the animal's phoria)
+   [@svede2015monocular]. **No threshold: the experimenter accepts or not, and the acceptance is
    recorded** (N§R5).
 4. **wl-preproc must be able to read these calibrations** (an ask, §21): a monocular grid's eye, the
    session-start block marked with the calibration task type, interlude recalibrations as
    `CALIBRATION_START`/`END` epochs, and the target positions they use.
-5. **Before every session**: a quick frame-timing check and the light-sensor test.
+5. **Before every session**: a quick frame-timing check and the light-sensor test
+   [@plant2004selfvalidating; @bridges2020timing].
 6. **Records committed per rig** under `docs/measurements/<rig>/`, each with an id.
 
 ## 13. Structure (N§10, N§R1, N§R6)
@@ -442,15 +489,18 @@ declared non-black background (§7.5).
    block. An interlude's trials keep the session's trial numbering but belong to no block, and record the
    task they ran.
 5. **Blocks follow a block-sequence policy** (replacing a fixed list): fixed, cyclic, seeded and
-   balanced, or by criterion with advance and fall-back. A block ends on a number of trials, every
-   condition's target met, a performance criterion, or a time limit. `taskd`'s guard against a spinning
-   plan becomes a per-advance progress check.
-6. **The continuous mode**: its own trial-less mode for long presentations. It can reward, insert probes
-   on a schedule, change contingent on gaze or neural data, and take marks and pauses; it ends on a
+   balanced, or by criterion with advance and fall-back
+   [@asaad2008flexible; @nimhmonkeylogic2026task; @berger2018standardized]. A block ends on a number of
+   trials, every condition's target met, a performance criterion, or a time limit. `taskd`'s guard
+   against a spinning plan becomes a per-advance progress check.
+6. **The continuous mode**: its own trial-less mode for long presentations. It can reward
+   [@russ2015functional], insert probes on a schedule, change contingent on gaze or neural data,
+   and take marks and pauses; it ends on a
    declared duration, its media ending, an operator stop or a criterion; it is analyzed as one epoch with
-   timed events. **Stop, pause and the welfare limits are checked about once a second inside it**, with a
-   console update; it strobes anchor codes (§8.4); it declares calibration probes, or the record states
-   the gaze map's age. Its record shape is designed in build K and asked of wl-preproc.
+   timed events [@russ2015functional]. **Stop, pause and the welfare limits are checked about once a
+   second inside it**, with a console update; it strobes anchor codes (§8.4); it declares calibration
+   probes, or the record states the gaze map's age. Its record shape is designed in build K and asked of
+   wl-preproc.
 7. **A session program** lists the runs; the console offers the next; the operator may deviate.
    **Per-animal state** (programs, presets, last values, procedure state) **lives on lab storage**,
    synced to whichever rig runs the animal (animals sometimes work on both, N§R6), one writer at a time,
@@ -461,12 +511,13 @@ declared non-black background (§7.5).
 
 ## 14. Variation (N§11, N§R1, N§R2)
 
-1. **Named conditions plus drawn values.** A parameter is set by a condition or drawn, never both (refused
-   at load).
+1. **Named conditions plus drawn values.** [@asaad2008flexible] A parameter is set by a condition or
+   drawn, never both (refused at load).
 2. **Factorial designs**: factors and levels, combinations minus exclusions, named from their levels.
-3. **Orderings**: shuffled passes; weighted draws; limits on repeats; sequence-balanced.
+3. **Orderings**: shuffled passes [@nimhmonkeylogic2026task]; weighted draws; limits on repeats;
+   sequence-balanced [@aguirre2011de; @brooks2012counterbalancing].
 4. **Distributions**: uniform; a weighted set; normal, truncated; a prepared list; a non-aging
-   foreperiod (§6.11).
+   foreperiod (§6.11) [@han2022revisiting].
 5. **Condition numbers are fixed per task** (XC-197): a condition keeps its number across runs, sessions,
    animals and both rigs; **numbers are assigned by the task's registry on lab storage** (one writer), a
    rig-added condition taking the next unused one; numbers never reused.
@@ -478,12 +529,14 @@ declared non-black background (§7.5).
 
 ## 15. Adaptivity (N§12)
 
-1. **Methods**: up-down staircases, interleaved staircases, Bayesian methods (QUEST, QUEST+, Psi),
-   training progressions that may step back.
+1. **Methods**: up-down staircases [@levitt1971transformed; @kaernbach1991simple], interleaved staircases
+   [@levitt1971transformed], Bayesian methods (QUEST [@watson1983quest], QUEST+ [@watson2017quest], Psi
+   [@kontsevich1999bayesian]), training progressions that may step back [@berger2018standardized].
 2. **A reviewed library plus task code** (between-trial Python, flagged for review).
 3. **What moves a staircase is declared per procedure**; the default reads the counting table (§16.1):
-   correct as success, wrong and miss as failure, trials ending before the decision ignored.
-4. **State carries per animal when declared** (§13.7).
+   correct as success, wrong and miss as failure, trials ending before the decision ignored
+   [@levitt1971transformed; @stanislaw1999calculation; @luo2015neuronal].
+4. **State carries per animal when declared** (§13.7) [@berger2018standardized].
 5. **What a procedure may read**: outcomes and reaction times; anything the trial recorded (the
    generator wait included); gaze traces; neural features.
 6. **A live value on a procedure-controlled parameter** holds and pauses the procedure until released.
@@ -495,18 +548,21 @@ declared non-black background (§7.5).
 1. **One table classifies every outcome**, per trial structure: whether it **counts** toward its
    condition's target, and whether it is **repeated**. **Counted by default: every trial with an
    answer** (N§R1): correct, wrong, early and late variants, and, where withholding is an answer (catch
-   trials, detection, go/no-go), misses, correct rejections and false alarms. **Not counted: trials that
-   end before the decision** (breaks, no fixation, faults).
+   trials, detection, go/no-go), misses, correct rejections and false alarms
+   [@stanislaw1999calculation; @luo2015neuronal]. **Not counted: trials that end before the decision**
+   (breaks, no fixation, faults).
 2. **Repeated by default**: `FIXATION_BREAK`, `NO_FIXATION`, `TRACKER_LOST`, `FAULT`. **For other breaks
    the task chooses, when repeats are active, whether such a trial is spent** (counted as presented and
-   marked an abort) **or owed** (shown again later) (N§R1). Not repeated: wrong targets (2026-08-31).
-3. **Where a repeat goes**: at a random later point in its block, never the very next trial
-   (superseding 2026-08-31's "end of the block") **unless it is the only condition still owed, when it
-   repeats at once, recorded** (N§R2). Build C defines "later" for each order type and for criterion- and
-   time-ended blocks.
-4. **Blocks whose order is the design** (priming, sequence-balanced) **declare their repeat rule**,
-   defaulting to no repeats; **the realized sequence is recorded either way**: each trial's actual
-   predecessor, aborted ones included, and whether their display was shown.
+   marked an abort) **or owed** (shown again later) (N§R1)
+   [@nimhmonkeylogic2026task; @asaad2008flexible]. Not repeated: wrong targets (2026-08-31).
+3. **Where a repeat goes**: at a random later point in its block [@nimhmonkeylogic2026task], never the
+   very next trial (superseding 2026-08-31's "end of the block") **unless it is the only condition still
+   owed, when it repeats at once, recorded** (N§R2). Build C defines "later" for each order type and for
+   criterion- and time-ended blocks.
+4. **Blocks whose order is the design** (priming [@bichot2002priming; @westerberg2020priming],
+   sequence-balanced [@brooks2012counterbalancing]) **declare their repeat rule**, defaulting to no
+   repeats; **the realized sequence is recorded either way**: each trial's actual predecessor, aborted
+   ones included, and whether their display was shown.
 5. **A repeat's drawn values** are fresh or the same, declared per task (N§R1).
 6. **A cap per condition**: past N repeats in a block, the condition's remaining debt is forgiven, its
    shortfall recorded, shown and flagged as possible avoidance (N§R2).
@@ -538,9 +594,9 @@ declared non-black background (§7.5).
    foreperiod's realized hazard, §6.11). Made for each task version and kept; a session records its
    task's report version.
 2. **Simulation is advised, not enforced.**
-3. **The simulated animal** follows declared functions with named profiles: perfect, chance, an
-   incorrect strategy, normal (85% correct), trying to break the task, trying to exploit the reward
-   schedule.
+3. **The simulated animal** follows declared functions [@wichmann2001psychometric; @carpenter1995neural]
+   with named profiles: perfect, chance, an incorrect strategy, normal (85% correct), trying to break the
+   task, trying to exploit the reward schedule.
 
 ## 19. Warnings, and what a session is for (N§4, N§R6)
 

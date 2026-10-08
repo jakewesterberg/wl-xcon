@@ -32,9 +32,10 @@ no reward, which is not "against simulators" but "against nothing"; that half is
 deliverables. They are P4.
 
 ## M2 — Display validated on rig hardware
-Protocol V1 on at least one rig: photodiode-measured onset lag and variability, dropped-frame
-rate over a 2 h stress run; protocol **V9** for split-panel per-half photometry and stereo
-viewport geometry measured rather than derived. Gates (proposed): onset variability < 1 ms; drops < 0.1%.
+Protocol V1 on at least one rig: photodiode-measured onset lag and variability, dropped-frame rate
+over a 2 h stress run; protocol **V9** for split-panel per-half photometry and stereo viewport
+geometry measured rather than derived. Gates (proposed): onset variability < 1 ms
+[@bridges2020timing]; drops < 0.1%.
 
 ## M3 — Eye loop live
 OpenIrisDPI streaming into `taskd` on-rig; calibration, recentering and drift correction

@@ -83,7 +83,8 @@ record is unaffected and remains the sync box's hardware ticks and the strobed e
 words — S3's finding that "our log is not the timing record" still holds, in full, for
 the same reason it held before: two other systems already carry the timing of anything
 scientifically meaningful. Nobody should read an NTP-disciplined wall clock on a task PC
-or a kiosk as good enough for aligning neural data, now or later.
+or a kiosk as good enough for aligning neural data, now or later [@mills2010network;
+@karsh2026sync].
 
 **Verify rather than assume.** Preflight should compare the host clock against the
 reference and refuse or warn beyond a threshold, in the same spirit as every other check
