@@ -32,6 +32,7 @@ from _ports import endpoints as free_endpoints
 from _rig import PATH as RIG_FILE, naming
 from _zmq_release import _every_zmq_context_released  # noqa: F401
 from _frames import idle
+from _calibrations import BACKGROUND, OBSERVER, PRIMARIES
 from wl_xcon import cli
 from wl_xcon import link as _link
 from wl_xcon.actor import Box
@@ -44,7 +45,7 @@ from wl_xcon.cli import (
     main,
     render,
 )
-from wl_xcon.findings import SESSION_KINDS
+from wl_xcon.findings import SESSION_KINDS, Finding
 from wl_xcon.link import (
     SCHEMA,
     Control,
@@ -140,7 +141,8 @@ def _a_session_that_cannot_finish_fails_instead_of_running_on(monkeypatch):
 
 def test_a_clean_task_exits_zero(capsys):
     assert main(["check", GOOD, "--rig", RIG_FILE, "--allocation", ALLOCATION]) == 0
-    assert "no findings" in capsys.readouterr().out
+    assert ("1 warning(s), each accepted only in the session kinds it names: the task loads"
+            in capsys.readouterr().out)
 
 
 def test_the_installed_command_can_load_the_test_rig(tmp_path):
@@ -168,7 +170,7 @@ def test_the_installed_command_can_load_the_test_rig(tmp_path):
     )
 
     assert done.returncode == 0, done.stderr
-    assert "no findings" in done.stdout
+    assert "1 warning(s), each accepted only in the session kinds it names: the task loads" in done.stdout
 
 
 def test_a_task_with_a_blocking_finding_exits_one(tmp_path, capsys):
@@ -193,6 +195,45 @@ def test_an_unallocated_code_is_refused_without_an_allocation(capsys):
     whose whole guardrail is that codes come from elsewhere."""
     assert main(["check", GOOD, "--rig", RIG_FILE]) == 1
     assert "unallocated-code" in capsys.readouterr().out
+
+
+def test_wlx_check_marks_a_warning_with_the_kinds_it_is_accepted_in(capsys):
+    assert main(["check", GOOD, "--rig", RIG_FILE, "--allocation", ALLOCATION, "--view", "direct"]) == 0
+
+    out = capsys.readouterr().out
+    assert "calibration: srgb-standard (the sRGB standard, measured by nobody)" in out
+    assert "warning  contrast-on-default" in out and "(accepted in training, piloting)" in out
+
+
+@pytest.mark.parametrize("kind, code", [("training", 0), ("piloting", 0), ("recording", 1)])
+def test_wlx_check_for_a_kind_refuses_a_warning_that_kind_does_not_accept(kind, code):
+    assert main(["check", GOOD, "--rig", RIG_FILE, "--allocation", ALLOCATION, "--view", "direct",
+                 "--kind", kind]) == code
+
+
+def test_wlx_check_refuses_a_calibration_record_that_will_not_load(tmp_path):
+    """Review Focus 3, `wlx check`'s side (Call 20): no animal waits on it."""
+    (tmp_path / "cal.json").write_text("{")
+    rig = naming(tmp_path / "rig", str(tmp_path / "cal.json"))
+
+    with pytest.raises(SystemExit) as refused:
+        main(["check", GOOD, "--rig", str(rig), "--allocation", ALLOCATION])
+
+    assert str(refused.value).startswith("refused: the calibration")
+    assert "not JSON" in str(refused.value)
+
+
+def test_wlx_check_says_a_findings_sentence_through_the_terminal_guard(monkeypatch, capsys):
+    """A finding's sentence quotes the task it was found in, so it reaches the terminal as
+    `render` sends wire text: through `_printable`."""
+    monkeypatch.setattr(cli, "check", lambda *a, **k: [Finding(
+        "contrast-on-default", "forged\x1b[2J\nrefused  nothing", blocking=False,
+        accepted_in=("training",))])
+
+    assert main(["check", GOOD, "--rig", RIG_FILE, "--allocation", ALLOCATION, "--view", "direct"]) == 0
+
+    out = capsys.readouterr().out
+    assert "forged\ufffd[2J\ufffdrefused  nothing" in out and "\x1b" not in out
 
 
 def _either_task(tmp_path, reach: float) -> str:
@@ -2102,7 +2143,7 @@ def _hours_ago(hours: float) -> str:
 
 #: What every `wlx run` here runs in: the stand-in rig's direct view, which the
 #: reference tasks are written for.
-_SETUP = ("--rig", RIG_FILE, "--view", "direct", "--kind", "training")
+_SETUP = ("--rig", RIG_FILE, "--view", "direct", "--kind", "training", "--accept-warnings")
 
 
 def _run_args(tmp_path, *extra: str) -> list:
@@ -2193,6 +2234,59 @@ def test_wlx_run_refuses_a_calibration_record_that_will_not_load_before_anything
     assert str(refused.value).startswith("refused: the calibration")
     assert "not JSON" in str(refused.value)
     assert not (tmp_path / "2027-01-14_01").exists()
+
+
+def test_wlx_run_lists_its_warnings_and_starts_only_once_they_are_accepted(tmp_path):
+    argv = [a for a in _run_args(tmp_path, "--out-of-cage-at", _hhmm()) if a != "--accept-warnings"]
+
+    with pytest.raises(SystemExit) as refused:
+        main(argv)
+
+    assert "default calibration" in str(refused.value) and "--accept-warnings" in str(refused.value)
+    assert not (tmp_path / "2027-01-14_01").exists()
+
+
+def test_wlx_run_refuses_a_calibration_dated_after_today_before_anything_is_recorded(tmp_path):
+    """Call 20: the one session-level warning no kind accepts, refused with or without the
+    flag, before anything is recorded."""
+    record = tmp_path / "cal.json"
+    record.write_text(json.dumps({
+        "id": "rig1", "measured_on": (datetime.now() + timedelta(days=2)).date().isoformat(),
+        "observer": OBSERVER, "primaries": PRIMARIES, "background": BACKGROUND,
+        "transfer": {c: [[0.0, 0.0], [1.0, 1.0]] for c in ("red", "green", "blue")},
+    }))
+    argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm())
+    argv[argv.index(RIG_FILE)] = str(naming(tmp_path / "rig", str(record)))
+
+    with pytest.raises(SystemExit) as refused:
+        main(argv)
+
+    assert "a training session does not accept calibration age" in str(refused.value)
+    assert not (tmp_path / "2027-01-14_01").exists()
+
+
+def test_wlx_run_records_the_warnings_its_flag_accepted(tmp_path):
+    assert main(_run_args(tmp_path, "--out-of-cage-at", _hhmm(), "--as", "jake")) == 0
+
+    rows = [json.loads(line) for line in
+            (tmp_path / "2027-01-14_01" / "xcon" / "warnings.jsonl").read_text().splitlines()]
+    assert [(r["code"], r["how"], r["by"]) for r in rows] == [
+        ("default calibration", "--accept-warnings", {"kind": "box", "name": "jake"}),
+        ("contrast-on-default", "--accept-warnings", {"kind": "box", "name": "jake"})]
+
+
+def test_wlx_run_says_its_warnings_through_the_terminal_guard(tmp_path, monkeypatch):
+    """Its refusal quotes the task's warnings, so it reaches the terminal through
+    `_printable`, as `wlx check`'s lines do."""
+    monkeypatch.setattr(cli, "check", lambda *a, **k: [Finding(
+        "contrast-on-default", "forged\x1b[2J", blocking=False, accepted_in=("training",))])
+    argv =[a for a in _run_args(tmp_path, "--out-of-cage-at", _hhmm()) if a != "--accept-warnings"]
+
+    with pytest.raises(SystemExit) as refused:
+        main(argv)
+
+    assert "contrast-on-default: forged\ufffd[2J" in str(refused.value)
+    assert "\x1b" not in str(refused.value)
 
 
 def test_wlx_run_in_the_stereoscope_needs_the_animals_settings(tmp_path):

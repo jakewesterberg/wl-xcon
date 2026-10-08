@@ -16,6 +16,7 @@ import threading
 import time
 import unicodedata
 from contextlib import nullcontext
+from datetime import date
 from pathlib import Path
 
 from wl_xcon import actor as actors
@@ -1216,6 +1217,14 @@ def main(argv: list[str] | None = None) -> int:
         "is then checked at that animal's half-IPD, rather than at both ends of the "
         "rig's range",
     )
+    checker.add_argument(
+        "--kind",
+        dest="session_kind",
+        choices=SESSION_KINDS,
+        default=None,
+        help="check as a session of this kind would: a warning it does not accept is refused. "
+        "Omitted, each warning is listed with the session kinds it is accepted in",
+    )
 
     reviewer = sub.add_parser(
         "review", help="render the artifact a task is approved from"
@@ -1262,6 +1271,14 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="what this session is for: training, piloting or recording (engine spec §19.1). "
         "**Required, with no default**: which of its warnings refuse it depends on it",
+    )
+    runner.add_argument(
+        "--accept-warnings",
+        action="store_true",
+        help="accept every warning this session lists, recorded as accepted by this flag with "
+        "--as's name, as --confirm-out-of-cage records its confirmation (engine spec §19.3). "
+        "Refused without it while the list is not empty; and a warning the session's kind does "
+        "not accept is refused with it",
     )
     runner.add_argument(
         "--subject-settings",
@@ -1618,6 +1635,31 @@ def main(argv: list[str] | None = None) -> int:
                 + "\n".join(f"  {f.code}: {f.detail}" for f in refusals)
             )
 
+        # **The warnings this session runs with** (engine spec §19.2-19.3): the calibration's,
+        # the deployment's and the task's. `wlx run` takes no pre-flight (XC-159), so none of
+        # today's unknowns is among them. A task warning its kind does not accept was refused
+        # above; a calibration dated after today, which no kind accepts, is refused here (the
+        # engine B plan, call 20); the rest are accepted by the flag, or the session does not
+        # start. Said through `_printable`: a task's warning quotes the task.
+        warnings = (
+            warnlist.of_calibration(calibration, date.fromtimestamp(time.time()))
+            + warnlist.of_deployment(deployment)
+            + warnlist.of_findings(findings)
+        )
+        outside = warnlist.refused(warnings, args.session_kind)
+        if outside:
+            raise SystemExit(
+                f"session not started, nothing recorded: a {args.session_kind} session does not "
+                f"accept {_printable(warnlist.sentence(outside))}"
+            )
+        if warnings and not args.accept_warnings:
+            raise SystemExit(
+                "session not started, nothing recorded: its warnings are "
+                + _printable(warnlist.sentence(warnings))
+                + ". Pass --accept-warnings to accept them for this session; they are recorded "
+                "with --as's name"
+            )
+
         # Once the check passes, one line, before the `--set` parsing, the link and
         # the `Session`; not beside `out of cage:`, which sits inside the welfare
         # path. Without `--link` this is the only place the setup is said here.
@@ -1791,6 +1833,9 @@ def main(argv: list[str] | None = None) -> int:
             # is called here.
             session.open(how="wlx run")
             try:
+                # What the flag accepted (the engine B plan, call 13), recorded first: nothing
+                # has been marked yet, and a fault here ends the session through the `finally`.
+                session.accept(warnings, by=Box(args.actor or ""), how="--accept-warnings", run=None)
                 # On a rig both of these are a person's marks -- out-of-cage the
                 # wl-works ELN's once it exists (P4d-2a spec §10) -- and the
                 # difference is the whole reason S8 makes them explicit. Here the
@@ -2047,6 +2092,8 @@ def main(argv: list[str] | None = None) -> int:
     trial = _load_trial(args.task)
     allocation = _load_allocation(args.allocation)
     rig = _load_rig(args.rig)
+    # A record that will not load refuses here (the engine B plan, call 20).
+    calibration = _load_calibration(rig, args.rig)
     settings = (
         _load_subject_settings(args.subject_settings, None)
         if args.subject_settings is not None
@@ -2057,24 +2104,45 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(_DIRECT_READS_NO_SETTINGS)
     for geometry in geometries:
         print(f"checked against: {_setup_words(geometry.view, geometry.half_ipd_cm)}")
+    print(
+        f"calibration: {calibration.id} ("
+        + ("the sRGB standard, measured by nobody" if calibration.standard
+           else f"measured {calibration.measured_on}")
+        + ")"
+    )
     # One list across the setups, each finding once: most findings are the task's own
     # and read the same in every setup, while check 8's name the field they failed in.
     findings: list = []
     for geometry in geometries or [None]:
-        for finding in check(trial, allocation, geometry=geometry):
+        for finding in check(trial, allocation, geometry=geometry, calibration=calibration):
             if finding not in findings:
                 findings.append(finding)
+    # Each sentence through `_printable`: a finding quotes the task it was found in.
     for finding in findings:
-        marker = "refused " if finding.blocking else "review  "
-        print(f"{marker} {finding.code:28} {finding.detail}")
+        marker = (
+            "refused " if finding.refuses(args.session_kind)
+            else "warning " if finding.is_warning
+            else "review  "
+        )
+        kinds = f" (accepted in {', '.join(finding.accepted_in)})" if finding.is_warning else ""
+        print(f"{marker} {_printable(finding.code):28} {_printable(finding.detail)}{kinds}")
 
-    blocking = [f for f in findings if f.blocking]
-    if blocking:
-        print(f"\n{len(blocking)} blocking finding(s): task refused")
+    refusing = [f for f in findings if f.refuses(args.session_kind)]
+    if refusing:
+        print(
+            f"\n{len(refusing)} blocking finding(s): task refused"
+            + ("" if args.session_kind is None else f" in a {args.session_kind} session")
+        )
         return 1
-    if findings:
-        print(f"\n{len(findings)} non-blocking finding(s): task needs human review")
-    else:
+    warned = [f for f in findings if f.is_warning]
+    notes = [f for f in findings if not f.is_warning]
+    if warned:
+        # The engine B plan, call 29.
+        print(f"\n{len(warned)} warning(s), each accepted only in the session kinds it names: "
+              f"the task loads")
+    if notes:
+        print(f"\n{len(notes)} non-blocking finding(s): task needs human review")
+    if not findings:
         print("no findings")
     return 0
 

@@ -1212,7 +1212,7 @@ GOOD = "tasks/fixation_detection.py"
 ALLOCATION = "tasks/allocation.py"
 #: What every `wlx run` here runs in: the stand-in rig's direct view, which the
 #: reference tasks are written for.
-_SETUP = ("--rig", RIG_FILE, "--view", "direct", "--kind", "training")
+_SETUP = ("--rig", RIG_FILE, "--view", "direct", "--kind", "training", "--accept-warnings")
 #: The eight-hour reference config: a session under it runs until it is stopped.
 EIGHT_HOURS = "tasks/eight_hour_bounds.py"
 #: What the fixation task needs set to run headless (as in `test_cli.py`).
