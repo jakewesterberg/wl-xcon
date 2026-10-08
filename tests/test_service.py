@@ -1320,6 +1320,12 @@ VALUES = {
     "fix_timeout": 4.0, "fix_hold": 0.3, "response_window": 0.6, "target_hold": 0.2,
     "fix_window": 2.0, "target_window": 3.0, "target_position": 10.0,
 }
+#: Starting values for `tasks/visual_search_training.py`, which declares no start for these.
+SEARCH_VALUES = {
+    "fix_timeout": 4.0, "fix_hold": 0.3, "response_window": 0.6, "target_hold": 0.2,
+    "fix_window": 2.0, "item_window": 1.0, "eccentricity": 8.0, "set_size": 4,
+    "target_index": 0, "array_phase": 0.0,
+}
 UNKNOWN = ("warnings", "pump calibration", "eye tracker")
 
 
@@ -1761,6 +1767,72 @@ def test_a_runs_warning_sentences_are_cut_on_the_frame_and_written_whole(tmp_pat
     why = _refused(refused)[-1]
     assert "warnings: a training session does not accept calibration record: yyy" in why
     assert len(why) < 2 * NOTE_LIMIT and "y" * (NOTE_LIMIT + 1) not in why
+
+
+def test_every_warning_a_start_accepts_is_named_in_the_item_it_accepted(tmp_path, monkeypatch):
+    """Fix round 1 of Task 12 (the review's probe): one acknowledgement of `warnings` accepts
+    every warning the item lists, so each is named in the item, whatever its cut takes. A
+    listing fault at the open leaves the default calibration owed with the visual search task's
+    two warnings, and the item's sentence before this fix put the third code past
+    `link.NOTE_LIMIT`, where the cut dropped it from the page while the start accepted it."""
+    service = _service(tmp_path)
+    shutil.copy("tasks/visual_search_training.py", service.tasks)
+
+    def broken(self):
+        raise RuntimeError("broken on purpose")
+
+    monkeypatch.setattr(Service, "calibration_warnings", broken)
+    _step(service, _open(accepted=()))
+    monkeypatch.undo()
+
+    service._start(_start(task="visual_search_training.py", values=dict(SEARCH_VALUES)))
+
+    item = {i.name: i for i in service.session.preflight.items}["warnings"]
+    accepted = service._starting[3]
+    assert [e.code for e in accepted] == [
+        "default calibration", "color-on-default", "contrast-on-default", "pump calibration", "eye tracker"]
+    owed = accepted[:3]
+    before = f"{len(owed)} not yet accepted this session: {warnlist.sentence(owed)}"
+    assert before.index("contrast-on-default:") > NOTE_LIMIT, "past the cut before this fix"
+    assert len(item.said) == NOTE_LIMIT + 1
+    assert item.said.startswith(
+        "3 not yet accepted this session (default calibration, color-on-default, "
+        "contrast-on-default): default calibration: the rig names no measured calibration"
+    )
+
+
+def test_a_carried_run_hands_its_run_nothing_to_accept(tmp_path):
+    """What a later start hands its run (`_starting`'s fourth value) leaves the carried items
+    out even when they are named again, as the page sends every unknown it shows -- held here,
+    not only by `Session.accept` skipping what it already holds (fix round 1 of Task 12)."""
+    service = _service(tmp_path)
+    _step(service, _open())
+    _step(service, _start())
+
+    service._start(_start())
+
+    assert service._starting[3] == []
+
+
+def test_only_the_pump_calibration_and_the_eye_tracker_are_ever_carried(tmp_path, monkeypatch):
+    """Welfare item 2 carries the two things nothing measures. The one other unknown item
+    today, `warnings`, is never carried: one acknowledgement of it accepts its warnings, each on
+    its own row, never the item. Asked again of the very pre-flight the first run started on,
+    only the two are carried; and a later run's new warning is asked for by name."""
+    service = _service(tmp_path)
+    _step(service, _open())
+    first = _step(service, CheckRun(by=BY, task=TASK, values=dict(VALUES))).preflight
+    _step(service, _start())
+
+    assert [i.name for i in first.items if i.result == "unknown"] == list(UNKNOWN)
+    assert service.session.carried(first) == {"pump calibration": BY, "eye tracker": BY}
+    monkeypatch.setattr(Service, "calibration_warnings",
+                        lambda self: [Entry("calibration age", "a new warning", SESSION_KINDS)])
+    refused = _step(service, _start(acknowledged=()))
+    assert "nobody has acknowledged: warnings." in _refused(refused)[-1]
+    _step(service, _start(acknowledged=("warnings",)))
+    second = [r for r in _runs(service.root) if r["event"] == "start"][1]
+    assert [r["name"] for r in second["preflight"] if r["carried"]] == ["pump calibration", "eye tracker"]
 
 
 def test_a_fault_before_a_run_starts_is_said_cut_on_the_feed(tmp_path, monkeypatch, capsys):

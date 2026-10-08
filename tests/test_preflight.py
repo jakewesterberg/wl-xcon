@@ -105,13 +105,32 @@ def test_the_warnings_items_sentence_is_cut_as_the_wire_cuts_and_each_warning_is
 
     item, owed = preflight.warnings([long], "training", frozenset())
     assert (item.result, len(item.said)) == ("unknown", NOTE_LIMIT + 1)
-    assert item.said.startswith("1 not yet accepted this session: long: xxx") and item.said.endswith("…")
+    assert item.said.startswith("1 not yet accepted this session (long): long: xxx")
+    assert item.said.endswith("…")
     assert owed == [long] and owed[0].detail == "x" * 2_000
 
     refused = Entry("refused", "y" * 2_000, ())
     item, _ = preflight.warnings([refused], "training", frozenset())
     assert (item.result, len(item.said)) == ("fail", NOTE_LIMIT + 1)
     assert item.said.startswith("a training session does not accept refused: yyy")
+
+
+def test_an_unknown_names_each_warning_first_or_fails_when_their_names_cannot_all_be_shown():
+    """Fix round 1 of Task 12: one acknowledgement accepts every warning the item lists, so its
+    head -- the count and each code, "1 not yet accepted this session (<code>)", 34 characters
+    and the code -- must fit within `link.NOTE_LIMIT`, which the cut keeps whole. One character
+    more, and the item fails, accepting nothing."""
+    fits = Entry("c" * (NOTE_LIMIT - 34), "x" * 2_000, SESSION_KINDS)
+    item, owed = preflight.warnings([fits], "training", frozenset())
+    assert (item.result, owed) == ("unknown", [fits])
+    assert item.said == f"1 not yet accepted this session ({fits.code})…"
+
+    over = Entry("c" * (NOTE_LIMIT - 33), "x", SESSION_KINDS)
+    item, owed = preflight.warnings([over], "training", frozenset())
+    assert (item.result, owed) == ("fail", [])
+    assert item.said.startswith(
+        "the names of the 1 warning(s) not yet accepted this session run past the 500 characters"
+    )
 
 
 @pytest.mark.parametrize(

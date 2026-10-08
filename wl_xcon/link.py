@@ -359,7 +359,7 @@ class WarningRow:
         is within `NOTE_LIMIT` (the engine B plan, call 25: the default calibration's, 270
         characters, is the longest, counted 2026-10-08), so an idle frame offers each whole, as
         the open's form must send it back."""
-        return cls(_cut(code, TEXT_LIMIT), _cut(detail, NOTE_LIMIT), tuple(accepted_in), by, at)
+        return cls(cut(code, TEXT_LIMIT), cut(detail, NOTE_LIMIT), tuple(accepted_in), by, at)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1667,9 +1667,11 @@ def _quoted(value: object) -> str:
     return text
 
 
-def _cut(text: str, limit: int) -> str:
+def cut(text: str, limit: int) -> str:
     """`text`, cut to `limit` characters plus `"…"` when longer: `_quoted`'s bound, for text
-    a frame shows as it is rather than quotes (`WarningRow.of`)."""
+    a frame shows as it is rather than quotes (`WarningRow.of`), and for a sentence a run's
+    pre-flight or its refusal says (`preflight.warnings`, `service.Service._preflight` and
+    `_run`)."""
     return text[:limit] + "…" if len(text) > limit else text
 
 

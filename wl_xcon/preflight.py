@@ -135,19 +135,33 @@ def warnings(entries, kind: str, accepted) -> tuple[PreflightItem, list]:
     warning rows are (`link.WarningRow.of`): nothing bounds a warning's sentence where it is
     made -- a task's `color-on-default` names every colored choice, and a record that will not
     load is quoted with what its loader said. The warnings returned keep every word: they,
-    never this sentence, are what a start accepts and `warnings.jsonl` records."""
+    never this sentence, are what a start accepts and `warnings.jsonl` records.
+
+    **An unknown names every warning it lists before it says any** (fix round 1 of Task 12):
+    one acknowledgement accepts them all, so a cut may shorten what they say but never drop
+    one's name. Its head -- the count and each code, in parentheses -- must fit within
+    `link.NOTE_LIMIT` characters, which the cut keeps whole; when it does not, the item
+    **fails** rather than ask to accept warnings it cannot show."""
     entries = list(entries)
     outside = warnlist.refused(entries, kind)
     if outside:
-        return PreflightItem(WARNINGS, FAIL, _link._cut(
+        return PreflightItem(WARNINGS, FAIL, _link.cut(
             f"a {kind} session does not accept {warnlist.sentence(outside)}", _link.NOTE_LIMIT,
         )), []
     owed = warnlist.owed(entries, accepted)
     if owed:
-        return (
-            PreflightItem(WARNINGS, UNKNOWN, _link._cut(
-                f"{len(owed)} not yet accepted this session: {warnlist.sentence(owed)}",
+        codes = ", ".join(entry.code for entry in owed)
+        head = f"{len(owed)} not yet accepted this session ({codes})"
+        if len(head) > _link.NOTE_LIMIT:
+            return PreflightItem(WARNINGS, FAIL, _link.cut(
+                f"the names of the {len(owed)} warning(s) not yet accepted this session run "
+                f"past the {_link.NOTE_LIMIT} characters this item shows, so one acknowledgement "
+                f"cannot be shown to accept them all, and none is accepted: {codes}",
                 _link.NOTE_LIMIT,
+            )), []
+        return (
+            PreflightItem(WARNINGS, UNKNOWN, _link.cut(
+                f"{head}: {warnlist.sentence(owed)}", _link.NOTE_LIMIT,
             )),
             owed,
         )

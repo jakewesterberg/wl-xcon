@@ -1026,7 +1026,7 @@ class Service:
                 # the item's other sentences are (`preflight.warnings`).
                 return _link.PreflightItem(
                     _preflight.WARNINGS, _preflight.FAIL,
-                    _link._cut(
+                    _link.cut(
                         f"the warnings could not be listed: {_fault(broken)}; no run starts "
                         f"until they can be",
                         _link.NOTE_LIMIT,
@@ -1164,7 +1164,7 @@ class Service:
                 session.refuse("start", by, _sentence(ended))
             else:
                 traceback.print_exc(file=sys.stderr)
-                session.refuse("start", by, _link._cut(
+                session.refuse("start", by, _link.cut(
                     f"the run did not start: {type(ended).__name__}: {ended}", _link.NOTE_LIMIT,
                 ))
 
