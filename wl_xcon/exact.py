@@ -65,6 +65,22 @@ def _rect(u, w, half_w, half_h):
     return np.hypot(np.maximum(qx, 0.0), np.maximum(qy, 0.0)) + np.minimum(np.maximum(qx, qy), 0.0)
 
 
+def _cross(u, w, a, b):
+    """The exact signed distance to a plus sign: bars of half-length `a` and
+    half-thickness `b` along x and y. Folded so that `p.x ≥ p.y ≥ 0` and `a ≥ b` (a bar
+    thicker than it is long makes the same plus), the nearest boundary outside is the
+    x bar's; inside, it is that bar's end or the top edge it keeps beyond the y bar,
+    which ends at the re-entrant corner `(b, b)`. The smaller of the two bars' distances
+    is too small inside near that corner."""
+    a, b = max(a, b), min(a, b)
+    px, py = np.abs(u), np.abs(w)
+    px, py = np.maximum(px, py), np.minimum(px, py)
+    qx, qy = px - a, py - b
+    outside = np.hypot(np.maximum(qx, 0.0), np.maximum(qy, 0.0))
+    inside = np.minimum(-qx, np.hypot(np.maximum(b - px, 0.0), -qy))
+    return np.where(np.maximum(qx, qy) > 0, outside, -inside)
+
+
 def _polygon(u, w, points):
     """Distance to a closed polygon, signed by an even-odd crossing count."""
     pts = np.asarray(points, dtype=float)
@@ -111,8 +127,7 @@ def signed_distance(shape, u, w):
     if isinstance(shape, look.Rect):
         return _rect(u, w, shape.width / 2, shape.height / 2)
     if isinstance(shape, look.Cross):
-        return np.minimum(_rect(u, w, shape.size / 2, shape.thickness / 2),
-                          _rect(u, w, shape.thickness / 2, shape.size / 2))
+        return _cross(u, w, shape.size / 2, shape.thickness / 2)
     if isinstance(shape, look.Ring):
         r = np.hypot(u, w)
         return np.maximum(r - shape.outer / 2, shape.inner / 2 - r)
@@ -164,6 +179,13 @@ def _phase(fill, w, item, screen):
     return 2.0 * math.pi * (fill.sf * w - fill.tf * t) + math.radians(fill.phase)
 
 
+def _modulation(fill, envelope, w, item, screen):
+    """A grating's `1 + m·sin(phase)·envelope` at each sample, one factor for every
+    channel: the light about its mean (`_light`), or the gain on the contrast below
+    (`_gain`)."""
+    return (1.0 + fill.michelson * np.sin(_phase(fill, w, item, screen)) * envelope)[..., None]
+
+
 def _light(fill, mean, background, envelope, w, item, screen):
     """An item's own light at each sample, before it meets what is below it: a flat fill's
     light, or a grating about its declared mean or, declaring none, about `mean`, which the
@@ -174,7 +196,7 @@ def _light(fill, mean, background, envelope, w, item, screen):
         return background * (1.0 + fill.weber)
     if isinstance(fill, ResolvedGrating):
         base = mean if fill.mean_xyz is None else np.asarray(fill.mean_xyz, dtype=float)
-        return base * (1.0 + fill.michelson * np.sin(_phase(fill, w, item, screen)) * envelope)[..., None]
+        return base * _modulation(fill, envelope, w, item, screen)
     raise NotYetDrawable(f"{type(fill).__name__} is drawn in engine build A3")
 
 
@@ -189,7 +211,7 @@ def _gain(fill, envelope, w, item, screen):
             )
         return 1.0 + fill.weber
     if isinstance(fill, ResolvedGrating):
-        return (1.0 + fill.michelson * np.sin(_phase(fill, w, item, screen)) * envelope)[..., None]
+        return _modulation(fill, envelope, w, item, screen)
     raise NotYetDrawable(f"{type(fill).__name__} is drawn in engine build A3")
 
 

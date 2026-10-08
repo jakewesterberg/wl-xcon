@@ -95,6 +95,29 @@ def test_each_shape_is_negative_inside_and_positive_outside(shape, inside, outsi
     assert d[0] < 0 < d[1]
 
 
+@pytest.mark.parametrize("point, d", [
+    ((0.09, 0.09), -math.hypot(0.01, 0.01)),  # nearest the re-entrant corner (0.1, 0.1)
+    ((0.15, 0.15), 0.05),                      # nearest (0.15, 0.1), on the x bar's top edge
+    ((0.5, 0.0), -0.1),
+    ((1.2, 0.0), 0.2),
+    ((0.0, 0.5), -0.1),
+])
+def test_a_cross_s_distance_is_exact_near_its_re_entrant_corners(point, d):
+    got = exact.signed_distance(look.Cross(size=2.0, thickness=0.2), np.array([point[0]]), np.array([point[1]]))
+    assert float(got[0]) == pytest.approx(d, abs=1e-12)
+
+
+def test_a_short_or_thick_cross_is_the_same_plus_and_exact():
+    # Arms shorter than twice their thickness: inside the central square the arm's end,
+    # 0.06 away, is nearer than the re-entrant corner.
+    d = exact.signed_distance(look.Cross(size=0.3, thickness=0.2), np.array([0.09]), np.array([0.0]))
+    assert float(d[0]) == pytest.approx(-0.06, abs=1e-12)
+    # Bars thicker than they are long make the same plus, each bar the other's.
+    u, w = np.array([0.09, 0.15, 0.5, 1.2]), np.array([0.09, 0.15, 0.0, 0.0])
+    assert exact.signed_distance(look.Cross(size=0.2, thickness=2.0), u, w).tolist() == pytest.approx(
+        exact.signed_distance(look.Cross(size=2.0, thickness=0.2), u, w).tolist(), abs=1e-12)
+
+
 def test_a_shape_or_an_edge_this_build_does_not_draw_names_the_build_that_will():
     # Every block in `look` is drawn; these stand in for one a later build adds.
     class Blob(look.Shape):
@@ -107,6 +130,21 @@ def test_a_shape_or_an_edge_this_build_does_not_draw_names_the_build_that_will()
         exact.signed_distance(Blob(), np.zeros(1), np.zeros(1))
     with pytest.raises(screen.NotYetDrawable, match="engine build A3"):
         exact.edge_profile(Feather(), np.zeros(1), np.zeros(1), np.zeros(1))
+
+
+def test_draw_refuses_a_shape_this_build_does_not_draw_rather_than_skip_it():
+    class Blob(look.Shape):
+        pass
+
+    item = screen.Item(name="b", order=(0, 0), layer=0, combine="cover", opacity=1.0, eye="both",
+                       at_left=(0.0, 0.0), at_right=(0.0, 0.0), orientation=0.0, shape=Blob(),
+                       fill=screen.ResolvedFlat(xyz=(1.0, 1.0, 1.0), weber=None),
+                       edge=look.Hard(applies="opacity"), outline=None, onset_frame=0)
+    s = screen.Screen(setup="direct", periphery="true_angle", background_left=(0.0, 0.0, 0.0),
+                      background_right=(0.0, 0.0, 0.0), items=(item,), frame=0, frame_period=1 / 240)
+    vp = viewport.viewports(RIG, DIRECT, pixels=(4, 4))[0]
+    with pytest.raises(screen.NotYetDrawable, match="engine build A3"):
+        exact.draw(s, vp)
 
 
 def test_the_whole_screen_is_inside_everywhere():
@@ -125,6 +163,25 @@ def test_a_raised_cosine_ramps_from_the_boundary_inward():
     assert p.tolist() == pytest.approx([1.0, 1.0, 0.5, 0.0, 0.0])
 
 
+def test_a_soft_edge_ramps_a_flat_light_in_from_the_boundary():
+    # A raised cosine 1° wide inside a 2° radius is 0.5·(1 − cos(π·(2 − r))) of the light
+    # at radius r. Each radius is read at one pixel whose center lies on it: an odd grid
+    # puts a row of pixel centers on the horizontal meridian, where two directions are as
+    # many degrees apart as their azimuths differ, and the disc is centered r degrees left
+    # of that pixel's. A pixel is the mean of its 4 × 4 samples; at this grid's 0.035°
+    # pixels the ramp's curvature moves that mean off its center's value by under 0.1%.
+    pixels, region = (1921, 1081), (940, 530, 1040, 551)
+    looks = look.Look(shape=look.Circle(size=4.0), fill=look.Flat(color=Gray(40.0)),
+                      edge=look.RaisedCosine(width=1.0))
+    probe = viewport.viewports(RIG, DIRECT, pixels=pixels)[0]
+    row, col = pixels[1] // 2, pixels[0] // 2 + 60
+    azimuth = math.degrees(math.atan((col + 0.5 - probe.width_px / 2) * probe.pitch_cm[0] / probe.distance_cm))
+    for r, expected in [(1.5, 20.0), (1.75, 40.0 * 0.5 * (1.0 - math.cos(math.pi / 4)))]:
+        image, vp = _draw([Stimulus("s", at=(azimuth - r, 0.0), looks=looks)], pixels=pixels, region=region)
+        assert image[row - region[1], col - region[0]][1] == pytest.approx(expected, rel=0.05)
+        assert image[_pixel(vp, azimuth - r, 0.0, region)][1] == pytest.approx(40.0)  # the center
+
+
 def test_a_gaussian_edge_is_the_radial_envelope():
     p = exact.edge_profile(look.GaussianEdge(sigma=1.0), np.array([-1.0, -1.0]),
                            np.array([0.0, 1.0]), np.array([0.0, 0.0]))
@@ -137,6 +194,16 @@ def test_an_outline_is_a_band_on_the_boundary_over_the_fill():
     image, vp = _draw([Stimulus("o", at=(0.0, 0.0), looks=looks)])
     assert image[_pixel(vp, 0.0, 0.0)][1] == pytest.approx(10.0)
     assert image[_pixel(vp, 2.0, 0.0)][1] == pytest.approx(40.0)
+
+
+def test_an_outline_is_drawn_at_its_stimulus_s_opacity():
+    # The band reaches 0.5° past the 2° boundary: the pixel at 2.25° (about 2.13° to 2.27°
+    # across its samples) is wholly outside the fill and inside the band.
+    looks = look.Look(shape=look.Circle(size=4.0), fill=look.Flat(color=Gray(10.0)),
+                      outline=look.Outline(width=1.0, color=Gray(40.0)))
+    image, vp = _draw([Stimulus("o", at=(0.0, 0.0), looks=looks, opacity=0.5)])
+    assert image[_pixel(vp, 2.25, 0.0)][1] == pytest.approx(20.0)
+    assert image[_pixel(vp, 0.0, 0.0)][1] == pytest.approx(5.0)
 
 
 def test_weber_contrast_is_against_the_eye_s_background():
@@ -292,6 +359,12 @@ def test_opacity_mixes_with_what_is_below():
 def test_add_adds_light_beyond_the_background():
     image, vp = _draw([_patch("a", 0.0, 30.0), _patch("b", 0.0, 25.0, combine="add")], trial=_gray20())
     assert _at_center(image, vp) == pytest.approx(30.0 + (25.0 - 20.0))
+
+
+def test_add_takes_a_contrast_against_the_background_not_what_is_below():
+    weber = Stimulus("w", at=(0.0, 0.0), looks=Disc(size=4.0, contrast=Weber(0.25)), combine="add")
+    image, vp = _draw([_patch("lit", 0.0, 30.0), weber], trial=_gray20())
+    assert _at_center(image, vp) == pytest.approx(30.0 + 20.0 * 0.25)
 
 
 def test_two_gratings_added_are_a_plaid_about_the_background():

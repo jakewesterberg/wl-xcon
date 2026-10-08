@@ -1,6 +1,7 @@
 """Each eye's viewport, in degrees (engine spec §5; build A1)."""
 
 import math
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -35,7 +36,16 @@ def test_samples_sit_inside_their_pixel_and_y_points_up():
     x_cm, y_cm = viewport.sample_cm(direct, 2)
     assert x_cm.shape == y_cm.shape == (4, 8)
     assert x_cm[0, 0] == pytest.approx(-2 * direct.pitch_cm[0] + direct.pitch_cm[0] / 4)
+    assert y_cm[0, 0] == pytest.approx((direct.height_px / 2 - 0.25) * direct.pitch_cm[1])
     assert y_cm[0, 0] > 0 > y_cm[-1, 0]
+
+
+def test_a_straight_ahead_point_right_of_and_above_the_panel_s_center_is_where_0_deg_falls():
+    # Rig.straight_ahead_cm is cm from the panel's center, x right and y up; samples are cm
+    # from it, so the panel's center sample sits left of and below it.
+    (vp,) = viewport.viewports(replace(RIG, straight_ahead_cm=(1.0, 0.5)), DIRECT, pixels=(5, 3))
+    x_cm, y_cm = viewport.sample_cm(vp, 1)
+    assert (float(x_cm[1, 2]), float(y_cm[1, 2])) == pytest.approx((-1.0, -0.5))
 
 
 def test_true_angle_coordinates_are_visual_angle_far_off_axis():
@@ -44,6 +54,23 @@ def test_true_angle_coordinates_are_visual_angle_far_off_axis():
     u, w = viewport.local_true_angle(v[None, :], c)
     assert float(u[0]) == pytest.approx(math.degrees(math.acos(float(v @ c))), abs=1e-9)
     assert abs(float(w[0])) < 1e-9
+
+
+def test_true_angle_coordinates_are_visual_angle_off_axis_in_x_and_y():
+    c = viewport.center(30.0, 10.0)
+    u, w = viewport.local_true_angle(c[None, :], c)
+    assert abs(float(u[0])) < 1e-9 and abs(float(w[0])) < 1e-9
+    # Directions 1° from c every 45° around it, about axes built another way than the frame's.
+    e1 = np.cross(c, [0.0, 0.0, 1.0])
+    e1 /= np.linalg.norm(e1)
+    e2 = np.cross(c, e1)
+    phi = np.radians(np.arange(0.0, 360.0, 45.0))
+    v = (math.cos(math.radians(1.0)) * c
+         + math.sin(math.radians(1.0)) * (np.cos(phi)[:, None] * e1 + np.sin(phi)[:, None] * e2))
+    u, w = viewport.local_true_angle(v, c)
+    assert np.hypot(u, w).tolist() == pytest.approx(np.degrees(np.arccos(v @ c)).tolist(), abs=1e-9)
+    u, w = viewport.local_true_angle(viewport.center(30.0, 11.0)[None, :], c)
+    assert float(w[0]) > 0  # up is up off axis too
 
 
 def test_the_local_frame_has_x_right_and_y_up():
