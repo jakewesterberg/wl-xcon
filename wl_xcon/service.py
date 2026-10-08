@@ -75,10 +75,17 @@ from wl_xcon import resume as _resume_mod
 from wl_xcon import stranded as _stranded
 from wl_xcon.actor import Actor
 from wl_xcon.bounds import Bounds, Exceeded
-from wl_xcon.cli import _load_allocation, _load_bounds, _load_rig, _load_subject_settings
+from wl_xcon.cli import (
+    _load_allocation,
+    _load_bounds,
+    _load_calibration,
+    _load_rig,
+    _load_subject_settings,
+)
 from wl_xcon.codes import Allocation
 from wl_xcon.dio import Simulated as SimulatedCard
 from wl_xcon.geometry import Rig
+from wl_xcon.photometry import Calibration
 from wl_xcon.record import XCON_DIRNAME
 from wl_xcon.taskd import RunSpec, Session, SessionSpec, bounds_record
 from wl_xcon.welfare import OUT_OF_CAGE, Deployment, SessionClock
@@ -318,6 +325,22 @@ class Service:
         self.rig, self.rig_path = rig, rig_path
         self.subjects, self.tasks, self.root = Path(subjects), Path(tasks), Path(root)
         self.allocation, self.allocation_path = allocation, allocation_path
+        #: The rig's color calibration (engine spec §7.1, §7.6), loaded once, here -- or
+        #: `None` when the record the rig names will not load, `calibration_refused` saying
+        #: why. **Which never stops `wlx taskd`** (the engine B plan, call 19): a stranded
+        #: session's return is taken only through a running service, and an open, an end and
+        #: a return never read this; every run's pre-flight fails on it instead (Task 12).
+        self.calibration: Calibration | None = None
+        self.calibration_refused = ""
+        try:
+            self.calibration = _load_calibration(rig, rig_path)
+        except (SystemExit, Exception) as refused:  # noqa: BLE001 -- see the comment above
+            self.calibration_refused = (
+                _sentence(refused)
+                if isinstance(refused, SystemExit)
+                else f"refused: the calibration {rig_path} names would not load: "
+                f"{type(refused).__name__}: {refused}"
+            )
         self.link = link
         self._card, self._pump, self._seed = card, pump, seed
         #: Injected by a test; otherwise the service's own anchored wall.
@@ -595,6 +618,7 @@ class Service:
                 deployment=Deployment(deployment),
                 geometry=geometry,
                 session_kind=session_kind,
+                calibration=self.calibration,
                 bounds_config=str(bounds_path),
                 rig_config=self.rig_path,
                 subject_settings="" if settings_path is None else str(settings_path),
@@ -1203,6 +1227,13 @@ def run(args) -> int:
                 f"  stranded: session {found.session_id} "
                 f"({found.subject or 'record unreadable'}); no session opens until its "
                 f"return is recorded"
+            )
+        if service.calibration is None:
+            # Said where the operator started it (the second review's Minor 12): every run
+            # this service takes will be refused until the record loads.
+            print(
+                f"  calibration: {service.calibration_refused}; every run's pre-flight fails "
+                f"on it until the record is repaired and wlx taskd started again"
             )
         try:
             service.serve(threading.Event())

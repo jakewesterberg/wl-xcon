@@ -11,6 +11,7 @@ from pathlib import Path
 from _rig import DIRECT
 from wl_xcon.bounds import Bounds, Ceiling, Floor
 from wl_xcon.dio import Simulated as Card
+from wl_xcon.photometry import SRGB
 from wl_xcon.taskd import Session, SessionSpec
 from wl_xcon.welfare import Deployment, Simulated as Pump
 
@@ -52,6 +53,7 @@ def session(
             deployment=deployment,
             geometry=DIRECT,
             session_kind="training",
+            calibration=SRGB,
         ),
         card=Card(),
         pump=Pump(),

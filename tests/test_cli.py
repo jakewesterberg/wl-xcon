@@ -29,7 +29,7 @@ import pytest
 # Autouse: every `ZmqLink`/`ZmqConsole` built here, `main()`'s own included, has its
 # context destroyed at teardown without `close()` (`tests/_zmq_release.py`).
 from _ports import endpoints as free_endpoints
-from _rig import PATH as RIG_FILE
+from _rig import PATH as RIG_FILE, naming
 from _zmq_release import _every_zmq_context_released  # noqa: F401
 from _frames import idle
 from wl_xcon import cli
@@ -2158,6 +2158,34 @@ def test_wlx_run_refuses_a_task_written_for_the_other_setup_before_anything_is_r
 
     assert "wrong-setup" in str(refused.value)
     assert "'direct'" in str(refused.value) and "'stereoscope'" in str(refused.value)
+    assert not (tmp_path / "2027-01-14_01").exists()
+
+
+def test_wlx_run_refuses_a_task_its_kind_does_not_accept_before_anything_is_recorded(tmp_path):
+    argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm())
+    argv[argv.index("tasks/fixation_detection.py")] = "tasks/visual_search_training.py"
+    argv[argv.index("--kind") + 1] = "recording"
+
+    with pytest.raises(SystemExit) as refused:
+        main(argv)
+
+    assert "task refused, session not started, nothing recorded" in str(refused.value)
+    assert "color-on-default" in str(refused.value)
+    assert not (tmp_path / "2027-01-14_01").exists()
+
+
+def test_wlx_run_refuses_a_calibration_record_that_will_not_load_before_anything_is_recorded(tmp_path):
+    """Review Focus 3, `wlx run`'s side (Call 20): no animal is waiting on it, so it refuses
+    outright, before the session opens and before the departure is asked about."""
+    (tmp_path / "cal.json").write_text("{")
+    argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm())
+    argv[argv.index(RIG_FILE)] = str(naming(tmp_path / "rig", str(tmp_path / "cal.json")))
+
+    with pytest.raises(SystemExit) as refused:
+        main(argv)
+
+    assert str(refused.value).startswith("refused: the calibration")
+    assert "not JSON" in str(refused.value)
     assert not (tmp_path / "2027-01-14_01").exists()
 
 

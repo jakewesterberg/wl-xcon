@@ -61,6 +61,7 @@ from wl_xcon.encode import (
 from wl_xcon.findings import kind_named
 from wl_xcon.geometry import Geometry
 from wl_xcon.levels import Levels
+from wl_xcon.photometry import Calibration
 from wl_xcon.record import XCON_DIRNAME, SessionRecord, _local, welfare_note
 from wl_xcon.scheduler import Block, Condition, Scheduler
 from wl_xcon.simulate import Census, Subject, Tally, prepare
@@ -204,6 +205,11 @@ class SessionSpec:
     #: with no default**, as `deployment` is: which warnings refuse it depends on it
     #: (`warnlist`), and a default would be a refusal lost by omission.
     session_kind: str
+    #: The display calibration colors are checked against (engine spec §7): the one the rig
+    #: names, or `photometry.SRGB`, the default, when it names none (spec §7.1). **Required,
+    #: with no default** (the engine B plan, call 14). `None` only in `wlx taskd` while the
+    #: rig's record will not load (call 19), and `run` then refuses every run.
+    calibration: Calibration | None
     #: The session's plan. `None` means one block of `trials` trials, which is the
     #: same code path with one block in it.
     blocks: list[Block] | None = None
@@ -696,6 +702,11 @@ class Session:
             "service": self.service,
             "deployment": self.spec.deployment.value,
             "session_kind": self.spec.session_kind,
+            "calibration": None if self.spec.calibration is None else {
+                "id": self.spec.calibration.id,
+                "standard": self.spec.calibration.standard,
+                "measured_on": self.spec.calibration.measured_on,
+            },
             "bounds": bounds_record(self.spec.bounds),
             "already_delivered_today": self.spec.already_delivered_today,
             "versions": {
@@ -1986,9 +1997,20 @@ class Session:
         implied = run is None
         if implied:
             run = RunSpec.of(self.spec)
+        if self.spec.calibration is None:
+            # The backstop for a caller that took no pre-flight (the engine B plan, call 19):
+            # `wlx taskd`'s pre-flight fails every run while the rig's record will not load.
+            raise SystemExit(
+                "task refused, session not started: no color calibration is loaded -- the "
+                "rig's calibration record would not load -- so no run draws on this display "
+                "(engine spec §7.1)"
+            )
         trial = _load_trial(Path(run.task))
-        findings = check(trial, self.allocation, geometry=self.spec.geometry)
-        blocking = [f for f in findings if f.blocking]
+        findings = check(trial, self.allocation, geometry=self.spec.geometry,
+                         calibration=self.spec.calibration)
+        # **By the session's kind** (engine spec §19.2): a warning outside its kinds refuses,
+        # here too, as the backstop for a caller that took no pre-flight.
+        blocking = [f for f in findings if f.refuses(self.spec.session_kind)]
         if blocking:
             raise SystemExit(
                 "task refused, session not started:\n"
@@ -2040,6 +2062,10 @@ class Session:
             self.run_index,
             self.wall_now(),
             task=run.task,
+            # The calibration it ran against (the engine B plan, call 26): `config.json`
+            # keeps the one the session opened with, and a resume after the rig's changed
+            # is not refused.
+            calibration=self.spec.calibration.id,
             allocation=self.spec.allocation,
             versions={"task": run.task, "allocation": self.spec.allocation},
             trials=run.trials,

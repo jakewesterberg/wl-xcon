@@ -125,7 +125,9 @@ def _load_calibration(rig: Rig, rig_path) -> Calibration:
     """The color calibration a rig names (engine spec §7.1, §7.6), or the default -- the sRGB
     standard -- when it names none. **A named record that will not load refuses**, with its
     sentence: it never falls back to the default, which would run a session on an unmeasured
-    panel its operator believes measured."""
+    panel its operator believes measured. `wlx check` and `wlx run` let this refusal stop
+    them, since no animal waits on either; `wlx taskd` keeps its sentence and fails every run
+    on it (the engine B plan, calls 19 and 20)."""
     named = rig.calibration
     if named is None:
         return SRGB
@@ -1569,15 +1571,18 @@ def main(argv: list[str] | None = None) -> int:
         # stops here -- before the session opens and before the departure is asked
         # about. `Session.run()` checks again, as the backstop for a caller that is
         # not this command.
-        refusals = [
-            finding
-            for finding in check(
-                _load_trial(args.task),
-                _load_allocation(args.allocation),
-                geometry=geometry,
-            )
-            if finding.blocking
-        ]
+        # The rig's color calibration (engine spec §7.1): a record that will not load refuses
+        # here, before anything is recorded (the engine B plan, call 20).
+        calibration = _load_calibration(_load_rig(args.rig), args.rig)
+        findings = check(
+            _load_trial(args.task),
+            _load_allocation(args.allocation),
+            geometry=geometry,
+            calibration=calibration,
+        )
+        # By the session's kind (engine spec §19.2): a warning its kind does not accept
+        # refuses here too.
+        refusals = [finding for finding in findings if finding.refuses(args.session_kind)]
         if refusals:
             raise SystemExit(
                 "task refused, session not started, nothing recorded:\n"
@@ -1702,6 +1707,7 @@ def main(argv: list[str] | None = None) -> int:
                         deployment=deployment,
                         geometry=geometry,
                         session_kind=args.session_kind,
+                        calibration=calibration,
                         rig_config=str(args.rig),
                         subject_settings=(
                             "" if args.subject_settings is None else str(args.subject_settings)

@@ -5,6 +5,7 @@ injected wall; the end-to-end tests at the bottom drive a real service over Zero
 
 from __future__ import annotations
 
+import dataclasses
 import gc
 import inspect
 import json
@@ -19,7 +20,7 @@ import pytest
 
 from _ports import endpoints as free_endpoints
 from _rig import PATH as RIG_FILE
-from _rig import RIG
+from _rig import RIG, naming
 from _sessions import WALL, malformed_task, typed, whole_point_task
 from _zmq_release import _every_zmq_context_released  # noqa: F401
 from wl_xcon import preflight, resume, stranded
@@ -113,10 +114,12 @@ def _folders(tmp_path, bounds: Path = EIGHT_HOURS, animals=("REFERENCE",)):
     return subjects, tasks, root
 
 
-def _made(folders, *, link=None, wall=None, seed=lambda: 7, card=None) -> Service:
+def _made(
+    folders, *, link=None, wall=None, seed=lambda: 7, card=None, rig=RIG, rig_path=RIG_FILE
+) -> Service:
     subjects, tasks, root = folders
     return Service(
-        rig=RIG, rig_path=RIG_FILE, subjects=subjects, tasks=tasks,
+        rig=rig, rig_path=rig_path, subjects=subjects, tasks=tasks,
         allocation=_load_allocation(Path(ALLOCATION)), allocation_path=ALLOCATION,
         root=root, link=link if link is not None else Simulated(), seed=seed,
         wall_clock=wall if wall is not None else _Wall(),
@@ -236,6 +239,29 @@ def test_an_opened_session_is_for_what_its_open_said(tmp_path):
     assert service.session.spec.session_kind == "piloting"
     config = json.loads((service.root / "2027-01-14_01" / "xcon" / "config.json").read_text())
     assert config["session_kind"] == "piloting"
+
+
+def test_a_calibration_record_that_will_not_load_never_stops_wlx_taskd_or_an_open(tmp_path):
+    """The review's C1 (Review Focus 3): `wlx taskd` starts, a session opens with no
+    calibration, its departure and its return are taken, and no run starts. Task 12's
+    pre-flight then fails the run first, naming the record
+    (`test_a_calibration_problem_fails_every_runs_preflight_naming_it`)."""
+    (tmp_path / "cal.json").write_text("{")
+    folders = _folders(tmp_path)
+    service = _made(folders, rig=dataclasses.replace(RIG, calibration=str(tmp_path / "cal.json")))
+
+    assert service.calibration is None
+    assert service.calibration_refused.startswith("refused: the calibration")
+    assert "not JSON" in service.calibration_refused
+    opened = _step(service, _open())
+    assert opened.phase == "between_runs" and service.session.spec.calibration is None
+    config = json.loads((service.root / "2027-01-14_01" / "xcon" / "config.json").read_text())
+    assert config["calibration"] is None
+    refused = _step(service, _start())
+    assert refused.run_index is None and _runs(service.root) == []
+    assert refused.refusals[-1].name == "start" and service.session.card.codes == [4128]
+    ended = _step(service, _end())
+    assert isinstance(ended, Idle) and _kinds(service.root)[-2:] == ["returned", "session ended"]
 
 
 def test_a_session_id_or_animal_that_is_not_one_folder_name_is_refused_and_nothing_is_written(tmp_path):
@@ -2620,6 +2646,27 @@ def test_wlx_taskd_stopped_by_a_fault_records_why_the_return_was_not_and_raises_
     assert [row["kind"] for row in rows][-2:] == ["return not recorded", "session ended"]
     assert "RuntimeError: the card stopped answering" in rows[-2]["reason"]
     assert "the return to the cage was not recorded" in capsys.readouterr().err
+
+
+def test_wlx_taskd_says_at_its_terminal_when_the_calibration_record_will_not_load(
+    tmp_path, monkeypatch, capsys
+):
+    """The second review's Minor 12: the operator who started it sees why every run will
+    be refused, before any page is opened."""
+    folders = _folders(tmp_path)
+    (tmp_path / "cal.json").write_text("{")
+    args = _taskd_args(folders, "--allocation", ALLOCATION)
+    args[args.index(RIG_FILE)] = str(naming(tmp_path / "rig", str(tmp_path / "cal.json")))
+
+    def serve(self, stop):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(Service, "serve", serve)
+
+    assert main(args) == 130
+    out = capsys.readouterr().out
+    assert "  calibration: refused: the calibration" in out
+    assert "every run's pre-flight fails on it" in out
 
 
 # --- end to end: a real `wlx taskd` service over ZeroMQ (spec §6.5) ---------------------

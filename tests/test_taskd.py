@@ -51,6 +51,7 @@ from wl_xcon.link import (
     Stop,
     Telemetry,
 )
+from wl_xcon.photometry import SRGB
 from wl_xcon.record import REFUSAL_LOG_LIMIT
 from wl_xcon.scheduler import Block, Condition, Counting, Scheduler
 from wl_xcon.simulate import Tally
@@ -150,6 +151,7 @@ def _spec(tmp_path, seed: int = 1, trials: int = 50, **kwargs) -> SessionSpec:
         deployment=Deployment.RIG_FIXED,
         geometry=DIRECT,
         session_kind="training",
+        calibration=SRGB,
     )
     for name, value in kwargs.items():
         setattr(spec, name, value)
@@ -2684,6 +2686,41 @@ def test_a_session_for_something_else_is_refused_when_it_is_built(tmp_path):
     spec = _sessions.session(tmp_path).spec
     with pytest.raises(ValueError, match="training, piloting or recording"):
         Session(dataclasses.replace(spec, session_kind="demo"))
+
+
+def test_a_recording_session_refuses_a_task_its_kind_does_not_accept(tmp_path):
+    """Review Focus 4, `Session.run`'s own backstop: the training variant names colors."""
+    made = _sessions.session(tmp_path)
+    made.spec.session_kind = "recording"
+    made.spec.task = "tasks/visual_search_training.py"
+    made.open()
+
+    with pytest.raises(SystemExit, match="color-on-default"):
+        made.run()
+
+
+def test_a_session_with_no_calibration_runs_nothing(tmp_path):
+    """Call 19's backstop: `wlx taskd` gives a session no calibration while the rig's record
+    will not load, and its pre-flight refuses every run (Task 12); `run` refuses one too."""
+    made = _sessions.session(tmp_path)
+    made.spec.calibration = None
+    made.open()
+
+    with pytest.raises(SystemExit, match="no color calibration is loaded"):
+        made.run()
+    assert json.loads((made.directory / "config.json").read_text())["calibration"] is None
+    assert not (made.directory / "runs.jsonl").exists()
+
+
+def test_a_sessions_config_and_each_start_row_name_its_calibration(tmp_path):
+    session = _session(_spec(tmp_path, trials=1))
+
+    session.run()
+
+    config = json.loads((session.directory / "config.json").read_text())
+    rows = [json.loads(line) for line in (session.directory / "runs.jsonl").read_text().splitlines()]
+    assert config["calibration"] == {"id": "srgb-standard", "standard": True, "measured_on": ""}
+    assert [r["calibration"] for r in rows if r["event"] == "start"] == ["srgb-standard"]
 
 
 # ---------------------------------------------------------------------------

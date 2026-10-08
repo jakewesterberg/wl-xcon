@@ -32,6 +32,7 @@ from wl_xcon.dio import Simulated as Card
 from wl_xcon.eye import Replay, Tracker, parse
 from wl_xcon.gaze import Calibrating, Tracked
 from wl_xcon.geometry import Geometry
+from wl_xcon.photometry import SRGB
 from wl_xcon.run import Recorded, run_trial
 from wl_xcon.scheduler import Block, Scheduler
 from wl_xcon.taskd import Session, SessionSpec
@@ -657,6 +658,7 @@ def _calibration_session(tmp_path, repeats: int = 2):
         deployment=Deployment.RIG_FIXED,
         geometry=DIRECT,
         session_kind="training",
+        calibration=SRGB,
         blocks=[block],
     )
     session = Session(
@@ -764,6 +766,7 @@ def test_the_fit_uses_the_hold_and_not_the_whole_trial(tmp_path):
         deployment=Deployment.RIG_FIXED,
         geometry=DIRECT,
         session_kind="training",
+        calibration=SRGB,
         blocks=[
             Block(
                 name="calibration",

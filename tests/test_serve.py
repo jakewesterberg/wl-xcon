@@ -61,6 +61,7 @@ from wl_xcon.link import (
     ZmqConsole,
     ZmqLink,
 )
+from wl_xcon.photometry import SRGB
 from wl_xcon.serve import (
     BUSY,
     CLOSED,
@@ -444,6 +445,7 @@ def test_a_host_clock_stepped_back_between_two_frames_leaves_the_reward_age_righ
             deployment=Deployment.RIG_CHAIRED,
             geometry=DIRECT,
             session_kind="training",
+            calibration=SRGB,
         ),
         card=Card(),
         pump=Pump(),
