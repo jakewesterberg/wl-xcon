@@ -1929,6 +1929,69 @@ def test_a_resume_names_who_resumed_it_not_who_accepted_a_warning(tmp_path):
     assert resumed["by"] == BY_MAP
 
 
+def _accepted_then_stopped(folders, wall, accepted_in=SESSION_KINDS) -> tuple:
+    """A session opened at `WALL`, a warning accepted by ann 5 s later, and its process
+    stopped: the warnings it gave while it ran."""
+    first = _made(folders, wall=wall)
+    _step(first, _open())
+    wall.at = WALL + 5.0
+    first.session.accept([Entry("head free", "the head is free", accepted_in)],
+                         by=Box("ann"), how="open", run=None)
+    return first.session.warnings
+
+
+def test_a_restored_warning_keeps_when_it_was_accepted(tmp_path):
+    folders, wall = _folders(tmp_path), _Wall()
+    _accepted_then_stopped(folders, wall)
+    wall.at = WALL + 100.0
+    second = _made(folders, wall=wall)
+
+    _step(second, ResumeSession(by=BY, session_id="2027-01-14_01"))
+
+    assert second.session.resumed_at == WALL + 100.0
+    assert [w[4] for w in second.session.warnings] == [WALL + 5.0]
+
+
+def test_a_resumed_session_gives_the_warnings_the_live_one_gave(tmp_path):
+    """One type for `accepted_in`: an entry built with its kinds as a list is kept with them as
+    a tuple, as a resume reads them back, so the two sessions' `warnings` are equal."""
+    folders, wall = _folders(tmp_path), _Wall()
+    live = _accepted_then_stopped(folders, wall, accepted_in=list(SESSION_KINDS))
+    wall.at = WALL + 100.0
+    second = _made(folders, wall=wall)
+
+    _step(second, ResumeSession(by=BY, session_id="2027-01-14_01"))
+
+    assert second.session.warnings == live
+    assert live == (("head free", "the head is free", SESSION_KINDS, Box("ann"), WALL + 5.0),)
+
+
+def test_a_torn_warnings_file_is_not_resumable_and_its_return_is_still_taken(tmp_path):
+    """The whole path, not the piece: a process that died writing an accepted warning leaves
+    half a line; `wlx taskd` starts again, `stranded.find` marks the session not resumable
+    with `resume.read`'s sentence, a resume is refused with it, and End session takes the
+    animal's return."""
+    folders = _folders(tmp_path)
+    first = _made(folders)
+    _step(first, _open())
+    first.session.accept([Entry("head free", "the head is free", SESSION_KINDS)],
+                         by=BY, how="open", run=None)
+    path = folders[2] / "2027-01-14_01" / "xcon" / "warnings.jsonl"
+    whole = path.read_text()
+    path.write_text(whole[: len(whole) // 2])
+    second = _made(folders)
+
+    (found,) = _step(second).stranded
+    assert (found.session_id, found.resumable) == ("2027-01-14_01", False)
+    assert found.left_at is not None, "its departure is read, so its return can be taken"
+    assert found.why.startswith("its warnings.jsonl cannot be read (")
+    assert _resume_refused(second, "2027-01-14_01") == found.why
+    frame = _step(second, _end(session_id="2027-01-14_01"))
+
+    assert isinstance(frame, Idle) and second.stranded == []
+    assert _kinds(folders[2])[-1] == "returned"
+
+
 def test_a_resume_after_the_rigs_calibration_changed_names_the_new_one_on_each_later_run(tmp_path):
     """Call 26 (Task 8's review): a session opened and run under the default calibration, and
     `wlx taskd` started again under a rig naming a measured record. The resume is not refused,

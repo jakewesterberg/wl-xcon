@@ -55,7 +55,7 @@ from wl_xcon.link import (
     Telemetry,
 )
 from wl_xcon.photometry import SRGB
-from wl_xcon.record import REFUSAL_LOG_LIMIT
+from wl_xcon.record import REFUSAL_LOG_LIMIT, SessionRecord
 from wl_xcon.scheduler import Block, Condition, Counting, Scheduler
 from wl_xcon.simulate import Tally
 from wl_xcon.task import Outcome
@@ -2769,6 +2769,57 @@ def test_an_unknown_accepted_earlier_is_carried_only_while_its_sentence_is_the_s
     changed = Preflight("t.py", (PreflightItem("pump calibration", "unknown", "a new sentence"),))
     assert made.carried(same) == {"pump calibration": Box("jake")}
     assert made.carried(changed) == {}
+
+
+def _accepted_rows(made) -> list[dict]:
+    path = made.directory / "warnings.jsonl"
+    return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+
+def test_a_warning_whose_row_was_not_written_is_not_accepted(tmp_path, monkeypatch):
+    """Nothing counts as accepted unless its row was written: the disk refuses the second
+    row, the error surfaces (`test_a_failed_row_write_is_never_swallowed`'s rule), and that
+    warning is still owed, so the next run's pre-flight asks for it again (Task 12)."""
+    made = _sessions.session(tmp_path)
+    made.open()
+    write, written = SessionRecord.warning, []
+
+    def second_refused(record, **row):
+        if written:
+            raise OSError("disk full")
+        written.append(row["code"])
+        write(record, **row)
+
+    monkeypatch.setattr(SessionRecord, "warning", second_refused)
+
+    with pytest.raises(OSError, match="disk full"):
+        made.accept([HEAD, COLOR], by=Box("jake"), how="open", run=None)
+
+    assert made.accepted_keys() == {HEAD.key}
+    assert [row["code"] for row in _accepted_rows(made)] == ["head free"]
+    assert [w[0] for w in made.warnings] == ["head free"]
+
+
+def test_a_list_with_one_warning_the_kind_does_not_accept_writes_none_of_it(tmp_path):
+    made = _sessions.session(tmp_path)
+    made.spec.session_kind = "recording"
+    made.open()
+
+    refused = "a recording session does not accept color-on-default: names colors$"
+    with pytest.raises(ValueError, match=refused):
+        made.accept([HEAD, COLOR], by=Box("jake"), how="open", run=None)
+
+    assert _accepted_rows(made) == [] and made.accepted_keys() == frozenset()
+
+
+def test_warnings_given_as_a_generator_are_each_accepted(tmp_path):
+    made = _sessions.session(tmp_path)
+    made.open()
+
+    made.accept((entry for entry in (HEAD, COLOR)), by=Box("jake"), how="open", run=None)
+
+    assert [row["code"] for row in _accepted_rows(made)] == ["head free", "color-on-default"]
+    assert made.accepted_keys() == {HEAD.key, COLOR.key}
 
 
 # ---------------------------------------------------------------------------

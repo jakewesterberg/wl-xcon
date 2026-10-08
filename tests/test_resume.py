@@ -429,15 +429,59 @@ def test_a_damaged_accepted_warning_row_makes_a_record_unresumable(tmp_path):
         read(directory, DEPARTURE)
 
 
-def test_an_accepted_warning_row_naming_no_session_kind_makes_a_record_unresumable(tmp_path):
-    """The engine B plan, call 12: a damaged `warnings.jsonl` is refused by `read`, so
-    `stranded.find` marks it not resumable, not by `Session.resume` once a resume is sent."""
-    directory = _folder(tmp_path)
-    _jsonl(directory / "warnings.jsonl", [{
-        "code": "head free", "detail": "the head is free", "accepted_in": ["training", "demo"],
-        "session_kind": "training", "by": None, "at": DEPARTURE + 5.0, "at_local": "",
+def _accepted_row(**over) -> dict:
+    """One `warnings.jsonl` row as `SessionRecord.warning` writes it; each field given
+    replaces its own."""
+    row = {
+        "code": "head free", "detail": "the head is free",
+        "accepted_in": ["training", "piloting", "recording"], "session_kind": "training",
+        "by": {"kind": "box", "name": "jake"}, "at": DEPARTURE + 5.0, "at_local": "",
         "how": "open", "run": None,
-    }])
+    }
+    row.update(over)
+    return row
 
-    with pytest.raises(Unresumable, match="'demo' is none of them"):
+
+@pytest.mark.parametrize("damage, named", [
+    ({"code": 5}, "has a code that is not text"),
+    ({"detail": None}, "has a detail that is not text"),
+    ({"accepted_in": ["training", "demo"]}, "has an accepted_in that is not a list"),
+    ({"accepted_in": "training"}, "has an accepted_in that is not a list"),
+    ({"accepted_in": [1]}, "has an accepted_in that is not a list"),
+    ({"accepted_in": {"training": 1}}, "has an accepted_in that is not a list"),
+    ({"session_kind": "recording"},
+     "has a session_kind of 'recording', and its config.json says the session is for 'training'"),
+    ({"at": True}, "has an at that is not a finite number"),
+    ({"at": "1700000005.0"}, "has an at that is not a finite number"),
+    ({"at": float("inf")}, "has an at that is not a finite number"),
+    ({"at": float("nan")}, "has an at that is not a finite number"),
+    ({"by": "jake"}, "has a by that is not an actor's map or null"),
+    ({"by": {"kind": "box", "name": "jake", "extra": 1}},
+     "has a by that is not an actor's map or null"),
+], ids=["code", "detail", "unknown-kind", "kinds-as-text", "kind-not-text", "kinds-as-object",
+         "session-kind", "at-bool", "at-text", "at-infinite", "at-nan", "by-text",
+         "by-extra-field"])
+def test_a_damaged_accepted_warning_row_is_refused_naming_its_field_never_coerced(
+    tmp_path, damage, named
+):
+    """The engine B plan, call 12: a `warnings.jsonl` row that is not what
+    `SessionRecord.warning` writes makes the record unresumable through `read`, so
+    `stranded.find` marks it so, rather than a resume `Session.resume` would then refuse or a
+    value coerced into something nobody accepted. The second row, after one that is whole."""
+    directory = _folder(tmp_path)
+    _jsonl(directory / "warnings.jsonl",
+           [_accepted_row(), _accepted_row(**{"code": "other", **damage})])
+
+    with pytest.raises(Unresumable) as refused:
         read(directory, DEPARTURE)
+
+    assert str(refused.value).startswith(f"its warnings.jsonl row 2 {named}")
+    assert str(refused.value).endswith("; end it instead")
+
+
+def test_a_warning_accepted_by_nobody_at_a_whole_second_reads_back_as_written(tmp_path):
+    directory = _folder(tmp_path)
+    _jsonl(directory / "warnings.jsonl", [_accepted_row(by=None, at=1_700_000_005)])
+
+    ((*_, by, at),) = read(directory, DEPARTURE).accepted
+    assert by is None and at == 1_700_000_005.0 and isinstance(at, float)

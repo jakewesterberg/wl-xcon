@@ -15,11 +15,12 @@ A record that cannot give the fluid so far cannot be resumed: it is never taken 
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
 from wl_xcon import actor as actors
-from wl_xcon.findings import SESSION_KINDS, kind_named
+from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.levels import Levels, task_name
 from wl_xcon.record import ACCEPTED_WARNINGS, CONTROLS, RUNS, TRIAL_STARTS
 from wl_xcon.simulate import Tally
@@ -82,6 +83,43 @@ def _rows(directory: Path, name: str) -> list[dict]:
                 if line.strip()]
     except (OSError, ValueError) as error:
         raise Unresumable(f"its {name} cannot be read ({error}); end it instead") from error
+
+
+def _accepted(row: dict, number: int, session_kind: str) -> tuple:
+    """Row `number` of `ACCEPTED_WARNINGS`, as `SessionRecord.warning` writes it, read back as
+    `Session.warnings` gives it -- or `Unresumable`, naming the field that is not what that
+    method writes (the engine B plan, call 12). **Nothing is coerced**, as `Service._resume`
+    says of the rest of the record: a damaged row is not what anyone accepted, so
+    `stranded.find` marks the session not resumable rather than restoring a guess. A field
+    the row lacks is a `KeyError`, which `read` names."""
+
+    def damaged(what: str) -> Unresumable:
+        return Unresumable(
+            f"its {ACCEPTED_WARNINGS} row {number} {what}, so what the session accepted "
+            f"cannot be known; end it instead"
+        )
+
+    code, detail, kinds, by, at = (
+        row[name] for name in ("code", "detail", "accepted_in", "by", "at")
+    )
+    if not isinstance(code, str):
+        raise damaged("has a code that is not text")
+    if not isinstance(detail, str):
+        raise damaged("has a detail that is not text")
+    if not isinstance(kinds, list) or not all(kind in SESSION_KINDS for kind in kinds):
+        raise damaged("has an accepted_in that is not a list of training, piloting or recording")
+    if row["session_kind"] != session_kind:
+        raise damaged(
+            f"has a session_kind of {row['session_kind']!r}, and its config.json says the "
+            f"session is for {session_kind!r}"
+        )
+    if isinstance(at, bool) or not isinstance(at, (int, float)) or not math.isfinite(at):
+        raise damaged("has an at that is not a finite number")
+    try:
+        accepted_by = None if by is None else actors.from_map(by)
+    except actors.NotAnActor as error:
+        raise damaged(f"has a by that is not an actor's map or null ({error})") from error
+    return (code, detail, tuple(kinds), accepted_by, float(at))
 
 
 def read(directory: Path, departure: float) -> Restoration:
@@ -221,12 +259,9 @@ def _read(directory: Path, departure: float) -> Restoration:
             f"session ended by {actors.shown(actors.read(ends[0]['by']))}, before any run"
         )
         stop_kind = "operator"
-    # Each kind checked here, as `warnlist.Entry` checks it, so a row naming none is damage
-    # `stranded.find` marks not resumable rather than a resume `Session.resume` then refuses.
     accepted = tuple(
-        (str(row["code"]), str(row["detail"]), tuple(kind_named(k) for k in row["accepted_in"]),
-         None if row["by"] is None else actors.from_map(row["by"]), float(row["at"]))
-        for row in _rows(directory, ACCEPTED_WARNINGS)
+        _accepted(row, number, session_kind)
+        for number, row in enumerate(_rows(directory, ACCEPTED_WARNINGS), start=1)
     )
     return Restoration(
         session_id=str(config["session_id"]),

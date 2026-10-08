@@ -1895,11 +1895,16 @@ class Session:
         """Accept warnings for this session (engine spec §19.3): one row in `warnings.jsonl`
         for each not accepted before, with who, when, how, the run and the session's kind.
         **A warning this session's kind does not accept is refused, never accepted** -- the
-        callers leave it out first; this is the last place it could slip through."""
+        callers leave it out first; this is the last place it could slip through. **The whole
+        list or none of it**: one entry refused writes nothing. **Accepted only once its row is
+        written**: a write that raises leaves that warning, and every one after it, unaccepted,
+        so it is asked again."""
         if self._record is None:
             raise RuntimeError(
                 "warnings are accepted into an open session's record, and this session's is not open"
             )
+        # Read twice below: a generator would be spent by the first pass, and nothing recorded.
+        entries = list(entries)
         kind = self.spec.session_kind
         outside = [entry for entry in entries if kind not in entry.accepted_in]
         if outside:
@@ -1910,7 +1915,10 @@ class Session:
             at = self.wall_now()
             self._record.warning(code=entry.code, detail=entry.detail, accepted_in=entry.accepted_in,
                                  session_kind=kind, by=by, at=at, how=how, run=run)
-            self._warnings[entry.key] = (entry, by, at)
+            # Its kinds as a tuple, as a resume restores them, so a live session's `warnings`
+            # and a resumed one's are equal.
+            kept = dataclasses.replace(entry, accepted_in=tuple(entry.accepted_in))
+            self._warnings[entry.key] = (kept, by, at)
 
     def accepted_keys(self) -> frozenset:
         """What this session has accepted, by `Entry.key`."""
