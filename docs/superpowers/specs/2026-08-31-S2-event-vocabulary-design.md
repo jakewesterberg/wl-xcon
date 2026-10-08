@@ -106,7 +106,7 @@ Generalized, that is the allocation rule:
 
 > **Event codes carry identity and timing. The session record carries content.** Encode
 > content into the stream only where the recording must remain interpretable without our
-> files.
+> files [@asaad2008flexible; @rubel2022neurodata].
 
 What must survive without our files is small, and `wl-preproc` has already allocated most of
 it: trial structure, trial number, condition, task type, target position, outcome. Parameter

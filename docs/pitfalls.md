@@ -77,8 +77,9 @@ during recording, and the flip patch will show it if someone forgets.
 
 **P5 — SpikeGLX gap.** The unmeasured regime (cross-machine, Python) is exactly where naive
 designs land. Design pins the fetch client to the acquisition PC (C++, loopback), ships
-features not raw data, and keeps the Open Ephys + Falcon path (published 9.241 ms median,
-384 ch) as the fallback and cross-check.
+features not raw data, and keeps the Open Ephys + Falcon path (published median 9.2 ms,
+maximum 13 ms, one probe, as read 2026-10-08 [@openephys2026falcon]) as the fallback and
+cross-check. *(Corrected 2026-10-08: this said "published 9.241 ms median, 384 ch".)*
 
 **P6 — Tracker stalls.** ~2% of OpenIrisDPI frames >= 10 ms (max ~50 ms) on the authors'
 hardware [@ressmeyer2026openirisdpi]. **Raised to High** because the experimental program
@@ -156,7 +157,8 @@ design, not the reviewer.**
 must-have and is also the most likely way this system quietly damages a dataset: a change
 made at trial 300 is invisible at analysis time unless it was recorded. Mitigation: every
 trial carries a **complete** resolved parameter snapshot rather than a pointer to "the
-config"; every change emits an event code so the discontinuity is on the recording clock;
+config" [@asaad2008flexible]; every change emits an event code so the discontinuity is on
+the recording clock;
 changes are staged and applied atomically in the ITI so no trial runs on a half-applied
 set; and every write records its origin and actor through one validated path.
 

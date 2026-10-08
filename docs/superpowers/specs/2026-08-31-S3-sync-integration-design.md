@@ -25,7 +25,8 @@ PIO). So each code we emit exists in at least three places: the sync box log, th
 lines into SpikeGLX, and our own log.
 
 **Consequence, and it simplifies us:** our log is not the timing record and does not need to
-be. It carries *meaning* — parameters, decisions, task state — keyed to codes whose timing two
+be [@siegle2021survey; @karsh2026sync]. It carries *meaning* — parameters, decisions, task
+state — keyed to codes whose timing two
 other systems already hold. This is S2's identity-versus-content rule applied one level up.
 
 ---
@@ -88,7 +89,7 @@ Raised with `wl-sync` and `wl-preproc` as an amendment (§9).
 2. **Never emit a barcode**, and never derive time from one. We read event codes back only
    through analysis, never in the loop.
 3. **Mirror every scientifically meaningful decision as a code**, so the sync box's `W` record
-   and the NI record are both complete without our files.
+   and the NI record are both complete without our files [@hwang2019nimh].
 4. **Photodiode patches drawn correctly and continuously** — the flip patch must alternate on
    *every* refresh, because the sync box and our own dropped-frame detection both read it as a
    frame clock (S0 §5.4, parent §11.5).
@@ -213,7 +214,8 @@ direct view refuses to exist. The flicker is checked invisible from the animal's
 setups at bring-up (V9).
 
 **Cameras** take the barcode as a timebase to record, not a trigger — they free-run, and the
-sync box captures their `ExposureActive` strobes on GPIO 26/27. **We do not trigger cameras and
+sync box captures their `ExposureActive` strobes on GPIO 26/27 [@siegle2021survey].
+**We do not trigger cameras and
 do not set their rate.**
 
 **Reconstruction (V6)** round-trips a synthetic multi-stream day: sync box `E`/`W`/`B` records,

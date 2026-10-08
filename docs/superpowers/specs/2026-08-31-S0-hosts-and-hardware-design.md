@@ -674,7 +674,7 @@ enforces a cap, are compared in §7.10.
 - **Rotation stability matters.**
   - DPI cancels head translation, but not camera rotation (PI).
   - A camera roll rotates the P1 − P4 vector. A turned collimated light moves the reflections
-    as an eye rotation would (INFERENCE).
+    as an eye rotation would (INFERENCE) [@wu2023highresolution].
   - So the brackets hold angle: stiff sections, short lever arms, and two fasteners or a keyed
     face at each joint, with no single-screw pivots.
   - Edmund publishes no angular deviation for the #16-716 (**UNVERIFIED**). The DTS25/M's is
@@ -685,7 +685,7 @@ enforces a cap, are compared in §7.10.
     steady-state (stage II) creep resistance, then PC, then PLA. PAHT-CF also had the highest
     flexural modulus (*J. Mater. Eng. Perform.*,
     [doi:10.1007/s11665-024-09144-9](https://link.springer.com/article/10.1007/s11665-024-09144-9),
-    abstract read 2026-09-27).
+    abstract read 2026-09-27) [@dimitrellou2024mechanical].
   - Whether the lab's printer can print either is the lab's check.
 - **Metal threaded inserts.** Every screwed joint that is adjusted, or that carries a camera
   or a light, goes into a heat-set or press-fit brass insert, never into printed thread.

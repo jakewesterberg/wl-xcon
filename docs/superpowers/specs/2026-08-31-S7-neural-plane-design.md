@@ -103,8 +103,9 @@ Every bound in S8 §4 applies. Two are specific here:
 ### 4.4 Blanking
 
 The RHS blinds its own amplifier around a pulse (amp-settle, ~1 ms post as the guide's starting
-point). Our feature extractor needs its own window on top, because a threshold detector sees the
-artifact before the amplifier has settled.
+point) [@intan2026intan, p. 24; @intan2021rhs]. Our feature extractor needs its own window on
+top, because a threshold detector sees the artifact before the amplifier has settled
+[@wagenaar2002realtime; @oshea2018eraasr].
 
 **Blank on the observed stim-output line, not on our command.** We know when we asked; the line
 knows when it fired. On the local path those differ by the whole trigger latency, and blanking
@@ -122,8 +123,8 @@ interface:
 
 | Type | Computed as | Natural home |
 |---|---|---|
-| **Envelope** | band-pass, full-wave rectify, boxcar integrate over a sliding window | SpikeGLX path — the filtered AP stream is already there |
-| **Threshold-crossing rate** | events past a per-channel threshold, counted in a window | Intan path — **RHX's Spike Output socket already produces these on GPU**, so the local loop is nearly free |
+| **Envelope** | band-pass, full-wave rectify, boxcar integrate over a sliding window [@legatt1980averaged; @super2005chronic; @stark2007predicting] | SpikeGLX path — the filtered AP stream is already there |
+| **Threshold-crossing rate** | events past a per-channel threshold, counted in a window [@fraser2009control; @chestek2011longterm; @christie2015comparison] | Intan path — **RHX's Spike Output socket already produces these on GPU**, so the local loop is nearly free |
 
 This plays each system's strength rather than forcing a common denominator, and it is why the
 local path costs so much less to build than the distant one (§1).
@@ -140,7 +141,8 @@ engineering constraints on whatever is chosen:
 - **CAR is server-side on the SpikeGLX path** — SpikeGLX maintains a bandpassed, globally
   demuxed-CAR stream (`js = -2`) and the cost is paid inside its C++, not our client. RHX does its
   own filtering and threshold detection on GPU. **So the two paths compute different things
-  unless deliberately matched**, and any experiment that switches sources mid-study must account
+  unless deliberately matched** [@christie2015comparison], and any experiment that switches
+  sources mid-study must account
   for it.
 - **The channel map hash travels with every message.** A feature vector whose channel map has
   changed is a different quantity with the same shape, and that is exactly the kind of silent
@@ -156,7 +158,8 @@ engineering constraints on whatever is chosen:
 | **V8** | RHX backpressure headroom — the margin between the operating point and the failure point, and confirmation that falling behind alarms rather than degrades |
 
 The RHX path has **no published latency figure anywhere**; V4 will be the first number for it.
-The SpikeGLX path has vendor loopback numbers that describe a configuration that is not ours.
+The SpikeGLX path has vendor loopback numbers that describe a configuration that is not ours
+[@karsh2026spikeglx; @karsh2026spikeglxcppsdk].
 
 Gates (proposed): median ≤ 6 ms on the SpikeGLX path; the RHX path measured and reported without
 a target, because inventing a threshold for an unmeasured path would be P1.

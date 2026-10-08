@@ -44,7 +44,7 @@ separately.
 | Symbol | Value | Source | Confidence |
 |---|---|---|---|
 | Panel | ASUS ROG Swift OLED **PG27UCDM**: "26.5-inch viewable", 3840 × 2160, active area **58.997 × 33.293 cm** | ASUS [spec page](https://rog.asus.com/us/monitors/27-to-31-5-inches/rog-swift-oled-pg27ucdm/spec/) ("Display Viewing Area (HxV) : 589.97 x 332.93 mm") and [product page](https://rog.asus.com/us/monitors/27-to-31-5-inches/rog-swift-oled-pg27ucdm/) ("27-inch (26.5-inch viewable)"), both read 2026-09-28; S0 §5.1 | Published by the maker. Chosen by the PI 2026-09-27 |
-| Pitch | **0.15364 mm** horizontal | derived: 589.97 mm / 3840 | ASUS lists "0.153mm". The area gives 0.15413 mm vertically (332.93 / 2160); whether the pixels are square is not published: **UNVERIFIED** |
+| Pitch | **0.15364 mm** horizontal | derived: 589.97 mm / 3840 | ASUS lists "0.153mm" [@asus2026rog]. The area gives 0.15413 mm vertically (332.93 / 2160); whether the pixels are square is not published: **UNVERIFIED** |
 | `Z` | **50.0 cm**, eye to screen, **physical**, the same in both setups | PI, 2026-09-28: "I want the screen to be the same physical distance from the animal in stereoscope and the direct viewing. The stereoscope is a device that is removable and everything else is fixed." | **Ruled.** The screen is fixed in place (a locked arm or stand with a stop), measured once at setup and re-checked in the regular rig checks |
 | `D` | **63.15 cm** optical path at `E` = 1.6 cm; **62.85–63.25 cm** over IPD 30–38 mm | derived: `D = Z + HW − E` (§3, §4.4) | **Per animal**, and measured per eye (V9) |
 | `HW`, `HH` | 14.749 cm, 16.647 cm — half-viewport on screen | active width / 4, active height / 2 | Derived |

@@ -33,10 +33,10 @@
     for a standard body across the rig.
 - **Analysis:**
   - uses: face (eyes, mouth, licking), hands and arms, body and posture, and **3D pose
-    from several views**;
+    from several views** [@mathis2018deeplabcut; @karashchuk2021anipose];
   - **200 fps**;
   - **the whole session, start to end**;
-  - **compressed, visually lossless, on the box's GPU**;
+  - **compressed, visually lossless, on the box's GPU** [@mathis2018inference];
   - **keep everything, and buy storage to fit.**
 - **Timing: the primary camera triggers the rest** (§2); the sync box is not changed.
 - **Viewing:** only people who can control see the cameras (the box in b2a, people signed
@@ -76,12 +76,13 @@
   line drives every other camera's trigger input through a custom **fan-out board** (PI,
   2026-09-27, reversing the off-the-shelf call; S0 §7.4), since one output line does not
   drive seven inputs. It needs a design check. The same board strobes the behavior lamps.
-  All cameras expose at the same instant, so frame *N* of every camera is one moment.
+  All cameras expose at the same instant, so frame *N* of every camera is one moment
+  [@bala2020automated].
 - **Alignment with the neural data, by the lab's existing design, unchanged** (S3 §8,
   wl-sync since 2026-08-16):
   - the sync box does not trigger cameras;
   - the primary samples the sync box's barcode (`BARCODE_RAW`, on a camera-facing BNC) on an
-    input line **every frame**;
+    input line **every frame** [@siegle2021survey];
   - the camera group's `ExposureActive` goes to the sync box's behavior frame-time input
     (GPIO27);
   - every camera stamps each frame's number and exposure time into the frame (chunk data),

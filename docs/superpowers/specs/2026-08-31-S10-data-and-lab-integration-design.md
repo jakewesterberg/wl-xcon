@@ -33,7 +33,7 @@ mirror every meaningful decision as a code is not optional.
 | Artifact | Contents |
 |---|---|
 | Event log (JSONL) | Every event: the code word, frame index, monotonic time, and the *meaning* the recorded streams cannot carry |
-| Behavioural tables (parquet) | One row per trial: outcome, RT, condition, target positions, **the full resolved parameter snapshot**, gaze-mapping version, per-trial gaze staleness (S5), token state, stim deliveries observed |
+| Behavioural tables (parquet) | One row per trial [@nwb2026nwb]: outcome, RT, condition, target positions, **the full resolved parameter snapshot**, gaze-mapping version, per-trial gaze staleness (S5), token state, stim deliveries observed |
 | Config snapshot | Rig, subject, task and code versions; bounded config in force; optics geometry and both measured optical paths; display mode; `stimulus_calibration_id`; the whole precedence chain, not just the resolved values |
 | Parameter-change log | Keyed by the sequence number `PARAM_CHANGE` carries |
 | Plot declaration | So the live view reproduces exactly offline (S9 §4) |

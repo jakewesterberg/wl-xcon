@@ -14,8 +14,9 @@ Contracts here are proposals until frozen at milestone M0.
    shared clocks.
 2. **The sync box defines session time.** `wl-sync` owns session identity, the barcode
    codec, the log format and event-code routing. We consume them; we do not mint them.
-3. Anything scientifically meaningful becomes an edge or word in a recorded stream.
-   Software timestamps are for control flow; hardware timestamps are for analysis.
+3. Anything scientifically meaningful becomes an edge or word in a recorded stream
+   [@hwang2019nimh; @rubel2022neurodata]. Software timestamps are for control flow; hardware
+   timestamps are for analysis [@plant2004selfvalidating; @siegle2021survey; @karsh2026sync].
 4. Hardware sits behind small interfaces; every interface has a simulator.
 5. The hot loop does bounded work: no allocation, no disk I/O, no unbounded queues, and
    it never renders a plot, serves a request, or holds a UI.
@@ -501,7 +502,8 @@ what changed: a system time daemon is a different layer from the AST-guarded
 application source, so the guardrail above is untouched; what is no longer unqualified
 is the routing claim itself, narrowed rather than reversed. NTP serves bookkeeping time
 only — which day it is, when a mark was made — never the timing record, which remains
-the sync box's hardware ticks and the strobed event words (S3). Application integration
+the sync box's hardware ticks and the strobed event words (S3) [@mills2010network;
+@karsh2026sync]. Application integration
 is otherwise still pull-based and reuses `wl-preproc`'s existing lab-host protocol, in three
 directions: wl-works pushes a `prepare-session` action carrying the ELN metadata bundle;
 live session state is exposed as **readings on `GET /health`**; and the finished session

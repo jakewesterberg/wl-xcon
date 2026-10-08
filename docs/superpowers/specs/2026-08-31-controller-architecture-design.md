@@ -91,7 +91,7 @@ the rest of this document works out their consequences.
 
 The sync box defines session time. Every scientifically meaningful event becomes an
 edge or word recorded in at least one acquisition stream; network messages are never
-the timing record.
+the timing record [@hwang2019nimh; @siegle2021survey; @karsh2026sync].
 
 ### 3.2 The task PC's interface (from the breakout spec §3, §9.2)
 
@@ -482,7 +482,8 @@ config time.
 - **Stim parameters are settable over the TCP command interface** — trigger, shape,
   magnitude, duration, per channel.
 - **Amp-settle is built into RHS headstages**, engaging around the pulse with configurable
-  pre/post duration; the guide suggests ~1 ms post as a starting point. RHD systems
+  pre/post duration; the guide suggests ~1 ms post as a starting point [@intan2026intan,
+  p. 24]. RHD systems
   additionally accept a digital blanking line at 4–5 sample periods of latency.
 - **No latency figure is published.** The guide names the sources (USB to host, TCP to
   client) and stops. This is a V4 measurement, not a citation.
@@ -697,11 +698,11 @@ Every row is a **budget or an external number, never a claim about this system.*
 | Saccade onset -> display change | **inside saccadic suppression** | The binding constraint for gaze-contingent work; tighter than anything previously written down [@ross2001changes; @saunders2014direct; @dimigen2026advantages] |
 | Decision -> display change | next flip | engine flip-locked [@saunders2014direct] |
 | Photodiode edge -> state transition | UNVERIFIED | New; NI DI change-detection latency (V2b) |
-| Neural event -> feature at `taskd` (SpikeGLX) | ~2–5 ms | vendor loopback histogram plus one hop (V4) |
+| Neural event -> feature at `taskd` (SpikeGLX) | ~2–5 ms | vendor loopback histogram plus one hop (V4) [@karsh2026spikeglxcppsdk] |
 | Neural event -> feature at `taskd` (RHX) | UNVERIFIED | No published figure exists (V4) |
 | Neural event -> stim TTL | ~3–6 ms | estimate (V4) |
 | Audio command -> sound onset | UNVERIFIED | New (V7) |
-| Fallback: Open Ephys + Falcon | ~9–13 ms | published plugin measurement |
+| Fallback: Open Ephys + Falcon | ~9–13 ms | published plugin measurement [@openephys2026falcon] |
 
 New protocols added to `docs/validation.md`: **V2b** digital-input read latency, **V7**
 audio onset timing and jitter, **V8** RHX backpressure headroom under closed-loop load, and

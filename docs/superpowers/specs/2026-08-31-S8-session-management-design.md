@@ -72,7 +72,8 @@ code (ADR-0006).
 
 ### 3.3 Provenance
 
-- **Every trial records a complete resolved parameter snapshot**, not a pointer to "the config."
+- **Every trial records a complete resolved parameter snapshot** [@asaad2008flexible], not a
+  pointer to "the config."
 - Every change emits `PARAM_CHANGE` carrying a sequence number that joins to the change record
   (S2 §5.2). The pointer is on the recording clock; the content is in the session directory.
 - **One validated write path**, whatever the origin — console, external control API, or the task

@@ -356,32 +356,37 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    live-driven values or frame-dependent content. The record's frame numbers say which change each edge
    was, and a per-trial check matches task-patch edges against logged changes, as §8.4 does for the flip
    patch.
-2. **Event codes go out at the decision**; the light sensor gives the exact time.
+2. **Event codes go out at the decision**; the light sensor gives the exact time [@hwang2019nimh;
+   @bridges2020timing; @elze2010achieving; @ibl2021standardized].
 3. **Stimulus codes are task codes, as S2 §5.1 planned** (N§R5): `STIMULUS_ON`, `STIMULUS_OFF` and
    `STIMULUS_CHANGED`, allocated once in wl-xtasks' range for every task; which stimulus each was is in
    the record by frame; a group is one code; no amendment to wl-preproc's frozen codec. Tasks' own
    onset codes (`FIX_ON`, `TARGET_ON`) stay.
 4. **Frames are matched to the recording** by counting flip-patch edges from each trial's start code,
-   checked against the trial's length. **The continuous mode strobes an anchor code about once a
+   checked against the trial's length [@siegle2021survey]. **The continuous mode strobes an
+   anchor code about once a
    second** and the screen log records the frame each was strobed on, so a miscount is confined to one
    interval and located.
 5. **The screen log**: every change with its frame and full resolved description; every live-driven
-   value per frame; seeds; and **the display's per-refresh report of which content it showed**. **A late
+   value per frame; seeds; and **the display's per-refresh report of which content it showed**
+   [@asaad2008flexible]. **A late
    frame repeats the previous content for one refresh, and the sequence then continues from where it
    was** (the loop never skips a frame number); m-sequence and other reverse-correlation trials with any
    repeat are marked [@reid1997use].
 6. **The console shows frame timing per trial**, at boundaries.
 7. **A frame-clock fault**: a warning and a warnings-list entry, affected trials marked, the session
-   goes on (acceptable in every session kind).
+   goes on (acceptable in every session kind) [@nwb2026nwb].
 
 ## 9. Media and sound (N§6, N§R5, N§R6)
 
 1. **Sounds play through two of the task PC's PCIe-6343 analog outputs** (4 on the card, NI, read
-   2026-10-07; the card runs on its own clock, not the recording's). **The wl-sync board is asked to
+   2026-10-07; the card runs on its own clock, not the recording's) [@hwang2019nimh]. **The wl-sync
+   board is asked to
    bring them to a line-out** beside the existing speaker tap (§21). The output is armed at the decision
    and **started by the task patch's next edge**, which marks the frame the visual change lands on (at
    the bottom of the screen); a task may declare an offset, including the scan delay to the stimulus's
-   height. **The actual onset is measured into the recording by the speaker tap** (V7). Speaker-to-ear
+   height. **The actual onset is measured into the recording by the speaker tap** (V7)
+   [@babjack2015reducing; @bridges2020timing]. Speaker-to-ear
    delay is acoustic and not in V7.
 2. **Simple sounds are made from parameters**, rebuilt from the record; files remain for recorded sounds.
 3. **Movie soundtracks** play when a task asks, in step with the frames.

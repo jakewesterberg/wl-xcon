@@ -77,7 +77,7 @@ CIE 10° L value at 390 nm is 0.000407615 where cvrl has 0.000407619 (9-sf 4.076
 5 nm entry agreeing to 6 significant figures. Both LMS datatable pages show stale MD5s (2° checked
 2026-10-08): 10° page c92c94a7…, file served c2e606fd…, matching metadata v2 (sha256 bd64f1f6…); 2° page
 27c74cc0…, file served dba2e9d1…, metadata sha256 f48160ed…. Whatever is bundled should record its
-source and the metadata JSON's sha256, not the page's MD5.
+source and the metadata JSON's sha256, not the page's MD5 [@cie2006cie; @cie2006cieb].
 
 **The LMS CSVs are 5 nm only** (checked 2026-10-08). One-nm values would be a derived table, made one of
 two ways (computed 2026-10-08): linear interpolation, the method the CIE metadata declares, which differs
@@ -92,7 +92,7 @@ error 2.4e-7).
   responsibility, with a copyright notice 1995-2026 (Color and Vision Research Labs). Nothing addresses
   redistribution: bundling cvrl tables is UNVERIFIED as permitted (contact a.stockman@ucl.ac.uk).
 - **CIE datasets: CC BY-SA 4.0**, per each dataset's metadata rights field (the HTML page shows a
-  recommended citation and "Copyright 2026 CIE").
+  recommended citation and "Copyright 2026 CIE") [@cie2006cie; @cie2006cieb].
 - **Creative Commons FAQ** (creativecommons.org/faq, paraphrased): CC material may sit in a collection
   whose license does not change it; CC 4.0 covers databases, including the EU database right (relevant at
   KU Leuven); attribution and share-alike bind only where copyright or database right restricts the use
@@ -105,7 +105,8 @@ error 2.4e-7).
 - **Precedent, not permission:** colour-science (BSD-3-Clause, develop 248121e3) bundles the Stockman &
   Sharpe 2° and 10° sets citing cvrl; Psychtoolbox bundles `T_cones_ss2.mat`, `T_cones_ss10.mat`,
   `T_xyzCIEPhys2.mat`, `T_xyzCIEPhys10.mat`; PsychoPy bundles Smith-Pokorny in `calibData.py`.
-- **Alternative to bundling:** Stockman & Rider (2023) give closed-form formulae (360-850 nm) that per
+- **Alternative to bundling:** Stockman & Rider (2023) [@stockman2023formulae] give closed-form
+  formulae (360-850 nm) that per
   their abstract reproduce the CIE 2° and 10° tables with little error, with a Python program whose
   license is UNVERIFIED (link stripped in the PMC text).
 
