@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from _calibrations import LINEAR
 from _rig import DIRECT, RIG
 from wl_xcon.calibration import constellation
 from wl_xcon.cli import _load_trial
@@ -159,9 +160,9 @@ PANEL = Calibration(
     green=xyY(0.300, 0.600, 145.0),
     blue=xyY(0.150, 0.060, 15.0),
     background=xyY(0.3127, 0.3290, 50.0),
-    gamma=2.2,
+    transfer=(LINEAR,) * 3,
     observer="macaque V(lambda) -- placeholder, unmeasured",
-    measured_on="unmeasured",
+    measured_on="2026-08-31",
 )
 
 

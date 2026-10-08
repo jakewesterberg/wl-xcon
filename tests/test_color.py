@@ -12,6 +12,7 @@ from dataclasses import replace
 
 import pytest
 
+from _calibrations import LINEAR
 from wl_xcon.check import check
 from wl_xcon.photometry import D65, DKL, RMS, Calibration, Gray, Michelson, Weber, to_xyz, xyY
 from wl_xcon.task import (
@@ -37,7 +38,7 @@ PANEL = Calibration(
     green=xyY(0.300, 0.600, 145.0),
     blue=xyY(0.150, 0.060, 15.0),
     background=xyY(0.3127, 0.3290, 50.0),
-    gamma=2.2,
+    transfer=(LINEAR,) * 3,
     observer="macaque V(lambda), Sidley & Sperling 1967",
     measured_on="2026-08-31",
 )
@@ -112,7 +113,7 @@ def test_isoluminance_is_a_declared_measurement_not_a_default():
         green=PANEL.green,
         blue=PANEL.blue,
         background=PANEL.background,
-        gamma=2.2,
+        transfer=(LINEAR,) * 3,
         observer="",
         measured_on="2026-08-31",
     )

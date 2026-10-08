@@ -12,14 +12,20 @@ isoluminance is usually false -- so this module makes stating it require a
 calibration that names whose luminous efficiency it was measured against. A
 macaque's is not a human's.
 
-**As of 2026-08-31 no calibration for our panels exists.** The `Calibration` in the
-tests is illustrative. A real one is measured and committed under
-`docs/measurements/`, per CLAUDE.md's rule on timing and physical claims.
+**No measured calibration for our panels exists yet** (build J measures one). Until a
+rig names one, sessions run on `SRGB`, the sRGB standard, and the warnings list says so
+(engine spec §7.1, build B). A measured one is a JSON record (`read_calibration`),
+committed under `docs/measurements/<rig>/`.
 """
 
 from __future__ import annotations
 
+import json
+import math
+import re
 from dataclasses import dataclass
+from datetime import date
+from pathlib import Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +133,56 @@ class RMS(Contrast):
     """The standard deviation of luminance over its mean: noise and images."""
 
 
+def _finite_number(value: object) -> bool:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:  # an integer too large for a float, which a JSON record can hold
+        return False
+
+
+@dataclass(frozen=True, slots=True)
+class Transfer:
+    """One channel's transfer, as measured (engine spec §7.6: "The transfer is a measured table
+    per channel"; N§4 batch 1, since a QD-OLED's transfer is not a power law): at each drive
+    `level`, the output code over its maximum, the channel's light as a `fraction` of its light
+    at full drive. **Stored and checked here, never evaluated in build B**: turning a light into
+    output levels through it is build A2's (`exact.py`'s docstring)."""
+
+    levels: tuple
+    fractions: tuple
+
+    def __post_init__(self) -> None:
+        levels, fractions = self.levels, self.fractions
+        if not (isinstance(levels, tuple) and isinstance(fractions, tuple)):
+            raise ValueError("a transfer's levels and fractions are tuples of numbers")
+        if len(levels) != len(fractions) or len(levels) < 2:
+            raise ValueError(
+                f"a transfer pairs each level with one fraction, at least two of each; this one "
+                f"has {len(levels)} levels and {len(fractions)} fractions"
+            )
+        if not all(_finite_number(v) for v in (*levels, *fractions)):
+            raise ValueError("a transfer's levels and fractions are finite numbers")
+        if levels[0] != 0.0 or levels[-1] != 1.0:
+            raise ValueError(
+                f"a transfer runs from level 0 to level 1; this one runs from {levels[0]} to "
+                f"{levels[-1]}"
+            )
+        if any(later <= earlier for earlier, later in zip(levels, levels[1:])):
+            raise ValueError("a transfer's levels rise strictly")
+        if any(later < earlier for earlier, later in zip(fractions, fractions[1:])):
+            raise ValueError("a transfer's fractions never fall as its level rises")
+        if fractions[0] < 0.0 or fractions[-1] != 1.0:
+            raise ValueError(
+                f"a transfer's fractions start at 0 or above and end at 1, full drive; this one "
+                f"runs from {fractions[0]} to {fractions[-1]}"
+            )
+
+
+_ISO_DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
 @dataclass(frozen=True, slots=True)
 class Calibration:
     """A display, as measured. Every field is an observation, not a setting.
@@ -135,20 +191,57 @@ class Calibration:
     because that is what makes `lum=0` mean anything: photometric luminance is
     defined by a V(lambda), and using a human one for a macaque produces a stimulus
     that is isoluminant for nobody in the room.
-    """
+
+    **Or the standard** (`standard=True`, `SRGB`): the default a session runs on when its
+    rig names no measured calibration (engine spec §7.1), measured by nobody, and listed as
+    a warning (`warnlist`). One calibration for the whole panel (spec §7.6)."""
 
     red: xyY
     green: xyY
     blue: xyY
     background: xyY
-    gamma: float
+    #: Each channel's measured transfer: red, green, blue (spec §7.6). Replaces the gamma
+    #: exponent nothing read (build B).
+    transfer: tuple
     observer: str
+    #: The day it was measured, `YYYY-MM-DD`; empty for the standard, which nobody measured.
     measured_on: str
-    #: The largest cone contrast this panel reaches on its weakest axis, measured.
-    #: A three-primary display cannot produce arbitrary cone contrast, and the
-    #: achievable maximum is a property of the primaries and the background -- so it
-    #: is measured rather than assumed, like everything else here.
-    max_cone_contrast: float = 0.85
+    #: The record's name, as the rig file, the session record and the page give it.
+    id: str = ""
+    #: Whether this is the sRGB standard rather than a measurement (spec §7.1).
+    standard: bool = False
+    #: The largest cone contrast this panel reaches on its weakest axis, measured; `None` when
+    #: a calibration states none, and then no DKL color is realizable against it until build
+    #: A2 converts DKL through cone fundamentals (spec §7.4).
+    max_cone_contrast: float | None = 0.85
+
+    def __post_init__(self) -> None:
+        if not (
+            isinstance(self.transfer, tuple)
+            and len(self.transfer) == 3
+            and all(isinstance(t, Transfer) for t in self.transfer)
+        ):
+            raise ValueError("a calibration holds three transfers: red, green and blue")
+        if self.standard:
+            return
+        if not (isinstance(self.measured_on, str) and _ISO_DAY.fullmatch(self.measured_on)):
+            raise ValueError(
+                f"measured_on is the day it was measured, YYYY-MM-DD; got {self.measured_on!r}"
+            )
+        try:
+            date.fromisoformat(self.measured_on)
+        except ValueError as refused:
+            raise ValueError(
+                f"measured_on is the day it was measured, YYYY-MM-DD; {self.measured_on!r} is "
+                f"no such day"
+            ) from refused
+
+    def age_days(self, today: date) -> int | None:
+        """Whole days since it was measured, by the calendar (spec §7.10: a calibration "never
+        expires" but carries its age); `None` for the standard, which nobody measured."""
+        if self.standard:
+            return None
+        return (today - date.fromisoformat(self.measured_on)).days
 
     def weights(self, color: xyY) -> tuple[float, float, float]:
         """Linear primary weights for a colour, by solving the 3x3 mixture.
@@ -217,6 +310,11 @@ def unrealizable(color: Color, panel: Calibration) -> str | None:
             )
         return None
     if isinstance(color, DKL):
+        if panel.max_cone_contrast is None:
+            return (
+                "this calibration states no cone-contrast limit, so whether the panel can make "
+                "it is unknown until build A2 converts DKL through cone fundamentals"
+            )
         if color.magnitude() > panel.max_cone_contrast + TOLERANCE:
             return (
                 f"asks for cone contrast {color.magnitude():.3f}; this panel was "
@@ -224,3 +322,137 @@ def unrealizable(color: Color, panel: Calibration) -> str | None:
             )
         return None
     return None
+
+
+#: A calibration record's fields, each required and no other (Question 4: one JSON file per
+#: measured calibration). `max_cone_contrast` alone is optional, until build A2 replaces it.
+RECORD_FIELDS = ("id", "measured_on", "observer", "primaries", "background", "transfer")
+_CHANNELS = ("red", "green", "blue")
+
+#: The longest id a record may carry: the rig file, `config.json`, every run's start row and
+#: every frame name it, and the calibration-age warning quotes it in a sentence the page's
+#: open sends back (`link.NOTE_LIMIT`, Call 25), so it is bounded where it is read.
+ID_LIMIT = 64
+
+
+def read_calibration(path) -> Calibration:
+    """A measured calibration from its record (engine spec §12.6: "records committed per rig
+    under docs/measurements/<rig>/, each with an id"). **Fills in nothing**: a missing field,
+    a field a record does not have, or a value that is not what its field holds raises
+    `ValueError` naming it; a file that cannot be read raises `OSError`. Reading it runs no
+    code, unlike the rig's and the animal's Python files."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError(f"it is not JSON ({error})") from error
+    if not isinstance(data, dict):
+        raise ValueError("a calibration record is one JSON object")
+    missing = [name for name in RECORD_FIELDS if name not in data]
+    if missing:
+        raise ValueError(f"it has no {', '.join(missing)}")
+    extra = sorted(set(data) - set(RECORD_FIELDS) - {"max_cone_contrast"})
+    if extra:
+        raise ValueError(f"it has {', '.join(extra)}, which a calibration record does not")
+    for name in ("id", "measured_on", "observer"):
+        if not isinstance(data[name], str):
+            raise ValueError(f"its {name} is text")
+    if not data["id"].strip():
+        raise ValueError("its id is empty")
+    if len(data["id"]) > ID_LIMIT:
+        raise ValueError(f"its id is at most {ID_LIMIT} characters, and this one is {len(data['id'])}")
+    primaries = _channels(data["primaries"], "primaries")
+    transfer = _channels(data["transfer"], "transfer")
+    limit = data.get("max_cone_contrast")
+    if limit is not None and not (_finite_number(limit) and limit > 0):
+        raise ValueError("its max_cone_contrast is a positive number")
+    return Calibration(
+        red=_light(primaries["red"], "red primary"),
+        green=_light(primaries["green"], "green primary"),
+        blue=_light(primaries["blue"], "blue primary"),
+        background=_light(data["background"], "background"),
+        transfer=tuple(_table(transfer[c], f"{c} transfer") for c in _CHANNELS),
+        observer=data["observer"],
+        measured_on=data["measured_on"],
+        id=data["id"],
+        max_cone_contrast=None if limit is None else float(limit),
+    )
+
+
+def _channels(value: object, what: str) -> dict:
+    if not isinstance(value, dict) or sorted(value) != sorted(_CHANNELS):
+        raise ValueError(f"its {what} name red, green and blue, each once")
+    return value
+
+
+def _light(value: object, what: str) -> xyY:
+    if not (isinstance(value, list) and len(value) == 3 and all(_finite_number(v) for v in value)):
+        raise ValueError(f"its {what} is three numbers, x, y and Y")
+    return xyY(*(float(v) for v in value))
+
+
+def _table(value: object, what: str) -> Transfer:
+    if not (isinstance(value, list) and all(isinstance(p, list) and len(p) == 2 for p in value)):
+        raise ValueError(f"its {what} is a list of [level, fraction] pairs")
+    try:
+        return Transfer(levels=tuple(p[0] for p in value), fractions=tuple(p[1] for p in value))
+    except ValueError as refused:
+        raise ValueError(f"its {what}: {refused}") from refused
+
+
+#: The highest output code of a 10-bit output (spec §7.8: "Output is 10-bit").
+TEN_BIT = 1023
+
+
+def _srgb_fraction(level: float) -> float:
+    """The sRGB standard's transfer, from output level to linear light. **The 0.04045
+    threshold is IEC 61966-2-1's as commonly quoted; the IEC standard itself was not opened,
+    so it is UNVERIFIED.** W3C's "A Standard Default Color Space for the Internet - sRGB",
+    version 1.10 (https://www.w3.org/Graphics/Color/sRGB.html, read 2026-10-08), uses 0.03928
+    (its equations 1.7a-b, printed as images), and its own note says the IEC standard
+    corrected "a small numerical error caused by rounding error"; between the two thresholds
+    the two branches differ by under 1e-6 of full scale (computed 2026-10-08)."""
+    return level / 12.92 if level <= 0.04045 else ((level + 0.055) / 1.055) ** 2.4
+
+
+#: The sRGB curve at each 10-bit level: the default calibration's transfer, every channel.
+SRGB_TRANSFER = Transfer(
+    levels=tuple(code / TEN_BIT for code in range(TEN_BIT + 1)),
+    fractions=tuple(_srgb_fraction(code / TEN_BIT) for code in range(TEN_BIT + 1)),
+)
+
+#: The default calibration's white, cd/m²: the sRGB standard's reference luminance level
+#: (W3C sRGB version 1.10, Table 0.1, "80 cd/m2", read 2026-10-08). The PI's answer to
+#: Question 1 of the engine B plan.
+SRGB_WHITE_CD_M2 = 80.0
+
+
+def _srgb_primaries(white: float) -> tuple[xyY, xyY, xyY]:
+    """The sRGB primaries' chromaticities, each at the luminance that makes full drive on all
+    three the standard's D65 white at `white` cd/m² -- **solved, not the rounded 0.2126,
+    0.7152 and 0.0722**, whose white misses D65 by 2e-4 and would be refused as out of gamut
+    by `TOLERANCE` (computed 2026-10-08)."""
+    chromaticities = ((0.64, 0.33), (0.30, 0.60), (0.15, 0.06))
+    unit = [_XYZ(xyY(x, y, 1.0)) for x, y in chromaticities]
+    luminances = _solve3(unit, _XYZ(xyY(D65[0], D65[1], white)))
+    return tuple(xyY(x, y, Y) for (x, y), Y in zip(chromaticities, luminances))
+
+
+_RED, _GREEN, _BLUE = _srgb_primaries(SRGB_WHITE_CD_M2)
+
+#: **The default calibration** (engine spec §7.1; the PI, N§4 batch 1: "Standard sRGB"): the
+#: panel in its sRGB mode, and the published standard's primaries and D65 white (W3C sRGB
+#: version 1.10, Table 0.2, read 2026-10-08) and its transfer curve (`_srgb_fraction`).
+#: How closely the panel follows it is UNVERIFIED until measured, and the warnings list says
+#: so. Its background is black, the default background (spec §7.5).
+SRGB = Calibration(
+    red=_RED,
+    green=_GREEN,
+    blue=_BLUE,
+    background=xyY(D65[0], D65[1], 0.0),
+    transfer=(SRGB_TRANSFER,) * 3,
+    observer="CIE 1931 2° (the sRGB standard's)",
+    measured_on="",
+    id="srgb-standard",
+    standard=True,
+    max_cone_contrast=None,
+)
