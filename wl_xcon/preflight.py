@@ -141,7 +141,10 @@ def warnings(entries, kind: str, accepted) -> tuple[PreflightItem, list]:
     one acknowledgement accepts them all, so a cut may shorten what they say but never drop
     one's name. Its head -- the count and each code, in parentheses -- must fit within
     `link.NOTE_LIMIT` characters, which the cut keeps whole; when it does not, the item
-    **fails** rather than ask to accept warnings it cannot show."""
+    **fails** rather than ask to accept warnings it cannot show. **A repeated code is named
+    once, with its count** ("luminance-step ×30"), in the order the codes first appear (fix
+    round 2): a task gives one `luminance-step` per pattern whose mean differs from the
+    background, and its names alone must not push the head past the limit."""
     entries = list(entries)
     outside = warnlist.refused(entries, kind)
     if outside:
@@ -150,7 +153,10 @@ def warnings(entries, kind: str, accepted) -> tuple[PreflightItem, list]:
         )), []
     owed = warnlist.owed(entries, accepted)
     if owed:
-        codes = ", ".join(entry.code for entry in owed)
+        counts: dict[str, int] = {}
+        for entry in owed:
+            counts[entry.code] = counts.get(entry.code, 0) + 1
+        codes = ", ".join(code if n == 1 else f"{code} ×{n}" for code, n in counts.items())
         head = f"{len(owed)} not yet accepted this session ({codes})"
         if len(head) > _link.NOTE_LIMIT:
             return PreflightItem(WARNINGS, FAIL, _link.cut(

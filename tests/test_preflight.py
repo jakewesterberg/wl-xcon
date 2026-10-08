@@ -133,6 +133,24 @@ def test_an_unknown_names_each_warning_first_or_fails_when_their_names_cannot_al
     )
 
 
+def test_a_repeated_code_is_named_once_with_its_count_in_the_order_codes_first_appear():
+    """Fix round 2 of Task 12: a task gives one `luminance-step` per pattern whose mean differs
+    from the background. Named once each, thirty of them would push the head past the limit
+    and fail every run; named once with their count, every distinct warning is named in a
+    short head, and the item asks to accept them all. A code's later repeats do not move it."""
+    default = Entry("default calibration", "the default", SESSION_KINDS)
+    steps = [Entry("luminance-step", f"pattern {i}'s mean differs", SESSION_KINDS) for i in range(30)]
+    free = Entry("head free", "the head is free", SESSION_KINDS)
+
+    item, owed = preflight.warnings([default, steps[0], free, *steps[1:]], "training", frozenset())
+
+    assert (item.result, owed) == ("unknown", [default, steps[0], free, *steps[1:]])
+    assert item.said.startswith(
+        "32 not yet accepted this session (default calibration, luminance-step ×30, head free): "
+        "default calibration: the default; luminance-step: pattern 0's mean differs; head free:"
+    )
+
+
 @pytest.mark.parametrize(
     ("given", "result", "said"),
     [
