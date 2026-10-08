@@ -67,6 +67,7 @@ from wl_xcon.scheduler import Block, Condition, Scheduler
 from wl_xcon.simulate import Census, Subject, Tally, prepare
 from wl_xcon.run import run_trial
 from wl_xcon.task import Entered, Exited, Outcome, Param, SaccadeTo, Trial
+from wl_xcon.warnlist import Entry, sentence
 from wl_xcon.welfare import (
     OUT_OF_CAGE,
     WARN_WITHIN_DEFAULT,
@@ -454,6 +455,9 @@ class Session:
     #: Every mark this session stamped, by its signal's number: `(number, trial,
     #: frame, at)`, what a note arriving later is joined to.
     _stamped: dict = field(init=False, default_factory=dict, repr=False)
+    #: Every warning accepted this session, by `Entry.key`: `(entry, by, at)`, in the order
+    #: accepted (engine spec §19.3). Restored from `warnings.jsonl` by `resume`.
+    _warnings: dict = field(init=False, default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
         kind_named(self.spec.session_kind)
@@ -666,6 +670,11 @@ class Session:
         for name, value in restoration.bounded.items():
             self.spec.bounds.set(name, value, by=by)
         self._levels = restoration.levels
+        # What it had accepted (engine spec §19.3), so nothing accepted is asked again. Named
+        # apart from `by`, who resumed it, which the `session resumed` row below records.
+        for code, detail, accepted_in, accepted_by, accepted_at in restoration.accepted:
+            entry = Entry(code, detail, accepted_in)
+            self._warnings[entry.key] = (entry, accepted_by, accepted_at)
         self.run_index = restoration.run_index
         self._sequence = restoration.sequence
         # How its last run ended (the final review's M1), so `end_runs` never says "before
@@ -1880,6 +1889,50 @@ class Session:
         self.phase = "awaiting_return"
         self._control(
             "end", by, f"session ended by {by}: waiting for the animal's return", self._index
+        )
+
+    def accept(self, entries, *, by: Actor | None, how: str, run: int | None) -> None:
+        """Accept warnings for this session (engine spec §19.3): one row in `warnings.jsonl`
+        for each not accepted before, with who, when, how, the run and the session's kind.
+        **A warning this session's kind does not accept is refused, never accepted** -- the
+        callers leave it out first; this is the last place it could slip through."""
+        if self._record is None:
+            raise RuntimeError(
+                "warnings are accepted into an open session's record, and this session's is not open"
+            )
+        kind = self.spec.session_kind
+        outside = [entry for entry in entries if kind not in entry.accepted_in]
+        if outside:
+            raise ValueError(f"a {kind} session does not accept " + sentence(outside))
+        for entry in entries:
+            if entry.key in self._warnings:
+                continue
+            at = self.wall_now()
+            self._record.warning(code=entry.code, detail=entry.detail, accepted_in=entry.accepted_in,
+                                 session_kind=kind, by=by, at=at, how=how, run=run)
+            self._warnings[entry.key] = (entry, by, at)
+
+    def accepted_keys(self) -> frozenset:
+        """What this session has accepted, by `Entry.key`."""
+        return frozenset(self._warnings)
+
+    def carried(self, preflight) -> dict:
+        """The unknown pre-flight items this session accepted at an earlier run, by name, with
+        who accepted each -- **only while an item's sentence is the one accepted** (the engine
+        B plan, call 7). `Service._start` counts them as acknowledged (engine spec §20.1)."""
+        return {
+            item.name: self._warnings[(item.name, item.said)][1]
+            for item in preflight.items
+            if item.result == "unknown" and (item.name, item.said) in self._warnings
+        }
+
+    @property
+    def warnings(self) -> tuple:
+        """Every warning accepted this session, in order, as `(code, detail, accepted_in, by,
+        at)`: what `link.Telemetry.warnings` carries."""
+        return tuple(
+            (entry.code, entry.detail, entry.accepted_in, by, at)
+            for entry, by, at in self._warnings.values()
         )
 
     def close(self, how: str) -> None:

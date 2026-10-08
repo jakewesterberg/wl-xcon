@@ -14,10 +14,12 @@ import shutil
 import threading
 import time
 import weakref
+from datetime import date
 from pathlib import Path
 
 import pytest
 
+from _calibrations import BACKGROUND, LINEAR, OBSERVER, PRIMARIES, measured
 from _ports import endpoints as free_endpoints
 from _rig import PATH as RIG_FILE
 from _rig import RIG, naming
@@ -25,8 +27,9 @@ from _sessions import WALL, malformed_task, typed, whole_point_task
 from _zmq_release import _every_zmq_context_released  # noqa: F401
 from wl_xcon import preflight, resume, stranded
 from wl_xcon.actor import Box
-from wl_xcon.cli import _load_allocation, main
+from wl_xcon.cli import _load_allocation, _load_rig, main
 from wl_xcon.bounds import Exceeded
+from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.link import (
     REFUSAL_HISTORY,
     CheckRun,
@@ -53,6 +56,7 @@ from wl_xcon.scheduler import Block, Condition
 from wl_xcon.service import Service, _fresh_seed
 from wl_xcon.task import Outcome
 from wl_xcon.taskd import Session
+from wl_xcon.warnlist import Entry
 from wl_xcon.welfare import Welfare
 
 #: wl-preproc's decoder and trial assembler, for the path through two crashes (XC-026):
@@ -1887,6 +1891,77 @@ def test_a_record_written_before_sessions_said_what_they_are_for_is_not_resumabl
     (found,) = _step(service).stranded
     assert (found.resumable, found.why) == (False, resume.PREDATES_KINDS)
     assert _resume_refused(service, "2027-01-14_01") == resume.PREDATES_KINDS
+
+
+def test_a_resumed_session_keeps_what_it_accepted(tmp_path):
+    """Review Focus 5. Written against the rows on disk, so it holds before and after Task 11
+    makes the open accept the rig's warnings too."""
+    folders = _folders(tmp_path)
+    first = _made(folders)
+    _step(first, _open())
+    first.session.accept([Entry("head free", "the head is free", SESSION_KINDS)],
+                         by=BY, how="open", run=None)
+    path = folders[2] / "2027-01-14_01" / "xcon" / "warnings.jsonl"
+    before = path.read_text()
+    second = _made(folders)
+
+    _step(second, ResumeSession(by=BY, session_id="2027-01-14_01"))
+
+    assert [w[0] for w in second.session.warnings] == [json.loads(line)["code"] for line in before.splitlines()]
+    assert "head free" in [w[0] for w in second.session.warnings]
+    assert path.read_text() == before, "nothing accepted is written again"
+
+
+def test_a_resume_names_who_resumed_it_not_who_accepted_a_warning(tmp_path):
+    """Each restored warning keeps who accepted it, and the `session resumed` row names the
+    person who sent the resume, whoever accepted the last warning."""
+    folders = _folders(tmp_path)
+    first = _made(folders)
+    _step(first, _open())
+    first.session.accept([Entry("head free", "the head is free", SESSION_KINDS)],
+                         by=Box("ann"), how="open", run=None)
+    second = _made(folders)
+
+    _step(second, ResumeSession(by=BY, session_id="2027-01-14_01"))
+
+    assert [w[3] for w in second.session.warnings] == [Box("ann")]
+    (resumed,) = [row for row in _rows(folders[2]) if row["kind"] == "session resumed"]
+    assert resumed["by"] == BY_MAP
+
+
+def test_a_resume_after_the_rigs_calibration_changed_names_the_new_one_on_each_later_run(tmp_path):
+    """Call 26 (Task 8's review): a session opened and run under the default calibration, and
+    `wlx taskd` started again under a rig naming a measured record. The resume is not refused,
+    `config.json` keeps the calibration the session opened with, and each run's start row names
+    the one it ran against. The record is dated today, so no age is listed."""
+    folders = _folders(tmp_path)
+    first = _made(folders)
+    _step(first, _open())
+    _step(first, _start())
+    _run_to_its_end(first)
+    today = date.fromtimestamp(WALL).isoformat()
+    panel = measured(measured_on=today, id=f"rig1@{today}")
+    (tmp_path / "rig").mkdir()
+    (tmp_path / "rig" / "cal.json").write_text(json.dumps({
+        "id": panel.id, "measured_on": panel.measured_on, "observer": OBSERVER,
+        "primaries": PRIMARIES, "background": BACKGROUND,
+        "transfer": {c: [list(p) for p in zip(LINEAR.levels, LINEAR.fractions)]
+                     for c in ("red", "green", "blue")},
+        "max_cone_contrast": panel.max_cone_contrast,
+    }))
+    rig_path = naming(tmp_path / "rig", "cal.json")
+    # the process stops; `wlx taskd` starts again over the same root, under the new rig
+    second = _made(folders, rig=_load_rig(rig_path), rig_path=str(rig_path))
+    assert second.calibration == panel
+
+    _step(second, ResumeSession(by=BY, session_id="2027-01-14_01"))
+    _step(second, _start())
+    _run_to_its_end(second)
+
+    starts = [row["calibration"] for row in _runs(folders[2]) if row["event"] == "start"]
+    assert starts == ["srgb-standard", panel.id]
+    config = json.loads((folders[2] / "2027-01-14_01" / "xcon" / "config.json").read_text())
+    assert config["calibration"] == {"id": "srgb-standard", "standard": True, "measured_on": ""}
 
 
 def test_a_stranded_session_past_its_out_of_cage_limit_is_refused_with_welfares_sentence(tmp_path):

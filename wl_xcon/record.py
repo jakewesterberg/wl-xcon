@@ -117,6 +117,13 @@ RUNS = "runs.jsonl"
 #: so a resume takes every number from here and never issues one twice in a recording.
 TRIAL_STARTS = "trial_starts.jsonl"
 
+#: The warnings a session accepted (engine spec §19.3: "Accepted once per session, at open,
+#: recorded"): one row each, when it was accepted, by whom, how -- at the open, at a run's
+#: start, or by `wlx run --accept-warnings` -- in which run, and in what kind of session. Its
+#: sentence is `detail`, as a load-time finding's is. Uncapped: a row is a person's act, at
+#: most one per warning per session.
+ACCEPTED_WARNINGS = "warnings.jsonl"
+
 
 def welfare_note(
     directory: Path,
@@ -312,6 +319,16 @@ class SessionRecord:
                 )
                 + "\n"
             )
+
+    def warning(self, *, code: str, detail: str, accepted_in: tuple, session_kind: str,
+                by: Actor | None, at: float, how: str, run: int | None) -> None:
+        """One accepted warning, as `taskd.Session.accept` gives it."""
+        with (self.directory / ACCEPTED_WARNINGS).open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({
+                "code": code, "detail": detail, "accepted_in": list(accepted_in),
+                "session_kind": session_kind, "by": actors.to_map_or_none(by), "at": at,
+                "at_local": _local(at), "how": how, "run": run,
+            }, sort_keys=True) + "\n")
 
     def parameter_change(
         self,

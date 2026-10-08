@@ -36,6 +36,7 @@ from wl_xcon.cli import _load_trial
 from wl_xcon.codes import BLOCK_END
 from wl_xcon.dio import Simulated as Card
 from wl_xcon.encode import BLOCK_START, UNALLOCATED_TASK_CODE, words_for_block
+from wl_xcon.findings import NOT_RECORDING, SESSION_KINDS
 from wl_xcon.link import (
     CONTROL_HISTORY,
     RECENT_OUTCOMES,
@@ -44,6 +45,8 @@ from wl_xcon.link import (
     ManualReward,
     Mark,
     Pause,
+    Preflight,
+    PreflightItem,
     Resume,
     ScheduleStop,
     SetParameter,
@@ -57,6 +60,7 @@ from wl_xcon.scheduler import Block, Condition, Counting, Scheduler
 from wl_xcon.simulate import Tally
 from wl_xcon.task import Outcome
 from wl_xcon.taskd import PAUSE_HOUSEKEEPING_S, RunSpec, Session, SessionSpec
+from wl_xcon.warnlist import Entry
 from wl_xcon.welfare import Deployment, Simulated as Pump
 import _sessions
 from _rig import DIRECT, STEREOSCOPE
@@ -2721,6 +2725,50 @@ def test_a_sessions_config_and_each_start_row_name_its_calibration(tmp_path):
     rows = [json.loads(line) for line in (session.directory / "runs.jsonl").read_text().splitlines()]
     assert config["calibration"] == {"id": "srgb-standard", "standard": True, "measured_on": ""}
     assert [r["calibration"] for r in rows if r["event"] == "start"] == ["srgb-standard"]
+
+
+HEAD = Entry("head free", "the head is free", SESSION_KINDS)
+COLOR = Entry("color-on-default", "names colors", NOT_RECORDING)
+
+
+def test_a_warning_is_accepted_once_and_recorded_once(tmp_path):
+    made = _sessions.session(tmp_path)
+    made.open()
+
+    made.accept([HEAD, COLOR], by=Box("jake"), how="open", run=None)
+    made.accept([HEAD], by=Box("ann"), how="start", run=0)
+
+    rows = [json.loads(line) for line in (made.directory / "warnings.jsonl").read_text().splitlines()]
+    assert [(r["code"], r["by"]["name"]) for r in rows] == [("head free", "jake"), ("color-on-default", "jake")]
+    assert [(w[0], w[3]) for w in made.warnings] == [("head free", Box("jake")), ("color-on-default", Box("jake"))]
+    assert made.accepted_keys() == {HEAD.key, COLOR.key}
+
+
+def test_a_warning_the_sessions_kind_does_not_accept_is_never_accepted(tmp_path):
+    made = _sessions.session(tmp_path)
+    made.spec.session_kind = "recording"
+    made.open()
+
+    with pytest.raises(ValueError, match="does not accept"):
+        made.accept([COLOR], by=Box("jake"), how="open", run=None)
+    assert not (made.directory / "warnings.jsonl").exists()
+
+
+def test_warnings_are_accepted_only_into_an_open_record(tmp_path):
+    with pytest.raises(RuntimeError, match="open session"):
+        _sessions.session(tmp_path).accept([HEAD], by=Box("jake"), how="open", run=None)
+
+
+def test_an_unknown_accepted_earlier_is_carried_only_while_its_sentence_is_the_same(tmp_path):
+    made = _sessions.session(tmp_path)
+    made.open()
+    made.accept([Entry("pump calibration", "no pump calibration", SESSION_KINDS)],
+                by=Box("jake"), how="start", run=0)
+
+    same = Preflight("t.py", (PreflightItem("pump calibration", "unknown", "no pump calibration"),))
+    changed = Preflight("t.py", (PreflightItem("pump calibration", "unknown", "a new sentence"),))
+    assert made.carried(same) == {"pump calibration": Box("jake")}
+    assert made.carried(changed) == {}
 
 
 # ---------------------------------------------------------------------------

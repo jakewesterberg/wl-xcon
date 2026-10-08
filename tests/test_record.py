@@ -18,7 +18,8 @@ import pytest
 from wl_xcon.actor import Box
 from wl_xcon.levels import Position
 from wl_xcon.record import (
-    CONTROLS, RUNS, REFUSAL_LOG_LIMIT, TRIAL_STARTS, SessionRecord, welfare_note,
+    ACCEPTED_WARNINGS, CONTROLS, RUNS, REFUSAL_LOG_LIMIT, TRIAL_STARTS, SessionRecord, _local,
+    welfare_note,
 )
 
 
@@ -521,3 +522,16 @@ def test_a_trial_line_carries_its_fluid_and_its_last_reward(tmp_path):
 
     row = json.loads((tmp_path / "2027-01-14_01" / "xcon" / "trials.jsonl").read_text())
     assert (row["fluid_ml"], row["last_reward_at"]) == (0.3, 1_700_000_001.5)
+
+
+def test_a_warning_row_says_what_was_accepted_by_whom_when_and_in_which_kind(tmp_path):
+    record = SessionRecord.open(tmp_path, "2027-01-14_01", "A")
+    record.warning(code="head free", detail="the head is free",
+                   accepted_in=("training", "piloting", "recording"), session_kind="training",
+                   by=Box("jake"), at=1_800_000_000.0, how="open", run=None)
+
+    (row,) = [json.loads(line) for line in (record.directory / ACCEPTED_WARNINGS).read_text().splitlines()]
+    assert row == {"code": "head free", "detail": "the head is free",
+                   "accepted_in": ["training", "piloting", "recording"], "session_kind": "training",
+                   "by": {"kind": "box", "name": "jake"}, "at": 1_800_000_000.0,
+                   "at_local": _local(1_800_000_000.0), "how": "open", "run": None}

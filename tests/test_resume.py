@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from wl_xcon.actor import Box
 from wl_xcon.resume import PREDATES, PREDATES_KINDS, Unresumable, read
 from wl_xcon.task import Outcome
 
@@ -403,3 +404,40 @@ def test_a_record_whose_session_was_for_something_else_cannot_be_resumed(tmp_pat
 
 def test_a_restoration_says_what_its_session_is_for(tmp_path):
     assert read(_folder(tmp_path, config=_config(session_kind="piloting")), DEPARTURE).session_kind == "piloting"
+
+
+def test_a_restoration_carries_what_the_session_accepted(tmp_path):
+    directory = _folder(tmp_path)
+    _jsonl(directory / "warnings.jsonl", [{
+        "code": "head free", "detail": "the head is free",
+        "accepted_in": ["training", "piloting", "recording"], "session_kind": "training",
+        "by": {"kind": "box", "name": "jake"}, "at": DEPARTURE + 5.0, "at_local": "",
+        "how": "open", "run": None,
+    }])
+
+    assert read(directory, DEPARTURE).accepted == (
+        ("head free", "the head is free", ("training", "piloting", "recording"), Box("jake"),
+         DEPARTURE + 5.0),
+    )
+
+
+def test_a_damaged_accepted_warning_row_makes_a_record_unresumable(tmp_path):
+    directory = _folder(tmp_path)
+    _jsonl(directory / "warnings.jsonl", [{"code": "head free"}])
+
+    with pytest.raises(Unresumable, match="KeyError"):
+        read(directory, DEPARTURE)
+
+
+def test_an_accepted_warning_row_naming_no_session_kind_makes_a_record_unresumable(tmp_path):
+    """The engine B plan, call 12: a damaged `warnings.jsonl` is refused by `read`, so
+    `stranded.find` marks it not resumable, not by `Session.resume` once a resume is sent."""
+    directory = _folder(tmp_path)
+    _jsonl(directory / "warnings.jsonl", [{
+        "code": "head free", "detail": "the head is free", "accepted_in": ["training", "demo"],
+        "session_kind": "training", "by": None, "at": DEPARTURE + 5.0, "at_local": "",
+        "how": "open", "run": None,
+    }])
+
+    with pytest.raises(Unresumable, match="'demo' is none of them"):
+        read(directory, DEPARTURE)

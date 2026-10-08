@@ -581,8 +581,12 @@ summary before its build merges:
 
 - **wl-preproc**: condition numbering for `CONDITION` (XC-197); the trial table's "overridden" flag
   (§14.7); reading monocular and session-start calibrations (§12.4); the continuous mode's record shape
-  and anchor codes (§13.6, §8.4); the session kind in the record (§19); onset alignment through the
-  screen log and the flip count. **No change to its frozen codec.**
+  and anchor codes (§13.6, §8.4); the session kind and the warnings in the record (§19; engine build B):
+  `config.json`'s `session_kind`, and its `calibration` (`id`, `standard`, `measured_on`, or `null` when
+  the rig's record would not load); each run's start row's `calibration` (the id); and `warnings.jsonl`,
+  one row per warning a session accepted (`code`, `detail`, `accepted_in`, `session_kind`, `by`, `at`,
+  `at_local`, `how`, `run`); onset alignment through the screen log and the flip count.
+  **No change to its frozen codec.**
 - **wl-xtasks**: the task object's format (§3.5) and plans; allocation of `STIMULUS_ON`, `STIMULUS_OFF`,
   `STIMULUS_CHANGED` and the anchor code (§8.3, §8.4).
 - **wl-sync**: a two-channel line-out from the task PC card's analog outputs, started by the task-patch

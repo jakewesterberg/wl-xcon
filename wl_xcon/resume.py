@@ -19,9 +19,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from wl_xcon import actor as actors
-from wl_xcon.findings import SESSION_KINDS
+from wl_xcon.findings import SESSION_KINDS, kind_named
 from wl_xcon.levels import Levels, task_name
-from wl_xcon.record import CONTROLS, RUNS, TRIAL_STARTS
+from wl_xcon.record import ACCEPTED_WARNINGS, CONTROLS, RUNS, TRIAL_STARTS
 from wl_xcon.simulate import Tally
 from wl_xcon.task import Outcome
 from wl_xcon.welfare import OUT_OF_CAGE
@@ -69,6 +69,8 @@ class Restoration:
     #: How its last run ended, as `Session.stopped_because` and `stop_kind` say it.
     stopped_because: str
     stop_kind: str | None
+    #: Each warning the session accepted, as `Session.warnings` gives it.
+    accepted: tuple
 
 
 def _rows(directory: Path, name: str) -> list[dict]:
@@ -219,6 +221,13 @@ def _read(directory: Path, departure: float) -> Restoration:
             f"session ended by {actors.shown(actors.read(ends[0]['by']))}, before any run"
         )
         stop_kind = "operator"
+    # Each kind checked here, as `warnlist.Entry` checks it, so a row naming none is damage
+    # `stranded.find` marks not resumable rather than a resume `Session.resume` then refuses.
+    accepted = tuple(
+        (str(row["code"]), str(row["detail"]), tuple(kind_named(k) for k in row["accepted_in"]),
+         None if row["by"] is None else actors.from_map(row["by"]), float(row["at"]))
+        for row in _rows(directory, ACCEPTED_WARNINGS)
+    )
     return Restoration(
         session_id=str(config["session_id"]),
         subject=str(config["subject"]),
@@ -239,4 +248,5 @@ def _read(directory: Path, departure: float) -> Restoration:
         ended=bool(ends),
         stopped_because=stopped_because,
         stop_kind=stop_kind,
+        accepted=accepted,
     )
