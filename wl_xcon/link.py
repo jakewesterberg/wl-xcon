@@ -149,8 +149,9 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: `Telemetry.calibration`, the color calibration's id, or `None` while the rig's record will
 #: not load; `Telemetry.warnings`, the warnings the session accepted, each a `WarningRow`
 #: with who accepted it and when; and `Idle.warnings`, those an open will ask to accept,
-#: unaccepted. A row's code and sentence are cut to `TEXT_LIMIT` and `NOTE_LIMIT` characters
-#: (`WarningRow.of`). A reader of 14 refuses 15 and 15 refuses 14, by name, for both shapes.
+#: unaccepted. A row's code longer than `TEXT_LIMIT` characters is cut to that many plus "…",
+#: and its sentence longer than `NOTE_LIMIT` the same way (`WarningRow.of`). A reader of 14
+#: refuses 15 and 15 refuses 14, by name, for both shapes.
 SCHEMA = 15
 
 #: How many refusals a session keeps, per source, and therefore how many one
@@ -349,14 +350,15 @@ class WarningRow:
     def of(
         cls, code: str, detail: str, accepted_in, by: Actor | None, at: float | None
     ) -> "WarningRow":
-        """One row for a frame, **its code cut to `TEXT_LIMIT` characters and its sentence to
-        `NOTE_LIMIT`**, each with "…", as `_quoted` cuts a value. Nothing bounds a warning's
-        sentence where it is made -- a task's `color-on-default` names every colored choice,
-        and a record that will not load is quoted with what its loader said -- and a frame is
-        re-encoded at every trial boundary. The record keeps every word (`warnings.jsonl`).
-        Every sentence an open can accept today is within `NOTE_LIMIT` (the engine B plan, call
-        25: the default calibration's, 270 characters, is the longest, counted 2026-10-08), so
-        an idle frame offers each whole, as the open's form must send it back."""
+        """One row for a frame, **a code longer than `TEXT_LIMIT` characters cut to that many
+        plus "…", and a sentence longer than `NOTE_LIMIT` the same way**, as `_quoted` cuts a
+        value. Nothing bounds a warning's sentence where it is made -- a task's
+        `color-on-default` names every colored choice, and a record that will not load is
+        quoted with what its loader said -- and a frame is re-encoded at every trial boundary.
+        The record keeps every word (`warnings.jsonl`). Every sentence an open can accept today
+        is within `NOTE_LIMIT` (the engine B plan, call 25: the default calibration's, 270
+        characters, is the longest, counted 2026-10-08), so an idle frame offers each whole, as
+        the open's form must send it back."""
         return cls(_cut(code, TEXT_LIMIT), _cut(detail, NOTE_LIMIT), tuple(accepted_in), by, at)
 
 

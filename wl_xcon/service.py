@@ -83,6 +83,7 @@ from wl_xcon.cli import (
     _load_calibration,
     _load_rig,
     _load_subject_settings,
+    _printable,
 )
 from wl_xcon.codes import Allocation
 from wl_xcon.dio import Simulated as SimulatedCard
@@ -131,6 +132,15 @@ def _fresh_seed() -> int:
 def _sentence(refused: BaseException) -> str:
     """What a refusal says: a `SystemExit`'s message, or the exception's own."""
     return str(refused.code if isinstance(refused, SystemExit) else refused)
+
+
+def _fault(broken: BaseException) -> str:
+    """`Type: message` for a fault -- or its type's name alone when its own `str()` raises, so
+    saying a fault never becomes a second one (`Service._idle_warnings`)."""
+    try:
+        return f"{type(broken).__name__}: {broken}"
+    except Exception:  # noqa: BLE001 -- see the docstring
+        return type(broken).__name__
 
 
 def _local(at: float) -> str:
@@ -408,8 +418,11 @@ class Service:
         session's included (`open_warnings`), which the dialog marks as a chaired session's.
         **Listed once per calendar day of the service's wall** (the engine B plan, call 27),
         not on every pass; and a fault listing them is one row saying so, never the end of
-        publishing -- an open lists them again itself. Each row is cut for the frame
-        (`link.WarningRow.of`): a record that will not load is quoted, and a fault says anything."""
+        publishing -- an open lists them again itself. Only a listing that succeeds is kept for
+        the day: while it faults it is tried again at every pass, so the row goes once it lists.
+        The fault is said through `_fault`, so one whose own `str()` raises is said by its type.
+        Each row is cut for the frame (`link.WarningRow.of`): a record that will not load is
+        quoted, and a fault says anything."""
         try:
             today = self._today()
             if self._idle_listed is not None and self._idle_listed[0] == today:
@@ -421,8 +434,8 @@ class Service:
         except Exception as broken:  # noqa: BLE001 -- see the docstring
             return (_link.WarningRow.of(
                 warnlist.UNLISTED,
-                f"the warnings an open asks to accept could not be listed: "
-                f"{type(broken).__name__}: {broken}; an open lists them again itself",
+                f"listing the warnings an open asks to accept raised {_fault(broken)}; an open "
+                f"lists them again itself",
                 (), None, None,
             ),)
         self._idle_listed = (today, rows)
@@ -1284,9 +1297,11 @@ def run(args) -> int:
         if service.calibration is None:
             # Said where the operator started it (the second review's Minor 12): every run
             # this service takes will be refused until the record loads.
+            # Through `_printable`, as the console prints it: the sentence quotes the record's
+            # path and what its loader said, its field names among them.
             print(
-                f"  calibration: {service.calibration_refused}; every run's pre-flight fails "
-                f"on it until the record is repaired and wlx taskd started again"
+                f"  calibration: {_printable(service.calibration_refused)}; every run's pre-flight "
+                f"fails on it until the record is repaired and wlx taskd started again"
             )
         try:
             service.serve(threading.Event())

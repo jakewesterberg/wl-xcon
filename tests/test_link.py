@@ -2580,9 +2580,9 @@ def test_a_frame_cuts_a_warnings_sentence_and_code_as_the_wire_cuts_its_other_te
     """Nothing bounds a warning's sentence where it is made -- a task's `color-on-default`
     names every colored choice (408 characters for visual_search, counted 2026-10-08), and a
     record that will not load is quoted -- while the frame is re-encoded at every trial
-    boundary. So a frame carries a sentence of at most `NOTE_LIMIT` characters and a code of
-    at most `TEXT_LIMIT`, cut with "…" as `_quoted` cuts a value; one at its limit is
-    carried whole, and `warnings.jsonl` keeps every word."""
+    boundary. So a frame cuts a sentence longer than `NOTE_LIMIT` characters to that many plus
+    "…", and a code longer than `TEXT_LIMIT` the same way, as `_quoted` cuts a value; one at
+    its limit is carried whole, and `warnings.jsonl` keeps every word."""
     session = _session_with(delivered_ml=1.0, already_today=None)
     session.warnings = (
         ("c" * (TEXT_LIMIT + 1), "x" * (NOTE_LIMIT + 1), SESSION_KINDS, Box("jake"), 1.0),

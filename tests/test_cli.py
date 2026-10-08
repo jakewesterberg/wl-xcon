@@ -3598,17 +3598,27 @@ def test_a_stranded_animals_departure_is_shown_as_this_hosts_time_or_said_unknow
 
 
 def test_the_terminal_console_strips_control_characters_from_an_idle_frames_text():
+    """Every wire string on the idle screen, schema 15's warning rows among them: a code an open
+    asks to accept, the code and the sentence of one no kind accepts, and a listing fault's
+    sentence -- each with its own control character, so dropping `_printable` from any one
+    leaves one on the screen, and a newline in a sentence adds a line."""
     shown = render(
         idle(
             question=Question("departure", "2027-01-14_01", 1.0, "far\x1b[2J", ("confirm", "am\rend")),
             refusals=(Refused("open\x1b", Box("ja\nke"), "why\x07"),),
+            warnings=(
+                WarningRow("default\x0bcalibration", "the standard's", SESSION_KINDS, None, None),
+                WarningRow("calibration\x0crecord", "refused\x1b[2J\nSTOPPED: forged", (), None, None),
+                WarningRow("warnings", "listing raised\x08 X\nSTOPPED: forged", (), None, None),
+            ),
         )
     )
 
-    assert "\x1b" not in shown and "\r" not in shown and "\x07" not in shown
+    assert not {"\x1b", "\r", "\x07", "\x0b", "\x0c", "\x08"} & set(shown)
+    assert "\nSTOPPED: forged" not in shown
     # the header, the question, the animals and tasks, what an open asks to accept (schema
-    # 15), and the refusal
-    assert len(shown.splitlines()) == 1 + 1 + 2 + 1 + 1
+    # 15), the one every run refuses, the listing fault, and the refusal
+    assert len(shown.splitlines()) == 1 + 1 + 2 + 1 + 1 + 1 + 1
 
 
 def test_the_console_says_what_the_session_is_for_its_calibration_and_what_it_accepted():
@@ -3627,20 +3637,25 @@ def test_the_console_prints_a_warnings_wire_text_safely():
     the review's minor ruling on the draft's new lines."""
     row = WarningRow("bad\x1b[2Jcode", "x", ("training",), None, None)
 
-    shown = render(_telemetry(session_kind="train\x1b[2Jing", warnings=(row,)))
+    shown = render(
+        _telemetry(session_kind="train\x1b[2Jing", calibration="srgb\x1b[2J\nSTOPPED: forged",
+                   warnings=(row,))
+    )
 
     assert "\x1b" not in shown and "bad\ufffd[2Jcode" in shown
+    assert "\nSTOPPED: forged" not in shown
+    assert "  color calibration: srgb\ufffd[2J\ufffdSTOPPED: forged" in shown
 
 
 def test_the_console_says_a_listing_fault_as_one_and_not_as_a_warning():
     """The second review's Minor 2: the idle frame's fault row has no kinds, and is not a
     warning every run refuses."""
-    fault = WarningRow("warnings", "the warnings an open asks to accept could not be listed: x",
+    fault = WarningRow("warnings", "listing the warnings an open asks to accept raised X: x",
                        (), None, None)
 
     shown = render(idle(warnings=(fault,)))
 
-    assert "  warnings could not be listed: the warnings an open asks" in shown
+    assert "  warnings could not be listed: listing the warnings an open asks" in shown
     assert "every run refuses" not in shown
 
 

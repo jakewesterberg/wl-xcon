@@ -14,7 +14,7 @@ import shutil
 import threading
 import time
 import weakref
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -52,6 +52,7 @@ from wl_xcon.link import (
     ZmqConsole,
     ZmqLink,
 )
+from wl_xcon.photometry import ID_LIMIT, RECORD_FIELDS
 from wl_xcon.record import welfare_note
 from wl_xcon.scheduler import Block, Condition
 from wl_xcon.service import Service, _fresh_seed
@@ -280,7 +281,65 @@ def test_an_idle_frames_sentences_are_cut_as_the_wire_cuts_its_other_text(tmp_pa
 
     (row,) = _step(service).warnings
     assert row.code == "warnings" and len(row.detail) == NOTE_LIMIT + 1
-    assert row.detail.startswith("the warnings an open asks to accept could not be listed: RuntimeError")
+    assert row.detail.startswith("listing the warnings an open asks to accept raised RuntimeError: yyy")
+
+
+class _Unsayable(Exception):
+    """A fault whose own sentence raises."""
+
+    def __str__(self) -> str:
+        raise RuntimeError("nor can this be said")
+
+
+def test_a_listing_fault_that_cannot_be_said_never_stops_publishing_or_a_stranded_return(
+    tmp_path, monkeypatch
+):
+    """The fix round's item 2: the fault is said by its type when its `str()` raises -- formatted
+    outside the listing's containment, it stopped `wlx taskd` with an animal stranded. The idle
+    frame publishes, pass after pass, and the stranded session's return is taken."""
+    folders = _folders(tmp_path)
+    _strand(folders[2])
+    service = _made(folders)
+
+    def broken(deployment):
+        raise _Unsayable
+
+    monkeypatch.setattr(service, "open_warnings", broken)
+
+    (row,) = _step(service).warnings
+    assert (row.code, row.accepted_in) == ("warnings", ())
+    assert "raised _Unsayable;" in row.detail
+    closed = _step(service, _end(session_id="2027-01-13_01"))
+    assert isinstance(closed, Idle) and closed.stranded == ()
+    assert _kinds(folders[2], "2027-01-13_01") == ["departure", "returned"]
+
+
+def test_every_warning_an_open_can_be_asked_to_accept_reaches_the_frame_whole(tmp_path):
+    """Call 25's bound, pinned: the open's form sends each accepted warning back by its
+    sentence, of at most `NOTE_LIMIT` characters, so a sentence the frame cut could never be
+    accepted. In the worst case today -- a chaired open (the idle frame always lists the free
+    head), the default calibration, and a measured one whose id is `ID_LIMIT` characters long
+    and whose age has four digits -- every row an open can be asked to accept fits whole, and
+    is the warning the open lists."""
+    oldest = (date.fromtimestamp(WALL) - timedelta(days=9_999)).isoformat()
+    worst = measured(measured_on=oldest, id="x" * ID_LIMIT)
+
+    for name, calibration in (("default", None), ("measured", worst)):
+        service = _service(tmp_path / name)
+        if calibration is not None:
+            service.calibration = calibration
+
+        offered = [w for w in _step(service).warnings if w.accepted_in]
+
+        listed = [e for e in service.open_warnings(Deployment.RIG_CHAIRED) if e.accepted_in]
+        assert [(w.code, w.detail) for w in offered] == [e.key for e in listed]
+        assert all(len(w.detail) <= NOTE_LIMIT for w in offered), name
+        assert [w.code for w in offered] == [
+            "default calibration" if calibration is None else "calibration age", "head free",
+        ]
+    assert "9999 days ago" in offered[0].detail
+
+
 
 
 @pytest.fixture
@@ -2944,6 +3003,29 @@ def test_wlx_taskd_says_at_its_terminal_when_the_calibration_record_will_not_loa
     out = capsys.readouterr().out
     assert "  calibration: refused: the calibration" in out
     assert "every run's pre-flight fails on it" in out
+
+
+def test_wlx_taskd_prints_an_unloadable_records_sentence_safely_at_its_terminal(
+    tmp_path, monkeypatch, capsys
+):
+    """The fix round's item 3: the sentence quotes what `read_calibration` said, a field name
+    the record carries among it, so it reaches the terminal through `_printable`, as the
+    console prints it -- a field name cannot clear the screen or forge a line."""
+    folders = _folders(tmp_path)
+    forged = "\x1b[2J\nSTOPPED: forged"
+    (tmp_path / "cal.json").write_text(json.dumps({**{name: 0 for name in RECORD_FIELDS}, forged: 1}))
+    args = _taskd_args(folders, "--allocation", ALLOCATION)
+    args[args.index(RIG_FILE)] = str(naming(tmp_path / "rig", str(tmp_path / "cal.json")))
+
+    def serve(self, stop):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(Service, "serve", serve)
+
+    assert main(args) == 130
+    out = capsys.readouterr().out
+    assert "\x1b" not in out and "\nSTOPPED: forged" not in out
+    assert "it has \ufffd[2J\ufffdSTOPPED: forged, which a calibration record does not" in out
 
 
 # --- end to end: a real `wlx taskd` service over ZeroMQ (spec §6.5) ---------------------
