@@ -9,8 +9,9 @@ distrust the reasoning. Numbers go stale, arguments do not.
 > written with**, `wl-expcontroller` and `wl_expcontroller/…` paths included, as the PI
 > ruled for dated documents; read `wl_expcontroller/taskd.py` there as `wl_xcon/taskd.py`.
 >
-> **This file describes `main`, except its newest entry**, "What moved on 2026-10-08: the reference
-> library", which is on branch `references` until it merges: every science-facing choice named with the
+> **This file describes `main`.** Its newest entry, "What moved on 2026-10-08: the reference
+> library" (on `main` by fast-forward, `b08200c`, its CI read green, the PI approving its four
+> welfare-document edits; spike S's timing run recorded beside it): every science-facing choice named with the
 > papers it rests on, or said to rest on none, each claim read against its source. Below it, "What moved
 > overnight on 2026-10-08: A1's follow-ups, spike S recorded, A2's color research, B's plan drafted",
 > fixes the defects A1's reviews
@@ -243,7 +244,7 @@ figure was one low. In order:
   error (trap 7).
 - `tools/calibration_design.py` — which constellation the block should present, and
   why. Results in `docs/measurements/dev-machine/2026-09-05-calibration-constellation.md`.
-- `docs/references/` — the reference library (branch `references` until it merges): `library.bib`,
+- `docs/references/` — the reference library: `library.bib`,
   one BibTeX entry per paper, and `decisions.md`, every science-facing decision with its basis.
   `tests/test_references.py` keeps them and every citation in `docs/` consistent;
   `tools/check_references.py` checks the DOIs against Crossref on demand. ADR-0010.
@@ -383,8 +384,17 @@ figure was one low. In order:
 
 **Resume here (state at 2026-10-08, afternoon):** the reference library is built, checked against its
 sources and recorded on branch `references` (worktree `.claude/worktrees/references`, from `main` at
-`d697f34`; plan `docs/superpowers/plans/2026-10-08-reference-library.md`, subagent-driven), **not yet
-merged**. Engine build B runs alongside on `engine-b`, in the other worktree. Besides the library's own
+`d697f34`; plan `docs/superpowers/plans/2026-10-08-reference-library.md`, subagent-driven), and **on
+`main`** by fast-forward (`b08200c`, CI green on all 15 jobs) at the PI's word on 2026-10-08, who
+approved its four welfare-document edits as numbered items: S8's head (chair time and trials no
+ceiling; the one limit eight hours cage to cage, per excursion), S8 §4's "Mandatory breaks" removed
+(a leftover), S9 §3 (the 30-minute warning his accepted starting value), and the twelve-to-eight-hour
+corrections (M0 §3.1, S0 §7.6, P9 §6, XC-085). The same afternoon: **spike S's timing test ran** at
+wh-dws0's text console — 1200 of 1200 frames, first-pixel-out intervals median 8.3333 ms, 0 missed;
+the NVIDIA driver's timestamps, not light (`docs/measurements/wh-dws0/2026-10-08-vulkan-timing/`); the
+monitor lost its signal when the program let go and came back at the login screen (Ctrl+Alt+F1);
+`~/wl-spike-s` was removed from wh-dws0 at the PI's word (Rust kept); and wl-xtasks gained its
+convention line (`ffeb62f`, closing XC-293). Engine build B runs alongside on `engine-b`, in the other worktree. Besides the library's own
 test and checker, the only code it changed is docstrings and comments in `run.py`, `task.py` and
 `eye.py`; no welfare-critical code. Tests: **2910 passed** at this entry (`WLX_REQUIRE_PREPROC=1
 WLX_REQUIRE_BROWSER=1`, `-W error::RuntimeWarning`; 2868 at `d697f34`).

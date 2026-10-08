@@ -10,7 +10,7 @@ On 2026-10-08, answering build A2's question on the macaque observer, the PI ask
 references that justify choices. This should be done throughout this repo and for desigining
 experiments. The wl-xcon and xtasks set should have a library of papers that justify choices and can
 be used for writing up reports" (the engine brainstorm notes, "The morning after (asked 2026-10-08)",
-on branch `engine-b`).
+which reach `main` with engine build B).
 
 No file held papers before this. Citations sat inline in specs and research notes, each written
 where it was needed, and nothing in the suite checked one. The cost showed the same week: engine spec
