@@ -2462,7 +2462,9 @@ def test_a_parse_refusal_is_a_bad_command():
 
 # --- P4d-2b b3a-2: the service's commands from the page ------------------------------
 
-#: The page's `open` body, every field as the *New session* dialog sends it.
+#: The page's `open` body, every field as the *New session* dialog sends it -- **except
+#: `session_kind`, which the dialog (`web.openSession`) sends only from engine build B's
+#: Task 14**; until then an open from the real page is refused.
 OPEN_BODY = {
     "kind": "open", "by": "jake", "session_id": "2027-01-14_01", "animal": "REFERENCE",
     "deployment": "rig_fixed", "view": "direct", "session_kind": "training",
@@ -3909,7 +3911,9 @@ def _typed(seconds_ago: float = 0.0) -> str:
 
 
 def _open_body(**over) -> dict:
-    """What the page's *New session* dialog sends (Task 6's `openSession`)."""
+    """What the page's *New session* dialog sends (Task 6's `openSession`) -- **except
+    `session_kind`, which the dialog sends only from engine build B's Task 14**; until
+    then an open from the real page is refused."""
     body = {
         "kind": "open", "session_id": "2027-01-14_01", "animal": "REFERENCE",
         "deployment": "rig_fixed", "view": "direct", "session_kind": "training",

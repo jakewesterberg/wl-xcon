@@ -2126,12 +2126,23 @@ def test_wlx_run_requires_the_setup(tmp_path, capsys):
     assert "--view" in capsys.readouterr().err
 
 
-def test_wlx_run_requires_what_the_session_is_for(tmp_path):
+def test_wlx_run_requires_what_the_session_is_for(tmp_path, capsys):
     argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm())
     at = argv.index("--kind")
     with pytest.raises(SystemExit) as exited:
         main(argv[:at] + argv[at + 2:])
     assert exited.value.code == 2
+    assert "--kind" in capsys.readouterr().err
+
+
+def test_wlx_run_records_what_the_session_is_for(tmp_path):
+    argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm())
+    argv[argv.index("--kind") + 1] = "piloting"
+
+    assert _main_uninterrupted(argv) == 0
+
+    config = json.loads((tmp_path / "2027-01-14_01" / "xcon" / "config.json").read_text())
+    assert config["session_kind"] == "piloting"
 
 
 def test_wlx_run_refuses_a_task_written_for_the_other_setup_before_anything_is_recorded(tmp_path):
