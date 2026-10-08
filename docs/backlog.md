@@ -15,12 +15,14 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 **Finding one.** Grep the ID, a package (`P9`, `b3`), a repository (`wl-sync`) or a file. The sections: brainstorms the PI asked to have later; features no plan covers yet; defects and review findings deliberately not fixed; debt (cleanup, stale wording, test hygiene); anything that needs the rig or other hardware, measurements included; and asks of, or waits on, other repositories.
 
-**Next free ID: XC-288.**
+**Next free ID: XC-290.**
 
 ## Brainstorms queued for the PI
 
 - **XC-001** Which eye or eyes task control listens to online; today one lost eye drops the whole sample, and a noisy eye pollutes the average unseen. — 2026-09-28, [CHECKPOINT at `42e4a9f`, "Queued for a brainstorm"](https://github.com/jakewesterberg/wl-xcon/blob/42e4a9f/docs/CHECKPOINT.md#what-moved-on-2026-09-28-the-screen-the-stereoscope-direct-view-and-b2a-under-way) — waits on: nothing; hold it before P10's tracker design (XC-032)
 - **XC-002** Automated color calibration and gray-tone linearization, built into the rig. — 2026-09-28, [CHECKPOINT at `42e4a9f`, "Queued for a brainstorm"](https://github.com/jakewesterberg/wl-xcon/blob/42e4a9f/docs/CHECKPOINT.md#what-moved-on-2026-09-28-the-screen-the-stereoscope-direct-view-and-b2a-under-way) — waits on: nothing
+- **XC-288** Records an AI agent can learn training techniques from: save all behavioral and task data so that, years on (hundreds of training sessions, about a dozen monkeys, many experimenter techniques), an agent can learn which techniques helped animals learn, suggest what to try, and perhaps run sessions by tweaking task and training parameters inside the same welfare limits, a person accountable (the PI, 2026-10-08); brainstorm it after engine build B lands and before build C is planned (the timing is an engineering call, not the PI's), since C defines how a task declares its factors and procedures and every session recorded before then is history an agent cannot use. — 2026-10-08, the PI's message of that day, during [the reference-library plan](superpowers/plans/2026-10-08-reference-library.md) — waits on: engine build B
+- **XC-289** A token economy: animals accumulate tokens toward a fluid reward, errors take tokens away, and later tasks may let a monkey wager tokens or trade them for juice, in wl-xtasks and wl-xcon (the PI, 2026-10-08; S8 §4's table already names a "Tokens" bound: token-to-fluid conversion and maximum accumulation; XC-009 is the missing mechanism); brainstorm it with build C's procedures and the reference tasks made right, build it after build E (tokens are drawn on screen), and its reward path is welfare-critical. — 2026-10-08, the PI's message of that day, during [the reference-library plan](superpowers/plans/2026-10-08-reference-library.md) — waits on: engine build C
 
 ## Features not yet planned
 
