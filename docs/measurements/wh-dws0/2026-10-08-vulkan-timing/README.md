@@ -35,3 +35,5 @@ not the rig's PG27UCDM.
 
 When the program released the display the monitor showed no signal and turned off (the PI's report);
 the program had finished normally (exit, results written, no process left).
+The display came back with Ctrl+Alt+F1, the login screen (plasmalogin.service, which RUN-ME.txt had
+named sddm; corrected the same day).
