@@ -19,7 +19,8 @@ directly), the ETRA 2024 OpenIris paper, and the OpenIrisDPI paper.
   - In vivo (macaque) precision 0.39-0.44 arcmin (azimuth/elevation) vs 1.55-1.82
     arcmin for P-CR on the same rig [@ressmeyer2026openirisdpi].
   - Frame processing 1.1 +/- 0.1 ms median — **but ~2% of frames take >= 10 ms
-    (max ~50 ms)** from OS preemption [@ressmeyer2026openirisdpi].
+    (max ~50 ms)**, likely from OS preemption [@ressmeyer2026openirisdpi]. *(Corrected
+    2026-10-08: the paper says "likely".)*
   - Validated in two rhesus macaques including Neuropixels NHP recordings (LGN).
 
 ## Output interfaces (verified in source/wiki)

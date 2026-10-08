@@ -299,8 +299,8 @@ index are both live.
 and dropped it. The tracker is binocular, and on a stereoscope a per-eye criterion is
 the correct primitive: under dichoptic presentation the non-viewing eye deviates to
 its phoria [@gantz2020synchronization; @svede2015monocular] rather than following the
-stimulus (in a normal macaque it stays nearly as stable as the viewing eye, but not
-aligned with it [@pirdankar2016influence]), so a conjugate estimate averages one eye
+stimulus (in a normal macaque it stays nearly as stable as the viewing eye
+[@pirdankar2016influence], but not aligned with it), so a conjugate estimate averages one eye
 doing the task with one eye not looking at the stimulus. A window scoring the eye its
 stimulus is not shown to is refused. *(Corrected 2026-10-08: this said the non-viewing
 eye "drifts", and "one eye doing nothing".)*
@@ -329,7 +329,7 @@ to fix the animal or the camera.
 **`BLINK_BREAK` and `TRACKER_LOST`, with independent graces.** They look identical in
 the data — gaze leaves the window — and they are different events: a blink is the
 animal, tracker loss is the rig. `Tolerances(blink=0.0, tracker_lost=0.05)`: blinks
-are not tolerated unless a task says so [@kimmel2012tracking], because the other way
+are not tolerated unless a task says so, because the other way
 round a task inherits a tolerance nobody chose; tracker loss always gets a brief
 grace, defaulting, as a placeholder until V3(a) measures ours (S5 §4), to the
 OpenIrisDPI paper's reported stall maximum on its authors' PC (~2% of frames >= 10 ms,

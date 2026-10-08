@@ -144,7 +144,8 @@ word on bit 0 on the reference rig** — rig wiring, not format, and one constan
 ## 4. P6 — the stall problem, handled honestly
 
 The OpenIrisDPI paper reports frame **processing** of 1.1 ± 0.1 ms median with **~2% of frames
-≥10 ms (max ~50 ms)** from OS preemption, on the authors' hardware [@ressmeyer2026openirisdpi].
+≥10 ms (max ~50 ms)**, likely from OS preemption, on the authors' hardware
+[@ressmeyer2026openirisdpi]. *(Corrected 2026-10-08: the paper says "likely".)*
 
 **Processing time is not the quantity that hurts us.** What matters is *staleness at the moment
 we poll* — a different distribution, related to the first through camera rate, queueing and
@@ -179,12 +180,14 @@ rig (P1).
 
 ### 4.2 Attack the source, not only the symptom
 
-The 2% is OS preemption on a Windows PC, and the paper measured *their* machine
-[@ressmeyer2026openirisdpi]. Before treating it as a constant, the OpenIris PC gets tuned as a
-rig-configuration task with a **measured before-and-after**: real-time process priority, CPU
-affinity and isolation, power management disabled, no other software, no background scanning. If
-that moves the distribution materially, the whole class of saccade-contingent experiment gets
-easier — and if it does not, we have measured that rather than assumed it.
+The 2% is likely OS preemption on a Windows PC, and the paper measured *their* machine
+[@ressmeyer2026openirisdpi]. *(Corrected 2026-10-08: the paper says "likely due to CPU preemption by
+background operating system processes" and does not name the operating system.)* Before treating it
+as a constant, the OpenIris PC gets tuned as a rig-configuration task with a **measured
+before-and-after**: real-time process priority, CPU affinity and isolation, power management
+disabled, no other software, no background scanning. If that moves the distribution materially,
+the whole class of saccade-contingent experiment gets easier — and if it does not, we have measured
+that rather than assumed it.
 
 ---
 
@@ -328,7 +331,7 @@ the online fit is validated against `validate_map` before an animal depends on i
 | # | Item | Blocks |
 |---|---|---|
 | 1 | ~~`wl-preproc` accepting an online-calibration reader for our format~~ **Closed 2026-09-05: they built it** (`eye/expcontroller.py::read_expcontroller_map`, at `c3f6c5e`), and its source fixes the schema — see §8 | — |
-| 2 | Staleness ceiling and grace-period values | frozen only after V3(a) [@saunders2014direct] |
+| 2 | Staleness ceiling and grace-period values | frozen only after V3(a) |
 | 3 | ~~Stall policy inside a gaze-contingent epoch~~ **Answered: proceed and mark.** Remaining: whether the per-trial staleness summary reaches `wl-preproc`'s `EyeQuality` | wl-preproc |
 | 4 | ~~Independent per-eye maps or a cyclopean fit~~ **Answered in S4 §3: independent per-eye maps against a shared cyclopean target set at zero disparity** | — |
 | 5 | ~~Saccade-detection algorithm~~ **Answered: Engbert–Kliegl**, matching `wl-preproc`'s offline suite so agreement is interpretable. Remaining: its parameters, from V3(c) | V3(c) |

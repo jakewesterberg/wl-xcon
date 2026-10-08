@@ -137,9 +137,11 @@ refuses one off the panel.
 ## 5. The eye camera and its light
 
 **One position, serving both setups**: directly below the screen, in the eye's own vertical
-plane, at the OpenIrisDPI paper's layout of camera at 35° and light at 25°. The paper's rule is
-that the illuminator sits about 10° shallower than the camera, to center P4 (Ressmeyer et al.
-2026, §3.1; panel comparison §4.1) [@ressmeyer2026openirisdpi].
+plane, at the OpenIrisDPI paper's layout of camera at 35° and light at 25° (§2.2). The paper's rule
+is that the illuminator sits shallower than the camera, to center P4 (Ressmeyer et al. 2026, §3.1)
+[@ressmeyer2026openirisdpi]; taking its layout's 10° as the offset is ASSUMED (panel comparison
+§4.1). *(Corrected 2026-10-08: this gave "about 10° shallower" as the paper's rule; 10° is its
+layout, not its rule.)*
 
 At `Z` = 50 cm on the 27-inch (panel comparison §4.2, even border split ASSUMED):
 - the housing's bottom edge is 20.3° below the line of sight;

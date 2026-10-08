@@ -211,7 +211,7 @@ Run from the console (S9), and one of them is required at every session start:
 4. Photodiode patch test — drive known sequences, confirm both comparator inputs.
 5. Frame-timing pattern for V1, per mode.
 6. **Disparity verification** — a target at known disparity, confirmed fused and at the intended
-   depth [@wirth2017gazeinformed; @tanabe2004rejection; @busettini1996shortlatency]. Disparity is
+   depth [@wirth2017gazeinformed; @busettini1996shortlatency]. Disparity is
    not covered by the gaze calibration (§3) and needs its own check.
 
 ---

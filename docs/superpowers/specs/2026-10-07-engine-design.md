@@ -243,7 +243,7 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    positive, +y up; a bar's orientation 0° is horizontal; a grating's orientation names its bars, its
    drift direction is a separate angle. A test pins +y as up in the drawing.
 2. **Sizes**: one size number is the full width; each block's definition states it.
-3. **Away from the center**: true visual angle (default) [@marshel2011functional] or the screen center's
+3. **Away from the center**: true visual angle (default) or the screen center's
    scale, declared per task.
 4. **Disparity**: in degrees, near negative [@tanabe2004rejection]. **The per-eye formula is pinned**:
    left eye at x − d/2, right eye at x + d/2, so d < 0 shifts the left eye's image right (crossed,
@@ -258,11 +258,13 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    unseen must land during the saccade** [@deubel1996postsaccadic; @cavanaugh2016saccadic]; one that
    lands after it may be seen (corrected from the notes' gloss, the science review's finding 12; and on
    2026-10-08 from the reference library: suppression of luminance contrast outlasts the saccade by
-   about 50 ms [@diamond2000extraretinal] and lessens within 5-25 ms of its end [@saunders2014direct],
-   so a change landing just after is neither safely hidden nor reliably seen; chromatic gratings show no
-   saccadic suppression [@diamond2000extraretinal], so an isoluminant change is not hidden by landing
-   inside a saccade; and trained monkeys did not show humans' benefit from a post-saccadic blank
-   [@joiner2013corollary], so human results on post-saccadic visibility do not transfer directly).
+   about 50 ms [@diamond2000extraretinal], so a change landing just after is neither safely hidden nor
+   reliably seen; flashed low-frequency chromatic gratings showed no saccadic suppression of contrast
+   threshold [@diamond2000extraretinal], so an isoluminant change may not be hidden by landing inside a
+   saccade (change detection itself was not tested); and trained monkeys did not show humans' benefit
+   from a post-saccadic blank [@joiner2013corollary], so human results on post-saccadic visibility do
+   not transfer directly. The same day, a clause that suppression "lessens within 5-25 ms" of the
+   saccade's end, cited to Saunders & Woods, was removed: it is their summary of other studies).
 7. **Gaze windows may be any shape**, including a stimulus's own outline grown by a margin.
 8. **Off the field**: only when declared; check 8 grows to test extents (XC-143, XC-144).
 9. **Head-free chaired sessions**: nominal head position, recorded and listed; a task may require a
