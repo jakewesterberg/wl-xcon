@@ -4,10 +4,14 @@ channel."""
 
 import json
 from datetime import date
+from pathlib import Path
 
 import pytest
 
 from _calibrations import BACKGROUND, LINEAR, OBSERVER, PRIMARIES, measured
+from _rig import PATH as RIG_FILE
+from _rig import RIG, naming
+from wl_xcon.cli import _load_calibration, _load_rig
 from wl_xcon.photometry import (
     D65,
     DKL,
@@ -199,3 +203,45 @@ def test_a_file_that_is_no_record_is_refused(tmp_path, text, said):
 def test_a_record_larger_than_a_mebibyte_is_refused(tmp_path):
     with pytest.raises(ValueError, match="larger than 1048576 bytes"):
         read_calibration(_write(tmp_path, _record(observer="x" * RECORD_LIMIT)))
+
+
+def test_a_rig_that_names_no_calibration_runs_on_the_default():
+    assert RIG.calibration is None
+    assert _load_calibration(RIG, RIG_FILE) is SRGB
+
+
+def test_the_lab_rig_names_none_until_one_is_measured():
+    assert _load_rig(Path("tasks/rig.py")).calibration is None
+
+
+def test_a_rig_names_its_record_relative_to_its_own_folder(tmp_path):
+    path = naming(tmp_path / "rig", "cal/rig1.json")
+    (tmp_path / "rig" / "cal").mkdir()
+    _write(tmp_path / "rig" / "cal", _record(), "rig1.json")
+
+    assert _load_calibration(_load_rig(path), path).id == "rig1@2027-01-20"
+
+
+@pytest.mark.parametrize("content, said", [
+    (None, "No such file"),
+    ("{", "not JSON"),
+    (json.dumps(_record(extra=1)), "extra"),
+    (json.dumps(_record(transfer={c: [[0.0, 0.5], [0.5, 0.4], [1.0, 1.0]] for c in ("red", "green", "blue")})), "never fall"),
+])
+def test_a_named_record_that_will_not_load_refuses_and_never_falls_back(tmp_path, content, said):
+    path = naming(tmp_path, "cal.json")
+    if content is not None:
+        (tmp_path / "cal.json").write_text(content)
+
+    with pytest.raises(SystemExit) as refused:
+        _load_calibration(_load_rig(path), path)
+
+    assert str(refused.value).startswith("refused: the calibration") and said in str(refused.value)
+
+
+@pytest.mark.parametrize("calibration", [3, "", "  "])
+def test_a_calibration_that_is_not_a_path_is_refused(tmp_path, calibration):
+    path = naming(tmp_path, calibration)
+
+    with pytest.raises(SystemExit, match="the path of a calibration record"):
+        _load_calibration(_load_rig(path), path)

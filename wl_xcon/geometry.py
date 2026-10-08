@@ -295,6 +295,11 @@ class Rig:
     #: Direct view's straight-ahead point, cm from the panel's center (x right, y up):
     #: where (0°, 0°) falls (engine spec §5.1). The center unless measured otherwise.
     straight_ahead_cm: tuple[float, float] = (0.0, 0.0)
+    #: The panel's color calibration (engine spec §7.6: "one calibration for the whole
+    #: panel"): the path of its record, relative to the rig file's folder unless absolute, or
+    #: `None`, and sessions then run on the default, the sRGB standard, which the warnings list
+    #: says (spec §7.1; `cli._load_calibration`).
+    calibration: str | None = None
 
     def direct(self) -> Geometry:
         return Geometry.direct(

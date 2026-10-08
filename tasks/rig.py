@@ -18,6 +18,9 @@ such.
 
 **Sessions are checked against this file** since direct view part 2: `wlx run --rig` and
 `wlx check --rig` load it and build the chosen setup's field from it.
+
+**Its color calibration** is a record this file names (engine build B); none is named, so the
+default applies.
 """
 
 from wl_xcon.geometry import Rig
@@ -42,4 +45,8 @@ RIG = Rig(
     # measured at build from the real sensors (direct-view spec §4, §9 item 1). Until
     # then direct view refuses to exist on these settings.
     housings=(),
+    # NOT YET MEASURED: the panel's color calibration (build J, by spectroradiometer). Until a
+    # record is named here, sessions run on the default, the sRGB standard, and every session's
+    # warnings list says so (engine spec §7.1).
+    calibration=None,
 )

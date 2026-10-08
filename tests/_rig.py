@@ -39,3 +39,19 @@ DIRECT = RIG.direct()
 STEREOSCOPE = RIG.stereoscope(half_ipd_cm=1.6)
 #: What `--rig` is given in the tests that run `wlx`.
 PATH = "tests/_rig.py"
+
+
+def naming(folder: Path, calibration: object) -> Path:
+    """A rig settings file in `folder`: this stand-in rig, housings and all, naming
+    `calibration` as its color calibration record (engine build B), for the tests of a
+    rig that names one. It imports `_rig`, which the suite's own path provides, so it is
+    loaded in-process only (`wlx check --rig`, `wlx run --rig`, `Service`)."""
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / "rig.py"
+    path.write_text(
+        "from dataclasses import replace\n"
+        "from _rig import RIG as _STAND_IN\n"
+        f"RIG = replace(_STAND_IN, calibration={calibration!r})\n",
+        encoding="utf-8",
+    )
+    return path

@@ -29,6 +29,7 @@ from wl_xcon.check import check
 from wl_xcon.review import render as render_review
 from wl_xcon.codes import PROVISIONAL, Allocation
 from wl_xcon.geometry import VIEWS, Geometry, Rig, SubjectSettings
+from wl_xcon.photometry import SRGB, Calibration, read_calibration
 from wl_xcon.actor import Actor, Box
 from wl_xcon.task import Trial
 from wl_xcon.welfare import Deployment
@@ -117,6 +118,28 @@ def _load_rig(path: Path) -> Rig:
     if not isinstance(found, Rig):
         raise SystemExit(f"{path} must define RIG, a geometry.Rig")
     return found
+
+
+def _load_calibration(rig: Rig, rig_path) -> Calibration:
+    """The color calibration a rig names (engine spec §7.1, §7.6), or the default -- the sRGB
+    standard -- when it names none. **A named record that will not load refuses**, with its
+    sentence: it never falls back to the default, which would run a session on an unmeasured
+    panel its operator believes measured."""
+    named = rig.calibration
+    if named is None:
+        return SRGB
+    if not isinstance(named, str) or not named.strip():
+        raise SystemExit(
+            f"refused: {rig_path}: RIG's calibration is the path of a calibration record, or "
+            f"None for the default; got {named!r}"
+        )
+    path = Path(named)
+    if not path.is_absolute():
+        path = Path(rig_path).parent / path
+    try:
+        return read_calibration(path)
+    except (OSError, ValueError) as refused:
+        raise SystemExit(f"refused: the calibration {rig_path} names, {path}: {refused}") from refused
 
 
 def _load_subject_settings(path: Path, subject: str | None) -> SubjectSettings:
