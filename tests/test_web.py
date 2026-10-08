@@ -23,8 +23,10 @@ import pytest
 from _frames import frame, idle, view
 from wl_xcon.actor import Box, Member
 from wl_xcon.cli import _clock, _local
-from wl_xcon.link import Control, Counts, ParamRow, Performance, Preflight, PreflightItem, Question, Refused, ScheduledStop, Staged, Stranded
+from wl_xcon.findings import SESSION_KINDS
+from wl_xcon.link import NOTE_LIMIT, Control, Counts, ParamRow, Performance, Preflight, PreflightItem, Question, Refused, ScheduledStop, Staged, Stranded, WarningRow
 from wl_xcon.web import (
+    _CSS,
     _SCRIPT,
     _clock_time,
     CONTROLS_AT_THE_BOX,
@@ -837,7 +839,7 @@ def test_the_page_writes_only_by_posting_json_to_commands():
     assert 'method: "POST"' in _SCRIPT
     assert "var headers = { \"Content-Type\": \"application/json\" };" in _SCRIPT
     radios = re.findall(r'<input type="radio"[^>]*>', document)
-    assert len(radios) == 4
+    assert len(radios) == 5
 
 
 def test_the_script_does_only_what_spec_4_3_and_5_2_ask():
@@ -2564,3 +2566,119 @@ def test_the_https_page_tells_its_script_how_often_to_ask_for_keys_again():
     assert 'if (answer.reason === "no_token") { window.location.reload(); return; }' in recheck
     assert recheck.count("window.location.reload()") == 1
     assert f'data-lock-wait-ms="{SIGNIN_LOCK_WAIT_MS}"' in document and SIGNIN_LOCK_WAIT_MS == 1000
+
+
+def test_the_warnings_tab_shows_each_accepted_warning_with_its_kinds_and_who_accepted_it():
+    pane = fragments(frame(), view())["warnings"]
+
+    assert "a training session" in pane
+    assert 'data-warn="default calibration"' in pane
+    assert "accepted in training, piloting, recording" in pane and "jake" in pane
+
+
+def test_with_no_session_open_the_tab_and_the_dialog_list_what_an_open_asks_to_accept():
+    panes = fragments(idle(), view())
+
+    assert "an open asks to accept" in panes["warnings"]
+    assert 'data-warn="default calibration"' in panes["dn-warnings"]
+    assert 'data-detail="the sRGB standard&#x27;s"' in panes["dn-warnings"]
+    assert 'data-kinds="training piloting recording"' in panes["dn-warnings"]
+    assert 'id="dn-accept"' in panes["dn-warnings"]
+
+
+def test_a_warning_no_kind_accepts_is_shown_in_the_dialog_and_can_never_be_sent():
+    """The engine B plan, call 21: listed, marked, and carrying no `data-warn`."""
+    refused = WarningRow("calibration record", "it is not JSON", (), None, None)
+
+    panes = fragments(idle(warnings=(refused,)), view())
+
+    assert "data-warn" not in panes["dn-warnings"]
+    assert "no session kind accepts this: every run's pre-flight fails on it" in panes["dn-warnings"]
+
+
+def test_a_listing_fault_is_shown_as_one_and_not_as_a_warning():
+    """The second review's Minor 2: the idle frame's fault row has no kinds, and is not a
+    warning every run refuses."""
+    fault = WarningRow("warnings", "the warnings an open asks to accept could not be listed: x",
+                       (), None, None)
+
+    pane = fragments(idle(warnings=(fault,)), view())["dn-warnings"]
+
+    assert "could not be listed" in pane and "data-warn" not in pane
+    assert "no session kind accepts this" not in pane
+
+
+def test_the_accept_box_is_drawn_only_when_a_row_can_be_accepted():
+    """D7: a box that accepts nothing would read as accepting something."""
+    refused = WarningRow("calibration record", "it is not JSON", (), None, None)
+    fault = WarningRow("warnings", "could not be listed: x", (), None, None)
+    good = WarningRow("default calibration", "the sRGB standard's", SESSION_KINDS, None, None)
+
+    assert "dn-accept" not in fragments(idle(warnings=(refused,)), view())["dn-warnings"]
+    assert "dn-accept" not in fragments(idle(warnings=(fault,)), view())["dn-warnings"]
+    assert "dn-accept" not in fragments(idle(warnings=(refused, fault)), view())["dn-warnings"]
+    assert 'id="dn-accept"' in fragments(idle(warnings=(refused, fault, good)), view())["dn-warnings"]
+
+
+def test_a_runs_owed_warnings_are_shown_whole_in_the_pre_flight():
+    """Task 12's welfare review, I1: the page does not shorten what the source already cut."""
+    said = "luminance-step x30, other: " + "q" * (NOTE_LIMIT - 27) + "…"
+    assert len(said) == NOTE_LIMIT + 1
+    shown = frame(
+        service=True, phase="between_runs",
+        preflight=Preflight("fixation_detection.py", (PreflightItem("warnings", "unknown", said),)),
+    )
+
+    assert f'<span class="val">{said}</span>' in fragments(shown, view())["preflight"]
+    assert "overflow-wrap: anywhere" in _CSS.split("#warnings .val")[1].split("}")[0]
+
+
+def test_the_head_and_the_session_panel_say_what_it_is_for_and_its_calibration():
+    panes = fragments(frame(), view())
+
+    assert '<span class="k">For</span><span class="v">training</span>' in panes["head-id"]
+    assert "<dt>color calibration</dt><dd>srgb-standard</dd>" in panes["setup"]
+    assert "<dt>for</dt><dd>training</dd>" in panes["setup"], "shown, never changed: fixed for the session"
+    assert "none loaded" in fragments(frame(calibration=None), view())["setup"]
+
+
+def test_an_unknown_accepted_earlier_this_session_shows_who_accepted_it_and_no_box():
+    """The review's minor ruling (Call 30): a carried item needs no new acknowledgement."""
+    pump = PreflightItem("pump calibration", "unknown", "no pump calibration")
+    shown = frame(
+        service=True, phase="between_runs",
+        preflight=Preflight("fixation_detection.py", (pump, PreflightItem("out of cage", "pass", "marked"))),
+        warnings=(WarningRow("pump calibration", "no pump calibration", SESSION_KINDS, Box("ann"), 1_700_000_000.0),),
+    )
+
+    panes = fragments(shown, view())
+
+    assert 'data-ack="pump calibration"' not in panes["preflight"]
+    assert "accepted earlier this session by" in panes["preflight"] and "ann" in panes["preflight"]
+    assert "pre-flight ✓" in panes["pf-sum"]
+
+
+def test_a_new_session_is_sent_with_what_it_is_for_and_the_warnings_accepted():
+    body = _function("openSession")
+
+    assert 'session_kind: el("dn-kind").value,' in body
+    assert "accepted: acceptedWarnings()" in body
+    assert ('if (!request.session_kind) { el("dn-msg").textContent = '
+            '"not sent: choose what this session is for"; return; }') in body
+    accepted = _function("acceptedWarnings")
+    assert "if (!box || !box.checked) { return []; }" in accepted
+    assert 'document.querySelectorAll("#dn-warnings [data-warn]")' in accepted
+    assert 'if (kinds.indexOf(el("dn-kind").value) >= 0) {' in accepted
+    assert 'pairs.push([row.getAttribute("data-warn"), row.getAttribute("data-detail")]);' in accepted
+    settle = _function("settleOpen")
+    assert 'el("dn-kind").value = "";' in settle
+    assert 'if (el("dn-accept")) { el("dn-accept").checked = false; }' in settle
+
+
+def test_the_page_has_a_warnings_tab_and_its_panel_shows_when_chosen():
+    html = page(fragments(frame(), view()), stale_after_s=30.0, nonce="n0nce")
+
+    assert '<label class="tab" for="t-warn">Warnings</label>' in html
+    assert '<div class="tabpanel" id="tp-warn">' in html
+    assert '<div id="warnings">' in html and '<div id="dn-warnings">' in html
+    assert "#t-warn:checked ~ .panels #tp-warn" in _CSS

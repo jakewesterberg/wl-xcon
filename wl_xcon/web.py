@@ -45,6 +45,7 @@ from wl_xcon.actor import Actor, Member
 from wl_xcon.cli import _clock, _moment, _setup_words
 from wl_xcon.link import RECENT_OUTCOMES, Counts, Idle, Question, Telemetry
 from wl_xcon.task import Family, Outcome
+from wl_xcon.warnlist import HEAD_FREE, UNLISTED
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,9 +129,11 @@ FRAGMENT_IDS = (
     "pf-sum",
     "preflight",
     "setup",
+    "warnings",
     "end-actions",
     "end",
     "dn-subject",
+    "dn-warnings",
 )
 
 #: The ticks' legend: one entry per `Family`, then the two strings that are none.
@@ -292,6 +295,7 @@ def _head(frame: Telemetry | None) -> str:
         ("Session", _e(frame.session_id), ""),
         ("Subject", _e(frame.subject), ""),
         ("Deployment", _e(frame.deployment), ""),
+        ("For", _e(frame.session_kind), ""),
         # Counted from 1, as `_state` says why.
         ("Run", "—" if frame.run_index is None else _e(frame.run_index + 1), ""),
         ("Block", "—" if frame.block is None else _e(frame.block), ""),
@@ -635,7 +639,8 @@ def _pf_state(frame: Telemetry | Idle | None) -> tuple[str, str]:
     """The pre-flight pill's tone and words (the mockup's `drawPreflight`), from the
     frame's pre-flight: a fail counts first, then the unknowns a person acknowledges --
     an item that is neither pass nor unknown counts as a fail, as `preflight.gate`
-    counts it -- and outside a `wlx taskd` session between runs, why there is none."""
+    counts it -- and outside a `wlx taskd` session between runs, why there is none. An
+    unknown accepted earlier this session is carried, not counted (the engine B plan, call 30)."""
     if frame is None or isinstance(frame, Idle):
         return "neutral", "no session"
     if not frame.service:
@@ -648,7 +653,10 @@ def _pf_state(frame: Telemetry | Idle | None) -> tuple[str, str]:
         return "neutral", "pre-flight · not taken"
     items = frame.preflight.items
     fails = sum(1 for item in items if item.result not in ("pass", "unknown"))
-    unknown = sum(1 for item in items if item.result == "unknown")
+    carried = _accepted(frame)
+    unknown = sum(
+        1 for item in items if item.result == "unknown" and (item.name, item.said) not in carried
+    )
     if fails:
         return "crit", f"pre-flight · {fails} fail"
     if unknown:
@@ -683,15 +691,25 @@ def _pf_pill(frame: Telemetry | Idle | None, view: View) -> str:
 _DOTS = {"pass": "pass", "unknown": "untested"}
 
 
-def _pf_row(item, view: View) -> str:
+def _pf_row(item, view: View, accepted: dict | None = None) -> str:
     """One pre-flight item: its dot, name and sentence, and -- for an unknown -- the box
-    that acknowledges it, carrying its exact name and never ticked here (decision 9)."""
-    acknowledge = (
-        f'<label class="chk"><input type="checkbox" data-ack="{_e(item.name)}" '
-        f'aria-label="acknowledge {_e(item.name)}"{_gate(view)}> acknowledge</label>'
-        if item.result == "unknown"
-        else "<span></span>"
-    )
+    that acknowledges it, carrying its exact name and never ticked here (decision 9); for
+    one the session accepted at an earlier run, who accepted it instead of a box."""
+    earlier = (accepted or {}).get((item.name, item.said)) if item.result == "unknown" else None
+    if earlier is not None:
+        # Carried from an earlier run of this session (the engine B plan, call 30): who
+        # accepted it and when, and no box, since it needs no new acknowledgement.
+        acknowledge = (
+            f'<span class="sub">accepted earlier this session by {_who(earlier.by)} at '
+            f"{_e(_clock_time(earlier.at))}</span>"
+        )
+    elif item.result == "unknown":
+        acknowledge = (
+            f'<label class="chk"><input type="checkbox" data-ack="{_e(item.name)}" '
+            f'aria-label="acknowledge {_e(item.name)}"{_gate(view)}> acknowledge</label>'
+        )
+    else:
+        acknowledge = "<span></span>"
     return (
         f'<div class="row"><span class="st {_DOTS.get(item.result, "fail")}" '
         f'title="{_e(item.result)}"></span><span>{_e(item.name)}</span>'
@@ -722,12 +740,78 @@ def _preflight_pane(frame: Telemetry | Idle | None, view: View) -> str:
             "pill</span>"
         )
     task = _e(frame.preflight.task)
-    rows = "".join(_pf_row(item, view) for item in frame.preflight.items)
+    carried = _accepted(frame)
+    rows = "".join(_pf_row(item, view, carried) for item in frame.preflight.items)
     return (
         f'<div class="sub">for {task} · a fail blocks the run; each unknown starts it only '
         "on your acknowledgement, by name, written into runs.jsonl</div>"
         f'<div class="pf" data-task="{task}">{rows}</div>'
     )
+
+
+def _warning_row(row) -> str:
+    """One warning: its code and sentence, the kinds it is accepted in, and who accepted it
+    and when -- nothing for one an open has yet to ask; a chaired session's says so. One no
+    kind accepts (the engine B plan, calls 19 and 21) is marked so and carries no `data-warn`,
+    so no form can send it as accepted; and a row saying the warnings could not be listed
+    (`UNLISTED`, calls 27 and 31) is said as that, being no warning."""
+    if row.code == UNLISTED and not row.accepted_in:
+        return (
+            f'<div class="row" data-unlisted=""><span>{_e(row.code)}</span>'
+            f'<span class="val">{_e(row.detail)}</span>'
+            '<span class="sub">could not be listed</span></div>'
+        )
+    if not row.accepted_in:
+        return (
+            f'<div class="row" data-refused="{_e(row.code)}"><span>{_e(row.code)}</span>'
+            f'<span class="val">{_e(row.detail)}</span>'
+            '<span class="sub">no session kind accepts this: every run\'s pre-flight fails on it</span></div>'
+        )
+    kinds = ", ".join(row.accepted_in)
+    who = "" if row.by is None else f" · accepted by {_who(row.by)} at {_e(_clock_time(row.at))}"
+    only = " · a chaired session's" if row.code == HEAD_FREE and row.by is None else ""
+    return (
+        f'<div class="row" data-warn="{_e(row.code)}" data-detail="{_e(row.detail)}" '
+        f'data-kinds="{_e(" ".join(row.accepted_in))}"><span>{_e(row.code)}</span>'
+        f'<span class="val">{_e(row.detail)}</span>'
+        f'<span class="sub">accepted in {_e(kinds)}{only}{who}</span></div>'
+    )
+
+
+def _warnings_pane(frame: Telemetry | Idle | None) -> str:
+    """The Warnings tab (engine spec §3.1, §19): the session's accepted warnings, or, with none
+    open, what an open asks to accept."""
+    if frame is None:
+        return _NONE
+    rows = "".join(_warning_row(row) for row in frame.warnings)
+    if isinstance(frame, Idle):
+        return ('<div class="sub">no session open · an open asks to accept these, once, for the '
+                'session</div>' + (rows or '<span class="nm">nothing</span>'))
+    return (f'<div class="sub">a {_e(frame.session_kind)} session · each accepted once, for the '
+            "session; a new one is asked in the next run's pre-flight</div>"
+            + (rows or '<span class="nm">none accepted yet</span>'))
+
+
+def _dn_warnings(frame: Idle, view: View) -> str:
+    """The *New session* dialog's warnings, and the one box that accepts those the chosen
+    kind accepts (`acceptedWarnings` sends each with its sentence: the engine B plan, call
+    25). The box is drawn only when a row can be accepted -- one a kind accepts, and not the
+    row saying the list could not be made (D7): a box that accepts nothing would read as
+    accepting something."""
+    if not frame.warnings:
+        return '<span class="nm">no warnings to accept</span>'
+    rows = "".join(_warning_row(row) for row in frame.warnings)
+    if not any(row.accepted_in and row.code != UNLISTED for row in frame.warnings):
+        return rows
+    return (rows + f'<label class="chk"><input type="checkbox" id="dn-accept"{_gate(view)}> '
+            "accept these warnings for this session</label>")
+
+
+def _accepted(frame: Telemetry) -> dict:
+    """The session's accepted warnings by code and sentence, for the pre-flight's rows: an
+    unknown among them was accepted at an earlier run and is carried (engine spec §20.1;
+    the engine B plan, call 30)."""
+    return {(row.code, row.detail): row for row in frame.warnings}
 
 
 # --- the controls (P4d-2b b2a) ------------------------------------------------------
@@ -1128,7 +1212,8 @@ def _params(frame: Telemetry | None, view: View) -> str:
 
 def _setup(frame: Telemetry | None) -> str:
     """S9a §3's configuration information. Display mode is the setup the session runs
-    in (direct-view spec §3); stimulus calibration has no source yet and says so."""
+    in (direct-view spec §3); stimulus calibration has no source yet and says so. Also what
+    the session is for, fixed for the session, and its color calibration (engine build B)."""
     if frame is None:
         return _NONE
     limit = (
@@ -1155,8 +1240,15 @@ def _setup(frame: Telemetry | None) -> str:
         ),
         ("daily fluid floor", f"{frame.floor_ml:.2f} mL"),
         ("out-of-cage limit", limit),
+        ("for", _e(frame.session_kind)),
         ("display mode", _e(_setup_words(frame.view, frame.half_ipd_cm))),
-        ("stimulus calibration", '<span class="nm">no source yet</span>'),
+        (
+            "color calibration",
+            '<span class="nm">none loaded: every run\'s pre-flight fails on it</span>'
+            if frame.calibration is None
+            else _e(frame.calibration),
+        ),
+        ("stimulus calibration", '<span class="nm">no source yet: S4 §9\'s id waits on V1 and V9</span>'),
     )
     return (
         '<dl class="dl">'
@@ -1369,6 +1461,8 @@ def _idle(frame: Idle, view: View) -> dict[str, str]:
     panes["task-sel"] = _options(frame.offered_tasks, "no task offered")
     panes["setup"] = _idle_setup(frame, view)
     panes["dn-subject"] = _options(frame.animals, "no animal offered", "choose the animal")
+    panes["warnings"] = _warnings_pane(frame)
+    panes["dn-warnings"] = _dn_warnings(frame, view)
     return panes
 
 
@@ -1397,9 +1491,11 @@ def fragments(frame: Telemetry | Idle | None, view: View) -> dict[str, str]:
         "pf-sum": _pf_sum(frame),
         "preflight": _preflight_pane(frame, view),
         "setup": _setup(frame),
+        "warnings": _warnings_pane(frame),
         "end-actions": _end_actions(frame, view),
         "end": _end(frame),
         "dn-subject": _options((), "no animal offered"),
+        "dn-warnings": "",
     }
 
 
@@ -1563,10 +1659,10 @@ h3 { margin: 0; font-family: var(--cond); font-weight: 600; font-size: 11.5px; l
 .main > input { position: absolute; opacity: 0; pointer-events: none; }
 .tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid var(--rule); }
 .tab { border: 1px solid transparent; border-bottom: 0; padding: 7px 12px 6px; cursor: pointer; font-family: var(--cond); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; font-size: 12.5px; color: var(--muted); border-radius: 6px 6px 0 0; margin-bottom: -1px; }
-#t-runtime:checked ~ .tabs [for="t-runtime"], #t-task:checked ~ .tabs [for="t-task"], #t-setup:checked ~ .tabs [for="t-setup"], #t-end:checked ~ .tabs [for="t-end"] { background: var(--surface); border-color: var(--edge); color: var(--ink); }
-#t-runtime:focus-visible ~ .tabs [for="t-runtime"], #t-task:focus-visible ~ .tabs [for="t-task"], #t-setup:focus-visible ~ .tabs [for="t-setup"], #t-end:focus-visible ~ .tabs [for="t-end"] { outline: 2px solid var(--accent); outline-offset: 2px; }
+#t-runtime:checked ~ .tabs [for="t-runtime"], #t-task:checked ~ .tabs [for="t-task"], #t-setup:checked ~ .tabs [for="t-setup"], #t-warn:checked ~ .tabs [for="t-warn"], #t-end:checked ~ .tabs [for="t-end"] { background: var(--surface); border-color: var(--edge); color: var(--ink); }
+#t-runtime:focus-visible ~ .tabs [for="t-runtime"], #t-task:focus-visible ~ .tabs [for="t-task"], #t-setup:focus-visible ~ .tabs [for="t-setup"], #t-warn:focus-visible ~ .tabs [for="t-warn"], #t-end:focus-visible ~ .tabs [for="t-end"] { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tabpanel { display: none; flex-direction: column; gap: 10px; }
-#t-runtime:checked ~ .panels #tp-runtime, #t-task:checked ~ .panels #tp-task, #t-setup:checked ~ .panels #tp-setup, #t-end:checked ~ .panels #tp-end { display: flex; }
+#t-runtime:checked ~ .panels #tp-runtime, #t-task:checked ~ .panels #tp-task, #t-setup:checked ~ .panels #tp-setup, #t-warn:checked ~ .panels #tp-warn, #t-end:checked ~ .panels #tp-end { display: flex; }
 .cols { display: grid; gap: 10px; align-items: stretch; }
 .cols.c3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (max-width: 1100px) { .cols.c3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
@@ -1658,6 +1754,9 @@ button.pill { border: 0; cursor: pointer; }
 .pf { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 20px; }
 .pf .row { display: grid; grid-template-columns: 12px minmax(0, 10em) minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 13px; padding: 3px 0; border-bottom: 1px solid var(--rule); min-height: 30px; }
 .pf .val { font-family: var(--mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+#warnings .row, #dn-warnings .row { display: grid; grid-template-columns: minmax(0, 10em) minmax(0, 1fr); gap: 2px 8px; font-size: 13px; padding: 3px 0; border-bottom: 1px solid var(--rule); }
+#warnings .val, #dn-warnings .val { font-family: var(--mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+#warnings .sub, #dn-warnings .sub { grid-column: 2; }
 .st { width: 10px; height: 10px; border-radius: 50%; }
 .st.pass { background: var(--ok); } .st.warn { background: var(--warn); } .st.fail { background: var(--crit); } .st.untested { box-shadow: inset 0 0 0 1.5px var(--muted); }
 .chk { display: flex; gap: 8px; align-items: center; font-size: 13px; }
@@ -2279,6 +2378,8 @@ _SCRIPT = """
     el("dn-id").value = "";
     el("dn-given").value = "";
     el("dn-subject").value = "";
+    el("dn-kind").value = "";
+    if (el("dn-accept")) { el("dn-accept").checked = false; }
     el("dn-msg").textContent = "";
     pendingOpen = null;
   }
@@ -2524,19 +2625,37 @@ _SCRIPT = """
       animal: el("dn-subject").value,
       deployment: el("dn-deployment").value,
       view: el("dn-view").value,
+      session_kind: el("dn-kind").value,
       departure: el("dn-left").value.trim(),
       delivered_today: today,
       answer: null,
       amend_to: null,
-      amend_reason: ""
+      amend_reason: "",
+      accepted: acceptedWarnings()
     };
     if (!request.animal) { el("dn-msg").textContent = "not sent: choose the animal"; return; }
+    if (!request.session_kind) { el("dn-msg").textContent = "not sent: choose what this session is for"; return; }
     lastOpen = Object.assign({}, request);
     pendingOpen = request.session_id;
     post(request, function (answer) {
       el("dn-msg").textContent = answer.said;
       if (answer.status === "sent") { el("dlg-new").hidden = true; }
     });
+  }
+  function acceptedWarnings() {
+    // What the person accepted for the session, each warning's code and its sentence as the
+    // dialog shows it (the engine B plan, call 25): those the chosen kind accepts. One no kind
+    // accepts carries no data-warn, and is never sent.
+    var box = el("dn-accept");
+    if (!box || !box.checked) { return []; }
+    var pairs = [];
+    Array.prototype.forEach.call(document.querySelectorAll("#dn-warnings [data-warn]"), function (row) {
+      var kinds = row.getAttribute("data-kinds").split(" ");
+      if (kinds.indexOf(el("dn-kind").value) >= 0) {
+        pairs.push([row.getAttribute("data-warn"), row.getAttribute("data-detail")]);
+      }
+    });
+    return pairs;
   }
   function askEnd() {
     el("end-return").value = "";
@@ -2861,11 +2980,13 @@ def page(
       <input type="radio" name="tab" id="t-runtime" checked>
       <input type="radio" name="tab" id="t-task">
       <input type="radio" name="tab" id="t-setup">
+      <input type="radio" name="tab" id="t-warn">
       <input type="radio" name="tab" id="t-end">
       <div class="tabs" aria-label="console sections">
         <label class="tab" for="t-runtime">Runtime</label>
         <label class="tab" for="t-task">Task parameters</label>
         <label class="tab" for="t-setup">Setup</label>
+        <label class="tab" for="t-warn">Warnings</label>
         <label class="tab" for="t-end">End of session</label>
       </div>
       <div class="panels">
@@ -2886,6 +3007,7 @@ def page(
           <section class="panel glass" id="pf-panel"><div class="top"><h2>Pre-flight</h2><span id="pf-sum">{p['pf-sum']}</span></div><div id="preflight">{p['preflight']}</div></section>
           <section class="panel glass"><div class="top"><h2>Session</h2></div><div id="setup">{p['setup']}</div></section>
         </div>
+        <div class="tabpanel" id="tp-warn"><section class="panel glass"><div class="top"><h2>Warnings</h2></div><div id="warnings">{p['warnings']}</div></section></div>
         <div class="tabpanel" id="tp-end"><section class="panel glass"><div class="top"><h2>Summary</h2><div class="selrow" id="end-actions">{p['end-actions']}</div></div>
           <div class="inline crit" id="end-confirm" role="alertdialog" aria-label="confirm end session" hidden><span>{_e(END_CONFIRM)}</span><span>→cage at</span><input id="end-return" autocomplete="off" placeholder="now, HH:MM, or blank for later" aria-label="the return to the home cage"{off}><button class="btn small danger" id="end-yes" type="button"{off}>end session</button><button class="btn small" id="end-no" type="button">cancel</button></div>
           <div class="inline info" id="return-form" role="dialog" aria-label="the return to the home cage" hidden><span>the return to the home cage · session <b class="mono" id="ret-session"></b> · →cage at</span><input id="ret-at" autocomplete="off" placeholder="now, HH:MM, or 2027-01-13T22:40" aria-label="the return to the home cage"{off}><button class="btn small primary" id="ret-yes" type="button"{off}>record return</button><button class="btn small" id="ret-no" type="button">cancel</button></div>
@@ -2909,10 +3031,12 @@ def page(
       <label class="sub" for="dn-subject">subject</label><select id="dn-subject"{off}>{p['dn-subject']}</select>
       <label class="sub" for="dn-deployment">deployment</label><select id="dn-deployment"{off}><option value="rig_fixed">head-fixed</option><option value="rig_chaired">chaired</option></select>
       <label class="sub" for="dn-view">setup</label><select id="dn-view"{off}><option value="direct">direct view</option><option value="stereoscope">stereoscope</option></select>
+      <label class="sub" for="dn-kind">for</label><select id="dn-kind"{off}><option value="">choose what this session is for</option><option value="training">training</option><option value="piloting">piloting</option><option value="recording">recording</option></select>
       <label class="sub" for="dn-left">←cage at</label><input class="field mono" id="dn-left" autocomplete="off" placeholder="HH:MM, or 2027-01-13T22:40"{off}>
       <label class="sub" for="dn-id">id</label><input class="field mono" id="dn-id" autocomplete="off" placeholder="as wlx run --session-id takes it"{off}>
       <label class="sub" for="dn-given">given today, mL</label><input class="field mono" id="dn-given" inputmode="decimal" autocomplete="off" placeholder="blank when not known"{off}>
     </div>
+    <div id="dn-warnings">{p['dn-warnings']}</div>
     <div id="dn-msg" class="sub" role="status"></div>
     <div class="end"><button class="btn" id="dn-cancel" type="button">cancel</button><button class="btn primary" id="dn-ok" type="button"{off}>open session</button></div>
   </div>
