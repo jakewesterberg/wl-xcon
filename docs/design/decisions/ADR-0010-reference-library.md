@@ -63,7 +63,8 @@ that **the lab's Zotero runs Better BibTeX** (2026-10-08).
 - `tools/check_references.py` compares each DOI with Crossref's record (year, first author, title),
   run by hand when papers are added; never in CI, since it needs the network.
 - **A Zotero group is optional**: the lab may import `library.bib` into one and export back to it
-  through Better BibTeX, which its Zotero runs, keys pinned on the way in and kept on the way out; the
+  through Better BibTeX, which its Zotero runs, keys kept on the way out (pinned on the way in:
+  UNVERIFIED, see the README); the
   file in this repository stays the record. An export comes back only through a commit that passes the
   test.
 - No PDFs in the repository, which is public under Apache-2.0.
