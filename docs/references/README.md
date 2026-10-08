@@ -67,13 +67,13 @@ disagrees, so a key never says 1987 for a 1988 paper.
    Never enter a paper from another paper's reference list, and never a claim from a summary of it.
    If no source can be reached, do not enter it: list the claim for the PI as unsourced.
 2. **Enter it** in `library.bib`, in key order, in the format below: `author`, `title`, `year`, what the
-   type needs (`journal`, `volume`, `pages` for an article; `booktitle`, `publisher`, `pages` for a
-   chapter; `publisher` or `organization` for a standard, data set, preprint or web page, `@misc`, whose
-   author is often the issuing body written whole in braces, `{CIE}`, with its short name in
-   `shortauthor`), a bare `doi` (`10.xxxx/...`) or
-   else a `url`, and `note = {checked YYYY-MM-DD: full text ...}` or `{checked YYYY-MM-DD: abstract
-   ...}` followed by what you opened (PubMed ID, PMC ID, the publisher's page, which table or page you
-   read).
+   type needs (`journal`, `volume`, `pages` for an article, with the issue's `number` in place of a
+   volume for a journal that numbers only its issues, as JoVE does; `booktitle`, `publisher`, `pages`
+   for a chapter; `publisher` or `organization` for a standard, data set, preprint or web page,
+   `@misc`, whose author is often the issuing body written whole in braces, `{CIE}`, with its short
+   name in `shortauthor`), a bare `doi` (`10.xxxx/...`) or else a `url`, and `note = {checked
+   YYYY-MM-DD: full text ...}` or `{checked YYYY-MM-DD: abstract ...}` followed by what you opened
+   (PubMed ID, PMC ID, the publisher's page, which table or page you read).
 3. **Add or extend the decision** in `decisions.md`: each key with the claim it supports and where in
    the paper (page, table, figure, or "abstract").
 4. **Run the test:** `python -m pytest -q tests/test_references.py`.

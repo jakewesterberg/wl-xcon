@@ -435,11 +435,11 @@ direct view part 2, 2026-09-29): a task that does not pass in the chosen setup i
 the session opens. The setup is in the session record and in telemetry (schema 14; the setup
 since 9).
 
-Through the stereoscope each eye views one half of the panel through redirection mirrors.
-Therefore one window, one flip, one refresh clock, no genlock — **two viewports on one
-framebuffer**, in cyclopean coordinates with disparity as a stimulus property. A task without
-disparity or per-eye content is the zero-disparity case of the same path, and runs in either
-setup.
+Through the stereoscope each eye views one half of the panel through redirection mirrors
+[@wheatstone1838contributions; @cox2019temporal; @dougherty2021binocular]. Therefore one
+window, one flip, one refresh clock, no genlock — **two viewports on one framebuffer**, in
+cyclopean coordinates with disparity as a stimulus property. A task without disparity or
+per-eye content is the zero-disparity case of the same path, and runs in either setup.
 
 Per-eye viewport geometry (center, folded optical path length, deg/pixel) is computed from
 the rig file (`geometry.py`, `viewport.py`) until V9 measures it. **Vergence is not set by

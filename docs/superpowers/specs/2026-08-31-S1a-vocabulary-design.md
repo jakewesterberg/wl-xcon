@@ -99,7 +99,8 @@ model that has not seen a methods section.
 `eye="left" | "right" | "both"` (default `"both"`). On a split-screen stereoscope,
 **monocular and dichoptic presentation are first-class**: binocular rivalry, monocular
 RF mapping, and interocular-suppression designs all need one eye's viewport to carry
-something the other's does not.
+something the other's does not [@leopold1996activity; @hubel1968receptive;
+@dougherty2021binocular; @mitchell2022stimulating].
 
 Disparity and `eye` are different mechanisms and both are needed. Disparity shifts one
 stimulus in both eyes; `eye` puts different content in each.
@@ -216,7 +217,7 @@ trials structurally identical, which is what makes them comparable.
 `Stimulus.disparity` shifts a whole stimulus in depth. That is not what a random-dot
 stereogram does: an RDS defines a **shape by disparity within the dot pattern**, so
 the figure is invisible monocularly and exists only in the correspondence between the
-two eyes' images. Cyclopean form, in the Julesz sense.
+two eyes' images. Cyclopean form, in the Julesz sense [@julesz1960binocular].
 
 The two are different mechanisms and the vocabulary currently has only the first.
 Adding it means either an `RDS` appearance carrying its own figure and disparity, or
@@ -226,18 +227,19 @@ displaced by it — which would also cover disparity-defined edges and surfaces.
 **Settled: both, split by what they describe.** `RDS` is an appearance carrying
 `correlation` — +1 correlated, 0 uncorrelated, **-1 anticorrelated** — because
 anticorrelation is not a shape at all and cannot be expressed as a displacement, and
-it is the control every disparity paper is asked for. Separately, `Form` is a
-disparity *field* across a patch (`Corrugation`, `Slant`), because a patch carrying
-one has no single disparity to be displaced by. A `Slant`'s extreme depends on how
-wide the patch is, so its range is answered against the aperture rather than quoted
-alone.
+it is the control every disparity paper is asked for [@cumming1997responses;
+@tanabe2004rejection]. Separately, `Form` is a disparity *field* across a patch
+(`Corrugation`, `Slant`) [@nienborg2004receptive; @nguyenkim2003disparitybased],
+because a patch carrying one has no single disparity to be displaced by. A `Slant`'s
+extreme depends on how wide the patch is, so its range is answered against the
+aperture rather than quoted alone.
 
 Check 8 adds a form's extremes to the stimulus's own disparity: a patch centred
 safely can still push one eye's image off the panel at the extreme of its
 corrugation, and only that eye's. A stereogram declared for one eye is refused —
-monocular presentation of one half is a field of random dots with no disparity, and
-it would still run, still record, and still appear in a figure as a disparity
-condition.
+monocular presentation of one half is a field of random dots with no disparity
+[@julesz1960binocular], and it would still run, still record, and still appear in a
+figure as a disparity condition.
 
 ## 11. Still open — the naming, which is the point
 

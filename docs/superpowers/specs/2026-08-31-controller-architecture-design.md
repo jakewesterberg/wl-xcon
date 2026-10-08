@@ -58,7 +58,7 @@ the rest of this document works out their consequences.
 | D3 | **Interchangeability with MonkeyLogic is at the rig-contract and data layer only** — controller-agnostic event lines, reward path, analog inputs, photodiode patches and event vocabulary, owned by `wl-sync` and `wl-exptasks`. No shared task language. A dual-boot task PC buys the swap. | ADR-0001 |
 | D4 | **Tasks are primarily model-authored** under experimenter direction, so the task API optimizes for verifiability, simulatability and review-by-diagram rather than for authoring ergonomics. | — |
 | D5 | **Within-trial logic is declarative data; between-trial logic is ordinary Python.** Representation is Python declarations (dataclass/pydantic), plain-text and IDE-readable. | — |
-| D6 | **Split-screen mirror stereoscope on one panel.** Two viewports on one framebuffer, cyclopean coordinates, disparity as a stimulus property; the monocular v1 task is the zero-disparity case of the stereo path. **Amended 2026-09-28: direct view is the other setup, and the first.** One screen fixed at 50 cm serves both, the stereoscope is removable, the operator picks the setup at session start, and a task declares `Trial.view` (`2026-09-28-direct-view-design.md`). | architecture.md's display section |
+| D6 | **Split-screen mirror stereoscope on one panel.** [@wheatstone1838contributions; @cox2019temporal; @dougherty2021binocular; @mitchell2022stimulating; @carmel2010how] Two viewports on one framebuffer, cyclopean coordinates, disparity as a stimulus property; the monocular v1 task is the zero-disparity case of the stereo path. **Amended 2026-09-28: direct view is the other setup, and the first.** One screen fixed at 50 cm serves both, the stereoscope is removable, the operator picks the setup at session start, and a task declares `Trial.view` (`2026-09-28-direct-view-design.md`). | architecture.md's display section |
 | D7 | **SpikeGLX and Intan both record; either may gate the loop; Intan always stimulates.** Two ingest paths behind one feature interface. | architecture.md's single-source neural plane |
 | D8 | **Microstimulation in three tiers** — epoch-triggered, gaze-triggered, neural-triggered. Tiers 1 and 2 are v1, so stim welfare interlocks are v1 work. | roadmap M6 |
 | D9 | **Live parameter control is a must-have.** Values and structure both, applied atomically at trial boundaries, with a full per-trial parameter snapshot, through one validated write path. | — |
@@ -357,8 +357,10 @@ mirrors. Consequences:
 - **Per-eye viewport geometry** — its own center, its own folded optical path length, its
   own deg/pixel. Path lengths are **measured, not derived** from the monitor's physical
   distance.
-- **Mirror angles set vergence**, so alignment is a calibrated rig parameter with a real
-  alignment procedure (Nonius/vernier), not an assumed symmetry.
+- **Vergence is a constant software offset, not a mirror angle** (optics drawing §6), and
+  mirror alignment is a calibrated rig parameter with a real alignment procedure
+  (Nonius/vernier), not an assumed symmetry. *(Corrected 2026-10-08: this began "**Mirror
+  angles set vergence**, so alignment is".)*
 - **Per-eye resolution and aspect are halved horizontally**, which constrains eccentricity
   and argues for horizontal resolution when selecting the panel.
 - **Photodiode patches sit outside both viewports** (§3.3).

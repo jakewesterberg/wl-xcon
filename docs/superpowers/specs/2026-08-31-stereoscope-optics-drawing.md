@@ -48,7 +48,7 @@ separately.
 | `Z` | **50.0 cm**, eye to screen, **physical**, the same in both setups | PI, 2026-09-28: "I want the screen to be the same physical distance from the animal in stereoscope and the direct viewing. The stereoscope is a device that is removable and everything else is fixed." | **Ruled.** The screen is fixed in place (a locked arm or stand with a stop), measured once at setup and re-checked in the regular rig checks |
 | `D` | **63.15 cm** optical path at `E` = 1.6 cm; **62.85–63.25 cm** over IPD 30–38 mm | derived: `D = Z + HW − E` (§3, §4.4) | **Per animal**, and measured per eye (V9) |
 | `HW`, `HH` | 14.749 cm, 16.647 cm — half-viewport on screen | active width / 4, active height / 2 | Derived |
-| `E` | half-IPD, **variable per animal** | measured per animal | **A build parameter, not a constant** |
+| `E` | half-IPD, **variable per animal** | measured per animal [@ferrea2025frontal; @wirth2017gazeinformed; @hadjidimitrakis2011fix; @walton2019rhesus] | **A build parameter, not a constant** |
 | `θ` | the full viewport, `atan(HW/D)` = **13.15°** at `E` = 1.6 cm (13.13–13.21° over IPD); the **mask** stops it, **starting at ±12°**; the **requirement** is ±10° | PI, 2026-09-27 ("for the stereoscope setup +/- 10 deg is enough, most of the experiments will not be in the stereoscope") and 2026-09-28 (the mask) | Ruled (§5) |
 
 **The area, not the diagonal.** ASUS's "26.5-inch" is rounded: the published area's own diagonal
@@ -65,8 +65,8 @@ screen fixed, it also makes the optical path, and so the field and deg/pixel, pe
 ## 2. The arrangement: a periscope per eye
 
 Two flat first-surface mirrors per eye at 45°, translating each eye's optical axis laterally
-outward onto the center of its own screen half. Plan view, not to scale, at `E` = 1.6 cm, with
-the mirrors built for the full viewport (§5):
+outward onto the center of its own screen half [@carmel2010how; @dougherty2021binocular]. Plan
+view, not to scale, at `E` = 1.6 cm, with the mirrors built for the full viewport (§5):
 
 ```
                       PANEL  (59.00 cm active width, split at the midline)
@@ -227,8 +227,9 @@ covers only the outer 1.33 cm of it; the rest is inside the right eye's field.
 
 **A midline divider blocks it** (PI, 2026-09-28): a thin matte-black plate on the midline, from
 the ridge back toward the face, stopping short of the nose, its face end trimmed to the animal
-at fitting. The animal's own nose was the alternative; whether it reaches far enough forward is
-**UNVERIFIED** (the muzzle clearance is found at build, §8 item 4), so it is not relied on.
+at fitting [@carmel2010how]. The animal's own nose was the alternative; whether it reaches far
+enough forward is **UNVERIFIED** (the muzzle clearance is found at build, §8 item 4), so it is
+not relied on.
 
 **The clip is also soft.** A pupil of diameter `d` sees the ridge from a spread of positions, so
 the nasal edge fades over `d / (a − E)` radians: 0.84° per mm of pupil at `E` = 1.6 cm (0.71–0.89°
@@ -336,7 +337,8 @@ item.
 The periscope translates without deviating, so both eyes' axes leave parallel and normal to the
 panel. A stimulus drawn at identical viewport coordinates therefore has **zero retinal
 disparity and is perceived at optical infinity**, while accommodation sits at the optical path,
-63.15 cm — the ordinary stereoscope conflict.
+63.15 cm — the ordinary stereoscope conflict [@hoffman2008vergenceaccommodation;
+@cumming1986disparityinduced].
 
 To place zero-disparity at the screen's optical distance instead, the axes must converge by
 `2·atan(E/D)` = **2.9°** at `E` = 1.6 cm (2.7–3.5° over IPD 30–38 mm). Do this **in software**,
@@ -355,9 +357,9 @@ metal, and it makes the two optical paths unequal — which S0's V9 already forb
 ## 7. Build and verification checklist
 
 **Build**
-1. First-surface mirrors only. A second-surface mirror gives a ghost image displaced by twice
-   the glass thickness, which on a stereoscope reads as a faint uncorrelated second image to one
-   eye — a genuine confound for binocular work.
+1. First-surface mirrors only [@edmundoptics2026what]. A second-surface mirror gives a ghost
+   image displaced by twice the glass thickness, which on a stereoscope reads as a faint
+   uncorrelated second image to one eye — a genuine confound for binocular work.
 2. M1 ridge on the midline, both faces at 45° ± 0.25°, meeting with no gap and no overlap.
 3. M2 faces parallel to their M1 counterpart, so the translation is pure.
 4. Independent fine adjustment on each M2, in the horizontal axis at minimum.

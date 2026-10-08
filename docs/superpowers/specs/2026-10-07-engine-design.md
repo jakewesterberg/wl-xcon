@@ -238,14 +238,14 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    positive, +y up; a bar's orientation 0° is horizontal; a grating's orientation names its bars, its
    drift direction is a separate angle. A test pins +y as up in the drawing.
 2. **Sizes**: one size number is the full width; each block's definition states it.
-3. **Away from the center**: true visual angle (default) or the screen center's scale, declared per
-   task.
-4. **Disparity**: in degrees, near negative. **The per-eye formula is pinned**: left eye at x − d/2,
-   right eye at x + d/2, so d < 0 shifts the left eye's image right (crossed, near). **A per-eye
-   position** is that eye's own direction in degrees (its viewport, after the vergence offset); a
-   stimulus carrying both per-eye positions and a disparity is refused. Both the formula and the sign
-   are pinned in the exact drawer's tests, and the sign is verified in an animal by its vergence
-   response to a disparity step (S4 §10 item 6, kept).
+3. **Away from the center**: true visual angle (default) [@marshel2011functional] or the screen center's
+   scale, declared per task.
+4. **Disparity**: in degrees, near negative [@tanabe2004rejection]. **The per-eye formula is pinned**:
+   left eye at x − d/2, right eye at x + d/2, so d < 0 shifts the left eye's image right (crossed,
+   near). **A per-eye position** is that eye's own direction in degrees (its viewport, after the
+   vergence offset); a stimulus carrying both per-eye positions and a disparity is refused. Both the
+   formula and the sign are pinned in the exact drawer's tests, and the sign is verified in an animal by
+   its vergence response to a disparity step [@busettini1996shortlatency] (S4 §10 item 6, kept).
 5. **Linked positions**: declared per link, moving with the other stimulus or placed once at onset.
 6. **Gaze-anchored stimuli**: the gaze rule selectable (newest, default; smoothed; predicted), each
    frame's sample age recorded; behavior when gaze is lost, and during a saccade, declared per task.
@@ -441,10 +441,11 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    constellation before any task; no first task without a validated map; calibration epochs inside tasks
    track drift. **It is its own early build (T)**, needing only the display and the tracker, before the
    first animal session; it does not wait on the spectroradiometer.
-3. **On the stereoscope, the calibration is two monocular grids** (the PI's method): the grid shown to
-   each eye in turn; each eye's map fitted from its own grid; and, from the covered eye recorded during
-   the other eye's grid, **the offset between the eyes at each point is reported** (mirror misalignment
-   plus the animal's phoria). **No threshold: the experimenter accepts or not, and the acceptance is
+3. **On the stereoscope, the calibration is two monocular grids** (the PI's method) [@cox2019temporal;
+   @mitchell2022stimulating; @dougherty2021binocular]: the grid shown to each eye in turn; each eye's
+   map fitted from its own grid; and, from the covered eye recorded during the other eye's grid, **the
+   offset between the eyes at each point is reported** (mirror misalignment plus the animal's phoria)
+   [@svede2015monocular]. **No threshold: the experimenter accepts or not, and the acceptance is
    recorded** (N§R5).
 4. **wl-preproc must be able to read these calibrations** (an ask, §21): a monocular grid's eye, the
    session-start block marked with the calibration task type, interlude recalibrations as

@@ -220,7 +220,9 @@ def test_an_organization_is_keyed_by_its_short_name():
 #: What each entry type needs beyond `COMMON`; `a/b` is met by either field. A type not
 #: listed here is refused; add it, with what it needs, when the library first holds one.
 REQUIRED = {
-    "article": ("journal", "volume", "pages"),
+    # A volume, or the issue's `number` for a journal that numbers only its issues (JoVE,
+    # `carmel2010how`).
+    "article": ("journal", "volume/number", "pages"),
     "incollection": ("booktitle", "publisher", "pages"),
     "inproceedings": ("booktitle", "pages"),
     "book": ("publisher",),

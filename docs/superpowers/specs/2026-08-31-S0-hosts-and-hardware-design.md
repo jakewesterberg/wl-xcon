@@ -318,8 +318,10 @@ vertically, at 0.84 arcmin per pixel. (This paragraph said 1.2 arcmin before 202
 was the 31.5" panel's figure at 50 cm; at 57 cm it was 1.1.) The viewport is 8:9, so horizontal
 eccentricity is the binding dimension — the cost of 16:9, and not binding on anything in the
 stated program. Path lengths are **measured per eye**, not derived (V9): the two folded paths
-are equal only if the mirrors are, and mirror angles set vergence, so alignment is a
-calibrated parameter with a Nonius/vernier procedure rather than an assumed symmetry.
+are equal only if the mirrors are, so alignment is a calibrated parameter with a Nonius/vernier
+procedure rather than an assumed symmetry. Vergence itself is a constant software offset, not a
+mirror angle (optics drawing §6). *(Corrected 2026-10-08: this said "the mirrors are, and mirror
+angles set vergence, so alignment".)*
 
 ### 5.3 Mode is a rig configuration
 
