@@ -424,13 +424,13 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    one**, black otherwise (N§R3). The flip patch still alternates.
 6. **The screen and its mode are checked** against the rig file: panel identity, resolution, refresh,
    bit depth, **and the panel's care features** (pixel shift, its brightness mode, the proximity sensor,
-   variable refresh, which must be off) [@asustekcomputerinc2026rogb; @asustekcomputerinc2026rog;
+   variable refresh, which must be off) [@asus2026rogb; @asus2026rog;
    @dimigen2026advantages; @poth2018ultrahigh; @saunders2014direct], recorded at bring-up; a mismatch is
    a warning.
 7. **After a graphics change**, the warnings list says so until a matching V1 exists [@bridges2020timing;
    @plant2016reminder].
 8. **The OLED's own maintenance** is scheduled outside sessions, or a session refuses to open while it
-   is due [@dimigen2026advantages; @asustekcomputerinc2026rogb] (UNVERIFIED whether the PG27UCDM allows
+   is due [@dimigen2026advantages; @asus2026rogb] (UNVERIFIED whether the PG27UCDM allows
    either).
 
 ## 12. Calibration procedures and test screens (N§9, N§R5)

@@ -104,30 +104,45 @@ SKIPPED = frozenset(
     "into like near of off on onto out outside over past per since through throughout to "
     "toward towards under underneath until up upon via with within without".split()
 )
-KEY = re.compile(r"^[a-z]+[0-9]{4}[a-z]+$")
+#: Author part, year, title word. The year is the four digits just before the closing
+#: letters, so a short name with a digit in it parses: `nc3rs2012refining` is `nc3rs`,
+#: 2012, `refining`.
+KEY = re.compile(r"^(?P<author>[a-z0-9]+)(?P<year>[0-9]{4})(?P<word>[a-z]+)$")
 
 
 def _expected_key(entry) -> str:
     """`<firstauthor><year><firstword>`: the first author's family name without
     particles, the year, and the title's first word that is not an article or a
-    preposition, all lowercase ASCII letters."""
-    words = refs.first_author(entry.fields.get("author", "")).split()
-    while len(words) > 1 and words[0][:1].islower():  # "van Norren" -> "Norren"
-        words.pop(0)
+    preposition, all lowercase ASCII letters. An organization that is the author
+    (`{Video Electronics Standards Association}`) is cited by its usual short name,
+    BibLaTeX's `shortauthor` (`{VESA}`), and that name, digits kept, is the author part
+    (docs/references/README.md, "Keys")."""
+    short = entry.fields.get("shortauthor", "")
+    if short:
+        author = re.sub(r"[^a-z0-9]", "", refs.fold(short))
+    else:
+        words = refs.first_author(entry.fields.get("author", "")).split()
+        while len(words) > 1 and words[0][:1].islower():  # "van Norren" -> "Norren"
+            words.pop(0)
+        author = refs.letters(" ".join(words))
     title = (refs.letters(w) for w in entry.fields.get("title", "").split())
     first_word = next((w for w in title if w and w not in SKIPPED), "")
-    return f"{refs.letters(' '.join(words))}{entry.fields.get('year', '')}{first_word}"
+    return f"{author}{entry.fields.get('year', '')}{first_word}"
 
 
 def _key_problems(entries) -> list[tuple[int, str, str]]:
-    """`(line, key, what is wrong)` for every key off the rule. A suffix letter is a
-    collision's, so it stands only beside the unsuffixed key it collided with."""
+    """`(line, key, what is wrong)` for every key off the rule. A digit in the author
+    part comes only from a `shortauthor`. A suffix letter is a collision's, so it stands
+    only beside the unsuffixed key it collided with."""
     keys = {entry.key for entry in entries}
     bad = []
     for entry in entries:
         expected = _expected_key(entry)
-        if not KEY.match(entry.key):
-            bad.append((entry.line, entry.key, "not lowercase letters, a year, letters"))
+        parts = KEY.match(entry.key)
+        if not parts:
+            bad.append((entry.line, entry.key, "not a lowercase author, a year, letters"))
+        elif not entry.fields.get("shortauthor") and not parts["author"].isalpha():
+            bad.append((entry.line, entry.key, "a digit in the author part, but no shortauthor"))
         elif entry.key == expected:
             continue
         elif entry.key[:-1] != expected or entry.key[-1] not in "bcdefghijklmnopqrstuvwxyz":
@@ -164,6 +179,44 @@ def test_a_collision_suffix_needs_the_key_it_collided_with():
     assert _key_problems(pair) == []
 
 
+def test_an_organization_is_keyed_by_its_short_name():
+    """`{Video Electronics Standards Association}` with `shortauthor = {VESA}` is
+    `vesa2026dsc`: a thirty-six-letter author part is no use in a sentence or a methods
+    section. The short name keeps its digits (`nc3rs2012refining`: NC3Rs, 2012,
+    "Refining"), and a digit in an author part has no other source. Without a
+    `shortauthor` the rule is unchanged."""
+    for key, split in (
+        ("nc3rs2012refining", ("nc3rs", "2012", "refining")),
+        ("ab12020word", ("ab1", "2020", "word")),  # a short name ending in a digit
+    ):
+        parts = KEY.match(key)
+        assert parts and parts.group("author", "year", "word") == split, key
+
+    entry = (
+        "@misc{{{key},\n  author = {{{{{author}}}}},\n{short}"
+        "  title = {{{title}}},\n  year = {{{year}}},\n}}\n"
+    )
+
+    def problems(key, author, short, title, year):
+        line = f"  shortauthor = {{{short}}},\n" if short else ""
+        text = entry.format(key=key, author=author, short=line, title=title, year=year)
+        return [problem for _, _, problem in _key_problems(refs.parse(text))]
+
+    vesa = ("Video Electronics Standards Association", "VESA", "DSC: Display Stream", "2026")
+    assert problems("vesa2026dsc", *vesa) == []
+    assert problems("videoelectronicsstandardsassociation2026dsc", *vesa) == [
+        "the rule gives 'vesa2026dsc'"
+    ]
+    nc3rs = ("NC3Rs", "NC3Rs", "Refining a procedure", "2012")
+    assert problems("nc3rs2012refining", *nc3rs) == []
+    assert problems("ncrs2012refining", *nc3rs) == ["the rule gives 'nc3rs2012refining'"]
+    unnamed = (nc3rs[0], "", *nc3rs[2:])
+    assert problems("ncrs2012refining", *unnamed) == []
+    assert problems("nc3rs2012refining", *unnamed) == [
+        "a digit in the author part, but no shortauthor"
+    ]
+
+
 #: What each entry type needs beyond `COMMON`; `a/b` is met by either field. A type not
 #: listed here is refused; add it, with what it needs, when the library first holds one.
 REQUIRED = {
@@ -174,7 +227,7 @@ REQUIRED = {
     "techreport": ("institution",),
     # A standard, a data set, a preprint or a maker's web page: who issued it, in place of
     # a journal, and like every entry a `doi` or `url`. Its author is often that body,
-    # written whole in braces (`{CIE}`), and its key is made from that name.
+    # written whole in braces (`{CIE}`), and its key is made from its `shortauthor`.
     "misc": ("publisher/organization",),
 }
 COMMON = ("author", "title", "year", "note")
@@ -277,9 +330,10 @@ TOKENS = re.compile(r"\[|\]|\n[ \t]*\n|@")
 #: Pandoc's key: a letter, digit or `_`, then those and single internal punctuation
 #: (pandoc.org/MANUAL.html, "Citation syntax", read 2026-10-08).
 PANDOC_KEY = re.compile(r"[A-Za-z0-9_](?:[A-Za-z0-9_]|[:.#$%&+?<>~/-](?=[A-Za-z0-9_]))*")
-#: Outside brackets only what looks like one of this library's keys is read, so a
-#: decorator (`@dataclass`) or a handle is not taken for a citation.
-LIBRARY_SHAPED = re.compile(r"[a-z]+[0-9]{4}[a-z]+(?![A-Za-z0-9_])")
+#: Outside brackets only what looks like one of this library's keys (`KEY`, digits in a
+#: short name included) is read, so a decorator (`@dataclass`) or a handle is not taken
+#: for a citation.
+LIBRARY_SHAPED = re.compile(r"[a-z0-9]+[0-9]{4}[a-z]+(?![A-Za-z0-9_])")
 
 
 def prose(text: str) -> str:
@@ -353,6 +407,7 @@ def test_citations_are_read_from_prose_only():
             "@lambda2000eleven says, in Pandoc's author-in-text form; not x@mu2001twelve.org,",
             "nor @dataclass; [@nu2002thirteen] is, and `[@xi2003fourteen]` in code is not.",
             "Any Pandoc key is read in brackets, after an inner one too: [see [sic] @Doe99].",
+            "A short name's digit does not hide a bare key: @nc3rs2012refining says so.",
         ]
     )
     assert citations(text) == [
@@ -365,6 +420,7 @@ def test_citations_are_read_from_prose_only():
         (15, "lambda2000eleven"),
         (16, "nu2002thirteen"),
         (17, "Doe99"),
+        (18, "nc3rs2012refining"),
     ]
 
 

@@ -188,7 +188,7 @@ defines it as the identity of a **stimulus calibration record** covering:
 | Per-mode gamma / luminance transfer, per half of the panel | On a split screen, left-right difference is an interocular mismatch (V9) [@abuhaila2025recent] |
 | Measured deg/pixel per eye, per mode | From the measured optical paths, not the nominal |
 | Vergence offset in force | Software constant, per animal |
-| Panel identity, firmware, and the state of every "care" feature | Pixel-shift silently corrupts the geometry (S0 §5.4) [@dimigen2026advantages; @asustekcomputerinc2026rogb] |
+| Panel identity, firmware, and the state of every "care" feature | Pixel-shift silently corrupts the geometry (S0 §5.4) [@dimigen2026advantages; @asus2026rogb] |
 | ABL fill-factor limit measured as an interocular coupling | S0 §5.4 criterion 2 [@dimigen2026advantages; @abuhaila2025recent; @brainard2002display] |
 | The V1 and V9 artifacts this was derived from | So the id resolves to measurements, not to a claim |
 

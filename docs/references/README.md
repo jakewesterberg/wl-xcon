@@ -45,10 +45,21 @@ file is read as BibLaTeX, and the extension `.bibtex` forces BibTeX. The command
 without particles or accents, and the title's first word that is not an article or a preposition.
 Schnapf, Kraft, Nunn & Baylor 1988, "Spectral sensitivity of primate photoreceptors", is
 `schnapf1988spectral`; Stockman & Sharpe 2000, "The spectral sensitivities of ...", is
-`stockman2000spectral`. A body that is the author, written whole in braces (`{CIE}`), is taken whole,
-letters only: CIE 170-1:2006 is `cie2006fundamental`. A second paper that would take the same key
-appends `b`, then `c`, and a suffixed key stands only beside the key it collided with. The test derives
-each key from its entry and fails one that disagrees, so a key never says 1987 for a 1988 paper.
+`stockman2000spectral`.
+
+A body that is the author is written whole in braces (`{Video Electronics Standards Association}`)
+and carries its usual short name in BibLaTeX's `shortauthor` field (`shortauthor = {VESA}`); the
+key's author part is that short name lowercased, letters and digits kept: VESA's page on Display Stream
+Compression is `vesa2026dsc`, and CIE 170-1:2006 (`{CIE}`, `shortauthor = {CIE}`) is
+`cie2006fundamental`. A short name keeps its digits (`NC3Rs` gives `nc3rs`); the year is the four
+digits just before the title word, so a digit in a short name does not move it, and a digit in a key's
+author part comes only from a `shortauthor`. Without `shortauthor` the author is taken whole, letters
+only. (The rule since 2026-10-08: VESA's name in full is a thirty-six-letter author part, no use in a
+sentence or a methods section.)
+
+A second paper that would take the same key appends `b`, then `c`, and a suffixed key stands only
+beside the key it collided with. The test derives each key from its entry and fails one that
+disagrees, so a key never says 1987 for a 1988 paper.
 
 ## Adding a paper
 
@@ -58,7 +69,8 @@ each key from its entry and fails one that disagrees, so a key never says 1987 f
 2. **Enter it** in `library.bib`, in key order, in the format below: `author`, `title`, `year`, what the
    type needs (`journal`, `volume`, `pages` for an article; `booktitle`, `publisher`, `pages` for a
    chapter; `publisher` or `organization` for a standard, data set, preprint or web page, `@misc`, whose
-   author is often the issuing body written whole in braces, `{CIE}`), a bare `doi` (`10.xxxx/...`) or
+   author is often the issuing body written whole in braces, `{CIE}`, with its short name in
+   `shortauthor`), a bare `doi` (`10.xxxx/...`) or
    else a `url`, and `note = {checked YYYY-MM-DD: full text ...}` or `{checked YYYY-MM-DD: abstract
    ...}` followed by what you opened (PubMed ID, PMC ID, the publisher's page, which table or page you
    read).

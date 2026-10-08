@@ -171,8 +171,8 @@ say whether it waits for standby (UNVERIFIED — a 12-hour session would meet it
 proximity sensor is mentioned. **Re-check Dell's lineup in January 2027, before purchase**, for a
 27-inch 4K QD-OLED with DisplayPort 2.1 UHBR20 (uncompressed 4K/240).
 
-ASUS lists, per the spec page and product page read 2026-09-27 [@asustekcomputerinc2026rog;
-@asustekcomputerinc2026rogb]:
+ASUS lists, per the spec page and product page read 2026-09-27 [@asus2026rog;
+@asus2026rogb]:
 - a **26.5" Tandem QD-OLED**, "Latest 4th-gen QD-OLED", 3840 × 2160 at 240 Hz, 0.153 mm
   pixel pitch, 10-bit;
 - **"DisplayPort 2.1a UHBR20 (80Gbps full bandwidth)"**, carrying "4K at 240Hz ... without
@@ -273,7 +273,7 @@ half-extents are `0.2179 * L` and `0.2451 * L`, the form this section first used
 the PG27UCDM's active area as "589.97 x 332.93 mm"
 ([spec page](https://rog.asus.com/us/monitors/27-to-31-5-inches/rog-swift-oled-pg27ucdm/spec/),
 read 2026-09-28), which is 1.772:1 rather than 16:9, and its "26.5-inch viewable" is rounded (the
-area's own diagonal is 26.67 in) [@asustekcomputerinc2026rog]. The diagonal form fed 26.5 in would
+area's own diagonal is 26.67 in) [@asus2026rog]. The diagonal form fed 26.5 in would
 put each edge 0.6–0.9% short.
 
 **The screen is 50 cm from the eyes, physically, in both setups** (PI, 2026-09-28): "I want the
@@ -340,7 +340,7 @@ DisplayPort 1.4's ~25.9 Gbps of data, so it requires DSC. 4K/120 and FHD/480 sit
 still over DP 1.4 at 10-bit, under it at 8-bit. DP 2.1 UHBR20 (~77 Gbps) carries all of them
 uncompressed. DSC is "visually lossless" by VESA's design intent, which is a claim about human
 subjective judgement on natural images, not about fine gratings, random-dot stereograms, or an
-animal's V1 [@videoelectronicsstandardsassociation2026dsc; @allison2018perspectives]. **Prefer a
+animal's V1 [@vesa2026dsc; @allison2018perspectives]. **Prefer a
 GPU and panel that can avoid it; if DSC is unavoidable, its effect is measured, not assumed.**
 
 ### 5.4 Panel acceptance test — written now, before the panel exists
@@ -349,7 +349,7 @@ Fold into **V9**. A panel that fails 1 or 2 is disqualified regardless of everyt
 
 1. **Burn-in protection is fully defeatable.** Pixel-shift, screen-move, logo dimming and
    anti-flicker all off, and *verified* off [@dimigen2026advantages;
-   @asustekcomputerinc2026rogb]. Pixel-shift translates the whole image periodically: on a rig
+   @asus2026rogb]. Pixel-shift translates the whole image periodically: on a rig
    with a calibrated gaze-to-pixel mapping and a photodiode patch at a fixed screen location,
    that is a silent, periodic corruption of the geometry, and it can walk the patch off its
    sensor. Ask the vendor before purchase; no review covers it.

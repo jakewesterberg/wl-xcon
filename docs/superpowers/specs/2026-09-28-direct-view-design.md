@@ -40,7 +40,7 @@ Earlier the same day the PI had also decided the following. This spec uses them 
 
 **The two setups share one screen at one place.** Both use the ASUS PG27UCDM's published active
 area, 589.97 × 332.93 mm (ASUS spec page, read 2026-09-28, S0 §5.1)
-[@asustekcomputerinc2026rog]. Each setup differs only in the path from the eye to that screen.
+[@asus2026rog]. Each setup differs only in the path from the eye to that screen.
 
 | | Direct view | Stereoscope |
 |---|---|---|
