@@ -327,3 +327,42 @@ def test_on_the_default_every_reference_task_trains_but_the_search_task(name):
     else:
         assert in_training == set()
         assert in_recording == {"contrast-on-default"}
+
+
+@pytest.fixture(scope="module")
+def training() -> Trial:
+    return _load("visual_search_training", "search")
+
+
+def test_the_training_variant_is_the_search_task_with_ordinary_colors(search, training):
+    """N§4 batch 2: "a training variant uses ordinary red and green (no isoluminance claim)".
+    Everything but the colors and their two luminances is the search task's own."""
+    assert (training.states, training.windows, training.view, training.start) == (
+        search.states, search.windows, search.view, search.start)
+    theirs = {p.name: p for p in search.params}
+    ours = {p.name: p for p in training.params}
+    assert set(ours) - set(theirs) == {"red_luminance", "green_luminance"}
+    for name in set(theirs) - {"target_looks", "distractors"}:
+        assert ours[name] == theirs[name], name
+    assert [(p.low, p.high, p.start) for p in (ours["red_luminance"], ours["green_luminance"])] == [
+        (0.0, 17.0, 15.0), (0.0, 57.0, 15.0)]
+
+
+def test_the_training_variant_trains_on_the_default_and_never_records_on_it(training):
+    found = check(training, _load("allocation", "ALLOCATION"), geometry=GEOMETRY, calibration=SRGB)
+
+    assert [f for f in found if f.refuses("training") or f.refuses("piloting")] == []
+    assert {f.code for f in found if f.refuses("recording")} == {
+        "color-on-default", "contrast-on-default"}
+
+
+def test_simulation_reaches_every_outcome_the_training_variant_declares(training):
+    census = simulate(
+        training,
+        Subject(seed=5, engagement=0.85, lapse=0.15,
+                hazards={Entered: 4.0, Exited: 0.5, SaccadeTo: 5.0}),
+        trials=1500, frame_period=1 / 240, values=SEARCH_VALUES, effects=Recorded(),
+    )
+
+    assert census.hangs == 0
+    assert census.uncovered(training) == set()

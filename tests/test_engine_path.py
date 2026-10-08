@@ -22,7 +22,7 @@ from _calibrations import LINEAR
 from _rig import DIRECT, RIG, STEREOSCOPE
 from wl_xcon import exact, screen, viewport
 from wl_xcon.check import check
-from wl_xcon.photometry import DKL, RMS, Calibration, Gray, Michelson, Weber, xyY
+from wl_xcon.photometry import DKL, RMS, SRGB, Calibration, Gray, Michelson, Weber, xyY
 from wl_xcon.task import (
     After,
     Array,
@@ -135,6 +135,7 @@ REFERENCE = {
     "fixation_detection": ("detection", "FIX", None),
     "adaptive_detection": ("adaptive_detection", "FIX", None),
     "visual_search": ("search", "FIX", PANEL),
+    "visual_search_training": ("search", "FIX", SRGB),
     "calibration": ("calibration", "TARGET", None),
 }
 
