@@ -419,7 +419,7 @@ alongside**. The design was put to him in chat and approved ("Yes, and run build
   library notes, 15 document fixes, 9 backlog lines, none to ask now, 5 questions to ask later) and of the
   disagreements; four integrations (color and display, stereo and eye, welfare and recording, task
   design) and one review over all four; then **four independent checkers who read every claim against
-  its source**, not a sample, and one fix pass. Their counts, Wrong / Overstated / Forced: color and
+  its source**, not a sample (about a third of them against the abstract alone, as each entry says), and one fix pass. Their counts, Wrong / Overstated / Forced: color and
   display **5 / 10 / 1**; stereo and eye **4 / 15 / 4**; welfare and recording **6 / 8 / 0**; task design
   **5 / 14 / 5**. All applied (`314bbc5`, `3978aba`, `4a0ce0e`, `a54d0f6`, `11ddcfa`); then two kiosk
   citations that said more than the paper were removed (Womelsdorf et al. 2021 at S8 §5.2b and S13 §4.0,
@@ -458,8 +458,9 @@ alongside**. The design was put to him in chat and approved ("Yes, and run build
   **XC-289**, a token economy, tokens earned toward fluid and lost on errors, and later wagered or traded
   for juice, in wl-xtasks and wl-xcon (brainstormed with build C's procedures and the reference tasks
   made right, built after build E; its reward path is welfare-critical; XC-009 is the missing mechanism).
-  Next free ID XC-290; `engine-b` holds XC-276 to XC-278 and files its deferrals from XC-290, so take
-  the higher counter at the merge.
+  XC-293 to XC-295 followed (wl-xtasks' key convention; a Better BibTeX round trip; bare keys of other
+  shapes). Next free XC-296; `engine-b` holds XC-276 to XC-278 and XC-290 to XC-292 are reserved for its
+  deferrals, so take the higher counter at the merge.
 - **Held for the PI, each asked in the UI at its moment, not filed** (the sources are in
   `docs/references/decisions.md`). For **the reference tasks made right** (step 3 of the order in "What
   moved on 2026-10-07: demo mode designed and parked", which now lists them): the staircase's miss rule
@@ -475,7 +476,7 @@ alongside**. The design was put to him in chat and approved ("Yes, and run build
   an animal outside 30-38 mm and one paper gives rhesus as "typically 25-35 mm" (STE-20).
 - **Unverified.** Whether Better BibTeX keeps our keys, `shortauthor` and `howpublished` on import (a
   stock Zotero round trip loses the keys); one real round trip through the lab's Zotero group settles it
-  (ADR-0010, the README).
+  (ADR-0010, the README; XC-294).
 - **The merge with `engine-b`.** A trial merge (`git merge-tree`) of this branch at `de32d64`, just
   before this entry, with `engine-b` at `77bc77a` conflicted only in `docs/backlog.md`: the Next free ID
   line and lines added at the same places; keep both sides' lines and the higher counter. Both branches edit

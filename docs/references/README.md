@@ -8,7 +8,7 @@ methods section can be written from the same entries.
 - [`library.bib`](library.bib) — one BibTeX entry per paper.
 - [`decisions.md`](decisions.md) — one entry per decision: when and by whom, where it is recorded,
   and its basis, published or not.
-- `tests/test_references.py` keeps the three consistent; `tools/check_references.py` checks each DOI
+- `tests/test_references.py` keeps the library, the decisions and every citation in `docs/` consistent; `tools/check_references.py` checks each DOI
   against Crossref on demand.
 
 **The rule** (CLAUDE.md): a choice that rests on the literature names its papers by key from

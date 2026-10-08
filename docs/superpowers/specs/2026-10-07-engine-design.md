@@ -263,8 +263,8 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    threshold [@diamond2000extraretinal], so an isoluminant change may not be hidden by landing inside a
    saccade (change detection itself was not tested); and trained monkeys did not show humans' benefit
    from a post-saccadic blank [@joiner2013corollary], so human results on post-saccadic visibility do
-   not transfer directly. The same day, a clause that suppression "lessens within 5-25 ms" of the
-   saccade's end, cited to Saunders & Woods, was removed: it is their summary of other studies).
+   not transfer directly. A clause that suppression "lessens within 5-25 ms" of the saccade's end,
+   cited to Saunders & Woods, was left out: it is their summary of other studies).
 7. **Gaze windows may be any shape**, including a stimulus's own outline grown by a margin.
 8. **Off the field**: only when declared; check 8 grows to test extents (XC-143, XC-144).
 9. **Head-free chaired sessions**: nominal head position, recorded and listed; a task may require a

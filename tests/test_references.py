@@ -520,6 +520,24 @@ def test_decisions_holds_entries():
     assert _decisions(), "docs/references/decisions.md holds no entries"
 
 
+def _starts_with_a_date(text: str) -> bool:
+    """Whether `text` begins with a real calendar date, written YYYY-MM-DD."""
+    found = re.match(r"(\d{4}-\d{2}-\d{2})\b", text.strip())
+    if not found:
+        return False
+    try:
+        datetime.date.fromisoformat(found.group(1))
+    except ValueError:
+        return False
+    return True
+
+
+def test_a_decided_line_starts_with_a_real_date():
+    assert _starts_with_a_date("2026-10-08, the PI")
+    assert not _starts_with_a_date("2026-19-09, the PI")
+    assert not _starts_with_a_date("the PI, 2026-10-08")
+
+
 def test_every_decision_says_when_where_and_on_what_basis():
     """**Decided** (starting with its date), **Where** and **Basis**, each saying
     something. A decision without its basis is the thing this file exists to end; one
@@ -530,7 +548,7 @@ def test_every_decision_says_when_where_and_on_what_basis():
         for name in ("Decided", "Where", "Basis"):
             if not fields.get(name):
                 bad.append((line, heading, f"no **{name}:**"))
-        if fields.get("Decided") and not re.match(r"\d{4}-\d{2}-\d{2}\b", fields["Decided"]):
+        if fields.get("Decided") and not _starts_with_a_date(fields["Decided"]):
             bad.append((line, heading, "**Decided:** does not start with its date"))
     assert bad == [], bad
 
