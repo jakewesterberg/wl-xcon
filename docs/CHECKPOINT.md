@@ -9,10 +9,10 @@ distrust the reasoning. Numbers go stale, arguments do not.
 > written with**, `wl-expcontroller` and `wl_expcontroller/…` paths included, as the PI
 > ruled for dated documents; read `wl_expcontroller/taskd.py` there as `wl_xcon/taskd.py`.
 >
-> **This file describes `main`, except its newest entry,** "What moved overnight on 2026-10-08:
-> A1's follow-ups, spike S recorded, A2's color research, B's plan drafted", which is on branch
-> `a1-followups` and records three pushed branches waiting for the PI (`main` is still A1, `79af7a5`).
-> Below it, "What moved on 2026-10-07: engine build A1,
+> **This file describes `main`.** Its newest entry, "What moved overnight on 2026-10-08: A1's
+> follow-ups, spike S recorded, A2's color research, B's plan drafted", fixes the defects A1's reviews
+> filed and records spike S and A2's research; the PI merged all three branches that morning (on `main`
+> by fast-forward once the merged result's CI read green). Below it, "What moved on 2026-10-07: engine build A1,
 > the screen description and the exact drawer", builds what is on the animal's screen as one resolved
 > description and the slow exact drawer that defines it (on `main` by fast-forward once its CI read
 > green); nothing in a session calls either yet. Below it, "What moved on 2026-10-07: demo mode
@@ -375,9 +375,13 @@ figure was one low. In order:
 ## What moved overnight on 2026-10-08: A1's follow-ups, spike S recorded, A2's color research, B's plan drafted
 
 **Resume here (state at the morning of 2026-10-08):** the PI said "keep building things through the
-night"; nothing science-facing was decided, and nothing new reached `main`, which is still A1 at
-`79af7a5` (its CI run `37696063115` read job by job: all 15 jobs green, `mutation-full` skipped by
-design). Three branches wait for the PI, each pushed:
+night"; nothing science-facing was decided overnight. In the morning **the PI merged all three
+branches** below (integration branch `overnight-merge`: `a1-followups` with `spike-s` and `a2-prep`
+merged in, onto `main` by fast-forward once its CI read green), and answered build B's Q1 (white on
+the default is the standard's **80 cd/m²**, so the reference tasks' luminance settings run 0-80) and
+Q5 (a session's kind is **fixed for the session**); the timing test is "later today". His answers
+are in the brainstorm notes' "The morning after". `main` before the merge was A1 at `79af7a5` (CI run
+`37696063115`, all 15 jobs green). The three branches, as they were merged:
 
 | Branch | Tip | What it holds | Touches |
 |---|---|---|---|
@@ -453,9 +457,11 @@ welfare items.
   `python -c "import wl_xcon; print(wl_xcon.__file__)"`. Two probes of build B's draft had tested `main`;
   the ones its tasks rest on were re-verified at `66c61aa`.
 
-**Next:** the PI's morning: run the timing test; answer A2's five questions and B's five; approve B's
-four welfare items; rule on merging `a1-followups`, `spike-s` and `a2-prep`; XC-262 (a drifting
-grating's direction under a varying orientation); the three stale remote branches; the cross-repo asks.
+**Next:** the timing test (the PI, later on 2026-10-08), its results then recorded under
+`docs/measurements/wh-dws0/`; build B's remaining questions (Q2 which tasks may record on the default,
+Q3 the training variant's red and green, Q4 the calibration file's format) and its welfare items, then
+its plan committed with Q5's task dropped; A2's five questions; XC-262 (a drifting grating's direction
+under a varying orientation); the three stale remote branches; the cross-repo asks.
 
 ## What moved on 2026-10-07: engine build A1, the screen description and the exact drawer
 

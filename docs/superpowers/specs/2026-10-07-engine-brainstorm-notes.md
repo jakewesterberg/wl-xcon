@@ -959,3 +959,17 @@ reward size) and otherwise to approve or comment.
 - **Keeping the spike** — "Report and source, labeled (Recommended)" (offered against: report only;
   keep it out): the report and results under `docs/measurements/`, the source under `tools/`, marked
   throwaway.
+
+## The morning after (asked 2026-10-08)
+
+- **Merging the night's branches** — all three: `a1-followups`, `spike-s` and `a2-prep` (offered
+  each separately).
+- **Spike S's timing test** — "Later today" (offered against: this morning, recommended; skip for now).
+- **Engine build B, its plan's Q1: how bright white counts on the default calibration** — "80, the
+  standard (Recommended)" (offered against: 100, the interim cap; no absolute scale): the published
+  sRGB 80 cd/m². The reference tasks' luminance settings run 0-80 cd/m² until a panel is measured
+  (lowering the 2026-10-07 bound of 100); 40 cd/m² stays the start.
+- **Build B's Q5: can a session's kind change during it** — "Fixed for the session" (offered against:
+  changeable between runs, recommended; chosen per run only): as the spec reads, the kind is chosen at
+  the open and holds until the return; build B's plan drops the task that would have made it
+  changeable.
