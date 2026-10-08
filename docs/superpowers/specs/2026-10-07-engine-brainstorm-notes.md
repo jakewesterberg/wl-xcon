@@ -973,3 +973,53 @@ reward size) and otherwise to approve or comment.
   changeable between runs, recommended; chosen per run only): as the spec reads, the kind is chosen at
   the open and holds until the return; build B's plan drops the task that would have made it
   changeable.
+- **Build B's Q2: which tasks may record on the default calibration until build C** — "Any brightness
+  setting blocks it (Recommended)" (offered against: only named colors block it; no recording on the
+  default at all): any light or contrast a parameter sets counts, so no lab task records on the default
+  until a panel is measured (build J).
+- **Build B's Q3: the `visual_search` training variant's red and green** — "Each its own setting
+  (Recommended)" (offered against: one shared setting; full brightness each): the sRGB red and green
+  primaries' colors, each with its own luminance setting starting at 15 cd/m².
+- **Build B's Q4: the calibration file's format** — "JSON data file (Recommended)" (offered against: a
+  Python file like `rig.py`; YAML, like wl-preproc): one JSON file per calibration, never executed,
+  unknown fields refused; ADR-0010 accepted with this answer.
+- **Build B's four welfare items** — "Approve all four" (offered against: approve with changes; not
+  yet). Build B is to start at once, "as A1 (Recommended)": subagent-driven, merged only after the PI
+  approves the finished code.
+- **Build A2's Q1: what a DKL number means** — "Hybrid (Recommended)" (offered against: pooled cone
+  contrast; Psychtoolbox `DKLDemo.m`'s per-axis scaling; no DKL, cone contrasts; set aside in the
+  question: fraction of the screen's range, each axis in its own cone's contrast): the luminance axis
+  is ordinary luminance contrast, the color axes pooled cone contrast; the gamut check then needs a
+  limit per axis.
+- **A2's Q2: the matrix for cone-based colors on the default** — "CIE's published matrix" (offered
+  against: a lab best-fit matrix; no cone colors on the default; the research note called it a
+  toss-up): the inverse of the CIE's LMS-to-XYZ_F,10 matrix applied to the default's XYZ, its use there
+  recorded as outside the CIE's definition.
+- **A2's Q3: where the cone tables come from** — "Bundle the CIE's files (Recommended)" (offered
+  against: cvrl.org after asking; generated from formulae; downloaded on first use): the CIE's CSVs as
+  separate CC BY-SA 4.0 files with attribution and the metadata's sha256; an ADR when A2 is planned.
+- **A2's Q5: the luminosity behind isoluminance and the DKL luminance axis** — "Cone-based V(λ), 10°
+  (Recommended)" (offered against: classic CIE V(λ) throughout; follow the task; measured per animal):
+  V_F,10; cd/m² stays on CIE V(λ), so the record carries two luminances.
+- **A2's Q4: adjusting the human 10° standard for monkeys** — first "Do a deeper search for macaque
+  monkey values and come back to me"; after the search (macaque lens about 60% of the human density,
+  Horwitz 2015, fitting Lindbloom-Brown et al. 2014; macaque macular pigment peaking at 0.42-1.0 and
+  varying up to fourfold between animals, Snodderly et al. 1984 and Handelman et al. 1991; no published
+  macaque-corrected fundamentals; effects about the size of the CIE's 2° vs 10° difference and smaller
+  than between animals), "Human 10°, switchable later (Recommended)" (offered against: macaque lens at
+  60%; lens and no macular pigment; no macular pigment only): the CIE 10° observer as is, its
+  parameters recorded, built from the CIE's parts so a macaque lens or macular setting can be switched
+  on later — "and record references that justify choices. This should be done throughout this repo
+  and for desigining experiments. The wl-xcon and xtasks set should have a library of papers that
+  justify choices and can be used for writing up reports".
+- **The reference library** — where: "In wl-xcon, xtasks cites it (Recommended)" (offered against: in
+  wl-xtasks; its own repo; in wl-works); form: "can we manage 1 and, as an option, 3? We use Zotero now
+  so it would be convenient, but bibtex as a fallback is nice to have" (offered: BibTeX and short
+  notes, recommended; CSL-JSON; a Zotero group as the source); how far back: "Full backfill now"
+  (offered against: the engine first, then as touched, recommended); and "Yes, and run build B
+  alongside" to the design put to him in chat. Plan: `docs/superpowers/plans/2026-10-08-reference-library.md`
+  on branch `references`.
+- **The cone citation** — "Yes, keep it (Recommended)": "virtually identical" is Schnapf, Kraft, Nunn
+  & Baylor (1988); the macaque peaks are Baylor, Nunn & Schnapf (1987).
+- **Old branches** — `demo-mode` and `xc240` deleted from GitHub (both wholly on `main`); `engine-design`
+  kept, since 63 commits of the engine spec's review history are only there.
