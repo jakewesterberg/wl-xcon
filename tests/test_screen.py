@@ -224,7 +224,8 @@ def test_a_flat_fill_with_no_light_is_refused_unless_it_is_a_window_or_a_scotoma
 
 def test_a_window_s_or_a_scotoma_s_declared_light_is_not_read():
     """The checker holds it to no light rule, so `resolve` reads none it could refuse: a flat
-    fill resolves to no light, a grating to its bars alone, its edge as a grating's."""
+    fill resolves to no light, a grating to its bars alone, and its edge to what shows through
+    it, since there is no contrast for it to shape (call 5)."""
     for looks in (Disc(size=1.0, contrast=Michelson(0.5)), Disc(size=1.0, color=Gray(40.0))):
         item = _one(Stimulus("w", at=(0.0, 0.0), looks=looks, combine="window")).items[0]
         assert item.fill == screen.ResolvedFlat(xyz=None, weber=None)
@@ -232,4 +233,22 @@ def test_a_window_s_or_a_scotoma_s_declared_light_is_not_read():
         item = _one(Stimulus("s", at=(0.0, 0.0), looks=looks, combine="scotoma")).items[0]
         assert item.fill == screen.ResolvedGrating(sf=2.0, phase=0.0, tf=0.0, michelson=None,
                                                    mean_xyz=None)
-        assert item.edge == look.GaussianEdge(sigma=0.5, applies="contrast")
+        assert item.edge == look.GaussianEdge(sigma=0.5, applies="opacity")
+
+
+@pytest.mark.parametrize("fill, combine", [
+    (look.Flat(color=Gray(40.0)), "cover"),
+    (look.SineGrating(contrast=Michelson(0.5)), "window"),
+    (look.SineGrating(contrast=Michelson(0.5)), "scotoma"),
+    (look.Flat(), "window"),
+])
+def test_an_edge_that_applies_to_a_contrast_there_is_none_of_is_refused(fill, combine):
+    """The checker refuses it at load (calls 2 and 5); `resolve` refuses it too rather than
+    give it a meaning, as `_drift` holds the drift rule."""
+    looks = look.Look(shape=look.Circle(size=2.0), fill=fill,
+                      edge=look.GaussianEdge(sigma=0.5, applies="contrast"))
+    with pytest.raises(ValueError, match="has no contrast of its own"):
+        _one(Stimulus("e", at=(0.0, 0.0), looks=looks, combine=combine))
+    covering = look.Look(shape=look.Circle(size=2.0), fill=look.SineGrating(contrast=Michelson(0.5)),
+                         edge=look.GaussianEdge(sigma=0.5, applies="contrast"))
+    assert _one(Stimulus("g", at=(0.0, 0.0), looks=covering)).items[0].edge.applies == "contrast"

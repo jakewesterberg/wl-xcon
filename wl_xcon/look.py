@@ -20,7 +20,9 @@ from wl_xcon.task import Appearance
 #: What an edge's profile multiplies (spec §4.2): the stimulus's opacity, or its
 #: pattern's contrast about the pattern's mean (the classic Gabor). `None` on an edge
 #: means the fill's own default: a contrast envelope on a pattern, an opacity ramp on a
-#: flat light (where the two are one thing: a light fading into what is behind it).
+#: flat light (where the two are one thing: a light fading into what is behind it). A
+#: window or a scotoma draws no light of its own, so its edge is an opacity ramp whatever
+#: its fill: it shapes what shows through (the A1 follow-ups' call 5).
 EDGE_APPLIES = ("opacity", "contrast")
 
 #: The `Gabor` shorthand's drawn extent, in envelope standard deviations from its center.

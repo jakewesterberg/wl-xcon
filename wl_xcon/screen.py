@@ -275,13 +275,28 @@ def _eyes(stimulus, values, geometry, offset):
     return (x + dx - d / 2 + v, y + dy), (x + dx + d / 2 - v, y + dy)
 
 
+def _edge(edge, fill, lit, name):
+    """An edge with `applies` resolved. Only a pattern that draws its own light has a
+    contrast for the edge to shape; a flat light's edge fades its light, and a window's or
+    a scotoma's, whatever its fill, shapes what shows through it (call 5: a Gabor-shaped
+    window is a Gaussian aperture). `check` refuses `"contrast"` on either at load
+    (`bad-block`); this is the backstop for input it never saw, as `_drift` is."""
+    patterned = lit and isinstance(fill, ResolvedGrating)
+    if edge.applies is None:
+        return replace(edge, applies="contrast" if patterned else "opacity")
+    if edge.applies == "contrast" and not patterned:
+        what = "a flat light" if lit else "a window or a scotoma"
+        raise ValueError(f"{name!r}'s edge applies to 'contrast', and {what} has no contrast of "
+                         f"its own for it to shape; it applies to 'opacity'")
+    return edge
+
+
 def _item(stimulus, name, order, looks, offset, values, geometry, onset) -> Item:
     expanded = as_look(looks, values)
     orientation = _num(expanded.orientation, values)
-    fill = _fill(expanded.fill, values, orientation, lit=stimulus.combine not in LIGHTLESS)
-    edge = _bind(expanded.edge, values)
-    if edge.applies is None:
-        edge = replace(edge, applies="contrast" if isinstance(fill, ResolvedGrating) else "opacity")
+    lit = stimulus.combine not in LIGHTLESS
+    fill = _fill(expanded.fill, values, orientation, lit=lit)
+    edge = _edge(_bind(expanded.edge, values), fill, lit, name)
     outline = None
     if expanded.outline is not None:
         outline = ResolvedOutline(width=_num(expanded.outline.width, values),

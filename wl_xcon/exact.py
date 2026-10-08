@@ -255,7 +255,7 @@ def draw(screen, vp, *, region=None, supersample=SUPERSAMPLE):
         u, w = _local(item, x_cm, y_cm, vp, screen.periphery)
         d = signed_distance(item.shape, u, w)
         profile = edge_profile(item.edge, d, u, w)
-        on_opacity = item.edge.applies == "opacity" or isinstance(item.fill, ResolvedFlat)
+        on_opacity = item.edge.applies == "opacity"
         a = coverage(d) * item.opacity * (profile if on_opacity else 1.0)
         envelope = 1.0 if on_opacity else profile
         canvas = _compose(item, canvas, background, a, envelope, w, screen)

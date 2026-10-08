@@ -38,6 +38,23 @@ def _pixel(vp, x_deg, y_deg, region=(0, 0)):
     return int(row) - region[1], int(col) - region[0]
 
 
+def _middle_row(vp, col):
+    """(row, col) of the pixel in column `col` of the middle row of `vp`, and its center's
+    direction (x°, y°). Samples are cm from the rig's straight-ahead point, so the direction
+    folds it in; on an odd grid whose straight-ahead point is the panel's center the row is
+    the horizontal meridian, and y is 0."""
+    row = vp.height_px // 2
+    x_cm, y_cm = viewport.sample_cm(vp, 1, (col, row, col + 1, row + 1))
+    return (row, col), tuple(math.degrees(math.atan(float(c[0, 0]) / vp.distance_cm))
+                             for c in (x_cm, y_cm))
+
+
+def _true_angle(vp, pixel, at):
+    """A pixel's center's angle from the direction `at`, in degrees."""
+    row, col = pixel
+    return float(_angles(vp, (col, row, col + 1, row + 1), *at)[0, 0])
+
+
 def test_a_disc_is_drawn_at_its_light_and_nothing_else_is_lit():
     image, vp = _draw([Stimulus("d", at=(0.0, 0.0), looks=Disc(size=4.0, color=Gray(40.0)))])
     assert image[_pixel(vp, 0.0, 0.0)] == pytest.approx(np.asarray(to_xyz(Gray(40.0))))
@@ -389,6 +406,29 @@ def test_a_scotoma_hides_what_is_below_inside_it():
     image, vp = _draw([_patch("big", 0.0, 40.0), scotoma], trial=_gray20())
     assert _at_center(image, vp) == pytest.approx(20.0)
     assert image[_pixel(vp, 1.5, 0.0)][1] == pytest.approx(40.0)
+
+
+def test_a_gabor_shaped_scotoma_is_a_gaussian_aperture():
+    # Call 5: its edge shapes what shows through it, whatever its fill, so it hides a lit
+    # disc in proportion to its envelope exp(−θ²/2σ²), never as a hard disc 4σ in radius. One
+    # pixel is read with the scotoma centered on it and 0.5° (= σ) left of it at its
+    # elevation; the expected value is taken at that pixel's true angle θ from the center.
+    # The pixel is the mean of its 4 × 4 samples, which at 0.035° pixels departs from its
+    # center's value by under 1e-3 of it (most at the envelope's peak; at θ = σ its radial
+    # curvature is zero).
+    lit, background, sigma = 40.0, 20.0, 0.5
+    pixels, region = (1921, 1081), (940, 530, 1040, 551)
+    probe = viewport.viewports(RIG, DIRECT, pixels=pixels)[0]
+    pixel, (azimuth, elevation) = _middle_row(probe, pixels[0] // 2 + 60)
+    for r in (0.0, sigma):
+        at = (azimuth - r, elevation)
+        below = Stimulus("big", at=at, looks=Disc(size=6.0, color=Gray(lit)))
+        scotoma = Stimulus("s", at=at, looks=Gabor(sigma=sigma), combine="scotoma", layer=1)
+        image, _ = _draw([below, scotoma], trial=_gray20(), pixels=pixels, region=region)
+        theta = _true_angle(probe, pixel, at)
+        hidden = math.exp(-theta ** 2 / (2.0 * sigma ** 2))
+        expected = background + (lit - background) * (1.0 - hidden)  # 20, then 20 + 20·(1 − e^−½)
+        assert image[pixel[0] - region[1], pixel[1] - region[0]][1] == pytest.approx(expected, rel=1e-3)
 
 
 def test_multiply_scales_the_contrast_below():

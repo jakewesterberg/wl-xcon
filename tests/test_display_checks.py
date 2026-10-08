@@ -1057,6 +1057,25 @@ def test_a_flat_light_s_edge_applies_to_its_opacity_not_a_contrast():
     assert _refused(_one(pattern, background=GRAY_BG)) == set()
 
 
+@pytest.mark.parametrize("combine", ["window", "scotoma"])
+def test_a_window_s_or_a_scotoma_s_edge_applies_to_what_shows_through_it(combine):
+    """It draws no light, so there is no contrast for its edge to shape, whatever its fill
+    (call 5): a Gabor-shaped window is a Gaussian aperture."""
+    def aperture(applies):
+        return look.Look(shape=look.Circle(size=4.0), fill=look.SineGrating(contrast=Michelson(0.5)),
+                         edge=look.GaussianEdge(sigma=0.5, applies=applies))
+    said = ("GaussianEdge.applies is 'contrast' on a window or a scotoma: it draws no light of its "
+            "own, so its edge shapes what shows through it and `applies` is \"opacity\" (or left "
+            "unset)")
+    found = _blocks(_over_lit(aperture("contrast"), combine))
+    assert len(found) == 1 and said in found[0], found
+    assert _refused(_over_lit(aperture("opacity"), combine)) == set()
+    assert _refused(_over_lit(aperture(None), combine)) == set()
+    # Through a parameter's choices too.
+    choices = [Param("l", unit="appearance", choices=(NO_LIGHT, aperture("contrast")))]
+    assert _says(_over_lit(P("l"), combine, params=choices), said)
+
+
 def _advice(trial: Trial) -> str:
     return " ".join(f.detail for f in check(trial) if f.code == "weber-on-black")
 

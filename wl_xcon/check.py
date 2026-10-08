@@ -1362,6 +1362,7 @@ def _block_faults(trial: Trial) -> list[Finding]:
     whose choices name it is refused too (XC-263)."""
     from wl_xcon import look
     from wl_xcon.photometry import Michelson, Weber
+    from wl_xcon.screen import LIGHTLESS
     from wl_xcon.task import Annulus, Appearance, Polygon
 
     params = {p.name: p for p in trial.params}
@@ -1414,6 +1415,7 @@ def _block_faults(trial: Trial) -> list[Finding]:
         else:
             kind(what, looks, lambda v: isinstance(v, Appearance), "an appearance")
 
+    lightless = [looks for looks, how in _combined(trial, params) if how in LIGHTLESS]
     for circular in _self_referring(params):
         bad(f"parameter {circular!r} refers to itself: one of its choices names it, directly or "
             f"through another parameter's choices, so it has no value a trial could bind")
@@ -1495,6 +1497,13 @@ def _block_faults(trial: Trial) -> list[Finding]:
                     bad(f"{type(part.edge).__name__}.applies is 'contrast' on a flat fill: a flat "
                         f"light's edge fades its light, so `applies` is \"opacity\" (or left "
                         f"unset); \"contrast\" applies to a pattern")
+            # A window or a scotoma draws no light, so has no contrast for its edge to shape:
+            # the edge shapes what shows through it, whatever the fill (call 5).
+            if getattr(part.edge, "applies", None) == "contrast" and any(
+                    part == shown for shown in lightless):
+                bad(f"{type(part.edge).__name__}.applies is 'contrast' on a window or a scotoma: "
+                    f"it draws no light of its own, so its edge shapes what shows through it and "
+                    f"`applies` is \"opacity\" (or left unset)")
     return findings
 
 

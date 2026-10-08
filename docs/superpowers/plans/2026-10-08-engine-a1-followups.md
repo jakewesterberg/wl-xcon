@@ -19,6 +19,7 @@
 3. **A window or a scotoma needs no light** (XC-257): they show or hide what is below and never draw their fill, so the checker stops asking for one and `resolve` accepts a light-less flat fill on them.
 4. **The cross's distance is the exact one** (XC-248), the standard closed form for a plus shape (two bars of half-length `size/2` and half-thickness `thickness/2`), so ramps and outlines are the same width at its re-entrant corners as on its arms; decided now, before the GPU drawer is matched against it (spec §10.1).
    *Note, 2026-10-08 (Task 5):* the closed form written in Task 5 below is exact only when `size ≥ 2·thickness`, which `check` does not require. What was built sorts the two half-widths so the larger is the arm and takes the inside value as `−min(a − p.x, hypot(max(b − p.x, 0), b − p.y))`; it matches a brute-force distance to the plus's outline to 1e-15 at eleven proportions, and `test_a_short_or_thick_cross_is_the_same_plus_and_exact` pins it. Do not restore the form below.
+5. **A window's or a scotoma's edge applies to its opacity, whatever its fill** (2026-10-08, from the final review's I1): it draws no light, so there is no contrast for an edge to shape, and the edge shapes what shows through it. A Gabor-shaped window or scotoma is a Gaussian aperture, as its author declared, not the hard disc 4σ in radius that call 3 left it drawing. An unset `applies` resolves to `"opacity"` on one; an explicit `"contrast"` is refused at load (`bad-block`, beside call 2's flat-fill rule); `screen.resolve` refuses `"contrast"` on a flat fill or on a window or scotoma as a backstop, and `exact.draw` no longer gives call 2's refused combination a meaning of its own. Cost if wrong: one line in `screen._edge`.
 
 ## Global Constraints
 
@@ -120,3 +121,4 @@
 - Every backlog item in scope maps to a task and is closed in it; the out-of-scope ones are named with why in **Authority**.
 - No new finding code; messages say what to write instead.
 - The four calls are the only new decisions; each is cheap to undo, and none is science-facing.
+  *Note, 2026-10-08 (final review):* call 5 was added after the plan was written; it is the same size as the four and as cheap to undo.
