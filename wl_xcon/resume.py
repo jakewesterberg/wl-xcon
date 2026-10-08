@@ -20,11 +20,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from wl_xcon import actor as actors
+from wl_xcon import link as _link
 from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.levels import Levels, task_name
 from wl_xcon.record import ACCEPTED_WARNINGS, CONTROLS, RUNS, TRIAL_STARTS
 from wl_xcon.simulate import Tally
 from wl_xcon.task import Outcome
+from wl_xcon.warnlist import Entry
 from wl_xcon.welfare import OUT_OF_CAGE
 
 #: The numbers a run's start row records (`Session.run`), which a resume continues from.
@@ -108,10 +110,18 @@ def _accepted(row: dict, number: int, session_kind: str) -> tuple:
         raise damaged("has a detail that is not text")
     if not isinstance(kinds, list) or not all(kind in SESSION_KINDS for kind in kinds):
         raise damaged("has an accepted_in that is not a list of training, piloting or recording")
+    # **Held to what `Entry` refuses** (the engine B final review): `Session.resume` builds one
+    # from each row, after it restores the departure, so a row it would refuse is refused here,
+    # as a reason the session cannot be resumed, never as an exception out of a resume.
+    try:
+        Entry(code, detail, tuple(kinds))
+    except (TypeError, ValueError) as error:
+        raise damaged(f"is not a warning as the rig lists one ({error})") from error
     if row["session_kind"] != session_kind:
+        # Quoted cut (the engine B final review): this sentence is shown on every idle frame.
         raise damaged(
-            f"has a session_kind of {row['session_kind']!r}, and its config.json says the "
-            f"session is for {session_kind!r}"
+            f"has a session_kind of {_link._quoted(row['session_kind'])}, and its config.json "
+            f"says the session is for {session_kind!r}"
         )
     if isinstance(at, bool) or not isinstance(at, (int, float)) or not math.isfinite(at):
         raise damaged("has an at that is not a finite number")
@@ -144,10 +154,12 @@ def _read(directory: Path, departure: float) -> Restoration:
     except (OSError, ValueError) as error:
         raise Unresumable(f"its config.json cannot be read ({error}); end it instead") from error
     # The final review's M5: a folder copied under another name is not that session.
+    # Its value quoted cut (`link._quoted`; the engine B final review), as the session kind's
+    # below: this sentence is `Stranded.why`, shown on every idle frame and the page's banner.
     if str(config["session_id"]) != directory.parent.name:
         raise Unresumable(
-            f"its config.json names session {config['session_id']!r} and its folder is "
-            f"{directory.parent.name!r}, so it is not the session it records; end it instead"
+            f"its config.json names session {_link._quoted(config['session_id'])} and its folder "
+            f"is {directory.parent.name!r}, so it is not the session it records; end it instead"
         )
     starts = _rows(directory, TRIAL_STARTS)
     lines = _rows(directory, "trials.jsonl")
@@ -173,8 +185,8 @@ def _read(directory: Path, departure: float) -> Restoration:
         raise Unresumable(PREDATES_KINDS)
     if session_kind not in SESSION_KINDS:
         raise Unresumable(
-            f"its config.json says the session is for {session_kind!r}, which is not training, "
-            f"piloting or recording; end it instead"
+            f"its config.json says the session is for {_link._quoted(session_kind)}, which is not "
+            f"training, piloting or recording; end it instead"
         )
     runs = _rows(directory, RUNS)
     run_rows = [row for row in runs if row["event"] == "start"]

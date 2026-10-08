@@ -1915,10 +1915,10 @@ class Session:
             at = self.wall_now()
             self._record.warning(code=entry.code, detail=entry.detail, accepted_in=entry.accepted_in,
                                  session_kind=kind, by=by, at=at, how=how, run=run)
-            # Its kinds as a tuple, as a resume restores them, so a live session's `warnings`
-            # and a resumed one's are equal.
-            kept = dataclasses.replace(entry, accepted_in=tuple(entry.accepted_in))
-            self._warnings[entry.key] = (kept, by, at)
+            # Its kinds are a tuple, which `Entry` refuses otherwise (the engine B final review),
+            # as a resume restores them, so a live session's `warnings` and a resumed one's are
+            # equal.
+            self._warnings[entry.key] = (entry, by, at)
 
     def accepted_keys(self) -> frozenset:
         """What this session has accepted, by `Entry.key`."""

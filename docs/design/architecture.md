@@ -131,11 +131,13 @@ stranded, or one marked not resumable; when its record cannot carry it (written 
 or before engine build B, so what the session is for is unknown; unreadable; a start row without
 its run numbers; a `config.json` naming another session than its folder, or a session kind other
 than training, piloting or recording; or a damaged `warnings.jsonl` row: a field missing, a code
-or detail that is not text, an `accepted_in` that is not a list of those kinds, a `session_kind`
-other than `config.json`'s, an `at` that is not a finite number, or a `by` that is neither an
-actor's map nor null) or names two animals; when its animal's bounded config or settings will not
-load, or its bounds changed since it opened; when the animal is past its out-of-cage limit, on
-the recorded departure and that limit, after which the page offers only *end* for it; and when
+or detail that is not text, an `accepted_in` that is not a list of those kinds, a warning
+`warnlist.Entry` refuses (an empty code, a code holding ",", "(", ")" or "×", or a kind named
+twice), a `session_kind` other than `config.json`'s, an `at` that is not a finite number, or a
+`by` that is neither an actor's map nor null) or names two animals; when its animal's bounded
+config or settings will not load, or its bounds changed since it opened; when the animal is
+past its out-of-cage limit, on the recorded departure and that limit, after which the page
+offers only *end* for it; and when
 the record holds a value its animal's bounds or `welfare` refuse (a reward size over its
 maximum, or a fluid that is not a real, non-negative number), which `Session.resume` checks
 before its first write; the out-of-cage limit over its maximum, or one that is no number, is

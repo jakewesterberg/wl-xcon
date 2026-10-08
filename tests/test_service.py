@@ -2639,13 +2639,13 @@ def test_a_resume_names_who_resumed_it_not_who_accepted_a_warning(tmp_path):
     assert resumed["by"] == BY_MAP
 
 
-def _accepted_then_stopped(folders, wall, accepted_in=SESSION_KINDS) -> tuple:
+def _accepted_then_stopped(folders, wall) -> tuple:
     """A session opened at `WALL` accepting the default calibration, a warning accepted by ann
     5 s later, and its process stopped: the warnings it gave while it ran."""
     first = _made(folders, wall=wall)
     _step(first, _open())
     wall.at = WALL + 5.0
-    first.session.accept([Entry("head free", "the head is free", accepted_in)],
+    first.session.accept([Entry("head free", "the head is free", SESSION_KINDS)],
                          by=Box("ann"), how="open", run=None)
     return first.session.warnings
 
@@ -2663,10 +2663,11 @@ def test_a_restored_warning_keeps_when_it_was_accepted(tmp_path):
 
 
 def test_a_resumed_session_gives_the_warnings_the_live_one_gave(tmp_path):
-    """One type for `accepted_in`: an entry built with its kinds as a list is kept with them as
-    a tuple, as a resume reads them back, so the two sessions' `warnings` are equal."""
+    """One type for `accepted_in`: an entry holds its kinds as a tuple, and refuses them
+    otherwise (the engine B final review), as a resume reads them back, so the two sessions'
+    `warnings` are equal."""
     folders, wall = _folders(tmp_path), _Wall()
-    live = _accepted_then_stopped(folders, wall, accepted_in=list(SESSION_KINDS))
+    live = _accepted_then_stopped(folders, wall)
     wall.at = WALL + 100.0
     second = _made(folders, wall=wall)
 
@@ -2695,6 +2696,36 @@ def test_a_torn_warnings_file_is_not_resumable_and_its_return_is_still_taken(tmp
     assert (found.session_id, found.resumable) == ("2027-01-14_01", False)
     assert found.left_at is not None, "its departure is read, so its return can be taken"
     assert found.why.startswith("its warnings.jsonl cannot be read (")
+    assert _resume_refused(second, "2027-01-14_01") == found.why
+    frame = _step(second, _end(session_id="2027-01-14_01"))
+
+    assert isinstance(frame, Idle) and second.stranded == []
+    assert _kinds(folders[2])[-1] == "returned"
+
+
+def test_an_accepted_warning_whose_code_an_entry_refuses_is_not_resumable_and_its_return_is_taken(
+    tmp_path,
+):
+    """The engine B final review, the whole path: a `warnings.jsonl` row whose code holds "×",
+    which `Entry` refuses and `Session.resume` would have raised on after restoring the
+    departure. `wlx taskd` starts again, `stranded.find` marks the session not resumable with
+    `resume.read`'s sentence naming the row, a resume is refused with it, and End session takes
+    the animal's return."""
+    folders = _folders(tmp_path)
+    first = _made(folders)
+    _step(first, _open())
+    path = folders[2] / "2027-01-14_01" / "xcon" / "warnings.jsonl"
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    rows[-1]["code"] = "luminance-step ×2"
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    second = _made(folders)
+
+    (found,) = _step(second).stranded
+    assert (found.session_id, found.resumable) == ("2027-01-14_01", False)
+    assert found.why.startswith(
+        f"its warnings.jsonl row {len(rows)} is not a warning as the rig lists one (a warning's "
+        f"code never holds '×'"
+    )
     assert _resume_refused(second, "2027-01-14_01") == found.why
     frame = _step(second, _end(session_id="2027-01-14_01"))
 

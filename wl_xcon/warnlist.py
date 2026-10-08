@@ -45,19 +45,45 @@ UNLISTED = "warnings"
 #: batch 3: "never expires, but there is an age ... A warning pops after 30 days").
 CALIBRATION_WARN_AFTER_DAYS = 30
 
+#: What no warning's code holds: a run's pre-flight names the codes it asks to accept as a list
+#: in parentheses, a repeated one with its count ("luminance-step ×30"; `preflight.warnings`),
+#: and its rule that a cut never drops a name relies on never meeting one of these in a code.
+CODE_REFUSES = (",", "(", ")", "×")
+
 
 @dataclass(frozen=True, slots=True)
 class Entry:
     """One warning: its code, its sentence (`detail`, as a `Finding`'s is), and the session
-    kinds it is acceptable in -- none, for one no session accepts."""
+    kinds it is acceptable in -- none, for one no session accepts.
+
+    **It refuses what its consumers cannot carry** (the engine B final review): an empty code,
+    a code holding one of `CODE_REFUSES`, and kinds that are not a tuple of the three, each
+    named once. A record read back from disk is held to this before a resume
+    (`resume._accepted`), so a damaged row is a reason it cannot be resumed, never an
+    exception."""
 
     code: str
     detail: str
     accepted_in: tuple[str, ...]
 
     def __post_init__(self) -> None:
+        if not isinstance(self.code, str) or not self.code.strip():
+            raise ValueError("a warning's code is text, and this one is empty")
+        for held in CODE_REFUSES:
+            if held in self.code:
+                raise ValueError(
+                    f"a warning's code never holds {held!r}, which a run's pre-flight uses to "
+                    f"list the codes it asks to accept"
+                )
+        if not isinstance(self.accepted_in, tuple):
+            raise TypeError(
+                f"a warning's accepted_in is a tuple of session kinds, not "
+                f"{type(self.accepted_in).__name__}"
+            )
         for kind in self.accepted_in:
             kind_named(kind)
+            if self.accepted_in.count(kind) > 1:
+                raise ValueError(f"a warning's accepted_in names {kind!r} twice")
 
     @property
     def key(self) -> tuple[str, str]:
@@ -74,7 +100,9 @@ def of_findings(findings: Iterable) -> list[Entry]:
 def of_calibration(calibration: Calibration, today: date) -> list[Entry]:
     """The calibration's: the default's, or a measured one's age past 30 days -- or, dated
     after `today`, one no session kind accepts, since its date or this host's clock is wrong
-    (the engine B plan, call 19)."""
+    (the engine B plan, call 19). **Its sentence says `wlx taskd` must start again**, as
+    `of_unloaded`'s does (the engine B final review): the service reads the record once and
+    anchors its clock once, both as it starts, so a corrected file or clock counts only then."""
     if calibration.standard:
         return [Entry(DEFAULT_CALIBRATION, (
             f"the rig names no measured calibration, so colors and luminances are the sRGB "
@@ -86,7 +114,8 @@ def of_calibration(calibration: Calibration, today: date) -> list[Entry]:
         return [Entry(CALIBRATION_AGE, (
             f"calibration {calibration.id} is dated {calibration.measured_on}, after today "
             f"({today.isoformat()}): its date or this host's clock is wrong, and no session kind "
-            f"accepts it, so every run's pre-flight fails on it until one is corrected"), ())]
+            f"accepts it, so every run's pre-flight fails on it until the one that is wrong is "
+            f"corrected and wlx taskd started again"), ())]
     if age > CALIBRATION_WARN_AFTER_DAYS:
         return [Entry(CALIBRATION_AGE, (
             f"calibration {calibration.id} was measured on {calibration.measured_on}, {age} days "

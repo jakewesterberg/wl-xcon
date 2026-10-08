@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from wl_xcon.actor import Box
+from wl_xcon.link import TEXT_LIMIT, _quoted
 from wl_xcon.resume import PREDATES, PREDATES_KINDS, Unresumable, read
 from wl_xcon.task import Outcome
 
@@ -458,9 +459,16 @@ def _accepted_row(**over) -> dict:
     ({"by": "jake"}, "has a by that is not an actor's map or null"),
     ({"by": {"kind": "box", "name": "jake", "extra": 1}},
      "has a by that is not an actor's map or null"),
+    # What `Entry` refuses (the engine B final review): `Session.resume` would raise on it.
+    ({"code": "luminance-step ×2"},
+     "is not a warning as the rig lists one (a warning's code never holds '×'"),
+    ({"code": "a, b"}, "is not a warning as the rig lists one (a warning's code never holds ','"),
+    ({"code": ""}, "is not a warning as the rig lists one (a warning's code is text, and this one is empty)"),
+    ({"accepted_in": ["training", "training"]},
+     "is not a warning as the rig lists one (a warning's accepted_in names 'training' twice)"),
 ], ids=["code", "detail", "unknown-kind", "kinds-as-text", "kind-not-text", "kinds-as-object",
          "session-kind", "at-bool", "at-text", "at-infinite", "at-nan", "by-text",
-         "by-extra-field"])
+         "by-extra-field", "code-with-a-count", "code-with-a-comma", "code-empty", "kind-twice"])
 def test_a_damaged_accepted_warning_row_is_refused_naming_its_field_never_coerced(
     tmp_path, damage, named
 ):
@@ -477,6 +485,28 @@ def test_a_damaged_accepted_warning_row_is_refused_naming_its_field_never_coerce
 
     assert str(refused.value).startswith(f"its warnings.jsonl row 2 {named}")
     assert str(refused.value).endswith("; end it instead")
+
+
+@pytest.mark.parametrize("where", ["config-kind", "row-kind", "config-session-id"])
+def test_a_value_of_ten_thousand_characters_is_quoted_cut(tmp_path, where):
+    """The engine B final review: why a session cannot be resumed is `Stranded.why`, shown on
+    every idle frame and the page's banner, so a session kind or a session id the record holds
+    is quoted cut, as `link._quoted` cuts a value."""
+    value = "k" * 10_000
+    if where == "config-kind":
+        directory = _folder(tmp_path, config=_config(session_kind=value))
+    elif where == "row-kind":
+        directory = _folder(tmp_path)
+        _jsonl(directory / "warnings.jsonl", [_accepted_row(session_kind=value)])
+    else:
+        directory = _folder(tmp_path, config=_config(session_id=value))
+
+    with pytest.raises(Unresumable) as refused:
+        read(directory, DEPARTURE)
+
+    said = str(refused.value)
+    assert _quoted(value) in said and "k" * (TEXT_LIMIT + 1) not in said
+    assert said.endswith("; end it instead") and len(said) < 2 * TEXT_LIMIT + 200
 
 
 def test_a_warning_accepted_by_nobody_at_a_whole_second_reads_back_as_written(tmp_path):
