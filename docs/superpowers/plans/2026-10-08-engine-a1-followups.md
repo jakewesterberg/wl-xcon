@@ -18,6 +18,7 @@
 2. **A flat light whose edge says `applies="contrast"` is refused at load** (XC-249) rather than given a meaning: for one light, fading its contrast and fading its opacity are the same over the background and different over another stimulus, and nothing asks for the second. Cost if wrong: one definition in `exact.py`.
 3. **A window or a scotoma needs no light** (XC-257): they show or hide what is below and never draw their fill, so the checker stops asking for one and `resolve` accepts a light-less flat fill on them.
 4. **The cross's distance is the exact one** (XC-248), the standard closed form for a plus shape (two bars of half-length `size/2` and half-thickness `thickness/2`), so ramps and outlines are the same width at its re-entrant corners as on its arms; decided now, before the GPU drawer is matched against it (spec §10.1).
+   *Note, 2026-10-08 (Task 5):* the closed form written in Task 5 below is exact only when `size ≥ 2·thickness`, which `check` does not require. What was built sorts the two half-widths so the larger is the arm and takes the inside value as `−min(a − p.x, hypot(max(b − p.x, 0), b − p.y))`; it matches a brute-force distance to the plus's outline to 1e-15 at eleven proportions, and `test_a_short_or_thick_cross_is_the_same_plus_and_exact` pins it. Do not restore the form below.
 
 ## Global Constraints
 
@@ -107,6 +108,8 @@
 - XC-252: on gray 20, a lit `Disc(size=4, color=Gray(30))` and over it a `Disc(size=4, contrast=Weber(0.25))` with `combine="add"`: the center is 30 + 20·0.25 = 35. Prove: swapping `_light`'s mean and background arguments in the `add` branch fails it.
 - XC-250: a soft edge drawn — a flat `look.Look(shape=Circle(size=4), fill=Flat(color=Gray(40)), edge=RaisedCosine(width=1.0))` on black: the pixel at radius 1.75° (half way into the 1° ramp from the 2° boundary) is ≈ 20 (rel 0.05) and at the center 40; an outline's opacity — the outline of a stimulus at `opacity=0.5` over black draws its band at half its color; `exact.draw` of a `Screen` holding an `Item` whose shape is a `Shape` subclass the drawer does not know raises `NotYetDrawable` naming a build.
 - XC-247: a `Viewport` with `ahead_cm=(1.0, 0.5)` puts the sample nearest the viewport's center at x ≈ −1.0 cm, y ≈ −0.5 cm (the straight-ahead point moved right and up); `sample_cm(vp, 2)`'s first row's y is exactly `(height/2 − 0.25) · pitch_y`; for `c = viewport.center(30.0, 10.0)`, `local_true_angle` of `c` itself is (0, 0), of a direction 1° away in any of several directions has `hypot(u, w)` equal to `acos(v·c)` in degrees (1e-9), and of `viewport.center(30.0, 11.0)` has `w > 0`.
+
+*Notes, 2026-10-08 (as built):* the cross's inside value is call 4's note, not the form in item 1. Three of the tests above were corrected before or during the work: at `(0.15, 0.15)` the distance is +0.05 (the nearest boundary point is (0.15, 0.1)), not +0.070711; the soft edge is half way into its ramp at r = 1.5° (≈ 20), and at 1.75° it is ≈ 5.858, since `RaisedCosine`'s ramp lies inside the boundary; and XC-252's proof as written cannot fail (in the `add` branch both arguments are the background), so the break made was `_light(fill, background, below, …)`, which the new test fails at 47.5 against 35.
 
 **Closes:** XC-247, XC-248, XC-250, XC-252, XC-254.
 
