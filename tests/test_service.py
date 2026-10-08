@@ -264,6 +264,37 @@ def test_a_calibration_record_that_will_not_load_never_stops_wlx_taskd_or_an_ope
     assert isinstance(ended, Idle) and _kinds(service.root)[-2:] == ["returned", "session ended"]
 
 
+def test_a_stranded_sessions_return_is_taken_alike_when_the_calibration_record_will_not_load(tmp_path):
+    """The review's C1, on the path it exists for: a stranded animal's return is taken only
+    through a running `wlx taskd`. A session stranded under a good record, and `wlx taskd`
+    started again with one that will not load: its `EndSession` is served, and writes the
+    rows a restart with a good record writes."""
+    (tmp_path / "cal.json").write_text("{")
+    bad = dataclasses.replace(RIG, calibration=str(tmp_path / "cal.json"))
+
+    def stranded_then_ended(where, rig) -> list[dict]:
+        folders = _folders(where)
+        first = _made(folders)
+        _step(first, _open())
+        _step(first, _start())
+        _run_to_its_end(first)
+        # the process stops; `wlx taskd` starts again over the same root, under `rig`
+        second = _made(folders, rig=rig)
+        assert [s.session_id for s in second.stranded] == ["2027-01-14_01"]
+
+        frame = _step(second, _end(session_id="2027-01-14_01"))
+
+        assert isinstance(frame, Idle) and second.stranded == []
+        assert (second.calibration is None) == (rig is bad)
+        return _rows(folders[2])
+
+    good_rows = stranded_then_ended(tmp_path / "good", RIG)
+    bad_rows = stranded_then_ended(tmp_path / "bad", bad)
+
+    assert [row["kind"] for row in bad_rows] == ["departure", "session opened", "returned"]
+    assert bad_rows == good_rows
+
+
 def test_a_session_id_or_animal_that_is_not_one_folder_name_is_refused_and_nothing_is_written(tmp_path):
     """Review Focus 1: each becomes a path, and arrives over the wire."""
     service = _service(tmp_path)
