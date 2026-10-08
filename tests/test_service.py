@@ -340,8 +340,6 @@ def test_every_warning_an_open_can_be_asked_to_accept_reaches_the_frame_whole(tm
     assert "9999 days ago" in offered[0].detail
 
 
-
-
 @pytest.fixture
 def zone(monkeypatch):
     """Sets the host's zone (`TZ`) for one test, and puts this host's back after."""

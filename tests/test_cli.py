@@ -3650,12 +3650,17 @@ def test_the_console_prints_a_warnings_wire_text_safely():
 def test_the_console_says_a_listing_fault_as_one_and_not_as_a_warning():
     """The second review's Minor 2: the idle frame's fault row has no kinds, and is not a
     warning every run refuses."""
-    fault = WarningRow("warnings", "listing the warnings an open asks to accept raised X: x",
-                       (), None, None)
+    fault = WarningRow(
+        "warnings", "listing the warnings an open asks to accept raised X: x\x1b[2J\nSTOPPED: forged",
+        (), None, None,
+    )
 
     shown = render(idle(warnings=(fault,)))
 
-    assert "  warnings could not be listed: listing the warnings an open asks" in shown
+    (line,) = [line for line in shown.splitlines() if "could not be listed" in line]
+    assert line.startswith("  warnings could not be listed: listing the warnings an open asks")
+    assert "\x1b" not in line and line.endswith("X: x\ufffd[2J\ufffdSTOPPED: forged")
+    assert "\nSTOPPED: forged" not in shown
     assert "every run refuses" not in shown
 
 
