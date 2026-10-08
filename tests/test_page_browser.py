@@ -27,12 +27,12 @@ except ImportError:
         raise
     pytest.skip("PyJWT is not installed (the signin extra)", allow_module_level=True)
 
-from _frames import ENDPOINT, frame  # noqa: E402
+from _frames import ENDPOINT, frame, idle  # noqa: E402
 from _issuer import Issuer  # noqa: E402
 from _ports import endpoints as free_endpoints  # noqa: E402
 from _tls import client_context, material  # noqa: E402
 from wl_xcon import signin, web  # noqa: E402
-from wl_xcon.link import ManualReward, Pause  # noqa: E402
+from wl_xcon.link import ManualReward, OpenSession, Pause  # noqa: E402
 from wl_xcon.serve import Hub, Remote, _PageServer, make_handler, tls_context  # noqa: E402
 
 TOKEN = "t0ken-for-tests"
@@ -1089,3 +1089,28 @@ def test_a_page_without_keys_keeps_a_stored_sign_in_grayed_until_its_reload(rig_
     page.click(PAUSE)
     rig.wait_for(lambda: _pauses(rig))
     assert _pauses(rig)[-1].by.name == "Jake Westerberg"
+
+
+def test_a_member_opens_a_session_for_a_kind_and_accepts_the_warning_the_dialog_offers(rig):
+    """Test the path, not the piece (ledger D8): the dialog's open, end to end through the
+    page's own script and `_command_from`. The rig's dispatch is a stand-in (there is no
+    `taskd` behind this page, so no `warnings.jsonl` to read), so what is checked is the
+    request that reached it: the kind chosen, and the warning with its sentence, signed by
+    the member."""
+    page = rig.browser_page()
+    _sign_in(page)
+    rig.hub.offer(idle())
+    page.wait_for_selector('#dn-warnings [data-warn="default calibration"]', state="attached")
+    page.click('[data-cmd="new"]')
+    page.select_option("#dn-subject", "A")
+    page.select_option("#dn-kind", "training")
+    page.fill("#dn-id", "s-1")
+    page.fill("#dn-left", "07:30")
+    page.check("#dn-accept")
+    page.click("#dn-ok")
+    rig.wait_for(lambda: any(isinstance(seen, OpenSession) for seen in rig.dispatch.seen))
+    opened = next(seen for seen in rig.dispatch.seen if isinstance(seen, OpenSession))
+    assert opened.session_kind == "training"
+    assert opened.by.name == "Jake Westerberg"
+    assert [pair[0] for pair in opened.accepted] == ["default calibration"]
+    assert opened.accepted[0][1] == "the sRGB standard's"
