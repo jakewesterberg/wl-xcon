@@ -35,8 +35,10 @@ def test_samples_sit_inside_their_pixel_and_y_points_up():
     (direct,) = viewport.viewports(RIG, DIRECT, pixels=(4, 2))
     x_cm, y_cm = viewport.sample_cm(direct, 2)
     assert x_cm.shape == y_cm.shape == (4, 8)
-    assert x_cm[0, 0] == pytest.approx(-2 * direct.pitch_cm[0] + direct.pitch_cm[0] / 4)
-    assert y_cm[0, 0] == pytest.approx((direct.height_px / 2 - 0.25) * direct.pitch_cm[1])
+    # Samples are cm from the rig's straight-ahead point, which need not be the panel's center.
+    (px, py), (ax, ay) = direct.pitch_cm, direct.ahead_cm
+    assert x_cm[0, 0] == pytest.approx(-2 * px + px / 4 - ax)
+    assert y_cm[0, 0] == pytest.approx((direct.height_px / 2 - 0.25) * py - ay)
     assert y_cm[0, 0] > 0 > y_cm[-1, 0]
 
 

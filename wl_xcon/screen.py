@@ -48,7 +48,8 @@ class ResolvedFlat:
 
 @dataclass(frozen=True, slots=True)
 class ResolvedGrating:
-    """A sine grating with every parameter a number."""
+    """A sine grating with every parameter bound to a number, but for the light a window or a
+    scotoma (`LIGHTLESS`) never draws: there `michelson` is `None`, and `mean_xyz` unread."""
 
     sf: float
     phase: float

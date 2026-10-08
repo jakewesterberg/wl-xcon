@@ -181,22 +181,24 @@ def test_a_raised_cosine_ramps_from_the_boundary_inward():
 
 
 def test_a_soft_edge_ramps_a_flat_light_in_from_the_boundary():
-    # A raised cosine 1° wide inside a 2° radius is 0.5·(1 − cos(π·(2 − r))) of the light
-    # at radius r. Each radius is read at one pixel whose center lies on it: an odd grid
-    # puts a row of pixel centers on the horizontal meridian, where two directions are as
-    # many degrees apart as their azimuths differ, and the disc is centered r degrees left
-    # of that pixel's. A pixel is the mean of its 4 × 4 samples; at this grid's 0.035°
-    # pixels the ramp's curvature moves that mean off its center's value by under 0.1%.
+    # A raised cosine 1° wide inside a 2° radius is 0.5·(1 − cos(π·(2 − θ))) of the light θ
+    # degrees from the center: 20 at 1.5°, about 5.858 at 1.75°. Each is read at one pixel,
+    # the disc centered r degrees left of that pixel's center at its elevation, and taken at
+    # the pixel's true angle θ from the disc's center, which is r on the horizontal meridian
+    # (the middle row of an odd grid when the straight-ahead point is the panel's center).
+    # A pixel is the mean of its 4 × 4 samples; at this grid's 0.035° pixels the ramp's
+    # curvature moves that mean off its center's value by under 0.1%.
     pixels, region = (1921, 1081), (940, 530, 1040, 551)
     looks = look.Look(shape=look.Circle(size=4.0), fill=look.Flat(color=Gray(40.0)),
                       edge=look.RaisedCosine(width=1.0))
     probe = viewport.viewports(RIG, DIRECT, pixels=pixels)[0]
-    row, col = pixels[1] // 2, pixels[0] // 2 + 60
-    azimuth = math.degrees(math.atan((col + 0.5 - probe.width_px / 2) * probe.pitch_cm[0] / probe.distance_cm))
-    for r, expected in [(1.5, 20.0), (1.75, 40.0 * 0.5 * (1.0 - math.cos(math.pi / 4)))]:
-        image, vp = _draw([Stimulus("s", at=(azimuth - r, 0.0), looks=looks)], pixels=pixels, region=region)
-        assert image[row - region[1], col - region[0]][1] == pytest.approx(expected, rel=0.05)
-        assert image[_pixel(vp, azimuth - r, 0.0, region)][1] == pytest.approx(40.0)  # the center
+    pixel, (azimuth, elevation) = _middle_row(probe, pixels[0] // 2 + 60)
+    for r in (1.5, 1.75):
+        at = (azimuth - r, elevation)
+        ramp = 0.5 * (1.0 - math.cos(math.pi * (2.0 - _true_angle(probe, pixel, at))))
+        image, vp = _draw([Stimulus("s", at=at, looks=looks)], pixels=pixels, region=region)
+        assert image[pixel[0] - region[1], pixel[1] - region[0]][1] == pytest.approx(40.0 * ramp, rel=0.05)
+        assert image[_pixel(vp, *at, region)][1] == pytest.approx(40.0)  # the center
 
 
 def test_a_gaussian_edge_is_the_radial_envelope():
@@ -382,6 +384,14 @@ def test_add_takes_a_contrast_against_the_background_not_what_is_below():
     weber = Stimulus("w", at=(0.0, 0.0), looks=Disc(size=4.0, contrast=Weber(0.25)), combine="add")
     image, vp = _draw([_patch("lit", 0.0, 30.0), weber], trial=_gray20())
     assert _at_center(image, vp) == pytest.approx(30.0 + 20.0 * 0.25)
+
+
+def test_cover_takes_a_contrast_against_the_background_not_what_is_below():
+    # Spec §7.5: a Weber contrast is against the eye's background, under a cover as under an
+    # add; against the lit disc below it would be 30·1.25 = 37.5.
+    weber = Stimulus("w", at=(0.0, 0.0), looks=Disc(size=4.0, contrast=Weber(0.25)))
+    image, vp = _draw([_patch("lit", 0.0, 30.0), weber], trial=_gray20())
+    assert _at_center(image, vp) == pytest.approx(20.0 * 1.25)
 
 
 def test_two_gratings_added_are_a_plaid_about_the_background():

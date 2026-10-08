@@ -1243,7 +1243,9 @@ def _light_faults(trial: Trial) -> list[Finding]:
         how = [combine for shown, combine in combined if shown == looks]
         if how and all(combine in LIGHTLESS for combine in how):
             continue
-        multiplied = bool(how) and all(combine == "multiply" for combine in how)
+        # A window or a scotoma reads no mean either, so with a multiplier it is still unread.
+        multiplied = bool(how) and all(combine == "multiply" or combine in LIGHTLESS
+                                       for combine in how)
         what += _through(color, contrast, mean)
         for color, contrast, mean in each:
             if kind == "flat":
@@ -2004,8 +2006,8 @@ def _placement_faults(trial: Trial) -> list[Finding]:
                                         for eye in ("at_left", "at_right")):
                 refuse("per-eye-misused", (
                     f"an update of {name!r} clears a per-eye position without giving `at`, so "
-                    f"it would be drawn at the `at` it was shown with; give `at` in the same "
-                    f"update"))
+                    f"it would be drawn at the `at` it was shown with; give `at` and clear both "
+                    f"per-eye positions in the same update"))
             # One eye's position alone keeps the other eye's (XC-260), so the other must be
             # there whatever it was shown and updated with. (One never shown at all is
             # `absent-stimulus`.)

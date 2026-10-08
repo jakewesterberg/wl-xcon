@@ -385,6 +385,8 @@ def test_an_update_of_at_on_a_stimulus_with_per_eye_positions_is_refused():
 
 
 CLEARS = "clears a per-eye position without giving `at`"
+#: What loads (the next test): an `at` alone, or with one eye cleared, is refused again.
+CLEAR_BOTH = "give `at` and clear both per-eye positions in the same update"
 
 
 @pytest.mark.parametrize("cleared", [
@@ -396,7 +398,7 @@ def test_an_update_that_clears_a_per_eye_position_without_at_is_refused(cleared)
     # It would be drawn at the `at` it was shown with, which XC-259's refusal calls unused.
     details = [f.detail for f in check(_shown_then(Update("s", **cleared), PER_EYE))
                if f.code == "per-eye-misused"]
-    assert any(CLEARS in detail for detail in details)
+    assert any(CLEARS in detail and CLEAR_BOTH in detail for detail in details), details
 
 
 def test_an_update_that_clears_both_per_eye_positions_with_at_is_accepted():
@@ -1078,6 +1080,17 @@ def test_a_multiplying_grating_needs_no_mean_on_black():
     trial = dataclasses.replace(trial, states=[dataclasses.replace(
         trial.states[0], enter=[*trial.states[0].enter, covering])])
     assert "unlit" in _refused(trial)
+
+
+def test_a_grating_one_stimulus_multiplies_by_and_another_shows_through_needs_no_mean():
+    """Neither reads its mean, so it was refused `unlit` and told to declare one, which the
+    multiply rule then refuses (the final review's m2)."""
+    gabor = Gabor(sf=1.0, sigma=1.0, contrast=Michelson(0.5))
+    trial = _over_lit(gabor, "multiply")
+    window = Show(Stimulus("v", at=(3.0, 0.0), looks=gabor, combine="window", layer=1))
+    trial = dataclasses.replace(trial, states=[dataclasses.replace(
+        trial.states[0], enter=[*trial.states[0].enter, window])])
+    assert _refused(trial) == set()
 
 
 def test_a_multiplying_grating_that_declares_a_mean_is_refused():
