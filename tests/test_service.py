@@ -610,6 +610,72 @@ def test_a_listing_fault_that_cannot_be_said_never_refuses_an_open(tmp_path, mon
     assert "could not be listed (_Unsayable)" in _refused(opened)[-1]
 
 
+#: The start of the open's one new refusal (welfare item 1 of engine build B): none of the
+#: refusals an open already had says it.
+_UNACCEPTED = "a session opens once its warnings are accepted"
+
+
+def test_an_open_for_a_stranded_animal_is_refused_for_that_before_its_warnings_are_asked(tmp_path):
+    """Welfare item 1's order: "The refusals an open already has run first, as before" -- here
+    an animal stranded, sent accepting nothing, refused with its own sentence alone."""
+    folders = _folders(tmp_path)
+    _strand(folders[2])
+    service = _made(folders)
+
+    (why,) = _refused(_step(service, _open(accepted=())))
+
+    assert why.startswith("no session opens while an animal's return is not recorded")
+    assert _UNACCEPTED not in why and service.session is None
+    assert not (folders[2] / "2027-01-14_01").exists()
+
+
+def test_an_open_that_cannot_be_built_is_refused_for_that_before_its_warnings_are_asked(tmp_path):
+    """Welfare item 1's order, for a session that cannot be built: an animal with no folder."""
+    service = _service(tmp_path)
+
+    (why,) = _refused(_step(service, _open(animal="NOBODY", accepted=())))
+
+    assert why.startswith("there is no animal 'NOBODY'")
+    assert _UNACCEPTED not in why and service.session is None
+    assert not (service.root / "2027-01-14_01").exists()
+
+
+def test_an_answer_nobody_asked_for_is_refused_for_that_before_its_warnings_are_asked(tmp_path):
+    """Welfare item 1's order, for an answer nobody asked for (`_unasked`): a confirm sent blind."""
+    service = _service(tmp_path)
+
+    (why,) = _refused(_step(service, _open(answer="confirm", accepted=())))
+
+    assert why.startswith("a confirmation or an amendment answers the warning a far departure")
+    assert _UNACCEPTED not in why and service.session is None
+    assert not (service.root / "2027-01-14_01").exists()
+
+
+def test_a_warning_only_training_accepts_is_asked_of_a_training_open_and_never_of_a_recording_one(
+    tmp_path, monkeypatch
+):
+    """Welfare item 1's "that the session's kind accepts": what is offered, and so required, is
+    read from the open's own kind. No warning today is accepted in some kinds and not others,
+    so one is listed here by hand."""
+    only_training = Entry("training only", "a warning only a training session accepts", ("training",))
+    monkeypatch.setattr(Service, "calibration_warnings", lambda self: [only_training])
+
+    recording = _service(tmp_path / "recording")
+    opened = _step(recording, _open(session_kind="recording", accepted=()))
+
+    assert opened.phase == "between_runs" and recording.session.spec.session_kind == "recording"
+    assert not (recording.root / "2027-01-14_01" / "xcon" / "warnings.jsonl").exists()
+
+    training = _service(tmp_path / "training")
+    (why,) = _refused(_step(training, _open(session_kind="training", accepted=())))
+
+    assert "training only: a warning only a training session accepts" in why
+    assert training.session is None
+    _step(training, _open(session_kind="training", accepted=(only_training.key,)))
+    rows = _jsonl(training.root / "2027-01-14_01" / "xcon" / "warnings.jsonl")
+    assert [(r["code"], r["session_kind"]) for r in rows] == [("training only", "training")]
+
+
 def test_a_session_id_or_animal_that_is_not_one_folder_name_is_refused_and_nothing_is_written(tmp_path):
     """Review Focus 1: each becomes a path, and arrives over the wire."""
     service = _service(tmp_path)
@@ -2225,17 +2291,18 @@ def test_a_resumed_session_keeps_what_it_accepted(tmp_path):
 
 def test_a_resume_names_who_resumed_it_not_who_accepted_a_warning(tmp_path):
     """Each restored warning keeps who accepted it, and the `session resumed` row names the
-    person who sent the resume, whoever accepted the last warning."""
+    person who sent the resume -- neither bea, who opened it and accepted its first warning,
+    nor ann, who accepted the last."""
     folders = _folders(tmp_path)
     first = _made(folders)
-    _step(first, _open())
+    _step(first, _open(by=Box("bea")))
     first.session.accept([Entry("head free", "the head is free", SESSION_KINDS)],
                          by=Box("ann"), how="open", run=None)
     second = _made(folders)
 
     _step(second, ResumeSession(by=BY, session_id="2027-01-14_01"))
 
-    assert [w[3] for w in second.session.warnings] == [BY, Box("ann")], "the open's, then ann's"
+    assert [w[3] for w in second.session.warnings] == [Box("bea"), Box("ann")]
     (resumed,) = [row for row in _rows(folders[2]) if row["kind"] == "session resumed"]
     assert resumed["by"] == BY_MAP
 
