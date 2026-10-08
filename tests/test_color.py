@@ -32,6 +32,7 @@ from wl_xcon.task import (
     RDS,
     REMEMBERED,
     After,
+    Array,
     Checkerboard,
     Disc,
     Noise,
@@ -45,6 +46,7 @@ from wl_xcon.task import (
     State,
     Stimulus,
     Trial,
+    Update,
     Window,
 )
 
@@ -474,6 +476,135 @@ def test_a_light_parameter_undeclared_or_among_its_own_choices_is_refused_never_
     assert "'lum'" in _found(undeclared)["contrast-on-default"].detail
     assert any("refers to itself" in f.detail for f in check(itself, calibration=SRGB))
     assert "'col'" in _found(itself)["contrast-on-default"].detail
+
+
+def test_a_per_eye_background_a_parameter_sets_is_a_light_factor():
+    trial = replace(a_task(Disc(size=1.0, color=Gray(10.0))), view="stereoscope",
+                    background_left=Gray(P("left")),
+                    params=[Param("left", unit="cd/m2", low=0.0, high=20.0)])
+
+    assert "'left'" in _found(trial)["contrast-on-default"].detail
+
+
+def test_a_gratings_frequency_phase_speed_and_direction_are_no_light():
+    """`_lit` reads a fill's `color`, `contrast` and `mean`, never the rest of it."""
+    grating = look.SineGrating(sf=P("sf"), phase=P("ph"), tf=P("tf"), direction=P("dir"),
+                               contrast=Michelson(0.5), mean=Gray(P("lum")))
+    trial = replace(a_task(look.Look(fill=grating)), background=Gray(20.0), params=[
+        Param("sf", unit="cyc/deg", low=1.0, high=4.0),
+        Param("ph", unit="deg", low=0.0, high=360.0),
+        Param("tf", unit="Hz", low=0.0, high=4.0),
+        Param("dir", unit="deg", choices=(90.0, 270.0)),
+        Param("lum", unit="cd/m2", low=10.0, high=40.0),
+    ])
+
+    detail = _found(trial)["contrast-on-default"].detail
+
+    assert "'lum'" in detail
+    assert not any(f"'{name}'" in detail for name in ("sf", "ph", "tf", "dir"))
+
+
+def _showing(opacity=1.0, *later) -> Trial:
+    """One gray disc, shown at `opacity`, then the actions `later`."""
+    return Trial(
+        start="on",
+        windows=[Window("w", at=(0.0, 0.0), radius=2.0, on="s")],
+        states=[
+            State("on", enter=[Show(Stimulus("s", at=(0.0, 0.0), opacity=opacity,
+                                             looks=Disc(size=1.0, color=Gray(10.0))))],
+                  go=[On(After(1.0), "later")]),
+            State("later", enter=list(later), go=[On(After(1.0), Outcome.ABORT)]),
+        ],
+    )
+
+
+def test_an_opacity_a_parameter_sets_when_shown_is_a_light_factor():
+    """Spec §4.4: front covers back by its opacity, so an opacity a parameter sets sets the
+    light shown (Task 4's review)."""
+    trial = replace(_showing(P("op")), params=[Param("op", unit="fraction", low=0.2, high=1.0)])
+
+    found = _found(trial)
+
+    assert "'op'" in found["contrast-on-default"].detail
+    assert found["contrast-on-default"].refuses("recording")
+
+
+def test_an_opacity_a_parameter_sets_in_an_update_is_a_light_factor():
+    trial = replace(_showing(1.0, Update("s", opacity=P("op"))),
+                    params=[Param("op", unit="fraction", choices=(0.5, 1.0))])
+
+    found = _found(trial)
+
+    assert "'op'" in found["contrast-on-default"].detail
+    assert found["contrast-on-default"].refuses("recording")
+    assert "contrast-on-default" not in _found(_showing(1.0, Update("s", at=(1.0, 0.0))))
+
+
+def _array(item, among=None) -> Array:
+    return Array(looks=item, among=Disc(size=1.0, color=Gray(10.0)) if among is None else among)
+
+
+def test_a_parameter_choosing_between_arrays_that_differ_only_in_light_is_a_factor():
+    """Task 4's review: `_lit` reads an `Array` as no light, so these compared equal. An
+    array's items are read in turn, and a parameter among them through its choices."""
+    gray = _choosing(_array(Disc(size=1.0, color=Gray(10.0))),
+                     _array(Disc(size=1.0, color=Gray(20.0))))
+    looks = replace(_choosing(_array(look.Look(fill=look.Flat(color=Gray(10.0)))),
+                              _array(look.Look(fill=look.Flat(color=Gray(20.0))))),
+                    background=Gray(20.0))
+    through = _choosing(_array(P("a")), _array(P("b")))
+    through = replace(through, params=[
+        *through.params,
+        Param("a", unit="appearance", choices=(Disc(size=1.0, color=Gray(10.0)),)),
+        Param("b", unit="appearance", choices=(Disc(size=1.0, color=Gray(20.0)),)),
+    ])
+
+    for trial in (gray, looks, through):
+        found = _found(trial)
+        assert "'looks'" in found["contrast-on-default"].detail
+        assert found["contrast-on-default"].refuses("recording")
+    assert "'a'" not in _found(through)["contrast-on-default"].detail
+
+
+def test_arrays_whose_items_differ_only_in_shape_are_not_a_light_factor():
+    """Shape-only choices stay clean when they are arrays (the twin of
+    `test_an_appearance_whose_choices_differ_only_in_shape_is_not_a_light_factor`), and a
+    parameter named among an array's items is no light factor for being named there: the
+    search task's shape-only case."""
+    disc, square = Disc(size=1.0, color=Gray(10.0)), Square(size=1.0, color=Gray(10.0))
+    literal = _choosing(_array(disc), _array(square))
+    through = _choosing(_array(P("a")), _array(P("b")))
+    through = replace(through, params=[*through.params,
+                                       Param("a", unit="appearance", choices=(disc,)),
+                                       Param("b", unit="appearance", choices=(square,))])
+    direct = replace(a_task(Array(looks=P("t"), among=P("d"))), params=[
+        Param("t", unit="appearance", choices=(disc, square)),
+        Param("d", unit="appearance", choices=(square, disc)),
+    ])
+
+    for trial in (literal, through, direct):
+        assert "contrast-on-default" not in _found(trial)
+
+
+def test_each_choice_of_an_appearance_parameter_is_named_in_its_own_finding():
+    """Task 4's review: the search task's five isoluminant choices were five identical lines."""
+    red, green = DKL(lum=0.0, l_m=0.08), DKL(lum=0.0, l_m=-0.08)
+    found = check(_choosing(Disc(size=1.0, color=red), Square(size=1.0, color=green)),
+                  calibration=SRGB)
+
+    details = [f.detail for f in found if f.code == "isoluminance-on-default"]
+
+    assert len(details) == 2
+    assert details[0].startswith("Disc (choice 1 of parameter 'looks') claims isoluminance")
+    assert details[1].startswith("Square (choice 2 of parameter 'looks') claims isoluminance")
+    shared = Disc(size=1.0, color=red)
+    twice = replace(_choosing(shared), params=[
+        Param("looks", unit="appearance", choices=(shared,)),
+        Param("other", unit="appearance", choices=(Square(size=1.0, color=green), shared)),
+    ])
+    assert any(f.detail.startswith(
+        "Disc (choice 1 of parameter 'looks', choice 2 of parameter 'other') claims")
+        for f in check(twice, calibration=SRGB))
 
 
 def test_an_appearance_whose_choices_differ_in_light_is_a_factor_too():

@@ -322,6 +322,8 @@ def test_on_the_default_every_reference_task_trains_but_the_search_task(name):
     in_recording = {f.code for f in found if f.refuses("recording")}
     if name == "visual_search":
         assert in_training == {"isoluminance-on-default"}
+        assert in_recording == {
+            "isoluminance-on-default", "color-on-default", "contrast-on-default"}
     else:
         assert in_training == set()
         assert in_recording == {"contrast-on-default"}

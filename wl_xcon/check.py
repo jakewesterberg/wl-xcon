@@ -909,8 +909,15 @@ def _colors(trial: Trial, params: dict[str, Param]):
     each block's (a flat fill, a grating's mean, an outline), and the backgrounds. A color
     that is a parameter is each of its choices; one offering none to read is refused by
     `_light_faults`, and a value that is not a color by `_block_faults`, so neither is one
-    here."""
+    here. An appearance a parameter offers is named as that parameter's choice (every one
+    it is, when the same object is offered twice), so the choices' findings say which is
+    which."""
     from wl_xcon import look
+
+    offered: dict[int, list[str]] = {}
+    for param in trial.params:
+        for at, choice in enumerate(param.choices, 1):
+            offered.setdefault(id(choice), []).append(f"choice {at} of parameter {param.name!r}")
 
     def each(what, color):
         try:
@@ -924,12 +931,14 @@ def _colors(trial: Trial, params: dict[str, Param]):
 
     for looks in _appearances(trial):
         what = type(looks).__name__
+        chosen = f" ({', '.join(offered[id(looks)])})" if id(looks) in offered else ""
         if isinstance(looks, look.Look):
             for part in (looks.fill, looks.outline):
                 for attr in ("color", "mean"):
-                    yield from each(f"{what}'s {type(part).__name__}", getattr(part, attr, None))
+                    yield from each(f"{what}'s {type(part).__name__}{chosen}",
+                                    getattr(part, attr, None))
         else:
-            yield from each(what, getattr(looks, "color", None))
+            yield from each(f"{what}{chosen}", getattr(looks, "color", None))
     for attr in ("background", "background_left", "background_right"):
         yield from each(f"the trial's {attr.replace('_', ' ')}", getattr(trial, attr))
 
@@ -996,9 +1005,10 @@ def _one_color(what: str, color, panel: Calibration | None) -> list[Finding]:
         # Spec §7.3: "Isoluminance needs a measured calibration", in every session (N§4
         # batch 1); any other DKL converts through cone fundamentals, which build A2 adds.
         # **`magnitude()` is never asked here** (the engine B plan, call 9): a component that
-        # is a parameter makes it raise (XC-269), and every session checks against this
-        # calibration. A literal `lum` of 0 beside another component that is a parameter or
-        # not 0 claims isoluminance at some value; every DKL here is refused either way.
+        # is a parameter makes it raise (XC-269), and from engine build B's Task 8 every
+        # session checks against this calibration. A literal `lum` of 0 beside another
+        # component that is a parameter or not 0 claims isoluminance at some value; every DKL
+        # here is refused either way.
         if _literal(color.lum) == 0.0 and any(_literal(v) != 0.0 for v in (color.l_m, color.s_lm)):
             return [Finding("isoluminance-on-default", (
                 f"{what} claims isoluminance, which needs a measured calibration (engine spec "
@@ -1043,22 +1053,23 @@ def _default_faults(trial: Trial, params: dict[str, Param]) -> list[Finding]:
     set_by = _parameter_lights(trial, params)
     if set_by:
         findings.append(Finding("contrast-on-default", (
-            f"parameter(s) {', '.join(repr(name) for name in set_by)} set a light or a contrast, "
-            f"which this build counts as a design factor until a task can declare its own "
-            f"(engine build C): a recording session refuses them on the default calibration "
+            f"parameter(s) {', '.join(repr(name) for name in set_by)} set a light, a contrast or "
+            f"an opacity, which this build counts as a design factor until a task can declare its "
+            f"own (engine build C): a recording session refuses them on the default calibration "
             f"(engine spec §7.2)"),
             blocking=False, accepted_in=NOT_RECORDING))
     return findings
 
 
 def _parameter_lights(trial: Trial, params: dict[str, Param]) -> list[str]:
-    """The parameters that set a light or a contrast anywhere a trial can show, by name,
-    sorted (the engine B plan, call 24): every parameter inside what lights an appearance
-    (`_lit`) or a background, **and inside each choice such a parameter offers** -- so a
+    """The parameters that set a light, a contrast or an opacity anywhere a trial can show, by
+    name, sorted (the engine B plan, call 24): every parameter inside what lights an
+    appearance (`_lit`), a background or a shown or updated stimulus's `opacity` (spec §4.4:
+    front covers back by it), **and inside each choice such a parameter offers** -- so a
     parameter that is a `Look`'s whole fill or outline counts and its fills or outlines are
     read (XC-271's shape, and XC-273's outline) -- and an appearance parameter whose
-    choices differ in what lights them. A parameter met again inside its own choices adds
-    nothing more: `_self_referring` refuses it."""
+    choices differ in what lights them, an `Array`'s items included (`_shown`). A parameter
+    met again inside its own choices adds nothing more: `_self_referring` refuses it."""
     from wl_xcon.task import Appearance
 
     names: set[str] = set()
@@ -1076,11 +1087,32 @@ def _parameter_lights(trial: Trial, params: dict[str, Param]) -> list[str]:
         walk(_lit(looks), frozenset())
     for attr in ("background", "background_left", "background_right"):
         walk(getattr(trial, attr), frozenset())
+    for _, action in actions_of(trial):
+        if isinstance(action, Show):
+            walk(action.stimulus.opacity, frozenset())
+        elif isinstance(action, Update):
+            walk(action.opacity, frozenset())
     for param in trial.params:
-        lit = [_lit(choice) for choice in param.choices if isinstance(choice, Appearance)]
+        lit = [_shown(choice, params) for choice in param.choices if isinstance(choice, Appearance)]
         if any(other != lit[0] for other in lit[1:]):
             names.add(param.name)
     return sorted(names)
+
+
+def _shown(looks, params: dict[str, Param], inside: frozenset[str] = frozenset()) -> list:
+    """What lights an appearance, for comparing an appearance parameter's choices: `_lit`, with
+    an `Array`'s items read in turn, and an appearance parameter among them as what each of its
+    choices shows. **Being named in an `Array` never makes a parameter a light factor**; its
+    own choices decide that. One undeclared, or met again inside its own choices, is read as
+    itself, so two of them differ by name: it fails closed."""
+    if isinstance(looks, P):
+        param = params.get(looks.name)
+        if param is None or looks.name in inside:
+            return [looks]
+        return [_shown(choice, params, inside | {looks.name}) for choice in param.choices]
+    if isinstance(looks, Array):
+        return [_shown(looks.looks, params, inside), _shown(looks.among, params, inside)]
+    return _lit(looks)
 
 
 def _lit(value) -> list:
