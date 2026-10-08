@@ -290,9 +290,10 @@ horizontally (1.13–1.21° over IPD) and 2.77° vertically, against 2.51° hori
 screen at 43.85 cm. §4.2 gives what that costs at the nasal edge for a wide pupil.
 
 S3 §8 requires both photodiode patches outside **both** viewports, or the flip patch
-(alternating every refresh) becomes a flickering distractor in one eye's field. Two viewports
-tile the panel exactly, so every pixel is seen by one eye unless the field is stopped. **The
-mask is what makes room for the patches.**
+(alternating every refresh) becomes a flickering distractor in one eye's field
+[@williams2004entrainment; @yantis1984abrupt]. Two viewports tile the panel exactly, so every
+pixel is seen by one eye unless the field is stopped. **The mask is what makes room for the
+patches.**
 
 | Mask at | **±12°, the start** | ±10°, the requirement | ±13.15°, the full viewport |
 |---|---|---|---|

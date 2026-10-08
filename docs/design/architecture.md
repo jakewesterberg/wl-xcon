@@ -448,7 +448,7 @@ software offset, `atan(E/D)` from the rig file's half-IPD `E` and path `D`
 (`Geometry.vergence_half_deg`, engine build A1), computed, not measured. Photodiode patches
 sit outside both viewports, at a bottom corner, and under the sensors' housings in direct
 view. Panel left/right nonuniformity is by construction an interocular mismatch and is
-photometered in V1.
+photometered in V9 (validation.md; V1 is display timing). *(Corrected 2026-10-08: this said V1.)*
 
 The **screen description** (`wl_xcon/screen.py`) and the **exact drawer** (`wl_xcon/exact.py`, with
 `look.py` and `viewport.py`) exist since engine build A1 (2026-10-07). Nothing in a session calls them

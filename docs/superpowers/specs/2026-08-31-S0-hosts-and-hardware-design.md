@@ -71,9 +71,10 @@ odd on Linux.
 
 ### 2.4 What gets pinned, and re-validated
 
-Distribution, kernel, NVIDIA driver, and session type (X11 vs Wayland) are recorded in the
-rig config and in every measurement artifact. **Any change to any of them re-runs V1**
-(pitfalls P4). Screen sharing stays off during recording, for the same reason.
+Distribution, kernel, NVIDIA driver, and session type (X11 vs Wayland) are recorded in the rig
+config and in every measurement artifact. **Any change to any of them re-runs V1** (pitfalls P4)
+[@bridges2020timing; @plant2016reminder]. Screen sharing stays off during recording, for the
+same reason.
 
 ---
 
@@ -135,7 +136,8 @@ specified for more than two.
 ### 5.1 Panel class
 
 **27-inch-class 16:9 flat tandem QD-OLED at 4K/240** (changed from 32-inch-class on
-2026-09-27; see below). **QD-OLED is a requirement** (PI, 2026-09-26).
+2026-09-27; see below) [@abuhaila2025recent; @dimigen2026advantages; @ito2013evaluation;
+@cooper2013assessment]. **QD-OLED is a requirement** (PI, 2026-09-26).
 
 **Chosen (PI, 2026-09-27): the ASUS ROG Swift OLED PG27UCDM.** It replaces the PG32UCDM
 Gen 3 chosen the day before. **Why:** most experiments view the monitor directly, not
@@ -169,7 +171,8 @@ say whether it waits for standby (UNVERIFIED — a 12-hour session would meet it
 proximity sensor is mentioned. **Re-check Dell's lineup in January 2027, before purchase**, for a
 27-inch 4K QD-OLED with DisplayPort 2.1 UHBR20 (uncompressed 4K/240).
 
-ASUS lists, per the spec page and product page read 2026-09-27:
+ASUS lists, per the spec page and product page read 2026-09-27 [@asustekcomputerinc2026rog;
+@asustekcomputerinc2026rogb]:
 - a **26.5" Tandem QD-OLED**, "Latest 4th-gen QD-OLED", 3840 × 2160 at 240 Hz, 0.153 mm
   pixel pitch, 10-bit;
 - **"DisplayPort 2.1a UHBR20 (80Gbps full bandwidth)"**, carrying "4K at 240Hz ... without
@@ -236,9 +239,10 @@ read 2026-09-26), so it compresses 4K/240 whatever the GPU.
 
 Tandem is the right architecture for this application, and for a reason narrower than its
 marketing. Stacked emissive layers reach a given luminance at lower per-layer current, which
-buys **ABL headroom** and **burn-in resistance** — precisely the two risks §5.4 lists. The
-figure that matters is therefore **sustained full-field luminance at 100% APL**, not peak
-small-window brightness, which is the number that will be advertised and is irrelevant here.
+buys **ABL headroom** and **burn-in resistance** — precisely the two risks §5.4 lists
+[@fung2016tandem]. The figure that matters is therefore **sustained full-field luminance at
+100% APL**, not peak small-window brightness, which is the number that will be advertised and
+is irrelevant here.
 
 **Schedule mitigation.** A launch date is not a plan. Buy a known-good 4K OLED now for bench
 work — the ASUS ROG Swift OLED PG32UCDP (31.5" flat WOLED, 4K@240 / FHD@480,
@@ -269,8 +273,8 @@ half-extents are `0.2179 * L` and `0.2451 * L`, the form this section first used
 the PG27UCDM's active area as "589.97 x 332.93 mm"
 ([spec page](https://rog.asus.com/us/monitors/27-to-31-5-inches/rog-swift-oled-pg27ucdm/spec/),
 read 2026-09-28), which is 1.772:1 rather than 16:9, and its "26.5-inch viewable" is rounded (the
-area's own diagonal is 26.67 in). The diagonal form fed 26.5 in would put each edge 0.6–0.9%
-short.
+area's own diagonal is 26.67 in) [@asustekcomputerinc2026rog]. The diagonal form fed 26.5 in would
+put each edge 0.6–0.9% short.
 
 **The screen is 50 cm from the eyes, physically, in both setups** (PI, 2026-09-28): "I want the
 screen to be the same physical distance from the animal in stereoscope and the direct viewing.
@@ -327,27 +331,28 @@ which is why dual-mode panels offer both. That gives a real experimental trade:
 | 4K | 1920×2160, 73 px/deg | 4.2 ms @240, 8.3 ms @120 | Disparity, fine gratings, natural images |
 | FHD | 960×1080, 37 px/deg | **2.08 ms** | Saccade-contingent updates, fast timing |
 
-Consequences: **V1 runs in every mode the rig will use**; each mode carries its own
-calibration and deg/pixel; the mode is recorded in the session snapshot; and gaze-contingent
-code never assumes a frame period.
+Consequences: **V1 runs in every mode the rig will use**; each mode carries its own calibration
+and deg/pixel; the mode is recorded in the session snapshot; and gaze-contingent code never
+assumes a frame period [@bridges2020timing; @saunders2014direct; @elze2010misspecifications].
 
 **Compression is a purchase-time question.** 4K/240 at 10-bit is ~60 Gbps and exceeds
 DisplayPort 1.4's ~25.9 Gbps of data, so it requires DSC. 4K/120 and FHD/480 sit at ~30 Gbps —
 still over DP 1.4 at 10-bit, under it at 8-bit. DP 2.1 UHBR20 (~77 Gbps) carries all of them
 uncompressed. DSC is "visually lossless" by VESA's design intent, which is a claim about human
 subjective judgement on natural images, not about fine gratings, random-dot stereograms, or an
-animal's V1. **Prefer a GPU and panel that can avoid it; if DSC is unavoidable, its effect is
-measured, not assumed.**
+animal's V1 [@videoelectronicsstandardsassociation2026dsc; @allison2018perspectives]. **Prefer a
+GPU and panel that can avoid it; if DSC is unavoidable, its effect is measured, not assumed.**
 
 ### 5.4 Panel acceptance test — written now, before the panel exists
 
 Fold into **V9**. A panel that fails 1 or 2 is disqualified regardless of everything else.
 
 1. **Burn-in protection is fully defeatable.** Pixel-shift, screen-move, logo dimming and
-   anti-flicker all off, and *verified* off. Pixel-shift translates the whole image
-   periodically: on a rig with a calibrated gaze-to-pixel mapping and a photodiode patch at a
-   fixed screen location, that is a silent, periodic corruption of the geometry, and it can
-   walk the patch off its sensor. Ask the vendor before purchase; no review covers it.
+   anti-flicker all off, and *verified* off [@dimigen2026advantages;
+   @asustekcomputerinc2026rogb]. Pixel-shift translates the whole image periodically: on a rig
+   with a calibrated gaze-to-pixel mapping and a photodiode patch at a fixed screen location,
+   that is a silent, periodic corruption of the geometry, and it can walk the patch off its
+   sensor. Ask the vendor before purchase; no review covers it.
 2. **ABL as interocular coupling.** Fill-factor sweep in one viewport, photometered in the
    other. On two displays ABL is a per-eye nonlinearity; **on one shared panel it is a
    coupling** — a bright stimulus in the left eye's viewport dimming the right eye's. An earlier
@@ -365,7 +370,8 @@ Fold into **V9**. A panel that fails 1 or 2 is disqualified regardless of everyt
    ASUS OLED (a WOLED) by about 4% and the Samsung QD-OLED TV by about 7%, all three consumer
    displays worse on their left half. *(Corrected 2026-10-08: this named neither the study nor the
    27-inch OLED's kind, and left out the QD-OLED's 7%.)*
-4. **Gamma, additivity and channel independence**, per unit, after calibration.
+4. **Gamma, additivity and channel independence**, per unit, after calibration [@brainard2002display;
+   @abuhaila2025recent; @cooper2013assessment].
 5. **Pixel response and onset**, photodiode-measured, in every mode.
 6. **Sustained full-field luminance at 100% APL**, which is the tandem claim that actually
    matters.

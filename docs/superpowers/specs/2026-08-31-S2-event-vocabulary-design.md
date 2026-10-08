@@ -129,7 +129,7 @@ are allocated once, in `wl-exptasks`, in one commit, so no two sessions can pick
 
 | Group | Events | Driven by |
 |---|---|---|
-| Stimulus | `STIMULUS_ON`, `STIMULUS_OFF`, `PHOTODIODE_CONFIRMED`, `PHOTODIODE_MISSING` | Photodiode-gated progression (parent §5.4); a missing edge must be a recorded fault, not a silence |
+| Stimulus | `STIMULUS_ON`, `STIMULUS_OFF`, `PHOTODIODE_CONFIRMED`, `PHOTODIODE_MISSING` | Photodiode-gated progression (parent §5.4); a missing edge must be a recorded fault, not a silence [@bridges2020timing; @plant2004selfvalidating] |
 | Gaze | `SACCADE_ONSET`, `SACCADE_END`, `TARGET_ACQUIRED`, `TRACKER_STALE` | Saccadic choice; P6 makes stall episodes worth recording as events rather than inferring later |
 | Response | `RESPONSE_JOYSTICK`, `RESPONSE_TOUCH`, `RESPONSE_LEVER` | Touch has **no hardware line**, so a code is its only route to the recording clock |
 | Reward and tokens | `REWARD_COMMANDED`, `TOKEN_AWARDED`, `TOKEN_LOST`, `TOKEN_CASHED` | Token economies; the reward lines are hardware truth, these carry the reason |

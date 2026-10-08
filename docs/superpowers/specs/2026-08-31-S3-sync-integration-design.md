@@ -189,7 +189,8 @@ Three consequences, and the third is the one that keeps flexibility:
 reach the recorders as edges plus analog copies.
 
 **Placement now has a geometric answer.** Both patches must sit outside both eyes' viewports,
-or the flip patch — alternating every refresh — is a flickering distractor in one eye's field.
+or the flip patch — alternating every refresh — is a flickering distractor in one eye's field
+[@williams2004entrainment; @yantis1984abrupt].
 Naively impossible, since two viewports tile the panel exactly. The answer is a **bottom strip
 the full panel width**, created by stopping the field vertically — vertical field is the
 surplus dimension, so it costs nothing that matters. Its height depends on the stop, which is
@@ -244,6 +245,6 @@ question, from their side.
 |---|---|---|
 | 1 | How taskd learns the session id | every output path |
 | 2 | ~~Day versus subject-session~~ **Answered: two animals routinely, and `SessionManifest` carries one subject — so a subject change must mint `_02`.** Remaining: `wl-sync` implementing it, and being told when a subject changes | directory layout under two subjects |
-| 3 | Photodiode patch placement — **candidate found** (central strip from the nasal clip); confirm with `wl-sync` and verify dark at bring-up | rig build |
+| 3 | Photodiode patch placement — **decided**: the bottom strip the stereoscope's mask makes (3.22 cm at the ±12° mask), and in direct view under each sensor's housing (S3 §8, S4 §7, optics drawing §5, direct-view spec §4); the central strip is the fallback (optics drawing §8 items 3-4); confirm with `wl-sync` and verify dark at bring-up. *(Corrected 2026-10-08: this said "candidate found (central strip from the nasal clip)".)* | rig build |
 | 4 | ~~Calibration blocks versus in-task epochs~~ **Answered: both.** Remaining: wl.works planning a calibration block per session | S5, S8, wl-works |
 | 5 | Whether our synthetic generator feeds `wl-preproc`'s harness or its own | V6 |

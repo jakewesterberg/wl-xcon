@@ -75,7 +75,7 @@ it was the mistake.** The spike is `tools/spike_display.py`, labelled throwaway.
 
 **Neither stack is built properly yet.** The spike stays a spike, PsychoPy stays
 installed, and the choice is made when a rig exists and V1 can measure both under the
-same photodiode protocol.
+same photodiode protocol [@bridges2020timing].
 
 The recommendation was to build the thin stack now, on the grounds that we already
 cannot use PsychoPy's units model or its stateful stimuli, so we would be taking 81

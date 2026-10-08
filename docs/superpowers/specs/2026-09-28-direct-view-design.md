@@ -38,9 +38,9 @@ Earlier the same day the PI had also decided the following. This spec uses them 
 
 ## 2. Geometry, per setup
 
-**The two setups share one screen at one place.** Both use the ASUS PG27UCDM's published
-active area, 589.97 × 332.93 mm (ASUS spec page, read 2026-09-28, S0 §5.1). Each setup
-differs only in the path from the eye to that screen.
+**The two setups share one screen at one place.** Both use the ASUS PG27UCDM's published active
+area, 589.97 × 332.93 mm (ASUS spec page, read 2026-09-28, S0 §5.1)
+[@asustekcomputerinc2026rog]. Each setup differs only in the path from the eye to that screen.
 
 | | Direct view | Stereoscope |
 |---|---|---|
@@ -121,7 +121,7 @@ fixed, the sensors are mounted once and never moved.
   tall at the ±12° mask (optics drawing, reworked), so no eye sees it through the mirrors.
 - **In direct view**, each sensor's own opaque housing covers its patch. The animal sees a
   small dark shape at the panel's far lower corner, around (±30°, −18°), well outside the ±15°
-  where stimuli go, and never the flicker.
+  where stimuli go, and never the flicker [@williams2004entrainment; @yantis1984abrupt].
 
 **The housings are rectangles in the rig's settings**, in cm on the panel, each with a margin
 recorded beside it. They are measured at build from the real sensors. Whether both sensors fit

@@ -39,7 +39,7 @@ A window's `at` may itself be a parameter, which is what makes "move the array f
 | Term | Means | Why this word |
 |---|---|---|
 | `After(duration)` | elapsed since the state was entered | |
-| `AfterFrames(n)` | an exact frame count | Stimulus durations that must be frame-exact rather than time-approximate |
+| `AfterFrames(n)` | an exact frame count | Stimulus durations that must be frame-exact rather than time-approximate [@elze2010misspecifications] |
 | `Acquired(window)` | gaze entered and settled | ML's `acquirefix` / `acquiretarget` |
 | `Held(window, duration)` | continuously inside for a duration | ML's `holdfix`; restarts if gaze leaves |
 | `Broke(window)` | left after acquiring | "the animal broke fixation" |
@@ -49,7 +49,7 @@ A window's `at` may itself be a parameter, which is what makes "move the array f
 | `Touched(window)` | touchscreen contact inside a window | S13 |
 | `JoystickIn(window)` | joystick deflected into a region | |
 | `RateAbove(source, threshold)` | MUA feature over threshold | Tier-3 gating (S7) |
-| `Onscreen(patch)` | **photodiode-confirmed** stimulus onset | S6 §3 — physical, not believed |
+| `Onscreen(patch)` | **photodiode-confirmed** stimulus onset | S6 §3 — physical, not believed [@bridges2020timing; @plant2004selfvalidating] |
 | `ChairStill()` / `ChairMoving()` | `wl-shook`'s motion gate | |
 
 **`Onscreen` is the one worth arguing over.** It reads as a claim about the world

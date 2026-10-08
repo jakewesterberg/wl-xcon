@@ -183,11 +183,12 @@ come from the exact drawer.
 - **Matching a set** (mean luminance, RMS contrast, optionally the amplitude spectrum): a declared
   preparation step when a task asks, **computed in linear luminance after the calibration**, recorded
   [@willenbockel2010controlling; @brainard2002display].
-- **Formats**: any common format; a lossy one carries a warning.
-- **Movies**: each movie frame held a whole number of refreshes; a rate that does not divide the display
-  rate is refused until re-timed beforehand, and any re-timing is recorded in the set's manifest (a 25
-  fps source re-timed to 24 changes speeds and pitch by 4%). Decoded beforehand or streamed by a decoder
-  thread, declared per movie; a streamed frame that misses is recorded late.
+- **Formats**: any common format; a lossy one carries a warning [@ccitt1992information].
+- **Movies**: each movie frame held a whole number of refreshes [@elze2010misspecifications]; a rate
+  that does not divide the display rate is refused until re-timed beforehand, and any re-timing is
+  recorded in the set's manifest (a 25 fps source re-timed to 24 changes speeds and pitch by 4%).
+  Decoded beforehand or streamed by a decoder thread, declared per movie; a streamed frame that misses
+  is recorded late.
 
 ### 4.7 Image procedures between trials
 
@@ -261,22 +262,23 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
 ## 6. When (N§3, N§R3)
 
 1. **The session's rate** comes from the display's reported mode, checked against the rig file, and is
-   carried in the session and in the load-time checks; a task file is checked at each rate it may run
-   at (240 and 120 Hz) or at its declared required rate.
+   carried in the session and in the load-time checks; a task file is checked at each rate it may run at
+   (240 and 120 Hz) or at its declared required rate [@bridges2020timing; @elze2010misspecifications].
 2. **Durations are converted to frames once, at load**, and the loop compares frame counts (today it
-   compares elapsed seconds, which rounds up and drifts with a measured period). An ordinary duration
-   rounds to the nearest frame, recorded as shown. **A duration that is a design level** (a factor
-   level, a sequence's item period, a procedure-stepped duration) **is exact by default**: whole frames
-   at the session's rate, or refused at load with the nearest valid values listed; two levels landing
-   on one frame count are refused; procedures on time step in frames. A sequence declares whether it
-   rounds per item or on cumulative onsets.
-3. **A late frame never stops a trial**; the record marks it.
+   compares elapsed seconds, which rounds up and drifts with a measured period)
+   [@elze2010misspecifications]. An ordinary duration rounds to the nearest frame, recorded as shown.
+   **A duration that is a design level** (a factor level, a sequence's item period, a procedure-stepped
+   duration) **is exact by default**: whole frames at the session's rate, or refused at load with the
+   nearest valid values listed; two levels landing on one frame count are refused; procedures on time
+   step in frames. A sequence declares whether it rounds per item or on cumulative onsets.
+3. **A late frame never stops a trial**; the record marks it [@bridges2020timing].
 4. **Temporal modulation**: sine at any frequency, sampled per frame; square-wave flicker needs whole
-   frames per half-cycle.
+   frames per half-cycle [@elze2010misspecifications].
 5. **Onset**: the record holds each frame's start and each stimulus's **vertical extent**. The screen
    scans top to bottom (Blur Busters, read 2026-10-07; UNVERIFIED for this panel), and both setups put
    the light sensors at the bottom, so V1 measures the scan delay with patches top and bottom and
-   analysis applies it across the stimulus's extent.
+   analysis applies it across the stimulus's extent [@dimigen2026advantages; @saunders2014direct;
+   @wang2011lcd; @elze2010misspecifications].
 6. **Sequences** (RSVP, predictive, masking streams): a sequence stimulus or one state per item.
 7. **Motion paths**: straight sweeps, pursuit targets, waypoint paths, seeded random walks.
 8. **The longest trial is 5 minutes** (the loop's frame cap derived from 300 s at the session's rate); a
@@ -285,9 +287,9 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    pause and the welfare limits are checked about once a second**, off the frame path (N§R6).
 9. **Between trials**: what the task declares (the background by default).
 10. **Contingent changes record their delay**: decision time minus the sample's capture time (on the eye
-    PC's clock once aligned), plus the frame's start, plus V1's scan delay at the stimulus's height, plus
-    the panel latency V1 measures. Until V1 and V3 exist, the figure is labeled a lower bound. A task may
-    declare a maximum; trials past it are marked.
+    PC's clock once aligned), plus the frame's start, plus V1's scan delay at the stimulus's height,
+    plus the panel latency V1 measures [@saunders2014direct; @dimigen2026advantages]. Until V1 and V3
+    exist, the figure is labeled a lower bound. A task may declare a maximum; trials past it are marked.
 11. **A non-aging foreperiod** declares its minimum, mean, maximum and tail rule; the review report's
     timing diagram plots the hazard it actually produces (a truncated exponential's hazard rises near
     its maximum).
@@ -360,7 +362,7 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    value per frame; seeds; and **the display's per-refresh report of which content it showed**. **A late
    frame repeats the previous content for one refresh, and the sequence then continues from where it
    was** (the loop never skips a frame number); m-sequence and other reverse-correlation trials with any
-   repeat are marked.
+   repeat are marked [@reid1997use].
 6. **The console shows frame timing per trial**, at boundaries.
 7. **A frame-clock fault**: a warning and a warnings-list entry, affected trials marked, the session
    goes on (acceptable in every session kind).
@@ -383,8 +385,9 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
 ## 10. The drawer (N§7)
 
 1. **The GPU drawer matches the exact definition within one output level** per pixel.
-2. **Edges are smooth and sub-pixel.**
-3. **A pattern near the pixel limit** is allowed with a warning.
+2. **Edges are smooth and sub-pixel.** [@bach1997antialiasing; @bach2001freiburg]
+3. **A pattern near the pixel limit** is allowed with a warning [@shannon1949communication;
+   @merigan1990spatial].
 4. **The core is Rust**, a separate process (§3.1), held to the exact definitions by the match tests and
    V1; **tests carry its review**.
 5. **Graphics interface**: Vulkan offers direct-to-display (`VK_KHR_display`) and presentation timing
@@ -402,7 +405,8 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    PI at a text console.
 6. **Prior art**: vstimd is AGPL-3.0-only; **no code is reused**, only ideas (direct display, a post-flip
    vblank wait, landing reports, a renderer-owned patch, a no-op renderer for CI).
-7. **ADR-0002**: our drawer is built now so V1 compares it with PsychoPy on day one; V1 chooses.
+7. **ADR-0002**: our drawer is built now so V1 compares it with PsychoPy on day one; V1 chooses
+   [@bridges2020timing; @peirce2019psychopy].
 
 ## 11. Lifecycle (N§8, N§R3)
 
@@ -420,10 +424,14 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    one**, black otherwise (N§R3). The flip patch still alternates.
 6. **The screen and its mode are checked** against the rig file: panel identity, resolution, refresh,
    bit depth, **and the panel's care features** (pixel shift, its brightness mode, the proximity sensor,
-   variable refresh, which must be off), recorded at bring-up; a mismatch is a warning.
-7. **After a graphics change**, the warnings list says so until a matching V1 exists.
+   variable refresh, which must be off) [@asustekcomputerinc2026rogb; @asustekcomputerinc2026rog;
+   @dimigen2026advantages; @poth2018ultrahigh; @saunders2014direct], recorded at bring-up; a mismatch is
+   a warning.
+7. **After a graphics change**, the warnings list says so until a matching V1 exists [@bridges2020timing;
+   @plant2016reminder].
 8. **The OLED's own maintenance** is scheduled outside sessions, or a session refuses to open while it
-   is due (UNVERIFIED whether the PG27UCDM allows either).
+   is due [@dimigen2026advantages; @asustekcomputerinc2026rogb] (UNVERIFIED whether the PG27UCDM allows
+   either).
 
 ## 12. Calibration procedures and test screens (N§9, N§R5)
 
@@ -441,7 +449,8 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
 4. **wl-preproc must be able to read these calibrations** (an ask, §21): a monocular grid's eye, the
    session-start block marked with the calibration task type, interlude recalibrations as
    `CALIBRATION_START`/`END` epochs, and the target positions they use.
-5. **Before every session**: a quick frame-timing check and the light-sensor test.
+5. **Before every session**: a quick frame-timing check and the light-sensor test
+   [@plant2004selfvalidating; @bridges2020timing].
 6. **Records committed per rig** under `docs/measurements/<rig>/`, each with an id.
 
 ## 13. Structure (N§10, N§R1, N§R6)

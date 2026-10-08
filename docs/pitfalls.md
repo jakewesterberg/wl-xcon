@@ -68,11 +68,12 @@ deciding nothing.
 
 **P4 — Graphics stack.** X11-vs-Wayland, compositor bypass, and NVIDIA vsync behavior all
 move timing. Pin distro/driver/session type per rig, record it with every measurement, and
-re-run V1 after any change. OLED task displays additionally need luminance/persistence QA.
-**Screen sharing is part of this risk:** VNC/RDP/capture stacks hook the graphics pipeline
-on the machine whose whole job is frame-accurate presentation. Remote work uses a remote
-*console* (ZMQ telemetry), not remote pixels; remote desktop stays off during recording,
-and the flip patch will show it if someone forgets.
+re-run V1 after any change [@bridges2020timing; @plant2016reminder]. OLED task displays
+additionally need luminance/persistence QA [@abuhaila2025recent; @dimigen2026advantages;
+@elze2013evaluation]. **Screen sharing is part of this risk:** VNC/RDP/capture stacks hook
+the graphics pipeline on the machine whose whole job is frame-accurate presentation. Remote
+work uses a remote *console* (ZMQ telemetry), not remote pixels; remote desktop stays off
+during recording, and the flip patch will show it if someone forgets.
 
 **P5 — SpikeGLX gap.** The unmeasured regime (cross-machine, Python) is exactly where naive
 designs land. Design pins the fetch client to the acquisition PC (C++, loopback), ships

@@ -60,10 +60,12 @@ prior design had digital input as an analysis convenience.
 - **Change detection on P0**, with the edge timestamped as close to the hardware as the driver
   allows. Polling in the frame loop adds a frame of latency and quantises the edge to the frame.
 - **`PD2_COMP` is counted continuously**, not sampled. A missing flip edge is a dropped frame,
-  detected at the display surface, reported live and logged per trial (parent §11.5).
-- **A missing `PD1_COMP` after a scene that should have produced one is a fault**, not a
-  silence — it emits `PHOTODIODE_MISSING` and the trial is marked (S2 §5.1). A trial that ran
-  with no stimulus must never look like a trial the animal failed.
+  detected at the display surface, reported live and logged per trial (parent §11.5)
+  [@bridges2020timing; @plant2004selfvalidating].
+- **A missing `PD1_COMP` after a scene that should have produced one is a fault**, not a silence —
+  it emits `PHOTODIODE_MISSING` and the trial is marked (S2 §5.1) [@bridges2020timing;
+  @plant2004selfvalidating]. A trial that ran with no stimulus must never look like a trial the
+  animal failed.
 - **V2b measures edge-to-userspace latency** under idle and loaded conditions. It has no prior
   estimate; if it is worse than a frame, photodiode-gated progression needs rethinking rather
   than tuning.
