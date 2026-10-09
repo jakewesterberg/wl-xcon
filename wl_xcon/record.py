@@ -341,8 +341,10 @@ class SessionRecord:
     ) -> None:
         """One live parameter change, joined to the recording by `sequence`.
 
-        The `PARAM_CHANGE` escape carries that number and nothing else: the values
-        live here (S2 §5.2). If the two ever disagree the change cannot be placed on
+        The `PARAM_CHANGE` escape is to carry that number and nothing else: the values
+        live here (S2 §5.2). **Not yet**: until XC-008, `Session` strobes the
+        payload-less `PARAM_CHANGED` word, so a row joins its code by count, the n-th
+        row to the n-th code. If the two ever disagree the change cannot be placed on
         the recording clock at all, so the join is the entire point of both halves.
 
         `by` records the origin -- console, control API, or the task -- because one
