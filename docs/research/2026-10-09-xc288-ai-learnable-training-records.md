@@ -7,59 +7,69 @@
 > its primary source on 2026-10-09 (Appendix B says how much of each was read); what could not be
 > checked is marked UNVERIFIED. Claims about wl-xcon are from its code at `171b8d8` (`main`, the
 > `xc288-prep` worktree), and claims about sibling repositories from their local checkouts, named
-> where used.
+> where used. Corrected the same day against an independent check of its claims, which also found
+> Yu et al. 2025 (§2.3).
 
 **The PI's idea** (XC-288, his words of 2026-10-08): "save all of the behavioral and task data in such
 a way that an AI agent could use a complete backlog of data from all animals all tasks etc to determine
 techniques to try to help animals learn tasks. For instance, maybe 5 years down the road we have
-hundreds of training sessions from a dozen or so monkeys where experimenters tried a variety of
+hundreds of training session[s] from a dozen or so monkeys where experimenters tried a variety of
 techniques to help the monkeys learn. The AI agent could learn from those logs to make suggestions for
 things to try and perhaps even run sessions (by tweaking task and training parameters) to help the
 monkey learn."
 
 ## In short
 
-1. An agent can learn "technique X helped" only from records in which X is a **named, typed event**:
-   what changed, from what to what, by whom, why, from which trial, set against the animal's state
-   before it and its progress after it, over days rather than trials.
-2. **wl-xcon already records** every trial's whole resolved parameter set and every live change's
-   name, old value, new value and actor. **It does not record** why a change was made, when (the change
-   row has no instant and no trial number), what else was considered, or what the change means across
-   tasks ("easier"). wl-preproc reads none of the change rows.
+1. The note's premise: an agent can learn "technique X helped" most reliably from records in which X
+   is a **named, typed event**: what changed, from what to what, by whom, why, from which trial, set
+   against the animal's state before it and its progress after it, over days rather than trials.
+2. **wl-xcon already records** every trial's resolved task parameters (the welfare-bounded reward
+   sizes sit in each run's start row and the change rows) and every live change's name, old value, new
+   value and actor. **It does not record** why a change was made, when (the change row has no instant
+   and no trial number), what else was considered, or what the change means across tasks ("easier").
+   wl-preproc reads none of the change rows.
 3. **Logs of experimenters' choices are observational**: if the animal that struggles gets the most
-   interventions, a naive learner concludes that interventions hurt. This is the central difficulty
+   interventions, a naive learner concludes that interventions hurt. This is a central difficulty
    in learning treatment policies from clinical records (Gottesman et al. 2018), and the reason
-   off-policy methods want the probability with which each logged choice was made (Swaminathan and
-   Joachims 2015).
+   importance-sampling methods want the probability with which each logged choice was made
+   (Swaminathan and Joachims 2015).
 4. The record feature that makes "which helped" answerable without assuming every reason for a choice
-   was recorded is
-   **randomization at decision points, with its probability recorded** (micro-randomization, Klasnja et
-   al. 2015). Whether to randomize any training choice for an animal is the PI's decision.
+   was recorded is **randomization at decision points, with its probability recorded**
+   (micro-randomization, Klasnja et al. 2015). Whether to randomize any training choice for an animal is the PI's decision.
 5. **Prior art**: rule-based automated training is established in mice [@ibl2021standardized] and in
    macaques' home cages [@berger2018standardized], and records outcomes and progression well. None of
-   the systems or standards read records the reason for a change or the alternatives considered.
-   MonkeyLogic records a trial-by-trial history of changed variables, without who or why.
-6. **Algorithmic curricula have been demonstrated on simulated learners only** (Bak et al. 2016; Tong
-   et al. 2025). I found no published case of a learned or language-model agent choosing training steps
-   for live laboratory animals.
+   the systems or standards read has a field for the reason for a training change or the alternatives
+   considered (Alyx's free-text `narrative` is the nearest). MonkeyLogic records a trial-by-trial
+   history of changed variables, without who or why.
+6. **One algorithmic curriculum has been tested on live animals that I found**: Yu et al. (2025,
+   HABITS) chose each mouse's next trial type from a model fitted to its own choices, and in a
+   working-memory task their mice reached criterion in fewer trials than mice given random trial types
+   (in a simpler two-choice task the groups did comparably). Bak et al. (2016) and Tong et
+   al. (2025) tested theirs on simulated learners only. I found no published case of a language-model
+   agent choosing training steps for live laboratory animals.
 7. **Most of what an agent needs falls in build C's scope**: the task object, live edits as a layer,
-   presets and history, procedures' carried state, the condition registry and the simulated animal.
+   presets and history, how a task declares its procedures (the procedure library, and with it their
+   carried state, is build D's), the condition registry and the simulated animal.
    C's plan is the cheap moment to shape these records.
-8. **An agent that acts would act through `Session.set`**, the one write path, welfare-critical and
-   bounded by the same ceilings as any actor. It would be a new kind of actor (the engine spec already
+8. **An agent that acts would act through the commands a console sends**: a live setting through
+   `Session.set` (welfare-critical whole), a run's task and starting values through the run's start
+   (`Service._start`, its pre-flight checking each value against the task's declarations), pauses,
+   stops and rewards through `Session._command`, each bounded by the same ceilings as any actor. It
+   would be a new kind of actor (the engine spec already
    plans a "system actor" beside `Box` and `Member`), and the law names persons, not software, as
    responsible for animals and projects (Directive 2010/63/EU, Articles 24(1) and 40(2)(b)).
 9. **No animal session exists yet** (the lab opens January 2027) and build C is ordered before build E,
-   the display ready for January's V1, so if that order holds, records shaped in C cover every animal
-   session the lab will run.
+   the display ready for January's V1, so if that order holds, records shaped in C cover every rig
+   session wl-xcon will run (not the kiosk's, whose record is undesigned, §3.3, nor a MonkeyLogic
+   session on the swapped rig, question 10).
 10. The questions for the brainstorm, ordered by what C's plan needs first, are in §6.
 
 ## 1. What an agent needs to learn "which technique helped"
 
 ### 1.1 The unit is an intervention, written as a typed event
 
-For "this helped" to be learnable across a dozen animals and many tasks, each intervention has to be
-recorded with these parts, and each part in a form a program can compare:
+For "this helped" to be learnable across a dozen animals and many tasks, the note suggests each
+intervention be recorded with these parts, each in a form a program can compare:
 
 - **What changed.** A parameter (a fixation window), a criterion (when a stage advances), which reward
   entry pays (a procedure may choose among the bounded config's named entries, never an amount; engine
@@ -81,8 +91,9 @@ Trial-level records are enough to model an animal's learning trajectory: PsyTrac
 trajectory of sensory decision-making strategies from choice data" in mice, rats and people and
 reveals "rapid adaptation to changes in task statistics" (Roy et al. 2021), and Bak et al. (2016)
 inferred a learning-rule model from rat training data. Both need each trial's stimulus, choice and
-outcome, which `trials.jsonl` already holds in full (§3.1). The gap is not the trials; it is the
-interventions between them.
+outcome, which `trials.jsonl` holds for a two-choice task (the outcome and the trial's parameters give
+the choice; which item a multi-choice trial chose, and the reaction time, are not in the row). The
+larger gap is not the trials; it is the interventions between them.
 
 ### 1.2 The counterfactual problem
 
@@ -101,14 +112,17 @@ is enough (Gottesman et al. 2018, §4). For training, the factors an experimente
 console shows, the animal's demeanor, the time of day and a colleague's advice. Some of these the rig
 can record; the rest live in free text or in wl.works' observations, or nowhere.
 
-**Off-policy evaluation needs the probability of each logged choice.** Swaminathan and Joachims (2015,
+**Importance-sampling off-policy evaluation uses the probability of each logged choice.** Swaminathan
+and Joachims (2015,
 §3-4) write the usable log as the context, the action, its outcome and its *propensity*, the logging
 policy's probability of that action, kept "during the operation of the logging policy". A log of
 choices is "both *biased* (predictions favored by the historical algorithm will be over-represented)
 and *incomplete* (feedback for other predictions will not be available)"; weighting by the recorded
 propensities corrects the bias, and small propensities make the estimate's variance unbounded. Gottesman et al. (2018, §5) show the practical
 consequence: when the policy being evaluated differs from the clinicians', "the number of informative
-samples may be very small".
+samples may be very small". Where the probability was never logged, as for a clinician's or an
+experimenter's choice, it has to be estimated from the records (this note's inference), which brings
+back the question of whether the recorded state holds every confounder.
 
 **A person's choice has no recorded probability.** Two partial remedies follow, both record design and
 neither a decision: record the options that were on offer when a choice was made, so the choice set is
@@ -126,7 +140,8 @@ a recorded probability.
   could be given (a limit near, the animal not working) is recorded as unavailable.
 - **Sequential randomization** (Murphy 2005): randomizing at each stage of an adaptive strategy, for
   decisions whose effects are delayed, which training steps are.
-- **Simulation before animals**: both published teachers were evaluated on simulated learners (§2.3).
+- **Simulation before animals**: Bak et al.'s and Tong et al.'s teachers were evaluated on simulated
+  learners only, and HABITS' was checked in simulation before it trained mice (§2.3).
   wl-xcon's simulated animal (engine spec §18.3) follows declared functions with named profiles, none of
   them described as learning, and today's `simulate.Subject` has its rates fixed in code (XC-146). As
   specified it could test an agent's safety (does it stay inside the bounds, does it handle refusals),
@@ -138,8 +153,8 @@ a recorded probability.
 
 | System or standard | What it records about training and interventions | What it lacks for XC-288 |
 |---|---|---|
-| **International Brain Laboratory**, standardized mouse training [@ibl2021standardized] | 140 mice in seven labs on one automated protocol: the stimulus set grows "as performance improved" (Appendix 1, table 1: over 80% correct on each contrast admits the next set); the reward drops by 0.1 µL after a session of over 200 trials while above 1.5 µL; errors on easy trials are more likely followed by a "repeat trial"; "trained 1a/1b" are criteria over three consecutive sessions. A colony database "stored data about each session and mouse (e.g. session start time, animal weight, etc.)" | The progression is one fixed rule for every animal, so its records show how animals respond to one protocol, not which of several techniques helped. I found no passage on how experimenters' departures from the protocol were recorded |
-| **Alyx**, IBL's lab database (its source, `alyx/actions/models.py`) | `Weighing` (who, when, grams); `WaterAdministration` (who, when, session, mL, water type, ad lib); `WaterRestriction` (reference weight); every action's users, procedures and `narrative`; a `Session`'s `task_protocol`, `n_trials`, `n_correct_trials`, `qc`. Husbandry and sessions in one database, keyed by subject | No typed intervention: what an experimenter did differently is free text in `narrative`, or a different `task_protocol` |
+| **International Brain Laboratory**, standardized mouse training [@ibl2021standardized] | 140 mice in seven labs on one automated protocol: the stimulus set grows "as performance improved" (Appendix 1, table 1: over 80% correct on each contrast admits 25%, then 12.5%; 6.25%, 0% and dropping 50% each follow 200 trials after the step before); the reward drops by 0.1 µL after a session of over 200 trials while above 1.5 µL; errors on easy trials are more likely followed by a "repeat trial"; "trained 1a/1b" are criteria over three consecutive sessions. A colony database "stored data about each session and mouse (e.g. session start time, animal weight, etc.)" | The progression is one fixed rule for every animal, so its records show how animals respond to one protocol, not which of several techniques helped. I found no passage on how experimenters' departures from the protocol were recorded |
+| **Alyx**, IBL's lab database (its source, `alyx/actions/models.py`) | `Weighing` (who, when, grams); `WaterAdministration` (who, when, session, mL, water type, ad lib); `WaterRestriction` (reference weight); every action's users, procedures and `narrative`; a `Session`'s `task_protocol`, `n_trials`, `n_correct_trials`, `qc`. Husbandry and sessions in one database, keyed by subject | No intervention type: what an experimenter did differently is free text in `narrative`, a different `task_protocol`, or whatever a lab puts in the user-defined `json` field each of these records carries (`alyx/base.py`, `BaseModel`: "Structured data, formatted in a user-defined way") |
 | **Berger et al.**, automated training of rhesus macaques in the home cage [@berger2018standardized] (abstract) | "across-task unsupervised training (AUT)" of "successively more complex cognitive tasks", designed for "self-paced training schedules with individualized learning speeds based on automatic updating of task conditions"; it revealed differences between animals and "easier and more difficult learning steps"; progress was "primarily determined by the number of interactions with the system rather than the mere exposure time"; "a predefined training strategy allows for an observer-independent comparison of learning between animals and of training approaches" | How deviations were recorded: UNVERIFIED (the full text was not reachable) |
 | **Calapai et al.**, the XBI cage-based system [@calapai2017cagebased] | 11 male rhesus macaques; tasks are XML files edited with a custom editor; one experimenter can manage several animals' training remotely; which animal made each interaction was assigned offline from video, with ID tags foreseen | I found no description of recording who changed a task file, when or why |
 | **Womelsdorf et al.**, the kiosk station [@womelsdorf2021kiosk] | Its software "saves data for each individual frame, enabling complete reconstruction of the entire experimental session"; its touch task "proceeds through pre-defined difficulty levels that the operator/tester can set flexibly before or during task performance" | No statement found on whether an operator's changes are written to the data |
@@ -149,8 +164,9 @@ a recorded probability.
 | **BIDS 1.11.2**, behavioral experiments | `beh/` with `_beh.tsv` and `_events.tsv`; `TaskName`, `Instructions`, `TaskDescription` and cognitive-ontology IDs in the sidecar | No intervention concept; the sidecar describes a task once (`Instructions` is the text given to participants) |
 
 **The pattern.** Per-trial settings and outcomes are recorded everywhere. Change histories are recorded
-sometimes (MonkeyLogic, and wl-xcon). Reasons, alternatives and probabilities are recorded by none of
-the systems read. Where training was automated it was one fixed rule, which yields comparable animals
+sometimes (MonkeyLogic, and wl-xcon). No system read has a field for reasons, alternatives or
+probabilities; Alyx's `narrative` can hold a reason as free text. Where training was automated by a
+fixed rule (IBL, Berger et al.) it was one rule, which yields comparable animals
 but no contrast between techniques.
 
 ### 2.2 Husbandry next to sessions
@@ -172,10 +188,22 @@ in wl.works (§3.3); the gap is the join, not the data.
   **Tested on simulated learners and deep reinforcement-learning agents, not animals.** It lists what
   makes animals harder: "limited flexibility in controlling rewards and exploration statistics",
   "partial observability", and "no delineation between training and test trials".
-- **Live animals.** Searches on 2026-10-09 found no published case of a learned or language-model agent
-  choosing training steps for live laboratory animals. The closest are the fixed rules above (IBL,
-  Berger et al.), which act without a person in the loop and are what wl-xcon's procedures (engine spec
-  §15, build D) will be.
+- **Live animals.** Yu et al. (2025) built a teacher of the kind Bak et al. proposed into a home cage
+  for mice (HABITS; the comparison with Bak et al. is this note's): "an online
+  logistic regression model" fitted to each mouse's choice history serves as its surrogate, predicts
+  where each candidate trial type would move it in "the latent weight space", and "the trial type with
+  closest position to the goal was selected as the next trials". They "first validated the theoretical
+  feasibility and efficiency of the algorithms in simulated 2AFC experiments". In a working-memory task
+  (7 mice taught this way, 8 given random trial types) the taught mice "achieved criteria performance
+  with significantly fewer trials compared with the random group" (two-sided Wilcoxon rank-sum, p <
+  0.01), and "three out of the eight mice in the random group even did not reach the criteria
+  performance at the end of training (60 days)"; in a simpler two-choice sound-frequency task, random,
+  anti-bias and taught groups all trained "with comparable efficiency and final performance". The
+  authors write: "To our knowledge, this is the first study demonstrating the utility of machine
+  teaching in augmenting animal behavioral training." It acts with no person in the loop, choosing each
+  trial's type. Searches on 2026-10-09 found no language-model agent choosing training steps for live
+  laboratory animals. The fixed rules above (IBL, Berger et al.) also act without a person in the loop,
+  and are what wl-xcon's procedures (engine spec §15, build D) will be.
 
 ## 3. What wl-xcon records today, and what is missing
 
@@ -185,8 +213,8 @@ in wl.works (§3.3); the gap is the join, not the data.
 |---|---|---|
 | `config.json` | Subject, deployment, **`session_kind`** (training, piloting or recording, since build B), calibration, bounded config, `already_delivered_today`, the config files' names, the setup | Days since the last session; weight (in wl.works) |
 | `runs.jsonl` | Per run, a start row (task, allocation, `versions`, trials, seed, block names, `layers` {task, run}, `resolved` values, bounded values, pre-flight rows, `by`) and an end row (`stopped_because`, `stop_kind`, trials, blocks run) | The task's `versions` entry is its path as given, not a content version; why this run and not another |
-| `trials.jsonl` | Every trial: outcome, **the whole resolved parameter set**, block and condition names, ten position numbers, fluid commanded | Condition numbers stable across sessions (build C's registry, §14.5); whether a live edit overrode the condition's value (§14.7, an ask of wl-preproc) |
-| `parameter_changes.jsonl` | Each applied live change: `sequence` (joined to the `PARAM_CHANGED` code on the recording clock), `name`, `was`, `now`, `by`, `run` | **A reason; an instant; the first trial it applied to** (placed only by the code's sequence and the file's order); the options on offer; a cross-task meaning |
+| `trials.jsonl` | Every trial: outcome, **the task's whole resolved parameter set** (not the welfare-bounded reward sizes), block and condition names, ten position numbers, fluid commanded | Condition numbers stable across sessions (build C's registry, §14.5); whether a live edit overrode the condition's value (§14.7, an ask of wl-preproc) |
+| `parameter_changes.jsonl` | Each applied live change: `sequence` (joined by count to the `PARAM_CHANGED` code, which carries no number until XC-008 strobes the `PARAM_CHANGE` escape), `name`, `was`, `now`, `by`, `run` | **A reason; an instant; the first trial it applied to** (placed only by the code's sequence and the file's order); the options on offer; a cross-task meaning |
 | `controls.jsonl` | Stops, pauses, resumes, marks with their free-text notes, schedules, cancellations, manual rewards while paused: `kind`, `by`, `at`, `trial_index`, `run` | A reason for a pause or stop |
 | `welfare_notes.jsonl` | Session opened and ended, departure, return, amendments with their reason | — (welfare marks, not training) |
 | `warnings.jsonl`, `refusals.jsonl` | Accepted warnings; refused welfare-bounded writes, capped at 50 | — |
@@ -201,8 +229,10 @@ wl.works account whose token `wlx serve` checked), or null for the process's own
 
 ### 3.2 Where the records go
 
-wl-preproc (local checkout at `a9a47a0`, 2026-10-08) reads `trials.jsonl` (each trial's resolved
-values become trial-table columns in its NWB), `runs.jsonl`, `config.json` (to check the subject) and
+wl-preproc (local checkout at `a9a47a0`, 2026-10-08, branch `spec/seven-way-agreement`; `main` at
+`95c8b54` reads the same files) reads `trials.jsonl` (each setting that varies across the session's
+trials becomes a trial-table column in its NWB, and each condition's constant settings a JSON cell in
+its conditions table), `runs.jsonl`, `config.json` (to check the subject) and
 an `xcon/*.yaml` calibration log. **It reads none of `parameter_changes.jsonl`, `controls.jsonl`,
 `welfare_notes.jsonl` or `warnings.jsonl`**; reading `warnings.jsonl` is an open ask (engine spec §21).
 Today, the who and why of a change would not reach the published dataset.
@@ -214,15 +244,19 @@ Today, the who and why of a change would not reach the published dataset.
   with their source (`rig` or `home_cage`), the water regime (`free`, `bottle` or `control`, with a
   minimum over a window and a reason), and observations (`clinical`, `behaviour` or `general`, free
   text, a concern flag). An animal's `rig_name` is the rig's subject (`^[a-z0-9]{1,8}$`, unique in the
-  table). Whether a rig name can be edited or reused after an animal leaves: UNVERIFIED (not read).
-- **The rig cannot push to wl.works** (architecture.md, "Data outputs and lab integration"); it receives
-  the day's delivered fluid with `prepare-session`, and nothing of a plan since 2026-10-01.
+  table). A rig name can be edited: `editAnimal` (`src/features/welfare/animals.ts`) rewrites it and
+  logs the before and after in `animal_revision`, and the unique index holds a name to one animal at a
+  time. The key that never changes is `animal.id`.
+- **The rig cannot push to wl.works** (architecture.md, "Data outputs and lab integration"); it is to
+  receive the day's delivered fluid with `prepare-session` (XC-100, waiting on wl-works; today the
+  figure is typed at the session's open), and nothing of a plan since 2026-10-01.
 - **The kiosk's record is undesigned.** S13 §5 leaves it open with three candidates and recommends "a
   lighter record of its own" outside the pipeline for a first version. If home-cage training is where
   much of the training happens, a backlog that omits it is missing the part XC-288 is about.
 - **Per-animal state on lab storage** (engine spec §13.7: programs, presets, last values, procedure
-  state, one writer at a time) is designed in build C; its carried state is "recorded whenever read or
-  written" (brainstorm notes, element 12).
+  state, one writer at a time) is partly build C's (presets and history, §24), and procedure state
+  comes with build D's library; a procedure's carried state is "recorded whenever read or written"
+  (brainstorm notes, element 12).
 
 ## 4. Candidate requirements (this note's suggestions)
 
@@ -238,22 +272,25 @@ welfare-critical list; where a suggestion touches a listed function, that is sai
 | R5 | **A procedure's decisions as events**: advance or fall back, with the criterion values that triggered it | Procedures are the automated techniques; their steps are interventions | C (the event), D (the library) |
 | R6 | **The options on offer and, when known, the probability** of the one chosen: presets offered, an agent's ranked suggestions, a randomized step's probability | Off-policy evaluation needs the probability; the choice set is the least a person's choice can carry | C reserves the fields; D for randomized procedures |
 | R7 | **Unavailable decision points**: a planned step not taken, and why (a limit near, the animal not working) | Klasnja et al.'s availability indicator | D |
-| R8 | **Stable identifiers across years**: the animal (its wl.works rig name and record id), the task and its version (the review report version, §18.1, or a content hash), condition numbers (§14.5), a procedure's identity and version | Five years of records join only on identifiers that never change meaning | C |
+| R8 | **Stable identifiers across years**: the animal (its wl.works record id, with the rig name it had that day), the task and its version (the review report version, §18.1, or a content hash), condition numbers (§14.5), a procedure's identity and version | Five years of records join only on identifiers that never change meaning | C |
 | R9 | **A daily summary per animal and task**: trials, correct by condition, reaction times, breaks, fluid, time in chair, the stage reached | The outcome an agent learns against is daily progress, not single trials | XC-011's session summary; C defines "stage" |
 | R10 | **Free-text notes kept apart from typed events, and able to point at one** (a note naming the change it explains) | Free text carries what no code anticipated; keeping it separate keeps the typed record countable | C |
 | R11 | **Every record reaches one corpus**: wl-preproc reading the change rows, the kiosk writing the same shapes, per-animal history on lab storage | An agent learns only from what reaches it | asks of wl-preproc; S13 §5 |
-| R12 | **A simulated animal that learns**, as a test bed for any agent's policy before an animal | Both published teachers were developed against simulated learners | C+I's simulated animal profiles, XC-146 |
+| R12 | **A simulated animal that learns**, as a test bed for any agent's policy before an animal | Every published teacher found was developed against simulated learners first, HABITS' included | C+I's simulated animal profiles, XC-146 |
 | R13 | **Room for an agent actor** in the actor and event shapes (§5) | So the first agent does not need a schema change of every file | C reserves; built when an agent is |
 
 ## 5. An agent that runs sessions
 
-**What bounds it is already built, and does not change.** A setting reaches a session through
-`Session.set`, "the one validated write path, whatever the origin", which is welfare-critical whole
-(architecture.md). A welfare-bounded name goes to `bounds.validate` against its ceiling; a task
+**By default it would be held to a person's bounds by code that already exists.** A live setting
+reaches a session through `Session.set`, "the one validated write path, whatever the origin" (its
+docstring, after S8 §3.3), welfare-critical whole (architecture.md); a run's task and starting values
+reach it through the run's start, each value checked against the task's declarations
+(`preflight.values`). A welfare-bounded name goes to `bounds.validate` against its ceiling; a task
 parameter is held to its declaration. A procedure may choose among named reward entries and "never an
 amount" (§15.7), and presets, revert and carried values "never carry a bounded setting" (§17.6). An
-agent acting through the same path is bounded the same way; the out-of-cage clock, the daily fluid floor
-and every ceiling apply to it as to a person.
+agent acting through the same paths is bounded the same way; the out-of-cage clock, the daily fluid
+floor and every ceiling apply to it as to a person. Whether an agent should also get tighter,
+agent-specific limits is open (question 8).
 
 **Where it could act from.** wl.works can publish nothing welfare-affecting to a rig: "No
 welfare-affecting action — reward, stimulation, session start, parameter change — is ever published
@@ -266,13 +303,18 @@ decision of its own.
 **Who it is in the record.** Today an actor is a `Box` or a `Member`; the system actor is planned.
 An agent would be a further kind. Fields the brainstorm may want (suggestions): its name and version,
 the policy or model it used, the person accountable for it, the approval mode it acted under, and the
-suggestion it was acting on.
+suggestion it was acting on. **An agent's identity in the record depends on XC-218 being closed**:
+`taskd` trusts a member map from any local sender (`actor.from_map`), so a process on the rig could
+today be recorded as a wl.works person.
 
-**A named person stays accountable.** Directive 2010/63/EU requires "one or several persons on site who
-shall ... be responsible for overseeing the welfare and care of the animals" (Article 24(1)(a)), and
-every project authorisation names "the persons responsible for the overall implementation of the
-project and its compliance with the project authorisation" (Article 40(2)(b)). An agent cannot hold
-either role, so each of its acts would name the person who is.
+**Responsible persons.** Directive 2010/63/EU requires "one or several persons on site who shall ... be
+responsible for overseeing the welfare and care of the animals" (Article 24(1)(a)), and every project
+authorisation names "the persons responsible for the overall implementation of the project and its
+compliance with the project authorisation" (Article 40(2)(b)). An agent cannot hold either role. The
+note suggests each of its acts name the person accountable for it; that is a record-design choice, not
+something the Directive says. For a lab at KU Leuven the binding text is the Belgian or Flemish law
+that transposes the Directive; this note read only the Directive (UNVERIFIED which text binds and what
+it adds).
 
 **Approval modes.** Parasuraman et al. (2000) treat automation per function (information acquisition,
 information analysis, "decision and action selection", action implementation), each at a level "from
@@ -288,7 +330,8 @@ Applied here, a mode could differ by kind of change:
 
 **Precedents.** Fixed rules already change training without a person in the loop (IBL's reward and
 contrast steps; Berger et al.'s automatic updating), and wl-xcon's procedures will be such rules. A
-learned agent acting on live animals has no published precedent that I found. Bak et al.'s caution
+model-fitted teacher has chosen trials for live mice (Yu et al. 2025, §2.3); a language-model agent
+acting on live animals has no published precedent that I found. Bak et al.'s caution
 applies directly: a teacher that maximizes learning speed may lower the animal's success rate, and with
 it reward and motivation, so what an agent optimizes is a decision (question 7 below).
 
@@ -314,8 +357,8 @@ Ordered by what build C's plan needs first. They are asked, not answered.
    should home-cage (kiosk) training be recorded in the same shape as rig sessions?
 7. **What should "helped" mean?** Fewer days to a criterion, fewer trials, steadier performance, and
    with which floor on the animal's reward rate and engagement while it learns?
-8. **How far should an agent go first?** Suggest only, or act within limits a person sets? Who is
-   accountable for its acts: you, or the animal's primary researcher in wl.works?
+8. **How far should an agent go first?** Suggest only, or act within limits a person sets? Should it
+   have tighter limits of its own than a person has? Who should be accountable for its acts?
 9. **Should weight and water be copied into each session's record at its start**, or joined from
    wl.works when the history is analyzed?
 10. **Should sessions run outside wl-xcon count**: a MonkeyLogic session on the swapped rig (ADR-0005
@@ -339,7 +382,12 @@ Ordered by what build C's plan needs first. They are asked, not answered.
 - wl-preproc's readers: `wl_preproc/events/rigtrials.py`, `events/rigruns.py`, `nwb/intervals.py`,
   `eye/xcon.py`; a search of `wl_preproc/` for the other file names found no reader.
 - wl.works' welfare tables: `src/db/schema/welfare.ts` (`animal`, `animal_weight`,
-  `animal_reference_weight`, `animal_water_entry`, `animal_water_requirement`, `animal_observation`).
+  `animal_reference_weight`, `animal_water_entry`, `animal_water_requirement`, `animal_observation`);
+  an animal's edit, rig name included, and its revision row: `editAnimal` and `snapshot` in
+  `src/features/welfare/animals.ts`.
+- The run's start pre-flight: `service.Service._start` calls `Service._preflight`, which runs
+  `preflight.values`. The day's delivered fluid typed at the open: `cli.py`'s `--delivered-today` and
+  the open command's `delivered_today` (`service.py`).
 - wl-xtasks (`ffeb62f`) holds no task code yet; wl-touchtrain (`9d377c9`, registry lifecycle
   `scaffolded`) holds no design yet.
 
@@ -357,8 +405,9 @@ Joachims 2015, full text of sections 1-4; Gottesman et al. 2018, full text of se
 al. 2015, full text (PMC4732571); Murphy 2005, abstract (PubMed 15586395); Roy et al. 2021, abstract
 (PubMed 33412101); Tong et al. 2025, full text (PMC12448964); Parasuraman et al. 2000, abstract (PubMed
 11760769); Ly et al. 2024, full text (bioRxiv's source XML) and the extension's README; the Alyx source
-file; MonkeyLogic's runtime-functions page; the BIDS page and its changelog; Directive 2010/63/EU on
-EUR-Lex, Articles 24 and 40.
+files (`alyx/actions/models.py`, `alyx/base.py`); MonkeyLogic's runtime-functions page; the BIDS page
+and its changelog; Directive 2010/63/EU on EUR-Lex, Articles 24 and 40; Yu et al. 2025, full text
+(PMC12440354), read after the independent check named it.
 
 **UNVERIFIED or not read:**
 
@@ -370,7 +419,11 @@ EUR-Lex, Articles 24 and 40.
   their code was not read.
 - The published version of IBL's data-architecture preprint (bioRxiv 10.1101/827873, abstract read;
   bioRxiv lists doi 10.1038/s41592-022-01742-6 as its publication): not opened, and not cited.
-- Whether a wl.works rig name can change or be reused.
+- Which law binds a lab at KU Leuven (the Belgian or Flemish transposition of Directive 2010/63/EU) and
+  what it adds: only the Directive was read.
+- Yu et al. 2025: the paper gives the group sizes (7 and 8) and that three of the eight random-group
+  mice did not reach criterion; it does not state in the text read whether all seven taught mice did,
+  so the note gives no count for them.
 
 ## Sources
 
@@ -387,8 +440,8 @@ Not in `library.bib`; each read on 2026-10-09.
   Wihl, D., Peng, X., Yao, J., Lage, I., Mosch, C., Lehman, L. H., Komorowski, M., Faisal, A., Celi,
   L. A., Sontag, D., & Doshi-Velez, F. (2018). Evaluating reinforcement learning algorithms in
   observational health settings. arXiv:1805.12298. https://arxiv.org/abs/1805.12298
-- International Brain Laboratory and others. Alyx, `alyx/actions/models.py`, `master` branch.
-  https://github.com/cortex-lab/alyx
+- International Brain Laboratory and others. Alyx, `alyx/actions/models.py` and `alyx/base.py`,
+  `master` branch. https://github.com/cortex-lab/alyx
 - Klasnja, P., Hekler, E. B., Shiffman, S., Boruvka, A., Almirall, D., Tewari, A., & Murphy, S. A.
   (2015). Microrandomized trials: an experimental design for developing just-in-time adaptive
   interventions. *Health Psychology*, 34S, 1220-1228. doi 10.1037/hea0000305
@@ -413,3 +466,6 @@ Not in `library.bib`; each read on 2026-10-09.
   https://bids-specification.readthedocs.io/en/stable/modality-specific-files/behavioral-experiments.html
 - Tong, W. L., Murthy, V. N., & Reddy, G. (2025). Adaptive algorithms for shaping behavior. *PLOS
   Computational Biology*, 21(9), e1013454. doi 10.1371/journal.pcbi.1013454
+- Yu, B., Li, P., Xu, H., Wang, Y., Xu, K., & Hao, Y. (2025). Novel and optimized mouse behavior enabled
+  by fully autonomous HABITS: Home-cage assisted behavioral innovation and testing system. *eLife*, 14,
+  RP104833. doi 10.7554/eLife.104833
