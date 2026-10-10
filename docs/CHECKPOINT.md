@@ -10,8 +10,8 @@ distrust the reasoning. Numbers go stale, arguments do not.
 > ruled for dated documents; read `wl_expcontroller/taskd.py` there as `wl_xcon/taskd.py`.
 >
 > **This file describes `main`, except its newest entry**, "What moved on 2026-10-10: engine build A2, color"
-> (built on branch `engine-a2`, its whole-branch review done and its fix wave re-reviewed clean; it waits
-> for its CI sweeps to be read and for the PI's merge decision; **start there**). Beside it, the parallel
+> (built on branch `engine-a2`, its whole-branch review done and its fix wave re-reviewed clean, its CI
+> sweeps read clean; it waits for the PI's merge decision; **start there**). Beside it, the parallel
 > branch `xc275-sweep-timeouts` (XC-275's first part, described in that entry) also waits for his merge
 > decision. The next entry, "What moved overnight 2026-10-09 to 10-10: build A2's
 > plan drafted and reviewed, XC-288's research", held three branches for the PI; he merged `xc288-prep`
@@ -419,18 +419,18 @@ drawer down to the output levels the panel is driven with. Built on `engine-a2` 
 `cbcb816` to `747e717` are Tasks 1 to 10's code with their fix commits, `ba50387` and `6d98d8d` are Task 11's
 docs and its fix, `b5005de`, `95bc590` and `d34da87` are the whole-branch review's fix wave, and the docs-only
 commit after them brought this entry up to date), subagent-driven as A1 and B were: a fresh
-implementer and a reviewer per task. **Not merged: its CI sweeps are not yet read, and the PI's word comes
-first (below). The whole-branch review is done and its fix wave re-reviewed clean (below).**
+implementer and a reviewer per task. **Not merged: its CI sweeps are read clean (below), and the merge is the
+PI's. The whole-branch review is done and its fix wave re-reviewed clean (below).**
 
-**Resume here (state at 2026-10-10, after the whole-branch review's fix wave):** the code is complete, each
+**Resume here (state at 2026-10-10, after its CI sweeps were read):** the code is complete, each
 task's review closed, the whole-branch review done and its fixes re-reviewed clean; the suite is **3370
 passed** at `d34da87` (`WLX_REQUIRE_PREPROC=1 WLX_REQUIRE_BROWSER=1`, `-W error::RuntimeWarning`, nothing
-skipped). **What is left** (Next, at the end): the three pending CI runs read shard by shard, the targeted
-local checks, then the PI's merge decisions on `engine-a2` and `xc275-sweep-timeouts`. Read in this order:
+skipped). **What is left** (Next, at the end): the PI's merge decisions on `engine-a2` and
+`xc275-sweep-timeouts`; the CI reading and its targeted local checks are done (below). Read in this order:
 this entry, the backlog (XC-314 and XC-315 are new), then the plan
-`docs/superpowers/plans/2026-10-09-engine-a2.md` only for the call a question touches. The SDD ledger is
-`.superpowers/sdd/2026-10-09-engine-a2/progress.md` in the worktree; it is git-ignored and dies with the
-plan, and its `Task N: minor (deferred)` lines were triaged by the whole-branch review: the cone-matrix
+`docs/superpowers/plans/2026-10-09-engine-a2.md` only for the call a question touches. The SDD ledger
+(`.superpowers/sdd/2026-10-09-engine-a2/progress.md`, git-ignored) was deleted once the CI reading below
+was recorded; its `Task N: minor (deferred)` lines were triaged by the whole-branch review: the cone-matrix
 items folded into XC-315, the isoluminance gap Task 6 deferred already filed as XC-314 at Task 11, the rest
 dropped for the reviewer's reasons (where those are: the rulings file). The controller's 33 rulings
 during the build, each with why and its cost if wrong, are kept in
@@ -497,15 +497,39 @@ tests, 1 to 8), `38036955043` for Task 2 (`check`, `photometry`, `service` swept
 caught, no survivors; only `_literal`, older than A2, by a timeout). The push runs at `12f1b0d` and
 `8608182` (Tasks 4 and 5, runs `38038114401` and `38038677015`) have finished and are not read. The
 controller cancelled two queued per-push runs (`ae5f4e1`, run `38039181685`; `fdd4b6a`, run
-`38041271547`) because the full sweep supersedes them. **Three runs are pending: the full sweep (run
-`38042608784`, `mutation-full`, `workflow_dispatch`) and the push run (`38042603715`), both at `ba50387`,
-which holds the code as Tasks 1 to 11 left it; and `d34da87`'s push run (`38045382976`), the only one
-that sweeps the fix wave's code (`check._can_be`, `check._colors`, `exact.output_levels`). Each is to be
-read shard by shard, every line a real `N failed`, never the job's color, and recorded before the
-merge**; nothing is claimed here about their results. Every A2-new or A2-changed function caught only by
-a timeout or an import error is to be checked locally: neuter it and run its tests, beside a control of
-the same files unmodified, as build B's 19 were (XC-275). So far that is `photometry.weights_of` (Task 2's
-push, run `38036955043`); the pending runs may add to the list.
+`38041271547`) because the full sweep supersedes them. **The three runs that decide the merge, read shard by shard on 2026-10-10: no survivor, and no catch
+unexplained.**
+- **The full sweep** (run `38042608784`, `mutation-full`, `workflow_dispatch`, at `ba50387`, the code as
+  Tasks 1 to 11 left it): 39 modules, 12 of 12 shards passed, **818 caught, 0 survived**; NOT MUTABLE the
+  usual three (`signin.redirect_request`, `welfare.emit`, `run.display`); every baseline and restore at
+  `3323 passed, 35 skipped`. 93 lines read caught by a timeout or an import error: 85 are functions
+  unchanged since the branch's base (`check`'s 13 older ones, `taskd`, `service`, `photometry`'s
+  `_finite_number`, `_XYZ`, `_solve3`, `_det3` and `_srgb_*`), XC-140's class; **8 are A2-new**:
+  `photometry.weights_of` (timed out) and `_inverse3` (`3 errors`), `check.absolute` (nested in
+  `_block_faults`; timed out), and `cones.cie_file`, `excitations`, `fundamentals`, `parse` and `table`
+  (`3 errors`: collection errors in `tests/test_color.py`, `test_engine_path.py` and
+  `test_reference_tasks.py`, whose module-level calibrations need them).
+- **The push run at `ba50387`** (`38042603715`; `exact`, `photometry`, `service`, `taskd`): 163 caught, 0
+  survived; its 29 timeout or import-error lines are a subset of the above.
+- **The fix wave's push run** (`38045382976`, at `d34da87`; `check`, `exact`, `photometry`, the only run
+  sweeping `check._can_be`, `check._colors` and `exact.output_levels`): 153 caught, 0 survived, every
+  baseline and restore at `3335 passed, 35 skipped`; its 22 timeout or import-error lines are a subset of
+  the full sweep's 93.
+- **The 8 A2-new ones, settled by a targeted local break** (each neutered by `tools/mutate.py`'s own
+  `_neuter_source` in a scratch copy of the tree, its test files run one by one beside an unmodified
+  control copy): `weights_of` → `91 failed` in `test_color.py`, and named failures in
+  `test_display_calibration.py`, `test_exact.py`, `test_reference_tasks.py` and `test_engine_path.py`;
+  `_inverse3` → `13 failed` in `test_cone_colors.py`, and named failures in three more files (and, with
+  its adjugate left untransposed rather than neutered, named failures in six); `check.absolute` → `12
+  failed` in `test_color.py`, `56` in `test_display_checks.py`, `33` in `test_task_checks.py`; each
+  `cones` function → named failures in `test_cones.py` (3 to 9), `test_cone_colors.py` (4) and
+  `test_display_calibration.py` (4). All real catches. The control copy fails one test,
+  `test_the_cie_files_and_their_notice_are_found_through_the_package_and_ship_with_it`, because a bare
+  copy of the tree is not an installed package; every mutant fails it the same way.
+- The docs-only push `5ae49e7` (`38046485272`) swept 0 modules; its tests are green.
+- `xc275-sweep-timeouts`' run (`38043345094`, at `9a246c8`) swept 0 modules, because a change to
+  `tools/mutate.py` does not escalate `--changed-only`; its tests are green on 3.11 to 3.13. **Its new
+  verdicts first run in the nightly after it merges**, and that nightly is the one to read for them.
 
 **Welfare, byte for byte.** Compared with `ast` against `171b8d8` and `ba50387` (the fix wave after it
 touches none of these modules), source segments equal: no welfare-listed function changed (`bounds`,
@@ -527,7 +551,7 @@ skipped** because the parallel branch `xc275-sweep-timeouts` (not yet merged) fi
 Next free (XC-314) loses to this one's: take XC-316.
 
 **The parallel branch, `xc275-sweep-timeouts`** (worktree `.claude/worktrees/xc275-sweep-timeouts`;
-`f59482b` and `9a246c8` on `main`'s `7fea382`; pushed, its CI run `38043345094` pending), worked beside A2
+`f59482b` and `9a246c8` on `main`'s `7fea382`; pushed, its CI run `38043345094` green, sweeping nothing, as above), worked beside A2
 as the PI chose, implements XC-275's first part: a timed-out mutant is judged by what its suite had done.
 A pytest plugin (`tools/suite_progress/`) records each test's start and outcome; a failure before the
 kill reads caught and is named, and none reads `TIMED OUT` and fails the run; the limit is max(300 s,
@@ -548,9 +572,8 @@ bullet.
   functions as the pushes come in, and settle each with a targeted local break.
 - Backlog IDs on parallel branches collide; the gap above is allowed, and merge order decides.
 
-**Next:** read the three pending runs shard by shard (`38042608784`, `38042603715`, `38045382976`) and
-run the targeted local checks; then the PI's merge decisions, on `engine-a2` and on
-`xc275-sweep-timeouts`. After A2, by the order: XC-288's brainstorm with him, then build C, unless he says
+**Next:** the PI's merge decisions, on `engine-a2` and on `xc275-sweep-timeouts`; the CI reading is
+done (above). After A2, by the order: XC-288's brainstorm with him, then build C, unless he says
 otherwise.
 
 ## What moved overnight 2026-10-09 to 10-10: build A2's plan drafted and reviewed, XC-288's research
