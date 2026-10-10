@@ -18,7 +18,7 @@ from wl_xcon import screen
 from wl_xcon.calibration import constellation
 from wl_xcon.cli import _load_trial
 from wl_xcon.check import check
-from wl_xcon.photometry import SRGB, SRGB_WHITE_CD_M2, Calibration, xyY
+from wl_xcon.photometry import SRGB, SRGB_WHITE_CD_M2, DKL, Calibration, Gray, xyY
 from wl_xcon.run import Recorded
 from wl_xcon.simulate import Subject, simulate
 from wl_xcon.task import (
@@ -164,6 +164,7 @@ PANEL = Calibration(
     transfer=(LINEAR,) * 3,
     observer="macaque V(lambda) -- placeholder, unmeasured",
     measured_on="2026-08-31",
+    max_cone_contrast=1.0,
 )
 
 
@@ -389,3 +390,13 @@ def test_each_color_reads_its_own_luminance_setting_and_nothing_else(training):
     assert lights(0, 0, red=5.0, green=11.0) == pytest.approx((5.0, 11.0))
     # And the other way about: green target, red distractors.
     assert lights(1, 1, red=5.0, green=9.0) == pytest.approx((9.0, 5.0))
+
+
+def test_the_search_task_shows_its_colors_on_a_gray_and_so_does_its_training(search, training):
+    """Its red and green are contrasts about the background, so they need a lit one (engine spec
+    §7.5): D65 at 16 cd/m², the training variant's too, and the red and green are the PI's 2023
+    items made isoluminant in the lab's observer (the PI's answer to the engine A2 plan's Q1)."""
+    assert search.background == Gray(16.0)
+    assert training.background == search.background
+    assert (_load("visual_search", "RED"), _load("visual_search", "GREEN")) == (
+        DKL(lum=0.0, l_m=0.603, s_lm=-0.94), DKL(lum=0.0, l_m=-0.143, s_lm=-0.87))

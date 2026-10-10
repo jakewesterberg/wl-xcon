@@ -10,7 +10,7 @@ from wl_xcon.codes import PROVISIONAL, Allocation
 from wl_xcon.components import Registry
 from wl_xcon.findings import NOT_RECORDING, SESSION_KINDS, Finding
 from wl_xcon.geometry import VIEWS, Geometry
-from wl_xcon.photometry import D65, DKL, Calibration, Color, Gray, unrealizable, xyY
+from wl_xcon.photometry import CONE_COLORS, D65, DKL, Calibration, Color, Gray, unrealizable, xyY
 from wl_xcon.task import (
     RDS,
     After,
@@ -1138,7 +1138,7 @@ _SIZES = ("size", "width", "height", "length", "thickness", "outer", "sigma", "a
 #: `None` is a value of one only where its block's own default is `None` (a grating's
 #: `direction`).
 _NUMBERS = (*_SIZES, "inner", "sides", "sf", "phase", "tf", "direction", "orientation", "value",
-            "cd_m2", "x", "y", "Y")
+            "cd_m2", "x", "y", "Y", "lum", "l_m", "s_lm")
 
 #: Block fields that hold a light: a `Color`, `None`, or a parameter offering those (XC-264).
 _LIGHTS = ("color", "mean")
@@ -1404,6 +1404,32 @@ def _light_faults(trial: Trial) -> list[Finding]:
                     f"sits under the pattern (engine spec §4.3: always a warning)"),
                     blocking=False,
                     accepted_in=SESSION_KINDS)  # Always a warning, in every kind (N§R3).
+    findings += _cone_color_faults(trial, params, on_black, fix)
+    return findings
+
+
+def _cone_color_faults(trial: Trial, params: dict[str, Param], on_black: bool,
+                       fix: str) -> list[Finding]:
+    """A cone color (`DKL`, `ConeContrast`) is a contrast about its background in cone terms, so
+    **it needs a background that is lit** (engine spec §7.5; the PI, N§4 batch 3: "It must
+    declare one"; A1's call 6) **and one background**: through the stereoscope, a trial whose
+    eyes' backgrounds differ as written is refused one, since the same color would be two
+    different lights (the engine A2 plan's call 10). One finding each, naming every carrier."""
+    carriers = sorted({what for what, color in _colors(trial, params)
+                       if isinstance(color, CONE_COLORS) and not what.startswith("the trial's ")})
+    if not carriers:
+        return []
+    findings = []
+    if on_black:
+        findings.append(Finding("cone-color-on-black", (
+            f"{'; '.join(carriers)}: a cone color is relative to the background, and an eye's "
+            f"background is or can be black; {fix} (engine spec §7.5)")))
+    left, right = (_backgrounds(trial) * 2)[:2]
+    if trial.view == "stereoscope" and left != right:
+        findings.append(Finding("cone-color-two-backgrounds", (
+            f"{'; '.join(carriers)}: a cone color is relative to the background, and the two eyes' "
+            f"backgrounds differ ({left} and {right}), so it would be two lights; give both eyes "
+            f"one background, or write the color as an absolute light (xyY)")))
     return findings
 
 
@@ -1531,6 +1557,9 @@ def _block_faults(trial: Trial) -> list[Finding]:
     def light(v) -> bool:
         return v is None or isinstance(v, Color)
 
+    def absolute(v) -> bool:
+        return v is None or isinstance(v, (Gray, xyY))
+
     def shown(what: str, looks) -> None:
         """An appearance: a parameter offering none is refused, as one of another kind is."""
         if isinstance(looks, P) and not (looks.name in params and params[looks.name].choices):
@@ -1550,7 +1579,8 @@ def _block_faults(trial: Trial) -> list[Finding]:
     blocks = [part for looks in _appearances(trial) for part in _parts(looks, params)]
     for attr in ("background", "background_left", "background_right"):
         blocks += _parts(getattr(trial, attr), params)
-        kind(f"the trial's {attr.replace('_', ' ')}", getattr(trial, attr), light, "a color")
+        kind(f"the trial's {attr.replace('_', ' ')}", getattr(trial, attr), absolute,
+             "an absolute light, Gray or xyY: what a contrast or a cone color is relative to")
     for part in blocks:
         name = type(part).__name__
         for f in dataclasses.fields(part):

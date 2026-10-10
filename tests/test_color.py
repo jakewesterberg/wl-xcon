@@ -12,7 +12,7 @@ from dataclasses import replace
 
 import pytest
 
-from _calibrations import LINEAR
+from _calibrations import LINEAR, measured
 from wl_xcon import look
 from wl_xcon.check import check
 from wl_xcon.cones import CIE2006_10
@@ -63,6 +63,9 @@ PANEL = Calibration(
     observer="macaque V(lambda), Sidley & Sperling 1967",
     measured_on="2026-08-31",
 )
+
+#: A lit gray background, for a color relative to it.
+GRAY_BG = Gray(20.0)
 
 
 def a_task(looks) -> Trial:
@@ -621,3 +624,62 @@ def test_a_gray_above_the_defaults_white_cannot_be_shown_on_it():
 
 def test_a_measured_calibration_brings_none_of_the_defaults_findings():
     assert _found(a_task(Disc(color=xyY(0.500, 0.400, 30.0))), calibration=PANEL) == {}
+
+
+# --- Cone colors need a lit background, and one (engine build A2) -----------------------------
+
+
+def test_a_cone_color_on_the_black_default_background_is_refused_naming_the_fix():
+    """Spec §7.5 (the PI, N§4 batch 3: "It must declare one"; A1's call 6)."""
+    found = _found(a_task(Disc(color=DKL(l_m=0.08))), calibration=measured())
+
+    assert found["cone-color-on-black"].blocking
+    assert found["cone-color-on-black"].detail.startswith("Disc: a cone color is relative")
+    assert "declare the trial's background" in found["cone-color-on-black"].detail
+
+
+def test_a_cone_color_on_a_background_a_parameter_can_make_black_is_refused():
+    trial = replace(a_task(Disc(color=DKL(l_m=0.08))), background=Gray(P("bg")),
+                    params=[Param("bg", unit="cd/m2", low=0.0, high=40.0)])
+
+    found = _found(trial, calibration=measured())
+
+    assert "raise the low end of parameter 'bg'" in found["cone-color-on-black"].detail
+
+
+def test_a_cone_color_on_a_lit_background_is_not_refused_for_it():
+    trial = replace(a_task(Disc(color=DKL(l_m=0.08))), background=GRAY_BG)
+
+    assert "cone-color-on-black" not in _found(trial, calibration=measured())
+
+
+def test_one_finding_names_every_cone_colored_carrier():
+    found = _found(_choosing(Disc(size=1.0, color=DKL(l_m=0.08)),
+                             Square(size=1.0, color=DKL(l_m=-0.08))), calibration=measured())
+
+    assert found["cone-color-on-black"].detail.startswith(
+        "Disc (choice 1 of parameter 'looks'); Square (choice 2 of parameter 'looks'): ")
+
+
+def test_a_cone_color_between_two_eyes_backgrounds_that_differ_is_refused():
+    trial = replace(a_task(Disc(color=DKL(l_m=0.08))), view="stereoscope",
+                    background_left=Gray(20.0), background_right=Gray(30.0))
+
+    assert _found(trial, calibration=measured())["cone-color-two-backgrounds"].blocking
+    same = replace(trial, background_left=Gray(20.0), background_right=Gray(20.0))
+    assert "cone-color-two-backgrounds" not in _found(same, calibration=measured())
+
+
+def test_a_background_is_an_absolute_light():
+    trial = replace(a_task(Disc(size=1.0, color=Gray(40.0))), background=DKL(lum=0.1))
+
+    found = _found(trial, calibration=measured())
+
+    assert "not an absolute light" in found["bad-block"].detail
+
+
+@pytest.mark.parametrize("field", ["lum", "l_m", "s_lm"])
+def test_each_dkl_component_is_a_number(field):
+    trial = replace(a_task(Disc(color=DKL(**{field: "much"}))), background=GRAY_BG)
+
+    assert f"DKL.{field} is 'much', not a number" in _found(trial)["bad-block"].detail

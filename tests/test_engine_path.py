@@ -55,6 +55,7 @@ PANEL = Calibration(
     transfer=(LINEAR,) * 3,
     observer="macaque V(lambda) -- placeholder, unmeasured",
     measured_on="2026-08-31",
+    max_cone_contrast=1.0,
 )
 
 

@@ -9,7 +9,8 @@ refuses it** while the default is in use (spec §7.2). Both start at 15 cd/m², 
 standard's numbers and measured by nobody: not isoluminant for any observer, and nothing here
 claims they are.
 
-Everything else -- states, windows, every other parameter -- is `visual_search`'s, and
+Everything else -- states, windows, every other parameter, and the gray it is shown on (the
+engine A2 plan's Q1) -- is `visual_search`'s, and
 `tests/test_reference_tasks.py` holds the two to that. Its starting values are as unset as
 that task's (XC-183).
 """
@@ -63,6 +64,7 @@ search = Trial(
     start="await_fix",
     # Direct view, with the detection tasks: the lab's programme runs there.
     view="direct",
+    background=Gray(16.0),  # visual_search.BACKGROUND (the engine A2 plan's Q1)
     windows=[
         Window("fix", at=(0.0, 0.0), radius=P("fix_window"), on="fix"),
         # One declaration, `set_size` windows. The author cannot write them out,
