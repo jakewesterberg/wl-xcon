@@ -11,7 +11,8 @@ distrust the reasoning. Numbers go stale, arguments do not.
 >
 > **This file describes `main`.** Its newest entry, "What moved overnight 2026-10-09 to 10-10: build A2's
 > plan drafted and reviewed, XC-288's research" (on branch `xc288-prep` until the PI merges it), holds
-> two branches for him: A2's plan with three questions, and the research for XC-288's brainstorm. Below
+> three branches for him: A2's plan with three questions, the research for XC-288's brainstorm, and
+> XC-291's ordinary sites with XC-299. Below
 > it, "What moved on 2026-10-08: engine build B, what a
 > session is for and the warnings list" (on `main` by fast-forward on 2026-10-09, once the PI approved
 > the welfare summary of its code as built and CI's sweep of the branch read clean): every session says what it
@@ -401,8 +402,8 @@ figure was one low. In order:
 ## What moved overnight 2026-10-09 to 10-10: build A2's plan drafted and reviewed, XC-288's research
 
 **Resume here (state at 2026-10-10, early morning):** `main` is `171b8d8`, engine build B (its entry is
-below). The PI went to bed asking for work through the night; two branches wait for him, neither
-merged, nothing built from either:
+below). The PI went to bed asking for work through the night; three branches wait for him,
+none merged:
 
 - **`engine-a2`** (worktree `.claude/worktrees/engine-a2`, cut from `171b8d8`): **engine build A2's
   plan**, `docs/superpowers/plans/2026-10-09-engine-a2.md` (eleven tasks: the CIE 2006 10° LMS table
@@ -433,6 +434,23 @@ merged, nothing built from either:
   Yu et al. 2025, HABITS), all corrected. Beside it, `SessionRecord.parameter_change`'s docstring now says
   the `PARAM_CHANGED` code carries no number until XC-008 (the checker found it).
 
+- **`fault-sentences`** (worktree `.claude/worktrees/fault-sentences`, four commits on `171b8d8`):
+  **XC-291's ordinary sites and XC-299**, implemented, reviewed (one Important and three Minors, all
+  applied) and pushed. A fault whose own `str()` raises no longer stops `wlx taskd` at `_unfinished`,
+  `Service._built`, `Service._run`, `Service._resume` and `run`'s fault handler (whose shutdown still records an
+  open session's return as not recorded and its end): they say it through a new `service._said` (the
+  type's name read past any metaclass; `KeyboardInterrupt` still ends the service); every value a
+  damaged record supplies to `Stranded.why` is cut (closes XC-299). **No welfare-listed function changed,
+  nor `_fault` or `_sentence`'s code** (checked by `ast` against `171b8d8`): `_sentence` and `_fault` are
+  called by `_close_stranded` and `_open`, so hardening them would change welfare-critical behavior under
+  an unchanged `ast`. `_open` and `_start` differ only through `_built` and `_unfinished`, which the PI
+  ruled off the list on 2026-10-02: a build or check fault that cannot describe itself is now refused
+  instead of stopping `wlx taskd`. XC-291 is narrowed to `_close_stranded`'s two sites (for the PI, with
+  a summary), XC-298 gains the same hardening at `_open`'s listing-fault line, and **XC-300** is filed
+  (`Session.run`'s fault handler, `Session._command`'s `set` refusal, `preflight`'s and `cli._load_named`'s
+  sentences). **Backlog IDs:** this branch uses XC-300; A2's plan writes `XC-???` and takes its IDs from
+  XC-301 when the PI approves it. Its suite: 3145 passed, 65 skipped (wl-preproc absent in that worktree).
+
 Also tonight, on this branch: this file's build B entry gives the PI's approval and the merge their
 real times (the approval in the night of 2026-10-08 to 10-09, the merge the evening of 10-09; it had
 said "late evening 2026-10-08" and "just after midnight").
@@ -453,7 +471,8 @@ whole-branch sweep, at `cb82df8`, in `main`'s history); the worktrees of merged 
 - **Dates come from commit timestamps, not recollection**: a session spanning midnight twice wrote the
   wrong evening into a resume line.
 
-**Next:** the PI's three A2 questions, then A2 built (subagent-driven, as A1 and B); XC-288's brainstorm
+**Next:** the PI's word on merging `xc288-prep` and `fault-sentences` (each pushed, its CI to be read
+job by job first); the PI's three A2 questions, then A2 built (subagent-driven, as A1 and B); XC-288's brainstorm
 with him before build C is planned (this branch's research is its starting point); then build C.
 
 ## What moved on 2026-10-08: engine build B, what a session is for and the warnings list
