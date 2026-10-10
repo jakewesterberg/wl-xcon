@@ -1,6 +1,6 @@
 # Where this build actually is
 
-**Last updated 2026-10-09**, at the commit this file was committed in. Check
+**Last updated 2026-10-10**, at the commit this file was committed in. Check
 `git log --oneline -1`; if it has moved far, distrust the numbers here before you
 distrust the reasoning. Numbers go stale, arguments do not.
 
@@ -9,7 +9,10 @@ distrust the reasoning. Numbers go stale, arguments do not.
 > written with**, `wl-expcontroller` and `wl_expcontroller/…` paths included, as the PI
 > ruled for dated documents; read `wl_expcontroller/taskd.py` there as `wl_xcon/taskd.py`.
 >
-> **This file describes `main`.** Its newest entry, "What moved on 2026-10-08: engine build B, what a
+> **This file describes `main`.** Its newest entry, "What moved overnight 2026-10-09 to 10-10: build A2's
+> plan drafted and reviewed, XC-288's research" (on branch `xc288-prep` until the PI merges it), holds
+> two branches for him: A2's plan with three questions, and the research for XC-288's brainstorm. Below
+> it, "What moved on 2026-10-08: engine build B, what a
 > session is for and the warnings list" (on `main` by fast-forward on 2026-10-09, once the PI approved
 > the welfare summary of its code as built and CI's sweep of the branch read clean): every session says what it
 > is for and runs with a recorded list of the imperfections it accepted, the default sRGB calibration
@@ -395,9 +398,67 @@ figure was one low. In order:
 
 ---
 
+## What moved overnight 2026-10-09 to 10-10: build A2's plan drafted and reviewed, XC-288's research
+
+**Resume here (state at 2026-10-10, early morning):** `main` is `171b8d8`, engine build B (its entry is
+below). The PI went to bed asking for work through the night; two branches wait for him, neither
+merged, nothing built from either:
+
+- **`engine-a2`** (worktree `.claude/worktrees/engine-a2`, cut from `171b8d8`): **engine build A2's
+  plan**, `docs/superpowers/plans/2026-10-09-engine-a2.md` (eleven tasks: the CIE 2006 10° LMS table
+  bundled with its checksum and license, ADR-0012; DKL converted through a calibration; cone contrast;
+  realizability by full conversion; isoluminance under V_F,10; a measured record's primaries' spectra,
+  ADR-0011 amended; transfers black-subtracted; `config.json` saying what a cone color meant). It
+  builds the PI's A2 answers of 2026-10-08 (decisions.md, "A2 Q1"-"Q5") and asks him **three
+  questions**: the search task's scene (the gray behind it, the items' colors — the task's ±0.08 or his
+  2023 paper's cone contrasts — and whether training shares the gray); whether a cone contrast that holds
+  luminance still claims isoluminance on the default calibration (the draft let the same light load or be
+  refused by how it was spelled); and a one-line confirm that the observer is the CIE's published table
+  rather than rebuilt from its parts. **How it was checked:** the drafter ran every task's code in a
+  scratch copy (3209 passed); two independent reviews on the most capable model, engineering and color
+  science (whose own computation from the CIE files matched the plan's color arithmetic to every printed
+  digit), found one crash in `check()` on a valid task and the questions omitting the PI's own 2023
+  numbers; a revision and a re-review followed, and the re-review's two fixes to what the PI is shown and
+  its minors were applied. The record: `docs/superpowers/plans/2026-10-09-engine-a2-reviews/`. **COL-05's
+  basis is corrected there** (dated): it said no paper gives a magnitude for isoluminant red-green search
+  items; the PI's 2023 paper gives their cone contrasts.
+- **`xc288-prep`** (worktree `.claude/worktrees/xc288-prep`, this entry's branch): **the research for
+  XC-288's brainstorm**, `docs/research/2026-10-09-xc288-ai-learnable-training-records.md` — what an agent
+  would need to learn which training technique helped (an intervention as a typed event with who, why
+  and the options offered; why experimenters' choices are confounded, and what makes "which helped"
+  answerable), what IBL, home-cage macaque systems, MonkeyLogic, NWB and BIDS record, what wl-xcon records
+  today, thirteen candidate requirements tagged with the build that would carry them, and ten questions
+  for the brainstorm. Each of its 87 claims was read against its source by an independent checker: 70
+  confirmed, 14 overstated, 2 wrong (one finding: a model-fitted teacher has chosen trials for live mice,
+  Yu et al. 2025, HABITS), all corrected. Beside it, `SessionRecord.parameter_change`'s docstring now says
+  the `PARAM_CHANGED` code carries no number until XC-008 (the checker found it).
+
+Also tonight, on this branch: this file's build B entry gives the PI's approval and the merge their
+real times (the approval in the night of 2026-10-08 to 10-09, the merge the evening of 10-09; it had
+said "late evening 2026-10-08" and "just after midnight").
+
+**Not done, for the PI's word:** deleting the branch `engine-b-sweep` (pushed for build B's
+whole-branch sweep, at `cb82df8`, in `main`'s history); the worktrees of merged branches
+(`references`, `spike-timing`, `b2b-remote-signin`) and `xc240`.
+
+**Learned, and costly to rediscover:**
+- **A sweep's "caught" by timeout or import error is settled in seconds by a targeted check**: neuter the
+  function (`tools/mutate.py`'s own `_neuter_source`; for one the package calls at import, a stub
+  installed after collection or a small perturbation of what it returns) and run only its own test file,
+  beside a control of the same files unmutated. Build B's 19 such functions each failed a named test
+  that way; in CI each "timeout" was the whole suite not finishing in 300 s (XC-275).
+- **A plan's questions need a domain reviewer before the PI sees them.** A2's draft asked which gray to
+  put behind the search task without saying the gray decides whether his own published colors can be
+  made; only the color-science review read his paper.
+- **Dates come from commit timestamps, not recollection**: a session spanning midnight twice wrote the
+  wrong evening into a resume line.
+
+**Next:** the PI's three A2 questions, then A2 built (subagent-driven, as A1 and B); XC-288's brainstorm
+with him before build C is planned (this branch's research is its starting point); then build C.
+
 ## What moved on 2026-10-08: engine build B, what a session is for and the warnings list
 
-**Resume here (state at 2026-10-09, just after midnight):** engine build B is **on `main`**, fast-forwarded
+**Resume here (state at 2026-10-09, evening):** engine build B is **on `main`**, fast-forwarded
 from branch `engine-b` (worktree `.claude/worktrees/b2b-remote-signin`, cut from `main` at `d697f34`; plan
 `docs/superpowers/plans/2026-10-08-engine-b.md`, committed with its three backlog lines at `40dc529`;
 spec `docs/superpowers/specs/2026-10-07-engine-design.md` §7, §19 and §20), subagent-driven: fourteen
@@ -405,7 +466,7 @@ tasks of code, each reviewed, the two welfare-critical ones by a welfare review,
 whole-branch review ("ready to merge", no Critical or Important finding) and its fix wave of eleven
 Minors (`05b337e`..`cfbf57a`). `main` (the reference library and spike S's timing record) was merged
 into it at `0baa380`. **The PI approved the welfare summary of the code as built** ("Approve all four
-as built", 2026-10-08, late evening, through the question box), and **CI's sweep of the branch against
+as built", the night of 2026-10-08 to 10-09, through the question box), and **CI's sweep of the branch against
 `main` read clean**: run `37839671518` (branch `engine-b-sweep` at `cb82df8`, so its base fell back to
 `origin/main`) and the fix wave's push run `37845900055` (`cfbf57a`, re-sweeping the nine modules whose source
 or tests the wave changed), read shard by shard: **543 functions in their final state, 0 survived**; every function
@@ -563,8 +624,8 @@ written.
   **XC-298** (`_open`'s listing-fault refusal line is not cut to `NOTE_LIMIT`; welfare-critical, so
   it waits for a summary to the PI) and **XC-299** (two values a damaged record supplies still reach
   `Stranded.why` uncut). **Next free XC-300.** Unblocked now: XC-288's brainstorm.
-- **What the PI approved** (2026-10-08, late evening, through the question box: "Approve all four as
-  built"): welfare items 1-4 as built, in plain terms, with every difference from their approved
+- **What the PI approved** (the night of 2026-10-08 to 10-09, through the question box: "Approve all
+  four as built"): welfare items 1-4 as built, in plain terms, with every difference from their approved
   wording named: the open's listing-fault line labelled "open" though the session opened, and said
   through `_fault` (the plan's f-string would have stopped `wlx taskd` on a fault that cannot describe
   itself); extra or repeated accepted pairs ignored; an acknowledgement sent again recorded under its
