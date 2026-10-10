@@ -1513,6 +1513,59 @@ def test_an_item_whose_check_raises_fails_by_its_name_and_the_service_goes_on(
     assert isinstance(ended, Idle) and _kinds(service.root)[-2:] == ["returned", "session ended"]
 
 
+#: A file that raises, as it loads, a fault whose own `str()` raises one it cannot say either:
+#: `preflight`'s own sentence for what a task file or a `bounds.py` raised then raises that out
+#: of the item's check, and `_unfinished` is what says it (XC-291).
+_UNSAYABLE_FILE = '''\
+class Unsayable(Exception):
+    def __str__(self):
+        raise Unsayable()
+
+
+raise Unsayable()
+'''
+
+
+@pytest.mark.parametrize("where", ["task file", "bounds.py", "an item's check"])
+def test_an_item_whose_check_raises_a_fault_that_cannot_be_said_fails_by_its_type_and_the_service_goes_on(
+    tmp_path, monkeypatch, where
+):
+    """XC-291: `_unfinished` said an item's fault outside the pre-flight's containment, so one
+    whose own `str()` raises stopped `wlx taskd` with the animal out, on a check or a start. It
+    is said by its type (`_fault`): the item fails under its own name, a start is refused, and
+    the return is taken. From a task file, from an animal's `bounds.py`, and from any item's
+    check."""
+    service = _service(tmp_path)
+    _step(service, _open())
+    if where == "task file":
+        (service.tasks / TASK).write_text(_UNSAYABLE_FILE)
+        names, said = ("task checks",), "Unsayable"
+    elif where == "bounds.py":
+        (service.subjects / "REFERENCE" / "bounds.py").write_text(_UNSAYABLE_FILE)
+        names, said = ("bounded config",), "Unsayable"
+    else:
+        def broken(*_args, **_kwargs):
+            raise _Unsayable
+
+        monkeypatch.setattr(preflight, "unmeasured", broken)
+        names, said = ("pump calibration", "eye tracker"), "_Unsayable"
+
+    checked = _step(service, CheckRun(by=BY, task=TASK, values=dict(VALUES)))
+    started = _step(service, _start())
+    ended = _step(service, _end())
+
+    shown = {i.name: i for i in checked.preflight.items}
+    assert list(shown) == list(CHECKED), "every item shows, in its place"
+    for name in names:
+        assert (shown[name].result, shown[name].said) == (
+            "fail", f"this item's check did not finish: {said}",
+        )
+    assert (started.phase, started.run_index) == ("between_runs", None)
+    assert f"pre-flight failed, so the run does not start: {names[0]}: " in _refused(started)[-1]
+    assert _runs(service.root) == []
+    assert isinstance(ended, Idle) and _kinds(service.root)[-2:] == ["returned", "session ended"]
+
+
 def test_a_run_whose_unknowns_nobody_acknowledged_does_not_start(tmp_path):
     service = _service(tmp_path)
     _step(service, _open())
@@ -2288,6 +2341,42 @@ def test_a_run_that_fails_before_it_starts_says_why_on_the_feed_and_on_stderr(
     )
     assert "RuntimeError: the task file changed under the run" in capsys.readouterr().err
     assert service.session.card.codes == [4128] and _runs(service.root) == []
+
+
+@pytest.mark.parametrize(
+    ("raised", "said", "traced"),
+    [(lambda: SystemExit(_Unsayable()), "SystemExit", False), (_Unsayable, "_Unsayable", True)],
+    ids=["a refusal", "a fault"],
+)
+def test_a_run_that_fails_before_it_starts_on_a_fault_that_cannot_be_said_is_refused_and_the_service_goes_on(
+    tmp_path, monkeypatch, capsys, raised, said, traced
+):
+    """XC-291: `_run` said what a run raised before it started outside its own containment -- a
+    refusal through `_sentence`, anything else through its own `str()` -- so one from a task
+    file edited between its pre-flight and its run, whose own `str()` raises, stopped `wlx
+    taskd` with the animal out. It is said by its type (`_sentence_or`, `_fault`), as a start
+    refusal on the feed and, for a fault, a traceback on stderr; nothing is strobed or written,
+    and the return is taken."""
+    from wl_xcon import taskd
+
+    def broken(path):
+        raise raised()
+
+    monkeypatch.setattr(taskd, "_load_trial", broken)
+    service = _service(tmp_path)
+    _step(service, _open())
+
+    frame = _step(service, _start())
+    codes = list(service.session.card.codes)
+    ended = _step(service, _end())
+
+    assert (frame.phase, frame.run_index) == ("between_runs", None)
+    assert (frame.refusals[-1].name, frame.refusals[-1].why) == (
+        "start", f"the run did not start: {said}",
+    )
+    assert ("_Unsayable" in capsys.readouterr().err) is traced
+    assert codes == [4128] and _runs(service.root) == []
+    assert isinstance(ended, Idle) and _kinds(service.root)[-2:] == ["returned", "session ended"]
 
 
 def test_a_reward_size_changed_in_one_run_is_where_the_next_run_starts(tmp_path):
@@ -3257,6 +3346,38 @@ def test_an_animal_whose_bounds_will_not_load_is_refused_alike_by_an_open_and_a_
     assert isinstance(_step(service), Idle), "the service goes on"
 
 
+@pytest.mark.parametrize("sent", ["open", "resume_session"])
+@pytest.mark.parametrize("base", ["ValueError", "Exception"], ids=["a refusal", "a fault"])
+def test_an_animal_whose_bounds_raise_a_fault_that_cannot_be_said_is_refused_and_the_service_goes_on(
+    tmp_path, sent, base
+):
+    """XC-291: `_built` said what a build raised outside its own containment -- a refusal's own
+    sentence through `_sentence`, a fault's through its own `str()` -- so an animal's `bounds.py`
+    raising one whose own `str()` raises stopped `wlx taskd` on an open or a resume. Each is
+    said by its type (`_sentence_or`, `_fault`), refused under its own kind with nothing
+    written, and the idle frame publishes."""
+    folders = _folders(tmp_path)
+    if sent == "resume_session":
+        _crashed(folders, "2027-01-14_01")
+    (folders[0] / "REFERENCE" / "bounds.py").write_text(
+        f"class Unsayable({base}):\n"
+        f"    def __str__(self):\n"
+        f"        raise RuntimeError('nor can this be said')\n\n\n"
+        f"raise Unsayable()\n"
+    )
+    service = _made(folders)
+
+    if sent == "open":
+        frame = _step(service, _open())
+        assert list(service.root.iterdir()) == [] and frame.refusals[-1].name == "open"
+        why = frame.refusals[-1].why
+    else:
+        why = _resume_refused(service, "2027-01-14_01")
+
+    assert why == "the session could not be built: Unsayable"
+    assert isinstance(_step(service), Idle), "the service goes on"
+
+
 # --- the path through two crashes (XC-026 spec §7; plan Task 7) ------------------
 
 
@@ -3556,6 +3677,36 @@ def test_wlx_taskd_stopped_by_a_fault_records_why_the_return_was_not_and_raises_
     assert [row["kind"] for row in rows][-2:] == ["return not recorded", "session ended"]
     assert "RuntimeError: the card stopped answering" in rows[-2]["reason"]
     assert "the return to the cage was not recorded" in capsys.readouterr().err
+
+
+def test_wlx_taskd_stopped_by_a_fault_that_cannot_be_said_still_records_the_return_as_not_recorded(
+    tmp_path, monkeypatch, capsys
+):
+    """XC-291: `run`'s handler said the fault before it called `shutdown`, so one whose own
+    `str()` raises skipped the rows that make the next start find the session stranded, and
+    left with a second fault in the first's place. It is said by its type (`_fault`): the open
+    session's return is recorded as not recorded, saying why, its end follows, the next start
+    finds it stranded, and the fault itself goes on to the caller."""
+    folders = _folders(tmp_path)
+    passes = []
+
+    def step(self):
+        if not passes:
+            passes.append(1)
+            # This service reads this host's clock, not `WALL`.
+            self._open(_open(departure=time.strftime("%Y-%m-%dT%H:%M:%S")))
+            return
+        raise _Unsayable
+
+    monkeypatch.setattr(Service, "step", step)
+
+    with pytest.raises(_Unsayable):
+        main(_taskd_args(folders, "--allocation", ALLOCATION))
+    rows = _rows(folders[2])
+    assert [row["kind"] for row in rows][-2:] == ["return not recorded", "session ended"]
+    assert rows[-2]["reason"] == "wlx taskd stopped on a fault with the session open: _Unsayable"
+    assert "the return to the cage was not recorded" in capsys.readouterr().err
+    assert [found.session_id for found in stranded.find(folders[2])] == ["2027-01-14_01"]
 
 
 def test_wlx_taskd_says_at_its_terminal_when_the_calibration_record_will_not_load(
