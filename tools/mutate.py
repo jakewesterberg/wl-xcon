@@ -102,11 +102,11 @@ def _clear_pycache() -> None:
 #: **What a timeout means changed as the suite grew, and the verdict did not.** Set
 #: when the suite ran in seconds (674 tests in 16 s on 2026-09-25, about eighteen times
 #: under the limit), 300 s then held only hangs, and a hang was counted *caught*. By
-#: 2026-10-09 CI's baselines ran 146-207 s, under half the limit, and a caught mutant
-#: runs the baseline plus a few seconds per failing test while those tests wait out
-#: their own bounded waits -- so the limit mostly caught slow suites, 82 functions on
-#: `main` read caught with no test named, and 45 more finished within 30 s of it
-#: (XC-275; CI runs `37919247229` and `37991004478`). Two changes answer that:
+#: 2026-10-09 CI's baselines ran 146-207 s, the limit only 1.45-2.05 times them, and a
+#: caught mutant runs the baseline plus a few seconds per failing test while those
+#: tests wait out their own bounded waits -- so the limit mostly caught slow suites:
+#: 82 functions on `main` read caught with no test named, and 45 more finished within
+#: 30 s of it (XC-275; CI runs `37919247229` and `37991004478`). Two changes answer that:
 #:
 #: - the limit is relative to the measured baseline, `LIMIT_FACTOR` times it and never
 #:   under this floor (`_mutant_limit`), so a slower machine is not 10 s from a false
@@ -658,9 +658,20 @@ def main() -> int:
             unsettled.append(f"{name} ({summary})")
             print(f"  TIMED OUT {name:32} {summary}")
             continue
-        print(f"  {'caught  ' if caught else 'SURVIVED'}  {name:32} {summary}")
-        if not caught:
+        # **Caught only when `mutate` said exactly True.** The other verdicts are
+        # strings, and a string is truthy: a fall-through `if caught` would read any
+        # verdict this loop does not know -- a new sentinel, a misspelt one -- as a
+        # catch, which is this harness's recurring failure in a new place.
+        if caught is True:
+            print(f"  caught    {name:32} {summary}")
+        elif caught is False:
+            print(f"  SURVIVED  {name:32} {summary}")
             survivors.append(name)
+        else:
+            raise ValueError(
+                f"mutate() gave {name} the verdict {caught!r}, which is none of True, "
+                f"False, None, INERT or TIMED_OUT; refusing to read it as anything"
+            )
 
     restored = _run_suite(timeout=BASELINE_TIMEOUT_SECONDS)
     ok = restored.passed

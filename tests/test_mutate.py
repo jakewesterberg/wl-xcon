@@ -337,6 +337,12 @@ def test_a_suite_run_names_every_failure_and_error(tmp_path, monkeypatch):
     ], failures
     assert "assert 1 == 2" in failures[0]
     assert "fixture broke" in failures[1]
+    # What a real sweep computes from its baseline: the mutants' limit from
+    # `seconds`, and the refusal of a blind baseline and each `of N tests` from
+    # `started`. Each read wrong would pass every stubbed test (XC-275's review).
+    assert run.timed_out is False, run
+    assert run.seconds > 0, run
+    assert run.started == run.finished == 3, run
 
 
 def test_a_failure_line_printed_by_a_test_is_not_mistaken_for_one():
@@ -690,6 +696,30 @@ def test_a_suite_killed_before_any_test_failed_is_timed_out_naming_the_one_runni
     assert "<-" not in summary, summary
 
 
+def test_a_kill_between_tests_with_no_failure_is_still_timed_out(monkeypatch, tmp_path):
+    """A kill can land between two tests -- in a module's teardown, or a session
+    that will not exit -- so nothing is running. No test had failed, so it is not a
+    catch, whatever was or was not running."""
+    target = tmp_path / "module.py"
+    target.write_text("def covered():\n    return [1]\n")
+    monkeypatch.setattr(mutate_tool, "SENTINEL", tmp_path / "sentinel.json")
+    monkeypatch.setattr(mutate_tool, "_clear_pycache", lambda: None)
+    monkeypatch.setattr(
+        mutate_tool,
+        "_run_suite",
+        lambda **_: mutate_tool.SuiteRun(
+            False, "timed out after 300s", [], timed_out=True, started=4, finished=4
+        ),
+    )
+
+    caught, summary = mutate_tool.mutate(target, "covered", "[]", of=10)
+
+    assert caught is mutate_tool.TIMED_OUT, summary
+    assert summary == (
+        "timed out after 300s, no test failed before it; no test running; 4 of 10 tests done"
+    )
+
+
 def test_a_progress_line_cut_short_by_the_kill_is_dropped_and_only_that_one():
     """The kill can land mid-write. Its last line is dropped; one that does not parse
     anywhere else is a broken plugin, and is not read around."""
@@ -795,6 +825,22 @@ def test_a_mutant_timed_out_after_a_failure_does_not_fail_the_run(
     assert "  caught    covered" in out, out
     assert "<- tests/test_a.py::test_one" in out, out
     assert "NOT SETTLED" not in out, out
+
+
+def test_a_verdict_main_does_not_know_is_refused_not_read_as_caught(monkeypatch, tmp_path):
+    """Every verdict but True and False is a truthy string. One `main` does not
+    know must stop the sweep, never print `caught`."""
+    _sweep_one(
+        monkeypatch,
+        tmp_path,
+        [mutate_tool.SuiteRun(True, "10 passed", [], seconds=100.0, started=10)],
+    )
+    monkeypatch.setattr(
+        mutate_tool, "mutate", lambda path, name, returns, **_: ("caught", "1 failed")
+    )
+
+    with pytest.raises(ValueError, match="'caught'"):
+        mutate_tool.main()
 
 
 @pytest.mark.parametrize(
