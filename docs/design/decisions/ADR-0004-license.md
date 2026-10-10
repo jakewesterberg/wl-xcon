@@ -75,6 +75,7 @@ whether it reaches the code that reads them, which stays Apache-2.0, is a legal 
   giving the attribution;
 - each has a row in the inventory below;
 - nothing derived from them is written to disk or committed.
+
 Any other CC BY-SA table, a modified one, or any other copyleft asset or dependency, still
 reopens this ADR.
 
@@ -98,7 +99,7 @@ justification and a license entry here.
 | Dependency | License | Why |
 |---|---|---|
 | `pydantic` >= 2 | MIT | Bounded configuration and session-snapshot validation |
-| `numpy` >= 1.24 | BSD-3-Clause | Least squares for the gaze calibration fit, and the SVD behind its conditioning gate. The gate is `wl-preproc`'s and is computed with numpy on their side; agreeing with their numerics on a refusal threshold is worth more than saving the dependency. Fitting only -- applying a map in the trial loop is plain float arithmetic (`calibration.EyeMap.degrees`) |
+| `numpy` >= 1.24 | BSD-3-Clause | Least squares for the gaze calibration fit, and the SVD behind its conditioning gate. The gate is `wl-preproc`'s and is computed with numpy on their side; agreeing with their numerics on a refusal threshold is worth more than saving the dependency. Applying a fitted map in the trial loop is plain float arithmetic (`calibration.EyeMap.degrees`). *Amended 2026-10-10 (engine build A2):* no longer fitting only -- the exact drawer (`exact` and its `viewport`, engine build A1) computes with it, and so does `cones`, which `photometry` imports as it builds `SRGB` at module load, so `check`, `taskd` and the CLI import numpy too |
 | `pytest` >= 8 (dev) | MIT | Test runner |
 | `pyyaml` >= 6 (contract extra) | MIT | Only so `wl-preproc`'s own `eye/xcon.py` (`eye/expcontroller.py` until 2026-09-28) can be imported by the contract tests, which read YAML. Never installed on a rig, and deliberately not `pip install -e ./wl-preproc`, which would pull DataJoint, Kilosort and SpikeInterface |
 | `pyzmq` >= 26.4 (console extra) | BSD-3-Clause (pypi.org/pypi/pyzmq/json `.info.license_expression`, verified 2026-09-19) | ADR-0003's control/telemetry transport (ZeroMQ PUB/SUB + REQ/REP), accepted 2026-08-31. Extra, not core: a terminal-only rig needs neither this nor msgpack. **Floor raised from 26 to 26.4 on 2026-09-27** (P4d-2b b2a): the mark signal is read with `Socket.recv_into`, added in 26.4 (pyzmq 27.2.0's `zmq/backend/cython/_zmq.py`, `.. versionadded:: 26.4`, read 2026-09-27). Same package, same license; no new dependency |

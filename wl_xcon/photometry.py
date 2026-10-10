@@ -8,9 +8,11 @@ measured with a photometer.
 
 The word that forces this is *isoluminant*. It is the control condition of most
 chromatic experiments, it is a claim about photometry, and an unmeasured claim of
-isoluminance is usually false -- so this module makes stating it require a
-calibration that names whose luminous efficiency it was measured against. A
-macaque's is not a human's.
+isoluminance is usually false -- so a cone color (`DKL`, `ConeContrast`) is stated in
+the lab's one observer, the CIE 2006 10° (`cones.CIE2006_10`), and converts to light
+through the calibration: a measured one's primaries' spectra, or the standard's CIE
+matrix. A measured record without spectra converts none, and isoluminance needs a
+measured calibration (`check`; engine spec §7.3).
 
 **No measured calibration for our panels exists yet** (build J measures one). Until a
 rig names one, sessions run on `SRGB`, the sRGB standard, and the warnings list says so

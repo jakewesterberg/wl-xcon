@@ -472,11 +472,12 @@ what claims isoluminance on the default (Q2), and "Yes, the CIE table now" (Q3).
 `38036092765`, `38036384126` and `38037024453` for `cones` (its six functions each caught by `N failed`
 tests, 1 to 8), and `38036955043` for Task 2 (`check`, `photometry`, `service` swept, 168 caught; `photometry.weights_of`
 caught there only by a timeout). The controller cancelled two queued per-push runs (`ae5f4e1`, run
-`38039181685`; `fdd4b6a`, run `38041271547`) because the full sweep at the tip supersedes them. **The tip's
-push run is `38042603715` and the full sweep is run `38042608784` (`mutation-full`, `workflow_dispatch`, at
-`ba50387`); the next session reads both shard by shard, every line a real `N failed`.** **The full sweep (`mutation-full`, `workflow_dispatch` on the branch) and the targeted local
-checks of every function caught only by a timeout or an import error are pending, to be read shard by
-shard and recorded in a follow-up commit before the merge**; nothing is claimed here about their results.
+`38039181685`; `fdd4b6a`, run `38041271547`) because the full sweep supersedes them. **The full sweep
+(run `38042608784`, `mutation-full`, `workflow_dispatch`) and the push run (`38042603715`) are both at
+`ba50387`, which holds the code as the build's eleven tasks left it (the commits after it are docs and the
+final review's fix wave). Both are pending, as are the targeted local checks of every function caught
+only by a timeout or an import error: each is to be read shard by shard, every line a real `N failed`, and
+recorded before the merge**; nothing is claimed here about their results.
 The one A2-new function already known to be caught only by a timeout is `photometry.weights_of` (Task 2's
 push, run `38036955043`): its break must be shown to fail a named test locally, beside a control of the same
 files unmodified, as build B's 19 were (XC-275). Later runs may add to that list.
