@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from _calibrations import BACKGROUND, LINEAR, OBSERVER, PRIMARIES, measured, promptly
+from _calibrations import BACKGROUND, LINEAR, OBSERVER, PRIMARIES, SPECTRA, measured, promptly
 from _rig import PATH as RIG_FILE
 from _rig import RIG, naming
 from wl_xcon.cli import _load_calibration, _load_rig
@@ -54,7 +54,7 @@ def test_the_default_is_the_srgb_standard_and_says_so():
     # Solved independently, in exact rational arithmetic (2026-10-08).
     assert (SRGB.red.Y, SRGB.green.Y, SRGB.blue.Y) == pytest.approx(
         (17.011120469720822, 57.213494301420475, 5.775385228858696), rel=1e-12)
-    assert SRGB.max_cone_contrast is None
+    assert SRGB.spectra is None
 
 
 def test_full_drive_on_the_default_is_the_standards_white_and_no_brighter():
@@ -64,11 +64,15 @@ def test_full_drive_on_the_default_is_the_standards_white_and_no_brighter():
     assert unrealizable(xyY(*D65, SRGB_WHITE_CD_M2 + 0.01), SRGB) is not None
 
 
-def test_no_dkl_color_is_realizable_on_a_calibration_that_states_no_cone_contrast_limit():
-    """The default states none, so even a faint DKL color is refused against it, by name,
-    until build A2 converts DKL through cone fundamentals."""
-    assert "states no cone-contrast limit" in unrealizable(DKL(l_m=0.01), SRGB)
-    assert unrealizable(DKL(l_m=0.01), measured()) is None
+def test_a_cone_color_converts_on_the_default_and_on_a_measured_calibration_with_spectra():
+    """Engine build A2: no stored cone-contrast limit; the full conversion decides (spec §7.4)."""
+    gray = xyY(*D65, 20.0)
+
+    assert unrealizable(DKL(l_m=0.08), SRGB, gray) is None
+    assert unrealizable(DKL(l_m=0.08), measured(), gray) is None
+    assert "outside [0, 1]" in unrealizable(DKL(l_m=-0.3), SRGB, gray)
+    assert "no background was given" in unrealizable(DKL(l_m=0.08), SRGB)
+    assert "measured without spectra" in unrealizable(DKL(l_m=0.08), measured(spectra=None), gray)
 
 
 def test_the_default_transfer_is_the_srgb_curve_at_ten_bits():
@@ -91,7 +95,9 @@ def test_the_default_transfer_is_the_srgb_curve_at_ten_bits():
     ((0.0, 0.5, 0.5, 1.0), (0.0, 0.2, 0.3, 1.0), "rise strictly"),
     ((0.0, 0.5, 0.7, 1.0), (0.0, 0.6, 0.4, 1.0), "never fall"),
     ((0.0, 1.0), (0.0, 0.9), "end at 1"),
-    ((0.0, 1.0), (-0.1, 1.0), "start at 0 or above"),
+    ((0.0, 1.0), (-0.1, 1.0), "start at 0 at level 0"),
+    # Engine build A2: a table's light is black-subtracted (ADR-0011), so it starts at 0.
+    ((0.0, 1.0), (0.01, 1.0), "the panel's black subtracted"),
     ([0.0, 1.0], (0.0, 1.0), "tuples"),
 ])
 def test_a_transfer_is_a_measured_table_or_it_is_refused(levels, fractions, said):
@@ -148,8 +154,6 @@ def test_a_record_reads_back_as_the_calibration_it_describes(tmp_path):
         "rig1@2027-01-20", "2027-01-20", False, "CIE 1931 2°")
     assert (panel.red, panel.background) == (xyY(0.68, 0.31, 45.0), xyY(0.3127, 0.329, 20.0))
     assert panel.transfer == (Transfer(levels=(0.0, 0.5, 1.0), fractions=(0.0, 0.2, 1.0)),) * 3
-    assert panel.max_cone_contrast is None
-    assert read_calibration(_write(tmp_path, _record(max_cone_contrast=0.2))).max_cone_contrast == 0.2
     assert read_calibration(_write(tmp_path, _record(id="rig 1 (left)"))).id == "rig 1 (left)"
 
 
@@ -163,7 +167,11 @@ def test_a_record_reads_back_as_the_calibration_it_describes(tmp_path):
     ({"background": [0.3, 0.3]}, "three numbers"),
     ({"transfer": {c: [[0.0, 0.0], [1.0, 0.8]] for c in ("red", "green", "blue")}}, "end at 1"),
     ({"transfer": {c: [0.0, 1.0] for c in ("red", "green", "blue")}}, "pairs"),
-    ({"max_cone_contrast": -1}, "positive"),
+    # Engine build A2 converts cone colors in full and keeps no stored limit (spec §7.4).
+    ({"max_cone_contrast": 0.2}, "max_cone_contrast, which a calibration record does not"),
+    ({"observer": " "}, "names the observer"),
+    ({"transfer": {c: [[0.0, 0.01], [1.0, 1.0]] for c in ("red", "green", "blue")}},
+     "red transfer: a transfer's fractions start at 0 at level 0"),
     # Too large for a float: `math.isfinite` raises `OverflowError` on it, not a ValueError.
     ({"background": [0.3127, 0.329, 10**400]}, "three numbers"),
     ({"primaries": {**PRIMARIES, "red": [0.68, 0.0, 45.0]}}, "red primary"),
@@ -278,3 +286,33 @@ def test_a_calibration_that_is_not_a_path_is_refused(tmp_path, calibration):
 
     with pytest.raises(SystemExit, match="the path of a calibration record"):
         _load_calibration(_load_rig(path), path)
+
+
+def _spectra_record(**over) -> dict:
+    record = {name: list(getattr(SPECTRA, name)) for name in ("nm", "red", "green", "blue")}
+    record.update(over)
+    return record
+
+
+def test_a_record_carries_its_primaries_spectra(tmp_path):
+    """Engine build A2 (ADR-0011, amended): a record may carry each primary's measured spectrum,
+    from which its cone colors convert; without them it converts none."""
+    panel = read_calibration(_write(tmp_path, _record(spectra=_spectra_record())))
+
+    assert panel.spectra == SPECTRA
+    assert panel.cones is not None
+    assert read_calibration(_write(tmp_path, _record())).spectra is None
+
+
+@pytest.mark.parametrize("spectra, said", [
+    (None, "name nm, red, green and blue"),
+    ({"nm": [400.0], "red": [1.0]}, "name nm, red, green and blue"),
+    (_spectra_record(red=["bright"] * len(SPECTRA.nm)), "spectra's red is a list of numbers"),
+    (_spectra_record(nm=[True] * len(SPECTRA.nm)), "spectra's nm is a list of numbers"),
+    (_spectra_record(blue=[0.0] * len(SPECTRA.nm)), "its spectra: the blue spectrum"),
+    (_spectra_record(nm=[float(v) for v in range(400, 801, 5)]),
+     "its spectra: a calibration's spectra cover"),
+])
+def test_a_record_whose_spectra_are_not_a_measurement_is_refused(tmp_path, spectra, said):
+    with pytest.raises(ValueError, match=said):
+        read_calibration(_write(tmp_path, _record(spectra=spectra)))

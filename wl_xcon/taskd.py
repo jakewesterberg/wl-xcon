@@ -61,7 +61,7 @@ from wl_xcon.encode import (
 from wl_xcon.findings import kind_named
 from wl_xcon.geometry import Geometry
 from wl_xcon.levels import Levels
-from wl_xcon.photometry import Calibration
+from wl_xcon.photometry import Calibration, cone_record
 from wl_xcon.record import XCON_DIRNAME, SessionRecord, _local, welfare_note
 from wl_xcon.scheduler import Block, Condition, Scheduler
 from wl_xcon.simulate import Census, Subject, Tally, prepare
@@ -715,6 +715,9 @@ class Session:
                 "id": self.spec.calibration.id,
                 "standard": self.spec.calibration.standard,
                 "measured_on": self.spec.calibration.measured_on,
+                # How its cone colors became light (engine build A2): the observer, what
+                # converted, which luminance isoluminance held, and what a DKL number means.
+                "cones": cone_record(self.spec.calibration),
             },
             "bounds": bounds_record(self.spec.bounds),
             "already_delivered_today": self.spec.already_delivered_today,

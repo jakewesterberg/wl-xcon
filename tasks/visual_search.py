@@ -12,9 +12,13 @@ parameter. Swapping `target_looks` from a red disc to a square turns a colour
 pop-out into a shape pop-out between one trial and the next, with the same task
 running and the same structure recorded.
 
-`target_looks` and `distractors` are isoluminant by construction -- `DKL(lum=0)` --
-which is a claim about photometry, so this task **will not load without a measured
-display calibration**. That is deliberate. No calibration for our panels exists yet.
+`target_looks` and `distractors` are isoluminant by construction -- `DKL(lum=0)` -- which is a
+claim about photometry, so this task **runs only on a measured display calibration that carries
+its primaries' spectra** (engine spec §7.3; engine build A2): on the default it is refused in
+every kind of session. Its red and green are the PI's 2023 pop-out items' (Westerberg et al.
+2023, Methods, "Task design: Pop-out search"), made isoluminant in the lab's observer, as
+contrasts about `BACKGROUND`, the gray the array is shown on (spec §7.5; the engine A2 plan's
+Q1). No calibration for our panels exists yet.
 """
 
 from wl_xcon.photometry import DKL, Gray
@@ -44,11 +48,16 @@ from wl_xcon.task import (
 
 FIX = Stimulus("fix", at=(0.0, 0.0), looks=Disc(size=0.3, color=Gray(P("fix_luminance"))))
 
-#: A red and a green of equal luminance, as cone contrasts from the background.
-#: Equal *by construction* rather than by arithmetic somebody did once: the whole
-#: reason DKL is the space this is written in.
-RED = DKL(lum=0.0, l_m=0.08)
-GREEN = DKL(lum=0.0, l_m=-0.08)
+#: A red and a green of equal luminance, as cone contrasts from the background. Equal *by
+#: construction* rather than by arithmetic somebody did once: the whole reason DKL is the space
+#: this is written in. The PI's 2023 items, carried over by his published numbers (the engine A2
+#: plan's Q1): their cone contrasts (red L +0.27, M -0.54, S -0.94; green L -0.06, M +0.13,
+#: S -0.87), computed in another cone set by Cole and Hine's (1992) method, taken as contrasts in
+#: the lab's observer about a D65 gray, and L and M moved to the nearest point isoluminant under
+#: V_F,10 (by at most 0.022), S kept (computed 2026-10-10). His published lights (their xy)
+#: converted against a D65 gray instead would give l_m +0.643 and -0.118.
+RED = DKL(lum=0.0, l_m=0.603, s_lm=-0.94)
+GREEN = DKL(lum=0.0, l_m=-0.143, s_lm=-0.87)
 
 ARRAY = Stimulus(
     "search",
@@ -63,10 +72,21 @@ ARRAY = Stimulus(
     ),
 )
 
+#: The gray the array is shown on, D65 at 16 cd/m². RED and GREEN are contrasts about it, and on
+#: black they would name no light (engine spec §7.5). The PI's answer to the engine A2 plan's Q1
+#: (2026-10-10): the gray at the items' own luminance, one level for all rigs, the brightest each
+#: rig's measured screen makes with a small margin. On sRGB-like primaries at an 80 cd/m² white,
+#: RED, made mostly by the red primary with a little green beside it, needs that primary at full
+#: drive on a 17.7 cd/m² gray, so 16 leaves 9.4% (computed 2026-10-10); re-set when the panels
+#: are measured (XC-310). The fixation point's starting 40 cd/m² stays
+#: brighter (Weber +1.5).
+BACKGROUND = Gray(16.0)
+
 search = Trial(
     start="await_fix",
     # Direct view, with the detection tasks: the lab's programme runs there.
     view="direct",
+    background=BACKGROUND,
     windows=[
         Window("fix", at=(0.0, 0.0), radius=P("fix_window"), on="fix"),
         # One declaration, `set_size` windows. The author cannot write them out,

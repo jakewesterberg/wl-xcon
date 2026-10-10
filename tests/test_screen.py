@@ -1,12 +1,13 @@
 """The screen description (engine spec §3.3; build A1)."""
 
 import math
+from dataclasses import replace
 
 import pytest
 
 from _rig import DIRECT, RIG, STEREOSCOPE
 from wl_xcon import exact, look, screen, viewport
-from wl_xcon.photometry import RMS, Gray, Michelson, Weber, to_xyz
+from wl_xcon.photometry import D65, DKL, RMS, SRGB, ConeContrast, Gray, Michelson, Weber, cone_xyz, to_xyz, xyY
 from wl_xcon.task import Array, Bar, Blank, Disc, Gabor, Noise, P, Square, Stimulus, Trial
 
 TRIAL = Trial(start="s", states=[])
@@ -252,3 +253,70 @@ def test_an_edge_that_applies_to_a_contrast_there_is_none_of_is_refused(fill, co
     covering = look.Look(shape=look.Circle(size=2.0), fill=look.SineGrating(contrast=Michelson(0.5)),
                          edge=look.GaussianEdge(sigma=0.5, applies="contrast"))
     assert _one(Stimulus("g", at=(0.0, 0.0), looks=covering)).items[0].edge.applies == "contrast"
+
+
+# --- Cone colors, converted against the background (engine build A2) -------------------------
+
+GRAY_TRIAL = replace(TRIAL, background=Gray(P("bg")))
+
+
+def test_a_cone_color_resolves_to_its_light_against_the_background_through_the_calibration():
+    stimulus = Stimulus("k", at=(0.0, 0.0), looks=Disc(color=DKL(l_m=P("c"))))
+
+    item = screen.resolve({"k": stimulus}, {"bg": 40.0, "c": 0.08}, GRAY_TRIAL, DIRECT,
+                          frame_period=1 / 240, calibration=SRGB).items[0]
+
+    assert item.fill.xyz == cone_xyz(DKL(l_m=0.08), SRGB, xyY(*D65, 40.0))
+    assert item.fill.xyz == pytest.approx((44.04969059, 40.0, 43.56231003), rel=1e-8)
+
+
+def test_a_cone_colored_outline_and_a_grating_mean_resolve_the_same_way():
+    looks = look.Look(fill=look.SineGrating(contrast=Michelson(0.3), mean=ConeContrast(S=0.5)),
+                      outline=look.Outline(width=0.1, color=DKL(lum=0.2)))
+
+    item = screen.resolve({"g": Stimulus("g", at=(0.0, 0.0), looks=looks)}, {"bg": 40.0},
+                          GRAY_TRIAL, DIRECT, frame_period=1 / 240, calibration=SRGB).items[0]
+
+    assert item.fill.mean_xyz == cone_xyz(ConeContrast(S=0.5), SRGB, xyY(*D65, 40.0))
+    assert item.outline.xyz == pytest.approx(to_xyz(Gray(48.0)), rel=1e-12)
+
+
+def test_a_cone_color_without_a_calibration_or_on_black_is_not_resolved():
+    stimulus = Stimulus("k", at=(0.0, 0.0), looks=Disc(color=DKL(l_m=0.08)))
+
+    with pytest.raises(ValueError, match="none was given"):
+        screen.resolve({"k": stimulus}, {"bg": 40.0}, GRAY_TRIAL, DIRECT, frame_period=1 / 240)
+    with pytest.raises(ValueError, match="background is black"):
+        screen.resolve({"k": stimulus}, {}, TRIAL, DIRECT, frame_period=1 / 240, calibration=SRGB)
+
+
+def test_a_cone_color_between_two_eyes_backgrounds_is_not_resolved():
+    """`check` refuses it at load (`cone-color-two-backgrounds`); this is the backstop."""
+    trial = replace(TRIAL, background_left=Gray(20.0), background_right=Gray(30.0))
+    stimulus = Stimulus("k", at=(0.0, 0.0), looks=Disc(color=DKL(l_m=0.08)))
+
+    with pytest.raises(ValueError, match="the two eyes' backgrounds differ"):
+        screen.resolve({"k": stimulus}, {}, trial, STEREOSCOPE, frame_period=1 / 240,
+                       calibration=SRGB)
+    lit = Stimulus("g", at=(0.0, 0.0), looks=Disc(color=Gray(40.0)))
+    s = screen.resolve({"g": lit}, {}, trial, STEREOSCOPE, frame_period=1 / 240)
+    assert (s.background_left[1], s.background_right[1]) == (20.0, 30.0)
+
+
+def test_two_equal_explicit_eye_backgrounds_are_one_background_for_a_cone_color():
+    stimulus = Stimulus("k", at=(0.0, 0.0), looks=Disc(color=DKL(l_m=0.08)))
+    split = replace(TRIAL, background_left=Gray(30.0), background_right=Gray(30.0))
+    shared = replace(TRIAL, background=Gray(30.0))
+
+    def fill(trial):
+        return screen.resolve({"k": stimulus}, {}, trial, STEREOSCOPE, frame_period=1 / 240,
+                              calibration=SRGB).items[0].fill.xyz
+
+    assert fill(split) == fill(shared)
+
+
+def test_a_named_grating_s_color_waits_for_the_pattern_fills():
+    stimulus = Stimulus("g", at=(0.0, 0.0), looks=Gabor(contrast=Michelson(0.5), color=Gray(20.0)))
+
+    with pytest.raises(screen.NotYetDrawable, match="engine build A3"):
+        _one(stimulus)

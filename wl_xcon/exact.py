@@ -17,8 +17,10 @@ frames come from it, and analysis rebuilds any recorded frame from it.
    width, `clip(0.5 − d / |∇d|, 0, 1)` with `∇d` across the sample grid (`coverage`) --
    times the edge's profile where the edge applies to opacity, times the item's opacity.
    Combine the item with what is below (`_compose`), then cover it with its outline.
-4. Average each pixel's samples. The result is CIE XYZ, Y in cd/m²; build A2 turns it
-   into the panel's output levels through a calibration.
+4. Average each pixel's samples. The result is CIE XYZ, Y in cd/m² (`draw`).
+5. Turn each pixel into the panel's output levels through a calibration (`output_levels`; engine
+   build A2): the primary weights that make it, then each channel's measured transfer read
+   backwards. A pixel the panel cannot make is refused, never clipped.
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ import math
 import numpy as np
 
 from wl_xcon import look, viewport
+from wl_xcon.photometry import TOLERANCE, to_xyz
 from wl_xcon.screen import NotYetDrawable, ResolvedFlat, ResolvedGrating
 
 SUPERSAMPLE = 4
@@ -264,3 +267,52 @@ def draw(screen, vp, *, region=None, supersample=SUPERSAMPLE):
             canvas = canvas + band[..., None] * (np.asarray(item.outline.xyz) - canvas)
     rows, cols = canvas.shape[0] // supersample, canvas.shape[1] // supersample
     return canvas.reshape(rows, supersample, cols, supersample, 3).mean(axis=(1, 3))
+
+
+def output_levels(image, calibration):
+    """Each pixel of a drawn eye, `(rows, cols, 3)` CIE XYZ in cd/m² (`draw`), as the output
+    levels that make it on `calibration`'s panel: red, green and blue, each a fraction of the
+    output's full scale, 0 to 1 (engine spec §4.9: "into the output levels that eye must see").
+
+    The primary weights that make each pixel (as `Calibration.weights` solves them), then **each
+    channel's measured transfer read backwards** (spec §7.6, `inverse_transfer`). **A pixel the
+    panel cannot make raises**, naming how many and the farthest weight, rather than being
+    clipped (spec §7.4); `check` refuses at load every such light it can see
+    (`unrealizable-color`). **Continuous, never quantized** (the engine A2 plan's call 19):
+    rounding to the output's codes, and dithering if it is the fallback (spec §7.8), are the
+    display process's (engine build E), held to this within one output level (spec §10.1)."""
+    primaries = np.array([to_xyz(p) for p in (calibration.red, calibration.green,
+                                              calibration.blue)]).T
+    weights = np.linalg.solve(primaries, np.asarray(image, dtype=float).reshape(-1, 3).T).T
+    # Asked as "every weight is in range", so a NaN, which fails every comparison, is refused.
+    inside = (weights >= -TOLERANCE) & (weights <= 1.0 + TOLERANCE)
+    if not inside.all():
+        pixels = int((~inside).any(axis=1).sum())
+        bad = weights[~inside]
+        worst = bad[np.argmax(np.abs(bad - 0.5))]
+        raise ValueError(
+            f"{pixels} pixel(s) need a primary weight outside [0, 1] (the farthest {worst:.7g}); "
+            f"`check` refuses a light it can see that does this, and this one it could not"
+        )
+    out = np.empty_like(weights)
+    for channel, transfer in enumerate(calibration.transfer):
+        out[:, channel] = inverse_transfer(transfer, np.clip(weights[:, channel], 0.0, 1.0))
+    return out.reshape(np.shape(image))
+
+
+def inverse_transfer(transfer, weights):
+    """The level at which `transfer` gives each of `weights` (a fraction of full drive's light):
+    between its measured points by straight lines, as it is read forwards, and **where the table
+    is flat, the lowest level that gives that light**. Every weight lies in [0, 1], the table's
+    own span (its fractions are black-subtracted, ADR-0011); `output_levels` refuses any other
+    first."""
+    fractions = np.asarray(transfer.fractions, dtype=float)
+    steps = np.asarray(transfer.levels, dtype=float)
+    w = np.asarray(weights, dtype=float)
+    # The first point whose light is not less than w, so a flat run is entered at its start, and
+    # the last point whose light is less: w lies between them, or is the first exactly.
+    at = np.minimum(np.searchsorted(fractions, w, side="left"), len(fractions) - 1)
+    below = np.maximum(at - 1, 0)
+    span = fractions[at] - fractions[below]
+    share = np.where(span > 0, (w - fractions[below]) / np.where(span > 0, span, 1.0), 0.0)
+    return steps[below] + share * (steps[at] - steps[below])

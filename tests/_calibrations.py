@@ -9,13 +9,14 @@ Never collected: its name does not start with `test_`.
 
 from __future__ import annotations
 
+import math
 import os
 import threading
 from pathlib import Path
 
 import pytest
 
-from wl_xcon.photometry import Calibration, Transfer, xyY
+from wl_xcon.photometry import Calibration, Spectra, Transfer, xyY
 
 #: A straight-line transfer, as illustrative as every calibration built on it.
 LINEAR = Transfer(levels=(0.0, 1.0), fractions=(0.0, 1.0))
@@ -26,14 +27,31 @@ PRIMARIES = {"red": (0.68, 0.31, 45.0), "green": (0.26, 0.69, 140.0), "blue": (0
 BACKGROUND = (0.3127, 0.329, 20.0)
 OBSERVER = "CIE 1931 2°"
 
+#: Where the measured test panel's spectra are sampled: every 5 nm from 380 to 780.
+NM = tuple(float(nm) for nm in range(380, 781, 5))
+
+
+def _band(center: float, width: float, peak: float) -> tuple:
+    """A Gaussian band, `width` its full width at half maximum, nm (engine A2 research note §3's
+    narrowband display model: 630/25, 530/25 and 455/20 nm)."""
+    sigma = width / (2.0 * math.sqrt(2.0 * math.log(2.0)))
+    return tuple(peak * math.exp(-0.5 * ((nm - center) / sigma) ** 2) for nm in NM)
+
+
+#: The measured test panel's spectra, W·sr⁻¹·m⁻²·nm⁻¹ at full drive. **Illustrative, and not
+#: consistent with `PRIMARIES`' chromaticities**: nothing in this build checks the two against
+#: each other (XC-308), and the tests need only some spectra.
+SPECTRA = Spectra(nm=NM, red=_band(630.0, 25.0, 0.02), green=_band(530.0, 25.0, 0.03),
+                  blue=_band(455.0, 20.0, 0.01))
+
 #: Housekeeping, not a measurement: how long a read of a record that is a named pipe may take
 #: before its test fails rather than waits.
 PIPE_WAIT_S = 5.0
 
 
 def measured(**over) -> Calibration:
-    """The measured test panel, measured 2027-01-20, a straight-line transfer on each channel;
-    each field given replaces its own."""
+    """The measured test panel, measured 2027-01-20, a straight-line transfer on each channel
+    and `SPECTRA`; each field given replaces its own."""
     fields = dict(
         red=xyY(*PRIMARIES["red"]),
         green=xyY(*PRIMARIES["green"]),
@@ -43,6 +61,7 @@ def measured(**over) -> Calibration:
         observer=OBSERVER,
         measured_on="2027-01-20",
         id="rig1@2027-01-20",
+        spectra=SPECTRA,
     )
     fields.update(over)
     return Calibration(**fields)

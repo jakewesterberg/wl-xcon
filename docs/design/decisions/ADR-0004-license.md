@@ -65,6 +65,20 @@ bundles them (condition 2), so the code stays Apache-2.0. The rule:
 - each font gets a row in the inventory below;
 - a modified font, or any other copyleft asset or dependency, still reopens this ADR.
 
+**Amended 2026-10-10: the CIE's two tables ADR-0012 names may ship unmodified as data** (PI,
+engine A2's Q3, 2026-10-08; ADR-0012). Engine build A2 bundles the CIE's 10° cone fundamentals
+and its 10° XYZ_F functions, which the CIE licenses CC BY-SA 4.0 (each data set's metadata,
+verified 2026-10-09). CC BY-SA is share-alike on the tables and on any table adapted from them;
+whether it reaches the code that reads them, which stays Apache-2.0, is a legal reading
+(UNVERIFIED; ADR-0012). For these two files:
+- each ships **unmodified** as package data, its source's metadata beside it, with a `NOTICE.md`
+  giving the attribution;
+- each has a row in the inventory below;
+- nothing derived from them is written to disk or committed.
+
+Any other CC BY-SA table, a modified one, or any other copyleft asset or dependency, still
+reopens this ADR.
+
 **The copyright holder is Jacob A. Westerberg**, decided 2026-09-05 and applied
 across the family in the same pass: `wl-expcontroller`, `wl-preproc`, `wl-sync`,
 `wl-stack`, `wl-expviz`, `wl-shook`, `wl-style`, `wl-orchestrator`. Every one shipped
@@ -85,7 +99,7 @@ justification and a license entry here.
 | Dependency | License | Why |
 |---|---|---|
 | `pydantic` >= 2 | MIT | Bounded configuration and session-snapshot validation |
-| `numpy` >= 1.24 | BSD-3-Clause | Least squares for the gaze calibration fit, and the SVD behind its conditioning gate. The gate is `wl-preproc`'s and is computed with numpy on their side; agreeing with their numerics on a refusal threshold is worth more than saving the dependency. Fitting only -- applying a map in the trial loop is plain float arithmetic (`calibration.EyeMap.degrees`) |
+| `numpy` >= 1.24 | BSD-3-Clause | Least squares for the gaze calibration fit, and the SVD behind its conditioning gate. The gate is `wl-preproc`'s and is computed with numpy on their side; agreeing with their numerics on a refusal threshold is worth more than saving the dependency. Applying a fitted map in the trial loop is plain float arithmetic (`calibration.EyeMap.degrees`). *Amended 2026-10-10 (engine build A2):* no longer fitting only -- the exact drawer (`exact` and its `viewport`, engine build A1) computes with it, and so does `cones`, which `photometry` imports as it builds `SRGB` at module load, so `check`, `taskd` and the CLI import numpy too |
 | `pytest` >= 8 (dev) | MIT | Test runner |
 | `pyyaml` >= 6 (contract extra) | MIT | Only so `wl-preproc`'s own `eye/xcon.py` (`eye/expcontroller.py` until 2026-09-28) can be imported by the contract tests, which read YAML. Never installed on a rig, and deliberately not `pip install -e ./wl-preproc`, which would pull DataJoint, Kilosort and SpikeInterface |
 | `pyzmq` >= 26.4 (console extra) | BSD-3-Clause (pypi.org/pypi/pyzmq/json `.info.license_expression`, verified 2026-09-19) | ADR-0003's control/telemetry transport (ZeroMQ PUB/SUB + REQ/REP), accepted 2026-08-31. Extra, not core: a terminal-only rig needs neither this nor msgpack. **Floor raised from 26 to 26.4 on 2026-09-27** (P4d-2b b2a): the mark signal is read with `Socket.recv_into`, added in 26.4 (pyzmq 27.2.0's `zmq/backend/cython/_zmq.py`, `.. versionadded:: 26.4`, read 2026-09-27). Same package, same license; no new dependency |
@@ -94,6 +108,8 @@ justification and a license entry here.
 | IBM Plex Sans Condensed (font, bundled unmodified as woff2 in `wl_xcon/fonts/ibm-plex-sans-condensed/`) | OFL-1.1, Reserved Font Name "Plex" (as IBM Plex Sans, verified 2026-09-26) | The console page's labels and headings. From the `@ibm/plex-sans-condensed@2.0.0` release, 400, 600 and 700; never subset or converted |
 | IBM Plex Mono (font, bundled unmodified as woff2 in `wl_xcon/fonts/ibm-plex-mono/`) | OFL-1.1, Reserved Font Name "Plex" (as IBM Plex Sans, verified 2026-09-26) | The console page's numbers and paths. From the `@ibm/plex-mono@2.5.0` release, 400, 500 and 600; never subset or converted |
 | Newsreader (font, bundled unmodified as woff2 in `wl_xcon/fonts/newsreader/`) | OFL-1.1 (`OFL.txt` at productiontype/Newsreader `cfcb4f7`, byte-identical to google/fonts `ofl/newsreader/OFL.txt`, verified 2026-09-26) | The wl.works logo's face on the console page: 700 upright and italic, from the 72pt optical-size cut, the size the logo's text is set at |
+| CIE 2006 LMS cone fundamentals, 10° (data, bundled unmodified as `wl_xcon/cie/CIE_lms_cf_10deg.csv` with its metadata JSON) | CC BY-SA 4.0 (the data set's metadata `rightsList`, DOI 10.25039/CIE.DS.nxsqeri8, verified 2026-10-09) | The lab observer every cone color converts through (engine build A2; PI, A2 Q3; ADR-0012). Never modified; read only when its sha256 is the CIE's |
+| CIE cone-fundamental-based tristimulus values XYZ_F,10 (data, `wl_xcon/cie/CIE_cfb_stv_10deg.csv` with its metadata JSON) | CC BY-SA 4.0 (its metadata, DOI 10.25039/CIE.DS.dm6qiig7, verified 2026-10-09) | What a test holds the CIE's LMS-to-XYZ_F,10 matrix to (A2 Q2); never read at runtime |
 | `pyjwt[crypto]` >= 2.10.1 (signin extra) | MIT (pypi.org/pypi/pyjwt/json `.info.license_expression`, 2.15.1, verified 2026-10-02) | Verifies a wl.works access token offline on the rig: RS256 against wl.works' published keys, audience, issuer and expiry (P4d-2b b2b spec §5). 2.10.1 is the floor because 2.10.0 compared a string issuer as a substring (read from its wheel, 2026-10-02) |
 | `cryptography` (via `pyjwt[crypto]`) | Apache-2.0 OR BSD-3-Clause (pypi.org/pypi/cryptography/json `.info.license_expression`, 50.0.2, verified 2026-10-02) | PyJWT's RSA backend; also generates the tests' throwaway keys and certificates |
 | `playwright` >= 1.63 (browser extra, tests only) | Apache-2.0 (pypi.org/pypi/playwright/json `.info.license_expression`, 1.63.0, verified 2026-10-02) | Drives the console page's script in headless Chromium (b2b spec §8, XC-186). Never installed on a rig |

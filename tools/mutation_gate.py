@@ -29,7 +29,7 @@ common cases -- the module changed, or its own test file changed -- and misses o
 deleting or weakening a test in `test_a.py` that happened to be the only thing
 covering a function in `b.py`. Nothing in a diff makes that visible, so the nightly
 full sweep is what catches it. Anything structural (`conftest.py` and the shared
-test helpers beside it, `mutate.py`, `pyproject.toml`, `tasks/`) escalates to a full
+test helpers beside it, `mutate.py` and its progress plugin, `pyproject.toml`, `tasks/`) escalates to a full
 sweep here rather than being reasoned about, because those change what every test
 sees.
 """
@@ -92,6 +92,7 @@ RETURNS: dict[str, str] = {
     "resume": "None",
     "viewport": "None",
     "warnlist": "None",
+    "cones": "None",
 }
 
 #: Modules with nothing to neuter, and why. An entry here is a claim someone made,
@@ -110,6 +111,8 @@ GLOBAL = (
     # The one frame test_health.py, test_web.py and test_serve.py build their cases on.
     "tests/_frames.py",
     "tools/mutate.py",
+    # Loaded into every suite `mutate.py` runs; it decides what a stopped suite read.
+    "tools/suite_progress/wlx_suite_progress.py",
     "tools/mutation_gate.py",
     "pyproject.toml",
     ".github/workflows/ci.yml",

@@ -210,8 +210,10 @@ nobody** (engine spec §7.1; engine build B, 2026-10-08). On the default a task 
 a colour or lets a setting change a light loads in training and piloting with a warning a
 person accepts and the record keeps, and is **refused in a recording session** (PI,
 2026-10-07 and 2026-10-08; engine spec §7.2); isoluminance needs a measured calibration in
-every session (§7.3), and every DKL colour is refused on the default until build A2. A
-measured calibration is taken with a **spectroradiometer** (engine spec §12 item 1),
+every session (§7.3). Since engine build A2 any other cone color converts on the default through
+the CIE's matrix, a use outside its definition that the warning names (A2's Q2), and on a
+measured calibration through its primaries' measured spectra; a cone color on a black
+background is refused. A measured calibration is taken with a **spectroradiometer** (engine spec §12 item 1),
 written as one JSON record (ADR-0011).
 
 **Whose luminous efficiency is still the risk.** Isoluminance is defined against a
@@ -233,6 +235,7 @@ default with its warning, and no lab task records on it until build J measures t
 *Reworded 2026-10-08 for engine build B (XC-285): until then this note said colour was
 refused without a measured calibration, that chromatic tasks waited on a photometer, and
 that a human V(lambda) made a stimulus "isoluminant for nobody in the room".*
+*Reworded 2026-10-10 for engine build A2: until then this note said every DKL color was refused on the default until build A2.*
 
 **P20 — Generated structure nobody reads.** The point of `Array` and `ItemWindows` is
 that set size is a value, so the individual items and their windows are never written

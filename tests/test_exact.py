@@ -6,9 +6,21 @@ import math
 import numpy as np
 import pytest
 
+from _calibrations import measured
 from _rig import DIRECT, RIG, STEREOSCOPE
 from wl_xcon import exact, look, screen, viewport
-from wl_xcon.photometry import Gray, Michelson, Weber, to_xyz
+from wl_xcon.photometry import (
+    SRGB,
+    SRGB_TRANSFER,
+    SRGB_WHITE_CD_M2,
+    TOLERANCE,
+    Gray,
+    Michelson,
+    Transfer,
+    Weber,
+    to_xyz,
+    xyY,
+)
 from wl_xcon.task import Bar, Disc, Gabor, Stimulus, Trial
 
 TRIAL = Trial(start="s", states=[])
@@ -511,3 +523,91 @@ def test_a_near_disparity_moves_the_left_eye_s_image_right_and_the_right_eye_s_l
     shift = vp.distance_cm * (math.tan(math.radians(v + side * 0.5)) - math.tan(math.radians(v))) / vp.pitch_cm[0]
     assert side * shift > 3.0  # about half a degree at this preview's 0.14° pixels
     assert _column(near) - _column(zero) == pytest.approx(shift, abs=0.05)
+
+
+# --- Output levels (engine build A2) ---------------------------------------------------------
+
+
+def _pixels(*lights):
+    return np.array([[to_xyz(light) for light in lights]])
+
+
+def test_the_defaults_white_and_black_are_full_drive_and_none():
+    out = exact.output_levels(_pixels(Gray(SRGB_WHITE_CD_M2), Gray(0.0)), SRGB)
+
+    assert out.shape == (1, 2, 3)
+    assert out[0, 0] == pytest.approx((1.0, 1.0, 1.0), abs=1e-12)
+    assert out[0, 1] == pytest.approx((0.0, 0.0, 0.0), abs=1e-12)
+
+
+def test_a_gray_at_a_tabulated_light_is_its_level_exactly():
+    """Code 512 of 1023 on the sRGB curve: the gray whose light is that fraction of white comes
+    back as that level on every channel."""
+    fraction = SRGB_TRANSFER.fractions[512]
+
+    out = exact.output_levels(_pixels(Gray(SRGB_WHITE_CD_M2 * fraction)), SRGB)
+
+    assert out[0, 0] == pytest.approx((512 / 1023,) * 3, abs=1e-12)
+
+
+def test_between_measured_points_the_level_is_read_by_straight_lines():
+    transfer = Transfer(levels=(0.0, 0.5, 1.0), fractions=(0.0, 0.2, 1.0))
+    panel = measured(transfer=(transfer,) * 3)
+
+    assert exact.inverse_transfer(transfer, [0.0, 0.1, 0.2, 0.6, 1.0]) == pytest.approx(
+        [0.0, 0.25, 0.5, 0.75, 1.0])
+    full = sum(np.array(to_xyz(p)) for p in (panel.red, panel.green, panel.blue))
+    assert exact.output_levels(np.array([[0.6 * full]]), panel)[0, 0] == pytest.approx((0.75,) * 3)
+
+
+def test_where_the_table_is_flat_the_lowest_level_that_gives_its_light():
+    flat = Transfer(levels=(0.0, 0.2, 0.5, 1.0), fractions=(0.0, 0.0, 0.4, 1.0))
+
+    assert exact.inverse_transfer(flat, [0.0, 0.2, 0.4, 0.7]) == pytest.approx(
+        [0.0, 0.35, 0.5, 0.75])
+
+
+def test_a_straight_line_transfer_gives_the_weights_themselves():
+    panel = measured()
+    light = xyY(0.3, 0.35, 40.0)
+
+    assert exact.output_levels(_pixels(light), panel)[0, 0] == pytest.approx(panel.weights(light))
+
+
+def test_a_pixel_the_panel_cannot_make_is_refused_never_clipped():
+    with pytest.raises(ValueError, match=r"^1 pixel\(s\) need a primary weight outside \[0, 1\]"):
+        exact.output_levels(_pixels(Gray(40.0), Gray(SRGB_WHITE_CD_M2 + 1.0)), SRGB)
+
+
+def test_a_pixel_that_is_not_a_number_is_refused_too():
+    """A NaN fails every comparison, so a range check written as "any weight out of range"
+    would pass it; this one asks that every weight be in range."""
+    for bad in (np.nan, np.inf):
+        image = _pixels(Gray(40.0), Gray(40.0))
+        image[0, 1, 1] = bad
+        with pytest.raises(ValueError, match=r"need a primary weight outside"):
+            exact.output_levels(image, SRGB)
+
+
+def _full(panel):
+    """The light of every primary at full drive, CIE XYZ."""
+    return sum(np.array(to_xyz(p)) for p in (panel.red, panel.green, panel.blue))
+
+
+def test_a_weight_past_full_drive_within_the_tolerance_is_full_drive_exactly():
+    """A weight past 1 by less than `TOLERANCE` is rounding, and is let through; its level is then
+    the output's full scale exactly, never past it (the A2 final review's item 9)."""
+    panel = measured()
+
+    out = exact.output_levels(np.array([[(1.0 + TOLERANCE / 2) * _full(panel)]]), panel)
+
+    assert out[0, 0].tolist() == [1.0, 1.0, 1.0]
+
+
+def test_a_refusal_names_the_farthest_weight_to_more_places_than_the_tolerance():
+    """`{:g}` printed a weight of 1.000002 as "1", a weight in range (the A2 final review's item
+    10)."""
+    panel = measured()
+
+    with pytest.raises(ValueError, match=r"\(the farthest 1\.000002\)"):
+        exact.output_levels(np.array([[(1.0 + 2 * TOLERANCE) * _full(panel)]]), panel)
