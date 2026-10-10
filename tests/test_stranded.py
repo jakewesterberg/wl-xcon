@@ -4,14 +4,15 @@ their returns taken under `welfare`'s rules."""
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
 from _sessions import WALL, bounds
-from wl_xcon import marks, stranded
+from wl_xcon import actor, marks, resume, stranded
 from wl_xcon.actor import Box
 from wl_xcon.bounds import Exceeded
-from wl_xcon.link import Stranded
+from wl_xcon.link import TEXT_LIMIT, Stranded, _quoted
 from wl_xcon.record import welfare_note
 from wl_xcon.resume import PREDATES
 
@@ -113,6 +114,126 @@ def test_an_unreadable_welfare_record_is_never_resumable(tmp_path):
 
 def test_no_root_finds_nothing(tmp_path):
     assert stranded.find(tmp_path / "missing") == []
+
+
+def test_a_start_rows_ten_thousand_character_run_is_quoted_cut_in_why(tmp_path):
+    """XC-299: why a session cannot be resumed is `Stranded.why`, shown on every idle frame and
+    the page's banner, and a damaged start row without its run numbers was said with its `run`
+    whole. It is quoted cut now, as `link._quoted` cuts the record's other values."""
+    directory = _notes(tmp_path, "2027-01-13_01", ("departure", WALL - 900))
+    _config(directory)
+    value = "r" * 10_000
+    (directory / "runs.jsonl").write_text(
+        json.dumps({"event": "start", "run": value, "task": "t.py", "bounded": {}}) + "\n"
+    )
+
+    (found,) = stranded.find(tmp_path)
+
+    assert (found.left_at, found.resumable) == (WALL - 900, False)
+    assert found.why == (
+        f"its runs.jsonl start row for run {_quoted(value)} does not record its run and task "
+        f"numbers, so the next run's could repeat one in the recording; end it instead"
+    )
+
+
+def test_a_trial_lines_number_of_4300_digits_is_quoted_cut_in_why(tmp_path):
+    """XC-299's review, I1: a `trials.jsonl` line naming a trial `trial_starts.jsonl` does not
+    was said with its number whole -- 4,300 digits, the most an `int` is said in, made a why of
+    4,380 characters on every idle frame. It is quoted cut now, as the record's other values
+    are."""
+    directory = _notes(tmp_path, "2027-01-13_01", ("departure", WALL - 900))
+    _config(directory)
+    (directory / "trial_starts.jsonl").write_text(json.dumps({
+        "run": 0, "task": "t.py", "trial_number": 1, "trial_in_task": 1,
+        "block_in_session": 1, "block_in_task": 1,
+    }) + "\n")
+    number = 10**4299
+    (directory / "trials.jsonl").write_text(json.dumps({
+        "trial_number": number, "outcome": "correct", "fluid_ml": 0.0, "last_reward_at": None,
+    }) + "\n")
+
+    (found,) = stranded.find(tmp_path)
+
+    assert (found.left_at, found.resumable) == (WALL - 900, False)
+    assert found.why == (
+        f"its trials.jsonl names trial {_quoted(number)}, which trial_starts.jsonl does not; "
+        f"end it instead"
+    )
+
+
+def test_a_folders_long_name_is_quoted_cut_in_why(tmp_path):
+    """XC-299's review: a folder copied under another name is said with both names, and a file
+    system lets a folder's run to 255 characters, past what a why quotes; it is quoted cut, as
+    the session id `config.json` names beside it is."""
+    name = "s" * 240
+    _config(_notes(tmp_path, name, ("departure", WALL - 900)), session_id="2027-01-13_01")
+
+    (found,) = stranded.find(tmp_path)
+
+    assert (found.left_at, found.resumable) == (WALL - 900, False)
+    assert found.why == (
+        f"its config.json names session '2027-01-13_01' and its folder is {_quoted(name)}, so "
+        f"it is not the session it records; end it instead"
+    )
+
+
+#: A `warnings.jsonl` row as `SessionRecord.warning` writes it, which `resume.read` reads whole.
+_ACCEPTED = {
+    "code": "head free", "detail": "the head is free",
+    "accepted_in": ["training", "piloting", "recording"], "session_kind": "training",
+    "by": {"kind": "box", "name": "jake"}, "at": WALL - 800, "at_local": "", "how": "open",
+    "run": None,
+}
+
+
+@pytest.mark.parametrize("where", ["config.json", "trials.jsonl", "a number", "a warning", "an actor"])
+def test_a_readers_long_sentence_is_cut_in_why(tmp_path, monkeypatch, where):
+    """XC-299: why a session cannot be resumed quoted what its reader said whole, and a reader's
+    sentence can be anything: an `OSError`'s quotes the whole path, `float()`'s every character
+    it could not read, and `Entry`'s and `actor.from_map`'s whatever a later change makes them
+    say. Each is cut to `link.TEXT_LIMIT` characters and "…" in `Stranded.why` now, as the
+    record's quoted values are, and the sentence around it is whole."""
+    path = where in ("config.json", "trials.jsonl")
+    # A folder name of 240 characters: an `OSError` quotes the path, which holds it whole.
+    long = "s" * 240 if path else "e" * 10_000
+    directory = _notes(tmp_path, long if path else "2027-01-13_01", ("departure", WALL - 900))
+    if where == "config.json":
+        (directory / "config.json").mkdir()
+        start = "its config.json cannot be read ("
+    else:
+        _config(directory)
+    if where == "trials.jsonl":
+        (directory / "trials.jsonl").mkdir()
+        start = "its trials.jsonl cannot be read ("
+    elif where == "a number":
+        (directory / "trial_starts.jsonl").write_text("{}\n")
+        (directory / "trials.jsonl").write_text(json.dumps({"fluid_ml": long}) + "\n")
+        start = "its record cannot be read (ValueError: could not convert string to float: "
+    elif where == "a warning":
+        (directory / "warnings.jsonl").write_text(json.dumps(_ACCEPTED) + "\n")
+
+        def refused(*_fields):
+            raise ValueError(long)
+
+        monkeypatch.setattr(resume, "Entry", refused)
+        start = "its warnings.jsonl row 1 is not a warning as the rig lists one ("
+    elif where == "an actor":
+        (directory / "warnings.jsonl").write_text(json.dumps(_ACCEPTED) + "\n")
+
+        def not_one(_by):
+            raise actor.NotAnActor(long)
+
+        monkeypatch.setattr(resume, "actors", SimpleNamespace(
+            from_map=not_one, NotAnActor=actor.NotAnActor, read=actor.read, shown=actor.shown,
+        ))
+        start = "its warnings.jsonl row 1 has a by that is not an actor's map or null ("
+
+    (found,) = stranded.find(tmp_path)
+
+    assert (found.left_at, found.resumable) == (WALL - 900, False)
+    assert found.why.startswith(start) and found.why.endswith("; end it instead")
+    assert long not in found.why and "…" in found.why
+    assert len(found.why) <= TEXT_LIMIT + 150
 
 
 def test_a_restored_session_takes_its_return_under_the_rules_and_writes_its_rows(tmp_path):

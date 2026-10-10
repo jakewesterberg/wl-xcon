@@ -49,6 +49,15 @@ class Unresumable(Exception):
     """A folder that cannot be resumed; its message says why, for the page."""
 
 
+def _cut(error: Exception) -> str:
+    """What a reader said of a record it could not read, cut to `link.TEXT_LIMIT` characters
+    and "…" as the file's quoted values are (`link._quoted`), shown as it is: why a session
+    cannot be resumed is `Stranded.why`, on every idle frame and the page's banner, and a
+    parser's message can quote what it could not read -- `float()`'s quotes all of it, and
+    an `OSError`'s the whole path (XC-299)."""
+    return _link.cut(str(error), _link.TEXT_LIMIT)
+
+
 @dataclass(frozen=True)
 class Restoration:
     session_id: str
@@ -84,7 +93,7 @@ def _rows(directory: Path, name: str) -> list[dict]:
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
                 if line.strip()]
     except (OSError, ValueError) as error:
-        raise Unresumable(f"its {name} cannot be read ({error}); end it instead") from error
+        raise Unresumable(f"its {name} cannot be read ({_cut(error)}); end it instead") from error
 
 
 def _accepted(row: dict, number: int, session_kind: str) -> tuple:
@@ -116,7 +125,7 @@ def _accepted(row: dict, number: int, session_kind: str) -> tuple:
     try:
         Entry(code, detail, tuple(kinds))
     except (TypeError, ValueError) as error:
-        raise damaged(f"is not a warning as the rig lists one ({error})") from error
+        raise damaged(f"is not a warning as the rig lists one ({_cut(error)})") from error
     if row["session_kind"] != session_kind:
         # Quoted cut (the engine B final review): this sentence is shown on every idle frame.
         raise damaged(
@@ -128,7 +137,7 @@ def _accepted(row: dict, number: int, session_kind: str) -> tuple:
     try:
         accepted_by = None if by is None else actors.from_map(by)
     except actors.NotAnActor as error:
-        raise damaged(f"has a by that is not an actor's map or null ({error})") from error
+        raise damaged(f"has a by that is not an actor's map or null ({_cut(error)})") from error
     return (code, detail, tuple(kinds), accepted_by, float(at))
 
 
@@ -144,7 +153,7 @@ def read(directory: Path, departure: float) -> Restoration:
         raise
     except Exception as error:  # noqa: BLE001 -- fail closed: an unreadable record is not resumed
         raise Unresumable(
-            f"its record cannot be read ({type(error).__name__}: {error}); end it instead"
+            f"its record cannot be read ({type(error).__name__}: {_cut(error)}); end it instead"
         ) from error
 
 
@@ -152,14 +161,18 @@ def _read(directory: Path, departure: float) -> Restoration:
     try:
         config = json.loads((directory / "config.json").read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
-        raise Unresumable(f"its config.json cannot be read ({error}); end it instead") from error
+        raise Unresumable(
+            f"its config.json cannot be read ({_cut(error)}); end it instead"
+        ) from error
     # The final review's M5: a folder copied under another name is not that session.
     # Its value quoted cut (`link._quoted`; the engine B final review), as the session kind's
     # below: this sentence is `Stranded.why`, shown on every idle frame and the page's banner.
+    # The folder's name too (XC-299's review), which a file system lets run to 255 characters.
     if str(config["session_id"]) != directory.parent.name:
         raise Unresumable(
             f"its config.json names session {_link._quoted(config['session_id'])} and its folder "
-            f"is {directory.parent.name!r}, so it is not the session it records; end it instead"
+            f"is {_link._quoted(directory.parent.name)}, so it is not the session it records; "
+            f"end it instead"
         )
     starts = _rows(directory, TRIAL_STARTS)
     lines = _rows(directory, "trials.jsonl")
@@ -209,9 +222,9 @@ def _read(directory: Path, departure: float) -> Restoration:
     for row in run_rows:
         if any(key not in row for key in RUN_NUMBERS):
             raise Unresumable(
-                f"its runs.jsonl start row for run {row['run']} does not record its run and "
-                f"task numbers, so the next run's could repeat one in the recording; end it "
-                f"instead"
+                f"its runs.jsonl start row for run {_link._quoted(row['run'])} does not record "
+                f"its run and task numbers, so the next run's could repeat one in the "
+                f"recording; end it instead"
             )
         name = levels.task = task_name(row["task"])
         levels.runs = max(levels.runs, int(row["run_in_session"]))
@@ -231,8 +244,8 @@ def _read(directory: Path, departure: float) -> Restoration:
         number = int(line["trial_number"])
         if number not in tasks:
             raise Unresumable(
-                f"its trials.jsonl names trial {number}, which trial_starts.jsonl does not; "
-                f"end it instead"
+                f"its trials.jsonl names trial {_link._quoted(number)}, which "
+                f"trial_starts.jsonl does not; end it instead"
             )
         for tally in (levels.session_tally, levels.task_tallies[tasks[number]]):
             if line["outcome"] == "hang":
