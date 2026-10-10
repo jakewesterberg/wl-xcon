@@ -1197,6 +1197,44 @@ entry has its three lines, that every link names a file that exists, and that ev
 - **Where:** [ADR-0009, "Decision"](../design/decisions/ADR-0009-ntp-time-synchronization.md#decision); [architecture.md, "Data outputs and lab integration"](../design/architecture.md#data-outputs-and-lab-integration).
 - **Basis:** PI decision, supported by the standards. [@mills2010network] — standard: typical secondary servers and clients on fast LANs are within a few hundred microseconds, and with long poll intervals precise within a few tens of milliseconds (RFC 5905 §1, p. 4), ample for which day and which minute. [@karsh2026sync] — software documentation: hardware sync edges align recorded streams with typical errors of about 0.01 ms (Overview), one to three orders of magnitude finer, which is why the timing record stays on hardware edges. [@ieee2020ieee] — standard: PTP, the network protocol for experimental-grade time, targets synchronization accuracy and precision in the sub-microsecond range (IEEE Std 1588-2019, abstract), the route if network time were ever wanted for timing; ADR-0009 does not propose it.
 
+## Training records
+
+### TRN-01 — Records first: every session is recorded so that an AI agent can later learn training techniques from it; the agent is designed when one is built
+- **Decided:** 2026-10-10, the PI (XC-288's brainstorm, Q1, "Records first (Recommended)", offered against designing the agent now and only leaving room; Q2, rig changes as countable events and wl.works' weights, water regime and observations joined by the animal's permanent id, other off-rig training in free-text notes, offered against rig changes only and counting off-rig techniques in wl.works).
+- **Where:** [XC-288 spec §1-§2](../superpowers/specs/2026-10-10-xc288-training-records-design.md#1-why); the research note [§6](../research/2026-10-09-xc288-ai-learnable-training-records.md#6-questions-for-the-brainstorm), questions 1 and 8.
+- **Basis:** PI decision, 2026-10-10, from his idea of 2026-10-08. Engineering premise, the research note's: no session has run, so every session recorded before the record holds what an agent needs is history an agent cannot use.
+
+### TRN-02 — The rig keeps its own full record of every session, behavior and eye data included, and builds one self-describing file per session for agents, experimenter notes joined in
+- **Decided:** 2026-10-10, the PI (Q9, "it should be more than just changes. the training log should be aware of all parameters and the behavior of the animal. even the eye data could be informative"; Q10, the rig keeping its own full log in every session, "the rig/xcon console is responsible for generating a file for ai agents to learn from", offered against always running the sync box and eye PC, and behavior without gaze; Q11, one file per session built at close and rebuildable, offered against the logs themselves and one history per animal; Q12, adding "the experimenter notes, which will come from the eln on wl works"). SQLite as its format is an engineering default (spec §5.1).
+- **Where:** [XC-288 spec §3](../superpowers/specs/2026-10-10-xc288-training-records-design.md#3-what-the-rig-records-in-every-session) and [§5](../superpowers/specs/2026-10-10-xc288-training-records-design.md#5-the-agents-file).
+- **Basis:** PI decision, 2026-10-10; the format an engineering default (no new dependency). In a recording session the eye PC's file stays the official gaze record (S5 §3); the rig's is labeled a copy.
+
+### TRN-03 — Every setting a person can change declares its meaning: clear-cut with a direction, expected with a direction and a context note, or not a difficulty setting; required
+- **Decided:** 2026-10-10, the PI (Q3: "some animals find some things harder when others find it easier. some things genuinely dont make things harder or easier. there are some things that are clear cut, though"; then "clear cut ones with a definitive indication and other variables have a context/expected change as a function of tweaking", with the example of a dimmer distractor confusing some monkeys; offered against a required easier/harder mark, optional marks, and nothing marked). Required is the stated default he did not change.
+- **Where:** [XC-288 spec §4.1](../superpowers/specs/2026-10-10-xc288-training-records-design.md#41-what-each-setting-means).
+- **Basis:** PI decision, 2026-10-10.
+
+### TRN-04 — Each change takes a reason, one tap at the change or by the session's close, never holding the change; a skipped one is recorded "no reason given"
+- **Decided:** 2026-10-10, the PI (Q4, "Tap now or by end (Recommended)", offered against optional reasons and reasons only at the end).
+- **Where:** [XC-288 spec §3.5](../superpowers/specs/2026-10-10-xc288-training-records-design.md#35-reasons).
+- **Basis:** PI decision, 2026-10-10. Its premise: [@gottesman2018evaluating] — a learner from observational records must include "any factors that causally affect both observed treatment decisions and the outcome", and "it is impossible to verify that all confounders have been measured based on statistical quantities alone" (§4); their learned policies recommended minimal treatment for the sickest patients, who received the most aggressive treatment and died most (§3).
+
+### TRN-05 — The rig may choose at random between training steps a person has approved as equally acceptable, off unless switched on per animal and task, with the odds recorded; unavailable decision points are recorded
+- **Decided:** 2026-10-10, the PI (Q5, "Allow, off by default (Recommended)", offered against leaving room only and never). Built with build D's procedures; build C reserves the fields.
+- **Where:** [XC-288 spec §4.5](../superpowers/specs/2026-10-10-xc288-training-records-design.md#45-steps-that-may-be-chosen-at-random-build-d).
+- **Basis:** PI decision, 2026-10-10. Its premise: [@swaminathan2015batch] — learning from logged decisions uses the logging policy's probability of each logged action, kept "during the operation of the logging policy" (§4), and such logs are "biased" and "incomplete" (§3); [@klasnja2015microrandomized] — micro-randomization assigns an intervention option at random at each relevant decision point, and records an "unavailable" indicator because "effect estimations have to take availability into account" (sections "Micro-randomized trial design" and "Randomization and participant availability"); [@murphy2005experimental] — sequential multiple assignment randomized trials for adaptive treatment strategies, since "past treatment may have delayed effects" (abstract).
+- **Caveat:** randomizing never touches a reward amount or a welfare ceiling (engine spec §15.7), and what an agent should optimize is not decided (spec §10).
+
+### TRN-06 — Training stages declare pass rules in what the rig counts; the rig records when one is met; a trainer may mark one by hand
+- **Decided:** 2026-10-10, the PI (Q6, "Stages declare criteria (Recommended)", offered against the trainer marking it and computing it later).
+- **Where:** [XC-288 spec §4.2](../superpowers/specs/2026-10-10-xc288-training-records-design.md#42-stages-and-their-pass-rules) and [§3.7](../superpowers/specs/2026-10-10-xc288-training-records-design.md#37-stages).
+- **Basis:** PI decision, 2026-10-10.
+
+### TRN-07 — A training change needs a wl.works sign-in; when sign-in is impossible it goes through under a name from the lab's people list, recorded "not signed in" with why; pause, stop, resume and manual reward never need sign-in
+- **Decided:** 2026-10-10, the PI (Q7, "Require sign-in first", offered against picking from a lab list, which was recommended, and typed names; Q8, "Allow, marked unverified (Recommended)", offered against refusing changes and allowing them only until opening). That welfare actions never need sign-in was stated as settled.
+- **Where:** [XC-288 spec §3.6](../superpowers/specs/2026-10-10-xc288-training-records-design.md#36-who).
+- **Basis:** PI decision, 2026-10-10.
+
 ## Other
 
 ### OTH-01 — Where the cone-fundamental tables come from: bundle the CIE's CSVs as separate CC BY-SA 4.0 files with attribution and the metadata's sha256

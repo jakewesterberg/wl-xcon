@@ -9,8 +9,10 @@ distrust the reasoning. Numbers go stale, arguments do not.
 > written with**, `wl-expcontroller` and `wl_expcontroller/…` paths included, as the PI
 > ruled for dated documents; read `wl_expcontroller/taskd.py` there as `wl_xcon/taskd.py`.
 >
-> **This file describes `main`.** Its newest entry, "What moved overnight 2026-10-09 to 10-10: build A2's
-> plan drafted and reviewed, XC-288's research" (on branch `xc288-prep` until the PI merges it), holds
+> **This file describes `main`, except its newest entry**, "What moved on 2026-10-10: XC-288 brainstormed"
+> (on branch `xc288-training-records`, its spec waiting for the PI's review; **start there**). Before it,
+> the entry "What moved overnight 2026-10-09 to 10-10: build A2's
+> plan drafted and reviewed, XC-288's research" (merged by the PI on the morning of 2026-10-10), held
 > three branches for him: A2's plan with three questions, the research for XC-288's brainstorm, and
 > XC-291's ordinary sites with XC-299. Below
 > it, "What moved on 2026-10-08: engine build B, what a
@@ -398,6 +400,45 @@ figure was one low. In order:
   a path outside the workspace, and no credentials for it.
 
 ---
+
+## What moved on 2026-10-10: XC-288 brainstormed
+
+The PI brainstormed XC-288, records an AI agent can learn training techniques from, on the afternoon of
+2026-10-10 while engine build A2's CI ran (A2 is on branch `engine-a2`, its own entry there). **The spec is
+written and waits for his review**:
+[2026-10-10-xc288-training-records-design.md](superpowers/specs/2026-10-10-xc288-training-records-design.md),
+on branch `xc288-training-records` (worktree `.claude/worktrees/xc288-training-records`, cut from `main` at
+`7fea382`). Its §2 holds his twelve answers, each with what it was offered against; `decisions.md`'s new
+area "Training records" (TRN-01 to TRN-07) holds the same with their bases.
+
+**What he decided, in one breath**: records first, the agent designed when one is built; **the rig keeps its
+own full record of every session**, behavior and eye data included ("we want the agent to have as much
+information as possible to learn from"), and **builds one self-describing, versioned, rebuildable SQLite file
+per session** for agents ("the rig/xcon console is responsible for generating a file for ai agents to learn
+from"), ELN notes from wl.works joined in; every changeable setting declares its meaning (clear-cut with a
+direction, expected with a direction and a context note, or none); a reason per change by one tap or before
+the close, never holding the change; random choice between pre-approved steps allowed, off by default, odds
+recorded (build D); stages declare pass rules; changes need a wl.works sign-in, falling back to a lab-list
+name marked "not signed in", while pause, stop, resume and a manual reward never need one. Most of it lands
+in build C (spec §7); eye samples in T; randomizing in D; the check against the sync box in F.
+
+**Found on the way, costly to rediscover**: the rig saves no reaction time, no item chosen, no
+fixation-break time, no trial times, no saccades and no gaze today (timing lives only in the codes strobed
+to the sync box; the eye PC's file is the gaze record, and nothing says either runs in a training session);
+wl-works' ELN per-session notes are designed and not built (read at `71b04613`), so nothing yet ties a note
+to a rig session. Four papers entered in the library, each opened on 2026-10-10:
+`gottesman2018evaluating`, `swaminathan2015batch`, `klasnja2015microrandomized`, `murphy2005experimental`
+(abstract only); the arXiv preprint is entered by its url, arXiv's DOI being DataCite's and not Crossref's.
+
+**Backlog**: XC-288 moved to features (waits on the spec's review, then build C's plan); filed XC-316 (the
+agent's own brainstorm), XC-317 (personal data in the records), XC-318 (a simulated animal that learns),
+XC-319 (MonkeyLogic sessions), XC-320 and XC-321 (the asks of wl-works and wl-preproc, sent once the spec is
+approved), XC-322 (the file's size with gaze). **Next free is XC-323 here**: XC-301 to XC-315 are taken on
+`engine-a2` and `xc275-sweep-timeouts`, neither merged; whichever of the three merges last keeps the highest
+Next free.
+
+**Next:** the PI reviews the spec (the reason list's wording, §3.5, is the one thing it asks him to settle);
+then its asks go out and build C's plan carries it.
 
 ## What moved overnight 2026-10-09 to 10-10: build A2's plan drafted and reviewed, XC-288's research
 
