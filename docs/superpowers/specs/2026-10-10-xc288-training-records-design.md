@@ -60,9 +60,15 @@ Each was asked through the console's question tool in plain terms; the recommend
 | Q10 | Behavior and eye data in training sessions | **The rig keeps its own full log, every session**: "i think the rig/xcon console is responsible for generating a file for ai agents to learn from" | always run the sync box and eye PC; behavior without gaze |
 | Q11 | What the agent reads | **One self-describing file per session**, built at close from the rig's logs, rebuildable | the logs themselves; one history per animal |
 | Q12 | Section 1, what the rig writes | Agreed, adding "**the experimenter notes, which will come from the eln on wl works**" | — |
+| Q13 | After the reviews: whether a pass rule counts trials a live change had eased | **Only trials at the stage's own difficulty** (§4.2) | count all, recording the counted trials' settings; count all |
+| Q14 | Hands-on techniques in a session | **Free-text notes**, as Q2 (§3.4) | one tap at the rig from a short list (recommended) |
+| Q15 | Names in the agent's file | **Account ids only**; names stay in wl.works (§3.6, §5.2) | names and ids |
 
 Sections 3 to 8 are the brainstorm's five design sections, each agreed as presented; §9 and §10 gather what
 they said about welfare and what was left for later; §11, added at review, lists the documents this changes.
+The first draft (`4689685`) had an engineering review against the code and a review by an NHP-training
+reviewer, and XC-317's reading of the personal-data rules; their fixes are folded into §3 to §9, and the three
+findings that were the PI's became Q13 to Q15.
 Two defaults were stated without asking and stood: **what the console offered** is recorded beside what was
 chosen (R6), and **the corpus is the session folders** that wl-preproc already ingests (§6). Every decision
 here is in [decisions.md](../../references/decisions.md), section "Training records".
@@ -131,7 +137,9 @@ declarations that differ and taking a reason (§3.5). Build T adds **a recenter*
 its offsets, S5 §6). Build D adds a procedure's step, a random pick, and a decision point where a planned
 step could not be taken.
 
-**[PI: in-session hand techniques]**
+**Hands-on techniques in a session are not a change kind**: hand-feeding, a verbal cue, guiding the animal,
+re-shaping with a manual reward while paused go in free-text notes (a mark's note, or the ELN), as Q2 put
+off-rig training (the PI, 2026-10-10, Q14, offered against one tap at the rig from a short list).
 
 Each row carries:
 
@@ -203,7 +211,9 @@ recommended minimal treatment for the sickest patients, who were the ones treate
   each entry a wl.works account id and a display name.
 - **"Not signed in" is a third actor kind**, beside box and member, on the wire and in the record, carrying
   the account id picked and why. `actor.from_map` refuses any kind but those two today, and resume reads
-  `by` through it, so both learn it in build C. **[PI: names or ids only]**
+  `by` through it, so both learn it in build C. **The agent's file names nobody** (Q15): it holds the
+  account id of whoever acted, signed in or picked, and names stay in wl.works, looked up when a person
+  needs them. The rig's own logs keep the actor as written today, for the welfare record.
 - **Pause, stop, resume and a manual reward never need sign-in.** They are welfare actions, and they work
   as they do today, for any actor.
 - **Where the rule is checked**: a setting in `Session._command`'s ordinary part, after its `SetParameter`
@@ -306,7 +316,12 @@ consecutive sessions: "at least 80% correct over the last 200 trials, in each of
 The check refuses a rule that names something the rig does not count, or no denominator. A stage's rule is
 part of the task's content hash; its id outlasts a revision, so a stage's trials count on across one.
 
-**[PI: whether a pass rule counts only trials at the stage's target difficulty]**
+**A pass rule counts only trials run at the stage's own difficulty** (Q13): each stage declares the value
+it is to be passed at for each of its clear-cut and expected settings, and a trial counts toward the rule
+only if each clear-cut setting was at that value or harder, each expected setting at that value, and no
+live change had eased one. A trial outside counts toward nothing and is still recorded. The "rule met"
+event stores the settings of the trials it counted. Otherwise easing the task could meet the rule, and an
+agent would learn that easing makes animals pass (the science review's first finding).
 
 ### 4.3 What "the item chosen" and "reaction time" mean
 
@@ -368,7 +383,10 @@ file are both made from the same logs; neither is the other's source.
 | `warnings` | the imperfections the session accepted (engine spec §19) |
 | `summary` | per task in the session: trials by outcome class, percent correct by condition with its denominator, reaction times, latency to acquire fixation, breaks and no-responses, fluid earned, time in the chair (from the `HEAD_FIXED` and `HEAD_RELEASED` codes in the event log, their only record today), stage reached; **XC-011's session summary**, one computation for both |
 
-People are recorded by wl.works account id. **[PI: names or ids only]**
+**People are recorded by wl.works account id only, never by name** (Q15): names stay in wl.works.
+Pseudonymized data are still personal data (GDPR Recital 26), but Belgium's Act of 30 July 2018 (Title 4,
+Art. 197) ranks them above identified data for research; free-text notes can still name people, which
+XC-317 covers.
 
 ### 5.3 When it is built
 
@@ -487,9 +505,10 @@ here (§10).
   limits tighter than a person's, who answers for it, what "helped" means as its objective. Q1 left it for
   when an agent is built; the record leaves room (§3.6) and keeps what every candidate objective needs
   (days, trials, reward, engagement; §5.2's `summary`). A backlog item.
-- **Personal data**: the file names lab members and holds free-text notes. It stays on lab storage; which
-  rules govern it at KU Leuven, and whether any of it is ever published, is UNVERIFIED and the PI's. A
-  backlog item.
+- **Personal data, beyond Q15**: the file holds staff account ids and free-text notes, so it is personal
+  data. KU Leuven's research-data guidance says any use of personal data is registered (its PRET
+  application, through the Privacy Team) before collection; which lawful basis applies, and whether any of
+  it is ever published, is UNVERIFIED and the PI's. XC-317, before build C writes a file.
 - **A simulated animal that learns**, as a test bed for an agent before an animal (R12): every published
   teacher found was tried on simulated learners first (the research note, §2.3). A backlog item, beside
   XC-146.

@@ -1200,7 +1200,7 @@ entry has its three lines, that every link names a file that exists, and that ev
 ## Training records
 
 ### TRN-01 — Records first: every session is recorded so that an AI agent can later learn training techniques from it; the agent is designed when one is built
-- **Decided:** 2026-10-10, the PI (XC-288's brainstorm, Q1, "Records first (Recommended)", offered against designing the agent now and only leaving room; Q2, rig changes as countable events and wl.works' weights, water regime and observations joined by the animal's permanent id, other off-rig training in free-text notes, offered against rig changes only and counting off-rig techniques in wl.works).
+- **Decided:** 2026-10-10, the PI (XC-288's brainstorm, Q1, "Records first (Recommended)", offered against designing the agent now and only leaving room; Q2, rig changes as countable events and wl.works' weights, water regime and observations joined by the animal's permanent id, other off-rig training in free-text notes, offered against rig changes only and counting off-rig techniques in wl.works; Q14, hands-on techniques in a session stay in free-text notes, offered against one tap at the rig, which was recommended).
 - **Where:** [XC-288 spec §1-§2](../superpowers/specs/2026-10-10-xc288-training-records-design.md#1-why); the research note [§6](../research/2026-10-09-xc288-ai-learnable-training-records.md#6-questions-for-the-brainstorm), questions 1 and 8.
 - **Basis:** PI decision, 2026-10-10, from his idea of 2026-10-08. Engineering premise, the research note's: no session has run, so every session recorded before the record holds what an agent needs is history an agent cannot use.
 
@@ -1225,8 +1225,8 @@ entry has its three lines, that every link names a file that exists, and that ev
 - **Basis:** PI decision, 2026-10-10. Its premise: [@swaminathan2015batch] — learning from logged decisions uses the logging policy's probability of each logged action, kept "during the operation of the logging policy" (§4), and such logs are "biased" and "incomplete" (§3); [@klasnja2015microrandomized] — micro-randomization assigns an intervention option at random at each relevant decision point, and records an "unavailable" indicator because "effect estimations have to take availability into account" (sections "Micro-randomized trial design" and "Randomization and participant availability"); [@murphy2005experimental] — sequential multiple assignment randomized trials for adaptive treatment strategies, since "past treatment may have delayed effects" (abstract).
 - **Caveat:** randomizing never touches a reward amount or a welfare ceiling (engine spec §15.7), and what an agent should optimize is not decided (spec §10).
 
-### TRN-06 — Training stages declare pass rules in what the rig counts; the rig records when one is met; a trainer may mark one by hand
-- **Decided:** 2026-10-10, the PI (Q6, "Stages declare criteria (Recommended)", offered against the trainer marking it and computing it later).
+### TRN-06 — Training stages declare pass rules in what the rig counts, counting only trials run at the stage's own difficulty; the rig records when one is met; a trainer may mark one by hand
+- **Decided:** 2026-10-10, the PI (Q6, "Stages declare criteria (Recommended)", offered against the trainer marking it and computing it later; Q13, after the science review found that easing the task could meet a rule, "Only at the stage's level (Recommended)", offered against counting all trials while recording their settings, and counting all).
 - **Where:** [XC-288 spec §4.2](../superpowers/specs/2026-10-10-xc288-training-records-design.md#42-stages-and-their-pass-rules) and [§3.7](../superpowers/specs/2026-10-10-xc288-training-records-design.md#37-stages).
 - **Basis:** PI decision, 2026-10-10.
 
@@ -1234,6 +1234,11 @@ entry has its three lines, that every link names a file that exists, and that ev
 - **Decided:** 2026-10-10, the PI (Q7, "Require sign-in first", offered against picking from a lab list, which was recommended, and typed names; Q8, "Allow, marked unverified (Recommended)", offered against refusing changes and allowing them only until opening). That welfare actions never need sign-in was stated as settled.
 - **Where:** [XC-288 spec §3.6](../superpowers/specs/2026-10-10-xc288-training-records-design.md#36-who).
 - **Basis:** PI decision, 2026-10-10.
+
+### TRN-08 — The agent's file names nobody: people are recorded by wl.works account id, names staying in wl.works
+- **Decided:** 2026-10-10, the PI (Q15, "IDs only (Recommended)", offered against names and ids), on XC-317's reading of the personal-data rules.
+- **Where:** [XC-288 spec §3.6](../superpowers/specs/2026-10-10-xc288-training-records-design.md#36-who) and [§5.2](../superpowers/specs/2026-10-10-xc288-training-records-design.md#52-what-it-holds).
+- **Basis:** PI decision, 2026-10-10. The rules it answers to are not papers: the GDPR (Regulation (EU) 2016/679, Art. 4(5) and Recital 26: pseudonymized data are still personal data) and Belgium's Act of 30 July 2018, Title 4, Art. 197 (pseudonymized data before identified data for research), as read on 2026-10-10 by XC-317's orientation; which lawful basis applies is UNVERIFIED and goes through KU Leuven's Privacy Team (XC-317).
 
 ## Other
 
