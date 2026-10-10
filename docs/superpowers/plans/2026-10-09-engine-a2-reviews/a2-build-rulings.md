@@ -200,8 +200,8 @@ PI chose on 2026-10-10.
   identical spectra loads with a singular matrix that is refused only later, by a sentence naming no
   calibration), folded into XC-315's line (invert once in `_convert`, inside its `try`; refuse a
   non-finite or singular matrix with a sentence naming the calibration). Every other deferred minor the
-  reviewer triaged "drop" is dropped, for the reasons the reviewer gave in its report to the controller;
-  that report is not copied into the repository. Cost: nothing.
+  reviewer triaged "drop" is dropped, for the reasons the reviewer gave, copied in
+  [a2-final-review-triage.md](a2-final-review-triage.md). Cost: nothing.
 - **No second fix wave** (the skill's rule). The CHECKPOINT's residuals (the counts, the review done, the
   fix wave's commits, which runs cover what, the XC-275 branch for the PI) are fixed in a docs-only
   commit now, so the entry point is true at the pushed tip. Two residuals are dropped as minor: a NaN
