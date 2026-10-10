@@ -69,13 +69,27 @@ class DKL(Color):
     l_m: float = 0.0
     s_lm: float = 0.0
 
-    def magnitude(self) -> float:
-        return max(abs(self.lum), abs(self.l_m), abs(self.s_lm))
+
+@dataclass(frozen=True, slots=True)
+class ConeContrast(Color):
+    """Cone contrast about the background: each cone's change in excitation over the
+    background's, ΔL/L, ΔM/M and ΔS/S [@brainard1996cone, p. 564, Eq. A.4.1], in the lab's
+    observer (`cones.CIE2006_10`). For cone-isolating stimuli (engine spec §7.4): `S=0.5` alone
+    raises the S cones' excitation by half and leaves L and M where the background has them.
+
+    A **modulation**, as `DKL` is: relative to the background, so it names no light on black
+    (spec §7.5), and the background itself is `ConeContrast()`. Each component may be a parameter.
+    Whether one claims isoluminance is `check`'s to say (`isoluminance-on-default`; the engine A2
+    plan's call 15)."""
+
+    L: object = 0.0
+    M: object = 0.0
+    S: object = 0.0
 
 
 #: The colors defined against the background in cone terms: a light only once a calibration and
 #: a background convert them (`cone_xyz`).
-CONE_COLORS = (DKL,)
+CONE_COLORS = (DKL, ConeContrast)
 
 
 #: CIE 1931 chromaticity of D65, the white point of the sRGB standard (IEC 61966-2-1).
@@ -271,10 +285,6 @@ class Calibration:
     id: str = ""
     #: Whether this is the sRGB standard rather than a measurement (spec §7.1).
     standard: bool = False
-    #: The largest cone contrast this panel reaches on its weakest axis, measured; `None` when
-    #: a calibration states none, and then no DKL color is realizable against it until build
-    #: A2 converts DKL through cone fundamentals (spec §7.4).
-    max_cone_contrast: float | None = 0.85
     #: Each primary's measured spectrum (engine spec §7.9), from which cone colors convert; `None`
     #: for the standard, which has none, and for a measured calibration taken without them, against
     #: which no cone color converts (`cones`).
@@ -438,7 +448,8 @@ def cone_contrast(color, panel: "Calibration", background: xyY) -> tuple[float, 
     (`cones.V_F10`) where the background has it, so `lum=0` is isoluminant by construction in the
     lab's observer (A2's Q5); the `s_lm` direction changes S alone, which V_F,10 does not see.
     **Signs** (the engine A2 plan's call 14): `+l_m` raises L and lowers M (toward red), `+s_lm`
-    raises S (toward violet), `+lum` brightens. Every component a number: `screen.resolve`
+    raises S (toward violet), `+lum` brightens. A `ConeContrast` is its own three numbers.
+    Every component a number: `screen.resolve`
     binds a task's parameters first, and `check` reads each value one can take."""
     return _contrast(color, background_cones(panel, background))
 
@@ -476,6 +487,8 @@ def _excited(matrix, background: xyY) -> tuple[float, float, float]:
 
 
 def _contrast(color, excited) -> tuple[float, float, float]:
+    if isinstance(color, ConeContrast):
+        return _numbers(color, (color.L, color.M, color.S))
     if not isinstance(color, DKL):
         raise TypeError(f"{type(color).__name__} is not a cone color")
     from wl_xcon import cones
@@ -539,38 +552,38 @@ def _det3(m) -> float:
 TOLERANCE = 1e-6
 
 
-def unrealizable(color: Color, panel: Calibration) -> str | None:
-    """Why `panel` cannot produce `color`, or `None` if it can."""
-    if isinstance(color, xyY):
-        try:
-            weights = panel.weights(color)
-        except ValueError as exc:
-            return str(exc)
-        if any(w < -TOLERANCE or w > 1.0 + TOLERANCE for w in weights):
-            return (
-                f"needs primary weights {tuple(round(w, 3) for w in weights)}, "
-                f"which are outside [0, 1]; the panel would clip, and a clipped "
-                f"colour is neither the requested chromaticity nor the requested "
-                f"luminance"
-            )
-        return None
-    if isinstance(color, DKL):
-        if panel.max_cone_contrast is None:
-            return (
-                "this calibration states no cone-contrast limit, so whether the panel can make "
-                "it is unknown until build A2 converts DKL through cone fundamentals"
-            )
-        if color.magnitude() > panel.max_cone_contrast + TOLERANCE:
-            return (
-                f"asks for cone contrast {color.magnitude():.3f}; this panel was "
-                f"measured to reach {panel.max_cone_contrast:.3f}"
-            )
-        return None
+def unrealizable(color: Color, panel: Calibration, background: xyY | None = None) -> str | None:
+    """Why `panel` cannot produce `color`, or `None` if it can: **by full conversion to primary
+    weights, for every space** (engine spec §7.4; COL-08) [@brainard2002display, pp. 177-178,
+    Eq. 14]. Each weight must lie in [0, 1] within `TOLERANCE`: a transfer's fractions are
+    black-subtracted (ADR-0011), so 0 is what each channel adds undriven. A cone color is
+    converted against `background` first (`cone_xyz`), so it is realizable only against one: the
+    same `DKL` fits on a mid gray and not on a bright one (COL-10). This replaces the
+    `max_cone_contrast` gate, which passed red-green contrasts no panel could make (the science
+    review's 7(b); the A2 research note §3)."""
+    try:
+        if isinstance(color, CONE_COLORS):
+            if background is None:
+                return "it is relative to the background, and no background was given"
+            xyz = cone_xyz(color, panel, background)
+        elif isinstance(color, xyY):
+            xyz = _XYZ(color)
+        else:
+            return None
+        weights = panel.weights_of(xyz)
+    except ValueError as exc:
+        return str(exc)
+    if any(w < -TOLERANCE or w > 1.0 + TOLERANCE for w in weights):
+        return (
+            f"needs primary weights {tuple(round(w, 3) for w in weights)}, which are outside "
+            f"[0, 1]; the panel would clip, and a clipped color is neither the requested "
+            f"chromaticity nor the requested luminance"
+        )
     return None
 
 
 #: A calibration record's fields, each required and no other (Question 4: one JSON file per
-#: measured calibration). `max_cone_contrast` alone is optional, until build A2 replaces it.
+#: measured calibration).
 RECORD_FIELDS = ("id", "measured_on", "observer", "primaries", "background", "transfer")
 _CHANNELS = ("red", "green", "blue")
 
@@ -642,7 +655,7 @@ def read_calibration(path) -> Calibration:
     missing = [name for name in RECORD_FIELDS if name not in data]
     if missing:
         raise ValueError(f"it has no {', '.join(missing)}")
-    extra = sorted(set(data) - set(RECORD_FIELDS) - {"max_cone_contrast"})
+    extra = sorted(set(data) - set(RECORD_FIELDS))
     if extra:
         raise ValueError(f"it has {', '.join(extra)}, which a calibration record does not")
     for name in ("id", "measured_on", "observer"):
@@ -660,9 +673,6 @@ def read_calibration(path) -> Calibration:
         raise ValueError(f"its id {data['id']!r} holds a character that does not print")
     primaries = _channels(data["primaries"], "primaries")
     transfer = _channels(data["transfer"], "transfer")
-    limit = data.get("max_cone_contrast")
-    if limit is not None and not (_finite_number(limit) and limit > 0):
-        raise ValueError("its max_cone_contrast is a positive number")
     return Calibration(
         red=_light(primaries["red"], "red primary"),
         green=_light(primaries["green"], "green primary"),
@@ -672,7 +682,6 @@ def read_calibration(path) -> Calibration:
         observer=data["observer"],
         measured_on=data["measured_on"],
         id=data["id"],
-        max_cone_contrast=None if limit is None else float(limit),
     )
 
 
@@ -763,5 +772,4 @@ SRGB = Calibration(
     measured_on="",
     id="srgb-standard",
     standard=True,
-    max_cone_contrast=None,
 )

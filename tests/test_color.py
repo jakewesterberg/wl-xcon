@@ -13,8 +13,8 @@ from dataclasses import replace
 import pytest
 
 from _calibrations import LINEAR, measured
-from wl_xcon import look
-from wl_xcon.check import check
+from wl_xcon import cones, look
+from wl_xcon.check import _background_lights, check
 from wl_xcon.cones import CIE2006_10
 from wl_xcon.findings import NOT_RECORDING
 from wl_xcon.photometry import (
@@ -23,6 +23,7 @@ from wl_xcon.photometry import (
     RMS,
     SRGB,
     Calibration,
+    ConeContrast,
     Gray,
     Michelson,
     Weber,
@@ -136,9 +137,95 @@ def test_isoluminance_is_a_named_observers_and_a_calibration_names_its_own():
                     transfer=(LINEAR,) * 3, observer="", measured_on="2026-08-31")
 
 
-def test_a_cone_contrast_beyond_the_measured_maximum_is_refused():
-    """The panel's reachable cone contrast is a measured number, not an aspiration."""
-    assert "unrealizable-color" in codes(a_task(Disc(color=DKL(l_m=0.95))))
+def test_a_cone_color_the_panel_cannot_make_on_its_background_is_refused():
+    """Full conversion, not a stored maximum (engine spec §7.4; COL-08): a red-green contrast the
+    old 0.85 gate passed is outside the panel's gamut."""
+    trial = replace(a_task(Disc(color=DKL(l_m=-0.5))), background=GRAY_BG)
+
+    found = _found(trial, calibration=measured())
+
+    assert found["unrealizable-color"].detail.startswith(
+        "Disc asks for DKL(lum=0.0, l_m=-0.5, s_lm=0.0) on a background of "
+        "xyY(x=0.3127, y=0.329, Y=20.0)")
+    assert "outside [0, 1]" in found["unrealizable-color"].detail
+    assert "unrealizable-color" not in _found(
+        replace(a_task(Disc(color=DKL(l_m=0.08))), background=GRAY_BG), calibration=measured())
+
+
+def test_a_cone_color_on_a_measured_calibration_without_spectra_is_refused():
+    trial = replace(a_task(Disc(color=DKL(l_m=0.08))), background=GRAY_BG)
+
+    assert "measured without spectra" in _found(trial, calibration=PANEL)["unrealizable-color"].detail
+
+
+def test_a_cone_color_is_realizable_or_not_by_its_background():
+    """COL-10: the same contrast fits on a dim gray and not on one near the panel's white."""
+    color = Disc(color=DKL(lum=0.5))
+    dim = replace(a_task(color), background=Gray(20.0))
+    bright = replace(a_task(color), background=Gray(150.0))
+
+    assert "unrealizable-color" not in _found(dim, calibration=measured())
+    assert "unrealizable-color" in _found(bright, calibration=measured())
+
+
+def test_a_cone_color_with_parameters_is_checked_at_each_value_they_can_take():
+    """XC-269: a parameter inside a `DKL` raised TypeError from `DKL.magnitude()` under a measured
+    calibration. Each component is read at each choice or both ends of its range, crossed."""
+    trial = replace(a_task(Disc(color=DKL(lum=0.0, l_m=P("c")))), background=GRAY_BG,
+                    params=[Param("c", unit="contrast", low=-0.6, high=0.1)])
+
+    found = check(trial, calibration=measured())
+
+    assert [f.detail.split(" on ")[0] for f in found if f.code == "unrealizable-color"] == [
+        "Disc asks for DKL(lum=0.0, l_m=-0.6, s_lm=0.0)"]
+
+
+def test_a_cone_contrast_is_checked_by_full_conversion_too():
+    trial = replace(a_task(Disc(color=ConeContrast(S=P("s")))), background=GRAY_BG,
+                    params=[Param("s", unit="contrast", choices=(0.5, 12.0))])
+
+    details = [f.detail for f in check(trial, calibration=measured())
+               if f.code == "unrealizable-color"]
+
+    assert len(details) == 1 and "ConeContrast(L=0.0, M=0.0, S=12.0)" in details[0]
+
+
+@pytest.mark.parametrize("field", ["L", "M", "S"])
+def test_each_cone_contrast_component_is_a_number(field):
+    trial = replace(a_task(Disc(color=ConeContrast(**{field: "much"}))), background=GRAY_BG)
+
+    assert (f"ConeContrast.{field} is 'much', not a number"
+            in _found(trial, calibration=measured())["bad-block"].detail)
+
+
+def test_a_black_background_value_is_left_to_its_own_refusal():
+    """`_background_lights` leaves black out, so a cone color is converted only against the lit
+    values; `cone-color-on-black` refuses the black one."""
+    trial = replace(a_task(Disc(color=DKL(l_m=-0.5))), background=P("bg"),
+                    params=[Param("bg", unit="color", choices=(Gray(0.0), Gray(20.0)))])
+    params = {p.name: p for p in trial.params}
+
+    assert _background_lights(trial, params) == [xyY(*D65, 20.0)]
+    found = check(trial, calibration=measured())
+    assert {f.code for f in found} >= {"cone-color-on-black", "unrealizable-color"}
+    assert all("Y=0.0" not in f.detail for f in found if f.code == "unrealizable-color")
+
+
+def test_a_cone_table_that_is_not_the_cies_refuses_cone_colors_and_nothing_else(monkeypatch):
+    """The review's E-I3: the checksum guard on the read path. Emptied cache, wrong checksum: the
+    table read refuses; a measured calibration built then converts no cone color, saying why,
+    and still checks a plain color."""
+    monkeypatch.setattr(cones, "_TABLE", [])
+    monkeypatch.setitem(cones.CIE_FILES, cones.TABLE, "0" * 64)
+    with pytest.raises(ValueError, match="is not the CIE's file"):
+        cones.table()
+
+    panel = measured()
+
+    assert panel.cones is None and "is not the CIE's file" in panel.cones_refused
+    trial = replace(a_task(Disc(color=DKL(l_m=0.08))), background=GRAY_BG)
+    assert "is not the CIE's file" in _found(trial, calibration=panel)["unrealizable-color"].detail
+    assert _found(a_task(Disc(color=xyY(0.3, 0.35, 20.0))), calibration=panel) == {}
 
 
 def test_pop_out_is_expressible_as_one_parameter():

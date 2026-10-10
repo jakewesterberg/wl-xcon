@@ -54,7 +54,7 @@ def test_the_default_is_the_srgb_standard_and_says_so():
     # Solved independently, in exact rational arithmetic (2026-10-08).
     assert (SRGB.red.Y, SRGB.green.Y, SRGB.blue.Y) == pytest.approx(
         (17.011120469720822, 57.213494301420475, 5.775385228858696), rel=1e-12)
-    assert SRGB.max_cone_contrast is None
+    assert SRGB.spectra is None
 
 
 def test_full_drive_on_the_default_is_the_standards_white_and_no_brighter():
@@ -64,11 +64,15 @@ def test_full_drive_on_the_default_is_the_standards_white_and_no_brighter():
     assert unrealizable(xyY(*D65, SRGB_WHITE_CD_M2 + 0.01), SRGB) is not None
 
 
-def test_no_dkl_color_is_realizable_on_a_calibration_that_states_no_cone_contrast_limit():
-    """The default states none, so even a faint DKL color is refused against it, by name,
-    until build A2 converts DKL through cone fundamentals."""
-    assert "states no cone-contrast limit" in unrealizable(DKL(l_m=0.01), SRGB)
-    assert unrealizable(DKL(l_m=0.01), measured()) is None
+def test_a_cone_color_converts_on_the_default_and_on_a_measured_calibration_with_spectra():
+    """Engine build A2: no stored cone-contrast limit; the full conversion decides (spec §7.4)."""
+    gray = xyY(*D65, 20.0)
+
+    assert unrealizable(DKL(l_m=0.08), SRGB, gray) is None
+    assert unrealizable(DKL(l_m=0.08), measured(), gray) is None
+    assert "outside [0, 1]" in unrealizable(DKL(l_m=-0.3), SRGB, gray)
+    assert "no background was given" in unrealizable(DKL(l_m=0.08), SRGB)
+    assert "measured without spectra" in unrealizable(DKL(l_m=0.08), measured(spectra=None), gray)
 
 
 def test_the_default_transfer_is_the_srgb_curve_at_ten_bits():
@@ -148,8 +152,6 @@ def test_a_record_reads_back_as_the_calibration_it_describes(tmp_path):
         "rig1@2027-01-20", "2027-01-20", False, "CIE 1931 2°")
     assert (panel.red, panel.background) == (xyY(0.68, 0.31, 45.0), xyY(0.3127, 0.329, 20.0))
     assert panel.transfer == (Transfer(levels=(0.0, 0.5, 1.0), fractions=(0.0, 0.2, 1.0)),) * 3
-    assert panel.max_cone_contrast is None
-    assert read_calibration(_write(tmp_path, _record(max_cone_contrast=0.2))).max_cone_contrast == 0.2
     assert read_calibration(_write(tmp_path, _record(id="rig 1 (left)"))).id == "rig 1 (left)"
 
 
@@ -163,7 +165,9 @@ def test_a_record_reads_back_as_the_calibration_it_describes(tmp_path):
     ({"background": [0.3, 0.3]}, "three numbers"),
     ({"transfer": {c: [[0.0, 0.0], [1.0, 0.8]] for c in ("red", "green", "blue")}}, "end at 1"),
     ({"transfer": {c: [0.0, 1.0] for c in ("red", "green", "blue")}}, "pairs"),
-    ({"max_cone_contrast": -1}, "positive"),
+    # Engine build A2 converts cone colors in full and keeps no stored limit (spec §7.4).
+    ({"max_cone_contrast": 0.2}, "max_cone_contrast, which a calibration record does not"),
+    ({"observer": " "}, "names the observer"),
     # Too large for a float: `math.isfinite` raises `OverflowError` on it, not a ValueError.
     ({"background": [0.3127, 0.329, 10**400]}, "three numbers"),
     ({"primaries": {**PRIMARIES, "red": [0.68, 0.0, 45.0]}}, "red primary"),

@@ -2840,7 +2840,6 @@ def test_a_resume_after_the_rigs_calibration_changed_names_the_new_one_on_each_l
         "primaries": PRIMARIES, "background": BACKGROUND,
         "transfer": {c: [list(p) for p in zip(LINEAR.levels, LINEAR.fractions)]
                      for c in ("red", "green", "blue")},
-        "max_cone_contrast": panel.max_cone_contrast,
     }))
     rig_path = naming(tmp_path / "rig", "cal.json")
     # the process stops; `wlx taskd` starts again over the same root, under the new rig

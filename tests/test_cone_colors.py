@@ -13,6 +13,7 @@ from wl_xcon.photometry import (
     D65,
     DKL,
     SRGB,
+    ConeContrast,
     Spectra,
     _apply3,
     background_cones,
@@ -162,3 +163,12 @@ def test_a_component_that_is_not_a_number_is_a_value_error_never_a_type_error():
     """Call 28: every caller's `except ValueError` holds it."""
     with pytest.raises(ValueError, match="not a number"):
         cone_xyz(DKL(l_m=P("c")), SRGB, GRAY)
+
+
+def test_a_cone_contrast_is_its_own_three_numbers():
+    background = background_cones(SRGB, GRAY)
+    lit = _apply3(SRGB.cones, cone_xyz(ConeContrast(L=0.1, S=-0.3), SRGB, GRAY))
+
+    assert cone_contrast(ConeContrast(L=0.1, M=-0.05, S=0.3), SRGB, GRAY) == (0.1, -0.05, 0.3)
+    assert [after / before - 1.0 for after, before in zip(lit, background)] == pytest.approx(
+        [0.1, 0.0, -0.3], abs=1e-12)

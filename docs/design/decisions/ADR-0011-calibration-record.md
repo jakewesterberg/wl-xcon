@@ -54,7 +54,7 @@ record). `tasks/rig.py` names none until build J measures the panel.
 | `primaries` | `red`, `green` and `blue`, each once, each `[x, y, Y]`: a light a display makes (x at least 0, y above 0, x + y at most 1 within `photometry.TOLERANCE`, Y above 0), the three not on one line in xy. |
 | `background` | `[x, y, Y]`, the reference background it was measured at; Y may be 0 (black, spec §7.5). |
 | `transfer` | `red`, `green` and `blue`, each once, each a list of at least two `[level, fraction]` pairs: levels from 0 to 1 rising strictly, fractions never falling, from 0 or above to 1 at full drive. Stored and checked; evaluated from build A2. |
-| `max_cone_contrast` | **Optional.** A positive number (or `null`), the panel's measured cone-contrast reach. Absent or `null`, the record states no DKL limit, and its DKL colors are refused until build A2 converts DKL through cone fundamentals (the plan's call 17). |
+| ~~`max_cone_contrast`~~ | **Removed 2026-10-10 (engine build A2)**: realizability is full conversion (spec §7.4), so a record carrying it is refused as a field a record does not have. No record had one. |
 
 Every number is a finite JSON number, never `true` or `false`. **Nothing is filled in.** A record is
 refused, with a sentence naming why, when a field is missing, when it has any other field, when a name
@@ -80,7 +80,7 @@ run's pre-flight on it (the plan's calls 19-20).
 - **The field list is provisional.** Builds A2 and J add measured spectra and cone fundamentals, and
   because a record carrying a field it does not know is refused, **each of them amends this ADR's
   list** in the build that adds the field (the plan's "What the PI should know", item 5). A2 also
-  replaces `max_cone_contrast` with its full conversion (spec §7.4).
+  replaces `max_cone_contrast` with its full conversion (spec §7.4). *(Done 2026-10-10.)*
 - A record cannot carry a field `read_calibration` ignores, so two programs cannot disagree about one
   silently; the cost is that an older reader refuses a newer record outright.
 - Each record holds its own transfer tables: the sRGB curve at all 1024 levels on each channel is

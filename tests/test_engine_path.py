@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from _calibrations import LINEAR
+from _calibrations import LINEAR, SPECTRA
 from _rig import DIRECT, RIG, STEREOSCOPE
 from wl_xcon import exact, screen, viewport
 from wl_xcon.check import check
@@ -55,7 +55,7 @@ PANEL = Calibration(
     transfer=(LINEAR,) * 3,
     observer="macaque V(lambda) -- placeholder, unmeasured",
     measured_on="2026-08-31",
-    max_cone_contrast=1.0,
+    spectra=SPECTRA,
 )
 
 

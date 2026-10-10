@@ -10,7 +10,17 @@ from wl_xcon.codes import PROVISIONAL, Allocation
 from wl_xcon.components import Registry
 from wl_xcon.findings import NOT_RECORDING, SESSION_KINDS, Finding
 from wl_xcon.geometry import VIEWS, Geometry
-from wl_xcon.photometry import CONE_COLORS, D65, DKL, Calibration, Color, Gray, unrealizable, xyY
+from wl_xcon.photometry import (
+    CONE_COLORS,
+    D65,
+    DKL,
+    Calibration,
+    Color,
+    ConeContrast,
+    Gray,
+    unrealizable,
+    xyY,
+)
 from wl_xcon.task import (
     RDS,
     After,
@@ -954,6 +964,7 @@ def _color_faults(trial: Trial, panel: Calibration | None) -> list[Finding]:
     experiment's control condition quietly becomes a luminance manipulation.
     """
     params = {p.name: p for p in trial.params}
+    backgrounds = _background_lights(trial, params)
     findings: list[Finding] = []
     for what, color in _colors(trial, params):
         # With no calibration at all -- `wlx taskd` while the rig's record will not load (the
@@ -964,15 +975,44 @@ def _color_faults(trial: Trial, panel: Calibration | None) -> list[Finding]:
         # it is checked as each light it can be.
         if panel is None and isinstance(color, Gray):
             continue
+        if what.startswith("the trial's ") and isinstance(color, CONE_COLORS):
+            continue  # a background is an absolute light, and `_block_faults` refuses one that is not
         try:
             lights = [color] if panel is None else _lights(color, params)
         except _Unbounded:
             continue  # refused as a bad block: it cannot be bounded
         for light in lights:
-            findings += _one_color(what, light, panel)
+            for finding in _one_color(what, light, panel, backgrounds):
+                if finding not in findings:  # one value's corners can say the same
+                    findings.append(finding)
     if panel is not None and panel.standard:
         findings += _default_faults(trial, params)
     return findings
+
+
+def _background_lights(trial: Trial, params: dict[str, Param]) -> list:
+    """Every lit light an eye's background can be, as an `xyY`, for a cone color's conversion:
+    each choice of a background parameter, each corner of a `Gray`'s or an `xyY`'s ranges
+    (`_lights`; exact for a luminance range, corners only for a chromaticity one, the engine A2
+    plan's call 11). Black is left out (`cone-color-on-black` refuses a cone color there), as is
+    one that cannot be bounded or is not an absolute light (`_block_faults` refuses it)."""
+    found: list = []
+    for background in _backgrounds(trial):
+        try:
+            values = _options(background, params)
+        except _Unbounded:
+            continue
+        for value in values:
+            if not isinstance(value, (Gray, xyY)):
+                continue
+            try:
+                lights = _lights(value, params)
+            except _Unbounded:
+                continue
+            for light in lights:
+                if light.Y > 0.0 and light not in found:
+                    found.append(light)
+    return found
 
 
 def _lights(color, params: dict[str, Param]) -> list:
@@ -989,11 +1029,19 @@ def _lights(color, params: dict[str, Param]) -> list:
     if isinstance(color, xyY):
         return [xyY(x, y, Y) for x, y, Y in itertools.product(
             *(_reach(v, params) for v in (color.x, color.y, color.Y)))]
+    if isinstance(color, DKL):
+        return [DKL(lum, l_m, s_lm) for lum, l_m, s_lm in itertools.product(
+            *(_reach(v, params) for v in (color.lum, color.l_m, color.s_lm)))]
+    if isinstance(color, ConeContrast):
+        return [ConeContrast(L, M, S) for L, M, S in itertools.product(
+            *(_reach(v, params) for v in (color.L, color.M, color.S)))]
     return [color]
 
 
-def _one_color(what: str, color, panel: Calibration | None) -> list[Finding]:
-    """One light against the calibration, or against its absence."""
+def _one_color(what: str, color, panel: Calibration | None, backgrounds: list) -> list[Finding]:
+    """One light against the calibration, or against its absence: a cone color against each lit
+    light the trial's background can be (`_background_lights`), since its conversion and so its
+    reach depend on the background (COL-10)."""
     if panel is None:
         return [
             Finding(
@@ -1021,6 +1069,11 @@ def _one_color(what: str, color, panel: Calibration | None) -> list[Finding]:
     # Isoluminance is the lab observer's V_F,10 (A2's Q5), named by `cones.CIE2006_10` and
     # recorded with the session; a measured calibration names its own photometry's observer or
     # does not load (`Calibration`), so nothing is left for a finding here (engine build A2).
+    if isinstance(color, CONE_COLORS):
+        return [Finding("unrealizable-color", f"{what} asks for {color} on a background of "
+                                              f"{background}: {why}")
+                for background in backgrounds
+                if (why := unrealizable(color, panel, background)) is not None]
     why = unrealizable(color, panel)
     if why is not None:
         return [Finding("unrealizable-color", f"{what} asks for {color}: {why}")]
@@ -1034,7 +1087,7 @@ def _default_faults(trial: Trial, params: dict[str, Param]) -> list[Finding]:
     until build C lets a task declare its factors (Question 2). Each is one warning per task,
     accepted in training and piloting."""
     findings = []
-    named = sorted({what for what, color in _colors(trial, params) if isinstance(color, (xyY, DKL))})
+    named = sorted({what for what, color in _colors(trial, params) if isinstance(color, (xyY, *CONE_COLORS))})
     if named:
         findings.append(Finding("color-on-default", (
             f"this task names colors ({'; '.join(named)}), and the default calibration is the sRGB "
@@ -1138,7 +1191,7 @@ _SIZES = ("size", "width", "height", "length", "thickness", "outer", "sigma", "a
 #: `None` is a value of one only where its block's own default is `None` (a grating's
 #: `direction`).
 _NUMBERS = (*_SIZES, "inner", "sides", "sf", "phase", "tf", "direction", "orientation", "value",
-            "cd_m2", "x", "y", "Y", "lum", "l_m", "s_lm")
+            "cd_m2", "x", "y", "Y", "lum", "l_m", "s_lm", "L", "M", "S")
 
 #: Block fields that hold a light: a `Color`, `None`, or a parameter offering those (XC-264).
 _LIGHTS = ("color", "mean")
