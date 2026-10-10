@@ -137,3 +137,46 @@ ruling applied in the revision.
 ## Declined (with reason)
 - Whether CC BY-SA data beside Apache-2.0 code needs more than ADR-0012 provides: legal, marked
   UNVERIFIED in the plan, put to the PI as part of ADR-0012's record.
+
+## Re-review of the revision (`d439ab9`), 2026-10-10
+
+One re-reviewer (most capable model) checked every ruling in both seats, reproduced E-C1's input (now an
+`unrealizable-color` finding; 132 grating-mean spellings on both calibrations, nothing raises), re-ran the
+named breaks (each fails), opened the PI's 2023 paper and recomputed the scene numbers independently
+(all match the plan's to the printed digit but one, below). Verdict: needs two fixes to what the PI is
+shown, and minors. **Rulings: apply all.**
+
+- **F1.** The recommended red, `DKL(l_m=+0.603, s_lm=−0.94)`, reaches a red weight of 1 at a 17.66 cd/m²
+  gray on sRGB at an 80 cd/m² white (17.39 is the published contrasts unprojected, which carry +1.8%
+  V_F,10 luminance). Write 17.7 in Q1 and COL-33, worded as "made mostly by the red primary (17.0
+  cd/m²), with a little green beside it", so the sentence no longer reads as a contradiction.
+- **F2.** The plan never says how "the 2023 items made isoluminant in the lab's observer" were derived:
+  it took the paper's contrast numbers (computed in another cone set, by Cole & Hine's 1992 method, ref.
+  94 of the paper) as contrasts in the CIE 2006 10° observer about a D65 gray and moved L and M to the
+  nearest point on V_F,10's isoluminant line, keeping S. Converting the 2023 *lights* instead (the paper's
+  xy at 2.8 cd/m² against its gray, through the CIE matrix) gives about l_m +0.625 (red) and −0.154
+  (green), both already isoluminant under V_F,10 by that route; the two routes differ by about 0.02.
+  Add one plain sentence to Q1, COL-33, COL-05 and the task's comment saying so, and let option A offer
+  the PI the published numbers or his published lights. (The reviewer's Smith-Pokorny coefficients were
+  recalled, not checked at the source: do not state them.)
+- **M1.** Task 2(c)'s `SPECTRA_COVER` comment still says 2.0e-6 / 2.0e-7: make it 2.4e-6 / 2.3e-7 by the
+  trapezoid rule, as call 6 and COL-35 now say.
+- **M2.** Q2-A's `ConeContrast` half of `_claims_isoluminance`: widening the band tenfold, the fail-closed
+  `except _Unbounded: return True` → `False`, and `_can_be`'s return for a parameter with neither choices
+  nor a range all survive. Add tests either side of the band on D65 (`ConeContrast(L=0.007)` claims,
+  `ConeContrast(L=0.0075)` does not), and `ConeContrast(S=P("undeclared"))` and
+  `DKL(lum=P("undeclared"), l_m=0.05)` both claiming; remove the unreachable `_is_number` line or make
+  it reachable.
+- **M3.** Q2's options B and C get one cost line each (B: no cone-contrast stimulus trains or pilots on the
+  default; C: the search red written as a cone contrast loads on the default with only a warning); "enough
+  to matter in a laminar M/P/K mapping" is attributed as the color reviewer's judgement unless a library
+  source says it; plainer opening words.
+- **M4.** The `color-on-default` warning's held-luminance clause starts at character 487 of the 500 a
+  screen shows (`NOTE_LIMIT`), so a person sees "on this calibr…", and with a second warning the "outside
+  the CIE's definition" clause is cut too. Put the clause first or shorten the sentence so both fit the
+  500 shown; "What the PI should know" item 2 then stays true of the screen.
+- **M5.** Task 6's "under B" note names `ConeContrast(L=0.1, S=0.5)` in
+  `test_a_cone_color_on_the_default_trains_and_pilots_with_the_warning`, which option B would refuse.
+- **M6.** Q1: the 2023 green on sRGB also needs a slightly negative red (−0.0025 at 12 cd/m²); option B's
+  "fits any panel easily" → "fits sRGB-like primaries easily"; option A says what happens if the panel
+  cannot make the colors (the task is refused at load and the choice comes back to him).
