@@ -1532,7 +1532,7 @@ def test_an_item_whose_check_raises_a_fault_that_cannot_be_said_fails_by_its_typ
 ):
     """XC-291: `_unfinished` said an item's fault outside the pre-flight's containment, so one
     whose own `str()` raises stopped `wlx taskd` with the animal out, on a check or a start. It
-    is said by its type (`_fault`): the item fails under its own name, a start is refused, and
+    is said by its type (`_said`): the item fails under its own name, a start is refused, and
     the return is taken. From a task file, from an animal's `bounds.py`, and from any item's
     check."""
     service = _service(tmp_path)
@@ -2354,7 +2354,7 @@ def test_a_run_that_fails_before_it_starts_on_a_fault_that_cannot_be_said_is_ref
     """XC-291: `_run` said what a run raised before it started outside its own containment -- a
     refusal through `_sentence`, anything else through its own `str()` -- so one from a task
     file edited between its pre-flight and its run, whose own `str()` raises, stopped `wlx
-    taskd` with the animal out. It is said by its type (`_sentence_or`, `_fault`), as a start
+    taskd` with the animal out. It is said by its type (`_sentence_or`, `_said`), as a start
     refusal on the feed and, for a fault, a traceback on stderr; nothing is strobed or written,
     and the return is taken."""
     from wl_xcon import taskd
@@ -3354,7 +3354,7 @@ def test_an_animal_whose_bounds_raise_a_fault_that_cannot_be_said_is_refused_and
     """XC-291: `_built` said what a build raised outside its own containment -- a refusal's own
     sentence through `_sentence`, a fault's through its own `str()` -- so an animal's `bounds.py`
     raising one whose own `str()` raises stopped `wlx taskd` on an open or a resume. Each is
-    said by its type (`_sentence_or`, `_fault`), refused under its own kind with nothing
+    said by its type (`_sentence_or`, `_said`), refused under its own kind with nothing
     written, and the idle frame publishes."""
     folders = _folders(tmp_path)
     if sent == "resume_session":
@@ -3378,7 +3378,7 @@ def test_an_animal_whose_bounds_raise_a_fault_that_cannot_be_said_is_refused_and
     assert isinstance(_step(service), Idle), "the service goes on"
 
 
-#: An animal's `bounds.py` raising, as it loads, a fault at `_fault`'s and `_sentence_or`'s
+#: An animal's `bounds.py` raising, as it loads, a fault at `_said`'s and `_sentence_or`'s
 #: edges (XC-291's review, M1): a `str()` raising what is not an `Exception`, a type whose name
 #: its metaclass redefines -- to raise, or to give a number -- and a name that is a `str` of its
 #: own kind, whose `__format__` raises. `BASE` is the fault's base.
@@ -3428,12 +3428,13 @@ _AT_THE_EDGE = {
 @pytest.mark.parametrize("edge", list(_AT_THE_EDGE))
 @pytest.mark.parametrize("base", ["ValueError", "Exception"], ids=["a refusal", "a fault"])
 def test_a_fault_at_the_edge_of_what_can_be_said_is_still_said_by_its_type(tmp_path, base, edge):
-    """XC-291's review, M1: `_fault` and `_sentence_or` caught only an `Exception` from `str()`,
-    and read the type's name through its metaclass, twice -- so a `str()` raising `SystemExit`
-    or a bare `BaseException`, or a metaclass whose `__name__` raises or is not text, still
-    stopped `wlx taskd` or said a number for the type. The name is read past the metaclass as a
-    plain `str` (`_type_name`), and whatever `str()` raises is caught but a `KeyboardInterrupt`:
-    the open is refused, saying the type, and the idle frame publishes."""
+    """XC-291's review, M1: XC-291's sites said a fault through `_fault`, which catches only an
+    `Exception` from `str()` and reads the type's name through its metaclass, twice -- so a
+    `str()` raising `SystemExit` or a bare `BaseException`, or a metaclass whose `__name__`
+    raises or is not text, still stopped `wlx taskd` or said a number for the type. They say it
+    through `_said` now, which reads the name past the metaclass as a plain `str` (`_type_name`)
+    and catches whatever `str()` raises but a `KeyboardInterrupt`: the open is refused, saying
+    the type, and the idle frame publishes."""
     folders = _folders(tmp_path)
     (folders[0] / "REFERENCE" / "bounds.py").write_text(
         _AT_THE_EDGE[edge].replace("BASE", base) + "\n\nraise Unsayable()\n"
@@ -3449,7 +3450,7 @@ def test_a_fault_at_the_edge_of_what_can_be_said_is_still_said_by_its_type(tmp_p
 
 @pytest.mark.parametrize("base", ["ValueError", "Exception"], ids=["a refusal", "a fault"])
 def test_ctrl_c_as_a_fault_is_said_still_ends_wlx_taskd(tmp_path, base):
-    """XC-291's review, M1: `_fault` and `_sentence_or` catch whatever a fault's `str()` raises
+    """XC-291's review, M1: `_said` and `_sentence_or` catch whatever a fault's `str()` raises
     but a `KeyboardInterrupt` -- Ctrl-C arriving once, as the sentence is said -- which goes on
     out of `step` to `run`'s handler, so Ctrl-C still ends `wlx taskd` as `service`'s docstring
     says; the same `str()` asked again would have answered."""
@@ -3837,7 +3838,7 @@ def test_wlx_taskd_stopped_by_a_fault_that_cannot_be_said_still_records_the_retu
 ):
     """XC-291: `run`'s handler said the fault before it called `shutdown`, so one whose own
     `str()` raises skipped the rows that make the next start find the session stranded, and
-    left with a second fault in the first's place. It is said by its type (`_fault`): the open
+    left with a second fault in the first's place. It is said by its type (`_said`): the open
     session's return is recorded as not recorded, saying why, its end follows, the next start
     finds it stranded, and the fault itself goes on to the caller -- its type's name read past
     its metaclass on stderr too (`_type_name`; the review's M1), so that line never takes the

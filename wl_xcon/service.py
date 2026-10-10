@@ -141,15 +141,15 @@ def _sentence(refused: BaseException) -> str:
 def _sentence_or(refused: BaseException, failing: str) -> str:
     """`_sentence`, for a refusal raised by code the service runs and does not own -- a task
     file, an animal's `bounds.py` or `settings.py` -- or, when its own `str()` raises,
-    `failing` with the refusal said by its type (`_fault`), so saying it does not become a fault
-    that stops `wlx taskd` (XC-291). **`_fault`'s limits are this one's**: a `KeyboardInterrupt`
+    `failing` with the refusal said by its type (`_said`), so saying it does not become a fault
+    that stops `wlx taskd` (XC-291). **`_said`'s limits are this one's**: a `KeyboardInterrupt`
     goes on, and a `str()` that never returns is not bounded."""
     try:
         return _sentence(refused)
     except KeyboardInterrupt:
         raise
     except BaseException:  # noqa: BLE001 -- see the docstring
-        return f"{failing}: {_fault(refused)}"
+        return f"{failing}: {_said(refused)}"
 
 
 def _type_name(broken: BaseException) -> str:
@@ -160,15 +160,20 @@ def _type_name(broken: BaseException) -> str:
     return str.__str__(type.__dict__["__name__"].__get__(type(broken)))
 
 
-def _fault(broken: BaseException) -> str:
+def _said(broken: BaseException) -> str:
     """`Type: message` for a fault -- or its type's name alone (`_type_name`) when its own
     `str()` raises, whatever it raises, `SystemExit` included -- so saying a fault does not
-    become a second one: an idle frame's listing (`Service._idle_warnings`), a pre-flight item
-    (`_unfinished`), a build (`Service._built`), a run that did not start (`Service._run`), and
-    `run`'s own fault handler, which must still reach the shutdown that records an open
-    session's return as not recorded (XC-291). **Its one limit is chosen**: a
-    `KeyboardInterrupt` raised while the message is said goes on, so Ctrl-C still ends `wlx
-    taskd` as this module says it does; and a `str()` that never returns is not bounded here."""
+    become a second one where code the service does not own can raise it: a pre-flight item
+    (`_unfinished`), a build (`Service._built`), a run that did not start (`Service._run`), a
+    refusal's own sentence (`_sentence_or`), and `run`'s own fault handler, which must still
+    reach the shutdown that records an open session's return as not recorded (XC-291 and its
+    review's M1). **Its one limit is chosen**: a `KeyboardInterrupt` raised while the message
+    is said goes on, so Ctrl-C still ends `wlx taskd` as this module says it does; and a
+    `str()` that never returns is not bounded here.
+
+    **`_fault` beside it is kept as it was**, because `Service._open`, welfare-critical, says a
+    listing fault through it: hardening `_fault` would change that function unreviewed, so the
+    same edges there go to the PI with XC-298."""
     name = _type_name(broken)
     try:
         return f"{name}: {broken}"
@@ -176,6 +181,15 @@ def _fault(broken: BaseException) -> str:
         raise
     except BaseException:  # noqa: BLE001 -- see the docstring
         return name
+
+
+def _fault(broken: BaseException) -> str:
+    """`Type: message` for a fault -- or its type's name alone when its own `str()` raises, so
+    saying a fault never becomes a second one (`Service._idle_warnings`)."""
+    try:
+        return f"{type(broken).__name__}: {broken}"
+    except Exception:  # noqa: BLE001 -- see the docstring
+        return type(broken).__name__
 
 
 def _local(at: float) -> str:
@@ -246,12 +260,12 @@ def _unasked(
 
 def _unfinished(names: tuple[str, ...], broken: BaseException) -> tuple:
     """A fail for each of `names`, the pre-flight items whose check raised `broken`, said
-    through `_fault`, so one whose own `str()` raises is said by its type (XC-291)."""
+    through `_said`, so one whose own `str()` raises is said by its type (XC-291)."""
     return tuple(
         _link.PreflightItem(
             name,
             _preflight.FAIL,
-            f"this item's check did not finish: {_fault(broken)}",
+            f"this item's check did not finish: {_said(broken)}",
         )
         for name in names
     )
@@ -744,15 +758,15 @@ class Service:
         named, since the animal's files are code and a broken one is never the
         service's end. **The one handler `_open` and `_resume` share** (review fix
         round 1 of XC-026 Task 4), so the two cannot drift. Either one whose own `str()`
-        raises is said by its type (`_sentence_or`, `_fault`; XC-291), so saying it never
-        stops `wlx taskd`."""
+        raises is said by its type (`_sentence_or`, `_said`; XC-291), so saying it does not
+        stop `wlx taskd`, within `_said`'s limits."""
         failing = "the session could not be built"
         try:
             return build()
         except (SystemExit, ValueError, TypeError, Exceeded) as refused:
             self._refuse(kind, by, _sentence_or(refused, failing))
         except Exception as broken:  # noqa: BLE001 -- the animal's files are code
-            self._refuse(kind, by, f"{failing}: {_fault(broken)}")
+            self._refuse(kind, by, f"{failing}: {_said(broken)}")
         return None
 
     def _open(self, command: _link.OpenSession) -> None:
@@ -1197,7 +1211,7 @@ class Service:
         cut for the feed (`link.NOTE_LIMIT`), since `Session.accept`'s refusal joins every
         sentence it refuses, and the traceback on stderr keeps every word. A refusal or a
         fault whose own `str()` raises -- a task file's -- is said by its type (`_sentence_or`,
-        `_fault`; XC-291), so saying it never stops `wlx taskd`."""
+        `_said`; XC-291), so saying it does not stop `wlx taskd`, within `_said`'s limits."""
         session = self.session
         before = session.run_index
         failing = "the run did not start"
@@ -1211,7 +1225,7 @@ class Service:
             else:
                 traceback.print_exc(file=sys.stderr)
                 session.refuse("start", by, _link.cut(
-                    f"{failing}: {_fault(ended)}", _link.NOTE_LIMIT,
+                    f"{failing}: {_said(ended)}", _link.NOTE_LIMIT,
                 ))
 
     # --- ending ---------------------------------------------------------------------
@@ -1469,12 +1483,12 @@ def run(args) -> int:
             # **Any other way out says why too** (fix round 1 of Task 7): a fault with a
             # session open is recorded as the reason its return was not, then goes on to
             # the caller unchanged. A kill (SIGTERM, SIGKILL) writes nothing, and the
-            # missing row is the signal, as for `wlx run`. **Said through `_fault`**
+            # missing row is the signal, as for `wlx run`. **Said through `_said`**
             # (XC-291): a fault whose own `str()` raised here, before `shutdown` was called,
             # skipped the rows that make the next start find the session stranded.
             if service.session is not None:
                 service.shutdown(
-                    f"wlx taskd stopped on a fault with the session open: {_fault(fault)}"
+                    f"wlx taskd stopped on a fault with the session open: {_said(fault)}"
                 )
                 print(
                     f"taskd: stopped by {_type_name(fault)} -- the session was open, "
