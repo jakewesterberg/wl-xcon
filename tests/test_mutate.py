@@ -15,6 +15,10 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -322,7 +326,8 @@ def test_a_suite_run_names_every_failure_and_error(tmp_path, monkeypatch):
         "    pass\n"
     )
 
-    passed, summary, failures = mutate_tool._run_suite(tmp_path)
+    run = mutate_tool._run_suite(tmp_path)
+    passed, summary, failures = run.passed, run.summary, run.failures
 
     assert passed is False
     assert summary.startswith("1 failed, 1 passed, 1 error in "), summary
@@ -360,7 +365,7 @@ def test_a_red_baseline_names_what_failed(monkeypatch):
     monkeypatch.setattr(
         mutate_tool,
         "_run_suite",
-        lambda: (
+        lambda **_: mutate_tool.SuiteRun(
             False,
             "1 failed, 673 passed in 16.20s",
             ["FAILED tests/test_x.py::test_flaky - AssertionError: never drained"],
@@ -380,8 +385,8 @@ def test_a_red_restore_names_what_failed(monkeypatch, capsys):
     """Five of the seven red suites on 09-25 were restores, not baselines."""
     runs = iter(
         [
-            (True, "674 passed in 16.05s", []),
-            (
+            mutate_tool.SuiteRun(True, "674 passed in 16.05s", [], started=674),
+            mutate_tool.SuiteRun(
                 False,
                 "1 failed, 673 passed in 16.26s",
                 ["FAILED tests/test_x.py::test_flaky - AssertionError: never drained"],
@@ -389,9 +394,9 @@ def test_a_red_restore_names_what_failed(monkeypatch, capsys):
         ]
     )
     monkeypatch.setattr(mutate_tool, "_restore_any_interrupted_run", lambda: None)
-    monkeypatch.setattr(mutate_tool, "_run_suite", lambda: next(runs))
+    monkeypatch.setattr(mutate_tool, "_run_suite", lambda **_: next(runs))
     monkeypatch.setattr(
-        mutate_tool, "mutate", lambda path, name, returns: (True, "3 failed, 671 passed")
+        mutate_tool, "mutate", lambda path, name, returns, **_: (True, "3 failed, 671 passed")
     )
     monkeypatch.setattr("sys.argv", ["mutate.py", "wl_xcon/check.py", "check"])
 
@@ -414,7 +419,7 @@ def test_a_caught_mutant_says_which_tests_caught_it(monkeypatch, tmp_path):
     monkeypatch.setattr(
         mutate_tool,
         "_run_suite",
-        lambda: (
+        lambda **_: mutate_tool.SuiteRun(
             False,
             "2 failed, 672 passed in 16.1s",
             [
@@ -490,11 +495,11 @@ def _stubbed_sweep(monkeypatch, tmp_path):
         mutate_tool, "_restore_any_interrupted_run", lambda: calls.append(("heal",))
     )
 
-    def suite():
+    def suite(**_):
         calls.append(("suite",))
-        return True, "5 passed in 0.01s", []
+        return mutate_tool.SuiteRun(True, "5 passed in 0.01s", [], started=5)
 
-    def mutant(path, name, returns):
+    def mutant(path, name, returns, **_):
         calls.append(("mutate", name))
         return True, "1 failed, 4 passed in 0.01s"
 
@@ -590,3 +595,292 @@ def test_only_naming_nothing_is_refused(monkeypatch, tmp_path):
 
     assert "--only" in str(raised.value)
     assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# A suite that runs past its limit (XC-275). Until 2026-10-10 a killed suite read
+# `caught` with nothing named, whether or not a test had noticed the mutation:
+# the harness threw away everything pytest had done before the kill. It now reads
+# a progress file the suite writes as it goes (`tools/suite_progress/`), and a
+# kill before any test failed is `TIMED OUT` -- not caught, and fatal.
+#
+# The toy suites below are killed at `_TOY_LIMIT` seconds; their sleeps are
+# bounded, so a harness that failed to kill would make a test fail, never hang.
+# Plugin autoloading is switched off in them so the child starts in a fraction of
+# a second whatever the machine is doing.
+# ---------------------------------------------------------------------------
+
+_TOY_LIMIT = 3
+_TOY_SLEEP = 20
+
+_FAILS_THEN_SLEEPS = (
+    "import time\n"
+    "def test_passes():\n"
+    "    pass\n"
+    "def test_fails():\n"
+    "    assert 1 == 2\n"
+    "def test_sleeps():\n"
+    f"    time.sleep({_TOY_SLEEP})\n"
+)
+
+_SLEEPS_FIRST = (
+    "import time\n"
+    "def test_passes():\n"
+    "    pass\n"
+    "def test_sleeps():\n"
+    f"    time.sleep({_TOY_SLEEP})\n"
+    "def test_fails_too_late():\n"
+    "    assert 1 == 2\n"
+)
+
+
+def _toy_mutant(monkeypatch, tmp_path, suite_source):
+    """`mutate` end to end on a scratch module, its suite a toy one in `tmp_path`:
+    the real `_run_suite`, the real plugin and the real progress reader, with only
+    the directory pytest runs in moved off the repository."""
+    suite = tmp_path / "suite"
+    suite.mkdir()
+    (suite / "test_toy.py").write_text(suite_source)
+    target = tmp_path / "module.py"
+    target.write_text("def covered():\n    return [1]\n")
+    monkeypatch.setattr(mutate_tool, "SENTINEL", tmp_path / "sentinel.json")
+    monkeypatch.setattr(mutate_tool, "_clear_pycache", lambda: None)
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    real = mutate_tool._run_suite
+    monkeypatch.setattr(
+        mutate_tool, "_run_suite", lambda **kwargs: real(suite, **kwargs)
+    )
+    return target
+
+
+def test_a_suite_killed_after_a_test_failed_is_caught_naming_it_and_the_one_running(
+    monkeypatch, tmp_path
+):
+    """A test noticed before the limit, so it is a catch -- and the line says which
+    test noticed and which was still running when the suite was stopped."""
+    target = _toy_mutant(monkeypatch, tmp_path, _FAILS_THEN_SLEEPS)
+
+    caught, summary = mutate_tool.mutate(
+        target, "covered", "[]", limit=_TOY_LIMIT, of=3
+    )
+
+    assert caught is True, summary
+    assert summary.startswith(f"timed out after {_TOY_LIMIT}s, 1 failed before it"), summary
+    assert "2 of 3 tests done" in summary, summary
+    assert "running test_toy.py::test_sleeps for " in summary, summary
+    assert summary.endswith("<- test_toy.py::test_fails"), summary
+    assert target.read_text() == "def covered():\n    return [1]\n"
+
+
+def test_a_suite_killed_before_any_test_failed_is_timed_out_naming_the_one_running(
+    monkeypatch, tmp_path
+):
+    """Nothing noticed before the limit. That is the harness noticing, not a test,
+    and it is the verdict that used to read `caught`."""
+    target = _toy_mutant(monkeypatch, tmp_path, _SLEEPS_FIRST)
+
+    caught, summary = mutate_tool.mutate(
+        target, "covered", "[]", limit=_TOY_LIMIT, of=3
+    )
+
+    assert caught is mutate_tool.TIMED_OUT, summary
+    assert summary.startswith(f"timed out after {_TOY_LIMIT}s, no test failed"), summary
+    assert "1 of 3 tests done" in summary, summary
+    assert "running test_toy.py::test_sleeps for " in summary, summary
+    assert "<-" not in summary, summary
+
+
+def test_a_progress_line_cut_short_by_the_kill_is_dropped_and_only_that_one():
+    """The kill can land mid-write. Its last line is dropped; one that does not parse
+    anywhere else is a broken plugin, and is not read around."""
+    whole = (
+        '{"event": "start", "nodeid": "t.py::a", "at": 100.0}\n'
+        '{"event": "failed", "nodeid": "t.py::a", "when": "call"}\n'
+        '{"event": "finished", "nodeid": "t.py::a"}\n'
+        '{"event": "start", "nodeid": "t.py::b", "at": 101.0}\n'
+    )
+
+    seen = mutate_tool._read_progress(whole + '{"event": "fin', now=131.0)
+
+    assert seen == mutate_tool.Progress(
+        failures=["FAILED t.py::a"], started=2, finished=1, running="t.py::b", running_for=30.0
+    )
+    with pytest.raises(json.JSONDecodeError):
+        mutate_tool._read_progress('{"event": "fin\n' + whole, now=131.0)
+
+
+def _sweep_one(monkeypatch, tmp_path, runs):
+    """`main()` over one scratch function, with each suite run taken from `runs` and
+    each call's keyword arguments recorded. `mutate` itself is real."""
+    target = tmp_path / "module.py"
+    target.write_text("def covered():\n    return [1]\n")
+    monkeypatch.setattr(mutate_tool, "SENTINEL", tmp_path / "sentinel.json")
+    monkeypatch.setattr(mutate_tool, "_clear_pycache", lambda: None)
+    monkeypatch.setattr(mutate_tool, "_restore_any_interrupted_run", lambda: None)
+    calls = []
+    queue = iter(runs)
+
+    def suite(**kwargs):
+        calls.append(kwargs)
+        return next(queue)
+
+    monkeypatch.setattr(mutate_tool, "_run_suite", suite)
+    monkeypatch.setattr("sys.argv", ["mutate.py", str(target), "covered"])
+    return calls
+
+
+def test_a_mutant_timed_out_before_any_failure_fails_the_run_and_is_named_at_the_end(
+    monkeypatch, tmp_path, capsys
+):
+    """Fatal, like a survivor: a mutant no test was seen to notice is not covered
+    until one is. The footer says where to look -- the test that was running, for
+    how long, and how far through the baseline's tests the suite had got."""
+    _sweep_one(
+        monkeypatch,
+        tmp_path,
+        [
+            mutate_tool.SuiteRun(True, "10 passed in 100.0s", [], seconds=100.0, started=10),
+            mutate_tool.SuiteRun(
+                False,
+                "timed out after 300s",
+                [],
+                timed_out=True,
+                started=6,
+                finished=5,
+                running="tests/test_a.py::test_slow",
+                running_for=280.4,
+            ),
+            mutate_tool.SuiteRun(True, "10 passed in 100.0s", [], seconds=100.0, started=10),
+        ],
+    )
+
+    assert mutate_tool.main() == 1
+
+    out = capsys.readouterr().out
+    assert "  TIMED OUT covered" in out, out
+    assert (
+        "NOT SETTLED (timed out before any test failed): covered (timed out after "
+        "300s, no test failed before it; running tests/test_a.py::test_slow for 280s; "
+        "5 of 10 tests done)"
+    ) in out, out
+
+
+def test_a_mutant_timed_out_after_a_failure_does_not_fail_the_run(
+    monkeypatch, tmp_path, capsys
+):
+    """The other side of the same line: a test failed before the kill, so the
+    mutant is caught, the run is green, and nothing is left unsettled."""
+    _sweep_one(
+        monkeypatch,
+        tmp_path,
+        [
+            mutate_tool.SuiteRun(True, "10 passed in 100.0s", [], seconds=100.0, started=10),
+            mutate_tool.SuiteRun(
+                False,
+                "timed out after 300s",
+                ["FAILED tests/test_a.py::test_one"],
+                timed_out=True,
+                started=6,
+                finished=5,
+                running="tests/test_a.py::test_slow",
+                running_for=280.4,
+            ),
+            mutate_tool.SuiteRun(True, "10 passed in 100.0s", [], seconds=100.0, started=10),
+        ],
+    )
+
+    assert mutate_tool.main() == 0
+
+    out = capsys.readouterr().out
+    assert "  caught    covered" in out, out
+    assert "<- tests/test_a.py::test_one" in out, out
+    assert "NOT SETTLED" not in out, out
+
+
+@pytest.mark.parametrize(
+    ("baseline_seconds", "limit"),
+    [(200.0, 400), (100.0, 300)],
+    ids=["twice-the-baseline", "never-under-300"],
+)
+def test_a_mutants_limit_is_twice_the_baseline_and_never_under_300s(
+    monkeypatch, tmp_path, capsys, baseline_seconds, limit
+):
+    """A fixed 300 s was about eighteen times the suite when it was set and under
+    twice it by October, so a machine running slow read "caught" for nothing. The
+    unmutated runs get a cap of their own, generous because they cannot be caught."""
+    unmutated = mutate_tool.SuiteRun(
+        True, "10 passed", [], seconds=baseline_seconds, started=10
+    )
+    calls = _sweep_one(
+        monkeypatch,
+        tmp_path,
+        [unmutated, mutate_tool.SuiteRun(False, "1 failed", []), unmutated],
+    )
+
+    assert mutate_tool.main() == 0
+
+    assert [call["timeout"] for call in calls] == [
+        mutate_tool.BASELINE_TIMEOUT_SECONDS,
+        limit,
+        mutate_tool.BASELINE_TIMEOUT_SECONDS,
+    ]
+    baseline_line = next(
+        line for line in capsys.readouterr().out.splitlines() if line.startswith("baseline:")
+    )
+    assert f"mutants stopped after {limit}s" in baseline_line, baseline_line
+
+
+def test_a_baseline_the_progress_plugin_recorded_nothing_of_refuses_the_sweep(
+    monkeypatch, tmp_path
+):
+    """A green baseline with no progress means the plugin is not loading, and every
+    timeout after it would be judged with nothing to judge it by -- read as `TIMED
+    OUT` at best. Refused before any mutant runs, rather than discovered after."""
+    calls = _sweep_one(
+        monkeypatch, tmp_path, [mutate_tool.SuiteRun(True, "10 passed", [], seconds=100.0)]
+    )
+
+    with pytest.raises(SystemExit) as raised:
+        mutate_tool.main()
+
+    assert "progress plugin recorded no test" in str(raised.value)
+    assert len(calls) == 1, "no mutant may run after a blind baseline"
+
+
+def test_the_progress_plugin_writes_only_when_its_variable_names_a_file(tmp_path):
+    """Loaded without `WLX_SUITE_PROGRESS` it must change nothing and write nothing;
+    loaded with it, it must write -- the second run is what shows the first one
+    loaded the plugin at all, rather than passing because it never ran."""
+    (tmp_path / "test_toy.py").write_text(
+        "def test_passes():\n    pass\n" "def test_fails():\n    assert 1 == 2\n"
+    )
+    env = {
+        key: value for key, value in os.environ.items() if key != mutate_tool.PROGRESS_ENV
+    }
+    env["PYTHONPATH"] = str(mutate_tool.PROGRESS_PLUGIN_DIR)
+    env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+    # Else pytest's rewritten bytecode lands in `tmp_path` and reads as a write.
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    argv = [
+        sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+        "-p", mutate_tool.PROGRESS_PLUGIN,
+    ]
+
+    unset = subprocess.run(argv, cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60)
+
+    assert unset.returncode == 1, unset.stdout + unset.stderr  # one test fails; no plugin error
+    assert "1 failed, 1 passed" in unset.stdout, unset.stdout
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["test_toy.py"]
+
+    progress = tmp_path.parent / f"{tmp_path.name}-progress.jsonl"
+    env[mutate_tool.PROGRESS_ENV] = str(progress)
+    subprocess.run(argv, cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60)
+
+    events = [json.loads(line) for line in progress.read_text().splitlines()]
+    assert [(e["event"], e["nodeid"]) for e in events] == [
+        ("start", "test_toy.py::test_passes"),
+        ("finished", "test_toy.py::test_passes"),
+        ("start", "test_toy.py::test_fails"),
+        ("failed", "test_toy.py::test_fails"),
+        ("finished", "test_toy.py::test_fails"),
+    ]

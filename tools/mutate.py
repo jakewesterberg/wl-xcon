@@ -30,10 +30,14 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import os
 import shutil
 import subprocess
 import sys
+import tempfile
+import time
 from pathlib import Path
+from typing import NamedTuple
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -92,10 +96,41 @@ def _clear_pycache() -> None:
 #: A mutated suite may not terminate. Neutering `Scheduler.record` stops the counts
 #: advancing, so a test running a block to completion never sees it finish -- and the
 #: suite hung until an outer timeout killed the whole harness, past its `finally`,
-#: stranding a neutered module on disk. The sentinel healed that, but the hang is the
-#: cause and this is the fix: a mutation that hangs counts as *caught*, since a suite
-#: that no longer terminates has certainly noticed the mutation.
+#: stranding a neutered module on disk (2026-09-01). The sentinel healed that; a time
+#: limit on every suite run is the fix.
+#:
+#: **What a timeout means changed as the suite grew, and the verdict did not.** Set
+#: when the suite ran in seconds (674 tests in 16 s on 2026-09-25, about eighteen times
+#: under the limit), 300 s then held only hangs, and a hang was counted *caught*. By
+#: 2026-10-09 CI's baselines ran 146-207 s, under half the limit, and a caught mutant
+#: runs the baseline plus a few seconds per failing test while those tests wait out
+#: their own bounded waits -- so the limit mostly caught slow suites, 82 functions on
+#: `main` read caught with no test named, and 45 more finished within 30 s of it
+#: (XC-275; CI runs `37919247229` and `37991004478`). Two changes answer that:
+#:
+#: - the limit is relative to the measured baseline, `LIMIT_FACTOR` times it and never
+#:   under this floor (`_mutant_limit`), so a slower machine is not 10 s from a false
+#:   catch;
+#: - a killed suite is judged by what it had done, read from the progress file
+#:   `tools/suite_progress/` writes as it runs: a test that failed before the kill is
+#:   a catch, named; a kill before any test failed is `TIMED OUT`, which is not.
 SUITE_TIMEOUT_SECONDS = 300
+
+#: A mutant's suite is stopped after this many times the baseline's wall time.
+LIMIT_FACTOR = 2
+
+#: The unmutated runs -- the baseline and the restored suite -- cannot be caught, so a
+#: limit on them only bounds a harness that would otherwise wait forever. Generous
+#: because the mutants' limit is computed from the baseline: a baseline cut short
+#: would leave nothing to compute it from.
+BASELINE_TIMEOUT_SECONDS = 3600
+
+#: The pytest plugin that records each test as it runs, in a directory of its own so
+#: that putting it on the child's `PYTHONPATH` exposes nothing else in `tools/`.
+PROGRESS_PLUGIN_DIR = Path(__file__).resolve().parent / "suite_progress"
+PROGRESS_PLUGIN = "wlx_suite_progress"
+#: The variable naming the plugin's file. Without it the plugin writes nothing.
+PROGRESS_ENV = "WLX_SUITE_PROGRESS"
 
 #: `-rfE` makes pytest end with one line per failed or errored test. **Keeping only
 #: the last line is how the 2026-09-25 nightly went red on a flaky test without once
@@ -110,28 +145,137 @@ SUITE_ARGV = ["-m", "pytest", "-q", "-p", "no:cacheprovider", "-rfE"]
 NAMED = 3
 
 
-def _run_suite(cwd: Path = ROOT) -> tuple[bool, str, list[str]]:
-    """Whether the suite passed, pytest's final line, and one line per failure.
+class SuiteRun(NamedTuple):
+    """One run of the suite: whether it passed, pytest's final line, one line per
+    failure, and -- from the progress file -- how far it got.
+
+    For a run that finished, `failures` are the short summary's lines (`_failures`).
+    For one that was killed (`timed_out`), pytest never printed a summary, so they
+    are built from the progress file instead, in the same `FAILED <nodeid>` /
+    `ERROR <nodeid>` form, and `running` is the test that had started and not
+    finished (`None` when the kill fell between tests), `running_for` how long it
+    had been running.
+
+    A `NamedTuple` rather than a dataclass: this file is loaded by path, outside
+    `sys.modules` (`tests/test_mutate.py`, `mutation_gate._load_mutate`), and a
+    dataclass with postponed annotations looks its module up there and fails.
+    """
+
+    passed: bool
+    summary: str
+    failures: list[str]
+    timed_out: bool = False
+    seconds: float = 0.0
+    started: int = 0
+    finished: int = 0
+    running: str | None = None
+    running_for: float = 0.0
+
+
+def _run_suite(cwd: Path = ROOT, *, timeout: float = SUITE_TIMEOUT_SECONDS) -> SuiteRun:
+    """Run the suite once, with the progress plugin loaded, and stop it at `timeout`.
 
     `cwd` is only ever the repository in use; it is a parameter so a test can run
     this, end to end, against a three-test suite rather than this one.
     """
     _clear_pycache()
+    handle, name = tempfile.mkstemp(prefix="wlx-suite-progress-", suffix=".jsonl")
+    os.close(handle)
+    progress = Path(name)
+    env = dict(os.environ)
+    env[PROGRESS_ENV] = str(progress)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(PROGRESS_PLUGIN_DIR), *filter(None, [os.environ.get("PYTHONPATH")])]
+    )
+    start = time.monotonic()
     try:
-        result = subprocess.run(
-            [sys.executable, *SUITE_ARGV],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=SUITE_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired:
-        return False, f"timed out after {SUITE_TIMEOUT_SECONDS}s (mutation hangs)", []
+        try:
+            result = subprocess.run(
+                [sys.executable, *SUITE_ARGV, "-p", PROGRESS_PLUGIN],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                env=env,
+            )
+        except subprocess.TimeoutExpired:
+            killed_at = time.time()
+            seen = _read_progress(progress.read_text(encoding="utf-8"), killed_at)
+            return SuiteRun(
+                False,
+                f"timed out after {timeout:.0f}s",
+                seen.failures,
+                timed_out=True,
+                seconds=time.monotonic() - start,
+                started=seen.started,
+                finished=seen.finished,
+                running=seen.running,
+                running_for=seen.running_for,
+            )
+        seconds = time.monotonic() - start
+        seen = _read_progress(progress.read_text(encoding="utf-8"), time.time())
+    finally:
+        progress.unlink(missing_ok=True)
     output = result.stdout.strip().splitlines()
-    return (
+    return SuiteRun(
         result.returncode == 0,
         output[-1] if output else "no output",
         _failures(result.stdout),
+        seconds=seconds,
+        started=seen.started,
+        finished=seen.finished,
+    )
+
+
+class Progress(NamedTuple):
+    """What the progress file says a suite had done."""
+
+    failures: list[str]
+    started: int
+    finished: int
+    running: str | None
+    running_for: float
+
+
+def _read_progress(text: str, now: float) -> Progress:
+    """Read the plugin's JSON lines (`tools/suite_progress/wlx_suite_progress.py`).
+
+    **The file, never pytest's terminal output.** A killed suite's output stops
+    mid-line and carries no summary; the file holds one record per event, written
+    as each test starts, fails and finishes. A test that fails in more than one
+    phase is one failure, named once, as pytest's summary names it: `FAILED` for
+    its call, `ERROR` for its setup or teardown.
+
+    A kill can land while the plugin is writing, so **the last line alone** may be
+    cut short and is dropped if it does not parse. Anywhere else a line that does
+    not parse is a broken plugin, and raises.
+    """
+    started: dict[str, float] = {}
+    finished: set[str] = set()
+    failed: dict[str, str] = {}
+    lines = [line for line in text.splitlines() if line.strip()]
+    for n, line in enumerate(lines):
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            if n == len(lines) - 1:
+                break
+            raise
+        nodeid = record["nodeid"]
+        if record["event"] == "start":
+            started.setdefault(nodeid, record["at"])
+        elif record["event"] == "finished":
+            finished.add(nodeid)
+        elif record["event"] == "failed":
+            failed.setdefault(nodeid, "FAILED" if record["when"] == "call" else "ERROR")
+    unfinished = [nodeid for nodeid in started if nodeid not in finished]
+    running = unfinished[-1] if unfinished else None
+    return Progress(
+        failures=[f"{kind} {nodeid}" for nodeid, kind in failed.items()],
+        started=len(started),
+        finished=len(finished),
+        running=running,
+        running_for=now - started[running] if running else 0.0,
     )
 
 
@@ -200,6 +344,11 @@ def _function_names(source: str) -> list[str]:
 
 #: Returned by `mutate` when the neutered body is the body it already had.
 INERT = "inert"
+
+#: Returned by `mutate` when the suite was stopped at its limit before any test had
+#: failed: nothing was seen to notice the mutation, so it is not a catch. Fatal, like
+#: a survivor, and listed at the end with the test that was running (XC-275).
+TIMED_OUT = "timed out"
 
 
 def _is_docstring(node: ast.stmt) -> bool:
@@ -332,8 +481,22 @@ def _already_inert(source: str, function: str, returns: str) -> bool:
     return found
 
 
-def mutate(path: Path, function: str, args_returns: str) -> bool:
-    """True if neutering `function` makes the suite fail, i.e. it is covered.
+def mutate(
+    path: Path,
+    function: str,
+    args_returns: str,
+    *,
+    limit: float = SUITE_TIMEOUT_SECONDS,
+    of: int | None = None,
+) -> tuple[bool | str | None, str]:
+    """`(verdict, the line's text)` for neutering `function`.
+
+    The verdict is True if the suite failed, i.e. the function is covered; False if
+    it passed (a survivor); `INERT` or `None` if nothing could be neutered; and
+    `TIMED_OUT` if the suite ran past `limit` before any test failed. A suite that
+    ran past `limit` *after* a test failed is a catch, and the line names the tests
+    that failed and the one still running (`_how_far`, where `of` is the baseline's
+    test count).
 
     A name defined more than once -- `satisfied`, implemented by every `World` --
     has **all** its definitions neutered together. Bailing on the ambiguity was the
@@ -367,12 +530,35 @@ def mutate(path: Path, function: str, args_returns: str) -> bool:
         SENTINEL.write_text(
             json.dumps({"path": str(path), "original": original, "mutated": mutated})
         )
-        passed, summary, failures = _run_suite()
-        return not passed, summary + _caught_by(failures)
+        run = _run_suite(timeout=limit)
+        if run.timed_out:
+            if not run.failures:
+                return TIMED_OUT, f"{run.summary}, no test failed before it; {_how_far(run, of)}"
+            return True, (
+                f"{run.summary}, {len(run.failures)} failed before it; {_how_far(run, of)}"
+                + _caught_by(run.failures)
+            )
+        return not run.passed, run.summary + _caught_by(run.failures)
     finally:
         path.write_text(original)
         SENTINEL.unlink(missing_ok=True)
         _clear_pycache()
+
+
+def _how_far(run: SuiteRun, of: int | None) -> str:
+    """Where a stopped suite was: the test still running and for how long, and how
+    many of the baseline's `of` tests had finished. One test running for most of the
+    limit is a hang there; most tests done is a suite near its own time."""
+    done = f"{run.finished} of {of} tests done" if of else f"{run.finished} tests done"
+    if run.running is None:
+        return f"no test running; {done}"
+    return f"running {run.running} for {run.running_for:.0f}s; {done}"
+
+
+def _mutant_limit(baseline_seconds: float) -> float:
+    """How long a mutant's suite may run: `LIMIT_FACTOR` times the baseline's wall
+    time, and never under `SUITE_TIMEOUT_SECONDS` (see there for why)."""
+    return max(SUITE_TIMEOUT_SECONDS, LIMIT_FACTOR * baseline_seconds)
 
 
 def _only(targets: list[str], only: str, path: Path) -> list[str]:
@@ -431,18 +617,35 @@ def main() -> int:
         targets = [args.function]
 
     _restore_any_interrupted_run()
-    baseline_ok, baseline, failures = _run_suite()
-    if not baseline_ok:
+    baseline = _run_suite(timeout=BASELINE_TIMEOUT_SECONDS)
+    if not baseline.passed:
         raise SystemExit(
-            "\n".join([f"suite is not green to begin with: {baseline}", *failures])
+            "\n".join(
+                [f"suite is not green to begin with: {baseline.summary}", *baseline.failures]
+            )
         )
-    print(f"baseline: {baseline}\n")
+    if not baseline.started:
+        # The progress file is how a stopped suite is judged. A baseline that ran and
+        # recorded nothing means the plugin is not loading, and every timeout after it
+        # would be judged blind -- so the sweep refuses rather than starting.
+        raise SystemExit(
+            f"the progress plugin recorded no test during the baseline "
+            f"({baseline.summary}); a suite stopped at its limit could not be judged. "
+            f"Check {PROGRESS_PLUGIN_DIR / (PROGRESS_PLUGIN + '.py')} loads."
+        )
+    limit = _mutant_limit(baseline.seconds)
+    print(
+        f"baseline: {baseline.summary}; mutants stopped after {limit:.0f}s "
+        f"({LIMIT_FACTOR} x this run's {baseline.seconds:.0f}s, never under "
+        f"{SUITE_TIMEOUT_SECONDS}s)\n"
+    )
 
     survivors = []
     skipped = []
     inert = []
+    unsettled = []
     for name in targets:
-        caught, summary = mutate(path, name, args.returns)
+        caught, summary = mutate(path, name, args.returns, limit=limit, of=baseline.started)
         if caught is None:
             skipped.append(name)
             print(f"  SKIPPED   {name:32} {summary}")
@@ -451,12 +654,17 @@ def main() -> int:
             inert.append(name)
             print(f"  inert     {name:32} {summary}")
             continue
+        if caught is TIMED_OUT:
+            unsettled.append(f"{name} ({summary})")
+            print(f"  TIMED OUT {name:32} {summary}")
+            continue
         print(f"  {'caught  ' if caught else 'SURVIVED'}  {name:32} {summary}")
         if not caught:
             survivors.append(name)
 
-    ok, summary, failures = _run_suite()
-    print("\n".join([f"\nrestored: {summary}", *failures]))
+    restored = _run_suite(timeout=BASELINE_TIMEOUT_SECONDS)
+    ok = restored.passed
+    print("\n".join([f"\nrestored: {restored.summary}", *restored.failures]))
     if inert:
         # Printed, never fatal, and never silent: these are functions no mutation
         # can reach, and a reader has to be able to tell that from coverage.
@@ -465,7 +673,9 @@ def main() -> int:
         print(f"\nNOT MUTATED (signature not matched): {', '.join(skipped)}")
     if survivors:
         print(f"\nNOT COVERED: {', '.join(survivors)}")
-    if survivors or skipped:
+    if unsettled:
+        print(f"\nNOT SETTLED (timed out before any test failed): {', '.join(unsettled)}")
+    if survivors or skipped or unsettled:
         return 1
     return 0 if ok else 1
 

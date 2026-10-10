@@ -97,6 +97,7 @@ def test_documentation_alone_selects_nothing():
         "tests/_zmq_release.py",
         "tests/_frames.py",
         "tools/mutate.py",
+        "tools/suite_progress/wlx_suite_progress.py",
         "pyproject.toml",
         ".github/workflows/ci.yml",
     ],
@@ -543,12 +544,13 @@ def test_twelve_shards_through_mutate_run_every_function_exactly_once(monkeypatc
     monkeypatch.setattr(
         mutate_tool,
         "_run_suite",
-        lambda: suites.append(1) or (True, "1 passed in 0.01s", []),
+        lambda **_: suites.append(1)
+        or mutate_tool.SuiteRun(True, "1 passed in 0.01s", [], started=1),
     )
     monkeypatch.setattr(
         mutate_tool,
         "mutate",
-        lambda path, name, returns: mutated.append((path.stem, name))
+        lambda path, name, returns, **_: mutated.append((path.stem, name))
         or (True, "1 failed in 0.01s"),
     )
     calls = []
