@@ -66,7 +66,9 @@ include = ["wl_xcon*"]
 # The console page's fonts (P4d-2b b1), served by `wlx serve` so the page never reaches
 # the internet. Each family's license ships beside its files as OFL.txt, which OFL-1.1's
 # condition 2 requires (ADR-0004's inventory).
-wl_xcon = ["fonts/*/*.woff2", "fonts/*/OFL.txt"]
+# The CIE's cone fundamentals and XYZ_F,10 tables (engine build A2), unmodified, each with its
+# metadata and the NOTICE.md CC BY-SA 4.0's attribution asks for (ADR-0012; ADR-0004's inventory).
+wl_xcon = ["fonts/*/*.woff2", "fonts/*/OFL.txt", "cie/*.csv", "cie/*.json", "cie/NOTICE.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
