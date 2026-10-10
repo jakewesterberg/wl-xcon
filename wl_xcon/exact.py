@@ -291,7 +291,7 @@ def output_levels(image, calibration):
         bad = weights[~inside]
         worst = bad[np.argmax(np.abs(bad - 0.5))]
         raise ValueError(
-            f"{pixels} pixel(s) need a primary weight outside [0, 1] (the farthest {worst:g}); "
+            f"{pixels} pixel(s) need a primary weight outside [0, 1] (the farthest {worst:.7g}); "
             f"`check` refuses a light it can see that does this, and this one it could not"
         )
     out = np.empty_like(weights)

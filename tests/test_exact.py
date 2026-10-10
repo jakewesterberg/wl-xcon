@@ -13,6 +13,7 @@ from wl_xcon.photometry import (
     SRGB,
     SRGB_TRANSFER,
     SRGB_WHITE_CD_M2,
+    TOLERANCE,
     Gray,
     Michelson,
     Transfer,
@@ -586,3 +587,27 @@ def test_a_pixel_that_is_not_a_number_is_refused_too():
         image[0, 1, 1] = bad
         with pytest.raises(ValueError, match=r"need a primary weight outside"):
             exact.output_levels(image, SRGB)
+
+
+def _full(panel):
+    """The light of every primary at full drive, CIE XYZ."""
+    return sum(np.array(to_xyz(p)) for p in (panel.red, panel.green, panel.blue))
+
+
+def test_a_weight_past_full_drive_within_the_tolerance_is_full_drive_exactly():
+    """A weight past 1 by less than `TOLERANCE` is rounding, and is let through; its level is then
+    the output's full scale exactly, never past it (the A2 final review's item 9)."""
+    panel = measured()
+
+    out = exact.output_levels(np.array([[(1.0 + TOLERANCE / 2) * _full(panel)]]), panel)
+
+    assert out[0, 0].tolist() == [1.0, 1.0, 1.0]
+
+
+def test_a_refusal_names_the_farthest_weight_to_more_places_than_the_tolerance():
+    """`{:g}` printed a weight of 1.000002 as "1", a weight in range (the A2 final review's item
+    10)."""
+    panel = measured()
+
+    with pytest.raises(ValueError, match=r"\(the farthest 1\.000002\)"):
+        exact.output_levels(np.array([[(1.0 + 2 * TOLERANCE) * _full(panel)]]), panel)
