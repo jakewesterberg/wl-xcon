@@ -51,7 +51,11 @@ LMS_TO_XYZ_F10 = (
 
 #: V_F,10, the CIE's cone-based luminosity for a 10° field: this many of L and of M, and no S
 #: (A2's Q5). It is `LMS_TO_XYZ_F10`'s luminance row, and the CIE tabulates the same function
-#: as its own data set (DOI 10.25039/CIE.DS.8mrru44q), identical to that row's column.
+#: as its own data set (DOI 10.25039/CIE.DS.8mrru44q; `CIE_cfb_sle_10deg.csv`, 1 nm, 390-830 nm,
+#: from CIE 170-2:2015, Table 10.4). Checked 2026-10-10 against that file (its sha256 is its
+#: metadata's): equal to the ȳ_F,10 column of `CIE_cfb_stv_10deg.csv` at all 441 wavelengths
+#: (difference 0), and within 4.5e-7 of `V_F10[0]*l̄10 + V_F10[1]*m̄10` at the 89 rows of the
+#: bundled cone table. That file is not bundled.
 V_F10 = (LMS_TO_XYZ_F10[1][0], LMS_TO_XYZ_F10[1][1])
 
 
