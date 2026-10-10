@@ -8,17 +8,19 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from _calibrations import LINEAR
+from _calibrations import LINEAR, SPECTRA
 from _rig import DIRECT, RIG
 from wl_xcon import screen
 from wl_xcon.calibration import constellation
 from wl_xcon.cli import _load_trial
 from wl_xcon.check import check
-from wl_xcon.photometry import SRGB, SRGB_WHITE_CD_M2, Calibration, xyY
+from wl_xcon.cones import V_F10
+from wl_xcon.photometry import SRGB, SRGB_WHITE_CD_M2, DKL, Calibration, Gray, _apply3, xyY
 from wl_xcon.run import Recorded
 from wl_xcon.simulate import Subject, simulate
 from wl_xcon.task import (
@@ -164,6 +166,7 @@ PANEL = Calibration(
     transfer=(LINEAR,) * 3,
     observer="macaque V(lambda) -- placeholder, unmeasured",
     measured_on="2026-08-31",
+    spectra=SPECTRA,
 )
 
 
@@ -178,6 +181,19 @@ def test_the_search_task_passes_every_load_time_check(search):
     assert check(search, allocation, geometry=GEOMETRY, calibration=PANEL) == []
 
 
+def test_the_search_task_is_refused_on_a_measured_display_without_spectra(search):
+    """A cone color converts through a measured calibration's spectra and has none to use
+    (call 8)."""
+    allocation = _load("allocation", "ALLOCATION")
+
+    found = [f for f in check(search, allocation, geometry=GEOMETRY,
+                              calibration=replace(PANEL, spectra=None))
+             if f.code == "unrealizable-color"]
+
+    assert found and all(f.blocking for f in found)
+    assert all("measured without spectra" in f.detail for f in found)
+
+
 def test_the_search_task_will_not_load_without_a_measured_display(search):
     """Isoluminance is a claim about photometry, so it needs a photometer.
 
@@ -189,6 +205,29 @@ def test_the_search_task_will_not_load_without_a_measured_display(search):
     codes = {f.code for f in check(search, allocation, geometry=GEOMETRY)}
 
     assert "uncalibrated-color" in codes
+
+
+def test_the_search_task_s_red_and_green_are_drawn_isoluminant_with_its_gray(search):
+    """The path end to end on a measured panel (engine build A2): checked, resolved through the
+    calibration, and each item's V_F,10 luminance is the gray's (A2's Q5), red and green
+    differing only in color."""
+    choices = {p.name: p.choices for p in search.params}
+    values = {**SEARCH_VALUES, "fix_luminance": 40.0, "target_looks": choices["target_looks"][0],
+              "distractors": choices["distractors"][0]}
+    array = _load("visual_search", "ARRAY")
+
+    s = screen.resolve({"search": array}, values, search, GEOMETRY, frame_period=1 / 240,
+                       calibration=PANEL)
+
+    def luminance(xyz):
+        L, M, _ = _apply3(PANEL.cones, xyz)
+        return V_F10[0] * L + V_F10[1] * M
+
+    gray = luminance(s.background_left)
+    target = next(i for i in s.items if i.order[1] == SEARCH_VALUES["target_index"])
+    distractor = next(i for i in s.items if i.order[1] != SEARCH_VALUES["target_index"])
+    assert [luminance(i.fill.xyz) for i in s.items] == pytest.approx([gray] * len(s.items), rel=1e-9)
+    assert target.fill.xyz != pytest.approx(distractor.fill.xyz, rel=1e-3)
 
 
 def test_set_size_is_a_value_this_task_can_be_run_at_several_of(search):
@@ -389,3 +428,13 @@ def test_each_color_reads_its_own_luminance_setting_and_nothing_else(training):
     assert lights(0, 0, red=5.0, green=11.0) == pytest.approx((5.0, 11.0))
     # And the other way about: green target, red distractors.
     assert lights(1, 1, red=5.0, green=9.0) == pytest.approx((9.0, 5.0))
+
+
+def test_the_search_task_shows_its_colors_on_a_gray_and_so_does_its_training(search, training):
+    """Its red and green are contrasts about the background, so they need a lit one (engine spec
+    §7.5): D65 at 16 cd/m², the training variant's too, and the red and green are the PI's 2023
+    items made isoluminant in the lab's observer (the PI's answer to the engine A2 plan's Q1)."""
+    assert search.background == Gray(16.0)
+    assert training.background == search.background
+    assert (_load("visual_search", "RED"), _load("visual_search", "GREEN")) == (
+        DKL(lum=0.0, l_m=0.603, s_lm=-0.94), DKL(lum=0.0, l_m=-0.143, s_lm=-0.87))

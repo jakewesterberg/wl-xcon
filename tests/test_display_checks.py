@@ -898,9 +898,9 @@ def test_an_opacity_that_is_no_number_is_refused():
      "SineGrating.mean is 20.0, not a color"),
     (look.Look(fill=look.Flat(color=Gray(10.0)), outline=look.Outline(color="white")), GRAY_BG, (),
      "Outline.color is 'white', not a color"),
-    (LIT, 20.0, (), "the trial's background is 20.0, not a color"),
+    (LIT, 20.0, (), "the trial's background is 20.0, not an absolute light"),
     (LIT, P("c"), [Param("c", unit="color", choices=(GRAY_BG, 20.0))],
-     "the trial's background can be 20.0 (parameter 'c'), not a color"),
+     "the trial's background can be 20.0 (parameter 'c'), not an absolute light"),
 ])
 def test_a_color_field_that_holds_no_color_is_refused(looks, background, params, said):
     trial = _one(looks, params=params, background=background)

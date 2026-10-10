@@ -3,7 +3,8 @@
 
 `resolve` is the one place a task's declarations become something to draw: parameters
 bound, named kinds expanded into `look` blocks, an `Array` into its items, each eye's
-direction computed (disparity, then the vergence offset), colors turned into CIE XYZ.
+direction computed (disparity, then the vergence offset), colors turned into CIE XYZ, a cone
+color against the background through the session's calibration (engine build A2).
 Its consumers -- the exact drawer now; the display process (build E), the screen log
 (build F), the simulated animal (build C) and demo mode later -- read the `Screen` and
 nothing else. It is versioned like telemetry: `SCHEMA`, which the display process's
@@ -16,7 +17,7 @@ import math
 from dataclasses import dataclass, fields, replace
 
 from wl_xcon import look
-from wl_xcon.photometry import Gray, Michelson, Weber, to_xyz, xyY
+from wl_xcon.photometry import CONE_COLORS, D65, Gray, Michelson, Weber, cone_xyz, to_xyz, xyY
 from wl_xcon.task import (
     Annulus, Array, Bar, Blank, Cross, Disc, Gabor, Grating, P, Polygon, Square, _value,
 )
@@ -124,17 +125,53 @@ def _bind(block, values):
     return replace(block, **changes) if changes else block
 
 
-def _color(color, values):
-    """CIE XYZ of an absolute color, its parameters bound; `None` stays `None`."""
+#: What `_Lights` holds for its background when the two eyes' differ: a cone color has no one
+#: background to be converted against there, and `check` refuses it at load.
+_TWO_BACKGROUNDS = "the two eyes' backgrounds differ"
+
+
+def _absolute(color, values) -> xyY | None:
+    """An absolute light, its parameters bound, as `xyY`; `None` stays `None` (black). A cone
+    color is not one: a background is what it is relative to, and `check` refuses one there."""
     if isinstance(color, P):
         color = _value(color, values)
     if color is None:
         return None
     if isinstance(color, Gray):
-        return to_xyz(Gray(_num(color.cd_m2, values)))
+        return xyY(D65[0], D65[1], _num(color.cd_m2, values))
     if isinstance(color, xyY):
-        return to_xyz(xyY(_num(color.x, values), _num(color.y, values), _num(color.Y, values)))
-    raise NotYetDrawable(f"{color} is drawn through cone fundamentals, in engine build A2")
+        return xyY(_num(color.x, values), _num(color.y, values), _num(color.Y, values))
+    raise ValueError(f"a background is an absolute light, Gray or xyY, and {color} is not")
+
+
+@dataclass(frozen=True, slots=True)
+class _Lights:
+    """How this trial's colors become CIE XYZ: an absolute one as itself, a cone color against
+    the background both eyes share, through `calibration` (engine build A2)."""
+
+    values: dict
+    calibration: object
+    #: The background both eyes see, as `xyY`; `None` for black; `_TWO_BACKGROUNDS` when the
+    #: eyes' differ.
+    background: object
+
+    def xyz(self, color):
+        """CIE XYZ of `color`, its parameters bound; `None` stays `None`."""
+        values = self.values
+        if isinstance(color, P):
+            color = _value(color, values)
+        if color is None:
+            return None
+        if isinstance(color, (Gray, xyY)):
+            return to_xyz(_absolute(color, values))
+        if isinstance(color, CONE_COLORS):
+            if self.calibration is None:
+                raise ValueError(f"{color} converts through a calibration, and none was given")
+            if self.background == _TWO_BACKGROUNDS:
+                raise ValueError(f"{color} is relative to the background, and {_TWO_BACKGROUNDS}")
+            bound = type(color)(*(_num(getattr(color, f.name), values) for f in fields(color)))
+            return cone_xyz(bound, self.calibration, self.background or xyY(*D65, 0.0))
+        raise ValueError(f"{color!r} is not a color; `check` refuses it at load (bad-block)")
 
 
 def _contrast(contrast, kind, values):
@@ -189,7 +226,9 @@ def as_look(looks, values) -> look.Look:
     if isinstance(looks, Annulus):
         return flat(look.Ring(inner=looks.inner, outer=looks.outer))
     if isinstance(looks, (Gabor, Grating)) and looks.color is not None:
-        raise NotYetDrawable("a colored grating is drawn in engine build A2")
+        raise NotYetDrawable(
+            "a named grating's color is drawn with the pattern fills, in engine build A3; a "
+            "luminance grating about a colored mean is a Look with a SineGrating mean")
     if isinstance(looks, Gabor):
         sigma = _num(looks.sigma, values)
         return look.Look(
@@ -227,14 +266,15 @@ def _drift(fill, values, orientation) -> float:
     return tf if math.cos(turn) > 0.0 else -tf
 
 
-def _fill(fill, values, orientation=0.0, lit=True):
+def _fill(fill, lights, orientation=0.0, lit=True):
     """A fill with every parameter bound. `lit` is false on a window or a scotoma
     (`LIGHTLESS`), which draws none of its own light: there its light is not read, so it may
     have none, and a flat fill resolves to no light and a grating to its bars alone."""
+    values = lights.values
     if isinstance(fill, look.Flat):
         if not lit:
             return ResolvedFlat(xyz=None, weber=None)
-        resolved = ResolvedFlat(xyz=_color(fill.color, values),
+        resolved = ResolvedFlat(xyz=lights.xyz(fill.color),
                                 weber=_contrast(fill.contrast, Weber, values))
         if resolved.xyz is None and resolved.weber is None:
             raise ValueError("a flat fill with neither a color nor a contrast has no light")
@@ -245,7 +285,7 @@ def _fill(fill, values, orientation=0.0, lit=True):
             raise ValueError("a grating with no contrast is its mean alone")
         return ResolvedGrating(sf=_num(fill.sf, values), phase=_num(fill.phase, values),
                                tf=_drift(fill, values, orientation), michelson=michelson,
-                               mean_xyz=_color(fill.mean, values) if lit else None)
+                               mean_xyz=lights.xyz(fill.mean) if lit else None)
     raise NotYetDrawable(f"{type(fill).__name__} is drawn in engine build A3")
 
 
@@ -292,16 +332,17 @@ def _edge(edge, fill, lit, name):
     return edge
 
 
-def _item(stimulus, name, order, looks, offset, values, geometry, onset) -> Item:
+def _item(stimulus, name, order, looks, offset, lights, geometry, onset) -> Item:
+    values = lights.values
     expanded = as_look(looks, values)
     orientation = _num(expanded.orientation, values)
     lit = stimulus.combine not in LIGHTLESS
-    fill = _fill(expanded.fill, values, orientation, lit=lit)
+    fill = _fill(expanded.fill, lights, orientation, lit=lit)
     edge = _edge(_bind(expanded.edge, values), fill, lit, name)
     outline = None
     if expanded.outline is not None:
         outline = ResolvedOutline(width=_num(expanded.outline.width, values),
-                                  xyz=_color(expanded.outline.color, values))
+                                  xyz=lights.xyz(expanded.outline.color))
         if outline.xyz is None:
             raise ValueError(f"{name!r}'s outline has no light; an outline is drawn in a color")
     at_left, at_right = _eyes(stimulus, values, geometry, offset)
@@ -315,30 +356,37 @@ def _item(stimulus, name, order, looks, offset, values, geometry, onset) -> Item
     )
 
 
-def _items(stimulus, order, values, geometry, onset) -> list[Item]:
+def _items(stimulus, order, lights, geometry, onset) -> list[Item]:
+    values = lights.values
     looks = _value(stimulus.looks, values) if isinstance(stimulus.looks, P) else stimulus.looks
     if isinstance(looks, Blank):
         return []
     if isinstance(looks, Array):
         return [
             _item(stimulus, f"{stimulus.name}.{i}", (order, i), looks.item_looks(i, values),
-                  offset, values, geometry, onset)
+                  offset, lights, geometry, onset)
             for i, offset in enumerate(looks.positions(values))
         ]
-    return [_item(stimulus, stimulus.name, (order, 0), looks, (0.0, 0.0), values, geometry, onset)]
+    return [_item(stimulus, stimulus.name, (order, 0), looks, (0.0, 0.0), lights, geometry, onset)]
 
 
-def resolve(visible, values, trial, geometry, *, frame_period, frame=0, onsets=None) -> Screen:
+def resolve(visible, values, trial, geometry, *, frame_period, frame=0, onsets=None,
+            calibration=None) -> Screen:
     """The screen as `visible` and `values` make it at `frame`. `visible` keeps the order
     stimuli were shown (the trial loop's `dict`), which breaks ties within a layer;
-    `onsets` gives each stimulus's first frame, from which drift is timed."""
-    base = _color(trial.background, values) or _BLACK
-    left = _color(trial.background_left, values) or base
-    right = _color(trial.background_right, values) or base
+    `onsets` gives each stimulus's first frame, from which drift is timed. **A cone color
+    (`DKL`, `ConeContrast`) converts against the background through `calibration`** (engine
+    build A2), so a trial with one needs it; the screen description itself stays CIE XYZ."""
+    base = _absolute(trial.background, values)
+    left = _absolute(trial.background_left, values) or base
+    right = _absolute(trial.background_right, values) or base
+    shared = left if left == right else _TWO_BACKGROUNDS
+    lights = _Lights(values=values, calibration=calibration, background=shared)
     items: list[Item] = []
     for order, stimulus in enumerate(visible.values()):
-        items.extend(_items(stimulus, order, values, geometry, (onsets or {}).get(stimulus.name, 0)))
+        items.extend(_items(stimulus, order, lights, geometry, (onsets or {}).get(stimulus.name, 0)))
     items.sort(key=lambda i: (i.layer, i.order))
-    return Screen(setup=geometry.view, periphery=trial.periphery, background_left=left,
-                  background_right=right, items=tuple(items), frame=frame,
-                  frame_period=frame_period)
+    return Screen(setup=geometry.view, periphery=trial.periphery,
+                  background_left=to_xyz(left) if left else _BLACK,
+                  background_right=to_xyz(right) if right else _BLACK,
+                  items=tuple(items), frame=frame, frame_period=frame_period)

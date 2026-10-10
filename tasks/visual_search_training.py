@@ -1,15 +1,17 @@
 """Colour pop-out search, for training on the default calibration (engine build B).
 
-**The search task with ordinary colors.** `visual_search` keeps its isoluminant red and green
-and waits for a measured calibration (engine spec §7.3); this variant shows the sRGB red and
-green primaries' colors instead, each at its own luminance, live-editable (the PI, N§4 batch 2:
-"a training variant uses ordinary red and green (no isoluminance claim)"; Question 3). It loads
-on the default calibration in training and piloting, with the warning, and **a recording session
-refuses it** while the default is in use (spec §7.2). Both start at 15 cd/m², equal by the sRGB
-standard's numbers and measured by nobody: not isoluminant for any observer, and nothing here
-claims they are.
+**The search task with ordinary colors.** `visual_search` shows the PI's 2023 red and green,
+isoluminant in the lab's observer on a 16 cd/m² gray, and runs only on a measured calibration
+that carries its primaries' spectra (engine spec §7.3; engine build A2); this variant shows the
+sRGB red and green primaries' colors instead, each at its own luminance, live-editable (the PI,
+N§4 batch 2: "a training variant uses ordinary red and green (no isoluminance claim)"; Question
+3). It loads on the default calibration in training and piloting, with the warning, and **a
+recording session refuses it** while the default is in use (spec §7.2). Both start at 15 cd/m²,
+equal by the sRGB standard's numbers and measured by nobody: not isoluminant for any observer,
+and nothing here claims they are.
 
-Everything else -- states, windows, every other parameter -- is `visual_search`'s, and
+Everything else -- states, windows, every other parameter, and the gray it is shown on (the
+engine A2 plan's Q1) -- is `visual_search`'s, and
 `tests/test_reference_tasks.py` holds the two to that. Its starting values are as unset as
 that task's (XC-183).
 """
@@ -63,6 +65,7 @@ search = Trial(
     start="await_fix",
     # Direct view, with the detection tasks: the lab's programme runs there.
     view="direct",
+    background=Gray(16.0),  # visual_search.BACKGROUND (the engine A2 plan's Q1)
     windows=[
         Window("fix", at=(0.0, 0.0), radius=P("fix_window"), on="fix"),
         # One declaration, `set_size` windows. The author cannot write them out,

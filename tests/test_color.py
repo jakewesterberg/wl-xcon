@@ -12,16 +12,20 @@ from dataclasses import replace
 
 import pytest
 
-from _calibrations import LINEAR
-from wl_xcon import look
-from wl_xcon.check import check
+from _calibrations import LINEAR, measured
+from wl_xcon import cones, look
+from wl_xcon.check import _background_lights, check
+from wl_xcon.cones import CIE2006_10
 from wl_xcon.findings import NOT_RECORDING
+from wl_xcon.link import NOTE_LIMIT, cut
 from wl_xcon.photometry import (
     D65,
     DKL,
+    HELD_STANDARD,
     RMS,
     SRGB,
     Calibration,
+    ConeContrast,
     Gray,
     Michelson,
     Weber,
@@ -35,6 +39,7 @@ from wl_xcon.task import (
     Array,
     Checkerboard,
     Disc,
+    Gabor,
     Noise,
     On,
     Outcome,
@@ -62,6 +67,9 @@ PANEL = Calibration(
     observer="macaque V(lambda), Sidley & Sperling 1967",
     measured_on="2026-08-31",
 )
+
+#: A lit gray background, for a color relative to it.
+GRAY_BG = Gray(20.0)
 
 
 def a_task(looks) -> Trial:
@@ -121,31 +129,106 @@ def test_an_achromatic_task_needs_no_calibration():
     assert codes(a_task(Disc(size=1.0, color=Gray(40.0))), calibration=None) == set()
 
 
-def test_isoluminance_is_a_declared_measurement_not_a_default():
-    """`DKL(lum=0)` is isoluminant *by construction*, against a stated observer.
-
-    Construction alone is not enough: the cone contrasts depend on whose luminous
-    efficiency the display was measured against, and a macaque's is not a human's.
-    A calibration that does not say refuses the colour rather than letting the task
-    inherit a silent assumption about the species in the chair.
-    """
-    unstated = Calibration(
-        red=PANEL.red,
-        green=PANEL.green,
-        blue=PANEL.blue,
-        background=PANEL.background,
-        transfer=(LINEAR,) * 3,
-        observer="",
-        measured_on="2026-08-31",
-    )
-    isoluminant = Disc(color=DKL(lum=0.0, l_m=0.08))
-    assert "unstated-observer" in codes(a_task(isoluminant), calibration=unstated)
-    assert "unstated-observer" not in codes(a_task(isoluminant), calibration=PANEL)
+def test_isoluminance_is_a_named_observers_and_a_calibration_names_its_own():
+    """`DKL(lum=0)` is isoluminant *by construction*, against a named observer: the lab's, the
+    CIE 2006 10° observer's V_F,10 (A2's Q5; COL-17), named in code and recorded with each
+    session. A measured calibration still says whose luminous efficiency its own luminances were
+    measured against, or it does not load: an unlabeled cd/m² is a claim nobody can check."""
+    assert CIE2006_10.luminosity == "V_F,10"
+    with pytest.raises(ValueError, match="names the observer"):
+        Calibration(red=PANEL.red, green=PANEL.green, blue=PANEL.blue, background=PANEL.background,
+                    transfer=(LINEAR,) * 3, observer="", measured_on="2026-08-31")
 
 
-def test_a_cone_contrast_beyond_the_measured_maximum_is_refused():
-    """The panel's reachable cone contrast is a measured number, not an aspiration."""
-    assert "unrealizable-color" in codes(a_task(Disc(color=DKL(l_m=0.95))))
+def test_a_cone_color_the_panel_cannot_make_on_its_background_is_refused():
+    """Full conversion, not a stored maximum (engine spec §7.4; COL-08): a red-green contrast the
+    old 0.85 gate passed is outside the panel's gamut."""
+    trial = replace(a_task(Disc(color=DKL(l_m=-0.5))), background=GRAY_BG)
+
+    found = _found(trial, calibration=measured())
+
+    assert found["unrealizable-color"].detail.startswith(
+        "Disc asks for DKL(lum=0.0, l_m=-0.5, s_lm=0.0) on a background of "
+        "xyY(x=0.3127, y=0.329, Y=20.0)")
+    assert "outside [0, 1]" in found["unrealizable-color"].detail
+    assert "unrealizable-color" not in _found(
+        replace(a_task(Disc(color=DKL(l_m=0.08))), background=GRAY_BG), calibration=measured())
+
+
+def test_a_cone_color_on_a_measured_calibration_without_spectra_is_refused():
+    trial = replace(a_task(Disc(color=DKL(l_m=0.08))), background=GRAY_BG)
+
+    assert "measured without spectra" in _found(trial, calibration=PANEL)["unrealizable-color"].detail
+
+
+def test_a_cone_color_is_realizable_or_not_by_its_background():
+    """COL-10: the same contrast fits on a dim gray and not on one near the panel's white."""
+    color = Disc(color=DKL(lum=0.5))
+    dim = replace(a_task(color), background=Gray(20.0))
+    bright = replace(a_task(color), background=Gray(150.0))
+
+    assert "unrealizable-color" not in _found(dim, calibration=measured())
+    assert "unrealizable-color" in _found(bright, calibration=measured())
+
+
+def test_a_cone_color_with_parameters_is_checked_at_each_value_they_can_take():
+    """XC-269: a parameter inside a `DKL` raised TypeError from `DKL.magnitude()` under a measured
+    calibration. Each component is read at each choice or both ends of its range, crossed."""
+    trial = replace(a_task(Disc(color=DKL(lum=0.0, l_m=P("c")))), background=GRAY_BG,
+                    params=[Param("c", unit="contrast", low=-0.6, high=0.1)])
+
+    found = check(trial, calibration=measured())
+
+    assert [f.detail.split(" on ")[0] for f in found if f.code == "unrealizable-color"] == [
+        "Disc asks for DKL(lum=0.0, l_m=-0.6, s_lm=0.0)"]
+
+
+def test_a_cone_contrast_is_checked_by_full_conversion_too():
+    trial = replace(a_task(Disc(color=ConeContrast(S=P("s")))), background=GRAY_BG,
+                    params=[Param("s", unit="contrast", choices=(0.5, 12.0))])
+
+    details = [f.detail for f in check(trial, calibration=measured())
+               if f.code == "unrealizable-color"]
+
+    assert len(details) == 1 and "ConeContrast(L=0.0, M=0.0, S=12.0)" in details[0]
+
+
+@pytest.mark.parametrize("field", ["L", "M", "S"])
+def test_each_cone_contrast_component_is_a_number(field):
+    trial = replace(a_task(Disc(color=ConeContrast(**{field: "much"}))), background=GRAY_BG)
+
+    assert (f"ConeContrast.{field} is 'much', not a number"
+            in _found(trial, calibration=measured())["bad-block"].detail)
+
+
+def test_a_black_background_value_is_left_to_its_own_refusal():
+    """`_background_lights` leaves black out, so a cone color is converted only against the lit
+    values; `cone-color-on-black` refuses the black one."""
+    trial = replace(a_task(Disc(color=DKL(l_m=-0.5))), background=P("bg"),
+                    params=[Param("bg", unit="color", choices=(Gray(0.0), Gray(20.0)))])
+    params = {p.name: p for p in trial.params}
+
+    assert _background_lights(trial, params) == [xyY(*D65, 20.0)]
+    found = check(trial, calibration=measured())
+    assert {f.code for f in found} >= {"cone-color-on-black", "unrealizable-color"}
+    assert all("Y=0.0" not in f.detail for f in found if f.code == "unrealizable-color")
+
+
+def test_a_cone_table_that_is_not_the_cies_refuses_cone_colors_and_nothing_else(monkeypatch):
+    """The review's E-I3: the checksum guard on the read path. Emptied cache, wrong checksum: the
+    table read refuses; a measured calibration built then converts no cone color, saying why,
+    and still checks a plain color."""
+    monkeypatch.setattr(cones, "_TABLE", [])
+    monkeypatch.setitem(cones.CIE_FILES, cones.TABLE, "0" * 64)
+    with pytest.raises(ValueError, match="is not the CIE's file"):
+        cones.table()
+
+    panel = measured()
+
+    assert panel.cones is None and "is not the CIE's file" in panel.cones_refused
+    trial = replace(a_task(Disc(color=DKL(l_m=0.08))), background=GRAY_BG)
+    assert "is not the CIE's file" in _found(trial, calibration=panel)["unrealizable-color"].detail
+    assert _found(a_task(Disc(color=xyY(0.3, 0.35, 20.0))), calibration=panel) == {}
 
 
 def test_pop_out_is_expressible_as_one_parameter():
@@ -341,24 +424,118 @@ def test_isoluminance_needs_a_measured_calibration_in_every_kind():
     assert "measured calibration" in found["isoluminance-on-default"].detail
 
 
-def test_a_dkl_color_on_the_default_waits_for_build_a2():
-    found = _found(a_task(Disc(color=DKL(lum=0.1))))
+def test_a_cone_color_on_the_default_trains_and_pilots_with_the_warning():
+    """Engine build A2 (B's call 9 retired): a DKL color that claims no isoluminance, or a cone
+    contrast that does not, converts through the CIE's matrix on the default and is refused only
+    in recording, by `color-on-default`, whose sentence says how it converted and which luminance
+    it held (2026-10-08's Q2; COL-18; the review's S-I2)."""
+    for color in (DKL(lum=0.1), DKL(lum=0.05, l_m=0.08), ConeContrast(L=0.1, S=0.5)):
+        found = check(replace(a_task(Disc(color=color)), background=GRAY_BG), calibration=SRGB)
 
-    assert found["dkl-on-default"].blocking and "A2" in found["dkl-on-default"].detail
-    assert "isoluminance-on-default" not in found
+        assert [f.code for f in found] == ["color-on-default"], color
+        assert found[0].accepted_in == NOT_RECORDING
+        assert "a use outside the CIE's definition" in found[0].detail
+        assert "the luminance they hold constant is the standard's CIE 1931 Y" in found[0].detail
 
 
-def test_a_dkl_color_with_a_parameter_inside_is_refused_on_the_default_never_raised():
-    """The review's I4: `DKL.magnitude()` raises on a parameter (XC-269), and from Task 8
-    every session, `wlx check` and `wlx run` check against the default."""
-    isoluminant = replace(a_task(Disc(color=DKL(lum=0.0, l_m=P("c")))),
-                          params=[Param("c", unit="contrast", low=-0.1, high=0.1)])
-    stepped = replace(a_task(Disc(color=DKL(lum=P("c"), l_m=0.05))),
-                      params=[Param("c", unit="contrast", low=-0.1, high=0.1)])
+def test_a_cone_color_warning_says_how_it_converted_within_what_a_screen_shows():
+    """The re-review's M4: a screen shows a warning's first `link.NOTE_LIMIT` characters
+    (`WarningRow.of`), and nothing bounds the list of colors a task names, so how the default
+    converts cone colors and which luminance they hold come before that list."""
+    trial = replace(_choosing(*(Disc(color=DKL(lum=0.1 + i / 100)) for i in range(12))),
+                    background=GRAY_BG)
+    detail = _found(trial)["color-on-default"].detail
 
-    assert _found(isoluminant)["isoluminance-on-default"].blocking
-    assert _found(stepped)["dkl-on-default"].blocking
-    assert "isoluminance-on-default" not in _found(stepped)
+    shown = cut(detail, NOTE_LIMIT)
+
+    assert len(detail) > NOTE_LIMIT
+    assert "a use outside the CIE's definition" in shown
+    assert "the luminance they hold constant is " + HELD_STANDARD + ";" in shown
+
+
+def test_the_default_warning_says_nothing_of_cone_colors_a_task_does_not_use():
+    found = _found(a_task(Disc(color=xyY(0.64, 0.33, 10.0))))
+
+    assert "CIE's definition" not in found["color-on-default"].detail
+
+
+def test_a_cone_color_the_default_cannot_make_is_refused_on_it():
+    """Not isoluminant (`lum` 0.01), so it converts; the sRGB standard's red cannot go that low."""
+    trial = replace(a_task(Disc(color=DKL(lum=0.01, l_m=-0.3))), background=GRAY_BG)
+
+    assert _found(trial)["unrealizable-color"].blocking
+
+
+def test_a_dkl_color_that_can_be_isoluminant_is_refused_on_the_default_whatever_its_parameters():
+    """Spec §7.3 asked of the color as written (XC-269): a `lum` whose range crosses 0 beside a
+    chromatic component claims isoluminance at that value, as a literal 0 beside a chromatic
+    parameter does; a `lum` that never reaches 0, or one with no chromatic component, does not."""
+    contrast = Param("c", unit="contrast", low=-0.1, high=0.1)
+    up = Param("up", unit="contrast", low=0.05, high=0.2)
+    claims = [
+        DKL(lum=0.0, l_m=P("c")),
+        DKL(lum=P("c"), l_m=0.05),
+        DKL(lum=P("c"), s_lm=P("c")),
+    ]
+    claims_none = [
+        DKL(lum=0.1, l_m=0.05),
+        DKL(lum=P("up"), l_m=0.05),
+        DKL(lum=P("c")),
+    ]
+
+    for color in claims:
+        trial = replace(a_task(Disc(color=color)), background=GRAY_BG, params=[contrast, up])
+        assert _found(trial)["isoluminance-on-default"].blocking, color
+    for color in claims_none:
+        trial = replace(a_task(Disc(color=color)), background=GRAY_BG, params=[contrast, up])
+        assert "isoluminance-on-default" not in _found(trial), color
+
+
+def test_a_dkl_lum_at_the_edge_of_a_range_or_among_choices_claims_isoluminance():
+    """The boundaries of `_claims_isoluminance` (the review's E-I4): 0 at either end of a range,
+    0 among choices, a chromatic range that is only 0 or reaches it, a `lum` within half a
+    percent of 0, the band's edge included, and a `lum` the task does not declare, which can be
+    anything (failing closed; the re-review's M2)."""
+    def claims(color, *params) -> bool:
+        trial = replace(a_task(Disc(color=color)), background=GRAY_BG, params=list(params))
+        return "isoluminance-on-default" in _found(trial)
+
+    assert claims(DKL(lum=P("lo"), l_m=0.05), Param("lo", unit="contrast", low=0.0, high=0.1))
+    assert claims(DKL(lum=P("hi"), l_m=0.05), Param("hi", unit="contrast", low=-0.1, high=0.0))
+    assert claims(DKL(lum=P("k"), l_m=0.05), Param("k", unit="contrast", choices=(0.1, 0.0)))
+    assert not claims(DKL(lum=P("k"), l_m=0.05), Param("k", unit="contrast", choices=(0.05, 0.1)))
+    assert not claims(DKL(l_m=P("z")), Param("z", unit="contrast", low=0.0, high=0.0))
+    assert claims(DKL(l_m=P("z")), Param("z", unit="contrast", choices=(0.0, 0.05)))
+    assert claims(DKL(l_m=P("w")), Param("w", unit="contrast", low=0.0, high=0.05))
+    assert claims(DKL(lum=0.005, l_m=0.05))
+    assert not claims(DKL(lum=0.006, l_m=0.05))
+    assert claims(DKL(lum=P("e"), l_m=0.05), Param("e", unit="contrast", low=0.005, high=0.1))
+    assert claims(DKL(lum=P("f"), l_m=0.05), Param("f", unit="contrast", low=-0.1, high=-0.005))
+    assert claims(DKL(lum=P("undeclared"), l_m=0.05))
+
+
+def test_a_cone_contrast_that_holds_v_f10_still_claims_isoluminance_on_the_default():
+    """The engine A2 plan's Q2, A: S alone, or L and M at V_F,10's ratio on the background (the
+    search task's red written as a cone contrast), within half a percent, either side of the
+    band's edge (on a D65 gray L's share of V_F,10 is 0.689, so an L contrast of 0.007 is a
+    luminance contrast of 0.0048 and 0.0075 one of 0.0052); and a range of L or M that crosses 0,
+    or a value the task does not declare, claims too, failing closed (the re-review's M2). One
+    whose luminance stays clear of 0 does not, nor any on a measured calibration."""
+    def claims(color, *params) -> bool:
+        trial = replace(a_task(Disc(color=color)), background=GRAY_BG, params=list(params))
+        return "isoluminance-on-default" in _found(trial)
+
+    assert claims(ConeContrast(S=0.5))
+    assert claims(ConeContrast(L=0.033, M=-0.073))
+    assert claims(ConeContrast(L=P("l")), Param("l", unit="contrast", low=-0.1, high=0.1))
+    assert not claims(ConeContrast(L=0.1, S=0.5))
+    assert not claims(ConeContrast(L=P("l")), Param("l", unit="contrast", choices=(0.1, 0.2)))
+    assert not claims(ConeContrast())
+    assert claims(ConeContrast(L=0.007))
+    assert not claims(ConeContrast(L=0.0075))
+    assert claims(ConeContrast(S=P("undeclared")))
+    assert "isoluminance-on-default" not in _found(
+        replace(a_task(Disc(color=ConeContrast(S=0.5))), background=GRAY_BG), calibration=measured())
 
 
 def test_a_named_color_on_the_default_is_refused_only_in_recording():
@@ -631,3 +808,305 @@ def test_a_gray_above_the_defaults_white_cannot_be_shown_on_it():
 
 def test_a_measured_calibration_brings_none_of_the_defaults_findings():
     assert _found(a_task(Disc(color=xyY(0.500, 0.400, 30.0))), calibration=PANEL) == {}
+
+
+# --- Cone colors need a lit background, and one (engine build A2) -----------------------------
+
+
+def test_a_cone_color_on_the_black_default_background_is_refused_naming_the_fix():
+    """Spec §7.5 (the PI, N§4 batch 3: "It must declare one"; A1's call 6)."""
+    found = _found(a_task(Disc(color=DKL(l_m=0.08))), calibration=measured())
+
+    assert found["cone-color-on-black"].blocking
+    assert found["cone-color-on-black"].detail.startswith("Disc: a cone color is relative")
+    assert "declare the trial's background" in found["cone-color-on-black"].detail
+
+
+def test_a_cone_contrast_on_the_black_default_background_is_refused_too():
+    found = _found(a_task(Disc(color=ConeContrast(S=0.5))), calibration=measured())
+
+    assert found["cone-color-on-black"].blocking
+    assert found["cone-color-on-black"].detail.startswith("Disc: a cone color is relative")
+
+
+def test_a_cone_color_on_a_background_a_parameter_can_make_black_is_refused():
+    trial = replace(a_task(Disc(color=DKL(l_m=0.08))), background=Gray(P("bg")),
+                    params=[Param("bg", unit="cd/m2", low=0.0, high=40.0)])
+
+    found = _found(trial, calibration=measured())
+
+    assert "raise the low end of parameter 'bg'" in found["cone-color-on-black"].detail
+
+
+def test_a_cone_color_on_a_lit_background_is_not_refused_for_it():
+    trial = replace(a_task(Disc(color=DKL(l_m=0.08))), background=GRAY_BG)
+
+    assert "cone-color-on-black" not in _found(trial, calibration=measured())
+
+
+def test_one_finding_names_every_cone_colored_carrier():
+    found = _found(_choosing(Disc(size=1.0, color=DKL(l_m=0.08)),
+                             Square(size=1.0, color=DKL(l_m=-0.08))), calibration=measured())
+
+    assert found["cone-color-on-black"].detail.startswith(
+        "Disc (choice 1 of parameter 'looks'); Square (choice 2 of parameter 'looks'): ")
+
+
+def test_a_cone_color_between_two_eyes_backgrounds_that_differ_is_refused():
+    trial = replace(a_task(Disc(color=DKL(l_m=0.08))), view="stereoscope",
+                    background_left=Gray(20.0), background_right=Gray(30.0))
+
+    assert _found(trial, calibration=measured())["cone-color-two-backgrounds"].blocking
+    same = replace(trial, background_left=Gray(20.0), background_right=Gray(20.0))
+    assert "cone-color-two-backgrounds" not in _found(same, calibration=measured())
+
+
+def test_a_background_is_an_absolute_light():
+    trial = replace(a_task(Disc(size=1.0, color=Gray(40.0))), background=DKL(lum=0.1))
+
+    found = _found(trial, calibration=measured())
+
+    assert "not an absolute light" in found["bad-block"].detail
+
+
+@pytest.mark.parametrize("field", ["lum", "l_m", "s_lm"])
+def test_each_dkl_component_is_a_number(field):
+    trial = replace(a_task(Disc(color=DKL(**{field: "much"}))), background=GRAY_BG)
+
+    assert f"DKL.{field} is 'much', not a number" in _found(trial)["bad-block"].detail
+
+
+# --- A cone color's parameters are bounded, and the default warns of it (engine build A2) --
+
+
+def test_a_cone_color_with_a_parameter_that_cannot_be_bounded_is_a_bad_block():
+    """A free parameter names no value to hold to the panel, so `_block_faults` refuses it as it
+    does an `xyY`'s."""
+    free = replace(a_task(Disc(color=DKL(lum=0.0, l_m=P("c")))), background=GRAY_BG,
+                   params=[Param("c", unit="contrast")])
+    half = replace(a_task(Disc(color=ConeContrast(S=P("s")))), background=GRAY_BG,
+                   params=[Param("s", unit="contrast", high=0.5)])
+
+    for trial, name in ((free, "DKL.l_m"), (half, "ConeContrast.S")):
+        found = _found(trial, calibration=measured())
+        assert found["bad-block"].blocking and name in found["bad-block"].detail
+        assert "cannot be bounded" in found["bad-block"].detail
+
+
+def test_an_unbounded_isoluminant_dkl_is_still_refused_on_the_default():
+    """Refused `isoluminance-on-default` before cone colors were bounded; now refused as a
+    blocking `bad-block`, since a color that cannot be bounded is not read as a light
+    (`_color_faults` skips it, as it does an `xyY`'s)."""
+    trial = replace(a_task(Disc(color=DKL(lum=0.0, l_m=P("s")))), background=GRAY_BG,
+                    params=[Param("s", unit="contrast")])
+
+    found = _found(trial)
+
+    assert found["bad-block"].blocking and "DKL.l_m" in found["bad-block"].detail
+
+
+def test_a_cone_contrast_names_a_color_on_the_default_as_an_xyy_does():
+    trial = replace(a_task(Disc(color=ConeContrast(L=0.2, M=0.2))), background=GRAY_BG)
+
+    warning = _found(trial)["color-on-default"]
+
+    assert (warning.blocking, warning.accepted_in) == (False, NOT_RECORDING)
+
+
+@pytest.mark.parametrize("color", [ConeContrast(L=1e308), DKL(l_m=1e308),
+                                   xyY(0.3, 0.3, 1.7e308)])
+def test_a_color_whose_weights_overflow_is_unrealizable_not_realizable(color):
+    """Finite components near the float maximum make weights of infinity or NaN; NaN fails both
+    range comparisons, so the test must fail closed."""
+    from wl_xcon.photometry import unrealizable
+
+    assert unrealizable(color, measured(), xyY(*D65, 20.0)) is not None
+
+
+
+# --- The lights a contrast makes, held to the panel's reach (engine build A2) -----------------
+
+
+def test_a_weber_light_brighter_than_the_panel_makes_on_its_background_is_refused():
+    """A Weber light is its background times one plus its contrast: +3 on a 30 cd/m² gray is
+    120 cd/m², past the sRGB standard's 80 cd/m² white."""
+    bright = replace(a_task(Disc(contrast=Weber(3.0))), background=Gray(30.0))
+    fits = replace(a_task(Disc(contrast=Weber(1.0))), background=Gray(30.0))
+
+    found = _found(bright)
+
+    assert found["unrealizable-color"].detail.startswith(
+        "Disc's Weber contrast of 3 on a background of xyY(x=0.3127, y=0.329, Y=30.0) reaches "
+        "xyY(x=0.3127, y=0.329, Y=120.0)")
+    assert "unrealizable-color" not in _found(fits)
+
+
+def test_a_grating_whose_brightest_bar_the_panel_cannot_make_is_refused():
+    """Michelson 0.8 about a 50 cd/m² gray peaks at 90 cd/m²; about 40, at 72."""
+    gabor = Gabor(sf=1.0, sigma=1.0, contrast=Michelson(0.8))
+    bright = replace(a_task(gabor), background=Gray(50.0))
+
+    assert "brightest bar at Michelson 0.8 about its mean, its background" in (
+        _found(bright)["unrealizable-color"].detail)
+    assert "unrealizable-color" not in _found(replace(a_task(gabor), background=Gray(40.0)))
+
+
+def test_a_grating_is_held_to_the_reach_about_the_mean_it_declares():
+    declared = look.Look(fill=look.SineGrating(contrast=Michelson(0.5), mean=Gray(60.0)))
+
+    detail = _found(replace(a_task(declared), background=Gray(20.0)))["unrealizable-color"].detail
+
+    assert "brightest bar at Michelson 0.5 about its mean xyY(x=0.3127, y=0.329, Y=60.0)" in detail
+
+
+def test_a_contrast_parameter_is_held_at_each_value_it_can_take():
+    trial = replace(a_task(Disc(contrast=P("c"))), background=Gray(30.0),
+                    params=[Param("c", unit="contrast", choices=(Weber(0.5), Weber(2.0)))])
+
+    details = [f.detail for f in check(trial, calibration=SRGB) if f.code == "unrealizable-color"]
+
+    assert len(details) == 1 and details[0].startswith("Disc's Weber contrast of 2 ")
+
+
+def test_a_multiplier_or_a_window_is_not_held_to_a_reach_of_its_own():
+    """Neither draws a light of its own (spec §4.4)."""
+    for combine in ("multiply", "window"):
+        trial = replace(a_task(Disc(contrast=Weber(3.0))), background=Gray(30.0))
+        trial = replace(trial, states=[replace(trial.states[0], enter=[Show(Stimulus(
+            "s", at=(0.0, 0.0), looks=Disc(contrast=Weber(3.0)), combine=combine))])])
+
+        assert "unrealizable-color" not in _found(trial), combine
+
+
+@pytest.mark.parametrize("calibration", [SRGB, measured()], ids=["default", "measured"])
+@pytest.mark.parametrize("mean", [DKL(lum=P("k"), l_m=0.02), ConeContrast(L=P("k"))],
+                         ids=["dkl", "cone"])
+def test_a_grating_about_a_cone_mean_with_a_parameter_is_checked_never_raised(calibration, mean):
+    """The review's E-C1: a parameter inside a grating's cone-colored mean reached `cone_xyz`
+    unbound and raised `TypeError` out of `check()`. Each value is read: about a 40 cd/m² gray, a
+    mean 5% brighter has bars at Michelson 0.5 within either panel's white; one five times as
+    bright does not."""
+    grating = look.Look(fill=look.SineGrating(contrast=Michelson(0.5), mean=mean))
+    trial = replace(a_task(grating), background=Gray(40.0),
+                    params=[Param("k", unit="contrast", choices=(0.05, 4.0))])
+
+    found = check(trial, calibration=calibration)
+
+    bars = [f.detail for f in found if f.code == "unrealizable-color" and "brightest bar" in f.detail]
+    assert any("=4.0," in d for d in bars)
+    assert not any("=0.05," in d for d in bars)
+
+
+def test_a_grating_about_an_isoluminant_cone_mean_has_no_luminance_step():
+    """Call 29: `DKL()` or a `lum` of 0, or a cone contrast changing S alone, is no step; a `DKL`
+    with a `lum` is one, and so is a cone contrast changing L or M."""
+    def steps(mean) -> bool:
+        grating = look.Look(fill=look.SineGrating(contrast=Michelson(0.3), mean=mean))
+        return "luminance-step" in _found(replace(a_task(grating), background=GRAY_BG),
+                                          calibration=measured())
+
+    assert not steps(DKL())
+    assert not steps(DKL(l_m=0.05))
+    assert not steps(ConeContrast(S=0.3))
+    assert steps(DKL(lum=0.1))
+    assert steps(ConeContrast(L=0.1))
+
+
+def _on_gray(color, *params) -> dict:
+    return _found(replace(a_task(Disc(color=color)), background=GRAY_BG, params=list(params)))
+
+
+def test_a_cone_contrast_is_isoluminant_only_where_it_is_chromatic_at_the_same_value():
+    """Task 6 fix round 1 (I1): the same light gets the same verdict however it is spelled
+    (`DKL(lum=0.003)` is `ConeContrast(0.003, 0.003, 0.003)`), and choices are judged one by one,
+    not pooled: choices of +-0.1 on L are each a V_F,10 contrast of +-0.069, and an achromatic
+    series (L, M and S all one parameter) claims nothing, as `DKL(lum=P(c))` does not."""
+    cases = [
+        (ConeContrast(L=P("c")), Param("c", unit="contrast", choices=(-0.1, 0.1))),
+        (ConeContrast(L=P("c"), M=P("c"), S=P("c")),
+         Param("c", unit="contrast", choices=(0.0, 0.05, 0.1))),
+        (ConeContrast(L=P("c"), M=P("c"), S=P("c")),
+         Param("c", unit="contrast", choices=(-0.2, 0.2))),
+        (ConeContrast(L=0.003, M=0.003, S=0.003),),
+    ]
+    for color, *params in cases:
+        found = _on_gray(color, *params)
+
+        assert "isoluminance-on-default" not in found, color
+        assert not found["color-on-default"].blocking, color
+
+
+def test_a_cone_contrast_with_one_isoluminant_chromatic_choice_is_refused_on_the_default():
+    """The isoluminant L on a D65 gray beside M = -0.2216 is 0.1 (L's share of V_F,10 is 0.689,
+    M's 0.311: 0.689 * 0.1 = 0.311 * 0.2216); a choice far from it does not excuse it."""
+    found = _on_gray(ConeContrast(L=P("c"), M=-0.2216),
+                     Param("c", unit="contrast", choices=(0.1, 0.5)))
+
+    assert found["isoluminance-on-default"].blocking
+
+
+def test_a_chromatic_cone_contrast_range_crossing_the_band_claims_and_an_achromatic_one_does_not():
+    wide = Param("c", unit="contrast", low=-0.2, high=0.2)
+
+    assert "isoluminance-on-default" in _on_gray(ConeContrast(L=P("c"), S=P("c")), wide)
+    assert "isoluminance-on-default" not in _on_gray(
+        ConeContrast(L=P("c"), M=P("c"), S=P("c")), wide)
+
+
+def test_a_dkl_lum_range_declared_high_to_low_claims_isoluminance_all_the_same():
+    inverted = Param("c", unit="contrast", low=0.1, high=-0.1)
+
+    assert "isoluminance-on-default" in _on_gray(DKL(lum=P("c"), l_m=0.05), inverted)
+
+
+@pytest.mark.parametrize("bounds", [("a", "b"), (P("z"), 0.1)], ids=["strings", "a-parameter"])
+@pytest.mark.parametrize("color", [DKL(lum=P("c"), l_m=0.1), DKL(lum=0.0, l_m=P("c")),
+                                   ConeContrast(L=P("c"))], ids=["dkl-lum", "dkl-l_m", "cone"])
+def test_a_cone_color_range_whose_bound_is_no_number_is_refused_never_raised(color, bounds):
+    """The A2 final review's I1: a DKL range ending at a string or at another parameter raised
+    `ValueError` or `TypeError` out of `check()` on the default (a `ConeContrast`'s did not, and
+    is held to the same). The bound is refused as a bad block, and the color, which can then be
+    anything, claims isoluminance, failing closed."""
+    low, high = bounds
+    trial = replace(a_task(Disc(color=color)), background=GRAY_BG,
+                    params=[Param("c", unit="contrast", low=low, high=high)])
+
+    found = _found(trial)
+
+    assert found["isoluminance-on-default"].blocking
+    assert found["bad-block"].blocking
+    assert _found(trial, calibration=measured())["bad-block"].blocking
+
+
+def _offered_by(written: str, color) -> Trial:
+    """A `Look` on a lit gray whose fill, or whose outline, is a parameter offering one block
+    in `color`."""
+    if written == "fill":
+        looks = look.Look(fill=P("part"))
+        offered = Param("part", unit="fill", choices=(look.Flat(color=color),))
+    else:
+        looks = look.Look(fill=look.Flat(color=Gray(10.0)), outline=P("part"))
+        offered = Param("part", unit="outline", choices=(look.Outline(color=color),))
+    return replace(a_task(looks), background=GRAY_BG, params=[offered])
+
+
+@pytest.mark.parametrize("written", ["fill", "outline"])
+def test_an_isoluminant_color_a_looks_fill_or_outline_parameter_offers_is_refused_on_the_default(
+        written):
+    """XC-271's second half (the A2 final review's I3): the colors a `Look`'s fill or outline
+    parameter offers were never read, so an isoluminant DKL among them trained and piloted on
+    the default with no `isoluminance-on-default`. It is refused in every kind, naming the
+    parameter."""
+    found = _found(_offered_by(written, DKL(l_m=0.1)))
+
+    assert found["isoluminance-on-default"].blocking
+    assert "a choice of parameter 'part'" in found["isoluminance-on-default"].detail
+
+
+@pytest.mark.parametrize("written", ["fill", "outline"])
+def test_a_color_a_looks_fill_or_outline_parameter_offers_is_held_to_the_panels_reach(written):
+    """The same blind spot, on a measured calibration: a color the panel cannot make, offered
+    by a fill or an outline parameter, is refused as one written into the `Look` is."""
+    found = _found(_offered_by(written, DKL(lum=20.0)), calibration=measured())
+
+    assert found["unrealizable-color"].blocking

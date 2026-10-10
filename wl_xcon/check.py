@@ -10,7 +10,20 @@ from wl_xcon.codes import PROVISIONAL, Allocation
 from wl_xcon.components import Registry
 from wl_xcon.findings import NOT_RECORDING, SESSION_KINDS, Finding
 from wl_xcon.geometry import VIEWS, Geometry
-from wl_xcon.photometry import D65, DKL, Calibration, Color, Gray, unrealizable, xyY
+from wl_xcon.photometry import (
+    CONE_COLORS,
+    D65,
+    DKL,
+    HELD_STANDARD,
+    Calibration,
+    Color,
+    ConeContrast,
+    Gray,
+    background_cones,
+    luminance_contrast,
+    unrealizable,
+    xyY,
+)
 from wl_xcon.task import (
     RDS,
     After,
@@ -906,12 +919,12 @@ def _literal(value) -> float | None:
 
 def _colors(trial: Trial, params: dict[str, Param]):
     """Every color a trial can put on screen, with what carries it: each appearance's,
-    each block's (a flat fill, a grating's mean, an outline), and the backgrounds. A color
-    that is a parameter is each of its choices; one offering none to read is refused by
-    `_light_faults`, and a value that is not a color by `_block_faults`, so neither is one
-    here. An appearance a parameter offers is named as that parameter's choice (every one
-    it is, when the same object is offered twice), so the choices' findings say which is
-    which."""
+    each block's (a flat fill, a grating's mean, an outline), and the backgrounds. A color,
+    or a `Look`'s fill or outline, that is a parameter is each of its choices; a color
+    offering none to read is refused by `_light_faults`, and a value that is not a color by
+    `_block_faults`, so neither is one here. An appearance a parameter offers is named as
+    that parameter's choice (every one it is, when the same object is offered twice), so the
+    choices' findings say which is which."""
     from wl_xcon import look
 
     offered: dict[int, list[str]] = {}
@@ -933,10 +946,18 @@ def _colors(trial: Trial, params: dict[str, Param]):
         what = type(looks).__name__
         chosen = f" ({', '.join(offered[id(looks)])})" if id(looks) in offered else ""
         if isinstance(looks, look.Look):
-            for part in (looks.fill, looks.outline):
-                for attr in ("color", "mean"):
-                    yield from each(f"{what}'s {type(part).__name__}{chosen}",
-                                    getattr(part, attr, None))
+            for written in (looks.fill, looks.outline):
+                # A fill or an outline that is a parameter is each fill or outline its choices
+                # offer, through any parameter among them (`_parts`; the A2 final review's I3).
+                parts, by = [written], ""
+                if isinstance(written, P):
+                    parts = [part for part in _parts(written, params)
+                             if isinstance(part, (look.Fill, look.Outline))]
+                    by = f" (a choice of parameter {written.name!r})"
+                for part in parts:
+                    for attr in ("color", "mean"):
+                        yield from each(f"{what}'s {type(part).__name__}{by}{chosen}",
+                                        getattr(part, attr, None))
         else:
             yield from each(f"{what}{chosen}", getattr(looks, "color", None))
     for attr in ("background", "background_left", "background_right"):
@@ -954,6 +975,7 @@ def _color_faults(trial: Trial, panel: Calibration | None) -> list[Finding]:
     experiment's control condition quietly becomes a luminance manipulation.
     """
     params = {p.name: p for p in trial.params}
+    backgrounds = _background_lights(trial, params)
     findings: list[Finding] = []
     for what, color in _colors(trial, params):
         # With no calibration at all -- `wlx taskd` while the rig's record will not load (the
@@ -964,15 +986,238 @@ def _color_faults(trial: Trial, panel: Calibration | None) -> list[Finding]:
         # it is checked as each light it can be.
         if panel is None and isinstance(color, Gray):
             continue
+        if what.startswith("the trial's ") and isinstance(color, CONE_COLORS):
+            continue  # a background is an absolute light, and `_block_faults` refuses one that is not
+        if (panel is not None and panel.standard
+                and _claims_isoluminance(color, params, panel, backgrounds)):
+            # Spec §7.3: "Isoluminance needs a measured calibration", in every session (N§4
+            # batch 1). Asked of the color as written, before its values are read, so a `lum`
+            # whose range crosses 0 claims it too (XC-269).
+            finding = Finding("isoluminance-on-default", (
+                f"{what} claims isoluminance, which needs a measured calibration (engine spec "
+                f"§7.3); the default calibration is the sRGB standard, measured by nobody"))
+            if finding not in findings:
+                findings.append(finding)
+            continue
         try:
             lights = [color] if panel is None else _lights(color, params)
         except _Unbounded:
             continue  # refused as a bad block: it cannot be bounded
         for light in lights:
-            findings += _one_color(what, light, panel)
+            for finding in _one_color(what, light, panel, backgrounds):
+                if finding not in findings:  # one value's corners can say the same
+                    findings.append(finding)
+    if panel is not None:
+        findings += [f for f in _modulation_faults(trial, params, panel, backgrounds)
+                     if f not in findings]
     if panel is not None and panel.standard:
         findings += _default_faults(trial, params)
     return findings
+
+
+def _modulation_faults(trial: Trial, params: dict[str, Param], panel: Calibration,
+                       backgrounds: list) -> list[Finding]:
+    """**The lights a contrast makes, held to the panel's reach** (engine spec §7.4, "for every
+    space"; the A2 research note §3, step 5: "check both extremes of a grating"): a flat
+    `Weber` light is its background times one plus its contrast, a sine grating's brightest and
+    darkest bars its mean times one plus and one minus its `Michelson` contrast -- the mean it
+    declares, absolute or a cone color on each background, or else each lit background. At each
+    value a parameter can take, the mean's own included (the plan's review, E-C1: a parameter in
+    a cone mean reached `cone_xyz` unbound). **Against the background only** (the plan's call 18):
+    drawn over another stimulus, a pattern's mean is that stimulus's light, and a sum of added
+    ones is not known here; the exact drawer refuses a pixel the panel cannot make
+    (`exact.output_levels`; XC-306). A window, a scotoma and a multiplier
+    draw no light of their own and are left out."""
+    from wl_xcon.photometry import Michelson, Weber, cone_xyz
+
+    combined = _combined(trial, params)
+    findings: list[Finding] = []
+
+    def held(what: str, base: xyY, factor: float, said: str) -> None:
+        light = xyY(base.x, base.y, base.Y * factor)
+        why = unrealizable(light, panel)
+        if why is not None:
+            finding = Finding("unrealizable-color", f"{what}'s {said} reaches {light}: {why}")
+            if finding not in findings:
+                findings.append(finding)
+
+    for looks in _appearances(trial):
+        if _multiplied([combine for shown, combine in combined if shown == looks]):
+            continue
+        light = _light(looks)
+        if light is None:
+            continue
+        kind, _, contrast, mean = light
+        what = type(looks).__name__
+        try:
+            contrasts = [c for c in _options(contrast, params) if isinstance(c, (Weber, Michelson))]
+            means = [None] if mean is None else _options(mean, params)
+            values = {id(c): _reach(c.value, params) for c in contrasts}
+        except _Unbounded:
+            continue  # refused where it is read: it cannot be bounded
+        for c in contrasts:
+            for value in values[id(c)]:
+                if kind == "flat" and isinstance(c, Weber):
+                    for background in backgrounds:
+                        held(what, background, 1.0 + value,
+                             f"Weber contrast of {value:g} on a background of {background}")
+                if kind != "grating" or not isinstance(c, Michelson):
+                    continue
+                for declared in means:
+                    if declared is None:
+                        bases = [(b, f"mean, its background {b}") for b in backgrounds]
+                        values_of_mean = []
+                    else:
+                        try:
+                            values_of_mean = _lights(declared, params)  # each value it can take
+                        except _Unbounded:
+                            continue  # refused where it is read: it cannot be bounded
+                        bases = [(m, f"mean {m}") for m in values_of_mean
+                                 if isinstance(m, xyY) and m.Y > 0.0]
+                    for m in values_of_mean:
+                        if not isinstance(m, CONE_COLORS):
+                            continue
+                        for b in backgrounds:
+                            try:
+                                X, Y, Z = cone_xyz(m, panel, b)
+                            except ValueError:
+                                continue  # the mean itself is refused where it is checked
+                            if Y > 0.0:
+                                bases.append((xyY(X / (X + Y + Z), Y / (X + Y + Z), Y),
+                                              f"mean {m} on {b}"))
+                    for base, said in bases:
+                        for sign, bar in ((1.0, "brightest"), (-1.0, "darkest")):
+                            held(what, base, 1.0 + sign * value,
+                                 f"{bar} bar at Michelson {value:g} about its {said}")
+    return findings
+
+
+def _multiplied(how: list) -> bool:
+    """Whether every stimulus that can show an appearance draws no light of its own: a
+    multiplier draws only its modulation, a window or a scotoma (`screen.LIGHTLESS`) none
+    (spec §4.4). Shared by the rules that would hold such a light to something."""
+    from wl_xcon.screen import LIGHTLESS
+
+    return bool(how) and all(combine == "multiply" or combine in LIGHTLESS for combine in how)
+
+
+def _background_lights(trial: Trial, params: dict[str, Param]) -> list:
+    """Every lit light an eye's background can be, as an `xyY`, for a cone color's conversion:
+    each choice of a background parameter, each corner of a `Gray`'s or an `xyY`'s ranges
+    (`_lights`; exact for a luminance range, corners only for a chromaticity one, the engine A2
+    plan's call 11). Black is left out (`cone-color-on-black` refuses a cone color there), as is
+    one that cannot be bounded or is not an absolute light (`_block_faults` refuses it)."""
+    found: list = []
+    for background in _backgrounds(trial):
+        try:
+            values = _options(background, params)
+        except _Unbounded:
+            continue
+        for value in values:
+            if not isinstance(value, (Gray, xyY)):
+                continue
+            try:
+                lights = _lights(value, params)
+            except _Unbounded:
+                continue
+            for light in lights:
+                if light.Y > 0.0 and light not in found:
+                    found.append(light)
+    return found
+
+
+#: How near zero a color's luminance contrast may be and still claim isoluminance: half a
+#: percent (the engine A2 plan's Q2, A; call 15). A hand-written cone contrast near V_F,10's
+#: ratio is a claim, and so is a DKL `lum` written as 0.001.
+ISOLUMINANT_WITHIN = 0.005
+
+
+def _claims_isoluminance(color, params: dict[str, Param], panel: Calibration,
+                         backgrounds: list) -> bool:
+    """Whether a color claims isoluminance (the PI, N§4 batch 1: "DKL `lum=0` with a chromatic
+    component"; the engine A2 plan's Q2, A): its luminance contrast under V_F,10 can be within
+    `ISOLUMINANT_WITHIN` of 0 **and** it can be chromatic. Written as literals, both halves say
+    it the same way, so one light gets one verdict however it is spelled; with parameters, each
+    half asks it its own way.
+
+    A `DKL` color's contrast is `lum`, and it is chromatic when `l_m` or `s_lm` is other than 0
+    (`lum` scales every cone alike). **The DKL half asks each separately** (`_can_be`): whether
+    `lum` can be in the band, and whether `l_m` or `s_lm` can be other than 0, each at any value
+    its parameter can take, not at one value of them all. So `DKL(lum=P("c"), l_m=P("c"))`, c 0
+    or 0.1, claims, though at no value is it both: a refusal of a color that is not
+    isoluminant, the safe direction.
+
+    A `ConeContrast`'s contrast is the V_F,10 weighted change of L and M on each lit background
+    (`_background_lights`), and it is chromatic when L, M and S are not all equal. **The
+    ConeContrast half asks at one value of its parameters**, per combination of their values:
+    choices exactly, one by one; a range by the ends of each (the contrast is linear in each
+    component, and a parameter in two components has one value), which claims when they span
+    the band, unless the color is achromatic at every value of the combination (L, M and S the
+    same literal or the same parameter).
+
+    **Both fail closed**: a value that cannot be read can be anything, and a chromatic range
+    crossing 0 claims, though at 0 it is the background (the plan's call 15). A component that
+    is no number names no light (`_lights`), and `_block_faults` refuses it."""
+    tol = ISOLUMINANT_WITHIN
+    if isinstance(color, DKL):
+        return (_can_be(color.lum, params, lambda v: abs(v) <= tol,
+                        lambda lo, hi: lo <= tol and hi >= -tol)
+                and any(_can_be(v, params, lambda v: v != 0.0,
+                                lambda lo, hi: lo != 0.0 or hi != 0.0)
+                        for v in (color.l_m, color.s_lm)))
+    if not isinstance(color, ConeContrast):
+        return False
+    parts = (color.L, color.M, color.S)
+    names = sorted({v.name for v in parts if isinstance(v, P)})
+    if not all(isinstance(v, P) or _is_number(v) for v in parts):
+        return False
+    try:
+        # Per parameter: its choices (each exact), or its range (the ends, together).
+        domains = {name: _domain(P(name), params) for name in names}
+    except _Unbounded:
+        return True
+    if not all(_is_number(v) for values in domains.values() for v in values):
+        return True
+    ranged = {name for name in names if not (params[name].choices)}
+    # The same parameter, or the same literal, in all three: a name never equals a number.
+    achromatic = len({v.name if isinstance(v, P) else float(v) for v in parts}) == 1
+    excitations = []
+    for background in backgrounds:
+        try:
+            excitations.append(background_cones(panel, background))
+        except ValueError:
+            continue
+    fixed = [name for name in names if name not in ranged]
+    for chosen in itertools.product(*(domains[name] for name in fixed)):
+        bound = dict(zip(fixed, chosen))
+        corners = [dict(bound, **dict(zip(sorted(ranged), ends))) for ends in itertools.product(
+            *(domains[name] for name in sorted(ranged)))]
+        lights = [tuple(float(point[v.name]) if isinstance(v, P) else float(v) for v in parts)
+                  for point in corners]
+        if not ranged and len({*lights[0]}) == 1:
+            continue  # one value, achromatic
+        if ranged and achromatic:
+            continue  # achromatic at every value
+        for excited in excitations:
+            contrasts = [luminance_contrast(L, M, excited) for L, M, _ in lights]
+            if min(contrasts) <= tol and max(contrasts) >= -tol:
+                return True
+    return False
+
+
+def _can_be(value, params: dict[str, Param], holds, spans) -> bool:
+    """Whether `value` can satisfy `holds`: a literal number itself, a parameter any of its
+    choices or, with a range of numbers, `spans(low, high)` (low first, however it was
+    declared). Anything else can, failing closed: a bound that is no number, which
+    `_block_faults` refuses, is read as no bound (the A2 final review's I1)."""
+    if isinstance(value, P):
+        param = params.get(value.name)
+        if param is not None and param.choices:
+            return any(not _is_number(c) or holds(float(c)) for c in param.choices)
+        if param is not None and _is_number(param.low) and _is_number(param.high):
+            return spans(*sorted((float(param.low), float(param.high))))
+        return True
+    return not _is_number(value) or holds(float(value))
 
 
 def _lights(color, params: dict[str, Param]) -> list:
@@ -989,11 +1234,19 @@ def _lights(color, params: dict[str, Param]) -> list:
     if isinstance(color, xyY):
         return [xyY(x, y, Y) for x, y, Y in itertools.product(
             *(_reach(v, params) for v in (color.x, color.y, color.Y)))]
+    if isinstance(color, DKL):
+        return [DKL(lum, l_m, s_lm) for lum, l_m, s_lm in itertools.product(
+            *(_reach(v, params) for v in (color.lum, color.l_m, color.s_lm)))]
+    if isinstance(color, ConeContrast):
+        return [ConeContrast(L, M, S) for L, M, S in itertools.product(
+            *(_reach(v, params) for v in (color.L, color.M, color.S)))]
     return [color]
 
 
-def _one_color(what: str, color, panel: Calibration | None) -> list[Finding]:
-    """One light against the calibration, or against its absence."""
+def _one_color(what: str, color, panel: Calibration | None, backgrounds: list) -> list[Finding]:
+    """One light against the calibration, or against its absence: a cone color against each lit
+    light the trial's background can be (`_background_lights`), since its conversion and so its
+    reach depend on the background (COL-10)."""
     if panel is None:
         return [
             Finding(
@@ -1003,39 +1256,18 @@ def _one_color(what: str, color, panel: Calibration | None) -> list[Finding]:
                 f"unmeasured",
             )
         ]
-    if panel.standard and isinstance(color, DKL):
-        # Spec §7.3: "Isoluminance needs a measured calibration", in every session (N§4
-        # batch 1); any other DKL converts through cone fundamentals, which build A2 adds.
-        # **`magnitude()` is never asked here** (the engine B plan, call 9): a component that
-        # is a parameter makes it raise (XC-269), and from engine build B's Task 8 every
-        # session checks against this calibration. A literal `lum` of 0 beside another
-        # component that is a parameter or not 0 claims isoluminance at some value; every DKL
-        # here is refused either way.
-        if _literal(color.lum) == 0.0 and any(_literal(v) != 0.0 for v in (color.l_m, color.s_lm)):
-            return [Finding("isoluminance-on-default", (
-                f"{what} claims isoluminance, which needs a measured calibration (engine spec "
-                f"§7.3); the default calibration is the sRGB standard, measured by nobody"))]
-        return [Finding("dkl-on-default", (
-            f"{what} is a DKL color, which converts through cone fundamentals (engine build "
-            f"A2); until then it loads only against a measured calibration"))]
-    findings: list[Finding] = []
-    if isinstance(color, DKL) and color.lum == 0.0 and color.magnitude() > 0.0:
-        if not panel.observer:
-            findings.append(
-                Finding(
-                    "unstated-observer",
-                    f"{what} claims isoluminance, but the calibration measured "
-                    f"{panel.measured_on} does not say whose luminous efficiency "
-                    f"it used; a human V(lambda) makes a stimulus that is "
-                    f"isoluminant for nobody in the room",
-                )
-            )
+    # Isoluminance is the lab observer's V_F,10 (A2's Q5), named by `cones.CIE2006_10` and
+    # recorded with the session; a measured calibration names its own photometry's observer or
+    # does not load (`Calibration`), so nothing is left for a finding here (engine build A2).
+    if isinstance(color, CONE_COLORS):
+        return [Finding("unrealizable-color", f"{what} asks for {color} on a background of "
+                                              f"{background}: {why}")
+                for background in backgrounds
+                if (why := unrealizable(color, panel, background)) is not None]
     why = unrealizable(color, panel)
     if why is not None:
-        findings.append(
-            Finding("unrealizable-color", f"{what} asks for {color}: {why}")
-        )
-    return findings
+        return [Finding("unrealizable-color", f"{what} asks for {color}: {why}")]
+    return []
 
 
 def _default_faults(trial: Trial, params: dict[str, Param]) -> list[Finding]:
@@ -1043,10 +1275,27 @@ def _default_faults(trial: Trial, params: dict[str, Param]) -> list[Finding]:
     from the task file"): a task that names a color, or one a parameter of which sets a light
     or a contrast -- this build's reading of "a design factor or a procedure-controlled value",
     until build C lets a task declare its factors (Question 2). Each is one warning per task,
-    accepted in training and piloting."""
+    accepted in training and piloting. Since engine build A2 the color finding also says how the
+    default's cone colors converted and which luminance they held."""
     findings = []
-    named = sorted({what for what, color in _colors(trial, params) if isinstance(color, (xyY, DKL))})
-    if named:
+    colors = [(what, color) for what, color in _colors(trial, params)
+              if isinstance(color, (xyY, *CONE_COLORS))]
+    named = sorted({what for what, _ in colors})
+    if named and any(isinstance(color, CONE_COLORS) for _, color in colors):
+        # 2026-10-08's Q2 (COL-18): the default's cone colors convert through the CIE's matrix
+        # outside its definition, and the warning a person accepts says so, and which luminance
+        # isoluminance held there (the review's S-I2), so the record does too. Both come before
+        # the colors' names, which nothing bounds, so a screen showing a warning's first
+        # `link.NOTE_LIMIT` characters shows them (the re-review's M4).
+        findings.append(Finding("color-on-default", (
+            "a recording session refuses this task on the default calibration, the sRGB "
+            "standard, measured by nobody (engine spec §7.2); there its cone colors (DKL, cone "
+            "contrast) convert through the inverse of the CIE's LMS-to-XYZ_F,10 matrix, a use "
+            "outside the CIE's definition, so how far each is from the cone contrast it names "
+            f"is unknown, and the luminance they hold constant is {HELD_STANDARD}; the colors "
+            f"it names: {'; '.join(named)}"),
+            blocking=False, accepted_in=NOT_RECORDING))
+    elif named:
         findings.append(Finding("color-on-default", (
             f"this task names colors ({'; '.join(named)}), and the default calibration is the sRGB "
             f"standard, measured by nobody: a recording session refuses it until a measured "
@@ -1145,11 +1394,12 @@ def _lit(value) -> list:
 _SIZES = ("size", "width", "height", "length", "thickness", "outer", "sigma", "aperture")
 
 #: Block fields that hold a number or a parameter (XC-245): every size, the rest the drawer
-#: reads as one, a contrast's `value`, a `Gray`'s `cd_m2` and an `xyY`'s `x`, `y` and `Y`.
+#: reads as one, a contrast's `value`, a `Gray`'s `cd_m2`, an `xyY`'s `x`, `y` and `Y`, a
+#: `DKL`'s `lum`, `l_m` and `s_lm`, and a `ConeContrast`'s `L`, `M` and `S`.
 #: `None` is a value of one only where its block's own default is `None` (a grating's
 #: `direction`).
 _NUMBERS = (*_SIZES, "inner", "sides", "sf", "phase", "tf", "direction", "orientation", "value",
-            "cd_m2", "x", "y", "Y")
+            "cd_m2", "x", "y", "Y", "lum", "l_m", "s_lm", "L", "M", "S")
 
 #: Block fields that hold a light: a `Color`, `None`, or a parameter offering those (XC-264).
 _LIGHTS = ("color", "mean")
@@ -1373,8 +1623,7 @@ def _light_faults(trial: Trial) -> list[Finding]:
         if how and all(combine in LIGHTLESS for combine in how):
             continue
         # A window or a scotoma reads no mean either, so with a multiplier it is still unread.
-        multiplied = bool(how) and all(combine == "multiply" or combine in LIGHTLESS
-                                       for combine in how)
+        multiplied = _multiplied(how)
         what += _through(color, contrast, mean)
         for color, contrast, mean in each:
             if kind == "flat":
@@ -1409,12 +1658,52 @@ def _light_faults(trial: Trial) -> list[Finding]:
                 found("unlit", (
                     f"{what}'s mean is whatever is behind it, and an eye's background is "
                     f"or can be black, so it may draw nothing; {fix}, or declare its mean"))
-            if mean is not None and not isinstance(mean, P) and any(mean != b for b in backgrounds):
+            if (mean is not None and not isinstance(mean, P) and not _isoluminant_as_written(mean)
+                    and any(mean != b for b in backgrounds)):
                 found("luminance-step", (
                     f"{what}'s mean {mean} differs from the background, so a luminance step "
                     f"sits under the pattern (engine spec §4.3: always a warning)"),
                     blocking=False,
                     accepted_in=SESSION_KINDS)  # Always a warning, in every kind (N§R3).
+    findings += _cone_color_faults(trial, params, on_black, fix)
+    return findings
+
+
+def _isoluminant_as_written(color) -> bool:
+    """A cone color with no luminance step as written: a `DKL` whose `lum` is a literal 0
+    (`DKL()` among them), or a `ConeContrast` changing S alone. A grating about such a mean has
+    no luminance step under it, so `luminance-step` does not list one (the engine A2 plan's call
+    29). One whose L and M sit at V_F,10's ratio still lists one: that ratio needs the
+    calibration, which `_light_faults` does not read."""
+    if isinstance(color, DKL):
+        return _literal(color.lum) == 0.0
+    if isinstance(color, ConeContrast):
+        return _literal(color.L) == 0.0 and _literal(color.M) == 0.0
+    return False
+
+
+def _cone_color_faults(trial: Trial, params: dict[str, Param], on_black: bool,
+                       fix: str) -> list[Finding]:
+    """A cone color (`DKL`, `ConeContrast`) is a contrast about its background in cone terms, so
+    **it needs a background that is lit** (engine spec §7.5; the PI, N§4 batch 3: "It must
+    declare one"; A1's call 6) **and one background**: through the stereoscope, a trial whose
+    eyes' backgrounds differ as written is refused one, since the same color would be two
+    different lights (the engine A2 plan's call 10). One finding each, naming every carrier."""
+    carriers = sorted({what for what, color in _colors(trial, params)
+                       if isinstance(color, CONE_COLORS) and not what.startswith("the trial's ")})
+    if not carriers:
+        return []
+    findings = []
+    if on_black:
+        findings.append(Finding("cone-color-on-black", (
+            f"{'; '.join(carriers)}: a cone color is relative to the background, and an eye's "
+            f"background is or can be black; {fix} (engine spec §7.5)")))
+    left, right = (_backgrounds(trial) * 2)[:2]
+    if trial.view == "stereoscope" and left != right:
+        findings.append(Finding("cone-color-two-backgrounds", (
+            f"{'; '.join(carriers)}: a cone color is relative to the background, and the two eyes' "
+            f"backgrounds differ ({left} and {right}), so it would be two lights; give both eyes "
+            f"one background, or write the color as an absolute light (xyY)")))
     return findings
 
 
@@ -1542,6 +1831,9 @@ def _block_faults(trial: Trial) -> list[Finding]:
     def light(v) -> bool:
         return v is None or isinstance(v, Color)
 
+    def absolute(v) -> bool:
+        return v is None or isinstance(v, (Gray, xyY))
+
     def shown(what: str, looks) -> None:
         """An appearance: a parameter offering none is refused, as one of another kind is."""
         if isinstance(looks, P) and not (looks.name in params and params[looks.name].choices):
@@ -1561,7 +1853,8 @@ def _block_faults(trial: Trial) -> list[Finding]:
     blocks = [part for looks in _appearances(trial) for part in _parts(looks, params)]
     for attr in ("background", "background_left", "background_right"):
         blocks += _parts(getattr(trial, attr), params)
-        kind(f"the trial's {attr.replace('_', ' ')}", getattr(trial, attr), light, "a color")
+        kind(f"the trial's {attr.replace('_', ' ')}", getattr(trial, attr), absolute,
+             "an absolute light, Gray or xyY: what a contrast or a cone color is relative to")
     for part in blocks:
         name = type(part).__name__
         for f in dataclasses.fields(part):
@@ -1590,6 +1883,10 @@ def _block_faults(trial: Trial) -> list[Finding]:
             for attr in ("x", "y", "Y"):
                 # Bounded here; whether the panel makes each value is `_color_faults`' test.
                 values(part, attr)
+        if isinstance(part, CONE_COLORS):
+            for field in dataclasses.fields(part):
+                # Bounded here, as an `xyY`'s are; whether the panel makes each is `_color_faults`'.
+                values(part, field.name)
         if isinstance(part, (look.Ring, Annulus)):
             inner, outer = values(part, "inner"), values(part, "outer")
             first(inner, lambda v: v < 0.0)

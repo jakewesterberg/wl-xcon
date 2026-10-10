@@ -372,6 +372,29 @@ any light, contrast or opacity a parameter sets (Q2; call 24), so no reference t
 default. A measured calibration is one JSON record, never executed (Q4; ADR-0011); "past 30 days"
 is an age of 31 calendar days or more (call 3).
 
+*Engine build A2, 2026-10-10* (plan `docs/superpowers/plans/2026-10-09-engine-a2.md`): cone
+colors convert through the CIE 2006 10° fundamentals, the CIE's table bundled (A2's Q3; ADR-0012)
+and the observer unadjusted, its parameters recorded (Q4); a DKL number is the hybrid (Q1), `lum`
+luminance contrast and `l_m`, `s_lm` pooled cone contrast, isoluminance under V_F,10 (Q5); a cone
+contrast (`ConeContrast`) is added. On the default they convert through the inverse of the CIE's
+LMS-to-XYZ_F,10 matrix, recorded as outside its definition (Q2), the luminance held there being the
+standard's CIE 1931 Y; on a measured calibration through its primaries' spectra, and a record
+without them converts none. Item 4's realizability is full conversion against each lit value of
+the background, a measured transfer being black-subtracted (ADR-0011, amended), and a contrast's
+extremes are held to the panel too; `max_cone_contrast` is gone. Item 5: a cone color on a
+background that is or can be black is refused, and one between two eyes' backgrounds that differ.
+Build B's `dkl-on-default` is retired, as its call 9 foresaw: a cone color that claims no
+isoluminance loads on the default in training and piloting under `color-on-default`;
+`isoluminance-on-default` stays, read at every value a parameter can take, and a DKL color or a cone
+contrast whose luminance contrast can be within half a percent of 0 while a cone changes claims it
+(the PI's answer to the plan's Q2). The search task's scene is the PI's answer to its Q1: his 2023
+red and green on a D65 gray at their own luminance, one level for all rigs, 16 cd/m² until the
+panels are measured (XC-310).
+This supersedes item 3's "`visual_search` keeps its isoluminant colors and waits" and build B's note's
+"until build A2" (that note stays as written; it was true of its date).
+Item 9's 2° set for foveal work is not built (XC-302); the record's second
+luminance waits on build F (XC-305).
+
 ## 8. Sync and evidence (N§5, N§R3, N§R5)
 
 1. **The flip patch** alternates every refresh. **The task patch toggles on every change** (§3.3):
@@ -673,8 +696,9 @@ summary before its build merges:
 - **wl-preproc**: condition numbering for `CONDITION` (XC-197); the trial table's "overridden" flag
   (§14.7); reading monocular and session-start calibrations (§12.4); the continuous mode's record shape
   and anchor codes (§13.6, §8.4); the session kind and the warnings in the record (§19; engine build B):
-  `config.json`'s `session_kind`, and its `calibration` (`id`, `standard`, `measured_on`, or `null` when
-  the rig's record would not load); each run's start row's `calibration` (the id); and `warnings.jsonl`,
+  `config.json`'s `session_kind`, and its `calibration` (`id`, `standard`, `measured_on`, and since engine build A2 `cones`: the observer
+  and its parameters, how cone colors converted, which luminance isoluminance held and what a DKL number
+  means; or `null` when the rig's record would not load); each run's start row's `calibration` (the id); and `warnings.jsonl`,
   one row per warning a session accepted (`code`, `detail`, `accepted_in`, `session_kind`, `by`, `at`,
   `at_local`, `how`, `run`); onset alignment through the screen log and the flip count.
   **No change to its frozen codec.**

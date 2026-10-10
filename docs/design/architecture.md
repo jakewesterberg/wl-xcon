@@ -480,6 +480,17 @@ The **screen description** (`wl_xcon/screen.py`) and the **exact drawer** (`wl_x
 `look.py` and `viewport.py`) exist since engine build A1 (2026-10-07). Nothing in a session calls them
 yet: the display process (engine build E) and the screen log (engine build F) will.
 
+**Color, since engine build A2.** A cone color (`DKL`, `ConeContrast`) is a contrast about its
+background in the lab's one observer, the CIE 2006 10° cone fundamentals (`wl_xcon/cones.py`; the
+CIE's table bundled unmodified in `wl_xcon/cie/` under CC BY-SA 4.0 and read only when its
+checksum is the CIE's, ADR-0012), turned into CIE XYZ through the session's calibration
+(`photometry.cone_xyz`): on the default through the CIE's LMS-to-XYZ_F,10 matrix inverted, on a
+measured record through its primaries' spectra (ADR-0011). `check` holds every light to the panel
+by full conversion against every lit value of its background, and the exact drawer's last step
+turns each pixel into output levels through the calibration's measured, black-subtracted transfer
+(`exact.output_levels`), refusing one the panel cannot make. Each session's `config.json` records
+the observer, how its cone colors converted and which luminance their isoluminance held.
+
 ## Neural plane and stimulation
 
 Both systems record; either may gate the loop; **Intan always stimulates.**

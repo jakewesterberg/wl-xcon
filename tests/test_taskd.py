@@ -2746,7 +2746,24 @@ def test_a_sessions_config_and_each_start_row_name_its_calibration(tmp_path):
 
     config = json.loads((session.directory / "config.json").read_text())
     rows = [json.loads(line) for line in (session.directory / "runs.jsonl").read_text().splitlines()]
-    assert config["calibration"] == {"id": "srgb-standard", "standard": True, "measured_on": ""}
+    assert config["calibration"] == {
+        "id": "srgb-standard", "standard": True, "measured_on": "",
+        # Engine build A2: how its cone colors became light (A2's Q2 and Q4).
+        "cones": {
+            "observer": {
+                "name": "CIE 2006 10°", "data": "10.25039/CIE.DS.nxsqeri8", "field_deg": 10.0,
+                "peak_optical_density": [0.38, 0.38, 0.30], "macular_density_460nm": 0.095,
+                "lens_density_400nm": 1.7649, "luminosity": "V_F,10",
+                "luminosity_weights": [0.69283932, 0.34967567],
+                "interpolation": "linear between the table's 5 nm points; zero outside 390-830 nm",
+            },
+            "via": "the inverse of the CIE's LMS-to-XYZ_F,10 matrix applied to the sRGB "
+                   "standard's CIE 1931 XYZ, a use outside the CIE's definition",
+            "luminance": "the standard's CIE 1931 Y, which the CIE's matrix equates with V_F,10",
+            "dkl": "lum is luminance contrast under V_F,10; l_m and s_lm are pooled cone contrast "
+                   "along their isolating directions, +l_m raising L, +s_lm raising S",
+        },
+    }
     assert [r["calibration"] for r in rows if r["event"] == "start"] == ["srgb-standard"]
 
 
