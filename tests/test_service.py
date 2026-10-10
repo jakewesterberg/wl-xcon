@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from _calibrations import BACKGROUND, LINEAR, OBSERVER, PRIMARIES, measured, promptly
+from _calibrations import BACKGROUND, LINEAR, OBSERVER, PRIMARIES, SPECTRA, measured, promptly
 from _ports import endpoints as free_endpoints
 from _rig import PATH as RIG_FILE
 from _rig import RIG, naming
@@ -2833,13 +2833,14 @@ def test_a_resume_after_the_rigs_calibration_changed_names_the_new_one_on_each_l
     _step(first, _start())
     _run_to_its_end(first)
     today = date.fromtimestamp(WALL).isoformat()
-    panel = measured(measured_on=today, id=f"rig1@{today}", spectra=None)
+    panel = measured(measured_on=today, id=f"rig1@{today}")
     (tmp_path / "rig").mkdir()
     (tmp_path / "rig" / "cal.json").write_text(json.dumps({
         "id": panel.id, "measured_on": panel.measured_on, "observer": OBSERVER,
         "primaries": PRIMARIES, "background": BACKGROUND,
         "transfer": {c: [list(p) for p in zip(LINEAR.levels, LINEAR.fractions)]
                      for c in ("red", "green", "blue")},
+        "spectra": {name: list(getattr(SPECTRA, name)) for name in ("nm", "red", "green", "blue")},
     }))
     rig_path = naming(tmp_path / "rig", "cal.json")
     # the process stops; `wlx taskd` starts again over the same root, under the new rig

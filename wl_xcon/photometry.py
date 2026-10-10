@@ -172,7 +172,10 @@ class Transfer:
     per channel"; N§4 batch 1, since a QD-OLED's transfer is not a power law): at each drive
     `level`, the output code over its maximum, the channel's light as a `fraction` of its light
     at full drive. **Stored and checked here, never evaluated in build B**: turning a light into
-    output levels through it is build A2's (`exact.py`'s docstring)."""
+    output levels through it is build A2's (`exact.py`'s docstring).
+
+    **Black-subtracted** (engine build A2; ADR-0011): its fraction at level 0 is 0, the panel's
+    black carried, when build J measures one, as a single ambient term (XC-309)."""
 
     levels: tuple
     fractions: tuple
@@ -197,10 +200,11 @@ class Transfer:
             raise ValueError("a transfer's levels rise strictly")
         if any(later < earlier for earlier, later in zip(fractions, fractions[1:])):
             raise ValueError("a transfer's fractions never fall as its level rises")
-        if fractions[0] < 0.0 or fractions[-1] != 1.0:
+        if fractions[0] != 0.0 or fractions[-1] != 1.0:
             raise ValueError(
-                f"a transfer's fractions start at 0 or above and end at 1, full drive; this one "
-                f"runs from {fractions[0]} to {fractions[-1]}"
+                f"a transfer's fractions start at 0 at level 0, the channel's light with the "
+                f"panel's black subtracted (ADR-0011), and end at 1, full drive; this one runs "
+                f"from {fractions[0]} to {fractions[-1]}"
             )
 
 
@@ -582,9 +586,12 @@ def unrealizable(color: Color, panel: Calibration, background: xyY | None = None
     return None
 
 
-#: A calibration record's fields, each required and no other (Question 4: one JSON file per
-#: measured calibration).
+#: A calibration record's fields, each required and no other but `RECORD_OPTIONAL` (Question 4:
+#: one JSON file per measured calibration).
 RECORD_FIELDS = ("id", "measured_on", "observer", "primaries", "background", "transfer")
+#: The one field a record may leave out (engine build A2): its primaries' spectra, without which it
+#: converts no cone color (`Calibration.cones`). Given, it is never `null`.
+RECORD_OPTIONAL = ("spectra",)
 _CHANNELS = ("red", "green", "blue")
 
 #: The longest id a record may carry: the rig file, `config.json`, every run's start row and
@@ -620,7 +627,8 @@ def read_calibration(path) -> Calibration:
     a field a record does not have or gives twice, or a value that is not what its field holds
     raises `ValueError` naming it, as does a file over `RECORD_LIMIT` or nested too deep to
     parse; a file that cannot be read raises `OSError`. Reading it runs no code, unlike the
-    rig's and the animal's Python files.
+    rig's and the animal's Python files. Its one optional field, `spectra` (engine build A2), is
+    read when given and never filled in when not.
 
     **Only a regular file is read** (the engine B final review): anything else -- a named
     pipe, a directory, a device -- raises `ValueError` saying what it is, before a byte is
@@ -655,7 +663,7 @@ def read_calibration(path) -> Calibration:
     missing = [name for name in RECORD_FIELDS if name not in data]
     if missing:
         raise ValueError(f"it has no {', '.join(missing)}")
-    extra = sorted(set(data) - set(RECORD_FIELDS))
+    extra = sorted(set(data) - set(RECORD_FIELDS) - set(RECORD_OPTIONAL))
     if extra:
         raise ValueError(f"it has {', '.join(extra)}, which a calibration record does not")
     for name in ("id", "measured_on", "observer"):
@@ -682,7 +690,23 @@ def read_calibration(path) -> Calibration:
         observer=data["observer"],
         measured_on=data["measured_on"],
         id=data["id"],
+        spectra=_spectra(data["spectra"]) if "spectra" in data else None,
     )
+
+
+def _spectra(value: object) -> Spectra:
+    """A record's `spectra`: `nm`, `red`, `green` and `blue`, each once, each a list of numbers,
+    held to what `Spectra` holds them to."""
+    names = ("nm", *_CHANNELS)
+    if not isinstance(value, dict) or sorted(value) != sorted(names):
+        raise ValueError("its spectra name nm, red, green and blue, each once")
+    for name in names:
+        if not (isinstance(value[name], list) and all(_finite_number(v) for v in value[name])):
+            raise ValueError(f"its spectra's {name} is a list of numbers")
+    try:
+        return Spectra(**{name: tuple(float(v) for v in value[name]) for name in names})
+    except ValueError as refused:
+        raise ValueError(f"its spectra: {refused}") from refused
 
 
 def _once_each(pairs: list) -> dict:

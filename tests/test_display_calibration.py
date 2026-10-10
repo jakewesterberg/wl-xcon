@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from _calibrations import BACKGROUND, LINEAR, OBSERVER, PRIMARIES, measured, promptly
+from _calibrations import BACKGROUND, LINEAR, OBSERVER, PRIMARIES, SPECTRA, measured, promptly
 from _rig import PATH as RIG_FILE
 from _rig import RIG, naming
 from wl_xcon.cli import _load_calibration, _load_rig
@@ -95,7 +95,9 @@ def test_the_default_transfer_is_the_srgb_curve_at_ten_bits():
     ((0.0, 0.5, 0.5, 1.0), (0.0, 0.2, 0.3, 1.0), "rise strictly"),
     ((0.0, 0.5, 0.7, 1.0), (0.0, 0.6, 0.4, 1.0), "never fall"),
     ((0.0, 1.0), (0.0, 0.9), "end at 1"),
-    ((0.0, 1.0), (-0.1, 1.0), "start at 0 or above"),
+    ((0.0, 1.0), (-0.1, 1.0), "start at 0 at level 0"),
+    # Engine build A2: a table's light is black-subtracted (ADR-0011), so it starts at 0.
+    ((0.0, 1.0), (0.01, 1.0), "the panel's black subtracted"),
     ([0.0, 1.0], (0.0, 1.0), "tuples"),
 ])
 def test_a_transfer_is_a_measured_table_or_it_is_refused(levels, fractions, said):
@@ -168,6 +170,8 @@ def test_a_record_reads_back_as_the_calibration_it_describes(tmp_path):
     # Engine build A2 converts cone colors in full and keeps no stored limit (spec §7.4).
     ({"max_cone_contrast": 0.2}, "max_cone_contrast, which a calibration record does not"),
     ({"observer": " "}, "names the observer"),
+    ({"transfer": {c: [[0.0, 0.01], [1.0, 1.0]] for c in ("red", "green", "blue")}},
+     "red transfer: a transfer's fractions start at 0 at level 0"),
     # Too large for a float: `math.isfinite` raises `OverflowError` on it, not a ValueError.
     ({"background": [0.3127, 0.329, 10**400]}, "three numbers"),
     ({"primaries": {**PRIMARIES, "red": [0.68, 0.0, 45.0]}}, "red primary"),
@@ -282,3 +286,33 @@ def test_a_calibration_that_is_not_a_path_is_refused(tmp_path, calibration):
 
     with pytest.raises(SystemExit, match="the path of a calibration record"):
         _load_calibration(_load_rig(path), path)
+
+
+def _spectra_record(**over) -> dict:
+    record = {name: list(getattr(SPECTRA, name)) for name in ("nm", "red", "green", "blue")}
+    record.update(over)
+    return record
+
+
+def test_a_record_carries_its_primaries_spectra(tmp_path):
+    """Engine build A2 (ADR-0011, amended): a record may carry each primary's measured spectrum,
+    from which its cone colors convert; without them it converts none."""
+    panel = read_calibration(_write(tmp_path, _record(spectra=_spectra_record())))
+
+    assert panel.spectra == SPECTRA
+    assert panel.cones is not None
+    assert read_calibration(_write(tmp_path, _record())).spectra is None
+
+
+@pytest.mark.parametrize("spectra, said", [
+    (None, "name nm, red, green and blue"),
+    ({"nm": [400.0], "red": [1.0]}, "name nm, red, green and blue"),
+    (_spectra_record(red=["bright"] * len(SPECTRA.nm)), "spectra's red is a list of numbers"),
+    (_spectra_record(nm=[True] * len(SPECTRA.nm)), "spectra's nm is a list of numbers"),
+    (_spectra_record(blue=[0.0] * len(SPECTRA.nm)), "its spectra: the blue spectrum"),
+    (_spectra_record(nm=[float(v) for v in range(400, 801, 5)]),
+     "its spectra: a calibration's spectra cover"),
+])
+def test_a_record_whose_spectra_are_not_a_measurement_is_refused(tmp_path, spectra, said):
+    with pytest.raises(ValueError, match=said):
+        read_calibration(_write(tmp_path, _record(spectra=spectra)))
