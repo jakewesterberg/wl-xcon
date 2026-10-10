@@ -14,10 +14,13 @@ from wl_xcon.photometry import (
     CONE_COLORS,
     D65,
     DKL,
+    HELD_STANDARD,
     Calibration,
     Color,
     ConeContrast,
     Gray,
+    background_cones,
+    luminance_contrast,
     unrealizable,
     xyY,
 )
@@ -977,6 +980,17 @@ def _color_faults(trial: Trial, panel: Calibration | None) -> list[Finding]:
             continue
         if what.startswith("the trial's ") and isinstance(color, CONE_COLORS):
             continue  # a background is an absolute light, and `_block_faults` refuses one that is not
+        if (panel is not None and panel.standard
+                and _claims_isoluminance(color, params, panel, backgrounds)):
+            # Spec §7.3: "Isoluminance needs a measured calibration", in every session (N§4
+            # batch 1). Asked of the color as written, before its values are read, so a `lum`
+            # whose range crosses 0 claims it too (XC-269).
+            finding = Finding("isoluminance-on-default", (
+                f"{what} claims isoluminance, which needs a measured calibration (engine spec "
+                f"§7.3); the default calibration is the sRGB standard, measured by nobody"))
+            if finding not in findings:
+                findings.append(finding)
+            continue
         try:
             lights = [color] if panel is None else _lights(color, params)
         except _Unbounded:
@@ -1015,6 +1029,63 @@ def _background_lights(trial: Trial, params: dict[str, Param]) -> list:
     return found
 
 
+#: How near zero a color's luminance contrast may be and still claim isoluminance: half a
+#: percent (the engine A2 plan's Q2, A; call 15). A hand-written cone contrast near V_F,10's
+#: ratio is a claim, and so is a DKL `lum` written as 0.001.
+ISOLUMINANT_WITHIN = 0.005
+
+
+def _claims_isoluminance(color, params: dict[str, Param], panel: Calibration,
+                         backgrounds: list) -> bool:
+    """Whether a color claims isoluminance (the PI, N§4 batch 1: "DKL `lum=0` with a chromatic
+    component"; the engine A2 plan's Q2, A): at some value its parameters can take, its luminance
+    contrast under V_F,10 is within `ISOLUMINANT_WITHIN` of 0 while some cone changes. For a `DKL`
+    color that contrast is `lum`, and the cones change when `l_m` or `s_lm` is other than 0. For a
+    `ConeContrast` it is the V_F,10 weighted change of L and M on each lit background
+    (`_background_lights`), over every corner of its values: a claim when those span the band
+    around 0 and the color is not the background everywhere. **It fails closed**: a value that
+    cannot be read can be anything, and an L or M range crossing 0 claims, though at 0 it is the
+    background (the plan's call 15). A component that is no number names no light (`_lights`),
+    and `_block_faults` refuses it."""
+    tol = ISOLUMINANT_WITHIN
+    if isinstance(color, DKL):
+        return (_can_be(color.lum, params, lambda v: abs(v) <= tol,
+                        lambda lo, hi: lo <= tol and hi >= -tol)
+                and any(_can_be(v, params, lambda v: v != 0.0,
+                                lambda lo, hi: lo != 0.0 or hi != 0.0)
+                        for v in (color.l_m, color.s_lm)))
+    if not isinstance(color, ConeContrast):
+        return False
+    try:
+        values = _lights(color, params)
+    except _Unbounded:
+        return True
+    if not any((value.L, value.M, value.S) != (0.0, 0.0, 0.0) for value in values):
+        return False
+    for background in backgrounds:
+        try:
+            excited = background_cones(panel, background)
+        except ValueError:
+            continue
+        contrasts = [luminance_contrast(v.L, v.M, excited) for v in values]
+        if min(contrasts) <= tol and max(contrasts) >= -tol:
+            return True
+    return False
+
+
+def _can_be(value, params: dict[str, Param], holds, spans) -> bool:
+    """Whether `value` can satisfy `holds`: a literal number itself, a parameter any of its
+    choices or, with a range, `spans(low, high)`. Anything else can, failing closed."""
+    if isinstance(value, P):
+        param = params.get(value.name)
+        if param is not None and param.choices:
+            return any(not _is_number(c) or holds(float(c)) for c in param.choices)
+        if param is not None and param.low is not None and param.high is not None:
+            return spans(float(param.low), float(param.high))
+        return True
+    return not _is_number(value) or holds(float(value))
+
+
 def _lights(color, params: dict[str, Param]) -> list:
     """Each light `color` can be, for a calibration to test, at each value a parameter in it
     can take (`_reach`: each choice, or both ends of a range): a `Gray` is D65 white at each
@@ -1051,21 +1122,6 @@ def _one_color(what: str, color, panel: Calibration | None, backgrounds: list) -
                 f"unmeasured",
             )
         ]
-    if panel.standard and isinstance(color, DKL):
-        # Spec §7.3: "Isoluminance needs a measured calibration", in every session (N§4
-        # batch 1); any other DKL converts through cone fundamentals, which build A2 adds.
-        # **`magnitude()` is never asked here** (the engine B plan, call 9): a component that
-        # is a parameter makes it raise (XC-269), and from engine build B's Task 8 every
-        # session checks against this calibration. A literal `lum` of 0 beside another
-        # component that is a parameter or not 0 claims isoluminance at some value; every DKL
-        # here is refused either way.
-        if _literal(color.lum) == 0.0 and any(_literal(v) != 0.0 for v in (color.l_m, color.s_lm)):
-            return [Finding("isoluminance-on-default", (
-                f"{what} claims isoluminance, which needs a measured calibration (engine spec "
-                f"§7.3); the default calibration is the sRGB standard, measured by nobody"))]
-        return [Finding("dkl-on-default", (
-            f"{what} is a DKL color, which converts through cone fundamentals (engine build "
-            f"A2); until then it loads only against a measured calibration"))]
     # Isoluminance is the lab observer's V_F,10 (A2's Q5), named by `cones.CIE2006_10` and
     # recorded with the session; a measured calibration names its own photometry's observer or
     # does not load (`Calibration`), so nothing is left for a finding here (engine build A2).
@@ -1085,10 +1141,27 @@ def _default_faults(trial: Trial, params: dict[str, Param]) -> list[Finding]:
     from the task file"): a task that names a color, or one a parameter of which sets a light
     or a contrast -- this build's reading of "a design factor or a procedure-controlled value",
     until build C lets a task declare its factors (Question 2). Each is one warning per task,
-    accepted in training and piloting."""
+    accepted in training and piloting. Since engine build A2 the color finding also says how the
+    default's cone colors converted and which luminance they held."""
     findings = []
-    named = sorted({what for what, color in _colors(trial, params) if isinstance(color, (xyY, *CONE_COLORS))})
-    if named:
+    colors = [(what, color) for what, color in _colors(trial, params)
+              if isinstance(color, (xyY, *CONE_COLORS))]
+    named = sorted({what for what, _ in colors})
+    if named and any(isinstance(color, CONE_COLORS) for _, color in colors):
+        # 2026-10-08's Q2 (COL-18): the default's cone colors convert through the CIE's matrix
+        # outside its definition, and the warning a person accepts says so, and which luminance
+        # isoluminance held there (the review's S-I2), so the record does too. Both come before
+        # the colors' names, which nothing bounds, so a screen showing a warning's first
+        # `link.NOTE_LIMIT` characters shows them (the re-review's M4).
+        findings.append(Finding("color-on-default", (
+            "a recording session refuses this task on the default calibration, the sRGB "
+            "standard, measured by nobody (engine spec §7.2); there its cone colors (DKL, cone "
+            "contrast) convert through the inverse of the CIE's LMS-to-XYZ_F,10 matrix, a use "
+            "outside the CIE's definition, so how far each is from the cone contrast it names "
+            f"is unknown, and the luminance they hold constant is {HELD_STANDARD}; the colors "
+            f"it names: {'; '.join(named)}"),
+            blocking=False, accepted_in=NOT_RECORDING))
+    elif named:
         findings.append(Finding("color-on-default", (
             f"this task names colors ({'; '.join(named)}), and the default calibration is the sRGB "
             f"standard, measured by nobody: a recording session refuses it until a measured "

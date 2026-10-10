@@ -419,6 +419,14 @@ class Calibration:
         return self._cones
 
 
+#: What luminance a DKL color's `lum` and isoluminance hold on the standard (the engine A2 plan's
+#: review S-I2): the CIE's matrix makes V_F,10 the standard's own CIE 1931 Y, so on a panel
+#: whose real primaries differ, the true V_F,10 contrast of such a light is unknown.
+HELD_STANDARD = "the standard's CIE 1931 Y, which the CIE's matrix equates with V_F,10"
+#: And on a measured calibration with spectra.
+HELD_SPECTRA = "V_F,10, computed from the primaries' measured spectra"
+
+
 def _inverse3(m) -> tuple:
     """The inverse of a 3×3 given row by row, by its adjugate."""
     det = _det3(m)
@@ -495,12 +503,26 @@ def _contrast(color, excited) -> tuple[float, float, float]:
         return _numbers(color, (color.L, color.M, color.S))
     if not isinstance(color, DKL):
         raise TypeError(f"{type(color).__name__} is not a cone color")
-    from wl_xcon import cones
-
-    ratio = (cones.V_F10[0] * excited[0]) / (cones.V_F10[1] * excited[1])
+    weight_l, weight_m = v_f10_weights(excited)
+    ratio = weight_l / weight_m
     norm = math.sqrt(1.0 + ratio * ratio)
     lum, l_m, s_lm = _numbers(color, (color.lum, color.l_m, color.s_lm))
     return (lum + l_m / norm, lum - l_m * ratio / norm, lum + s_lm)
+
+
+def v_f10_weights(excited) -> tuple[float, float]:
+    """V_F,10's weights on the L and M contrasts about a background whose excitations are
+    `excited`: each cone's V_F,10 coefficient times its excitation."""
+    from wl_xcon import cones
+
+    return cones.V_F10[0] * excited[0], cones.V_F10[1] * excited[1]
+
+
+def luminance_contrast(L: float, M: float, excited) -> float:
+    """The V_F,10 luminance contrast of cone contrasts `L` and `M` about a background (a `DKL`
+    color's `lum`, which `_contrast` inverts): their weighted mean under `v_f10_weights`."""
+    weight_l, weight_m = v_f10_weights(excited)
+    return (weight_l * L + weight_m * M) / (weight_l + weight_m)
 
 
 def _numbers(color, values) -> tuple[float, ...]:

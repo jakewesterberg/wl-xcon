@@ -17,9 +17,11 @@ from wl_xcon import cones, look
 from wl_xcon.check import _background_lights, check
 from wl_xcon.cones import CIE2006_10
 from wl_xcon.findings import NOT_RECORDING
+from wl_xcon.link import NOTE_LIMIT, cut
 from wl_xcon.photometry import (
     D65,
     DKL,
+    HELD_STANDARD,
     RMS,
     SRGB,
     Calibration,
@@ -421,24 +423,118 @@ def test_isoluminance_needs_a_measured_calibration_in_every_kind():
     assert "measured calibration" in found["isoluminance-on-default"].detail
 
 
-def test_a_dkl_color_on_the_default_waits_for_build_a2():
-    found = _found(a_task(Disc(color=DKL(lum=0.1))))
+def test_a_cone_color_on_the_default_trains_and_pilots_with_the_warning():
+    """Engine build A2 (B's call 9 retired): a DKL color that claims no isoluminance, or a cone
+    contrast that does not, converts through the CIE's matrix on the default and is refused only
+    in recording, by `color-on-default`, whose sentence says how it converted and which luminance
+    it held (2026-10-08's Q2; COL-18; the review's S-I2)."""
+    for color in (DKL(lum=0.1), DKL(lum=0.05, l_m=0.08), ConeContrast(L=0.1, S=0.5)):
+        found = check(replace(a_task(Disc(color=color)), background=GRAY_BG), calibration=SRGB)
 
-    assert found["dkl-on-default"].blocking and "A2" in found["dkl-on-default"].detail
-    assert "isoluminance-on-default" not in found
+        assert [f.code for f in found] == ["color-on-default"], color
+        assert found[0].accepted_in == NOT_RECORDING
+        assert "a use outside the CIE's definition" in found[0].detail
+        assert "the luminance they hold constant is the standard's CIE 1931 Y" in found[0].detail
 
 
-def test_a_dkl_color_with_a_parameter_inside_is_refused_on_the_default_never_raised():
-    """The review's I4: `DKL.magnitude()` raises on a parameter (XC-269), and from Task 8
-    every session, `wlx check` and `wlx run` check against the default."""
-    isoluminant = replace(a_task(Disc(color=DKL(lum=0.0, l_m=P("c")))),
-                          params=[Param("c", unit="contrast", low=-0.1, high=0.1)])
-    stepped = replace(a_task(Disc(color=DKL(lum=P("c"), l_m=0.05))),
-                      params=[Param("c", unit="contrast", low=-0.1, high=0.1)])
+def test_a_cone_color_warning_says_how_it_converted_within_what_a_screen_shows():
+    """The re-review's M4: a screen shows a warning's first `link.NOTE_LIMIT` characters
+    (`WarningRow.of`), and nothing bounds the list of colors a task names, so how the default
+    converts cone colors and which luminance they hold come before that list."""
+    trial = replace(_choosing(*(Disc(color=DKL(lum=0.1 + i / 100)) for i in range(12))),
+                    background=GRAY_BG)
+    detail = _found(trial)["color-on-default"].detail
 
-    assert _found(isoluminant)["isoluminance-on-default"].blocking
-    assert _found(stepped)["dkl-on-default"].blocking
-    assert "isoluminance-on-default" not in _found(stepped)
+    shown = cut(detail, NOTE_LIMIT)
+
+    assert len(detail) > NOTE_LIMIT
+    assert "a use outside the CIE's definition" in shown
+    assert "the luminance they hold constant is " + HELD_STANDARD + ";" in shown
+
+
+def test_the_default_warning_says_nothing_of_cone_colors_a_task_does_not_use():
+    found = _found(a_task(Disc(color=xyY(0.64, 0.33, 10.0))))
+
+    assert "CIE's definition" not in found["color-on-default"].detail
+
+
+def test_a_cone_color_the_default_cannot_make_is_refused_on_it():
+    """Not isoluminant (`lum` 0.01), so it converts; the sRGB standard's red cannot go that low."""
+    trial = replace(a_task(Disc(color=DKL(lum=0.01, l_m=-0.3))), background=GRAY_BG)
+
+    assert _found(trial)["unrealizable-color"].blocking
+
+
+def test_a_dkl_color_that_can_be_isoluminant_is_refused_on_the_default_whatever_its_parameters():
+    """Spec §7.3 asked of the color as written (XC-269): a `lum` whose range crosses 0 beside a
+    chromatic component claims isoluminance at that value, as a literal 0 beside a chromatic
+    parameter does; a `lum` that never reaches 0, or one with no chromatic component, does not."""
+    contrast = Param("c", unit="contrast", low=-0.1, high=0.1)
+    up = Param("up", unit="contrast", low=0.05, high=0.2)
+    claims = [
+        DKL(lum=0.0, l_m=P("c")),
+        DKL(lum=P("c"), l_m=0.05),
+        DKL(lum=P("c"), s_lm=P("c")),
+    ]
+    claims_none = [
+        DKL(lum=0.1, l_m=0.05),
+        DKL(lum=P("up"), l_m=0.05),
+        DKL(lum=P("c")),
+    ]
+
+    for color in claims:
+        trial = replace(a_task(Disc(color=color)), background=GRAY_BG, params=[contrast, up])
+        assert _found(trial)["isoluminance-on-default"].blocking, color
+    for color in claims_none:
+        trial = replace(a_task(Disc(color=color)), background=GRAY_BG, params=[contrast, up])
+        assert "isoluminance-on-default" not in _found(trial), color
+
+
+def test_a_dkl_lum_at_the_edge_of_a_range_or_among_choices_claims_isoluminance():
+    """The boundaries of `_claims_isoluminance` (the review's E-I4): 0 at either end of a range,
+    0 among choices, a chromatic range that is only 0 or reaches it, a `lum` within half a
+    percent of 0, the band's edge included, and a `lum` the task does not declare, which can be
+    anything (failing closed; the re-review's M2)."""
+    def claims(color, *params) -> bool:
+        trial = replace(a_task(Disc(color=color)), background=GRAY_BG, params=list(params))
+        return "isoluminance-on-default" in _found(trial)
+
+    assert claims(DKL(lum=P("lo"), l_m=0.05), Param("lo", unit="contrast", low=0.0, high=0.1))
+    assert claims(DKL(lum=P("hi"), l_m=0.05), Param("hi", unit="contrast", low=-0.1, high=0.0))
+    assert claims(DKL(lum=P("k"), l_m=0.05), Param("k", unit="contrast", choices=(0.1, 0.0)))
+    assert not claims(DKL(lum=P("k"), l_m=0.05), Param("k", unit="contrast", choices=(0.05, 0.1)))
+    assert not claims(DKL(l_m=P("z")), Param("z", unit="contrast", low=0.0, high=0.0))
+    assert claims(DKL(l_m=P("z")), Param("z", unit="contrast", choices=(0.0, 0.05)))
+    assert claims(DKL(l_m=P("w")), Param("w", unit="contrast", low=0.0, high=0.05))
+    assert claims(DKL(lum=0.005, l_m=0.05))
+    assert not claims(DKL(lum=0.006, l_m=0.05))
+    assert claims(DKL(lum=P("e"), l_m=0.05), Param("e", unit="contrast", low=0.005, high=0.1))
+    assert claims(DKL(lum=P("f"), l_m=0.05), Param("f", unit="contrast", low=-0.1, high=-0.005))
+    assert claims(DKL(lum=P("undeclared"), l_m=0.05))
+
+
+def test_a_cone_contrast_that_holds_v_f10_still_claims_isoluminance_on_the_default():
+    """The engine A2 plan's Q2, A: S alone, or L and M at V_F,10's ratio on the background (the
+    search task's red written as a cone contrast), within half a percent, either side of the
+    band's edge (on a D65 gray L's share of V_F,10 is 0.689, so an L contrast of 0.007 is a
+    luminance contrast of 0.0048 and 0.0075 one of 0.0052); and a range of L or M that crosses 0,
+    or a value the task does not declare, claims too, failing closed (the re-review's M2). One
+    whose luminance stays clear of 0 does not, nor any on a measured calibration."""
+    def claims(color, *params) -> bool:
+        trial = replace(a_task(Disc(color=color)), background=GRAY_BG, params=list(params))
+        return "isoluminance-on-default" in _found(trial)
+
+    assert claims(ConeContrast(S=0.5))
+    assert claims(ConeContrast(L=0.033, M=-0.073))
+    assert claims(ConeContrast(L=P("l")), Param("l", unit="contrast", low=-0.1, high=0.1))
+    assert not claims(ConeContrast(L=0.1, S=0.5))
+    assert not claims(ConeContrast(L=P("l")), Param("l", unit="contrast", choices=(0.1, 0.2)))
+    assert not claims(ConeContrast())
+    assert claims(ConeContrast(L=0.007))
+    assert not claims(ConeContrast(L=0.0075))
+    assert claims(ConeContrast(S=P("undeclared")))
+    assert "isoluminance-on-default" not in _found(
+        replace(a_task(Disc(color=ConeContrast(S=0.5))), background=GRAY_BG), calibration=measured())
 
 
 def test_a_named_color_on_the_default_is_refused_only_in_recording():
