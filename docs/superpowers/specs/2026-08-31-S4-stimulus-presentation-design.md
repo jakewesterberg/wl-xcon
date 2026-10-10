@@ -61,6 +61,12 @@ makes stereo cost nothing to keep available (D6).
 > the absolute lights (`Gray`, `xyY`, in CIE XYZ at cd/m²) and the Weber and Michelson contrasts. The rest of §7 (cone
 > fundamentals, cone contrast and DKL, their conversion and realizability, and the panel's output levels through a
 > calibration) is engine build A2's.
+>
+> **Note, 2026-10-10 (engine build A2).** The rest of engine spec §7 is now defined: a cone color
+> (`DKL`, `ConeContrast`) is converted against its background through the session's calibration
+> by `wl_xcon/photometry.py`'s `cone_xyz` in the CIE 2006 10° observer (`wl_xcon/cones.py`), held
+> to the panel by `check`, and turned into output levels by `wl_xcon/exact.py`'s `output_levels`
+> (the engine spec §7's note of that date).
 
 ---
 
