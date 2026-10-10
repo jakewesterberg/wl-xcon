@@ -1127,15 +1127,20 @@ ISOLUMINANT_WITHIN = 0.005
 def _claims_isoluminance(color, params: dict[str, Param], panel: Calibration,
                          backgrounds: list) -> bool:
     """Whether a color claims isoluminance (the PI, N§4 batch 1: "DKL `lum=0` with a chromatic
-    component"; the engine A2 plan's Q2, A): at some value its parameters can take, its luminance
-    contrast under V_F,10 is within `ISOLUMINANT_WITHIN` of 0 while some cone changes. For a `DKL`
-    color that contrast is `lum`, and the cones change when `l_m` or `s_lm` is other than 0. For a
-    `ConeContrast` it is the V_F,10 weighted change of L and M on each lit background
-    (`_background_lights`), over every corner of its values: a claim when those span the band
-    around 0 and the color is not the background everywhere. **It fails closed**: a value that
-    cannot be read can be anything, and an L or M range crossing 0 claims, though at 0 it is the
-    background (the plan's call 15). A component that is no number names no light (`_lights`),
-    and `_block_faults` refuses it."""
+    component"; the engine A2 plan's Q2, A): **at one value its parameters can take**, its
+    luminance contrast under V_F,10 is within `ISOLUMINANT_WITHIN` of 0 **and** it is chromatic.
+    Both halves say it the same way, so one light gets one verdict however it is spelled.
+
+    A `DKL` color's contrast is `lum`, and it is chromatic when `l_m` or `s_lm` is other than 0
+    (`lum` scales every cone alike). A `ConeContrast`'s is the V_F,10 weighted change of L and M
+    on each lit background (`_background_lights`), and it is chromatic when L, M and S are not
+    all equal. A `ConeContrast` is judged per combination of its parameters' values: choices
+    exactly, one by one; a range by the ends of each (the contrast is linear in each component,
+    and a parameter in two components has one value), which claims when they span the band, unless the color is achromatic at every value of the combination (L, M and S
+    the same literal or the same parameter). **It fails closed**: a value that cannot be read
+    can be anything, and a chromatic range crossing 0 claims, though at 0 it is the background
+    (the plan's call 15). A component that is no number names no light (`_lights`), and
+    `_block_faults` refuses it."""
     tol = ISOLUMINANT_WITHIN
     if isinstance(color, DKL):
         return (_can_be(color.lum, params, lambda v: abs(v) <= tol,
@@ -1145,32 +1150,54 @@ def _claims_isoluminance(color, params: dict[str, Param], panel: Calibration,
                         for v in (color.l_m, color.s_lm)))
     if not isinstance(color, ConeContrast):
         return False
+    parts = (color.L, color.M, color.S)
+    names = sorted({v.name for v in parts if isinstance(v, P)})
+    if not all(isinstance(v, P) or _is_number(v) for v in parts):
+        return False
     try:
-        values = _lights(color, params)
+        # Per parameter: its choices (each exact), or its range (the ends, together).
+        domains = {name: _domain(P(name), params) for name in names}
     except _Unbounded:
         return True
-    if not any((value.L, value.M, value.S) != (0.0, 0.0, 0.0) for value in values):
-        return False
+    if not all(_is_number(v) for values in domains.values() for v in values):
+        return True
+    ranged = {name for name in names if not (params[name].choices)}
+    # The same parameter, or the same literal, in all three: a name never equals a number.
+    achromatic = len({v.name if isinstance(v, P) else float(v) for v in parts}) == 1
+    excitations = []
     for background in backgrounds:
         try:
-            excited = background_cones(panel, background)
+            excitations.append(background_cones(panel, background))
         except ValueError:
             continue
-        contrasts = [luminance_contrast(v.L, v.M, excited) for v in values]
-        if min(contrasts) <= tol and max(contrasts) >= -tol:
-            return True
+    fixed = [name for name in names if name not in ranged]
+    for chosen in itertools.product(*(domains[name] for name in fixed)):
+        bound = dict(zip(fixed, chosen))
+        corners = [dict(bound, **dict(zip(sorted(ranged), ends))) for ends in itertools.product(
+            *(domains[name] for name in sorted(ranged)))]
+        lights = [tuple(float(point[v.name]) if isinstance(v, P) else float(v) for v in parts)
+                  for point in corners]
+        if not ranged and len({*lights[0]}) == 1:
+            continue  # one value, achromatic
+        if ranged and achromatic:
+            continue  # achromatic at every value
+        for excited in excitations:
+            contrasts = [luminance_contrast(L, M, excited) for L, M, _ in lights]
+            if min(contrasts) <= tol and max(contrasts) >= -tol:
+                return True
     return False
 
 
 def _can_be(value, params: dict[str, Param], holds, spans) -> bool:
     """Whether `value` can satisfy `holds`: a literal number itself, a parameter any of its
-    choices or, with a range, `spans(low, high)`. Anything else can, failing closed."""
+    choices or, with a range, `spans(low, high)` (low first, however it was declared). Anything
+    else can, failing closed."""
     if isinstance(value, P):
         param = params.get(value.name)
         if param is not None and param.choices:
             return any(not _is_number(c) or holds(float(c)) for c in param.choices)
         if param is not None and param.low is not None and param.high is not None:
-            return spans(float(param.low), float(param.high))
+            return spans(*sorted((float(param.low), float(param.high))))
         return True
     return not _is_number(value) or holds(float(value))
 

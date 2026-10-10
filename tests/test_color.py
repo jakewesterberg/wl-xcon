@@ -1009,3 +1009,50 @@ def test_a_grating_about_an_isoluminant_cone_mean_has_no_luminance_step():
     assert not steps(DKL(l_m=0.05))
     assert not steps(ConeContrast(S=0.3))
     assert steps(DKL(lum=0.1))
+
+
+def _on_gray(color, *params) -> dict:
+    return _found(replace(a_task(Disc(color=color)), background=GRAY_BG, params=list(params)))
+
+
+def test_a_cone_contrast_is_isoluminant_only_where_it_is_chromatic_at_the_same_value():
+    """Task 6 fix round 1 (I1): the same light gets the same verdict however it is spelled
+    (`DKL(lum=0.003)` is `ConeContrast(0.003, 0.003, 0.003)`), and choices are judged one by one,
+    not pooled: choices of +-0.1 on L are each a V_F,10 contrast of +-0.069, and an achromatic
+    series (L, M and S all one parameter) claims nothing, as `DKL(lum=P(c))` does not."""
+    cases = [
+        (ConeContrast(L=P("c")), Param("c", unit="contrast", choices=(-0.1, 0.1))),
+        (ConeContrast(L=P("c"), M=P("c"), S=P("c")),
+         Param("c", unit="contrast", choices=(0.0, 0.05, 0.1))),
+        (ConeContrast(L=P("c"), M=P("c"), S=P("c")),
+         Param("c", unit="contrast", choices=(-0.2, 0.2))),
+        (ConeContrast(L=0.003, M=0.003, S=0.003),),
+    ]
+    for color, *params in cases:
+        found = _on_gray(color, *params)
+
+        assert "isoluminance-on-default" not in found, color
+        assert not found["color-on-default"].blocking, color
+
+
+def test_a_cone_contrast_with_one_isoluminant_chromatic_choice_is_refused_on_the_default():
+    """The isoluminant L on a D65 gray beside M = -0.2216 is 0.1 (L's share of V_F,10 is 0.689,
+    M's 0.311: 0.689 * 0.1 = 0.311 * 0.2216); a choice far from it does not excuse it."""
+    found = _on_gray(ConeContrast(L=P("c"), M=-0.2216),
+                     Param("c", unit="contrast", choices=(0.1, 0.5)))
+
+    assert found["isoluminance-on-default"].blocking
+
+
+def test_a_chromatic_cone_contrast_range_crossing_the_band_claims_and_an_achromatic_one_does_not():
+    wide = Param("c", unit="contrast", low=-0.2, high=0.2)
+
+    assert "isoluminance-on-default" in _on_gray(ConeContrast(L=P("c"), S=P("c")), wide)
+    assert "isoluminance-on-default" not in _on_gray(
+        ConeContrast(L=P("c"), M=P("c"), S=P("c")), wide)
+
+
+def test_a_dkl_lum_range_declared_high_to_low_claims_isoluminance_all_the_same():
+    inverted = Param("c", unit="contrast", low=0.1, high=-0.1)
+
+    assert "isoluminance-on-default" in _on_gray(DKL(lum=P("c"), l_m=0.05), inverted)
