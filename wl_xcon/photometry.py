@@ -25,7 +25,7 @@ import math
 import os
 import re
 import stat
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 
 
@@ -59,6 +59,10 @@ class DKL(Color):
     rather than by arithmetic somebody did once in a spreadsheet.
 
     `l_m` is the L-minus-M axis (red/green), `s_lm` the S-cone axis (violet/lime).
+
+    **Read as the PI's hybrid** (A2's Q1; `cone_contrast`): `lum` a luminance contrast, `l_m` and
+    `s_lm` pooled cone contrast along their isolating directions, in the lab's observer
+    (`cones.CIE2006_10`).
     """
 
     lum: float = 0.0
@@ -67,6 +71,11 @@ class DKL(Color):
 
     def magnitude(self) -> float:
         return max(abs(self.lum), abs(self.l_m), abs(self.s_lm))
+
+
+#: The colors defined against the background in cone terms: a light only once a calibration and
+#: a background convert them (`cone_xyz`).
+CONE_COLORS = (DKL,)
 
 
 #: CIE 1931 chromaticity of D65, the white point of the sRGB standard (IEC 61966-2-1).
@@ -89,7 +98,7 @@ def to_xyz(color: "xyY | Gray") -> tuple[float, float, float]:
     """CIE XYZ of an absolute color, Y in cd/m^2.
 
     Only an absolute color names a light by itself. `DKL` is a modulation relative to
-    the background and converts through cone fundamentals (engine build A2). A `Gray`
+    the background, converted against one through a calibration by `cone_xyz`. A `Gray`
     whose luminance is still a parameter names none until it is bound.
     """
     if isinstance(color, Gray):
@@ -107,7 +116,7 @@ def to_xyz(color: "xyY | Gray") -> tuple[float, float, float]:
         return _XYZ(color)
     raise TypeError(
         f"{type(color).__name__} is relative to the background, not a light by itself; "
-        f"it converts through cone fundamentals (engine build A2)"
+        f"`cone_xyz` converts it against one, through a calibration"
     )
 
 
@@ -181,6 +190,57 @@ class Transfer:
             )
 
 
+#: What a calibration's spectra must cover, nm: the CIE table runs 390-830, and beyond 780 nm the
+#: L cones take 2.4e-6 of an equal-energy light's excitation and the M cones 2.3e-7 (the bundled
+#: table integrated by the trapezoid rule, 2026-10-10), so a spectrum may stop there.
+SPECTRA_COVER = (390.0, 780.0)
+#: The widest step between a spectrum's wavelengths, nm: the CIE table's own.
+SPECTRA_STEP = 5.0
+
+
+@dataclass(frozen=True, slots=True)
+class Spectra:
+    """Each primary's spectral radiance at full drive, W·sr⁻¹·m⁻²·nm⁻¹, at the wavelengths `nm`
+    the spectroradiometer sampled (engine spec §7.9: "The spectroradiometer's spectra are stored in
+    each calibration, so any named set converts from them"). **The record holds what was
+    measured**: the cone tables are interpolated onto these wavelengths, never these onto the
+    tables' (`cones.excitations`)."""
+
+    nm: tuple
+    red: tuple
+    green: tuple
+    blue: tuple
+
+    def __post_init__(self) -> None:
+        nm = self.nm
+        if not (isinstance(nm, tuple) and len(nm) >= 2 and all(_finite_number(v) for v in nm)):
+            raise ValueError("a calibration's spectra are sampled at a tuple of finite wavelengths")
+        if any(later <= earlier for earlier, later in zip(nm, nm[1:])):
+            raise ValueError("a calibration's spectra's wavelengths rise strictly")
+        if nm[0] > SPECTRA_COVER[0] or nm[-1] < SPECTRA_COVER[1]:
+            raise ValueError(
+                f"a calibration's spectra cover {SPECTRA_COVER[0]:g} to {SPECTRA_COVER[1]:g} nm; "
+                f"these run from {nm[0]:g} to {nm[-1]:g}"
+            )
+        widest = max(later - earlier for earlier, later in zip(nm, nm[1:]))
+        if widest > SPECTRA_STEP:
+            raise ValueError(
+                f"a calibration's spectra are sampled at least every {SPECTRA_STEP:g} nm, the CIE "
+                f"table's step; these leave a gap of {widest:g} nm"
+            )
+        for channel in _CHANNELS:
+            values = getattr(self, channel)
+            if not (isinstance(values, tuple) and len(values) == len(nm)):
+                raise ValueError(
+                    f"the {channel} spectrum gives one radiance at each of the {len(nm)} "
+                    f"wavelengths, as a tuple"
+                )
+            if not all(_finite_number(v) and v >= 0.0 for v in values) or not any(values):
+                raise ValueError(
+                    f"the {channel} spectrum is finite radiances, none negative and not all zero"
+                )
+
+
 _ISO_DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
@@ -188,10 +248,10 @@ _ISO_DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
 class Calibration:
     """A display, as measured. Every field is an observation, not a setting.
 
-    `observer` names whose luminous efficiency the luminances were measured against,
-    because that is what makes `lum=0` mean anything: photometric luminance is
-    defined by a V(lambda), and using a human one for a macaque produces a stimulus
-    that is isoluminant for nobody in the room.
+    `observer` names whose luminous efficiency **this record's own luminances** were measured
+    against (its cd/m², CIE V(λ) as photometry has it). **Isoluminance is not the record's**: it
+    is the lab observer's V_F,10 (A2's Q5; `cones.CIE2006_10`), the same on every calibration and
+    recorded with each session.
 
     **Or the standard** (`standard=True`, `SRGB`): the default a session runs on when its
     rig names no measured calibration (engine spec §7.1), measured by nobody, and listed as
@@ -215,6 +275,14 @@ class Calibration:
     #: a calibration states none, and then no DKL color is realizable against it until build
     #: A2 converts DKL through cone fundamentals (spec §7.4).
     max_cone_contrast: float | None = 0.85
+    #: Each primary's measured spectrum (engine spec §7.9), from which cone colors convert; `None`
+    #: for the standard, which has none, and for a measured calibration taken without them, against
+    #: which no cone color converts (`cones`).
+    spectra: Spectra | None = None
+    #: The 3×3 from CIE XYZ to the lab observer's cone excitations (`cones`), computed once, as
+    #: the calibration is built; and, where there is none, why no cone color converts.
+    _cones: tuple | None = field(init=False, default=None, compare=False, repr=False)
+    cones_refused: str = field(init=False, default="", compare=False, repr=False)
 
     def __post_init__(self) -> None:
         if not (
@@ -248,8 +316,17 @@ class Calibration:
             raise ValueError(
                 "the three primaries lie on one line in xy, so they do not span a gamut"
             )
+        if self.spectra is not None and not isinstance(self.spectra, Spectra):
+            raise ValueError("a calibration's spectra are a `Spectra`, or None")
         if self.standard:
+            if self.spectra is not None:
+                raise ValueError("the standard is measured by nobody, so it has no spectra")
+            self._convert()
             return
+        if not (isinstance(self.observer, str) and self.observer.strip()):
+            raise ValueError(
+                "a measured calibration names the observer its luminances were measured against"
+            )
         if not (isinstance(self.measured_on, str) and _ISO_DAY.fullmatch(self.measured_on)):
             raise ValueError(
                 f"measured_on is the day it was measured, YYYY-MM-DD; got {self.measured_on!r}"
@@ -261,6 +338,42 @@ class Calibration:
                 f"measured_on is the day it was measured, YYYY-MM-DD; {self.measured_on!r} is "
                 f"no such day"
             ) from refused
+        self._convert()
+
+    def _convert(self) -> None:
+        """Compute the cone matrix once (`cones`). **The standard**: the inverse of the CIE's
+        LMS-to-XYZ_F,10 transformation, applied to the standard's CIE 1931 XYZ (A2's Q2, "CIE's
+        published matrix"; COL-18) -- **a use outside the CIE's definition**, which defines it for
+        XYZ_F,10, and recorded as such (`cone_record`). **Measured**: each primary's excitations
+        from its spectrum (`cones.excitations`), times the inverse of the primaries' measured XYZ
+        -- exact for every mixture of the three, which is every light the panel makes. Without
+        spectra, or when the bundled table is refused (`cones.cie_file`), there is no matrix and
+        `cones_refused` says why: plain colors still check, and each cone color is refused with
+        that sentence."""
+        from wl_xcon import cones
+
+        matrix, refused = None, ""
+        name = self.id or self.measured_on
+        if self.standard:
+            matrix = _inverse3(cones.LMS_TO_XYZ_F10)
+        elif self.spectra is None:
+            refused = (
+                f"calibration {name} was measured without spectra, so no cone color converts "
+                f"against it: a measured calibration converts cone colors from its primaries' "
+                f"spectra (engine spec §7.9)"
+            )
+        else:
+            try:
+                s = self.spectra
+                excited = [cones.excitations(s.nm, getattr(s, c)) for c in _CHANNELS]
+                lms = tuple(tuple(excited[j][i] for j in range(3)) for i in range(3))
+                xyz = tuple(
+                    tuple(_XYZ(p)[i] for p in (self.red, self.green, self.blue)) for i in range(3))
+                matrix = _product3(lms, _inverse3(xyz))
+            except ValueError as error:
+                refused = f"calibration {name}'s cones could not be computed: {error}"
+        object.__setattr__(self, "_cones", matrix)
+        object.__setattr__(self, "cones_refused", refused)
 
     def age_days(self, today: date) -> int | None:
         """Whole days since it was measured, by the calendar (spec §7.10: a calibration "never
@@ -276,8 +389,114 @@ class Calibration:
         "this panel can make this light" means, and it covers chromaticity and
         luminance in one test rather than two approximations.
         """
+        return self.weights_of(_XYZ(color))
+
+    def weights_of(self, xyz) -> tuple[float, float, float]:
+        """`weights`, for a light given as CIE XYZ."""
         columns = [_XYZ(p) for p in (self.red, self.green, self.blue)]
-        return _solve3(columns, _XYZ(color))
+        return _solve3(columns, xyz)
+
+    @property
+    def cones(self) -> tuple | None:
+        """The 3×3 that turns CIE XYZ (Y in cd/m²) into the lab observer's cone excitations
+        (`cones.CIE2006_10`) for every light this panel makes, row by row, computed once as the
+        calibration is built (`_convert`); `None` where no cone color converts, `cones_refused`
+        saying why."""
+        return self._cones
+
+
+def _inverse3(m) -> tuple:
+    """The inverse of a 3×3 given row by row, by its adjugate."""
+    det = _det3(m)
+    if abs(det) < 1e-12:
+        raise ValueError("a 3×3 with no inverse: its rows are not independent")
+    cofactor = [[(m[(i + 1) % 3][(j + 1) % 3] * m[(i + 2) % 3][(j + 2) % 3]
+                  - m[(i + 1) % 3][(j + 2) % 3] * m[(i + 2) % 3][(j + 1) % 3])
+                 for j in range(3)] for i in range(3)]
+    return tuple(tuple(cofactor[j][i] / det for j in range(3)) for i in range(3))
+
+
+def _product3(a, b) -> tuple:
+    """`a` times `b`, two 3×3 given row by row."""
+    return tuple(tuple(sum(a[i][k] * b[k][j] for k in range(3)) for j in range(3))
+                 for i in range(3))
+
+
+def _apply3(m, v) -> tuple[float, float, float]:
+    """A 3×3, row by row, times a vector."""
+    return tuple(sum(m[i][k] * v[k] for k in range(3)) for i in range(3))
+
+
+def cone_contrast(color, panel: "Calibration", background: xyY) -> tuple[float, float, float]:
+    """ΔL/L, ΔM/M and ΔS/S of a cone color about `background` on `panel`, in the lab's observer.
+
+    **A `DKL` color is read as the PI's hybrid** (A2's Q1, "Hybrid"; COL-07)
+    [@brainard1996cone, pp. 571-572]: `lum` is a luminance contrast, the background scaled, so
+    each cone changes by `lum`; `l_m` and `s_lm` are pooled cone contrast, the root of the sum of
+    the three contrasts squared [@brainard1996cone, p. 568, Eq. A.4.2], along their isolating
+    directions. The `l_m` direction changes L and M and not S, at the ratio that keeps V_F,10
+    (`cones.V_F10`) where the background has it, so `lum=0` is isoluminant by construction in the
+    lab's observer (A2's Q5); the `s_lm` direction changes S alone, which V_F,10 does not see.
+    **Signs** (the engine A2 plan's call 14): `+l_m` raises L and lowers M (toward red), `+s_lm`
+    raises S (toward violet), `+lum` brightens. Every component a number: `screen.resolve`
+    binds a task's parameters first, and `check` reads each value one can take."""
+    return _contrast(color, background_cones(panel, background))
+
+
+def background_cones(panel: "Calibration", background: xyY) -> tuple[float, float, float]:
+    """The lab observer's cone excitations of `background` on `panel`. **Refused on black**: a
+    cone color is a contrast about its background, and black has none to be relative to (engine
+    spec §7.5; COL-09). Refused too on a measured calibration with no spectra."""
+    return _excited(_cone_matrix(panel), background)
+
+
+def cone_xyz(color, panel: "Calibration", background: xyY) -> tuple[float, float, float]:
+    """CIE XYZ, Y in cd/m², of a cone color against `background` on `panel`
+    [@brainard2002display, pp. 177-178, Eq. 14]: the background's excitations, each scaled by one
+    plus its contrast (`cone_contrast`), back through `Calibration.cones`."""
+    matrix = _cone_matrix(panel)
+    excited = _excited(matrix, background)
+    contrast = _contrast(color, excited)
+    return _apply3(_inverse3(matrix), tuple(e * (1.0 + c) for e, c in zip(excited, contrast)))
+
+
+def _cone_matrix(panel: "Calibration") -> tuple:
+    if panel.cones is None:
+        raise ValueError(panel.cones_refused)
+    return panel.cones
+
+
+def _excited(matrix, background: xyY) -> tuple[float, float, float]:
+    if background.Y <= 0.0:
+        raise ValueError(
+            "a cone color is relative to its background, and this background is black (engine "
+            "spec §7.5)"
+        )
+    return _apply3(matrix, _XYZ(background))
+
+
+def _contrast(color, excited) -> tuple[float, float, float]:
+    if not isinstance(color, DKL):
+        raise TypeError(f"{type(color).__name__} is not a cone color")
+    from wl_xcon import cones
+
+    ratio = (cones.V_F10[0] * excited[0]) / (cones.V_F10[1] * excited[1])
+    norm = math.sqrt(1.0 + ratio * ratio)
+    lum, l_m, s_lm = _numbers(color, (color.lum, color.l_m, color.s_lm))
+    return (lum + l_m / norm, lum - l_m * ratio / norm, lum + s_lm)
+
+
+def _numbers(color, values) -> tuple[float, ...]:
+    """A cone color's components as numbers. **A `ValueError`, never a `TypeError`**, for one that
+    is still a parameter or not a number: `check` reads each value a parameter can take first, and
+    `screen.resolve` binds them; a caller that did neither is refused by the same sentence an
+    unrealizable color is (XC-269; the engine A2 plan's call 28)."""
+    if not all(_finite_number(v) for v in values):
+        raise ValueError(
+            f"{color} has a component that is not a number: a parameter is bound, or read at each "
+            f"value it can take, before a cone color converts"
+        )
+    return tuple(float(v) for v in values)
 
 
 def _XYZ(c: xyY) -> tuple[float, float, float]:

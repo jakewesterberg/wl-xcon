@@ -2833,7 +2833,7 @@ def test_a_resume_after_the_rigs_calibration_changed_names_the_new_one_on_each_l
     _step(first, _start())
     _run_to_its_end(first)
     today = date.fromtimestamp(WALL).isoformat()
-    panel = measured(measured_on=today, id=f"rig1@{today}")
+    panel = measured(measured_on=today, id=f"rig1@{today}", spectra=None)
     (tmp_path / "rig").mkdir()
     (tmp_path / "rig" / "cal.json").write_text(json.dumps({
         "id": panel.id, "measured_on": panel.measured_on, "observer": OBSERVER,

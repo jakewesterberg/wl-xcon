@@ -1018,24 +1018,13 @@ def _one_color(what: str, color, panel: Calibration | None) -> list[Finding]:
         return [Finding("dkl-on-default", (
             f"{what} is a DKL color, which converts through cone fundamentals (engine build "
             f"A2); until then it loads only against a measured calibration"))]
-    findings: list[Finding] = []
-    if isinstance(color, DKL) and color.lum == 0.0 and color.magnitude() > 0.0:
-        if not panel.observer:
-            findings.append(
-                Finding(
-                    "unstated-observer",
-                    f"{what} claims isoluminance, but the calibration measured "
-                    f"{panel.measured_on} does not say whose luminous efficiency "
-                    f"it used; a human V(lambda) makes a stimulus that is "
-                    f"isoluminant for nobody in the room",
-                )
-            )
+    # Isoluminance is the lab observer's V_F,10 (A2's Q5), named by `cones.CIE2006_10` and
+    # recorded with the session; a measured calibration names its own photometry's observer or
+    # does not load (`Calibration`), so nothing is left for a finding here (engine build A2).
     why = unrealizable(color, panel)
     if why is not None:
-        findings.append(
-            Finding("unrealizable-color", f"{what} asks for {color}: {why}")
-        )
-    return findings
+        return [Finding("unrealizable-color", f"{what} asks for {color}: {why}")]
+    return []
 
 
 def _default_faults(trial: Trial, params: dict[str, Param]) -> list[Finding]:

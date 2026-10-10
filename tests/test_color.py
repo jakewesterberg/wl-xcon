@@ -15,6 +15,7 @@ import pytest
 from _calibrations import LINEAR
 from wl_xcon import look
 from wl_xcon.check import check
+from wl_xcon.cones import CIE2006_10
 from wl_xcon.findings import NOT_RECORDING
 from wl_xcon.photometry import (
     D65,
@@ -121,26 +122,15 @@ def test_an_achromatic_task_needs_no_calibration():
     assert codes(a_task(Disc(size=1.0, color=Gray(40.0))), calibration=None) == set()
 
 
-def test_isoluminance_is_a_declared_measurement_not_a_default():
-    """`DKL(lum=0)` is isoluminant *by construction*, against a stated observer.
-
-    Construction alone is not enough: the cone contrasts depend on whose luminous
-    efficiency the display was measured against, and a macaque's is not a human's.
-    A calibration that does not say refuses the colour rather than letting the task
-    inherit a silent assumption about the species in the chair.
-    """
-    unstated = Calibration(
-        red=PANEL.red,
-        green=PANEL.green,
-        blue=PANEL.blue,
-        background=PANEL.background,
-        transfer=(LINEAR,) * 3,
-        observer="",
-        measured_on="2026-08-31",
-    )
-    isoluminant = Disc(color=DKL(lum=0.0, l_m=0.08))
-    assert "unstated-observer" in codes(a_task(isoluminant), calibration=unstated)
-    assert "unstated-observer" not in codes(a_task(isoluminant), calibration=PANEL)
+def test_isoluminance_is_a_named_observers_and_a_calibration_names_its_own():
+    """`DKL(lum=0)` is isoluminant *by construction*, against a named observer: the lab's, the
+    CIE 2006 10° observer's V_F,10 (A2's Q5; COL-17), named in code and recorded with each
+    session. A measured calibration still says whose luminous efficiency its own luminances were
+    measured against, or it does not load: an unlabeled cd/m² is a claim nobody can check."""
+    assert CIE2006_10.luminosity == "V_F,10"
+    with pytest.raises(ValueError, match="names the observer"):
+        Calibration(red=PANEL.red, green=PANEL.green, blue=PANEL.blue, background=PANEL.background,
+                    transfer=(LINEAR,) * 3, observer="", measured_on="2026-08-31")
 
 
 def test_a_cone_contrast_beyond_the_measured_maximum_is_refused():
