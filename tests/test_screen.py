@@ -303,6 +303,18 @@ def test_a_cone_color_between_two_eyes_backgrounds_is_not_resolved():
     assert (s.background_left[1], s.background_right[1]) == (20.0, 30.0)
 
 
+def test_two_equal_explicit_eye_backgrounds_are_one_background_for_a_cone_color():
+    stimulus = Stimulus("k", at=(0.0, 0.0), looks=Disc(color=DKL(l_m=0.08)))
+    split = replace(TRIAL, background_left=Gray(30.0), background_right=Gray(30.0))
+    shared = replace(TRIAL, background=Gray(30.0))
+
+    def fill(trial):
+        return screen.resolve({"k": stimulus}, {}, trial, STEREOSCOPE, frame_period=1 / 240,
+                              calibration=SRGB).items[0].fill.xyz
+
+    assert fill(split) == fill(shared)
+
+
 def test_a_named_grating_s_color_waits_for_the_pattern_fills():
     stimulus = Stimulus("g", at=(0.0, 0.0), looks=Gabor(contrast=Michelson(0.5), color=Gray(20.0)))
 

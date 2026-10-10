@@ -19,7 +19,8 @@ from wl_xcon import screen
 from wl_xcon.calibration import constellation
 from wl_xcon.cli import _load_trial
 from wl_xcon.check import check
-from wl_xcon.photometry import SRGB, SRGB_WHITE_CD_M2, DKL, Calibration, Gray, xyY
+from wl_xcon.cones import V_F10
+from wl_xcon.photometry import SRGB, SRGB_WHITE_CD_M2, DKL, Calibration, Gray, _apply3, xyY
 from wl_xcon.run import Recorded
 from wl_xcon.simulate import Subject, simulate
 from wl_xcon.task import (
@@ -210,9 +211,6 @@ def test_the_search_task_s_red_and_green_are_drawn_isoluminant_with_its_gray(sea
     """The path end to end on a measured panel (engine build A2): checked, resolved through the
     calibration, and each item's V_F,10 luminance is the gray's (A2's Q5), red and green
     differing only in color."""
-    from wl_xcon.cones import V_F10
-    from wl_xcon.photometry import _apply3
-
     choices = {p.name: p.choices for p in search.params}
     values = {**SEARCH_VALUES, "fix_luminance": 40.0, "target_looks": choices["target_looks"][0],
               "distractors": choices["distractors"][0]}

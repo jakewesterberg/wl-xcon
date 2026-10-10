@@ -5,7 +5,8 @@ tasks the exact drawer then raised on, or drew invisibly or out of range, mostly
 value was written as a parameter. So this walks the path a session will: `check`, then
 `screen.resolve`, then `exact.draw` on a small preview of each eye. A trial the checker
 accepts must draw, finite, never negative and visibly, or raise `NotYetDrawable` naming
-the build that draws it (A2, A3 or A4).
+the build that draws it (A3 or A4). Since engine build A2 a cone color draws, through the
+calibration the trial was checked against.
 """
 
 from __future__ import annotations
