@@ -1,12 +1,13 @@
 # Amendments to wl-preproc
 
-**Five are open.** The first three were opened 2026-08-31 while designing S2
+**Six are open.** The first three were opened 2026-08-31 while designing S2
 ([`superpowers/specs/2026-08-31-S2-event-vocabulary-design.md`](superpowers/specs/2026-08-31-S2-event-vocabulary-design.md)),
 and the fourth (`read_online_map`) was added before XC-026. Written here rather than applied
 there, following that repository's own convention for `wl-works`. The first three were read
 against `wl_preproc/contracts/events.py` at commit `f7fb10a`.
-**And one from XC-026, opened 2026-10-01**: what a resumed session's stream holds, at the end
-of this file, before the note that is not an ask.
+**And one from XC-026, opened 2026-10-01**: what a resumed session's stream holds, and **one
+from XC-288, opened 2026-10-10**: the change log, reasons, timed events and pauses, both at the
+end of this file, before the note that is not an ask.
 
 **Of the first three, two are free, and the third is small.** Items 2 and 3 change no numbers and
 no wire behaviour — one records an ownership split in a docstring, the other corrects a
@@ -257,6 +258,46 @@ The tightest bound the stream gives for the crashed run is its last event before
 ask nothing yet: 4137's number is provisional until wl-xtasks allocates it, and reading it
 would tie `assemble` to a code `contracts/events.py` does not own. Recorded so that a run's
 length read from a resumed recording is not taken at face value meanwhile.
+
+---
+
+# OPEN — XC-288: the change log, reasons, timed events and pauses (new, 2026-10-10)
+
+Opened 2026-10-10 by XC-288 ([its spec](superpowers/specs/2026-10-10-xc288-training-records-design.md), approved by the PI that day), backlog XC-321. The ask is in its
+[§6](superpowers/specs/2026-10-10-xc288-training-records-design.md#6-where-the-records-go) and [§7](superpowers/specs/2026-10-10-xc288-training-records-design.md#7-which-build-carries-what). Not read against wl-preproc's
+source for this entry; the file list below is what the rig will write, not a description of what wl-preproc
+reads today beyond the spec's own statement that it reads none of these.
+
+## What changed on our side
+
+The rig records every change to what the animal experiences, why, and what happened inside each trial, in the
+session folder, in every session ([§3](superpowers/specs/2026-10-10-xc288-training-records-design.md#3-what-the-rig-records-in-every-session)). The session folder is
+what wl-preproc already ingests. These files are new or grown:
+
+| File | Row shape (spec section) |
+|---|---|
+| `parameter_changes.jsonl`, grown into **one change log** | One row per setting moved; a preset is one row per setting, all sharing one `change` id. Carries `change`, the instant it applied, the `trial_number` of the first trial it applied to, its run, what (setting, from, to), its declared meaning and direction, who (a wl.works account id), what was offered, the odds when the rig chose at random (empty until a later build), and the procedure and version when one acted. **Only rows that strobe `PARAM_CHANGED` carry `sequence`**; the join to the recording is the codes' count, the n-th `sequence` row to the n-th code, until XC-008 puts the number on the wire ([§3.4](superpowers/specs/2026-10-10-xc288-training-records-design.md#34-one-change-log)) |
+| `reasons.jsonl` (new) | **One row per reason, pointing at the `change` id it explains** (or at a pause's `id`), so a reason given later never rewrites a line already written. A preset's rows share one reason through their id. A change unexplained at the close is recorded "no reason given" by the rig. The code list only grows ([§3.5](superpowers/specs/2026-10-10-xc288-training-records-design.md#35-reasons)) |
+| the timed event log (new) | Every state the task entered and left with its instant and why it left, and every code strobed with the instant it strobed. Instants are the session's wall clock; events inside a trial are frame offsets from the trial's start ([§3.2](superpowers/specs/2026-10-10-xc288-training-records-design.md#32-a-timed-event-log), [§3.11](superpowers/specs/2026-10-10-xc288-training-records-design.md#311-the-rigs-clock)) |
+| `controls.jsonl` | Pauses, stops, resumes, marks and manual rewards, **its writers and fields unchanged; its new rows gain an `id`**, so a reason row can point at a pause ([§3.10](superpowers/specs/2026-10-10-xc288-training-records-design.md#310-what-stays-where-it-is)) |
+
+## The ask
+
+1. **Read those four into the published dataset.** Today wl-preproc reads none of them (the spec's §6). The join
+   keys are the `change` id, `sequence` and `trial_number`, as above.
+2. **Accept the agent's file in the session folder without reading it.** A SQLite file, one per session, built by
+   the rig's tooling after the session closes ([§5.1](superpowers/specs/2026-10-10-xc288-training-records-design.md#51-one-file-per-session-sqlite)); it is rebuilt by the rig's
+   tooling whenever a format version changes or later notes arrive. Ingest must not
+   fail on its presence.
+
+## What is deliberately not asked for
+
+- **The agent's file is not read or published.** It is rebuilt from the logs and from wl.works' facts, and
+  carries account ids only; it is not part of the dataset.
+- **No new escape or code.** The change log joins to the stream through the existing `PARAM_CHANGE` pointer
+  (the first item of this file) and the codes' count; nothing here asks for a new value.
+- **No timing claim.** The rig's event-log instants are wall-clock bookkeeping; the sync box stays the timing
+  ground truth ([§3.11](superpowers/specs/2026-10-10-xc288-training-records-design.md#311-the-rigs-clock)).
 
 ---
 

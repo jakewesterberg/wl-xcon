@@ -7,6 +7,9 @@ owned by another worker, including its remote, so these are written where wl-pre
 writes its own — in the requesting repository, for the other side to accept, amend or
 refuse.
 
+**And one from XC-288, opened 2026-10-10**: what the training-record file needs from wl.works,
+under "XC-288's training records", before the closing list of decisions.
+
 **Both build on a document that is itself proposed, not agreed.**
 `wl-preproc/docs/ops/lab-host-protocol.md` says so in its own opening line: it is written
 by wl-preproc, describes the host half, and is *"proposed to wl.works rather than written
@@ -390,6 +393,86 @@ and that is item 5 below.
 
 ---
 
+# OPEN — XC-288's training records: what the agent's file needs from wl-works (new, 2026-10-10)
+
+Opened 2026-10-10 by XC-288 ([its spec](superpowers/specs/2026-10-10-xc288-training-records-design.md), approved by the PI that day), backlog XC-320. The
+spec's wl-works asks are in its [§7](superpowers/specs/2026-10-10-xc288-training-records-design.md#7-which-build-carries-what); the reasons are in
+[§3.8](superpowers/specs/2026-10-10-xc288-training-records-design.md#38-at-the-sessions-open), [§3.9](superpowers/specs/2026-10-10-xc288-training-records-design.md#39-experimenter-notes-and-welfare-observations) and
+[§5.4](superpowers/specs/2026-10-10-xc288-training-records-design.md#54-rebuilding-and-versions). Read against wl-works at `71b04613` for the ELN's state, as the spec's
+§3.9 records. Each is yours to accept, amend or refuse.
+
+## The finding
+
+Every session now ends with one self-describing file for an AI agent to learn from, built from the rig's own logs
+([§5](superpowers/specs/2026-10-10-xc288-training-records-design.md#5-the-agents-file)). Most of it is the rig's. The part that is not is what the trainer saw and wrote
+down: the animal's weight and water, the notes, the observations. Per §3.9, the ELN's per-session notes are
+designed (its plan 11 and 16b, `animal_session`) and not built; nothing ties a note to a rig session; nothing
+delivers notes to lab storage. Observations exist per animal, with when they happened and when they were written.
+
+## The ask
+
+**1. `prepare-session` (XC-100) carries more** ([§3.8](superpowers/specs/2026-10-10-xc288-training-records-design.md#38-at-the-sessions-open)). It already stages the
+day's metadata and the fluid delivered so far. Added:
+
+| Field | Why the rig wants it |
+|---|---|
+| The animal's **permanent id** (`animal.id`), beside the rig name | A rig name can be edited and reused in wl.works; the id never changes. Until it arrives, the record holds the rig name and the file is joined to the id at its build |
+| **That day's weight with the date it was measured**, and the **water regime** | The record shows what the trainer saw. Until it arrives, the same facts are joined at the file's build |
+| **Water entries** are not asked of `prepare-session`; they come by the read path in item 4. The **reward fluid** (type, dilution) is recorded by the rig itself at the open, so it is not asked of wl-works either | Named here so that nobody adds it |
+| The lab's **people list with each person's account id** | Lets a change be attributed when nobody can sign in (spec §3.6): the person picks a name from the list and the row is recorded "not signed in", with why. Until it arrives the list is a file on lab storage kept by hand |
+
+**2. The ELN's session keyed to the rig's session** (16b's `animal_session`; subject and session folder name).
+Without a key, a note written after the session cannot be found from it.
+
+**3. Each note with its own author and time**, not only whole-session revisions. The agent's file records who wrote
+what and when, and says how recent its notes are ([§3.9](superpowers/specs/2026-10-10-xc288-training-records-design.md#39-experimenter-notes-and-welfare-observations)).
+
+**4. A read path for one named lab workstation's own wl.works client** ([§5.4](superpowers/specs/2026-10-10-xc288-training-records-design.md#54-rebuilding-and-versions)).
+Signed in as a member, it reads:
+
+- a session's notes;
+- an animal's observations and health over time;
+- weights with their dates;
+- the water regime and water entries (amounts, sources, supplements, ad-lib days);
+- rig names over time, so a session is joined to the right animal by id on the day.
+
+The file's rebuild writes a dated snapshot of what it fetched into the session's folder and builds from the folder
+only, so the same folder always gives the same file. Notes are often written after the session, so a rebuild picks
+them up; the read path is how.
+
+**5. Days with no session, and why.** A record per animal per day of whether it trained, and why not ([§7](superpowers/specs/2026-10-10-xc288-training-records-design.md#7-which-build-carries-what)).
+An agent that sees only sessions cannot tell a day of rest from a day of illness.
+
+## What the PI ruled that bears on this
+
+- **Account ids only, never names** (Q15, [§5.2](superpowers/specs/2026-10-10-xc288-training-records-design.md#52-what-it-holds)). The agent's file holds the wl.works
+  account id of whoever acted, signed in or picked from the list. Names stay in wl.works and are looked up when a
+  person needs them. This is why the people list carries ids.
+- **The rig gets no new network route** ([§5.4](superpowers/specs/2026-10-10-xc288-training-records-design.md#54-rebuilding-and-versions)). The read in item 4 is not made
+  by a rig and not by a wl-preproc host (which never initiates a connection). **It runs on one named lab
+  workstation** with its own wl.works client and a member's sign-in. Everything the rig itself needs arrives with
+  `prepare-session`, as above.
+- **Changes need a wl.works sign-in** (Q7, Q8, [§3.6](superpowers/specs/2026-10-10-xc288-training-records-design.md#36-who)), which is the existing sign-in work
+  (XC-151, XC-152) and not part of this ask.
+
+## What is deliberately not asked for
+
+- **No push to the rig, and no new route.** The rig still has no route in or out beyond what the sections above
+  already settle; what it receives arrives with `prepare-session`, which wl-works sends as it does for the
+  other fields.
+- **Nothing welfare-affecting is published.** The standing exclusion above is unchanged: reward, stimulation,
+  session start and parameter changes are not actions, and nothing here adds one. The weight, water and
+  observation facts are read, not acted on, and the rig's welfare limits do not depend on them or on wl.works
+  answering.
+- **No names in the agent's file**, and so no request for wl-works to send them to the rig beyond the display
+  name in the people list the picker needs.
+- **No schema fixed here.** The rig's field names follow whatever `prepare-session` settles on.
+
+**Nothing waits on an answer for a session to run.** Until each part is met the file says what it lacks (it
+holds no ELN notes; it holds the rig name and not the id) and is rebuilt when it arrives.
+
+---
+
 ## What wl-works must decide
 
 1. Whether the client's host list becomes configuration.
@@ -411,6 +494,11 @@ and that is item 5 below.
    audience is the rig, and the rig's page exchanging a code for a token (new, 2026-09-29 —
    see "Signing in from a rig's page"). **The permission for rigs to connect is the PI's and
    is given; the route is not built.**
+7. **XC-288's asks (new, 2026-10-10; above).** Whether `prepare-session` may carry the animal's permanent id,
+   the day's weight with its date, the water regime and the people list with account ids;
+   whether the ELN's session can be keyed to the rig's and each note carry its own author and time; whether a
+   read path for one lab workstation's own client is acceptable; and whether a record of days with no session
+   and why is something wl-works can hold.
 
 Nothing here is blocked on an answer: the controller's v1 works with no ELN integration at
 all, writing everything to the session directory as it would anyway. This buys the ELN
