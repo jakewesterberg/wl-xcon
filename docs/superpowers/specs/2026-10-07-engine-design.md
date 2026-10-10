@@ -673,8 +673,9 @@ summary before its build merges:
 - **wl-preproc**: condition numbering for `CONDITION` (XC-197); the trial table's "overridden" flag
   (§14.7); reading monocular and session-start calibrations (§12.4); the continuous mode's record shape
   and anchor codes (§13.6, §8.4); the session kind and the warnings in the record (§19; engine build B):
-  `config.json`'s `session_kind`, and its `calibration` (`id`, `standard`, `measured_on`, or `null` when
-  the rig's record would not load); each run's start row's `calibration` (the id); and `warnings.jsonl`,
+  `config.json`'s `session_kind`, and its `calibration` (`id`, `standard`, `measured_on`, and since engine build A2 `cones`: the observer
+  and its parameters, how cone colors converted, which luminance isoluminance held and what a DKL number
+  means; or `null` when the rig's record would not load); each run's start row's `calibration` (the id); and `warnings.jsonl`,
   one row per warning a session accepted (`code`, `detail`, `accepted_in`, `session_kind`, `by`, `at`,
   `at_local`, `how`, `run`); onset alignment through the screen log and the flip count.
   **No change to its frozen codec.**

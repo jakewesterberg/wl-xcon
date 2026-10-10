@@ -2854,7 +2854,24 @@ def test_a_resume_after_the_rigs_calibration_changed_names_the_new_one_on_each_l
     starts = [row["calibration"] for row in _runs(folders[2]) if row["event"] == "start"]
     assert starts == ["srgb-standard", panel.id]
     config = json.loads((folders[2] / "2027-01-14_01" / "xcon" / "config.json").read_text())
-    assert config["calibration"] == {"id": "srgb-standard", "standard": True, "measured_on": ""}
+    assert config["calibration"] == {
+        "id": "srgb-standard", "standard": True, "measured_on": "",
+        # Pinned as written out, not computed by `cone_record`, so a broken `cone_record` fails here too.
+        "cones": {
+            "observer": {
+                "name": "CIE 2006 10°", "data": "10.25039/CIE.DS.nxsqeri8", "field_deg": 10.0,
+                "peak_optical_density": [0.38, 0.38, 0.30], "macular_density_460nm": 0.095,
+                "lens_density_400nm": 1.7649, "luminosity": "V_F,10",
+                "luminosity_weights": [0.69283932, 0.34967567],
+                "interpolation": "linear between the table's 5 nm points; zero outside 390-830 nm",
+            },
+            "via": "the inverse of the CIE's LMS-to-XYZ_F,10 matrix applied to the sRGB "
+                   "standard's CIE 1931 XYZ, a use outside the CIE's definition",
+            "luminance": "the standard's CIE 1931 Y, which the CIE's matrix equates with V_F,10",
+            "dkl": "lum is luminance contrast under V_F,10; l_m and s_lm are pooled cone contrast "
+                   "along their isolating directions, +l_m raising L, +s_lm raising S",
+        },
+    }
 
 
 def test_a_stranded_session_past_its_out_of_cage_limit_is_refused_with_welfares_sentence(tmp_path):

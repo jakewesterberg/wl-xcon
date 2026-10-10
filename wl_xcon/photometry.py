@@ -424,6 +424,37 @@ class Calibration:
 HELD_STANDARD = "the standard's CIE 1931 Y, which the CIE's matrix equates with V_F,10"
 #: And on a measured calibration with spectra.
 HELD_SPECTRA = "V_F,10, computed from the primaries' measured spectra"
+#: How the standard converts cone colors, as its record says it (A2's Q2; COL-18).
+VIA_STANDARD = (
+    "the inverse of the CIE's LMS-to-XYZ_F,10 matrix applied to the sRGB standard's CIE 1931 XYZ, "
+    "a use outside the CIE's definition"
+)
+#: How a measured calibration with spectra converts them.
+VIA_SPECTRA = "its primaries' measured spectra"
+#: What a `DKL` number means, as a record states it: the normalization must be stated whenever
+#: DKL is used [@brainard1996cone, p. 575] (A2's Q1, "Hybrid"; COL-07).
+DKL_NORMALIZATION = (
+    "lum is luminance contrast under V_F,10; l_m and s_lm are pooled cone contrast along their "
+    "isolating directions, +l_m raising L, +s_lm raising S"
+)
+
+
+def cone_record(panel: "Calibration") -> dict:
+    """How a session's cone colors became light, as `config.json` writes it beside the
+    calibration's id (A2's Q4: the observer's "parameters recorded"; Q2: the default's matrix
+    "recorded as outside the CIE's definition"): the observer and its parameters
+    (`cones.CIE2006_10`), what converted, which luminance isoluminance held on it, and what a
+    `DKL` number means. `via` and `luminance` are `None` where no cone color converts."""
+    from wl_xcon import cones
+
+    if panel.standard:
+        via, held = VIA_STANDARD, HELD_STANDARD
+    elif panel.cones is not None:
+        via, held = VIA_SPECTRA, HELD_SPECTRA
+    else:
+        via, held = None, None
+    return {"observer": cones.CIE2006_10.record(), "via": via, "luminance": held,
+            "dkl": DKL_NORMALIZATION}
 
 
 def _inverse3(m) -> tuple:

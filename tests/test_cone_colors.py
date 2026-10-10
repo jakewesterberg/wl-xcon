@@ -12,12 +12,18 @@ from wl_xcon import cones
 from wl_xcon.photometry import (
     D65,
     DKL,
+    DKL_NORMALIZATION,
+    HELD_SPECTRA,
+    HELD_STANDARD,
     SRGB,
+    VIA_SPECTRA,
+    VIA_STANDARD,
     ConeContrast,
     Spectra,
     _apply3,
     background_cones,
     cone_contrast,
+    cone_record,
     cone_xyz,
     xyY,
 )
@@ -172,3 +178,17 @@ def test_a_cone_contrast_is_its_own_three_numbers():
     assert cone_contrast(ConeContrast(L=0.1, M=-0.05, S=0.3), SRGB, GRAY) == (0.1, -0.05, 0.3)
     assert [after / before - 1.0 for after, before in zip(lit, background)] == pytest.approx(
         [0.1, 0.0, -0.3], abs=1e-12)
+
+
+def test_a_record_says_how_its_cone_colors_became_light():
+    """A2's Q2 and Q4: the observer's parameters, and the default's matrix as outside the CIE's
+    definition, holding the standard's CIE 1931 Y (the review's S-I2); a measured calibration's
+    spectra and V_F,10; none without them."""
+    assert cone_record(SRGB) == {"observer": cones.CIE2006_10.record(), "via": VIA_STANDARD,
+                                 "luminance": HELD_STANDARD, "dkl": DKL_NORMALIZATION}
+    assert "outside the CIE's definition" in VIA_STANDARD
+    assert "CIE 1931 Y" in HELD_STANDARD
+    assert (cone_record(measured())["via"], cone_record(measured())["luminance"]) == (
+        VIA_SPECTRA, HELD_SPECTRA)
+    assert (cone_record(measured(spectra=None))["via"],
+            cone_record(measured(spectra=None))["luminance"]) == (None, None)
