@@ -999,7 +999,7 @@ def test_a_grating_about_a_cone_mean_with_a_parameter_is_checked_never_raised(ca
 
 def test_a_grating_about_an_isoluminant_cone_mean_has_no_luminance_step():
     """Call 29: `DKL()` or a `lum` of 0, or a cone contrast changing S alone, is no step; a `DKL`
-    with a `lum` is one."""
+    with a `lum` is one, and so is a cone contrast changing L or M."""
     def steps(mean) -> bool:
         grating = look.Look(fill=look.SineGrating(contrast=Michelson(0.3), mean=mean))
         return "luminance-step" in _found(replace(a_task(grating), background=GRAY_BG),
@@ -1009,6 +1009,7 @@ def test_a_grating_about_an_isoluminant_cone_mean_has_no_luminance_step():
     assert not steps(DKL(l_m=0.05))
     assert not steps(ConeContrast(S=0.3))
     assert steps(DKL(lum=0.1))
+    assert steps(ConeContrast(L=0.1))
 
 
 def _on_gray(color, *params) -> dict:
@@ -1056,3 +1057,56 @@ def test_a_dkl_lum_range_declared_high_to_low_claims_isoluminance_all_the_same()
     inverted = Param("c", unit="contrast", low=0.1, high=-0.1)
 
     assert "isoluminance-on-default" in _on_gray(DKL(lum=P("c"), l_m=0.05), inverted)
+
+
+@pytest.mark.parametrize("bounds", [("a", "b"), (P("z"), 0.1)], ids=["strings", "a-parameter"])
+@pytest.mark.parametrize("color", [DKL(lum=P("c"), l_m=0.1), DKL(lum=0.0, l_m=P("c")),
+                                   ConeContrast(L=P("c"))], ids=["dkl-lum", "dkl-l_m", "cone"])
+def test_a_cone_color_range_whose_bound_is_no_number_is_refused_never_raised(color, bounds):
+    """The A2 final review's I1: a DKL range ending at a string or at another parameter raised
+    `ValueError` or `TypeError` out of `check()` on the default (a `ConeContrast`'s did not, and
+    is held to the same). The bound is refused as a bad block, and the color, which can then be
+    anything, claims isoluminance, failing closed."""
+    low, high = bounds
+    trial = replace(a_task(Disc(color=color)), background=GRAY_BG,
+                    params=[Param("c", unit="contrast", low=low, high=high)])
+
+    found = _found(trial)
+
+    assert found["isoluminance-on-default"].blocking
+    assert found["bad-block"].blocking
+    assert _found(trial, calibration=measured())["bad-block"].blocking
+
+
+def _offered_by(written: str, color) -> Trial:
+    """A `Look` on a lit gray whose fill, or whose outline, is a parameter offering one block
+    in `color`."""
+    if written == "fill":
+        looks = look.Look(fill=P("part"))
+        offered = Param("part", unit="fill", choices=(look.Flat(color=color),))
+    else:
+        looks = look.Look(fill=look.Flat(color=Gray(10.0)), outline=P("part"))
+        offered = Param("part", unit="outline", choices=(look.Outline(color=color),))
+    return replace(a_task(looks), background=GRAY_BG, params=[offered])
+
+
+@pytest.mark.parametrize("written", ["fill", "outline"])
+def test_an_isoluminant_color_a_looks_fill_or_outline_parameter_offers_is_refused_on_the_default(
+        written):
+    """XC-271's second half (the A2 final review's I3): the colors a `Look`'s fill or outline
+    parameter offers were never read, so an isoluminant DKL among them trained and piloted on
+    the default with no `isoluminance-on-default`. It is refused in every kind, naming the
+    parameter."""
+    found = _found(_offered_by(written, DKL(l_m=0.1)))
+
+    assert found["isoluminance-on-default"].blocking
+    assert "a choice of parameter 'part'" in found["isoluminance-on-default"].detail
+
+
+@pytest.mark.parametrize("written", ["fill", "outline"])
+def test_a_color_a_looks_fill_or_outline_parameter_offers_is_held_to_the_panels_reach(written):
+    """The same blind spot, on a measured calibration: a color the panel cannot make, offered
+    by a fill or an outline parameter, is refused as one written into the `Look` is."""
+    found = _found(_offered_by(written, DKL(lum=20.0)), calibration=measured())
+
+    assert found["unrealizable-color"].blocking

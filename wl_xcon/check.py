@@ -919,12 +919,12 @@ def _literal(value) -> float | None:
 
 def _colors(trial: Trial, params: dict[str, Param]):
     """Every color a trial can put on screen, with what carries it: each appearance's,
-    each block's (a flat fill, a grating's mean, an outline), and the backgrounds. A color
-    that is a parameter is each of its choices; one offering none to read is refused by
-    `_light_faults`, and a value that is not a color by `_block_faults`, so neither is one
-    here. An appearance a parameter offers is named as that parameter's choice (every one
-    it is, when the same object is offered twice), so the choices' findings say which is
-    which."""
+    each block's (a flat fill, a grating's mean, an outline), and the backgrounds. A color,
+    or a `Look`'s fill or outline, that is a parameter is each of its choices; a color
+    offering none to read is refused by `_light_faults`, and a value that is not a color by
+    `_block_faults`, so neither is one here. An appearance a parameter offers is named as
+    that parameter's choice (every one it is, when the same object is offered twice), so the
+    choices' findings say which is which."""
     from wl_xcon import look
 
     offered: dict[int, list[str]] = {}
@@ -946,10 +946,18 @@ def _colors(trial: Trial, params: dict[str, Param]):
         what = type(looks).__name__
         chosen = f" ({', '.join(offered[id(looks)])})" if id(looks) in offered else ""
         if isinstance(looks, look.Look):
-            for part in (looks.fill, looks.outline):
-                for attr in ("color", "mean"):
-                    yield from each(f"{what}'s {type(part).__name__}{chosen}",
-                                    getattr(part, attr, None))
+            for written in (looks.fill, looks.outline):
+                # A fill or an outline that is a parameter is each fill or outline its choices
+                # offer, through any parameter among them (`_parts`; the A2 final review's I3).
+                parts, by = [written], ""
+                if isinstance(written, P):
+                    parts = [part for part in _parts(written, params)
+                             if isinstance(part, (look.Fill, look.Outline))]
+                    by = f" (a choice of parameter {written.name!r})"
+                for part in parts:
+                    for attr in ("color", "mean"):
+                        yield from each(f"{what}'s {type(part).__name__}{by}{chosen}",
+                                        getattr(part, attr, None))
         else:
             yield from each(f"{what}{chosen}", getattr(looks, "color", None))
     for attr in ("background", "background_left", "background_right"):
@@ -1127,20 +1135,29 @@ ISOLUMINANT_WITHIN = 0.005
 def _claims_isoluminance(color, params: dict[str, Param], panel: Calibration,
                          backgrounds: list) -> bool:
     """Whether a color claims isoluminance (the PI, N§4 batch 1: "DKL `lum=0` with a chromatic
-    component"; the engine A2 plan's Q2, A): **at one value its parameters can take**, its
-    luminance contrast under V_F,10 is within `ISOLUMINANT_WITHIN` of 0 **and** it is chromatic.
-    Both halves say it the same way, so one light gets one verdict however it is spelled.
+    component"; the engine A2 plan's Q2, A): its luminance contrast under V_F,10 can be within
+    `ISOLUMINANT_WITHIN` of 0 **and** it can be chromatic. Written as literals, both halves say
+    it the same way, so one light gets one verdict however it is spelled; with parameters, each
+    half asks it its own way.
 
     A `DKL` color's contrast is `lum`, and it is chromatic when `l_m` or `s_lm` is other than 0
-    (`lum` scales every cone alike). A `ConeContrast`'s is the V_F,10 weighted change of L and M
-    on each lit background (`_background_lights`), and it is chromatic when L, M and S are not
-    all equal. A `ConeContrast` is judged per combination of its parameters' values: choices
-    exactly, one by one; a range by the ends of each (the contrast is linear in each component,
-    and a parameter in two components has one value), which claims when they span the band, unless the color is achromatic at every value of the combination (L, M and S
-    the same literal or the same parameter). **It fails closed**: a value that cannot be read
-    can be anything, and a chromatic range crossing 0 claims, though at 0 it is the background
-    (the plan's call 15). A component that is no number names no light (`_lights`), and
-    `_block_faults` refuses it."""
+    (`lum` scales every cone alike). **The DKL half asks each separately** (`_can_be`): whether
+    `lum` can be in the band, and whether `l_m` or `s_lm` can be other than 0, each at any value
+    its parameter can take, not at one value of them all. So `DKL(lum=P("c"), l_m=P("c"))`, c 0
+    or 0.1, claims, though at no value is it both: a refusal of a color that is not
+    isoluminant, the safe direction.
+
+    A `ConeContrast`'s contrast is the V_F,10 weighted change of L and M on each lit background
+    (`_background_lights`), and it is chromatic when L, M and S are not all equal. **The
+    ConeContrast half asks at one value of its parameters**, per combination of their values:
+    choices exactly, one by one; a range by the ends of each (the contrast is linear in each
+    component, and a parameter in two components has one value), which claims when they span
+    the band, unless the color is achromatic at every value of the combination (L, M and S the
+    same literal or the same parameter).
+
+    **Both fail closed**: a value that cannot be read can be anything, and a chromatic range
+    crossing 0 claims, though at 0 it is the background (the plan's call 15). A component that
+    is no number names no light (`_lights`), and `_block_faults` refuses it."""
     tol = ISOLUMINANT_WITHIN
     if isinstance(color, DKL):
         return (_can_be(color.lum, params, lambda v: abs(v) <= tol,
@@ -1190,13 +1207,14 @@ def _claims_isoluminance(color, params: dict[str, Param], panel: Calibration,
 
 def _can_be(value, params: dict[str, Param], holds, spans) -> bool:
     """Whether `value` can satisfy `holds`: a literal number itself, a parameter any of its
-    choices or, with a range, `spans(low, high)` (low first, however it was declared). Anything
-    else can, failing closed."""
+    choices or, with a range of numbers, `spans(low, high)` (low first, however it was
+    declared). Anything else can, failing closed: a bound that is no number, which
+    `_block_faults` refuses, is read as no bound (the A2 final review's I1)."""
     if isinstance(value, P):
         param = params.get(value.name)
         if param is not None and param.choices:
             return any(not _is_number(c) or holds(float(c)) for c in param.choices)
-        if param is not None and param.low is not None and param.high is not None:
+        if param is not None and _is_number(param.low) and _is_number(param.high):
             return spans(*sorted((float(param.low), float(param.high))))
         return True
     return not _is_number(value) or holds(float(value))
@@ -1376,7 +1394,8 @@ def _lit(value) -> list:
 _SIZES = ("size", "width", "height", "length", "thickness", "outer", "sigma", "aperture")
 
 #: Block fields that hold a number or a parameter (XC-245): every size, the rest the drawer
-#: reads as one, a contrast's `value`, a `Gray`'s `cd_m2` and an `xyY`'s `x`, `y` and `Y`.
+#: reads as one, a contrast's `value`, a `Gray`'s `cd_m2`, an `xyY`'s `x`, `y` and `Y`, a
+#: `DKL`'s `lum`, `l_m` and `s_lm`, and a `ConeContrast`'s `L`, `M` and `S`.
 #: `None` is a value of one only where its block's own default is `None` (a grating's
 #: `direction`).
 _NUMBERS = (*_SIZES, "inner", "sides", "sf", "phase", "tf", "direction", "orientation", "value",
