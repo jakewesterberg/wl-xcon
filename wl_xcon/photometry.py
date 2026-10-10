@@ -577,7 +577,7 @@ def unrealizable(color: Color, panel: Calibration, background: xyY | None = None
         weights = panel.weights_of(xyz)
     except ValueError as exc:
         return str(exc)
-    if any(w < -TOLERANCE or w > 1.0 + TOLERANCE for w in weights):
+    if not all(-TOLERANCE <= w <= 1.0 + TOLERANCE for w in weights):  # NaN fails closed
         return (
             f"needs primary weights {tuple(round(w, 3) for w in weights)}, which are outside "
             f"[0, 1]; the panel would clip, and a clipped color is neither the requested "

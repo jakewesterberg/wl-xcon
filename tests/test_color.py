@@ -725,6 +725,13 @@ def test_a_cone_color_on_the_black_default_background_is_refused_naming_the_fix(
     assert "declare the trial's background" in found["cone-color-on-black"].detail
 
 
+def test_a_cone_contrast_on_the_black_default_background_is_refused_too():
+    found = _found(a_task(Disc(color=ConeContrast(S=0.5))), calibration=measured())
+
+    assert found["cone-color-on-black"].blocking
+    assert found["cone-color-on-black"].detail.startswith("Disc: a cone color is relative")
+
+
 def test_a_cone_color_on_a_background_a_parameter_can_make_black_is_refused():
     trial = replace(a_task(Disc(color=DKL(l_m=0.08))), background=Gray(P("bg")),
                     params=[Param("bg", unit="cd/m2", low=0.0, high=40.0)])
@@ -770,3 +777,51 @@ def test_each_dkl_component_is_a_number(field):
     trial = replace(a_task(Disc(color=DKL(**{field: "much"}))), background=GRAY_BG)
 
     assert f"DKL.{field} is 'much', not a number" in _found(trial)["bad-block"].detail
+
+
+# --- A cone color's parameters are bounded, and the default warns of it (engine build A2) --
+
+
+def test_a_cone_color_with_a_parameter_that_cannot_be_bounded_is_a_bad_block():
+    """A free parameter names no value to hold to the panel, so `_block_faults` refuses it as it
+    does an `xyY`'s."""
+    free = replace(a_task(Disc(color=DKL(lum=0.0, l_m=P("c")))), background=GRAY_BG,
+                   params=[Param("c", unit="contrast")])
+    half = replace(a_task(Disc(color=ConeContrast(S=P("s")))), background=GRAY_BG,
+                   params=[Param("s", unit="contrast", high=0.5)])
+
+    for trial, name in ((free, "DKL.l_m"), (half, "ConeContrast.S")):
+        found = _found(trial, calibration=measured())
+        assert found["bad-block"].blocking and name in found["bad-block"].detail
+        assert "cannot be bounded" in found["bad-block"].detail
+
+
+def test_an_unbounded_isoluminant_dkl_is_still_refused_on_the_default():
+    """Refused `isoluminance-on-default` before cone colors were bounded; now refused as a
+    blocking `bad-block`, since a color that cannot be bounded is not read as a light
+    (`_color_faults` skips it, as it does an `xyY`'s)."""
+    trial = replace(a_task(Disc(color=DKL(lum=0.0, l_m=P("s")))), background=GRAY_BG,
+                    params=[Param("s", unit="contrast")])
+
+    found = _found(trial)
+
+    assert found["bad-block"].blocking and "DKL.l_m" in found["bad-block"].detail
+
+
+def test_a_cone_contrast_names_a_color_on_the_default_as_an_xyy_does():
+    trial = replace(a_task(Disc(color=ConeContrast(L=0.2, M=0.2))), background=GRAY_BG)
+
+    warning = _found(trial)["color-on-default"]
+
+    assert (warning.blocking, warning.accepted_in) == (False, NOT_RECORDING)
+
+
+@pytest.mark.parametrize("color", [ConeContrast(L=1e308), DKL(l_m=1e308),
+                                   xyY(0.3, 0.3, 1.7e308)])
+def test_a_color_whose_weights_overflow_is_unrealizable_not_realizable(color):
+    """Finite components near the float maximum make weights of infinity or NaN; NaN fails both
+    range comparisons, so the test must fail closed."""
+    from wl_xcon.photometry import unrealizable
+
+    assert unrealizable(color, measured(), xyY(*D65, 20.0)) is not None
+

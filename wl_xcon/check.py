@@ -1662,6 +1662,10 @@ def _block_faults(trial: Trial) -> list[Finding]:
             for attr in ("x", "y", "Y"):
                 # Bounded here; whether the panel makes each value is `_color_faults`' test.
                 values(part, attr)
+        if isinstance(part, CONE_COLORS):
+            for field in dataclasses.fields(part):
+                # Bounded here, as an `xyY`'s are; whether the panel makes each is `_color_faults`'.
+                values(part, field.name)
         if isinstance(part, (look.Ring, Annulus)):
             inner, outer = values(part, "inner"), values(part, "outer")
             first(inner, lambda v: v < 0.0)

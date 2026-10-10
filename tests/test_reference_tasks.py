@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -177,6 +178,19 @@ def test_the_search_task_passes_every_load_time_check(search):
     allocation = _load("allocation", "ALLOCATION")
 
     assert check(search, allocation, geometry=GEOMETRY, calibration=PANEL) == []
+
+
+def test_the_search_task_is_refused_on_a_measured_display_without_spectra(search):
+    """A cone color converts through a measured calibration's spectra and has none to use
+    (call 8)."""
+    allocation = _load("allocation", "ALLOCATION")
+
+    found = [f for f in check(search, allocation, geometry=GEOMETRY,
+                              calibration=replace(PANEL, spectra=None))
+             if f.code == "unrealizable-color"]
+
+    assert found and all(f.blocking for f in found)
+    assert all("measured without spectra" in f.detail for f in found)
 
 
 def test_the_search_task_will_not_load_without_a_measured_display(search):
