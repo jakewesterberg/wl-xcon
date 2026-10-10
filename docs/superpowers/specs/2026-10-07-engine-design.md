@@ -390,6 +390,8 @@ contrast whose luminance contrast can be within half a percent of 0 while a cone
 (the PI's answer to the plan's Q2). The search task's scene is the PI's answer to its Q1: his 2023
 red and green on a D65 gray at their own luminance, one level for all rigs, 16 cd/m² until the
 panels are measured (XC-310).
+This supersedes item 3's "`visual_search` keeps its isoluminant colors and waits" and build B's note's
+"until build A2" (that note stays as written; it was true of its date).
 Item 9's 2° set for foveal work is not built (XC-302); the record's second
 luminance waits on build F (XC-305).
 
