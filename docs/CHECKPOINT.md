@@ -401,6 +401,17 @@ figure was one low. In order:
 
 ## What moved overnight 2026-10-09 to 10-10: build A2's plan drafted and reviewed, XC-288's research
 
+> **Update, 2026-10-10 morning (the PI back):** he merged `xc288-prep` and `fault-sentences` (`main` at
+> `3d76cc2`, each fast-forwarded once its CI read green job by job; the second after `main` was merged into
+> it), had `engine-b-sweep` and the merged worktrees removed, answered A2's three questions (the 2023 red and
+> green by his numbers on a 16 cd/m² D65 gray, one level for all rigs, re-set at build J, XC-310; an
+> isoluminant cone contrast refused on the default like DKL; the CIE's table) and approved A2's plan ("Start
+> now, as A1 and B"): committed on `engine-a2` at `be7c8bb` with XC-301 to XC-311 filed (Next free XC-312).
+> **A2 is being built on `engine-a2`**; its ledger is `.superpowers/sdd/2026-10-09-engine-a2/progress.md` in
+> that worktree. **The interpreter moved**: `.claude/worktrees/engine-a2/.superpowers/venv` (Anaconda 3.13
+> with its site packages, plus playwright 1.63.0), with the worktree's `wl-preproc` link for
+> `WLX_REQUIRE_PREPROC=1`; the old one went with `b2b-remote-signin`.
+
 **Resume here (state at 2026-10-10, early morning):** `main` is `171b8d8`, engine build B (its entry is
 below). The PI went to bed asking for work through the night; three branches wait for him,
 none merged:
