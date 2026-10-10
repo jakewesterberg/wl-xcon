@@ -39,6 +39,7 @@ from wl_xcon.task import (
     Array,
     Checkerboard,
     Disc,
+    Gabor,
     Noise,
     On,
     Outcome,
@@ -921,3 +922,90 @@ def test_a_color_whose_weights_overflow_is_unrealizable_not_realizable(color):
 
     assert unrealizable(color, measured(), xyY(*D65, 20.0)) is not None
 
+
+
+# --- The lights a contrast makes, held to the panel's reach (engine build A2) -----------------
+
+
+def test_a_weber_light_brighter_than_the_panel_makes_on_its_background_is_refused():
+    """A Weber light is its background times one plus its contrast: +3 on a 30 cd/m² gray is
+    120 cd/m², past the sRGB standard's 80 cd/m² white."""
+    bright = replace(a_task(Disc(contrast=Weber(3.0))), background=Gray(30.0))
+    fits = replace(a_task(Disc(contrast=Weber(1.0))), background=Gray(30.0))
+
+    found = _found(bright)
+
+    assert found["unrealizable-color"].detail.startswith(
+        "Disc's Weber contrast of 3 on a background of xyY(x=0.3127, y=0.329, Y=30.0) reaches "
+        "xyY(x=0.3127, y=0.329, Y=120.0)")
+    assert "unrealizable-color" not in _found(fits)
+
+
+def test_a_grating_whose_brightest_bar_the_panel_cannot_make_is_refused():
+    """Michelson 0.8 about a 50 cd/m² gray peaks at 90 cd/m²; about 40, at 72."""
+    gabor = Gabor(sf=1.0, sigma=1.0, contrast=Michelson(0.8))
+    bright = replace(a_task(gabor), background=Gray(50.0))
+
+    assert "brightest bar at Michelson 0.8 about its mean, its background" in (
+        _found(bright)["unrealizable-color"].detail)
+    assert "unrealizable-color" not in _found(replace(a_task(gabor), background=Gray(40.0)))
+
+
+def test_a_grating_is_held_to_the_reach_about_the_mean_it_declares():
+    declared = look.Look(fill=look.SineGrating(contrast=Michelson(0.5), mean=Gray(60.0)))
+
+    detail = _found(replace(a_task(declared), background=Gray(20.0)))["unrealizable-color"].detail
+
+    assert "brightest bar at Michelson 0.5 about its mean xyY(x=0.3127, y=0.329, Y=60.0)" in detail
+
+
+def test_a_contrast_parameter_is_held_at_each_value_it_can_take():
+    trial = replace(a_task(Disc(contrast=P("c"))), background=Gray(30.0),
+                    params=[Param("c", unit="contrast", choices=(Weber(0.5), Weber(2.0)))])
+
+    details = [f.detail for f in check(trial, calibration=SRGB) if f.code == "unrealizable-color"]
+
+    assert len(details) == 1 and details[0].startswith("Disc's Weber contrast of 2 ")
+
+
+def test_a_multiplier_or_a_window_is_not_held_to_a_reach_of_its_own():
+    """Neither draws a light of its own (spec §4.4)."""
+    for combine in ("multiply", "window"):
+        trial = replace(a_task(Disc(contrast=Weber(3.0))), background=Gray(30.0))
+        trial = replace(trial, states=[replace(trial.states[0], enter=[Show(Stimulus(
+            "s", at=(0.0, 0.0), looks=Disc(contrast=Weber(3.0)), combine=combine))])])
+
+        assert "unrealizable-color" not in _found(trial), combine
+
+
+@pytest.mark.parametrize("calibration", [SRGB, measured()], ids=["default", "measured"])
+@pytest.mark.parametrize("mean", [DKL(lum=P("k"), l_m=0.02), ConeContrast(L=P("k"))],
+                         ids=["dkl", "cone"])
+def test_a_grating_about_a_cone_mean_with_a_parameter_is_checked_never_raised(calibration, mean):
+    """The review's E-C1: a parameter inside a grating's cone-colored mean reached `cone_xyz`
+    unbound and raised `TypeError` out of `check()`. Each value is read: about a 40 cd/m² gray, a
+    mean 5% brighter has bars at Michelson 0.5 within either panel's white; one five times as
+    bright does not."""
+    grating = look.Look(fill=look.SineGrating(contrast=Michelson(0.5), mean=mean))
+    trial = replace(a_task(grating), background=Gray(40.0),
+                    params=[Param("k", unit="contrast", choices=(0.05, 4.0))])
+
+    found = check(trial, calibration=calibration)
+
+    bars = [f.detail for f in found if f.code == "unrealizable-color" and "brightest bar" in f.detail]
+    assert any("=4.0," in d for d in bars)
+    assert not any("=0.05," in d for d in bars)
+
+
+def test_a_grating_about_an_isoluminant_cone_mean_has_no_luminance_step():
+    """Call 29: `DKL()` or a `lum` of 0, or a cone contrast changing S alone, is no step; a `DKL`
+    with a `lum` is one."""
+    def steps(mean) -> bool:
+        grating = look.Look(fill=look.SineGrating(contrast=Michelson(0.3), mean=mean))
+        return "luminance-step" in _found(replace(a_task(grating), background=GRAY_BG),
+                                          calibration=measured())
+
+    assert not steps(DKL())
+    assert not steps(DKL(l_m=0.05))
+    assert not steps(ConeContrast(S=0.3))
+    assert steps(DKL(lum=0.1))

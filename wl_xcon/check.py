@@ -999,9 +999,98 @@ def _color_faults(trial: Trial, panel: Calibration | None) -> list[Finding]:
             for finding in _one_color(what, light, panel, backgrounds):
                 if finding not in findings:  # one value's corners can say the same
                     findings.append(finding)
+    if panel is not None:
+        findings += [f for f in _modulation_faults(trial, params, panel, backgrounds)
+                     if f not in findings]
     if panel is not None and panel.standard:
         findings += _default_faults(trial, params)
     return findings
+
+
+def _modulation_faults(trial: Trial, params: dict[str, Param], panel: Calibration,
+                       backgrounds: list) -> list[Finding]:
+    """**The lights a contrast makes, held to the panel's reach** (engine spec §7.4, "for every
+    space"; the A2 research note §3, step 5: "check both extremes of a grating"): a flat
+    `Weber` light is its background times one plus its contrast, a sine grating's brightest and
+    darkest bars its mean times one plus and one minus its `Michelson` contrast -- the mean it
+    declares, absolute or a cone color on each background, or else each lit background. At each
+    value a parameter can take, the mean's own included (the plan's review, E-C1: a parameter in
+    a cone mean reached `cone_xyz` unbound). **Against the background only** (the plan's call 18):
+    drawn over another stimulus, a pattern's mean is that stimulus's light, and a sum of added
+    ones is not known here; the exact drawer refuses a pixel the panel cannot make
+    (`exact.output_levels`; XC-306). A window, a scotoma and a multiplier
+    draw no light of their own and are left out."""
+    from wl_xcon.photometry import Michelson, Weber, cone_xyz
+
+    combined = _combined(trial, params)
+    findings: list[Finding] = []
+
+    def held(what: str, base: xyY, factor: float, said: str) -> None:
+        light = xyY(base.x, base.y, base.Y * factor)
+        why = unrealizable(light, panel)
+        if why is not None:
+            finding = Finding("unrealizable-color", f"{what}'s {said} reaches {light}: {why}")
+            if finding not in findings:
+                findings.append(finding)
+
+    for looks in _appearances(trial):
+        if _multiplied([combine for shown, combine in combined if shown == looks]):
+            continue
+        light = _light(looks)
+        if light is None:
+            continue
+        kind, _, contrast, mean = light
+        what = type(looks).__name__
+        try:
+            contrasts = [c for c in _options(contrast, params) if isinstance(c, (Weber, Michelson))]
+            means = [None] if mean is None else _options(mean, params)
+            values = {id(c): _reach(c.value, params) for c in contrasts}
+        except _Unbounded:
+            continue  # refused where it is read: it cannot be bounded
+        for c in contrasts:
+            for value in values[id(c)]:
+                if kind == "flat" and isinstance(c, Weber):
+                    for background in backgrounds:
+                        held(what, background, 1.0 + value,
+                             f"Weber contrast of {value:g} on a background of {background}")
+                if kind != "grating" or not isinstance(c, Michelson):
+                    continue
+                for declared in means:
+                    if declared is None:
+                        bases = [(b, f"mean, its background {b}") for b in backgrounds]
+                        values_of_mean = []
+                    else:
+                        try:
+                            values_of_mean = _lights(declared, params)  # each value it can take
+                        except _Unbounded:
+                            continue  # refused where it is read: it cannot be bounded
+                        bases = [(m, f"mean {m}") for m in values_of_mean
+                                 if isinstance(m, xyY) and m.Y > 0.0]
+                    for m in values_of_mean:
+                        if not isinstance(m, CONE_COLORS):
+                            continue
+                        for b in backgrounds:
+                            try:
+                                X, Y, Z = cone_xyz(m, panel, b)
+                            except ValueError:
+                                continue  # the mean itself is refused where it is checked
+                            if Y > 0.0:
+                                bases.append((xyY(X / (X + Y + Z), Y / (X + Y + Z), Y),
+                                              f"mean {m} on {b}"))
+                    for base, said in bases:
+                        for sign, bar in ((1.0, "brightest"), (-1.0, "darkest")):
+                            held(what, base, 1.0 + sign * value,
+                                 f"{bar} bar at Michelson {value:g} about its {said}")
+    return findings
+
+
+def _multiplied(how: list) -> bool:
+    """Whether every stimulus that can show an appearance draws no light of its own: a
+    multiplier draws only its modulation, a window or a scotoma (`screen.LIGHTLESS`) none
+    (spec §4.4). Shared by the rules that would hold such a light to something."""
+    from wl_xcon.screen import LIGHTLESS
+
+    return bool(how) and all(combine == "multiply" or combine in LIGHTLESS for combine in how)
 
 
 def _background_lights(trial: Trial, params: dict[str, Param]) -> list:
@@ -1488,8 +1577,7 @@ def _light_faults(trial: Trial) -> list[Finding]:
         if how and all(combine in LIGHTLESS for combine in how):
             continue
         # A window or a scotoma reads no mean either, so with a multiplier it is still unread.
-        multiplied = bool(how) and all(combine == "multiply" or combine in LIGHTLESS
-                                       for combine in how)
+        multiplied = _multiplied(how)
         what += _through(color, contrast, mean)
         for color, contrast, mean in each:
             if kind == "flat":
@@ -1524,7 +1612,8 @@ def _light_faults(trial: Trial) -> list[Finding]:
                 found("unlit", (
                     f"{what}'s mean is whatever is behind it, and an eye's background is "
                     f"or can be black, so it may draw nothing; {fix}, or declare its mean"))
-            if mean is not None and not isinstance(mean, P) and any(mean != b for b in backgrounds):
+            if (mean is not None and not isinstance(mean, P) and not _isoluminant_as_written(mean)
+                    and any(mean != b for b in backgrounds)):
                 found("luminance-step", (
                     f"{what}'s mean {mean} differs from the background, so a luminance step "
                     f"sits under the pattern (engine spec §4.3: always a warning)"),
@@ -1532,6 +1621,19 @@ def _light_faults(trial: Trial) -> list[Finding]:
                     accepted_in=SESSION_KINDS)  # Always a warning, in every kind (N§R3).
     findings += _cone_color_faults(trial, params, on_black, fix)
     return findings
+
+
+def _isoluminant_as_written(color) -> bool:
+    """A cone color with no luminance step as written: a `DKL` whose `lum` is a literal 0
+    (`DKL()` among them), or a `ConeContrast` changing S alone. A grating about such a mean has
+    no luminance step under it, so `luminance-step` does not list one (the engine A2 plan's call
+    29). One whose L and M sit at V_F,10's ratio still lists one: that ratio needs the
+    calibration, which `_light_faults` does not read."""
+    if isinstance(color, DKL):
+        return _literal(color.lum) == 0.0
+    if isinstance(color, ConeContrast):
+        return _literal(color.L) == 0.0 and _literal(color.M) == 0.0
+    return False
 
 
 def _cone_color_faults(trial: Trial, params: dict[str, Param], on_black: bool,

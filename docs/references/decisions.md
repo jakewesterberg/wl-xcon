@@ -196,6 +196,11 @@ entry has its three lines, that every link names a file that exists, and that ev
 - **Where:** [wl_xcon/photometry.py](../../wl_xcon/photometry.py), Spectra and Calibration.cones; [wl_xcon/cones.py](../../wl_xcon/cones.py), fundamentals and excitations; [ADR-0011](../design/decisions/ADR-0011-calibration-record.md).
 - **Basis:** A display's cone-excitation matrix is best taken from its primaries' measured spectra [@brainard2002display] (p. 178), and the spectra are stored so any named set converts from them (COL-15). Linear interpolation between the CIE's 5 nm values and zero outside 390-830 nm are the methods the CIE's metadata declares for its table [@cie2006cie] (metadata, `interpolationMethod`, `extrapolationMethod`). The coverage and the step are engineering: beyond 780 nm the 10° L cones take 2.4e-6 of an equal-energy light's excitation and the M cones 2.3e-7 (the bundled table integrated by the trapezoid rule over 780-830 and 390-830 nm, 2026-10-10), and the step is the CIE table's own. Each record's transfers are black-subtracted (ADR-0011, amended by engine build A2), so a primary's spectrum at full drive is its light alone.
 
+### COL-36 — A contrast's extremes are held to the panel: a flat Weber light (background × (1 + c)) and a grating's brightest and darkest bars (mean × (1 ± m)), against the background and a declared mean; over another stimulus, when the frame is drawn
+- **Decided:** 2026-10-10, engineering (engine A2 plan, call 18), building COL-08's "for every space".
+- **Where:** [wl_xcon/check.py](../../wl_xcon/check.py), _modulation_faults.
+- **Basis:** Engineering default. A light the panel cannot make is clipped, and a clipped light is neither the color nor the luminance asked for (COL-04, arithmetic); checking a grating at both extremes is the A2 research note's procedure (§3, step 5), a computation, not a paper. Weights in [0, 1]: [@brainard2002display] (p. 173, Eq. 1). What a light over another stimulus is depends on that stimulus, so it is refused at draw time (XC-306).
+
 ## Display and timing
 
 ### DISP-01 — The display is a tandem QD-OLED at 4K/240 Hz, 10-bit, the ASUS PG27UCDM (26.5 in); tandem for ABL headroom and burn-in resistance, so the figure that matters is sustained full-field luminance at 100% APL
