@@ -163,6 +163,9 @@ def _drawn_or_named(trial, stimuli, values, geometry, calibration):
         background = np.asarray(s.background_right if vp.eye == "right" else s.background_left)
         assert np.isfinite(image).all() and image.min() >= 0.0, vp.eye
         assert np.abs(image - background).max() > 0.1, f"nothing visible in the {vp.eye} eye"
+        # And the panel makes it: every pixel has output levels (engine build A2).
+        out = exact.output_levels(image, calibration or SRGB)
+        assert out.min() >= 0.0 and out.max() <= 1.0, vp.eye
 
 
 @pytest.mark.parametrize("case", CASES)

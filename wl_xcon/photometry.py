@@ -171,8 +171,7 @@ class Transfer:
     """One channel's transfer, as measured (engine spec §7.6: "The transfer is a measured table
     per channel"; N§4 batch 1, since a QD-OLED's transfer is not a power law): at each drive
     `level`, the output code over its maximum, the channel's light as a `fraction` of its light
-    at full drive. **Stored and checked here, never evaluated in build B**: turning a light into
-    output levels through it is build A2's (`exact.py`'s docstring).
+    at full drive. Read backwards by `exact.output_levels` (engine build A2).
 
     **Black-subtracted** (engine build A2; ADR-0011): its fraction at level 0 is 0, the panel's
     black carried, when build J measures one, as a single ambient term (XC-309)."""
