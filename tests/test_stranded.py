@@ -136,6 +136,47 @@ def test_a_start_rows_ten_thousand_character_run_is_quoted_cut_in_why(tmp_path):
     )
 
 
+def test_a_trial_lines_number_of_4300_digits_is_quoted_cut_in_why(tmp_path):
+    """XC-299's review, I1: a `trials.jsonl` line naming a trial `trial_starts.jsonl` does not
+    was said with its number whole -- 4,300 digits, the most an `int` is said in, made a why of
+    4,380 characters on every idle frame. It is quoted cut now, as the record's other values
+    are."""
+    directory = _notes(tmp_path, "2027-01-13_01", ("departure", WALL - 900))
+    _config(directory)
+    (directory / "trial_starts.jsonl").write_text(json.dumps({
+        "run": 0, "task": "t.py", "trial_number": 1, "trial_in_task": 1,
+        "block_in_session": 1, "block_in_task": 1,
+    }) + "\n")
+    number = 10**4299
+    (directory / "trials.jsonl").write_text(json.dumps({
+        "trial_number": number, "outcome": "correct", "fluid_ml": 0.0, "last_reward_at": None,
+    }) + "\n")
+
+    (found,) = stranded.find(tmp_path)
+
+    assert (found.left_at, found.resumable) == (WALL - 900, False)
+    assert found.why == (
+        f"its trials.jsonl names trial {_quoted(number)}, which trial_starts.jsonl does not; "
+        f"end it instead"
+    )
+
+
+def test_a_folders_long_name_is_quoted_cut_in_why(tmp_path):
+    """XC-299's review: a folder copied under another name is said with both names, and a file
+    system lets a folder's run to 255 characters, past what a why quotes; it is quoted cut, as
+    the session id `config.json` names beside it is."""
+    name = "s" * 240
+    _config(_notes(tmp_path, name, ("departure", WALL - 900)), session_id="2027-01-13_01")
+
+    (found,) = stranded.find(tmp_path)
+
+    assert (found.left_at, found.resumable) == (WALL - 900, False)
+    assert found.why == (
+        f"its config.json names session '2027-01-13_01' and its folder is {_quoted(name)}, so "
+        f"it is not the session it records; end it instead"
+    )
+
+
 #: A `warnings.jsonl` row as `SessionRecord.warning` writes it, which `resume.read` reads whole.
 _ACCEPTED = {
     "code": "head free", "detail": "the head is free",

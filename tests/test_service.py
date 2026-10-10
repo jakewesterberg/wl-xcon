@@ -3378,6 +3378,139 @@ def test_an_animal_whose_bounds_raise_a_fault_that_cannot_be_said_is_refused_and
     assert isinstance(_step(service), Idle), "the service goes on"
 
 
+#: An animal's `bounds.py` raising, as it loads, a fault at `_fault`'s and `_sentence_or`'s
+#: edges (XC-291's review, M1): a `str()` raising what is not an `Exception`, a type whose name
+#: its metaclass redefines -- to raise, or to give a number -- and a name that is a `str` of its
+#: own kind, whose `__format__` raises. `BASE` is the fault's base.
+_AT_THE_EDGE = {
+    "SystemExit": (
+        "class Unsayable(BASE):\n"
+        "    def __str__(self):\n"
+        "        raise SystemExit('nor can this be said')\n"
+    ),
+    "a BaseException": (
+        "class Unsaid(BaseException):\n"
+        "    pass\n\n\n"
+        "class Unsayable(BASE):\n"
+        "    def __str__(self):\n"
+        "        raise Unsaid()\n"
+    ),
+    "a name that raises": (
+        "class Named(type):\n"
+        "    @property\n"
+        "    def __name__(cls):\n"
+        "        raise RuntimeError('nor can this be named')\n\n\n"
+        "class Unsayable(BASE, metaclass=Named):\n"
+        "    def __str__(self):\n"
+        "        raise RuntimeError('nor can this be said')\n"
+    ),
+    "a name that is a number": (
+        "class Named(type):\n"
+        "    @property\n"
+        "    def __name__(cls):\n"
+        "        return 5\n\n\n"
+        "class Unsayable(BASE, metaclass=Named):\n"
+        "    def __str__(self):\n"
+        "        raise RuntimeError('nor can this be said')\n"
+    ),
+    "a name of its own kind": (
+        "class Named(str):\n"
+        "    def __format__(self, spec):\n"
+        "        raise RuntimeError('nor can this be formatted')\n\n\n"
+        "class Unsayable(BASE):\n"
+        "    def __str__(self):\n"
+        "        raise RuntimeError('nor can this be said')\n\n\n"
+        "Unsayable.__name__ = Named('Unsayable')\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("edge", list(_AT_THE_EDGE))
+@pytest.mark.parametrize("base", ["ValueError", "Exception"], ids=["a refusal", "a fault"])
+def test_a_fault_at_the_edge_of_what_can_be_said_is_still_said_by_its_type(tmp_path, base, edge):
+    """XC-291's review, M1: `_fault` and `_sentence_or` caught only an `Exception` from `str()`,
+    and read the type's name through its metaclass, twice -- so a `str()` raising `SystemExit`
+    or a bare `BaseException`, or a metaclass whose `__name__` raises or is not text, still
+    stopped `wlx taskd` or said a number for the type. The name is read past the metaclass as a
+    plain `str` (`_type_name`), and whatever `str()` raises is caught but a `KeyboardInterrupt`:
+    the open is refused, saying the type, and the idle frame publishes."""
+    folders = _folders(tmp_path)
+    (folders[0] / "REFERENCE" / "bounds.py").write_text(
+        _AT_THE_EDGE[edge].replace("BASE", base) + "\n\nraise Unsayable()\n"
+    )
+    service = _made(folders)
+
+    frame = _step(service, _open())
+
+    assert list(service.root.iterdir()) == [] and frame.refusals[-1].name == "open"
+    assert frame.refusals[-1].why == "the session could not be built: Unsayable"
+    assert isinstance(_step(service), Idle), "the service goes on"
+
+
+@pytest.mark.parametrize("base", ["ValueError", "Exception"], ids=["a refusal", "a fault"])
+def test_ctrl_c_as_a_fault_is_said_still_ends_wlx_taskd(tmp_path, base):
+    """XC-291's review, M1: `_fault` and `_sentence_or` catch whatever a fault's `str()` raises
+    but a `KeyboardInterrupt` -- Ctrl-C arriving once, as the sentence is said -- which goes on
+    out of `step` to `run`'s handler, so Ctrl-C still ends `wlx taskd` as `service`'s docstring
+    says; the same `str()` asked again would have answered."""
+    folders = _folders(tmp_path)
+    (folders[0] / "REFERENCE" / "bounds.py").write_text(
+        f"class Interrupted({base}):\n"
+        f"    said = 0\n\n"
+        f"    def __str__(self):\n"
+        f"        type(self).said += 1\n"
+        f"        if type(self).said == 1:\n"
+        f"            raise KeyboardInterrupt\n"
+        f"        return 'said at the second asking'\n\n\n"
+        f"raise Interrupted()\n"
+    )
+    service = _made(folders)
+
+    with pytest.raises(KeyboardInterrupt):
+        _step(service, _open())
+    assert list(service.root.iterdir()) == []
+
+
+#: Appended to an animal's `bounds.py`: its `BOUNDS` remade as a subclass whose own `set`
+#: refuses with a sentence that cannot be said (XC-291's review, M3). The file is code, so its
+#: bounded config can be any `Bounds`, and a resume asks it to set what the record carries.
+_REFUSING_BOUNDS = '''
+
+class Unsayable(ValueError):
+    def __str__(self):
+        raise RuntimeError("nor can this be said")
+
+
+class Refusing(type(BOUNDS)):
+    def set(self, name, value, by):
+        raise Unsayable()
+
+
+BOUNDS = Refusing(BOUNDS.subject, BOUNDS.ceilings, BOUNDS.minima)
+'''
+
+
+@pytest.mark.parametrize("where", ["the past-limit check", "the resume"])
+def test_a_resume_its_bounds_refuse_with_a_sentence_that_cannot_be_said_is_refused_and_the_service_goes_on(
+    tmp_path, where
+):
+    """XC-291's review, M3: `_resume` said its bounds' refusal through `_sentence`, at the
+    past-limit check (the out-of-cage limit a record carries, set on a copy of the bounds) and
+    at `Session.resume` (each bounded value the record carries), so a `bounds.py` whose `Bounds`
+    refuses with a sentence that cannot be said stopped `wlx taskd`. Said by its type now
+    (`_sentence_or`): refused, nothing written, the session still stranded, the service on."""
+    folders = _folders(tmp_path)
+    _crashed(folders, "2027-01-14_01", run=True)
+    if where == "the past-limit check":
+        _start_row_out_of_cage_as(3600.0)(folders[2] / "2027-01-14_01" / "xcon")
+    path = folders[0] / "REFERENCE" / "bounds.py"
+    path.write_text(path.read_text() + _REFUSING_BOUNDS)
+    service = _made(folders)
+
+    assert _resume_refused(service, "2027-01-14_01") == "the session could not be resumed: Unsayable"
+    assert isinstance(_step(service), Idle), "the service goes on"
+
+
 # --- the path through two crashes (XC-026 spec §7; plan Task 7) ------------------
 
 
@@ -3679,14 +3812,36 @@ def test_wlx_taskd_stopped_by_a_fault_records_why_the_return_was_not_and_raises_
     assert "the return to the cage was not recorded" in capsys.readouterr().err
 
 
+class _Nameless(type):
+    """A metaclass whose classes' `__name__` raises."""
+
+    @property
+    def __name__(cls):
+        raise RuntimeError("nor can this be named")
+
+
+class _Unnamed(Exception, metaclass=_Nameless):
+    """A fault whose type's name raises, through its metaclass (XC-291's review, M1)."""
+
+
+@pytest.mark.parametrize(
+    ("fault", "said"),
+    [
+        (_Unsayable(), "_Unsayable"),
+        (_Unnamed("the card stopped answering"), "_Unnamed: the card stopped answering"),
+    ],
+    ids=["its sentence raises", "its type's name raises"],
+)
 def test_wlx_taskd_stopped_by_a_fault_that_cannot_be_said_still_records_the_return_as_not_recorded(
-    tmp_path, monkeypatch, capsys
+    tmp_path, monkeypatch, capsys, fault, said
 ):
     """XC-291: `run`'s handler said the fault before it called `shutdown`, so one whose own
     `str()` raises skipped the rows that make the next start find the session stranded, and
     left with a second fault in the first's place. It is said by its type (`_fault`): the open
     session's return is recorded as not recorded, saying why, its end follows, the next start
-    finds it stranded, and the fault itself goes on to the caller."""
+    finds it stranded, and the fault itself goes on to the caller -- its type's name read past
+    its metaclass on stderr too (`_type_name`; the review's M1), so that line never takes the
+    fault's place."""
     folders = _folders(tmp_path)
     passes = []
 
@@ -3696,16 +3851,17 @@ def test_wlx_taskd_stopped_by_a_fault_that_cannot_be_said_still_records_the_retu
             # This service reads this host's clock, not `WALL`.
             self._open(_open(departure=time.strftime("%Y-%m-%dT%H:%M:%S")))
             return
-        raise _Unsayable
+        raise fault
 
     monkeypatch.setattr(Service, "step", step)
 
-    with pytest.raises(_Unsayable):
+    with pytest.raises(type(fault)) as raised:
         main(_taskd_args(folders, "--allocation", ALLOCATION))
+    assert raised.value is fault
     rows = _rows(folders[2])
     assert [row["kind"] for row in rows][-2:] == ["return not recorded", "session ended"]
-    assert rows[-2]["reason"] == "wlx taskd stopped on a fault with the session open: _Unsayable"
-    assert "the return to the cage was not recorded" in capsys.readouterr().err
+    assert rows[-2]["reason"] == f"wlx taskd stopped on a fault with the session open: {said}"
+    assert f"taskd: stopped by {said.split(':')[0]} -- the session was open" in capsys.readouterr().err
     assert [found.session_id for found in stranded.find(folders[2])] == ["2027-01-14_01"]
 
 

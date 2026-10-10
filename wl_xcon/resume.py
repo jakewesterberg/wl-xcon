@@ -167,10 +167,12 @@ def _read(directory: Path, departure: float) -> Restoration:
     # The final review's M5: a folder copied under another name is not that session.
     # Its value quoted cut (`link._quoted`; the engine B final review), as the session kind's
     # below: this sentence is `Stranded.why`, shown on every idle frame and the page's banner.
+    # The folder's name too (XC-299's review), which a file system lets run to 255 characters.
     if str(config["session_id"]) != directory.parent.name:
         raise Unresumable(
             f"its config.json names session {_link._quoted(config['session_id'])} and its folder "
-            f"is {directory.parent.name!r}, so it is not the session it records; end it instead"
+            f"is {_link._quoted(directory.parent.name)}, so it is not the session it records; "
+            f"end it instead"
         )
     starts = _rows(directory, TRIAL_STARTS)
     lines = _rows(directory, "trials.jsonl")
@@ -242,8 +244,8 @@ def _read(directory: Path, departure: float) -> Restoration:
         number = int(line["trial_number"])
         if number not in tasks:
             raise Unresumable(
-                f"its trials.jsonl names trial {number}, which trial_starts.jsonl does not; "
-                f"end it instead"
+                f"its trials.jsonl names trial {_link._quoted(number)}, which "
+                f"trial_starts.jsonl does not; end it instead"
             )
         for tally in (levels.session_tally, levels.task_tallies[tasks[number]]):
             if line["outcome"] == "hang":
