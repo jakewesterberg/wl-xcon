@@ -20,9 +20,9 @@ import pytest
 
 from _calibrations import LINEAR, SPECTRA
 from _rig import DIRECT, RIG, STEREOSCOPE
-from wl_xcon import exact, screen, viewport
+from wl_xcon import exact, look, screen, viewport
 from wl_xcon.check import check
-from wl_xcon.photometry import DKL, RMS, SRGB, Calibration, Gray, Michelson, Weber, xyY
+from wl_xcon.photometry import DKL, RMS, SRGB, Calibration, ConeContrast, Gray, Michelson, Weber, xyY
 from wl_xcon.task import (
     After,
     Array,
@@ -126,9 +126,16 @@ CASES = {
         {"s": 2.0, "c": Weber(0.5), "bg": 20.0}, DIRECT, None),
     "noise, a later build's fill": (_shown(_s("n", Noise(contrast=RMS(0.2))), background=GRAY),
                                     {}, DIRECT, None),
-    "an isoluminant color, a later build's light": (
+    "an isoluminant color on a measured panel": (
         _shown(_s("k", Disc(size=2.0, color=DKL(lum=0.0, l_m=0.08))), background=GRAY),
         {}, DIRECT, PANEL),
+    "a cone contrast on the default": (
+        _shown(_s("k", Disc(size=2.0, color=ConeContrast(L=0.1, S=0.5))), background=GRAY),
+        {}, DIRECT, SRGB),
+    "a grating about a DKL mean": (
+        _shown(_s("g", look.Look(fill=look.SineGrating(contrast=Michelson(0.3),
+                                                       mean=DKL(lum=0.2, l_m=0.05)))),
+               background=GRAY), {}, DIRECT, SRGB),
 }
 
 #: Each reference task, with the stimulus it shows first and the calibration it needs.
@@ -141,14 +148,15 @@ REFERENCE = {
 }
 
 
-def _drawn_or_named(trial, stimuli, values, geometry):
+def _drawn_or_named(trial, stimuli, values, geometry, calibration):
     """Resolve and draw each eye; a `NotYetDrawable` must name the build that draws it."""
     try:
-        s = screen.resolve({x.name: x for x in stimuli}, values, trial, geometry, frame_period=1 / 240)
+        s = screen.resolve({x.name: x for x in stimuli}, values, trial, geometry,
+                           frame_period=1 / 240, calibration=calibration)
         eyes = viewport.viewports(RIG, geometry, pixels=(192, 108))
         images = [exact.draw(s, vp, supersample=2) for vp in eyes]
     except screen.NotYetDrawable as later:
-        assert re.search(r"\bA[234]\b", str(later)), f"names no later build: {later}"
+        assert re.search(r"\bA[34]\b", str(later)), f"names no later build: {later}"
         return
     for vp, image in zip(eyes, images):
         background = np.asarray(s.background_right if vp.eye == "right" else s.background_left)
@@ -160,7 +168,8 @@ def _drawn_or_named(trial, stimuli, values, geometry):
 def test_a_trial_the_checker_accepts_is_drawn_or_names_the_build_that_will(case):
     trial, values, geometry, calibration = CASES[case]
     assert [f for f in check(trial, geometry=geometry, calibration=calibration) if f.blocking] == []
-    _drawn_or_named(trial, [a.stimulus for a in trial.states[0].enter], values, geometry)
+    _drawn_or_named(trial, [a.stimulus for a in trial.states[0].enter], values, geometry,
+                    calibration)
 
 
 @pytest.mark.parametrize("task", REFERENCE)
@@ -174,4 +183,4 @@ def test_each_reference_task_s_first_stimulus_is_drawn_at_its_starting_values(ta
     # `calibration` declares no starting position yet (XC-183); straight ahead is one it allows.
     values.setdefault("target_x", 0.0)
     values.setdefault("target_y", 0.0)
-    _drawn_or_named(trial, [_load(task, stimulus)], values, DIRECT)
+    _drawn_or_named(trial, [_load(task, stimulus)], values, DIRECT, calibration)

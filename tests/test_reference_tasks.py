@@ -206,6 +206,32 @@ def test_the_search_task_will_not_load_without_a_measured_display(search):
     assert "uncalibrated-color" in codes
 
 
+def test_the_search_task_s_red_and_green_are_drawn_isoluminant_with_its_gray(search):
+    """The path end to end on a measured panel (engine build A2): checked, resolved through the
+    calibration, and each item's V_F,10 luminance is the gray's (A2's Q5), red and green
+    differing only in color."""
+    from wl_xcon.cones import V_F10
+    from wl_xcon.photometry import _apply3
+
+    choices = {p.name: p.choices for p in search.params}
+    values = {**SEARCH_VALUES, "fix_luminance": 40.0, "target_looks": choices["target_looks"][0],
+              "distractors": choices["distractors"][0]}
+    array = _load("visual_search", "ARRAY")
+
+    s = screen.resolve({"search": array}, values, search, GEOMETRY, frame_period=1 / 240,
+                       calibration=PANEL)
+
+    def luminance(xyz):
+        L, M, _ = _apply3(PANEL.cones, xyz)
+        return V_F10[0] * L + V_F10[1] * M
+
+    gray = luminance(s.background_left)
+    target = next(i for i in s.items if i.order[1] == SEARCH_VALUES["target_index"])
+    distractor = next(i for i in s.items if i.order[1] != SEARCH_VALUES["target_index"])
+    assert [luminance(i.fill.xyz) for i in s.items] == pytest.approx([gray] * len(s.items), rel=1e-9)
+    assert target.fill.xyz != pytest.approx(distractor.fill.xyz, rel=1e-3)
+
+
 def test_set_size_is_a_value_this_task_can_be_run_at_several_of(search):
     """The gap, closed: one task file, many set sizes, no structural change."""
     for n in (2, 4, 8, 12):
