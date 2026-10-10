@@ -1,9 +1,12 @@
 """The cone fundamentals (engine spec §7.9; engine build A2): the CIE's own table, bundled and
 checked by its checksum, and the CIE's transformation to XYZ_F,10, held to the CIE's own data."""
 
+import fnmatch
 import hashlib
 import json
+import tomllib
 from importlib import resources
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -124,12 +127,8 @@ def test_the_observer_records_its_parameters():
 
 
 def test_the_cie_files_and_their_notice_are_found_through_the_package_and_ship_with_it():
-    """The review's minor: read through `importlib.resources`, as an installed package reads them,
+    """Read through `importlib.resources`, as an installed package reads them,
     and every one covered by `pyproject.toml`'s package data; git keeps them byte for byte."""
-    import fnmatch
-    import tomllib
-    from pathlib import Path
-
     names = [*cones.CIE_FILES, "CIE_lms_cf_10deg.csv_metadata_v2.json",
              "CIE_cfb_stv_10deg.csv_metadata.json", "NOTICE.md"]
     root = Path(__file__).resolve().parents[1]
