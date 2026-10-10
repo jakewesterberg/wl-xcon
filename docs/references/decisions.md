@@ -1265,7 +1265,7 @@ entry has its three lines, that every link names a file that exists, and that ev
 ### TRN-08 — The agent's file names nobody: people are recorded by wl.works account id, names staying in wl.works
 - **Decided:** 2026-10-10, the PI (Q15, "IDs only (Recommended)", offered against names and ids), on XC-317's reading of the personal-data rules.
 - **Where:** [XC-288 spec §3.6](../superpowers/specs/2026-10-10-xc288-training-records-design.md#36-who) and [§5.2](../superpowers/specs/2026-10-10-xc288-training-records-design.md#52-what-it-holds).
-- **Basis:** PI decision, 2026-10-10. The rules it answers to are not papers: the GDPR (Regulation (EU) 2016/679, Art. 4(5) and Recital 26: pseudonymized data are still personal data) and Belgium's Act of 30 July 2018, Title 4, Art. 197 (pseudonymized data before identified data for research), as read on 2026-10-10 by XC-317's orientation; which lawful basis applies is UNVERIFIED and goes through KU Leuven's Privacy Team (XC-317).
+- **Basis:** PI decision, 2026-10-10. The rules it answers to are not papers: the GDPR (Regulation (EU) 2016/679, Art. 4(5) and Recital 26: pseudonymized data are still personal data) and Belgium's Act of 30 July 2018, Title 4, Art. 197 (pseudonymized data before identified data for research), as read on 2026-10-10 by XC-317's orientation; on approving the spec the PI ruled "personal data is safe as is" (2026-10-10), so nothing further is planned.
 
 ## Other
 

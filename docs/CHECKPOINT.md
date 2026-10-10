@@ -10,7 +10,7 @@ distrust the reasoning. Numbers go stale, arguments do not.
 > ruled for dated documents; read `wl_expcontroller/taskd.py` there as `wl_xcon/taskd.py`.
 >
 > **This file describes `main`, except its newest entry**, "What moved on 2026-10-10: XC-288 brainstormed"
-> (on branch `xc288-training-records`, its spec reviewed, revised and waiting for the PI's review; **start
+> (on branch `xc288-training-records`, its spec reviewed, revised and approved by the PI; **start
 > there**). Below it, "What moved on 2026-10-10: engine build A2, color", merged by the PI on the evening of
 > 2026-10-10, its CI sweeps read clean, and `xc275-sweep-timeouts` (XC-275's first part, described in that
 > entry) after it. The next entry, "What moved overnight 2026-10-09 to 10-10: build A2's
@@ -440,7 +440,7 @@ to a rig session. Four papers entered in the library, each opened on 2026-10-10:
 (abstract only); the arXiv preprint is entered by its url, arXiv's DOI being DataCite's and not Crossref's.
 
 **Backlog**: XC-288 moved to features (waits on the spec's review, then build C's plan); filed XC-316 (the
-agent's own brainstorm), XC-317 (personal data in the records), XC-318 (a simulated animal that learns),
+agent's own brainstorm), XC-317 (personal data in the records; closed on the PI's ruling), XC-318 (a simulated animal that learns),
 XC-319 (MonkeyLogic sessions), XC-320 and XC-321 (the asks of wl-works and wl-preproc, sent once the spec is
 approved), XC-322 (the file's size with gaze). **Next free is XC-323**, on `main` too since A2's merge, which raised it
 past this branch's IDs.
@@ -453,11 +453,12 @@ change to its strobed code (only rows that strobe now carry `sequence`, every ro
 three (`880fdaa`): a pass rule counts only trials at the stage's own difficulty (Q13); hands-on techniques
 stay in free-text notes (Q14); the agent's file holds account ids, never names (Q15, TRN-08). Build C's
 sign-in check, preset grouping, stranded-session reasons and `wlx run`'s build spawn go on C's welfare
-summary (spec §9); the welfare list is unchanged. **Before build C writes a file, the lab registers its
-personal data with KU Leuven's Privacy Team** (XC-317).
+summary (spec §9); the welfare list is unchanged. **The PI approved the spec that evening**: "keep going,
+approved, personal data is safe as is", the reason list as written; XC-317 (registering the records'
+personal data) closed on his ruling.
 
-**Next:** the PI reviews the spec file (the reason list's wording, §3.5, is the one thing it asks him to
-settle); then its asks go out (XC-320, XC-321) and build C's plan carries it.
+**Next:** the spec's asks written into the pending amendments files (XC-320, XC-321); then build C's plan,
+which carries it.
 
 ## What moved on 2026-10-10: engine build A2, color
 

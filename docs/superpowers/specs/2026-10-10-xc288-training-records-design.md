@@ -1,6 +1,7 @@
 # XC-288: training records an AI agent can learn from
 
-- **Status:** proposed, for the PI's review
+- **Status:** approved by the PI, 2026-10-10 ("keep going, approved, personal data is safe as is"), the reason
+  list (§3.5) as written
 - **Date:** 2026-10-10
 - **Backlog:** XC-288 (the PI, 2026-10-08), brainstormed with the PI on 2026-10-10, while engine build A2's CI ran
 - **Reviews:** an engineering and an NHP-training review, 2026-10-10; their fixes are folded in as defaults, and
@@ -386,7 +387,7 @@ file are both made from the same logs; neither is the other's source.
 **People are recorded by wl.works account id only, never by name** (Q15): names stay in wl.works.
 Pseudonymized data are still personal data (GDPR Recital 26), but Belgium's Act of 30 July 2018 (Title 4,
 Art. 197) ranks them above identified data for research; free-text notes can still name people, which
-XC-317 covers.
+the PI judged safe as is on approving this spec.
 
 ### 5.3 When it is built
 
@@ -505,10 +506,9 @@ here (§10).
   limits tighter than a person's, who answers for it, what "helped" means as its objective. Q1 left it for
   when an agent is built; the record leaves room (§3.6) and keeps what every candidate objective needs
   (days, trials, reward, engagement; §5.2's `summary`). A backlog item.
-- **Personal data, beyond Q15**: the file holds staff account ids and free-text notes, so it is personal
-  data. KU Leuven's research-data guidance says any use of personal data is registered (its PRET
-  application, through the Privacy Team) before collection; which lawful basis applies, and whether any of
-  it is ever published, is UNVERIFIED and the PI's. XC-317, before build C writes a file.
+- **Personal data, beyond Q15**: settled by the PI on approving this spec, 2026-10-10: "personal data is
+  safe as is". The file holds account ids, never names (Q15); nothing further is planned. Whether any of it
+  is ever published is his to decide if that arises.
 - **A simulated animal that learns**, as a test bed for an agent before an animal (R12): every published
   teacher found was tried on simulated learners first (the research note, §2.3). A backlog item, beside
   XC-146.
