@@ -93,6 +93,7 @@ RETURNS: dict[str, str] = {
     "viewport": "None",
     "warnlist": "None",
     "cones": "None",
+    "declarations": "None",
 }
 
 #: Modules with nothing to neuter, and why. An entry here is a claim someone made,
