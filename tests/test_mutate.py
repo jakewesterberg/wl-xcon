@@ -453,6 +453,22 @@ def test_a_mutant_caught_by_many_tests_names_a_few_and_counts_the_rest():
     )
 
 
+def test_a_verdict_line_caps_the_length_of_every_test_name_it_prints():
+    """XC-331: `tests/test_signin.py` had a bytes parameter that pytest turned into a
+    65,537-space test id; the timeout verdict named it twice, the 66 KB line made
+    `gh run view --log` drop the rest of the shard's log, and the job read success."""
+    huge = "tests/t.py::t[" + " " * 70000 + "]"
+    run = mutate_tool.SuiteRun(
+        False, "timed out", [f"FAILED {huge}"], timed_out=True, finished=3, running=huge,
+        running_for=9.0,
+    )
+
+    verdict = mutate_tool._how_far(run, 10) + mutate_tool._caught_by(run.failures)
+
+    assert len(verdict) < 1024
+    assert "tests/t.py::t[" in verdict
+
+
 def test_a_collection_error_is_named_by_its_file():
     """What the four `geometry` entries on 2026-09-20 were caught by: an import at
     module scope in an unrelated test file, not an assertion."""

@@ -319,13 +319,15 @@ def run(plan: list[tuple[str, list[str] | None]]) -> int:
     is `None`, and `--only` its part of the module when a shard cut it."""
     failures = []
     for module, only in plan:
-        command = [sys.executable, "tools/mutate.py", "--all"]
+        # -u: each verdict line leaves when it is reached, so CI timestamps it truthfully
+        # and a cancelled job loses no verdict it already reached (XC-331).
+        command = [sys.executable, "-u", "tools/mutate.py", "--all"]
         if only is not None:
             command += ["--only", ",".join(only)]
         if RETURNS[module] != "[]":
             command += ["--returns", RETURNS[module]]
         command.append(f"{PACKAGE}/{module}.py")
-        print(f"\n=== {module} ({' '.join(command[2:])}) ===", flush=True)
+        print(f"\n=== {module} ({' '.join(command[3:])}) ===", flush=True)
         if subprocess.run(command, cwd=ROOT).returncode != 0:
             failures.append(module)
     if failures:

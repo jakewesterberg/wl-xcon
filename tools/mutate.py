@@ -294,6 +294,21 @@ def _failures(stdout: str) -> list[str]:
     return [line for line in lines[start + 1 :] if line.startswith(("FAILED ", "ERROR "))]
 
 
+NAME_LIMIT = 200
+
+
+def _short(test_id: str) -> str:
+    """A test id cut to `NAME_LIMIT` characters, keeping the start (file and test).
+
+    A verdict line names tests, and a parameter can make an id enormous: one bytes
+    parameter became a 65,537-space id, the 66 KB line broke `gh run view --log`'s
+    64 KiB line limit, and the rest of that shard's log vanished (XC-331).
+    """
+    if len(test_id) <= NAME_LIMIT:
+        return test_id
+    return f"{test_id[:NAME_LIMIT]}... ({len(test_id)} chars)"
+
+
 def _caught_by(failures: list[str]) -> str:
     """What to append to a mutant's line: the tests that failed, by node id.
 
@@ -303,7 +318,7 @@ def _caught_by(failures: list[str]) -> str:
     """
     if not failures:
         return ""
-    names = [line.split(" ", 1)[1].split(" - ", 1)[0] for line in failures]
+    names = [_short(line.split(" ", 1)[1].split(" - ", 1)[0]) for line in failures]
     shown = ", ".join(names[:NAMED])
     rest = len(names) - NAMED
     return f"  <- {shown}" + (f", +{rest} more" if rest > 0 else "")
@@ -552,7 +567,7 @@ def _how_far(run: SuiteRun, of: int | None) -> str:
     done = f"{run.finished} of {of} tests done" if of else f"{run.finished} tests done"
     if run.running is None:
         return f"no test running; {done}"
-    return f"running {run.running} for {run.running_for:.0f}s; {done}"
+    return f"running {_short(run.running)} for {run.running_for:.0f}s; {done}"
 
 
 def _mutant_limit(baseline_seconds: float) -> float:
