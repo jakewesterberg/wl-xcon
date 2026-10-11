@@ -179,11 +179,13 @@ def test_a_task_with_a_blocking_finding_exits_one(tmp_path, capsys):
     to be able to refuse it without parsing prose."""
     bad = tmp_path / "bad_task.py"
     bad.write_text(
-        "from wl_xcon.task import After, On, Outcome, State, Trial\n"
+        "from wl_xcon.task import NO_CHOICE, After, On, Outcome, ReactionTime, State, Task, Trial\n"
         "t = Trial(start='a', states=[\n"
         "    State('a', go=[On(After(1.0), Outcome.CORRECT)]),\n"
         "    State('orphan', go=[On(After(1.0), Outcome.CORRECT)]),\n"
         "])\n"
+        "TASK = Task({'t': t}, default='t', choice=NO_CHOICE,\n"
+        "            reaction_time=ReactionTime('a', (Outcome.CORRECT,), 'the wait'))\n"
     )
 
     assert main(["check", str(bad), "--rig", RIG_FILE]) == 1
@@ -248,7 +250,7 @@ def test_wlx_check_for_a_kind_lists_the_calibrations_own_warnings(capsys):
 def test_wlx_check_says_no_findings_only_when_it_said_no_warning_either(monkeypatch, capsys):
     """The engine B final review: a task with no findings, checked for a kind on the default
     calibration, said "1 warning(s) ... the task loads" and then "no findings"."""
-    monkeypatch.setattr(cli, "check", lambda *a, **k: [])
+    monkeypatch.setattr(cli, "check_task", lambda *a, **k: [])
     argv = ["check", GOOD, "--rig", RIG_FILE, "--allocation", ALLOCATION, "--view", "direct"]
 
     assert main([*argv, "--kind", "recording"]) == 0
@@ -273,7 +275,7 @@ def test_wlx_check_for_a_kind_refuses_a_calibration_dated_after_today(kind, tmp_
 def test_wlx_check_says_a_findings_sentence_through_the_terminal_guard(monkeypatch, capsys):
     """A finding's sentence quotes the task it was found in, so it reaches the terminal as
     `render` sends wire text: through `_printable`."""
-    monkeypatch.setattr(cli, "check", lambda *a, **k: [Finding(
+    monkeypatch.setattr(cli, "check_task", lambda *a, **k: [Finding(
         "contrast-on-default", "forged\x1b[2J\nrefused  nothing", blocking=False,
         accepted_in=("training",))])
 
@@ -470,13 +472,17 @@ def test_review_renders_the_artifact(capsys):
     out = capsys.readouterr().out
     assert "stateDiagram-v2" in out
     assert "Needs human review" in out
+    # What a reviewer confirms, first, then the structure (engine build C1).
+    assert "## What a reviewer confirms" in out and "Content: `sha256:" in out
+    assert "## Structure `detection`, the default" in out
+    assert out.index("## What a reviewer confirms") < out.index("stateDiagram-v2")
 
 
-def test_a_file_with_no_trial_says_so(tmp_path):
+def test_a_file_with_no_task_object_says_so(tmp_path):
     empty = tmp_path / "empty.py"
     empty.write_text("x = 1\n")
 
-    with pytest.raises(SystemExit, match="0 trials"):
+    with pytest.raises(SystemExit, match="0 task objects"):
         main(["check", str(empty), "--rig", RIG_FILE])
 
 
@@ -2255,6 +2261,40 @@ def test_wlx_run_refuses_a_task_written_for_the_other_setup_before_anything_is_r
     assert not (tmp_path / "2027-01-14_01").exists()
 
 
+def test_wlx_run_refuses_a_task_that_needs_a_fixed_head_in_a_chaired_session_before_anything_is_recorded(
+    tmp_path,
+):
+    """Engine spec §20.1 (XC-277): refused before the session opens, as a task written for the
+    other setup is, so no departure is marked for a session that cannot run."""
+    text = Path("tasks/fixation_detection.py").read_text()
+    was = '    default="detection",\n'
+    assert text.count(was) == 1
+    task = tmp_path / "fixed_head.py"
+    task.write_text(text.replace(was, was + "    needs_fixed_head=True,\n"))
+    argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm(), "--deployment", "rig-chaired")
+    argv[argv.index("tasks/fixation_detection.py")] = str(task)
+
+    with pytest.raises(SystemExit) as refused:
+        main(argv)
+
+    assert "head-not-fixed" in str(refused.value)
+    assert not (tmp_path / "2027-01-14_01").exists()
+
+
+def test_wlx_check_holds_the_task_object_to_its_declarations(tmp_path, capsys):
+    """`wlx check` is the guardrail a person runs (this file's docstring): a setting with no meaning
+    is refused there too."""
+    text = Path("tasks/fixation_detection.py").read_text()
+    was = '        Param("fix_hold", unit="s", low=0.05, high=2.0, start=0.3),\n'
+    assert text.count(was) == 1
+    unexplained = tmp_path / "unexplained.py"
+    unexplained.write_text(text.replace(
+        was, was + '        Param("cue_delay", unit="s", low=0.0, high=1.0, start=0.2),\n'))
+
+    assert main(["check", str(unexplained), "--rig", RIG_FILE, "--allocation", ALLOCATION]) == 1
+    assert "undeclared-meaning" in capsys.readouterr().out
+
+
 def test_wlx_run_refuses_a_task_its_kind_does_not_accept_before_anything_is_recorded(tmp_path):
     argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm())
     argv[argv.index("tasks/fixation_detection.py")] = "tasks/visual_search_training.py"
@@ -2353,7 +2393,7 @@ def test_wlx_run_accepts_its_warnings_before_the_departure_is_marked(tmp_path, m
 
 def test_wlx_run_says_a_refused_tasks_findings_through_the_terminal_guard(tmp_path, monkeypatch):
     """The refusal before anything is recorded quotes the task too."""
-    monkeypatch.setattr(cli, "check", lambda *a, **k: [
+    monkeypatch.setattr(cli, "check_task", lambda *a, **k: [
         Finding("bad\x9bcode", "forged\x1b[2J\nSTOPPED: forged")])
 
     with pytest.raises(SystemExit) as refused:
@@ -2366,7 +2406,7 @@ def test_wlx_run_says_a_refused_tasks_findings_through_the_terminal_guard(tmp_pa
 def test_wlx_run_says_its_warnings_through_the_terminal_guard(tmp_path, monkeypatch):
     """Its refusal quotes the task's warnings, so it reaches the terminal through
     `_printable`, as `wlx check`'s lines do."""
-    monkeypatch.setattr(cli, "check", lambda *a, **k: [Finding(
+    monkeypatch.setattr(cli, "check_task", lambda *a, **k: [Finding(
         "contrast-on-default", "forged\x1b[2J", blocking=False, accepted_in=("training",))])
     argv = [a for a in _run_args(tmp_path, "--out-of-cage-at", _hhmm()) if a != "--accept-warnings"]
 
@@ -3372,7 +3412,7 @@ def test_a_task_refused_by_its_checks_records_that_the_session_did_not_start(
     anything is recorded (`test_wlx_run_refuses_a_task_written_for_the_other_setup_
     before_anything_is_recorded`). `run()`'s own check is the backstop for a caller
     that is not this command, and this reaches it by silencing the command's."""
-    monkeypatch.setattr(cli, "check", lambda *args, **kwargs: [])
+    monkeypatch.setattr(cli, "check_task", lambda *args, **kwargs: [])
     bad = tmp_path / "bad_task.py"
     bad.write_text(
         "from wl_xcon.task import NO_CHOICE, After, On, Outcome, ReactionTime, State, Task, Trial\n"
