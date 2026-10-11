@@ -10,7 +10,7 @@ distrust the reasoning. Numbers go stale, arguments do not.
 > ruled for dated documents; read `wl_expcontroller/taskd.py` there as `wl_xcon/taskd.py`.
 >
 > **This file describes `main`, except its newest entry**, "What moved on 2026-10-11: the asks delivered,
-> build C split, C1 planned" (on branch `engine-c1`, its plan waiting for the PI's review; **start there**).
+> build C split, C1 planned" (on branch `engine-c1`, its plan approved and being built; **start there**).
 > Below it, "What moved on 2026-10-10: XC-288 brainstormed" (its approved spec on `main` since 2026-10-11).
 > Below that, "What moved on 2026-10-10: engine build A2, color", merged by the PI on the evening of
 > 2026-10-10, its CI sweeps read clean, and `xc275-sweep-timeouts` (XC-275's first part, described in that
@@ -414,14 +414,16 @@ figure was one low. In order:
 ## What moved on 2026-10-11: the asks delivered, build C split, C1 planned
 
 **Resume here.** `main` is at `5475c96` (pushed): XC-288's approved spec merged in the morning (the PI, "Merge
-now"), and the delivered asks recorded. **Engine build C1's plan waits for the PI's review on branch
+now"), and the delivered asks recorded. **Engine build C1's plan was approved by the PI the same morning ("Approve, subagent-driven"; Appendix B
+"Review before merge") and is being built on branch
 `engine-c1`** (worktree `.claude/worktrees/engine-c1`): `docs/superpowers/plans/2026-10-11-engine-c1.md`, ten
 tasks, with **Appendix B, the meanings of the reference tasks' settings (31 items), for him to confirm as a
 numbered list before C1 merges**. Nothing of C1 is built. The plan was drafted, reviewed twice (an engineering
 review that ran Tasks 1-9 verbatim in a scratch copy, and an NHP-training review of every meaning), revised, and
 **re-verified: Tasks 1-10 applied verbatim in a scratch copy at `5475c96`, every red step and named break seen,
 the suite green after each task, 3382 to 3481**. Not run: Task 10's CI sweep and Python 3.11.
-**Also waiting for his merge: branch `mutate-name-cap`** (`c40ebd2`, `b6146b2`; CI green), XC-331 below.
+**`mutate-name-cap`** (XC-331 below) **merged into `main` at `b6146b2`** at his word, and `main` merged into
+`engine-c1` before C1 started.
 
 **The PI's decisions of 2026-10-11:**
 - **XC-288's spec approved** the evening before: "keep going, approved, personal data is safe as is"; the
