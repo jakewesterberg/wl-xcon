@@ -339,9 +339,9 @@ it), so they draw as §4.4 says until a run sets them.
 > `array_eccentricity`, and `adaptive_detection`'s `contrast` and `eccentricity` → `target_contrast`
 > and `target_eccentricity`; an array's members are objects, not items. The two detection tasks
 > gained a `target_y`, at the PI's request the same day, starting at 0 (the controller's choice,
-> not his). And every reference task
-> now needs a fixed head (its Appendix B, item 31), so none runs in a chaired or cage-side session,
-> and a demo session running one is declared head-fixed. The text is left as approved.
+> not his). And every reference task now needs a fixed head (its Appendix B, item 31), so none
+> runs in a chaired or cage-side session: a demo session runs one head-fixed, and `--chaired`
+> (§5 item 3) refuses it. The text is left as approved.
 
 ## 7. When things fail
 

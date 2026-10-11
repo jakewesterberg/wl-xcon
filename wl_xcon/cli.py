@@ -1642,7 +1642,8 @@ def main(argv: list[str] | None = None) -> int:
         # here, before anything is recorded (the engine B plan, call 20).
         calibration = _load_calibration(rig, args.rig)
         # The task object, held to its declarations and, since engine build C1, to the session's
-        # deployment: a task that needs a fixed head is refused unless the head is fixed (XC-277).
+        # deployment: a task that needs a fixed head is refused in any session not declared
+        # head-fixed (`RIG_FIXED`; XC-277).
         findings = check_task(
             _load_task(args.task),
             _load_allocation(args.allocation),

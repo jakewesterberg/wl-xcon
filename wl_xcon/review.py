@@ -365,7 +365,8 @@ def render_task(task: Task, allocation_names: dict[int, str] | None = None) -> s
         offered = f"{objects}, chosen by a {task.choice.by}."
     lines += ["### Choice", "", offered, ""]
     head = (
-        "Needs a fixed head: refused in any session whose head is not fixed (engine spec §20.1)."
+        "Needs a fixed head: refused in any session not declared head-fixed (`RIG_FIXED`; engine "
+        "spec §20.1)."
         if task.needs_fixed_head
         else "Runs with the head fixed or free; a chaired session lists its free head as a warning."
     )

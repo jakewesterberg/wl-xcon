@@ -226,6 +226,6 @@ TASK = Task(
     meanings={"set_size": SET_SIZE},
     # The rig fixes the head, which has no tracking there (the PI, 2026-10-11: "kiosk will be head
     # free, in the rig will be head fixed. we do not have head tracking in the rig"; the engine C1
-    # plan's Appendix B, item 31): refused in any session whose head is not fixed.
+    # plan's Appendix B, item 31): refused in any session not declared head-fixed (`RIG_FIXED`).
     needs_fixed_head=True,
 )

@@ -1353,8 +1353,8 @@ class Task:
     choice: "Choice | NoChoice | None" = None
     meanings: "dict[str, Meaning]" = field(default_factory=dict)
     #: Whether the task needs the animal's head fixed (engine spec §20.1; STE-25): refused in any
-    #: session whose head is not fixed, whose free head positions every stimulus against a nominal
-    #: head.
+    #: session not declared head-fixed (`RIG_FIXED`), where a free head would position every
+    #: stimulus against a nominal head.
     needs_fixed_head: bool = False
 
     def __post_init__(self) -> None:

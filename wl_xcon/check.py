@@ -285,11 +285,11 @@ def _hash_faults(task: Task) -> list[Finding]:
 
 
 def _head_faults(task: Task, deployment: "Deployment | None") -> list[Finding]:
-    """A task that needs a fixed head, in a session whose head is not fixed (engine spec §20.1;
-    STE-25: "a task may declare it needs a fixed head and is then refused in chaired sessions").
-    **Failing closed** (the engine C1 plan's call 16): refused in every deployment but `RIG_FIXED`,
-    a cage-side session as much as a chaired one. A load-time finding, so it fails the pre-flight's
-    task checks, `Session.run`'s backstop and `wlx run` alike, and `preflight.gate` and
+    """A task that needs a fixed head, in any session not declared head-fixed (`RIG_FIXED`; engine
+    spec §20.1; STE-25: "a task may declare it needs a fixed head and is then refused in chaired
+    sessions"). **Failing closed** (the engine C1 plan's call 16): refused in every deployment but
+    `RIG_FIXED`, a cage-side session as much as a chaired one. A load-time finding, so it fails the
+    pre-flight's task checks, `Session.run`'s backstop and `wlx run` alike, and `preflight.gate` and
     `Service._start` stay as they are."""
     if task.needs_fixed_head and deployment is not None and deployment is not Deployment.RIG_FIXED:
         return [Finding("head-not-fixed", (
