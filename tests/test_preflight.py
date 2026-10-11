@@ -452,7 +452,7 @@ def test_parameters_used_names_every_parameter_the_task_references():
     `run._resolve` meets them in a trial."""
     assert parameters_used(_trial()) == frozenset({
         "fix_hold", "fix_acquisition", "fix_window", "response_deadline", "target_hold",
-        "target_appearance", "target_x", "target_window",
+        "target_appearance", "target_x", "target_y", "target_window",
         "fix_luminance", "target_luminance",
     })
 
@@ -461,7 +461,7 @@ def test_a_run_given_nothing_starts_from_the_tasks_own_values():
     """What the page sends (P4d-2b spec §6.2): no values, and the task's own pass."""
     item = preflight.values(_as_task(_trial()), {})
 
-    assert (item.result, item.said) == ("pass", "9 starting value(s), each declared and in range")
+    assert (item.result, item.said) == ("pass", "10 starting value(s), each declared and in range")
 
 
 def _starting(**starts):

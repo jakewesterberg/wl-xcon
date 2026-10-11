@@ -311,6 +311,14 @@ what wl-preproc already ingests. These files are new or grown:
 
 - **The agent's file is not read or published.** It is rebuilt from the logs and from wl.works' facts, and
   carries account ids only; it is not part of the dataset.
+  *Revised 2026-10-11*: the PI, having discussed it with wl-works ("wl-works and i discussed the id thing
+  being too conservative. each person will have an id, but the name should also be present in places
+  where who said or did something is useful"): each person keeps a permanent account id, still the join
+  key, and the person's name is recorded beside it wherever who said or did something is useful, so the
+  change log's who above and the agent's file carry names as well as account ids
+  ([§3.6](superpowers/specs/2026-10-10-xc288-training-records-design.md#36-who) and
+  [§5.2](superpowers/specs/2026-10-10-xc288-training-records-design.md#52-what-it-holds)'s notes;
+  decisions.md TRN-08). The file is still not read or published.
 - **No new escape or code.** The change log joins to the stream through the existing `PARAM_CHANGE` pointer
   (the first item of this file) and the codes' count; nothing here asks for a new value.
 - **No timing claim.** The rig's event-log instants are wall-clock bookkeeping; the sync box stays the timing

@@ -38,8 +38,11 @@ from wl_xcon.task import (
     Hold,
     Exited,
     Outcome,
+    P,
     SaccadeTo,
+    Show,
     Trial,
+    actions_of,
 )
 from wl_xcon.welfare import Deployment
 
@@ -119,6 +122,20 @@ def test_the_adaptive_trial_is_the_detection_trial_with_more_parameters(adaptive
     *trial* is structurally the same. Everything adaptive lives between trials."""
     assert [s.name for s in adaptive.states] == [s.name for s in detection.states]
     assert {p.name for p in detection.params} < {p.name for p in adaptive.params}
+
+
+def test_each_detection_task_places_its_target_at_its_x_and_y(adaptive, detection):
+    """The PI, 2026-10-11: "shouldnt there also be a target_y?". The target and its window sit at
+    (`target_x`, `target_y`), each declared over ±16° and `target_y` starting on the horizontal
+    meridian; the target's computed position is the trial's to record (XC-348), not a setting."""
+    where = (P("target_x"), P("target_y"))
+    for trial in (detection, adaptive):
+        shown = {action.stimulus.name: action.stimulus.at
+                 for _, action in actions_of(trial) if isinstance(action, Show)}
+        windows = {window.name: window.at for window in trial.windows}
+        assert shown["target"] == windows["target"] == where
+        (y,) = [param for param in trial.params if param.name == "target_y"]
+        assert (y.low, y.high, y.start) == (-16.0, 16.0, 0.0) == (*_range(trial, "target_x"), 0.0)
 
 
 def test_the_staircase_converges_downward_on_success_and_backs_off_on_error():
@@ -336,12 +353,14 @@ def test_the_fixation_task_starts_from_the_values_the_console_mockup_shows():
     """P4d-2b spec §6.2 ("Starting values are the task's own"), with the values the
     mockup the PI reviewed shows for it (`TASKS.fixation_detection`) -- the ones every
     end-to-end test has run it at (`tests/test_cli.py`'s `_TASK_SETS`) -- each inside its
-    own range. Its appearance is left unset, as every test has left it."""
+    own range. Its appearance is left unset, as every test has left it; its `target_y`, added by
+    the PI on 2026-10-11 ("shouldnt there also be a target_y?"), starts on the horizontal
+    meridian."""
     params = _load_task(TASKS / "fixation_detection.py").params
 
     assert {param.name: param.start for param in params} == {
         "fix_acquisition": 4.0, "fix_hold": 0.3, "response_deadline": 0.6, "target_hold": 0.2,
-        "fix_window": 2.0, "target_window": 3.0, "target_x": 10.0,
+        "fix_window": 2.0, "target_window": 3.0, "target_x": 10.0, "target_y": 0.0,
         "target_appearance": None, "fix_luminance": 40.0, "target_luminance": 40.0,
     }
     for param in params:
@@ -469,48 +488,90 @@ TASK_FILES = {
 }
 
 #: **Appendix B of the engine C1 plan, as the PI confirmed it** on 2026-10-11, item by item and with
-#: changes (decisions.md TRN-10): the shared list's kind, role, direction and what the direction reads
-#: relative to, for each setting. A list of appearances is no difficulty setting unless a task says
+#: changes, and as he revised it on reviewing the build that day (decisions.md TRN-10): the shared
+#: list's kind, role, direction, what the direction reads relative to, note and why it overrides,
+#: for each setting (`_said`). A list of appearances is no difficulty setting unless a task says
 #: otherwise (his rule for item 1).
 CONFIRMED_SHARED = {
-    "fix_acquisition": (CLEAR_CUT, CRITERION, EASIER, None),
-    "fix_hold": (CLEAR_CUT, CRITERION, HARDER, None),
-    "fix_window": (CLEAR_CUT, CRITERION, EASIER, None),
-    "fix_luminance": (EXPECTED, STIMULUS, EASIER, BACKGROUND),
-    "response_deadline": (CLEAR_CUT, CRITERION, EASIER, None),
-    "target_hold": (CLEAR_CUT, CRITERION, HARDER, None),
-    "target_window": (CLEAR_CUT, CRITERION, EASIER, None),
-    "object_window": (EXPECTED, CRITERION, EASIER, None),
-    "target_appearance": (NOT_DIFFICULTY, STIMULUS, None, None),
-    "target_luminance": (EXPECTED, STIMULUS, EASIER, BACKGROUND),
-    "target_x": (NOT_DIFFICULTY, STIMULUS, None, None),
-    "set_size": (NOT_DIFFICULTY, STIMULUS, None, None),
-    "distractor_appearance": (NOT_DIFFICULTY, STIMULUS, None, None),
-    "target_index": (NOT_DIFFICULTY, STIMULUS, None, None),
-    "array_rotation": (NOT_DIFFICULTY, STIMULUS, None, None),
-    "array_eccentricity": (NOT_DIFFICULTY, STIMULUS, None, None),
+    "fix_acquisition": (CLEAR_CUT, CRITERION, EASIER, None, "", ""),
+    "fix_hold": (CLEAR_CUT, CRITERION, HARDER, None, "", ""),
+    "fix_window": (CLEAR_CUT, CRITERION, EASIER, None, "", ""),
+    "fix_luminance": (EXPECTED, STIMULUS, EASIER, BACKGROUND, (
+        "a point farther in luminance from the background is easier to find: on black a brighter "
+        "one; on a gray one farther above or below it, so a point near the gray's luminance can "
+        "vanish"), ""),
+    "response_deadline": (CLEAR_CUT, CRITERION, EASIER, None, "", ""),
+    "target_hold": (CLEAR_CUT, CRITERION, HARDER, None, "", ""),
+    "target_window": (CLEAR_CUT, CRITERION, EASIER, None, "", ""),
+    "object_window": (EXPECTED, CRITERION, EASIER, None, (
+        "a wider window accepts a less accurate landing on the target, and can also turn a "
+        "near-miss beside a distractor into a wrong target"), ""),
+    "target_appearance": (NOT_DIFFICULTY, STIMULUS, None, None, (
+        "an appearance is not easier or harder in general; a task where it is what the animal "
+        "judges may declare its own meaning"), ""),
+    "target_luminance": (EXPECTED, STIMULUS, EASIER, BACKGROUND, (
+        "a target farther in luminance from the background is easier to see: on black a brighter "
+        "one, on a gray one farther above or below it; saccade latency falls as intensity rises "
+        "and then levels off, so far above threshold more light changes little"), ""),
+    "target_x": (NOT_DIFFICULTY, STIMULUS, None, None, (
+        "the target's horizontal position; a task may declare how moving it changes the task"), ""),
+    "target_y": (NOT_DIFFICULTY, STIMULUS, None, None, (
+        "the target's vertical position; a task may declare how moving it changes the task"), ""),
+    "set_size": (NOT_DIFFICULTY, STIMULUS, None, None, (
+        "the direction depends on the search: in a pop-out search more objects make it easier, "
+        "in a search without pop-out harder"), ""),
+    "distractor_appearance": (NOT_DIFFICULTY, STIMULUS, None, None, (
+        "what a change does depends on the search, a broad category of tasks where one "
+        "definition does not serve: a task declares its own as it is created"), ""),
+    "target_index": (NOT_DIFFICULTY, STIMULUS, None, None,
+                     "which object of the array is the target", ""),
+    "array_rotation": (NOT_DIFFICULTY, STIMULUS, None, None, (
+        "turns the whole array; held fixed with target_index, it lets an animal answer by "
+        "position rather than by the target's appearance"), ""),
+    "array_eccentricity": (NOT_DIFFICULTY, STIMULUS, None, None, (
+        "how far the array sits from fixation; what moving it does depends on the search task, "
+        "and an array need not be a ring"), ""),
 }
+#: The pop-out search tasks' override of `set_size`, the PI's words (2026-10-11).
+POP_OUT = (EXPECTED, STIMULUS, EASIER, None,
+           "in a pop-out search a denser array makes the odd object stand out more",
+           "a pop-out search: a denser array makes the odd object stand out more", OVERRIDE)
+#: The training variant's two luminances, each read from the other.
+GAP = (
+    "the cue it adds is the brightness gap between the red and the green, redundant with their "
+    "color, so a larger gap is easier; near equal brightness, whose point for this animal is "
+    "unknown, the direction is uncertain; narrowing the gap is the fading path toward "
+    "isoluminance"
+)
 #: And each task's own: its settings no other task declares alike, and its overrides.
 CONFIRMED_OWN = {
     "fixation_detection": {},
     "adaptive_detection": {
-        "target_contrast": (CLEAR_CUT, STIMULUS, EASIER, None, OWN),
-        "target_eccentricity": (NOT_DIFFICULTY, STIMULUS, None, None, OWN),
+        "target_contrast": (CLEAR_CUT, STIMULUS, EASIER, None, (
+            "nothing reads it yet: no stimulus draws with it, and nothing moves it until a "
+            "between-trial procedure is called (XC-242)"), "", OWN),
+        "target_eccentricity": (NOT_DIFFICULTY, STIMULUS, None, None, (
+            "nothing reads it yet: the target's place is target_x's and target_y's, and this "
+            "setting moves nothing on screen until a between-trial procedure is called "
+            "(XC-242)"), "", OWN),
     },
-    "visual_search": {
-        "set_size": (EXPECTED, STIMULUS, EASIER, None, OVERRIDE),
-    },
+    "visual_search": {"set_size": POP_OUT},
     "visual_search_training": {
-        "set_size": (EXPECTED, STIMULUS, EASIER, None, OVERRIDE),
-        "red_luminance": (EXPECTED, STIMULUS, EASIER, "green_luminance", OWN),
-        "green_luminance": (EXPECTED, STIMULUS, EASIER, "red_luminance", OWN),
+        "set_size": POP_OUT,
+        "red_luminance": (EXPECTED, STIMULUS, EASIER, "green_luminance", GAP, "", OWN),
+        "green_luminance": (EXPECTED, STIMULUS, EASIER, "red_luminance", GAP, "", OWN),
     },
     "calibration": {
-        "target_y": (NOT_DIFFICULTY, STIMULUS, None, None, OWN),
-        "cal_window": (CLEAR_CUT, CRITERION, EASIER, None, OWN),
-        "cal_hold": (CLEAR_CUT, CRITERION, HARDER, None, OWN),
+        "cal_window": (CLEAR_CUT, CRITERION, EASIER, None, "", "", OWN),
+        "cal_hold": (CLEAR_CUT, CRITERION, HARDER, None, "", "", OWN),
     },
 }
+
+
+def _said(meaning) -> tuple:
+    """A meaning as the tables above write it: every field of it."""
+    return (meaning.kind, meaning.role, meaning.raising, meaning.relative_to, meaning.note,
+            meaning.overrides)
 
 
 @pytest.mark.parametrize("name", sorted(TASK_FILES))
@@ -535,8 +596,8 @@ def test_each_reference_task_object_adds_no_finding_to_its_trials(name, calibrat
 
 
 def test_the_shared_list_says_what_the_pi_confirmed():
-    assert {name: (m.kind, m.role, m.raising, m.relative_to)
-            for name, m in COMMON.items()} == CONFIRMED_SHARED
+    assert {name: _said(m) for name, m in COMMON.items()} == CONFIRMED_SHARED
+    assert len(COMMON) == 17
 
 
 @pytest.mark.parametrize("name", sorted(TASK_FILES))
@@ -547,7 +608,7 @@ def test_every_setting_of_each_reference_task_has_the_meaning_the_pi_confirmed(n
                 for setting in settings if setting in CONFIRMED_SHARED}
     expected.update(CONFIRMED_OWN[name])
 
-    assert {setting: (meaning.kind, meaning.role, meaning.raising, meaning.relative_to, origin)
+    assert {setting: (*_said(meaning), origin)
             for setting, (meaning, origin) in resolved(task).items()} == expected
     assert set(expected) == set(settings), "every setting has a meaning"
 

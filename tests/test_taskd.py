@@ -97,6 +97,7 @@ VALUES = {
     "fix_window": 2.0,
     "target_window": 3.0,
     "target_x": 10.0,
+    "target_y": 0.0,
     "target_appearance": None,
     "fix_luminance": 40.0,
     "target_luminance": 40.0,
@@ -106,7 +107,7 @@ VALUES = {
 #: decision 1).
 FIXATION_STARTS = {
     "fix_acquisition": 4.0, "fix_hold": 0.3, "response_deadline": 0.6, "target_hold": 0.2,
-    "fix_window": 2.0, "target_window": 3.0, "target_x": 10.0,
+    "fix_window": 2.0, "target_window": 3.0, "target_x": 10.0, "target_y": 0.0,
     "fix_luminance": 40.0, "target_luminance": 40.0,
 }
 
@@ -596,7 +597,7 @@ def test_a_refused_run_leaves_the_last_runs_state_as_it_was(tmp_path):
     values, rows = dict(session.spec.values), _runs(session)
     refused = RunSpec(task=str(bad), trials=3, seed=9, values={**VALUES, "fix_hold": 0.9})
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit, match="unreachable-state: no transition reaches 'orphan'"):
         session.run(refused)
 
     assert session.run_index == 0

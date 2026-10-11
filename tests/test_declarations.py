@@ -79,17 +79,17 @@ def test_a_setting_with_no_meaning_is_left_out_for_the_check_to_refuse():
 
 
 def test_the_shared_list_holds_every_setting_two_reference_task_files_use_alike():
-    """The nine settings three or more reference task files use, `target_x` among them now that
-    the detection tasks' target position bears calibration's name, and the seven two task files
-    share, `array_eccentricity` among them (the engine C1 plan's call 5; the PI's confirmation of
-    its Appendix B, 2026-10-11): sixteen."""
+    """The ten settings three or more reference task files use, `target_x` and `target_y` among
+    them now that the detection tasks' target position bears calibration's names, and the seven
+    two task files share, `array_eccentricity` among them (the engine C1 plan's call 5; the PI's
+    confirmation of its Appendix B and his `target_y`, 2026-10-11): seventeen."""
     assert set(COMMON) == {
         "fix_acquisition", "fix_hold", "fix_luminance", "fix_window", "response_deadline",
-        "target_hold", "target_appearance", "target_luminance", "target_x",
+        "target_hold", "target_appearance", "target_luminance", "target_x", "target_y",
         "target_window", "object_window", "set_size", "target_index",
         "array_rotation", "array_eccentricity", "distractor_appearance",
     }
-    assert len(COMMON) == 16
+    assert len(COMMON) == 17
 
 
 def test_every_shared_meaning_says_whether_its_setting_is_a_criterion_or_a_stimulus():
@@ -153,7 +153,9 @@ REQUIRED = "<required>"
 #: plan's call 11): each class a task's content can hold (`_vocabulary`), and each of its fields'
 #: defaults as `canonical` writes them, or `REQUIRED`. `canonical` leaves a field at its default
 #: out of a task's content, so a default that changes would change what a task does and leave its
-#: hash as it was; it raises `FORMAT` instead, which every content carries.
+#: hash as it was; it raises `FORMAT` instead, which every content carries. *Format 1 was rewritten
+#: in place on 2026-10-11, before it shipped (build C1 unmerged, no hash recorded): `ItemWindows`
+#: became `ObjectWindows` and `Choice.items` `Choice.objects`, the PI's "object", not "item".*
 DEFAULTS_AT_FORMAT = 1
 DEFAULTS = {
     "Action": {},

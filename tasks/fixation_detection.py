@@ -34,7 +34,9 @@ from wl_xcon.task import (
 )
 
 FIX = Stimulus("fix", at=(0.0, 0.0), looks=Disc(size=0.3, color=Gray(P("fix_luminance"))))
-TARGET = Stimulus("target", at=(P("target_x"), 0.0), looks=P("target_appearance"))
+TARGET = Stimulus(
+    "target", at=(P("target_x"), P("target_y")), looks=P("target_appearance")
+)
 
 detection = Trial(
     start="await_fix",
@@ -45,7 +47,7 @@ detection = Trial(
         Window("fix", at=(0.0, 0.0), radius=P("fix_window"), on="fix"),
         Window(
             "target",
-            at=(P("target_x"), 0.0),
+            at=(P("target_x"), P("target_y")),
             radius=P("target_window"),
             on="target",
         ),
@@ -63,6 +65,9 @@ detection = Trial(
         # ±12 was the interim, at the stereoscope's mask, before direct view had a
         # `Geometry` (2026-09-28).
         Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0),
+        # Its vertical place (the PI, 2026-10-11: "shouldnt there also be a target_y?"), over
+        # the same range, starting on the horizontal meridian; direct view shows ±18.4°.
+        Param("target_y", unit="deg", low=-16.0, high=16.0, start=0.0),
         # Appearance is a parameter, so switching circles among squares for
         # penguins among elephants is a value applied in an ITI -- not a new
         # task and not a new block.

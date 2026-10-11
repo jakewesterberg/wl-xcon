@@ -90,7 +90,7 @@ def whole_point_task(folder: Path) -> Path:
     not fixed here): what a pre-flight must turn into a fail rather than pass on."""
     text = Path("tasks/fixation_detection.py").read_text()
     for old, new in (
-        ('            "target",\n            at=(P("target_x"), 0.0),',
+        ('            "target",\n            at=(P("target_x"), P("target_y")),',
          '            "target",\n            at=P("target_point"),'),
         ('        Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0),',
          '        Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0),\n'

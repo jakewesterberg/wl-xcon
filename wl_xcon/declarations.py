@@ -42,12 +42,13 @@ OWN = "this task"
 OVERRIDE = "overrides the shared list"
 
 #: **The shared list**: every setting two or more reference task files use with one meaning (the
-#: engine C1 plan's call 5; its Appendix B, items 4 to 19 and 22, as the PI confirmed them on
-#: 2026-10-11). A direction reads on raising a number, on moving it away from a reference
-#: (`relative_to`), or on changing a list of choices (call 4). **A setting whose values are a list
-#: of appearances is not a difficulty setting here** (the PI: "generally speaking though,
-#: appearance is not a easier/harder thing"): a task where an appearance is what the animal judges
-#: overrides it with its own meaning and a note saying why, and may read a direction on changing it.
+#: engine C1 plan's call 5; its Appendix B, items 4 to 19, 22 and 23, as the PI confirmed them on
+#: 2026-10-11, with `target_y` added to the detection tasks that day). A direction reads on raising
+#: a number, on moving it away from a reference (`relative_to`), or on changing a list of choices
+#: (call 4). **A setting whose values are a list of appearances is not a difficulty setting here**
+#: (the PI: "generally speaking though, appearance is not a easier/harder thing"): a task where an
+#: appearance is what the animal judges may override it with its own meaning and a note saying
+#: why, and read a direction on changing it.
 COMMON: dict[str, Meaning] = {
     # Fixation.
     "fix_acquisition": Meaning(CLEAR_CUT, CRITERION, raising=EASIER),
@@ -67,14 +68,15 @@ COMMON: dict[str, Meaning] = {
     # The target.
     "target_appearance": Meaning(NOT_DIFFICULTY, STIMULUS, note=(
         "an appearance is not easier or harder in general; a task where it is what the animal "
-        "judges declares its own meaning")),
+        "judges may declare its own meaning")),
     "target_luminance": Meaning(EXPECTED, STIMULUS, raising=EASIER, relative_to=BACKGROUND, note=(
         "a target farther in luminance from the background is easier to see: on black a brighter "
         "one, on a gray one farther above or below it; saccade latency falls as intensity rises "
         "and then levels off, so far above threshold more light changes little")),
     "target_x": Meaning(NOT_DIFFICULTY, STIMULUS, note=(
-        "the target's horizontal position; how moving it changes the task is a task's own to "
-        "declare")),
+        "the target's horizontal position; a task may declare how moving it changes the task")),
+    "target_y": Meaning(NOT_DIFFICULTY, STIMULUS, note=(
+        "the target's vertical position; a task may declare how moving it changes the task")),
     # The search array.
     "set_size": Meaning(NOT_DIFFICULTY, STIMULUS, note=(
         "the direction depends on the search: in a pop-out search more objects make it easier, "
@@ -124,7 +126,9 @@ def resolved(task: Task) -> dict[str, tuple[Meaning, str]]:
 #: when a field's default changes, since `canonical` leaves a field at its default out and the
 #: change would otherwise alter what a task does without moving its hash. A field added at its
 #: default needs no raise. `tests/test_declarations.py` holds every default to the format it was
-#: written at (`DEFAULTS`).
+#: written at (`DEFAULTS`). *Format 1 was rewritten in place on 2026-10-11, before it shipped
+#: (build C1 unmerged, no hash recorded): `ItemWindows` became `ObjectWindows` and `Choice.items`
+#: `Choice.objects`, the PI's "object", not "item".*
 FORMAT = 1
 
 

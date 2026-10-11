@@ -204,10 +204,7 @@ SET_SIZE = Meaning(
     EXPECTED,
     STIMULUS,
     raising=EASIER,
-    note=(
-        "while an animal learns, more objects mean fewer lucky guesses, chance being 1/n, which "
-        "is chance's harder, not the animal's"
-    ),
+    note="in a pop-out search a denser array makes the odd object stand out more",
     overrides="a pop-out search: a denser array makes the odd object stand out more",
 )
 

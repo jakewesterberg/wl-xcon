@@ -53,7 +53,7 @@ adaptive_detection = Trial(
         Window("fix", at=(0.0, 0.0), radius=P("fix_window"), on="fix"),
         Window(
             "target",
-            at=(P("target_x"), 0.0),
+            at=(P("target_x"), P("target_y")),
             radius=P("target_window"),
             on="target",
         ),
@@ -69,6 +69,9 @@ adaptive_detection = Trial(
         # ±12 was the interim, at the stereoscope's mask, before direct view had a
         # `Geometry` (2026-09-28).
         Param("target_x", unit="deg", low=-16.0, high=16.0),
+        # Its vertical place (the PI, 2026-10-11: "shouldnt there also be a target_y?"), over
+        # the same range, starting on the horizontal meridian; direct view shows ±18.4°.
+        Param("target_y", unit="deg", low=-16.0, high=16.0, start=0.0),
         # Appearance is a parameter, so switching circles among squares for
         # penguins among elephants is a value applied in an ITI -- not a new
         # task and not a new block.
@@ -81,7 +84,8 @@ adaptive_detection = Trial(
             ),
         ),
         Param("target_contrast", unit="fraction", low=0.02, high=1.0),
-        # Held eccentricity is |target_x|, so the same bound.
+        # Held eccentricity was |target_x| while the target moved only along the horizontal
+        # meridian, so the same bound.
         Param("target_eccentricity", unit="deg", low=2.0, high=16.0),
         # Absolute luminance, D65 white (the PI, 2026-10-07: "Absolute cd/m²", starting
         # at "40 cd/m²"). Bounded at 80, the default calibration's white (the sRGB
@@ -116,7 +120,7 @@ adaptive_detection = Trial(
                 Show(
                     Stimulus(
                         "target",
-                        at=(P("target_x"), 0.0),
+                        at=(P("target_x"), P("target_y")),
                         looks=P("target_appearance"),
                     )
                 ),
@@ -214,7 +218,7 @@ TASK = Task(
             "nothing reads it yet: no stimulus draws with it, and nothing moves it until a "
             "between-trial procedure is called (XC-242)")),
         "target_eccentricity": Meaning(NOT_DIFFICULTY, STIMULUS, note=(
-            "nothing reads it yet: the target's distance is target_x's, and this "
+            "nothing reads it yet: the target's place is target_x's and target_y's, and this "
             "setting moves nothing on screen until a between-trial procedure is called "
             "(XC-242)")),
     },

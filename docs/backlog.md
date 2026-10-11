@@ -15,7 +15,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 **Finding one.** Grep the ID, a package (`P9`, `b3`), a repository (`wl-sync`) or a file. The sections: brainstorms the PI asked to have later; features no plan covers yet; defects and review findings deliberately not fixed; debt (cleanup, stale wording, test hygiene); anything that needs the rig or other hardware, measurements included; and asks of, or waits on, other repositories.
 
-**Next free ID: XC-348.**
+**Next free ID: XC-349.**
 
 ## Brainstorms queued for the PI
 
@@ -87,6 +87,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 - **XC-343** Refuse settings whose combination can never be correct: a search target that looks like its distractors, a target_hold at least as long as the response_deadline, a set size of 2 while the target's color varies. — 2026-10-11, [engine C1 plan, "What the PI should know"](superpowers/plans/2026-10-11-engine-c1.md#what-the-pi-should-know) — waits on: engine build C3 (varying conditions and live edits, which make the combinations)
 - **XC-344** Record that a setting varied within a block, and how, beside its values: how much a setting varies matters as much as its value (uncertainty about where a target appears raises thresholds, and a fixed one lets an animal skip the feature it is meant to use), so an agent reading values alone would blame a mixed block's cost on them. — 2026-10-11, [engine C1 plan, "What the PI should know"](superpowers/plans/2026-10-11-engine-c1.md#what-the-pi-should-know) — waits on: engine build C3 (varying conditions)
 - **XC-346** Task authoring: each task documents its settings' meanings usefully and adjusts the shared defaults where its design needs (the PI, 2026-10-11: "we should think carefully about when building tasks, how we make sure the parameters are documented in a useful way that can be adjusted in these training files"; search tasks especially, "defined in task creation, search is a broad category of tasks where one definition does not serve"), and the reference tasks' own definitions of set_size's alternatives, distractor_appearance and array_eccentricity when they are rewritten. — 2026-10-11, [engine C1 plan, Appendix B](superpowers/plans/2026-10-11-engine-c1.md#appendix-b-for-the-pi-to-confirm), the PI's confirmation of items 15, 16 and 19 — waits on: the reference tasks made right
+- **XC-348** Record each trial's computed target position (x, y) and its distance from fixation, as drawn, beside the settings (the PI, 2026-10-11), so difficulty can be related to distance without recomputing it. — 2026-10-11, [engine C1 plan, Appendix B](superpowers/plans/2026-10-11-engine-c1.md#appendix-b-for-the-pi-to-confirm), the PI on reviewing items 14, 22 and 23 — waits on: engine build C7 (with build F's screen log)
 
 ## Deferred defects
 

@@ -44,9 +44,7 @@ from wl_xcon.task import (
     CRITERION,
     EASIER,
     HARDER,
-    NOT_DIFFICULTY,
     NO_CHOICE,
-    STIMULUS,
     Meaning,
     ReactionTime,
     Task,
@@ -121,11 +119,11 @@ calibration = Trial(
 
 
 #: The task object (engine spec §3.5; engine build C1): its reaction time is the latency to
-#: acquire the target, it offers no choice, and it declares three settings only it has (the engine
-#: C1 plan's Appendix B, items 23 to 25, as the PI confirmed them on 2026-10-11; decisions.md
-#: TRN-10); its `target_x` is the shared list's, the detection tasks' too. Where a target goes is
-#: the constellation's schedule, so its two positions are set by the schedule more than by a
-#: trainer.
+#: acquire the target, it offers no choice, and it declares two settings only it has (the engine
+#: C1 plan's Appendix B, items 24 and 25, as the PI confirmed them on 2026-10-11; decisions.md
+#: TRN-10); its `target_x` and `target_y` are the shared list's, the detection tasks' too. Where a
+#: target goes is the constellation's schedule, so its two positions are set by the schedule more
+#: than by a trainer.
 TASK = Task(
     structures={"calibration": calibration},
     default="calibration",
@@ -139,9 +137,6 @@ TASK = Task(
     ),
     choice=NO_CHOICE,
     meanings={
-        "target_y": Meaning(NOT_DIFFICULTY, STIMULUS, note=(
-            "the target's vertical position, set by the constellation's schedule more than by a "
-            "trainer")),
         "cal_window": Meaning(CLEAR_CUT, CRITERION, raising=EASIER),
         "cal_hold": Meaning(CLEAR_CUT, CRITERION, raising=HARDER),
     },

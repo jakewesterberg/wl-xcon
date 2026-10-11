@@ -322,8 +322,8 @@ target's `eccentricity`, until the PI named them `array_eccentricity` and `targe
 TRN-13); the bounded settings' table is there too (`BOUNDED`). A direction reads on raising a
 value, or on moving it away from a reference -- a number, another setting the task declares, or the
 trial's background. An appearance, a setting whose values are a list of looks, is not a difficulty
-setting by default; a task where it is what the animal judges declares its own meaning, which may
-read a direction on changing it (TRN-11). Each meaning says whether its setting is a criterion,
+setting by default; a task where it is what the animal judges may declare its own meaning, which
+may read a direction on changing it (TRN-11). Each meaning says whether its setting is a criterion,
 what counts as success, or a stimulus, what the animal sees; the bounded settings are neither (the
 PI, 2026-10-11; TRN-12). Every declared setting needs one, live or not. The reference tasks'
 declarations are the PI's confirmation of build C1's plan's Appendix B, with his changes, on
@@ -440,7 +440,10 @@ the PI judged safe as is on approving this spec.
 > places where who said or did something is useful"):** people are recorded by their permanent
 > wl.works account id, still the join key, and by name too wherever who said or did something is
 > useful: changes, reasons, notes and marks (the `changes`, `reasons`, `notes` and `controls`
-> tables). The paragraph above is left as approved (decisions.md TRN-08).
+> tables). With names recorded beside ids (the PI's revision of 2026-10-11), the file holds
+> identified personal data, not pseudonymized data; the PI's rulings stand ("personal data is safe
+> as is", 2026-10-10; ids plus names, 2026-10-11). The paragraph above is left as approved
+> (decisions.md TRN-08).
 
 ### 5.3 When it is built
 

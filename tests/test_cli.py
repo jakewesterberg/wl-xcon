@@ -287,14 +287,16 @@ def test_wlx_check_says_a_findings_sentence_through_the_terminal_guard(monkeypat
 
 
 def _either_task(tmp_path, reach: float) -> str:
-    """`fixation_detection` declared for either setup, its target reaching `reach`°."""
+    """`fixation_detection` declared for either setup, its target reaching `reach`° along each
+    axis."""
     text = Path("tasks/fixation_detection.py").read_text(encoding="utf-8")
     written_for = 'view="direct"'
-    target = 'Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0)'
-    assert text.count(written_for) == 1 and text.count(target) == 1
+    across = 'Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0)'
+    up = 'Param("target_y", unit="deg", low=-16.0, high=16.0, start=0.0)'
+    assert text.count(written_for) == 1 and text.count(across) == 1 and text.count(up) == 1
     text = text.replace(written_for, 'view="either"').replace(
-        target, f'Param("target_x", unit="deg", low={-reach}, high={reach}, start=10.0)'
-    )
+        across, f'Param("target_x", unit="deg", low={-reach}, high={reach}, start=10.0)'
+    ).replace(up, f'Param("target_y", unit="deg", low={-reach}, high={reach}, start=0.0)')
     # One file per reach: two files of the same name, size and second share a bytecode
     # cache entry, and the second would silently load the first's task.
     path = tmp_path / f"either_detection_{abs(reach):g}.py"
