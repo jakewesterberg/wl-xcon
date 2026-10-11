@@ -65,8 +65,12 @@ detection = Trial(
         # ±12 was the interim, at the stereoscope's mask, before direct view had a
         # `Geometry` (2026-09-28).
         Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0),
-        # Its vertical place (the PI, 2026-10-11: "shouldnt there also be a target_y?"), over
-        # the same range, starting on the horizontal meridian; direct view shows ±18.4°.
+        # Its vertical place, which the PI asked for (2026-10-11: "shouldnt there also be a
+        # target_y?"). Its range, `target_x`'s, and its start on the horizontal meridian were the
+        # controller's choice, not his; direct view shows ±18.4°. On the extent he ruled the same
+        # day: "all tasks should be able to use all of the screen, there can be a warning that the
+        # gaze monitoring is most accurate up to ~15 deg (where the calibrated regions lies)"
+        # (decisions.md TSK-38; XC-349).
         Param("target_y", unit="deg", low=-16.0, high=16.0, start=0.0),
         # Appearance is a parameter, so switching circles among squares for
         # penguins among elephants is a value applied in an ITI -- not a new
