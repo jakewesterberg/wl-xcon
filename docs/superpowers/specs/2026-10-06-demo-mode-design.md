@@ -337,8 +337,9 @@ it), so they draw as §4.4 says until a run sets them.
 > `response_window` → `response_deadline`, `target_position` → `target_x`, `item_window` →
 > `object_window`, `array_phase` → `array_rotation`, `visual_search`'s `eccentricity` →
 > `array_eccentricity`, and `adaptive_detection`'s `contrast` and `eccentricity` → `target_contrast`
-> and `target_eccentricity`; an array's members are objects, not items. The text is left as
-> approved.
+> and `target_eccentricity`; an array's members are objects, not items. And every reference task
+> now needs a fixed head (its Appendix B, item 31), so none runs in a chaired or cage-side session,
+> and a demo session running one is declared head-fixed. The text is left as approved.
 
 ## 7. When things fail
 

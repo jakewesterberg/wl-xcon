@@ -41,6 +41,7 @@ from wl_xcon.task import (
     SaccadeTo,
     Trial,
 )
+from wl_xcon.welfare import Deployment
 
 TASKS = Path(__file__).resolve().parents[1] / "tasks"
 
@@ -549,6 +550,20 @@ def test_every_setting_of_each_reference_task_has_the_meaning_the_pi_confirmed(n
     assert {setting: (meaning.kind, meaning.role, meaning.raising, meaning.relative_to, origin)
             for setting, (meaning, origin) in resolved(task).items()} == expected
     assert set(expected) == set(settings), "every setting has a meaning"
+
+
+@pytest.mark.parametrize("name", sorted(TASK_FILES))
+def test_each_reference_task_needs_a_fixed_head_and_is_refused_without_one(name):
+    """The PI, 2026-10-11 (the engine C1 plan's Appendix B, item 31): "kiosk will be head free, in
+    the rig will be head fixed. we do not have head tracking in the rig". Every reference task is
+    refused in a chaired or cage-side session, and only there."""
+    task = _load_task(TASKS / f"{name}.py")
+
+    def refused(deployment: Deployment) -> bool:
+        return "head-not-fixed" in {f.code for f in check_task(task, deployment=deployment)}
+
+    assert task.needs_fixed_head is True
+    assert [refused(d) for d in Deployment] == [d is not Deployment.RIG_FIXED for d in Deployment]
 
 
 def test_the_reference_tasks_declare_twenty_three_settings_between_them():

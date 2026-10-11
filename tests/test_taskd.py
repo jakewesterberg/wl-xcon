@@ -461,13 +461,17 @@ def test_a_run_whose_allocation_has_no_run_codes_runs_and_says_it_was_not_strobe
 
 def test_a_second_run_starts_afresh_and_the_session_goes_on(tmp_path):
     """Plan decision 2, the run's half and the session's half. Rig-chaired, so no head
-    is released between the two runs of a session that is not a service's."""
-    session = _session(_spec(tmp_path, deployment=Deployment.RIG_CHAIRED))
-    session.run(_run_spec(trials=4, fix_hold=0.4))
+    is released between the two runs of a session that is not a service's, and so the
+    reference task's head-free copy (`_sessions.head_free_task`)."""
+    task = str(_sessions.head_free_task(tmp_path / "task"))
+    session = _session(_spec(tmp_path, deployment=Deployment.RIG_CHAIRED, task=task))
+    first, second = _run_spec(trials=4, fix_hold=0.4), _run_spec(trials=2)
+    first.task = second.task = task
+    session.run(first)
     fluid = session.welfare.commanded
     session.scheduled_stop = ("trials", 99.0, Box("jake"), "after trial 99")
 
-    census = session.run(_run_spec(trials=2))
+    census = session.run(second)
 
     assert session.run_index == 1
     assert sum(census.outcomes.values()) + census.hangs == 2, "the second run's own count"
@@ -485,7 +489,7 @@ def test_a_second_run_starts_afresh_and_the_session_goes_on(tmp_path):
 
 
 def test_an_explicit_run_starts_from_a_copy_of_its_values(tmp_path):
-    session = _session(_spec(tmp_path, deployment=Deployment.RIG_CHAIRED))
+    session = _session(_spec(tmp_path))
     run = _run_spec(trials=1)
 
     session.run(run)
@@ -523,14 +527,18 @@ def test_the_config_holds_what_is_fixed_and_is_written_as_the_session_opens(tmp_
 def test_a_control_names_the_run_it_was_made_in(tmp_path):
     """Plan decision 4: rows in `controls.jsonl` name their run, as trial rows do."""
     link = _Scripted(script={1: [Resume(by=Box("sam"))]})
+    # Two runs of a session that is not a service's: chaired, so the head-free copy.
+    task = str(_sessions.head_free_task(tmp_path / "task"))
     session = _session(
-        _spec(tmp_path, trials=2, deployment=Deployment.RIG_CHAIRED), link=link
+        _spec(tmp_path, trials=2, deployment=Deployment.RIG_CHAIRED, task=task), link=link
     )
+    run = _run_spec(trials=2)
+    run.task = task
     link.queue(Pause(by=Box("jake")))
-    session.run(_run_spec(trials=2))
+    session.run(run)
     link.script = {2: [Resume(by=Box("sam"))]}
     link.queue(Pause(by=Box("jake")))
-    session.run(_run_spec(trials=2))
+    session.run(run)
 
     rows = _controls_rows(session)
 
@@ -548,7 +556,7 @@ def test_the_session_task_is_the_run_in_progress_or_the_last_one(tmp_path):
     described.run()
     assert described.task == "tasks/fixation_detection.py"
 
-    taskless = _session(_spec(tmp_path / "b", trials=1, task="", deployment=Deployment.RIG_CHAIRED))
+    taskless = _session(_spec(tmp_path / "b", trials=1, task=""))
     assert taskless.task is None, "a spec that names no task, before any run"
     taskless.run(other)
     assert taskless.task == other.task
@@ -583,7 +591,7 @@ def test_a_refused_run_leaves_the_last_runs_state_as_it_was(tmp_path):
         "TASK = Task({'t': t}, default='t', choice=NO_CHOICE,"
         " reaction_time=ReactionTime('a', (Outcome.CORRECT,), 'the wait'))\n"
     )
-    session = _session(_spec(tmp_path, deployment=Deployment.RIG_CHAIRED))
+    session = _session(_spec(tmp_path))
     session.run(_run_spec(trials=2, fix_hold=0.4))
     values, rows = dict(session.spec.values), _runs(session)
     refused = RunSpec(task=str(bad), trials=3, seed=9, values={**VALUES, "fix_hold": 0.9})
@@ -657,18 +665,20 @@ def test_a_session_refuses_a_task_whose_setting_says_nothing_of_what_it_means(tm
         _session(spec).run()
 
 
-def test_a_session_refuses_a_task_that_needs_a_fixed_head_when_it_is_chaired(tmp_path):
-    """`Session.run`'s backstop, for a caller that took no pre-flight (engine spec §20.1)."""
-    text = Path("tasks/fixation_detection.py").read_text()
-    was = '    default="detection",\n'
-    assert text.count(was) == 1
-    task = tmp_path / "fixed_head.py"
-    task.write_text(text.replace(was, was + "    needs_fixed_head=True,\n"))
-    spec = _spec(tmp_path / "session", deployment=Deployment.RIG_CHAIRED)
-    spec.task = str(task)
+@pytest.mark.parametrize("deployment", [Deployment.RIG_CHAIRED, Deployment.CAGE_SIDE])
+def test_a_session_refuses_the_reference_task_unless_its_head_is_fixed(tmp_path, deployment):
+    """`Session.run`'s backstop, for a caller that took no pre-flight (engine spec §20.1): the
+    reference task needs a fixed head (the PI, 2026-10-11; the engine C1 plan's Appendix B, item
+    31), so a chaired or cage-side session refuses it before its first trial."""
+    spec = _spec(tmp_path / "session", deployment=deployment)
+    if deployment is Deployment.CAGE_SIDE:
+        spec.bounds = _cage_side_bounds()
+    session = _session(spec) if deployment is Deployment.RIG_CHAIRED else Session(
+        spec, card=Card(), pump=Pump(), wall_clock=lambda: WALL_NOW)
 
     with pytest.raises(SystemExit, match="head-not-fixed"):
-        _session(spec).run()
+        session.run()
+    assert not (session.directory / "trials.jsonl").exists()
 
 
 def test_each_run_names_its_task_by_its_content_never_its_path(tmp_path):
@@ -681,8 +691,8 @@ def test_each_run_names_its_task_by_its_content_never_its_path(tmp_path):
     same, moved = tmp_path / "same_task.py", tmp_path / "moved_task.py"
     same.write_text(text)
     moved.write_text(text.replace(was, was.replace("start=0.3", "start=0.4")))
-    # Rig-chaired, so no head is released between the runs of a session that is not a service's.
-    session = _session(_spec(tmp_path / "session", deployment=Deployment.RIG_CHAIRED))
+    # A service session, whose head stays fixed between its runs.
+    session = _service_session(tmp_path / "session")
 
     for path in ("tasks/fixation_detection.py", str(same), str(moved)):
         session.run(RunSpec(task=path, trials=1, seed=2, values=dict(VALUES)))
@@ -695,7 +705,7 @@ def test_each_run_names_its_task_by_its_content_never_its_path(tmp_path):
 
 
 def test_a_run_after_the_session_ended_is_refused_before_anything_resets(tmp_path):
-    session = _session(_spec(tmp_path, trials=1, deployment=Deployment.RIG_CHAIRED))
+    session = _session(_spec(tmp_path, trials=1))
     session.run()
     session.end()
 
@@ -906,8 +916,9 @@ def test_a_chaired_session_runs_and_strobes_no_restraint_codes(tmp_path):
     before it would be a restraint record for restraint nothing marked.
 
     `run()` released the head unconditionally until this test existed, which would
-    have strobed 4129 into exactly such a stream."""
-    spec = _spec(tmp_path, trials=5)
+    have strobed 4129 into exactly such a stream. The reference task needs a fixed head, so a
+    chaired session runs its head-free copy."""
+    spec = _spec(tmp_path, trials=5, task=str(_sessions.head_free_task(tmp_path / "task")))
     spec.deployment = Deployment.RIG_CHAIRED
     session = _session(spec)
 
@@ -2450,7 +2461,8 @@ def _cage_side_bounds() -> Bounds:
 def test_a_cage_side_session_has_no_return_to_await(tmp_path):
     link = Simulated()
     spec = _spec(
-        tmp_path, trials=3, deployment=Deployment.CAGE_SIDE, bounds=_cage_side_bounds()
+        tmp_path, trials=3, deployment=Deployment.CAGE_SIDE, bounds=_cage_side_bounds(),
+        task=str(_sessions.head_free_task(tmp_path / "task")),
     )
     session = Session(spec, card=Card(), pump=Pump(), link=link, wall_clock=lambda: WALL_NOW)
     session.observe = _trial_budget(spec)
@@ -4722,8 +4734,11 @@ def test_ending_the_runs_after_a_run_keeps_how_the_run_ended(tmp_path):
 def test_closing_needs_the_return_then_ends_the_session_with_one_closed_frame(tmp_path):
     link = Simulated()
     session = _service_session(tmp_path, link=link, deployment=Deployment.RIG_CHAIRED)
-    # One run first: until Task 4, a frame needs a run's scheduler to be built from.
-    session.run(_run_spec(trials=1))
+    # One run first: until Task 4, a frame needs a run's scheduler to be built from. Chaired, so
+    # the reference task's head-free copy.
+    run = _run_spec(trials=1)
+    run.task = str(_sessions.head_free_task(tmp_path / "task"))
+    session.run(run)
     session.end_runs(Box("jake"))
 
     with pytest.raises(RuntimeError, match="not home"):
@@ -5832,7 +5847,9 @@ def test_a_resumed_head_fixed_session_is_fixed_at_the_resume_and_may_run(tmp_pat
 
 def test_a_resumed_chaired_session_strobes_no_head_fixed_and_has_no_chair_time(tmp_path):
     first = _service_session(tmp_path, deployment=Deployment.RIG_CHAIRED)
-    first.run(_levels_run(blocks=_plan("X", each=2)))
+    run = _levels_run(blocks=_plan("X", each=2))
+    run.task = str(_sessions.head_free_task(tmp_path / "task"))
+    first.run(run)
     again = _resumed(tmp_path, first, deployment=Deployment.RIG_CHAIRED)
 
     assert 4128 not in again.card.codes

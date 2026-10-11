@@ -1430,21 +1430,17 @@ def test_a_task_the_checks_raise_on_fails_its_preflight_and_the_service_goes_on(
     assert isinstance(ended, Idle) and _kinds(service.root)[-2:] == ["returned", "session ended"]
 
 
-def test_a_task_that_needs_a_fixed_head_starts_only_in_a_fixed_head_session(tmp_path):
-    """Review Focus 5; engine spec §20.1 (XC-277): in a chaired session its pre-flight's task checks
-    fail, naming the finding, and nothing is strobed or written; with the head fixed it starts."""
-    text = Path("tasks/fixation_detection.py").read_text()
-    was = '    default="detection",\n'
-    assert text.count(was) == 1
+def test_the_reference_task_starts_only_in_a_fixed_head_session(tmp_path):
+    """Review Focus 5; engine spec §20.1 (XC-277): the reference task needs a fixed head (the PI,
+    2026-10-11; the engine C1 plan's Appendix B, item 31), so in a chaired session its pre-flight's
+    task checks fail, naming the finding, and nothing is strobed or written; with the head fixed it
+    starts."""
     chaired, fixed = _service(tmp_path / "chaired"), _service(tmp_path / "fixed")
-    for service in (chaired, fixed):
-        (service.tasks / "fixed_head.py").write_text(
-            text.replace(was, was + "    needs_fixed_head=True,\n"))
     _step(chaired, _open(deployment="rig_chaired"))
     _step(fixed, _open())
 
-    refused = _step(chaired, _start(task="fixed_head.py"))
-    started = _step(fixed, _start(task="fixed_head.py"))
+    refused = _step(chaired, _start())
+    started = _step(fixed, _start())
 
     items = {i.name: i for i in refused.preflight.items}
     assert items["task checks"].result == "fail"

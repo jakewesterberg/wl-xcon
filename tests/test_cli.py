@@ -33,6 +33,7 @@ from _rig import PATH as RIG_FILE, naming
 from _zmq_release import _every_zmq_context_released  # noqa: F401
 from _frames import idle
 from _calibrations import BACKGROUND, OBSERVER, PRIMARIES
+import _sessions
 from wl_xcon import cli
 from wl_xcon import link as _link
 from wl_xcon.actor import Box
@@ -1962,11 +1963,12 @@ def test_wlx_run_refuses_a_departure_that_is_not_a_time(tmp_path, capsys):
 def test_wlx_run_can_run_a_chaired_session_with_no_head_fixation(tmp_path, capsys):
     """**Head-fixation is a property of the deployment** (PI, 2026-09-20). A chaired
     session runs, is bounded by the same out-of-cage clock, and emits no
-    `HEAD_FIXED`/`HEAD_RELEASED` -- because it has none to record."""
+    `HEAD_FIXED`/`HEAD_RELEASED` -- because it has none to record. The reference task
+    needs a fixed head (the PI, 2026-10-11), so it runs the task's head-free copy."""
     exit_code = main(
         [
             "run",
-            "tasks/fixation_detection.py",
+            str(_sessions.head_free_task(tmp_path / "task")),
             *_SETUP,
             "--allocation", "tasks/allocation.py",
             "--bounds", "tasks/reference_bounds.py",
@@ -2261,18 +2263,14 @@ def test_wlx_run_refuses_a_task_written_for_the_other_setup_before_anything_is_r
     assert not (tmp_path / "2027-01-14_01").exists()
 
 
-def test_wlx_run_refuses_a_task_that_needs_a_fixed_head_in_a_chaired_session_before_anything_is_recorded(
+def test_wlx_run_refuses_the_reference_task_in_a_chaired_session_before_anything_is_recorded(
     tmp_path,
 ):
-    """Engine spec §20.1 (XC-277): refused before the session opens, as a task written for the
-    other setup is, so no departure is marked for a session that cannot run."""
-    text = Path("tasks/fixation_detection.py").read_text()
-    was = '    default="detection",\n'
-    assert text.count(was) == 1
-    task = tmp_path / "fixed_head.py"
-    task.write_text(text.replace(was, was + "    needs_fixed_head=True,\n"))
+    """Engine spec §20.1 (XC-277): the reference task needs a fixed head (the PI, 2026-10-11; the
+    engine C1 plan's Appendix B, item 31), so it is refused before a chaired session opens, as a
+    task written for the other setup is, and no departure is marked for a session that cannot
+    run."""
     argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm(), "--deployment", "rig-chaired")
-    argv[argv.index("tasks/fixation_detection.py")] = str(task)
 
     with pytest.raises(SystemExit) as refused:
         main(argv)
@@ -3096,19 +3094,21 @@ def test_a_far_return_is_confirmed_at_the_terminal(tmp_path, monkeypatch):
     ago, and a return an hour ago would put the animal home while still in the
     chair -- `welfare` refuses that before any confirmation is asked, and rightly.
     A chaired session has no head-fixation marks, so the confirmation is what this
-    reaches."""
+    reaches; and the reference task needs a fixed head (the PI, 2026-10-11), so it runs the
+    task's head-free copy."""
     answers = iter([_hours_ago(1), "confirm"])
     monkeypatch.setattr("sys.stdin.isatty", lambda: True, raising=False)
     monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
-
-    exit_code = main(
-        _run_args(
-            tmp_path,
-            "--out-of-cage-at", _hours_ago(2),
-            "--confirm-out-of-cage",
-            "--deployment", "rig-chaired",
-        )
+    argv = _run_args(
+        tmp_path,
+        "--out-of-cage-at", _hours_ago(2),
+        "--confirm-out-of-cage",
+        "--deployment", "rig-chaired",
     )
+    argv[argv.index("tasks/fixation_detection.py")] = str(
+        _sessions.head_free_task(tmp_path / "task"))
+
+    exit_code = main(argv)
 
     assert exit_code == 0
     assert _kinds(tmp_path) == [
