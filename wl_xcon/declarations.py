@@ -25,9 +25,14 @@ as a fact (XC-288 §4.1).
 
 from __future__ import annotations
 
+import dataclasses
+import hashlib
+import json
+from enum import Enum
+
 from wl_xcon.task import (
     BACKGROUND, CLEAR_CUT, CRITERION, EASIER, EXPECTED, HARDER, NEITHER, NOT_DIFFICULTY, STIMULUS,
-    Meaning, Task,
+    Meaning, Reward, Task, Unchanged, actions_of,
 )
 
 #: Where a resolved meaning came from: the shared list, the task's own declaration of a setting only
@@ -107,3 +112,89 @@ def resolved(task: Task) -> dict[str, tuple[Meaning, str]]:
         elif param.name in COMMON:
             found[param.name] = (COMMON[param.name], SHARED)
     return found
+
+
+#: **The content's format** (the engine C1 plan's call 11), part of every task's content: raised
+#: when a field's default changes, since `canonical` leaves a field at its default out and the
+#: change would otherwise alter what a task does without moving its hash. A field added at its
+#: default needs no raise. `tests/test_declarations.py` holds every default to the format it was
+#: written at (`DEFAULTS`).
+FORMAT = 1
+
+
+def rewarded_through(task: Task) -> set[str]:
+    """The bounded-config entries `task`'s structures reward through, by name (`Reward.ref`)."""
+    return {
+        action.ref.name
+        for structure in task.structures.values()
+        for _, action in actions_of(structure)
+        if isinstance(action, Reward)
+    }
+
+
+def _at_default(spec: dataclasses.Field, value: object) -> bool:
+    """Whether a dataclass field holds the default its class declares."""
+    if spec.default is not dataclasses.MISSING:
+        return value == spec.default
+    if spec.default_factory is not dataclasses.MISSING:
+        return value == spec.default_factory()
+    return False
+
+
+def canonical(value: object) -> object:
+    """`value` as plain data for the content hash (the engine C1 plan's call 11): each declaration
+    by its class's name and the fields it sets away from their defaults -- so a field a later build
+    adds, at its default, leaves every task's hash as it was, and a default that changes raises
+    `FORMAT` -- an `Enum` by its class and value, and sequences and text-keyed dicts element by
+    element. **A `Reward` is read for the entry it names before the dataclass rule**, which would
+    read no field of it (call 19). Anything else raises `TypeError`: a value written by its
+    address would make every process's hash its own."""
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, Enum):
+        return {"enum": type(value).__name__, "value": canonical(value.value)}
+    if isinstance(value, (list, tuple)):
+        return [canonical(item) for item in value]
+    if isinstance(value, dict):
+        for key in value:
+            if not isinstance(key, str):
+                raise TypeError(f"a declaration's keys are text, and {key!r} is not")
+        return {key: canonical(item) for key, item in value.items()}
+    if isinstance(value, Reward):
+        return {"class": "Reward", "fields": {"ref": canonical(value.ref)}}
+    if isinstance(value, Unchanged):
+        return {"class": "Unchanged", "fields": {}}
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {"class": type(value).__name__, "fields": {
+            spec.name: canonical(getattr(value, spec.name))
+            for spec in dataclasses.fields(value)
+            if not _at_default(spec, getattr(value, spec.name))
+        }}
+    raise TypeError(
+        f"{type(value).__name__!r} is not a declaration the task's content hash can read"
+    )
+
+
+def content(task: Task) -> dict:
+    """What `task` declares, as `canonical` writes it (XC-288 §4.4), under the content's `FORMAT`:
+    the task object -- its structures, default, reaction time, choice, own meanings and whether it
+    needs a fixed head -- every setting's meaning as resolved, since a shared meaning is part of
+    what a task declares, and the meaning of each bounded setting it rewards through, which its
+    review report shows beside the hash. Not its file, its path, or its between-trial Python
+    (call 11)."""
+    return {
+        "format": FORMAT,
+        "task": canonical(task),
+        "meanings": canonical({name: meaning for name, (meaning, _) in resolved(task).items()}),
+        "bounded": canonical(
+            {ref: BOUNDED[ref] for ref in rewarded_through(task) if ref in BOUNDED}
+        ),
+    }
+
+
+def content_hash(task: Task) -> str:
+    """The task's identity in the record (XC-288 §4.4: "always: a hash of its content, never its file
+    path"): `"sha256:"` and the hex digest of `content(task)` written as JSON with sorted keys and
+    no spaces. Each run's start row carries it as `versions.task` (`taskd.Session.run`)."""
+    text = json.dumps(content(task), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return "sha256:" + hashlib.sha256(text.encode("ascii")).hexdigest()
