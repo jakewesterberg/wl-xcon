@@ -37,6 +37,14 @@ from wl_xcon.task import (
     Square,
     State,
     Stimulus,
+    EASIER,
+    EXPECTED,
+    HARDER,
+    STIMULUS,
+    Choice,
+    Meaning,
+    ReactionTime,
+    Task,
     Trial,
     Window,
 )
@@ -171,4 +179,67 @@ search = Trial(
             ],
         ),
     ],
+)
+
+
+#: The target's look, in search: `visual_search`'s override, written here as that file's other
+#: declarations are (`tests/test_reference_tasks.py` holds the two equal).
+TARGET_LOOKS = Meaning(
+    EXPECTED,
+    STIMULUS,
+    raising=HARDER,
+    note=(
+        "read with the distractors: the target's look is the feature it pops out on, and a swap "
+        "of its color slows the next few trials (priming of pop-out); a change can leave it "
+        "looking like the distractors, with no answer, and a shape difference guides search "
+        "less surely than a color one"
+    ),
+    overrides=(
+        "in search the target's look is the feature that pops out, not a lone target's shape"
+    ),
+)
+
+#: The ring's radius: `visual_search`'s, as above.
+RING = Meaning(
+    EXPECTED,
+    STIMULUS,
+    raising=HARDER,
+    note=(
+        "a wider ring makes the array sparser, which weakens pop-out; red-green sensitivity "
+        "falls farther from fixation; and saccades scatter more while the item windows stay "
+        "as they are"
+    ),
+)
+
+#: Each color's luminance, read from the other's (the engine C1 plan's Appendix B, items 26 and
+#: 27; decisions.md TRN-10): the cue it adds is the brightness gap between them.
+_GAP = (
+    "the cue it adds is the brightness gap between the red and the green, redundant with their "
+    "color, so a larger gap is easier; near equal brightness, whose point for this animal is "
+    "unknown, the direction is uncertain; narrowing the gap is the fading path toward "
+    "isoluminance"
+)
+
+#: The task object (engine spec §3.5; engine build C1): `visual_search`'s, and the two luminance
+#: settings only this variant has.
+TASK = Task(
+    structures={"search": search},
+    default="search",
+    reaction_time=ReactionTime(
+        state="array_on",
+        to=("verify", Outcome.WRONG_TARGET),
+        note=(
+            "from entering array_on, the frame the array is commanded, to a saccade landing on "
+            "an item, the target or a distractor"
+        ),
+    ),
+    choice=Choice(items=("search.target", "search.distractor"), by="saccade"),
+    meanings={
+        "target_looks": TARGET_LOOKS,
+        "eccentricity": RING,
+        "red_luminance": Meaning(
+            EXPECTED, STIMULUS, raising=EASIER, relative_to="green_luminance", note=_GAP),
+        "green_luminance": Meaning(
+            EXPECTED, STIMULUS, raising=EASIER, relative_to="red_luminance", note=_GAP),
+    },
 )

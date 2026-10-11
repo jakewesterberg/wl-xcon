@@ -31,6 +31,14 @@ from wl_xcon.task import (
     Square,
     State,
     Stimulus,
+    CLEAR_CUT,
+    EASIER,
+    NOT_DIFFICULTY,
+    NO_CHOICE,
+    STIMULUS,
+    Meaning,
+    ReactionTime,
+    Task,
     Trial,
     Window,
 )
@@ -180,3 +188,34 @@ def next_params(
         "contrast": staircase.value,
         "eccentricity": eccentricity,
     }
+
+
+#: The task object (engine spec §3.5; engine build C1): the detection trial, timed as
+#: `fixation_detection`'s is, and the two settings it declares as no other task does (the engine
+#: C1 plan's Appendix B, items 20 and 21; decisions.md TRN-10). No stimulus reads either and
+#: nothing moves them until a between-trial procedure is called (XC-242): `contrast` keeps the
+#: direction `Staircase` above assumes, raising it after an error, and `eccentricity` is no
+#: difficulty setting while nothing reads it; each note says so, so the record never teaches an
+#: agent that either has no effect.
+TASK = Task(
+    structures={"detection": adaptive_detection},
+    default="detection",
+    reaction_time=ReactionTime(
+        state="stim_on",
+        to=("verify",),
+        note=(
+            "from entering stim_on, the frame the target is commanded, to a saccade landing in "
+            "its window"
+        ),
+    ),
+    choice=NO_CHOICE,
+    meanings={
+        "contrast": Meaning(CLEAR_CUT, STIMULUS, raising=EASIER, note=(
+            "nothing reads it yet: no stimulus draws with it, and nothing moves it until a "
+            "between-trial procedure is called (XC-242)")),
+        "eccentricity": Meaning(NOT_DIFFICULTY, STIMULUS, note=(
+            "nothing reads it yet: the target's distance is target_position's, and this "
+            "setting moves nothing on screen until a between-trial procedure is called "
+            "(XC-242)")),
+    },
+)

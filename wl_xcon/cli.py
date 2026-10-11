@@ -34,7 +34,7 @@ from wl_xcon.codes import PROVISIONAL, Allocation
 from wl_xcon.geometry import VIEWS, Geometry, Rig, SubjectSettings
 from wl_xcon.photometry import SRGB, Calibration, read_calibration
 from wl_xcon.actor import Actor, Box
-from wl_xcon.task import Trial
+from wl_xcon.task import Task, Trial
 from wl_xcon.welfare import Deployment
 
 
@@ -54,6 +54,36 @@ def _load_trial(path: Path) -> Trial:
     if len(trials) != 1:
         raise SystemExit(f"{path} defines {len(trials)} trials; expected exactly 1")
     return trials[0]
+
+
+def _load_task(path: Path) -> Task:
+    """Import a task file and return the task object it defines (engine spec §3.5; engine build
+    C1): exactly one `Task`, which holds its trial structures and says what its settings mean, what
+    it offers to choose and how its reaction time is defined (XC-288 §4). **A file defining trials
+    and no task object -- one written before engine build C1 -- is refused, saying how to wrap
+    them**, never run as a task that declares nothing about itself (the engine C1 plan's call 2).
+
+    Tasks are plain Python declarations (ADR-0006), so loading one is an import. That is also why
+    the checks run *at load*: by the time this returns, the task is a data structure that can be
+    inspected rather than a program to be trusted.
+    """
+    spec = importlib.util.spec_from_file_location(path.stem, path)
+    if spec is None or spec.loader is None:
+        raise SystemExit(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    found = list(vars(module).values())
+    tasks = [value for value in found if isinstance(value, Task)]
+    if len(tasks) != 1:
+        trials = sum(isinstance(value, Trial) for value in found)
+        why = (
+            f": it defines {trials} trial structure(s) and no Task, and since engine build C1 a "
+            f"task file wraps its trials in one Task(...) that says what its settings mean and "
+            f"how its reaction time is defined (engine spec §3.5; XC-288 §4)"
+            if not tasks and trials else ""
+        )
+        raise SystemExit(f"{path} defines {len(tasks)} task objects; expected exactly 1{why}")
+    return tasks[0]
 
 
 def _load_allocation(path: Path | None) -> Allocation:  # noqa: C901

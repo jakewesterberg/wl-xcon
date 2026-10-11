@@ -26,6 +26,9 @@ from wl_xcon.task import (
     Square,
     State,
     Stimulus,
+    NO_CHOICE,
+    ReactionTime,
+    Task,
     Trial,
     Window,
 )
@@ -132,4 +135,23 @@ detection = Trial(
             ],
         ),
     ],
+)
+
+
+#: The task object (engine spec §3.5; engine build C1). Every setting it declares is on the shared
+#: list (`wl_xcon/declarations.py`), so it declares no meaning of its own; it offers no choice, its
+#: one target being where to look (XC-288 §4.3). Each declaration is the engine C1 plan's
+#: proposal, confirmed by the PI (its Appendix B; decisions.md TRN-10).
+TASK = Task(
+    structures={"detection": detection},
+    default="detection",
+    reaction_time=ReactionTime(
+        state="stim_on",
+        to=("verify",),
+        note=(
+            "from entering stim_on, the frame the target is commanded, to a saccade landing in "
+            "its window"
+        ),
+    ),
+    choice=NO_CHOICE,
 )

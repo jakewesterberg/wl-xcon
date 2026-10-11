@@ -42,6 +42,13 @@ from wl_xcon.task import (
     Square,
     State,
     Stimulus,
+    EXPECTED,
+    HARDER,
+    STIMULUS,
+    Choice,
+    Meaning,
+    ReactionTime,
+    Task,
     Trial,
     Window,
 )
@@ -187,4 +194,53 @@ search = Trial(
             ],
         ),
     ],
+)
+
+
+#: The target's look, in search: the feature it pops out on, overriding the shared list's meaning
+#: for a lone target's look (the engine C1 plan's Appendix B, item 28; decisions.md TRN-10).
+TARGET_LOOKS = Meaning(
+    EXPECTED,
+    STIMULUS,
+    raising=HARDER,
+    note=(
+        "read with the distractors: the target's look is the feature it pops out on, and a swap "
+        "of its color slows the next few trials (priming of pop-out); a change can leave it "
+        "looking like the distractors, with no answer, and a shape difference guides search "
+        "less surely than a color one"
+    ),
+    overrides=(
+        "in search the target's look is the feature that pops out, not a lone target's shape"
+    ),
+)
+
+#: The ring's radius (`Array.radius`), declared here and not shared: in `adaptive_detection` the
+#: same name moves nothing on screen (the engine C1 plan's Appendix B, item 19).
+RING = Meaning(
+    EXPECTED,
+    STIMULUS,
+    raising=HARDER,
+    note=(
+        "a wider ring makes the array sparser, which weakens pop-out; red-green sensitivity "
+        "falls farther from fixation; and saccades scatter more while the item windows stay "
+        "as they are"
+    ),
+)
+
+#: The task object (engine spec §3.5; engine build C1): a saccade landing on any item of the
+#: array is the choice, the target or a distractor, and its reaction time runs from the array's
+#: command to it (XC-288 §4.3).
+TASK = Task(
+    structures={"search": search},
+    default="search",
+    reaction_time=ReactionTime(
+        state="array_on",
+        to=("verify", Outcome.WRONG_TARGET),
+        note=(
+            "from entering array_on, the frame the array is commanded, to a saccade landing on "
+            "an item, the target or a distractor"
+        ),
+    ),
+    choice=Choice(items=("search.target", "search.distractor"), by="saccade"),
+    meanings={"target_looks": TARGET_LOOKS, "eccentricity": RING},
 )

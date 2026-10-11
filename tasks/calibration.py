@@ -40,6 +40,16 @@ from wl_xcon.task import (
     Show,
     State,
     Stimulus,
+    CLEAR_CUT,
+    CRITERION,
+    EASIER,
+    EXPECTED,
+    HARDER,
+    NO_CHOICE,
+    STIMULUS,
+    Meaning,
+    ReactionTime,
+    Task,
     Trial,
     Window,
 )
@@ -107,4 +117,35 @@ calibration = Trial(
             ],
         ),
     ],
+)
+
+
+#: The task object (engine spec §3.5; engine build C1): its reaction time is the latency to
+#: acquire the target, it offers no choice, and it declares four settings only it has (the engine
+#: C1 plan's Appendix B, items 22 to 25; decisions.md TRN-10). Where a target goes is the
+#: constellation's schedule, so its two positions are set by the schedule more than by a trainer.
+_FARTHER = Meaning(EXPECTED, STIMULUS, raising=HARDER, relative_to=0, note=(
+    "farther from the center a target is harder to fixate accurately and an uncalibrated map's "
+    "error grows; beyond about 10 degrees the tracker can lose the eye's fourth Purkinje image, "
+    "which is the rig's harder, not the animal's; near the center the direction can turn over, "
+    "small saccades being slower"))
+
+TASK = Task(
+    structures={"calibration": calibration},
+    default="calibration",
+    reaction_time=ReactionTime(
+        state="await_fix",
+        to=("hold",),
+        note=(
+            "from entering await_fix, the frame the calibration target is commanded, to gaze "
+            "entering its window: the latency to acquire it"
+        ),
+    ),
+    choice=NO_CHOICE,
+    meanings={
+        "target_x": _FARTHER,
+        "target_y": _FARTHER,
+        "cal_window": Meaning(CLEAR_CUT, CRITERION, raising=EASIER),
+        "cal_hold": Meaning(CLEAR_CUT, CRITERION, raising=HARDER),
+    },
 )

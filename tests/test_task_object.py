@@ -8,6 +8,7 @@ from __future__ import annotations
 import pytest
 
 from wl_xcon.check import check, check_task
+from wl_xcon.cli import _load_task
 from wl_xcon.findings import Finding
 from wl_xcon.task import (
     BACKGROUND,
@@ -367,3 +368,49 @@ def test_a_task_whose_content_cannot_be_hashed_is_refused():
                             "odd": Meaning(NOT_DIFFICULTY, STIMULUS)})
 
     assert "unhashable-task" in _codes(task)
+
+
+#: A task file of one trial and its task object.
+ONE_TASK = '''from wl_xcon.task import After, On, Outcome, ReactionTime, State, Task, Trial
+
+trial = Trial(start="wait", states=[State("wait", go=[On(After(1.0), Outcome.CORRECT)])])
+TASK = Task({"wait": trial}, default="wait",
+            reaction_time=ReactionTime("wait", (Outcome.CORRECT,), "the wait"))
+'''
+
+
+def test_a_file_with_one_task_object_loads_it(tmp_path):
+    path = tmp_path / "one_task.py"
+    path.write_text(ONE_TASK)
+
+    task = _load_task(path)
+
+    assert (list(task.structures), task.default) == (["wait"], "wait")
+
+
+def test_a_file_with_trials_and_no_task_object_is_refused_saying_why(tmp_path):
+    """Review Focus 1: a task file written before engine build C1 is refused by its loader, which
+    says how to wrap its trials; it is never run as a task that declares nothing about itself."""
+    bare = tmp_path / "bare.py"
+    bare.write_text(ONE_TASK.split("TASK = ")[0])
+
+    with pytest.raises(SystemExit) as refused:
+        _load_task(bare)
+
+    assert "defines 0 task objects; expected exactly 1" in str(refused.value)
+    assert "1 trial structure(s) and no Task" in str(refused.value)
+    assert "wraps its trials in one Task(...)" in str(refused.value)
+
+
+def test_a_file_with_no_trial_or_two_task_objects_is_refused(tmp_path):
+    empty, two = tmp_path / "empty.py", tmp_path / "two_tasks.py"
+    empty.write_text("x = 1\n")
+    two.write_text(ONE_TASK + "SECOND = Task({'wait': trial}, default='wait')\n")
+
+    with pytest.raises(SystemExit) as nothing:
+        _load_task(empty)
+    with pytest.raises(SystemExit) as twice:
+        _load_task(two)
+
+    assert str(nothing.value).endswith("defines 0 task objects; expected exactly 1")
+    assert "defines 2 task objects; expected exactly 1" in str(twice.value)
