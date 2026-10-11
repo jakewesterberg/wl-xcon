@@ -9,9 +9,10 @@ distrust the reasoning. Numbers go stale, arguments do not.
 > written with**, `wl-expcontroller` and `wl_expcontroller/…` paths included, as the PI
 > ruled for dated documents; read `wl_expcontroller/taskd.py` there as `wl_xcon/taskd.py`.
 >
-> **This file describes `main`, except its newest entry**, "What moved on 2026-10-10: XC-288 brainstormed"
-> (on branch `xc288-training-records`, its spec reviewed, revised and approved by the PI; **start
-> there**). Below it, "What moved on 2026-10-10: engine build A2, color", merged by the PI on the evening of
+> **This file describes `main`, except its newest entry**, "What moved on 2026-10-11: the asks delivered,
+> build C split, C1 planned" (on branch `engine-c1`, its plan waiting for the PI's review; **start there**).
+> Below it, "What moved on 2026-10-10: XC-288 brainstormed" (its approved spec on `main` since 2026-10-11).
+> Below that, "What moved on 2026-10-10: engine build A2, color", merged by the PI on the evening of
 > 2026-10-10, its CI sweeps read clean, and `xc275-sweep-timeouts` (XC-275's first part, described in that
 > entry) after it. The next entry, "What moved overnight 2026-10-09 to 10-10: build A2's
 > plan drafted and reviewed, XC-288's research", held three branches for the PI; he merged `xc288-prep`
@@ -409,6 +410,69 @@ figure was one low. In order:
   a path outside the workspace, and no credentials for it.
 
 ---
+
+## What moved on 2026-10-11: the asks delivered, build C split, C1 planned
+
+**Resume here.** `main` is at `5475c96` (pushed): XC-288's approved spec merged in the morning (the PI, "Merge
+now"), and the delivered asks recorded. **Engine build C1's plan waits for the PI's review on branch
+`engine-c1`** (worktree `.claude/worktrees/engine-c1`): `docs/superpowers/plans/2026-10-11-engine-c1.md`, ten
+tasks, with **Appendix B, the meanings of the reference tasks' settings (31 items), for him to confirm as a
+numbered list before C1 merges**. Nothing of C1 is built. The plan was drafted, reviewed twice (an engineering
+review that ran Tasks 1-9 verbatim in a scratch copy, and an NHP-training review of every meaning), revised, and
+**re-verified: Tasks 1-10 applied verbatim in a scratch copy at `5475c96`, every red step and named break seen,
+the suite green after each task, 3382 to 3481**. Not run: Task 10's CI sweep and Python 3.11.
+**Also waiting for his merge: branch `mutate-name-cap`** (`c40ebd2`, `b6146b2`; CI green), XC-331 below.
+
+**The PI's decisions of 2026-10-11:**
+- **XC-288's spec approved** the evening before: "keep going, approved, personal data is safe as is"; the
+  reason list as written; XC-317 closed on that ruling.
+- **Build C is too large for one plan; it splits into C1 to C9** (the research map, kept as the plan's
+  source): C1 the task object; C2 plans, blocks and repeats; C3 varying conditions and the live-edit layer
+  with XC-288's change log; C4 who and why; C5 per-animal state (a lab-storage ADR first); C6 programs, rig
+  edits and interludes; C7 what the animal did, with stages; C8 the review report, the simulated animal and
+  the disengagement alert; C9 the agent's file. Each is planned and merged on its own, A1/A2 style.
+- **C1 defines the task-object format in wl-xcon; his approval of C1's plan is "wl-xtasks' agreement on the
+  task object"** (engine spec §24). wl-xtasks is an empty scaffold ("The repository holds no code yet").
+- **Setting meanings come from a shared list of common settings, which a task may override with a note**;
+  a setting one task has is declared in that task. And **each setting also says whether it is a criterion
+  (what counts as success: a window, a hold, a timeout) or a stimulus (what the animal sees)**, so an agent
+  can judge progress at fixed criteria rather than drift toward lenient ones (from the C1 plan's domain review).
+- **Every open ask went out**, as on 2026-08-31: a dated section committed to each sibling's `main` —
+  wl-preproc `7183347`, wl-sync `5ca9891`, wl-works `2bf5aca0`, wl-xtasks `0486476` (its first handover).
+  wl-xcon's pending files and backlog record it (`5475c96`; XC-323 to XC-330 filed for asks that had no ID).
+
+**Main's post-merge CI (run `38078734244`, at `59bab42`) is read: 12 of 12 shards passed**, and XC-275's new
+timeout verdicts work: every timed-out mutant named the tests that had failed before the kill (6, 179, 221, 490,
+524, 693), none read `TIMED OUT`. **The nightly of 2026-10-11 had not started** by the time this was written.
+
+**Questions still to ask, each when its build is planned** (the research map's): where a repeated trial
+goes in a block with no fixed length, and whether a trial at the 5-minute cap repeats (C2, XC-287); where
+per-animal state lives before lab storage exists (C5); what counts as "not working" for the alert (C8).
+
+**Found on the way, costly to rediscover:**
+- **A live edit loses to a condition's value today** (`taskd.py`, the trial's values are the run's merged
+  with the condition's), the reverse of engine spec §14.7 and §17.1; C3 fixes it. **A block with catch trials
+  never meets its targets** (`scheduler.RESPONDED` omits CORRECT_REJECT and FALSE_ALARM), and `REQUEUED`
+  repeats target and blink breaks the spec leaves out; C2 fixes both. **A change row without `sequence`
+  makes `resume.read` fail closed**, and welfare-listed `stranded.find` reads through it; C3 ships resume's
+  handling with the first such row.
+- **wl-xtasks had never received a handover**; past asks reached the siblings only as committed handover
+  files. wl-works' sources name three NTP hosts (`ntp.`, `ptp.`, `time.wl.works`); the handover asks which.
+- Engine spec §9.1's "existing speaker tap" does not exist in wl-sync (XC-089 unassigned); amended with a
+  dated note.
+- **`gh run view --log` silently drops everything after a line over 64 KiB** (gh 2.88.1's line scanner), and
+  XC-275's timeout lines name the running test: one test's id is 65,537 spaces (`tests/test_signin.py`'s bytes
+  parameter), so shard 2's displayed log lost 15 of its 24 verdicts while the job's real log (the per-job API,
+  `gh api repos/{owner}/{repo}/actions/jobs/<id>/logs`) has all 24, caught. **A shard's log counts as read only if
+  it ends with the gate's closing line and "Cleaning up orphan processes".** XC-331 caps the names a verdict
+  prints at 200 characters, shortens that test's id and runs `mutate.py` unbuffered (so a line's CI timestamp is
+  when its verdict was reached), on branch `mutate-name-cap`.
+- Three settings combinations in the reference tasks can never produce a correct trial (a search target
+  identical to its distractors; `target_hold` at least `response_window`; set size 2 with a varying target
+  color); C1's Task 10 files them (XC-343), with the variation point (XC-344), for later builds.
+
+**Next:** the PI reviews C1's plan (Appendix B is confirmed before C1 merges, not before it starts) and merges
+`mutate-name-cap`; then C1 is built subagent-driven, as A1, A2 and B were, with steps overlapped as in A2.
 
 ## What moved on 2026-10-10: XC-288 brainstormed
 
