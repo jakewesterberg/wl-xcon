@@ -652,7 +652,8 @@ def test_a_setting_only_another_structure_declares_is_settable_live(tmp_path):
 
 def test_a_session_refuses_a_task_whose_setting_says_nothing_of_what_it_means(tmp_path):
     """XC-288 §4.1, required: `Session.run` holds the task object to `check_task`, so a setting with
-    no meaning refuses the run before anything is strobed."""
+    no meaning refuses the run before anything is strobed: the card carries only the head's
+    fixation, which the fixture strobed (`_session`)."""
     text = Path("tasks/fixation_detection.py").read_text()
     was = '        Param("fix_hold", unit="s", low=0.05, high=2.0, start=0.3),\n'
     assert text.count(was) == 1
@@ -661,9 +662,11 @@ def test_a_session_refuses_a_task_whose_setting_says_nothing_of_what_it_means(tm
         was, was + '        Param("cue_delay", unit="s", low=0.0, high=1.0, start=0.2),\n'))
     spec = _spec(tmp_path / "session")
     spec.task = str(task)
+    session = _session(spec)
 
     with pytest.raises(SystemExit, match="undeclared-meaning"):
-        _session(spec).run()
+        session.run()
+    assert session.card.codes == [4128], "nothing of the run was strobed"
 
 
 @pytest.mark.parametrize("deployment", [Deployment.RIG_CHAIRED, Deployment.CAGE_SIDE])

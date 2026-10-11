@@ -1448,6 +1448,7 @@ def test_the_reference_task_starts_only_in_a_fixed_head_session(tmp_path):
     assert "pre-flight failed, so the run does not start: task checks: " in _refused(refused)[-1]
     assert refused.run_index is None and _runs(chaired.root) == []
     assert 4135 not in chaired.session.card.codes
+    assert refused.phase == "between_runs", "the session waits between runs"
     assert started.run_index == 0
 
 
