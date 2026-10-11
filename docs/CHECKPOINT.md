@@ -9,8 +9,9 @@ distrust the reasoning. Numbers go stale, arguments do not.
 > written with**, `wl-expcontroller` and `wl_expcontroller/…` paths included, as the PI
 > ruled for dated documents; read `wl_expcontroller/taskd.py` there as `wl_xcon/taskd.py`.
 >
-> **This file describes `main`, except its newest entry**, "What moved on 2026-10-11: the asks delivered,
-> build C split, C1 planned" (on branch `engine-c1`, its plan approved and being built; **start there**).
+> **This file describes `main`, except its two newest entries**, "What moved on 2026-10-11: engine build C1,
+> the task object" (built and reviewed on branch `engine-c1`, waiting for the PI's merge; **start there**) and
+> "What moved on 2026-10-11: the asks delivered, build C split, C1 planned" below it.
 > Below it, "What moved on 2026-10-10: XC-288 brainstormed" (its approved spec on `main` since 2026-10-11).
 > Below that, "What moved on 2026-10-10: engine build A2, color", merged by the PI on the evening of
 > 2026-10-10, its CI sweeps read clean, and `xc275-sweep-timeouts` (XC-275's first part, described in that
@@ -411,6 +412,81 @@ figure was one low. In order:
 
 ---
 
+## What moved on 2026-10-11: engine build C1, the task object
+
+**Resume here.** Engine build C1 is **built and reviewed on branch `engine-c1`** (worktree
+`.claude/worktrees/engine-c1`; cut from `main` at `5475c96`, `main` merged in at `b6146b2`), waiting for the PI's
+merge. Plan: `docs/superpowers/plans/2026-10-11-engine-c1.md` (approved 2026-10-11, "Approve, subagent-driven").
+Built subagent-driven with overlap (a task's review and the next task's implementer together), each task
+reviewed, then a whole-branch review on the most capable model ("ready to merge, with fixes") and one fix wave.
+Suite **3490 passed** at the tip. **No welfare-listed function changed** (AST and text identical at
+`b6146b2` and the tip, the final review's comparison); the PI's welfare summary for C1 is the plan's Appendix A,
+two items, both behaviors reaching listed functions through unlisted callees.
+
+**What was built.** A task file defines **one task object** (`wl_xcon/task.py`'s `Task`): its trial structures
+(runs still play the default one until C2), what every changeable setting **means** (`Meaning`: clear-cut with a
+direction, expected with a direction and a note, or not a difficulty setting; and its **role**: criterion,
+stimulus, or neither), how its **reaction time** is defined, its **choice** (or `NO_CHOICE`), and whether it
+**needs a fixed head**. Common settings' meanings come from **one shared list** (`wl_xcon/declarations.py`'s
+`COMMON`, 17 entries), which a task may override only with a note saying why; the bounded settings' meanings sit
+in `BOUNDED`, outside `bounds.py`. `check.check_task` refuses a task that leaves any of it undeclared; each run's
+start row names the task by **`content_hash`**, a hash of what it declares (never its path; fields at their
+defaults left out, so later builds can add fields; `FORMAT` and a defaults snapshot guard a changed default). The
+loader (`cli._load_task`; `_load_trial` retired), the rig (`Session` validates live edits against the union of
+the structures' settings), the pre-flight, `wlx run`/`check`/`review`, the review report (opening with what a
+reviewer confirms) and the simulator all take the task object. A task needing a fixed head, run in a session not
+declared head-fixed (`RIG_FIXED`), goes ahead **with a warning** explaining why gaze may be unreliable (XC-277
+closed; built first as a refusal, turned into a warning at the PI's rule below).
+
+**The PI's decisions of 2026-10-11** (each in decisions.md, TRN-08 to TRN-13, TSK-50, REC-24):
+- C1 defines the task-object format in wl-xcon; his approval of the plan is wl-xtasks' agreement (wl-xtasks had
+  not replied to its handover by the build's end).
+- A shared list of common settings, overridable with a note; every setting tagged criterion or stimulus.
+- **Appendix B confirmed item by item, with changes**: ten renames (`fix_timeout`→`fix_acquisition`, "timeout
+  would be added time between trials as a result of an animal doing something incorrect";
+  `response_window`→`response_deadline`; `item_window`→`object_window`; `target_looks`→`target_appearance`;
+  `distractors`→`distractor_appearance`; `target_position`→`target_x`; `array_phase`→`array_rotation`; search
+  `eccentricity`→`array_eccentricity`; adaptive `eccentricity`→`target_eccentricity`; `contrast`→
+  `target_contrast`), "object" for "item" in the vocabulary (`ObjectWindows`, `Choice.objects`), appearances and
+  positions **not difficulty settings** by default (a task may declare otherwise), `set_size` with no shared
+  direction (the two pop-out search tasks declare it easier), luminances read against the background, search
+  details "defined in task creation", and **every reference task needing a fixed head** ("we do not have head
+  tracking in the rig"; `rig_chaired` kept for now). `target_y` added to the detection tasks at his question.
+- **Names beside ids** in the training records (TRN-08 revised: "each person will have an id, but the name should
+  also be present in places where who said or did something is useful"), after he discussed it with wl-works.
+- **Positions may use the whole screen**, with a warning, not a refusal, beyond about 15° where gaze monitoring is
+  less accurate: XC-349, not yet built; C1 keeps `target_x`/`target_y` at ±16°.
+- **Warnings over refusals, as a rule**: "in general, I think you have been too gung ho on refusals. I think
+  warnings are more appropriate most of the time with an explanation of why it may not be a good idea to use a
+  value or follow a path you may think to refuse. the experimenter needs free control most of the time." Applied
+  in C1 to the fixed-head check (now a warning); incomplete task files stay refused (an authoring rule, his
+  choice). **XC-352 audits every other refusal in the engine** against this rule, for him to rule on item by item.
+  The fixed-head warning holds in every session kind, recording included (his answer: "Warning everywhere").
+
+**CI.** The per-push gates of the C1 code commits were read shard by shard (the per-job API where `gh` truncates):
+652 catches, 0 survivors; every catch a test failing by name or a timeout with failures before the kill, except
+`task._reference`, caught by an import error because `COMMON` is built at import, and proven by a content test
+(`test_a_meanings_words_are_text_and_its_reference_a_number_a_name_or_the_background` fails when it is broken).
+**Not yet read at this entry**: the gates of the Appendix B fix and the final fix wave (runs `38164728174` at
+`769371c`, `38167636472` at `77f1943`, `38171608748` at `b2d9cc4`), which re-sweep every function of each module
+the renames touched and were still running; the merge waits on reading them shard by shard.
+
+**Found on the way, costly to rediscover:**
+- **A test that needs a chaired or cage-side session uses `tests/_sessions.head_free_task`**, a reference task
+  with only its `needs_fixed_head` line removed: every reference task now refuses those sessions.
+- **XC-347**: the `head-not-fixed` warning reads the session's declared deployment, not the head's state;
+  reachable only by running a non-service `rig_fixed` session twice from Python.
+- **For C5's "task revised"**: store each run's `declarations.content(task)`, not only its hash, so a revision can
+  name what changed; decide number normalization first (XC-350). **For C3's change log**: read meanings through
+  `declarations.resolved`; a direction relative to the background needs the background's luminance through the
+  calibration, one relative to another setting needs that setting's live value.
+- Backlog XC-340 to XC-353 filed by the build (Next free XC-354); XC-353: the console page cuts a warning's
+  explanation at 500 characters before it is accepted, the fixed-head warning's why among them.
+
+**Next:** the PI's merge decision on `engine-c1` and his confirmation of the plan's Appendix A (the welfare
+summary). Then C2's plan (plans, blocks and repeats), whose questions (where a repeated trial goes; whether a
+trial at the 5-minute cap repeats, XC-287) are asked when it is planned.
+
 ## What moved on 2026-10-11: the asks delivered, build C split, C1 planned
 
 **Resume here.** `main` is at `5475c96` (pushed): XC-288's approved spec merged in the morning (the PI, "Merge
@@ -418,7 +494,7 @@ now"), and the delivered asks recorded. **Engine build C1's plan was approved by
 "Review before merge") and is being built on branch
 `engine-c1`** (worktree `.claude/worktrees/engine-c1`): `docs/superpowers/plans/2026-10-11-engine-c1.md`, ten
 tasks, with **Appendix B, the meanings of the reference tasks' settings (31 items), for him to confirm as a
-numbered list before C1 merges**. Nothing of C1 is built. The plan was drafted, reviewed twice (an engineering
+numbered list before C1 merges**. Nothing of C1 was built when this entry was written; the entry above records the build. The plan was drafted, reviewed twice (an engineering
 review that ran Tasks 1-9 verbatim in a scratch copy, and an NHP-training review of every meaning), revised, and
 **re-verified: Tasks 1-10 applied verbatim in a scratch copy at `5475c96`, every red step and named break seen,
 the suite green after each task, 3382 to 3481**. Not run: Task 10's CI sweep and Python 3.11.
