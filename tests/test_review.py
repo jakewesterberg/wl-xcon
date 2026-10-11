@@ -75,7 +75,7 @@ def test_the_code_table_names_what_each_code_means():
 
 
 def test_a_parameter_reference_renders_as_its_name():
-    """The artifact exists to be read. `After(fix_timeouts)` -- a unit suffix glued
+    """The artifact exists to be read. `After(fix_acquisitions)` -- a unit suffix glued
     to a parameter name -- and a raw `P(name='fix_hold')` are both noise in the one
     place noise costs the most, because a reviewer who stops trusting the diagram
     goes back to reading source, which is the thing this replaces."""
@@ -110,7 +110,7 @@ HOLDING = Trial(
     params=[
         Param("fix_hold", unit="s", low=0.05, high=2.0),
         Param("contrast", unit="fraction", low=0.02, high=1.0),
-        Param("target_looks", unit="appearance", choices=("disc", "square")),
+        Param("target_appearance", unit="appearance", choices=("disc", "square")),
     ],
     states=[
         State("hold", enter=[Mark(4096)],
@@ -130,7 +130,7 @@ def _reviewed(**over) -> Task:
         default="holding",
         reaction_time=ReactionTime("hold", ("held",), "from the hold's start to a saccade"),
         choice=Choice(("fix",), "saccade"),
-        meanings={"contrast": Meaning(CLEAR_CUT, STIMULUS, raising=EASIER), "target_looks": LOOKS},
+        meanings={"contrast": Meaning(CLEAR_CUT, STIMULUS, raising=EASIER), "target_appearance": LOOKS},
     )
     fields.update(over)
     return Task(**fields)
@@ -147,7 +147,7 @@ def test_a_task_report_says_what_each_setting_means_and_where_that_comes_from():
     assert (f"| fix_hold | s | {shared.role} | {shared.kind} | raising it: {shared.raising} "
             f"|  | shared list |" in out)
     assert "| contrast | fraction | stimulus | clear-cut | raising it: easier |  | this task |" in out
-    assert ("| target_looks | appearance | stimulus | expected | changing it: harder "
+    assert ("| target_appearance | appearance | stimulus | expected | changing it: harder "
             "| the feature \\| that pops out | overrides the shared list: search pops out on it |"
             in out)
 
@@ -159,14 +159,14 @@ def test_a_direction_read_from_a_reference_says_from_what():
                            ("fix_hold", "farther from `fix_hold`"),
                            (BACKGROUND, "farther from the background")]:
         contrast = Meaning(EXPECTED, STIMULUS, raising=EASIER, note="n", relative_to=relative)
-        out = render_task(_reviewed(meanings={"contrast": contrast, "target_looks": LOOKS}))
+        out = render_task(_reviewed(meanings={"contrast": contrast, "target_appearance": LOOKS}))
 
         assert f"| contrast | fraction | stimulus | expected | {said}: easier | n | this task |" in out
 
 
 def test_a_setting_with_no_meaning_is_shown_undeclared_not_hidden():
     """`wlx review` checks nothing first, so the report says what is missing."""
-    out = render_task(_reviewed(meanings={"target_looks": LOOKS}))
+    out = render_task(_reviewed(meanings={"target_appearance": LOOKS}))
 
     assert "| contrast | fraction | **UNDECLARED** | | | | |" in out
 

@@ -701,7 +701,7 @@ def conditions(
     *,
     window_deg: float,
     hold_s: float,
-    timeout_s: float,
+    acquisition_s: float,
     luminance_cd_m2: float,
     repeats: int = 1,
     targets: tuple[tuple[float, float], ...] | None = None,
@@ -715,7 +715,8 @@ def conditions(
     in the ordinary task vocabulary.
 
     `luminance_cd_m2` is the target's luminance, cd/m² (`tasks/calibration.py`'s
-    `target_luminance`).
+    `target_luminance`), and `acquisition_s` the time allowed to acquire it, s (its
+    `fix_acquisition`).
 
     `repeats` is the target count per condition, not a number of fixations: more
     presentations of the same target is how a block buys down fixation noise, and the
@@ -734,7 +735,7 @@ def conditions(
                 "target_y": y,
                 "cal_window": window_deg,
                 "cal_hold": hold_s,
-                "fix_timeout": timeout_s,
+                "fix_acquisition": acquisition_s,
                 "target_luminance": luminance_cd_m2,
             },
             target=repeats,

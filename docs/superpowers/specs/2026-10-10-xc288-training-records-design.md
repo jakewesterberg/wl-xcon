@@ -330,6 +330,12 @@ A task that offers a choice declares which of its items count as choices and wha
 landing, a touch, a lever), so every trial records the one chosen (§3.1). **Every task declares how its
 reaction time is defined**, from which event to which, so one column means one thing per task.
 
+> **Amended 2026-10-11 (the PI, confirming engine build C1's plan's Appendix B: "i prefer object to
+> item"):** what a task offers to choose between are its **objects**, not items. Read "the item chosen"
+> and "its items" here, "which item was chosen" in §3.1 and "no item chosen" in §1 as the object chosen
+> and its objects: `Choice.objects` in `wl_xcon/task.py`, and an array's per-object windows
+> `ObjectWindows`. The text above is left as approved.
+
 ### 4.4 Identities that hold for years
 
 - **The task's content hash**, always: a hash of its content, never its file path (the research note's §3.1

@@ -418,10 +418,10 @@ class Trial:
     start: str
     states: list[State]
     params: list[Param] = field(default_factory=list)
-    #: Hand-written windows and `ItemWindows` families, in one list: a window is a
+    #: Hand-written windows and `ObjectWindows` families, in one list: a window is a
     #: window whether an author typed it or an array generated it, and keeping them
     #: apart would mean every check that walks windows had to walk two lists.
-    windows: "list[Window | ItemWindows]" = field(default_factory=list)
+    windows: "list[Window | ObjectWindows]" = field(default_factory=list)
     tolerances: "Tolerances" = field(default_factory=lambda: Tolerances())
     #: Which setup the task is written for: `"direct"`, `"stereoscope"` or `"either"`
     #: (direct-view spec §3). **`"either"` is safe as the default** because the field
@@ -763,11 +763,11 @@ class RDS(Appearance):
 
 @dataclass(frozen=True, slots=True)
 class Array(Appearance):
-    """`n` items evenly spaced on a ring, one of them the target.
+    """`n` objects evenly spaced on a ring, one of them the target.
 
     **This exists so that set size is a value.** Written the obvious way -- an
-    N-item array as N separate `Show` actions -- set size becomes a change to the
-    *shape* of the task: a different task file for four items and eight, unavailable
+    N-object array as N separate `Show` actions -- set size becomes a change to the
+    *shape* of the task: a different task file for four objects and eight, unavailable
     to live editing, and untouchable by a parameter. That is the commonest
     manipulation in visual search, and visual search is the lab's programme.
 
@@ -782,17 +782,17 @@ class Array(Appearance):
     #: manipulable between trials like anything else.
     target: "int | P" = 0
     looks: "Appearance | P" = field(default_factory=Disc)
-    #: What the other items look like. Target and distractors differing in exactly
+    #: What the other objects look like. Target and distractors differing in exactly
     #: one property is what makes this a feature-search array rather than a
     #: collection of unrelated shapes -- and `looks`/`among` being parameters is what
     #: makes "red among green" and "circle among squares" the same task.
     among: "Appearance | P" = field(default_factory=Disc)
-    #: Where item 0 sits, in degrees counter-clockwise from the positive x axis.
+    #: Where object 0 sits, in degrees counter-clockwise from the positive x axis.
     #: Randomising it between trials is what stops an animal learning positions.
     phase: "float | P" = 0.0
 
     def positions(self, values: dict) -> "list[tuple[float, float]]":
-        """Item centres, in cyclopean degrees relative to the stimulus position."""
+        """Object centres, in cyclopean degrees relative to the stimulus position."""
         n = int(_value(self.n, values))
         radius = float(_value(self.radius, values))
         phase = math.radians(float(_value(self.phase, values)))
@@ -804,7 +804,7 @@ class Array(Appearance):
             for i in range(n)
         ]
 
-    def item_looks(self, index: int, values: dict) -> "Appearance | P":
+    def object_looks(self, index: int, values: dict) -> "Appearance | P":
         target = int(_value(self.target, values))
         return self.looks if index == target else self.among
 
@@ -824,15 +824,15 @@ def _value(value, values: dict):
 
 
 @dataclass(frozen=True, slots=True)
-class ItemWindows:
-    """The per-item windows an `Array` needs, declared once.
+class ObjectWindows:
+    """The per-object windows an `Array` needs, declared once.
 
     One declaration rather than n, because n is not known until a trial runs. It
-    generates `<of>.<i>` per item plus two aliases: **`<of>.target`**, and
-    **`<of>.distractor`**, which is satisfied by any non-target item.
+    generates `<of>.<i>` per object plus two aliases: **`<of>.target`**, and
+    **`<of>.distractor`**, which is satisfied by any non-target object.
 
     The distractor alias is the point. Without it, every error saccade would have to
-    be enumerated as one transition per item -- which is the same structure-versus-
+    be enumerated as one transition per object -- which is the same structure-versus-
     value problem one level down, and it would make the measurement search tasks
     exist to produce, target-versus-distractor, unavailable.
     """
@@ -869,7 +869,7 @@ class ItemWindows:
         return windows
 
     def members(self, array: Array, values: dict) -> "dict[str, tuple[str, ...]]":
-        """Alias name to the concrete item windows that satisfy it."""
+        """Alias name to the concrete object windows that satisfy it."""
         n = len(array.positions(values))
         target = int(_value(array.target, values))
         return {
@@ -1141,7 +1141,7 @@ def expand_windows(
     windows: list[Window] = []
     aliases: dict[str, tuple[str, ...]] = {}
     for declared in trial.windows:
-        if isinstance(declared, ItemWindows):
+        if isinstance(declared, ObjectWindows):
             array = arrays.get(declared.of)
             if array is None:
                 continue
@@ -1156,7 +1156,7 @@ def expand_windows(
 #
 # A task file defines one `Task`: its trial structures by name, the default one its runs play until
 # plans exist (engine build C2), and what XC-288 §4 has a task declare about itself: what each of
-# its settings means, which of its items count as choices, and how its reaction time is defined.
+# its settings means, which of its objects count as choices, and how its reaction time is defined.
 # Its format is defined here, in wl-xcon (the PI, 2026-10-11; the engine C1 plan). Plans (C2),
 # procedures (D) and stages (C7) join it as fields with defaults.
 
@@ -1173,8 +1173,9 @@ HARDER = "harder"
 DIRECTIONS = (EASIER, HARDER)
 
 #: What a setting is (the PI, 2026-10-11): a **criterion**, what counts as success -- a window, a
-#: hold, a timeout, a response window -- or a **stimulus**, what the animal sees -- brightness,
-#: size, position, look -- or **neither**: the bounded settings, a consequence and a session limit.
+#: hold, the time allowed to acquire fixation, a response deadline -- or a **stimulus**, what the
+#: animal sees -- brightness, size, position, appearance -- or **neither**: the bounded settings, a
+#: consequence and a session limit.
 CRITERION = "criterion"
 STIMULUS = "stimulus"
 NEITHER = "neither"
@@ -1297,8 +1298,8 @@ class ReactionTime:
                 )
 
 
-#: What choosing an item is (XC-288 §4.3), as the guards that make it: a saccade landing, gaze
-#: entering or held, a touch, a lever.
+#: What choosing an object is (XC-288 §4.3, as amended 2026-10-11: "object", not "item"), as the
+#: guards that make it: a saccade landing, gaze entering or held, a touch, a lever.
 CHOSEN_BY: "dict[str, tuple[type, ...]]" = {
     "saccade": (SaccadeTo,),
     "gaze": (Entered, Hold),
@@ -1309,19 +1310,19 @@ CHOSEN_BY: "dict[str, tuple[type, ...]]" = {
 
 @dataclass(frozen=True, slots=True)
 class Choice:
-    """What a task offers to choose between (XC-288 §4.3): the windows -- or an array's item
-    families, `"search.target"` -- whose items count as choices, and what choosing one is, one of
-    `CHOSEN_BY`, so each trial can record the one chosen (engine build C7)."""
+    """What a task offers to choose between (XC-288 §4.3): the windows -- or an array's object
+    families, `"search.target"` -- whose objects count as choices, and what choosing one is, one
+    of `CHOSEN_BY`, so each trial can record the object chosen (engine build C7)."""
 
-    items: tuple
+    objects: tuple
     by: str
 
     def __post_init__(self) -> None:
-        if not isinstance(self.items, tuple) or not self.items:
-            raise ValueError("a choice names its items: a tuple of windows, at least one")
-        for item in self.items:
-            if not isinstance(item, str) or not item:
-                raise ValueError(f"a choice's item is a window's name, not {item!r}")
+        if not isinstance(self.objects, tuple) or not self.objects:
+            raise ValueError("a choice names its objects: a tuple of windows, at least one")
+        for chosen in self.objects:
+            if not isinstance(chosen, str) or not chosen:
+                raise ValueError(f"a choice's object is a window's name, not {chosen!r}")
         if self.by not in CHOSEN_BY:
             raise ValueError(f"a choice is made by {', '.join(CHOSEN_BY)}, not {self.by!r}")
 

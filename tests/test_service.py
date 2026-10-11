@@ -1334,14 +1334,14 @@ def test_a_service_stopped_with_a_session_open_leaves_it_stranded_for_the_next(t
 # --- runs -----------------------------------------------------------------------
 
 VALUES = {
-    "fix_timeout": 4.0, "fix_hold": 0.3, "response_window": 0.6, "target_hold": 0.2,
-    "fix_window": 2.0, "target_window": 3.0, "target_position": 10.0,
+    "fix_acquisition": 4.0, "fix_hold": 0.3, "response_deadline": 0.6, "target_hold": 0.2,
+    "fix_window": 2.0, "target_window": 3.0, "target_x": 10.0,
 }
 #: Starting values for `tasks/visual_search_training.py`, which declares no start for these.
 SEARCH_VALUES = {
-    "fix_timeout": 4.0, "fix_hold": 0.3, "response_window": 0.6, "target_hold": 0.2,
-    "fix_window": 2.0, "item_window": 1.0, "eccentricity": 8.0, "set_size": 4,
-    "target_index": 0, "array_phase": 0.0,
+    "fix_acquisition": 4.0, "fix_hold": 0.3, "response_deadline": 0.6, "target_hold": 0.2,
+    "fix_window": 2.0, "object_window": 1.0, "array_eccentricity": 8.0, "set_size": 4,
+    "target_index": 0, "array_rotation": 0.0,
 }
 UNKNOWN = ("warnings", "pump calibration", "eye tracker")
 

@@ -43,8 +43,8 @@ from wl_xcon.task import (
     CLEAR_CUT,
     CRITERION,
     EASIER,
-    EXPECTED,
     HARDER,
+    NOT_DIFFICULTY,
     NO_CHOICE,
     STIMULUS,
     Meaning,
@@ -83,7 +83,7 @@ calibration = Trial(
         # for a good map it would reject every fixation on the uncalibrated animal
         # it exists to measure.
         Param("cal_window", unit="deg", low=1.0, high=8.0),
-        Param("fix_timeout", unit="s", low=0.5, high=10.0),
+        Param("fix_acquisition", unit="s", low=0.5, high=10.0),
         Param("cal_hold", unit="s", low=0.1, high=2.0),
         # Absolute luminance, D65 white (the PI, 2026-10-07: "Absolute cd/m²", starting
         # at "40 cd/m²"). Bounded at 80, the default calibration's white (the sRGB
@@ -97,7 +97,7 @@ calibration = Trial(
             enter=[Show(TARGET), Mark(4105)],
             go=[
                 On(Entered("cal"), "hold"),
-                On(After(P("fix_timeout")), Outcome.NO_FIXATION, do=[Mark(4100)]),
+                On(After(P("fix_acquisition")), Outcome.NO_FIXATION, do=[Mark(4100)]),
             ],
         ),
         State(
@@ -113,7 +113,7 @@ calibration = Trial(
                 # practice, for the reason `fixation_detection` gives: check 4
                 # refuses a state that could wait forever, and "in practice" is the
                 # reasoning that produced the S1 bake-off's unbounded hold.
-                On(After(P("fix_timeout")), Outcome.NO_FIXATION),
+                On(After(P("fix_acquisition")), Outcome.NO_FIXATION),
             ],
         ),
     ],
@@ -121,15 +121,11 @@ calibration = Trial(
 
 
 #: The task object (engine spec §3.5; engine build C1): its reaction time is the latency to
-#: acquire the target, it offers no choice, and it declares four settings only it has (the engine
-#: C1 plan's Appendix B, items 22 to 25; decisions.md TRN-10). Where a target goes is the
-#: constellation's schedule, so its two positions are set by the schedule more than by a trainer.
-_FARTHER = Meaning(EXPECTED, STIMULUS, raising=HARDER, relative_to=0, note=(
-    "farther from the center a target is harder to fixate accurately and an uncalibrated map's "
-    "error grows; beyond about 10 degrees the tracker can lose the eye's fourth Purkinje image, "
-    "which is the rig's harder, not the animal's; near the center the direction can turn over, "
-    "small saccades being slower"))
-
+#: acquire the target, it offers no choice, and it declares three settings only it has (the engine
+#: C1 plan's Appendix B, items 23 to 25, as the PI confirmed them on 2026-10-11; decisions.md
+#: TRN-10); its `target_x` is the shared list's, the detection tasks' too. Where a target goes is
+#: the constellation's schedule, so its two positions are set by the schedule more than by a
+#: trainer.
 TASK = Task(
     structures={"calibration": calibration},
     default="calibration",
@@ -143,8 +139,9 @@ TASK = Task(
     ),
     choice=NO_CHOICE,
     meanings={
-        "target_x": _FARTHER,
-        "target_y": _FARTHER,
+        "target_y": Meaning(NOT_DIFFICULTY, STIMULUS, note=(
+            "the target's vertical position, set by the constellation's schedule more than by a "
+            "trainer")),
         "cal_window": Meaning(CLEAR_CUT, CRITERION, raising=EASIER),
         "cal_hold": Meaning(CLEAR_CUT, CRITERION, raising=HARDER),
     },

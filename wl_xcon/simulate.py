@@ -301,7 +301,7 @@ class Tally:
 def prepare(subject: Subject, trial: Trial, frame_period: float, values: dict) -> None:
     """Tell a subject the rig's frame period and which stimulus each window scores.
 
-    Per trial rather than per session, because an array's per-item windows are not
+    Per trial rather than per session, because an array's per-object windows are not
     known until `n` is bound and `n` can be a condition's value: a session running
     set size 2 and set size 12 in one block has a different window set on alternate
     trials. Between-trial code, so the work is free (ADR-0006).

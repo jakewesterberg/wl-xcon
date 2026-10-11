@@ -768,6 +768,15 @@ The PI's order: **definition first, display by January**.
 
 - **What the PI decides when the reference tasks are made right**: `adaptive_detection`'s staircase and
   catch trials, `visual_search`'s `item_window`, `calibration`'s `cal_hold`.
+
+  > **Amended 2026-10-11 (the PI, confirming engine build C1's plan's Appendix B):** the reference tasks'
+  > settings were renamed: `item_window` is `object_window` ("i prefer object to item"), and
+  > `fix_timeout`, `response_window`, `target_looks`, `distractors`, `target_position` and `array_phase`
+  > are `fix_acquisition`, `response_deadline`, `target_appearance`, `distractor_appearance`, `target_x`
+  > and `array_rotation`; the search array's `eccentricity` is `array_eccentricity` and
+  > `adaptive_detection`'s `eccentricity` and `contrast` are `target_eccentricity` and
+  > `target_contrast`. An array's members are **objects**, not items, wherever this spec says "item"
+  > of an array or a layout (§4.1, §4.4). The text above is left as approved.
 - **Formats designed in their builds**: the shared-memory layout (E), the generator protocol (H), the
   continuous mode's record (K), the task object's exact shape (C, with wl-xtasks), "later" per order
   type (C).

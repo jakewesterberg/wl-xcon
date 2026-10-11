@@ -90,14 +90,14 @@ _contract = pytest.mark.skipif(
 )
 
 VALUES = {
-    "fix_timeout": 4.0,
+    "fix_acquisition": 4.0,
     "fix_hold": 0.3,
-    "response_window": 0.6,
+    "response_deadline": 0.6,
     "target_hold": 0.2,
     "fix_window": 2.0,
     "target_window": 3.0,
-    "target_position": 10.0,
-    "target_looks": None,
+    "target_x": 10.0,
+    "target_appearance": None,
     "fix_luminance": 40.0,
     "target_luminance": 40.0,
 }
@@ -105,8 +105,8 @@ VALUES = {
 #: `tasks/fixation_detection.py`'s own starting values (`Param.start`; the b3a-2 plan,
 #: decision 1).
 FIXATION_STARTS = {
-    "fix_timeout": 4.0, "fix_hold": 0.3, "response_window": 0.6, "target_hold": 0.2,
-    "fix_window": 2.0, "target_window": 3.0, "target_position": 10.0,
+    "fix_acquisition": 4.0, "fix_hold": 0.3, "response_deadline": 0.6, "target_hold": 0.2,
+    "fix_window": 2.0, "target_window": 3.0, "target_x": 10.0,
     "fix_luminance": 40.0, "target_luminance": 40.0,
 }
 
@@ -1083,11 +1083,11 @@ def test_head_fixation_is_event_coded_at_both_ends(tmp_path):
 
 
 def _two_blocks() -> list[Block]:
-    near = Condition("near", {"target_position": 5.0}, target=6)
-    far = Condition("far", {"target_position": 12.0}, target=6)
+    near = Condition("near", {"target_x": 5.0}, target=6)
+    far = Condition("far", {"target_x": 12.0}, target=6)
     return [
         Block(name="near-far", conditions=[near, far]),
-        Block(name="far-only", conditions=[Condition("far", {"target_position": 12.0}, target=4)]),
+        Block(name="far-only", conditions=[Condition("far", {"target_x": 12.0}, target=4)]),
     ]
 
 
@@ -1119,7 +1119,7 @@ def test_each_trial_records_the_condition_it_actually_ran(tmp_path):
         ).read_text().splitlines()
     ]
 
-    positions = {row["params"]["target_position"] for row in rows}
+    positions = {row["params"]["target_x"] for row in rows}
     assert positions == {5.0, 12.0}
     assert {row["condition"] for row in rows} == {"near", "far"}
     assert {row["block"] for row in rows} == {"near-far", "far-only"}

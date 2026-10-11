@@ -332,6 +332,14 @@ it), so they draw as §4.4 says until a run sets them.
 | | `cal_window` | 4.0° | twice `fix_window`: a calibration window admits gaze as wrong as calibration will correct |
 | | `cal_hold` | 0.3 s | `fixation_detection`'s `fix_hold` |
 
+> **Amended 2026-10-11 (the PI, confirming engine build C1's plan's Appendix B):** the reference
+> tasks' settings in this table and in §14 were renamed: `fix_timeout` → `fix_acquisition`,
+> `response_window` → `response_deadline`, `target_position` → `target_x`, `item_window` →
+> `object_window`, `array_phase` → `array_rotation`, `visual_search`'s `eccentricity` →
+> `array_eccentricity`, and `adaptive_detection`'s `contrast` and `eccentricity` → `target_contrast`
+> and `target_eccentricity`; an array's members are objects, not items. The text is left as
+> approved.
+
 ## 7. When things fail
 
 | What | What happens |

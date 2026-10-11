@@ -53,36 +53,36 @@ adaptive_detection = Trial(
         Window("fix", at=(0.0, 0.0), radius=P("fix_window"), on="fix"),
         Window(
             "target",
-            at=(P("target_position"), 0.0),
+            at=(P("target_x"), 0.0),
             radius=P("target_window"),
             on="target",
         ),
     ],
     params=[
-        Param("fix_timeout", unit="s", low=0.5, high=10.0),
+        Param("fix_acquisition", unit="s", low=0.5, high=10.0),
         Param("fix_hold", unit="s", low=0.05, high=2.0),
-        Param("response_window", unit="s", low=0.1, high=3.0),
+        Param("response_deadline", unit="s", low=0.1, high=3.0),
         Param("target_hold", unit="s", low=0.05, high=1.0),
         Param("fix_window", unit="deg", low=0.5, high=5.0),
         Param("target_window", unit="deg", low=0.5, high=6.0),
         # ±16° again (direct-view spec §8), checked against direct view's ±30.5° field.
         # ±12 was the interim, at the stereoscope's mask, before direct view had a
         # `Geometry` (2026-09-28).
-        Param("target_position", unit="deg", low=-16.0, high=16.0),
+        Param("target_x", unit="deg", low=-16.0, high=16.0),
         # Appearance is a parameter, so switching circles among squares for
         # penguins among elephants is a value applied in an ITI -- not a new
         # task and not a new block.
         Param(
-            "target_looks",
+            "target_appearance",
             unit="appearance",
             choices=(
                 Disc(size=1.0, color=Gray(P("target_luminance"))),
                 Square(size=1.0, color=Gray(P("target_luminance"))),
             ),
         ),
-        Param("contrast", unit="fraction", low=0.02, high=1.0),
-        # Held eccentricity is |target_position|, so the same bound.
-        Param("eccentricity", unit="deg", low=2.0, high=16.0),
+        Param("target_contrast", unit="fraction", low=0.02, high=1.0),
+        # Held eccentricity is |target_x|, so the same bound.
+        Param("target_eccentricity", unit="deg", low=2.0, high=16.0),
         # Absolute luminance, D65 white (the PI, 2026-10-07: "Absolute cd/m²", starting
         # at "40 cd/m²"). Bounded at 80, the default calibration's white (the sRGB
         # standard's), until a measured calibration and V9's brightness cap say otherwise
@@ -96,7 +96,7 @@ adaptive_detection = Trial(
             enter=[Show(FIX), Mark(4096)],
             go=[
                 On(Entered("fix"), "hold_fix"),
-                On(After(P("fix_timeout")), Outcome.NO_FIXATION, do=[Mark(4100)]),
+                On(After(P("fix_acquisition")), Outcome.NO_FIXATION, do=[Mark(4100)]),
             ],
         ),
         State(
@@ -104,7 +104,7 @@ adaptive_detection = Trial(
             go=[
                 On(Hold("fix", P("fix_hold")), "stim_on"),
                 On(Exited("fix"), Outcome.FIXATION_BREAK, do=[Mark(4101)]),
-                On(After(P("fix_timeout")), Outcome.NO_FIXATION, do=[Mark(4100)]),
+                On(After(P("fix_acquisition")), Outcome.NO_FIXATION, do=[Mark(4100)]),
             ],
         ),
         State(
@@ -116,15 +116,15 @@ adaptive_detection = Trial(
                 Show(
                     Stimulus(
                         "target",
-                        at=(P("target_position"), 0.0),
-                        looks=P("target_looks"),
+                        at=(P("target_x"), 0.0),
+                        looks=P("target_appearance"),
                     )
                 ),
                 Mark(4097),
             ],
             go=[
                 On(SaccadeTo("target"), "verify", do=[Mark(4098)]),
-                On(After(P("response_window")), Outcome.NO_RESPONSE),
+                On(After(P("response_deadline")), Outcome.NO_RESPONSE),
             ],
         ),
         State(
@@ -136,7 +136,7 @@ adaptive_detection = Trial(
                     do=[Mark(4099), Mark(4102), Reward("reward_correct")],
                 ),
                 On(Exited("target"), Outcome.WRONG_TARGET),
-                On(After(P("response_window")), Outcome.NO_RESPONSE),
+                On(After(P("response_deadline")), Outcome.NO_RESPONSE),
             ],
         ),
     ],
@@ -145,7 +145,7 @@ adaptive_detection = Trial(
 
 @dataclass
 class Staircase:
-    """One-up two-down on contrast, converging near 71% correct.
+    """One-up two-down on the target's contrast, converging near 71% correct.
 
     Between-trial Python. It holds state across trials, does arbitrary arithmetic,
     and none of that costs anything -- it runs in the inter-trial interval where
@@ -170,32 +170,32 @@ class Staircase:
 
 
 def next_params(
-    staircase: Staircase, eccentricity: float, last: Outcome | None
+    staircase: Staircase, target_eccentricity: float, last: Outcome | None
 ) -> dict[str, float]:
     """The next trial's values. Called at a trial boundary, never inside one.
 
     Only completed trials move the staircase: an abort says nothing about
-    difficulty, and letting one move the estimate makes contrast track engagement
-    rather than perception.
+    difficulty, and letting one move the estimate makes the target's contrast track
+    engagement rather than perception.
     """
     if last in (Outcome.CORRECT, Outcome.WRONG_TARGET):
         staircase.update(last is Outcome.CORRECT)
     return {
-        "fix_timeout": 4.0,
+        "fix_acquisition": 4.0,
         "fix_hold": 0.3,
-        "response_window": 0.6,
+        "response_deadline": 0.6,
         "target_hold": 0.2,
-        "contrast": staircase.value,
-        "eccentricity": eccentricity,
+        "target_contrast": staircase.value,
+        "target_eccentricity": target_eccentricity,
     }
 
 
 #: The task object (engine spec §3.5; engine build C1): the detection trial, timed as
 #: `fixation_detection`'s is, and the two settings it declares as no other task does (the engine
 #: C1 plan's Appendix B, items 20 and 21; decisions.md TRN-10). No stimulus reads either and
-#: nothing moves them until a between-trial procedure is called (XC-242): `contrast` keeps the
-#: direction `Staircase` above assumes, raising it after an error, and `eccentricity` is no
-#: difficulty setting while nothing reads it; each note says so, so the record never teaches an
+#: nothing moves them until a between-trial procedure is called (XC-242): `target_contrast` keeps
+#: the direction `Staircase` above assumes, raising it after an error, and `target_eccentricity` is
+#: no difficulty setting while nothing reads it; each note says so, so the record never teaches an
 #: agent that either has no effect.
 TASK = Task(
     structures={"detection": adaptive_detection},
@@ -210,11 +210,11 @@ TASK = Task(
     ),
     choice=NO_CHOICE,
     meanings={
-        "contrast": Meaning(CLEAR_CUT, STIMULUS, raising=EASIER, note=(
+        "target_contrast": Meaning(CLEAR_CUT, STIMULUS, raising=EASIER, note=(
             "nothing reads it yet: no stimulus draws with it, and nothing moves it until a "
             "between-trial procedure is called (XC-242)")),
-        "eccentricity": Meaning(NOT_DIFFICULTY, STIMULUS, note=(
-            "nothing reads it yet: the target's distance is target_position's, and this "
+        "target_eccentricity": Meaning(NOT_DIFFICULTY, STIMULUS, note=(
+            "nothing reads it yet: the target's distance is target_x's, and this "
             "setting moves nothing on screen until a between-trial procedure is called "
             "(XC-242)")),
     },

@@ -29,7 +29,6 @@ from wl_xcon.task import (
     RDS,
     After,
     Array,
-    ItemWindows,
     Custom,
     Entered,
     Exited,
@@ -37,6 +36,7 @@ from wl_xcon.task import (
     Hold,
     Mark,
     NoChoice,
+    ObjectWindows,
     Outcome,
     P,
     Param,
@@ -238,13 +238,13 @@ def _destination(end: object) -> str:
 def _choice_faults(task: Task) -> list[Finding]:
     """What the task offers to choose between (XC-288 §4.3): declared -- a `Choice`, or `NO_CHOICE`
     for a task that offers none, since an unset choice cannot be told from a forgotten one (the
-    engine C1 plan's call 10) -- and each item a window some structure's transition fires on by
+    engine C1 plan's call 10) -- and each object a window some structure's transition fires on by
     the act the choice names (`CHOSEN_BY`)."""
     choice = task.choice
     if choice is None:
         return [Finding("undeclared-choice", (
             "the task does not say what it offers to choose between (XC-288 §4.3), and an unset "
-            "choice cannot be told from a forgotten one; declare choice=Choice(items, by), or "
+            "choice cannot be told from a forgotten one; declare choice=Choice(objects, by), or "
             "choice=NO_CHOICE for a task that offers none"))]
     if isinstance(choice, NoChoice):
         return []
@@ -258,10 +258,10 @@ def _choice_faults(task: Task) -> list[Finding]:
     }
     return [
         Finding("bad-choice", (
-            f"{item!r} is declared a choice made by {choice.by}, and no structure's transition "
+            f"{offered!r} is declared a choice made by {choice.by}, and no structure's transition "
             f"fires on a {choice.by} to it"))
-        for item in choice.items
-        if item not in chosen
+        for offered in choice.objects
+        if offered not in chosen
     ]
 
 
@@ -676,8 +676,8 @@ def _reachable(
         for sign in signs:
             centres = bases[sign]
             if isinstance(looks, Array):
-                # An array's items sit on a ring around the stimulus position, so the
-                # thing that can leave the field is an *item*, never the centre. The
+                # An array's objects sit on a ring around the stimulus position, so the
+                # thing that can leave the field is an *object*, never the centre. The
                 # extreme is the widest legal radius: with n a parameter too, every
                 # smaller set is a subset of those positions.
                 widest = max(_numbers(looks.radius, params))
@@ -915,8 +915,8 @@ def _uncoupled_windows(trial: Trial) -> list[Finding]:
             f"on='<stimulus>', or on=REMEMBERED if nothing is displayed there",
         )
         for window in trial.windows
-        # An `ItemWindows` family always couples to its array, by construction.
-        if not isinstance(window, ItemWindows) and window.on is None
+        # An `ObjectWindows` family always couples to its array, by construction.
+        if not isinstance(window, ObjectWindows) and window.on is None
     ]
 
 
@@ -1088,7 +1088,7 @@ def _combined(trial: Trial, params: dict[str, Param]) -> list[tuple[object, obje
 
     A `Show` pairs its looks with its own `combine`. An `Update` of `looks` pairs them with
     the `combine` of each `Show` of that name, since an update cannot change one, or with
-    `None` when nothing shows that name, which no rule exempts. An `Array`'s items combine
+    `None` when nothing shows that name, which no rule exempts. An `Array`'s objects combine
     as the array does, and a parameter's choices as the stimulus whose looks it is. An
     appearance `_appearances` finds that this pairs with nothing (a parameter's choice no
     stimulus shows) has no combination to exempt it from any rule."""
@@ -1531,7 +1531,7 @@ def _parameter_lights(trial: Trial, params: dict[str, Param]) -> list[str]:
     front covers back by it), **and inside each choice such a parameter offers** -- so a
     parameter that is a `Look`'s whole fill or outline counts and its fills or outlines are
     read (XC-271's shape, and XC-273's outline) -- and an appearance parameter whose
-    choices differ in what lights them, an `Array`'s items included (`_shown`). A parameter
+    choices differ in what lights them, an `Array`'s objects included (`_shown`). A parameter
     met again inside its own choices adds nothing more: `_self_referring` refuses it."""
     from wl_xcon.task import Appearance
 
@@ -1564,7 +1564,7 @@ def _parameter_lights(trial: Trial, params: dict[str, Param]) -> list[str]:
 
 def _shown(looks, params: dict[str, Param], inside: frozenset[str] = frozenset()) -> list:
     """What lights an appearance, for comparing an appearance parameter's choices: `_lit`, with
-    an `Array`'s items read in turn, and an appearance parameter among them as what each of its
+    an `Array`'s objects read in turn, and an appearance parameter among them as what each of its
     choices shows. **Being named in an `Array` never makes a parameter a light factor**; its
     own choices decide that. One undeclared, or met again inside its own choices, is read as
     itself, so two of them differ by name: it fails closed."""
@@ -2212,7 +2212,7 @@ def _widest(value, ranges) -> tuple[float, float]:
 def _declared_window_names(trial: Trial) -> set[str]:
     """Window names a task has, including every one an array generates.
 
-    An array's items are named `<of>.<i>` and are as declared as anything an author
+    An array's objects are named `<of>.<i>` and are as declared as anything an author
     typed -- the whole point is that the author cannot type them, because how many
     there are is not known until a trial runs.
     """
@@ -2220,7 +2220,7 @@ def _declared_window_names(trial: Trial) -> set[str]:
     ranges = _ranges(trial)
     names: set[str] = set()
     for window in trial.windows:
-        if isinstance(window, ItemWindows):
+        if isinstance(window, ObjectWindows):
             names |= {f"{window.of}.target", f"{window.of}.distractor"}
             array = arrays.get(window.of)
             if array is not None:
@@ -2237,7 +2237,7 @@ def _coupling(trial: Trial) -> dict[str, object]:
     for name in _declared_window_names(trial):
         scores[name] = None
     for window in trial.windows:
-        if isinstance(window, ItemWindows):
+        if isinstance(window, ObjectWindows):
             for name in list(scores):
                 if name.startswith(f"{window.of}."):
                     scores[name] = window.of
@@ -2247,10 +2247,10 @@ def _coupling(trial: Trial) -> dict[str, object]:
 
 
 def _array_faults(trial: Trial) -> list[Finding]:
-    """An array's target must be one of its items, for every legal setting.
+    """An array's target must be one of its objects, for every legal setting.
 
     Set size and target index are both live parameters, so an experimenter can put
-    the target at position 6 of a four-item array between one trial and the next.
+    the target at position 6 of a four-object array between one trial and the next.
     Reasoning over declared ranges is the only way to catch that before it is a
     session rather than a load.
     """
@@ -2266,9 +2266,9 @@ def _array_faults(trial: Trial) -> list[Finding]:
             findings.append(
                 Finding(
                     "target-outside-array",
-                    f"state {state!r} shows an array of as few as {lowest_n} items "
+                    f"state {state!r} shows an array of as few as {lowest_n} objects "
                     f"with a target index reaching {highest_t}; the target must be "
-                    f"one of the items for every setting the console allows, not "
+                    f"one of the objects for every setting the console allows, not "
                     f"only the one it has today",
                 )
             )
@@ -2397,7 +2397,7 @@ def _overlapping_windows(trial: Trial) -> list[Finding]:
     doing something ordinary.
     """
     ranges = _ranges(trial)
-    by_name = {w.name: w for w in trial.windows if not isinstance(w, ItemWindows)}
+    by_name = {w.name: w for w in trial.windows if not isinstance(w, ObjectWindows)}
     findings: list[Finding] = []
     seen: set[tuple[str, str]] = set()
     for state in trial.states:
@@ -2466,16 +2466,16 @@ def _target_name(target: object) -> str:
 
 
 def _crowded_arrays(trial: Trial) -> list[Finding]:
-    """An array's own items must not overlap, for any legal setting.
+    """An array's own objects must not overlap, for any legal setting.
 
     Set size, eccentricity and window radius are all live, so crowding is something
-    an experimenter dials in between two trials: twelve items on a small ring with
+    an experimenter dials in between two trials: twelve objects on a small ring with
     generous windows overlap, and a saccade to one distractor is then scored against
     another, or against the target. **Nobody ever reads these windows** -- they are
-    generated, which is the whole point of `ItemWindows` and the reason this needs a
+    generated, which is the whole point of `ObjectWindows` and the reason this needs a
     check rather than an author's eye.
 
-    The worst case is the most items on the smallest ring with the largest windows:
+    The worst case is the most objects on the smallest ring with the largest windows:
     adjacent centres are `2 R sin(pi/n)` apart, and two windows touch when that
     falls below their summed radius.
     """
@@ -2483,7 +2483,7 @@ def _crowded_arrays(trial: Trial) -> list[Finding]:
     ranges = _ranges(trial)
     findings: list[Finding] = []
     for declared in trial.windows:
-        if not isinstance(declared, ItemWindows):
+        if not isinstance(declared, ObjectWindows):
             continue
         array = arrays.get(declared.of)
         if array is None:
@@ -2498,9 +2498,9 @@ def _crowded_arrays(trial: Trial) -> list[Finding]:
             findings.append(
                 Finding(
                     "crowded-array",
-                    f"array {declared.of!r} can put {int(most)} items on a "
+                    f"array {declared.of!r} can put {int(most)} objects on a "
                     f"{tightest:g}° ring, {spacing:.2f}° apart, with windows of "
-                    f"{widest:g}° radius; adjacent items would overlap and a "
+                    f"{widest:g}° radius; adjacent objects would overlap and a "
                     f"saccade to one would be scored against another",
                 )
             )
@@ -2521,7 +2521,7 @@ def _nonzero(value) -> bool:
 def _modulates(looks, params: dict[str, Param], inside: frozenset[str] = frozenset()) -> bool:
     """Whether a stimulus can multiply the contrast below it, for every value it can take:
     a pattern, or a flat Weber contrast (a gain of 1 + c). An absolute light names no gain.
-    An `Array` modulates only if each of its items does, and a parameter only if each of
+    An `Array` modulates only if each of its objects does, and a parameter only if each of
     its choices does; one with no choices to read is `_Unbounded`, naming it. One met again
     inside its own choices adds nothing: they are being read already, and it is refused as
     referring to itself (`_self_referring`)."""
@@ -2555,7 +2555,7 @@ def _declares_mean(looks, params: dict[str, Param], inside: frozenset[str] = fro
     """Whether a stimulus can be a grating that declares its own mean, at any value it can
     take. Multiplying draws a grating's modulation alone (`exact._gain`), so a mean it
     declares would be ignored without a word (call 1, XC-253). An `Array` can if either of
-    its items can, a parameter if any of its choices can, a mean parameter if any choice is
+    its objects can, a parameter if any of its choices can, a mean parameter if any choice is
     a light. One with no choices to read declares none here: it is refused where its light
     or its modulation is read."""
     if isinstance(looks, P):

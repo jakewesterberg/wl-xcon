@@ -143,14 +143,14 @@ def test_a_reaction_time_names_its_state_where_it_ends_and_what_it_measures():
             ReactionTime(state, to, note)
 
 
-def test_a_choice_names_its_items_and_the_act_that_chooses_one():
+def test_a_choice_names_its_objects_and_the_act_that_chooses_one():
     assert tuple(CHOSEN_BY) == ("saccade", "gaze", "touch", "lever")
     assert Choice(("search.target", "search.distractor"), "saccade").by == "saccade"
     with pytest.raises(ValueError, match="is made by saccade, gaze, touch, lever"):
         Choice(("target",), "wink")
-    for items in [(), ("",), ["target"], (3,)]:
+    for objects in [(), ("",), ["target"], (3,)]:
         with pytest.raises(ValueError):
-            Choice(items, "gaze")
+            Choice(objects, "gaze")
 
 
 def test_a_task_holds_its_structures_by_name_and_plays_the_default():
@@ -350,7 +350,8 @@ def test_a_task_must_say_what_it_offers_to_choose_even_when_it_is_nothing():
 
 
 def test_a_choice_names_windows_chosen_by_the_act_it_names():
-    """XC-288 §4.3: "which of its items count as choices and what choosing one is"."""
+    """XC-288 §4.3 (amended 2026-10-11, "object", not "item"): which of its objects count as
+    choices, and what choosing one is."""
     touched = _whole(choice=Choice(("target",), "touch"))
     elsewhere = _whole(choice=Choice(("target", "elsewhere"), "saccade"))
 

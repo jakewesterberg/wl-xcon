@@ -25,7 +25,7 @@ from wl_xcon.task import (
     Outcome,
     P,
     Hide,
-    ItemWindows,
+    ObjectWindows,
     Reward,
     Show,
     Stimulus,
@@ -45,7 +45,7 @@ ARROW = " \u2192 "
 def _value_label(value: object) -> str:
     """A parameter reference by name, a literal duration with its unit.
 
-    The unit belongs to the *literal*, not to the name: `After(fix_timeouts)` reads
+    The unit belongs to the *literal*, not to the name: `After(fix_acquisitions)` reads
     as a parameter nobody declared, and a reviewer who stops trusting the diagram
     goes back to reading source -- which is the thing this artifact replaces.
     """
@@ -226,13 +226,13 @@ def render(trial: Trial, allocation_names: dict[int, str] | None = None) -> str:
                   "|---|---|---|---|---|"]
         arrays = arrays_of(trial)
         for window in trial.windows:
-            if isinstance(window, ItemWindows):
+            if isinstance(window, ObjectWindows):
                 # A family, described as one: how many members it has is a
                 # parameter, so listing them would be listing one configuration.
                 array = arrays.get(window.of)
                 count = _value_label(array.n) if array is not None else "?"
                 lines.append(
-                    f"| `{window.of}.*` | {count} items on a ring "
+                    f"| `{window.of}.*` | {count} objects on a ring "
                     f"| {_value_label(window.radius)} | `{window.of}` "
                     f"| {window.eye} |"
                 )
@@ -361,8 +361,8 @@ def render_task(task: Task, allocation_names: dict[int, str] | None = None) -> s
     elif isinstance(task.choice, NoChoice):
         offered = "None: the task offers no choice."
     else:
-        items = ", ".join("`" + item + "`" for item in task.choice.items)
-        offered = f"{items}, chosen by a {task.choice.by}."
+        objects = ", ".join("`" + window + "`" for window in task.choice.objects)
+        offered = f"{objects}, chosen by a {task.choice.by}."
     lines += ["### Choice", "", offered, ""]
     head = (
         "Needs a fixed head: refused in any session whose head is not fixed (engine spec §20.1)."

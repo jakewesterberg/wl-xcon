@@ -18,9 +18,9 @@ session limit.
 and the out-of-cage limit change live and are declared in the subject's bounded config, whose loader
 is welfare-listed and which the task check does not read.
 
-Each entry is the engine C1 plan's proposal (its Appendix B), confirmed by the PI as a numbered list
-before that build merged (decisions.md TRN-10). An expected direction is recorded as expected, never
-as a fact (XC-288 §4.1).
+Each entry is the engine C1 plan's proposal (its Appendix B) as the PI confirmed it, item by item and
+with changes, on 2026-10-11 (decisions.md TRN-10). An expected direction is recorded as expected,
+never as a fact (XC-288 §4.1).
 """
 
 from __future__ import annotations
@@ -42,11 +42,15 @@ OWN = "this task"
 OVERRIDE = "overrides the shared list"
 
 #: **The shared list**: every setting two or more reference task files use with one meaning (the
-#: engine C1 plan's call 5; its Appendix B, items 4 to 18). A direction reads on raising a number,
-#: on moving it away from a reference (`relative_to`), or on changing a list of choices (call 4).
+#: engine C1 plan's call 5; its Appendix B, items 4 to 19 and 22, as the PI confirmed them on
+#: 2026-10-11). A direction reads on raising a number, on moving it away from a reference
+#: (`relative_to`), or on changing a list of choices (call 4). **A setting whose values are a list
+#: of appearances is not a difficulty setting here** (the PI: "generally speaking though,
+#: appearance is not a easier/harder thing"): a task where an appearance is what the animal judges
+#: overrides it with its own meaning and a note saying why, and may read a direction on changing it.
 COMMON: dict[str, Meaning] = {
     # Fixation.
-    "fix_timeout": Meaning(CLEAR_CUT, CRITERION, raising=EASIER),
+    "fix_acquisition": Meaning(CLEAR_CUT, CRITERION, raising=EASIER),
     "fix_hold": Meaning(CLEAR_CUT, CRITERION, raising=HARDER),
     "fix_window": Meaning(CLEAR_CUT, CRITERION, raising=EASIER),
     "fix_luminance": Meaning(EXPECTED, STIMULUS, raising=EASIER, relative_to=BACKGROUND, note=(
@@ -54,36 +58,38 @@ COMMON: dict[str, Meaning] = {
         "one; on a gray one farther above or below it, so a point near the gray's luminance can "
         "vanish")),
     # Responding.
-    "response_window": Meaning(CLEAR_CUT, CRITERION, raising=EASIER),
+    "response_deadline": Meaning(CLEAR_CUT, CRITERION, raising=EASIER),
     "target_hold": Meaning(CLEAR_CUT, CRITERION, raising=HARDER),
     "target_window": Meaning(CLEAR_CUT, CRITERION, raising=EASIER),
-    "item_window": Meaning(EXPECTED, CRITERION, raising=EASIER, note=(
+    "object_window": Meaning(EXPECTED, CRITERION, raising=EASIER, note=(
         "a wider window accepts a less accurate landing on the target, and can also turn a "
         "near-miss beside a distractor into a wrong target")),
     # The target.
-    "target_looks": Meaning(EXPECTED, STIMULUS, raising=HARDER, note=(
-        "where to look does not change, but a new look can slow or confuse an animal over the "
-        "next few trials: a change along a feature the task does not use; going back to a "
-        "familiar look is not harder")),
-    "target_luminance": Meaning(EXPECTED, STIMULUS, raising=EASIER, note=(
-        "a brighter target is easier to see on black; saccade latency falls as intensity rises "
+    "target_appearance": Meaning(NOT_DIFFICULTY, STIMULUS, note=(
+        "an appearance is not easier or harder in general; a task where it is what the animal "
+        "judges declares its own meaning")),
+    "target_luminance": Meaning(EXPECTED, STIMULUS, raising=EASIER, relative_to=BACKGROUND, note=(
+        "a target farther in luminance from the background is easier to see: on black a brighter "
+        "one, on a gray one farther above or below it; saccade latency falls as intensity rises "
         "and then levels off, so far above threshold more light changes little")),
-    "target_position": Meaning(EXPECTED, STIMULUS, raising=HARDER, relative_to=0, note=(
-        "farther from fixation a saccade lands less accurately, and beyond about 10 degrees the "
-        "tracker can lose the eye's fourth Purkinje image, which is the rig's harder, not the "
-        "animal's; near the center the direction can turn over, the target sitting by the "
-        "fixation window and small saccades being slower; which side can matter to an animal "
-        "with a bias")),
+    "target_x": Meaning(NOT_DIFFICULTY, STIMULUS, note=(
+        "the target's horizontal position; how moving it changes the task is a task's own to "
+        "declare")),
     # The search array.
-    "set_size": Meaning(EXPECTED, STIMULUS, raising=HARDER, note=(
-        "while an animal learns, more items mean fewer lucky guesses, chance being 1/n, which is "
-        "chance's harder, not the animal's; once it finds the odd item, more items change little")),
-    "distractors": Meaning(EXPECTED, STIMULUS, raising=HARDER, note=(
-        "read with the target's look: a change can leave the target looking like the distractors, "
-        "with no answer, or differing by color, by shape or by both, which is easier; a color swap "
-        "slows the next few trials (priming of pop-out)")),
-    "target_index": Meaning(NOT_DIFFICULTY, STIMULUS, note="which item of the ring is the target"),
-    "array_phase": Meaning(NOT_DIFFICULTY, STIMULUS, note="turns the whole ring"),
+    "set_size": Meaning(NOT_DIFFICULTY, STIMULUS, note=(
+        "the direction depends on the search: in a pop-out search more objects make it easier, "
+        "in a search without pop-out harder")),
+    "distractor_appearance": Meaning(NOT_DIFFICULTY, STIMULUS, note=(
+        "what a change does depends on the search, a broad category of tasks where one "
+        "definition does not serve: a task declares its own as it is created")),
+    "target_index": Meaning(NOT_DIFFICULTY, STIMULUS, note=(
+        "which object of the array is the target")),
+    "array_rotation": Meaning(NOT_DIFFICULTY, STIMULUS, note=(
+        "turns the whole array; held fixed with target_index, it lets an animal answer by "
+        "position rather than by the target's appearance")),
+    "array_eccentricity": Meaning(NOT_DIFFICULTY, STIMULUS, note=(
+        "how far the array sits from fixation; what moving it does depends on the search task, "
+        "and an array need not be a ring")),
 }
 
 #: **The bounded settings' meanings** (XC-288 §4.1; Appendix B, items 29 and 30): what changes live

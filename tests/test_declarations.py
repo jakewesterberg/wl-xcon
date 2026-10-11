@@ -79,22 +79,25 @@ def test_a_setting_with_no_meaning_is_left_out_for_the_check_to_refuse():
 
 
 def test_the_shared_list_holds_every_setting_two_reference_task_files_use_alike():
-    """The nine settings three or more reference task files use, but `eccentricity`, which means a different thing in
-    each task using it, and the seven two task files share (the engine C1 plan's call 5)."""
+    """The nine settings three or more reference task files use, `target_x` among them now that
+    the detection tasks' target position bears calibration's name, and the seven two task files
+    share, `array_eccentricity` among them (the engine C1 plan's call 5; the PI's confirmation of
+    its Appendix B, 2026-10-11): sixteen."""
     assert set(COMMON) == {
-        "fix_timeout", "fix_hold", "fix_luminance", "fix_window", "response_window",
-        "target_hold", "target_looks", "target_luminance",
-        "target_window", "target_position", "item_window", "set_size", "target_index",
-        "array_phase", "distractors",
+        "fix_acquisition", "fix_hold", "fix_luminance", "fix_window", "response_deadline",
+        "target_hold", "target_appearance", "target_luminance", "target_x",
+        "target_window", "object_window", "set_size", "target_index",
+        "array_rotation", "array_eccentricity", "distractor_appearance",
     }
+    assert len(COMMON) == 16
 
 
 def test_every_shared_meaning_says_whether_its_setting_is_a_criterion_or_a_stimulus():
     """The PI, 2026-10-11: windows, holds and the times allowed are criteria; what the animal
     sees is a stimulus. Neither is the bounded settings' alone."""
     assert {name for name, meaning in COMMON.items() if meaning.role == CRITERION} == {
-        "fix_timeout", "fix_hold", "fix_window", "response_window", "target_hold",
-        "target_window", "item_window",
+        "fix_acquisition", "fix_hold", "fix_window", "response_deadline", "target_hold",
+        "target_window", "object_window",
     }
     assert all(meaning.role == STIMULUS for name, meaning in COMMON.items()
                if meaning.role != CRITERION)
@@ -171,7 +174,7 @@ DEFAULTS = {
     "Bounded": {"name": REQUIRED},
     "ChairStill": {},
     "Checkerboard": {"check_size": 1.0, "contrast": None, "aperture": 10.0, "color": None},
-    "Choice": {"items": REQUIRED, "by": REQUIRED},
+    "Choice": {"objects": REQUIRED, "by": REQUIRED},
     "Color": {},
     "ConeContrast": {"L": 0.0, "M": 0.0, "S": 0.0},
     "Contrast": {"value": REQUIRED},
@@ -213,7 +216,7 @@ DEFAULTS = {
     "Guard": {},
     "Hide": {"stimulus": REQUIRED},
     "Hold": {"window": REQUIRED, "seconds": REQUIRED},
-    "ItemWindows": {"of": REQUIRED, "radius": REQUIRED, "eye": "both"},
+    "ObjectWindows": {"of": REQUIRED, "radius": REQUIRED, "eye": "both"},
     "Mark": {"code": REQUIRED},
     "Meaning": {
         "kind": REQUIRED,

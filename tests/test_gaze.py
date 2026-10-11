@@ -146,7 +146,7 @@ def test_a_replayed_payload_becomes_degrees():
 
 def test_gaze_in_degrees_decides_a_window():
     values = {"target_x": 6.0, "target_y": -4.0, "cal_window": 2.0,
-              "fix_timeout": 3.0, "cal_hold": 0.2}
+              "fix_acquisition": 3.0, "cal_hold": 0.2}
     mapping = _fitted_mapping()
 
     inside = Tracked(_tracker_at(6.0, -4.0), mapping, calibration, 0.008, values)
@@ -161,7 +161,7 @@ def test_a_window_is_missed_when_the_map_is_the_wrong_one():
     """The failure this whole path exists to make visible. Uncalibrated gaze lands
     somewhere plausible and the trial scores as behaviour, not as a rig fault."""
     values = {"target_x": 6.0, "target_y": -4.0, "cal_window": 2.0,
-              "fix_timeout": 3.0, "cal_hold": 0.2}
+              "fix_acquisition": 3.0, "cal_hold": 0.2}
     wrong = Mapping(
         version=1,
         targets=_targets(),
@@ -178,7 +178,7 @@ def test_before_the_first_sample_gaze_is_unavailable_not_centred():
     centre target and score a hold against an empty chair."""
     world = Tracked(Tracker(), _fitted_mapping(), calibration, 0.008,
                     {"target_x": 0.0, "target_y": 0.0, "cal_window": 3.0,
-                     "fix_timeout": 3.0, "cal_hold": 0.2})
+                     "fix_acquisition": 3.0, "cal_hold": 0.2})
     assert world.gaze("left", frame=0) is None
     assert world.signal(frame=0) == "lost"
     assert not world.in_window("cal", frame=0)
@@ -189,7 +189,7 @@ def test_a_stale_sample_is_not_a_position():
     8 ms a frame, the 50 ms default expires part-way through frame 7."""
     world = Tracked(_tracker_at(0.0, 0.0, at=0.0), _fitted_mapping(), calibration, 0.008,
                     {"target_x": 0.0, "target_y": 0.0, "cal_window": 3.0,
-                     "fix_timeout": 3.0, "cal_hold": 0.2})
+                     "fix_acquisition": 3.0, "cal_hold": 0.2})
     assert world.in_window("cal", frame=6)
     assert world.signal(frame=6) == "ok"
     assert not world.in_window("cal", frame=7)
@@ -209,7 +209,7 @@ def test_version_zero_maps_nothing():
     log = MappingLog(_targets())
     world = Tracked(_tracker_at(0.0, 0.0), log.current, calibration, 0.008,
                     {"target_x": 0.0, "target_y": 0.0, "cal_window": 3.0,
-                     "fix_timeout": 3.0, "cal_hold": 0.2})
+                     "fix_acquisition": 3.0, "cal_hold": 0.2})
     assert world.mapping_version == 0
     assert world.gaze("left", frame=0) is None
     assert not world.in_window("cal", frame=0)
@@ -257,7 +257,7 @@ def test_saccade_to_waits_for_the_eye_to_land():
     """At confirmation the eye is still in flight and has landed nowhere. Firing
     `SaccadeTo` then would report a saccade heading somewhere as having arrived."""
     values = {"target_x": 8.0, "target_y": 0.0, "cal_window": 2.0,
-              "fix_timeout": 3.0, "cal_hold": 0.2}
+              "fix_acquisition": 3.0, "cal_hold": 0.2}
     world = Tracked(
         Tracker(), _fitted_mapping(), calibration, 0.002, values,
         source=_saccade_source(dwell=120, steps=10, to=(8.0, 0.0)),
@@ -282,7 +282,7 @@ def test_saccade_to_does_not_fire_when_the_saccade_lands_elsewhere():
     """The distinction between `SaccadeTo` and 'a saccade happened'. A saccade away
     from the target must not satisfy a guard naming the target."""
     values = {"target_x": 8.0, "target_y": 0.0, "cal_window": 2.0,
-              "fix_timeout": 3.0, "cal_hold": 0.2}
+              "fix_acquisition": 3.0, "cal_hold": 0.2}
     world = Tracked(
         Tracker(), _fitted_mapping(), calibration, 0.002, values,
         source=_saccade_source(dwell=120, steps=10, to=(-9.0, 4.0)),
@@ -295,7 +295,7 @@ def test_a_saccade_is_consumed_by_whichever_guard_takes_it():
     """Otherwise one saccade satisfies `SaccadeTo` on every later frame gaze stays in
     the window, which is indistinguishable from saccading there over and over."""
     values = {"target_x": 8.0, "target_y": 0.0, "cal_window": 2.0,
-              "fix_timeout": 3.0, "cal_hold": 0.2}
+              "fix_acquisition": 3.0, "cal_hold": 0.2}
     world = Tracked(
         Tracker(), _fitted_mapping(), calibration, 0.002, values,
         source=_saccade_source(dwell=120, steps=10, to=(8.0, 0.0)),
@@ -321,7 +321,7 @@ def test_a_calibration_trial_is_scored_from_replayed_gaze():
     """P6's exit condition. Payloads in, `CORRECT` out, through the parser, the
     tracker, a fitted map, the window geometry and the trial loop."""
     values = {"target_x": 6.0, "target_y": -4.0, "cal_window": 2.0,
-              "fix_timeout": 2.0, "cal_hold": 0.1}
+              "fix_acquisition": 2.0, "cal_hold": 0.1}
     frame_period = 0.008
     world = Tracked(
         Tracker(),
@@ -342,7 +342,7 @@ def test_a_calibration_trial_aborts_when_the_animal_looks_elsewhere():
     `NO_FIXATION` rather than `CORRECT` is what says the window test is actually
     being applied rather than passing everything."""
     values = {"target_x": 6.0, "target_y": -4.0, "cal_window": 2.0,
-              "fix_timeout": 0.5, "cal_hold": 0.1}
+              "fix_acquisition": 0.5, "cal_hold": 0.1}
     frame_period = 0.008
     world = Tracked(
         Tracker(),
@@ -363,7 +363,7 @@ def test_a_tracker_that_stops_delivering_is_equipment_not_behaviour():
     `TRACKER_LOST`, not as a fixation break: scoring a dropped camera as the animal
     looking away inflates a session's break rate with equipment failure, invisibly."""
     values = {"target_x": 6.0, "target_y": -4.0, "cal_window": 2.0,
-              "fix_timeout": 3.0, "cal_hold": 2.0}
+              "fix_acquisition": 3.0, "cal_hold": 2.0}
     frame_period = 0.008
     world = Tracked(
         Tracker(),
@@ -539,7 +539,7 @@ def test_a_whole_calibration_block_produces_an_installed_map():
     block = Block(
         name="calibration",
         conditions=conditions(
-            GEOMETRY, window_deg=3.0, hold_s=0.1, timeout_s=1.0,
+            GEOMETRY, window_deg=3.0, hold_s=0.1, acquisition_s=1.0,
             luminance_cd_m2=40.0, repeats=2
         ),
     )
@@ -647,7 +647,7 @@ def _calibration_session(tmp_path, repeats: int = 2):
     block = Block(
         name="calibration",
         conditions=conditions(
-            GEOMETRY, window_deg=3.0, hold_s=0.1, timeout_s=1.0,
+            GEOMETRY, window_deg=3.0, hold_s=0.1, acquisition_s=1.0,
             luminance_cd_m2=40.0, repeats=repeats
         ),
     )
@@ -668,7 +668,7 @@ def _calibration_session(tmp_path, repeats: int = 2):
         trials=0,
         frame_period=frame_period,
         seed=11,
-        values={"cal_window": 3.0, "fix_timeout": 1.0, "cal_hold": 0.1},
+        values={"cal_window": 3.0, "fix_acquisition": 1.0, "cal_hold": 0.1},
         bounds=_calibration_bounds(),
         already_delivered_today=0.0,
         deployment=Deployment.RIG_FIXED,
@@ -776,7 +776,7 @@ def test_the_fit_uses_the_hold_and_not_the_whole_trial(tmp_path):
         trials=0,
         frame_period=frame_period,
         seed=11,
-        values={"cal_window": 3.0, "fix_timeout": 1.0, "cal_hold": hold_s},
+        values={"cal_window": 3.0, "fix_acquisition": 1.0, "cal_hold": hold_s},
         bounds=_calibration_bounds(),
         already_delivered_today=0.0,
         deployment=Deployment.RIG_FIXED,
@@ -787,7 +787,7 @@ def test_the_fit_uses_the_hold_and_not_the_whole_trial(tmp_path):
             Block(
                 name="calibration",
                 conditions=conditions(
-                    GEOMETRY, window_deg=3.0, hold_s=hold_s, timeout_s=1.0,
+                    GEOMETRY, window_deg=3.0, hold_s=hold_s, acquisition_s=1.0,
                     luminance_cd_m2=40.0, repeats=1
                 ),
             )

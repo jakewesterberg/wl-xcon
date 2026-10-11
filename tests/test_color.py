@@ -240,7 +240,7 @@ def test_pop_out_is_expressible_as_one_parameter():
     """
     red = Disc(size=1.0, color=DKL(lum=0.0, l_m=0.08))
     green = Disc(size=1.0, color=DKL(lum=0.0, l_m=-0.08))
-    param = Param("target_looks", unit="appearance", choices=(red, green))
+    param = Param("target_appearance", unit="appearance", choices=(red, green))
     assert param.choices[0].color.lum == 0.0
     assert param.choices[0].color != param.choices[1].color
 
@@ -718,13 +718,13 @@ def test_an_opacity_a_parameter_sets_in_an_update_is_a_light_factor():
     assert "contrast-on-default" not in _found(_showing(1.0, Update("s", at=(1.0, 0.0))))
 
 
-def _array(item, among=None) -> Array:
-    return Array(looks=item, among=Disc(size=1.0, color=Gray(10.0)) if among is None else among)
+def _array(target, among=None) -> Array:
+    return Array(looks=target, among=Disc(size=1.0, color=Gray(10.0)) if among is None else among)
 
 
 def test_a_parameter_choosing_between_arrays_that_differ_only_in_light_is_a_factor():
     """Task 4's review: `_lit` reads an `Array` as no light, so these compared equal. An
-    array's items are read in turn, and a parameter among them through its choices."""
+    array's objects are read in turn, and a parameter among them through its choices."""
     gray = _choosing(_array(Disc(size=1.0, color=Gray(10.0))),
                      _array(Disc(size=1.0, color=Gray(20.0))))
     looks = replace(_choosing(_array(look.Look(fill=look.Flat(color=Gray(10.0)))),
@@ -744,10 +744,10 @@ def test_a_parameter_choosing_between_arrays_that_differ_only_in_light_is_a_fact
     assert "'a'" not in _found(through)["contrast-on-default"].detail
 
 
-def test_arrays_whose_items_differ_only_in_shape_are_not_a_light_factor():
+def test_arrays_whose_objects_differ_only_in_shape_are_not_a_light_factor():
     """Shape-only choices stay clean when they are arrays (the twin of
     `test_an_appearance_whose_choices_differ_only_in_shape_is_not_a_light_factor`), and a
-    parameter named among an array's items is no light factor for being named there: the
+    parameter named among an array's objects is no light factor for being named there: the
     search task's shape-only case."""
     disc, square = Disc(size=1.0, color=Gray(10.0)), Square(size=1.0, color=Gray(10.0))
     literal = _choosing(_array(disc), _array(square))

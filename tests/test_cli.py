@@ -78,13 +78,13 @@ BOUNDS = f"{TASKS}/reference_bounds.py"
 #: Every `--set` this fixation task needs to run headless, factored out once
 #: rather than repeated in every `run`/console-link test that has to launch one.
 _TASK_SETS = [
-    "--set", "fix_timeout=4.0",
+    "--set", "fix_acquisition=4.0",
     "--set", "fix_hold=0.3",
-    "--set", "response_window=0.6",
+    "--set", "response_deadline=0.6",
     "--set", "target_hold=0.2",
     "--set", "fix_window=2.0",
     "--set", "target_window=3.0",
-    "--set", "target_position=10.0",
+    "--set", "target_x=10.0",
 ]
 
 
@@ -289,10 +289,10 @@ def _either_task(tmp_path, reach: float) -> str:
     """`fixation_detection` declared for either setup, its target reaching `reach`°."""
     text = Path("tasks/fixation_detection.py").read_text(encoding="utf-8")
     written_for = 'view="direct"'
-    target = 'Param("target_position", unit="deg", low=-16.0, high=16.0, start=10.0)'
+    target = 'Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0)'
     assert text.count(written_for) == 1 and text.count(target) == 1
     text = text.replace(written_for, 'view="either"').replace(
-        target, f'Param("target_position", unit="deg", low={-reach}, high={reach}, start=10.0)'
+        target, f'Param("target_x", unit="deg", low={-reach}, high={reach}, start=10.0)'
     )
     # One file per reach: two files of the same name, size and second share a bytecode
     # cache entry, and the second would silently load the first's task.
@@ -513,13 +513,13 @@ def test_wlx_run_runs_a_session_and_reports_its_outcomes(tmp_path, capsys):
             "--out-of-cage-at", _hhmm(),
             "--delivered-today", "0",
             "--trials", "20",
-            "--set", "fix_timeout=4.0",
+            "--set", "fix_acquisition=4.0",
             "--set", "fix_hold=0.3",
-            "--set", "response_window=0.6",
+            "--set", "response_deadline=0.6",
             "--set", "target_hold=0.2",
             "--set", "fix_window=2.0",
             "--set", "target_window=3.0",
-            "--set", "target_position=10.0",
+            "--set", "target_x=10.0",
         ]
     )
 
@@ -1795,13 +1795,13 @@ def test_wlx_run_takes_the_departure_as_a_clock_time(tmp_path, capsys):
             "--out-of-cage-at", _hhmm(),
             "--delivered-today", "0",
             "--trials", "5",
-            "--set", "fix_timeout=4.0",
+            "--set", "fix_acquisition=4.0",
             "--set", "fix_hold=0.3",
-            "--set", "response_window=0.6",
+            "--set", "response_deadline=0.6",
             "--set", "target_hold=0.2",
             "--set", "fix_window=2.0",
             "--set", "target_window=3.0",
-            "--set", "target_position=10.0",
+            "--set", "target_x=10.0",
         ]
     )
 
@@ -1830,13 +1830,13 @@ def test_wlx_run_prints_how_long_the_animal_has_been_out(tmp_path, capsys):
             "--out-of-cage-at", _hhmm(),
             "--delivered-today", "0",
             "--trials", "2",
-            "--set", "fix_timeout=4.0",
+            "--set", "fix_acquisition=4.0",
             "--set", "fix_hold=0.3",
-            "--set", "response_window=0.6",
+            "--set", "response_deadline=0.6",
             "--set", "target_hold=0.2",
             "--set", "fix_window=2.0",
             "--set", "target_window=3.0",
-            "--set", "target_position=10.0",
+            "--set", "target_x=10.0",
         ]
     )
 
@@ -1977,13 +1977,13 @@ def test_wlx_run_can_run_a_chaired_session_with_no_head_fixation(tmp_path, capsy
             "--deployment", "rig-chaired",
             "--delivered-today", "0",
             "--trials", "5",
-            "--set", "fix_timeout=4.0",
+            "--set", "fix_acquisition=4.0",
             "--set", "fix_hold=0.3",
-            "--set", "response_window=0.6",
+            "--set", "response_deadline=0.6",
             "--set", "target_hold=0.2",
             "--set", "fix_window=2.0",
             "--set", "target_window=3.0",
-            "--set", "target_position=10.0",
+            "--set", "target_x=10.0",
         ]
     )
 
@@ -2124,7 +2124,7 @@ def test_console_lists_every_parameter_with_its_range_or_its_ceiling():
             params=(
                 ParamRow("fix_hold", "s", 0.1, 1.0, 0.3, False),
                 ParamRow("reward_correct", "mL", 0.0, 10.0, 0.05, True),
-                ParamRow("target_looks", "", None, None, None, False),
+                ParamRow("target_appearance", "", None, None, None, False),
                 ParamRow("fix_window", "deg", None, 5.0, 2.0, False),
             )
         )
@@ -2132,7 +2132,7 @@ def test_console_lists_every_parameter_with_its_range_or_its_ceiling():
 
     assert "  param: fix_hold 0.30 s (range 0.1 to 1 s)" in rendered
     assert "  param: reward_correct 0.05 mL (welfare ceiling 10.00 mL)" in rendered
-    assert "  param: target_looks unset (no declared range)" in rendered
+    assert "  param: target_appearance unset (no declared range)" in rendered
     assert "  param: fix_window 2.00 deg (range open to 5 deg)" in rendered
 
 

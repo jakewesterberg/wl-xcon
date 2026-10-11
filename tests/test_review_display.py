@@ -76,17 +76,17 @@ def test_an_update_appears_in_the_timeline():
 def test_an_array_task_renders():
     """Review-by-artifact fails closed only if the artifact renders.
 
-    `ItemWindows` was added to the vocabulary and nothing rendered one, so the
+    `ObjectWindows` was added to the vocabulary and nothing rendered one, so the
     review artifact -- the thing ADR-0006 says a task is approved from -- raised
     `AttributeError` on every search task. No test caught it because no test
     rendered a task with an array.
     """
-    from wl_xcon.task import Array, ItemWindows, P, Param, SaccadeTo
+    from wl_xcon.task import Array, ObjectWindows, P, Param, SaccadeTo
 
     trial = Trial(
         start="search",
-        params=[Param("set_size", unit="items", low=2, high=6)],
-        windows=[ItemWindows(of="search", radius=2.0)],
+        params=[Param("set_size", unit="objects", low=2, high=6)],
+        windows=[ObjectWindows(of="search", radius=2.0)],
         states=[
             State(
                 "search",
@@ -110,7 +110,7 @@ def test_an_array_task_renders():
 
     # The family is described as a family, since how many there are is a parameter.
     assert "search.*" in artifact
-    assert "set_size items" in artifact
+    assert "set_size objects" in artifact
 
 
 def _window_row(artifact: str, name: str) -> str:

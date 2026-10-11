@@ -2,7 +2,7 @@
 (engine spec §3.3; build A1).
 
 `resolve` is the one place a task's declarations become something to draw: parameters
-bound, named kinds expanded into `look` blocks, an `Array` into its items, each eye's
+bound, named kinds expanded into `look` blocks, an `Array` into an `Item` per object, each eye's
 direction computed (disparity, then the vergence offset), colors turned into CIE XYZ, a cone
 color against the background through the session's calibration (engine build A2).
 Its consumers -- the exact drawer now; the display process (build E), the screen log
@@ -73,7 +73,7 @@ class ResolvedOutline:
 class Item:
     """One thing on the screen, every field a number."""
 
-    #: `"<stimulus>"`, or `"<array>.<i>"` for an array's items.
+    #: `"<stimulus>"`, or `"<array>.<i>"` for an array's objects.
     name: str
     #: (order shown, index within its array).
     order: tuple[int, int]
@@ -363,7 +363,7 @@ def _items(stimulus, order, lights, geometry, onset) -> list[Item]:
         return []
     if isinstance(looks, Array):
         return [
-            _item(stimulus, f"{stimulus.name}.{i}", (order, i), looks.item_looks(i, values),
+            _item(stimulus, f"{stimulus.name}.{i}", (order, i), looks.object_looks(i, values),
                   offset, lights, geometry, onset)
             for i, offset in enumerate(looks.positions(values))
         ]

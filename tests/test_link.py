@@ -1279,7 +1279,7 @@ def test_schema_7_survives_the_wire_with_its_absences_intact():
     original = _telemetry(
         params=(
             ParamRow("fix_hold", "s", 0.1, 1.0, 0.3, False),
-            ParamRow("target_looks", "", None, None, None, False),
+            ParamRow("target_appearance", "", None, None, None, False),
             ParamRow("shape", "", None, None, "penguin", False),
         ),
         recent_outcomes=("correct", "hang", "no_fixation"),

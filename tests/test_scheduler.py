@@ -24,8 +24,8 @@ def _block(**kwargs) -> Block:
     return Block(
         name="main",
         conditions=[
-            Condition("near", values={"eccentricity": 5.0}, target=10),
-            Condition("far", values={"eccentricity": 15.0}, target=10),
+            Condition("near", values={"target_eccentricity": 5.0}, target=10),
+            Condition("far", values={"target_eccentricity": 15.0}, target=10),
         ],
         **kwargs,
     )

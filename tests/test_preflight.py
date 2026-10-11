@@ -200,11 +200,11 @@ def test_a_value_whose_declaration_cannot_be_compared_fails_rather_than_raising(
     typed as text passes `check()` and then raised `TypeError` here -- out of the
     service's pre-flight, ending `wlx taskd` with the animal out. It fails that value,
     naming it, and every other value is still checked."""
-    item = preflight.values(_declaring(declared), {"fix_hold": 0.3, "fix_timeout": 99.0})
+    item = preflight.values(_declaring(declared), {"fix_hold": 0.3, "fix_acquisition": 99.0})
 
     assert (item.name, item.result) == ("starting values", "fail")
     assert "'fix_hold' could not be checked against its declaration: TypeError: " in item.said
-    assert "'fix_timeout' is declared over [0.5, 10.0] s and 99.0 is outside it" in item.said
+    assert "'fix_acquisition' is declared over [0.5, 10.0] s and 99.0 is outside it" in item.said
 
 
 def test_declarations_that_cannot_be_read_fail_every_value_rather_than_raising():
@@ -451,8 +451,8 @@ def test_parameters_used_names_every_parameter_the_task_references():
     """From the task down -- states, windows and the stimuli they name -- as
     `run._resolve` meets them in a trial."""
     assert parameters_used(_trial()) == frozenset({
-        "fix_hold", "fix_timeout", "fix_window", "response_window", "target_hold",
-        "target_looks", "target_position", "target_window",
+        "fix_hold", "fix_acquisition", "fix_window", "response_deadline", "target_hold",
+        "target_appearance", "target_x", "target_window",
         "fix_luminance", "target_luminance",
     })
 
@@ -489,7 +489,7 @@ def test_a_number_the_task_uses_that_nothing_gives_a_value_fails_naming_it():
     assert (item.name, item.result) == ("starting values", "fail")
     assert "'fix_hold' is used by the task and has no starting value" in item.said
     assert "'fix_window' is used by the task and has no starting value" in item.said
-    assert "target_looks" not in item.said
+    assert "target_appearance" not in item.said
     assert preflight.values(trial, {"fix_hold": 0.3, "fix_window": 2.0}).result == "pass"
 
 

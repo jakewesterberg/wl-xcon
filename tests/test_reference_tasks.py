@@ -48,9 +48,9 @@ TASKS = Path(__file__).resolve().parents[1] / "tasks"
 #: stand-in housings (`tests/_rig.py`).
 GEOMETRY = DIRECT
 VALUES = {
-    "fix_timeout": 4.0,
+    "fix_acquisition": 4.0,
     "fix_hold": 0.3,
-    "response_window": 0.6,
+    "response_deadline": 0.6,
     "target_hold": 0.2,
 }
 
@@ -135,14 +135,14 @@ def test_the_staircase_converges_downward_on_success_and_backs_off_on_error():
 
 def test_an_aborted_trial_does_not_move_the_staircase():
     """An abort says nothing about difficulty. Letting one move the estimate makes
-    contrast track engagement rather than perception -- so a disengaged animal
+    the target's contrast track engagement rather than perception -- so a disengaged animal
     would be handed easier stimuli for a reason unrelated to what it can see."""
     module_staircase = _load("adaptive_detection", "Staircase")
     next_params = _load("adaptive_detection", "next_params")
     staircase = module_staircase(value=0.5)
 
     for outcome in (Outcome.NO_FIXATION, Outcome.FIXATION_BREAK, Outcome.NO_RESPONSE):
-        next_params(staircase, eccentricity=10.0, last=outcome)
+        next_params(staircase, target_eccentricity=10.0, last=outcome)
 
     assert staircase.value == 0.5
 
@@ -154,16 +154,16 @@ def test_an_aborted_trial_does_not_move_the_staircase():
 # actions, so set size was a change to the shape of the task rather than a value.
 
 SEARCH_VALUES = {
-    "fix_timeout": 4.0,
+    "fix_acquisition": 4.0,
     "fix_hold": 0.3,
-    "response_window": 0.6,
+    "response_deadline": 0.6,
     "target_hold": 0.2,
     "fix_window": 2.0,
-    "item_window": 2.0,
-    "eccentricity": 8.0,
+    "object_window": 2.0,
+    "array_eccentricity": 8.0,
     "set_size": 6,
     "target_index": 1,
-    "array_phase": 0.0,
+    "array_rotation": 0.0,
 }
 
 #: Illustrative, not measured. A real calibration comes from a photometer on the
@@ -219,11 +219,11 @@ def test_the_search_task_will_not_load_without_a_measured_display(search):
 
 def test_the_search_task_s_red_and_green_are_drawn_isoluminant_with_its_gray(search):
     """The path end to end on a measured panel (engine build A2): checked, resolved through the
-    calibration, and each item's V_F,10 luminance is the gray's (A2's Q5), red and green
+    calibration, and each object's V_F,10 luminance is the gray's (A2's Q5), red and green
     differing only in color."""
     choices = {p.name: p.choices for p in search.params}
-    values = {**SEARCH_VALUES, "fix_luminance": 40.0, "target_looks": choices["target_looks"][0],
-              "distractors": choices["distractors"][0]}
+    values = {**SEARCH_VALUES, "fix_luminance": 40.0, "target_appearance": choices["target_appearance"][0],
+              "distractor_appearance": choices["distractor_appearance"][0]}
     array = _load("visual_search", "ARRAY")
 
     s = screen.resolve({"search": array}, values, search, GEOMETRY, frame_period=1 / 240,
@@ -299,10 +299,10 @@ def test_every_reference_task_is_written_for_direct_view(name):
 def test_the_interim_narrowing_is_undone(detection, adaptive, search):
     """The ranges the stereoscope's ±12° mask forced on 2026-09-28, back to what they
     were, now that direct view's field is what they are checked against."""
-    assert _range(detection, "target_position") == (-16.0, 16.0)
-    assert _range(adaptive, "target_position") == (-16.0, 16.0)
-    assert _range(adaptive, "eccentricity") == (2.0, 16.0)
-    assert _range(search, "eccentricity") == (5.0, 14.0)
+    assert _range(detection, "target_x") == (-16.0, 16.0)
+    assert _range(adaptive, "target_x") == (-16.0, 16.0)
+    assert _range(adaptive, "target_eccentricity") == (2.0, 16.0)
+    assert _range(search, "array_eccentricity") == (5.0, 14.0)
 
 
 def test_the_calibration_task_passes_every_load_time_check_in_direct_view():
@@ -339,9 +339,9 @@ def test_the_fixation_task_starts_from_the_values_the_console_mockup_shows():
     params = _load_task(TASKS / "fixation_detection.py").params
 
     assert {param.name: param.start for param in params} == {
-        "fix_timeout": 4.0, "fix_hold": 0.3, "response_window": 0.6, "target_hold": 0.2,
-        "fix_window": 2.0, "target_window": 3.0, "target_position": 10.0,
-        "target_looks": None, "fix_luminance": 40.0, "target_luminance": 40.0,
+        "fix_acquisition": 4.0, "fix_hold": 0.3, "response_deadline": 0.6, "target_hold": 0.2,
+        "fix_window": 2.0, "target_window": 3.0, "target_x": 10.0,
+        "target_appearance": None, "fix_luminance": 40.0, "target_luminance": 40.0,
     }
     for param in params:
         if param.start is not None:
@@ -392,7 +392,7 @@ def test_the_training_variant_is_the_search_task_with_ordinary_colors(search, tr
     theirs = {p.name: p for p in search.params}
     ours = {p.name: p for p in training.params}
     assert set(ours) - set(theirs) == {"red_luminance", "green_luminance"}
-    for name in set(theirs) - {"target_looks", "distractors"}:
+    for name in set(theirs) - {"target_appearance", "distractor_appearance"}:
         assert ours[name] == theirs[name], name
     assert [(p.low, p.high, p.start) for p in (ours["red_luminance"], ours["green_luminance"])] == [
         (0.0, 17.0, 15.0), (0.0, 57.0, 15.0)]
@@ -431,14 +431,14 @@ def test_each_color_reads_its_own_luminance_setting_and_nothing_else(training):
     array = _load("visual_search_training", "ARRAY")
 
     def lights(target, among, red, green):
-        values = {**SEARCH_VALUES, "target_looks": choices["target_looks"][target],
-                  "distractors": choices["distractors"][among],
+        values = {**SEARCH_VALUES, "target_appearance": choices["target_appearance"][target],
+                  "distractor_appearance": choices["distractor_appearance"][among],
                   "red_luminance": red, "green_luminance": green}
         s = screen.resolve({"search": array}, values, training, GEOMETRY, frame_period=1 / 240)
         by_index = {i.order[1]: i.fill.xyz[1] for i in s.items}
         return by_index[SEARCH_VALUES["target_index"]], by_index[0]
 
-    # target_looks[0] is the red disc and distractors[0] the green one.
+    # target_appearance[0] is the red disc and distractor_appearance[0] the green one.
     assert lights(0, 0, red=5.0, green=9.0) == pytest.approx((5.0, 9.0))
     assert lights(0, 0, red=7.0, green=9.0) == pytest.approx((7.0, 9.0))
     assert lights(0, 0, red=5.0, green=11.0) == pytest.approx((5.0, 11.0))
@@ -449,7 +449,7 @@ def test_each_color_reads_its_own_luminance_setting_and_nothing_else(training):
 def test_the_search_task_shows_its_colors_on_a_gray_and_so_does_its_training(search, training):
     """Its red and green are contrasts about the background, so they need a lit one (engine spec
     §7.5): D65 at 16 cd/m², the training variant's too, and the red and green are the PI's 2023
-    items made isoluminant in the lab's observer (the PI's answer to the engine A2 plan's Q1)."""
+    objects made isoluminant in the lab's observer (the PI's answer to the engine A2 plan's Q1)."""
     assert search.background == Gray(16.0)
     assert training.background == search.background
     assert (_load("visual_search", "RED"), _load("visual_search", "GREEN")) == (
@@ -467,45 +467,45 @@ TASK_FILES = {
     "calibration": ("calibration", "calibration"),
 }
 
-#: **Appendix B of the engine C1 plan, as the PI confirmed it** (decisions.md TRN-10): the shared
-#: list's kind, role, direction and what the direction reads relative to, for each setting.
+#: **Appendix B of the engine C1 plan, as the PI confirmed it** on 2026-10-11, item by item and with
+#: changes (decisions.md TRN-10): the shared list's kind, role, direction and what the direction reads
+#: relative to, for each setting. A list of appearances is no difficulty setting unless a task says
+#: otherwise (his rule for item 1).
 CONFIRMED_SHARED = {
-    "fix_timeout": (CLEAR_CUT, CRITERION, EASIER, None),
+    "fix_acquisition": (CLEAR_CUT, CRITERION, EASIER, None),
     "fix_hold": (CLEAR_CUT, CRITERION, HARDER, None),
     "fix_window": (CLEAR_CUT, CRITERION, EASIER, None),
     "fix_luminance": (EXPECTED, STIMULUS, EASIER, BACKGROUND),
-    "response_window": (CLEAR_CUT, CRITERION, EASIER, None),
+    "response_deadline": (CLEAR_CUT, CRITERION, EASIER, None),
     "target_hold": (CLEAR_CUT, CRITERION, HARDER, None),
     "target_window": (CLEAR_CUT, CRITERION, EASIER, None),
-    "item_window": (EXPECTED, CRITERION, EASIER, None),
-    "target_looks": (EXPECTED, STIMULUS, HARDER, None),
-    "target_luminance": (EXPECTED, STIMULUS, EASIER, None),
-    "target_position": (EXPECTED, STIMULUS, HARDER, 0),
-    "set_size": (EXPECTED, STIMULUS, HARDER, None),
-    "distractors": (EXPECTED, STIMULUS, HARDER, None),
+    "object_window": (EXPECTED, CRITERION, EASIER, None),
+    "target_appearance": (NOT_DIFFICULTY, STIMULUS, None, None),
+    "target_luminance": (EXPECTED, STIMULUS, EASIER, BACKGROUND),
+    "target_x": (NOT_DIFFICULTY, STIMULUS, None, None),
+    "set_size": (NOT_DIFFICULTY, STIMULUS, None, None),
+    "distractor_appearance": (NOT_DIFFICULTY, STIMULUS, None, None),
     "target_index": (NOT_DIFFICULTY, STIMULUS, None, None),
-    "array_phase": (NOT_DIFFICULTY, STIMULUS, None, None),
+    "array_rotation": (NOT_DIFFICULTY, STIMULUS, None, None),
+    "array_eccentricity": (NOT_DIFFICULTY, STIMULUS, None, None),
 }
 #: And each task's own: its settings no other task declares alike, and its overrides.
 CONFIRMED_OWN = {
     "fixation_detection": {},
     "adaptive_detection": {
-        "contrast": (CLEAR_CUT, STIMULUS, EASIER, None, OWN),
-        "eccentricity": (NOT_DIFFICULTY, STIMULUS, None, None, OWN),
+        "target_contrast": (CLEAR_CUT, STIMULUS, EASIER, None, OWN),
+        "target_eccentricity": (NOT_DIFFICULTY, STIMULUS, None, None, OWN),
     },
     "visual_search": {
-        "target_looks": (EXPECTED, STIMULUS, HARDER, None, OVERRIDE),
-        "eccentricity": (EXPECTED, STIMULUS, HARDER, None, OWN),
+        "set_size": (EXPECTED, STIMULUS, EASIER, None, OVERRIDE),
     },
     "visual_search_training": {
-        "target_looks": (EXPECTED, STIMULUS, HARDER, None, OVERRIDE),
-        "eccentricity": (EXPECTED, STIMULUS, HARDER, None, OWN),
+        "set_size": (EXPECTED, STIMULUS, EASIER, None, OVERRIDE),
         "red_luminance": (EXPECTED, STIMULUS, EASIER, "green_luminance", OWN),
         "green_luminance": (EXPECTED, STIMULUS, EASIER, "red_luminance", OWN),
     },
     "calibration": {
-        "target_x": (EXPECTED, STIMULUS, HARDER, 0, OWN),
-        "target_y": (EXPECTED, STIMULUS, HARDER, 0, OWN),
+        "target_y": (NOT_DIFFICULTY, STIMULUS, None, None, OWN),
         "cal_window": (CLEAR_CUT, CRITERION, EASIER, None, OWN),
         "cal_hold": (CLEAR_CUT, CRITERION, HARDER, None, OWN),
     },
@@ -558,11 +558,11 @@ def test_the_reference_tasks_declare_twenty_three_settings_between_them():
 
 def test_each_reference_task_says_how_its_reaction_time_is_defined_and_what_it_offers():
     """XC-288 §4.3, Appendix B: the detection tasks time a saccade to their one target and offer no
-    choice; the search tasks time a saccade to any item and offer the target and the distractors;
+    choice; the search tasks time a saccade to any object and offer the target and the distractors;
     the calibration task times its target's acquisition and offers no choice."""
     def declared(name):
         task = _load_task(TASKS / f"{name}.py")
-        offered = task.choice if task.choice is NO_CHOICE else (task.choice.items, task.choice.by)
+        offered = task.choice if task.choice is NO_CHOICE else (task.choice.objects, task.choice.by)
         return task.reaction_time.state, task.reaction_time.to, offered
 
     assert declared("fixation_detection") == declared("adaptive_detection") == (
@@ -575,7 +575,7 @@ def test_each_reference_task_says_how_its_reaction_time_is_defined_and_what_it_o
 
 def test_a_search_task_that_says_nothing_of_its_choice_is_refused():
     """The plan's engineering review, I2: with its choice unset, `visual_search` would load and its
-    trials would record no item chosen (build C7); it is refused at load instead."""
+    trials would record no object chosen (build C7); it is refused at load instead."""
     task = _load_task(TASKS / "visual_search.py")
 
     assert "undeclared-choice" not in {f.code for f in check_task(task)}

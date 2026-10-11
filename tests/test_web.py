@@ -619,7 +619,7 @@ def test_parameters_show_value_range_ceiling_and_what_is_staged():
             params=(
                 ParamRow("fix_hold", "s", 0.1, 1.0, 0.3, False),
                 ParamRow("reward_correct", "mL", 0.0, 0.4, 0.15, True),
-                ParamRow("target_looks", "", None, None, None, False),
+                ParamRow("target_appearance", "", None, None, None, False),
                 ParamRow("fix_window", "deg", None, 5.0, 2.0, False),
                 ParamRow("shape", "", None, None, "penguin", False),
             ),
@@ -1010,7 +1010,7 @@ def test_each_parameter_card_has_arrows_and_an_input_with_its_step_and_range():
                 ParamRow("fix_hold", "s", 0.1, 1.0, 0.3, False),
                 ParamRow("reward_correct", "mL", 0.0, 0.4, 0.15, True),
                 ParamRow("fix_window", "deg", None, 5.0, 2.0, False),
-                ParamRow("target_looks", "", None, None, None, False),
+                ParamRow("target_appearance", "", None, None, None, False),
                 ParamRow("shape", "", None, None, "penguin", False),
             )
         ),
@@ -1024,7 +1024,7 @@ def test_each_parameter_card_has_arrows_and_an_input_with_its_step_and_range():
     ) in params
     assert 'data-param="reward_correct" data-step="0.01" data-min="0.0" data-max="0.4"' in params
     assert 'data-param="fix_window" data-step="0.1" data-max="5.0" inputmode="decimal" value="2.0"' in params
-    assert 'data-param="target_looks" data-step="0.01" inputmode="decimal" value=""' in params
+    assert 'data-param="target_appearance" data-step="0.01" inputmode="decimal" value=""' in params
     assert (
         '<input class="field mono" data-param="shape" data-kind="word" value="penguin" '
         'aria-label="shape">'
