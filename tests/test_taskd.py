@@ -670,19 +670,22 @@ def test_a_session_refuses_a_task_whose_setting_says_nothing_of_what_it_means(tm
 
 
 @pytest.mark.parametrize("deployment", [Deployment.RIG_CHAIRED, Deployment.CAGE_SIDE])
-def test_a_session_refuses_the_reference_task_unless_its_head_is_fixed(tmp_path, deployment):
+def test_a_session_runs_the_reference_task_with_its_head_not_fixed(tmp_path, deployment):
     """`Session.run`'s backstop, for a caller that took no pre-flight (engine spec §20.1): the
     reference task needs a fixed head (the PI, 2026-10-11; the engine C1 plan's Appendix B, item
-    31), so a chaired or cage-side session refuses it before its first trial."""
-    spec = _spec(tmp_path / "session", deployment=deployment)
+    31), and in a chaired or cage-side session that is a warning, which its callers list, not a
+    refusal (the PI, 2026-10-11: "the experimenter needs free control most of the time"), so the
+    run goes ahead."""
+    spec = _spec(tmp_path / "session", trials=3, deployment=deployment)
     if deployment is Deployment.CAGE_SIDE:
         spec.bounds = _cage_side_bounds()
     session = _session(spec) if deployment is Deployment.RIG_CHAIRED else Session(
         spec, card=Card(), pump=Pump(), wall_clock=lambda: WALL_NOW)
 
-    with pytest.raises(SystemExit, match="head-not-fixed"):
-        session.run()
-    assert not (session.directory / "trials.jsonl").exists()
+    session.run()
+
+    assert RUN_START in session.card.codes
+    assert len((session.directory / "trials.jsonl").read_text().splitlines()) == 3
 
 
 def test_each_run_names_its_task_by_its_content_never_its_path(tmp_path):

@@ -341,7 +341,10 @@ it), so they draw as §4.4 says until a run sets them.
 > gained a `target_y`, at the PI's request the same day, starting at 0 (the controller's choice,
 > not his). And every reference task now needs a fixed head (its Appendix B, item 31), so none
 > runs in a chaired or cage-side session: a demo session runs one head-fixed, and `--chaired`
-> (§5 item 3) refuses it. The text is left as approved.
+> (§5 item 3) refuses it. *Revised the same day, the PI on reviewing build C1 ("warnings are more
+> appropriate most of the time")*: in a chaired or cage-side session each runs with the
+> `head-not-fixed` warning, not refused, so `--chaired` runs one, printing that warning among the
+> pre-flight's unknowns it acknowledges (§5 item 4). The text is left as approved.
 
 ## 7. When things fail
 

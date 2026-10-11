@@ -337,12 +337,13 @@ stimulus), what it offers to choose (or `NO_CHOICE`) and how its reaction time i
 and whether it needs a fixed head. The common settings' meanings are declared once, in
 `wl_xcon/declarations.py`'s shared list, which a task overrides only with a note saying why; the
 bounded settings' are a table there, outside `bounds.py`. `check.check_task` refuses a task that
-leaves any of it undeclared, and one that needs a fixed head in any session not declared
-head-fixed (`RIG_FIXED`; engine spec §20.1); `Session.set` validates against the union of its
-structures' settings; each run's start row names the task by a hash of what it declares
-(`versions.task`), never its path (§4.4), the hash carrying the format its defaults were read at
-(`declarations.FORMAT`). The format is defined here, in wl-xcon (the PI, 2026-10-11), and
-wl-xtasks writes its tasks in it.
+leaves any of it undeclared, and gives one that needs a fixed head, in any session not declared
+head-fixed (`RIG_FIXED`), a warning saying why, never a refusal (engine spec §20.1; the PI,
+2026-10-11: "the experimenter needs free control most of the time"); `Session.set` validates
+against the union of its structures' settings; each run's start row names the task by a hash of
+what it declares (`versions.task`), never its path (§4.4), the hash carrying the format its
+defaults were read at (`declarations.FORMAT`). The format is defined here, in wl-xcon (the PI,
+2026-10-11), and wl-xtasks writes its tasks in it.
 
 A session is a sequence of **blocks** (condition set, parameter overrides, length rule,
 transition) and **interludes** (sub-tasks such as calibration that the session enters and

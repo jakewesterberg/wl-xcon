@@ -177,8 +177,8 @@ def test_the_report_says_how_reaction_time_is_defined_what_it_offers_and_its_hea
     assert "From entering `hold` to leaving it for `held`: from the hold's start to a saccade." in out
     assert "`fix`, chosen by a saccade." in out
     assert "Runs with the head fixed or free" in out
-    assert "Needs a fixed head: refused in any session not declared head-fixed (`RIG_FIXED`" in (
-        render_task(_reviewed(needs_fixed_head=True)))
+    head = "Needs a fixed head: a warning, not a refusal, in any session not declared head-fixed"
+    assert head in render_task(_reviewed(needs_fixed_head=True))
     assert "None: the task offers no choice." in render_task(_reviewed(choice=NO_CHOICE))
     bare = render_task(_reviewed(reaction_time=None, choice=None))
     assert bare.count("**Not declared.**") == 2

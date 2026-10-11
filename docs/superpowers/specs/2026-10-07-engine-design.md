@@ -712,6 +712,17 @@ summary before its build merges:
    head tracking in the rig"), so each is refused in a chaired or a cage-side session; the chaired
    deployment stays. The finding reads the session's deployment, not whether the head is still fixed
    (XC-347).
+   *Revised 2026-10-11, the PI, on reviewing build C1*: "in general, I think you have been too gung ho
+   on refusals. I think warnings are more appropriate most of the time with an explanation of why it
+   may not be a good idea to use a value or follow a path you may think to refuse. the experimenter
+   needs free control most of the time." So a fixed-head task in a session not declared head-fixed is
+   **a warning, not a refusal**: `head-not-fixed` is accepted in every session kind and says why it
+   may be a bad idea (the task tracks gaze, the rig has no head tracking, so with the head free its
+   gaze decisions may be wrong). It reaches the pre-flight's `warnings` item, accepted once a
+   session, and `wlx run`'s `--accept-warnings`, and the run goes ahead; `preflight.gate` and
+   `Service._start` are still unchanged, byte for byte. A task file that leaves a declaration out is
+   still refused (an authoring rule, which the PI kept). Every other refusal is to be audited against
+   his rule (XC-352).
 2. **`Service._open`**: the session kind; a refusal while the OLED's maintenance is due.
    *Engine build B, 2026-10-08*: the session kind is built (carried through `Service._session_for`),
    with the open's one new refusal, the warnings its kind accepts left unaccepted. The refusal while

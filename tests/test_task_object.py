@@ -9,7 +9,7 @@ import pytest
 
 from wl_xcon.check import check, check_task
 from wl_xcon.cli import _load_task
-from wl_xcon.findings import Finding
+from wl_xcon.findings import SESSION_KINDS, Finding
 from wl_xcon.task import (
     BACKGROUND,
     CHOSEN_BY,
@@ -436,11 +436,12 @@ def test_a_tasks_need_for_a_fixed_head_is_true_or_false():
 
 
 @pytest.mark.parametrize("deployment", [None, *Deployment])
-def test_a_task_that_needs_a_fixed_head_is_refused_unless_the_head_is_fixed(deployment):
-    """Engine spec §20.1; STE-25: "a task may declare it needs a fixed head and is then refused in
-    chaired sessions" -- failing closed, in every deployment but a head-fixed one, a cage-side one
-    too (the plan's engineering review, M3). Without a deployment (`wlx check`, `wlx review`)
-    nothing is refused."""
+def test_a_task_that_needs_a_fixed_head_is_a_warning_unless_the_session_is_head_fixed(deployment):
+    """Engine spec §20.1; STE-25, revised: in every deployment but a head-fixed one, a cage-side
+    one too, a task that needs a fixed head runs with a warning saying why that may be a bad idea,
+    accepted in every session kind and never refusing (the PI, 2026-10-11: "warnings are more
+    appropriate most of the time ... the experimenter needs free control most of the time").
+    Without a deployment (`wlx check`, `wlx review`) nothing is said."""
     needs = _whole(needs_fixed_head=True)
 
     found = _task_findings(needs, deployment=deployment)
@@ -448,7 +449,10 @@ def test_a_task_that_needs_a_fixed_head_is_refused_unless_the_head_is_fixed(depl
     if deployment in (None, Deployment.RIG_FIXED):
         assert found == []
     else:
-        (refusal,) = found
-        assert refusal.code == "head-not-fixed" and refusal.blocking
-        assert deployment.value in refusal.detail and "engine spec §20.1" in refusal.detail
+        (warning,) = found
+        assert warning.code == "head-not-fixed" and warning.is_warning
+        assert warning.accepted_in == SESSION_KINDS
+        assert not any(warning.refuses(kind) for kind in (None, *SESSION_KINDS))
+        assert deployment.value in warning.detail and "engine spec §20.1" in warning.detail
+        assert "no head tracking" in warning.detail and "gaze" in warning.detail
     assert _task_findings(_whole(), deployment=deployment) == []

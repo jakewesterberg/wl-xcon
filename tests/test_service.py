@@ -1430,26 +1430,35 @@ def test_a_task_the_checks_raise_on_fails_its_preflight_and_the_service_goes_on(
     assert isinstance(ended, Idle) and _kinds(service.root)[-2:] == ["returned", "session ended"]
 
 
-def test_the_reference_task_starts_only_in_a_fixed_head_session(tmp_path):
-    """Review Focus 5; engine spec §20.1 (XC-277): the reference task needs a fixed head (the PI,
-    2026-10-11; the engine C1 plan's Appendix B, item 31), so in a chaired session its pre-flight's
-    task checks fail, naming the finding, and nothing is strobed or written; with the head fixed it
-    starts."""
+def test_the_reference_task_runs_in_a_chaired_session_once_its_head_warning_is_accepted(tmp_path):
+    """Review Focus 5, revised; engine spec §20.1 (XC-277): the reference task needs a fixed head
+    (the PI, 2026-10-11; the engine C1 plan's Appendix B, item 31), and in a chaired session that is
+    a warning, not a refusal (the PI, 2026-10-11: "warnings are more appropriate most of the time
+    ... the experimenter needs free control most of the time"). Its task checks pass and its
+    warnings item asks, naming `head-not-fixed`; a start that does not accept it is refused, nothing
+    strobed or written, and the session waits between runs; one that does starts, and
+    `warnings.jsonl` records the warning with why. A head-fixed session is not warned."""
     chaired, fixed = _service(tmp_path / "chaired"), _service(tmp_path / "fixed")
     _step(chaired, _open(deployment="rig_chaired"))
     _step(fixed, _open())
 
-    refused = _step(chaired, _start())
-    started = _step(fixed, _start())
+    unaccepted = _step(chaired, _start(acknowledged=("pump calibration", "eye tracker")))
+    codes = list(chaired.session.card.codes)
+    started = _step(chaired, _start())
+    plain = _step(fixed, _start())
 
-    items = {i.name: i for i in refused.preflight.items}
-    assert items["task checks"].result == "fail"
-    assert "head-not-fixed" in items["task checks"].said
-    assert "pre-flight failed, so the run does not start: task checks: " in _refused(refused)[-1]
-    assert refused.run_index is None and _runs(chaired.root) == []
-    assert 4135 not in chaired.session.card.codes
-    assert refused.phase == "between_runs", "the session waits between runs"
-    assert started.run_index == 0
+    items = {i.name: i for i in unaccepted.preflight.items}
+    assert items["task checks"].result == "pass"
+    assert items["warnings"].result == "unknown" and "head-not-fixed" in items["warnings"].said
+    assert "unknown item(s) nobody has acknowledged: warnings." in _refused(unaccepted)[-1]
+    assert unaccepted.run_index is None and 4135 not in codes
+    assert unaccepted.phase == "between_runs", "the session waits between runs"
+    assert started.run_index == 0 and plain.run_index == 0
+    warned = _jsonl(chaired.root / "2027-01-14_01" / "xcon" / "warnings.jsonl")
+    (head,) = [row for row in warned if row["code"] == "head-not-fixed"]
+    assert head["how"] == "start" and "no head tracking" in head["detail"]
+    assert "head-not-fixed" not in {
+        row["code"] for row in _jsonl(fixed.root / "2027-01-14_01" / "xcon" / "warnings.jsonl")}
 
 
 def test_a_task_whose_declarations_are_malformed_fails_its_preflight_and_the_service_goes_on(

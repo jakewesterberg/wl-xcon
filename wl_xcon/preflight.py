@@ -75,8 +75,8 @@ def task(path: Path, allocation, geometry, calibration, deployment=None) -> tupl
     **Its findings come back too**, for the run's `warnings` item: a warning is never this
     item's fail, whatever the session's kind; and `calibration` is the session's, or `None`
     while the rig's record will not load (the engine B plan, call 19). **The session's deployment**
-    refuses a task that needs a fixed head in any but a head-fixed session (engine spec §20.1;
-    XC-277)."""
+    makes a task that needs a fixed head a warning in any but a head-fixed session, never this
+    item's fail (engine spec §20.1; XC-277; the PI, 2026-10-11)."""
     try:
         loaded = _load_task(path)
     except SystemExit as refused:

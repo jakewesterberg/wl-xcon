@@ -2265,20 +2265,27 @@ def test_wlx_run_refuses_a_task_written_for_the_other_setup_before_anything_is_r
     assert not (tmp_path / "2027-01-14_01").exists()
 
 
-def test_wlx_run_refuses_the_reference_task_in_a_chaired_session_before_anything_is_recorded(
+def test_wlx_run_runs_the_reference_task_in_a_chaired_session_once_its_head_warning_is_accepted(
     tmp_path,
 ):
     """Engine spec §20.1 (XC-277): the reference task needs a fixed head (the PI, 2026-10-11; the
-    engine C1 plan's Appendix B, item 31), so it is refused before a chaired session opens, as a
-    task written for the other setup is, and no departure is marked for a session that cannot
-    run."""
+    engine C1 plan's Appendix B, item 31), and in a chaired session that is a warning, not a
+    refusal (the PI, 2026-10-11: "warnings are more appropriate most of the time"). Unaccepted it
+    is listed, saying why, before anything is recorded, as every warning `wlx run` meets is;
+    accepted, the session runs and `warnings.jsonl` records it."""
     argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm(), "--deployment", "rig-chaired")
 
-    with pytest.raises(SystemExit) as refused:
-        main(argv)
-
-    assert "head-not-fixed" in str(refused.value)
+    with pytest.raises(SystemExit) as unaccepted:
+        main([a for a in argv if a != "--accept-warnings"])
+    said = str(unaccepted.value)
     assert not (tmp_path / "2027-01-14_01").exists()
+    assert main(argv) == 0
+
+    assert "its warnings are" in said and "head-not-fixed" in said and "no head tracking" in said
+    rows = [json.loads(line) for line in
+            (tmp_path / "2027-01-14_01" / "xcon" / "warnings.jsonl").read_text().splitlines()]
+    (head,) = [row for row in rows if row["code"] == "head-not-fixed"]
+    assert head["how"] == "--accept-warnings" and "rig_chaired" in head["detail"]
 
 
 def test_wlx_check_holds_the_task_object_to_its_declarations(tmp_path, capsys):

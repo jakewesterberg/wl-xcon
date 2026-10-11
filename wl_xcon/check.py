@@ -106,9 +106,9 @@ def check_task(
     its runs can record (§4.4). **What a caller holds a task to is this**; `check` is one
     structure's part of it, and stays what a bare `Trial` is checked by.
 
-    **Given the session's deployment**, a task that needs a fixed head is refused in any but a
-    head-fixed one (engine spec §20.1; XC-277); without one -- `wlx check`, the review report --
-    nothing is refused for it."""
+    **Given the session's deployment**, a task that needs a fixed head is a warning in any but a
+    head-fixed one, never a refusal (engine spec §20.1; XC-277; the PI, 2026-10-11); without one --
+    `wlx check`, the review report -- nothing is said of it."""
     several = len(task.structures) > 1
     findings: list[Finding] = []
     for name, structure in task.structures.items():
@@ -292,16 +292,20 @@ def _hash_faults(task: Task) -> list[Finding]:
 
 def _head_faults(task: Task, deployment: "Deployment | None") -> list[Finding]:
     """A task that needs a fixed head, in any session not declared head-fixed (`RIG_FIXED`; engine
-    spec §20.1; STE-25: "a task may declare it needs a fixed head and is then refused in chaired
-    sessions"). **Failing closed** (the engine C1 plan's call 16): refused in every deployment but
-    `RIG_FIXED`, a cage-side session as much as a chaired one. A load-time finding, so it fails the
-    pre-flight's task checks, `Session.run`'s backstop and `wlx run` alike, and `preflight.gate` and
-    `Service._start` stay as they are."""
+    spec §20.1; STE-25), is **a warning, not a refusal** (the PI, 2026-10-11: "in general, I think
+    you have been too gung ho on refusals ... the experimenter needs free control most of the
+    time"): the run goes ahead, the warning saying why that may be a bad idea, accepted in every
+    session kind. Given in every deployment but `RIG_FIXED` (the engine C1 plan's call 16), a
+    cage-side session as much as a chaired one; it reads the deployment, not the head's state
+    (XC-347). A load-time finding, so it reaches the pre-flight's warnings item and `wlx run`'s
+    `--accept-warnings` as every task warning does, and `preflight.gate` and `Service._start` stay
+    as they are."""
     if task.needs_fixed_head and deployment is not None and deployment is not Deployment.RIG_FIXED:
         return [Finding("head-not-fixed", (
-            f"the task needs a fixed head, and this session's deployment, {deployment.value}, "
-            f"does not fix it; a task that needs a fixed head runs only in a head-fixed session "
-            f"(engine spec §20.1)"))]
+            f"the task needs a fixed head, and this session's deployment, {deployment.value}, does "
+            f"not declare one fixed: the task tracks gaze and the rig has no head tracking, so "
+            f"with the head free its gaze decisions (holding fixation, where a saccade lands) may "
+            f"be wrong (engine spec §20.1)"), blocking=False, accepted_in=SESSION_KINDS)]
     return []
 
 

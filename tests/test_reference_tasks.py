@@ -21,6 +21,7 @@ from wl_xcon.cli import _load_task
 from wl_xcon.check import check, check_task
 from wl_xcon.cones import V_F10
 from wl_xcon.declarations import COMMON, OVERRIDE, OWN, SHARED, resolved
+from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.photometry import SRGB, SRGB_WHITE_CD_M2, DKL, Calibration, Gray, _apply3, xyY
 from wl_xcon.run import Recorded
 from wl_xcon.simulate import Subject, simulate
@@ -614,17 +615,21 @@ def test_every_setting_of_each_reference_task_has_the_meaning_the_pi_confirmed(n
 
 
 @pytest.mark.parametrize("name", sorted(TASK_FILES))
-def test_each_reference_task_needs_a_fixed_head_and_is_refused_without_one(name):
+def test_each_reference_task_needs_a_fixed_head_and_warns_without_one(name):
     """The PI, 2026-10-11 (the engine C1 plan's Appendix B, item 31): "kiosk will be head free, in
-    the rig will be head fixed. we do not have head tracking in the rig". Every reference task is
-    refused in a chaired or cage-side session, and only there."""
+    the rig will be head fixed. we do not have head tracking in the rig". Every reference task warns
+    in a chaired or cage-side session, and only there, and is refused in none (the PI, 2026-10-11:
+    "warnings are more appropriate most of the time")."""
     task = _load_task(TASKS / f"{name}.py")
 
-    def refused(deployment: Deployment) -> bool:
-        return "head-not-fixed" in {f.code for f in check_task(task, deployment=deployment)}
+    def head(deployment: Deployment) -> list:
+        return [f for f in check_task(task, deployment=deployment) if f.code == "head-not-fixed"]
 
     assert task.needs_fixed_head is True
-    assert [refused(d) for d in Deployment] == [d is not Deployment.RIG_FIXED for d in Deployment]
+    assert [bool(head(d)) for d in Deployment] == [
+        d is not Deployment.RIG_FIXED for d in Deployment]
+    assert all(f.is_warning and not f.refuses(kind)
+               for d in Deployment for f in head(d) for kind in SESSION_KINDS)
 
 
 def test_the_reference_tasks_declare_twenty_three_settings_between_them():
