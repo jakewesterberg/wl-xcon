@@ -17,9 +17,11 @@ from dataclasses import fields, is_dataclass
 from wl_xcon.task import (
     arrays_of,
     After,
+    Background,
     Custom,
     Mark,
     Guard,
+    NoChoice,
     Outcome,
     P,
     Hide,
@@ -27,6 +29,7 @@ from wl_xcon.task import (
     Reward,
     Show,
     Stimulus,
+    Task,
     Trial,
     Update,
     actions_of,
@@ -294,3 +297,110 @@ def render(trial: Trial, allocation_names: dict[int, str] | None = None) -> str:
 
     return "\n".join(lines)
 
+
+def render_task(task: Task, allocation_names: dict[int, str] | None = None) -> str:
+    """A task's review report (engine spec §18.1; engine build C1). **First what a reviewer
+    confirms** (XC-288 §4: "the person reviewing the task confirms it, in the review report"): the
+    task's content hash, each setting's role, meaning and where it comes from -- the shared list,
+    the task's own, or the task's override of the shared list with why (the PI, 2026-10-11) -- the
+    bounded settings it rewards through, how its reaction time is defined, what it offers to
+    choose, and whether it needs a fixed head. **Then each trial structure**, the default first,
+    as `render` draws one, a heading level down. Nothing is checked first, as `wlx review` checks
+    nothing: an undeclared meaning is shown as one, and a content that cannot be hashed says so."""
+    from wl_xcon.declarations import BOUNDED, OVERRIDE, content_hash, resolved, rewarded_through
+
+    try:
+        identity = "`" + content_hash(task) + "`"
+    except (TypeError, ValueError) as unread:
+        identity = "**cannot be hashed**: " + _cell(str(unread))
+    lines = [
+        "# Task review",
+        "",
+        f"Content: {identity} (XC-288 §4.4), as each run's start row names it.",
+        "",
+        "## What a reviewer confirms",
+        "",
+        "### What each setting means",
+        "",
+        "| Setting | Unit | Role | Meaning | Direction | Note | From |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    meanings = resolved(task)
+    for param in task.params:
+        found = meanings.get(param.name)
+        if found is None:
+            lines.append(f"| {param.name} | {param.unit} | **UNDECLARED** | | | | |")
+            continue
+        meaning, origin = found
+        source = origin + ": " + _cell(meaning.overrides) if origin == OVERRIDE else origin
+        lines.append(
+            f"| {param.name} | {param.unit} | {meaning.role} | {meaning.kind} "
+            f"| {_direction(meaning, param)} | {_cell(meaning.note)} | {source} |"
+        )
+    lines.append("")
+    rewarded = sorted(rewarded_through(task))
+    if rewarded:
+        lines += ["### Bounded settings it rewards through", "",
+                  "| Setting | Role | Meaning | Note |", "|---|---|---|---|"]
+        for name in rewarded:
+            meaning = BOUNDED.get(name)
+            lines.append(
+                f"| {name} | **UNDECLARED** | | |" if meaning is None
+                else f"| {name} | {meaning.role} | {meaning.kind} | {_cell(meaning.note)} |"
+            )
+        lines.append("")
+    timed = task.reaction_time
+    if timed is None:
+        said = "**Not declared.**"
+    else:
+        ends = " or ".join("`" + _target_label(end) + "`" for end in timed.to)
+        said = f"From entering `{timed.state}` to leaving it for {ends}: {_cell(timed.note)}."
+    lines += ["### Reaction time", "", said, ""]
+    if task.choice is None:
+        offered = "**Not declared.**"
+    elif isinstance(task.choice, NoChoice):
+        offered = "None: the task offers no choice."
+    else:
+        items = ", ".join("`" + item + "`" for item in task.choice.items)
+        offered = f"{items}, chosen by a {task.choice.by}."
+    lines += ["### Choice", "", offered, ""]
+    head = (
+        "Needs a fixed head: refused in any session whose head is not fixed (engine spec §20.1)."
+        if task.needs_fixed_head
+        else "Runs with the head fixed or free; a chaired session lists its free head as a warning."
+    )
+    lines += ["### Head", "", head, ""]
+    for name in (task.default, *(other for other in task.structures if other != task.default)):
+        heading = f"## Structure `{name}`"
+        if name == task.default:
+            heading += ", the default: its runs play it until plans exist (engine build C2)"
+        lines += [heading, "", _demoted(render(task.structures[name], allocation_names)), ""]
+    return "\n".join(lines)
+
+
+def _demoted(text: str) -> str:
+    """`render`'s report a heading level down, to sit under its structure's heading."""
+    return "\n".join("#" + line if line.startswith("## ") else line for line in text.split("\n"))
+
+
+def _cell(text: str) -> str:
+    """Text for one cell of a Markdown table: a bar escaped, a line break a space."""
+    return text.replace("|", "\\|").replace("\n", " ")
+
+
+def _direction(meaning, param) -> str:
+    """Which way a setting moves the task, as `Meaning.raising` reads (the engine C1 plan's call
+    4): changing a list of choices; raising a number; or moving it away from what it reads
+    relative to -- a number, another setting, or the trial's background."""
+    if meaning.raising is None:
+        return "none"
+    if param.choices:
+        return f"changing it: {meaning.raising}"
+    relative = meaning.relative_to
+    if relative is None:
+        return f"raising it: {meaning.raising}"
+    if isinstance(relative, Background):
+        return f"farther from the background: {meaning.raising}"
+    if isinstance(relative, str):
+        return f"farther from `{relative}`: {meaning.raising}"
+    return f"farther from {relative:g}: {meaning.raising}"

@@ -29,6 +29,7 @@ from wl_xcon.task import (
     Guard,
     Outcome,
     Remembered,
+    Task,
     Trial,
 )
 
@@ -229,6 +230,12 @@ class Subject:
         return True
 
 
+def _structure(of: "Trial | Task") -> Trial:
+    """The trial structure a simulation plays: a task's default, until build C2's plans name others
+    (engine spec §3.5: the simulator takes the task object), or a bare trial."""
+    return of.trial if isinstance(of, Task) else of
+
+
 @dataclass(frozen=True, slots=True)
 class Census:
     outcomes: Counter
@@ -239,7 +246,7 @@ class Census:
     #: it -- what varies, and what the experiment is about, happens inside.
     responses: Counter = field(default_factory=Counter)
 
-    def uncovered(self, trial: Trial) -> set[Outcome]:
+    def uncovered(self, trial: "Trial | Task") -> set[Outcome]:
         """Outcomes the task declares that no simulated trial reached.
 
         Not a failure by itself -- a rare error condition may legitimately need
@@ -248,6 +255,7 @@ class Census:
         is the difference between an outcome nobody reached and an outcome nobody
         noticed was unreachable.
         """
+        trial = _structure(trial)
         declared = {
             edge.to
             for state in trial.states
@@ -304,7 +312,7 @@ def prepare(subject: Subject, trial: Trial, frame_period: float, values: dict) -
 
 
 def run_session(
-    trial: Trial,
+    trial: "Trial | Task",
     subject: Subject,
     trials: int,
     frame_period: float,
@@ -324,7 +332,7 @@ def run_session(
 
 
 def simulate(
-    trial: Trial,
+    trial: "Trial | Task",
     subject: Subject,
     trials: int,
     frame_period: float,
@@ -347,6 +355,7 @@ def simulate(
     # `levels` imports this module for `Tally`, so a module-level import would cycle.
     from wl_xcon.levels import Position
 
+    trial = _structure(trial)
     tally = Tally()
     prepare(subject, trial, frame_period, values or {})
     for index in range(trials):
