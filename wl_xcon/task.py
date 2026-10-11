@@ -1150,3 +1150,253 @@ def expand_windows(
         else:
             windows.append(declared)
     return windows, aliases
+
+
+# --- The task object (engine spec §3.5; engine build C1) --------------------------------
+#
+# A task file defines one `Task`: its trial structures by name, the default one its runs play until
+# plans exist (engine build C2), and what XC-288 §4 has a task declare about itself: what each of
+# its settings means, which of its items count as choices, and how its reaction time is defined.
+# Its format is defined here, in wl-xcon (the PI, 2026-10-11; the engine C1 plan). Plans (C2),
+# procedures (D) and stages (C7) join it as fields with defaults.
+
+#: What a setting's meaning may be (XC-288 §4.1; TRN-03): clear-cut with a direction, expected
+#: with a direction and a context note, or not a difficulty setting.
+CLEAR_CUT = "clear-cut"
+EXPECTED = "expected"
+NOT_DIFFICULTY = "not a difficulty setting"
+MEANING_KINDS = (CLEAR_CUT, EXPECTED, NOT_DIFFICULTY)
+
+#: Which way a clear-cut or expected setting moves the task.
+EASIER = "easier"
+HARDER = "harder"
+DIRECTIONS = (EASIER, HARDER)
+
+#: What a setting is (the PI, 2026-10-11): a **criterion**, what counts as success -- a window, a
+#: hold, a timeout, a response window -- or a **stimulus**, what the animal sees -- brightness,
+#: size, position, look -- or **neither**: the bounded settings, a consequence and a session limit.
+CRITERION = "criterion"
+STIMULUS = "stimulus"
+NEITHER = "neither"
+ROLES = (CRITERION, STIMULUS, NEITHER)
+
+
+@dataclass(frozen=True, slots=True)
+class Background:
+    """`Meaning.relative_to`'s "the trial's background": a direction read on moving a luminance
+    away from that of the background the trial is shown on (`Trial.background`; black when that
+    is `None`)."""
+
+
+BACKGROUND = Background()
+
+
+def _text(value: object, what: str) -> None:
+    """`value` is text, or a `ValueError` naming `what`."""
+    if not isinstance(value, str):
+        raise ValueError(f"{what} is text, not {type(value).__name__}")
+
+
+def _reference(value: object) -> bool:
+    """Whether a direction can read from `value` (`Meaning.relative_to`): `None`, a finite number
+    that is not a `bool`, a setting's name, or `BACKGROUND`."""
+    if value is None or isinstance(value, Background):
+        return True
+    if isinstance(value, str):
+        return bool(value)
+    return (
+        isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class Meaning:
+    """What changing one setting does to the task (XC-288 §4.1; TRN-03), so a change to it can be
+    recorded as easier or harder, or as neither, and an expected direction is never recorded as a
+    fact; and **whether the setting is a criterion or a stimulus** (`role`; the PI, 2026-10-11),
+    so a lenient criterion is never read as an easier stimulus.
+
+    **`raising` reads relative to `relative_to`** (the engine C1 plan's call 4): with `None`, what
+    raising the value does; with a number, what moving the value away from it does (0 for a
+    position, whose side is not its difficulty); with another setting's name, what moving the
+    value away from that setting's current value does; with `BACKGROUND`, what moving a luminance
+    away from the trial's background does. For a setting whose values are choices
+    (`Param.choices`), which have no order, it is what changing it does. `overrides` is set only
+    where a task overrides the shared meaning of a common setting (`declarations.COMMON`), and
+    says why (the PI, 2026-10-11)."""
+
+    kind: str
+    role: str
+    raising: "str | None" = None
+    note: str = ""
+    relative_to: "float | str | Background | None" = None
+    overrides: str = ""
+
+    def __post_init__(self) -> None:
+        if self.kind not in MEANING_KINDS:
+            raise ValueError(
+                f"a setting's meaning is {', '.join(repr(k) for k in MEANING_KINDS)}, "
+                f"not {self.kind!r}"
+            )
+        if self.role not in ROLES:
+            raise ValueError(
+                f"a setting's role is {', '.join(repr(r) for r in ROLES)}, not {self.role!r}: "
+                f"what counts as success, what the animal sees, or neither (the PI, 2026-10-11)"
+            )
+        _text(self.note, "a meaning's note")
+        _text(self.overrides, "why a meaning overrides the shared one")
+        if not _reference(self.relative_to):
+            raise ValueError(
+                f"a meaning's relative_to is None (raising the value), a number, another "
+                f"setting's name or BACKGROUND, not {self.relative_to!r}"
+            )
+        if self.kind == NOT_DIFFICULTY:
+            if self.raising is not None or self.relative_to is not None:
+                raise ValueError(
+                    "a setting that is not a difficulty setting moves the task neither way, "
+                    "so it takes no direction"
+                )
+            return
+        if self.raising not in DIRECTIONS:
+            raise ValueError(
+                f"a setting that is {self.kind} says which way raising it moves the task, "
+                f"{EASIER!r} or {HARDER!r}, not {self.raising!r}"
+            )
+        if self.kind == EXPECTED and not self.note.strip():
+            raise ValueError(
+                "an expected direction comes with a note on why it might not hold for an "
+                "animal (XC-288 §4.1)"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class ReactionTime:
+    """How a task's reaction time is defined (XC-288 §4.3), so one column means one thing per task:
+    from the instant a trial entered `state` to the instant it left that state for one of `to` (a
+    state's name or an `Outcome`). A trial that left it any other way -- a timeout, a break -- has
+    none. `note` says in words what it measures (the engine C1 plan's call 8)."""
+
+    state: str
+    to: tuple
+    note: str
+
+    def __post_init__(self) -> None:
+        _text(self.state, "a reaction time's state")
+        _text(self.note, "a reaction time's note")
+        if not self.state or not self.note.strip():
+            raise ValueError("a reaction time names its state and says what it measures")
+        if not isinstance(self.to, tuple) or not self.to:
+            raise ValueError(
+                "a reaction time ends where its state is left for: a tuple of states or "
+                "outcomes, at least one"
+            )
+        for end in self.to:
+            if not isinstance(end, (str, Outcome)):
+                raise ValueError(
+                    f"a reaction time ends on leaving for a state or an outcome, not {end!r}"
+                )
+
+
+#: What choosing an item is (XC-288 §4.3), as the guards that make it: a saccade landing, gaze
+#: entering or held, a touch, a lever.
+CHOSEN_BY: "dict[str, tuple[type, ...]]" = {
+    "saccade": (SaccadeTo,),
+    "gaze": (Entered, Hold),
+    "touch": (Touched,),
+    "lever": (Pressed, Released),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class Choice:
+    """What a task offers to choose between (XC-288 §4.3): the windows -- or an array's item
+    families, `"search.target"` -- whose items count as choices, and what choosing one is, one of
+    `CHOSEN_BY`, so each trial can record the one chosen (engine build C7)."""
+
+    items: tuple
+    by: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.items, tuple) or not self.items:
+            raise ValueError("a choice names its items: a tuple of windows, at least one")
+        for item in self.items:
+            if not isinstance(item, str) or not item:
+                raise ValueError(f"a choice's item is a window's name, not {item!r}")
+        if self.by not in CHOSEN_BY:
+            raise ValueError(f"a choice is made by {', '.join(CHOSEN_BY)}, not {self.by!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class NoChoice:
+    """`Task.choice`'s "this task offers nothing to choose between" (XC-288 §4.3), which leaving
+    `choice` unset cannot mean: unset is refused at load (`check.check_task`'s
+    `undeclared-choice`), so a task offering none says so, as a window with nothing in it says
+    `REMEMBERED`, and a forgotten choice cannot pass for no choice."""
+
+
+NO_CHOICE = NoChoice()
+
+
+@dataclass(frozen=True, slots=True)
+class Task:
+    """One task (engine spec §3.5): its trial structures by name (§13.3), `default` the one its runs
+    play until plans exist (engine build C2), and what XC-288 §4 has it declare: what its settings
+    mean beyond the shared list (`meanings`; `declarations.COMMON`), what it offers to choose --
+    a `Choice`, or `NO_CHOICE` -- and how its reaction time is defined. **Its shape is refused as
+    it is built**, as a `Param`'s start is; what it declares is checked at load
+    (`check.check_task`), which refuses an unset reaction time or choice."""
+
+    structures: "dict[str, Trial]"
+    default: str
+    reaction_time: "ReactionTime | None" = None
+    choice: "Choice | NoChoice | None" = None
+    meanings: "dict[str, Meaning]" = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.structures, dict) or not self.structures:
+            raise ValueError("a task has its trial structures, by name: a dict, at least one")
+        for name, structure in self.structures.items():
+            if not isinstance(name, str) or not name:
+                raise ValueError(f"a trial structure is named by text, not {name!r}")
+            if not isinstance(structure, Trial):
+                raise ValueError(f"structure {name!r} is a Trial, not {type(structure).__name__}")
+        if self.default not in self.structures:
+            raise ValueError(
+                f"the task's default structure {self.default!r} is not one of its structures "
+                f"({', '.join(self.structures)})"
+            )
+        if self.reaction_time is not None and not isinstance(self.reaction_time, ReactionTime):
+            raise ValueError("a task's reaction_time is a ReactionTime")
+        if self.choice is not None and not isinstance(self.choice, (Choice, NoChoice)):
+            raise ValueError("a task's choice is a Choice, or NO_CHOICE when it offers none")
+        if not isinstance(self.meanings, dict):
+            raise ValueError("a task's meanings are a dict of setting names to Meanings")
+        for name, meaning in self.meanings.items():
+            if not isinstance(name, str) or not isinstance(meaning, Meaning):
+                raise ValueError(
+                    f"a task's meanings name a setting by text and give it a Meaning; {name!r} "
+                    f"does not"
+                )
+
+    @property
+    def trial(self) -> Trial:
+        """The structure a run plays until plans exist (engine build C2): the default."""
+        return self.structures[self.default]
+
+    @property
+    def view(self) -> str:
+        """The setup the task is written for: its structures' one view (`check_task` refuses
+        structures that differ)."""
+        return self.trial.view
+
+    @property
+    def params(self) -> "list[Param]":
+        """The union of its structures' declared parameters (engine spec §3.5), the default
+        structure's first, each name once: what `Session.set` validates against and a run's
+        values are held to. A name two structures declare differently is refused at load
+        (`check_task`); here the first declaration stands."""
+        union: dict[str, Param] = {}
+        for name in (self.default, *(other for other in self.structures if other != self.default)):
+            for param in self.structures[name].params:
+                union.setdefault(param.name, param)
+        return list(union.values())
