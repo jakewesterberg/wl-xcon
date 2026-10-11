@@ -498,6 +498,7 @@ def test_a_shard_runs_each_of_its_modules_with_only_its_functions(monkeypatch, c
     assert commands == [
         [
             sys.executable,
+            "-u",
             "tools/mutate.py",
             "--all",
             "--only",
@@ -556,9 +557,9 @@ def test_twelve_shards_through_mutate_run_every_function_exactly_once(monkeypatc
     calls = []
 
     def through_mutate(command, cwd):
-        assert command[:2] == [sys.executable, "tools/mutate.py"]
+        assert command[:3] == [sys.executable, "-u", "tools/mutate.py"]
         calls.append(command)
-        monkeypatch.setattr(sys, "argv", ["mutate.py", *command[2:]])
+        monkeypatch.setattr(sys, "argv", ["mutate.py", *command[3:]])
         return subprocess.CompletedProcess(command, mutate_tool.main())
 
     monkeypatch.setattr(gate.subprocess, "run", through_mutate)

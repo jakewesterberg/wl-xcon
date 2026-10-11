@@ -327,7 +327,8 @@ def test_fetch_json_refuses_a_certificate_from_an_authority_it_does_not_trust(tm
         (201, b"{}", "answered 201"),
         (200, b"not json", None),
         (200, b"[1, 2]", "did not answer a JSON object"),
-        (200, b" " * (signin.FETCH_LIMIT + 1), "more than"),
+        # A short id: pytest would otherwise print the whole body as the test's name (XC-331).
+        pytest.param(200, b" " * (signin.FETCH_LIMIT + 1), "more than", id="over-the-limit"),
     ],
 )
 def test_fetch_json_refuses_what_is_not_one_small_json_object(tmp_path, status, body, says):
