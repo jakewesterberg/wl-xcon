@@ -2082,7 +2082,8 @@ class Session:
             )
         task = _load_task(Path(run.task))
         findings = check_task(task, self.allocation, geometry=self.spec.geometry,
-                              calibration=self.spec.calibration)
+                              calibration=self.spec.calibration,
+                              deployment=self.spec.deployment)
         # **By the session's kind** (engine spec §19.2): a warning outside its kinds refuses,
         # here too, as the backstop for a caller that took no pre-flight.
         blocking = [f for f in findings if f.refuses(self.spec.session_kind)]

@@ -1430,6 +1430,31 @@ def test_a_task_the_checks_raise_on_fails_its_preflight_and_the_service_goes_on(
     assert isinstance(ended, Idle) and _kinds(service.root)[-2:] == ["returned", "session ended"]
 
 
+def test_a_task_that_needs_a_fixed_head_starts_only_in_a_fixed_head_session(tmp_path):
+    """Review Focus 5; engine spec §20.1 (XC-277): in a chaired session its pre-flight's task checks
+    fail, naming the finding, and nothing is strobed or written; with the head fixed it starts."""
+    text = Path("tasks/fixation_detection.py").read_text()
+    was = '    default="detection",\n'
+    assert text.count(was) == 1
+    chaired, fixed = _service(tmp_path / "chaired"), _service(tmp_path / "fixed")
+    for service in (chaired, fixed):
+        (service.tasks / "fixed_head.py").write_text(
+            text.replace(was, was + "    needs_fixed_head=True,\n"))
+    _step(chaired, _open(deployment="rig_chaired"))
+    _step(fixed, _open())
+
+    refused = _step(chaired, _start(task="fixed_head.py"))
+    started = _step(fixed, _start(task="fixed_head.py"))
+
+    items = {i.name: i for i in refused.preflight.items}
+    assert items["task checks"].result == "fail"
+    assert "head-not-fixed" in items["task checks"].said
+    assert "pre-flight failed, so the run does not start: task checks: " in _refused(refused)[-1]
+    assert refused.run_index is None and _runs(chaired.root) == []
+    assert 4135 not in chaired.session.card.codes
+    assert started.run_index == 0
+
+
 def test_a_task_whose_declarations_are_malformed_fails_its_preflight_and_the_service_goes_on(
     tmp_path,
 ):

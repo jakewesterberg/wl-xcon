@@ -298,6 +298,7 @@ DEFAULTS = {
         "reaction_time": None,
         "choice": None,
         "meanings": {},
+        "needs_fixed_head": False,
     },
     "Tolerances": {"blink": 0.0, "tracker_lost": 0.05},
     "Touched": {"window": REQUIRED},
@@ -526,3 +527,11 @@ def test_every_class_a_reference_task_declares_has_its_defaults_held():
                 _classes(canonical(value), found)
 
     assert {"Trial", "Array", "DKL", "xyY"} <= found <= set(DEFAULTS)
+
+
+def test_needing_a_fixed_head_is_part_of_the_task_and_not_needing_one_changes_nothing():
+    plain = _task(HOLD)
+    fixed = Task(plain.structures, default=plain.default, needs_fixed_head=True)
+    unfixed = Task(plain.structures, default=plain.default, needs_fixed_head=False)
+
+    assert content_hash(fixed) != content_hash(plain) == content_hash(unfixed)

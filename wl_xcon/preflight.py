@@ -63,7 +63,7 @@ def _said(refused: SystemExit, path: Path) -> str:
     return f"{path.name} ended its own load without saying why (exit {code!r})"
 
 
-def task(path: Path, allocation, geometry, calibration) -> tuple[PreflightItem, Task | None, list]:
+def task(path: Path, allocation, geometry, calibration, deployment=None) -> tuple[PreflightItem, Task | None, list]:
     """The task's load-time checks in the session's setup: **fail** if it will not load -- a file
     with trials and no task object among them (engine build C1) --, if its checks do not finish,
     or if any finding blocks (`check.check_task`: each structure's and the task object's own).
@@ -74,7 +74,9 @@ def task(path: Path, allocation, geometry, calibration) -> tuple[PreflightItem, 
 
     **Its findings come back too**, for the run's `warnings` item: a warning is never this
     item's fail, whatever the session's kind; and `calibration` is the session's, or `None`
-    while the rig's record will not load (the engine B plan, call 19)."""
+    while the rig's record will not load (the engine B plan, call 19). **The session's deployment**
+    refuses a task that needs a fixed head in any but a head-fixed session (engine spec §20.1;
+    XC-277)."""
     try:
         loaded = _load_task(path)
     except SystemExit as refused:
@@ -88,7 +90,8 @@ def task(path: Path, allocation, geometry, calibration) -> tuple[PreflightItem, 
             [],
         )
     try:
-        findings = check_task(loaded, allocation, geometry=geometry, calibration=calibration)
+        findings = check_task(loaded, allocation, geometry=geometry, calibration=calibration,
+                              deployment=deployment)
         blocking = [f for f in findings if f.blocking]
     except Exception as broken:  # noqa: BLE001 -- the checks run on code; their fault is this item's
         # Fix round 1 of Task 8: `check` can raise on a task shape it does not expect

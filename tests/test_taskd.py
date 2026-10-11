@@ -657,6 +657,20 @@ def test_a_session_refuses_a_task_whose_setting_says_nothing_of_what_it_means(tm
         _session(spec).run()
 
 
+def test_a_session_refuses_a_task_that_needs_a_fixed_head_when_it_is_chaired(tmp_path):
+    """`Session.run`'s backstop, for a caller that took no pre-flight (engine spec §20.1)."""
+    text = Path("tasks/fixation_detection.py").read_text()
+    was = '    default="detection",\n'
+    assert text.count(was) == 1
+    task = tmp_path / "fixed_head.py"
+    task.write_text(text.replace(was, was + "    needs_fixed_head=True,\n"))
+    spec = _spec(tmp_path / "session", deployment=Deployment.RIG_CHAIRED)
+    spec.task = str(task)
+
+    with pytest.raises(SystemExit, match="head-not-fixed"):
+        _session(spec).run()
+
+
 def test_each_run_names_its_task_by_its_content_never_its_path(tmp_path):
     """Review Focus 4; XC-288 §4.4: each start row's `versions.task` is the task's content hash. A
     copy of the task under another name is the same task; one with a start value moved is another

@@ -53,6 +53,7 @@ from wl_xcon.task import (
     actions_of,
     arrays_of,
 )
+from wl_xcon.welfare import Deployment
 
 
 def check(
@@ -96,13 +97,18 @@ def check_task(
     components: Registry | None = None,
     geometry: Geometry | None = None,
     calibration: Calibration | None = None,
+    deployment: Deployment | None = None,
 ) -> list[Finding]:
     """The load-time checks of a task object (engine spec §3.5; engine build C1): each trial
     structure's own (`check`), named by its structure where the task has several (the engine C1
     plan's call 13), then what the task declares across them -- one set of settings and one setup,
     every setting's meaning (XC-288 §4.1), its reaction time and its choice (§4.3), and a content
     its runs can record (§4.4). **What a caller holds a task to is this**; `check` is one
-    structure's part of it, and stays what a bare `Trial` is checked by."""
+    structure's part of it, and stays what a bare `Trial` is checked by.
+
+    **Given the session's deployment**, a task that needs a fixed head is refused in any but a
+    head-fixed one (engine spec §20.1; XC-277); without one -- `wlx check`, the review report --
+    nothing is refused for it."""
     several = len(task.structures) > 1
     findings: list[Finding] = []
     for name, structure in task.structures.items():
@@ -118,6 +124,7 @@ def check_task(
         + _reaction_time_faults(task)
         + _choice_faults(task)
         + _hash_faults(task)
+        + _head_faults(task, deployment)
     )
 
 
@@ -274,6 +281,21 @@ def _hash_faults(task: Task) -> list[Finding]:
         return [Finding("unhashable-task", (
             f"the task's content could not be hashed ({unread}), so a run could not record which "
             f"version of it ran (XC-288 §4.4)"))]
+    return []
+
+
+def _head_faults(task: Task, deployment: "Deployment | None") -> list[Finding]:
+    """A task that needs a fixed head, in a session whose head is not fixed (engine spec §20.1;
+    STE-25: "a task may declare it needs a fixed head and is then refused in chaired sessions").
+    **Failing closed** (the engine C1 plan's call 16): refused in every deployment but `RIG_FIXED`,
+    a cage-side session as much as a chaired one. A load-time finding, so it fails the pre-flight's
+    task checks, `Session.run`'s backstop and `wlx run` alike, and `preflight.gate` and
+    `Service._start` stay as they are."""
+    if task.needs_fixed_head and deployment is not None and deployment is not Deployment.RIG_FIXED:
+        return [Finding("head-not-fixed", (
+            f"the task needs a fixed head, and this session's deployment, {deployment.value}, "
+            f"does not fix it; a task that needs a fixed head runs only in a head-fixed session "
+            f"(engine spec §20.1)"))]
     return []
 
 

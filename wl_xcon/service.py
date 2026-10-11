@@ -1067,7 +1067,8 @@ class Service:
         owed: list = []
         try:
             item, loaded, findings = _preflight.task(
-                task, self.allocation, session.spec.geometry, session.spec.calibration
+                task, self.allocation, session.spec.geometry, session.spec.calibration,
+                deployment=session.spec.deployment,
             )
             checked = (item,)
         except Exception as broken:  # noqa: BLE001 -- see the docstring

@@ -40,6 +40,7 @@ from wl_xcon.task import (
     Trial,
     Window,
 )
+from wl_xcon.welfare import Deployment
 
 HOLD = Param("fix_hold", unit="s", low=0.05, high=2.0, start=0.3)
 LONGER_HOLD = Param("fix_hold", unit="s", low=0.05, high=5.0, start=0.3)
@@ -195,7 +196,7 @@ def test_a_tasks_settings_are_its_structures_union_the_defaults_first():
 TASK_CODES = frozenset({
     "parameter-mismatch", "view-mismatch", "undeclared-meaning", "override-without-why",
     "bad-meaning", "meaning-for-nothing", "no-reaction-time", "bad-reaction-time",
-    "undeclared-choice", "bad-choice", "unhashable-task",
+    "undeclared-choice", "bad-choice", "unhashable-task", "head-not-fixed",
 })
 TIMED = ReactionTime("wait", ("chose",), "from entering wait to a saccade landing on the target")
 
@@ -414,3 +415,28 @@ def test_a_file_with_no_trial_or_two_task_objects_is_refused(tmp_path):
 
     assert str(nothing.value).endswith("defines 0 task objects; expected exactly 1")
     assert "defines 2 task objects; expected exactly 1" in str(twice.value)
+
+
+def test_a_tasks_need_for_a_fixed_head_is_true_or_false():
+    with pytest.raises(ValueError, match="needs_fixed_head is True or False"):
+        _whole(needs_fixed_head="yes")
+    assert _whole().needs_fixed_head is False
+
+
+@pytest.mark.parametrize("deployment", [None, *Deployment])
+def test_a_task_that_needs_a_fixed_head_is_refused_unless_the_head_is_fixed(deployment):
+    """Engine spec §20.1; STE-25: "a task may declare it needs a fixed head and is then refused in
+    chaired sessions" -- failing closed, in every deployment but a head-fixed one, a cage-side one
+    too (the plan's engineering review, M3). Without a deployment (`wlx check`, `wlx review`)
+    nothing is refused."""
+    needs = _whole(needs_fixed_head=True)
+
+    found = _task_findings(needs, deployment=deployment)
+
+    if deployment in (None, Deployment.RIG_FIXED):
+        assert found == []
+    else:
+        (refusal,) = found
+        assert refusal.code == "head-not-fixed" and refusal.blocking
+        assert deployment.value in refusal.detail and "engine spec §20.1" in refusal.detail
+    assert _task_findings(_whole(), deployment=deployment) == []

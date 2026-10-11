@@ -1342,7 +1342,7 @@ class Task:
     """One task (engine spec §3.5): its trial structures by name (§13.3), `default` the one its runs
     play until plans exist (engine build C2), and what XC-288 §4 has it declare: what its settings
     mean beyond the shared list (`meanings`; `declarations.COMMON`), what it offers to choose --
-    a `Choice`, or `NO_CHOICE` -- and how its reaction time is defined. **Its shape is refused as
+    a `Choice`, or `NO_CHOICE` -- how its reaction time is defined, and whether it needs a fixed head. **Its shape is refused as
     it is built**, as a `Param`'s start is; what it declares is checked at load
     (`check.check_task`), which refuses an unset reaction time or choice."""
 
@@ -1351,6 +1351,10 @@ class Task:
     reaction_time: "ReactionTime | None" = None
     choice: "Choice | NoChoice | None" = None
     meanings: "dict[str, Meaning]" = field(default_factory=dict)
+    #: Whether the task needs the animal's head fixed (engine spec §20.1; STE-25): refused in any
+    #: session whose head is not fixed, whose free head positions every stimulus against a nominal
+    #: head.
+    needs_fixed_head: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.structures, dict) or not self.structures:
@@ -1377,6 +1381,8 @@ class Task:
                     f"a task's meanings name a setting by text and give it a Meaning; {name!r} "
                     f"does not"
                 )
+        if not isinstance(self.needs_fixed_head, bool):
+            raise ValueError("a task's needs_fixed_head is True or False")
 
     @property
     def trial(self) -> Trial:
