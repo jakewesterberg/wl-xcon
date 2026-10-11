@@ -1962,7 +1962,10 @@ def test_the_new_session_dialog_asks_what_an_open_needs_and_offers_no_now_for_th
         ("dn-left", "←cage at"), ("dn-id", "id"), ("dn-given", "given today, mL"),
     ):
         assert f'<label class="sub" for="{field}">{label}</label>' in document, field
-    assert '<option value="rig_fixed">head-fixed</option><option value="rig_chaired">chaired</option>' in document
+    assert (
+        '<select id="dn-deployment" required><option value="">choose the deployment</option>'
+        '<option value="rig_fixed">head-fixed</option><option value="rig_chaired">chaired</option></select>'
+    ) in document, "WEL-06: each session declares its deployment, with no default (XC-355)"
     assert '<option value="direct">direct view</option><option value="stereoscope">stereoscope</option>' in document
     left = re.search(r'<input[^>]*id="dn-left"[^>]*>', document).group(0)
     assert " value=" not in left and "now" not in left
@@ -2113,6 +2116,12 @@ def test_the_new_session_dialog_forgets_what_was_typed_once_the_session_it_sent_
     assert 'if (id === "end-actions") { settleOpen(); }' in swap
     assert "pendingOpen = request.session_id;" in send
     assert 'if (!request.animal) { el("dn-msg").textContent = "not sent: choose the animal"; return; }' in send
+    assert (
+        'if (!request.deployment) { el("dn-msg").textContent = '
+        '"not sent: a deployment must be chosen"; return; }'
+    ) in send, "WEL-06: no open goes out without a deployment (XC-355)"
+    assert send.index("must be chosen") < send.index("post(")
+    assert 'el("dn-deployment").value = "";' in settle, "the next session's starts with none chosen"
     assert "if (pendingOpen === null) { return; }" in settle
     assert (
         "var shown = el(\"end-actions\").querySelector('[data-cmd=\"end\"][data-session]');"

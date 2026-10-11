@@ -1856,6 +1856,12 @@ def _command_from(data: dict) -> Command:
         return ScheduleStop(kind=data["stop"], value=data["value"], by=by)
     if kind == "open":
         by = _actor(data.get("by"), "open")
+        if data.get("deployment") in (None, ""):
+            raise CommandRefused(
+                "open", by,
+                "a deployment must be chosen -- head-fixed or chaired, with no default "
+                "(WEL-06) -- so this open is refused",
+            )
         if data.get("deployment") not in ("rig_fixed", "rig_chaired"):
             raise CommandRefused(
                 "open", by,

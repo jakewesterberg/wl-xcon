@@ -1113,6 +1113,7 @@ def test_a_member_opens_a_session_for_a_kind_and_accepts_the_warning_the_dialog_
     page.wait_for_selector('#dn-warnings [data-warn="default calibration"]', state="attached")
     page.click('[data-cmd="new"]')
     page.select_option("#dn-subject", "A")
+    page.select_option("#dn-deployment", "rig_fixed")
     page.select_option("#dn-kind", "training")
     page.fill("#dn-id", "s-1")
     page.fill("#dn-left", "07:30")
@@ -1132,9 +1133,28 @@ def _opens(rig) -> list:
 def _fill_open(page) -> None:
     page.click('[data-cmd="new"]')
     page.select_option("#dn-subject", "A")
+    page.select_option("#dn-deployment", "rig_fixed")
     page.select_option("#dn-kind", "training")
     page.fill("#dn-id", "s-1")
     page.fill("#dn-left", "07:30")
+
+
+def test_an_open_with_no_deployment_chosen_is_refused_at_the_form(rig):
+    """WEL-06 (XC-355): the form starts with no deployment, and an open without one is
+    refused where it is typed -- nothing reaches the rig."""
+    page = rig.browser_page()
+    _sign_in(page)
+    rig.hub.offer(idle())
+    page.wait_for_selector('#dn-warnings [data-warn="default calibration"]', state="attached")
+    _fill_open(page)
+    page.select_option("#dn-deployment", "")
+    assert page.input_value("#dn-deployment") == ""
+    page.click("#dn-ok")
+    page.wait_for_function(
+        'document.getElementById("dn-msg").textContent.includes("a deployment must be chosen")'
+    )
+    time.sleep(0.3)
+    assert _opens(rig) == []
 
 
 def test_an_open_with_the_accept_box_unticked_accepts_nothing(rig):

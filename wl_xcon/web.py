@@ -2380,6 +2380,7 @@ _SCRIPT = """
     el("dn-id").value = "";
     el("dn-given").value = "";
     el("dn-subject").value = "";
+    el("dn-deployment").value = "";
     el("dn-kind").value = "";
     if (el("dn-accept")) { el("dn-accept").checked = false; }
     el("dn-msg").textContent = "";
@@ -2636,6 +2637,7 @@ _SCRIPT = """
       accepted: acceptedWarnings()
     };
     if (!request.animal) { el("dn-msg").textContent = "not sent: choose the animal"; return; }
+    if (!request.deployment) { el("dn-msg").textContent = "not sent: a deployment must be chosen"; return; }
     if (!request.session_kind) { el("dn-msg").textContent = "not sent: choose what this session is for"; return; }
     lastOpen = Object.assign({}, request);
     pendingOpen = request.session_id;
@@ -3031,7 +3033,7 @@ def page(
     <h2 id="dn-h">New session</h2>
     <div class="grid">
       <label class="sub" for="dn-subject">subject</label><select id="dn-subject"{off}>{p['dn-subject']}</select>
-      <label class="sub" for="dn-deployment">deployment</label><select id="dn-deployment"{off}><option value="rig_fixed">head-fixed</option><option value="rig_chaired">chaired</option></select>
+      <label class="sub" for="dn-deployment">deployment</label><select id="dn-deployment" required{off}><option value="">choose the deployment</option><option value="rig_fixed">head-fixed</option><option value="rig_chaired">chaired</option></select>
       <label class="sub" for="dn-view">setup</label><select id="dn-view"{off}><option value="direct">direct view</option><option value="stereoscope">stereoscope</option></select>
       <label class="sub" for="dn-kind">for</label><select id="dn-kind"{off}><option value="">choose what this session is for</option><option value="training">training</option><option value="piloting">piloting</option><option value="recording">recording</option></select>
       <label class="sub" for="dn-left">←cage at</label><input class="field mono" id="dn-left" autocomplete="off" placeholder="HH:MM, or 2027-01-13T22:40"{off}>

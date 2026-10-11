@@ -2341,6 +2341,8 @@ def test_the_services_commands_cross_a_real_socket_intact(zmq_cleanup, command):
     [
         ({"kind": "open", "session_id": 7}, "session_id"),
         ({"kind": "open", "deployment": "cage_side"}, "rig_fixed or rig_chaired"),
+        ({"kind": "open", "deployment": ""}, "a deployment must be chosen"),
+        ({"kind": "open", "deployment": None}, "a deployment must be chosen"),
         ({"kind": "open", "view": "sideways"}, "direct or stereoscope"),
         ({"kind": "open", "answer": "maybe"}, "confirm, amend or none"),
         ({"kind": "open", "delivered_today": float("nan")}, "delivered_today"),
