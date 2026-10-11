@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import pytest
 
+from wl_xcon.check import check, check_task
+from wl_xcon.findings import Finding
 from wl_xcon.task import (
     BACKGROUND,
     CHOSEN_BY,
@@ -186,3 +188,182 @@ def test_a_tasks_settings_are_its_structures_union_the_defaults_first():
 
     assert Task({"a": a, "b": b}, default="b").params == [LONGER_HOLD, CONTRAST, WINDOW]
     assert Task({"a": a, "b": b}, default="a").params == [HOLD, WINDOW, CONTRAST]
+
+
+#: The findings `check_task` adds to a structure's own (engine build C1).
+TASK_CODES = frozenset({
+    "parameter-mismatch", "view-mismatch", "undeclared-meaning", "override-without-why",
+    "bad-meaning", "meaning-for-nothing", "no-reaction-time", "bad-reaction-time",
+    "undeclared-choice", "bad-choice", "unhashable-task",
+})
+TIMED = ReactionTime("wait", ("chose",), "from entering wait to a saccade landing on the target")
+
+
+def _whole(**over) -> Task:
+    """A task declaring everything: a shared setting and its own, its reaction time, its choice."""
+    fields = dict(
+        structures={"main": _trial(CONTRAST)},
+        default="main",
+        reaction_time=TIMED,
+        choice=Choice(("target",), "saccade"),
+        meanings={"contrast": Meaning(CLEAR_CUT, STIMULUS, raising=EASIER)},
+    )
+    fields.update(over)
+    return Task(**fields)
+
+
+def _task_findings(task: Task, **kwargs) -> list[Finding]:
+    """What `check_task` found about the task itself, a structure's own findings left out."""
+    return [f for f in check_task(task, **kwargs) if f.code in TASK_CODES]
+
+
+def _codes(task: Task, **kwargs) -> set[str]:
+    return {f.code for f in _task_findings(task, **kwargs)}
+
+
+def test_a_task_that_declares_everything_adds_no_finding_of_its_own():
+    assert _task_findings(_whole()) == []
+    assert all(f.blocking for f in _task_findings(_whole(reaction_time=None, choice=None)))
+
+
+def test_each_structures_findings_name_it_when_the_task_has_several():
+    """A one-structure task's findings read as `check`'s always have (call 13)."""
+    orphaned = Trial(start="a", states=[State("a", go=[On(After(1.0), Outcome.CORRECT)]),
+                                        State("orphan", go=[On(After(1.0), Outcome.CORRECT)])])
+    (own,) = [f for f in check(orphaned) if f.code == "unreachable-state"]
+
+    alone = check_task(Task({"only": orphaned}, default="only"))
+    both = check_task(Task({"one": orphaned, "two": orphaned}, default="one"))
+
+    assert [f.detail for f in alone if f.code == "unreachable-state"] == [own.detail]
+    assert [f.detail for f in both if f.code == "unreachable-state"] == [
+        f"in structure 'one': {own.detail}", f"in structure 'two': {own.detail}"]
+
+
+def test_a_setting_two_structures_declare_differently_is_refused():
+    """Engine spec §3.5: one set of settings, which `Session.set` validates against."""
+    same = _whole(structures={"a": _trial(CONTRAST), "b": _trial(CONTRAST)}, default="a")
+    differ = _whole(structures={"a": _trial(CONTRAST), "b": _trial(CONTRAST, hold=LONGER_HOLD)},
+                    default="a")
+
+    assert _codes(same) == set()
+    (found,) = _task_findings(differ)
+    assert found.code == "parameter-mismatch" and "'fix_hold'" in found.detail
+    assert "'a'" in found.detail and "'b'" in found.detail
+
+
+def test_structures_written_for_different_setups_are_refused():
+    task = _whole(structures={"a": _trial(CONTRAST, view="direct"),
+                              "b": _trial(CONTRAST, view="stereoscope")}, default="a")
+
+    assert _codes(task) == {"view-mismatch"}
+
+
+def test_a_setting_with_no_meaning_is_refused_naming_it():
+    """XC-288 §4.1: "Required ... a missing declaration cannot be told from a forgotten one"."""
+    (found,) = _task_findings(_whole(meanings={}))
+
+    assert found.code == "undeclared-meaning" and "'contrast'" in found.detail
+
+
+def test_overriding_a_shared_meaning_needs_a_note_saying_why():
+    """Review Focus 2; the PI, 2026-10-11: a task overrides a shared meaning "only with a note
+    saying why"."""
+    own = {"contrast": Meaning(CLEAR_CUT, STIMULUS, raising=EASIER)}
+    silent = _whole(meanings={**own, "fix_hold": Meaning(CLEAR_CUT, CRITERION, raising=EASIER)})
+    said = _whole(meanings={**own, "fix_hold": Meaning(CLEAR_CUT, CRITERION, raising=EASIER,
+                                                       overrides="this task's hold is a reward")})
+
+    (found,) = _task_findings(silent)
+    assert found.code == "override-without-why" and "'fix_hold'" in found.detail
+    assert _codes(said) == set()
+
+
+def test_an_override_of_nothing_and_a_meaning_for_no_setting_are_refused():
+    """Review Focus 2: a meaning kept for a setting the task no longer declares is refused, and so
+    is an override of a name the shared list does not have."""
+    stale = _whole(meanings={"contrast": Meaning(CLEAR_CUT, STIMULUS, raising=EASIER),
+                             "speed": Meaning(CLEAR_CUT, STIMULUS, raising=HARDER)})
+    overriding = _whole(meanings={"contrast": Meaning(CLEAR_CUT, STIMULUS, raising=EASIER,
+                                                      overrides="nothing to override")})
+
+    (found,) = _task_findings(stale)
+    assert found.code == "meaning-for-nothing" and "'speed'" in found.detail
+    (found,) = _task_findings(overriding)
+    assert found.code == "bad-meaning" and "'contrast'" in found.detail
+
+
+def test_a_direction_reads_from_another_declared_setting_and_never_on_a_list_of_choices():
+    """Call 4: a direction read relative to a setting reads from another one the task declares;
+    a list of choices has no distance from anything, so reads on changing it alone."""
+    cue = Param("cue", unit="appearance", choices=("disc", "square"))
+
+    def relative(contrast_to: object, cue_to: object = None) -> Task:
+        return _whole(structures={"main": _trial(CONTRAST, cue)}, meanings={
+            "contrast": Meaning(EXPECTED, STIMULUS, raising=EASIER, note="n",
+                                relative_to=contrast_to),
+            "cue": Meaning(EXPECTED, STIMULUS, raising=HARDER, note="n", relative_to=cue_to)})
+
+    for fine in (None, 0, BACKGROUND, "fix_hold"):
+        assert _codes(relative(fine)) == set()
+    for wrong, named in [("contrast", "'contrast'"), ("speed", "'speed'")]:
+        (found,) = _task_findings(relative(wrong))
+        assert found.code == "bad-meaning" and named in found.detail
+    (found,) = _task_findings(relative(None, cue_to=0))
+    assert found.code == "bad-meaning" and "'cue'" in found.detail
+
+
+def test_a_bounded_setting_the_task_rewards_through_needs_its_meaning_in_the_table():
+    """XC-288 §4.1: its meaning comes from `declarations.BOUNDED`, outside `bounds.py`."""
+    streak = _whole(structures={"main": _trial(CONTRAST, rewarded="reward_streak")})
+
+    (found,) = _task_findings(streak)
+    assert found.code == "undeclared-meaning" and "'reward_streak'" in found.detail
+
+
+def test_a_task_must_say_how_its_reaction_time_is_defined():
+    """XC-288 §4.3: "Every task declares how its reaction time is defined"."""
+    assert _codes(_whole(reaction_time=None)) == {"no-reaction-time"}
+
+
+def test_a_reaction_time_from_a_state_no_structure_has_or_to_where_it_never_goes_is_refused():
+    nowhere = _whole(reaction_time=ReactionTime("stim_on", ("chose",), "x"))
+    wrong_end = _whole(reaction_time=ReactionTime("wait", ("chose", Outcome.WRONG_TARGET), "x"))
+    both_ends = _whole(reaction_time=ReactionTime("wait", ("chose", Outcome.NO_RESPONSE), "x"))
+
+    (found,) = _task_findings(nowhere)
+    assert found.code == "bad-reaction-time" and "'stim_on'" in found.detail
+    (found,) = _task_findings(wrong_end)
+    assert found.code == "bad-reaction-time" and "WRONG_TARGET" in found.detail
+    assert _codes(both_ends) == set()
+
+
+def test_a_task_must_say_what_it_offers_to_choose_even_when_it_is_nothing():
+    """The plan's engineering review, I2: an unset choice cannot be told from a forgotten one
+    (XC-288 §4.1's reason, for §4.3), so a task offering none says `NO_CHOICE`."""
+    (found,) = _task_findings(_whole(choice=None))
+
+    assert found.code == "undeclared-choice" and "NO_CHOICE" in found.detail
+    assert _codes(_whole(choice=NO_CHOICE)) == set()
+
+
+def test_a_choice_names_windows_chosen_by_the_act_it_names():
+    """XC-288 §4.3: "which of its items count as choices and what choosing one is"."""
+    touched = _whole(choice=Choice(("target",), "touch"))
+    elsewhere = _whole(choice=Choice(("target", "elsewhere"), "saccade"))
+
+    (found,) = _task_findings(touched)
+    assert found.code == "bad-choice" and "'target'" in found.detail and "touch" in found.detail
+    (found,) = _task_findings(elsewhere)
+    assert found.code == "bad-choice" and "'elsewhere'" in found.detail
+
+
+def test_a_task_whose_content_cannot_be_hashed_is_refused():
+    """XC-288 §4.4: a run records which version of its task it ran, so a task that cannot be named
+    by its content is refused before any run."""
+    odd = Param("odd", unit="label", choices=(object(),))
+    task = _whole(structures={"main": _trial(CONTRAST, odd)},
+                  meanings={"contrast": Meaning(CLEAR_CUT, STIMULUS, raising=EASIER),
+                            "odd": Meaning(NOT_DIFFICULTY, STIMULUS)})
+
+    assert "unhashable-task" in _codes(task)

@@ -25,6 +25,7 @@ from wl_xcon.photometry import (
     xyY,
 )
 from wl_xcon.task import (
+    CHOSEN_BY,
     RDS,
     After,
     Array,
@@ -35,6 +36,7 @@ from wl_xcon.task import (
     Hide,
     Hold,
     Mark,
+    NoChoice,
     Outcome,
     P,
     Param,
@@ -42,6 +44,7 @@ from wl_xcon.task import (
     SaccadeTo,
     Show,
     Stimulus,
+    Task,
     Touched,
     Trial,
     Unchanged,
@@ -85,6 +88,193 @@ def check(
         + _placement_faults(trial)
         + _trial_display_faults(trial)
     )
+
+
+def check_task(
+    task: Task,
+    allocation: Allocation = PROVISIONAL,
+    components: Registry | None = None,
+    geometry: Geometry | None = None,
+    calibration: Calibration | None = None,
+) -> list[Finding]:
+    """The load-time checks of a task object (engine spec §3.5; engine build C1): each trial
+    structure's own (`check`), named by its structure where the task has several (the engine C1
+    plan's call 13), then what the task declares across them -- one set of settings and one setup,
+    every setting's meaning (XC-288 §4.1), its reaction time and its choice (§4.3), and a content
+    its runs can record (§4.4). **What a caller holds a task to is this**; `check` is one
+    structure's part of it, and stays what a bare `Trial` is checked by."""
+    several = len(task.structures) > 1
+    findings: list[Finding] = []
+    for name, structure in task.structures.items():
+        for finding in check(structure, allocation, components, geometry, calibration):
+            findings.append(
+                dataclasses.replace(finding, detail=f"in structure {name!r}: {finding.detail}")
+                if several else finding
+            )
+    return (
+        findings
+        + _structure_faults(task)
+        + _meaning_faults(task)
+        + _reaction_time_faults(task)
+        + _choice_faults(task)
+        + _hash_faults(task)
+    )
+
+
+def _structure_faults(task: Task) -> list[Finding]:
+    """One set of settings and one setup across a task's structures (engine spec §3.5, §13.3): a name
+    two structures declare differently would be validated by `Session.set` against whichever came
+    first, and a task's runs are checked against one field."""
+    findings: list[Finding] = []
+    first: dict[str, tuple[str, Param]] = {}
+    for name, structure in task.structures.items():
+        for param in structure.params:
+            where, declared = first.setdefault(param.name, (name, param))
+            if declared != param:
+                findings.append(Finding("parameter-mismatch", (
+                    f"setting {param.name!r} is declared one way by structure {where!r} and "
+                    f"another by {name!r}; a task's settings are one set, which a live edit is "
+                    f"checked against (engine spec §3.5)")))
+    views = sorted({str(structure.view) for structure in task.structures.values()})
+    if len(views) > 1:
+        findings.append(Finding("view-mismatch", (
+            f"the task's structures are written for different setups ({', '.join(views)}); a "
+            f"task runs in one")))
+    return findings
+
+
+def _meaning_faults(task: Task) -> list[Finding]:
+    """Every setting a person can change declares what it means (XC-288 §4.1; TRN-03): the shared
+    list's (`declarations.COMMON`), or the task's own -- which, for a setting on the shared list, is
+    an override and says why (the PI, 2026-10-11). **Required**: "a missing declaration cannot be
+    told from a forgotten one". The bounded settings a task rewards through take theirs from
+    `declarations.BOUNDED`. A meaning for no setting, an override of nothing, a direction read
+    relative to anything on a list of choices, and one read relative to no other setting the task
+    declares are refused too."""
+    from wl_xcon.declarations import BOUNDED, COMMON, rewarded_through
+
+    findings: list[Finding] = []
+    declared = {param.name: param for param in task.params}
+    for name, param in declared.items():
+        own = task.meanings.get(name)
+        meaning = own if own is not None else COMMON.get(name)
+        if meaning is None:
+            findings.append(Finding("undeclared-meaning", (
+                f"setting {name!r} declares no meaning: clear-cut with a direction, expected with "
+                f"a direction and a note, or not a difficulty setting (XC-288 §4.1); a missing "
+                f"declaration cannot be told from a forgotten one")))
+            continue
+        if own is not None and name in COMMON and not own.overrides.strip():
+            findings.append(Finding("override-without-why", (
+                f"the task gives {name!r} a meaning of its own, and {name!r} is on the shared "
+                f"list; a task overrides a shared meaning only with a note saying why "
+                f"(Meaning.overrides)")))
+        if own is not None and name not in COMMON and own.overrides:
+            findings.append(Finding("bad-meaning", (
+                f"{name!r}'s meaning says it overrides the shared list, which has no "
+                f"{name!r}")))
+        relative = meaning.relative_to
+        if relative is not None and param.choices:
+            findings.append(Finding("bad-meaning", (
+                f"{name!r}'s direction reads relative to {relative!r}, and its values are "
+                f"choices, which are no distance from anything")))
+        elif isinstance(relative, str) and (relative == name or relative not in declared):
+            findings.append(Finding("bad-meaning", (
+                f"{name!r}'s direction reads relative to setting {relative!r}, which is not "
+                f"another setting the task declares")))
+    for name in task.meanings:
+        if name not in declared:
+            findings.append(Finding("meaning-for-nothing", (
+                f"the task declares a meaning for {name!r}, which none of its structures "
+                f"declares as a setting")))
+    for ref in sorted(rewarded_through(task)):
+        if ref not in BOUNDED:
+            findings.append(Finding("undeclared-meaning", (
+                f"bounded setting {ref!r}, which the task rewards through, has no meaning in "
+                f"declarations.BOUNDED (XC-288 §4.1)")))
+    return findings
+
+
+def _reaction_time_faults(task: Task) -> list[Finding]:
+    """How the task's reaction time is defined (XC-288 §4.3): declared, from a state some structure
+    has, ending where that state's transitions go (the engine C1 plan's call 8)."""
+    timed = task.reaction_time
+    if timed is None:
+        return [Finding("no-reaction-time", (
+            "the task does not say how its reaction time is defined, from which event to which "
+            "(XC-288 §4.3), so its trials' reaction times would mean nothing; declare "
+            "reaction_time=ReactionTime(state, to, note)"))]
+    states = [
+        state
+        for structure in task.structures.values()
+        for state in structure.states
+        if state.name == timed.state
+    ]
+    if not states:
+        return [Finding("bad-reaction-time", (
+            f"the reaction time is timed from state {timed.state!r}, which no structure has"))]
+    leaves = {edge.to for state in states for edge in state.go}
+    return [
+        Finding("bad-reaction-time", (
+            f"the reaction time ends when {timed.state!r} is left for {_destination(end)}, and "
+            f"no structure's {timed.state!r} goes there"))
+        for end in timed.to
+        if end not in leaves
+    ]
+
+
+def _destination(end: object) -> str:
+    """Where a transition goes, as a finding names it: an outcome by its name, a state quoted."""
+    return end.name if isinstance(end, Outcome) else repr(end)
+
+
+def _choice_faults(task: Task) -> list[Finding]:
+    """What the task offers to choose between (XC-288 §4.3): declared -- a `Choice`, or `NO_CHOICE`
+    for a task that offers none, since an unset choice cannot be told from a forgotten one (the
+    engine C1 plan's call 10) -- and each item a window some structure's transition fires on by
+    the act the choice names (`CHOSEN_BY`)."""
+    choice = task.choice
+    if choice is None:
+        return [Finding("undeclared-choice", (
+            "the task does not say what it offers to choose between (XC-288 §4.3), and an unset "
+            "choice cannot be told from a forgotten one; declare choice=Choice(items, by), or "
+            "choice=NO_CHOICE for a task that offers none"))]
+    if isinstance(choice, NoChoice):
+        return []
+    acts = CHOSEN_BY[choice.by]
+    chosen = {
+        _chosen(edge.guard)
+        for structure in task.structures.values()
+        for state in structure.states
+        for edge in state.go
+        if isinstance(edge.guard, acts)
+    }
+    return [
+        Finding("bad-choice", (
+            f"{item!r} is declared a choice made by {choice.by}, and no structure's transition "
+            f"fires on a {choice.by} to it"))
+        for item in choice.items
+        if item not in chosen
+    ]
+
+
+def _chosen(guard: object) -> "str | None":
+    """The window -- or, for a lever, the device -- a choosing guard names."""
+    return getattr(guard, "window", None) or getattr(guard, "device", None)
+
+
+def _hash_faults(task: Task) -> list[Finding]:
+    """A run records which version of its task it ran by the task's content hash (XC-288 §4.4), so
+    a task whose content cannot be hashed is refused before any run."""
+    from wl_xcon.declarations import content_hash
+
+    try:
+        content_hash(task)
+    except (TypeError, ValueError) as unread:
+        return [Finding("unhashable-task", (
+            f"the task's content could not be hashed ({unread}), so a run could not record which "
+            f"version of it ran (XC-288 §4.4)"))]
+    return []
 
 
 def _unreachable_states(trial: Trial) -> list[Finding]:
