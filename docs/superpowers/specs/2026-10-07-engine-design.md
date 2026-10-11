@@ -434,6 +434,15 @@ luminance waits on build F (XC-305).
    height. **The actual onset is measured into the recording by the speaker tap** (V7)
    [@babjack2015reducing; @bridges2020timing]. Speaker-to-ear
    delay is acoustic and not in V7.
+
+> **Amended 2026-10-11 (the ask was sent to wl-sync that day, `5ca9891`):** this said the line-out sits "beside
+> the existing speaker tap". **wl-sync has no speaker tap**: backlog XC-089 (a misc BNC assigned to the audio
+> verification tap) is unassigned, and its misc BNCs are input-only by construction (an output port "would be a
+> respin", its breakout spec line 990, as wl-sync's reply reads it); it also found no task-PC analog-output net
+> in its hardware README. So the line-out is XC-327 and the tap that measures the onset is XC-089, two separate
+> asks, and the line-out may be new copper or may be nothing if the card's connector can feed the amplifier.
+> The decision itself (sound from two analog outputs of the PCIe-6343, started by the task-patch edge) is
+> unchanged. The text above is left as approved.
 2. **Simple sounds are made from parameters**, rebuilt from the record; files remain for recorded sounds.
 3. **Movie soundtracks** play when a task asks, in step with the frames.
 4. **Media live on lab storage** by checksum; the rig keeps a verified local copy; the set's identity is
@@ -706,6 +715,10 @@ summary before its build merges:
   `STIMULUS_CHANGED` and the anchor code (§8.3, §8.4).
 - **wl-sync**: a two-channel line-out from the task PC card's analog outputs, started by the task-patch
   edge (§9.1); top-and-bottom test patches for V1's scan-out measurement (§6.5).
+
+> **Sent 2026-10-11** (the PI: "Send all now"), as dated sections of the siblings' handover files: wl-preproc
+> `7183347`, wl-sync `5ca9891`, wl-xtasks `0486476` (a new file there). Backlog XC-197 and XC-323 to XC-326
+> (wl-preproc), XC-327 and XC-328 (wl-sync), XC-329 and XC-330 (wl-xtasks).
 
 ## 22. Amendments to other documents (each with the build that changes it)
 

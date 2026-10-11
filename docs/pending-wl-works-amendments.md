@@ -1,8 +1,16 @@
 # Amendments to wl-works
 
-**Two are open, both opened 2026-08-31** while designing this controller
+Delivered 2026-10-11 as a dated section of wl-works' `HANDOVER-wl-expcontroller.md` (`2bf5aca0`); answers are read there.
+
+**Updated 2026-10-11.** Six asks were delivered that day (XC-320; XC-099 and XC-100's build order; XC-103;
+XC-104's alert half; XC-105; XC-098), listed in "Delivered 2026-10-11" below, and wl-works' own list of what is
+closed is there too. Most of what was open here has since been **answered by wl.works** (the host list,
+`prepare-session` and the fluid envelope on 2026-08-31; rig sign-in 2026-09-29 and 2026-10-06; the plan fields and the
+calibration block withdrawn 2026-10-01), so what remains is the building, not the agreeing. Read against
+wl-works `main` at `71b04613` (wl-works' own reading, 2026-10-11). Of the two asks opened
+2026-08-31 while designing this controller
 ([`superpowers/specs/2026-08-31-controller-architecture-design.md`](superpowers/specs/2026-08-31-controller-architecture-design.md)
-§12.3). Neither is applied here, and neither is wl-works' to discover: that repository is
+§12.3), neither is applied here, and neither is wl-works' to discover: that repository is
 owned by another worker, including its remote, so these are written where wl-preproc
 writes its own — in the requesting repository, for the other side to accept, amend or
 refuse.
@@ -89,6 +97,8 @@ Proposed initial actions: `prepare-session` (§ the second amendment below) and
 `export-session` (re-emit a session's outputs if a transfer was lost). Both are idempotent
 under the existing key, both return the existing activation-key shape, and both use `422`
 for "this host cannot do that" exactly as documented.
+
+> **Note, 2026-10-11:** wl.works' answers of 2026-08-31 name `prepare-session`, the host list as configuration and the fluid envelope; **`export-session` is not among them**, and wl-works' 2026-10-11 handover does not ask about it. Treat it as proposed here and unanswered, and as not needed by any build.
 
 > **No welfare-affecting action is ever published here.** `lab-host-protocol.md`'s most
 > prominent line is that publishing an action makes it available to every member of the
@@ -362,6 +372,8 @@ topology — wl-works binds only to WireGuard, lab machines have no route in —
 client-initiated: the lab host asks, the server answers. So a lab host reaching wl-works
 for time needs a route to it that does not exist today, on UDP 123 only.
 
+> **Updated 2026-10-11 — the hostname is not as settled as this section says.** wl-works' own sources give **three** names, and its handover asks which a lab host will be given; **wl-xcon asserts none of them.** `ntp.wl.works` is the PI's name (2026-09-20, as this section says). wl-works' `docs/ops/waiting-on.md` (lines 3552 and 3564) says `ptp.wl.works` serves NTP, and its row-60 spec (`2026-09-20-row-60-lab-time-service-design.md` §8) rules `time.wl.works`, over both `ptp.` and `ntp.`. Wherever this file or the backlog writes `ntp.wl.works` below, read it as "the PI's name, awaiting wl-works' answer". The route (a lab host initiating UDP 123, one port, one direction) is asked unchanged. XC-017, a preflight clock-skew check, waits on it.
+
 **This is not the AST guardrail changing.** `wl-preproc`'s "never initiates a connection"
 check (`tests/test_cli_guardrails.py`, read from source 2026-09-20) is a static walk over
 *application source*, asserting nothing in that package opens an outbound socket. A
@@ -475,8 +487,8 @@ holds no ELN notes; it holds the rig name and not the id) and is rebuilt when it
 
 ## What wl-works must decide
 
-1. Whether the client's host list becomes configuration.
-2. Whether `prepare-session` and `export-session` are acceptable as published actions given
+1. Whether the client's host list becomes configuration. **Answered yes, 2026-08-31.**
+2. **Answered 2026-08-31: yes to `prepare-session`, unrestricted; `export-session` was not answered (see the note in the first section).** Whether `prepare-session` and `export-session` are acceptable as published actions given
    the flat permission model, with the welfare exclusion above as a standing constraint.
 3. Whether a control box may register as an OAuth2 client of wl.works for operator
    attribution (above), and whether that is one client per box or one for the fleet.
@@ -488,7 +500,7 @@ holds no ELN notes; it holds the rig name and not the id) and is rebuilt when it
    the fluid figure as an envelope, the host list as configuration (item 1) and alerts.
 5. Whether wl-works can run an NTP server at `ntp.wl.works` reachable from the lab
    network on UDP 123, and open the one-port routing exception that requires (new,
-   2026-09-20 — see above). **The hostname is settled by the PI; the route is not.**
+   2026-09-20 — see above). **The hostname is the PI's; the route is not settled. As of 2026-10-11 wl-works names two other hostnames (see the update in the NTP section), and its answer is awaited on which a lab host is given.**
 6. **Answered 2026-09-29: yes, with conditions (above).** Whether signed-in members may send controls to a rig from its page, and, if so, the four
    changes that needs: a client per rig, the rig's callback URL allowed, tokens whose
    audience is the rig, and the rig's page exchanging a code for a token (new, 2026-09-29 —
@@ -503,3 +515,25 @@ holds no ELN notes; it holds the rig name and not the id) and is rebuilt when it
 Nothing here is blocked on an answer: the controller's v1 works with no ELN integration at
 all, writing everything to the session directory as it would anyway. This buys the ELN
 entry, not the recording.
+
+---
+
+# OPEN — delivered 2026-10-11: what wl-works was asked, and what it listed as closed
+
+On 2026-10-11 the PI decided to send every open ask to its sibling repositories ("Send all now"). The six below
+are wl-works' section, in its order; each is wl-works' to accept, amend or refuse.
+
+| Backlog | The ask | Blocks (wl-xcon) |
+|---|---|---|
+| XC-320 | The five parts of the XC-288 section above ((a) to (e)) | no build; the training-record file says what it lacks until each part is met |
+| XC-099, XC-100 | wl-works answered yes to both on 2026-08-31 and has not built them (no code behind `manage-lab-hosts`). Asked: whether they are scheduled, so wl-xcon knows whether to code against a fake, and the envelope's field names once settled (the fluid figure as `value_ml`, `as_of`, `sources_included`, `complete`). XC-320 (a) rides on this | nothing |
+| XC-103 | Which of the three NTP hostnames a lab host is given (see the NTP section's update), then the route | XC-017 |
+| XC-104 | The alert half: wl-works said yes to the `state` reading and not yet to raising an alert, because its notification seam delivered nothing. Has that changed? The kiosk cannot initiate a connection, so the alert originates on wl-works' side; a local indicator at the cage is the complement and does not wait | nothing |
+| XC-105 | Does the ELN record both ends of an out-of-cage interval as clock times, and when might the rig read them? The rig's own 8-hour limit stays the rig's. wl-works did not check this | nothing; the stand-in works |
+| XC-098 | Does wl-works want to write `session_manifest.yaml`? The question is open with wl-preproc too (the XC-098 line in [the wl-preproc file](pending-wl-preproc-amendments.md#open--delivered-2026-10-11-engine-spec-21-and-the-older-backlog-asks)) | nothing |
+
+**Closed, per wl-works (not re-asked):** XC-102, XC-147 to XC-149, XC-225 and XC-240 (rig sign-in built and deployed,
+`4eb2c568` and `637007a7`; only XC-151 and XC-152, wl-xcon's, stand between it and a live check); the host list,
+`prepare-session` as a published action and the fluid envelope (yes, 2026-08-31; building is the XC-099/XC-100 row);
+the plan fields and the calibration block (withdrawn 2026-10-01, XC-101); XC-104's reading half (yes, 2026-08-31).
+XC-151 and XC-152 are stated as wl-xcon's own work and were not asked of wl.works.

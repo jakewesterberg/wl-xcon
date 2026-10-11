@@ -1,15 +1,22 @@
 # Amendments to wl-preproc
 
-**Six are open.** The first three were opened 2026-08-31 while designing S2
+Delivered 2026-10-11 as a dated section of wl-preproc's `HANDOVER-wl-expcontroller.md` (`7183347`); answers are read there.
+
+**Updated 2026-10-11.** Of the four asks opened in August, **all four are done**; each is marked below
+with wl-preproc's evidence, and the headings are left as they were. What is open now is XC-288's ask
+(XC-321), the asks of engine spec §21 and the older backlog items, all delivered 2026-10-11 and listed
+in the section "delivered 2026-10-11" below; the XC-026 note is accepted (see its section).
+The first three were opened 2026-08-31 while designing S2
 ([`superpowers/specs/2026-08-31-S2-event-vocabulary-design.md`](superpowers/specs/2026-08-31-S2-event-vocabulary-design.md)),
-and the fourth (`read_online_map`) was added before XC-026. Written here rather than applied
+and the fourth (`read_online_map`, now `read_xcon_map`) was added before XC-026. Written here rather than applied
 there, following that repository's own convention for `wl-works`. The first three were read
-against `wl_preproc/contracts/events.py` at commit `f7fb10a`.
+against `wl_preproc/contracts/events.py` at commit `f7fb10a` (2026-08-31); the
+2026-10-11 section is wl-preproc's own reading of its source, not rechecked here.
 **And one from XC-026, opened 2026-10-01**: what a resumed session's stream holds, and **one
 from XC-288, opened 2026-10-10**: the change log, reasons, timed events and pauses, both at the
 end of this file, before the note that is not an ask.
 
-**Of the first three, two are free, and the third is small.** Items 2 and 3 change no numbers and
+**Of the first three (all since done), two were free, and the third was small.** Items 2 and 3 change no numbers and
 no wire behaviour — one records an ownership split in a docstring, the other corrects a
 premise. Only item 1 touches the frozen interface, and it adds one escape without altering
 any existing value.
@@ -21,6 +28,8 @@ moving target. If any of it collides with work in flight, this document is the l
 ---
 
 # OPEN — one new escape: `PARAM_CHANGE`
+
+> **DONE — wl-preproc added it: `contracts/events.py:157`, commit `5ea827b` (2026-08-31), as listed in its 2026-10-11 handover.** The text below is the ask as written.
 
 ## The ask
 
@@ -66,6 +75,8 @@ needs no change — it reads `PAYLOAD_WORD_COUNTS` and checksums generically.
 ---
 
 # OPEN — record the ownership split, because two manifests currently contradict
+
+> **DONE — answered 2026-09-01 ("we agree", in wl-preproc's `docs/CHECKPOINT.md`); commit `7e100ab`; `wl.yaml:522` now declares `event-code-protocol`, so the codec is visible to `wlo`.** The text below is the ask as written.
 
 ## The finding
 
@@ -123,6 +134,8 @@ dependency. Ours lands the moment yours does.
 
 # OPEN — the DVA comment's premise, under ADR-0005
 
+> **DONE — commit `ae1ece1` (2026-08-31) restated the comment.** The text below is the ask as written.
+
 ## The finding
 
 `encode_dva`'s comment reasons about why positions are transmitted in degrees rather than
@@ -154,6 +167,8 @@ a single number, which is an argument for never putting pixels on the wire.
 ---
 
 # OPEN — `read_online_map` needs a reader for a controller that is not MonkeyLogic
+
+> **DONE — the reader exists as `eye/xcon.py::read_xcon_map` (line 242), named for our controller rather than for MonkeyLogic. The name `read_online_map` below is the ask's name for it and is kept as history.** The text below is the ask as written.
 
 ## The finding
 
@@ -216,6 +231,8 @@ repository now, and a change to it would reach us.
 ---
 
 # OPEN — a resumed session's stream: 4137, numbers that go on, and the crashed run's end
+
+> **ACCEPTED — wl-preproc has built the run and block escapes this section depends on:** `RUN_START` `0x8006` (`events.py:162`) and the `RUN_END` marker; accepted 2026-10-01 per `docs/pending-wl-xcon-amendments.md` in wl-preproc (told to us by its 2026-10-11 handover, not checked here). The `assemble` consequence below was asked of nobody and stays recorded.
 
 Opened 2026-10-01 by XC-026 ([its spec](superpowers/specs/2026-10-01-xc026-resume-design.md)
 §6, "Told to wl-preproc once built"). Read against wl-preproc's `main` at `6a67ae2`
@@ -298,6 +315,38 @@ what wl-preproc already ingests. These files are new or grown:
   (the first item of this file) and the codes' count; nothing here asks for a new value.
 - **No timing claim.** The rig's event-log instants are wall-clock bookkeeping; the sync box stays the timing
   ground truth ([§3.11](superpowers/specs/2026-10-10-xc288-training-records-design.md#311-the-rigs-clock)).
+
+---
+
+# OPEN — delivered 2026-10-11: engine spec §21 and the older backlog asks
+
+On 2026-10-11 the PI decided to send every open ask to its sibling repositories ("Send all now"). wl-preproc's
+handover section lists these eleven; it also lists, as closed, the four August asks above and the XC-026 escapes,
+and Offer 2 (the online detector as an eighth registry entry), which had no reply and stays an offer, not a task.
+Where a number is given it is the backlog's. wl-preproc did not verify that its ingest tolerates an unknown
+SQLite file in the session folder, nor that engine build B's output is "already written"; the handover says so.
+
+| Backlog | The ask | Blocks (wl-xcon) | Source |
+|---|---|---|---|
+| XC-321 | Read XC-288's training records; accept the agent's file unread | build C (+I) writes them | the XC-288 section above |
+| XC-197 | Say how `CONDITION` (`0x8003`) numbers are assigned; carry an "overridden" flag in the trial table | the flag: build F; numbering: XC-207 | [engine spec §14.7, §21](superpowers/specs/2026-10-07-engine-design.md#21-asks-of-other-repositories-sent-once-this-spec-is-approved) |
+| XC-323 | Read monocular and session-start calibrations (the stereoscope's monocular grids, interlude recalibrations as `CALIBRATION_START`/`END` epochs, their target positions) | build T | engine spec §12.4, §21 |
+| XC-324 | The continuous mode's record shape (the once-a-second check strobes, the screen log's frame record) and the anchor code (the allocation itself is wl-xtasks', ADR-0007) | build K | engine spec §13.6, §8.4, §21 |
+| XC-325 | Read `config.json`'s `session_kind` and `calibration`, each run's start row's `calibration` id, and `warnings.jsonl` | nothing (what build B writes) | engine spec §19, §21 |
+| XC-326 | Align stimulus onsets through the screen log's frame record and the flip count | build F | engine spec §8, §21 |
+| XC-093 | Amend the `bcam` sidecar contract for primary-triggered cameras (`digital_line`, `frame_rate_hz` required; a trigger source for "the primary triggered") | P9 | [P9 spec §7](superpowers/specs/2026-09-27-P9-camera-system-design.md#7-outside-this-repository-asks-not-assumptions) |
+| XC-094 | Say whether a `pupil − CR1` fallback is carried (a second `raw_definition`, which `eye/xcon.py:73` refuses by design) or kept out | XC-006 | [S5 §1](superpowers/specs/2026-08-31-S5-eye-tracking-design.md#1-most-of-the-calibration-is-already-decided-and-not-by-us) |
+| XC-095 | Correct the eye spec's `DataQuality` description (OpenIrisDPI writes 100 on every row) | nothing | [CHECKPOINT, 2026-09-27 afternoon](CHECKPOINT.md#what-moved-on-2026-09-27-afternoon-b1-merged-b2-designed-the-camera-ci) |
+| XC-096 | Per-trial gaze staleness into `EyeQuality` (the offer above; "yes, in `EyeQuality`" or "no, leave it in the behavioral table") | XC-007 | [S5 §10 item 3](superpowers/specs/2026-08-31-S5-eye-tracking-design.md#10-open-items) |
+| XC-098 | Who writes `session_manifest.yaml`; wl-xcon supplies `started_at_source` and `stimulus_calibration_id` by whichever route | nothing | [S10 §6 item 1](superpowers/specs/2026-08-31-S10-data-and-lab-integration-design.md#6-open-items) |
+
+**The new ones, in a sentence each, so a reader of this file does not need the handover.** XC-323: the map's provenance
+depends on reading which eye a grid was and when a recalibration ran. XC-324: a trial that lasts minutes needs
+a record shape `assemble` tolerates. XC-325: a session run with an accepted warning, or in a non-experimental
+kind, should be marked so in the published dataset; only carrying, not acting on, the warnings is asked.
+XC-326: wl-xcon records the frame each change was strobed on, and the sync box measures the actual onset
+(through the speaker tap, V7, which waits on XC-089); the two must join. No timing number is claimed here.
+**Nothing here changes the frozen codec**, and wl-xcon sends nothing new on the wire until wl-preproc says it is on `main`.
 
 ---
 

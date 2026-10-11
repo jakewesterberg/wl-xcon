@@ -1241,7 +1241,10 @@ untouched, and the display process (build E) and the screen log (build F) are th
   Gabor, two patches and both eye viewports; its report and source are recorded on their own branch,
   `spike-s`), and its presentation-timing test is being built for the PI to run from a text console. The
   cross-repository asks the approved engine spec §21 lists (wl-preproc, wl-xtasks, wl-sync) are due
-  and have not been sent; each is outward-facing and needs the PI's go-ahead. Stale remote branches
+  and have not been sent; each is outward-facing and needs the PI's go-ahead. **[Note, 2026-10-11: they
+  were sent that day, at the PI's "Send all now", with every other open ask: wl-preproc `7183347`, wl-sync
+  `5ca9891`, wl-works `2bf5aca0` and wl-xtasks `0486476`. Backlog XC-323 to XC-330 hold the §21 asks; the
+  four `docs/pending-wl-*-amendments.md` files say what was asked.]** Stale remote branches
   `engine-design`, `demo-mode` and `xc240` await a decision to delete. The final whole-branch review's
   findings are fixed (below) or filed in `docs/backlog.md`.
 - **The final whole-branch review, and its fix wave.** The checker still read literals only, so a task
