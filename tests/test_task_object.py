@@ -254,6 +254,17 @@ def test_a_setting_two_structures_declare_differently_is_refused():
     assert "'a'" in found.detail and "'b'" in found.detail
 
 
+def test_a_setting_one_structure_declares_twice_differently_is_refused_saying_so():
+    """The final review's M4: one structure declaring a setting twice, two ways, is not two
+    structures disagreeing, and the finding does not read as if it were."""
+    twice = _whole(structures={"w": _trial(CONTRAST, LONGER_HOLD)}, default="w")
+
+    (found,) = _task_findings(twice)
+    assert found.code == "parameter-mismatch"
+    assert found.detail.startswith("structure 'w' declares setting 'fix_hold' twice, differently")
+    assert "another by" not in found.detail
+
+
 def test_structures_written_for_different_setups_are_refused():
     task = _whole(structures={"a": _trial(CONTRAST, view="direct"),
                               "b": _trial(CONTRAST, view="stereoscope")}, default="a")

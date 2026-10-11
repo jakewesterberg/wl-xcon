@@ -137,11 +137,17 @@ def _structure_faults(task: Task) -> list[Finding]:
     for name, structure in task.structures.items():
         for param in structure.params:
             where, declared = first.setdefault(param.name, (name, param))
-            if declared != param:
-                findings.append(Finding("parameter-mismatch", (
-                    f"setting {param.name!r} is declared one way by structure {where!r} and "
-                    f"another by {name!r}; a task's settings are one set, which a live edit is "
-                    f"checked against (engine spec §3.5)")))
+            if declared == param:
+                continue
+            said = (
+                f"structure {name!r} declares setting {param.name!r} twice, differently"
+                if where == name
+                else f"setting {param.name!r} is declared one way by structure {where!r} and "
+                f"another by {name!r}"
+            )
+            findings.append(Finding("parameter-mismatch", (
+                f"{said}; a task's settings are one set, which a live edit is checked against "
+                f"(engine spec §3.5)")))
     views = sorted({str(structure.view) for structure in task.structures.values()})
     if len(views) > 1:
         findings.append(Finding("view-mismatch", (
