@@ -1066,12 +1066,12 @@ class Service:
         settings = Path(session.spec.subject_settings) if session.spec.subject_settings else None
         owed: list = []
         try:
-            item, trial, findings = _preflight.task(
+            item, loaded, findings = _preflight.task(
                 task, self.allocation, session.spec.geometry, session.spec.calibration
             )
             checked = (item,)
         except Exception as broken:  # noqa: BLE001 -- see the docstring
-            checked, trial, findings = _unfinished((_preflight.TASK_CHECKS,), broken), None, []
+            checked, loaded, findings = _unfinished((_preflight.TASK_CHECKS,), broken), None, []
 
         def warned():
             try:
@@ -1103,7 +1103,7 @@ class Service:
                 *checked,
                 *_contained((_preflight.WARNINGS,), warned),
                 *_contained(
-                    (_preflight.STARTING_VALUES,), lambda: _preflight.values(trial, values)
+                    (_preflight.STARTING_VALUES,), lambda: _preflight.values(loaded, values)
                 ),
                 *_contained(
                     (_preflight.BOUNDED_CONFIG,)

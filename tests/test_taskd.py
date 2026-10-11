@@ -32,8 +32,9 @@ import pytest
 
 from wl_xcon.actor import Box
 from wl_xcon.bounds import Bounds, Ceiling, Exceeded, Floor
-from wl_xcon.cli import _load_trial
+from wl_xcon.cli import _load_task
 from wl_xcon.codes import BLOCK_END
+from wl_xcon.declarations import content_hash
 from wl_xcon.dio import Simulated as Card
 from wl_xcon.encode import BLOCK_START, UNALLOCATED_TASK_CODE, words_for_block
 from wl_xcon.findings import NOT_RECORDING, SESSION_KINDS, Finding
@@ -260,9 +261,11 @@ def test_a_session_refuses_to_start_if_the_task_fails_its_checks(tmp_path):
     discovers the task is malformed has already put an animal in a chair."""
     bad = tmp_path / "bad.py"
     bad.write_text(
-        "from wl_xcon.task import After, On, Outcome, State, Trial\n"
+        "from wl_xcon.task import NO_CHOICE, After, On, Outcome, ReactionTime, State, Task, Trial\n"
         "t = Trial(start='a', states=[State('a', go=[On(After(1.0), Outcome.CORRECT)]),"
         " State('orphan', go=[On(After(1.0), Outcome.CORRECT)])])\n"
+        "TASK = Task({'t': t}, default='t', choice=NO_CHOICE,"
+        " reaction_time=ReactionTime('a', (Outcome.CORRECT,), 'the wait'))\n"
     )
     spec = _spec(tmp_path)
     spec.task = str(bad)
@@ -305,7 +308,7 @@ def test_a_session_writes_its_record_and_its_config(tmp_path):
     runs = [json.loads(line) for line in (directory / "runs.jsonl").read_text().splitlines()]
 
     assert runs[0]["resolved"]["fix_hold"] == 0.3
-    assert runs[0]["versions"]["task"].endswith("fixation_detection.py")
+    assert runs[0]["versions"]["task"] == content_hash(_load_task(Path("tasks/fixation_detection.py")))
     assert "resolved" not in config, "what varies by run is in runs.jsonl (spec §6.3)"
 
 
@@ -322,7 +325,8 @@ def test_the_run_a_session_spec_describes_is_run_0_in_every_file_it_writes(tmp_p
     assert (start["event"], start["run"], end["event"], end["run"]) == ("start", 0, "end", 0)
     assert start["task"] == "tasks/fixation_detection.py"
     assert start["versions"] == {
-        "task": "tasks/fixation_detection.py",
+        # The task by its content (XC-288 §4.4); the row's `task` keeps the path it was given.
+        "task": content_hash(_load_task(Path("tasks/fixation_detection.py"))),
         "allocation": "tasks/allocation.py",
     }
     assert start["resolved"]["fix_hold"] == 0.3, "what it started with, before the staged 0.5"
@@ -573,9 +577,11 @@ def test_a_refused_run_leaves_the_last_runs_state_as_it_was(tmp_path):
     the marks pass."""
     bad = tmp_path / "bad.py"
     bad.write_text(
-        "from wl_xcon.task import After, On, Outcome, State, Trial\n"
+        "from wl_xcon.task import NO_CHOICE, After, On, Outcome, ReactionTime, State, Task, Trial\n"
         "t = Trial(start='a', states=[State('a', go=[On(After(1.0), Outcome.CORRECT)]),"
         " State('orphan', go=[On(After(1.0), Outcome.CORRECT)])])\n"
+        "TASK = Task({'t': t}, default='t', choice=NO_CHOICE,"
+        " reaction_time=ReactionTime('a', (Outcome.CORRECT,), 'the wait'))\n"
     )
     session = _session(_spec(tmp_path, deployment=Deployment.RIG_CHAIRED))
     session.run(_run_spec(trials=2, fix_hold=0.4))
@@ -588,6 +594,90 @@ def test_a_refused_run_leaves_the_last_runs_state_as_it_was(tmp_path):
     assert session.run_index == 0
     assert session.spec.values == values and session.task == "tasks/fixation_detection.py"
     assert _runs(session) == rows, "no new start row"
+
+
+#: A task of two structures (engine build C1): the reference detection trial, the default, and a
+#: copy of it declaring one more setting, `cue_delay`, which only that copy has.
+TWO_STRUCTURES = """
+import importlib.util
+from dataclasses import replace
+
+from wl_xcon.task import CLEAR_CUT, HARDER, STIMULUS, Meaning, Param, Task
+
+_spec = importlib.util.spec_from_file_location("reference_detection", "tasks/fixation_detection.py")
+_reference = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_reference)
+detection = _reference.detection
+cued = replace(
+    detection,
+    params=[*detection.params, Param("cue_delay", unit="s", low=0.0, high=1.0, start=0.2)],
+)
+TASK = Task(
+    {"detection": detection, "cued": cued},
+    default="detection",
+    reaction_time=_reference.TASK.reaction_time,
+    choice=_reference.TASK.choice,
+    meanings={"cue_delay": Meaning(CLEAR_CUT, STIMULUS, raising=HARDER)},
+)
+"""
+
+
+def test_a_setting_only_another_structure_declares_is_settable_live(tmp_path):
+    """Review Focus 3 (engine spec §3.5): `Session.set` validates against the union of the task's
+    structures' settings, so one that only a structure other than the default declares is taken,
+    and a name no structure declares is still refused. The union is built once, as the task is
+    taken, never at each trial's publish (the plan's engineering review, M5)."""
+    task = tmp_path / "two_structures.py"
+    task.write_text(TWO_STRUCTURES)
+    spec = _spec(tmp_path / "session")
+    spec.task = str(task)
+    session = _session(spec)
+
+    session.set("cue_delay", 0.5, by=Box("console"))
+
+    assert "cue_delay" in [row[0] for row in session.parameters]
+    assert session._params() is session._params()
+    with pytest.raises(Exceeded, match="not a parameter this task declares"):
+        session.set("cue_dely", 0.5, by=Box("console"))
+
+
+def test_a_session_refuses_a_task_whose_setting_says_nothing_of_what_it_means(tmp_path):
+    """XC-288 §4.1, required: `Session.run` holds the task object to `check_task`, so a setting with
+    no meaning refuses the run before anything is strobed."""
+    text = Path("tasks/fixation_detection.py").read_text()
+    was = '        Param("fix_hold", unit="s", low=0.05, high=2.0, start=0.3),\n'
+    assert text.count(was) == 1
+    task = tmp_path / "unexplained.py"
+    task.write_text(text.replace(
+        was, was + '        Param("cue_delay", unit="s", low=0.0, high=1.0, start=0.2),\n'))
+    spec = _spec(tmp_path / "session")
+    spec.task = str(task)
+
+    with pytest.raises(SystemExit, match="undeclared-meaning"):
+        _session(spec).run()
+
+
+def test_each_run_names_its_task_by_its_content_never_its_path(tmp_path):
+    """Review Focus 4; XC-288 §4.4: each start row's `versions.task` is the task's content hash. A
+    copy of the task under another name is the same task; one with a start value moved is another
+    (the research note's §3.1 found the path there)."""
+    text = Path("tasks/fixation_detection.py").read_text()
+    was = 'Param("fix_hold", unit="s", low=0.05, high=2.0, start=0.3)'
+    assert text.count(was) == 1
+    same, moved = tmp_path / "same_task.py", tmp_path / "moved_task.py"
+    same.write_text(text)
+    moved.write_text(text.replace(was, was.replace("start=0.3", "start=0.4")))
+    # Rig-chaired, so no head is released between the runs of a session that is not a service's.
+    session = _session(_spec(tmp_path / "session", deployment=Deployment.RIG_CHAIRED))
+
+    for path in ("tasks/fixation_detection.py", str(same), str(moved)):
+        session.run(RunSpec(task=path, trials=1, seed=2, values=dict(VALUES)))
+
+    starts = [row for row in _runs(session) if row["event"] == "start"]
+    assert [row["task"] for row in starts] == ["tasks/fixation_detection.py", str(same), str(moved)]
+    hashes = [row["versions"]["task"] for row in starts]
+    assert hashes[0] == hashes[1] == content_hash(_load_task(Path("tasks/fixation_detection.py")))
+    assert hashes[2] != hashes[0] and hashes[2].startswith("sha256:")
 
 
 def test_a_run_after_the_session_ended_is_refused_before_anything_resets(tmp_path):
@@ -2589,7 +2679,7 @@ def test_the_parameters_a_console_shows_are_the_declarations_then_the_ceilings(
     -- and not the out-of-cage ceiling, which is the limit a clock runs against and
     not a task setting."""
     session = _session(_spec(tmp_path))
-    declared = _load_trial(Path("tasks/fixation_detection.py")).params
+    declared = _load_task(Path("tasks/fixation_detection.py")).params
 
     rows = session.parameters
     by_name = {row[0]: row for row in rows}
@@ -2716,7 +2806,7 @@ def test_a_run_refused_by_its_backstop_says_the_findings_through_the_terminal_gu
     """The backstop's refusal quotes the task, as `wlx run`'s does: through `_printable`."""
     made = _sessions.session(tmp_path)
     made.open()
-    monkeypatch.setattr("wl_xcon.taskd.check",
+    monkeypatch.setattr("wl_xcon.taskd.check_task",
                         lambda *a, **k: [Finding("E1", "forged\x1b[2J\nSTOPPED: forged")])
 
     with pytest.raises(SystemExit) as refused:
@@ -4888,11 +4978,17 @@ def test_a_trial_that_faults_keeps_its_number_and_the_next_trial_never_reuses_it
 #: A task with one state: `FIX_ON` on entering it, `CORRECT` 0.01 s later. No window, no
 #: reward and no parameter, so every code its session strobes is one these tests name.
 ONE_STATE_TASK = """
-from wl_xcon.task import After, Mark, On, Outcome, State, Trial
+from wl_xcon.task import NO_CHOICE, After, Mark, On, Outcome, ReactionTime, State, Task, Trial
 
 trial = Trial(
     start="only",
     states=[State("only", enter=[Mark(4096)], go=[On(After(0.01), Outcome.CORRECT)])],
+)
+TASK = Task(
+    {"only": trial},
+    default="only",
+    reaction_time=ReactionTime("only", (Outcome.CORRECT,), "the one state's length"),
+    choice=NO_CHOICE,
 )
 """
 

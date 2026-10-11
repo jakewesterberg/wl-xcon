@@ -3375,11 +3375,13 @@ def test_a_task_refused_by_its_checks_records_that_the_session_did_not_start(
     monkeypatch.setattr(cli, "check", lambda *args, **kwargs: [])
     bad = tmp_path / "bad_task.py"
     bad.write_text(
-        "from wl_xcon.task import After, On, Outcome, State, Trial\n"
+        "from wl_xcon.task import NO_CHOICE, After, On, Outcome, ReactionTime, State, Task, Trial\n"
         "t = Trial(start='a', states=[\n"
         "    State('a', go=[On(After(1.0), Outcome.CORRECT)]),\n"
         "    State('orphan', go=[On(After(1.0), Outcome.CORRECT)]),\n"
         "])\n"
+        "TASK = Task({'t': t}, default='t', choice=NO_CHOICE,\n"
+        "            reaction_time=ReactionTime('a', (Outcome.CORRECT,), 'the wait'))\n"
     )
     argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm())
     argv[1] = str(bad)

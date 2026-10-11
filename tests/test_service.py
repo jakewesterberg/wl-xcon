@@ -2303,7 +2303,7 @@ def test_a_run_its_session_refuses_as_it_starts_is_a_refusal_and_runs_nothing(
     def blocked(path):
         raise SystemExit("task refused, session not started:\n  E1: a finding")
 
-    monkeypatch.setattr(taskd, "_load_trial", blocked)
+    monkeypatch.setattr(taskd, "_load_task", blocked)
     service = _service(tmp_path)
     _step(service, _open())
 
@@ -2329,7 +2329,7 @@ def test_a_run_that_fails_before_it_starts_says_why_on_the_feed_and_on_stderr(
     def broken(path):
         raise RuntimeError("the task file changed under the run")
 
-    monkeypatch.setattr(taskd, "_load_trial", broken)
+    monkeypatch.setattr(taskd, "_load_task", broken)
     service = _service(tmp_path)
     _step(service, _open())
 
@@ -2362,7 +2362,7 @@ def test_a_run_that_fails_before_it_starts_on_a_fault_that_cannot_be_said_is_ref
     def broken(path):
         raise raised()
 
-    monkeypatch.setattr(taskd, "_load_trial", broken)
+    monkeypatch.setattr(taskd, "_load_task", broken)
     service = _service(tmp_path)
     _step(service, _open())
 

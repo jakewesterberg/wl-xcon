@@ -47,9 +47,10 @@ from pathlib import Path
 from wl_xcon import link as _link
 from wl_xcon.actor import Actor
 from wl_xcon.bounds import Bounds, Exceeded, _finite
-from wl_xcon.check import check
-from wl_xcon.cli import _clock, _load_allocation, _load_trial, _printable, _shown
+from wl_xcon.check import check_task
+from wl_xcon.cli import _clock, _load_allocation, _load_task, _printable, _shown
 from wl_xcon.codes import BLOCK_END, RUN_END_MARKER, TRIAL_END, TRIAL_START, Allocation
+from wl_xcon.declarations import content_hash
 from wl_xcon.dio import Absent as NoCard
 from wl_xcon.encode import (
     TRIAL_NUMBER,
@@ -66,7 +67,7 @@ from wl_xcon.record import XCON_DIRNAME, SessionRecord, _local, welfare_note
 from wl_xcon.scheduler import Block, Condition, Scheduler
 from wl_xcon.simulate import Census, Subject, Tally, prepare
 from wl_xcon.run import run_trial
-from wl_xcon.task import Entered, Exited, Outcome, Param, SaccadeTo, Trial
+from wl_xcon.task import Entered, Exited, Outcome, Param, SaccadeTo, Task, Trial
 from wl_xcon.warnlist import Entry, sentence
 from wl_xcon.welfare import (
     OUT_OF_CAGE,
@@ -1757,14 +1758,20 @@ class Session:
             self._refuse(command.name, command.by, why)
 
     def _params(self) -> dict[str, Param]:
-        """The declarations of the run's task: the run in progress or the last one, or
-        the task a `SessionSpec` names before its run starts. **None before any run of a
-        session whose spec names no task** (`wlx taskd`'s), so a setting then is refused
-        as undeclared."""
-        trial = self._trial
-        if trial is None and self.spec.task:
-            trial = self._trial = _load_trial(Path(self.spec.task))
-        return {} if trial is None else {p.name: p for p in trial.params}
+        """The declarations of the run's task -- the union of its trial structures' (engine spec
+        §3.5; engine build C1), which `set` validates against: the run in progress or the last
+        one, or the task a `SessionSpec` names before its run starts. **None before any run of a
+        session whose spec names no task** (`wlx taskd`'s), so a setting then is refused as
+        undeclared. **Built once for each task the session takes** (`_take`), never per call:
+        `publish` asks for it at every trial's boundary, through `parameters`."""
+        if self._task is None and self.spec.task:
+            self._take(_load_task(Path(self.spec.task)))
+        return self._declared
+
+    def _take(self, task: Task) -> None:
+        """Hold `task` as the session's, with its settings by name, built here once (`_params`)."""
+        self._task = task
+        self._declared = {param.name: param for param in task.params}
 
     def _apply_staged(self, index: int) -> None:
         """Applied atomically in the inter-trial interval, and all of them at once.
@@ -1824,7 +1831,9 @@ class Session:
 
     # --- running ----------------------------------------------------------
 
-    _trial: Trial | None = field(init=False, default=None, repr=False)
+    _task: Task | None = field(init=False, default=None, repr=False)
+    #: `_task`'s settings by name, built once as it is taken (`_take`).
+    _declared: dict[str, Param] = field(init=False, default_factory=dict, repr=False)
 
     def _plan(self, run: RunSpec) -> list[Block]:
         """The run's blocks, or the one block a flat run is.
@@ -2071,9 +2080,9 @@ class Session:
                 "rig's calibration record would not load -- so no run draws on this display "
                 "(engine spec §7.1)"
             )
-        trial = _load_trial(Path(run.task))
-        findings = check(trial, self.allocation, geometry=self.spec.geometry,
-                         calibration=self.spec.calibration)
+        task = _load_task(Path(run.task))
+        findings = check_task(task, self.allocation, geometry=self.spec.geometry,
+                              calibration=self.spec.calibration)
         # **By the session's kind** (engine spec §19.2): a warning outside its kinds refuses,
         # here too, as the backstop for a caller that took no pre-flight.
         blocking = [f for f in findings if f.refuses(self.spec.session_kind)]
@@ -2095,13 +2104,15 @@ class Session:
         # starts afresh; the session's welfare, clocks, record, feeds and bounded
         # config go on. A change staged before `run()` is not dropped here: it applies
         # at this run's first boundary, as a live write always has.
-        self._trial = trial
+        self._take(task)
+        # The structure this run plays: the default, until build C2's plans name others.
+        trial = task.trial
         self._run = run
         # **The task's own starting values, under the run's** (P4d-2b spec §6.2:
         # "Starting values are the task's own"; S8 §3.4's task layer; the b3a-2 plan,
         # decision 1): each declared `Param.start` that the run was not given. `wlx run`'s
         # one run fills its spec's own dict, as its values always were (`RunSpec.of`).
-        starts = {param.name: param.start for param in trial.params if param.start is not None}
+        starts = {param.name: param.start for param in task.params if param.start is not None}
         given = dict(run.values)
         if implied:
             for name, start in starts.items():
@@ -2140,7 +2151,9 @@ class Session:
             # is not refused.
             calibration=self.spec.calibration.id,
             allocation=self.spec.allocation,
-            versions={"task": run.task, "allocation": self.spec.allocation},
+            # The task by its content, never its path (XC-288 §4.4; `task` above keeps the path
+            # it was given); the allocation is still named by its path (XC-178).
+            versions={"task": content_hash(task), "allocation": self.spec.allocation},
             trials=run.trials,
             seed=run.seed,
             blocks=None if not run.blocks else [block.name for block in run.blocks],
