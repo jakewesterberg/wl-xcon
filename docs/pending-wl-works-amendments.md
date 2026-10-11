@@ -460,6 +460,13 @@ An agent that sees only sessions cannot tell a day of rest from a day of illness
 - **Account ids only, never names** (Q15, [§5.2](superpowers/specs/2026-10-10-xc288-training-records-design.md#52-what-it-holds)). The agent's file holds the wl.works
   account id of whoever acted, signed in or picked from the list. Names stay in wl.works and are looked up when a
   person needs them. This is why the people list carries ids.
+  *Revised 2026-10-11*: the PI discussed it with wl-works ("wl-works and i discussed the id thing
+  being too conservative. each person will have an id, but the name should also be present in places
+  where who said or did something is useful"). Each person keeps a permanent account id, still the
+  join key, and the person's name is also recorded wherever who said or did something is useful
+  (changes, reasons, notes, marks), so the people list's names are recorded beside its ids, not only
+  looked up ([§3.6](superpowers/specs/2026-10-10-xc288-training-records-design.md#36-who)
+  and [§5.2](superpowers/specs/2026-10-10-xc288-training-records-design.md#52-what-it-holds)'s notes; decisions.md TRN-08).
 - **The rig gets no new network route** ([§5.4](superpowers/specs/2026-10-10-xc288-training-records-design.md#54-rebuilding-and-versions)). The read in item 4 is not made
   by a rig and not by a wl-preproc host (which never initiates a connection). **It runs on one named lab
   workstation** with its own wl.works client and a member's sign-in. Everything the rig itself needs arrives with

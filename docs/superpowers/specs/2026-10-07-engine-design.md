@@ -109,6 +109,15 @@ union of their declared parameters, which `Session.set` validates against. The l
 pre-flight, the review report and the simulator take the task object. Its exact shape is agreed with
 wl-xtasks, where tasks live (§21).
 
+*Engine build C1, 2026-10-11* (plan `docs/superpowers/plans/2026-10-11-engine-c1.md`): the format is
+defined in wl-xcon, and the PI's approval of that plan is wl-xtasks' agreement on it (the PI,
+2026-10-11). A task file defines one `Task`: its trial structures by name, the default one its runs
+play until plans exist, what its settings mean beyond the shared list (`wl_xcon/declarations.py`;
+XC-288 §4.1), what it offers to choose and how its reaction time is defined (XC-288 §4.3), and
+whether it needs a fixed head (§20.1). `Session.set` validates against the union of its structures' settings;
+the loader, the checks (`check.check_task`), the pre-flight, the review report and the simulator
+take it. Plans (C2), procedures (D) and stages (C7) join it as fields of their own.
+
 ## 4. What can be shown (N§1)
 
 ### 4.1 The stimulus model: building blocks and reviewed extensions
@@ -528,6 +537,9 @@ luminance waits on build F (XC-305).
 2. **The operator may edit freely** (conditions and block types added or removed), each change recorded
    and **checked exactly as the task file is**, refused if it fails.
 3. **Several trial structures per task**, each condition naming its own.
+   *Engine build C1, 2026-10-11*: a task object holds several structures, its settings one set and
+   its structures written for one setup; a condition naming its own is build C2's, and until then a
+   run plays one block of the default structure.
 4. **Interludes** (a recalibration, a quick RF map, a rest): the run steps aside and returns to the same
    block. An interlude's trials keep the session's trial numbering but belong to no block, and record the
    task they ran.
@@ -636,6 +648,11 @@ luminance waits on build F (XC-305).
    per eye); the plan in tables; a simulation census per condition and block; a timing diagram (with the
    foreperiod's realized hazard, §6.11). Made for each task version and kept; a session records its
    task's report version.
+   *Engine build C1, 2026-10-11*: the report opens with what a reviewer confirms -- the task's
+   content hash, each setting's role, meaning and where it comes from (the shared list, the task's
+   own, or an override with why), the bounded settings it rewards through, its reaction time, its
+   choice and whether it needs a fixed head (`review.render_task`) -- then each structure. Its plan
+   tables, census and timing diagram, and keeping each version's report, are builds C2 and C8's.
 2. **Simulation is advised, not enforced.**
 3. **The simulated animal** follows declared functions [@wichmann2001psychometric; @carpenter1995neural]
    with named profiles: perfect, chance, an incorrect strategy, normal (85% correct), trying to break the
@@ -686,6 +703,15 @@ summary before its build merges:
    its session kinds are built in `Service._start` and its pre-flight's `warnings` item;
    `preflight.gate` is unchanged, byte for byte. A fixed-head task in a chaired session is not refused
    yet: no task can say it needs a fixed head until build C (XC-277, the plan's call 5).
+   *Engine build C1, 2026-10-11*: a task that needs a fixed head (`Task.needs_fixed_head`) is refused
+   in every session but a head-fixed one -- a chaired session, and a cage-side one too, failing
+   closed -- by a load-time finding, `head-not-fixed`, which fails the pre-flight's task checks,
+   `Session.run`'s backstop and `wlx run`; `preflight.gate` and `Service._start` are unchanged, byte
+   for byte (XC-277, closed). All five reference tasks declare it (the PI, 2026-10-11, confirming the
+   plan's Appendix B, item 31: "kiosk will be head free, in the rig will be head fixed. we do not have
+   head tracking in the rig"), so each is refused in a chaired or a cage-side session; the chaired
+   deployment stays. The finding reads the session's deployment, not whether the head is still fixed
+   (XC-347).
 2. **`Service._open`**: the session kind; a refusal while the OLED's maintenance is due.
    *Engine build B, 2026-10-08*: the session kind is built (carried through `Service._session_for`),
    with the open's one new refusal, the warnings its kind accepts left unaccepted. The refusal while
@@ -711,7 +737,7 @@ summary before its build merges:
   one row per warning a session accepted (`code`, `detail`, `accepted_in`, `session_kind`, `by`, `at`,
   `at_local`, `how`, `run`); onset alignment through the screen log and the flip count.
   **No change to its frozen codec.**
-- **wl-xtasks**: the task object's format (§3.5) and plans; allocation of `STIMULUS_ON`, `STIMULUS_OFF`,
+- **wl-xtasks**: the task object's format (§3.5; defined in wl-xcon by engine build C1, the PI's approval of its plan being wl-xtasks' agreement, 2026-10-11) and plans (build C2); allocation of `STIMULUS_ON`, `STIMULUS_OFF`,
   `STIMULUS_CHANGED` and the anchor code (§8.3, §8.4).
 - **wl-sync**: a two-channel line-out from the task PC card's analog outputs, started by the task-patch
   edge (§9.1); top-and-bottom test patches for V1's scan-out measurement (§6.5).
@@ -753,7 +779,7 @@ The PI's order: **definition first, display by January**.
 | **S** | The Vulkan spike (§10.5). | A's Gabor definition; the PI's Linux machine for timing |
 | **A** | The screen description and the slow exact drawer: blocks, edges' semantics, combinations, groups, placement and per-eye positions, the color spaces and conversion, contrast conventions (migrating the reference tasks), deterministic generators; the review report's frames. | — |
 | **B** | Session kinds and the warnings list with its severity model; the default calibration and calibration records; the `visual_search` training variant. | A |
-| **C + I** | The task object; trials that vary (plans, block-sequence policy, conditions, drawn values, orders, counting table, repeats, caps, interludes, condition registry); live edits as a layer; presets, history; the disengagement alert; the review report and the simulated animal's profiles. | A; wl-xtasks' agreement on the task object |
+| **C + I** | The task object; trials that vary (plans, block-sequence policy, conditions, drawn values, orders, counting table, repeats, caps, interludes, condition registry); live edits as a layer; presets, history; the disengagement alert; the review report and the simulated animal's profiles. | A; wl-xtasks' agreement on the task object (given as the PI's approval of build C1's plan, 2026-10-11) |
 | **E** | The display process: shared memory (after the ADR), lockstep, patches, 10-bit, the lookup table, per-refresh reports, the no-op and development drawers, the rate from the display's mode. Ready for January's V1. | S, A |
 | **T** | The eye tracker's session-start calibration, the stereoscope's monocular grids, the pre-session checks (§12.2-12.5). Before the first animal session. | E; the tracker |
 | **D** | The adaptive library. | C |
@@ -778,7 +804,7 @@ The PI's order: **definition first, display by January**.
   > `target_contrast`. An array's members are **objects**, not items, wherever this spec says "item"
   > of an array or a layout (§4.1, §4.4). The text above is left as approved.
 - **Formats designed in their builds**: the shared-memory layout (E), the generator protocol (H), the
-  continuous mode's record (K), the task object's exact shape (C, with wl-xtasks), "later" per order
+  continuous mode's record (K), the task object's exact shape (C1, defined in wl-xcon, 2026-10-11), "later" per order
   type (C).
 - **Every UNVERIFIED hardware fact**: the panel's scan-out, sRGB mode, care features and maintenance
   control; the 10-bit path; the ABL level; NVIDIA's present timing on this card; which connector carries
