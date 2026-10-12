@@ -207,14 +207,14 @@ def test_a_task_referencing_an_undeclared_parameter_is_refused():
         start="hold",
         params=[Param("fix_hold", unit="s", low=0.1, high=2.0)],
         states=[
-            State("hold", go=[On(After(P("response_window")), Outcome.NO_RESPONSE)]),
+            State("hold", go=[On(After(P("response_deadline")), Outcome.NO_RESPONSE)]),
         ],
     )
 
     findings = check(trial)
 
     assert [f.code for f in findings] == ["undeclared-parameter"]
-    assert "response_window" in findings[0].detail
+    assert "response_deadline" in findings[0].detail
 
 
 def test_a_task_referencing_a_declared_parameter_is_accepted():
@@ -562,7 +562,7 @@ def test_a_disparity_declared_by_choices_is_checked_at_every_choice():
 
 
 def test_an_array_radius_declared_by_choices_is_checked_at_every_choice():
-    """An item ring whose radius is chosen among values reaches as far as the
+    """An object ring whose radius is chosen among values reaches as far as the
     largest; read as 0, it was only ever its centre."""
     ring = [Param("r", unit="deg", choices=(4.0, 20.0))]
 
@@ -571,7 +571,7 @@ def test_an_array_radius_declared_by_choices_is_checked_at_every_choice():
 
 def test_an_appearance_parameter_is_checked_at_each_appearance_it_offers():
     """An appearance is a parameter too (S1a §4), and one of its choices may be an
-    item ring. Check 8 looked only at a literal `Array`, so a ring offered as a choice
+    object ring. Check 8 looked only at a literal `Array`, so a ring offered as a choice
     was never measured."""
     looks = [Param("looks", unit="appearance", choices=(LIT, Array(radius=20.0)))]
     small = [Param("looks", unit="appearance", choices=(LIT, Array(radius=4.0)))]
@@ -803,7 +803,7 @@ def test_a_view_that_is_no_setup_is_refused():
 def test_an_arrays_ring_reaching_a_housing_is_refused_even_though_its_centre_is_legal():
     """Task 3 review: check 8 already refuses a stimulus whose *extent* reaches a
     housing in direct view -- not only one whose centre sits under it. An `Array`'s
-    item ring makes the point without disparity, which would also trip the new
+    object ring makes the point without disparity, which would also trip the new
     needs-stereoscope finding in direct view."""
     centre = (-25.0, -16.0)
     assert DIRECT.can_show(*centre), "the centre alone is legal"

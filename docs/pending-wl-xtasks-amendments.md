@@ -18,6 +18,15 @@ code yet"; `task-event-vocabulary` published with stability `planned`). That is 
 
 # OPEN — the task object's format
 
+*Engine build C1, 2026-10-11*: the format is the one build C1's plan defines
+([`superpowers/plans/2026-10-11-engine-c1.md`](superpowers/plans/2026-10-11-engine-c1.md)), approved by
+the PI on 2026-10-11, and built in `wl_xcon/task.py` (`Task`) and `wl_xcon/declarations.py`. Item 2
+had no reply when the plan was written (wl-xtasks `origin/main` at `0486476`, 2026-10-11, the
+delivery itself), so what wl-xtasks says under it now is a change request. Item 1 stays open until
+tasks move (XC-108); XC-329 waits on build C1 merging. Where the list below says "the item chosen",
+read the object chosen (`Choice.objects`): the PI chose "object" over "item" on 2026-10-11 ("i prefer
+object to item"), and renamed the reference tasks' settings the same day (decisions.md TRN-13).
+
 ## The ask
 
 **Information, adopt, and say now.** The PI decided on 2026-10-11 that wl-xcon's engine build C defines the

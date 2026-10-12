@@ -92,9 +92,9 @@ HALF_V = GEOMETRY.half_field_v_deg
 MARGIN = 0.85
 
 #: The largest eccentricity the reference tasks declared on 2026-09-05 --
-#: `fixation_detection`'s `target_position` ran -16..16 deg, inside the 31.5-inch
-#: panel's field. Accuracy is scored over this region because it is where windows can
-#: actually land, not over the whole panel.
+#: `fixation_detection`'s `target_position` (`target_x` since 2026-10-11) ran
+#: -16..16 deg, inside the 31.5-inch panel's field. Accuracy is scored over this
+#: region because it is where windows can actually land, not over the whole panel.
 MAX_TESTED_DEG = 16.0
 
 #: Where a window can land, which the tested disc is clipped to; `None` when the disc

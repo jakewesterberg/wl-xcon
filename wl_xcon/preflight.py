@@ -34,11 +34,11 @@ from wl_xcon import link as _link
 from wl_xcon import warnlist
 from wl_xcon.actor import Actor, Box, Member
 from wl_xcon.bounds import Exceeded
-from wl_xcon.check import check, parameters_used
-from wl_xcon.cli import _load_bounds, _load_subject_settings, _load_trial, _setup_words
+from wl_xcon.check import check_task, parameters_used
+from wl_xcon.cli import _load_bounds, _load_subject_settings, _load_task, _setup_words
 from wl_xcon.geometry import Rig
 from wl_xcon.link import Preflight, PreflightItem
-from wl_xcon.task import Trial
+from wl_xcon.task import Task
 from wl_xcon.welfare import OUT_OF_CAGE, Absent, Simulated
 
 PASS, UNKNOWN, FAIL = "pass", "unknown", "fail"
@@ -63,19 +63,22 @@ def _said(refused: SystemExit, path: Path) -> str:
     return f"{path.name} ended its own load without saying why (exit {code!r})"
 
 
-def task(path: Path, allocation, geometry, calibration) -> tuple[PreflightItem, Trial | None, list]:
-    """The task's load-time checks in the session's setup: **fail** if it will not load,
-    if its checks do not finish, or if any finding blocks. Returns the loaded `Trial`
-    too, for `values`. **Nothing a task file does raises out of here**, nor out of
+def task(path: Path, allocation, geometry, calibration, deployment=None) -> tuple[PreflightItem, Task | None, list]:
+    """The task's load-time checks in the session's setup: **fail** if it will not load -- a file
+    with trials and no task object among them (engine build C1) --, if its checks do not finish,
+    or if any finding blocks (`check.check_task`: each structure's and the task object's own).
+    Returns the loaded task object too, for `values`. **Nothing a task file does raises out of here**, nor out of
     `values`; and the service contains whatever any item's check raises
     (`Service._preflight`), since it takes a pre-flight on every check and start and a
     raise there would end it.
 
     **Its findings come back too**, for the run's `warnings` item: a warning is never this
     item's fail, whatever the session's kind; and `calibration` is the session's, or `None`
-    while the rig's record will not load (the engine B plan, call 19)."""
+    while the rig's record will not load (the engine B plan, call 19). **The session's deployment**
+    makes a task that needs a fixed head a warning in any but a head-fixed session, never this
+    item's fail (engine spec §20.1; XC-277; the PI, 2026-10-11)."""
     try:
-        trial = _load_trial(path)
+        loaded = _load_task(path)
     except SystemExit as refused:
         return PreflightItem(TASK_CHECKS, FAIL, _said(refused, path)), None, []
     except Exception as broken:  # noqa: BLE001 -- a task file is code; its fault is this item's
@@ -87,7 +90,8 @@ def task(path: Path, allocation, geometry, calibration) -> tuple[PreflightItem, 
             [],
         )
     try:
-        findings = check(trial, allocation, geometry=geometry, calibration=calibration)
+        findings = check_task(loaded, allocation, geometry=geometry, calibration=calibration,
+                              deployment=deployment)
         blocking = [f for f in findings if f.blocking]
     except Exception as broken:  # noqa: BLE001 -- the checks run on code; their fault is this item's
         # Fix round 1 of Task 8: `check` can raise on a task shape it does not expect
@@ -100,7 +104,7 @@ def task(path: Path, allocation, geometry, calibration) -> tuple[PreflightItem, 
                 f"{path.name}'s load-time checks did not finish: "
                 f"{type(broken).__name__}: {broken}",
             ),
-            trial,
+            loaded,
             [],
         )
     if blocking:
@@ -108,7 +112,7 @@ def task(path: Path, allocation, geometry, calibration) -> tuple[PreflightItem, 
             PreflightItem(
                 TASK_CHECKS, FAIL, "; ".join(f"{f.code}: {f.detail}" for f in blocking)
             ),
-            trial,
+            loaded,
             findings,
         )
     return (
@@ -118,7 +122,7 @@ def task(path: Path, allocation, geometry, calibration) -> tuple[PreflightItem, 
             f"{path.name} passes its load-time checks in "
             f"{_setup_words(geometry.view, geometry.half_ipd_cm)}",
         ),
-        trial,
+        loaded,
         findings,
     )
 
@@ -176,9 +180,10 @@ def warnings(entries, kind: str, accepted) -> tuple[PreflightItem, list]:
     ), []
 
 
-def values(trial: Trial | None, given: dict) -> PreflightItem:
+def values(task: Task | None, given: dict) -> PreflightItem:
     """A run's starting values -- its task's own (`Param.start`), with what a console
-    sent over them (P4d-2b spec §6.2; S8 §3.4) -- against the task's own declarations:
+    sent over them (P4d-2b spec §6.2; S8 §3.4) -- against the task's declarations, the union of
+    its trial structures' (engine spec §3.5):
     **fail** for a name it does not declare, a word where it takes a number, a number
     outside its range, a choice it does not offer, or a declaration it cannot be
     compared with; and **for a number the task uses that nothing gives a value** (the
@@ -188,16 +193,19 @@ def values(trial: Trial | None, given: dict) -> PreflightItem:
     a trial needs it -- S4's display is not built -- so one left unset is not refused.
     Checked as `Session.set` checks a live value, non-finite numbers included. **Nothing
     a task's declarations hold raises out of here.**"""
-    if trial is None:
+    if task is None:
         return PreflightItem(
             STARTING_VALUES, FAIL, "the task did not load, so its values cannot be checked"
         )
     try:
-        declared = {param.name: param for param in trial.params}
+        declared = {param.name: param for param in task.params}
         starts = {
             name: param.start for name, param in declared.items() if param.start is not None
         }
-        used = parameters_used(trial)
+        # Every structure's numbers, since engine build C1: a run's values cover each trial
+        # structure its task can play, failing closed (the engine C1 plan's call 15); build C2's
+        # plans narrow it to the structures a run plays.
+        used = frozenset().union(*(parameters_used(s) for s in task.structures.values()))
     except Exception as broken:  # noqa: BLE001 -- a task's declarations are code's output
         return PreflightItem(
             STARTING_VALUES,

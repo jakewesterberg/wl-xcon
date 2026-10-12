@@ -44,6 +44,13 @@ and expose live-editable parameters.
    neither was visible on reading. See
    `docs/superpowers/specs/2026-08-31-S1-task-model-design.md` §7.
 
+**Amended 2026-10-11 (engine build C1): a task file defines one task object** (the PI, 2026-10-11:
+build C1 defines the task object's format in wl-xcon, his approval of its plan being wl-xtasks'
+agreement on it). `wl_xcon/task.py`'s `Task` holds the file's trial structures, still declarative
+data under item 1, and declares what each setting means, what the task offers to choose and how its
+reaction time is defined (XC-288 §4), all checked at load. Item 3 is unchanged: these are Python
+declarations, and wl-xtasks writes its tasks in them; item 4's codes stay wl-xtasks' to allocate.
+
 ## Alternatives considered
 
 - **A bespoke declarative DSL (new text language).** Rejected: models write mainstream

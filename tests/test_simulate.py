@@ -22,6 +22,7 @@ from wl_xcon.task import (
     SaccadeTo,
     Score,
     State,
+    Task,
     Trial,
     Window,
 )
@@ -219,3 +220,20 @@ def test_a_remembered_window_needs_no_stimulus():
         frame_period=1 / 240,
     )
     assert census.outcomes[Outcome.CORRECT] > 150
+
+
+def test_the_simulator_takes_a_task_object_and_plays_its_default_structure():
+    """Engine spec §3.5 (engine build C1): the simulator takes the task object and plays the
+    structure its runs play until plans exist (build C2), its default."""
+    other = Trial(start="only", states=[State("only", go=[On(After(0.05), Outcome.NO_RESPONSE)])])
+    task = Task({"other": other, "detection": DETECTION}, default="detection")
+
+    def census(of):
+        return simulate(of, Subject(seed=7, hazards={Entered: 0.25, Exited: 0.02}),
+                        trials=300, frame_period=0.01)
+
+    played, alone = census(task), census(DETECTION)
+
+    assert (played.outcomes, played.states_visited) == (alone.outcomes, alone.states_visited)
+    assert "only" not in played.states_visited
+    assert played.uncovered(task) == played.uncovered(DETECTION)

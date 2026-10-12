@@ -279,13 +279,13 @@ def test_a_grating_with_a_declared_mean_on_another_background_is_warned_not_refu
     assert findings[0].accepted_in == ("training", "piloting", "recording")
 
 
-def test_an_array_s_items_must_be_lit_too():
+def test_an_array_s_objects_must_be_lit_too():
     assert "unlit" in _refused(_one(Array(looks=Disc(color=Gray(40.0)))))
 
 
 def test_a_degenerate_block_inside_an_array_member_is_reported_once():
-    items = Array(looks=Disc(size=0.0, color=Gray(40.0)), among=Disc(color=Gray(40.0)))
-    findings = [f.code for f in check(_one(items, background=GRAY_BG)) if f.blocking]
+    array = Array(looks=Disc(size=0.0, color=Gray(40.0)), among=Disc(color=Gray(40.0)))
+    findings = [f.code for f in check(_one(array, background=GRAY_BG)) if f.blocking]
     assert findings.count("bad-block") == 1
 
 
@@ -547,7 +547,7 @@ def _multiplying(looks, params=()) -> Trial:
     return _placed(looks=looks, background=GRAY_BG, combine="multiply", params=params)
 
 
-def test_multiply_reads_each_item_of_an_array():
+def test_multiply_reads_each_object_of_an_array():
     assert "multiply-needs-modulation" in _refused(_multiplying(Array(looks=LIT, among=LIT)))
     assert "multiply-needs-modulation" in _refused(_multiplying(Array(looks=WEBER, among=LIT)))
     assert _refused(_multiplying(Array(looks=WEBER, among=WEBER))) == set()
@@ -641,7 +641,7 @@ def test_a_parameter_whose_every_value_is_sound_is_accepted():
               Param("m", unit="fraction", choices=(0.0, 1.0)), Param("L", unit="cd/m2", low=0.0, high=100.0)]
     looks = Array(looks=Disc(size=P("s"), contrast=Weber(P("c"))),
                   among=Gabor(sigma=P("s"), contrast=Michelson(P("m"))))
-    # A background that can reach 0 cd/m² can be black, for each item.
+    # A background that can reach 0 cd/m² can be black, for each object.
     assert _refused(_one(looks, params=params, background=Gray(P("L")))) == {"weber-on-black", "unlit"}
     assert _refused(_one(looks, params=params, background=GRAY_BG)) == set()
 
@@ -784,11 +784,11 @@ def test_a_parameter_fill_is_held_to_the_drift_rule_at_each_choice():
     params = _fill_choices(_good_fill(), _bad_fill())
     direct = look.Look(shape=shape, fill=P("f"), orientation=0.0)
     assert _blocks(_one(direct, params=params, background=GRAY_BG))
-    items = Array(looks=direct, among=direct)
-    assert _blocks(_one(items, params=params, background=GRAY_BG))
+    array = Array(looks=direct, among=direct)
+    assert _blocks(_one(array, params=params, background=GRAY_BG))
     fine = _fill_choices(_good_fill(), look.SineGrating(direction=270.0, contrast=Michelson(0.5)))
     assert _refused(_one(direct, params=fine, background=GRAY_BG)) == set()
-    assert _refused(_one(items, params=fine, background=GRAY_BG)) == set()
+    assert _refused(_one(array, params=fine, background=GRAY_BG)) == set()
 
 
 # --- Values of the wrong kind, and parameters that refer to themselves (A1 follow-ups) --
@@ -963,7 +963,7 @@ def test_vertices_that_enclose_an_area_are_accepted():
     (LIT, P("a"), [Param("a", unit="color", choices=(P("a"),))], "cover"),
     (LIT, P("a"), [Param("a", unit="color", choices=(P("b"),)),
                    Param("b", unit="color", choices=(Gray(P("a")),))], "cover"),
-    # An array, multiplying, whose items are the parameter that offers it.
+    # An array, multiplying, whose objects are the parameter that offers it.
     (P("a"), GRAY_BG, [Param("a", unit="appearance", choices=(Array(looks=P("a"), among=WEBER),))],
      "multiply"),
 ])
@@ -1109,8 +1109,8 @@ def test_a_multiplying_grating_that_declares_a_mean_is_refused():
     assert "bad-placement" in _refused(_over_lit(chosen, "multiply", params=means, background=GRAY_BG))
     looks = [Param("l", unit="appearance", choices=(Gabor(contrast=Michelson(0.5)), grating))]
     assert "bad-placement" in _refused(_over_lit(P("l"), "multiply", params=looks, background=GRAY_BG))
-    items = Array(looks=Gabor(contrast=Michelson(0.5)), among=grating)
-    assert "bad-placement" in _refused(_over_lit(items, "multiply", background=GRAY_BG))
+    array = Array(looks=Gabor(contrast=Michelson(0.5)), among=grating)
+    assert "bad-placement" in _refused(_over_lit(array, "multiply", background=GRAY_BG))
     gain = Stimulus("s", at=(0.0, 0.0), looks=Gabor(contrast=Michelson(0.5)), combine="multiply")
     trial = dataclasses.replace(_two_updates(gain, Update("s", layer=1), Update("s", looks=grating)),
                                 background=GRAY_BG)

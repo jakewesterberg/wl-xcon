@@ -1,7 +1,7 @@
 """Set size as a value, not a structure.
 
-An N-item search array written as N separate `Show` actions makes set size a change
-to the *shape* of the task -- a different task file for 4 items and 8 items, which
+An N-object search array written as N separate `Show` actions makes set size a change
+to the *shape* of the task -- a different task file for 4 objects and 8 objects, which
 defeats the entire reason the model is declarative and makes the commonest
 manipulation in visual search unavailable to live editing. Visual search is the
 lab's programme, so this was not a small gap.
@@ -15,7 +15,7 @@ from wl_xcon.check import check
 from wl_xcon.task import (
     Array,
     Disc,
-    ItemWindows,
+    ObjectWindows,
     On,
     After,
     Outcome,
@@ -45,7 +45,7 @@ def test_set_size_is_a_parameter_the_array_expands_at_run_time():
 
 def test_the_target_wears_the_target_appearance_and_the_rest_do_not():
     array = Array(n=4, target=1, looks=Square(size=1.0), among=Disc(size=1.0))
-    worn = [array.item_looks(i, {}) for i in range(4)]
+    worn = [array.object_looks(i, {}) for i in range(4)]
 
     assert worn[1] == Square(size=1.0)
     assert worn[0] == worn[2] == worn[3] == Disc(size=1.0)
@@ -55,15 +55,15 @@ def test_a_target_index_outside_the_set_is_refused_over_the_whole_range():
     """Legal at the value someone tested, illegal at one the console can set.
 
     Set size and target index are both live parameters, so an experimenter can put
-    the target at position 6 of a 4-item array between one trial and the next. The
+    the target at position 6 of a 4-object array between one trial and the next. The
     check reasons over declared *ranges*, which is the only way to catch it before
     it happens.
     """
     trial = Trial(
         start="on",
-        windows=[ItemWindows(of="search", radius=2.0)],
+        windows=[ObjectWindows(of="search", radius=2.0)],
         params=[
-            Param("set_size", unit="items", low=2, high=8),
+            Param("set_size", unit="objects", low=2, high=8),
             Param("target_index", unit="index", low=0, high=11),
         ],
         states=[
@@ -87,7 +87,7 @@ def test_a_target_index_outside_the_set_is_refused_over_the_whole_range():
 
 def test_the_array_generates_its_own_windows():
     """One declaration, n windows, because n is not known until a trial runs."""
-    windows = ItemWindows(of="search", radius=2.0).expand(
+    windows = ObjectWindows(of="search", radius=2.0).expand(
         Array(n=4, radius=8.0, target=1), {}
     )
     names = {w.name for w in windows}
@@ -100,7 +100,7 @@ def test_the_array_generates_its_own_windows():
         "search.target",
         "search.distractor",
     }
-    # The target alias sits where item 1 sits, not somewhere of its own.
+    # The target alias sits where object 1 sits, not somewhere of its own.
     by_name = {w.name: w for w in windows}
     assert by_name["search.target"].at == by_name["search.1"].at
     # Every generated window scores the array, so the display check applies to
@@ -112,14 +112,14 @@ def test_a_saccade_to_a_distractor_is_distinguishable_from_one_to_the_target():
     """The measurement search tasks exist to make.
 
     Without a distractor alias every error saccade would have to be enumerated as
-    a separate transition per item -- which is n transitions, so it is the same
+    a separate transition per object -- which is n transitions, so it is the same
     structure-versus-value problem one level down.
     """
     from wl_xcon.run import Scripted, run_trial
 
     trial = Trial(
         start="search",
-        windows=[ItemWindows(of="search", radius=2.0)],
+        windows=[ObjectWindows(of="search", radius=2.0)],
         params=[],
         states=[
             State(
@@ -149,12 +149,12 @@ def test_a_saccade_to_a_distractor_is_distinguishable_from_one_to_the_target():
 
 
 def test_an_array_that_would_not_fit_on_the_display_is_refused():
-    """Check 8, over an array's items rather than one stimulus."""
+    """Check 8, over an array's objects rather than one stimulus."""
     from wl_xcon.geometry import Geometry
 
     trial = Trial(
         start="on",
-        windows=[ItemWindows(of="search", radius=2.0)],
+        windows=[ObjectWindows(of="search", radius=2.0)],
         params=[],
         states=[
             State(
@@ -179,8 +179,8 @@ def test_an_array_that_would_not_fit_on_the_display_is_refused():
     assert "stimulus-off-screen" in codes
 
 
-def test_a_hold_on_an_alias_resolves_to_the_item_it_names():
-    """`search.target` is where item 1 is, and the loop must know that.
+def test_a_hold_on_an_alias_resolves_to_the_object_it_names():
+    """`search.target` is where object 1 is, and the loop must know that.
 
     A saccade guard reaches the world directly, so aliases worked there by accident.
     Membership guards -- entering, leaving, holding -- are derived by the loop from
@@ -192,7 +192,7 @@ def test_a_hold_on_an_alias_resolves_to_the_item_it_names():
 
     trial = Trial(
         start="search",
-        windows=[ItemWindows(of="search", radius=2.0)],
+        windows=[ObjectWindows(of="search", radius=2.0)],
         params=[],
         states=[
             State(
@@ -214,14 +214,14 @@ def test_a_hold_on_an_alias_resolves_to_the_item_it_names():
         ],
     )
 
-    class OnItem:
-        """A world that knows only concrete item windows, as a rig would."""
+    class OnObject:
+        """A world that knows only concrete object windows, as a rig would."""
 
-        def __init__(self, item: str) -> None:
-            self.item = item
+        def __init__(self, held: str) -> None:
+            self.held = held
 
         def in_window(self, window: str, frame: int, eye: str = "both") -> bool:
-            return window == self.item
+            return window == self.held
 
         def happened(self, guard, state: str, frame: int) -> bool:
             return False
@@ -232,8 +232,8 @@ def test_a_hold_on_an_alias_resolves_to_the_item_it_names():
         def signal(self, frame: int) -> str:
             return "ok"
 
-    assert run_trial(trial, OnItem("search.1"), 0.01).outcome is Outcome.CORRECT
-    assert run_trial(trial, OnItem("search.2"), 0.01).outcome is Outcome.NO_RESPONSE
+    assert run_trial(trial, OnObject("search.1"), 0.01).outcome is Outcome.CORRECT
+    assert run_trial(trial, OnObject("search.2"), 0.01).outcome is Outcome.NO_RESPONSE
 
 
 def test_a_search_task_simulates():
@@ -242,7 +242,7 @@ def test_a_search_task_simulates():
 
     trial = Trial(
         start="search",
-        windows=[ItemWindows(of="search", radius=2.0)],
+        windows=[ObjectWindows(of="search", radius=2.0)],
         params=[],
         states=[
             State(

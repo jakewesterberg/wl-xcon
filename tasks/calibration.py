@@ -40,6 +40,14 @@ from wl_xcon.task import (
     Show,
     State,
     Stimulus,
+    CLEAR_CUT,
+    CRITERION,
+    EASIER,
+    HARDER,
+    NO_CHOICE,
+    Meaning,
+    ReactionTime,
+    Task,
     Trial,
     Window,
 )
@@ -73,7 +81,7 @@ calibration = Trial(
         # for a good map it would reject every fixation on the uncalibrated animal
         # it exists to measure.
         Param("cal_window", unit="deg", low=1.0, high=8.0),
-        Param("fix_timeout", unit="s", low=0.5, high=10.0),
+        Param("fix_acquisition", unit="s", low=0.5, high=10.0),
         Param("cal_hold", unit="s", low=0.1, high=2.0),
         # Absolute luminance, D65 white (the PI, 2026-10-07: "Absolute cd/m²", starting
         # at "40 cd/m²"). Bounded at 80, the default calibration's white (the sRGB
@@ -87,7 +95,7 @@ calibration = Trial(
             enter=[Show(TARGET), Mark(4105)],
             go=[
                 On(Entered("cal"), "hold"),
-                On(After(P("fix_timeout")), Outcome.NO_FIXATION, do=[Mark(4100)]),
+                On(After(P("fix_acquisition")), Outcome.NO_FIXATION, do=[Mark(4100)]),
             ],
         ),
         State(
@@ -103,8 +111,37 @@ calibration = Trial(
                 # practice, for the reason `fixation_detection` gives: check 4
                 # refuses a state that could wait forever, and "in practice" is the
                 # reasoning that produced the S1 bake-off's unbounded hold.
-                On(After(P("fix_timeout")), Outcome.NO_FIXATION),
+                On(After(P("fix_acquisition")), Outcome.NO_FIXATION),
             ],
         ),
     ],
+)
+
+
+#: The task object (engine spec §3.5; engine build C1): its reaction time is the latency to
+#: acquire the target, it offers no choice, and it declares two settings only it has (the engine
+#: C1 plan's Appendix B, items 24 and 25, as the PI confirmed them on 2026-10-11; decisions.md
+#: TRN-10); its `target_x` and `target_y` are the shared list's, the detection tasks' too. Where a
+#: target goes is the constellation's schedule, so its two positions are set by the schedule more
+#: than by a trainer.
+TASK = Task(
+    structures={"calibration": calibration},
+    default="calibration",
+    reaction_time=ReactionTime(
+        state="await_fix",
+        to=("hold",),
+        note=(
+            "from entering await_fix, the frame the calibration target is commanded, to gaze "
+            "entering its window: the latency to acquire it"
+        ),
+    ),
+    choice=NO_CHOICE,
+    meanings={
+        "cal_window": Meaning(CLEAR_CUT, CRITERION, raising=EASIER),
+        "cal_hold": Meaning(CLEAR_CUT, CRITERION, raising=HARDER),
+    },
+    # The rig fixes the head, which has no tracking there (the PI, 2026-10-11: "kiosk will be head
+    # free, in the rig will be head fixed. we do not have head tracking in the rig"; the engine C1
+    # plan's Appendix B, item 31): a warning in any session not declared head-fixed (`RIG_FIXED`).
+    needs_fixed_head=True,
 )

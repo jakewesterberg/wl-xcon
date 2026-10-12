@@ -15,16 +15,26 @@ from _sessions import WALL, session
 from wl_xcon import preflight
 from wl_xcon.actor import Box
 from wl_xcon.check import parameters_used
-from wl_xcon.cli import _load_allocation, _load_trial
+from wl_xcon.cli import _load_allocation, _load_task
 from wl_xcon.findings import NOT_RECORDING, SESSION_KINDS
 from wl_xcon.link import NOTE_LIMIT, Preflight, PreflightItem
 from wl_xcon.photometry import SRGB
-from wl_xcon.task import Param
+from wl_xcon.task import P, Param, Task
 from wl_xcon.warnlist import Entry
 from wl_xcon.welfare import Absent, Deployment, Simulated
 
 ALLOCATION = _load_allocation(Path("tasks/allocation.py"))
 TASK = Path("tasks/fixation_detection.py")
+
+
+def _trial():
+    """The reference task's one trial structure (engine build C1)."""
+    return _load_task(TASK).trial
+
+
+def _as_task(trial) -> Task:
+    """`trial` as a task's one structure, which is what `preflight.values` reads."""
+    return Task({"detection": trial}, default="detection")
 
 
 def test_a_task_that_passes_its_checks_in_the_sessions_setup_passes():
@@ -42,7 +52,7 @@ def test_a_task_written_for_the_other_setup_fails_naming_the_finding():
 
 @pytest.mark.parametrize(
     ("text", "said"),
-    [("x = 1\n", "defines 0 trials"), ("raise ValueError('broken on purpose')\n", "did not load")],
+    [("x = 1\n", "defines 0 task objects"), ("raise ValueError('broken on purpose')\n", "did not load")],
 )
 def test_a_task_file_that_does_not_load_fails_rather_than_raising(tmp_path, text, said):
     bad = tmp_path / "bad.py"
@@ -164,17 +174,17 @@ def test_a_repeated_code_is_named_once_with_its_count_in_the_order_codes_first_a
     ],
 )
 def test_starting_values_are_checked_against_the_tasks_declarations(given, result, said):
-    item = preflight.values(_load_trial(TASK), given)
+    item = preflight.values(_as_task(_trial()), given)
 
     assert (item.name, item.result) == ("starting values", result) and said in item.said
 
 
 def _declaring(declared: Param):
     """The reference task with `fix_hold` declared as `declared` instead."""
-    trial = _load_trial(TASK)
-    return dataclasses.replace(
+    trial = _trial()
+    return _as_task(dataclasses.replace(
         trial, params=[declared if p.name == "fix_hold" else p for p in trial.params]
-    )
+    ))
 
 
 @pytest.mark.parametrize(
@@ -190,15 +200,15 @@ def test_a_value_whose_declaration_cannot_be_compared_fails_rather_than_raising(
     typed as text passes `check()` and then raised `TypeError` here -- out of the
     service's pre-flight, ending `wlx taskd` with the animal out. It fails that value,
     naming it, and every other value is still checked."""
-    item = preflight.values(_declaring(declared), {"fix_hold": 0.3, "fix_timeout": 99.0})
+    item = preflight.values(_declaring(declared), {"fix_hold": 0.3, "fix_acquisition": 99.0})
 
     assert (item.name, item.result) == ("starting values", "fail")
     assert "'fix_hold' could not be checked against its declaration: TypeError: " in item.said
-    assert "'fix_timeout' is declared over [0.5, 10.0] s and 99.0 is outside it" in item.said
+    assert "'fix_acquisition' is declared over [0.5, 10.0] s and 99.0 is outside it" in item.said
 
 
 def test_declarations_that_cannot_be_read_fail_every_value_rather_than_raising():
-    item = preflight.values(dataclasses.replace(_load_trial(TASK), params=None), {"fix_hold": 0.3})
+    item = preflight.values(_as_task(dataclasses.replace(_trial(), params=None)), {"fix_hold": 0.3})
 
     assert (item.name, item.result) == ("starting values", "fail")
     assert item.said.startswith("the task's parameter declarations could not be read: TypeError: ")
@@ -440,30 +450,30 @@ def test_only_an_unknown_nobody_named_here_is_recorded_as_carried():
 def test_parameters_used_names_every_parameter_the_task_references():
     """From the task down -- states, windows and the stimuli they name -- as
     `run._resolve` meets them in a trial."""
-    assert parameters_used(_load_trial(TASK)) == frozenset({
-        "fix_hold", "fix_timeout", "fix_window", "response_window", "target_hold",
-        "target_looks", "target_position", "target_window",
+    assert parameters_used(_trial()) == frozenset({
+        "fix_hold", "fix_acquisition", "fix_window", "response_deadline", "target_hold",
+        "target_appearance", "target_x", "target_y", "target_window",
         "fix_luminance", "target_luminance",
     })
 
 
 def test_a_run_given_nothing_starts_from_the_tasks_own_values():
     """What the page sends (P4d-2b spec §6.2): no values, and the task's own pass."""
-    item = preflight.values(_load_trial(TASK), {})
+    item = preflight.values(_as_task(_trial()), {})
 
-    assert (item.result, item.said) == ("pass", "9 starting value(s), each declared and in range")
+    assert (item.result, item.said) == ("pass", "10 starting value(s), each declared and in range")
 
 
 def _starting(**starts):
     """The reference task with the named parameters' own `start` replaced."""
-    trial = _load_trial(TASK)
-    return dataclasses.replace(
+    trial = _trial()
+    return _as_task(dataclasses.replace(
         trial,
         params=[
             dataclasses.replace(param, start=starts[param.name]) if param.name in starts else param
             for param in trial.params
         ],
-    )
+    ))
 
 
 def test_a_number_the_task_uses_that_nothing_gives_a_value_fails_naming_it():
@@ -479,7 +489,7 @@ def test_a_number_the_task_uses_that_nothing_gives_a_value_fails_naming_it():
     assert (item.name, item.result) == ("starting values", "fail")
     assert "'fix_hold' is used by the task and has no starting value" in item.said
     assert "'fix_window' is used by the task and has no starting value" in item.said
-    assert "target_looks" not in item.said
+    assert "target_appearance" not in item.said
     assert preflight.values(trial, {"fix_hold": 0.3, "fix_window": 2.0}).result == "pass"
 
 
@@ -500,11 +510,13 @@ def test_a_tasks_own_start_outside_its_range_fails_as_a_sent_value_does():
     declare one; the pre-flight still holds every merged value to its range."""
     with pytest.raises(ValueError, match="'fix_hold'.*99.0 is above"):
         _starting(fix_hold=99.0)
-    item = preflight.values(_unchecked(_load_trial(TASK), "fix_hold", 99.0), {})
+    item = preflight.values(_as_task(_unchecked(_trial(), "fix_hold", 99.0)), {})
 
     assert item.result == "fail"
     assert "'fix_hold' is declared over [0.05, 2.0] s and 99.0 is outside it" in item.said
-    assert preflight.values(_unchecked(_load_trial(TASK), "fix_hold", 99.0), {"fix_hold": 0.3}).result == "pass", (
+    assert preflight.values(
+        _as_task(_unchecked(_trial(), "fix_hold", 99.0)), {"fix_hold": 0.3}
+    ).result == "pass", (
         "what was sent is what the run starts with"
     )
 
@@ -512,11 +524,53 @@ def test_a_tasks_own_start_outside_its_range_fails_as_a_sent_value_does():
 def test_a_parameter_used_but_never_declared_fails_naming_it():
     """`check()`'s undeclared-parameter finding walks the states only; a window's radius
     naming nothing declared passed both and faulted after `RUN_START`."""
-    from wl_xcon.task import P
-
-    trial = _load_trial(TASK)
+    trial = _trial()
     windows = [dataclasses.replace(trial.windows[0], radius=P("fix_windw"))] + list(trial.windows[1:])
-    item = preflight.values(dataclasses.replace(trial, windows=windows), {})
+    item = preflight.values(_as_task(dataclasses.replace(trial, windows=windows)), {})
 
     assert item.result == "fail"
     assert "'fix_windw' is used by the task and is not declared" in item.said
+
+
+def test_a_task_file_from_before_the_task_object_fails_its_preflight_saying_why(tmp_path):
+    """Review Focus 1: a file with a trial and no task object is refused by its loader, which says
+    how to wrap it; the item fails and nothing raises."""
+    bare = tmp_path / "bare.py"
+    bare.write_text("from wl_xcon.task import After, On, Outcome, State, Trial\n"
+                    "t = Trial(start='a', states=[State('a', go=[On(After(1.0), Outcome.CORRECT)])])\n")
+
+    item, task, _ = preflight.task(bare, ALLOCATION, DIRECT, SRGB)
+
+    assert (item.result, task) == ("fail", None)
+    assert "defines 0 task objects" in item.said and "wraps its trials in one Task" in item.said
+
+
+def test_a_task_whose_setting_says_nothing_of_what_it_means_fails_its_preflight(tmp_path):
+    text = TASK.read_text()
+    was = '        Param("fix_hold", unit="s", low=0.05, high=2.0, start=0.3),\n'
+    assert text.count(was) == 1
+    unexplained = tmp_path / "unexplained.py"
+    unexplained.write_text(text.replace(
+        was, was + '        Param("cue_delay", unit="s", low=0.0, high=1.0, start=0.2),\n'))
+
+    item, task, _ = preflight.task(unexplained, ALLOCATION, DIRECT, SRGB)
+
+    assert item.result == "fail" and "undeclared-meaning" in item.said and task is not None
+
+
+def test_a_run_needs_a_value_for_every_number_any_of_its_structures_uses():
+    """The engine C1 plan's call 15: a run's starting values cover every trial structure its task
+    can play, failing closed, until build C2's plans name the ones a run plays."""
+    trial = _trial()
+    cued = dataclasses.replace(
+        trial,
+        params=[*trial.params, Param("cue_delay", unit="s", low=0.0, high=1.0)],
+        windows=[dataclasses.replace(trial.windows[0], radius=P("cue_delay")), *trial.windows[1:]],
+    )
+    task = Task({"detection": trial, "cued": cued}, default="detection")
+
+    item = preflight.values(task, {})
+
+    assert item.result == "fail"
+    assert "'cue_delay' is used by the task and has no starting value" in item.said
+    assert preflight.values(task, {"cue_delay": 0.2}).result == "pass"

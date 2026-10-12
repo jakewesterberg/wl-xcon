@@ -1334,14 +1334,14 @@ def test_a_service_stopped_with_a_session_open_leaves_it_stranded_for_the_next(t
 # --- runs -----------------------------------------------------------------------
 
 VALUES = {
-    "fix_timeout": 4.0, "fix_hold": 0.3, "response_window": 0.6, "target_hold": 0.2,
-    "fix_window": 2.0, "target_window": 3.0, "target_position": 10.0,
+    "fix_acquisition": 4.0, "fix_hold": 0.3, "response_deadline": 0.6, "target_hold": 0.2,
+    "fix_window": 2.0, "target_window": 3.0, "target_x": 10.0,
 }
 #: Starting values for `tasks/visual_search_training.py`, which declares no start for these.
 SEARCH_VALUES = {
-    "fix_timeout": 4.0, "fix_hold": 0.3, "response_window": 0.6, "target_hold": 0.2,
-    "fix_window": 2.0, "item_window": 1.0, "eccentricity": 8.0, "set_size": 4,
-    "target_index": 0, "array_phase": 0.0,
+    "fix_acquisition": 4.0, "fix_hold": 0.3, "response_deadline": 0.6, "target_hold": 0.2,
+    "fix_window": 2.0, "object_window": 1.0, "array_eccentricity": 8.0, "set_size": 4,
+    "target_index": 0, "array_rotation": 0.0,
 }
 UNKNOWN = ("warnings", "pump calibration", "eye tracker")
 
@@ -1428,6 +1428,37 @@ def test_a_task_the_checks_raise_on_fails_its_preflight_and_the_service_goes_on(
     assert started.run_index is None and _runs(service.root) == []
     assert "pre-flight failed, so the run does not start: task checks: " in _refused(started)[-1]
     assert isinstance(ended, Idle) and _kinds(service.root)[-2:] == ["returned", "session ended"]
+
+
+def test_the_reference_task_runs_in_a_chaired_session_once_its_head_warning_is_accepted(tmp_path):
+    """Review Focus 5, revised; engine spec §20.1 (XC-277): the reference task needs a fixed head
+    (the PI, 2026-10-11; the engine C1 plan's Appendix B, item 31), and in a chaired session that is
+    a warning, not a refusal (the PI, 2026-10-11: "warnings are more appropriate most of the time
+    ... the experimenter needs free control most of the time"). Its task checks pass and its
+    warnings item asks, naming `head-not-fixed`; a start that does not accept it is refused, nothing
+    strobed or written, and the session waits between runs; one that does starts, and
+    `warnings.jsonl` records the warning with why. A head-fixed session is not warned."""
+    chaired, fixed = _service(tmp_path / "chaired"), _service(tmp_path / "fixed")
+    _step(chaired, _open(deployment="rig_chaired"))
+    _step(fixed, _open())
+
+    unaccepted = _step(chaired, _start(acknowledged=("pump calibration", "eye tracker")))
+    codes = list(chaired.session.card.codes)
+    started = _step(chaired, _start())
+    plain = _step(fixed, _start())
+
+    items = {i.name: i for i in unaccepted.preflight.items}
+    assert items["task checks"].result == "pass"
+    assert items["warnings"].result == "unknown" and "head-not-fixed" in items["warnings"].said
+    assert "unknown item(s) nobody has acknowledged: warnings." in _refused(unaccepted)[-1]
+    assert unaccepted.run_index is None and 4135 not in codes
+    assert unaccepted.phase == "between_runs", "the session waits between runs"
+    assert started.run_index == 0 and plain.run_index == 0
+    warned = _jsonl(chaired.root / "2027-01-14_01" / "xcon" / "warnings.jsonl")
+    (head,) = [row for row in warned if row["code"] == "head-not-fixed"]
+    assert head["how"] == "start" and "no head tracking" in head["detail"]
+    assert "head-not-fixed" not in {
+        row["code"] for row in _jsonl(fixed.root / "2027-01-14_01" / "xcon" / "warnings.jsonl")}
 
 
 def test_a_task_whose_declarations_are_malformed_fails_its_preflight_and_the_service_goes_on(
@@ -2303,7 +2334,7 @@ def test_a_run_its_session_refuses_as_it_starts_is_a_refusal_and_runs_nothing(
     def blocked(path):
         raise SystemExit("task refused, session not started:\n  E1: a finding")
 
-    monkeypatch.setattr(taskd, "_load_trial", blocked)
+    monkeypatch.setattr(taskd, "_load_task", blocked)
     service = _service(tmp_path)
     _step(service, _open())
 
@@ -2329,7 +2360,7 @@ def test_a_run_that_fails_before_it_starts_says_why_on_the_feed_and_on_stderr(
     def broken(path):
         raise RuntimeError("the task file changed under the run")
 
-    monkeypatch.setattr(taskd, "_load_trial", broken)
+    monkeypatch.setattr(taskd, "_load_task", broken)
     service = _service(tmp_path)
     _step(service, _open())
 
@@ -2362,7 +2393,7 @@ def test_a_run_that_fails_before_it_starts_on_a_fault_that_cannot_be_said_is_ref
     def broken(path):
         raise raised()
 
-    monkeypatch.setattr(taskd, "_load_trial", broken)
+    monkeypatch.setattr(taskd, "_load_task", broken)
     service = _service(tmp_path)
     _step(service, _open())
 

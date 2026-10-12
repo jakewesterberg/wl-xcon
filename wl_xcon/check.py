@@ -25,16 +25,18 @@ from wl_xcon.photometry import (
     xyY,
 )
 from wl_xcon.task import (
+    CHOSEN_BY,
     RDS,
     After,
     Array,
-    ItemWindows,
     Custom,
     Entered,
     Exited,
     Hide,
     Hold,
     Mark,
+    NoChoice,
+    ObjectWindows,
     Outcome,
     P,
     Param,
@@ -42,6 +44,7 @@ from wl_xcon.task import (
     SaccadeTo,
     Show,
     Stimulus,
+    Task,
     Touched,
     Trial,
     Unchanged,
@@ -50,6 +53,7 @@ from wl_xcon.task import (
     actions_of,
     arrays_of,
 )
+from wl_xcon.welfare import Deployment
 
 
 def check(
@@ -85,6 +89,224 @@ def check(
         + _placement_faults(trial)
         + _trial_display_faults(trial)
     )
+
+
+def check_task(
+    task: Task,
+    allocation: Allocation = PROVISIONAL,
+    components: Registry | None = None,
+    geometry: Geometry | None = None,
+    calibration: Calibration | None = None,
+    deployment: Deployment | None = None,
+) -> list[Finding]:
+    """The load-time checks of a task object (engine spec §3.5; engine build C1): each trial
+    structure's own (`check`), named by its structure where the task has several (the engine C1
+    plan's call 13), then what the task declares across them -- one set of settings and one setup,
+    every setting's meaning (XC-288 §4.1), its reaction time and its choice (§4.3), and a content
+    its runs can record (§4.4). **What a caller holds a task to is this**; `check` is one
+    structure's part of it, and stays what a bare `Trial` is checked by.
+
+    **Given the session's deployment**, a task that needs a fixed head is a warning in any but a
+    head-fixed one, never a refusal (engine spec §20.1; XC-277; the PI, 2026-10-11); without one --
+    `wlx check`, the review report -- nothing is said of it."""
+    several = len(task.structures) > 1
+    findings: list[Finding] = []
+    for name, structure in task.structures.items():
+        for finding in check(structure, allocation, components, geometry, calibration):
+            findings.append(
+                dataclasses.replace(finding, detail=f"in structure {name!r}: {finding.detail}")
+                if several else finding
+            )
+    return (
+        findings
+        + _structure_faults(task)
+        + _meaning_faults(task)
+        + _reaction_time_faults(task)
+        + _choice_faults(task)
+        + _hash_faults(task)
+        + _head_faults(task, deployment)
+    )
+
+
+def _structure_faults(task: Task) -> list[Finding]:
+    """One set of settings and one setup across a task's structures (engine spec §3.5, §13.3): a name
+    two structures declare differently would be validated by `Session.set` against whichever came
+    first, and a task's runs are checked against one field."""
+    findings: list[Finding] = []
+    first: dict[str, tuple[str, Param]] = {}
+    for name, structure in task.structures.items():
+        for param in structure.params:
+            where, declared = first.setdefault(param.name, (name, param))
+            if declared == param:
+                continue
+            said = (
+                f"structure {name!r} declares setting {param.name!r} twice, differently"
+                if where == name
+                else f"setting {param.name!r} is declared one way by structure {where!r} and "
+                f"another by {name!r}"
+            )
+            findings.append(Finding("parameter-mismatch", (
+                f"{said}; a task's settings are one set, which a live edit is checked against "
+                f"(engine spec §3.5)")))
+    views = sorted({str(structure.view) for structure in task.structures.values()})
+    if len(views) > 1:
+        findings.append(Finding("view-mismatch", (
+            f"the task's structures are written for different setups ({', '.join(views)}); a "
+            f"task runs in one")))
+    return findings
+
+
+def _meaning_faults(task: Task) -> list[Finding]:
+    """Every setting a person can change declares what it means (XC-288 §4.1; TRN-03): the shared
+    list's (`declarations.COMMON`), or the task's own -- which, for a setting on the shared list, is
+    an override and says why (the PI, 2026-10-11). **Required**: "a missing declaration cannot be
+    told from a forgotten one". The bounded settings a task rewards through take theirs from
+    `declarations.BOUNDED`. A meaning for no setting, an override of nothing, a direction read
+    relative to anything on a list of choices, and one read relative to no other setting the task
+    declares are refused too."""
+    from wl_xcon.declarations import BOUNDED, COMMON, rewarded_through
+
+    findings: list[Finding] = []
+    declared = {param.name: param for param in task.params}
+    for name, param in declared.items():
+        own = task.meanings.get(name)
+        meaning = own if own is not None else COMMON.get(name)
+        if meaning is None:
+            findings.append(Finding("undeclared-meaning", (
+                f"setting {name!r} declares no meaning: clear-cut with a direction, expected with "
+                f"a direction and a note, or not a difficulty setting (XC-288 §4.1); a missing "
+                f"declaration cannot be told from a forgotten one")))
+            continue
+        if own is not None and name in COMMON and not own.overrides.strip():
+            findings.append(Finding("override-without-why", (
+                f"the task gives {name!r} a meaning of its own, and {name!r} is on the shared "
+                f"list; a task overrides a shared meaning only with a note saying why "
+                f"(Meaning.overrides)")))
+        if own is not None and name not in COMMON and own.overrides:
+            findings.append(Finding("bad-meaning", (
+                f"{name!r}'s meaning says it overrides the shared list, which has no "
+                f"{name!r}")))
+        relative = meaning.relative_to
+        if relative is not None and param.choices:
+            findings.append(Finding("bad-meaning", (
+                f"{name!r}'s direction reads relative to {relative!r}, and its values are "
+                f"choices, which are no distance from anything")))
+        elif isinstance(relative, str) and (relative == name or relative not in declared):
+            findings.append(Finding("bad-meaning", (
+                f"{name!r}'s direction reads relative to setting {relative!r}, which is not "
+                f"another setting the task declares")))
+    for name in task.meanings:
+        if name not in declared:
+            findings.append(Finding("meaning-for-nothing", (
+                f"the task declares a meaning for {name!r}, which none of its structures "
+                f"declares as a setting")))
+    for ref in sorted(rewarded_through(task)):
+        if ref not in BOUNDED:
+            findings.append(Finding("undeclared-meaning", (
+                f"bounded setting {ref!r}, which the task rewards through, has no meaning in "
+                f"declarations.BOUNDED (XC-288 §4.1)")))
+    return findings
+
+
+def _reaction_time_faults(task: Task) -> list[Finding]:
+    """How the task's reaction time is defined (XC-288 §4.3): declared, from a state some structure
+    has, ending where that state's transitions go (the engine C1 plan's call 8)."""
+    timed = task.reaction_time
+    if timed is None:
+        return [Finding("no-reaction-time", (
+            "the task does not say how its reaction time is defined, from which event to which "
+            "(XC-288 §4.3), so its trials' reaction times would mean nothing; declare "
+            "reaction_time=ReactionTime(state, to, note)"))]
+    states = [
+        state
+        for structure in task.structures.values()
+        for state in structure.states
+        if state.name == timed.state
+    ]
+    if not states:
+        return [Finding("bad-reaction-time", (
+            f"the reaction time is timed from state {timed.state!r}, which no structure has"))]
+    leaves = {edge.to for state in states for edge in state.go}
+    return [
+        Finding("bad-reaction-time", (
+            f"the reaction time ends when {timed.state!r} is left for {_destination(end)}, and "
+            f"no structure's {timed.state!r} goes there"))
+        for end in timed.to
+        if end not in leaves
+    ]
+
+
+def _destination(end: object) -> str:
+    """Where a transition goes, as a finding names it: an outcome by its name, a state quoted."""
+    return end.name if isinstance(end, Outcome) else repr(end)
+
+
+def _choice_faults(task: Task) -> list[Finding]:
+    """What the task offers to choose between (XC-288 §4.3): declared -- a `Choice`, or `NO_CHOICE`
+    for a task that offers none, since an unset choice cannot be told from a forgotten one (the
+    engine C1 plan's call 10) -- and each object a window some structure's transition fires on by
+    the act the choice names (`CHOSEN_BY`)."""
+    choice = task.choice
+    if choice is None:
+        return [Finding("undeclared-choice", (
+            "the task does not say what it offers to choose between (XC-288 §4.3), and an unset "
+            "choice cannot be told from a forgotten one; declare choice=Choice(objects, by), or "
+            "choice=NO_CHOICE for a task that offers none"))]
+    if isinstance(choice, NoChoice):
+        return []
+    acts = CHOSEN_BY[choice.by]
+    chosen = {
+        _chosen(edge.guard)
+        for structure in task.structures.values()
+        for state in structure.states
+        for edge in state.go
+        if isinstance(edge.guard, acts)
+    }
+    return [
+        Finding("bad-choice", (
+            f"{offered!r} is declared a choice made by {choice.by}, and no structure's transition "
+            f"fires on a {choice.by} to it"))
+        for offered in choice.objects
+        if offered not in chosen
+    ]
+
+
+def _chosen(guard: object) -> "str | None":
+    """The window -- or, for a lever, the device -- a choosing guard names."""
+    return getattr(guard, "window", None) or getattr(guard, "device", None)
+
+
+def _hash_faults(task: Task) -> list[Finding]:
+    """A run records which version of its task it ran by the task's content hash (XC-288 §4.4), so
+    a task whose content cannot be hashed is refused before any run."""
+    from wl_xcon.declarations import content_hash
+
+    try:
+        content_hash(task)
+    except (TypeError, ValueError) as unread:
+        return [Finding("unhashable-task", (
+            f"the task's content could not be hashed ({unread}), so a run could not record which "
+            f"version of it ran (XC-288 §4.4)"))]
+    return []
+
+
+def _head_faults(task: Task, deployment: "Deployment | None") -> list[Finding]:
+    """A task that needs a fixed head, in any session not declared head-fixed (`RIG_FIXED`; engine
+    spec §20.1; STE-25), is **a warning, not a refusal** (the PI, 2026-10-11: "in general, I think
+    you have been too gung ho on refusals ... the experimenter needs free control most of the
+    time"): the run goes ahead, the warning saying why that may be a bad idea, accepted in every
+    session kind. Given in every deployment but `RIG_FIXED` (the engine C1 plan's call 16), a
+    cage-side session as much as a chaired one; it reads the deployment, not the head's state
+    (XC-347). A load-time finding, so it reaches the pre-flight's warnings item and `wlx run`'s
+    `--accept-warnings` as every task warning does, and `preflight.gate` and `Service._start` stay
+    as they are."""
+    if task.needs_fixed_head and deployment is not None and deployment is not Deployment.RIG_FIXED:
+        return [Finding("head-not-fixed", (
+            f"the task needs a fixed head, and this session's deployment, {deployment.value}, does "
+            f"not declare one fixed: the task tracks gaze and the rig has no head tracking, so "
+            f"with the head free its gaze decisions (holding fixation, where a saccade lands) may "
+            f"be wrong (engine spec §20.1)"), blocking=False, accepted_in=SESSION_KINDS)]
+    return []
 
 
 def _unreachable_states(trial: Trial) -> list[Finding]:
@@ -464,8 +686,8 @@ def _reachable(
         for sign in signs:
             centres = bases[sign]
             if isinstance(looks, Array):
-                # An array's items sit on a ring around the stimulus position, so the
-                # thing that can leave the field is an *item*, never the centre. The
+                # An array's objects sit on a ring around the stimulus position, so the
+                # thing that can leave the field is an *object*, never the centre. The
                 # extreme is the widest legal radius: with n a parameter too, every
                 # smaller set is a subset of those positions.
                 widest = max(_numbers(looks.radius, params))
@@ -703,8 +925,8 @@ def _uncoupled_windows(trial: Trial) -> list[Finding]:
             f"on='<stimulus>', or on=REMEMBERED if nothing is displayed there",
         )
         for window in trial.windows
-        # An `ItemWindows` family always couples to its array, by construction.
-        if not isinstance(window, ItemWindows) and window.on is None
+        # An `ObjectWindows` family always couples to its array, by construction.
+        if not isinstance(window, ObjectWindows) and window.on is None
     ]
 
 
@@ -876,7 +1098,7 @@ def _combined(trial: Trial, params: dict[str, Param]) -> list[tuple[object, obje
 
     A `Show` pairs its looks with its own `combine`. An `Update` of `looks` pairs them with
     the `combine` of each `Show` of that name, since an update cannot change one, or with
-    `None` when nothing shows that name, which no rule exempts. An `Array`'s items combine
+    `None` when nothing shows that name, which no rule exempts. An `Array`'s objects combine
     as the array does, and a parameter's choices as the stimulus whose looks it is. An
     appearance `_appearances` finds that this pairs with nothing (a parameter's choice no
     stimulus shows) has no combination to exempt it from any rule."""
@@ -1319,7 +1541,7 @@ def _parameter_lights(trial: Trial, params: dict[str, Param]) -> list[str]:
     front covers back by it), **and inside each choice such a parameter offers** -- so a
     parameter that is a `Look`'s whole fill or outline counts and its fills or outlines are
     read (XC-271's shape, and XC-273's outline) -- and an appearance parameter whose
-    choices differ in what lights them, an `Array`'s items included (`_shown`). A parameter
+    choices differ in what lights them, an `Array`'s objects included (`_shown`). A parameter
     met again inside its own choices adds nothing more: `_self_referring` refuses it."""
     from wl_xcon.task import Appearance
 
@@ -1352,7 +1574,7 @@ def _parameter_lights(trial: Trial, params: dict[str, Param]) -> list[str]:
 
 def _shown(looks, params: dict[str, Param], inside: frozenset[str] = frozenset()) -> list:
     """What lights an appearance, for comparing an appearance parameter's choices: `_lit`, with
-    an `Array`'s items read in turn, and an appearance parameter among them as what each of its
+    an `Array`'s objects read in turn, and an appearance parameter among them as what each of its
     choices shows. **Being named in an `Array` never makes a parameter a light factor**; its
     own choices decide that. One undeclared, or met again inside its own choices, is read as
     itself, so two of them differ by name: it fails closed."""
@@ -2000,7 +2222,7 @@ def _widest(value, ranges) -> tuple[float, float]:
 def _declared_window_names(trial: Trial) -> set[str]:
     """Window names a task has, including every one an array generates.
 
-    An array's items are named `<of>.<i>` and are as declared as anything an author
+    An array's objects are named `<of>.<i>` and are as declared as anything an author
     typed -- the whole point is that the author cannot type them, because how many
     there are is not known until a trial runs.
     """
@@ -2008,7 +2230,7 @@ def _declared_window_names(trial: Trial) -> set[str]:
     ranges = _ranges(trial)
     names: set[str] = set()
     for window in trial.windows:
-        if isinstance(window, ItemWindows):
+        if isinstance(window, ObjectWindows):
             names |= {f"{window.of}.target", f"{window.of}.distractor"}
             array = arrays.get(window.of)
             if array is not None:
@@ -2025,7 +2247,7 @@ def _coupling(trial: Trial) -> dict[str, object]:
     for name in _declared_window_names(trial):
         scores[name] = None
     for window in trial.windows:
-        if isinstance(window, ItemWindows):
+        if isinstance(window, ObjectWindows):
             for name in list(scores):
                 if name.startswith(f"{window.of}."):
                     scores[name] = window.of
@@ -2035,10 +2257,10 @@ def _coupling(trial: Trial) -> dict[str, object]:
 
 
 def _array_faults(trial: Trial) -> list[Finding]:
-    """An array's target must be one of its items, for every legal setting.
+    """An array's target must be one of its objects, for every legal setting.
 
     Set size and target index are both live parameters, so an experimenter can put
-    the target at position 6 of a four-item array between one trial and the next.
+    the target at position 6 of a four-object array between one trial and the next.
     Reasoning over declared ranges is the only way to catch that before it is a
     session rather than a load.
     """
@@ -2054,9 +2276,9 @@ def _array_faults(trial: Trial) -> list[Finding]:
             findings.append(
                 Finding(
                     "target-outside-array",
-                    f"state {state!r} shows an array of as few as {lowest_n} items "
+                    f"state {state!r} shows an array of as few as {lowest_n} objects "
                     f"with a target index reaching {highest_t}; the target must be "
-                    f"one of the items for every setting the console allows, not "
+                    f"one of the objects for every setting the console allows, not "
                     f"only the one it has today",
                 )
             )
@@ -2185,7 +2407,7 @@ def _overlapping_windows(trial: Trial) -> list[Finding]:
     doing something ordinary.
     """
     ranges = _ranges(trial)
-    by_name = {w.name: w for w in trial.windows if not isinstance(w, ItemWindows)}
+    by_name = {w.name: w for w in trial.windows if not isinstance(w, ObjectWindows)}
     findings: list[Finding] = []
     seen: set[tuple[str, str]] = set()
     for state in trial.states:
@@ -2254,16 +2476,16 @@ def _target_name(target: object) -> str:
 
 
 def _crowded_arrays(trial: Trial) -> list[Finding]:
-    """An array's own items must not overlap, for any legal setting.
+    """An array's own objects must not overlap, for any legal setting.
 
     Set size, eccentricity and window radius are all live, so crowding is something
-    an experimenter dials in between two trials: twelve items on a small ring with
+    an experimenter dials in between two trials: twelve objects on a small ring with
     generous windows overlap, and a saccade to one distractor is then scored against
     another, or against the target. **Nobody ever reads these windows** -- they are
-    generated, which is the whole point of `ItemWindows` and the reason this needs a
+    generated, which is the whole point of `ObjectWindows` and the reason this needs a
     check rather than an author's eye.
 
-    The worst case is the most items on the smallest ring with the largest windows:
+    The worst case is the most objects on the smallest ring with the largest windows:
     adjacent centres are `2 R sin(pi/n)` apart, and two windows touch when that
     falls below their summed radius.
     """
@@ -2271,7 +2493,7 @@ def _crowded_arrays(trial: Trial) -> list[Finding]:
     ranges = _ranges(trial)
     findings: list[Finding] = []
     for declared in trial.windows:
-        if not isinstance(declared, ItemWindows):
+        if not isinstance(declared, ObjectWindows):
             continue
         array = arrays.get(declared.of)
         if array is None:
@@ -2286,9 +2508,9 @@ def _crowded_arrays(trial: Trial) -> list[Finding]:
             findings.append(
                 Finding(
                     "crowded-array",
-                    f"array {declared.of!r} can put {int(most)} items on a "
+                    f"array {declared.of!r} can put {int(most)} objects on a "
                     f"{tightest:g}° ring, {spacing:.2f}° apart, with windows of "
-                    f"{widest:g}° radius; adjacent items would overlap and a "
+                    f"{widest:g}° radius; adjacent objects would overlap and a "
                     f"saccade to one would be scored against another",
                 )
             )
@@ -2309,7 +2531,7 @@ def _nonzero(value) -> bool:
 def _modulates(looks, params: dict[str, Param], inside: frozenset[str] = frozenset()) -> bool:
     """Whether a stimulus can multiply the contrast below it, for every value it can take:
     a pattern, or a flat Weber contrast (a gain of 1 + c). An absolute light names no gain.
-    An `Array` modulates only if each of its items does, and a parameter only if each of
+    An `Array` modulates only if each of its objects does, and a parameter only if each of
     its choices does; one with no choices to read is `_Unbounded`, naming it. One met again
     inside its own choices adds nothing: they are being read already, and it is refused as
     referring to itself (`_self_referring`)."""
@@ -2343,7 +2565,7 @@ def _declares_mean(looks, params: dict[str, Param], inside: frozenset[str] = fro
     """Whether a stimulus can be a grating that declares its own mean, at any value it can
     take. Multiplying draws a grating's modulation alone (`exact._gain`), so a mean it
     declares would be ignored without a word (call 1, XC-253). An `Array` can if either of
-    its items can, a parameter if any of its choices can, a mean parameter if any choice is
+    its objects can, a parameter if any of its choices can, a mean parameter if any choice is
     a light. One with no choices to read declares none here: it is refused where its light
     or its modulation is read."""
     if isinstance(looks, P):

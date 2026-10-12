@@ -9,7 +9,8 @@ recorded"; "a warning appearing later asks again").
 §7.10); a calibration that will not load or is dated after today, which no kind accepts (the
 engine B plan, call 19: every run's pre-flight fails on it, and nothing else reads it); a
 chaired session's free head (§5.9); a task's warnings, its load-time findings that
-are warnings (`luminance-step`, `color-on-default`, `contrast-on-default`); and today's
+are warnings (`luminance-step`, `color-on-default`, `contrast-on-default`, and, since the PI's
+ruling of 2026-10-11, `head-not-fixed`); and today's
 pre-flight unknowns, the pump calibration and the eye tracker (S9a §10). **What later builds
 add**, each waiting on the build named: dithering and a timing record older than a graphics
 change (E, V1); a pattern near the pixel limit, and a screen, mode or care-feature mismatch

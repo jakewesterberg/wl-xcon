@@ -116,7 +116,7 @@ CASES = {
         {}, STEREOSCOPE, None),
     "a near disparity on the stereoscope": (
         _shown(_s("n", LIT, disparity=-0.5), view="stereoscope"), {}, STEREOSCOPE, None),
-    "an array of lit items": (
+    "an array of lit objects": (
         _shown(_s("a", Array(n=4, radius=5.0, looks=LIT, among=Square(size=2.0, color=Gray(40.0))))),
         {}, DIRECT, None),
     "a light written as parameters": (

@@ -33,6 +33,7 @@ from _rig import PATH as RIG_FILE, naming
 from _zmq_release import _every_zmq_context_released  # noqa: F401
 from _frames import idle
 from _calibrations import BACKGROUND, OBSERVER, PRIMARIES
+import _sessions
 from wl_xcon import cli
 from wl_xcon import link as _link
 from wl_xcon.actor import Box
@@ -78,13 +79,13 @@ BOUNDS = f"{TASKS}/reference_bounds.py"
 #: Every `--set` this fixation task needs to run headless, factored out once
 #: rather than repeated in every `run`/console-link test that has to launch one.
 _TASK_SETS = [
-    "--set", "fix_timeout=4.0",
+    "--set", "fix_acquisition=4.0",
     "--set", "fix_hold=0.3",
-    "--set", "response_window=0.6",
+    "--set", "response_deadline=0.6",
     "--set", "target_hold=0.2",
     "--set", "fix_window=2.0",
     "--set", "target_window=3.0",
-    "--set", "target_position=10.0",
+    "--set", "target_x=10.0",
 ]
 
 
@@ -179,11 +180,13 @@ def test_a_task_with_a_blocking_finding_exits_one(tmp_path, capsys):
     to be able to refuse it without parsing prose."""
     bad = tmp_path / "bad_task.py"
     bad.write_text(
-        "from wl_xcon.task import After, On, Outcome, State, Trial\n"
+        "from wl_xcon.task import NO_CHOICE, After, On, Outcome, ReactionTime, State, Task, Trial\n"
         "t = Trial(start='a', states=[\n"
         "    State('a', go=[On(After(1.0), Outcome.CORRECT)]),\n"
         "    State('orphan', go=[On(After(1.0), Outcome.CORRECT)]),\n"
         "])\n"
+        "TASK = Task({'t': t}, default='t', choice=NO_CHOICE,\n"
+        "            reaction_time=ReactionTime('a', (Outcome.CORRECT,), 'the wait'))\n"
     )
 
     assert main(["check", str(bad), "--rig", RIG_FILE]) == 1
@@ -248,7 +251,7 @@ def test_wlx_check_for_a_kind_lists_the_calibrations_own_warnings(capsys):
 def test_wlx_check_says_no_findings_only_when_it_said_no_warning_either(monkeypatch, capsys):
     """The engine B final review: a task with no findings, checked for a kind on the default
     calibration, said "1 warning(s) ... the task loads" and then "no findings"."""
-    monkeypatch.setattr(cli, "check", lambda *a, **k: [])
+    monkeypatch.setattr(cli, "check_task", lambda *a, **k: [])
     argv = ["check", GOOD, "--rig", RIG_FILE, "--allocation", ALLOCATION, "--view", "direct"]
 
     assert main([*argv, "--kind", "recording"]) == 0
@@ -273,7 +276,7 @@ def test_wlx_check_for_a_kind_refuses_a_calibration_dated_after_today(kind, tmp_
 def test_wlx_check_says_a_findings_sentence_through_the_terminal_guard(monkeypatch, capsys):
     """A finding's sentence quotes the task it was found in, so it reaches the terminal as
     `render` sends wire text: through `_printable`."""
-    monkeypatch.setattr(cli, "check", lambda *a, **k: [Finding(
+    monkeypatch.setattr(cli, "check_task", lambda *a, **k: [Finding(
         "contrast-on-default", "forged\x1b[2J\nrefused  nothing", blocking=False,
         accepted_in=("training",))])
 
@@ -284,14 +287,16 @@ def test_wlx_check_says_a_findings_sentence_through_the_terminal_guard(monkeypat
 
 
 def _either_task(tmp_path, reach: float) -> str:
-    """`fixation_detection` declared for either setup, its target reaching `reach`°."""
+    """`fixation_detection` declared for either setup, its target reaching `reach`° along each
+    axis."""
     text = Path("tasks/fixation_detection.py").read_text(encoding="utf-8")
     written_for = 'view="direct"'
-    target = 'Param("target_position", unit="deg", low=-16.0, high=16.0, start=10.0)'
-    assert text.count(written_for) == 1 and text.count(target) == 1
+    across = 'Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0)'
+    up = 'Param("target_y", unit="deg", low=-16.0, high=16.0, start=0.0)'
+    assert text.count(written_for) == 1 and text.count(across) == 1 and text.count(up) == 1
     text = text.replace(written_for, 'view="either"').replace(
-        target, f'Param("target_position", unit="deg", low={-reach}, high={reach}, start=10.0)'
-    )
+        across, f'Param("target_x", unit="deg", low={-reach}, high={reach}, start=10.0)'
+    ).replace(up, f'Param("target_y", unit="deg", low={-reach}, high={reach}, start=0.0)')
     # One file per reach: two files of the same name, size and second share a bytecode
     # cache entry, and the second would silently load the first's task.
     path = tmp_path / f"either_detection_{abs(reach):g}.py"
@@ -470,13 +475,17 @@ def test_review_renders_the_artifact(capsys):
     out = capsys.readouterr().out
     assert "stateDiagram-v2" in out
     assert "Needs human review" in out
+    # What a reviewer confirms, first, then the structure (engine build C1).
+    assert "## What a reviewer confirms" in out and "Content: `sha256:" in out
+    assert "## Structure `detection`, the default" in out
+    assert out.index("## What a reviewer confirms") < out.index("stateDiagram-v2")
 
 
-def test_a_file_with_no_trial_says_so(tmp_path):
+def test_a_file_with_no_task_object_says_so(tmp_path):
     empty = tmp_path / "empty.py"
     empty.write_text("x = 1\n")
 
-    with pytest.raises(SystemExit, match="0 trials"):
+    with pytest.raises(SystemExit, match="0 task objects"):
         main(["check", str(empty), "--rig", RIG_FILE])
 
 
@@ -507,13 +516,13 @@ def test_wlx_run_runs_a_session_and_reports_its_outcomes(tmp_path, capsys):
             "--out-of-cage-at", _hhmm(),
             "--delivered-today", "0",
             "--trials", "20",
-            "--set", "fix_timeout=4.0",
+            "--set", "fix_acquisition=4.0",
             "--set", "fix_hold=0.3",
-            "--set", "response_window=0.6",
+            "--set", "response_deadline=0.6",
             "--set", "target_hold=0.2",
             "--set", "fix_window=2.0",
             "--set", "target_window=3.0",
-            "--set", "target_position=10.0",
+            "--set", "target_x=10.0",
         ]
     )
 
@@ -1789,13 +1798,13 @@ def test_wlx_run_takes_the_departure_as_a_clock_time(tmp_path, capsys):
             "--out-of-cage-at", _hhmm(),
             "--delivered-today", "0",
             "--trials", "5",
-            "--set", "fix_timeout=4.0",
+            "--set", "fix_acquisition=4.0",
             "--set", "fix_hold=0.3",
-            "--set", "response_window=0.6",
+            "--set", "response_deadline=0.6",
             "--set", "target_hold=0.2",
             "--set", "fix_window=2.0",
             "--set", "target_window=3.0",
-            "--set", "target_position=10.0",
+            "--set", "target_x=10.0",
         ]
     )
 
@@ -1824,13 +1833,13 @@ def test_wlx_run_prints_how_long_the_animal_has_been_out(tmp_path, capsys):
             "--out-of-cage-at", _hhmm(),
             "--delivered-today", "0",
             "--trials", "2",
-            "--set", "fix_timeout=4.0",
+            "--set", "fix_acquisition=4.0",
             "--set", "fix_hold=0.3",
-            "--set", "response_window=0.6",
+            "--set", "response_deadline=0.6",
             "--set", "target_hold=0.2",
             "--set", "fix_window=2.0",
             "--set", "target_window=3.0",
-            "--set", "target_position=10.0",
+            "--set", "target_x=10.0",
         ]
     )
 
@@ -1956,11 +1965,12 @@ def test_wlx_run_refuses_a_departure_that_is_not_a_time(tmp_path, capsys):
 def test_wlx_run_can_run_a_chaired_session_with_no_head_fixation(tmp_path, capsys):
     """**Head-fixation is a property of the deployment** (PI, 2026-09-20). A chaired
     session runs, is bounded by the same out-of-cage clock, and emits no
-    `HEAD_FIXED`/`HEAD_RELEASED` -- because it has none to record."""
+    `HEAD_FIXED`/`HEAD_RELEASED` -- because it has none to record. The reference task
+    needs a fixed head (the PI, 2026-10-11), so it runs the task's head-free copy."""
     exit_code = main(
         [
             "run",
-            "tasks/fixation_detection.py",
+            str(_sessions.head_free_task(tmp_path / "task")),
             *_SETUP,
             "--allocation", "tasks/allocation.py",
             "--bounds", "tasks/reference_bounds.py",
@@ -1971,13 +1981,13 @@ def test_wlx_run_can_run_a_chaired_session_with_no_head_fixation(tmp_path, capsy
             "--deployment", "rig-chaired",
             "--delivered-today", "0",
             "--trials", "5",
-            "--set", "fix_timeout=4.0",
+            "--set", "fix_acquisition=4.0",
             "--set", "fix_hold=0.3",
-            "--set", "response_window=0.6",
+            "--set", "response_deadline=0.6",
             "--set", "target_hold=0.2",
             "--set", "fix_window=2.0",
             "--set", "target_window=3.0",
-            "--set", "target_position=10.0",
+            "--set", "target_x=10.0",
         ]
     )
 
@@ -2118,7 +2128,7 @@ def test_console_lists_every_parameter_with_its_range_or_its_ceiling():
             params=(
                 ParamRow("fix_hold", "s", 0.1, 1.0, 0.3, False),
                 ParamRow("reward_correct", "mL", 0.0, 10.0, 0.05, True),
-                ParamRow("target_looks", "", None, None, None, False),
+                ParamRow("target_appearance", "", None, None, None, False),
                 ParamRow("fix_window", "deg", None, 5.0, 2.0, False),
             )
         )
@@ -2126,7 +2136,7 @@ def test_console_lists_every_parameter_with_its_range_or_its_ceiling():
 
     assert "  param: fix_hold 0.30 s (range 0.1 to 1 s)" in rendered
     assert "  param: reward_correct 0.05 mL (welfare ceiling 10.00 mL)" in rendered
-    assert "  param: target_looks unset (no declared range)" in rendered
+    assert "  param: target_appearance unset (no declared range)" in rendered
     assert "  param: fix_window 2.00 deg (range open to 5 deg)" in rendered
 
 
@@ -2255,6 +2265,43 @@ def test_wlx_run_refuses_a_task_written_for_the_other_setup_before_anything_is_r
     assert not (tmp_path / "2027-01-14_01").exists()
 
 
+def test_wlx_run_runs_the_reference_task_in_a_chaired_session_once_its_head_warning_is_accepted(
+    tmp_path,
+):
+    """Engine spec §20.1 (XC-277): the reference task needs a fixed head (the PI, 2026-10-11; the
+    engine C1 plan's Appendix B, item 31), and in a chaired session that is a warning, not a
+    refusal (the PI, 2026-10-11: "warnings are more appropriate most of the time"). Unaccepted it
+    is listed, saying why, before anything is recorded, as every warning `wlx run` meets is;
+    accepted, the session runs and `warnings.jsonl` records it."""
+    argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm(), "--deployment", "rig-chaired")
+
+    with pytest.raises(SystemExit) as unaccepted:
+        main([a for a in argv if a != "--accept-warnings"])
+    said = str(unaccepted.value)
+    assert not (tmp_path / "2027-01-14_01").exists()
+    assert main(argv) == 0
+
+    assert "its warnings are" in said and "head-not-fixed" in said and "no head tracking" in said
+    rows = [json.loads(line) for line in
+            (tmp_path / "2027-01-14_01" / "xcon" / "warnings.jsonl").read_text().splitlines()]
+    (head,) = [row for row in rows if row["code"] == "head-not-fixed"]
+    assert head["how"] == "--accept-warnings" and "rig_chaired" in head["detail"]
+
+
+def test_wlx_check_holds_the_task_object_to_its_declarations(tmp_path, capsys):
+    """`wlx check` is the guardrail a person runs (this file's docstring): a setting with no meaning
+    is refused there too."""
+    text = Path("tasks/fixation_detection.py").read_text()
+    was = '        Param("fix_hold", unit="s", low=0.05, high=2.0, start=0.3),\n'
+    assert text.count(was) == 1
+    unexplained = tmp_path / "unexplained.py"
+    unexplained.write_text(text.replace(
+        was, was + '        Param("cue_delay", unit="s", low=0.0, high=1.0, start=0.2),\n'))
+
+    assert main(["check", str(unexplained), "--rig", RIG_FILE, "--allocation", ALLOCATION]) == 1
+    assert "undeclared-meaning" in capsys.readouterr().out
+
+
 def test_wlx_run_refuses_a_task_its_kind_does_not_accept_before_anything_is_recorded(tmp_path):
     argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm())
     argv[argv.index("tasks/fixation_detection.py")] = "tasks/visual_search_training.py"
@@ -2353,7 +2400,7 @@ def test_wlx_run_accepts_its_warnings_before_the_departure_is_marked(tmp_path, m
 
 def test_wlx_run_says_a_refused_tasks_findings_through_the_terminal_guard(tmp_path, monkeypatch):
     """The refusal before anything is recorded quotes the task too."""
-    monkeypatch.setattr(cli, "check", lambda *a, **k: [
+    monkeypatch.setattr(cli, "check_task", lambda *a, **k: [
         Finding("bad\x9bcode", "forged\x1b[2J\nSTOPPED: forged")])
 
     with pytest.raises(SystemExit) as refused:
@@ -2366,7 +2413,7 @@ def test_wlx_run_says_a_refused_tasks_findings_through_the_terminal_guard(tmp_pa
 def test_wlx_run_says_its_warnings_through_the_terminal_guard(tmp_path, monkeypatch):
     """Its refusal quotes the task's warnings, so it reaches the terminal through
     `_printable`, as `wlx check`'s lines do."""
-    monkeypatch.setattr(cli, "check", lambda *a, **k: [Finding(
+    monkeypatch.setattr(cli, "check_task", lambda *a, **k: [Finding(
         "contrast-on-default", "forged\x1b[2J", blocking=False, accepted_in=("training",))])
     argv = [a for a in _run_args(tmp_path, "--out-of-cage-at", _hhmm()) if a != "--accept-warnings"]
 
@@ -3056,19 +3103,21 @@ def test_a_far_return_is_confirmed_at_the_terminal(tmp_path, monkeypatch):
     ago, and a return an hour ago would put the animal home while still in the
     chair -- `welfare` refuses that before any confirmation is asked, and rightly.
     A chaired session has no head-fixation marks, so the confirmation is what this
-    reaches."""
+    reaches; and the reference task needs a fixed head (the PI, 2026-10-11), so it runs the
+    task's head-free copy."""
     answers = iter([_hours_ago(1), "confirm"])
     monkeypatch.setattr("sys.stdin.isatty", lambda: True, raising=False)
     monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
-
-    exit_code = main(
-        _run_args(
-            tmp_path,
-            "--out-of-cage-at", _hours_ago(2),
-            "--confirm-out-of-cage",
-            "--deployment", "rig-chaired",
-        )
+    argv = _run_args(
+        tmp_path,
+        "--out-of-cage-at", _hours_ago(2),
+        "--confirm-out-of-cage",
+        "--deployment", "rig-chaired",
     )
+    argv[argv.index("tasks/fixation_detection.py")] = str(
+        _sessions.head_free_task(tmp_path / "task"))
+
+    exit_code = main(argv)
 
     assert exit_code == 0
     assert _kinds(tmp_path) == [
@@ -3372,14 +3421,16 @@ def test_a_task_refused_by_its_checks_records_that_the_session_did_not_start(
     anything is recorded (`test_wlx_run_refuses_a_task_written_for_the_other_setup_
     before_anything_is_recorded`). `run()`'s own check is the backstop for a caller
     that is not this command, and this reaches it by silencing the command's."""
-    monkeypatch.setattr(cli, "check", lambda *args, **kwargs: [])
+    monkeypatch.setattr(cli, "check_task", lambda *args, **kwargs: [])
     bad = tmp_path / "bad_task.py"
     bad.write_text(
-        "from wl_xcon.task import After, On, Outcome, State, Trial\n"
+        "from wl_xcon.task import NO_CHOICE, After, On, Outcome, ReactionTime, State, Task, Trial\n"
         "t = Trial(start='a', states=[\n"
         "    State('a', go=[On(After(1.0), Outcome.CORRECT)]),\n"
         "    State('orphan', go=[On(After(1.0), Outcome.CORRECT)]),\n"
         "])\n"
+        "TASK = Task({'t': t}, default='t', choice=NO_CHOICE,\n"
+        "            reaction_time=ReactionTime('a', (Outcome.CORRECT,), 'the wait'))\n"
     )
     argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm())
     argv[1] = str(bad)

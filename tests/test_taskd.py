@@ -32,8 +32,9 @@ import pytest
 
 from wl_xcon.actor import Box
 from wl_xcon.bounds import Bounds, Ceiling, Exceeded, Floor
-from wl_xcon.cli import _load_trial
+from wl_xcon.cli import _load_task
 from wl_xcon.codes import BLOCK_END
+from wl_xcon.declarations import content_hash
 from wl_xcon.dio import Simulated as Card
 from wl_xcon.encode import BLOCK_START, UNALLOCATED_TASK_CODE, words_for_block
 from wl_xcon.findings import NOT_RECORDING, SESSION_KINDS, Finding
@@ -89,14 +90,15 @@ _contract = pytest.mark.skipif(
 )
 
 VALUES = {
-    "fix_timeout": 4.0,
+    "fix_acquisition": 4.0,
     "fix_hold": 0.3,
-    "response_window": 0.6,
+    "response_deadline": 0.6,
     "target_hold": 0.2,
     "fix_window": 2.0,
     "target_window": 3.0,
-    "target_position": 10.0,
-    "target_looks": None,
+    "target_x": 10.0,
+    "target_y": 0.0,
+    "target_appearance": None,
     "fix_luminance": 40.0,
     "target_luminance": 40.0,
 }
@@ -104,8 +106,8 @@ VALUES = {
 #: `tasks/fixation_detection.py`'s own starting values (`Param.start`; the b3a-2 plan,
 #: decision 1).
 FIXATION_STARTS = {
-    "fix_timeout": 4.0, "fix_hold": 0.3, "response_window": 0.6, "target_hold": 0.2,
-    "fix_window": 2.0, "target_window": 3.0, "target_position": 10.0,
+    "fix_acquisition": 4.0, "fix_hold": 0.3, "response_deadline": 0.6, "target_hold": 0.2,
+    "fix_window": 2.0, "target_window": 3.0, "target_x": 10.0, "target_y": 0.0,
     "fix_luminance": 40.0, "target_luminance": 40.0,
 }
 
@@ -260,9 +262,11 @@ def test_a_session_refuses_to_start_if_the_task_fails_its_checks(tmp_path):
     discovers the task is malformed has already put an animal in a chair."""
     bad = tmp_path / "bad.py"
     bad.write_text(
-        "from wl_xcon.task import After, On, Outcome, State, Trial\n"
+        "from wl_xcon.task import NO_CHOICE, After, On, Outcome, ReactionTime, State, Task, Trial\n"
         "t = Trial(start='a', states=[State('a', go=[On(After(1.0), Outcome.CORRECT)]),"
         " State('orphan', go=[On(After(1.0), Outcome.CORRECT)])])\n"
+        "TASK = Task({'t': t}, default='t', choice=NO_CHOICE,"
+        " reaction_time=ReactionTime('a', (Outcome.CORRECT,), 'the wait'))\n"
     )
     spec = _spec(tmp_path)
     spec.task = str(bad)
@@ -305,7 +309,7 @@ def test_a_session_writes_its_record_and_its_config(tmp_path):
     runs = [json.loads(line) for line in (directory / "runs.jsonl").read_text().splitlines()]
 
     assert runs[0]["resolved"]["fix_hold"] == 0.3
-    assert runs[0]["versions"]["task"].endswith("fixation_detection.py")
+    assert runs[0]["versions"]["task"] == content_hash(_load_task(Path("tasks/fixation_detection.py")))
     assert "resolved" not in config, "what varies by run is in runs.jsonl (spec §6.3)"
 
 
@@ -322,7 +326,8 @@ def test_the_run_a_session_spec_describes_is_run_0_in_every_file_it_writes(tmp_p
     assert (start["event"], start["run"], end["event"], end["run"]) == ("start", 0, "end", 0)
     assert start["task"] == "tasks/fixation_detection.py"
     assert start["versions"] == {
-        "task": "tasks/fixation_detection.py",
+        # The task by its content (XC-288 §4.4); the row's `task` keeps the path it was given.
+        "task": content_hash(_load_task(Path("tasks/fixation_detection.py"))),
         "allocation": "tasks/allocation.py",
     }
     assert start["resolved"]["fix_hold"] == 0.3, "what it started with, before the staged 0.5"
@@ -457,13 +462,17 @@ def test_a_run_whose_allocation_has_no_run_codes_runs_and_says_it_was_not_strobe
 
 def test_a_second_run_starts_afresh_and_the_session_goes_on(tmp_path):
     """Plan decision 2, the run's half and the session's half. Rig-chaired, so no head
-    is released between the two runs of a session that is not a service's."""
-    session = _session(_spec(tmp_path, deployment=Deployment.RIG_CHAIRED))
-    session.run(_run_spec(trials=4, fix_hold=0.4))
+    is released between the two runs of a session that is not a service's, and so the
+    reference task's head-free copy (`_sessions.head_free_task`)."""
+    task = str(_sessions.head_free_task(tmp_path / "task"))
+    session = _session(_spec(tmp_path, deployment=Deployment.RIG_CHAIRED, task=task))
+    first, second = _run_spec(trials=4, fix_hold=0.4), _run_spec(trials=2)
+    first.task = second.task = task
+    session.run(first)
     fluid = session.welfare.commanded
     session.scheduled_stop = ("trials", 99.0, Box("jake"), "after trial 99")
 
-    census = session.run(_run_spec(trials=2))
+    census = session.run(second)
 
     assert session.run_index == 1
     assert sum(census.outcomes.values()) + census.hangs == 2, "the second run's own count"
@@ -481,7 +490,7 @@ def test_a_second_run_starts_afresh_and_the_session_goes_on(tmp_path):
 
 
 def test_an_explicit_run_starts_from_a_copy_of_its_values(tmp_path):
-    session = _session(_spec(tmp_path, deployment=Deployment.RIG_CHAIRED))
+    session = _session(_spec(tmp_path))
     run = _run_spec(trials=1)
 
     session.run(run)
@@ -519,14 +528,18 @@ def test_the_config_holds_what_is_fixed_and_is_written_as_the_session_opens(tmp_
 def test_a_control_names_the_run_it_was_made_in(tmp_path):
     """Plan decision 4: rows in `controls.jsonl` name their run, as trial rows do."""
     link = _Scripted(script={1: [Resume(by=Box("sam"))]})
+    # Two runs of a session that is not a service's: chaired, so the head-free copy.
+    task = str(_sessions.head_free_task(tmp_path / "task"))
     session = _session(
-        _spec(tmp_path, trials=2, deployment=Deployment.RIG_CHAIRED), link=link
+        _spec(tmp_path, trials=2, deployment=Deployment.RIG_CHAIRED, task=task), link=link
     )
+    run = _run_spec(trials=2)
+    run.task = task
     link.queue(Pause(by=Box("jake")))
-    session.run(_run_spec(trials=2))
+    session.run(run)
     link.script = {2: [Resume(by=Box("sam"))]}
     link.queue(Pause(by=Box("jake")))
-    session.run(_run_spec(trials=2))
+    session.run(run)
 
     rows = _controls_rows(session)
 
@@ -544,7 +557,7 @@ def test_the_session_task_is_the_run_in_progress_or_the_last_one(tmp_path):
     described.run()
     assert described.task == "tasks/fixation_detection.py"
 
-    taskless = _session(_spec(tmp_path / "b", trials=1, task="", deployment=Deployment.RIG_CHAIRED))
+    taskless = _session(_spec(tmp_path / "b", trials=1, task=""))
     assert taskless.task is None, "a spec that names no task, before any run"
     taskless.run(other)
     assert taskless.task == other.task
@@ -573,16 +586,18 @@ def test_a_refused_run_leaves_the_last_runs_state_as_it_was(tmp_path):
     the marks pass."""
     bad = tmp_path / "bad.py"
     bad.write_text(
-        "from wl_xcon.task import After, On, Outcome, State, Trial\n"
+        "from wl_xcon.task import NO_CHOICE, After, On, Outcome, ReactionTime, State, Task, Trial\n"
         "t = Trial(start='a', states=[State('a', go=[On(After(1.0), Outcome.CORRECT)]),"
         " State('orphan', go=[On(After(1.0), Outcome.CORRECT)])])\n"
+        "TASK = Task({'t': t}, default='t', choice=NO_CHOICE,"
+        " reaction_time=ReactionTime('a', (Outcome.CORRECT,), 'the wait'))\n"
     )
-    session = _session(_spec(tmp_path, deployment=Deployment.RIG_CHAIRED))
+    session = _session(_spec(tmp_path))
     session.run(_run_spec(trials=2, fix_hold=0.4))
     values, rows = dict(session.spec.values), _runs(session)
     refused = RunSpec(task=str(bad), trials=3, seed=9, values={**VALUES, "fix_hold": 0.9})
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit, match="unreachable-state: no transition reaches 'orphan'"):
         session.run(refused)
 
     assert session.run_index == 0
@@ -590,8 +605,114 @@ def test_a_refused_run_leaves_the_last_runs_state_as_it_was(tmp_path):
     assert _runs(session) == rows, "no new start row"
 
 
+#: A task of two structures (engine build C1): the reference detection trial, the default, and a
+#: copy of it declaring one more setting, `cue_delay`, which only that copy has.
+TWO_STRUCTURES = """
+import importlib.util
+from dataclasses import replace
+
+from wl_xcon.task import CLEAR_CUT, HARDER, STIMULUS, Meaning, Param, Task
+
+_spec = importlib.util.spec_from_file_location("reference_detection", "tasks/fixation_detection.py")
+_reference = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_reference)
+detection = _reference.detection
+cued = replace(
+    detection,
+    params=[*detection.params, Param("cue_delay", unit="s", low=0.0, high=1.0, start=0.2)],
+)
+TASK = Task(
+    {"detection": detection, "cued": cued},
+    default="detection",
+    reaction_time=_reference.TASK.reaction_time,
+    choice=_reference.TASK.choice,
+    meanings={"cue_delay": Meaning(CLEAR_CUT, STIMULUS, raising=HARDER)},
+)
+"""
+
+
+def test_a_setting_only_another_structure_declares_is_settable_live(tmp_path):
+    """Review Focus 3 (engine spec §3.5): `Session.set` validates against the union of the task's
+    structures' settings, so one that only a structure other than the default declares is taken,
+    and a name no structure declares is still refused. The union is built once, as the task is
+    taken, never at each trial's publish (the plan's engineering review, M5)."""
+    task = tmp_path / "two_structures.py"
+    task.write_text(TWO_STRUCTURES)
+    spec = _spec(tmp_path / "session")
+    spec.task = str(task)
+    session = _session(spec)
+
+    session.set("cue_delay", 0.5, by=Box("console"))
+
+    assert "cue_delay" in [row[0] for row in session.parameters]
+    assert session._params() is session._params()
+    with pytest.raises(Exceeded, match="not a parameter this task declares"):
+        session.set("cue_dely", 0.5, by=Box("console"))
+
+
+def test_a_session_refuses_a_task_whose_setting_says_nothing_of_what_it_means(tmp_path):
+    """XC-288 §4.1, required: `Session.run` holds the task object to `check_task`, so a setting with
+    no meaning refuses the run before anything is strobed: the card carries only the head's
+    fixation, which the fixture strobed (`_session`)."""
+    text = Path("tasks/fixation_detection.py").read_text()
+    was = '        Param("fix_hold", unit="s", low=0.05, high=2.0, start=0.3),\n'
+    assert text.count(was) == 1
+    task = tmp_path / "unexplained.py"
+    task.write_text(text.replace(
+        was, was + '        Param("cue_delay", unit="s", low=0.0, high=1.0, start=0.2),\n'))
+    spec = _spec(tmp_path / "session")
+    spec.task = str(task)
+    session = _session(spec)
+
+    with pytest.raises(SystemExit, match="undeclared-meaning"):
+        session.run()
+    assert session.card.codes == [4128], "nothing of the run was strobed"
+
+
+@pytest.mark.parametrize("deployment", [Deployment.RIG_CHAIRED, Deployment.CAGE_SIDE])
+def test_a_session_runs_the_reference_task_with_its_head_not_fixed(tmp_path, deployment):
+    """`Session.run`'s backstop, for a caller that took no pre-flight (engine spec §20.1): the
+    reference task needs a fixed head (the PI, 2026-10-11; the engine C1 plan's Appendix B, item
+    31), and in a chaired or cage-side session that is a warning, which its callers list, not a
+    refusal (the PI, 2026-10-11: "the experimenter needs free control most of the time"), so the
+    run goes ahead."""
+    spec = _spec(tmp_path / "session", trials=3, deployment=deployment)
+    if deployment is Deployment.CAGE_SIDE:
+        spec.bounds = _cage_side_bounds()
+    session = _session(spec) if deployment is Deployment.RIG_CHAIRED else Session(
+        spec, card=Card(), pump=Pump(), wall_clock=lambda: WALL_NOW)
+
+    session.run()
+
+    assert RUN_START in session.card.codes
+    assert len((session.directory / "trials.jsonl").read_text().splitlines()) == 3
+
+
+def test_each_run_names_its_task_by_its_content_never_its_path(tmp_path):
+    """Review Focus 4; XC-288 §4.4: each start row's `versions.task` is the task's content hash. A
+    copy of the task under another name is the same task; one with a start value moved is another
+    (the research note's §3.1 found the path there)."""
+    text = Path("tasks/fixation_detection.py").read_text()
+    was = 'Param("fix_hold", unit="s", low=0.05, high=2.0, start=0.3)'
+    assert text.count(was) == 1
+    same, moved = tmp_path / "same_task.py", tmp_path / "moved_task.py"
+    same.write_text(text)
+    moved.write_text(text.replace(was, was.replace("start=0.3", "start=0.4")))
+    # A service session, whose head stays fixed between its runs.
+    session = _service_session(tmp_path / "session")
+
+    for path in ("tasks/fixation_detection.py", str(same), str(moved)):
+        session.run(RunSpec(task=path, trials=1, seed=2, values=dict(VALUES)))
+
+    starts = [row for row in _runs(session) if row["event"] == "start"]
+    assert [row["task"] for row in starts] == ["tasks/fixation_detection.py", str(same), str(moved)]
+    hashes = [row["versions"]["task"] for row in starts]
+    assert hashes[0] == hashes[1] == content_hash(_load_task(Path("tasks/fixation_detection.py")))
+    assert hashes[2] != hashes[0] and hashes[2].startswith("sha256:")
+
+
 def test_a_run_after_the_session_ended_is_refused_before_anything_resets(tmp_path):
-    session = _session(_spec(tmp_path, trials=1, deployment=Deployment.RIG_CHAIRED))
+    session = _session(_spec(tmp_path, trials=1))
     session.run()
     session.end()
 
@@ -802,8 +923,9 @@ def test_a_chaired_session_runs_and_strobes_no_restraint_codes(tmp_path):
     before it would be a restraint record for restraint nothing marked.
 
     `run()` released the head unconditionally until this test existed, which would
-    have strobed 4129 into exactly such a stream."""
-    spec = _spec(tmp_path, trials=5)
+    have strobed 4129 into exactly such a stream. The reference task needs a fixed head, so a
+    chaired session runs its head-free copy."""
+    spec = _spec(tmp_path, trials=5, task=str(_sessions.head_free_task(tmp_path / "task")))
     spec.deployment = Deployment.RIG_CHAIRED
     session = _session(spec)
 
@@ -979,11 +1101,11 @@ def test_head_fixation_is_event_coded_at_both_ends(tmp_path):
 
 
 def _two_blocks() -> list[Block]:
-    near = Condition("near", {"target_position": 5.0}, target=6)
-    far = Condition("far", {"target_position": 12.0}, target=6)
+    near = Condition("near", {"target_x": 5.0}, target=6)
+    far = Condition("far", {"target_x": 12.0}, target=6)
     return [
         Block(name="near-far", conditions=[near, far]),
-        Block(name="far-only", conditions=[Condition("far", {"target_position": 12.0}, target=4)]),
+        Block(name="far-only", conditions=[Condition("far", {"target_x": 12.0}, target=4)]),
     ]
 
 
@@ -1015,7 +1137,7 @@ def test_each_trial_records_the_condition_it_actually_ran(tmp_path):
         ).read_text().splitlines()
     ]
 
-    positions = {row["params"]["target_position"] for row in rows}
+    positions = {row["params"]["target_x"] for row in rows}
     assert positions == {5.0, 12.0}
     assert {row["condition"] for row in rows} == {"near", "far"}
     assert {row["block"] for row in rows} == {"near-far", "far-only"}
@@ -2346,7 +2468,8 @@ def _cage_side_bounds() -> Bounds:
 def test_a_cage_side_session_has_no_return_to_await(tmp_path):
     link = Simulated()
     spec = _spec(
-        tmp_path, trials=3, deployment=Deployment.CAGE_SIDE, bounds=_cage_side_bounds()
+        tmp_path, trials=3, deployment=Deployment.CAGE_SIDE, bounds=_cage_side_bounds(),
+        task=str(_sessions.head_free_task(tmp_path / "task")),
     )
     session = Session(spec, card=Card(), pump=Pump(), link=link, wall_clock=lambda: WALL_NOW)
     session.observe = _trial_budget(spec)
@@ -2589,7 +2712,7 @@ def test_the_parameters_a_console_shows_are_the_declarations_then_the_ceilings(
     -- and not the out-of-cage ceiling, which is the limit a clock runs against and
     not a task setting."""
     session = _session(_spec(tmp_path))
-    declared = _load_trial(Path("tasks/fixation_detection.py")).params
+    declared = _load_task(Path("tasks/fixation_detection.py")).params
 
     rows = session.parameters
     by_name = {row[0]: row for row in rows}
@@ -2716,7 +2839,7 @@ def test_a_run_refused_by_its_backstop_says_the_findings_through_the_terminal_gu
     """The backstop's refusal quotes the task, as `wlx run`'s does: through `_printable`."""
     made = _sessions.session(tmp_path)
     made.open()
-    monkeypatch.setattr("wl_xcon.taskd.check",
+    monkeypatch.setattr("wl_xcon.taskd.check_task",
                         lambda *a, **k: [Finding("E1", "forged\x1b[2J\nSTOPPED: forged")])
 
     with pytest.raises(SystemExit) as refused:
@@ -4618,8 +4741,11 @@ def test_ending_the_runs_after_a_run_keeps_how_the_run_ended(tmp_path):
 def test_closing_needs_the_return_then_ends_the_session_with_one_closed_frame(tmp_path):
     link = Simulated()
     session = _service_session(tmp_path, link=link, deployment=Deployment.RIG_CHAIRED)
-    # One run first: until Task 4, a frame needs a run's scheduler to be built from.
-    session.run(_run_spec(trials=1))
+    # One run first: until Task 4, a frame needs a run's scheduler to be built from. Chaired, so
+    # the reference task's head-free copy.
+    run = _run_spec(trials=1)
+    run.task = str(_sessions.head_free_task(tmp_path / "task"))
+    session.run(run)
     session.end_runs(Box("jake"))
 
     with pytest.raises(RuntimeError, match="not home"):
@@ -4888,11 +5014,17 @@ def test_a_trial_that_faults_keeps_its_number_and_the_next_trial_never_reuses_it
 #: A task with one state: `FIX_ON` on entering it, `CORRECT` 0.01 s later. No window, no
 #: reward and no parameter, so every code its session strobes is one these tests name.
 ONE_STATE_TASK = """
-from wl_xcon.task import After, Mark, On, Outcome, State, Trial
+from wl_xcon.task import NO_CHOICE, After, Mark, On, Outcome, ReactionTime, State, Task, Trial
 
 trial = Trial(
     start="only",
     states=[State("only", enter=[Mark(4096)], go=[On(After(0.01), Outcome.CORRECT)])],
+)
+TASK = Task(
+    {"only": trial},
+    default="only",
+    reaction_time=ReactionTime("only", (Outcome.CORRECT,), "the one state's length"),
+    choice=NO_CHOICE,
 )
 """
 
@@ -5722,7 +5854,9 @@ def test_a_resumed_head_fixed_session_is_fixed_at_the_resume_and_may_run(tmp_pat
 
 def test_a_resumed_chaired_session_strobes_no_head_fixed_and_has_no_chair_time(tmp_path):
     first = _service_session(tmp_path, deployment=Deployment.RIG_CHAIRED)
-    first.run(_levels_run(blocks=_plan("X", each=2)))
+    run = _levels_run(blocks=_plan("X", each=2))
+    run.task = str(_sessions.head_free_task(tmp_path / "task"))
+    first.run(run)
     again = _resumed(tmp_path, first, deployment=Deployment.RIG_CHAIRED)
 
     assert 4128 not in again.card.codes

@@ -27,33 +27,45 @@ from wl_xcon.marks import TIME_FORMATS as _TIME_FORMATS
 from wl_xcon.marks import clock_or_now as _clock_or_now
 from wl_xcon.marks import clock_time as _wall_clock_time
 from wl_xcon.bounds import Bounds, Exceeded
-from wl_xcon.check import check
+from wl_xcon.check import check_task
 from wl_xcon.findings import SESSION_KINDS
-from wl_xcon.review import render as render_review
+from wl_xcon.review import render_task as render_review
 from wl_xcon.codes import PROVISIONAL, Allocation
 from wl_xcon.geometry import VIEWS, Geometry, Rig, SubjectSettings
 from wl_xcon.photometry import SRGB, Calibration, read_calibration
 from wl_xcon.actor import Actor, Box
-from wl_xcon.task import Trial
+from wl_xcon.task import Task, Trial
 from wl_xcon.welfare import Deployment
 
 
-def _load_trial(path: Path) -> Trial:
-    """Import a task file and return the `Trial` it defines.
+def _load_task(path: Path) -> Task:
+    """Import a task file and return the task object it defines (engine spec §3.5; engine build
+    C1): exactly one `Task`, which holds its trial structures and says what its settings mean, what
+    it offers to choose and how its reaction time is defined (XC-288 §4). **A file defining trials
+    and no task object -- one written before engine build C1 -- is refused, saying how to wrap
+    them**, never run as a task that declares nothing about itself (the engine C1 plan's call 2).
 
-    Tasks are plain Python declarations (ADR-0006), so loading one is an import.
-    That is also why the checks run *at load*: by the time this returns, the task
-    is a data structure that can be inspected rather than a program to be trusted.
+    Tasks are plain Python declarations (ADR-0006), so loading one is an import. That is also why
+    the checks run *at load*: by the time this returns, the task is a data structure that can be
+    inspected rather than a program to be trusted.
     """
     spec = importlib.util.spec_from_file_location(path.stem, path)
     if spec is None or spec.loader is None:
         raise SystemExit(f"cannot load {path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    trials = [v for v in vars(module).values() if isinstance(v, Trial)]
-    if len(trials) != 1:
-        raise SystemExit(f"{path} defines {len(trials)} trials; expected exactly 1")
-    return trials[0]
+    found = list(vars(module).values())
+    tasks = [value for value in found if isinstance(value, Task)]
+    if len(tasks) != 1:
+        trials = sum(isinstance(value, Trial) for value in found)
+        why = (
+            f": it defines {trials} trial structure(s) and no Task, and since engine build C1 a "
+            f"task file wraps its trials in one Task(...) that says what its settings mean and "
+            f"how its reaction time is defined (engine spec §3.5; XC-288 §4)"
+            if not tasks and trials else ""
+        )
+        raise SystemExit(f"{path} defines {len(tasks)} task objects; expected exactly 1{why}")
+    return tasks[0]
 
 
 def _load_allocation(path: Path | None) -> Allocation:  # noqa: C901
@@ -190,7 +202,7 @@ def _setup_words(view: object, half_ipd_cm: object) -> str:
 
 
 def _setups(
-    trial: Trial, rig: Rig, view: str | None, settings: SubjectSettings | None
+    task: Task, rig: Rig, view: str | None, settings: SubjectSettings | None
 ) -> list[Geometry]:
     """The fields `wlx check` holds a task to (direct-view spec §8): the setup named, or
     every setup the task allows. Through the stereoscope, one animal's field when its
@@ -204,7 +216,7 @@ def _setups(
             "direct": ["direct"],
             "stereoscope": ["stereoscope"],
             "either": ["direct", "stereoscope"],
-        }.get(trial.view, [])
+        }.get(task.view, [])
     )
     halves = [settings.half_ipd_cm] if settings else list(rig.half_ipd_range_cm)
     geometries: list[Geometry] = []
@@ -1629,11 +1641,15 @@ def main(argv: list[str] | None = None) -> int:
         # The rig's color calibration (engine spec §7.1): a record that will not load refuses
         # here, before anything is recorded (the engine B plan, call 20).
         calibration = _load_calibration(rig, args.rig)
-        findings = check(
-            _load_trial(args.task),
+        # The task object, held to its declarations and, since engine build C1, to the session's
+        # deployment: a task that needs a fixed head is a warning in any session not declared
+        # head-fixed (`RIG_FIXED`; XC-277; the PI, 2026-10-11), accepted with the others below.
+        findings = check_task(
+            _load_task(args.task),
             _load_allocation(args.allocation),
             geometry=geometry,
             calibration=calibration,
+            deployment=deployment,
         )
         # By the session's kind (engine spec §19.2): a warning its kind does not accept
         # refuses here too.
@@ -2095,10 +2111,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "review":
         allocation = _load_allocation(args.allocation)
-        print(render_review(_load_trial(args.task), allocation.task_events))
+        print(render_review(_load_task(args.task), allocation.task_events))
         return 0
 
-    trial = _load_trial(args.task)
+    task = _load_task(args.task)
     allocation = _load_allocation(args.allocation)
     rig = _load_rig(args.rig)
     # A record that will not load refuses here (the engine B plan, call 20).
@@ -2108,7 +2124,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.subject_settings is not None
         else None
     )
-    geometries = _setups(trial, rig, args.view, settings)
+    geometries = _setups(task, rig, args.view, settings)
     if settings is not None and geometries and {g.view for g in geometries} == {"direct"}:
         raise SystemExit(_DIRECT_READS_NO_SETTINGS)
     for geometry in geometries:
@@ -2123,7 +2139,7 @@ def main(argv: list[str] | None = None) -> int:
     # and read the same in every setup, while check 8's name the field they failed in.
     findings: list = []
     for geometry in geometries or [None]:
-        for finding in check(trial, allocation, geometry=geometry, calibration=calibration):
+        for finding in check_task(task, allocation, geometry=geometry, calibration=calibration):
             if finding not in findings:
                 findings.append(finding)
     # **With a kind, the calibration's own warnings first**, as `wlx run` lists them (the

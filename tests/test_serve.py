@@ -1217,13 +1217,13 @@ _SETUP = ("--rig", RIG_FILE, "--view", "direct", "--kind", "training", "--accept
 EIGHT_HOURS = "tasks/eight_hour_bounds.py"
 #: What the fixation task needs set to run headless (as in `test_cli.py`).
 _TASK_SETS = [
-    "--set", "fix_timeout=4.0",
+    "--set", "fix_acquisition=4.0",
     "--set", "fix_hold=0.3",
-    "--set", "response_window=0.6",
+    "--set", "response_deadline=0.6",
     "--set", "target_hold=0.2",
     "--set", "fix_window=2.0",
     "--set", "target_window=3.0",
-    "--set", "target_position=10.0",
+    "--set", "target_x=10.0",
 ]
 
 #: **Ruling 10** (P4d-2a final review), as `tests/test_cli.py`'s autouse fixture has it:

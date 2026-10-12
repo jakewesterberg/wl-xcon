@@ -63,7 +63,7 @@ Each was asked through the console's question tool in plain terms; the recommend
 | Q12 | Section 1, what the rig writes | Agreed, adding "**the experimenter notes, which will come from the eln on wl works**" | — |
 | Q13 | After the reviews: whether a pass rule counts trials a live change had eased | **Only trials at the stage's own difficulty** (§4.2) | count all, recording the counted trials' settings; count all |
 | Q14 | Hands-on techniques in a session | **Free-text notes**, as Q2 (§3.4) | one tap at the rig from a short list (recommended) |
-| Q15 | Names in the agent's file | **Account ids only**; names stay in wl.works (§3.6, §5.2) | names and ids |
+| Q15 | Names in the agent's file | **Account ids only**; names stay in wl.works (§3.6, §5.2) (revised 2026-10-11: ids plus names where who acted matters) | names and ids |
 
 Sections 3 to 8 are the brainstorm's five design sections, each agreed as presented; §9 and §10 gather what
 they said about welfare and what was left for later; §11, added at review, lists the documents this changes.
@@ -227,6 +227,14 @@ recommended minimal treatment for the sickest patients, who were the ones treate
   take their place in the same field, each naming the person accountable for it (R13). Nothing here builds
   one. An agent's identity in the record also waits on XC-218.
 
+> **Amended 2026-10-11 (the PI, having discussed it with wl-works: "wl-works and i discussed the id
+> thing being too conservative. each person will have an id, but the name should also be present in
+> places where who said or did something is useful"):** Q15 is revised. Each person has a permanent
+> wl.works account id, which stays the join key, and the person's name is also recorded wherever who
+> said or did something is useful: changes, reasons, notes and marks. Read "the agent's file names
+> nobody" above as ids plus names where who acted matters (decisions.md TRN-08). The text above is
+> left as approved.
+
 ### 3.7 Stages
 
 **When a stage's pass rule is met** (§4.2), the rig records it as an event, with the counts that met it:
@@ -282,6 +290,10 @@ the rig's clock until a script in `tools/` has measured it** (CLAUDE.md).
 Agreed with wl-xtasks as part of build C's task object (engine spec §21's ask). The task's author proposes
 each; **the person reviewing the task confirms it**, in the review report (engine spec §18.1).
 
+*Engine build C1, 2026-10-11*: the format is defined in wl-xcon, the PI's approval of build C1's plan
+being wl-xtasks' agreement on it (2026-10-11); the review report lists each declaration for the
+reviewer's confirmation (`review.render_task`).
+
 ### 4.1 What each setting means
 
 Every task setting a person can change between trials declares one of:
@@ -301,6 +313,21 @@ animal, is one of the things an agent can learn.
 **Two bounded settings change live**, `reward_correct` and the out-of-cage limit. They are declared in the
 bounded config, whose loader is welfare-listed, so the task check does not cover them: their meanings come
 from a table in wl-xcon, outside `bounds.py`.
+
+*Engine build C1, 2026-10-11*: a setting several tasks use alike is declared once, in
+`wl_xcon/declarations.py`'s shared list, and a task overrides it only with a note saying why (the
+PI, 2026-10-11; TRN-09); a setting only one task has is declared by that task, and one that would
+mean a different thing in each task using it by each (the search array's and the detection
+target's `eccentricity`, until the PI named them `array_eccentricity` and `target_eccentricity`,
+TRN-13); the bounded settings' table is there too (`BOUNDED`). A direction reads on raising a
+value, or on moving it away from a reference -- a number, another setting the task declares, or the
+trial's background. An appearance, a setting whose values are a list of looks, is not a difficulty
+setting by default; a task where it is what the animal judges may declare its own meaning, which
+may read a direction on changing it (TRN-11). Each meaning says whether its setting is a criterion,
+what counts as success, or a stimulus, what the animal sees; the bounded settings are neither (the
+PI, 2026-10-11; TRN-12). Every declared setting needs one, live or not. The reference tasks'
+declarations are the PI's confirmation of build C1's plan's Appendix B, with his changes, on
+2026-10-11 (TRN-10), their settings named as he named them (TRN-13).
 
 ### 4.2 Stages and their pass rules
 
@@ -330,6 +357,17 @@ A task that offers a choice declares which of its items count as choices and wha
 landing, a touch, a lever), so every trial records the one chosen (§3.1). **Every task declares how its
 reaction time is defined**, from which event to which, so one column means one thing per task.
 
+> **Amended 2026-10-11 (the PI, confirming engine build C1's plan's Appendix B: "i prefer object to
+> item"):** what a task offers to choose between are its **objects**, not items. Read "the item chosen"
+> and "its items" here, "which item was chosen" in §3.1 and "no item chosen" in §1 as the object chosen
+> and its objects: `Choice.objects` in `wl_xcon/task.py`, and an array's per-object windows
+> `ObjectWindows`. The text above is left as approved.
+
+*Engine build C1, 2026-10-11*: a reaction time is declared by states, from entering one to leaving it
+for named places (`ReactionTime`), and a choice as the objects offered and the act that chooses one
+(`Choice`), or `NO_CHOICE` for a task that offers none, an unset choice being refused like an unset
+meaning; both are checked at load (TRN-11). Recording them in each trial is build C7's.
+
 ### 4.4 Identities that hold for years
 
 - **The task's content hash**, always: a hash of its content, never its file path (the research note's §3.1
@@ -337,6 +375,14 @@ reaction time is defined**, from which event to which, so one column means one t
 - **Stages' ids** (§4.2), and **conditions' permanent numbers** from the task's registry on lab storage
   (engine spec §14.5).
 - **A procedure's identity and version** (build D).
+
+*Engine build C1, 2026-10-11*: the hash is sha256 of what the task object declares -- its structures,
+default, reaction time, choice, head, every setting's resolved meaning and the meanings of the
+bounded settings it rewards through -- written by class and the fields set away from their
+defaults, with the format those defaults were read at (`declarations.FORMAT`, raised when one
+changes), as JSON with sorted keys (`declarations.content_hash`), in each run's start row as
+`versions.task` (REC-24). A comment, the file's name and its between-trial Python are not in it, nor
+is the wl-xcon that ran it (XC-340).
 
 ### 4.5 Steps that may be chosen at random (build D)
 
@@ -388,6 +434,16 @@ file are both made from the same logs; neither is the other's source.
 Pseudonymized data are still personal data (GDPR Recital 26), but Belgium's Act of 30 July 2018 (Title 4,
 Art. 197) ranks them above identified data for research; free-text notes can still name people, which
 the PI judged safe as is on approving this spec.
+
+> **Amended 2026-10-11 (the PI, having discussed it with wl-works: "wl-works and i discussed the id
+> thing being too conservative. each person will have an id, but the name should also be present in
+> places where who said or did something is useful"):** people are recorded by their permanent
+> wl.works account id, still the join key, and by name too wherever who said or did something is
+> useful: changes, reasons, notes and marks (the `changes`, `reasons`, `notes` and `controls`
+> tables). With names recorded beside ids (the PI's revision of 2026-10-11), the file holds
+> identified personal data, not pseudonymized data; the PI's rulings stand ("personal data is safe
+> as is", 2026-10-10; ids plus names, 2026-10-11). The paragraph above is left as approved
+> (decisions.md TRN-08).
 
 ### 5.3 When it is built
 
@@ -509,6 +565,7 @@ here (§10).
 - **Personal data, beyond Q15**: settled by the PI on approving this spec, 2026-10-10: "personal data is
   safe as is". The file holds account ids, never names (Q15); nothing further is planned. Whether any of it
   is ever published is his to decide if that arises.
+  *Revised 2026-10-11, the PI*: ids plus names where who acted matters (§3.6's and §5.2's notes).
 - **A simulated animal that learns**, as a test bed for an agent before an animal (R12): every published
   teacher found was tried on simulated learners first (the research note, §2.3). A backlog item, beside
   XC-146.

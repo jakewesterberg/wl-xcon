@@ -17,20 +17,35 @@ from _calibrations import LINEAR, SPECTRA
 from _rig import DIRECT, RIG
 from wl_xcon import screen
 from wl_xcon.calibration import constellation
-from wl_xcon.cli import _load_trial
-from wl_xcon.check import check
+from wl_xcon.cli import _load_task
+from wl_xcon.check import check, check_task
 from wl_xcon.cones import V_F10
+from wl_xcon.declarations import COMMON, OVERRIDE, OWN, SHARED, resolved
+from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.photometry import SRGB, SRGB_WHITE_CD_M2, DKL, Calibration, Gray, _apply3, xyY
 from wl_xcon.run import Recorded
 from wl_xcon.simulate import Subject, simulate
 from wl_xcon.task import (
+    BACKGROUND,
+    CLEAR_CUT,
+    CRITERION,
+    EASIER,
+    EXPECTED,
+    HARDER,
+    NOT_DIFFICULTY,
+    NO_CHOICE,
+    STIMULUS,
     Entered,
     Hold,
     Exited,
     Outcome,
+    P,
     SaccadeTo,
+    Show,
     Trial,
+    actions_of,
 )
+from wl_xcon.welfare import Deployment
 
 TASKS = Path(__file__).resolve().parents[1] / "tasks"
 
@@ -38,9 +53,9 @@ TASKS = Path(__file__).resolve().parents[1] / "tasks"
 #: stand-in housings (`tests/_rig.py`).
 GEOMETRY = DIRECT
 VALUES = {
-    "fix_timeout": 4.0,
+    "fix_acquisition": 4.0,
     "fix_hold": 0.3,
-    "response_window": 0.6,
+    "response_deadline": 0.6,
     "target_hold": 0.2,
 }
 
@@ -110,6 +125,20 @@ def test_the_adaptive_trial_is_the_detection_trial_with_more_parameters(adaptive
     assert {p.name for p in detection.params} < {p.name for p in adaptive.params}
 
 
+def test_each_detection_task_places_its_target_at_its_x_and_y(adaptive, detection):
+    """The PI, 2026-10-11: "shouldnt there also be a target_y?". The target and its window sit at
+    (`target_x`, `target_y`), each declared over ±16° and `target_y` starting on the horizontal
+    meridian; the target's computed position is the trial's to record (XC-348), not a setting."""
+    where = (P("target_x"), P("target_y"))
+    for trial in (detection, adaptive):
+        shown = {action.stimulus.name: action.stimulus.at
+                 for _, action in actions_of(trial) if isinstance(action, Show)}
+        windows = {window.name: window.at for window in trial.windows}
+        assert shown["target"] == windows["target"] == where
+        (y,) = [param for param in trial.params if param.name == "target_y"]
+        assert (y.low, y.high, y.start) == (-16.0, 16.0, 0.0) == (*_range(trial, "target_x"), 0.0)
+
+
 def test_the_staircase_converges_downward_on_success_and_backs_off_on_error():
     staircase = _load("adaptive_detection", "Staircase")(value=0.5)
 
@@ -125,14 +154,14 @@ def test_the_staircase_converges_downward_on_success_and_backs_off_on_error():
 
 def test_an_aborted_trial_does_not_move_the_staircase():
     """An abort says nothing about difficulty. Letting one move the estimate makes
-    contrast track engagement rather than perception -- so a disengaged animal
+    the target's contrast track engagement rather than perception -- so a disengaged animal
     would be handed easier stimuli for a reason unrelated to what it can see."""
     module_staircase = _load("adaptive_detection", "Staircase")
     next_params = _load("adaptive_detection", "next_params")
     staircase = module_staircase(value=0.5)
 
     for outcome in (Outcome.NO_FIXATION, Outcome.FIXATION_BREAK, Outcome.NO_RESPONSE):
-        next_params(staircase, eccentricity=10.0, last=outcome)
+        next_params(staircase, target_eccentricity=10.0, last=outcome)
 
     assert staircase.value == 0.5
 
@@ -144,16 +173,16 @@ def test_an_aborted_trial_does_not_move_the_staircase():
 # actions, so set size was a change to the shape of the task rather than a value.
 
 SEARCH_VALUES = {
-    "fix_timeout": 4.0,
+    "fix_acquisition": 4.0,
     "fix_hold": 0.3,
-    "response_window": 0.6,
+    "response_deadline": 0.6,
     "target_hold": 0.2,
     "fix_window": 2.0,
-    "item_window": 2.0,
-    "eccentricity": 8.0,
+    "object_window": 2.0,
+    "array_eccentricity": 8.0,
     "set_size": 6,
     "target_index": 1,
-    "array_phase": 0.0,
+    "array_rotation": 0.0,
 }
 
 #: Illustrative, not measured. A real calibration comes from a photometer on the
@@ -209,11 +238,11 @@ def test_the_search_task_will_not_load_without_a_measured_display(search):
 
 def test_the_search_task_s_red_and_green_are_drawn_isoluminant_with_its_gray(search):
     """The path end to end on a measured panel (engine build A2): checked, resolved through the
-    calibration, and each item's V_F,10 luminance is the gray's (A2's Q5), red and green
+    calibration, and each object's V_F,10 luminance is the gray's (A2's Q5), red and green
     differing only in color."""
     choices = {p.name: p.choices for p in search.params}
-    values = {**SEARCH_VALUES, "fix_luminance": 40.0, "target_looks": choices["target_looks"][0],
-              "distractors": choices["distractors"][0]}
+    values = {**SEARCH_VALUES, "fix_luminance": 40.0, "target_appearance": choices["target_appearance"][0],
+              "distractor_appearance": choices["distractor_appearance"][0]}
     array = _load("visual_search", "ARRAY")
 
     s = screen.resolve({"search": array}, values, search, GEOMETRY, frame_period=1 / 240,
@@ -289,10 +318,10 @@ def test_every_reference_task_is_written_for_direct_view(name):
 def test_the_interim_narrowing_is_undone(detection, adaptive, search):
     """The ranges the stereoscope's ±12° mask forced on 2026-09-28, back to what they
     were, now that direct view's field is what they are checked against."""
-    assert _range(detection, "target_position") == (-16.0, 16.0)
-    assert _range(adaptive, "target_position") == (-16.0, 16.0)
-    assert _range(adaptive, "eccentricity") == (2.0, 16.0)
-    assert _range(search, "eccentricity") == (5.0, 14.0)
+    assert _range(detection, "target_x") == (-16.0, 16.0)
+    assert _range(adaptive, "target_x") == (-16.0, 16.0)
+    assert _range(adaptive, "target_eccentricity") == (2.0, 16.0)
+    assert _range(search, "array_eccentricity") == (5.0, 14.0)
 
 
 def test_the_calibration_task_passes_every_load_time_check_in_direct_view():
@@ -325,13 +354,15 @@ def test_the_fixation_task_starts_from_the_values_the_console_mockup_shows():
     """P4d-2b spec §6.2 ("Starting values are the task's own"), with the values the
     mockup the PI reviewed shows for it (`TASKS.fixation_detection`) -- the ones every
     end-to-end test has run it at (`tests/test_cli.py`'s `_TASK_SETS`) -- each inside its
-    own range. Its appearance is left unset, as every test has left it."""
-    params = _load_trial(TASKS / "fixation_detection.py").params
+    own range. Its appearance is left unset, as every test has left it; its `target_y`, added by
+    the PI on 2026-10-11 ("shouldnt there also be a target_y?"), starts on the horizontal
+    meridian."""
+    params = _load_task(TASKS / "fixation_detection.py").params
 
     assert {param.name: param.start for param in params} == {
-        "fix_timeout": 4.0, "fix_hold": 0.3, "response_window": 0.6, "target_hold": 0.2,
-        "fix_window": 2.0, "target_window": 3.0, "target_position": 10.0,
-        "target_looks": None, "fix_luminance": 40.0, "target_luminance": 40.0,
+        "fix_acquisition": 4.0, "fix_hold": 0.3, "response_deadline": 0.6, "target_hold": 0.2,
+        "fix_window": 2.0, "target_window": 3.0, "target_x": 10.0, "target_y": 0.0,
+        "target_appearance": None, "fix_luminance": 40.0, "target_luminance": 40.0,
     }
     for param in params:
         if param.start is not None:
@@ -382,10 +413,16 @@ def test_the_training_variant_is_the_search_task_with_ordinary_colors(search, tr
     theirs = {p.name: p for p in search.params}
     ours = {p.name: p for p in training.params}
     assert set(ours) - set(theirs) == {"red_luminance", "green_luminance"}
-    for name in set(theirs) - {"target_looks", "distractors"}:
+    for name in set(theirs) - {"target_appearance", "distractor_appearance"}:
         assert ours[name] == theirs[name], name
     assert [(p.low, p.high, p.start) for p in (ours["red_luminance"], ours["green_luminance"])] == [
         (0.0, 17.0, 15.0), (0.0, 57.0, 15.0)]
+    theirs_task = _load_task(TASKS / "visual_search.py")
+    ours_task = _load_task(TASKS / "visual_search_training.py")
+    assert (ours_task.reaction_time, ours_task.choice) == (
+        theirs_task.reaction_time, theirs_task.choice)
+    assert {name: meaning for name, meaning in ours_task.meanings.items()
+            if name not in ("red_luminance", "green_luminance")} == theirs_task.meanings
 
 
 def test_the_training_variant_trains_on_the_default_and_never_records_on_it(training):
@@ -415,14 +452,14 @@ def test_each_color_reads_its_own_luminance_setting_and_nothing_else(training):
     array = _load("visual_search_training", "ARRAY")
 
     def lights(target, among, red, green):
-        values = {**SEARCH_VALUES, "target_looks": choices["target_looks"][target],
-                  "distractors": choices["distractors"][among],
+        values = {**SEARCH_VALUES, "target_appearance": choices["target_appearance"][target],
+                  "distractor_appearance": choices["distractor_appearance"][among],
                   "red_luminance": red, "green_luminance": green}
         s = screen.resolve({"search": array}, values, training, GEOMETRY, frame_period=1 / 240)
         by_index = {i.order[1]: i.fill.xyz[1] for i in s.items}
         return by_index[SEARCH_VALUES["target_index"]], by_index[0]
 
-    # target_looks[0] is the red disc and distractors[0] the green one.
+    # target_appearance[0] is the red disc and distractor_appearance[0] the green one.
     assert lights(0, 0, red=5.0, green=9.0) == pytest.approx((5.0, 9.0))
     assert lights(0, 0, red=7.0, green=9.0) == pytest.approx((7.0, 9.0))
     assert lights(0, 0, red=5.0, green=11.0) == pytest.approx((5.0, 11.0))
@@ -433,8 +470,194 @@ def test_each_color_reads_its_own_luminance_setting_and_nothing_else(training):
 def test_the_search_task_shows_its_colors_on_a_gray_and_so_does_its_training(search, training):
     """Its red and green are contrasts about the background, so they need a lit one (engine spec
     §7.5): D65 at 16 cd/m², the training variant's too, and the red and green are the PI's 2023
-    items made isoluminant in the lab's observer (the PI's answer to the engine A2 plan's Q1)."""
+    objects made isoluminant in the lab's observer (the PI's answer to the engine A2 plan's Q1)."""
     assert search.background == Gray(16.0)
     assert training.background == search.background
     assert (_load("visual_search", "RED"), _load("visual_search", "GREEN")) == (
         DKL(lum=0.0, l_m=0.603, s_lm=-0.94), DKL(lum=0.0, l_m=-0.143, s_lm=-0.87))
+
+
+# --- The task object (engine build C1) ------------------------------------------------------
+
+#: Each reference task file: its trial's attribute and the name its task object gives it.
+TASK_FILES = {
+    "fixation_detection": ("detection", "detection"),
+    "adaptive_detection": ("adaptive_detection", "detection"),
+    "visual_search": ("search", "search"),
+    "visual_search_training": ("search", "search"),
+    "calibration": ("calibration", "calibration"),
+}
+
+#: **Appendix B of the engine C1 plan, as the PI confirmed it** on 2026-10-11, item by item and with
+#: changes, and as he revised it on reviewing the build that day (decisions.md TRN-10): the shared
+#: list's kind, role, direction, what the direction reads relative to, note and why it overrides,
+#: for each setting (`_said`). A list of appearances is no difficulty setting unless a task says
+#: otherwise (his rule for item 1).
+CONFIRMED_SHARED = {
+    "fix_acquisition": (CLEAR_CUT, CRITERION, EASIER, None, "", ""),
+    "fix_hold": (CLEAR_CUT, CRITERION, HARDER, None, "", ""),
+    "fix_window": (CLEAR_CUT, CRITERION, EASIER, None, "", ""),
+    "fix_luminance": (EXPECTED, STIMULUS, EASIER, BACKGROUND, (
+        "a point farther in luminance from the background is easier to find: on black a brighter "
+        "one; on a gray one farther above or below it, so a point near the gray's luminance can "
+        "vanish"), ""),
+    "response_deadline": (CLEAR_CUT, CRITERION, EASIER, None, "", ""),
+    "target_hold": (CLEAR_CUT, CRITERION, HARDER, None, "", ""),
+    "target_window": (CLEAR_CUT, CRITERION, EASIER, None, "", ""),
+    "object_window": (EXPECTED, CRITERION, EASIER, None, (
+        "a wider window accepts a less accurate landing on the target, and can also turn a "
+        "near-miss beside a distractor into a wrong target"), ""),
+    "target_appearance": (NOT_DIFFICULTY, STIMULUS, None, None, (
+        "an appearance is not easier or harder in general; a task where it is what the animal "
+        "judges may declare its own meaning"), ""),
+    "target_luminance": (EXPECTED, STIMULUS, EASIER, BACKGROUND, (
+        "a target farther in luminance from the background is easier to see: on black a brighter "
+        "one, on a gray one farther above or below it; saccade latency falls as intensity rises "
+        "and then levels off, so far above threshold more light changes little"), ""),
+    "target_x": (NOT_DIFFICULTY, STIMULUS, None, None, (
+        "the target's horizontal position; a task may declare how moving it changes the task"), ""),
+    "target_y": (NOT_DIFFICULTY, STIMULUS, None, None, (
+        "the target's vertical position; a task may declare how moving it changes the task"), ""),
+    "set_size": (NOT_DIFFICULTY, STIMULUS, None, None, (
+        "the direction depends on the search: in a pop-out search more objects make it easier, "
+        "in a search without pop-out harder"), ""),
+    "distractor_appearance": (NOT_DIFFICULTY, STIMULUS, None, None, (
+        "what a change does depends on the search, a broad category of tasks where one "
+        "definition does not serve: a task declares its own as it is created"), ""),
+    "target_index": (NOT_DIFFICULTY, STIMULUS, None, None,
+                     "which object of the array is the target", ""),
+    "array_rotation": (NOT_DIFFICULTY, STIMULUS, None, None, (
+        "turns the whole array; held fixed with target_index, it lets an animal answer by "
+        "position rather than by the target's appearance"), ""),
+    "array_eccentricity": (NOT_DIFFICULTY, STIMULUS, None, None, (
+        "how far the array sits from fixation; what moving it does depends on the search task, "
+        "and an array need not be a ring"), ""),
+}
+#: The pop-out search tasks' override of `set_size`, the PI's words (2026-10-11).
+POP_OUT = (EXPECTED, STIMULUS, EASIER, None,
+           "in a pop-out search a denser array makes the odd object stand out more",
+           "a pop-out search: a denser array makes the odd object stand out more", OVERRIDE)
+#: The training variant's two luminances, each read from the other.
+GAP = (
+    "the cue it adds is the brightness gap between the red and the green, redundant with their "
+    "color, so a larger gap is easier; near equal brightness, whose point for this animal is "
+    "unknown, the direction is uncertain; narrowing the gap is the fading path toward "
+    "isoluminance"
+)
+#: And each task's own: its settings no other task declares alike, and its overrides.
+CONFIRMED_OWN = {
+    "fixation_detection": {},
+    "adaptive_detection": {
+        "target_contrast": (CLEAR_CUT, STIMULUS, EASIER, None, (
+            "nothing reads it yet: no stimulus draws with it, and nothing moves it until a "
+            "between-trial procedure is called (XC-242)"), "", OWN),
+        "target_eccentricity": (NOT_DIFFICULTY, STIMULUS, None, None, (
+            "nothing reads it yet: the target's place is target_x's and target_y's, and this "
+            "setting moves nothing on screen until a between-trial procedure is called "
+            "(XC-242)"), "", OWN),
+    },
+    "visual_search": {"set_size": POP_OUT},
+    "visual_search_training": {
+        "set_size": POP_OUT,
+        "red_luminance": (EXPECTED, STIMULUS, EASIER, "green_luminance", GAP, "", OWN),
+        "green_luminance": (EXPECTED, STIMULUS, EASIER, "red_luminance", GAP, "", OWN),
+    },
+    "calibration": {
+        "cal_window": (CLEAR_CUT, CRITERION, EASIER, None, "", "", OWN),
+        "cal_hold": (CLEAR_CUT, CRITERION, HARDER, None, "", "", OWN),
+    },
+}
+
+
+def _said(meaning) -> tuple:
+    """A meaning as the tables above write it: every field of it."""
+    return (meaning.kind, meaning.role, meaning.raising, meaning.relative_to, meaning.note,
+            meaning.overrides)
+
+
+@pytest.mark.parametrize("name", sorted(TASK_FILES))
+def test_each_reference_task_file_defines_one_task_object_over_its_trial(name):
+    attribute, structure = TASK_FILES[name]
+    task = _load_task(TASKS / f"{name}.py")
+
+    assert (list(task.structures), task.default) == ([structure], structure)
+    assert task.trial == _load(name, attribute)
+
+
+@pytest.mark.parametrize("name", sorted(TASK_FILES))
+@pytest.mark.parametrize("calibration", [None, SRGB, PANEL], ids=["none", "default", "measured"])
+def test_each_reference_task_object_adds_no_finding_to_its_trials(name, calibration):
+    """Its settings' meanings, its reaction time and its choice are declared and well formed: the
+    task object's checks find nothing its one structure's did not."""
+    task = _load_task(TASKS / f"{name}.py")
+    allocation = _load("allocation", "ALLOCATION")
+
+    assert check_task(task, allocation, geometry=GEOMETRY, calibration=calibration) == check(
+        task.trial, allocation, geometry=GEOMETRY, calibration=calibration)
+
+
+def test_the_shared_list_says_what_the_pi_confirmed():
+    assert {name: _said(m) for name, m in COMMON.items()} == CONFIRMED_SHARED
+    assert len(COMMON) == 17
+
+
+@pytest.mark.parametrize("name", sorted(TASK_FILES))
+def test_every_setting_of_each_reference_task_has_the_meaning_the_pi_confirmed(name):
+    task = _load_task(TASKS / f"{name}.py")
+    settings = [param.name for param in task.params]
+    expected = {setting: (*CONFIRMED_SHARED[setting], SHARED)
+                for setting in settings if setting in CONFIRMED_SHARED}
+    expected.update(CONFIRMED_OWN[name])
+
+    assert {setting: (*_said(meaning), origin)
+            for setting, (meaning, origin) in resolved(task).items()} == expected
+    assert set(expected) == set(settings), "every setting has a meaning"
+
+
+@pytest.mark.parametrize("name", sorted(TASK_FILES))
+def test_each_reference_task_needs_a_fixed_head_and_warns_without_one(name):
+    """The PI, 2026-10-11 (the engine C1 plan's Appendix B, item 31): "kiosk will be head free, in
+    the rig will be head fixed. we do not have head tracking in the rig". Every reference task warns
+    in a chaired or cage-side session, and only there, and is refused in none (the PI, 2026-10-11:
+    "warnings are more appropriate most of the time")."""
+    task = _load_task(TASKS / f"{name}.py")
+
+    def head(deployment: Deployment) -> list:
+        return [f for f in check_task(task, deployment=deployment) if f.code == "head-not-fixed"]
+
+    assert task.needs_fixed_head is True
+    assert [bool(head(d)) for d in Deployment] == [
+        d is not Deployment.RIG_FIXED for d in Deployment]
+    assert all(f.is_warning and not f.refuses(kind)
+               for d in Deployment for f in head(d) for kind in SESSION_KINDS)
+
+
+def test_the_reference_tasks_declare_twenty_three_settings_between_them():
+    assert len({param.name for name in TASK_FILES
+                for param in _load_task(TASKS / f"{name}.py").params}) == 23
+
+
+def test_each_reference_task_says_how_its_reaction_time_is_defined_and_what_it_offers():
+    """XC-288 §4.3, Appendix B: the detection tasks time a saccade to their one target and offer no
+    choice; the search tasks time a saccade to any object and offer the target and the distractors;
+    the calibration task times its target's acquisition and offers no choice."""
+    def declared(name):
+        task = _load_task(TASKS / f"{name}.py")
+        offered = task.choice if task.choice is NO_CHOICE else (task.choice.objects, task.choice.by)
+        return task.reaction_time.state, task.reaction_time.to, offered
+
+    assert declared("fixation_detection") == declared("adaptive_detection") == (
+        "stim_on", ("verify",), NO_CHOICE)
+    assert declared("visual_search") == declared("visual_search_training") == (
+        "array_on", ("verify", Outcome.WRONG_TARGET),
+        (("search.target", "search.distractor"), "saccade"))
+    assert declared("calibration") == ("await_fix", ("hold",), NO_CHOICE)
+
+
+def test_a_search_task_that_says_nothing_of_its_choice_is_refused():
+    """The plan's engineering review, I2: with its choice unset, `visual_search` would load and its
+    trials would record no object chosen (build C7); it is refused at load instead."""
+    task = _load_task(TASKS / "visual_search.py")
+
+    assert "undeclared-choice" not in {f.code for f in check_task(task)}
+    assert "undeclared-choice" in {f.code for f in check_task(replace(task, choice=None))}

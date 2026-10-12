@@ -130,23 +130,23 @@ def test_two_after_bounds_whose_ranges_cross_are_allowed():
     assert "unreachable-timeout" not in codes(trial)
 
 
-def test_array_items_that_can_crowd_into_each_other_are_refused():
+def test_array_objects_that_can_crowd_into_each_other_are_refused():
     """Set size and eccentricity are both live, so crowding is a console setting.
 
-    Twelve items on a small ring with generous windows overlap, and then a saccade
+    Twelve objects on a small ring with generous windows overlap, and then a saccade
     to one distractor is scored against another -- or against the target. The
     windows are generated, so no author ever looks at them.
     """
-    from wl_xcon.task import Array, ItemWindows, SaccadeTo
+    from wl_xcon.task import Array, ObjectWindows, SaccadeTo
 
     trial = Trial(
         start="search",
         params=[
-            Param("set_size", unit="items", low=2, high=12),
-            Param("eccentricity", unit="deg", low=3.0, high=12.0),
-            Param("item_window", unit="deg", low=0.5, high=4.0),
+            Param("set_size", unit="objects", low=2, high=12),
+            Param("array_eccentricity", unit="deg", low=3.0, high=12.0),
+            Param("object_window", unit="deg", low=0.5, high=4.0),
         ],
-        windows=[ItemWindows(of="search", radius=P("item_window"))],
+        windows=[ObjectWindows(of="search", radius=P("object_window"))],
         states=[
             State(
                 "search",
@@ -157,7 +157,7 @@ def test_array_items_that_can_crowd_into_each_other_are_refused():
                             at=(0.0, 0.0),
                             looks=Array(
                                 n=P("set_size"),
-                                radius=P("eccentricity"),
+                                radius=P("array_eccentricity"),
                                 target=0,
                             ),
                         )
@@ -174,16 +174,16 @@ def test_array_items_that_can_crowd_into_each_other_are_refused():
 
 
 def test_an_array_that_cannot_crowd_is_accepted():
-    from wl_xcon.task import Array, ItemWindows, SaccadeTo
+    from wl_xcon.task import Array, ObjectWindows, SaccadeTo
 
     trial = Trial(
         start="search",
         params=[
-            Param("set_size", unit="items", low=2, high=6),
-            Param("eccentricity", unit="deg", low=8.0, high=12.0),
-            Param("item_window", unit="deg", low=0.5, high=2.0),
+            Param("set_size", unit="objects", low=2, high=6),
+            Param("array_eccentricity", unit="deg", low=8.0, high=12.0),
+            Param("object_window", unit="deg", low=0.5, high=2.0),
         ],
-        windows=[ItemWindows(of="search", radius=P("item_window"))],
+        windows=[ObjectWindows(of="search", radius=P("object_window"))],
         states=[
             State(
                 "search",
@@ -194,7 +194,7 @@ def test_an_array_that_cannot_crowd_is_accepted():
                             at=(0.0, 0.0),
                             looks=Array(
                                 n=P("set_size"),
-                                radius=P("eccentricity"),
+                                radius=P("array_eccentricity"),
                                 target=0,
                             ),
                         )

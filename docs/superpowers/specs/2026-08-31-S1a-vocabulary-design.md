@@ -307,6 +307,11 @@ and it would make the measurement search tasks exist to produce unavailable.
 `target-outside-array` reasons over declared **ranges**, because set size and target
 index are both live.
 
+> **Amended 2026-10-11 (the PI, confirming engine build C1's plan's Appendix B: "i prefer
+> object to item"):** an array's members are **objects**: `ItemWindows` is `ObjectWindows`,
+> one window per object. The reference tasks' `target_position` (§1's example) is
+> `target_x`. The text above is left as written.
+
 **Per-eye criteria.** `Window.eye` is honoured by the loop, which previously parsed
 and dropped it. The tracker is binocular, and on a stereoscope a per-eye criterion is
 the correct primitive: under dichoptic presentation the non-viewing eye deviates to

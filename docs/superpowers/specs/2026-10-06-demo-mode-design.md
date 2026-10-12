@@ -332,6 +332,20 @@ it), so they draw as §4.4 says until a run sets them.
 | | `cal_window` | 4.0° | twice `fix_window`: a calibration window admits gaze as wrong as calibration will correct |
 | | `cal_hold` | 0.3 s | `fixation_detection`'s `fix_hold` |
 
+> **Amended 2026-10-11 (the PI, confirming engine build C1's plan's Appendix B):** the reference
+> tasks' settings in this table and in §14 were renamed: `fix_timeout` → `fix_acquisition`,
+> `response_window` → `response_deadline`, `target_position` → `target_x`, `item_window` →
+> `object_window`, `array_phase` → `array_rotation`, `visual_search`'s `eccentricity` →
+> `array_eccentricity`, and `adaptive_detection`'s `contrast` and `eccentricity` → `target_contrast`
+> and `target_eccentricity`; an array's members are objects, not items. The two detection tasks
+> gained a `target_y`, at the PI's request the same day, starting at 0 (the controller's choice,
+> not his). And every reference task now needs a fixed head (its Appendix B, item 31), so none
+> runs in a chaired or cage-side session: a demo session runs one head-fixed, and `--chaired`
+> (§5 item 3) refuses it. *Revised the same day, the PI on reviewing build C1 ("warnings are more
+> appropriate most of the time")*: in a chaired or cage-side session each runs with the
+> `head-not-fixed` warning, not refused, so `--chaired` runs one, printing that warning among the
+> pre-flight's unknowns it acknowledges (§5 item 4). The text is left as approved.
+
 ## 7. When things fail
 
 | What | What happens |

@@ -237,10 +237,10 @@ refused without a measured calibration, that chromatic tasks waited on a photome
 that a human V(lambda) made a stimulus "isoluminant for nobody in the room".*
 *Reworded 2026-10-10 for engine build A2: until then this note said every DKL color was refused on the default until build A2.*
 
-**P20 — Generated structure nobody reads.** The point of `Array` and `ItemWindows` is
-that set size is a value, so the individual items and their windows are never written
+**P20 — Generated structure nobody reads.** The point of `Array` and `ObjectWindows` is
+that set size is a value, so the individual objects and their windows are never written
 down and never read. That removes the author's eye from exactly the structure most
-likely to be wrong: `tasks/visual_search.py` shipped allowing twelve items on a 3°
+likely to be wrong: `tasks/visual_search.py` shipped allowing twelve objects on a 3°
 ring with 4° windows — adjacent centres 1.55° apart with 8° of summed window, so a
 saccade to one distractor would have been scored against another. It passed every
 check that existed when it was committed, and the defect was found only when the
@@ -249,6 +249,8 @@ crowding check was written a day later.
 Mitigation: anything a parameter generates gets a check reasoning over the declared
 ranges, not the current values. The rule generalises — **when a feature exists to
 stop a human writing something out, it also stops a human reviewing it.**
+*Renamed 2026-10-11: `ObjectWindows` was `ItemWindows`, and an array's objects its items (the PI,
+confirming engine build C1's plan's Appendix B: "i prefer object to item").*
 
 **P21 — A guardrail nothing calls, behind a comment that went stale.** Two instances,
 found together on 2026-09-06 and both a week old.

@@ -90,10 +90,10 @@ def whole_point_task(folder: Path) -> Path:
     not fixed here): what a pre-flight must turn into a fail rather than pass on."""
     text = Path("tasks/fixation_detection.py").read_text()
     for old, new in (
-        ('            "target",\n            at=(P("target_position"), 0.0),',
+        ('            "target",\n            at=(P("target_x"), P("target_y")),',
          '            "target",\n            at=P("target_point"),'),
-        ('        Param("target_position", unit="deg", low=-16.0, high=16.0, start=10.0),',
-         '        Param("target_position", unit="deg", low=-16.0, high=16.0, start=10.0),\n'
+        ('        Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0),',
+         '        Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0),\n'
          '        Param("target_point", unit="deg", choices=((10.0, 0.0), (-10.0, 0.0))),'),
         ('                On(SaccadeTo("target"), "verify", do=[Mark(4098)]),',
          '                On(SaccadeTo("target"), "verify", do=[Mark(4098)]),\n'
@@ -117,4 +117,21 @@ def malformed_task(folder: Path) -> Path:
     assert text.count(old) == 1, old
     path = Path(folder) / "malformed.py"
     path.write_text(text.replace(old, 'Param("fix_hold", unit="s", low="0.05", high=2.0, start=0.3),'))
+    return path
+
+
+def head_free_task(folder: Path) -> Path:
+    """The reference detection task without its need for a fixed head, written into `folder` as
+    `head_free.py`. Every reference task needs the head fixed since 2026-10-11 (the PI: "kiosk will
+    be head free, in the rig will be head fixed. we do not have head tracking in the rig"; the
+    engine C1 plan's Appendix B, item 31), and warns in a chaired or cage-side session
+    (`head-not-fixed`, a warning since the PI's ruling of 2026-10-11); a test whose subject is one
+    of those deployments, or a run of a session that keeps no head fixed between its runs, runs
+    this copy instead, meeting no such warning; it differs from the reference task in that alone."""
+    text = Path("tasks/fixation_detection.py").read_text()
+    old = "    needs_fixed_head=True,\n"
+    assert text.count(old) == 1, old
+    path = Path(folder) / "head_free.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text.replace(old, ""))
     return path
