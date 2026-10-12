@@ -2,6 +2,8 @@
 
 Delivered 2026-10-11 as a dated section of wl-preproc's `HANDOVER-wl-expcontroller.md` (`7183347`); answers are read there.
 
+**Reply read 2026-10-11 (wl-preproc `1dda41b`): see "ANSWERED 2026-10-11" below.**
+
 **Updated 2026-10-11.** Of the four asks opened in August, **all four are done**; each is marked below
 with wl-preproc's evidence, and the headings are left as they were. What is open now is XC-288's ask
 (XC-321), the asks of engine spec §21 and the older backlog items, all delivered 2026-10-11 and listed
@@ -355,6 +357,45 @@ kind, should be marked so in the published dataset; only carrying, not acting on
 XC-326: wl-xcon records the frame each change was strobed on, and the sync box measures the actual onset
 (through the speaker tap, V7, which waits on XC-089); the two must join. No timing number is claimed here.
 **Nothing here changes the frozen codec**, and wl-xcon sends nothing new on the wire until wl-preproc says it is on `main`.
+
+---
+
+# ANSWERED 2026-10-11 — wl-preproc's reply at `1dda41b`
+
+Read from wl-preproc's `HANDOVER-wl-expcontroller.md` (section "2026-10-11: open asks from wl-xcon"),
+its `docs/pending-wl-xcon-amendments.md` (section "OPEN — blinks in the DPI tracker, and raw eye video
+from the first sessions") and `docs/superpowers/specs/2026-10-11-eye-loss-design.md` (§1, amendment 9),
+all at its `main` `1dda41b`. Its later `main` `9773bda` changed only `docs/CHECKPOINT.md` and `wl.yaml`.
+
+**Answered.**
+
+| Backlog | wl-preproc's answer (2026-10-11) | What is left |
+|---|---|---|
+| XC-093 | Accepted as the sidecar's version 2: the primary camera may be named as the trigger; `digital_line` and `frame_rate_hz` required; version 1 reads as today. Built when P9 needs it. | Tell it when (XC-093). |
+| XC-094 | Carry it, designed once XC-006 settles the switching rule and the second map. | XC-094 waits on XC-006. |
+| XC-095 | Corrected: its eye spec §1.1 and §6 say `DataQuality` is necessary, not sufficient (100 on all 1,177,799 frames of each eye). `EyeQuality` and the validity mask now read a lost eye from the 0s OpenIrisDPI writes (branch `fix/eye-loss`). | Closed. |
+| XC-096 | No: staleness stays in our behavioral table, not `EyeQuality` (one row per session per eye; staleness is per trial). | Closed. Whether the published trials table carries it is decided with XC-321. |
+| XC-098 | wl-xcon writes `session_manifest.yaml` at the session folder's root. | XC-356. A session with no task PC still needs another writer, not yet settled. |
+| XC-197 | (a) The task assigns condition numbers, from 1, fixed within a task version, 0 for none. (b) The "overridden" flag is accepted for the published trials table. | Tell it both field names (XC-197). |
+| XC-321 | The agent's file is accepted unread: ingest never reads `xcon/`. Reading the records into the dataset is open there, not scheduled. | Extension constraint and the re-archive note (XC-357); XC-321 stays. |
+| XC-323 to XC-326 | Listed as open in its handover with no answer. | All four stay as they were. |
+
+**Corrections for XC-006,** quoted from the eye-loss spec: `DataQuality` is 100 on every frame, blinks
+included, so it cannot be the switching rule; P4 is reported through every blink, and outside blinks has a
+coordinate at 0 on 13,275 left-eye frames (1.13%) and 2,626 right-eye frames (0.22%), "with the pupil high in
+the image ... the eye looking up, P1 at 0 too on 12,947 of the left eye's".
+
+**Two asks back, for P10.** (a) Detect a blink from the image, not only a lost pupil, and pad its flanks
+(P1 to P4 jumps stay above baseline about 40 to 50 ms before the pupil is lost and about 80 ms after it
+returns), spoiled frames reaching taskd as "no sample": XC-358. It also offers, until P10 exists, to run its
+offline "no sample" rule online on the samples we receive; we have not taken that up. (b) Record raw eye
+video with OpenIrisDPI from the first sessions (`RecordVideo` on, `DecimateVideoRatio` 1), which it needs
+for P10's validation. It asked whether the lab's OpenIrisDPI PC records it and where the files land.
+
+**Our answer to (b), from the PI, 2026-10-12:** "Yes, it will record" (his choice: "The OpenIrisDPI PC
+records raw video from the first sessions"). He gave no file location, so **the folder is not yet named**;
+wl-preproc archives every file of a session folder and reads none of the video yet. Storage at 500 Hz in
+both eyes is the cost it flagged. This is an answer to send, not an open item here.
 
 ---
 
