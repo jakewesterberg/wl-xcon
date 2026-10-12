@@ -452,8 +452,9 @@ session's scratchpad; each plan is committed to `docs/superpowers/plans/` as its
   staircase counts **a miss as incorrect** (contrast steps up).
 - Each comes to the PI for approval with its welfare summary (Appendix A); C2a's Appendix B he confirms item by item.
 
-**wl-preproc's reply of 2026-10-11** (its `main` at `1dda41b`) is being filed on branch `wl-preproc-reply`; the PI
-answered its raw-eye-video question on 2026-10-12: "Yes, it will record" (the OpenIrisDPI PC records raw video from
+**wl-preproc's reply of 2026-10-11** (its `main` at `1dda41b`) is filed (`b75c8ad`: XC-095, XC-096 and XC-098
+closed, XC-356 to XC-358 new, XC-006 corrected; its offer to run its offline "no sample" rule online until P10 exists
+is in XC-358, for the PI when P10 is planned); the PI answered its raw-eye-video question on 2026-10-12: "Yes, it will record" (the OpenIrisDPI PC records raw video from
 the first sessions; the folder not yet named).
 
 **Next:** the two revised plans to the PI; then the warnings build (subagent-driven, as before), then C2a.
