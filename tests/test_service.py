@@ -1738,17 +1738,26 @@ def test_the_unknowns_are_acknowledged_once_a_session(tmp_path):
         ("contrast-on-default", 0), ("pump calibration", 0), ("eye tracker", 0)]
 
 
-def test_a_recording_session_refuses_a_run_whose_task_warning_recording_does_not_accept(tmp_path):
-    """Review Focus 4, the pre-flight's side."""
+def test_a_recording_session_on_the_default_runs_once_its_warnings_are_accepted(tmp_path):
+    """COL-02, revised (the PI, 2026-10-11, XC-352's A21: "a warning in recording too"; the record
+    names the default): a recording session's run of the reference task, on the default
+    calibration, asks to accept `contrast-on-default` and starts once it is accepted; its
+    config.json names the default."""
     service = _service(tmp_path)
     _step(service, _open(session_kind="recording"))
 
-    frame = _step(service, _start())
+    asked = _step(service, _start(acknowledged=("pump calibration", "eye tracker")))
+    started = _step(service, _start())
 
-    assert frame.run_index is None
-    (why,) = [r.why for r in frame.refusals if r.name == "start"]
-    assert "warnings: a recording session does not accept contrast-on-default" in why
-    assert not (service.root / "2027-01-14_01" / "xcon" / "runs.jsonl").exists()
+    item = {i.name: i for i in asked.preflight.items}["warnings"]
+    assert item.result == "unknown" and "contrast-on-default" in item.said
+    assert asked.run_index is None and started.run_index == 0
+    folder = service.root / "2027-01-14_01" / "xcon"
+    rows = _jsonl(folder / "warnings.jsonl")
+    assert [(r["code"], r["session_kind"]) for r in rows if r["how"] == "start"][0] == (
+        "contrast-on-default", "recording")
+    calibration = json.loads((folder / "config.json").read_text())["calibration"]
+    assert (calibration["id"], calibration["standard"]) == ("srgb-standard", True)
 
 
 def test_a_run_whose_new_warnings_are_not_acknowledged_does_not_start(tmp_path):

@@ -17,7 +17,7 @@ import math
 
 from wl_xcon.codes import PROVISIONAL, Allocation
 from wl_xcon.components import Registry
-from wl_xcon.findings import NOT_RECORDING, SESSION_KINDS, Finding
+from wl_xcon.findings import SESSION_KINDS, Finding
 from wl_xcon.geometry import VIEWS, Geometry
 from wl_xcon.photometry import (
     CONE_COLORS,
@@ -1216,6 +1216,10 @@ def _color_faults(trial: Trial, panel: Calibration | None) -> list[Finding]:
     params = {p.name: p for p in trial.params}
     backgrounds = _background_lights(trial, params)
     findings: list[Finding] = []
+    # Each color that claims isoluminance on the default, for the task's one warning, and where
+    # that warning goes among the findings (the warnings-over-refusals review's M8).
+    isoluminant: list[str] = []
+    at = 0
     for what, color in _colors(trial, params):
         # With no calibration at all -- `wlx taskd` while the rig's record will not load (the
         # engine B plan, call 19), or a direct `check()` call -- an absolute luminance is not
@@ -1229,15 +1233,16 @@ def _color_faults(trial: Trial, panel: Calibration | None) -> list[Finding]:
             continue  # a background is an absolute light, and `_block_faults` refuses one that is not
         if (panel is not None and panel.standard
                 and _claims_isoluminance(color, params, panel, backgrounds)):
-            # Spec §7.3: "Isoluminance needs a measured calibration", in every session (N§4
-            # batch 1). Asked of the color as written, before its values are read, so a `lum`
-            # whose range crosses 0 claims it too (XC-269).
-            finding = Finding("isoluminance-on-default", (
-                f"{what} claims isoluminance, which needs a measured calibration (engine spec "
-                f"§7.3); the default calibration is the sRGB standard, measured by nobody"))
-            if finding not in findings:
-                findings.append(finding)
-            continue
+            # Spec §7.3 asked a measured calibration for isoluminance; since COL-03's revision
+            # (the PI, 2026-10-11, XC-352's A19: "a warning everywhere") it is a warning in every
+            # kind, saying the colors are only nominally isoluminant: **one per task, naming each
+            # color that claims it** (below; the warnings-over-refusals review's M8). Asked of the
+            # color as written, before its values are read, so a `lum` whose range crosses 0
+            # claims it too (XC-269). Its lights are still held to the panel's reach, below.
+            if not isoluminant:
+                at = len(findings)
+            if what not in isoluminant:
+                isoluminant.append(what)
         try:
             lights = [color] if panel is None else _lights(color, params)
         except _Unbounded:
@@ -1246,6 +1251,13 @@ def _color_faults(trial: Trial, panel: Calibration | None) -> list[Finding]:
             for finding in _one_color(what, light, panel, backgrounds):
                 if finding not in findings:  # one value's corners can say the same
                     findings.append(finding)
+    if isoluminant:
+        findings.insert(at, Finding("isoluminance-on-default", (
+            f"the default calibration is the sRGB standard, measured by nobody, so this task's "
+            f"colors that claim isoluminance are only nominally isoluminant on an unmeasured "
+            f"panel: the luminance they hold constant is {HELD_STANDARD}, and what this panel "
+            f"shows of it is unknown (engine spec §7.3); the colors that claim it: "
+            f"{'; '.join(isoluminant)}"), blocking=False, accepted_in=SESSION_KINDS))
     if panel is not None:
         findings += [f for f in _modulation_faults(trial, params, panel, backgrounds)
                      if f not in findings]
@@ -1510,11 +1522,13 @@ def _one_color(what: str, color, panel: Calibration | None, backgrounds: list) -
 
 
 def _default_faults(trial: Trial, params: dict[str, Param]) -> list[Finding]:
-    """What a recording cannot carry on the default calibration (engine spec §7.2; N§R4: "Yes,
-    from the task file"): a task that names a color, or one a parameter of which sets a light
-    or a contrast -- this build's reading of "a design factor or a procedure-controlled value",
-    until build C lets a task declare its factors (Question 2). Each is one warning per task,
-    accepted in training and piloting. Since engine build A2 the color finding also says how the
+    """What the default calibration makes nominal (engine spec §7.2; N§R4: "Yes, from the task
+    file"): a task that names a color, or one a parameter of which sets a light or a contrast --
+    this build's reading of "a design factor or a procedure-controlled value", until build C lets
+    a task declare its factors (Question 2). Each is one warning per task, **accepted in every
+    session kind, recording included** (COL-02, revised by the PI on 2026-10-11, XC-352's A21: "a
+    warning in recording too"; refused in recording until then), saying that the session's
+    `config.json` names the default. Since engine build A2 the color finding also says how the
     default's cone colors converted and which luminance they held."""
     findings = []
     colors = [(what, color) for what, color in _colors(trial, params)
@@ -1527,27 +1541,30 @@ def _default_faults(trial: Trial, params: dict[str, Param]) -> list[Finding]:
         # the colors' names, which nothing bounds, so a screen showing a warning's first
         # `link.NOTE_LIMIT` characters shows them (the re-review's M4).
         findings.append(Finding("color-on-default", (
-            "a recording session refuses this task on the default calibration, the sRGB "
-            "standard, measured by nobody (engine spec §7.2); there its cone colors (DKL, cone "
-            "contrast) convert through the inverse of the CIE's LMS-to-XYZ_F,10 matrix, a use "
-            "outside the CIE's definition, so how far each is from the cone contrast it names "
-            f"is unknown, and the luminance they hold constant is {HELD_STANDARD}; the colors "
-            f"it names: {'; '.join(named)}"),
-            blocking=False, accepted_in=NOT_RECORDING))
+            "on the default calibration, the sRGB standard, measured by nobody (engine spec "
+            "§7.2), this task's cone colors (DKL, cone contrast) convert through the inverse of "
+            "the CIE's LMS-to-XYZ_F,10 matrix, a use outside the CIE's definition, so how far "
+            "each is from the cone contrast it names is unknown, and the luminance they hold "
+            f"constant is {HELD_STANDARD}; every color in the data is nominal, and the "
+            f"session's config.json names the default calibration; the colors it names: "
+            f"{'; '.join(named)}"),
+            blocking=False, accepted_in=SESSION_KINDS))
     elif named:
         findings.append(Finding("color-on-default", (
-            f"this task names colors ({'; '.join(named)}), and the default calibration is the sRGB "
-            f"standard, measured by nobody: a recording session refuses it until a measured "
-            f"calibration is in use (engine spec §7.2)"),
-            blocking=False, accepted_in=NOT_RECORDING))
+            f"the default calibration is the sRGB standard, measured by nobody, so every color "
+            f"this task names is nominal, in a recording as in training, and the session's "
+            f"config.json names the default calibration (engine spec §7.2); the colors it names: "
+            f"{'; '.join(named)}"),
+            blocking=False, accepted_in=SESSION_KINDS))
     set_by = _parameter_lights(trial, params)
     if set_by:
         findings.append(Finding("contrast-on-default", (
             f"parameter(s) {', '.join(repr(name) for name in set_by)} set a light, a contrast or "
             f"an opacity, which this build counts as a design factor until a task can declare its "
-            f"own (engine build C): a recording session refuses them on the default calibration "
-            f"(engine spec §7.2)"),
-            blocking=False, accepted_in=NOT_RECORDING))
+            f"own (engine build C): on the default calibration every such value is nominal, in a "
+            f"recording as in training, and the session's config.json names the default "
+            f"calibration (engine spec §7.2)"),
+            blocking=False, accepted_in=SESSION_KINDS))
     return findings
 
 

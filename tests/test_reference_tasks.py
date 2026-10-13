@@ -387,21 +387,23 @@ def test_each_reference_task_lights_its_achromatic_stimuli_at_40_cd_m2(module, a
 
 
 @pytest.mark.parametrize("name", sorted(REFERENCE))
-def test_on_the_default_every_reference_task_trains_but_the_search_task(name):
-    """Spec §7.2-7.3 on the four tasks: each runs in training on the default calibration, with
-    its warning, except the search task's isoluminant colors; none records on it (Q2-A)."""
+def test_on_the_default_every_reference_task_runs_in_every_kind_with_its_warnings(name):
+    """Spec §7.2-7.3 on the four tasks, as the PI revised COL-02 and COL-03 (2026-10-11, XC-352's
+    A19 and A21): each runs on the default calibration in every session kind, recording included,
+    with its warnings -- the search task's isoluminant colors among them. **But the search task's
+    isoluminant red and green are just outside the sRGB standard's gamut** (a primary weight of
+    -0.003 to -0.006), which its isoluminance refusal hid until then: `unrealizable-color` still
+    refuses them here, until a light the panel cannot make is a warning (XC-352's A20)."""
     found = check(_load(name, REFERENCE[name]), _load("allocation", "ALLOCATION"),
                   geometry=GEOMETRY, calibration=SRGB)
 
-    in_training = {f.code for f in found if f.refuses("training")}
-    in_recording = {f.code for f in found if f.refuses("recording")}
+    refusing = {f.code for f in found if any(f.refuses(kind) for kind in SESSION_KINDS)}
+    warned = {f.code for f in found if f.is_warning}
     if name == "visual_search":
-        assert in_training == {"isoluminance-on-default"}
-        assert in_recording == {
-            "isoluminance-on-default", "color-on-default", "contrast-on-default"}
+        assert refusing == {"unrealizable-color"}
+        assert warned == {"isoluminance-on-default", "color-on-default", "contrast-on-default"}
     else:
-        assert in_training == set()
-        assert in_recording == {"contrast-on-default"}
+        assert refusing == set() and warned == {"contrast-on-default"}
 
 
 @pytest.fixture(scope="module")
@@ -429,12 +431,12 @@ def test_the_training_variant_is_the_search_task_with_ordinary_colors(search, tr
             if name not in ("red_luminance", "green_luminance")} == theirs_task.meanings
 
 
-def test_the_training_variant_trains_on_the_default_and_never_records_on_it(training):
+def test_the_training_variant_runs_on_the_default_in_every_kind_with_its_warnings(training):
+    """COL-02, revised (the PI, 2026-10-11): a warning in recording too."""
     found = check(training, _load("allocation", "ALLOCATION"), geometry=GEOMETRY, calibration=SRGB)
 
-    assert [f for f in found if f.refuses("training") or f.refuses("piloting")] == []
-    assert {f.code for f in found if f.refuses("recording")} == {
-        "color-on-default", "contrast-on-default"}
+    assert [f for f in found if any(f.refuses(kind) for kind in SESSION_KINDS)] == []
+    assert {f.code for f in found if f.is_warning} == {"color-on-default", "contrast-on-default"}
 
 
 def test_simulation_reaches_every_outcome_the_training_variant_declares(training):

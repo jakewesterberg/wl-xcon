@@ -16,7 +16,7 @@ from _calibrations import LINEAR, measured
 from wl_xcon import cones, look
 from wl_xcon.check import _background_lights, check
 from wl_xcon.cones import CIE2006_10
-from wl_xcon.findings import NOT_RECORDING
+from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.link import NOTE_LIMIT, cut
 from wl_xcon.photometry import (
     D65,
@@ -417,23 +417,27 @@ def _choosing(*choices) -> Trial:
 CONTRAST = Param("c", unit="contrast", low=0.1, high=0.9)
 
 
-def test_isoluminance_needs_a_measured_calibration_in_every_kind():
-    found = _found(a_task(Disc(color=DKL(lum=0.0, l_m=0.08))))
+def test_isoluminance_on_the_default_is_a_warning_in_every_kind_that_it_is_only_nominal():
+    """COL-03, revised (the PI, 2026-10-11, XC-352's A19: "a warning everywhere"): isoluminance on
+    the sRGB default is accepted in every session kind, and the warning says the colors are only
+    nominally isoluminant on an unmeasured panel."""
+    warning = _found(a_task(Disc(color=DKL(lum=0.0, l_m=0.08))))["isoluminance-on-default"]
 
-    assert found["isoluminance-on-default"].blocking
-    assert "measured calibration" in found["isoluminance-on-default"].detail
+    assert (warning.blocking, warning.accepted_in) == (False, SESSION_KINDS)
+    assert "only nominally isoluminant on an unmeasured panel" in warning.detail
 
 
-def test_a_cone_color_on_the_default_trains_and_pilots_with_the_warning():
+def test_a_cone_color_on_the_default_runs_in_every_kind_with_the_warning():
     """Engine build A2 (B's call 9 retired): a DKL color that claims no isoluminance, or a cone
-    contrast that does not, converts through the CIE's matrix on the default and is refused only
-    in recording, by `color-on-default`, whose sentence says how it converted and which luminance
-    it held (2026-10-08's Q2; COL-18; the review's S-I2)."""
+    contrast that does not, converts through the CIE's matrix on the default with `color-on-default`,
+    accepted in every kind since COL-02's revision (the PI, 2026-10-11, XC-352's A21: "a warning in
+    recording too"), whose sentence says how it converted and which luminance it held (2026-10-08's
+    Q2; COL-18; the review's S-I2)."""
     for color in (DKL(lum=0.1), DKL(lum=0.05, l_m=0.08), ConeContrast(L=0.1, S=0.5)):
         found = check(replace(a_task(Disc(color=color)), background=GRAY_BG), calibration=SRGB)
 
         assert [f.code for f in found] == ["color-on-default"], color
-        assert found[0].accepted_in == NOT_RECORDING
+        assert found[0].accepted_in == SESSION_KINDS
         assert "a use outside the CIE's definition" in found[0].detail
         assert "the luminance they hold constant is the standard's CIE 1931 Y" in found[0].detail
 
@@ -466,7 +470,7 @@ def test_a_cone_color_the_default_cannot_make_is_refused_on_it():
     assert _found(trial)["unrealizable-color"].blocking
 
 
-def test_a_dkl_color_that_can_be_isoluminant_is_refused_on_the_default_whatever_its_parameters():
+def test_a_dkl_color_that_can_be_isoluminant_is_warned_of_on_the_default_whatever_its_parameters():
     """Spec §7.3 asked of the color as written (XC-269): a `lum` whose range crosses 0 beside a
     chromatic component claims isoluminance at that value, as a literal 0 beside a chromatic
     parameter does; a `lum` that never reaches 0, or one with no chromatic component, does not."""
@@ -485,7 +489,7 @@ def test_a_dkl_color_that_can_be_isoluminant_is_refused_on_the_default_whatever_
 
     for color in claims:
         trial = replace(a_task(Disc(color=color)), background=GRAY_BG, params=[contrast, up])
-        assert _found(trial)["isoluminance-on-default"].blocking, color
+        assert _found(trial)["isoluminance-on-default"].is_warning, color
     for color in claims_none:
         trial = replace(a_task(Disc(color=color)), background=GRAY_BG, params=[contrast, up])
         assert "isoluminance-on-default" not in _found(trial), color
@@ -538,16 +542,19 @@ def test_a_cone_contrast_that_holds_v_f10_still_claims_isoluminance_on_the_defau
         replace(a_task(Disc(color=ConeContrast(S=0.5))), background=GRAY_BG), calibration=measured())
 
 
-def test_a_named_color_on_the_default_is_refused_only_in_recording():
+def test_a_named_color_on_the_default_is_a_warning_in_every_kind_naming_the_record():
+    """COL-02, revised (the PI, 2026-10-11, XC-352's A21: "a warning in recording too"; the record
+    names the default)."""
     found = _found(a_task(Disc(color=xyY(0.64, 0.33, 10.0))))
 
     assert set(found) == {"color-on-default"}
     warning = found["color-on-default"]
-    assert (warning.blocking, warning.accepted_in) == (False, NOT_RECORDING)
+    assert (warning.blocking, warning.accepted_in) == (False, SESSION_KINDS)
     assert "Disc" in warning.detail
+    assert "the session's config.json names the default calibration" in warning.detail
 
 
-def test_a_light_a_parameter_sets_is_refused_only_in_recording_on_the_default():
+def test_a_light_a_parameter_sets_is_a_warning_in_every_kind_on_the_default():
     trial = replace(a_task(Disc(color=Gray(P("lum")))),
                     params=[Param("lum", unit="cd/m2", low=0.0, high=80.0)])
 
@@ -555,7 +562,8 @@ def test_a_light_a_parameter_sets_is_refused_only_in_recording_on_the_default():
 
     assert set(found) == {"contrast-on-default"}
     assert "'lum'" in found["contrast-on-default"].detail
-    assert found["contrast-on-default"].accepted_in == NOT_RECORDING
+    assert found["contrast-on-default"].accepted_in == SESSION_KINDS
+    assert "the session's config.json names the default calibration" in found["contrast-on-default"].detail
 
 
 def test_a_color_parameter_and_a_parameter_inside_its_choices_are_both_light_factors():
@@ -704,7 +712,7 @@ def test_an_opacity_a_parameter_sets_when_shown_is_a_light_factor():
     found = _found(trial)
 
     assert "'op'" in found["contrast-on-default"].detail
-    assert found["contrast-on-default"].refuses("recording")
+    assert found["contrast-on-default"].is_warning
 
 
 def test_an_opacity_a_parameter_sets_in_an_update_is_a_light_factor():
@@ -714,7 +722,7 @@ def test_an_opacity_a_parameter_sets_in_an_update_is_a_light_factor():
     found = _found(trial)
 
     assert "'op'" in found["contrast-on-default"].detail
-    assert found["contrast-on-default"].refuses("recording")
+    assert found["contrast-on-default"].is_warning
     assert "contrast-on-default" not in _found(_showing(1.0, Update("s", at=(1.0, 0.0))))
 
 
@@ -740,7 +748,7 @@ def test_a_parameter_choosing_between_arrays_that_differ_only_in_light_is_a_fact
     for trial in (gray, looks, through):
         found = _found(trial)
         assert "'looks'" in found["contrast-on-default"].detail
-        assert found["contrast-on-default"].refuses("recording")
+        assert found["contrast-on-default"].is_warning
     assert "'a'" not in _found(through)["contrast-on-default"].detail
 
 
@@ -764,25 +772,27 @@ def test_arrays_whose_objects_differ_only_in_shape_are_not_a_light_factor():
         assert "contrast-on-default" not in _found(trial)
 
 
-def test_each_choice_of_an_appearance_parameter_is_named_in_its_own_finding():
-    """Task 4's review: the search task's five isoluminant choices were five identical lines."""
+def test_one_warning_names_each_isoluminant_choice_of_an_appearance_parameter():
+    """Task 4's review: the search task's five isoluminant choices were five identical lines, so
+    each was named in its own finding. **One warning per task names each** since the
+    warnings-over-refusals review's M8, as `color-on-default` names its colors: five findings ran
+    the search task's warnings item to thousands of characters."""
     red, green = DKL(lum=0.0, l_m=0.08), DKL(lum=0.0, l_m=-0.08)
     found = check(_choosing(Disc(size=1.0, color=red), Square(size=1.0, color=green)),
                   calibration=SRGB)
 
-    details = [f.detail for f in found if f.code == "isoluminance-on-default"]
+    (detail,) = [f.detail for f in found if f.code == "isoluminance-on-default"]
 
-    assert len(details) == 2
-    assert details[0].startswith("Disc (choice 1 of parameter 'looks') claims isoluminance")
-    assert details[1].startswith("Square (choice 2 of parameter 'looks') claims isoluminance")
+    assert detail.endswith("the colors that claim it: Disc (choice 1 of parameter 'looks'); "
+                           "Square (choice 2 of parameter 'looks')")
     shared = Disc(size=1.0, color=red)
     twice = replace(_choosing(shared), params=[
         Param("looks", unit="appearance", choices=(shared,)),
         Param("other", unit="appearance", choices=(Square(size=1.0, color=green), shared)),
     ])
-    assert any(f.detail.startswith(
-        "Disc (choice 1 of parameter 'looks', choice 2 of parameter 'other') claims")
-        for f in check(twice, calibration=SRGB))
+    (detail,) = [f.detail for f in check(twice, calibration=SRGB)
+                 if f.code == "isoluminance-on-default"]
+    assert "Disc (choice 1 of parameter 'looks', choice 2 of parameter 'other')" in detail
 
 
 def test_an_appearance_whose_choices_differ_in_light_is_a_factor_too():
@@ -910,7 +920,7 @@ def test_a_cone_contrast_names_a_color_on_the_default_as_an_xyy_does():
 
     warning = _found(trial)["color-on-default"]
 
-    assert (warning.blocking, warning.accepted_in) == (False, NOT_RECORDING)
+    assert (warning.blocking, warning.accepted_in) == (False, SESSION_KINDS)
 
 
 @pytest.mark.parametrize("color", [ConeContrast(L=1e308), DKL(l_m=1e308),
@@ -1036,13 +1046,13 @@ def test_a_cone_contrast_is_isoluminant_only_where_it_is_chromatic_at_the_same_v
         assert not found["color-on-default"].blocking, color
 
 
-def test_a_cone_contrast_with_one_isoluminant_chromatic_choice_is_refused_on_the_default():
+def test_a_cone_contrast_with_one_isoluminant_chromatic_choice_is_warned_of_on_the_default():
     """The isoluminant L on a D65 gray beside M = -0.2216 is 0.1 (L's share of V_F,10 is 0.689,
     M's 0.311: 0.689 * 0.1 = 0.311 * 0.2216); a choice far from it does not excuse it."""
     found = _on_gray(ConeContrast(L=P("c"), M=-0.2216),
                      Param("c", unit="contrast", choices=(0.1, 0.5)))
 
-    assert found["isoluminance-on-default"].blocking
+    assert found["isoluminance-on-default"].is_warning
 
 
 def test_a_chromatic_cone_contrast_range_crossing_the_band_claims_and_an_achromatic_one_does_not():
@@ -1073,7 +1083,7 @@ def test_a_cone_color_range_whose_bound_is_no_number_is_refused_never_raised(col
 
     found = _found(trial)
 
-    assert found["isoluminance-on-default"].blocking
+    assert found["isoluminance-on-default"].is_warning
     assert found["bad-block"].blocking
     assert _found(trial, calibration=measured())["bad-block"].blocking
 
@@ -1091,15 +1101,15 @@ def _offered_by(written: str, color) -> Trial:
 
 
 @pytest.mark.parametrize("written", ["fill", "outline"])
-def test_an_isoluminant_color_a_looks_fill_or_outline_parameter_offers_is_refused_on_the_default(
+def test_an_isoluminant_color_a_looks_fill_or_outline_parameter_offers_is_warned_of_on_the_default(
         written):
     """XC-271's second half (the A2 final review's I3): the colors a `Look`'s fill or outline
     parameter offers were never read, so an isoluminant DKL among them trained and piloted on
-    the default with no `isoluminance-on-default`. It is refused in every kind, naming the
-    parameter."""
+    the default with no `isoluminance-on-default`. It is a warning in every kind (COL-03, revised
+    2026-10-11), naming the parameter."""
     found = _found(_offered_by(written, DKL(l_m=0.1)))
 
-    assert found["isoluminance-on-default"].blocking
+    assert found["isoluminance-on-default"].is_warning
     assert "a choice of parameter 'part'" in found["isoluminance-on-default"].detail
 
 

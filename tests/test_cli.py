@@ -46,7 +46,7 @@ from wl_xcon.cli import (
     main,
     render,
 )
-from wl_xcon.findings import SESSION_KINDS, Finding
+from wl_xcon.findings import NOT_RECORDING, SESSION_KINDS, Finding
 from wl_xcon.link import (
     SCHEMA,
     Control,
@@ -210,13 +210,25 @@ def test_wlx_check_marks_a_warning_with_the_kinds_it_is_accepted_in(capsys):
 
     out = capsys.readouterr().out
     assert "calibration: srgb-standard (the sRGB standard, measured by nobody)" in out
-    assert "warning  contrast-on-default" in out and "(accepted in training, piloting)" in out
+    assert "warning  contrast-on-default" in out
+    assert "(accepted in training, piloting, recording)" in out
 
 
 @pytest.mark.parametrize("kind, code", [("training", 0), ("piloting", 0), ("recording", 1)])
-def test_wlx_check_for_a_kind_refuses_a_warning_that_kind_does_not_accept(kind, code):
+def test_wlx_check_for_a_kind_refuses_a_warning_that_kind_does_not_accept(kind, code, monkeypatch):
+    """No finding is accepted in fewer kinds since COL-02's revision (the PI, 2026-10-11), so a
+    stand-in is; the reference task checks clean in every kind (below)."""
+    monkeypatch.setattr(cli, "check_task", lambda *a, **k: [Finding(
+        "color-on-default", "names colors", blocking=False, accepted_in=NOT_RECORDING)])
     assert main(["check", GOOD, "--rig", RIG_FILE, "--allocation", ALLOCATION, "--view", "direct",
                  "--kind", kind]) == code
+
+
+@pytest.mark.parametrize("kind", ["training", "piloting", "recording"])
+def test_wlx_check_passes_the_reference_task_on_the_default_in_every_kind(kind):
+    """COL-02, revised (the PI, 2026-10-11, XC-352's A21): a warning in recording too."""
+    assert main(["check", GOOD, "--rig", RIG_FILE, "--allocation", ALLOCATION, "--view", "direct",
+                 "--kind", kind]) == 0
 
 
 def test_wlx_check_refuses_a_calibration_record_that_will_not_load(tmp_path):
@@ -2307,9 +2319,13 @@ def test_wlx_check_holds_the_task_object_to_its_declarations(tmp_path, capsys):
     assert "undeclared-meaning" in capsys.readouterr().out
 
 
-def test_wlx_run_refuses_a_task_its_kind_does_not_accept_before_anything_is_recorded(tmp_path):
+def test_wlx_run_refuses_a_task_its_kind_does_not_accept_before_anything_is_recorded(
+    tmp_path, monkeypatch
+):
+    """A stand-in finding: none is accepted in fewer kinds since COL-02's revision (2026-10-11)."""
+    monkeypatch.setattr(cli, "check_task", lambda *a, **k: [Finding(
+        "color-on-default", "names colors", blocking=False, accepted_in=NOT_RECORDING)])
     argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm())
-    argv[argv.index("tasks/fixation_detection.py")] = "tasks/visual_search_training.py"
     argv[argv.index("--kind") + 1] = "recording"
 
     with pytest.raises(SystemExit) as refused:

@@ -23,8 +23,9 @@ from dataclasses import dataclass
 #: for"), chosen when it opens. In this order wherever a list of them is written.
 SESSION_KINDS = ("training", "piloting", "recording")
 
-#: A warning acceptable everywhere but in a recording (spec §7.2: the default calibration
-#: "refused in recording" for a task that names a color or makes contrast a factor).
+#: A warning acceptable everywhere but in a recording. **No finding gives it since the PI's
+#: rulings of 2026-10-11** (XC-352's A21: the default calibration's colors are "a warning in
+#: recording too", COL-02, revised); kept as the vocabulary a warning's kinds are written in.
 NOT_RECORDING = ("training", "piloting")
 
 

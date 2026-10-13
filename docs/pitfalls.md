@@ -23,7 +23,7 @@ the moment it becomes someone's active job. Review this file at every milestone 
 | **P16** | **Live parameter change becomes an undocumented discontinuity** | **High** | Full per-trial parameter snapshot; event-coded changes; atomic ITI application; provenance on every write |
 | **P17** | **Our fluid total is a lower bound, not a total** | Medium | Reconcile against the sync box's record of the delivered line, never against commanded — under a floor this is what stops a top-up being asked for fluid already given by hand |
 | **P18** | **Correct graph, wrong experiment** | **High** | Gates must inspect different *objects*, not the same one three ways — see expanded note |
-| **P19** | **A colour nobody measured reaches a methods section** | **High** | Device-independent colour only, checked against the rig's calibration; on the default sRGB calibration a warning, refused in recording; isoluminance against a named observer, which the methods section states — see expanded note |
+| **P19** | **A colour nobody measured reaches a methods section** | **High** | Device-independent colour only, checked against the rig's calibration; on the default sRGB calibration a warning in every session kind, the record naming the default; isoluminance against a named observer, which the methods section states — see expanded note |
 | **P20** | **Generated structure nobody reads** | Medium | Anything a parameter generates — array items, their windows — needs a check, because no author will ever look at it |
 | **P21** | **A guardrail nothing calls, behind a comment that went stale** | **High** | A safety component needs a *consumer* in the same commit, and a test that the consumer is on the only path — see expanded note |
 | **P22** | **A browser page that can write is a page any site can try to make write** | **High** | Spec §2's four checks on every write, the `Host` check on every request, the rig's own validation behind them — see expanded note |
@@ -207,10 +207,11 @@ colour is specified in CIE xyY or DKL cone contrast [@cie2018colorimetry;
 @derrington1984chromatic] and checked against the session's calibration: the measured
 record the rig names or, when it names none, **the default, the sRGB standard, measured by
 nobody** (engine spec §7.1; engine build B, 2026-10-08). On the default a task that names
-a colour or lets a setting change a light loads in training and piloting with a warning a
-person accepts and the record keeps, and is **refused in a recording session** (PI,
-2026-10-07 and 2026-10-08; engine spec §7.2); isoluminance needs a measured calibration in
-every session (§7.3). Since engine build A2 any other cone color converts on the default through
+a colour or lets a setting change a light loads with a warning a person accepts and the
+record keeps, **in a recording session too**, the session's `config.json` naming the
+default (the PI, 2026-10-11, XC-352's A21, revising his rulings of 2026-10-07 and 2026-10-08,
+which refused it in recording; engine spec §7.2); isoluminance on the default is a warning in
+every session that the colours are only nominally isoluminant (XC-352's A19; §7.3). Since engine build A2 any other cone color converts on the default through
 the CIE's matrix, a use outside its definition that the warning names (A2's Q2), and on a
 measured calibration through its primaries' measured spectra; a cone color on a black
 background is refused. A measured calibration is taken with a **spectroradiometer** (engine spec §12 item 1),

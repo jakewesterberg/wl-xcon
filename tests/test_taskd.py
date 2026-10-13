@@ -2815,13 +2815,15 @@ def test_a_session_for_something_else_is_refused_when_it_is_built(tmp_path):
         Session(dataclasses.replace(spec, session_kind="demo"))
 
 
-def test_a_recording_session_refuses_a_task_its_kind_does_not_accept(tmp_path):
-    """Review Focus 4, `Session.run`'s own backstop: the training variant names colors. **And
-    nothing of the run is strobed or written** (the engine B final review): the animal is out of
-    its cage, so the refusal is `run`'s alone, never `welfare.preflight`'s."""
+def test_a_recording_session_refuses_a_task_its_kind_does_not_accept(tmp_path, monkeypatch):
+    """Review Focus 4, `Session.run`'s own backstop: a warning its kind does not accept. No
+    finding is one since COL-02's revision (the PI, 2026-10-11), so a stand-in is. **And nothing
+    of the run is strobed or written** (the engine B final review): the animal is out of its cage,
+    so the refusal is `run`'s alone, never `welfare.preflight`'s."""
+    monkeypatch.setattr("wl_xcon.taskd.check_task", lambda *a, **k: [Finding(
+        "color-on-default", "names colors", blocking=False, accepted_in=NOT_RECORDING)])
     made = _sessions.session(tmp_path)
     made.spec.session_kind = "recording"
-    made.spec.task = "tasks/visual_search_training.py"
     made.open()
     made.left_cage(at=_sessions.WALL)
     strobed = list(made.card.codes)
@@ -2995,11 +2997,12 @@ def test_what_a_start_accepted_is_written_as_its_run_starts(tmp_path):
         ("pump calibration", "start", 0, {"kind": "box", "name": "jake"})]
 
 
-def test_a_run_refused_by_its_backstop_writes_no_accepted_warning(tmp_path):
+def test_a_run_refused_by_its_backstop_writes_no_accepted_warning(tmp_path, monkeypatch):
     """The engine B plan, call 23: the rows are written once both refusals pass."""
+    monkeypatch.setattr("wl_xcon.taskd.check_task", lambda *a, **k: [Finding(
+        "color-on-default", "names colors", blocking=False, accepted_in=NOT_RECORDING)])
     made = _sessions.session(tmp_path)
     made.spec.session_kind = "recording"
-    made.spec.task = "tasks/visual_search_training.py"
     made.open()
 
     with pytest.raises(SystemExit):
