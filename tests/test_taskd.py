@@ -1220,15 +1220,35 @@ def test_a_live_write_is_recorded_with_its_origin(tmp_path):
     ]
 
 
-def test_a_live_write_outside_a_parameters_declared_range_is_refused(tmp_path):
-    """The declaration S8 §3.1 turns into validation. It is the same declaration the
-    console builds its widget from, so a value it cannot show is a value it cannot
-    send."""
+def test_a_live_write_outside_a_parameters_declared_range_is_staged_with_its_warning(tmp_path):
+    """The declaration S8 §3.1 turns into validation. Since XC-352's D2 (the PI, 2026-10-11) a
+    value outside its range is checked again with the range widened to it, and staged with its
+    warning when nothing breaks; with no record open to write that warning into, it is refused."""
+    unopened = _session(_spec(tmp_path / "unopened", trials=4))
+    with pytest.raises(Exceeded, match="'fix_hold' at 8 is outside its declared range, and its "
+                                       "warning could not be recorded"):
+        unopened.set("fix_hold", 8.0, by=Box("console"))
+    session = _session(_spec(tmp_path / "opened", trials=4))
+    session.open()
+
+    session.set("fix_hold", 8.0, by=Box("console"))
+
+    assert session.staged[-1][:3] == ("fix_hold", VALUES["fix_hold"], 8.0)
+    assert [row["code"] for row in _warned(session)] == ["outside-range"]
+
+
+def test_a_live_wait_longer_than_any_the_task_declares_is_staged_with_its_warnings(tmp_path):
+    """The plan's call 4, answered by the PI on 2026-10-12: "Allow, with a warning". A stop, a
+    pause and the out-of-cage limit are heard between trials, so `fix_acquisition` at 60 s --
+    past the 10 s the reference task's longest wait declares -- is staged with two warnings, that
+    it is outside its range and that they go unheard until that trial ends."""
     session = _session(_spec(tmp_path, trials=4))
+    session.open()
 
-    with pytest.raises(Exceeded, match="fix_hold"):
-        session.set("fix_hold", 99.0, by=Box("console"))
+    session.set("fix_acquisition", 60.0, by=Box("console"))
 
+    assert session.staged[-1][:3] == ("fix_acquisition", VALUES["fix_acquisition"], 60.0)
+    assert [row["code"] for row in _warned(session)] == ["outside-range", "longer-than-declared"]
 
 def test_a_live_write_to_an_undeclared_parameter_is_refused(tmp_path):
     """A typo must not become a parameter. `fix_hld` accepted silently is a session
@@ -3040,6 +3060,80 @@ def test_a_malformed_setting_is_refused_and_the_session_runs_on(tmp_path, name, 
     assert session.stop_kind == "completed"
     assert [(n, b) for n, b, _ in session.refusals] == [(name, Box("jake"))]
     assert said in session.refusals[0][2]
+
+
+def _warned(session) -> list[dict]:
+    path = session.directory / "warnings.jsonl"
+    return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+
+def test_a_live_value_outside_its_range_applies_with_a_warning_that_the_task_was_not_designed_for_it(
+    tmp_path,
+):
+    """XC-352's D2 (the PI, 2026-10-11: "re-run the load-time checks with the range widened to the
+    new value; accept with a warning that the task was not designed for it if nothing breaks"): a
+    fixation window of 7° (declared 0.5-5°) is staged and applied at the next boundary; its
+    warning, accepted by who set it, is in `warnings.jsonl` and on the changes feed."""
+    link = Simulated()
+    link.queue(SetParameter(name="fix_window", value=7.0, by=Box("jake")))
+    session = _session(_spec(tmp_path, trials=3), link=link)
+
+    session.run()
+
+    assert session.refusals == [] and session.spec.values["fix_window"] == 7.0
+    (row,) = _warned(session)
+    assert (row["code"], row["how"], row["by"], row["run"]) == (
+        "outside-range", "set", {"kind": "box", "name": "jake"}, 0)
+    assert row["detail"].startswith("'fix_window' is 7 deg, outside the [0.5, 5.0] the task declares")
+    (warned,) = [c for c in session.controls if c[0] == "warning"]
+    assert warned[3].startswith("outside-range: 'fix_window' is 7 deg")
+
+
+def test_a_live_value_that_would_put_the_target_off_screen_is_refused_saying_so(tmp_path):
+    """XC-352's D2: "refuse only what would break the run (off screen, ...), saying what". A
+    target 40° out (declared ±16°) is off direct view's screen: refused, the previous value
+    stands, and no warning is recorded."""
+    link = Simulated()
+    link.queue(SetParameter(name="target_x", value=40.0, by=Box("jake")))
+    session = _session(_spec(tmp_path, trials=3), link=link)
+
+    session.run()
+
+    (refusal,) = session.refusals
+    assert refusal[:2] == ("target_x", Box("jake"))
+    assert "with the range widened to it the load-time checks refuse it: stimulus-off-screen: " in (
+        refusal[2])
+    assert refusal[2].endswith("the previous value stands")
+    assert session.spec.values["target_x"] == VALUES["target_x"] and _warned(session) == []
+
+
+def test_a_live_value_whose_widened_checks_raise_or_whose_warning_cannot_be_written_is_refused(
+    tmp_path, monkeypatch
+):
+    """Nothing but `Exceeded` leaves `set` for a value outside its range (`Session._command`
+    catches it alone): a check that raises, or a warning row that cannot be written, refuses the
+    value, and the session runs on."""
+    monkeypatch.setattr("wl_xcon.taskd.beyond_range", lambda *a, **k: 1 / 0)
+    link = Simulated()
+    link.queue(SetParameter(name="fix_window", value=7.0, by=Box("jake")))
+    raised = _session(_spec(tmp_path / "raised", trials=3), link=link)
+    raised.run()
+    monkeypatch.undo()
+
+    def refused(record, **row):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(SessionRecord, "warning", refused)
+    link = Simulated()
+    link.queue(SetParameter(name="fix_window", value=7.0, by=Box("jake")))
+    unwritten = _session(_spec(tmp_path / "unwritten", trials=3), link=link)
+    unwritten.run()
+
+    for session, said in ((raised, "could not be run again with the range widened (ZeroDivisionError"),
+                          (unwritten, "its warning could not be recorded (OSError: disk full)")):
+        assert session.stop_kind == "completed"
+        (refusal,) = session.refusals
+        assert said in refusal[2] and session.spec.values["fix_window"] == VALUES["fix_window"]
 
 
 def test_a_type_error_in_a_setting_is_a_refusal_not_a_fault(tmp_path, monkeypatch):

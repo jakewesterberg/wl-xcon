@@ -247,6 +247,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 ## Needs the rig
 
+- **XC-372** Measure how long a live edit outside its declared range holds the trial boundary that drains it on the rig PC (Session._beyond_range runs the task's load-time checks twice, between trials, never in a frame): no timing claim without a measurement, and the inter-trial interval it lengthens is unmeasured. — 2026-10-11, [warnings-over-refusals plan, call 9](superpowers/plans/2026-10-11-warnings-over-refusals.md#calls-taken-in-this-plan) — waits on: the rig PC
 - **XC-062** Bench the NI PCIe-6343 with NI-DAQmx on Ubuntu 24.04, V2's output latency and V2b's input latency included. — 2026-08-31, [S0 §3.1](superpowers/specs/2026-08-31-S0-hosts-and-hardware-design.md#31-the-bench-test-in-order) — waits on: the card
 - **XC-063** The `nidaqmx` implementation of `dio`'s card. — 2026-09-01, [CHECKPOINT, Work packages P7](CHECKPOINT.md#work-packages) — waits on: XC-062
 - **XC-064** Strobe width and setup/hold against wl-sync's PIO capture and the 6343 (the mule test). — 2026-08-31, [S2 §8 item 5](superpowers/specs/2026-08-31-S2-event-vocabulary-design.md#8-open-items) — waits on: the card and the sync box

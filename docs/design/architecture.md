@@ -226,7 +226,11 @@ and `link._setting` are what the PI's items 3 and 4 rest on, and `_schedule` is 
 2 rests on). `set` is the one write path for a setting from a console: its two type
 guards refuse a value that is not a number, for a welfare ceiling and for a numeric
 parameter alike (M8, item 4), and it sends a ceiling's name to `bounds.validate`, which
-is what keeps a reward size set from the page under its approved ceiling (item 3).
+is what keeps a reward size set from the page under its approved ceiling (item 3). **A task's own
+setting outside its declared range** is checked again with the range widened to it
+(`Session._beyond_range`, not on this list), refused only for what breaks the run and otherwise
+staged with its warnings, which are written to `warnings.jsonl` (the PI, 2026-10-11, XC-352's
+D2); the ceiling's branch is unchanged, byte for byte.
 `link._setting` is M8 where bytes become a command — in `_command_from` for the wire's
 `_decode_command`, and in `serve.parse_command` for a `POST /commands` body: a `set`'s
 value directly and, through `_command_from` since P4d-2b b3a-2, each starting value a

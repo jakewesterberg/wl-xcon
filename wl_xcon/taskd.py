@@ -47,7 +47,7 @@ from pathlib import Path
 from wl_xcon import link as _link
 from wl_xcon.actor import Actor
 from wl_xcon.bounds import Bounds, Exceeded, _finite
-from wl_xcon.check import check_task
+from wl_xcon.check import beyond_range, check_task
 from wl_xcon.cli import _clock, _load_allocation, _load_task, _printable, _shown
 from wl_xcon.codes import BLOCK_END, RUN_END_MARKER, TRIAL_END, TRIAL_START, Allocation
 from wl_xcon.declarations import content_hash
@@ -68,7 +68,7 @@ from wl_xcon.scheduler import Block, Condition, Scheduler
 from wl_xcon.simulate import Census, Subject, Tally, prepare
 from wl_xcon.run import run_trial
 from wl_xcon.task import Entered, Exited, Outcome, Param, SaccadeTo, Task, Trial
-from wl_xcon.warnlist import PAUSE_UNMARKED, Entry, sentence
+from wl_xcon.warnlist import PAUSE_UNMARKED, Entry, of_findings, sentence
 from wl_xcon.welfare import (
     OUT_OF_CAGE,
     WARN_WITHIN_DEFAULT,
@@ -968,8 +968,11 @@ class Session:
 
         Two vocabularies, deliberately: a **welfare-bounded** name is checked by
         `bounds.validate` against its ceiling, and an ordinary one against the task's
-        own `Param` declaration. Reward volume is in the first, which is why the
-        console can adjust it and cannot exceed it. Both then go on `_staged` and
+        own `Param` declaration -- outside its range, by the load-time checks run again
+        with the range widened to it, refused only for what breaks the run and otherwise
+        accepted with its warnings (`_beyond_range`; the PI, 2026-10-11, XC-352's D2).
+        Reward volume is in the first, which is why the console can adjust it and cannot
+        exceed it; the first's branch is unchanged by D2. Both then go on `_staged` and
         both are applied by `_apply_staged()` at the top of the pass *after* the one
         that drained them (S8 §3.2: a parameter that changed under a running trial
         makes that trial's record a description of neither value).
@@ -1055,11 +1058,60 @@ class Session:
             _finite(f"{name!r}", value)
             low, high = declared.low, declared.high
             if (low is not None and value < low) or (high is not None and value > high):
-                raise Exceeded(
-                    f"{name!r} is declared over [{low}, {high}] {declared.unit} and "
-                    f"{value} is outside it"
-                )
+                # Outside its declared range (the PI, 2026-10-11, XC-352's D2): the load-time
+                # checks run again with the range widened to it, refusing only what breaks the
+                # run and otherwise accepting its warnings (`_beyond_range`).
+                self._beyond_range(name, value, by)
         self._staged.append((name, self.spec.values.get(name), value, by, False))
+
+    def _beyond_range(self, name: str, value: float, by: Actor) -> None:
+        """**A live value outside its setting's declared range** (the PI, 2026-10-11, XC-352's D2:
+        "re-run the load-time checks with the range widened to the new value; accept with a
+        warning that the task was not designed for it if nothing breaks; refuse only what would
+        break the run (off screen, windows colliding, colors unmakeable), saying what"). The run's
+        task, checked again with each range widened to the values outside it -- the session's,
+        those staged and this one (`check.beyond_range`) -- in the session's setup, calibration
+        and deployment. **Refused**, as `Exceeded` saying what breaks, when a finding refuses this
+        session's kind; otherwise its warnings are accepted by `by` (`warnings.jsonl`, once each)
+        and said on the changes feed, and `set` stages the value. **Nothing but `Exceeded` leaves
+        here** (`_command` catches it alone): a check that raises, or a warning that cannot be
+        written, refuses the value. Run between trials, as the command is drained, never in a
+        frame. Not welfare-critical: `set` calls it only for a task's own setting, never a
+        ceiling."""
+        values = {**self.spec.values,
+                  **{n: now for n, _, now, _, bounded in self._staged if not bounded},
+                  name: value}
+        try:
+            found = beyond_range(self._task, values, self.allocation,
+                                 geometry=self.spec.geometry, calibration=self.spec.calibration,
+                                 deployment=self.spec.deployment)
+        except Exception as broken:  # noqa: BLE001 -- see the docstring
+            raise Exceeded(
+                f"{name!r} at {value:g} is outside its declared range, and the load-time checks "
+                f"could not be run again with the range widened ({type(broken).__name__}: "
+                f"{broken}), so it is refused and the previous value stands"
+            ) from broken
+        refusing = [f for f in found if f.refuses(self.spec.session_kind)]
+        if refusing:
+            raise Exceeded(
+                f"{name!r} at {value:g} is outside its declared range, and with the range widened "
+                f"to it the load-time checks refuse it: "
+                + "; ".join(f"{f.code}: {f.detail}" for f in refusing)
+                + "; the previous value stands"
+            )
+        entries = of_findings(found)
+        new = [entry for entry in entries if entry.key not in self._warnings]
+        try:
+            self.accept(entries, by=by, how="set", run=self.run_index)
+        except Exception as broken:  # noqa: BLE001 -- see the docstring
+            raise Exceeded(
+                f"{name!r} at {value:g} is outside its declared range, and its warning could not "
+                f"be recorded ({type(broken).__name__}: {broken}), so it is refused and the "
+                f"previous value stands"
+            ) from broken
+        at = self.wall_now()
+        for entry in new:
+            self._feed("warning", by, at, f"{entry.code}: {entry.detail}")
 
     @property
     def task(self) -> str | None:

@@ -26,10 +26,13 @@ add**, each waiting on the build named: dithering and a timing record older than
 change (E, V1); a pattern near the pixel limit, and a screen, mode or care-feature mismatch
 (E); frame-clock faults (E, F); a lossy image (A4).
 
-**Not built: a warning appearing during a run** (spec §19.3's pause at the next trial). Nothing
-in this build can appear mid-run outside its kinds: the calibration is loaded once, as `wlx
-taskd` starts; a calibration's age is accepted in every kind; and the rest are fixed when a run
-starts. XC-276 waits on build E, the first that can.
+**Not built: a warning appearing during a run outside its kinds** (spec §19.3's pause at the
+next trial). Nothing in this build can: the calibration is loaded once, as `wlx taskd` starts;
+a calibration's age is accepted in every kind; the rest are fixed when a run starts; and the two
+that can appear during a run since the PI's rulings on XC-352 (2026-10-11) -- a live value
+outside its declared range (`outside-range`, D2) and a pause the allocation cannot mark (D5) --
+are accepted in every kind, by whoever set the value or paused, as they happen. XC-276 waits on
+build E, the first that can.
 """
 
 from __future__ import annotations
