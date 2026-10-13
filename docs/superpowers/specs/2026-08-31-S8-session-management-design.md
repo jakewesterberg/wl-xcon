@@ -66,6 +66,12 @@ From that one declaration comes validation, the console's widgets, the saved rec
 summary — which is what makes live control work for model-authored tasks with no per-task UI
 code (ADR-0006).
 
+*The PI, 2026-10-11 (XC-352's D2; engine build "warnings over refusals")*: the declared range is
+what the task was designed for, not a limit. A value outside it, at a run's start or live, is
+checked again with the range widened to it, accepted with a warning that the task was not designed
+for it, and refused only for what would break the run (off screen, windows colliding, colors
+unmakeable), saying what (`check.beyond_range`; decisions.md TSK-51).
+
 ### 3.2 Application
 
 - **Staged, then applied atomically in the ITI.** Never mid-trial [@asaad2008flexible].

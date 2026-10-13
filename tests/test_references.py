@@ -567,6 +567,25 @@ def test_every_link_in_decisions_names_a_file_that_exists():
     assert missing == [], missing
 
 
+#: A decision's number, as its heading opens: an area's letters and a number ("### TSK-51 — ").
+DECISION_ID = re.compile(r"^### (?P<id>[A-Z]+-\d+)\b")
+
+
+def _shared_numbers(text: str) -> list[str]:
+    """Each decision number that more than one `### ` heading in `text` opens with, sorted."""
+    ids = [found["id"] for line in text.splitlines() if (found := DECISION_ID.match(line))]
+    return sorted({number for number in ids if ids.count(number) > 1})
+
+
+def test_no_two_decisions_share_a_number():
+    """A decision is cited by its number (COL-02, TSK-51) in code, plans and the backlog, so two
+    entries under one number make every citation of it ambiguous. Two builds planned side by side
+    can each take the next free one: the warnings-over-refusals plan and build C2a's both took
+    TSK-51 (that plan's review, M2)."""
+    assert _shared_numbers("### TSK-51 — one\n### TSK-52 — two\n### TSK-51 — three\n") == ["TSK-51"]
+    assert _shared_numbers(DECISIONS.read_text(encoding="utf-8")) == []
+
+
 # ---------------------------------------------------------------------------
 # tools/check_references.py, against a canned Crossref record
 # ---------------------------------------------------------------------------

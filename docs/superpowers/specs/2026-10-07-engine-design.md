@@ -401,6 +401,20 @@ red and green on a D65 gray at their own luminance, one level for all rigs, 16 c
 panels are measured (XC-310).
 This supersedes item 3's "`visual_search` keeps its isoluminant colors and waits" and build B's note's
 "until build A2" (that note stays as written; it was true of its date).
+
+*The PI's rulings on XC-352, 2026-10-11* (`docs/research/2026-10-11-xc352-refusal-audit.md`; built
+by `docs/superpowers/plans/2026-10-11-warnings-over-refusals.md`): item 2, on the default a task that names a color or whose
+settings set a light is a warning in recording too, the session's config.json naming the default
+("a warning in recording too", A21); item 3, isoluminance on the default is "a warning everywhere",
+saying the colors are only nominally isoluminant on an unmeasured panel (A19); item 4, a light the
+panel cannot make is a warning naming the light it shows, the exact drawer clipping it and giving
+the light shown ("a warning, and the drawer records the light actually shown beside the one asked
+for", A20; recording it per frame waits on builds E and F, XC-370); A2's "a record without them
+converts none": a measured calibration without spectra converts cone colors as the default does,
+with a warning (E3); build B's record that will not load: the default stands in for it, with a
+warning (E1); item 10, a calibration dated after today is a warning in every kind (E2). The search
+task's isoluminant red and green, just outside the sRGB standard's gamut, run on the default with
+both warnings.
 Item 9's 2° set for foveal work is not built (XC-302); the record's second
 luminance waits on build F (XC-305).
 
@@ -679,6 +693,14 @@ luminance waits on build F (XC-305).
    build lists the default calibration, a calibration past 30 days, a chaired session's free head, a
    task's warnings (`luminance-step`, `color-on-default`, `contrast-on-default`) and today's pre-flight
    unknowns; the others wait on the builds that make them (`wl_xcon/warnlist.py`).
+   *The PI's rulings on XC-352, 2026-10-11*: a calibration that will not load, in whose place the
+   default runs, and one dated after today are warnings every kind accepts (E1, E2); a stereoscope's
+   setup -- the nominal half-IPD with no settings file, another animal's settings, a half-IPD
+   outside the drawn optics -- and settings direct view ignores are listed (C6-C8, H4); a task's
+   warnings gain `overlapping-windows`, `crowded-array`, `wrong-eye-criterion`,
+   `monocular-stereogram`, `wrong-setup` (without stereo content), `isoluminance-on-default`,
+   `unrealizable-color`, `cone-colors-without-spectra` and `outside-range`, and `color-on-default`
+   and `contrast-on-default` are accepted in recording. No warning the rig lists refuses any kind.
 3. **Accepted once per session**, at open, recorded. **A warning appearing during a run that its kinds do
    not accept pauses the run at the next trial**, for the operator to accept (recorded) or stop (N§R6).
    Today's unknowns keep the 2026-09-19 rule: proceed on a recorded acknowledgment.
@@ -688,6 +710,10 @@ luminance waits on build F (XC-305).
    in its pre-flight. A warning is its code and its sentence, so a reworded one is asked again (call 7).
    The pause for a warning appearing during a run is not built: nothing in this build can appear
    mid-run outside its kinds (XC-276, call 8).
+   *The PI's rulings on XC-352, 2026-10-11*: two warnings can appear during a run, each accepted in
+   every kind as it happens by whoever caused it: a live value outside its declared range (D2) and a
+   pause the allocation cannot mark (D5); XC-276's pause stays for one outside its kinds. A run's
+   pre-flight shows every warning it asks to accept whole (XC-353).
 
 ## 20. Welfare
 
@@ -723,6 +749,10 @@ summary before its build merges:
    `Service._start` are still unchanged, byte for byte. A task file that leaves a declaration out is
    still refused (an authoring rule, which the PI kept). Every other refusal is to be audited against
    his rule (XC-352).
+   *The PI's rulings on XC-352, 2026-10-11* (decisions.md TSK-51): fourteen refusals became warnings
+   or review notes, seven questions he answered, 48 refusals kept. `preflight.gate` and
+   `Service._start` are unchanged, byte for byte, and `Service._open`'s code too; what an open asks
+   to accept now includes a calibration that will not load or is dated after today (E1, E2).
 2. **`Service._open`**: the session kind; a refusal while the OLED's maintenance is due.
    *Engine build B, 2026-10-08*: the session kind is built (carried through `Service._session_for`),
    with the open's one new refusal, the warnings its kind accepts left unaccepted. The refusal while
@@ -730,6 +760,12 @@ summary before its build merges:
    and needs the panel (XC-278, call 16).
 3. **`Session.set`**: instant parameters, never a bounded setting; presets, revert and carried values
    never carry a bounded setting (§17.6).
+   *The PI's rulings on XC-352, 2026-10-11* (D2): a task's own setting outside its declared range is
+   checked again with the range widened to it, refused only for what breaks the run and otherwise
+   staged with its warnings; the bounded setting's branch is unchanged, byte for byte. *And his
+   answer of 2026-10-12*: such a value that makes a wait longer than any the task declares is
+   allowed, "with a warning" that a stop, a pause and the out-of-cage limit go unheard until that
+   trial ends, since item 4's once-a-second check inside a trial is not built (XC-373).
 4. **`Session._ends` and `_hold`**: checked about once a second inside long trials and the continuous
    mode; continuous-mode rewards.
 5. **Adaptive procedures choosing among named reward entries** (§15.7).
