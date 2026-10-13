@@ -231,16 +231,17 @@ def test_wlx_check_passes_the_reference_task_on_the_default_in_every_kind(kind):
                  "--kind", kind]) == 0
 
 
-def test_wlx_check_refuses_a_calibration_record_that_will_not_load(tmp_path):
-    """Review Focus 3, `wlx check`'s side (Call 20): no animal waits on it."""
+def test_wlx_check_checks_on_the_default_when_the_record_will_not_load_saying_why(tmp_path, capsys):
+    """XC-352's E1 (the PI, 2026-10-11): the default stands in for a record that will not load,
+    with a warning saying why, and the task is checked against it."""
     (tmp_path / "cal.json").write_text("{")
     rig = naming(tmp_path / "rig", str(tmp_path / "cal.json"))
 
-    with pytest.raises(SystemExit) as refused:
-        main(["check", GOOD, "--rig", str(rig), "--allocation", ALLOCATION])
+    assert main(["check", GOOD, "--rig", str(rig), "--allocation", ALLOCATION, "--view", "direct"]) == 0
 
-    assert str(refused.value).startswith("refused: the calibration")
-    assert "not JSON" in str(refused.value)
+    out = capsys.readouterr().out
+    assert "calibration: srgb-standard (the sRGB standard, measured by nobody)" in out
+    assert "warning  calibration record" in out and "not JSON" in out
 
 
 def _dated_after_today(tmp_path) -> str:
@@ -279,14 +280,13 @@ def test_wlx_check_says_no_findings_only_when_it_said_no_warning_either(monkeypa
 
 
 @pytest.mark.parametrize("kind", SESSION_KINDS)
-def test_wlx_check_for_a_kind_refuses_a_calibration_dated_after_today(kind, tmp_path, capsys):
-    """In every kind, as `wlx run` refuses it (call 20)."""
+def test_wlx_check_for_a_kind_warns_of_a_calibration_dated_after_today(kind, tmp_path, capsys):
+    """XC-352's E2 (the PI, 2026-10-11): a warning in every kind, as `wlx run` lists it."""
     assert main(["check", GOOD, "--rig", _dated_after_today(tmp_path), "--allocation", ALLOCATION,
-                 "--view", "direct", "--kind", kind]) == 1
+                 "--view", "direct", "--kind", kind]) == 0
 
     out = capsys.readouterr().out
-    assert "refused  calibration age" in out and "(accepted in no session kind)" in out
-    assert f"task refused in a {kind} session" in out
+    assert "warning  calibration age" in out and "check this host's clock" in out
 
 
 def test_wlx_check_says_a_findings_sentence_through_the_terminal_guard(monkeypatch, capsys):
@@ -2336,19 +2336,19 @@ def test_wlx_run_refuses_a_task_its_kind_does_not_accept_before_anything_is_reco
     assert not (tmp_path / "2027-01-14_01").exists()
 
 
-def test_wlx_run_refuses_a_calibration_record_that_will_not_load_before_anything_is_recorded(tmp_path):
-    """Review Focus 3, `wlx run`'s side (Call 20): no animal is waiting on it, so it refuses
-    outright, before the session opens and before the departure is asked about."""
+def test_wlx_run_runs_on_the_default_when_the_record_will_not_load_once_that_is_accepted(tmp_path):
+    """XC-352's E1 (the PI, 2026-10-11): the default stands in, with a warning saying why, which
+    the flag accepts; the session's config.json names the default."""
     (tmp_path / "cal.json").write_text("{")
     argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm())
     argv[argv.index(RIG_FILE)] = str(naming(tmp_path / "rig", str(tmp_path / "cal.json")))
 
-    with pytest.raises(SystemExit) as refused:
-        main(argv)
+    assert _main_uninterrupted(argv) == 0
 
-    assert str(refused.value).startswith("refused: the calibration")
-    assert "not JSON" in str(refused.value)
-    assert not (tmp_path / "2027-01-14_01").exists()
+    folder = tmp_path / "2027-01-14_01" / "xcon"
+    assert json.loads((folder / "config.json").read_text())["calibration"]["id"] == "srgb-standard"
+    codes = [json.loads(line)["code"] for line in (folder / "warnings.jsonl").read_text().splitlines()]
+    assert codes[:2] == ["calibration record", "default calibration"]
 
 
 def test_wlx_run_runs_its_rig_file_once(tmp_path):
@@ -2381,17 +2381,21 @@ def test_wlx_run_lists_its_warnings_and_starts_only_once_they_are_accepted(tmp_p
     assert not (tmp_path / "2027-01-14_01").exists()
 
 
-def test_wlx_run_refuses_a_calibration_dated_after_today_before_anything_is_recorded(tmp_path):
-    """Call 20: the one session-level warning no kind accepts, refused with or without the
-    flag, before anything is recorded."""
+def test_wlx_run_runs_on_a_calibration_dated_after_today_once_its_warning_is_accepted(tmp_path):
+    """XC-352's E2 (the PI, 2026-10-11): a warning, listed and accepted by the flag; without the
+    flag nothing is recorded."""
     argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm())
     argv[argv.index(RIG_FILE)] = _dated_after_today(tmp_path)
+    unflagged = [a for a in argv if a != "--accept-warnings"]
 
     with pytest.raises(SystemExit) as refused:
-        main(argv)
-
-    assert "a training session does not accept calibration age" in str(refused.value)
+        main(unflagged)
+    assert "calibration age" in str(refused.value) and "--accept-warnings" in str(refused.value)
     assert not (tmp_path / "2027-01-14_01").exists()
+
+    assert _main_uninterrupted(argv) == 0
+    rows = (tmp_path / "2027-01-14_01" / "xcon" / "warnings.jsonl").read_text()
+    assert '"code": "calibration age"' in rows
 
 
 def test_wlx_run_records_the_warnings_its_flag_accepted(tmp_path):

@@ -2852,8 +2852,9 @@ def test_a_run_refused_by_its_backstop_says_the_findings_through_the_terminal_gu
 
 
 def test_a_session_with_no_calibration_runs_nothing(tmp_path):
-    """Call 19's backstop: `wlx taskd` gives a session no calibration while the rig's record
-    will not load, and its pre-flight refuses every run (Task 12); `run` refuses one too."""
+    """Call 19's backstop, for a caller that gives a session no calibration: since XC-352's E1
+    neither `wlx taskd` nor `wlx run` does, the default standing in for a record that will not
+    load; `run` refuses one."""
     made = _sessions.session(tmp_path)
     made.spec.calibration = None
     made.open()

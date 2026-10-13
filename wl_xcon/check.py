@@ -1221,11 +1221,11 @@ def _color_faults(trial: Trial, panel: Calibration | None) -> list[Finding]:
     isoluminant: list[str] = []
     at = 0
     for what, color in _colors(trial, params):
-        # With no calibration at all -- `wlx taskd` while the rig's record will not load (the
-        # engine B plan, call 19), or a direct `check()` call -- an absolute luminance is not
-        # checked here, since every run's pre-flight fails on the missing calibration; on the
-        # default it is the session's one warning (`warnlist.of_calibration`, accepted at the
-        # open). Any other color with no calibration is unmeasured once, as written; with one,
+        # With no calibration at all -- a direct `check()` call; no session runs without one
+        # since XC-352's E1 (2026-10-11), the default standing in for a record that will not
+        # load -- an absolute luminance is not checked here; on the default it is the session's
+        # one warning (`warnlist.of_calibration`, accepted at the open). Any other color with no
+        # calibration is unmeasured once, as written; with one,
         # it is checked as each light it can be.
         if panel is None and isinstance(color, Gray):
             continue
@@ -1265,7 +1265,27 @@ def _color_faults(trial: Trial, panel: Calibration | None) -> list[Finding]:
         findings = _clips(findings)
     if panel is not None and panel.standard:
         findings += _default_faults(trial, params)
+    if panel is not None and not panel.standard and panel.spectra is None:
+        findings += _spectra_faults(trial, params, panel)
     return findings
+
+
+def _spectra_faults(trial: Trial, params: dict[str, Param], panel: Calibration) -> list[Finding]:
+    """Cone colors on a measured calibration without spectra, which convert as the default's do
+    (COL-18's conversion): **a warning in every kind** (the PI, 2026-10-11, XC-352's E3: "convert
+    as the default does, with COL-18's sentence"; refused until then, so a panel measured without
+    spectra ran fewer tasks than the unmeasured default). One per task, naming its cone colors."""
+    named = sorted({what for what, color in _colors(trial, params)
+                    if isinstance(color, CONE_COLORS)})
+    if not named:
+        return []
+    return [Finding("cone-colors-without-spectra", (
+        f"calibration {panel.id or panel.measured_on} was measured without spectra, so this task's "
+        f"cone colors (DKL, cone contrast) convert as the default's do, through the inverse of the "
+        f"CIE's LMS-to-XYZ_F,10 matrix applied to its measured CIE 1931 XYZ, a use outside the "
+        f"CIE's definition, so how far each is from the cone contrast it names is unknown, and the "
+        f"luminance they hold constant is its measured CIE 1931 Y (COL-18); the colors it names: "
+        f"{'; '.join(named)}"), blocking=False, accepted_in=SESSION_KINDS)]
 
 
 def _modulation_faults(trial: Trial, params: dict[str, Param], panel: Calibration,

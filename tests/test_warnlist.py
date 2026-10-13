@@ -9,7 +9,7 @@ import pytest
 from _calibrations import measured
 from wl_xcon import warnlist
 from wl_xcon.findings import NOT_RECORDING, SESSION_KINDS, Finding
-from wl_xcon.link import PreflightItem
+from wl_xcon.link import NOTE_LIMIT, PreflightItem
 from wl_xcon.photometry import SRGB, Calibration
 from wl_xcon.warnlist import Entry
 from wl_xcon.welfare import Deployment
@@ -41,27 +41,35 @@ def test_a_calibration_is_listed_past_thirty_days_and_never_refused(days, listed
         assert f"{days} days ago" in entry.detail and "rig1" in entry.detail
 
 
-def test_a_calibration_dated_after_today_is_accepted_in_no_kind():
-    """The review's C1: no session kind accepts it, so every run's pre-flight fails on it --
-    and nothing else does: an open, an end and a return never read it (Call 19)."""
+def test_a_calibration_dated_after_today_is_a_warning_in_every_kind_to_check_the_clock():
+    """XC-352's E2 (the PI, 2026-10-11): its date or this host's clock is wrong, which a warning
+    says, in every session kind, never a refusal (until then no kind accepted it)."""
     (entry,) = warnlist.of_calibration(_measured(-1), TODAY)
 
-    assert (entry.code, entry.accepted_in) == ("calibration age", ())
-    assert [warnlist.refused([entry], kind) for kind in SESSION_KINDS] == [[entry]] * 3
-    assert "after today" in entry.detail and "every run's pre-flight fails" in entry.detail
-    # Read once and its clock anchored once, both as `wlx taskd` starts (the final review).
-    assert entry.detail.endswith(
-        "until the one that is wrong is corrected and wlx taskd started again"
-    )
+    assert (entry.code, entry.accepted_in) == ("calibration age", SESSION_KINDS)
+    assert [warnlist.refused([entry], kind) for kind in SESSION_KINDS] == [[]] * 3
+    assert "after today" in entry.detail and "check this host's clock" in entry.detail
 
 
-def test_a_calibration_that_will_not_load_is_one_entry_no_kind_accepts():
+def test_a_calibration_that_will_not_load_is_a_warning_that_the_default_runs_in_its_place():
+    """XC-352's E1 (the PI, 2026-10-11): the session falls back to the sRGB default with a
+    warning, in every kind, quoting why the record would not load -- cut, so the whole sentence
+    stays within what an open's form sends back (`link.NOTE_LIMIT`)."""
     refusal = "refused: the calibration tests/_rig.py names, cal.json: it is not JSON (Expecting value)"
 
     (entry,) = warnlist.of_unloaded(refusal)
+    (long,) = warnlist.of_unloaded("refused: " + "x" * 2_000)
 
-    assert (entry.code, entry.accepted_in) == ("calibration record", ())
-    assert entry.detail.startswith(refusal) and "every run's pre-flight fails" in entry.detail
+    assert (entry.code, entry.accepted_in) == ("calibration record", SESSION_KINDS)
+    assert entry.detail.startswith(refusal)
+    assert "this session runs on the default calibration, the sRGB standard" in entry.detail
+    assert len(long.detail) <= NOTE_LIMIT and "…" in long.detail
+    # Cut in its middle: a record's refusal names its path first and why it would not load last.
+    assert long.detail.startswith("refused: xxx")
+    # The default's own warning says why it stands in, never that the rig names none (the
+    # warnings-over-refusals review's M4).
+    (default,) = warnlist.of_calibration(SRGB, TODAY, unloaded=True)
+    assert default.detail.startswith("the calibration record the rig names would not load, so ")
 
 
 def test_a_chaired_session_lists_its_free_head_and_a_fixed_one_lists_nothing():

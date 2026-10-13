@@ -209,8 +209,9 @@ class SessionSpec:
     session_kind: str
     #: The display calibration colors are checked against (engine spec §7): the one the rig
     #: names, or `photometry.SRGB`, the default, when it names none (spec §7.1). **Required,
-    #: with no default** (the engine B plan, call 14). `None` only in `wlx taskd` while the
-    #: rig's record will not load (call 19), and `run` then refuses every run.
+    #: with no default** (the engine B plan, call 14). `None` only from a caller that gives
+    #: none -- since XC-352's E1 (2026-10-11) `wlx taskd` and `wlx run` put the default in the
+    #: place of a record that will not load -- and `run` then refuses every run.
     calibration: Calibration | None
     #: The session's plan. `None` means one block of `trials` trials, which is the
     #: same code path with one block in it.
@@ -2073,8 +2074,8 @@ class Session:
         if implied:
             run = RunSpec.of(self.spec)
         if self.spec.calibration is None:
-            # The backstop for a caller that took no pre-flight (the engine B plan, call 19):
-            # `wlx taskd`'s pre-flight fails every run while the rig's record will not load.
+            # The backstop for a caller that gives no calibration (the engine B plan, call 19);
+            # since XC-352's E1 neither `wlx taskd` nor `wlx run` does.
             raise SystemExit(
                 "task refused, session not started: no color calibration is loaded -- the "
                 "rig's calibration record would not load -- so no run draws on this display "

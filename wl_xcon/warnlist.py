@@ -6,9 +6,10 @@ and `_start` for a run's in its pre-flight (spec §19.3: "Accepted once per sess
 recorded"; "a warning appearing later asks again").
 
 **What this build lists:** the default calibration and a calibration past 30 days (spec §7.1,
-§7.10); a calibration that will not load or is dated after today, which no kind accepts (the
-engine B plan, call 19: every run's pre-flight fails on it, and nothing else reads it); a
-chaired session's free head (§5.9); a task's warnings, its load-time findings that
+§7.10); a calibration that will not load, in whose place the default runs, and one dated after
+today (accepted in every kind since the PI's rulings on XC-352, 2026-10-11, E1 and E2: no kind
+accepted them, and every run's pre-flight failed on them, until then); a chaired session's free
+head (§5.9); a task's warnings, its load-time findings that
 are warnings (`luminance-step`, `color-on-default`, `contrast-on-default`, and, since the PI's
 ruling of 2026-10-11, `head-not-fixed`); and today's
 pre-flight unknowns, the pump calibration and the eye tracker (S9a §10). **What later builds
@@ -28,6 +29,7 @@ from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from datetime import date
 
+from wl_xcon import link as _link
 from wl_xcon.findings import SESSION_KINDS, kind_named
 from wl_xcon.photometry import SRGB_WHITE_CD_M2, Calibration
 from wl_xcon.welfare import Deployment
@@ -98,15 +100,20 @@ def of_findings(findings: Iterable) -> list[Entry]:
     return [Entry(f.code, f.detail, f.accepted_in) for f in findings if f.is_warning]
 
 
-def of_calibration(calibration: Calibration, today: date) -> list[Entry]:
+def of_calibration(calibration: Calibration, today: date, unloaded: bool = False) -> list[Entry]:
     """The calibration's: the default's, or a measured one's age past 30 days -- or, dated
-    after `today`, one no session kind accepts, since its date or this host's clock is wrong
-    (the engine B plan, call 19). **Its sentence says `wlx taskd` must start again**, as
-    `of_unloaded`'s does (the engine B final review): the service reads the record once and
-    anchors its clock once, both as it starts, so a corrected file or clock counts only then."""
+    after `today`, a warning in every kind that its date or this host's clock is wrong (the PI,
+    2026-10-11, XC-352's E2; no kind accepted it until then, the engine B plan's call 19). Every
+    sentence an open can be asked to accept fits `link.NOTE_LIMIT`, which the open's form sends
+    back (a calibration's id is at most `photometry.ID_LIMIT` characters). **`unloaded`**: the
+    default stands in for a record the rig names that would not load (`of_unloaded`, listed
+    first; XC-352's E1), and its sentence says so, not that the rig names none (the
+    warnings-over-refusals review's M4)."""
     if calibration.standard:
+        why = ("the calibration record the rig names would not load" if unloaded
+               else "the rig names no measured calibration")
         return [Entry(DEFAULT_CALIBRATION, (
-            f"the rig names no measured calibration, so colors and luminances are the sRGB "
+            f"{why}, so colors and luminances are the sRGB "
             f"standard's (its primaries, D65 white at {SRGB_WHITE_CD_M2:g} cd/m², its transfer "
             f"curve) and no luminance here was measured; how closely the panel's sRGB mode "
             f"follows the standard is UNVERIFIED (engine spec §7.1)"), SESSION_KINDS)]
@@ -114,9 +121,9 @@ def of_calibration(calibration: Calibration, today: date) -> list[Entry]:
     if age < 0:
         return [Entry(CALIBRATION_AGE, (
             f"calibration {calibration.id} is dated {calibration.measured_on}, after today "
-            f"({today.isoformat()}): its date or this host's clock is wrong, and no session kind "
-            f"accepts it, so every run's pre-flight fails on it until the one that is wrong is "
-            f"corrected and wlx taskd started again"), ())]
+            f"({today.isoformat()}): its date or this host's clock is wrong; check this host's "
+            f"clock, which every welfare time is anchored to, and the record's date (wlx taskd "
+            f"reads both as it starts)"), SESSION_KINDS)]
     if age > CALIBRATION_WARN_AFTER_DAYS:
         return [Entry(CALIBRATION_AGE, (
             f"calibration {calibration.id} was measured on {calibration.measured_on}, {age} days "
@@ -127,12 +134,21 @@ def of_calibration(calibration: Calibration, today: date) -> list[Entry]:
 
 def of_unloaded(refusal: str) -> list[Entry]:
     """A calibration record the rig names and that will not load, as `cli._load_calibration`
-    refused it (the review's C1): one entry no session kind accepts, so every run's pre-flight
-    fails on it, with the refusal's own sentence, while `wlx taskd` goes on taking opens, ends
-    and returns."""
-    return [Entry(CALIBRATION_RECORD, (
-        f"{refusal}; no session kind accepts a calibration that will not load, so every run's "
-        f"pre-flight fails on it until the record is repaired and wlx taskd started again"), ())]
+    refused it: **a warning in every kind that the default runs in its place** (the PI,
+    2026-10-11, XC-352's E1: "fall back to the default with a warning"; no kind accepted it, and
+    every run's pre-flight failed on it, until then). The refusal is quoted cut in its middle, so
+    the whole sentence stays within `link.NOTE_LIMIT`, which the open's form sends back, and keeps
+    why it would not load; `wlx taskd` prints it whole as it starts."""
+    tail = (
+        "; this session runs on the default calibration, the sRGB standard, in its place, until "
+        "the record is repaired and read again (wlx taskd reads it as it starts; engine spec §7.1)"
+    )
+    room = _link.NOTE_LIMIT - len(tail)
+    if len(refusal) > room:
+        # Its middle cut: a record's refusal names its path first and why it would not load last.
+        head = room // 3
+        refusal = refusal[:head] + "…" + refusal[-(room - head - 1):]
+    return [Entry(CALIBRATION_RECORD, refusal + tail, SESSION_KINDS)]
 
 
 def of_deployment(deployment: Deployment) -> list[Entry]:

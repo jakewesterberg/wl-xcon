@@ -171,12 +171,20 @@ def test_a_cone_color_the_panel_cannot_make_is_a_warning_naming_the_light_it_sho
         replace(a_task(Disc(color=DKL(l_m=0.08))), background=GRAY_BG), calibration=measured())
 
 
-def test_a_cone_color_on_a_measured_calibration_without_spectra_is_refused():
+def test_a_cone_color_on_a_measured_calibration_without_spectra_is_a_warning_naming_the_conversion():
+    """XC-352's E3 (the PI, 2026-10-11): it converts as the default's do (COL-18), with a warning
+    in every kind saying so, and is held to the panel's reach like any other; until then it was
+    refused, and a panel measured without spectra ran fewer tasks than the unmeasured default."""
     trial = replace(a_task(Disc(color=DKL(l_m=0.08))), background=GRAY_BG)
 
-    refusal = _found(trial, calibration=PANEL)["unrealizable-color"]
-    # No light to clip: the color does not convert at all, which stays a refusal (XC-352's A20).
-    assert refusal.blocking and "measured without spectra" in refusal.detail
+    found = _found(trial, calibration=PANEL)
+
+    assert set(found) == {"cone-colors-without-spectra"}
+    warning = found["cone-colors-without-spectra"]
+    assert (warning.blocking, warning.accepted_in) == (False, SESSION_KINDS)
+    assert "a use outside the CIE's definition" in warning.detail and "Disc" in warning.detail
+    assert "cone-colors-without-spectra" not in _found(
+        a_task(Disc(color=xyY(0.3, 0.35, 20.0))), calibration=PANEL)
 
 
 def test_a_cone_color_is_realizable_or_not_by_its_background():

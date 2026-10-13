@@ -171,9 +171,10 @@ should not start.
 PI as planned on 2026-10-08, and as built on the day he approves its welfare summary): an open is
 refused, before anything is marked, until the warnings its session's kind accepts (the default
 calibration's, a calibration's age past 30 days, a chaired session's free head) are accepted, each
-by its code and its sentence, and that is its only new refusal; a calibration problem (a
-calibration that will not load or is dated after today) never refuses an open and never stops
-`wlx taskd`, and fails every run instead, as a fault listing the warnings does; what an open
+by its code and its sentence, and that is its only new refusal; since the PI's rulings on XC-352
+(2026-10-11, E1 and E2) a calibration that will not load, in whose place the default runs, and
+one dated after today are among those warnings, accepted in every kind (until then no kind
+accepted them, and they failed every run instead); none stops `wlx taskd`; what an open
 accepted is written once the service holds the session. A run's pre-flight has a `warnings` item:
 a fail for a warning the session's kind does not accept (or for warnings that cannot be listed),
 otherwise an unknown acknowledged by name while any is not yet accepted this session, which names
@@ -502,7 +503,8 @@ background in the lab's one observer, the CIE 2006 10° cone fundamentals (`wl_x
 CIE's table bundled unmodified in `wl_xcon/cie/` under CC BY-SA 4.0 and read only when its
 checksum is the CIE's, ADR-0012), turned into CIE XYZ through the session's calibration
 (`photometry.cone_xyz`): on the default through the CIE's LMS-to-XYZ_F,10 matrix inverted, on a
-measured record through its primaries' spectra (ADR-0011). `check` holds every light to the panel
+measured record through its primaries' spectra (ADR-0011), and on one measured without spectra as
+on the default, with a warning (XC-352's E3). `check` holds every light to the panel
 by full conversion against every lit value of its background, and the exact drawer's last step
 turns each pixel into output levels through the calibration's measured, black-subtracted transfer
 (`exact.output_levels`), clipping one the panel cannot make, whose light `exact.shown` gives and

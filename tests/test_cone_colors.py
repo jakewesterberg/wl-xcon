@@ -15,9 +15,11 @@ from wl_xcon.photometry import (
     DKL_NORMALIZATION,
     HELD_SPECTRA,
     HELD_STANDARD,
+    HELD_WITHOUT_SPECTRA,
     SRGB,
     VIA_SPECTRA,
     VIA_STANDARD,
+    VIA_WITHOUT_SPECTRA,
     ConeContrast,
     Spectra,
     _apply3,
@@ -106,12 +108,14 @@ def test_a_measured_calibration_converts_through_its_spectra():
         assert background_cones(panel, primary) == pytest.approx(expected, rel=1e-9), channel
 
 
-def test_a_measured_calibration_without_spectra_converts_no_cone_color():
+def test_a_measured_calibration_without_spectra_converts_cone_colors_as_the_default_does():
+    """XC-352's E3 (the PI, 2026-10-11): through the inverse of the CIE's LMS-to-XYZ_F,10 matrix,
+    applied to its measured CIE 1931 XYZ (COL-18's conversion), with a warning (`check`'s
+    `cone-colors-without-spectra`); until then it converted none."""
     panel = measured(spectra=None)
 
-    assert panel.cones is None
-    with pytest.raises(ValueError, match="measured without spectra"):
-        cone_xyz(DKL(l_m=0.08), panel, xyY(0.3127, 0.329, 20.0))
+    assert panel.cones == SRGB.cones and panel.cones_refused == ""
+    assert cone_xyz(DKL(l_m=0.08), panel, xyY(0.3127, 0.329, 20.0))
 
 
 def test_a_measured_calibration_names_its_observer():
@@ -191,4 +195,7 @@ def test_a_record_says_how_its_cone_colors_became_light():
     assert (cone_record(measured())["via"], cone_record(measured())["luminance"]) == (
         VIA_SPECTRA, HELD_SPECTRA)
     assert (cone_record(measured(spectra=None))["via"],
-            cone_record(measured(spectra=None))["luminance"]) == (None, None)
+            cone_record(measured(spectra=None))["luminance"]) == (VIA_WITHOUT_SPECTRA,
+                                                                  HELD_WITHOUT_SPECTRA)
+    assert "outside the CIE's definition" in VIA_WITHOUT_SPECTRA
+    assert "measured CIE 1931 Y" in HELD_WITHOUT_SPECTRA

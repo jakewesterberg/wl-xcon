@@ -72,7 +72,8 @@ def test_a_cone_color_converts_on_the_default_and_on_a_measured_calibration_with
     assert unrealizable(DKL(l_m=0.08), measured(), gray) is None
     assert "outside [0, 1]" in unrealizable(DKL(l_m=-0.3), SRGB, gray)
     assert "no background was given" in unrealizable(DKL(l_m=0.08), SRGB)
-    assert "measured without spectra" in unrealizable(DKL(l_m=0.08), measured(spectra=None), gray)
+    # Without spectra, as the default does (XC-352's E3).
+    assert unrealizable(DKL(l_m=0.08), measured(spectra=None), gray) is None
 
 
 def test_the_default_transfer_is_the_srgb_curve_at_ten_bits():

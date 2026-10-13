@@ -88,7 +88,7 @@ from wl_xcon.cli import (
 from wl_xcon.codes import Allocation
 from wl_xcon.dio import Simulated as SimulatedCard
 from wl_xcon.geometry import Rig
-from wl_xcon.photometry import Calibration
+from wl_xcon.photometry import SRGB, Calibration
 from wl_xcon.record import XCON_DIRNAME
 from wl_xcon.taskd import RunSpec, Session, SessionSpec, bounds_record
 from wl_xcon.welfare import OUT_OF_CAGE, Deployment, SessionClock
@@ -391,12 +391,13 @@ class Service:
         self.rig, self.rig_path = rig, rig_path
         self.subjects, self.tasks, self.root = Path(subjects), Path(tasks), Path(root)
         self.allocation, self.allocation_path = allocation, allocation_path
-        #: The rig's color calibration (engine spec §7.1, §7.6), loaded once, here -- or
-        #: `None` when the record the rig names will not load, `calibration_refused` saying
-        #: why. **Which never stops `wlx taskd`** (the engine B plan, call 19): a stranded
-        #: session's return is taken only through a running service, and an open, an end and
-        #: a return never read this; every run's pre-flight fails on it instead (Task 12).
-        self.calibration: Calibration | None = None
+        #: The rig's color calibration (engine spec §7.1, §7.6), loaded once, here -- or **the
+        #: default, the sRGB standard, in the place of a record the rig names that will not
+        #: load**, `calibration_refused` saying why (the PI, 2026-10-11, XC-352's E1: "fall back
+        #: to the default with a warning"; `warnlist.of_unloaded`, which an open asks to accept).
+        #: **Which never stops `wlx taskd`** (the engine B plan, call 19): a stranded session's
+        #: return is taken only through a running service.
+        self.calibration: Calibration = SRGB
         self.calibration_refused = ""
         try:
             self.calibration = _load_calibration(rig, rig_path)
@@ -455,12 +456,13 @@ class Service:
 
     def calibration_warnings(self) -> list:
         """The rig's calibration on the warnings list (engine spec §7.1, §7.10): the default,
-        a measured one's age past 30 days, one dated after today -- or, while the record the
-        rig names will not load, that, which no session kind accepts (the engine B plan,
-        call 19)."""
-        if self.calibration is None:
-            return warnlist.of_unloaded(self.calibration_refused)
-        return warnlist.of_calibration(self.calibration, self._today())
+        a measured one's age past 30 days, one dated after today -- and, while the record the
+        rig names will not load, that the default runs in its place, first (XC-352's E1), the
+        default's own sentence saying why it stands in (the warnings-over-refusals review's M4)."""
+        refused = self.calibration_refused
+        unloaded = warnlist.of_unloaded(refused) if refused else []
+        return unloaded + warnlist.of_calibration(self.calibration, self._today(),
+                                                  unloaded=bool(refused))
 
     def open_warnings(self, deployment: Deployment) -> list:
         """The warnings an open lists (engine spec §19.3: "at open"): the rig's calibration's,
@@ -779,8 +781,9 @@ class Service:
         frame, with a refusal row saying what to send.
 
         **And its warnings** (engine build B): those the session's kind accepts, accepted on
-        the form by their sentences, or the open is refused before anything is marked; a
-        calibration problem is never one of them (it fails every run instead). If the
+        the form by their sentences, or the open is refused before anything is marked; since
+        XC-352's E1 and E2 (the PI, 2026-10-11) a calibration that will not load, or is dated after
+        today, is one of them, accepted in every kind. If the
         warnings cannot be listed, the open goes ahead with none offered, says so on the
         session's feed, and no run starts until they can be (call 31). Each accepted one is
         written once the service holds the session."""
@@ -822,9 +825,9 @@ class Service:
         # **The warnings this open asks to accept** (engine spec §19.3: "Accepted once per
         # session, at open, recorded"): those the session's kind accepts, each by its code and
         # its sentence (the engine B plan, calls 7 and 25), refused before anything is marked
-        # or written, as a refused departure is. One no kind accepts -- a calibration that will
-        # not load or is dated after today -- is not offered and never refuses an open: it
-        # fails every run's pre-flight (call 19). This is the open's only new refusal.
+        # or written, as a refused departure is. One no kind accepts is not offered and never
+        # refuses an open; since XC-352's E1 and E2 (2026-10-11) none is. This is the open's
+        # only new refusal.
         try:
             listed, unlisted = self.open_warnings(Deployment(command.deployment)), None
         except Exception as broken:  # noqa: BLE001 -- the engine B plan, call 31
@@ -1458,14 +1461,14 @@ def run(args) -> int:
                 f"({found.subject or 'record unreadable'}); no session opens until its "
                 f"return is recorded"
             )
-        if service.calibration is None:
-            # Said where the operator started it (the second review's Minor 12): every run
-            # this service takes will be refused until the record loads.
-            # Through `_printable`, as the console prints it: the sentence quotes the record's
-            # path and what its loader said, its field names among them.
+        if service.calibration_refused:
+            # Said where the operator started it (the second review's Minor 12), whole: the
+            # open's warning quotes it cut (XC-352's E1). Through `_printable`, as the console
+            # prints it: the sentence quotes the record's path and what its loader said.
             print(
-                f"  calibration: {_printable(service.calibration_refused)}; every run's pre-flight "
-                f"fails on it until the record is repaired and wlx taskd started again"
+                f"  calibration: {_printable(service.calibration_refused)}; sessions run on the "
+                f"default calibration, the sRGB standard, with a warning, until the record is "
+                f"repaired and wlx taskd started again"
             )
         try:
             service.serve(threading.Event())

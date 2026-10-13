@@ -267,12 +267,15 @@ def test_an_idle_frames_sentences_are_cut_as_the_wire_cuts_its_other_text(tmp_pa
     frame each is cut to `link.NOTE_LIMIT` characters and "…" (`link.WarningRow.of`), as a
     session's frame cuts the warnings it accepted; the code and the kinds are untouched."""
     service = _service(tmp_path)
-    service.calibration, service.calibration_refused = None, "refused: " + "x" * 2_000
+    service.calibration_refused = "refused: " + "x" * 2_000
 
-    unloaded, head = _step(service).warnings
+    unloaded, default, head = _step(service).warnings
 
-    assert (unloaded.code, unloaded.accepted_in) == ("calibration record", ())
-    assert unloaded.detail == ("refused: " + "x" * 2_000)[:NOTE_LIMIT] + "…"
+    # XC-352's E1: a warning every kind accepts, quoting its refusal cut, so it reaches the frame
+    # whole (`warnlist.of_unloaded`).
+    assert (unloaded.code, unloaded.accepted_in) == ("calibration record", SESSION_KINDS)
+    assert len(unloaded.detail) <= NOTE_LIMIT and not unloaded.detail.endswith("…")
+    assert default.code == "default calibration"
     assert head.code == "head free" and not head.detail.endswith("…")
 
     def broken(deployment):
@@ -325,21 +328,31 @@ def test_every_warning_an_open_can_be_asked_to_accept_reaches_the_frame_whole(tm
     is the warning the open lists."""
     oldest = (date.fromtimestamp(WALL) - timedelta(days=9_999)).isoformat()
     worst = measured(measured_on=oldest, id="x" * ID_LIMIT)
+    # Since XC-352's E1 and E2, a record that will not load (quoting any refusal) and one dated
+    # after today are offered at an open too.
+    future = measured(measured_on="9999-12-31", id="y" * ID_LIMIT)
+    expected = {
+        "default": ["default calibration", "head free"],
+        "measured": ["calibration age", "head free"],
+        "future": ["calibration age", "head free"],
+        "unloaded": ["calibration record", "default calibration", "head free"],
+    }
 
-    for name, calibration in (("default", None), ("measured", worst)):
+    for name in expected:
         service = _service(tmp_path / name)
-        if calibration is not None:
-            service.calibration = calibration
+        if name == "measured":
+            service.calibration = worst
+        if name == "future":
+            service.calibration = future
+        if name == "unloaded":
+            service.calibration_refused = "refused: " + "z" * 2_000
 
         offered = [w for w in _step(service).warnings if w.accepted_in]
 
         listed = [e for e in service.open_warnings(Deployment.RIG_CHAIRED) if e.accepted_in]
-        assert [(w.code, w.detail) for w in offered] == [e.key for e in listed]
+        assert [(w.code, w.detail) for w in offered] == [e.key for e in listed], name
         assert all(len(w.detail) <= NOTE_LIMIT for w in offered), name
-        assert [w.code for w in offered] == [
-            "default calibration" if calibration is None else "calibration age", "head free",
-        ]
-    assert "9999 days ago" in offered[0].detail
+        assert [w.code for w in offered] == expected[name], name
 
 
 @pytest.fixture
@@ -361,7 +374,7 @@ def test_a_calibrations_age_and_its_date_are_counted_on_the_rigs_local_calendar(
     2027-02-19 13:00 UTC, is 2027-02-20 fourteen hours east and still 2027-02-19 twelve
     hours west: a record measured 2027-01-20 is 31 days old in the first and listed, 30 in
     the second and not; one measured 2027-02-20 is today's in the first and dated after
-    today in the second, which no session kind accepts."""
+    today in the second, a warning in every kind since XC-352's E2."""
     instant = datetime(2027, 2, 19, 13, 0, tzinfo=timezone.utc).timestamp()
     service = _service(tmp_path, wall=lambda: instant)
     month_old = measured(measured_on="2027-01-20", id="rig1@2027-01-20")
@@ -382,7 +395,7 @@ def test_a_calibrations_age_and_its_date_are_counted_on_the_rigs_local_calendar(
     assert service.calibration_warnings() == []
     service.calibration = east_today
     (future,) = service.calibration_warnings()
-    assert future.accepted_in == () and "after today (2027-02-19)" in future.detail
+    assert future.accepted_in == SESSION_KINDS and "after today (2027-02-19)" in future.detail
 
 
 # --- open -----------------------------------------------------------------------
@@ -412,27 +425,38 @@ def test_an_opened_session_is_for_what_its_open_said(tmp_path):
     assert config["session_kind"] == "piloting"
 
 
-def test_a_calibration_record_that_will_not_load_never_stops_wlx_taskd_or_an_open(tmp_path):
-    """The review's C1 (Review Focus 3): `wlx taskd` starts, a session opens with no
-    calibration, its departure and its return are taken, and no run starts. Task 12's
-    pre-flight then fails the run first, naming the record
-    (`test_a_calibration_problem_fails_every_runs_preflight_naming_it`)."""
+def test_a_calibration_record_that_will_not_load_runs_sessions_on_the_default_with_a_warning(
+    tmp_path,
+):
+    """XC-352's E1 (the PI, 2026-10-11): `wlx taskd` starts on the sRGB default in the record's
+    place. An open asks to accept that, beside the default's own warning, and is refused, nothing
+    recorded, until both are accepted; then it opens, a run starts, and the session's config.json
+    names the default. Until then no kind accepted it and every run failed on it."""
     (tmp_path / "cal.json").write_text("{")
     folders = _folders(tmp_path)
     service = _made(folders, rig=dataclasses.replace(RIG, calibration=str(tmp_path / "cal.json")))
 
-    assert service.calibration is None
+    assert service.calibration is SRGB
     assert service.calibration_refused.startswith("refused: the calibration")
     assert "not JSON" in service.calibration_refused
-    opened = _step(service, _open())
-    assert opened.phase == "between_runs" and service.session.spec.calibration is None
-    config = json.loads((service.root / "2027-01-14_01" / "xcon" / "config.json").read_text())
-    assert config["calibration"] is None
-    refused = _step(service, _start())
-    assert refused.run_index is None and _runs(service.root) == []
-    assert refused.refusals[-1].name == "start" and service.session.card.codes == [4128]
-    ended = _step(service, _end())
-    assert isinstance(ended, Idle) and _kinds(service.root)[-2:] == ["returned", "session ended"]
+    record, default = service.open_warnings(Deployment.RIG_FIXED)
+    assert (record.code, record.accepted_in, default.code) == (
+        "calibration record", SESSION_KINDS, "default calibration")
+    # The default's own sentence says why it stands in, not that the rig names none (M4).
+    assert default.detail.startswith("the calibration record the rig names would not load, so ")
+
+    unaccepted = _step(service, _open())
+    assert service.session is None and "calibration record: refused: the calibration" in _refused(
+        unaccepted)[-1]
+    assert not (service.root / "2027-01-14_01").exists()
+    _step(service, _open(accepted=(record.key, default.key)))
+    started = _step(service, _start())
+
+    assert started.run_index == 0
+    folder = service.root / "2027-01-14_01" / "xcon"
+    assert json.loads((folder / "config.json").read_text())["calibration"]["id"] == "srgb-standard"
+    assert [r["code"] for r in _jsonl(folder / "warnings.jsonl") if r["how"] == "open"] == [
+        "calibration record", "default calibration"]
 
 
 def test_a_calibration_record_that_is_a_named_pipe_never_holds_wlx_taskd_at_its_start(tmp_path):
@@ -445,11 +469,12 @@ def test_a_calibration_record_that_is_a_named_pipe_never_holds_wlx_taskd_at_its_
 
     service = promptly(lambda: _made(folders, rig=dataclasses.replace(RIG, calibration=str(pipe))), pipe)
 
-    assert service.calibration is None
+    assert service.calibration is SRGB
     assert service.calibration_refused.startswith(
         f"refused: the calibration {RIG_FILE} names, {pipe}: it is a named pipe, not a regular file"
     )
-    assert _step(service, _open()).phase == "between_runs"
+    accepted = tuple(e.key for e in service.open_warnings(Deployment.RIG_FIXED))
+    assert _step(service, _open(accepted=accepted)).phase == "between_runs"
 
 
 def test_a_stranded_sessions_return_is_taken_alike_when_the_calibration_record_will_not_load(tmp_path):
@@ -473,7 +498,7 @@ def test_a_stranded_sessions_return_is_taken_alike_when_the_calibration_record_w
         frame = _step(second, _end(session_id="2027-01-14_01"))
 
         assert isinstance(frame, Idle) and second.stranded == []
-        assert (second.calibration is None) == (rig is bad)
+        assert bool(second.calibration_refused) == (rig is bad)
         return _rows(folders[2])
 
     good_rows = stranded_then_ended(tmp_path / "good", RIG)
@@ -525,22 +550,27 @@ def test_an_open_that_accepted_an_older_sentence_is_refused(tmp_path):
     assert service.session is None
 
 
-def test_a_calibration_problem_never_refuses_an_open(tmp_path):
-    """The review's C1: a record dated after today, or one that will not load, is a warning no
-    kind accepts, so it is not offered at the open and never refuses it; every run's
-    pre-flight fails on it instead (Task 12)."""
+def test_a_calibration_problem_is_a_warning_the_open_asks_to_accept(tmp_path):
+    """XC-352's E1 and E2 (the PI, 2026-10-11): a record dated after today, or one that will not
+    load, is a warning every kind accepts, offered at the open like the default's; an open that
+    does not accept it is refused before anything is marked, and one that does records it."""
     future = _calibration_record(tmp_path, date.fromtimestamp(WALL) + timedelta(days=1))
     (tmp_path / "broken.json").write_text("{")
 
-    for name, record in (("future", future), ("broken", tmp_path / "broken.json")):
+    for name, record, code in (("future", future, "calibration age"),
+                               ("broken", tmp_path / "broken.json", "calibration record")):
         folders = _folders(tmp_path / name)
         service = _made(folders, rig=dataclasses.replace(RIG, calibration=str(record)))
+        listed = service.open_warnings(Deployment.RIG_FIXED)
 
-        frame = _step(service, _open(accepted=()))
+        refused = _step(service, _open(accepted=()))
+        assert service.session is None and f"{code}: " in _refused(refused)[-1], name
+        assert _kinds(folders[2]) == [], name
+        opened = _step(service, _open(accepted=tuple(e.key for e in listed)))
 
-        assert frame.phase == "between_runs", name
-        assert _kinds(folders[2]) == ["departure", "session opened"], name
-        assert not (folders[2] / "2027-01-14_01" / "xcon" / "warnings.jsonl").exists(), name
+        assert opened.phase == "between_runs", name
+        rows = _jsonl(folders[2] / "2027-01-14_01" / "xcon" / "warnings.jsonl")
+        assert code in [r["code"] for r in rows], name
 
 
 def test_an_open_records_each_warning_it_accepted_with_who_and_how(tmp_path):
@@ -1792,26 +1822,25 @@ def test_a_run_whose_new_warnings_are_not_acknowledged_does_not_start(tmp_path):
     assert "warnings" in [r.why for r in frame.refusals if r.name == "start"][0]
 
 
-def test_a_calibration_problem_fails_every_runs_preflight_naming_it(tmp_path):
-    """The review's C1 (Review Focus 3): a record dated after today, or one that will not
-    load, is a warning no kind accepts. The open is taken, every run's pre-flight fails on
-    its `warnings` item with the sentence, and the session ends with its return."""
+def test_a_calibration_problem_accepted_at_the_open_lets_every_run_start(tmp_path):
+    """XC-352's E1 and E2: accepted once at the open, a record dated after today, or one that
+    will not load, is not asked again; the runs start, and the session ends with its return."""
     future = _calibration_record(tmp_path, date.fromtimestamp(WALL) + timedelta(days=1))
     (tmp_path / "broken.json").write_text("{")
 
-    for name, record, said in (
-        ("future", future, "calibration age: calibration rig1 is dated"),
-        ("broken", tmp_path / "broken.json", "calibration record: refused: the calibration"),
-    ):
+    for name, record in (("future", future), ("broken", tmp_path / "broken.json")):
         folders = _folders(tmp_path / name)
         service = _made(folders, rig=dataclasses.replace(RIG, calibration=str(record)))
-        _step(service, _open())
+        _step(service, _open(accepted=tuple(
+            e.key for e in service.open_warnings(Deployment.RIG_FIXED))))
 
-        refused = _step(service, _start())
+        started = _step(service, _start())
 
-        assert refused.run_index is None and _runs(folders[2]) == [], name
-        assert (f"pre-flight failed, so the run does not start: warnings: a training session "
-                f"does not accept {said}") in _refused(refused)[-1], name
+        assert started.run_index == 0, name
+        item = {r["name"]: r for r in _runs(folders[2])[0]["preflight"]}["warnings"]
+        assert "calibration age" not in item["said"], name
+        assert "calibration record" not in item["said"], name
+        _run_to_its_end(service)
         ended = _step(service, _end())
         assert isinstance(ended, Idle) and _kinds(folders[2])[-2:] == ["returned", "session ended"], name
 
@@ -4015,8 +4044,8 @@ def test_wlx_taskd_stopped_by_a_fault_that_cannot_be_said_still_records_the_retu
 def test_wlx_taskd_says_at_its_terminal_when_the_calibration_record_will_not_load(
     tmp_path, monkeypatch, capsys
 ):
-    """The second review's Minor 12: the operator who started it sees why every run will
-    be refused, before any page is opened."""
+    """The second review's Minor 12: the operator who started it sees why, before any page is
+    opened, and that sessions run on the default in its place (XC-352's E1)."""
     folders = _folders(tmp_path)
     (tmp_path / "cal.json").write_text("{")
     args = _taskd_args(folders, "--allocation", ALLOCATION)
@@ -4030,7 +4059,7 @@ def test_wlx_taskd_says_at_its_terminal_when_the_calibration_record_will_not_loa
     assert main(args) == 130
     out = capsys.readouterr().out
     assert "  calibration: refused: the calibration" in out
-    assert "every run's pre-flight fails on it" in out
+    assert "sessions run on the default calibration, the sRGB standard, with a warning" in out
 
 
 def test_wlx_taskd_prints_an_unloadable_records_sentence_safely_at_its_terminal(

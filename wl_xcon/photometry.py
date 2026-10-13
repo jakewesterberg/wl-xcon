@@ -361,22 +361,18 @@ class Calibration:
         published matrix"; COL-18) -- **a use outside the CIE's definition**, which defines it for
         XYZ_F,10, and recorded as such (`cone_record`). **Measured**: each primary's excitations
         from its spectrum (`cones.excitations`), times the inverse of the primaries' measured XYZ
-        -- exact for every mixture of the three, which is every light the panel makes. Without
-        spectra, or when the bundled table is refused (`cones.cie_file`), there is no matrix and
-        `cones_refused` says why: plain colors still check, and each cone color is refused with
-        that sentence."""
+        -- exact for every mixture of the three, which is every light the panel makes. **Measured
+        without spectra, as the standard does**: the inverse of the CIE's matrix applied to its
+        measured CIE 1931 XYZ (the PI, 2026-10-11, XC-352's E3; `check`'s
+        `cone-colors-without-spectra` warns of it; until then it converted none). When the bundled
+        table is refused (`cones.cie_file`), there is no matrix and `cones_refused` says why: plain
+        colors still check, and each cone color is refused with that sentence."""
         from wl_xcon import cones
 
         matrix, refused = None, ""
         name = self.id or self.measured_on
-        if self.standard:
+        if self.standard or self.spectra is None:
             matrix = _inverse3(cones.LMS_TO_XYZ_F10)
-        elif self.spectra is None:
-            refused = (
-                f"calibration {name} was measured without spectra, so no cone color converts "
-                f"against it: a measured calibration converts cone colors from its primaries' "
-                f"spectra (engine spec §7.9)"
-            )
         else:
             try:
                 s = self.spectra
@@ -433,6 +429,13 @@ VIA_STANDARD = (
 )
 #: How a measured calibration with spectra converts them.
 VIA_SPECTRA = "its primaries' measured spectra"
+#: How one measured without spectra converts them, as the standard does (XC-352's E3).
+VIA_WITHOUT_SPECTRA = (
+    "the inverse of the CIE's LMS-to-XYZ_F,10 matrix applied to the measured primaries' CIE 1931 "
+    "XYZ, a use outside the CIE's definition, since it was measured without spectra"
+)
+#: And which luminance its isoluminance holds.
+HELD_WITHOUT_SPECTRA = "the measured CIE 1931 Y, which the CIE's matrix equates with V_F,10"
 #: What a `DKL` number means, as a record states it: the normalization must be stated whenever
 #: DKL is used [@brainard1996cone, p. 575] (A2's Q1, "Hybrid"; COL-07).
 DKL_NORMALIZATION = (
@@ -451,6 +454,8 @@ def cone_record(panel: "Calibration") -> dict:
 
     if panel.standard:
         via, held = VIA_STANDARD, HELD_STANDARD
+    elif panel.cones is not None and panel.spectra is None:
+        via, held = VIA_WITHOUT_SPECTRA, HELD_WITHOUT_SPECTRA
     elif panel.cones is not None:
         via, held = VIA_SPECTRA, HELD_SPECTRA
     else:

@@ -675,7 +675,8 @@ class Telemetry:
     #: `session.spec.session_kind`: what the session is for (schema 15; engine spec §19.1).
     session_kind: str
     #: `session.spec.calibration.id`: the color calibration colors are checked against, or
-    #: `None` while the rig's record will not load (the engine B plan, call 19).
+    #: `None` for a session given none, which neither `wlx taskd` nor `wlx run` does since
+    #: XC-352's E1 (2026-10-11): the default stands in for a record that will not load.
     calibration: str | None
     #: `session.warnings`, as `WarningRow`s: every warning the session accepted, in order,
     #: each cut for the frame (`WarningRow.of`).

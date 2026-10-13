@@ -73,8 +73,8 @@ def task(path: Path, allocation, geometry, calibration, deployment=None) -> tupl
     raise there would end it.
 
     **Its findings come back too**, for the run's `warnings` item: a warning is never this
-    item's fail, whatever the session's kind; and `calibration` is the session's, or `None`
-    while the rig's record will not load (the engine B plan, call 19). **The session's deployment**
+    item's fail, whatever the session's kind; and `calibration` is the session's (the default in
+    the place of a record that will not load, since XC-352's E1). **The session's deployment**
     makes a task that needs a fixed head a warning in any but a head-fixed session, never this
     item's fail (engine spec §20.1; XC-277; the PI, 2026-10-11)."""
     try:
@@ -129,9 +129,9 @@ def task(path: Path, allocation, geometry, calibration, deployment=None) -> tupl
 
 def warnings(entries, kind: str, accepted) -> tuple[PreflightItem, list]:
     """The run's warnings (engine spec §19.2-19.3): the rig's calibration's, the deployment's
-    and its task's. **Fail** when the session's kind does not accept one -- among them a
-    calibration that will not load or is dated after today, which no kind accepts (the engine
-    B plan, call 19); **unknown**, acknowledged by name, when any is not yet accepted this
+    and its task's. **Fail** when the session's kind does not accept one (since the PI's rulings
+    on XC-352, 2026-10-11, no warning the rig lists is one; a calibration that will not load or
+    is dated after today was); **unknown**, acknowledged by name, when any is not yet accepted this
     session -- returned, so the start that acknowledges them records each; **pass** when each
     was.
 

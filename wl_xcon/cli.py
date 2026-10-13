@@ -138,10 +138,9 @@ def _load_rig(path: Path) -> Rig:
 def _load_calibration(rig: Rig, rig_path) -> Calibration:
     """The color calibration a rig names (engine spec §7.1, §7.6), or the default -- the sRGB
     standard -- when it names none. **A named record that will not load refuses**, with its
-    sentence: it never falls back to the default, which would run a session on an unmeasured
-    panel its operator believes measured. `wlx check` and `wlx run` let this refusal stop
-    them, since no animal waits on either; `wlx taskd` keeps its sentence and fails every run
-    on it (the engine B plan, calls 19 and 20)."""
+    sentence. Its callers put the default in its place with a warning saying why
+    (`_calibration_or_default`, `service.Service`; the PI, 2026-10-11, XC-352's E1), so no
+    session runs on an unmeasured panel its operator believes measured."""
     named = rig.calibration
     if named is None:
         return SRGB
@@ -157,6 +156,20 @@ def _load_calibration(rig: Rig, rig_path) -> Calibration:
         return read_calibration(path)
     except (OSError, ValueError) as refused:
         raise SystemExit(f"refused: the calibration {rig_path} names, {path}: {refused}") from refused
+
+
+def _calibration_or_default(rig: Rig, rig_path) -> tuple[Calibration, str]:
+    """The calibration a rig names, with "" -- or, when the record will not load, **the default
+    in its place, with why** (the PI, 2026-10-11, XC-352's E1: "fall back to the default with a
+    warning"), which `warnlist.of_unloaded` makes the warning a session accepts. `wlx run` and
+    `wlx check` read the rig's calibration through this; a rig file's own refusal of its field
+    (not the path of a record) still stops them."""
+    try:
+        return _load_calibration(rig, rig_path), ""
+    except SystemExit as refused:
+        if not str(refused.code).startswith("refused: the calibration "):
+            raise
+        return SRGB, str(refused.code)
 
 
 def _load_subject_settings(path: Path, subject: str | None) -> SubjectSettings:
@@ -1638,9 +1651,9 @@ def main(argv: list[str] | None = None) -> int:
         # stops here -- before the session opens and before the departure is asked
         # about. `Session.run()` checks again, as the backstop for a caller that is
         # not this command.
-        # The rig's color calibration (engine spec §7.1): a record that will not load refuses
-        # here, before anything is recorded (the engine B plan, call 20).
-        calibration = _load_calibration(rig, args.rig)
+        # The rig's color calibration (engine spec §7.1): the default in the place of a record
+        # that will not load, with a warning saying why (XC-352's E1), accepted below.
+        calibration, unloaded = _calibration_or_default(rig, args.rig)
         # The task object, held to its declarations and, since engine build C1, to the session's
         # deployment: a task that needs a fixed head is a warning in any session not declared
         # head-fixed (`RIG_FIXED`; XC-277; the PI, 2026-10-11), accepted with the others below.
@@ -1663,11 +1676,13 @@ def main(argv: list[str] | None = None) -> int:
         # **The warnings this session runs with** (engine spec §19.2-19.3): the calibration's,
         # the deployment's and the task's. `wlx run` takes no pre-flight (XC-159), so none of
         # today's unknowns is among them. A task warning its kind does not accept was refused
-        # above; a calibration dated after today, which no kind accepts, is refused here (the
-        # engine B plan, call 20); the rest are accepted by the flag, or the session does not
-        # start. Said through `_printable`: a task's warning quotes the task.
+        # above, and one of the rig's would be here (since XC-352's E1 and E2, 2026-10-11, none
+        # is); the rest are accepted by the flag, or the session does not start. Said through
+        # `_printable`: a task's warning quotes the task.
         warnings = (
-            warnlist.of_calibration(calibration, date.fromtimestamp(time.time()))
+            (warnlist.of_unloaded(unloaded) if unloaded else [])
+            + warnlist.of_calibration(calibration, date.fromtimestamp(time.time()),
+                                      unloaded=bool(unloaded))
             + warnlist.of_deployment(deployment)
             + warnlist.of_findings(findings)
         )
@@ -2117,8 +2132,8 @@ def main(argv: list[str] | None = None) -> int:
     task = _load_task(args.task)
     allocation = _load_allocation(args.allocation)
     rig = _load_rig(args.rig)
-    # A record that will not load refuses here (the engine B plan, call 20).
-    calibration = _load_calibration(rig, args.rig)
+    # The default in the place of a record that will not load, said below (XC-352's E1).
+    calibration, unloaded = _calibration_or_default(rig, args.rig)
     settings = (
         _load_subject_settings(args.subject_settings, None)
         if args.subject_settings is not None
@@ -2142,12 +2157,14 @@ def main(argv: list[str] | None = None) -> int:
         for finding in check_task(task, allocation, geometry=geometry, calibration=calibration):
             if finding not in findings:
                 findings.append(finding)
-    # **With a kind, the calibration's own warnings first**, as `wlx run` lists them (the
-    # engine B plan, call 20: one dated after today is accepted in no kind). Without one there
-    # is no session to judge them for. The deployment's are `wlx run`'s: a check names none.
-    rig_warnings = (
+    # **The calibration's own warnings first**, as `wlx run` lists them: a record that will not
+    # load, always, since the task was checked against the default in its place (XC-352's E1);
+    # and with a kind, the calibration's age or the default (without one there is no session to
+    # judge them for). The deployment's are `wlx run`'s: a check names none.
+    rig_warnings = (warnlist.of_unloaded(unloaded) if unloaded else []) + (
         [] if args.session_kind is None
-        else warnlist.of_calibration(calibration, date.fromtimestamp(time.time()))
+        else warnlist.of_calibration(calibration, date.fromtimestamp(time.time()),
+                                     unloaded=bool(unloaded))
     )
     outside = (
         [] if args.session_kind is None else warnlist.refused(rig_warnings, args.session_kind)

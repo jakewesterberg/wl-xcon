@@ -210,17 +210,15 @@ def test_the_search_task_passes_every_load_time_check(search):
     assert check(search, allocation, geometry=GEOMETRY, calibration=PANEL) == []
 
 
-def test_the_search_task_is_refused_on_a_measured_display_without_spectra(search):
-    """A cone color converts through a measured calibration's spectra and has none to use
-    (call 8)."""
+def test_the_search_task_runs_on_a_measured_display_without_spectra_with_a_warning(search):
+    """XC-352's E3 (the PI, 2026-10-11): its cone colors convert as the default's do, with a
+    warning in every kind; until then it was refused (call 8)."""
     allocation = _load("allocation", "ALLOCATION")
 
-    found = [f for f in check(search, allocation, geometry=GEOMETRY,
-                              calibration=replace(PANEL, spectra=None))
-             if f.code == "unrealizable-color"]
+    found = check(search, allocation, geometry=GEOMETRY, calibration=replace(PANEL, spectra=None))
 
-    assert found and all(f.blocking for f in found)
-    assert all("measured without spectra" in f.detail for f in found)
+    assert [f for f in found if f.blocking] == []
+    assert "cone-colors-without-spectra" in {f.code for f in found if f.is_warning}
 
 
 def test_the_search_task_will_not_load_without_a_measured_display(search):
