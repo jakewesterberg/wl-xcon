@@ -135,20 +135,18 @@ def warnings(entries, kind: str, accepted) -> tuple[PreflightItem, list]:
     session -- returned, so the start that acknowledges them records each; **pass** when each
     was.
 
-    **The item's sentence is cut to `link.NOTE_LIMIT` characters and "…"**, as a frame's
-    warning rows are (`link.WarningRow.of`): nothing bounds a warning's sentence where it is
-    made -- a task's `color-on-default` names every colored choice, and a record that will not
-    load is quoted with what its loader said. The warnings returned keep every word: they,
-    never this sentence, are what a start accepts and `warnings.jsonl` records.
+    **An unknown says every warning it asks to accept, whole** (XC-353; the PI, 2026-10-11:
+    warnings "with an explanation of why it may not be a good idea"): its head -- the count and
+    each code, a repeated one named once with its count ("luminance-step ×30"), in the order
+    the codes first appear -- then each warning's code and every word of its sentence. One
+    acknowledgement of this item accepts them all, so each is shown in full before it is
+    accepted, on the page and at a terminal alike. **Nothing here cuts it, and no length fails
+    it** (XC-352's B1: a display limit is no reason to refuse a run); it is on a frame only
+    between runs (`Session.run` clears it as a run starts).
 
-    **An unknown names every warning it lists before it says any** (fix round 1 of Task 12):
-    one acknowledgement accepts them all, so a cut may shorten what they say but never drop
-    one's name. Its head -- the count and each code, in parentheses -- must fit within
-    `link.NOTE_LIMIT` characters, which the cut keeps whole; when it does not, the item
-    **fails** rather than ask to accept warnings it cannot show. **A repeated code is named
-    once, with its count** ("luminance-step ×30"), in the order the codes first appear (fix
-    round 2): a task gives one `luminance-step` per pattern whose mean differs from the
-    background, and its names alone must not push the head past the limit."""
+    **A fail is cut to `link.NOTE_LIMIT` characters and "…"**: it accepts nothing, and the
+    gate's refusal quotes it. The warnings returned keep every word: they, never this
+    sentence, are what a start accepts and `warnings.jsonl` records."""
     entries = list(entries)
     outside = warnlist.refused(entries, kind)
     if outside:
@@ -161,18 +159,12 @@ def warnings(entries, kind: str, accepted) -> tuple[PreflightItem, list]:
         for entry in owed:
             counts[entry.code] = counts.get(entry.code, 0) + 1
         codes = ", ".join(code if n == 1 else f"{code} ×{n}" for code, n in counts.items())
-        head = f"{len(owed)} not yet accepted this session ({codes})"
-        if len(head) > _link.NOTE_LIMIT:
-            return PreflightItem(WARNINGS, FAIL, _link.cut(
-                f"the names of the {len(owed)} warning(s) not yet accepted this session run "
-                f"past the {_link.NOTE_LIMIT} characters this item shows, so one acknowledgement "
-                f"cannot be shown to accept them all, and none is accepted: {codes}",
-                _link.NOTE_LIMIT,
-            )), []
         return (
-            PreflightItem(WARNINGS, UNKNOWN, _link.cut(
-                f"{head}: {warnlist.sentence(owed)}", _link.NOTE_LIMIT,
-            )),
+            PreflightItem(
+                WARNINGS, UNKNOWN,
+                f"{len(owed)} not yet accepted this session ({codes}): "
+                f"{warnlist.sentence(owed)}",
+            ),
             owed,
         )
     return PreflightItem(

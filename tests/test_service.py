@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from _calibrations import BACKGROUND, LINEAR, OBSERVER, PRIMARIES, SPECTRA, measured, promptly
+from _frames import view
 from _ports import endpoints as free_endpoints
 from _rig import PATH as RIG_FILE
 from _rig import RIG, naming
@@ -59,6 +60,7 @@ from wl_xcon.service import Service, _fresh_seed
 from wl_xcon.task import Outcome
 from wl_xcon.taskd import Session
 from wl_xcon.warnlist import Entry
+from wl_xcon.web import fragments
 from wl_xcon.welfare import Deployment, Welfare
 
 #: wl-preproc's decoder and trial assembler, for the path through two crashes (XC-026):
@@ -1461,6 +1463,24 @@ def test_the_reference_task_runs_in_a_chaired_session_once_its_head_warning_is_a
         row["code"] for row in _jsonl(fixed.root / "2027-01-14_01" / "xcon" / "warnings.jsonl")}
 
 
+def test_a_chaired_runs_head_warning_is_on_the_page_whole_before_it_is_accepted(tmp_path):
+    """XC-353, from engine C1's final fix wave: on the default calibration the reference task's
+    `head-not-fixed` came last in the `warnings` item, past its 500-character cut, so the page
+    never showed why ("no head tracking") before a person accepted it. The item and the page's
+    pre-flight panel now show every owed warning whole."""
+    service = _service(tmp_path)
+    _step(service, _open(deployment="rig_chaired"))
+
+    checked = _step(service, CheckRun(by=BY, task=TASK, values=dict(VALUES)))
+
+    item = {i.name: i for i in checked.preflight.items}["warnings"]
+    assert item.result == "unknown" and len(item.said) > NOTE_LIMIT
+    head = item.said[item.said.index("head-not-fixed: "):]
+    assert head.endswith("(engine spec §20.1)") and "no head tracking" in head
+    panel = fragments(checked, view())["preflight"]
+    assert "no head tracking, so" in panel and "(engine spec §20.1)" in panel
+
+
 def test_a_task_whose_declarations_are_malformed_fails_its_preflight_and_the_service_goes_on(
     tmp_path,
 ):
@@ -1844,11 +1864,13 @@ def test_a_listing_faults_sentence_is_cut_in_the_runs_warnings_item(tmp_path, mo
     assert item.said.startswith("the warnings could not be listed: RuntimeError: yyy")
 
 
-def test_a_runs_warning_sentences_are_cut_on_the_frame_and_written_whole(tmp_path, monkeypatch):
-    """Nothing bounds a warning's sentence where it is made -- a task's `color-on-default`
-    names every colored choice, a record that will not load is quoted -- so the `warnings`
-    item's sentence is cut to `link.NOTE_LIMIT` characters and "…" on the frame and in a
-    refusal; the warning itself is never cut, and `warnings.jsonl` keeps every word."""
+def test_a_runs_warnings_are_shown_whole_before_they_are_accepted_and_written_whole(
+    tmp_path, monkeypatch
+):
+    """XC-353: nothing bounds a warning's sentence where it is made -- a task's
+    `color-on-default` names every colored choice -- and the `warnings` item a start
+    acknowledges shows each whole on the frame, before it is accepted; `warnings.jsonl` keeps
+    every word. A fail, which accepts nothing, is cut in the refusal that quotes it."""
     service = _service(tmp_path)
     _step(service, _open())
     long = Entry("calibration age", "x" * 2_000, SESSION_KINDS)
@@ -1856,7 +1878,7 @@ def test_a_runs_warning_sentences_are_cut_on_the_frame_and_written_whole(tmp_pat
 
     checked = _step(service, CheckRun(by=BY, task=TASK, values=dict(VALUES)))
     item = {i.name: i for i in checked.preflight.items}["warnings"]
-    assert (item.result, len(item.said)) == ("unknown", NOTE_LIMIT + 1) and item.said.endswith("…")
+    assert item.result == "unknown" and "calibration age: " + "x" * 2_000 in item.said
     _step(service, _start())
     rows = _jsonl(service.root / "2027-01-14_01" / "xcon" / "warnings.jsonl")
     assert [r["detail"] for r in rows if r["code"] == "calibration age"] == ["x" * 2_000]
@@ -1895,11 +1917,10 @@ def test_every_warning_a_start_accepts_is_named_in_the_item_it_accepted(tmp_path
     owed = accepted[:3]
     before = f"{len(owed)} not yet accepted this session: {warnlist.sentence(owed)}"
     assert before.index("contrast-on-default:") > NOTE_LIMIT, "past the cut before this fix"
-    assert len(item.said) == NOTE_LIMIT + 1
-    assert item.said.startswith(
+    assert item.said == (
         "3 not yet accepted this session (default calibration, color-on-default, "
-        "contrast-on-default): default calibration: the rig names no measured calibration"
-    )
+        f"contrast-on-default): {warnlist.sentence(owed)}"
+    ), "each shown whole (XC-353)"
 
 
 def test_a_carried_run_hands_its_run_nothing_to_accept(tmp_path):

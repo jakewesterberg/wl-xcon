@@ -175,9 +175,10 @@ by its code and its sentence, and that is its only new refusal; a calibration pr
 calibration that will not load or is dated after today) never refuses an open and never stops
 `wlx taskd`, and fails every run instead, as a fault listing the warnings does; what an open
 accepted is written once the service holds the session. A run's pre-flight has a `warnings` item:
-a fail for a warning the session's kind does not accept (or for warnings that cannot be listed, or
-too many to name in the item), otherwise an unknown acknowledged by name while any is not yet
-accepted this session, and a pass once each is. The pre-flight's unknowns are acknowledged once a
+a fail for a warning the session's kind does not accept (or for warnings that cannot be listed),
+otherwise an unknown acknowledged by name while any is not yet accepted this session, which names
+and says each whole, however long (XC-353; since 2026-10-11 no length fails it, XC-352's B1), and
+a pass once each is. The pre-flight's unknowns are acknowledged once a
 session and carried to its later runs while each one's sentence is unchanged, under the name of
 whoever acknowledged them; `_start` writes nothing, and what it accepted is written as the run
 starts, inside the run's containment.

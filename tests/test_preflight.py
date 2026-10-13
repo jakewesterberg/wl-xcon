@@ -105,42 +105,42 @@ def test_the_warnings_item_passes_when_each_was_accepted_or_there_are_none():
     assert preflight.warnings([], "recording", frozenset())[0] == PreflightItem("warnings", "pass", "none")
 
 
-def test_the_warnings_items_sentence_is_cut_as_the_wire_cuts_and_each_warning_is_kept_whole():
-    """A task's `color-on-default` names every colored choice, and a record that will not load
-    is quoted with whatever its loader said, so nothing bounds the item's sentence where it is
-    made: it is cut to `link.NOTE_LIMIT` characters and "…", as a frame's warning rows are.
-    What the start accepts is the warnings themselves, never the sentence, so each keeps every
-    word for `warnings.jsonl`."""
-    long = Entry("long", "x" * 2_000, SESSION_KINDS)
+def test_an_unknown_says_each_warning_it_asks_to_accept_whole():
+    """XC-353 (the PI, 2026-10-11: warnings "with an explanation of why it may not be a good
+    idea"): one acknowledgement of this item accepts every warning it lists, so it says each
+    whole -- its code and every word of its sentence -- however long. What the start accepts is
+    the warnings themselves, and each keeps every word for `warnings.jsonl`."""
+    long = Entry("long", "x" * 2_000 + " the end", SESSION_KINDS)
 
     item, owed = preflight.warnings([long], "training", frozenset())
-    assert (item.result, len(item.said)) == ("unknown", NOTE_LIMIT + 1)
-    assert item.said.startswith("1 not yet accepted this session (long): long: xxx")
-    assert item.said.endswith("…")
-    assert owed == [long] and owed[0].detail == "x" * 2_000
 
+    assert item.result == "unknown"
+    assert item.said == "1 not yet accepted this session (long): long: " + "x" * 2_000 + " the end"
+    assert owed == [long]
+
+
+def test_an_unknown_names_every_warning_however_long_their_names_and_never_fails_for_it():
+    """XC-352's B1 (the PI, 2026-10-11, approving the audit): a display limit is no reason to
+    refuse a run. Twenty codes whose names together run past `link.NOTE_LIMIT` failed the item
+    before; each is named now, and the item asks to accept them."""
+    many = [Entry(f"code-{i:02d}-" + "c" * 40, "x", SESSION_KINDS) for i in range(20)]
+
+    item, owed = preflight.warnings(many, "training", frozenset())
+
+    assert (item.result, owed) == ("unknown", many)
+    head = item.said.split("): ")[0]
+    assert len(head) > NOTE_LIMIT and all(entry.code in head for entry in many)
+
+
+def test_a_fail_accepts_nothing_and_is_cut_as_the_refusal_quoting_it_is():
+    """A warning the session's kind does not accept fails the item, which accepts nothing, so
+    its sentence is cut to `link.NOTE_LIMIT` characters and "…": the gate's refusal quotes it."""
     refused = Entry("refused", "y" * 2_000, ())
-    item, _ = preflight.warnings([refused], "training", frozenset())
-    assert (item.result, len(item.said)) == ("fail", NOTE_LIMIT + 1)
+
+    item, owed = preflight.warnings([refused], "training", frozenset())
+
+    assert (item.result, len(item.said), owed) == ("fail", NOTE_LIMIT + 1, [])
     assert item.said.startswith("a training session does not accept refused: yyy")
-
-
-def test_an_unknown_names_each_warning_first_or_fails_when_their_names_cannot_all_be_shown():
-    """Fix round 1 of Task 12: one acknowledgement accepts every warning the item lists, so its
-    head -- the count and each code, "1 not yet accepted this session (<code>)", 34 characters
-    and the code -- must fit within `link.NOTE_LIMIT`, which the cut keeps whole. One character
-    more, and the item fails, accepting nothing."""
-    fits = Entry("c" * (NOTE_LIMIT - 34), "x" * 2_000, SESSION_KINDS)
-    item, owed = preflight.warnings([fits], "training", frozenset())
-    assert (item.result, owed) == ("unknown", [fits])
-    assert item.said == f"1 not yet accepted this session ({fits.code})…"
-
-    over = Entry("c" * (NOTE_LIMIT - 33), "x", SESSION_KINDS)
-    item, owed = preflight.warnings([over], "training", frozenset())
-    assert (item.result, owed) == ("fail", [])
-    assert item.said.startswith(
-        "the names of the 1 warning(s) not yet accepted this session run past the 500 characters"
-    )
 
 
 def test_a_repeated_code_is_named_once_with_its_count_in_the_order_codes_first_appear():
