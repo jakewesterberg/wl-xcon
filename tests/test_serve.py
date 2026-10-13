@@ -42,6 +42,8 @@ from wl_xcon.actor import Box
 from wl_xcon.cli import _load_allocation, main
 from wl_xcon.service import Service
 from wl_xcon.link import (
+    CONNECT_TIMEOUT_S,
+    REPLY_TIMEOUT_S,
     SCHEMA,
     CancelScheduledStop,
     CheckRun,
@@ -2247,6 +2249,21 @@ class _Dispatch:
         return self.answer
 
 
+#: How long `_post` waits for `wlx serve`'s answer (XC-296, XC-204): the command
+#: thread's own deadline -- up to `CONNECT_TIMEOUT_S` for a connection to the rig, then
+#: up to `REPLY_TIMEOUT_S` for its acknowledgment, after which `wlx serve` answers *not
+#: delivered* itself -- and the 5 s `_post` used to allow the whole round trip, kept for
+#: the HTTP part of it. A command sent while trials run is acknowledged only at `taskd`'s
+#: next trial boundary, and 5 s alone ended inside that deadline, so a slow runner failed
+#: a test while `wlx serve` was still waiting as it may: `TimeoutError: timed out`, in CI
+#: runs `37770387339` and `38313086333`. A scratch probe that held each acknowledgment
+#: 6 s gave both of those tests that failure, at their first command sent while trials
+#: ran; with this wait both pass. A rig slower than the deadline now fails a test on
+#: `wlx serve`'s own *not delivered* answer, and a `wlx serve` that never answers still
+#: fails one, on this timeout.
+POST_ANSWER_S = CONNECT_TIMEOUT_S + REPLY_TIMEOUT_S + 5.0
+
+
 def _post(port: int, body, headers: dict | None = None):
     """`POST /commands` the way the box's own page sends it, unless `headers` says
     otherwise: loopback `Host`, this page's `Origin`, and JSON."""
@@ -2257,7 +2274,7 @@ def _post(port: int, body, headers: dict | None = None):
         "Content-Type": "application/json",
     }
     sent.update(headers or {})
-    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=POST_ANSWER_S)
     try:
         connection.putrequest("POST", "/commands", skip_host=True)
         for name, value in sent.items():
