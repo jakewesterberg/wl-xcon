@@ -16,15 +16,19 @@ from wl_xcon.findings import SESSION_KINDS, Finding
 from wl_xcon.photometry import SRGB, Gray, Michelson, Weber
 from wl_xcon.run import run_trial
 from wl_xcon.task import (
+    RDS,
     Task,
     After,
+    Array,
     Disc,
     Grating,
     Hold,
+    ObjectWindows,
     On,
     Outcome,
     P,
     Param,
+    SaccadeTo,
     Show,
     Square,
     State,
@@ -149,6 +153,20 @@ def test_two_after_bounds_whose_ranges_cross_are_allowed():
                 ],
             ),
         ],
+    )
+    assert "unreachable-timeout" not in codes(trial)
+
+
+def test_a_bound_whose_setting_has_one_bound_is_never_called_dead_by_reading_it_as_0():
+    """Task 10's review, fix round 2: `_widest` read a setting with one bound as 0 to 0, so an
+    `After` of 2 s racing one up to 3 s was "never reached" -- the 3 s one read as always firing
+    at 0. Read over what it can reach (`_span`), from 0 up to 3 s, either can win."""
+    trial = Trial(
+        start="wait",
+        params=[Param("short", unit="s", high=3.0)],
+        windows=[],
+        states=[State("wait", go=[On(After(P("short")), Outcome.NO_RESPONSE),
+                                  On(After(2.0), Outcome.ABORT)])],
     )
     assert "unreachable-timeout" not in codes(trial)
 
@@ -645,3 +663,83 @@ def test_a_finding_that_breaks_a_run_and_names_nothing_it_is_about_is_refused(mo
     assert [(f.code, f.blocking) for f in found] == [
         ("outside-range", False), ("overlapping-windows", True)]
     assert found[1].detail == "with 'fix_window' at 5, outside its declared range: two windows collide"
+
+
+# --- A setting with one bound, in the checks that refuse (Task 10's review, fix round 2) ------
+
+
+def _stereogram(correlation: Param) -> Task:
+    """A random-dot stereogram whose correlation is `correlation`, on the stereoscope."""
+    trial = Trial(
+        start="on",
+        view="stereoscope",
+        params=[correlation],
+        states=[State("on", enter=[
+            Show(Stimulus("rds", at=(0.0, 0.0), looks=RDS(correlation=P(correlation.name)))),
+        ], go=[On(After(1.0), Outcome.CORRECT)])],
+    )
+    return Task({"stereogram": trial}, default="stereogram")
+
+
+def test_a_correlation_with_one_bound_is_refused_at_load_and_widened_past_one_refused_again():
+    """The fix round's concern 1: `_widest` read a setting with one bound as 0 to 0, so a
+    correlation declared up to 1 alone passed at load -- though a console can send it any value
+    below, unchecked -- and sent at 2 passed the widened check too: an impossible stereogram
+    accepted, the run failing mid-trial, what D2 refuses. Read over what it can reach (`_span`),
+    its undeclared lowest is without end: refused at load, saying so, and at 2 refused again,
+    naming the value. A correlation declared over [-0.5, 0.5] passes at load, and sent at 0.9,
+    a correlation still, is only outside its range."""
+    one_bound = _stereogram(Param("c", unit="r", high=1.0, start=0.5))
+    control = _stereogram(Param("c", unit="r", low=-0.5, high=0.5, start=0.2))
+
+    (declared,) = [f for f in check_task(one_bound) if f.code == "impossible-correlation"]
+    (refusal,) = [f for f in beyond_range(one_bound, {"c": 2.0}) if f.blocking]
+
+    assert declared.blocking and "whose correlation has no declared lowest;" in declared.detail
+    assert refusal.code == "impossible-correlation"
+    assert refusal.detail.startswith(
+        "with 'c' at 2, outside its declared range: state 'on' shows a stereogram whose "
+        "correlation reaches 2 and has no declared lowest;")
+    assert "impossible-correlation" not in {f.code for f in check_task(control)}
+    assert [(f.code, f.blocking) for f in beyond_range(control, {"c": 0.9})] == [
+        ("outside-range", False)]
+
+
+def _targeted(target: Param) -> Task:
+    """Four objects on a ring 8° out, the target the one `target` indexes."""
+    trial = Trial(
+        start="search",
+        params=[target],
+        windows=[ObjectWindows(of="search", radius=1.0)],
+        states=[State("search", enter=[Show(Stimulus("search", at=(0.0, 0.0), looks=Array(
+            n=4, radius=8.0, target=P(target.name))))], go=[
+            On(SaccadeTo("search.target"), Outcome.CORRECT),
+            On(After(1.0), Outcome.NO_RESPONSE),
+        ])],
+    )
+    return Task({"search": trial}, default="search")
+
+
+def test_a_target_index_with_one_bound_is_refused_at_load_and_widened_past_the_array_again():
+    """The fix round's concern 1, for an array: a target index declared up to 1 alone was read as
+    0 to 0, so it passed at load -- though a console can send it below 0, unchecked, where the
+    target window is none of the objects -- and sent at 6, past four objects, passed the widened
+    check too, the run then failing as the trial expands its windows. Refused at load, saying
+    its lowest is undeclared, and at 6 refused again, naming the value; one declared over [0, 1]
+    passes at load, and sent at 3, still one of the four, is only outside its range."""
+    one_bound = _targeted(Param("ti", unit="index", high=1, start=0))
+    control = _targeted(Param("ti", unit="index", low=0, high=1, start=0))
+
+    (declared,) = [f for f in check_task(one_bound) if f.code == "target-outside-array"]
+    (refusal,) = [f for f in beyond_range(one_bound, {"ti": 6}) if f.blocking]
+
+    assert declared.blocking and (
+        "with a target index reaching 1 that can be below 0, its lowest undeclared;"
+        in declared.detail)
+    assert refusal.code == "target-outside-array"
+    assert refusal.detail.startswith(
+        "with 'ti' at 6, outside its declared range: state 'search' shows an array of as few "
+        "as 4 objects with a target index reaching 6 that can be below 0")
+    assert "target-outside-array" not in {f.code for f in check_task(control)}
+    assert [(f.code, f.blocking) for f in beyond_range(control, {"ti": 3})] == [
+        ("outside-range", False)]

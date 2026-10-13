@@ -17,6 +17,8 @@ from wl_xcon.task import (
     Bounded,
     Custom,
     Exited,
+    Hold,
+    ObjectWindows,
     On,
     Outcome,
     P,
@@ -24,6 +26,7 @@ from wl_xcon.task import (
     Mark,
     Response,
     Reward,
+    SaccadeTo,
     Show,
     State,
     Stimulus,
@@ -31,7 +34,7 @@ from wl_xcon.task import (
     Window,
     Trial,
 )
-from wl_xcon.check import check
+from wl_xcon.check import _declared_window_names, check
 from wl_xcon.findings import SESSION_KINDS
 from dataclasses import replace
 
@@ -576,6 +579,67 @@ def test_an_array_radius_declared_by_choices_is_checked_at_every_choice():
     assert len(_off(_showing((0.0, 0.0), ring, looks=Array(radius=P("r"))))) == 1
 
 
+def _searching(params, n, target, *named) -> Trial:
+    """An array of `n` objects on a ring 8° out, its target the one `target` indexes, and a state
+    holding each object window in `named`."""
+    return Trial(
+        start="search",
+        params=list(params),
+        windows=[ObjectWindows(of="search", radius=1.0)],
+        states=[State("search", enter=[Show(Stimulus("search", at=(0.0, 0.0), looks=Array(
+            n=n, radius=8.0, target=target, looks=LIT, among=LIT)))], go=[
+            *(On(Hold(name, 0.1), Outcome.CORRECT) for name in named),
+            On(SaccadeTo("search.target"), Outcome.CORRECT),
+            On(After(1.0), Outcome.NO_RESPONSE),
+        ])],
+    )
+
+
+def _finding(trial, code):
+    return [f for f in check(trial) if f.code == code]
+
+
+def test_an_arrays_target_and_a_correlation_are_read_over_their_choices_and_one_bound_never_as_zero():
+    """Task 10's review, fix round 2: `_widest` read a setting with no two-sided range -- one
+    bound, or choices -- as 0 to 0. A target index chosen from 0 and 5 of four objects, one with
+    no highest, and a correlation chosen from 0.5 and 2 each passed at load, and each breaks a
+    trial; a set size chosen from 4 and 8 was refused, read as no objects. Each is read over
+    its choices, or over what its undeclared side can reach (`_span`)."""
+    (chosen,) = _finding(_searching([Param("t", unit="index", choices=(0, 5))], 4, P("t")),
+                         "target-outside-array")
+    (endless,) = _finding(_searching([Param("t", unit="index", low=0)], 4, P("t")),
+                          "target-outside-array")
+    stereogram = replace(_task(Show(Stimulus("rds", at=(0.0, 0.0), looks=RDS(correlation=P("c"))))),
+                         params=[Param("c", unit="r", choices=(0.5, 2.0))])
+
+    assert "with a target index reaching 5;" in chosen.detail
+    assert "with a target index with no declared highest;" in endless.detail
+    assert _finding(_searching([Param("n", unit="objects", choices=(4, 8))], P("n"), 0),
+                    "target-outside-array") == []
+    (correlation,) = _finding(stereogram, "impossible-correlation")
+    assert "whose correlation reaches 2;" in correlation.detail
+
+
+def test_an_object_the_task_names_is_declared_when_the_set_size_can_reach_it():
+    """Task 10's review, fix round 2: a set size with no highest was read as 0 objects, so an
+    object the task names was undeclared; it can be any number, so every object index is one.
+    One past the highest declared stays undeclared. **Only the objects the task names are
+    listed**: every index up to the highest set size was, so a value sent past its range cost as
+    many names as it was large, inside the widened check between two trials."""
+    endless = [Param("n", unit="objects", low=2)]
+    six = [Param("n", unit="objects", low=2, high=6)]
+    twelve = [Param("n", unit="objects", low=2, high=12)]
+
+    assert _finding(_searching(endless, P("n"), 0, "search.7"), "undeclared-window") == []
+    assert _finding(_searching(six, P("n"), 0, "search.5"), "undeclared-window") == []
+    (past,) = _finding(_searching(six, P("n"), 0, "search.6"), "undeclared-window")
+    assert "'search.6'" in past.detail
+    # Named exactly as a trial names its windows, or none: `search.05` is not `search.5`.
+    assert len(_finding(_searching(six, P("n"), 0, "search.05"), "undeclared-window")) == 1
+    assert _declared_window_names(_searching(twelve, P("n"), 0, "search.5")) == {
+        "search.target", "search.distractor", "search.5"}
+
+
 def _scoring_both(fix: Window, target: Window, params: list) -> Trial:
     """One state scoring a fixation window and a target window at once."""
     return Trial(
@@ -781,8 +845,9 @@ def test_a_disparity_parameter_counts_when_its_range_can_leave_zero():
 
 def test_a_disparity_parameter_declared_by_choices_counts():
     """Review I1(a): a disparity parameter with no `low`/`high` -- declared by
-    `choices` instead -- is not the `(0, 0)` `_widest` falls back to for an
-    undeclared range. `taskd` would accept any listed choice, so the checker must
+    `choices` instead -- is not the `(0, 0)` `_widest` fell back to for an
+    undeclared range (it is gone since Task 10's review, fix round 2). `taskd` would
+    accept any listed choice, so the checker must
     count the non-zero ones as stereo content too."""
     choices = [Param("d", unit="deg", choices=(-0.4, 0.0, 0.4))]
     pinned = [Param("d", unit="deg", choices=(0.0,))]

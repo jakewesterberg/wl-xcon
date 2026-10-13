@@ -727,8 +727,11 @@ def _custom_components(trial: Trial, components: Registry) -> list[Finding]:
 def _span(
     value: object, params: dict[str, Param], least: float = -math.inf
 ) -> tuple[float, float]:
-    """The least and the greatest a window's coordinate or radius, or an array's size or ring,
-    can be over every setting the console allows.
+    """The least and the greatest a value a range check reads can be over every setting the
+    console allows: a window's coordinate or radius, an array's size, ring or target index, a
+    stereogram's correlation, a time bound's seconds. **The one reading of a declared range
+    every range check shares** (`_widest`, which read a setting with one bound as 0 to 0, is
+    gone since Task 10's review, fix round 2).
 
     A literal is itself; a parameter is **its declared range**, because every value in it is
     one an experimenter can dial in live, or the least and greatest of its choices. Checking
@@ -736,12 +739,13 @@ def _span(
     proving it happens not to be today.
 
     **A side it does not bound reaches as far as that side can go** (Task 10's review, I2):
-    `least` below -- 0 for a radius or a count, which go no lower, and without end for a
-    position -- and without end above, so that no check reads a setting with one bound, or
-    none, as the 0 it was once read as, and passes what a value it accepts would fail. A
-    bound or a choice that is no finite number bounds nothing, failing closed, and so does an
-    undeclared setting (`_undeclared_parameters` refuses it). A value widened past its one
-    bound (`widened`) moves that bound and leaves the other side unbounded.
+    `least` below -- 0 for a radius, a count or seconds, which mean nothing lower, and without
+    end for a position, an index or a correlation -- and without end above, so that no check
+    reads a setting with one bound, or none, as the 0 it was once read as, and passes what a
+    value it accepts would fail. A bound or a choice that is no finite number bounds nothing,
+    failing closed, and so does an undeclared setting (`_undeclared_parameters` refuses it). A
+    value widened past its one bound (`widened`) moves that bound and leaves the other side
+    unbounded.
     """
     if not isinstance(value, P):
         return (float(value), float(value))
@@ -2547,20 +2551,10 @@ def _direction_faults(looks, grating, params: dict[str, Param], bad) -> None:
 # --- Arrays ----------------------------------------------------------------
 
 
-def _ranges(trial: Trial) -> dict[str, tuple[float, float]]:
-    return {
-        p.name: (p.low, p.high)
-        for p in trial.params
-        if p.low is not None and p.high is not None
-    }
-
-
-def _widest(value, ranges) -> tuple[float, float]:
-    """The lowest and highest a value can take over its declared range."""
-    if isinstance(value, P):
-        low, high = ranges.get(value.name, (0.0, 0.0))
-        return (low, high)
-    return (float(value), float(value))
+def _whole(value: float) -> float:
+    """A count or an index as the run reads it (`int`, as `Array.positions` and
+    `ObjectWindows.expand` do), and one without end as it is (`_span`)."""
+    return value if math.isinf(value) else int(value)
 
 
 def _declared_window_names(trial: Trial) -> set[str]:
@@ -2568,21 +2562,38 @@ def _declared_window_names(trial: Trial) -> set[str]:
 
     An array's objects are named `<of>.<i>` and are as declared as anything an author
     typed -- the whole point is that the author cannot type them, because how many
-    there are is not known until a trial runs.
+    there are is not known until a trial runs. Each the task names is declared when its
+    index is below the most objects the set size can reach (`_span`), any index when it has
+    no highest. **Only the ones the task names are listed**: listing every index up to the
+    highest set size made a value sent past its range cost as many names as it is large,
+    in the widened check run between two trials (Task 10's review, fix round 2).
     """
     arrays = arrays_of(trial)
-    ranges = _ranges(trial)
+    params = {p.name: p for p in trial.params}
+    named = set(_window_refs(trial.states))
     names: set[str] = set()
     for window in trial.windows:
         if isinstance(window, ObjectWindows):
             names |= {f"{window.of}.target", f"{window.of}.distractor"}
             array = arrays.get(window.of)
             if array is not None:
-                highest = int(_widest(array.n, ranges)[1])
-                names |= {f"{window.of}.{i}" for i in range(highest)}
+                most = _whole(_span(array.n, params, 0.0)[1])
+                names |= {name for name in named
+                          if (index := _object_index(name, window.of)) is not None
+                          and index < most}
         else:
             names.add(window.name)
     return names
+
+
+def _object_index(name: str, of: str) -> int | None:
+    """The index of the object of array `of` that `name` names, exactly as
+    `ObjectWindows.expand` names it (`<of>.<i>`), or `None` for any other name: `search.05`
+    names no window a trial has."""
+    suffix = name[len(of) + 1:] if name.startswith(f"{of}.") else ""
+    if not suffix.isdecimal() or suffix != str(int(suffix)):
+        return None
+    return int(suffix)
 
 
 def _coupling(trial: Trial) -> dict[str, object]:
@@ -2607,21 +2618,31 @@ def _array_faults(trial: Trial) -> list[Finding]:
     the target at position 6 of a four-object array between one trial and the next.
     Reasoning over declared ranges is the only way to catch that before it is a
     session rather than a load.
+
+    Each is read over its declared range or its choices (`_span`). **A side either leaves
+    undeclared cannot be proved inside the array**, so it gives this finding, saying so (Task
+    10's review, fix round 2): a set size with no lowest can be no objects, and a target
+    index with no highest past any, or with no lowest below 0, where the target window is
+    never one of the objects. Read as 0, either passed at load and widened past its bound.
     """
-    ranges = _ranges(trial)
+    params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
     for state, action in actions_of(trial):
         looks = getattr(getattr(action, "stimulus", None), "looks", None)
         if not isinstance(looks, Array):
             continue
-        lowest_n = int(_widest(looks.n, ranges)[0])
-        lowest_t, highest_t = (int(v) for v in _widest(looks.target, ranges))
+        lowest_n = _whole(_span(looks.n, params, 0.0)[0])
+        lowest_t, highest_t = (_whole(v) for v in _span(looks.target, params))
         if lowest_t < 0 or highest_t >= lowest_n:
+            index = (f"reaching {highest_t}" if math.isfinite(highest_t)
+                     else "with no declared highest")
+            if math.isinf(lowest_t):
+                index += " that can be below 0, its lowest undeclared"
             findings.append(
                 Finding(
                     "target-outside-array",
                     f"state {state!r} shows an array of as few as {lowest_n} objects "
-                    f"with a target index reaching {highest_t}; the target must be "
+                    f"with a target index {index}; the target must be "
                     f"one of the objects for every setting the console allows, not "
                     f"only the one it has today",
                 )
@@ -2633,21 +2654,32 @@ def _array_faults(trial: Trial) -> list[Finding]:
 
 
 def _stereogram_faults(trial: Trial) -> list[Finding]:
-    """A stereogram is a relationship between two images, so it needs both."""
-    ranges = _ranges(trial)
+    """A stereogram is a relationship between two images, so it needs both.
+
+    Its correlation is read over its declared range or its choices (`_span`): **a side it
+    leaves undeclared reaches past -1 or +1**, so it gives `impossible-correlation`, saying
+    so; read as 0, it passed at load and widened past its bound (Task 10's review, fix
+    round 2).
+    """
+    params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
     for state, action in actions_of(trial):
         stimulus = getattr(action, "stimulus", None)
         looks = getattr(stimulus, "looks", None)
         if not isinstance(looks, RDS):
             continue
-        low, high = _widest(looks.correlation, ranges)
+        low, high = _span(looks.correlation, params)
         if low < -1.0 or high > 1.0:
+            reached = [f"{v:g}" for v, out in ((low, low < -1.0), (high, high > 1.0))
+                       if out and math.isfinite(v)]
+            said = [f"reaches {' and '.join(reached)}"] if reached else []
+            said += [f"has no declared {side}" for v, side in ((low, "lowest"), (high, "highest"))
+                     if math.isinf(v)]
             findings.append(
                 Finding(
                     "impossible-correlation",
-                    f"state {state!r} shows a stereogram whose correlation reaches "
-                    f"{low if low < -1.0 else high:g}; correlation runs from -1 "
+                    f"state {state!r} shows a stereogram whose correlation "
+                    f"{' and '.join(said)}; correlation runs from -1 "
                     f"(anticorrelated) through 0 (uncorrelated) to +1. A value "
                     f"outside that is not a stronger stimulus, it is not a stimulus",
                 )
@@ -2809,14 +2841,17 @@ def _unreachable_timeouts(trial: Trial) -> list[Finding]:
 
     It reads as a safety net, so the case it was meant to catch goes unprotected and
     nobody notices -- the line is right there. Ranges again: two bounds whose ranges
-    cross are both live, because either can win depending on the setting. **A review note,
-    never a refusal** (XC-352's A7; the PI, 2026-10-11): the state still has its other bound.
+    cross are both live, because either can win depending on the setting; a side a setting
+    leaves undeclared reaches 0 below and without end above (`_span`), never the 0 to 0 it
+    was once read as, which called a bound dead that a setting could still let win. **A
+    review note, never a refusal** (XC-352's A7; the PI, 2026-10-11): the state still has its
+    other bound.
     """
-    ranges = _ranges(trial)
+    params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
     for state in trial.states:
         bounds = [
-            (edge, _widest(edge.guard.seconds, ranges))
+            (edge, _span(edge.guard.seconds, params, 0.0))
             for edge in state.go
             if isinstance(edge.guard, After) and edge.guard.since is None
         ]
@@ -3214,10 +3249,10 @@ def _disparity_is_zero(value, trial: Trial) -> bool:
     A literal is zero only at exactly `0.0`, and one that is no number is not provably
     zero (`_placement_faults` refuses it; reading it as a float raised out of `check`). A
     parameter is zero only if it is *declared* and its whole domain is zero: every
-    `choices` entry is `0.0`, or `low == high == 0.0`. An undeclared parameter -- one
-    `_ranges` cannot see because it has neither a two-sided range nor `choices` -- is not
-    provably anything, so it counts as stereo content rather than failing open the way
-    `_widest`'s `(0, 0)` fallback did.
+    `choices` entry is `0.0`, or `low == high == 0.0`. An undeclared parameter, or one with
+    neither a two-sided range nor `choices`, is not provably anything, so it counts as
+    stereo content rather than failing open the way the `(0, 0)` that `_widest` read such a
+    parameter as did (`_widest` is gone since Task 10's review, fix round 2; `_span`).
     """
     if not isinstance(value, P):
         return _literal(value) == 0.0
