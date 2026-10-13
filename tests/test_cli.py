@@ -2478,11 +2478,12 @@ def test_wlx_run_warns_of_subject_settings_in_direct_view_and_records_none(tmp_p
 
 
 def test_wlx_run_runs_on_another_animals_settings_with_a_warning(tmp_path):
-    """XC-352's C8 (the PI, 2026-10-11), through `wlx run`."""
+    """XC-352's C8 (the PI, 2026-10-11), through `wlx run`: built for the half-IPD those settings
+    give (1.7 cm, not the nominal 1.6), which the record names (Task 7's review, M1)."""
     other = tmp_path / "b.py"
     other.write_text(
         "from wl_xcon.geometry import SubjectSettings\n"
-        "SETTINGS = SubjectSettings(subject='B', half_ipd_cm=1.6)\n",
+        "SETTINGS = SubjectSettings(subject='B', half_ipd_cm=1.7)\n",
         encoding="utf-8",
     )
     argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm(), "--subject-settings", str(other))
@@ -2492,6 +2493,8 @@ def test_wlx_run_runs_on_another_animals_settings_with_a_warning(tmp_path):
     assert _main_uninterrupted(argv) == 0
 
     assert "another animal's settings" in _warned(tmp_path)
+    setup = json.loads((tmp_path / "2027-01-14_01" / "xcon" / "config.json").read_text())["setup"]
+    assert (setup["half_ipd_cm"], setup["half_ipd_nominal"]) == (1.7, False)
 
 
 def test_wlx_run_refuses_direct_view_on_a_rig_whose_housings_are_unmeasured(tmp_path):

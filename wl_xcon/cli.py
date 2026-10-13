@@ -208,7 +208,8 @@ def _setups(
     """The fields `wlx check` holds a task to (direct-view spec §8): the setup named, or
     every setup the task allows. Through the stereoscope, one animal's field when its
     settings are given, and otherwise the fields at **both ends** of the half-IPDs the
-    rig is built for, so a task that passes, passes for every animal it could run on.
+    rig is drawn for, so a task that passes, passes for the animals the drawing covers; one outside
+    that range runs too, with a warning (XC-352's C7), which only its own settings can check.
     A task whose `view` is unrecognized gets none, and `check` refuses it by name."""
     views = (
         [view]

@@ -139,7 +139,10 @@ twice), a `session_kind` other than `config.json`'s, an `at` that is not a finit
 the resume says so on the changes feed and in its `session resumed` row, which names the
 calibration the session now runs on; one resumed on another calibration than its `config.json`
 names is a warning its first run asks to accept, naming both (the warnings-over-refusals
-review's I2), never a refusal.
+review's I2), never a refusal; so is a stereoscope session resumed on another half-IPD than
+its `config.json` names (its settings file removed, added or changed while `wlx taskd` was
+down; `setup changed`, Task 7's review, I1), whose `session resumed` row names the half-IPD
+it now runs on.
 It is refused, too, when its animal's bounded
 config or settings will not load, or its bounds changed since it opened; when the animal is
 past its out-of-cage limit, on the recorded departure and that limit, after which the page

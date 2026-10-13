@@ -674,7 +674,8 @@ class Session:
         **A damaged `warnings.jsonl` row is left out** (`resume.read`; the PI, 2026-10-11,
         XC-352's C11): its warning is asked again, and why is said on the changes feed, as a
         `warning`, and in the `session resumed` row, which also names the calibration the
-        session now runs on (the warnings-over-refusals review's I2)."""
+        session now runs on (the warnings-over-refusals review's I2) and, through the
+        stereoscope, its half-IPD (Task 7's review, I1)."""
         if not self.service:
             raise RuntimeError("only a wlx taskd session is resumed (XC-026 spec §9)")
         if self.opened_wall_at is not None:
@@ -699,6 +700,11 @@ class Session:
         # The calibration it now runs on (the warnings-over-refusals review's I2): config.json
         # keeps the one it opened on.
         on = "none" if self.spec.calibration is None else self.spec.calibration.id
+        # And, through the stereoscope, the half-IPD (Task 7's review, I1).
+        if self.spec.geometry.view == "stereoscope":
+            on += (f"; it runs on a half-IPD of {self.spec.geometry.half_ipd_cm:g} cm ("
+                   + ("from the animal's settings" if self.spec.subject_settings else "nominal")
+                   + ")")
         self._note(
             "session resumed", now, by, how,
             reason=f"after its process stopped; its record was last written at "

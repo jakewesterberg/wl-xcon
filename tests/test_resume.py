@@ -310,6 +310,15 @@ def test_an_unreadable_record_cannot_be_resumed(tmp_path, name):
         read(directory, DEPARTURE)
 
 
+def test_a_warnings_file_that_cannot_be_read_at_all_cannot_be_resumed(tmp_path):
+    """XC-352's C10, the refusal kept: a torn row is left out (C11), but a `warnings.jsonl` that
+    is not a readable file (here a directory) is still a reason it cannot be resumed."""
+    directory = _two_runs(tmp_path)
+    (directory / "warnings.jsonl").mkdir()
+    with pytest.raises(Unresumable, match=r"warnings\.jsonl cannot be read"):
+        read(directory, DEPARTURE)
+
+
 def test_a_record_whose_config_names_another_session_cannot_be_resumed(tmp_path):
     """The final review's M5: a folder copied under another name is not that session."""
     directory = _folder(tmp_path, config=_config(session_id="2027-01-13_01"))

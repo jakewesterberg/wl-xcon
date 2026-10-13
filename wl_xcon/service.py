@@ -1004,9 +1004,24 @@ class Service:
         # record. A warning, never a refusal (the PI's rule of 2026-10-11), asked with the
         # resumed session's first run, naming both; each run's start row names the calibration
         # it ran against, and the `session resumed` row the one it now runs on.
+        # It compares ids only, so a record measured again under the same id is not noticed (a
+        # known limit of this warning).
         if restoration.calibration != session.spec.calibration.id:
             session.spec.setup_warnings += tuple(warnlist.of_changed_calibration(
                 restoration.calibration, session.spec.calibration))
+        # **On another half-IPD than it opened on** (Task 7's review, I1): its settings file may
+        # have been removed, added or changed while `wlx taskd` was down, and `_build` reads the
+        # file as it is now. The same warning, asked with its first run. A record with no half-IPD
+        # (direct view, or written before XC-352's C6) has nothing to compare, so adds none.
+        geometry = session.spec.geometry
+        if (geometry.view == "stereoscope" and restoration.half_ipd_cm is not None
+                and restoration.half_ipd_nominal is not None):
+            now_nominal = not session.spec.subject_settings
+            if (restoration.half_ipd_cm != geometry.half_ipd_cm
+                    or restoration.half_ipd_nominal != now_nominal):
+                session.spec.setup_warnings += tuple(warnlist.of_changed_setup(
+                    restoration.half_ipd_cm, restoration.half_ipd_nominal,
+                    geometry.half_ipd_cm, now_nominal))
         try:
             session.resume(restoration, by=command.by, how="wlx taskd")
         except (Exceeded, TypeError, ValueError) as refused:

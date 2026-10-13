@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from _rig import DIRECT, RIG, STEREOSCOPE
+from _rig import DIRECT, STEREOSCOPE
 import _sessions
 from _sessions import WALL, session
 from wl_xcon import preflight

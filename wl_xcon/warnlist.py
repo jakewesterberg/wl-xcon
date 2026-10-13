@@ -45,6 +45,7 @@ DEFAULT_CALIBRATION = "default calibration"
 CALIBRATION_AGE = "calibration age"
 CALIBRATION_RECORD = "calibration record"
 CALIBRATION_CHANGED = "calibration changed"
+SETUP_CHANGED = "setup changed"
 HEAD_FREE = "head free"
 NOMINAL_HALF_IPD = "nominal half-IPD"
 OTHER_ANIMALS_SETTINGS = "another animal's settings"
@@ -75,8 +76,8 @@ class Entry:
     **It refuses what its consumers cannot carry** (the engine B final review): an empty code,
     a code holding one of `CODE_REFUSES`, and kinds that are not a tuple of the three, each
     named once. A record read back from disk is held to this before a resume
-    (`resume._accepted`), so a damaged row is a reason it cannot be resumed, never an
-    exception."""
+    (`resume._accepted`), so a damaged row is left out of the resume and its warning asked again
+    (XC-352's C11), never an exception."""
 
     code: str
     detail: str
@@ -177,6 +178,25 @@ def of_changed_calibration(opened_on: str | None, now: Calibration) -> list[Entr
         f"{now.id}{standard} which this wlx taskd runs on: its runs from here are checked and "
         f"drawn against {now.id}, and each run's start row in runs.jsonl names the calibration it "
         f"ran against"), SESSION_KINDS)]
+
+
+def of_changed_setup(
+    opened_on_cm: float, opened_nominal: bool, now_cm: float, now_nominal: bool
+) -> list[Entry]:
+    """A stranded stereoscope session resumed on another half-IPD than its `config.json` names
+    (Task 7's review, I1; modeled on `of_changed_calibration`): the animal's settings file was
+    removed, added or changed since it opened. **A warning in every kind, never a refusal** (the PI's
+    rule of 2026-10-11), asked with the resumed session's first run, naming both. `config.json`
+    keeps what it opened on; the `session resumed` row in welfare_notes.jsonl names what it now
+    runs on."""
+    def words(cm: float, nominal: bool) -> str:
+        return f"{cm:g} cm ({'nominal' if nominal else 'from the animal' + chr(39) + 's settings'})"
+
+    return [Entry(SETUP_CHANGED, (
+        f"this session opened on a half-IPD of {words(opened_on_cm, opened_nominal)}, which its "
+        f"config.json names, and is resumed on {words(now_cm, now_nominal)}, from the settings "
+        f"file now read: its runs from here are drawn at {now_cm:g} cm, and the session resumed "
+        f"row in welfare_notes.jsonl names it"), SESSION_KINDS)]
 
 
 def of_deployment(deployment: Deployment) -> list[Entry]:

@@ -95,6 +95,12 @@ class Restoration:
     #: for none: `Service._resume` warns when the service now runs another (the
     #: warnings-over-refusals review's I2).
     calibration: str | None = None
+    #: The half-IPD `config.json`'s `setup` names, in cm, and whether it was the nominal one, the
+    #: stereoscope the session opened on: `None` for each when the record has none (direct view, or
+    #: a record written before XC-352's C6). `Service._resume` warns when the rebuilt session runs on
+    #: another (Task 7's review, I1).
+    half_ipd_cm: float | None = None
+    half_ipd_nominal: bool | None = None
 
 
 def _rows(directory: Path, name: str) -> list[dict]:
@@ -134,8 +140,8 @@ def _accepted(row: dict, number: int, session_kind: str) -> tuple:
     if not isinstance(kinds, list) or not all(kind in SESSION_KINDS for kind in kinds):
         raise damaged("has an accepted_in that is not a list of training, piloting or recording")
     # **Held to what `Entry` refuses** (the engine B final review): `Session.resume` builds one
-    # from each row, after it restores the departure, so a row it would refuse is refused here,
-    # as a reason the session cannot be resumed, never as an exception out of a resume.
+    # from each row, after it restores the departure, so a row it would refuse is found damaged
+    # here, left out of the resume and its warning asked again, never an exception out of a resume.
     try:
         Entry(code, detail, tuple(kinds))
     except (TypeError, ValueError) as error:
@@ -352,4 +358,11 @@ def _read(directory: Path, departure: float) -> Restoration:
         damaged=damaged,
         calibration=(config["calibration"].get("id")
                      if isinstance(config.get("calibration"), dict) else None),
+        half_ipd_cm=(
+            config["setup"]["half_ipd_cm"]
+            if isinstance(config["setup"].get("half_ipd_cm"), (int, float))
+            and not isinstance(config["setup"]["half_ipd_cm"], bool)
+            and math.isfinite(config["setup"]["half_ipd_cm"]) else None),
+        half_ipd_nominal=(config["setup"]["half_ipd_nominal"]
+                          if isinstance(config["setup"].get("half_ipd_nominal"), bool) else None),
     )

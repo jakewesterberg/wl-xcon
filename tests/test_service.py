@@ -746,10 +746,16 @@ def test_a_session_id_or_animal_that_is_not_one_folder_name_is_refused_and_nothi
         ({"departure": "half past nine"}, "is not a clock time"),
         ({"departure": typed(-3600)}, "in the future"),
         ({"delivered_today": -1.0}, "cannot be negative"),
+        ({"view": "stereoscope"}, "no positive optical path"),
     ],
 )
 def test_an_open_that_is_refused_says_why_and_writes_nothing(tmp_path, over, said):
     service = _service(tmp_path, animals=("B", "REFERENCE"))
+    if over.get("view") == "stereoscope":
+        # Task 7's review, M3: a half-IPD that leaves no optical path has no field, still refused.
+        (service.subjects / "REFERENCE" / "settings.py").write_text(
+            "from wl_xcon.geometry import SubjectSettings\n"
+            "SETTINGS = SubjectSettings(subject='REFERENCE', half_ipd_cm=70.0)\n")
 
     frame = _step(service, _open(**over))
 
@@ -2993,6 +2999,7 @@ def test_a_torn_warnings_file_is_resumed_and_its_lost_warning_asked_again(tmp_pa
     assert "row 1 is not JSON" in row["reason"]
     item = {i.name: i for i in checked.preflight.items}["warnings"]
     assert item.result == "unknown" and "default calibration" in item.said
+    assert "calibration changed" not in item.said, "the same calibration on both sides"
 
 
 def test_an_accepted_warning_whose_code_an_entry_refuses_is_left_out_of_a_resume(tmp_path):
@@ -3079,6 +3086,66 @@ def test_a_session_resumed_on_another_calibration_asks_its_first_run_to_accept_t
     assert started.run_index == 0
     assert [r["how"] for r in _jsonl(folder / "warnings.jsonl")
             if r["code"] == "calibration changed"] == ["start"]
+
+
+def _settings_file(service, half) -> None:
+    found = service.subjects / "REFERENCE" / "settings.py"
+    if half is None:
+        found.unlink(missing_ok=True)
+    else:
+        found.write_text("from wl_xcon.geometry import SubjectSettings\n"
+                         f"SETTINGS = SubjectSettings(subject='REFERENCE', half_ipd_cm={half})\n")
+
+
+def _resumed_stereoscope(tmp_path, before, after):
+    """A stereoscope session opened on settings of `before` cm (`None`: no file), its process
+    stopped, its file made `after` cm (`None`: removed), and `wlx taskd` started again and asked to
+    resume it. Returns the new service, the first run's check, the folders and the task."""
+    folders = _folders(tmp_path)
+    first = _made(folders)
+    _settings_file(first, before)
+    task = _narrow(first)
+    _step(first, _open(view="stereoscope"))
+    second = _made(folders)
+    _settings_file(second, after)
+    _step(second, ResumeSession(by=BY, session_id="2027-01-14_01"))
+    return second, _step(second, CheckRun(by=BY, task=task, values=dict(VALUES))), folders, task
+
+
+@pytest.mark.parametrize(("before", "after", "was", "now"), [
+    (1.7, None, "1.7 cm (from the animal's settings)", "1.6 cm (nominal)"),
+    (None, 1.8, "1.6 cm (nominal)", "1.8 cm (from the animal's settings)"),
+], ids=["file removed", "file added"])
+def test_a_stereoscope_session_resumed_on_another_half_ipd_asks_its_first_run_to_accept_that(
+    tmp_path, before, after, was, now
+):
+    """Task 7's review, I1: `_build` reads the animal's settings as they are now, so a resume
+    can run on a half-IPD `config.json` does not name. A warning, never a refusal (the PI's rule
+    of 2026-10-11), asked with the first run, naming both; `config.json` keeps what the session
+    opened on, and the `session resumed` row names what it now runs on."""
+    second, checked, folders, task = _resumed_stereoscope(tmp_path, before, after)
+    started = _step(second, _start(task=task))
+
+    item = {i.name: i for i in checked.preflight.items}["warnings"]
+    assert (f"setup changed: this session opened on a half-IPD of {was}, which its config.json "
+            f"names, and is resumed on {now}") in item.said
+    assert started.run_index == 0
+    folder = folders[2] / "2027-01-14_01" / "xcon"
+    assert [r["how"] for r in _jsonl(folder / "warnings.jsonl") if r["code"] == "setup changed"] == ["start"]
+    (row,) = [r for r in _rows(folders[2]) if r["kind"] == "session resumed"]
+    assert f"; it runs on a half-IPD of {now}" in row["reason"]
+    setup = json.loads((folder / "config.json").read_text())["setup"]
+    assert (setup["half_ipd_cm"], setup["half_ipd_nominal"]) == (
+        (before or 1.6), before is None)
+
+
+def test_a_stereoscope_session_resumed_on_the_same_half_ipd_asks_nothing_about_its_setup(tmp_path):
+    second, checked, folders, task = _resumed_stereoscope(tmp_path, 1.7, 1.7)
+
+    item = {i.name: i for i in checked.preflight.items}["warnings"]
+    assert "setup changed" not in item.said
+    (row,) = [r for r in _rows(folders[2]) if r["kind"] == "session resumed"]
+    assert "; it runs on a half-IPD of 1.7 cm (from the animal's settings)" in row["reason"]
 
 
 def test_a_resume_after_the_rigs_calibration_changed_names_the_new_one_on_each_later_run(tmp_path):

@@ -170,3 +170,15 @@ def test_an_entry_refuses_a_code_holding_what_the_preflight_lists_codes_with(hel
         Entry(f"luminance{held}step", "one", SESSION_KINDS)
     with pytest.raises(ValueError, match="training, piloting or recording"):
         warnlist.refused([], "demo")
+
+
+def test_a_resume_on_another_half_ipd_is_a_warning_naming_both_that_fits_a_note():
+    """Task 7's review, I1: modeled on the calibration's; the longest wording (both from the
+    animal's settings, widest numbers) still fits `link.NOTE_LIMIT`."""
+    (entry,) = warnlist.of_changed_setup(1.7, False, 1.6, True)
+
+    assert (entry.code, entry.accepted_in) == ("setup changed", SESSION_KINDS)
+    assert "opened on a half-IPD of 1.7 cm (from the animal's settings)" in entry.detail
+    assert "resumed on 1.6 cm (nominal)" in entry.detail
+    (longest,) = warnlist.of_changed_setup(1.234567, False, 3.456789, False)
+    assert len(longest.detail) <= NOTE_LIMIT

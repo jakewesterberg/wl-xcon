@@ -294,7 +294,9 @@ class Control:
     happens, since the PI's rulings on XC-352, 2026-10-11);
     `by` is who sent it, `None` for a mark's stamp, whose sender arrives with its note;
     `at` is on the session's anchored clock; `said` is the sentence after the kind.
-    The session record keeps every one (`record.CONTROLS`); this feed keeps the last
+    The session record (`record.CONTROLS`) keeps every one but a `warning`, which reaches this
+    feed alone (`taskd.Session._feed`): a resume's, for a damaged `warnings.jsonl` row, is kept in
+    the `session resumed` row of `welfare_notes.jsonl`. This feed keeps the last
     `CONTROL_HISTORY`."""
 
     kind: str
