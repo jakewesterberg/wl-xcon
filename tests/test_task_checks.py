@@ -32,6 +32,7 @@ from wl_xcon.task import (
     Trial,
 )
 from wl_xcon.check import check
+from wl_xcon.findings import SESSION_KINDS
 from dataclasses import replace
 
 # `GEOMETRY` is the rig's stereoscope at the drawing's `E` = 1.6 cm: a 63.15 cm path, and
@@ -769,20 +770,50 @@ def test_a_stimulus_shown_to_one_eye_needs_the_stereoscope():
     assert check(_task(Update("s", eye="both"))) == []
 
 
-def test_a_task_written_for_one_setup_is_refused_in_the_other_naming_both():
-    """Spec §3: "a stereoscope task in direct view, or a direct task in the
-    stereoscope" -- the refusal part 2's session start will show, naming both
-    sides."""
+def test_a_task_written_for_one_setup_is_a_warning_in_the_other_naming_both():
+    """Spec §3: "a stereoscope task in direct view, or a direct task in the stereoscope".
+    **A warning, not a refusal, when it shows nothing that needs each eye its own image**
+    (XC-352's A12; the PI, 2026-10-11): it runs, and the warning says what the other setup
+    changes. The field check still holds it to the setup it runs in."""
     (in_direct,) = check(_task(view="stereoscope"), geometry=DIRECT)
     (in_stereoscope,) = check(_task(view="direct"), geometry=GEOMETRY)
 
     assert in_direct.code == in_stereoscope.code == "wrong-setup"
+    for warning in (in_direct, in_stereoscope):
+        assert (warning.blocking, warning.accepted_in) == (False, SESSION_KINDS)
     assert "written for 'stereoscope'" in in_direct.detail
     assert "checked against 'direct'" in in_direct.detail
+    assert "both eyes see the whole panel" in in_direct.detail
     assert "written for 'direct'" in in_stereoscope.detail
     assert "checked against 'stereoscope'" in in_stereoscope.detail
+    assert "each eye sees its own half of the panel, inside the ±12° mask" in in_stereoscope.detail
     assert check(_task(view="direct"), geometry=DIRECT) == []
     assert check(_task(view="stereoscope"), geometry=GEOMETRY) == []
+
+
+@pytest.mark.parametrize("shown", [
+    Show(Stimulus("d", at=(1.0, 0.0), looks=LIT, disparity=0.2)),
+    Show(Stimulus("l", at=(1.0, 0.0), looks=LIT, eye="left")),
+    Show(Stimulus("p", at=(0.0, 0.0), looks=LIT, at_left=(1.0, 0.0), at_right=(-1.0, 0.0))),
+], ids=["a disparity", "one eye", "a position per eye"])
+def test_a_stereoscope_task_that_shows_each_eye_its_own_image_is_refused_in_direct_view(shown):
+    """What an unmirrored screen cannot show stays refused (XC-352's A12: "`needs-stereoscope`
+    and the field check still refuse"): both eyes would see both images, so the record would
+    not describe what was shown."""
+    (refusal,) = check(_task(shown, view="stereoscope"), geometry=DIRECT)
+
+    assert refusal.code == "wrong-setup" and refusal.blocking
+    assert "which an unmirrored screen cannot show" in refusal.detail
+
+
+def test_a_stereoscope_task_with_a_background_per_eye_is_refused_in_direct_view():
+    """Engine spec §4.4: each eye's own background is the stereoscope's; an unmirrored screen
+    has one."""
+    task = replace(_task(view="stereoscope"), background_left=Gray(10.0), background_right=Gray(20.0))
+
+    (refusal,) = [f for f in check(task, geometry=DIRECT) if f.code == "wrong-setup"]
+
+    assert refusal.blocking and "it gives each eye its own background" in refusal.detail
 
 
 def test_without_a_geometry_the_setup_is_unchecked():

@@ -2750,8 +2750,8 @@ def test_a_session_holds_its_task_to_the_setup_it_runs_in(tmp_path):
     with pytest.raises(SystemExit) as refused:
         session.run()
 
-    assert "wrong-setup" in str(refused.value)
-    assert "'direct'" in str(refused.value) and "'stereoscope'" in str(refused.value)
+    # The setups' mismatch is a warning (XC-352's A12); its ±16° beyond the mask still refuses.
+    assert "stimulus-off-screen" in str(refused.value) and "wrong-setup" not in str(refused.value)
 
 
 def test_the_config_snapshot_records_the_setup_it_ran_in(tmp_path):

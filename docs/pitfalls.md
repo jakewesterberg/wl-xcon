@@ -247,7 +247,11 @@ check that existed when it was committed, and the defect was found only when the
 crowding check was written a day later.
 
 Mitigation: anything a parameter generates gets a check reasoning over the declared
-ranges, not the current values. The rule generalises — **when a feature exists to
+ranges, not the current values. *Since the PI's rulings on XC-352 (2026-10-11)* the crowding
+check, like the overlapping-windows one, is a warning a person accepts with its reason rather
+than a refusal ("the experimenter needs free control most of the time"); the check still runs
+on every load, and a value a console sends outside the declared range is checked again with the
+range widened to it, and refused if it newly crowds the array (`check.BREAKS_A_RUN`). The rule generalises — **when a feature exists to
 stop a human writing something out, it also stops a human reviewing it.**
 *Renamed 2026-10-11: `ObjectWindows` was `ItemWindows`, and an array's objects its items (the PI,
 confirming engine build C1's plan's Appendix B: "i prefer object to item").*

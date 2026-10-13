@@ -11,6 +11,7 @@ task could declare a left-eye criterion, run, record, and be scored on both.
 """
 
 from wl_xcon.check import check
+from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.run import run_trial
 from wl_xcon.task import (
     After,
@@ -86,7 +87,7 @@ def test_a_conjugate_window_is_asked_about_both():
     assert ("fix", "both") in world.asked
 
 
-def test_scoring_one_eye_against_a_stimulus_the_other_eye_sees_is_refused():
+def test_scoring_one_eye_against_a_stimulus_the_other_eye_sees_is_a_warning():
     """A dichoptic task that scores the blind eye.
 
     It runs, it records, and every trial is an abort for a reason no one can see in
@@ -108,7 +109,10 @@ def test_scoring_one_eye_against_a_stimulus_the_other_eye_sees_is_refused():
             ),
         ],
     )
-    assert "wrong-eye-criterion" in {f.code for f in check(trial)}
+    (warning,) = [f for f in check(trial) if f.code == "wrong-eye-criterion"]
+    # A warning, not a refusal (XC-352's A10; the PI, 2026-10-11), saying why.
+    assert (warning.blocking, warning.accepted_in) == (False, SESSION_KINDS)
+    assert "the animal can do the task perfectly with the seeing eye" in warning.detail
 
 
 def test_an_unknown_eye_is_refused():

@@ -2326,14 +2326,18 @@ def _stereogram_faults(trial: Trial) -> list[Finding]:
                 )
             )
         if getattr(stimulus, "eye", "both") != "both":
+            # A warning, not a refusal (XC-352's A11; the PI, 2026-10-11): a monocular control
+            # is the experimenter's to choose; the warning says what its trials are not.
             findings.append(
                 Finding(
                     "monocular-stereogram",
                     f"state {state!r} shows a stereogram to the "
-                    f"{stimulus.eye} eye only; monocular presentation of one half "
-                    f"is not a degraded stereogram, it is a field of random dots "
-                    f"with no disparity -- and it would still run, still record, "
-                    f"and still appear in a figure as a disparity condition",
+                    f"{stimulus.eye} eye only; with one eye there is no disparity, only a "
+                    f"field of random dots, so these trials are not a disparity condition and "
+                    f"are not to be analyzed as one (the task, which each run names by its "
+                    f"content hash, says which eye)",
+                    blocking=False,
+                    accepted_in=SESSION_KINDS,
                 )
             )
     return findings
@@ -2349,7 +2353,8 @@ def _eye_faults(trial: Trial) -> list[Finding]:
 
     A window scoring the eye a stimulus is *not* shown to runs, records, and aborts
     every trial for a reason invisible in the data: the animal was doing the task
-    perfectly with the eye nobody scored.
+    perfectly with the eye nobody scored. **A warning, not a refusal** (XC-352's A10; the
+    PI, 2026-10-11), saying so; an eye that is not one of `EYES` is still refused.
     """
     findings: list[Finding] = []
     shown_to = {
@@ -2382,7 +2387,10 @@ def _eye_faults(trial: Trial) -> list[Finding]:
                     "wrong-eye-criterion",
                     f"window {name!r} scores the {eye} eye against stimulus "
                     f"{on!r}, which is shown only to the {stimulus_eye} eye; the "
-                    f"animal can do the task perfectly and abort every trial",
+                    f"animal can do the task perfectly with the seeing eye and fail every "
+                    f"trial, for a reason the data will not show",
+                    blocking=False,
+                    accepted_in=SESSION_KINDS,
                 )
             )
     return findings
@@ -2421,7 +2429,9 @@ def _overlapping_windows(trial: Trial) -> list[Finding]:
 
     Only windows scored by the *same state* are compared: two windows in different
     states are never both live, and a task that reuses a position across states is
-    doing something ordinary.
+    doing something ordinary. **A warning, not a refusal** (XC-352's A8; the PI,
+    2026-10-11): the order is defined (M0 §4) and is part of the task's content, which each
+    run names by its hash.
     """
     ranges = _ranges(trial)
     by_name = {w.name: w for w in trial.windows if not isinstance(w, ObjectWindows)}
@@ -2449,7 +2459,10 @@ def _overlapping_windows(trial: Trial) -> list[Finding]:
                             f"which can come within {gap:.2f}° while their radii "
                             f"sum to {reach:.2f}°; a gaze position inside both "
                             f"satisfies both guards, and which one scores is decided "
-                            f"by the order the transitions happen to be written in",
+                            f"by the order the transitions happen to be written in, so "
+                            f"a look at one can count as the other",
+                            blocking=False,
+                            accepted_in=SESSION_KINDS,
                         )
                     )
     return findings
@@ -2507,7 +2520,8 @@ def _crowded_arrays(trial: Trial) -> list[Finding]:
 
     The worst case is the most objects on the smallest ring with the largest windows:
     adjacent centres are `2 R sin(pi/n)` apart, and two windows touch when that
-    falls below their summed radius.
+    falls below their summed radius. **A warning, not a refusal** (XC-352's A9; the PI,
+    2026-10-11), saying which settings crowd it.
     """
     arrays = arrays_of(trial)
     ranges = _ranges(trial)
@@ -2532,6 +2546,8 @@ def _crowded_arrays(trial: Trial) -> list[Finding]:
                     f"{tightest:g}° ring, {spacing:.2f}° apart, with windows of "
                     f"{widest:g}° radius; adjacent objects would overlap and a "
                     f"saccade to one would be scored against another",
+                    blocking=False,
+                    accepted_in=SESSION_KINDS,
                 )
             )
     return findings
@@ -2766,8 +2782,13 @@ def _view_faults(trial: Trial, geometry: Geometry | None) -> list[Finding]:
 
     **Stereo content needs the stereoscope, with or without a geometry**: it is a
     property of the task, not of the session, so it is refused at every load. **Against
-    a geometry, a task written for the other setup is refused, naming both**, so a
-    caller that passes the session's geometry has nothing else to do. `taskd` and
+    a geometry, a task written for the other setup is a warning, naming both and saying what
+    the other setup changes** (XC-352's A12; the PI, 2026-10-11), unless it is a stereoscope
+    task that shows each eye its own image -- a disparity, one eye, a position or a
+    background per eye (`_per_eye_content`) -- in direct view, which an unmirrored screen
+    cannot show, and that stays refused. The field check holds it to the setup it runs in
+    (`_offscreen_stimuli`), so a caller that passes the session's geometry has nothing else
+    to do. `taskd` and
     `wlx check` are those callers (`wlx run --rig --view` and `wlx check --rig`, which
     take the field from the rig file); without a geometry (`wlx review`, the tests)
     only the stereo-content finding is reachable. An unrecognized `view` is refused
@@ -2795,15 +2816,48 @@ def _view_faults(trial: Trial, geometry: Geometry | None) -> list[Finding]:
             for what in _stereo_content(trial)
         ]
     if geometry is not None and trial.view not in ("either", geometry.view):
-        findings.append(
-            Finding(
-                "wrong-setup",
-                f"the task is written for {trial.view!r} and is checked against "
-                f"{geometry.view!r}; a task written for one setup is refused in the "
-                f"other (direct-view spec §3)",
-            )
-        )
+        written = (f"the task is written for {trial.view!r} and is checked against "
+                   f"{geometry.view!r}")
+        both = _stereo_content(trial) + _per_eye_content(trial)
+        if geometry.view == "direct" and both:
+            findings.append(Finding("wrong-setup", (
+                f"{written}: {both[0]}, which an unmirrored screen cannot show, since each eye "
+                f"would see both images (direct-view spec §3)")))
+        elif geometry.view == "direct":
+            findings.append(Finding("wrong-setup", (
+                f"{written}: here both eyes see the whole panel, unmirrored, at "
+                f"{geometry.viewing_distance_cm:g} cm; it shows nothing that needs each eye "
+                f"its own image, so it runs, but it was not designed for this setup "
+                f"(direct-view spec §3)"), blocking=False, accepted_in=SESSION_KINDS))
+        else:
+            stop = ("its field" if geometry.mask_deg is None
+                    else f"the ±{geometry.mask_deg:g}° mask")
+            findings.append(Finding("wrong-setup", (
+                f"{written}: here each eye sees its own half of the panel, inside "
+                f"{stop}, through the mirrors at "
+                f"{geometry.viewing_distance_cm:.2f} cm; its positions and sizes are degrees, so "
+                f"they hold, but it was not designed for this setup (direct-view spec §3)"),
+                blocking=False, accepted_in=SESSION_KINDS))
     return findings
+
+
+def _per_eye_content(trial: Trial) -> list[str]:
+    """What a stereoscope task shows each eye that `_stereo_content` does not name: a position
+    per eye (engine spec §5.4), by a `Show` or an `Update`, and a background per eye (§4.4). An
+    unmirrored screen cannot show either, so neither runs in direct view (`_view_faults`)."""
+    found = []
+    for state, action in actions_of(trial):
+        if isinstance(action, Show) and (
+            action.stimulus.at_left is not None or action.stimulus.at_right is not None
+        ):
+            found.append(f"state {state!r} gives {action.stimulus.name!r} a position per eye")
+        elif isinstance(action, Update) and any(
+            action.changes().get(eye) is not None for eye in ("at_left", "at_right")
+        ):
+            found.append(f"state {state!r} gives {action.stimulus!r} a position per eye")
+    if trial.background_left is not None or trial.background_right is not None:
+        found.append("it gives each eye its own background")
+    return found
 
 
 def _has_rds(looks) -> bool:

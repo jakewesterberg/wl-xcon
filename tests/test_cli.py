@@ -2264,8 +2264,9 @@ def test_wlx_run_refuses_a_task_written_for_the_other_setup_before_anything_is_r
     with pytest.raises(SystemExit) as refused:
         main(argv)
 
-    assert "wrong-setup" in str(refused.value)
-    assert "'direct'" in str(refused.value) and "'stereoscope'" in str(refused.value)
+    # The setups' mismatch is a warning (XC-352's A12); the reference task's ±16° beyond the
+    # stereoscope's ±12° mask still refuses, before anything is recorded.
+    assert "stimulus-off-screen" in str(refused.value) and "wrong-setup" not in str(refused.value)
     assert not (tmp_path / "2027-01-14_01").exists()
 
 

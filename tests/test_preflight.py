@@ -44,10 +44,14 @@ def test_a_task_that_passes_its_checks_in_the_sessions_setup_passes():
     assert "direct view" in item.said and trial is not None
 
 
-def test_a_task_written_for_the_other_setup_fails_naming_the_finding():
-    item, _, _ = preflight.task(TASK, ALLOCATION, STEREOSCOPE, SRGB)
+def test_a_task_written_for_the_other_setup_fails_on_its_field_and_warns_of_its_setup():
+    """XC-352's A12: the setups' mismatch is a warning; the reference task's ±16° beyond the
+    stereoscope's mask still fails (A15, kept)."""
+    item, _, findings = preflight.task(TASK, ALLOCATION, STEREOSCOPE, SRGB)
 
-    assert item.result == "fail" and "wrong-setup" in item.said
+    assert item.result == "fail" and "stimulus-off-screen" in item.said
+    assert "wrong-setup" not in item.said
+    assert [f.code for f in findings if f.is_warning and f.code == "wrong-setup"] == ["wrong-setup"]
 
 
 @pytest.mark.parametrize(

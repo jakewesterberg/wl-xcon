@@ -17,6 +17,7 @@ whole point, and the reason cyclopean form is a category of its own.
 import pytest
 
 from wl_xcon.check import check
+from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.task import (
     RDS,
     After,
@@ -94,14 +95,17 @@ def test_a_correlation_outside_minus_one_to_one_is_refused():
     )
 
 
-def test_a_stereogram_shown_to_one_eye_only_is_refused():
+def test_a_stereogram_shown_to_one_eye_only_is_a_warning_not_to_analyze_it_as_disparity():
     """A stereogram is a relationship between two images.
 
     Monocular presentation of one is not a degraded version of the stimulus, it is
-    a field of random dots with no disparity at all -- and it would still run,
-    still record, and still appear in a figure as a disparity condition.
+    a field of random dots with no disparity at all. **A warning, not a refusal** (XC-352's
+    A11; the PI, 2026-10-11): a monocular control is a thing an experimenter may want, and
+    the warning says not to analyze those trials as a disparity condition.
     """
-    assert "monocular-stereogram" in codes(a_task(RDS(), eye="left"))
+    (warning,) = [f for f in check(a_task(RDS(), eye="left")) if f.code == "monocular-stereogram"]
+    assert (warning.blocking, warning.accepted_in) == (False, SESSION_KINDS)
+    assert "not a disparity condition" in warning.detail
     assert "monocular-stereogram" not in codes(a_task(RDS(), eye="both"))
 
 

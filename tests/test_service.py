@@ -1501,6 +1501,32 @@ def test_a_task_with_a_state_nothing_reaches_runs_and_is_asked_nothing_about_it(
     assert started.run_index == 0
 
 
+def test_a_direct_view_task_runs_in_the_stereoscope_once_its_setup_warning_is_accepted(tmp_path):
+    """XC-352's A12 (the PI, 2026-10-11): a task written for direct view, whose stimuli the
+    stereoscope's ±12° mask can show, runs there: its task checks pass, its warnings item asks
+    for `wrong-setup` with what the stereoscope changes, and a start accepting it runs, recording
+    it in `warnings.jsonl`."""
+    service = _service(tmp_path)
+    text = Path("tasks/fixation_detection.py").read_text()
+    for axis, start in (("x", "10.0"), ("y", "0.0")):
+        wide = f'Param("target_{axis}", unit="deg", low=-16.0, high=16.0, start={start})'
+        assert text.count(wide) == 1
+        text = text.replace(wide, f'Param("target_{axis}", unit="deg", low=-10.0, high=10.0, start={start})')
+    (service.tasks / "narrow.py").write_text(text)
+    _step(service, _open(view="stereoscope"))
+
+    checked = _step(service, CheckRun(by=BY, task="narrow.py", values=dict(VALUES)))
+    started = _step(service, _start(task="narrow.py"))
+
+    items = {i.name: i for i in checked.preflight.items}
+    assert items["task checks"].result == "pass"
+    assert items["warnings"].result == "unknown"
+    assert "wrong-setup: the task is written for 'direct'" in items["warnings"].said
+    assert started.run_index == 0
+    warned = _jsonl(service.root / "2027-01-14_01" / "xcon" / "warnings.jsonl")
+    assert [row["how"] for row in warned if row["code"] == "wrong-setup"] == ["start"]
+
+
 def test_a_task_whose_declarations_are_malformed_fails_its_preflight_and_the_service_goes_on(
     tmp_path,
 ):

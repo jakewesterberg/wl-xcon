@@ -341,13 +341,17 @@ def test_the_calibration_task_can_present_direct_views_whole_constellation():
         assert x_low <= x <= x_high and y_low <= y <= y_high
 
 
-def test_a_direct_view_task_is_refused_in_the_stereoscope_naming_both(detection):
-    """What direct view part 2's session start will say if the operator picks the
-    stereoscope for this task: the mismatch, and the ±16° its mask cannot show."""
+def test_a_direct_view_task_is_refused_in_the_stereoscope_for_its_field_and_warned_for_its_setup(
+    detection,
+):
+    """What a session start says if the operator picks the stereoscope for this task: the ±16°
+    its mask cannot show refuses (A15, kept), and the mismatch of setups is a warning (XC-352's
+    A12; the PI, 2026-10-11)."""
     allocation = _load("allocation", "ALLOCATION")
-    codes = {f.code for f in check(detection, allocation, geometry=RIG.stereoscope(1.6))}
+    found = {f.code: f for f in check(detection, allocation, geometry=RIG.stereoscope(1.6))}
 
-    assert codes == {"wrong-setup", "stimulus-off-screen"}
+    assert set(found) == {"wrong-setup", "stimulus-off-screen"}
+    assert found["stimulus-off-screen"].blocking and found["wrong-setup"].is_warning
 
 
 def test_the_fixation_task_starts_from_the_values_the_console_mockup_shows():
