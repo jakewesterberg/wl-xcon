@@ -562,13 +562,31 @@ def test_a_starting_value_outside_its_range_is_checked_widened_and_what_breaks_f
 
 def test_a_check_that_cannot_run_widened_fails_closed(tmp_path, monkeypatch):
     """Nothing a task's declarations hold raises out of the pre-flight: a widened check that
-    raises refuses the value, naming why."""
+    raises refuses the values, saying what is known -- the checks could not run, and why -- and
+    never that a value is outside its range, which none may be (Task 10's review, M3)."""
     monkeypatch.setattr(preflight, "beyond_range", lambda *a, **k: 1 / 0)
 
     (refusal,) = preflight.beyond(_load_task(TASK), {"fix_window": 7.0}, ALLOCATION, DIRECT, SRGB, None)
 
     assert refusal.blocking and refusal.code == "outside-range"
-    assert "could not be run again with the range widened (ZeroDivisionError" in refusal.detail
+    assert refusal.detail.startswith(
+        "the load-time checks could not be run again with each range widened to its starting "
+        "value (ZeroDivisionError: division by zero), so what the starting values would break is "
+        "unknown")
+
+
+def test_a_bound_that_cannot_be_compared_refuses_the_values_without_saying_one_is_outside():
+    """Task 10's review, M3: a bound typed as text cannot be compared with a value, so the widened
+    checks cannot run; the refusal says so, and why, and not that a value is outside its range --
+    0.3 s is inside the 0.05-2 s meant."""
+    task = _declaring(Param("fix_hold", unit="s", low="0.05", high=2.0))
+
+    (refusal,) = preflight.beyond(task, {"fix_hold": 0.3}, ALLOCATION, DIRECT, SRGB, None)
+
+    assert refusal.blocking and refusal.code == "outside-range"
+    assert "could not be run again with each range widened to its starting value (TypeError: " in (
+        refusal.detail)
+    assert "is outside its declared range" not in refusal.detail
 
 
 def test_a_parameter_used_but_never_declared_fails_naming_it():

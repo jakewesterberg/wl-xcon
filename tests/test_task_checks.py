@@ -576,6 +576,68 @@ def test_an_array_radius_declared_by_choices_is_checked_at_every_choice():
     assert len(_off(_showing((0.0, 0.0), ring, looks=Array(radius=P("r"))))) == 1
 
 
+def _scoring_both(fix: Window, target: Window, params: list) -> Trial:
+    """One state scoring a fixation window and a target window at once."""
+    return Trial(
+        start="wait",
+        params=params,
+        windows=[fix, target],
+        states=[State("wait", enter=[Show(Stimulus("fix", at=(0.0, 0.0), looks=LIT))], go=[
+            On(Entered("target"), Outcome.CORRECT),
+            On(Entered("fix"), Outcome.WRONG_TARGET),
+            On(After(1.0), Outcome.NO_RESPONSE),
+        ])],
+    )
+
+
+def _overlap(trial) -> list:
+    return [f for f in check(trial) if f.code == "overlapping-windows"]
+
+
+def test_windows_whose_position_ranges_overlap_on_one_axis_are_found_between_the_corners():
+    """Task 10's review, I2: the least distance between two windows was taken over the corners
+    of their position ranges. A target 2° in radius over x 4-16° and y ±8° comes within 4° of a
+    fixation window 3° in radius, at (4, 0) -- inside their summed 5° -- while its nearest corners
+    are 8.9° away. Per axis, the distance between the ranges, 0 where they overlap: a warning at
+    load (XC-352's A8)."""
+    params = [Param("target_x", unit="deg", low=4.0, high=16.0),
+              Param("target_y", unit="deg", low=-8.0, high=8.0)]
+    trial = _scoring_both(Window("fix", at=(0.0, 0.0), radius=3.0, on="fix"),
+                          Window("target", at=(P("target_x"), P("target_y")), radius=2.0, on="fix"),
+                          params)
+
+    (warning,) = _overlap(trial)
+
+    assert warning.is_warning
+    assert "which can come within 4.00° while their radii sum to 5.00°" in warning.detail
+    assert _overlap(replace(trial, windows=[
+        Window("fix", at=(0.0, 0.0), radius=1.0, on="fix"), trial.windows[1]])) == []
+
+
+def test_a_window_setting_with_one_bound_is_read_without_the_other_never_as_zero():
+    """Task 10's review, I2: a setting with one bound was left out of the ranges and read as 0,
+    so it could never reach another window. A position's missing bound leaves that side
+    unbounded, and a radius' missing highest leaves it any size, so an overlap cannot be ruled
+    out and is warned of; a radius' missing lowest is 0."""
+    target = Window("target", at=(P("target_x"), 0.0), radius=P("target_window"), on="fix")
+    fix = Window("fix", at=(10.0, 0.0), radius=1.0, on="fix")
+
+    def declared(*params):
+        return _overlap(_scoring_both(fix, target, list(params)))
+
+    # `target_x` up to 16° alone reaches 10°, where the fixation window is.
+    (reaching,) = declared(Param("target_x", unit="deg", high=16.0),
+                           Param("target_window", unit="deg", low=0.5, high=2.0))
+    assert "which can come within 0.00°" in reaching.detail
+    # A radius from 0.5° up, with no highest: any size, so any two windows can overlap.
+    (any_size,) = declared(Param("target_x", unit="deg", low=-16.0, high=-4.0),
+                           Param("target_window", unit="deg", low=0.5))
+    assert "while a radius has no declared highest" in any_size.detail
+    # Up to 2° alone: from 0, and 14° away it overlaps nothing.
+    assert declared(Param("target_x", unit="deg", low=-16.0, high=-4.0),
+                    Param("target_window", unit="deg", high=2.0)) == []
+
+
 def test_an_appearance_parameter_is_checked_at_each_appearance_it_offers():
     """An appearance is a parameter too (S1a §4), and one of its choices may be an
     object ring. Check 8 looked only at a literal `Array`, so a ring offered as a choice

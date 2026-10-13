@@ -9,14 +9,17 @@ experimenter cannot break it from the console.
 import inspect
 from dataclasses import replace
 
-from wl_xcon.check import BREAKS_A_RUN, beyond_range, check, widened
-from wl_xcon.findings import SESSION_KINDS
-from wl_xcon.photometry import SRGB, Gray
+import wl_xcon.check as checking
+from wl_xcon import service
+from wl_xcon.check import BREAKS_A_RUN, beyond_range, check, check_task, widened
+from wl_xcon.findings import SESSION_KINDS, Finding
+from wl_xcon.photometry import SRGB, Gray, Michelson, Weber
 from wl_xcon.run import run_trial
 from wl_xcon.task import (
     Task,
     After,
     Disc,
+    Grating,
     Hold,
     On,
     Outcome,
@@ -233,6 +236,27 @@ def test_an_array_that_cannot_crowd_is_accepted():
     assert "crowded-array" not in codes(trial)
 
 
+def test_an_array_whose_size_has_no_highest_or_is_chosen_is_checked_at_its_largest():
+    """Task 10's review, I2, for arrays: a set size declared with no highest, or by choices, was
+    left out of the ranges and read as 0 objects, which never crowd. With no highest it can be
+    any number, and crowds; by choices it is its largest choice; a ring with no lowest can be
+    0° (`_span`)."""
+    def sized(declared: Param) -> Trial:
+        trial = _array_task(6).structures["search"]
+        return replace(trial, params=[declared if p.name == declared.name else p
+                                      for p in trial.params])
+
+    unbounded = found(sized(Param("set_size", unit="objects", low=2)), "crowded-array")
+    ringless = found(sized(Param("array_eccentricity", unit="deg", high=12.0)), "crowded-array")
+    any_size = found(sized(Param("object_window", unit="deg", low=0.5)), "crowded-array")
+
+    assert "can put any number of objects on a 8° ring" in unbounded.detail
+    assert "can put 6 objects on a 0° ring, 0.00° apart" in ringless.detail
+    assert "with windows of any radius" in any_size.detail
+    assert "crowded-array" in codes(sized(Param("set_size", unit="objects", choices=(2, 16))))
+    assert "crowded-array" not in codes(sized(Param("set_size", unit="objects", choices=(2, 6))))
+
+
 # --- A value outside its declared range (the PI, 2026-10-11, XC-352's D2) -------------------
 
 
@@ -280,6 +304,65 @@ def test_a_value_outside_its_range_that_makes_windows_collide_is_refused_saying_
     assert set(BREAKS_A_RUN) == {"overlapping-windows", "crowded-array", "unrealizable-color"}
 
 
+def _target_task() -> Task:
+    """A fixation window at the centre, 1° in radius, and a target window 2° in radius anywhere
+    over x 4-16° and y ±8°, both scored in one state: within their ranges never nearer than 4°,
+    beyond the 3° their radii sum to."""
+    trial = Trial(
+        start="wait",
+        params=[Param("target_x", unit="deg", low=4.0, high=16.0, start=8.0),
+                Param("target_y", unit="deg", low=-8.0, high=8.0, start=0.0)],
+        windows=[Window("fix", at=(0.0, 0.0), radius=1.0, on="fix"),
+                 Window("target", at=(P("target_x"), P("target_y")), radius=2.0, on="fix")],
+        states=[State("wait", enter=[Show(FIX)], go=[
+            On(Hold("target", 0.1), Outcome.CORRECT),
+            On(Hold("fix", 0.1), Outcome.WRONG_TARGET),
+            On(After(1.0), Outcome.NO_RESPONSE),
+        ])],
+    )
+    return Task({"w": trial}, default="w")
+
+
+def test_a_value_that_brings_a_window_onto_another_between_the_corners_of_its_ranges_is_refused():
+    """Task 10's review, I2: the least distance between two windows was taken over the corners of
+    their position ranges, so a target widened to x 0-16° and y ±8° was never nearer the fixation
+    window than its corners, 8°, though at (0, 0) it sits on it. Per axis, the distance between
+    the two ranges, 0 where they overlap (`_closest_approach`): refused, naming the value and the
+    windows; a value that keeps them apart is only outside its range."""
+    found = beyond_range(_target_task(), {"target_x": 0.0})
+
+    assert "overlapping-windows" not in {f.code for f in check_task(_target_task())}
+    (refusal,) = [f for f in found if f.blocking]
+    assert refusal.code == "overlapping-windows"
+    assert refusal.detail.startswith(
+        "with 'target_x' at 0, outside its declared range: state 'wait' scores 'target' and "
+        "'fix', which can come within 0.00°")
+    assert [(f.code, f.blocking) for f in beyond_range(_target_task(), {"target_x": 3.5})] == [
+        ("outside-range", False)]
+
+
+def test_a_radius_declared_only_up_to_a_bound_is_refused_past_it_when_the_windows_then_collide():
+    """Task 10's review, I2: a setting with one bound was left out of the ranges and read as
+    (0, 0), so a radius declared up to 3° alone, sent at 9° with a window 6° away, was only a
+    warning. A radius' missing lowest is 0, and the value widens the bound it lies beyond, so the
+    radius is checked over [0, 9]: refused. Its `outside-range` warning names the one bound
+    declared, never `None` (the review's M2)."""
+    trial = two_windows((0.0, 0.0), P("fix_window"), (6.0, 0.0), 2.0,
+                        params=[Param("fix_window", unit="deg", high=3.0, start=1.0)])
+    task = Task({"windows": trial}, default="windows")
+
+    found = beyond_range(task, {"fix_window": 9.0})
+
+    assert "overlapping-windows" not in {f.code for f in check_task(task)}
+    (refusal,) = [f for f in found if f.blocking]
+    assert refusal.code == "overlapping-windows"
+    assert refusal.detail.startswith(
+        "with 'fix_window' at 9, outside its declared range: state 'wait' scores 'a' and 'b'")
+    assert found[0].detail.startswith(
+        "'fix_window' is 9 deg, above its declared 3.0, so the task was not designed for it")
+    assert "None" not in found[0].detail
+
+
 def _waiting_task() -> Task:
     """One state waiting on `fix_acquisition` (0.5-10 s) for a fixation, or `fix_hold` (0.05-2 s)
     inside its window; the task's longest declared wait is 10 s."""
@@ -317,6 +400,8 @@ def test_a_wait_longer_than_any_the_task_declares_is_a_warning_that_stop_and_the
     # The cap it names is the loop's; build C2a's five-minute cap changes both (engine spec §6.8).
     assert inspect.signature(run_trial).parameters["max_frames"].default == 100_000
     assert "the trial cap, 100,000 frames (about 417 s at 240 Hz)" in found[1].detail
+    # Its 240 Hz is the rate `wlx taskd` runs at (Task 10's review, M4).
+    assert service.FRAME_PERIOD == 1 / 240 and round(100_000 * service.FRAME_PERIOD) == 417
 
 
 def test_a_literal_wait_counts_toward_the_tasks_longest():
@@ -329,6 +414,46 @@ def test_a_literal_wait_counts_toward_the_tasks_longest():
     found = beyond_range(Task({"waiting": longer}, default="waiting"), {"fix_acquisition": 20.0})
 
     assert [(f.code, f.blocking) for f in found] == [("outside-range", False)]
+
+
+def _timing_out(timeout: Param) -> Task:
+    """`_waiting_task` with a third wait, `After(P("timeout"))`, its setting declared as
+    `timeout`."""
+    trial = _waiting_task().structures["waiting"]
+    state = trial.states[0]
+    return Task({"waiting": replace(
+        trial, params=[*trial.params, timeout],
+        states=[replace(state, go=[*state.go, On(After(P("timeout")), Outcome.ABORT)])],
+    )}, default="waiting")
+
+
+def test_a_wait_with_no_highest_makes_no_wait_longer_than_any_the_task_declares():
+    """Task 10's review, M1: a wait setting with no highest was left out of the task's longest
+    wait, so one sent below its lowest was "a wait longer than any the task declares (its
+    longest, 0 s)". With no highest a wait can be any length, so no value of any wait is longer
+    than one the task declares. Its `outside-range` warning names the one bound declared (M2)."""
+    task = _timing_out(Param("timeout", unit="s", low=1.0, start=2.0))
+
+    below = beyond_range(task, {"timeout": 0.5})
+
+    assert [f.code for f in beyond_range(task, {"fix_acquisition": 600.0})] == ["outside-range"]
+    assert [(f.code, f.blocking) for f in below] == [("outside-range", False)]
+    assert below[0].detail.startswith(
+        "'timeout' is 0.5 s, below its declared 1.0, so the task was not designed for it")
+    assert "None" not in below[0].detail
+
+
+def test_a_wait_declared_by_choices_counts_its_longest_choice():
+    """Task 10's review, M1: a wait setting declared by choices was left out of the task's
+    longest wait; it counts by its largest choice that is a number."""
+    task = _timing_out(Param("timeout", unit="s", choices=(1.0, 30.0)))
+
+    within = beyond_range(task, {"fix_acquisition": 20.0})
+    longer = beyond_range(task, {"fix_acquisition": 60.0})
+
+    assert [f.code for f in within] == ["outside-range"]
+    assert [f.code for f in longer] == ["outside-range", "longer-than-declared"]
+    assert "a wait longer than any the task declares (its longest, 30 s)" in longer[1].detail
 
 
 def test_a_finding_the_declared_ranges_already_give_is_not_refused_again():
@@ -410,7 +535,83 @@ def test_a_light_clipped_further_is_a_warning_and_one_newly_clipped_is_refused_n
     assert [f.blocking for f in further if f.code == "unrealizable-color"] == [False]
     (refusal,) = [f for f in newly if f.blocking]
     assert refusal.code == "unrealizable-color"
-    assert refusal.detail.endswith("(new with this value: Square)")
+    # What a clip is about names the color as the task wrote it (Task 10's review, I1).
+    assert refusal.detail.endswith(
+        "(new with this value: Square asking for Gray(cd_m2=P(name='square')))")
+
+
+def _two_discs() -> Task:
+    """Two plain discs: one lit by `disc_a`, over 10-100 cd/m², which the sRGB default's
+    80 cd/m² white clips at load, and one by `disc_b`, over 10-50, which it never clips."""
+    trial = Trial(
+        start="on",
+        params=[Param("disc_a", unit="cd/m2", low=10.0, high=100.0, start=20.0),
+                Param("disc_b", unit="cd/m2", low=10.0, high=50.0, start=20.0)],
+        states=[State("on", enter=[
+            Show(Stimulus("a", at=(-2.0, 0.0), looks=Disc(size=1.0, color=Gray(P("disc_a"))))),
+            Show(Stimulus("b", at=(2.0, 0.0), looks=Disc(size=1.0, color=Gray(P("disc_b"))))),
+        ], go=[On(After(1.0), Outcome.CORRECT)])],
+    )
+    return Task({"lights": trial}, default="lights")
+
+
+def test_a_value_that_newly_clips_a_second_appearance_of_one_type_is_refused_naming_it():
+    """Task 10's review, I1: a clip was about its appearance's type, so a disc a value newly
+    clipped was "about" the other disc's clip, which the task was accepted with, and only a
+    warning. A clip is about what asks for its light and the color as the task wrote it
+    (`Finding.subjects`): `disc_b` newly clipped is refused, naming it -- at 150, and at 100,
+    where its light is the very light `disc_a` already asks for -- while `disc_a` clipped
+    further is a warning."""
+    newly = beyond_range(_two_discs(), {"disc_b": 150.0}, calibration=SRGB)
+    same_light = beyond_range(_two_discs(), {"disc_b": 100.0}, calibration=SRGB)
+    further = beyond_range(_two_discs(), {"disc_a": 150.0}, calibration=SRGB)
+
+    for found, value in ((newly, "150"), (same_light, "100")):
+        (refusal,) = [f for f in found if f.blocking]
+        assert refusal.code == "unrealizable-color"
+        assert refusal.detail.startswith(f"with 'disc_b' at {value}, outside its declared range: ")
+        assert refusal.detail.endswith(
+            "(new with this value: Disc asking for Gray(cd_m2=P(name='disc_b')))")
+    # The light both ask for at 100 is said once, naming the disc once (`_clips`).
+    (refusal,) = [f for f in same_light if f.blocking]
+    assert refusal.detail.count("Disc asks for xyY(x=0.3127, y=0.329, Y=100.0)") == 1
+    assert "Disc and Disc" not in refusal.detail
+    assert [(f.code, f.blocking) for f in further] == [
+        ("outside-range", False), ("unrealizable-color", False)]
+
+
+def _two_contrasts(make) -> Task:
+    """Two stimuli `make` makes on a 60 cd/m² background: one at contrast `strong`, over 0-0.5,
+    whose brightest light, 90 cd/m², the sRGB default's 80 cd/m² white clips at load, and one at
+    `weak`, over 0-0.2, whose 72 cd/m² it never clips."""
+    trial = Trial(
+        start="on",
+        background=Gray(60.0),
+        params=[Param("strong", unit="contrast", low=0.0, high=0.5, start=0.1),
+                Param("weak", unit="contrast", low=0.0, high=0.2, start=0.1)],
+        states=[State("on", enter=[
+            Show(Stimulus("s", at=(-3.0, 0.0), looks=make(P("strong")))),
+            Show(Stimulus("w", at=(3.0, 0.0), looks=make(P("weak")))),
+        ], go=[On(After(1.0), Outcome.CORRECT)])],
+    )
+    return Task({"contrasts": trial}, default="contrasts")
+
+
+def test_a_value_that_newly_clips_a_second_contrast_of_one_type_is_refused_naming_it():
+    """Task 10's review, I1, for the lights a contrast makes (`_modulation_faults`): such a clip is
+    about what asks for it with its contrast and mean as the task wrote them, so `weak` at 0.5,
+    whose light is the very light `strong` already makes, is refused, naming it -- a disc's Weber
+    contrast and a grating's Michelson alike."""
+    for make, written in (
+        (lambda c: Disc(size=1.0, contrast=Weber(c)), "Disc asking for Weber(value=P(name='weak'))"),
+        (lambda c: Grating(contrast=Michelson(c)),
+         "Grating asking for Michelson(value=P(name='weak')) about its background"),
+    ):
+        found = beyond_range(_two_contrasts(make), {"weak": 0.5}, calibration=SRGB)
+
+        (refusal,) = [f for f in found if f.blocking]
+        assert refusal.code == "unrealizable-color"
+        assert refusal.detail.endswith(f"(new with this value: {written})"), written
 
 
 def test_an_overlap_new_in_one_structure_is_refused_though_another_has_one_of_the_same_names():
@@ -426,3 +627,21 @@ def test_an_overlap_new_in_one_structure_is_refused_though_another_has_one_of_th
 
     (refusal,) = [f for f in found if f.blocking]
     assert refusal.code == "overlapping-windows" and "in structure 'far'" in refusal.detail
+
+
+def test_a_finding_that_breaks_a_run_and_names_nothing_it_is_about_is_refused(monkeypatch):
+    """`beyond_range` fails closed (Task 10's review, M4): a finding of `BREAKS_A_RUN` the widening
+    adds that names nothing it is about cannot be shown to be about something the task was
+    accepted with, so it is refused. No check gives one today; one that forgot its subjects must
+    not pass as a warning."""
+    declared = _windows_task(3.0)
+    collide = Finding("overlapping-windows", "two windows collide", blocking=False,
+                      accepted_in=SESSION_KINDS)
+    monkeypatch.setattr(checking, "check_task",
+                        lambda task, *a, **k: [] if task is declared else [collide])
+
+    found = beyond_range(declared, {"fix_window": 5.0})
+
+    assert [(f.code, f.blocking) for f in found] == [
+        ("outside-range", False), ("overlapping-windows", True)]
+    assert found[1].detail == "with 'fix_window' at 5, outside its declared range: two windows collide"

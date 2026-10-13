@@ -144,14 +144,22 @@ def check_task(
 #: D2: "refuse only what would break the run (off screen, windows colliding, colors unmakeable),
 #: saying what"). Each is a warning at load, within the declared ranges, since his rulings on
 #: A8, A9 and A20 the same day, and so is one that is about nothing new (`Finding.subjects`: the
-#: same pair of windows, array or color, only larger); off screen (`stimulus-off-screen`)
-#: already blocks.
+#: same state and pair of windows, the same array, or the same thing asking for the same color
+#: as the task wrote it, only larger -- never merely another appearance of the same type, Task
+#: 10's review, I1); off screen (`stimulus-off-screen`) already blocks.
 BREAKS_A_RUN = ("overlapping-windows", "crowded-array", "unrealizable-color")
 
 #: The trial cap, as a `longer-than-declared` warning says it: `run.run_trial`'s `max_frames`
 #: backstop, 100,000 frames, about 417 s at the 240 Hz `wlx taskd` runs at (computed). Build C2a
 #: makes it five minutes at the session's rate (engine spec §6.8), and this changes with it.
 TRIAL_CAP = "the trial cap, 100,000 frames (about 417 s at 240 Hz)"
+
+
+def _among(finding: Finding, findings: list[Finding]) -> bool:
+    """Whether `findings` holds one equal to `finding` and about the same things: `Finding`'s
+    equality leaves `subjects` out, so two parts of a clip warning that name one light asked for
+    by two written colors are equal, and are not the same part (Task 10's review, I1)."""
+    return any(f == finding and f.subjects == finding.subjects for f in findings)
 
 
 def _outside(param: Param, value: object) -> bool:
@@ -167,7 +175,10 @@ def _outside(param: Param, value: object) -> bool:
 
 def _waits(task: Task) -> tuple[set[str], float]:
     """The settings a trial waits on -- an `After`'s or a `Hold`'s seconds -- and the longest wait
-    the task declares: the highest bound any of them declares, or its longest literal wait."""
+    the task declares: the highest bound any of them declares, the largest number a choice
+    setting among them offers, or its longest literal wait. **A wait setting with no highest
+    that is a number can be any length** (Task 10's review, M1), so the longest is unbounded
+    (`math.inf`) and no value of any wait is longer than one the task declares."""
     declared = {param.name: param for param in task.params}
     names: set[str] = set()
     longest = 0.0
@@ -180,8 +191,15 @@ def _waits(task: Task) -> tuple[set[str], float]:
                 if isinstance(seconds, P):
                     names.add(seconds.name)
                     param = declared.get(seconds.name)
-                    if param is not None and _is_number(param.high):
+                    if param is None:
+                        continue  # refused at load (`_undeclared_parameters`)
+                    if param.choices:
+                        offered = [float(c) for c in param.choices if _is_number(c)]
+                        longest = max([longest, *offered])
+                    elif _is_number(param.high):
                         longest = max(longest, float(param.high))
+                    else:
+                        longest = math.inf
                 elif _is_number(seconds):
                     longest = max(longest, float(seconds))
     return names, longest
@@ -243,11 +261,17 @@ def beyond_range(
     waits, longest = _waits(task)
     findings: list[Finding] = []
     for name, value in outside.items():
+        param = declared[name]
+        # The bounds it declares, and only those (Task 10's review, M2): a setting with one bound
+        # is outside it on that side.
+        where = (f"outside the [{param.low}, {param.high}] the task declares"
+                 if param.low is not None and param.high is not None
+                 else f"above its declared {param.high}" if param.high is not None
+                 else f"below its declared {param.low}")
         findings.append(Finding("outside-range", (
-            f"{name!r} is {value:g} {declared[name].unit}, outside the [{declared[name].low}, "
-            f"{declared[name].high}] the task declares, so the task was not designed for it: its "
-            f"load-time checks were proved only over that range, and were run again with the "
-            f"range widened to {value:g}"), blocking=False, accepted_in=SESSION_KINDS))
+            f"{name!r} is {value:g} {param.unit}, {where}, so the task was not designed for it: "
+            f"its load-time checks were proved only over its declared range, and were run again "
+            f"with the range widened to {value:g}"), blocking=False, accepted_in=SESSION_KINDS))
         if name in waits and value > longest:
             findings.append(Finding("longer-than-declared", (
                 f"{name!r} at {value:g} s is a wait longer than any the task declares (its "
@@ -262,7 +286,10 @@ def beyond_range(
     known = {(finding.code, subject) for finding in before for subject in finding.subjects}
     for finding in check_task(widened(task, outside), allocation, components, geometry,
                               calibration, deployment):
-        if finding in before or not (finding.blocking or finding.is_warning):
+        # One the declared task gives, about the same things: equality leaves `subjects` out, and
+        # a light a value newly asks for can be one the task's clip warning already says, word
+        # for word (Task 10's review, I1).
+        if _among(finding, before) or not (finding.blocking or finding.is_warning):
             continue
         detail = f"with {said}, outside its declared range: {finding.detail}"
         new = [subject for subject in finding.subjects if (finding.code, subject) not in known]
@@ -697,18 +724,42 @@ def _custom_components(trial: Trial, components: Registry) -> list[Finding]:
     return findings
 
 
-def _extremes(value: object, ranges: dict[str, tuple[float, float]]) -> list[float]:
-    """The values a position component can actually take.
+def _span(
+    value: object, params: dict[str, Param], least: float = -math.inf
+) -> tuple[float, float]:
+    """The least and the greatest a window's coordinate or radius, or an array's size or ring,
+    can be over every setting the console allows.
 
-    A literal is itself; a parameter is **both ends of its declared range**, because
-    every value between them is one an experimenter can dial in live. Checking the
-    range rather than a value proves the task cannot place a stimulus off-screen for
-    any legal setting, instead of proving it happens not to today.
+    A literal is itself; a parameter is **its declared range**, because every value in it is
+    one an experimenter can dial in live, or the least and greatest of its choices. Checking
+    the range rather than a value proves a task cannot be broken from the console, instead of
+    proving it happens not to be today.
+
+    **A side it does not bound reaches as far as that side can go** (Task 10's review, I2):
+    `least` below -- 0 for a radius or a count, which go no lower, and without end for a
+    position -- and without end above, so that no check reads a setting with one bound, or
+    none, as the 0 it was once read as, and passes what a value it accepts would fail. A
+    bound or a choice that is no finite number bounds nothing, failing closed, and so does an
+    undeclared setting (`_undeclared_parameters` refuses it). A value widened past its one
+    bound (`widened`) moves that bound and leaves the other side unbounded.
     """
-    if isinstance(value, P):
-        low, high = ranges.get(value.name, (0.0, 0.0))
-        return [low, high]
-    return [float(value)]
+    if not isinstance(value, P):
+        return (float(value), float(value))
+    param = params.get(value.name)
+    if param is None:
+        return (least, math.inf)
+    if param.choices:
+        offered = [float(c) for c in param.choices if _finite(c)]
+        if len(offered) < len(param.choices):
+            return (least, math.inf)
+        return (min(offered), max(offered))
+    return (float(param.low) if _finite(param.low) else least,
+            float(param.high) if _finite(param.high) else math.inf)
+
+
+def _finite(value: object) -> bool:
+    """Whether `value` is a finite number, and not a `bool`."""
+    return _is_number(value) and math.isfinite(value)
 
 
 class _Unbounded(Exception):
@@ -1385,9 +1436,14 @@ def _color_faults(trial: Trial, panel: Calibration | None) -> list[Finding]:
             lights = [color] if panel is None else _lights(color, params)
         except _Unbounded:
             continue  # refused as a bad block: it cannot be bounded
+        # What a clip of these lights is about (`Finding.subjects`): what asks for them and the
+        # color as the task wrote it, before `_lights` reads each value it can take. Two things
+        # asking for one written color clip alike; two written colors of one appearance type
+        # are two things a value can newly clip (Task 10's review, I1).
+        about = f"{what} asking for {color}"
         for light in lights:
-            for finding in _one_color(what, light, panel, backgrounds):
-                if finding not in findings:  # one value's corners can say the same
+            for finding in _one_color(what, light, panel, backgrounds, about=about):
+                if not _among(finding, findings):  # one value's corners can say the same
                     findings.append(finding)
     if isoluminant:
         findings.insert(at, Finding("isoluminance-on-default", (
@@ -1445,13 +1501,13 @@ def _modulation_faults(trial: Trial, params: dict[str, Param], panel: Calibratio
     combined = _combined(trial, params)
     findings: list[Finding] = []
 
-    def held(what: str, base: xyY, factor: float, said: str) -> None:
+    def held(what: str, about: str, base: xyY, factor: float, said: str) -> None:
         light = xyY(base.x, base.y, base.Y * factor)
         why = unrealizable(light, panel)
         if why is not None:
             finding = _unrealizable(f"{what}'s {said} reaches {light}", why, light, panel,
-                                    what=what)
-            if finding not in findings:
+                                    what=what, about=about)
+            if not _among(finding, findings):
                 findings.append(finding)
 
     for looks in _appearances(trial):
@@ -1470,13 +1526,17 @@ def _modulation_faults(trial: Trial, params: dict[str, Param], panel: Calibratio
             continue  # refused where it is read: it cannot be bounded
         for c in contrasts:
             for value in values[id(c)]:
+                # What each clip is about (`Finding.subjects`): what asks for the light, and its
+                # contrast and mean as the task wrote them (Task 10's review, I1).
                 if kind == "flat" and isinstance(c, Weber):
                     for background in backgrounds:
-                        held(what, background, 1.0 + value,
+                        held(what, f"{what} asking for {c}", background, 1.0 + value,
                              f"Weber contrast of {value:g} on a background of {background}")
                 if kind != "grating" or not isinstance(c, Michelson):
                     continue
                 for declared in means:
+                    about = (f"{what} asking for {c} about "
+                             f"{'its background' if declared is None else declared}")
                     if declared is None:
                         bases = [(b, f"mean, its background {b}") for b in backgrounds]
                         values_of_mean = []
@@ -1500,7 +1560,7 @@ def _modulation_faults(trial: Trial, params: dict[str, Param], panel: Calibratio
                                               f"mean {m} on {b}"))
                     for base, said in bases:
                         for sign, bar in ((1.0, "brightest"), (-1.0, "darkest")):
-                            held(what, base, 1.0 + sign * value,
+                            held(what, about, base, 1.0 + sign * value,
                                  f"{bar} bar at Michelson {value:g} about its {said}")
     return findings
 
@@ -1656,10 +1716,11 @@ def _lights(color, params: dict[str, Param]) -> list:
     return [color]
 
 
-def _one_color(what: str, color, panel: Calibration | None, backgrounds: list) -> list[Finding]:
+def _one_color(what: str, color, panel: Calibration | None, backgrounds: list, *,
+               about: str) -> list[Finding]:
     """One light against the calibration, or against its absence: a cone color against each lit
     light the trial's background can be (`_background_lights`), since its conversion and so its
-    reach depend on the background (COL-10)."""
+    reach depend on the background (COL-10). A clip of it is about `about` (`_unrealizable`)."""
     if panel is None:
         return [
             Finding(
@@ -1674,25 +1735,28 @@ def _one_color(what: str, color, panel: Calibration | None, backgrounds: list) -
     # does not load (`Calibration`), so nothing is left for a finding here (engine build A2).
     if isinstance(color, CONE_COLORS):
         return [_unrealizable(f"{what} asks for {color} on a background of {background}", why,
-                              color, panel, background, what=what)
+                              color, panel, background, what=what, about=about)
                 for background in backgrounds
                 if (why := unrealizable(color, panel, background)) is not None]
     why = unrealizable(color, panel)
     if why is not None:
-        return [_unrealizable(f"{what} asks for {color}", why, color, panel, what=what)]
+        return [_unrealizable(f"{what} asks for {color}", why, color, panel, what=what,
+                              about=about)]
     return []
 
 
 def _unrealizable(said: str, why: str, light, panel: Calibration, background=None, *,
-                  what: str) -> Finding:
+                  what: str, about: str) -> Finding:
     """A light the panel cannot make (engine spec §7.4; COL-08, COL-34, COL-36), `said` naming
     `what` asks for it, and `why` what `photometry.unrealizable` said of it: **a warning naming the
     primary weights it needs and the light the panel shows instead**, accepted in every session
     kind (the PI, 2026-10-11, XC-352's A20: "a warning, and the drawer records the light actually
     shown beside the one asked for"), which `warnings.jsonl` records with the light asked for once
-    it is accepted: one part of the task's one `unrealizable-color` warning (`_clips`), about
-    `what`. **A light that does not convert at all stays a refusal**, saying `why`: a cone color on
-    a calibration with no cone matrix, or against a black background, or a weight that is no
+    it is accepted: one part of the task's one `unrealizable-color` warning (`_clips`). A part's
+    `subjects` are two: `what`, which its sentence starts with, and `about`, what asks for the
+    light and the color as the task wrote it, which the warning is about (`Finding.subjects`).
+    **A light that does not convert at all stays a refusal**, saying `why`: a cone color on a
+    calibration with no cone matrix, or against a black background, or a weight that is no
     number, has no light to clip (`_clipped`)."""
     clipped = _clipped(light, panel, background)
     if clipped is None:
@@ -1700,22 +1764,29 @@ def _unrealizable(said: str, why: str, light, panel: Calibration, background=Non
     weights, shown = clipped
     return Finding("unrealizable-color", (
         f"{said}: primary weights {weights}, outside [0, 1], so the panel shows {shown}"),
-        blocking=False, accepted_in=SESSION_KINDS, subjects=(what,))
+        blocking=False, accepted_in=SESSION_KINDS, subjects=(what, about))
 
 
 def _clips(findings: list[Finding]) -> list[Finding]:
     """**One `unrealizable-color` warning per task**, where its first part stood, naming each light
     the panel cannot make, what asks for it and the light it shows (the warnings-over-refusals
     review's M8: a warning per light ran the search task's warnings item to thousands of
-    characters). A light several things ask for is said once, naming each (`Finding.subjects`). A
-    light that does not convert at all stays its own refusal."""
+    characters). A light several things ask for is said once, naming each once -- two written
+    colors of one appearance type can ask for the same light. The warning is about what each part
+    is (`_unrealizable`), each once (`Finding.subjects`). A light that does not convert at all
+    stays its own refusal."""
     parts = [f for f in findings if f.code == "unrealizable-color" and f.is_warning]
     if not parts:
         return findings
     asking: dict[str, list[str]] = {}
+    about: list[str] = []
     for part in parts:
-        (what,) = part.subjects
-        asking.setdefault(part.detail[len(what):], []).append(what)
+        what, subject = part.subjects
+        whats = asking.setdefault(part.detail[len(what):], [])
+        if what not in whats:
+            whats.append(what)
+        if subject not in about:
+            about.append(subject)
     said = []
     for rest, whats in asking.items():
         if len(whats) > 1 and rest.startswith(" asks for "):
@@ -1728,8 +1799,7 @@ def _clips(findings: list[Finding]) -> list[Finding]:
     return rest[:first] + [Finding("unrealizable-color", (
         "; ".join(said) + "; the drawer clips each primary weight to [0, 1], and a clipped light "
         "is neither the chromaticity nor the luminance asked for (engine spec §7.4)"),
-        blocking=False, accepted_in=SESSION_KINDS,
-        subjects=tuple(what for whats in asking.values() for what in whats))] + rest[first:]
+        blocking=False, accepted_in=SESSION_KINDS, subjects=tuple(about))] + rest[first:]
 
 
 def _clipped(light, panel: Calibration, background=None) -> "tuple[tuple, str] | None":
@@ -2661,19 +2731,25 @@ def _eye_faults(trial: Trial) -> list[Finding]:
 # console between two trials.
 
 
-def _closest_approach(a: Window, b: Window, ranges) -> tuple[float, float]:
-    """Least possible centre separation, and greatest possible summed radius."""
-    a_x, a_y = a.at
-    b_x, b_y = b.at
-    gaps = [
-        math.hypot(ax - bx, ay - by)
-        for ax in _extremes(a_x, ranges)
-        for ay in _extremes(a_y, ranges)
-        for bx in _extremes(b_x, ranges)
-        for by in _extremes(b_y, ranges)
-    ]
-    reach = max(_extremes(a.radius, ranges)) + max(_extremes(b.radius, ranges))
-    return (min(gaps), reach)
+def _closest_approach(a: Window, b: Window, params: dict[str, Param]) -> tuple[float, float]:
+    """Least possible centre separation, and greatest possible summed radius (`_span`).
+
+    **Per axis, the distance between the two centres' ranges**: 0 where they overlap, since a
+    value inside both puts the centres level on that axis, and otherwise the gap between their
+    nearer ends; the least separation is the hypotenuse of the two. The corners of the ranges
+    alone were wrong whenever the ranges overlap on an axis (Task 10's review, I2): a target
+    window over x 0-16° and y ±8° sits on a fixation window at the centre at (0, 0), while every
+    corner is 8° or more from it. Settings shared between the axes or the windows are read as
+    independent, which can only make the separation smaller: a warning, never a pass."""
+    (a_x, a_y), (b_x, b_y) = a.at, b.at
+
+    def apart(one: object, other: object) -> float:
+        low, high = _span(one, params)
+        other_low, other_high = _span(other, params)
+        return max(0.0, low - other_high, other_low - high)
+
+    reach = _span(a.radius, params, 0.0)[1] + _span(b.radius, params, 0.0)[1]
+    return (math.hypot(apart(a_x, b_x), apart(a_y, b_y)), reach)
 
 
 def _overlapping_windows(trial: Trial) -> list[Finding]:
@@ -2690,7 +2766,7 @@ def _overlapping_windows(trial: Trial) -> list[Finding]:
     2026-10-11): the order is defined (M0 §4) and is part of the task's content, which each
     run names by its hash.
     """
-    ranges = _ranges(trial)
+    params = {p.name: p for p in trial.params}
     by_name = {w.name: w for w in trial.windows if not isinstance(w, ObjectWindows)}
     findings: list[Finding] = []
     seen: set[tuple[str, str]] = set()
@@ -2707,14 +2783,16 @@ def _overlapping_windows(trial: Trial) -> list[Finding]:
                 if first == second or pair in seen:
                     continue
                 seen.add(pair)
-                gap, reach = _closest_approach(by_name[first], by_name[second], ranges)
+                gap, reach = _closest_approach(by_name[first], by_name[second], params)
                 if gap < reach:
+                    radii = (f"their radii sum to {reach:.2f}°" if math.isfinite(reach)
+                             else "a radius has no declared highest, so they can be any size")
                     findings.append(
                         Finding(
                             "overlapping-windows",
                             f"state {state.name!r} scores {first!r} and {second!r}, "
-                            f"which can come within {gap:.2f}° while their radii "
-                            f"sum to {reach:.2f}°; a gaze position inside both "
+                            f"which can come within {gap:.2f}° while {radii}; "
+                            f"a gaze position inside both "
                             f"satisfies both guards, and which one scores is decided "
                             f"by the order the transitions happen to be written in, so "
                             f"a look at one can count as the other",
@@ -2778,11 +2856,13 @@ def _crowded_arrays(trial: Trial) -> list[Finding]:
 
     The worst case is the most objects on the smallest ring with the largest windows:
     adjacent centres are `2 R sin(pi/n)` apart, and two windows touch when that
-    falls below their summed radius. **A warning, not a refusal** (XC-352's A9; the PI,
-    2026-10-11), saying which settings crowd it.
+    falls below their summed radius. Each is read over its declared range or its choices
+    (`_span`): a count or a radius with no highest can be any size, and crowds; a ring with
+    no lowest can be 0 (Task 10's review, I2). **A warning, not a refusal** (XC-352's A9;
+    the PI, 2026-10-11), saying which settings crowd it.
     """
     arrays = arrays_of(trial)
-    ranges = _ranges(trial)
+    params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
     for declared in trial.windows:
         if not isinstance(declared, ObjectWindows):
@@ -2790,19 +2870,21 @@ def _crowded_arrays(trial: Trial) -> list[Finding]:
         array = arrays.get(declared.of)
         if array is None:
             continue
-        most = max(_extremes(array.n, ranges))
-        tightest = min(_extremes(array.radius, ranges))
-        widest = max(_extremes(declared.radius, ranges))
+        most = _span(array.n, params, 0.0)[1]
+        tightest = _span(array.radius, params, 0.0)[0]
+        widest = _span(declared.radius, params, 0.0)[1]
         if most < 2:
             continue
         spacing = 2.0 * tightest * math.sin(math.pi / most)
         if spacing < 2.0 * widest:
+            objects = "any number of" if math.isinf(most) else f"{int(most)}"
+            windows = "of any" if math.isinf(widest) else f"of {widest:g}°"
             findings.append(
                 Finding(
                     "crowded-array",
-                    f"array {declared.of!r} can put {int(most)} objects on a "
-                    f"{tightest:g}° ring, {spacing:.2f}° apart, with windows of "
-                    f"{widest:g}° radius; adjacent objects would overlap and a "
+                    f"array {declared.of!r} can put {objects} objects on a "
+                    f"{tightest:g}° ring, {spacing:.2f}° apart, with windows "
+                    f"{windows} radius; adjacent objects would overlap and a "
                     f"saccade to one would be scored against another",
                     blocking=False,
                     accepted_in=SESSION_KINDS,

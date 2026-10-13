@@ -184,7 +184,9 @@ def beyond(task: Task | None, given: dict, allocation, geometry, calibration, de
     the load-time checks run again with each range widened to its value (`check.beyond_range`),
     the session's setup, calibration and deployment theirs. Its warnings join the run's warnings
     item and what blocks fails the starting values item (`values`). **Nothing raises out of
-    here**: a check that does not finish refuses the values, naming why."""
+    here**: a check that does not finish refuses the values, saying only what is known -- that
+    the checks could not run, and why -- since what raised can be a bound that cannot be compared
+    with any value, and no value need be outside its range (Task 10's review, M3)."""
     if task is None:
         return []
     try:
@@ -192,8 +194,9 @@ def beyond(task: Task | None, given: dict, allocation, geometry, calibration, de
                             calibration=calibration, deployment=deployment)
     except Exception as broken:  # noqa: BLE001 -- the checks run on code; their fault refuses
         return [Finding("outside-range", (
-            f"a starting value is outside its declared range, and the load-time checks could not "
-            f"be run again with the range widened ({type(broken).__name__}: {broken})"))]
+            f"the load-time checks could not be run again with each range widened to its "
+            f"starting value ({type(broken).__name__}: {broken}), so what the starting values "
+            f"would break is unknown"))]
 
 
 def values(task: Task | None, given: dict, refused=()) -> PreflightItem:

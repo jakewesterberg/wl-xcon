@@ -51,10 +51,15 @@ class Finding:
     #: refuses: it asks for a person's review of the task, not of the session.
     accepted_in: tuple[str, ...] = ()
     #: **What it is about**, where that must be told apart from its sentence, which carries
-    #: numbers: the color each part of a task's one `unrealizable-color` warning names
-    #: (`check._clips`), and, for a value outside its declared range, whether a finding of
-    #: `check.BREAKS_A_RUN` is about something the declared ranges already give
-    #: (`check.beyond_range`). No part of its equality, nor of what a session accepts.
+    #: numbers: for a task's one `unrealizable-color` warning, each thing asking for a light the
+    #: panel cannot make with the color as the task wrote it, such as "Disc asking for
+    #: Gray(cd_m2=P(name='disc'))" (`check._clips`; two things asking for one written color
+    #: clip alike and are one subject, two written colors of one type two -- Task 10's review,
+    #: I1); for `overlapping-windows`, the state and the pair of windows; for `crowded-array`,
+    #: the array; each named by its structure in a task of several (`check.check_task`). For a
+    #: value outside its declared range, it says whether a finding of `check.BREAKS_A_RUN` is
+    #: about something the declared ranges already give (`check.beyond_range`). No part of its
+    #: equality, nor of what a session accepts; compared where it must be (`check._among`).
     subjects: tuple[str, ...] = field(default=(), compare=False)
 
     def __post_init__(self) -> None:
