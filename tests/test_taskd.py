@@ -2771,6 +2771,7 @@ def test_the_config_snapshot_records_the_setup_it_ran_in(tmp_path):
     config = json.loads((session.directory / "config.json").read_text())
     assert config["setup"]["view"] == "direct"
     assert config["setup"]["half_ipd_cm"] is None
+    assert config["setup"]["half_ipd_nominal"] is None, "direct view has no half-IPD"
     assert config["setup"]["viewing_distance_cm"] == DIRECT.viewing_distance_cm
     assert len(config["setup"]["housings"]) == 2
     assert config["versions"]["rig"] == "tests/_rig.py"

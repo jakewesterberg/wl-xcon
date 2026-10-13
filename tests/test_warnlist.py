@@ -8,7 +8,9 @@ import pytest
 
 from _calibrations import measured
 from wl_xcon import warnlist
+from _rig import RIG
 from wl_xcon.findings import NOT_RECORDING, SESSION_KINDS, Finding
+from wl_xcon.geometry import SubjectSettings
 from wl_xcon.link import NOTE_LIMIT, PreflightItem
 from wl_xcon.photometry import SRGB, Calibration
 from wl_xcon.warnlist import Entry
@@ -70,6 +72,44 @@ def test_a_calibration_that_will_not_load_is_a_warning_that_the_default_runs_in_
     # warnings-over-refusals review's M4).
     (default,) = warnlist.of_calibration(SRGB, TODAY, unloaded=True)
     assert default.detail.startswith("the calibration record the rig names would not load, so ")
+
+
+def test_a_stereoscope_built_without_settings_is_a_warning_that_records_the_half_ipd_as_nominal():
+    """XC-352's C6 (the PI, 2026-10-11: "a warning; the nominal 1.6 cm is recorded as nominal")."""
+    (entry,) = warnlist.of_setup(RIG, "A", 1.6, None, "")
+
+    assert (entry.code, entry.accepted_in) == ("nominal half-IPD", SESSION_KINDS)
+    assert "'A' has no settings file" in entry.detail and "not a measurement" in entry.detail
+    assert "records it as nominal" in entry.detail
+
+
+def test_another_animals_settings_are_a_warning_naming_whose_half_ipd_the_session_uses():
+    """XC-352's C8 (the PI, 2026-10-11)."""
+    theirs = SubjectSettings(subject="B", half_ipd_cm=1.7)
+
+    (entry,) = warnlist.of_setup(RIG, "A", 1.7, theirs, "subjects/A/settings.py")
+
+    assert (entry.code, entry.accepted_in) == ("another animal's settings", SESSION_KINDS)
+    assert "these are 'B''s settings" in entry.detail and "half-IPD of 1.7 cm" in entry.detail
+    assert warnlist.of_setup(RIG, "B", 1.7, theirs, "subjects/B/settings.py") == []
+
+
+@pytest.mark.parametrize("half", [1.4, 2.0])
+def test_a_half_ipd_outside_the_drawn_optics_is_a_warning_that_they_are_extrapolated(half):
+    """XC-352's C7 (the PI, 2026-10-11: "outside the drawn optics, extrapolated")."""
+    (entry,) = warnlist.of_setup(RIG, "A", half, SubjectSettings(subject="A", half_ipd_cm=half), "s.py")
+
+    assert (entry.code, entry.accepted_in) == ("half-IPD outside the optics", SESSION_KINDS)
+    assert f"a half-IPD of {half:g} cm is outside the 1.5-1.9 cm" in entry.detail
+    assert "extrapolated" in entry.detail
+
+
+def test_settings_direct_view_reads_nothing_from_are_a_warning_that_they_are_ignored():
+    """XC-352's H4 (the PI, 2026-10-11)."""
+    (entry,) = warnlist.of_ignored_settings("tasks/reference_subject.py")
+
+    assert (entry.code, entry.accepted_in) == ("settings not read", SESSION_KINDS)
+    assert "direct view reads nothing from it" in entry.detail
 
 
 def test_a_chaired_session_lists_its_free_head_and_a_fixed_one_lists_nothing():

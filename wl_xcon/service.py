@@ -87,7 +87,7 @@ from wl_xcon.cli import (
 )
 from wl_xcon.codes import Allocation
 from wl_xcon.dio import Simulated as SimulatedCard
-from wl_xcon.geometry import Rig
+from wl_xcon.geometry import NOMINAL_HALF_IPD_CM, Rig
 from wl_xcon.photometry import SRGB, Calibration
 from wl_xcon.record import XCON_DIRNAME
 from wl_xcon.taskd import RunSpec, Session, SessionSpec, bounds_record
@@ -711,19 +711,19 @@ class Service:
                 f"{bounds_path} holds {bounds.subject!r}'s bounded config, and this folder "
                 f"is {animal!r}'s; ceilings belong to an animal"
             )
-        settings_path = None
+        settings_path, setup = None, []
         if view == "direct":
             geometry = self.rig.direct()
         else:
-            settings_path = folder / "settings.py"
-            if not settings_path.is_file():
-                raise ValueError(
-                    f"the stereoscope needs {animal!r}'s settings, and "
-                    f"{settings_path} does not exist"
-                )
-            geometry = self.rig.stereoscope(
-                _load_subject_settings(settings_path, animal).half_ipd_cm
-            )
+            # The animal's settings, or the nominal half-IPD with none; another animal's, or a
+            # half-IPD outside the drawn optics, as given: each a warning its runs' pre-flights
+            # list (the PI, 2026-10-11, XC-352's C6, C7 and C8; each refused here until then).
+            found = folder / "settings.py"
+            settings = _load_subject_settings(found) if found.is_file() else None
+            settings_path = found if settings is not None else None
+            half = NOMINAL_HALF_IPD_CM if settings is None else settings.half_ipd_cm
+            setup = warnlist.of_setup(self.rig, animal, half, settings, found)
+            geometry = self.rig.stereoscope(half)
         session = Session(
             SessionSpec(
                 task="",
@@ -744,6 +744,7 @@ class Service:
                 bounds_config=str(bounds_path),
                 rig_config=self.rig_path,
                 subject_settings="" if settings_path is None else str(settings_path),
+                setup_warnings=tuple(setup),
             ),
             card=self._card(),
             pump=self._pump(),
@@ -1079,7 +1080,10 @@ class Service:
 
         def warned():
             try:
-                rig = self.open_warnings(session.spec.deployment)
+                # The setup's warnings too (XC-352's C6-C8): known at the open, asked with the
+                # first run's, accepted once a session.
+                rig = (self.open_warnings(session.spec.deployment)
+                       + list(session.spec.setup_warnings))
             except Exception as broken:  # noqa: BLE001 -- the engine B plan, call 31
                 # The rig's warnings could not be listed: the item fails, saying so, until they
                 # list -- never a run started without them asked (call 31). Said through
@@ -1114,7 +1118,6 @@ class Service:
                     + (() if settings is None else (_preflight.SUBJECT_SETTINGS,)),
                     lambda: _preflight.files(
                         Path(session.spec.bounds_config), session.spec.subject, settings,
-                        self.rig,
                     ),
                 ),
                 *_contained(

@@ -37,6 +37,12 @@ from dataclasses import dataclass
 #: session start; a task's `Trial.view` names one of these, or `"either"`.
 VIEWS = ("direct", "stereoscope")
 
+#: The optics drawing's nominal half-IPD, `E`, in cm (its §1; IPD 32 mm): what the stereoscope is
+#: built for when an animal has no settings file, with a warning, the session recording it as
+#: nominal (the PI, 2026-10-11, XC-352's C6: "a warning; the nominal 1.6 cm is recorded as
+#: nominal"; `warnlist.of_setup`). **Not a measurement** (STE-20).
+NOMINAL_HALF_IPD_CM = 1.6
+
 
 @dataclass(frozen=True, slots=True)
 class Housing:
@@ -285,9 +291,10 @@ class Rig:
     screen_distance_cm: float
     #: The stereoscope's mask, as a half-angle (±12° to start, PI 2026-09-28).
     mask_deg: float
-    #: The half-IPDs the stereoscope is built for, in cm: the optics drawing's
-    #: eye-separation table, IPD 30-38 mm (S0 §7.1.3). An animal outside it is refused
-    #: rather than given a field nobody drew.
+    #: The half-IPDs the stereoscope is drawn for, in cm: the optics drawing's
+    #: eye-separation table, IPD 30-38 mm (S0 §7.1.3). An animal outside it runs with a
+    #: warning that its field is extrapolated, not drawn (the PI, 2026-10-11, XC-352's C7;
+    #: `warnlist.of_setup`); it was refused until then.
     half_ipd_range_cm: tuple[float, float]
     #: The panel's pixels, horizontal and vertical (S0 §5.1).
     pixels: tuple[int, int]
@@ -311,13 +318,15 @@ class Rig:
 
     def stereoscope(self, half_ipd_cm: float) -> Geometry:
         """Through the stereoscope, for one animal's half-IPD, `E`, from its settings
-        file (spec §2; PI, 2026-09-29)."""
-        low, high = self.half_ipd_range_cm
-        if not low <= half_ipd_cm <= high:
+        file (spec §2; PI, 2026-09-29), or the nominal one (`NOMINAL_HALF_IPD_CM`). **One
+        outside `half_ipd_range_cm` is built too**, its field extrapolated (a warning,
+        `warnlist.of_setup`; the PI, 2026-10-11, XC-352's C7). One that leaves no positive
+        optical path, `Z + W/4 − E`, or is no number, has no field, and is refused."""
+        path = self.screen_distance_cm + self.panel_width_cm / 4 - half_ipd_cm
+        if not path > 0:
             raise ValueError(
-                f"a half-IPD of {half_ipd_cm:g} cm is outside the {low:g}-{high:g} cm "
-                f"this stereoscope is built for (IPD {20 * low:g}-{20 * high:g} mm, the "
-                f"optics drawing's table); its mirrors and its field are unknown there"
+                f"a half-IPD of {half_ipd_cm:g} cm leaves no positive optical path through this "
+                f"stereoscope (Z + W/4 − E = {path:g} cm), so it has no field"
             )
         return Geometry.stereoscope(
             self.panel_width_cm,

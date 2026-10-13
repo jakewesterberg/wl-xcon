@@ -31,7 +31,7 @@ from wl_xcon.check import check_task
 from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.review import render_task as render_review
 from wl_xcon.codes import PROVISIONAL, Allocation
-from wl_xcon.geometry import VIEWS, Geometry, Rig, SubjectSettings
+from wl_xcon.geometry import NOMINAL_HALF_IPD_CM, VIEWS, Geometry, Rig, SubjectSettings
 from wl_xcon.photometry import SRGB, Calibration, read_calibration
 from wl_xcon.actor import Actor, Box
 from wl_xcon.task import Task, Trial
@@ -172,26 +172,14 @@ def _calibration_or_default(rig: Rig, rig_path) -> tuple[Calibration, str]:
         return SRGB, str(refused.code)
 
 
-def _load_subject_settings(path: Path, subject: str | None) -> SubjectSettings:
-    """Load one animal's settings (PI, 2026-09-29): a Python file defining `SETTINGS`.
-    **Refused for another animal**, as a bounded config is, when `subject` is given:
-    one animal's eye spacing is not another's."""
+def _load_subject_settings(path: Path) -> SubjectSettings:
+    """Load one animal's settings (PI, 2026-09-29): a Python file defining `SETTINGS`, whoever
+    it names. **Another animal's is a warning, never a refusal** (the PI, 2026-10-11, XC-352's
+    C8; `warnlist.of_setup`), which its caller lists."""
     found = _load_named(path, "SETTINGS")
     if not isinstance(found, SubjectSettings):
         raise SystemExit(f"{path} must define SETTINGS, a geometry.SubjectSettings")
-    if subject is not None and found.subject != subject:
-        raise SystemExit(
-            f"refused: {path} holds {found.subject!r}'s settings and this session is "
-            f"for {subject!r}; one animal's eye spacing is not another's"
-        )
     return found
-
-
-#: Said by `wlx run` and `wlx check` alike, so the two cannot drift apart.
-_DIRECT_READS_NO_SETTINGS = (
-    "refused: --subject-settings holds the stereoscope's half-IPD, and direct view "
-    "reads nothing from it; leave it off, or pass --view stereoscope"
-)
 
 
 def _setup_words(view: object, half_ipd_cm: object) -> str:
@@ -252,28 +240,28 @@ def _setups(
     return geometries
 
 
-def _session_geometry(args, rig: Rig) -> Geometry:
+def _session_geometry(args, rig: Rig) -> tuple[Geometry, list]:
     """The field a `wlx run` session is held to, from `rig` (`--rig`'s, loaded once by the
-    caller), `--view` and `--subject-settings` (direct-view spec §3; PI, 2026-09-29). Every
-    refusal is a sentence: an unmeasured rig, an animal the stereoscope is not built for,
-    another animal's file, or a file where none belongs."""
+    caller), `--view` and `--subject-settings` (direct-view spec §3; PI, 2026-09-29), **with the
+    warnings its setup runs with** (the PI, 2026-10-11, XC-352's C6, C7, C8 and H4; each refused
+    until then): settings direct view ignores, the nominal half-IPD with no settings, another
+    animal's, a half-IPD outside the drawn optics. A refusal is a sentence: an unmeasured rig,
+    or a half-IPD with no field."""
     if args.view == "direct":
-        if args.subject_settings is not None:
-            raise SystemExit(_DIRECT_READS_NO_SETTINGS)
+        setup = ([] if args.subject_settings is None
+                 else warnlist.of_ignored_settings(args.subject_settings))
         build = rig.direct
     else:
-        if args.subject_settings is None:
-            raise SystemExit(
-                "refused: --view stereoscope needs --subject-settings, the file "
-                "holding this animal's half-IPD (PI, 2026-09-29)"
-            )
-        half = _load_subject_settings(args.subject_settings, args.subject).half_ipd_cm
+        settings = (None if args.subject_settings is None
+                    else _load_subject_settings(args.subject_settings))
+        half = NOMINAL_HALF_IPD_CM if settings is None else settings.half_ipd_cm
+        setup = warnlist.of_setup(rig, args.subject, half, settings, args.subject_settings)
 
         def build() -> Geometry:
             return rig.stereoscope(half)
 
     try:
-        return build()
+        return build(), setup
     except ValueError as refused:
         raise SystemExit(f"refused: {refused}") from refused
 
@@ -1645,7 +1633,7 @@ def main(argv: list[str] | None = None) -> int:
         # The rig file is run once (the engine B final review): its geometry and its color
         # calibration both come from this one load.
         rig = _load_rig(args.rig)
-        geometry = _session_geometry(args, rig)
+        geometry, setup = _session_geometry(args, rig)
         # **Refused before anything is recorded** (direct-view spec §3, plan decision
         # 7): a task written for the other setup, or one the chosen field cannot show,
         # stops here -- before the session opens and before the departure is asked
@@ -1684,6 +1672,7 @@ def main(argv: list[str] | None = None) -> int:
             + warnlist.of_calibration(calibration, date.fromtimestamp(time.time()),
                                       unloaded=bool(unloaded))
             + warnlist.of_deployment(deployment)
+            + setup
             + warnlist.of_findings(findings)
         )
         outside = warnlist.refused(warnings, args.session_kind)
@@ -1820,8 +1809,10 @@ def main(argv: list[str] | None = None) -> int:
                         session_kind=args.session_kind,
                         calibration=calibration,
                         rig_config=str(args.rig),
+                        # None read in direct view, whatever was given (XC-352's H4).
                         subject_settings=(
-                            "" if args.subject_settings is None else str(args.subject_settings)
+                            "" if args.subject_settings is None or args.view == "direct"
+                            else str(args.subject_settings)
                         ),
                         warn_within=(
                             WARN_WITHIN_DEFAULT
@@ -2135,13 +2126,20 @@ def main(argv: list[str] | None = None) -> int:
     # The default in the place of a record that will not load, said below (XC-352's E1).
     calibration, unloaded = _calibration_or_default(rig, args.rig)
     settings = (
-        _load_subject_settings(args.subject_settings, None)
+        _load_subject_settings(args.subject_settings)
         if args.subject_settings is not None
         else None
     )
     geometries = _setups(task, rig, args.view, settings)
-    if settings is not None and geometries and {g.view for g in geometries} == {"direct"}:
-        raise SystemExit(_DIRECT_READS_NO_SETTINGS)
+    # The settings' own warnings (XC-352's C7 and H4): ignored in direct view; a half-IPD
+    # outside the drawn optics, through the stereoscope. A check names no animal, so whose
+    # settings they are is the session's to warn of.
+    setup = [] if settings is None else (
+        warnlist.of_ignored_settings(args.subject_settings)
+        if geometries and {g.view for g in geometries} == {"direct"}
+        else warnlist.of_setup(rig, settings.subject, settings.half_ipd_cm, settings,
+                               args.subject_settings)
+    )
     for geometry in geometries:
         print(f"checked against: {_setup_words(geometry.view, geometry.half_ipd_cm)}")
     print(
@@ -2165,7 +2163,7 @@ def main(argv: list[str] | None = None) -> int:
         [] if args.session_kind is None
         else warnlist.of_calibration(calibration, date.fromtimestamp(time.time()),
                                      unloaded=bool(unloaded))
-    )
+    ) + setup
     outside = (
         [] if args.session_kind is None else warnlist.refused(rig_warnings, args.session_kind)
     )

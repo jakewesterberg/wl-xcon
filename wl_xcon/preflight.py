@@ -36,7 +36,6 @@ from wl_xcon.actor import Actor, Box, Member
 from wl_xcon.bounds import Exceeded
 from wl_xcon.check import check_task, parameters_used
 from wl_xcon.cli import _load_bounds, _load_subject_settings, _load_task, _setup_words
-from wl_xcon.geometry import Rig
 from wl_xcon.link import Preflight, PreflightItem
 from wl_xcon.task import Task
 from wl_xcon.welfare import OUT_OF_CAGE, Absent, Simulated
@@ -251,14 +250,15 @@ def values(task: Task | None, given: dict) -> PreflightItem:
     )
 
 
-def files(
-    bounds_path: Path, subject: str, settings_path: Path | None, rig: Rig
-) -> list[PreflightItem]:
+def files(bounds_path: Path, subject: str, settings_path: Path | None) -> list[PreflightItem]:
     """The animal's files, read again (spec §6.2: "fail if refused"): the bounded config
-    loads and names this animal, and in the stereoscope its settings load, name it, and
-    give a half-IPD this rig is built for. **The session runs under what it loaded when
-    it opened**; a file that no longer loads or names another animal is a sign
-    something about this animal's files has gone wrong since, and blocks a new run."""
+    loads and names this animal, and in the stereoscope its settings load. **The session runs
+    under what it loaded when it opened**; a bounded config that no longer loads or names
+    another animal, or settings that no longer load, are a sign something about this animal's
+    files has gone wrong since, and block a new run. Settings naming another animal, or a
+    half-IPD outside the drawn optics, pass, saying whose they are: each is a warning, which
+    the run's warnings item lists from the session's open (the PI, 2026-10-11, XC-352's C7 and
+    C8)."""
     items = []
     try:
         found = _load_bounds(bounds_path)
@@ -287,20 +287,17 @@ def files(
         )
     if settings_path is not None:
         try:
-            half = _load_subject_settings(settings_path, subject).half_ipd_cm
-            rig.stereoscope(half)
+            found = _load_subject_settings(settings_path)
             items.append(
                 PreflightItem(
                     SUBJECT_SETTINGS,
                     PASS,
-                    f"{settings_path} loads, names {subject!r}, and gives a half-IPD of "
-                    f"{half:g} cm this stereoscope is built for",
+                    f"{settings_path} loads and gives {found.subject!r}'s half-IPD of "
+                    f"{found.half_ipd_cm:g} cm; the session runs under the setup it opened with",
                 )
             )
         except SystemExit as refused:
             items.append(PreflightItem(SUBJECT_SETTINGS, FAIL, _said(refused, settings_path)))
-        except ValueError as refused:
-            items.append(PreflightItem(SUBJECT_SETTINGS, FAIL, str(refused)))
         except Exception as broken:  # noqa: BLE001 -- a settings file is code
             items.append(
                 PreflightItem(

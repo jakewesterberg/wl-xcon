@@ -19,7 +19,7 @@ import pytest
 
 from _rig import DIRECT, RIG as STAND_IN_RIG
 from tasks.rig import RIG
-from wl_xcon.geometry import Geometry, SubjectSettings
+from wl_xcon.geometry import NOMINAL_HALF_IPD_CM, Geometry, SubjectSettings
 
 #: The PG27UCDM through the stereoscope, the screen at 50 cm, `E` = 1.6 cm
 #: (S0 §5.1, §5.2; PI 2026-09-27, 2026-09-28).
@@ -377,15 +377,18 @@ def test_subject_settings_refuse_a_half_ipd_that_is_not_a_number():
             SubjectSettings(subject="A", half_ipd_cm=half)
 
 
-def test_the_stereoscope_refuses_a_half_ipd_it_is_not_built_for():
-    """The optics drawing tabulates IPD 30-38 mm (S0 §7.1.3), so the rig is built for
-    half-IPDs 1.5-1.9 cm. Outside that, the mirrors and the field are nobody's drawing."""
+def test_the_stereoscope_builds_any_half_ipd_its_optics_extend_to():
+    """The optics drawing tabulates IPD 30-38 mm (S0 §7.1.3), so the rig is drawn for half-IPDs
+    1.5-1.9 cm. Outside that, the mirrors and the field are extrapolated: a warning
+    (`warnlist.of_setup`; the PI, 2026-10-11, XC-352's C7), never a refusal. A half-IPD that
+    leaves no positive optical path, or is no number, has no field, and is refused."""
     assert RIG.half_ipd_range_cm == (1.5, 1.9)
-    RIG.stereoscope(half_ipd_cm=1.5)
-    RIG.stereoscope(half_ipd_cm=1.9)
-    for half in (1.49, 1.91, float("nan")):
-        with pytest.raises(ValueError, match="IPD 30-38 mm"):
+    for half in (1.49, 1.91, 3.0):
+        assert RIG.stereoscope(half_ipd_cm=half).half_ipd_cm == half
+    for half in (100.0, float("nan")):
+        with pytest.raises(ValueError, match="no positive optical path"):
             RIG.stereoscope(half_ipd_cm=half)
+    assert NOMINAL_HALF_IPD_CM == 1.6
 
 
 def test_a_geometry_carries_the_half_ipd_it_was_built_for():

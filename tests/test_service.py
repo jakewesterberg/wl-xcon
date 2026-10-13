@@ -743,7 +743,6 @@ def test_a_session_id_or_animal_that_is_not_one_folder_name_is_refused_and_nothi
     ("over", "said"),
     [
         ({"animal": "C"}, "there is no animal 'C'"),
-        ({"view": "stereoscope", "animal": "B"}, "settings"),
         ({"departure": "half past nine"}, "is not a clock time"),
         ({"departure": typed(-3600)}, "in the future"),
         ({"delivered_today": -1.0}, "cannot be negative"),
@@ -1577,6 +1576,52 @@ def test_the_search_task_runs_on_the_default_and_records_the_light_the_panel_sho
     (clipped,) = [r["detail"] for r in rows if r["code"] == "unrealizable-color"]
     assert clipped.count(" ask for DKL(") == 2 and clipped.count("so the panel shows x=") == 2
     assert len(items["warnings"].said) < 3_000, "5,392 with one per light and per isoluminant color"
+
+
+def _narrow(service) -> str:
+    """`fixation_detection`, its target held to ±10° so the stereoscope's ±12° mask shows it."""
+    text = Path("tasks/fixation_detection.py").read_text()
+    for axis, start in (("x", "10.0"), ("y", "0.0")):
+        wide = f'Param("target_{axis}", unit="deg", low=-16.0, high=16.0, start={start})'
+        assert text.count(wide) == 1
+        text = text.replace(wide, f'Param("target_{axis}", unit="deg", low=-10.0, high=10.0, start={start})')
+    (service.tasks / "narrow.py").write_text(text)
+    return "narrow.py"
+
+
+@pytest.mark.parametrize(("settings", "code"), [
+    (None, "nominal half-IPD"),
+    ("SubjectSettings(subject='B', half_ipd_cm=1.7)", "another animal's settings"),
+    ("SubjectSettings(subject='REFERENCE', half_ipd_cm=2.0)", "half-IPD outside the optics"),
+], ids=["no settings file", "another animal's", "outside the drawn optics"])
+def test_a_stereoscope_session_runs_on_its_settings_warnings_once_they_are_accepted(
+    tmp_path, settings, code
+):
+    """XC-352's C6, C7 and C8 (the PI, 2026-10-11): an animal with no settings file runs on the
+    nominal half-IPD, recorded as nominal; another animal's settings, and a half-IPD outside the
+    drawn optics, run as given. Each is a warning in the run's pre-flight, and the run starts once
+    it is accepted, `warnings.jsonl` recording it; until then each refused the open."""
+    service = _service(tmp_path)
+    found = service.subjects / "REFERENCE" / "settings.py"
+    if settings is None:
+        found.unlink()
+    else:
+        found.write_text(f"from wl_xcon.geometry import SubjectSettings\nSETTINGS = {settings}\n")
+    task = _narrow(service)
+    _step(service, _open(view="stereoscope"))
+
+    checked = _step(service, CheckRun(by=BY, task=task, values=dict(VALUES)))
+    started = _step(service, _start(task=task))
+
+    item = {i.name: i for i in checked.preflight.items}["warnings"]
+    assert item.result == "unknown" and f"{code}: " in item.said
+    assert started.run_index == 0
+    folder = service.root / "2027-01-14_01" / "xcon"
+    assert [r["how"] for r in _jsonl(folder / "warnings.jsonl") if r["code"] == code] == ["start"]
+    setup = json.loads((folder / "config.json").read_text())["setup"]
+    assert setup["half_ipd_nominal"] is (settings is None)
+    assert setup["half_ipd_cm"] == {"nominal half-IPD": 1.6, "another animal's settings": 1.7,
+                                    "half-IPD outside the optics": 2.0}[code]
 
 
 def test_a_task_whose_declarations_are_malformed_fails_its_preflight_and_the_service_goes_on(

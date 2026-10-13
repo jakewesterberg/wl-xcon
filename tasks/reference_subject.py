@@ -7,7 +7,7 @@ view reads nothing from it.
 
 **The number is not a measurement.** 1.6 cm is the optics drawing's nominal `E`, and
 the subject is `REFERENCE`, the one `reference_bounds.py` is written for, so a session
-refuses this file for any real animal.
+warns that it holds another animal's settings for any real animal (XC-352's C8).
 """
 
 from wl_xcon.geometry import SubjectSettings

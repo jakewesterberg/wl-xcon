@@ -9,7 +9,9 @@ recorded"; "a warning appearing later asks again").
 §7.10); a calibration that will not load, in whose place the default runs, and one dated after
 today (accepted in every kind since the PI's rulings on XC-352, 2026-10-11, E1 and E2: no kind
 accepted them, and every run's pre-flight failed on them, until then); a chaired session's free
-head (§5.9); a task's warnings, its load-time findings that
+head (§5.9); a stereoscope's setup -- the nominal half-IPD, another animal's settings, a
+half-IPD outside the drawn optics -- and settings direct view ignores (the PI's rulings on
+XC-352, 2026-10-11, C6, C7, C8 and H4); a task's warnings, its load-time findings that
 are warnings (`luminance-step`, `color-on-default`, `contrast-on-default`, and, since the PI's
 ruling of 2026-10-11, `head-not-fixed`); and today's
 pre-flight unknowns, the pump calibration and the eye tracker (S9a §10). **What later builds
@@ -31,6 +33,7 @@ from datetime import date
 
 from wl_xcon import link as _link
 from wl_xcon.findings import SESSION_KINDS, kind_named
+from wl_xcon.geometry import Rig, SubjectSettings
 from wl_xcon.photometry import SRGB_WHITE_CD_M2, Calibration
 from wl_xcon.welfare import Deployment
 
@@ -39,6 +42,10 @@ DEFAULT_CALIBRATION = "default calibration"
 CALIBRATION_AGE = "calibration age"
 CALIBRATION_RECORD = "calibration record"
 HEAD_FREE = "head free"
+NOMINAL_HALF_IPD = "nominal half-IPD"
+OTHER_ANIMALS_SETTINGS = "another animal's settings"
+HALF_IPD_OUTSIDE = "half-IPD outside the optics"
+SETTINGS_NOT_READ = "settings not read"
 #: The code of a row saying the warnings could not be listed at all (`service.Service`'s idle
 #: frame and its run's pre-flight; the engine B plan, calls 27 and 31): not a warning, so no
 #: console says it as one every run refuses.
@@ -158,6 +165,45 @@ def of_deployment(deployment: Deployment) -> list[Entry]:
             "a chaired session's head is free, so every stimulus position assumes a nominal head "
             "position (engine spec §5.9)"), SESSION_KINDS)]
     return []
+
+
+def of_setup(
+    rig: Rig, subject: str, half_ipd_cm: float, settings: SubjectSettings | None, path
+) -> list[Entry]:
+    """A stereoscope's setup for `subject`, built for `half_ipd_cm` from `settings` (read from
+    `path`), or for the nominal half-IPD when there are none (the PI, 2026-10-11, XC-352's C6, C7
+    and C8; each refused until then), **each a warning in every kind**: no settings file, so the
+    nominal half-IPD, recorded as nominal (`config.json`'s `setup.half_ipd_nominal`); another
+    animal's settings, whose half-IPD the session uses; and a half-IPD outside the optics
+    drawing's table, its field extrapolated."""
+    entries = []
+    if settings is None:
+        entries.append(Entry(NOMINAL_HALF_IPD, (
+            f"{subject!r} has no settings file, so the stereoscope is built for the optics "
+            f"drawing's nominal half-IPD, {half_ipd_cm:g} cm, which is not a measurement (STE-20): "
+            f"disparities and the vergence offset assume it, and the session records it as "
+            f"nominal"), SESSION_KINDS))
+    elif settings.subject != subject:
+        entries.append(Entry(OTHER_ANIMALS_SETTINGS, (
+            f"{path} holds {settings.subject!r}'s settings, and this session is {subject!r}'s: "
+            f"these are {settings.subject!r}'s settings, so the stereoscope is built for "
+            f"{settings.subject!r}'s half-IPD of {half_ipd_cm:g} cm"), SESSION_KINDS))
+    low, high = rig.half_ipd_range_cm
+    if not low <= half_ipd_cm <= high:
+        entries.append(Entry(HALF_IPD_OUTSIDE, (
+            f"a half-IPD of {half_ipd_cm:g} cm is outside the {low:g}-{high:g} cm this "
+            f"stereoscope is drawn for (IPD {20 * low:g}-{20 * high:g} mm, the optics drawing's "
+            f"table): its mirrors and its field are extrapolated there, not drawn, so positions "
+            f"and the off-screen check rest on an unmodeled field"), SESSION_KINDS))
+    return entries
+
+
+def of_ignored_settings(path) -> list[Entry]:
+    """`--subject-settings` given with direct view, which reads nothing from it: a warning that
+    the session ignores it (the PI, 2026-10-11, XC-352's H4; refused until then)."""
+    return [Entry(SETTINGS_NOT_READ, (
+        f"--subject-settings {path} holds the stereoscope's half-IPD, and direct view reads "
+        f"nothing from it, so this session ignores it"), SESSION_KINDS)]
 
 
 def of_unknowns(items: Iterable) -> list[Entry]:

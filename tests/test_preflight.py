@@ -223,7 +223,7 @@ def test_a_bare_exit_from_a_task_or_bounds_file_still_says_something(tmp_path):
     bad.write_text("import sys\nsys.exit()\n")
 
     item, _, _ = preflight.task(bad, ALLOCATION, DIRECT, SRGB)
-    kept = preflight.files(bad, "A", None, RIG)[0]
+    kept = preflight.files(bad, "A", None)[0]
 
     assert item.result == kept.result == "fail"
     assert item.said.strip() and kept.said.strip() and "bad.py" in item.said
@@ -235,11 +235,28 @@ def test_the_animals_files_pass_when_they_load_and_name_it(tmp_path):
     shutil.copy("tasks/reference_bounds.py", folder / "bounds.py")
     shutil.copy("tasks/reference_subject.py", folder / "settings.py")
 
-    items = preflight.files(folder / "bounds.py", "REFERENCE", folder / "settings.py", RIG)
+    items = preflight.files(folder / "bounds.py", "REFERENCE", folder / "settings.py")
 
     assert [(i.name, i.result) for i in items] == [
         ("bounded config", "pass"), ("subject settings", "pass"),
     ]
+
+
+def test_settings_that_name_another_animal_or_an_undrawn_half_ipd_pass_saying_so(tmp_path):
+    """XC-352's C7 and C8 (the PI, 2026-10-11): warnings, listed with the run's (the session's
+    `setup_warnings`), so the re-read passes, saying whose settings they are; only a file that no
+    longer loads fails."""
+    folder = tmp_path / "A"
+    folder.mkdir()
+    shutil.copy("tasks/reference_bounds.py", folder / "bounds.py")
+    (folder / "settings.py").write_text(
+        "from wl_xcon.geometry import SubjectSettings\n"
+        "SETTINGS = SubjectSettings(subject='B', half_ipd_cm=2.4)\n")
+
+    _, settings = preflight.files(folder / "bounds.py", "REFERENCE", folder / "settings.py")
+
+    assert settings.result == "pass"
+    assert "gives 'B''s half-IPD of 2.4 cm" in settings.said
 
 
 def test_the_animals_files_fail_when_they_name_another_or_do_not_load(tmp_path):
@@ -248,7 +265,7 @@ def test_the_animals_files_fail_when_they_name_another_or_do_not_load(tmp_path):
     shutil.copy("tasks/reference_bounds.py", folder / "bounds.py")
     (folder / "settings.py").write_text("SETTINGS = None\n")
 
-    items = preflight.files(folder / "bounds.py", "B", folder / "settings.py", RIG)
+    items = preflight.files(folder / "bounds.py", "B", folder / "settings.py")
 
     assert [i.result for i in items] == ["fail", "fail"]
     assert "'REFERENCE'" in items[0].said and "must define SETTINGS" in items[1].said

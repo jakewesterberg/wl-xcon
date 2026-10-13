@@ -233,6 +233,11 @@ class SessionSpec:
     #: and for `subject_settings` in direct view, which reads none.
     rig_config: str = ""
     subject_settings: str = ""
+    #: The warnings a stereoscope's setup was built with (the PI, 2026-10-11, XC-352's C6, C7
+    #: and C8; `warnlist.of_setup`): the nominal half-IPD for an animal with no settings file,
+    #: another animal's settings, a half-IPD outside the drawn optics. A `wlx taskd` run's
+    #: pre-flight lists them (`Service._preflight`), accepted once a session.
+    setup_warnings: tuple = ()
     #: Rates per second, not per frame (S9/simulate). Roughly: acquires fixation
     #: within a few hundred ms, saccades to a target at a plausible latency, and
     #: breaks fixation about once every twenty seconds of holding.
@@ -731,6 +736,10 @@ class Session:
             "setup": {
                 "view": geometry.view,
                 "half_ipd_cm": geometry.half_ipd_cm,
+                # Whether that half-IPD is the nominal one, read from no settings file (XC-352's
+                # C6): `None` in direct view, which has none.
+                "half_ipd_nominal": (None if geometry.view == "direct"
+                                     else not self.spec.subject_settings),
                 "viewing_distance_cm": geometry.viewing_distance_cm,
                 "half_field_deg": [geometry.half_field_h_deg, geometry.half_field_v_deg],
                 "mask_deg": geometry.mask_deg,

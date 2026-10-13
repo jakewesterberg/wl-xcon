@@ -358,16 +358,14 @@ def test_wlx_check_refuses_a_task_whose_view_it_does_not_know(tmp_path, capsys):
     assert "no findings" not in out
 
 
-def test_wlx_check_refuses_settings_that_a_direct_view_check_would_ignore(capsys):
-    """`--subject-settings` holds the stereoscope's half-IPD. Given with `--view direct`
-    it would be read by nothing and said nowhere; `wlx run` refuses it, in the same
-    sentence (final review, item 5)."""
-    with pytest.raises(SystemExit) as refused:
-        main(["check", GOOD, "--rig", RIG_FILE, "--allocation", ALLOCATION,
-              "--view", "direct", "--subject-settings", "tasks/reference_subject.py"])
+def test_wlx_check_warns_of_settings_that_a_direct_view_check_ignores(capsys):
+    """`--subject-settings` holds the stereoscope's half-IPD. Given with `--view direct` it is
+    read by nothing, which a warning says (XC-352's H4; the PI, 2026-10-11), as `wlx run`'s does."""
+    assert main(["check", GOOD, "--rig", RIG_FILE, "--allocation", ALLOCATION,
+                 "--view", "direct", "--subject-settings", "tasks/reference_subject.py"]) == 0
 
-    assert str(refused.value) == cli._DIRECT_READS_NO_SETTINGS
-    assert str(refused.value).startswith("refused: --subject-settings holds")
+    out = capsys.readouterr().out
+    assert "warning  settings not read" in out and "direct view reads nothing from it" in out
 
 
 def test_wlx_check_of_an_either_task_on_an_unmeasured_direct_view_points_at_the_other(tmp_path):
@@ -477,13 +475,12 @@ def test_a_rig_or_settings_file_that_defines_nothing_is_refused(tmp_path):
         main(["check", GOOD, "--rig", RIG_FILE, "--subject-settings", str(empty)])
 
 
-def test_subject_settings_for_another_animal_are_refused(tmp_path):
-    """Review Focus 3."""
+def test_subject_settings_load_whoever_they_name(tmp_path):
+    """XC-352's C8 (the PI, 2026-10-11): another animal's settings are a warning
+    (`warnlist.of_setup`), so the loader reads them, naming whose they are."""
     from wl_xcon.cli import _load_subject_settings
 
-    with pytest.raises(SystemExit) as exited:
-        _load_subject_settings(Path("tasks/reference_subject.py"), "B")
-    assert "'REFERENCE'" in str(exited.value) and "'B'" in str(exited.value)
+    assert _load_subject_settings(Path("tasks/reference_subject.py")).subject == "REFERENCE"
 
 
 def test_review_renders_the_artifact(capsys):
@@ -2449,24 +2446,39 @@ def test_wlx_run_says_its_warnings_through_the_terminal_guard(tmp_path, monkeypa
     assert "\x1b" not in str(refused.value)
 
 
-def test_wlx_run_in_the_stereoscope_needs_the_animals_settings(tmp_path):
+def _warned(tmp_path) -> list[str]:
+    path = tmp_path / "2027-01-14_01" / "xcon" / "warnings.jsonl"
+    return [json.loads(line)["code"] for line in path.read_text().splitlines()]
+
+
+def test_wlx_run_in_the_stereoscope_without_settings_runs_on_the_nominal_half_ipd(tmp_path):
+    """XC-352's C6 (the PI, 2026-10-11): a warning, accepted by the flag; the record says the
+    half-IPD was nominal."""
     argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm())
+    argv[argv.index("tasks/fixation_detection.py")] = _either_task(tmp_path, 10.0)
     argv[argv.index("direct")] = "stereoscope"
 
-    with pytest.raises(SystemExit, match="needs --subject-settings"):
-        main(argv)
+    assert _main_uninterrupted(argv) == 0
+
+    assert "nominal half-IPD" in _warned(tmp_path)
+    setup = json.loads((tmp_path / "2027-01-14_01" / "xcon" / "config.json").read_text())["setup"]
+    assert (setup["half_ipd_cm"], setup["half_ipd_nominal"]) == (1.6, True)
 
 
-def test_wlx_run_refuses_subject_settings_in_direct_view(tmp_path):
-    """Direct view reads nothing from them, and accepting them would say it did."""
+def test_wlx_run_warns_of_subject_settings_in_direct_view_and_records_none(tmp_path):
+    """XC-352's H4: direct view reads nothing from them, which a warning says; the record names
+    no settings file, since none was read."""
     argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm(), "--subject-settings", "tasks/reference_subject.py")
 
-    with pytest.raises(SystemExit, match="direct view reads nothing from it"):
-        main(argv)
+    assert _main_uninterrupted(argv) == 0
+
+    assert "settings not read" in _warned(tmp_path)
+    config = json.loads((tmp_path / "2027-01-14_01" / "xcon" / "config.json").read_text())
+    assert config["versions"]["subject_settings"] == ""
 
 
-def test_wlx_run_refuses_another_animals_settings(tmp_path):
-    """Review Focus 3, through `wlx run`."""
+def test_wlx_run_runs_on_another_animals_settings_with_a_warning(tmp_path):
+    """XC-352's C8 (the PI, 2026-10-11), through `wlx run`."""
     other = tmp_path / "b.py"
     other.write_text(
         "from wl_xcon.geometry import SubjectSettings\n"
@@ -2474,10 +2486,12 @@ def test_wlx_run_refuses_another_animals_settings(tmp_path):
         encoding="utf-8",
     )
     argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm(), "--subject-settings", str(other))
+    argv[argv.index("tasks/fixation_detection.py")] = _either_task(tmp_path, 10.0)
     argv[argv.index("direct")] = "stereoscope"
 
-    with pytest.raises(SystemExit, match="holds 'B'"):
-        main(argv)
+    assert _main_uninterrupted(argv) == 0
+
+    assert "another animal's settings" in _warned(tmp_path)
 
 
 def test_wlx_run_refuses_direct_view_on_a_rig_whose_housings_are_unmeasured(tmp_path):
