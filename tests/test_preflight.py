@@ -169,7 +169,8 @@ def test_a_repeated_code_is_named_once_with_its_count_in_the_order_codes_first_a
     ("given", "result", "said"),
     [
         ({"fix_hold": 0.3}, "pass", "each declared and in range"),
-        ({"fix_hold": 99.0}, "fail", "outside"),
+        # Outside its range: a warning, never this item's fail (XC-352's D2; `preflight.beyond`).
+        ({"fix_hold": 99.0}, "pass", "1 outside its declared range ('fix_hold')"),
         ({"no_such": 1.0}, "fail", "not a parameter this task declares"),
         ({"fix_hold": "long"}, "fail", "takes a number"),
         ({"fix_hold": float("nan")}, "fail", "not a real number"),
@@ -208,7 +209,8 @@ def test_a_value_whose_declaration_cannot_be_compared_fails_rather_than_raising(
 
     assert (item.name, item.result) == ("starting values", "fail")
     assert "'fix_hold' could not be checked against its declaration: TypeError: " in item.said
-    assert "'fix_acquisition' is declared over [0.5, 10.0] s and 99.0 is outside it" in item.said
+    # Outside its range, a warning (XC-352's D2): never among this item's fails.
+    assert "'fix_acquisition'" not in item.said
 
 
 def test_declarations_that_cannot_be_read_fail_every_value_rather_than_raising():
@@ -526,20 +528,47 @@ def _unchecked(trial, name: str, start: float):
     return dataclasses.replace(trial, params=params)
 
 
-def test_a_tasks_own_start_outside_its_range_fails_as_a_sent_value_does():
+def test_a_tasks_own_start_outside_its_range_is_held_as_a_sent_value_is():
     """`Param` refuses such a start as the task is built (m2), so a task file cannot
-    declare one; the pre-flight still holds every merged value to its range."""
+    declare one; the pre-flight still holds every merged value to its range, which outside it
+    is a warning since XC-352's D2 (the PI, 2026-10-11)."""
     with pytest.raises(ValueError, match="'fix_hold'.*99.0 is above"):
         _starting(fix_hold=99.0)
     item = preflight.values(_as_task(_unchecked(_trial(), "fix_hold", 99.0)), {})
 
-    assert item.result == "fail"
-    assert "'fix_hold' is declared over [0.05, 2.0] s and 99.0 is outside it" in item.said
+    assert item.result == "pass" and "1 outside its declared range ('fix_hold')" in item.said
     assert preflight.values(
         _as_task(_unchecked(_trial(), "fix_hold", 99.0)), {"fix_hold": 0.3}
-    ).result == "pass", (
+    ).said == "10 starting value(s), each declared and in range", (
         "what was sent is what the run starts with"
     )
+
+
+def test_a_starting_value_outside_its_range_is_checked_widened_and_what_breaks_fails_the_item():
+    """XC-352's D2 (the PI, 2026-10-11): the load-time checks run again with the range widened to
+    the value (`preflight.beyond`); what breaks the run -- here the target off direct view's
+    screen -- fails the starting values item, saying which value, and the rest are warnings."""
+    task = _load_task(TASK)
+
+    off = preflight.beyond(task, {"target_x": 40.0}, ALLOCATION, DIRECT, SRGB, None)
+    wide = preflight.beyond(task, {"fix_window": 7.0}, ALLOCATION, DIRECT, SRGB, None)
+    item = preflight.values(task, {"target_x": 40.0}, [f for f in off if f.blocking])
+
+    assert [(f.code, f.blocking) for f in wide] == [("outside-range", False)]
+    assert {f.code for f in off if f.blocking} == {"stimulus-off-screen"}
+    assert item.result == "fail"
+    assert "stimulus-off-screen: with 'target_x' at 40, outside its declared range: " in item.said
+
+
+def test_a_check_that_cannot_run_widened_fails_closed(tmp_path, monkeypatch):
+    """Nothing a task's declarations hold raises out of the pre-flight: a widened check that
+    raises refuses the value, naming why."""
+    monkeypatch.setattr(preflight, "beyond_range", lambda *a, **k: 1 / 0)
+
+    (refusal,) = preflight.beyond(_load_task(TASK), {"fix_window": 7.0}, ALLOCATION, DIRECT, SRGB, None)
+
+    assert refusal.blocking and refusal.code == "outside-range"
+    assert "could not be run again with the range widened (ZeroDivisionError" in refusal.detail
 
 
 def test_a_parameter_used_but_never_declared_fails_naming_it():

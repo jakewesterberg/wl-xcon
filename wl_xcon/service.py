@@ -1101,6 +1101,10 @@ class Service:
             checked = (item,)
         except Exception as broken:  # noqa: BLE001 -- see the docstring
             checked, loaded, findings = _unfinished((_preflight.TASK_CHECKS,), broken), None, []
+        # Starting values outside their declared ranges, checked widened (XC-352's D2): its
+        # warnings join the run's, and what breaks the run fails the starting values item.
+        beyond = _preflight.beyond(loaded, values, self.allocation, session.spec.geometry,
+                                   session.spec.calibration, session.spec.deployment)
 
         def warned():
             try:
@@ -1122,7 +1126,7 @@ class Service:
                     ),
                 )
             item, found = _preflight.warnings(
-                rig + warnlist.of_findings(findings),
+                rig + warnlist.of_findings(findings + beyond),
                 session.spec.session_kind,
                 session.accepted_keys(),
             )
@@ -1135,7 +1139,8 @@ class Service:
                 *checked,
                 *_contained((_preflight.WARNINGS,), warned),
                 *_contained(
-                    (_preflight.STARTING_VALUES,), lambda: _preflight.values(loaded, values)
+                    (_preflight.STARTING_VALUES,),
+                    lambda: _preflight.values(loaded, values, [f for f in beyond if f.blocking]),
                 ),
                 *_contained(
                     (_preflight.BOUNDED_CONFIG,)

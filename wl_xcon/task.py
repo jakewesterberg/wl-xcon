@@ -144,8 +144,10 @@ class Param:
     #: not carried until something records and publishes one, and a start outside
     #: `[low, high]` would run under `wlx run`, which takes no pre-flight (XC-159; the
     #: b3a-2 final review, m2). A bound that is not a real number is left to
-    #: `preflight.values`, which holds the merged values to `[low, high]` again and fails
-    #: closed on a bound it cannot compare. `None`, the default, leaves it to whoever
+    #: `preflight.values`, which holds the merged values to `[low, high]` again -- one outside
+    #: it a warning since XC-352's D2 (2026-10-11), unless the checks widened to it refuse it
+    #: (`preflight.beyond`) -- and fails closed on a bound it cannot compare. `None`, the
+    #: default, leaves it to whoever
     #: starts the run -- and a `wlx taskd` run whose trials use a number nobody gave is
     #: refused by its pre-flight (`preflight.values`), not faulted at its first trial.
     start: object = None

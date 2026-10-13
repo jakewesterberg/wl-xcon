@@ -123,7 +123,9 @@ def check_task(
     for name, structure in task.structures.items():
         for finding in check(structure, allocation, components, geometry, calibration):
             findings.append(
-                dataclasses.replace(finding, detail=f"in structure {name!r}: {finding.detail}")
+                dataclasses.replace(
+                    finding, detail=f"in structure {name!r}: {finding.detail}",
+                    subjects=tuple(f"{name}: {subject}" for subject in finding.subjects))
                 if several else finding
             )
     return (
@@ -135,6 +137,142 @@ def check_task(
         + _hash_faults(task)
         + _head_faults(task, deployment)
     )
+
+
+#: The findings a value outside its declared range is refused for when it newly causes them,
+#: beside every finding that blocks: what the PI named as breaking the run (2026-10-11, XC-352's
+#: D2: "refuse only what would break the run (off screen, windows colliding, colors unmakeable),
+#: saying what"). Each is a warning at load, within the declared ranges, since his rulings on
+#: A8, A9 and A20 the same day, and so is one that is about nothing new (`Finding.subjects`: the
+#: same pair of windows, array or color, only larger); off screen (`stimulus-off-screen`)
+#: already blocks.
+BREAKS_A_RUN = ("overlapping-windows", "crowded-array", "unrealizable-color")
+
+#: The trial cap, as a `longer-than-declared` warning says it: `run.run_trial`'s `max_frames`
+#: backstop, 100,000 frames, about 417 s at the 240 Hz `wlx taskd` runs at (computed). Build C2a
+#: makes it five minutes at the session's rate (engine spec §6.8), and this changes with it.
+TRIAL_CAP = "the trial cap, 100,000 frames (about 417 s at 240 Hz)"
+
+
+def _outside(param: Param, value: object) -> bool:
+    """Whether `value` is a finite number outside the range `param` declares (a setting with
+    choices has none)."""
+    if param.choices or isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    if not math.isfinite(value):
+        return False
+    return ((param.low is not None and value < param.low)
+            or (param.high is not None and value > param.high))
+
+
+def _waits(task: Task) -> tuple[set[str], float]:
+    """The settings a trial waits on -- an `After`'s or a `Hold`'s seconds -- and the longest wait
+    the task declares: the highest bound any of them declares, or its longest literal wait."""
+    declared = {param.name: param for param in task.params}
+    names: set[str] = set()
+    longest = 0.0
+    for structure in task.structures.values():
+        for state in structure.states:
+            for edge in state.go:
+                if not isinstance(edge.guard, (After, Hold)):
+                    continue
+                seconds = edge.guard.seconds
+                if isinstance(seconds, P):
+                    names.add(seconds.name)
+                    param = declared.get(seconds.name)
+                    if param is not None and _is_number(param.high):
+                        longest = max(longest, float(param.high))
+                elif _is_number(seconds):
+                    longest = max(longest, float(seconds))
+    return names, longest
+
+
+def widened(task: Task, values) -> Task:
+    """`task` with each numeric setting's declared range stretched to take its number in
+    `values`, every structure alike: what the load-time checks are run again against for a value
+    outside its range (the PI, 2026-10-11, XC-352's D2). A setting with choices, a value that is
+    no finite number, a name the task does not declare and a value inside its range leave its
+    declaration as it is."""
+    def wide(param: Param) -> Param:
+        value = values.get(param.name)
+        if not _outside(param, value):
+            return param
+        low = value if param.low is not None and value < param.low else param.low
+        high = value if param.high is not None and value > param.high else param.high
+        return dataclasses.replace(param, low=low, high=high, start=None)
+
+    return dataclasses.replace(task, structures={
+        name: dataclasses.replace(structure, params=[wide(p) for p in structure.params])
+        for name, structure in task.structures.items()
+    })
+
+
+def beyond_range(
+    task: Task,
+    values,
+    allocation: Allocation = PROVISIONAL,
+    components: Registry | None = None,
+    geometry: Geometry | None = None,
+    calibration: Calibration | None = None,
+    deployment: Deployment | None = None,
+) -> list[Finding]:
+    """**A value outside its declared range** (the PI, 2026-10-11, XC-352's D2: "re-run the
+    load-time checks with the range widened to the new value; accept with a warning that the task
+    was not designed for it if nothing breaks; refuse only what would break the run (off screen,
+    windows colliding, colors unmakeable), saying what"): for each, a warning, `outside-range`,
+    and for a wait longer than any the task declares a second, `longer-than-declared` (`_waits`;
+    the PI, 2026-10-12: "Allow, with a warning"), each accepted in every kind. Then each finding
+    the task widened to them gives that the task as declared does not, saying which values
+    caused it: **refused** when it blocks, or when it is one `BREAKS_A_RUN` names about something
+    the declared task's findings are not (`Finding.subjects`); otherwise a warning, among them a
+    value that only enlarges an overlap or a clip the task was accepted with at load. Nothing
+    when every value is inside its range. The ranges are what every load-time proof is made over
+    (S1 §9's "a check against declared ranges proves an experimenter cannot break it from the
+    console"), so the checks run again, twice, here: at a run's start (`preflight.beyond`) and on
+    a live edit (`Session.set`)."""
+    declared = {param.name: param for param in task.params}
+    outside = {name: value for name, value in values.items()
+               if name in declared and _outside(declared[name], value)}
+    if not outside:
+        return []
+    # **A wait longer than any the task declares is a warning**, one per wait (the PI, 2026-10-12,
+    # on the plan's call 4: "Allow, with a warning"): stop, pause and the out-of-cage limit are
+    # heard between trials, never inside one, until they are checked about once a second inside
+    # a trial (WEL-11; engine spec §6.8; XC-373), when this sentence changes, as it does with
+    # build C2a's five-minute cap (`TRIAL_CAP`).
+    waits, longest = _waits(task)
+    findings: list[Finding] = []
+    for name, value in outside.items():
+        findings.append(Finding("outside-range", (
+            f"{name!r} is {value:g} {declared[name].unit}, outside the [{declared[name].low}, "
+            f"{declared[name].high}] the task declares, so the task was not designed for it: its "
+            f"load-time checks were proved only over that range, and were run again with the "
+            f"range widened to {value:g}"), blocking=False, accepted_in=SESSION_KINDS))
+        if name in waits and value > longest:
+            findings.append(Finding("longer-than-declared", (
+                f"{name!r} at {value:g} s is a wait longer than any the task declares (its "
+                f"longest, {longest:g} s), and a stop, a pause and the out-of-cage limit are heard "
+                f"only between trials: while a trial waits on {name!r} they go unheard until that "
+                f"trial ends, and {TRIAL_CAP} ends any trial still running then, with no outcome "
+                f"(a hang)"), blocking=False, accepted_in=SESSION_KINDS))
+    said = ", ".join(f"{name!r} at {value:g}" for name, value in outside.items())
+    before = check_task(task, allocation, components, geometry, calibration, deployment)
+    # What the declared task's findings are about (the warnings-over-refusals review's I5): a
+    # finding of `BREAKS_A_RUN` about the same thing, only larger, was accepted with the task.
+    known = {(finding.code, subject) for finding in before for subject in finding.subjects}
+    for finding in check_task(widened(task, outside), allocation, components, geometry,
+                              calibration, deployment):
+        if finding in before or not (finding.blocking or finding.is_warning):
+            continue
+        detail = f"with {said}, outside its declared range: {finding.detail}"
+        new = [subject for subject in finding.subjects if (finding.code, subject) not in known]
+        if finding.blocking or (finding.code in BREAKS_A_RUN and (new or not finding.subjects)):
+            if len(finding.subjects) > 1:
+                detail += f" (new with this value: {'; '.join(new)})"
+            findings.append(Finding(finding.code, detail))
+        else:
+            findings.append(dataclasses.replace(finding, detail=detail))
+    return findings
 
 
 def _structure_faults(task: Task) -> list[Finding]:
@@ -2582,6 +2720,7 @@ def _overlapping_windows(trial: Trial) -> list[Finding]:
                             f"a look at one can count as the other",
                             blocking=False,
                             accepted_in=SESSION_KINDS,
+                            subjects=(f"state {state.name!r}: {pair[0]!r} and {pair[1]!r}",),
                         )
                     )
     return findings
@@ -2667,6 +2806,7 @@ def _crowded_arrays(trial: Trial) -> list[Finding]:
                     f"saccade to one would be scored against another",
                     blocking=False,
                     accepted_in=SESSION_KINDS,
+                    subjects=(f"array {declared.of!r}",),
                 )
             )
     return findings

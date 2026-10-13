@@ -1630,6 +1630,30 @@ def test_a_stereoscope_session_runs_on_its_settings_warnings_once_they_are_accep
                                     "half-IPD outside the optics": 2.0}[code]
 
 
+def test_a_starting_value_outside_its_range_starts_with_a_warning_unless_it_breaks_the_run(tmp_path):
+    """XC-352's D2 (the PI, 2026-10-11: "re-run the load-time checks with the range widened to the
+    new value; accept with a warning that the task was not designed for it if nothing breaks;
+    refuse only what would break the run"): a fixation window of 7° (declared 0.5-5°) asks for its
+    warning and starts once accepted, `warnings.jsonl` recording it; a target at 40° (declared
+    ±16°) is off direct view's screen, and the start is refused, saying so."""
+    service = _service(tmp_path)
+    _step(service, _open())
+
+    off = _step(service, _start(values={**VALUES, "target_x": 40.0}))
+    wide = _step(service, CheckRun(by=BY, task=TASK, values={**VALUES, "fix_window": 7.0}))
+    started = _step(service, _start(values={**VALUES, "fix_window": 7.0}))
+
+    assert off.run_index is None
+    assert ("starting values: stimulus-off-screen: with 'target_x' at 40, outside its declared "
+            "range: ") in _refused(off)[-1]
+    items = {i.name: i for i in wide.preflight.items}
+    assert items["starting values"].result == "pass" and items["warnings"].result == "unknown"
+    assert "outside-range: 'fix_window' is 7 deg, outside the [0.5, 5.0]" in items["warnings"].said
+    assert started.run_index == 0
+    rows = _jsonl(service.root / "2027-01-14_01" / "xcon" / "warnings.jsonl")
+    assert [r["how"] for r in rows if r["code"] == "outside-range"] == ["start"]
+
+
 def test_a_task_whose_declarations_are_malformed_fails_its_preflight_and_the_service_goes_on(
     tmp_path,
 ):
@@ -1804,7 +1828,8 @@ def test_an_acknowledged_run_starts_records_who_acknowledged_what_and_ends_betwe
 @pytest.mark.parametrize(
     ("over", "item"),
     [
-        ({"values": {**VALUES, "fix_hold": 99.0}}, "starting values"),
+        # Off the screen: a starting value outside its range that breaks the run (XC-352's D2).
+        ({"values": {**VALUES, "target_x": 40.0}}, "starting values"),
         ({"values": {**VALUES, "no_such": 1.0}}, "starting values"),
         ({"task": "empty.py"}, "task checks"),
     ],

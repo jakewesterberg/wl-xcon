@@ -34,8 +34,9 @@ from wl_xcon import link as _link
 from wl_xcon import warnlist
 from wl_xcon.actor import Actor, Box, Member
 from wl_xcon.bounds import Exceeded
-from wl_xcon.check import check_task, parameters_used
+from wl_xcon.check import beyond_range, check_task, parameters_used
 from wl_xcon.cli import _load_bounds, _load_subject_settings, _load_task, _setup_words
+from wl_xcon.findings import Finding
 from wl_xcon.link import Preflight, PreflightItem
 from wl_xcon.task import Task
 from wl_xcon.welfare import OUT_OF_CAGE, Absent, Simulated
@@ -171,13 +172,40 @@ def warnings(entries, kind: str, accepted) -> tuple[PreflightItem, list]:
     ), []
 
 
-def values(task: Task | None, given: dict) -> PreflightItem:
+def starting(task: Task, given: dict) -> dict:
+    """A run's starting values: its task's own (`Param.start`), with what a console sent over
+    them (P4d-2b spec §6.2; S8 §3.4)."""
+    starts = {param.name: param.start for param in task.params if param.start is not None}
+    return {**starts, **given}
+
+
+def beyond(task: Task | None, given: dict, allocation, geometry, calibration, deployment) -> list:
+    """**A run's starting values outside their declared ranges** (the PI, 2026-10-11, XC-352's D2):
+    the load-time checks run again with each range widened to its value (`check.beyond_range`),
+    the session's setup, calibration and deployment theirs. Its warnings join the run's warnings
+    item and what blocks fails the starting values item (`values`). **Nothing raises out of
+    here**: a check that does not finish refuses the values, naming why."""
+    if task is None:
+        return []
+    try:
+        return beyond_range(task, starting(task, given), allocation, geometry=geometry,
+                            calibration=calibration, deployment=deployment)
+    except Exception as broken:  # noqa: BLE001 -- the checks run on code; their fault refuses
+        return [Finding("outside-range", (
+            f"a starting value is outside its declared range, and the load-time checks could not "
+            f"be run again with the range widened ({type(broken).__name__}: {broken})"))]
+
+
+def values(task: Task | None, given: dict, refused=()) -> PreflightItem:
     """A run's starting values -- its task's own (`Param.start`), with what a console
     sent over them (P4d-2b spec §6.2; S8 §3.4) -- against the task's declarations, the union of
     its trial structures' (engine spec §3.5):
-    **fail** for a name it does not declare, a word where it takes a number, a number
-    outside its range, a choice it does not offer, or a declaration it cannot be
-    compared with; and **for a number the task uses that nothing gives a value** (the
+    **fail** for a name it does not declare, a word where it takes a number, a choice it does
+    not offer, or a declaration it cannot be compared with; for what `refused` holds, the
+    findings that block once the checks are run again with a range widened to a value outside
+    it (`beyond`; the PI, 2026-10-11, XC-352's D2: a value outside its range is a warning,
+    never this item's fail, unless it breaks the run); and **for a number the task uses that
+    nothing gives a value** (the
     b3a-2 plan, decision 2): a run started without one faults at its first trial
     (`run._resolve`), after `RUN_START`, so it is refused here instead, naming each. A
     categorical parameter is an appearance, which nothing in this build resolves before
@@ -205,7 +233,7 @@ def values(task: Task | None, given: dict) -> PreflightItem:
             f"{type(broken).__name__}: {broken}",
         )
     merged = {**starts, **given}
-    wrong = []
+    wrong, outside = [], []
     for name, value in merged.items():
         param = declared.get(name)
         # **Fails closed per value** (the b3a-1 final review, Important 1): `Param` checks
@@ -225,10 +253,7 @@ def values(task: Task | None, given: dict) -> PreflightItem:
             elif (param.low is not None and value < param.low) or (
                 param.high is not None and value > param.high
             ):
-                wrong.append(
-                    f"{name!r} is declared over [{param.low}, {param.high}] {param.unit} and "
-                    f"{value} is outside it"
-                )
+                outside.append(name)
         except Exception as broken:  # noqa: BLE001 -- see above
             wrong.append(
                 f"{name!r} could not be checked against its declaration: "
@@ -243,8 +268,14 @@ def values(task: Task | None, given: dict) -> PreflightItem:
                 f"{name!r} is used by the task and has no starting value: the task "
                 f"declares none, and none was sent"
             )
+    wrong += [f"{f.code}: {f.detail}" for f in refused]
     if wrong:
         return PreflightItem(STARTING_VALUES, FAIL, "; ".join(wrong))
+    if outside:
+        return PreflightItem(STARTING_VALUES, PASS, (
+            f"{len(merged)} starting value(s), each declared; {len(outside)} outside its declared "
+            f"range ({', '.join(repr(name) for name in outside)}), a warning the warnings item "
+            f"asks to accept"))
     return PreflightItem(
         STARTING_VALUES, PASS, f"{len(merged)} starting value(s), each declared and in range"
     )
