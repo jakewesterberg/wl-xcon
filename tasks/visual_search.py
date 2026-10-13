@@ -13,9 +13,11 @@ pop-out into a shape pop-out between one trial and the next, with the same task
 running and the same structure recorded.
 
 `target_appearance` and `distractor_appearance` are isoluminant by construction -- `DKL(lum=0)` --
-which is a claim about photometry, so this task **runs only on a measured display calibration that
-carries its primaries' spectra** (engine spec §7.3; engine build A2): on the default it is refused
-in every kind of session. Its red and green are the PI's 2023 pop-out objects' (Westerberg et al.
+which is a claim about photometry, so this task **is meant for a measured display calibration that
+carries its primaries' spectra** (engine spec §7.3; engine build A2). On the default it runs with
+warnings that its colors are only nominally isoluminant and that the panel clips its red and green
+(the PI's rulings of 2026-10-11, XC-352's A19 and A20; refused in every kind of session until
+then). Its red and green are the PI's 2023 pop-out objects' (Westerberg et al.
 2023, Methods, "Task design: Pop-out search"), made isoluminant in the lab's observer, as
 contrasts about `BACKGROUND`, the gray the array is shown on (spec §7.5; the engine A2 plan's
 Q1). No calibration for our panels exists yet.
@@ -85,7 +87,10 @@ ARRAY = Stimulus(
 #: rig's measured screen makes with a small margin. On sRGB-like primaries at an 80 cd/m² white,
 #: RED, made mostly by the red primary with a little green beside it, needs that primary at full
 #: drive on a 17.7 cd/m² gray, so 16 leaves 9.4% (computed 2026-10-10); re-set when the panels
-#: are measured (XC-310). The fixation point's starting 40 cd/m² stays
+#: are measured (XC-310). **Both are just outside the sRGB standard's gamut all the same**: a
+#: primary goes negative in each -- RED's blue (-0.006), GREEN's red and blue (-0.0034, -0.0054;
+#: computed 2026-10-10) -- so the default's panel clips them, which `check` warns of (XC-352's
+#: A20). The fixation point's starting 40 cd/m² stays
 #: brighter (Weber +1.5).
 BACKGROUND = Gray(16.0)
 

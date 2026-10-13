@@ -1527,6 +1527,28 @@ def test_a_direct_view_task_runs_in_the_stereoscope_once_its_setup_warning_is_ac
     assert [row["how"] for row in warned if row["code"] == "wrong-setup"] == ["start"]
 
 
+def test_the_search_task_runs_on_the_default_and_records_the_light_the_panel_shows(tmp_path):
+    """XC-352's A19 and A20 (the PI, 2026-10-11): the search task's isoluminant red and green,
+    just outside the sRGB standard's gamut, are warnings, not refusals; once accepted the run
+    starts, and `warnings.jsonl` records each color asked for beside the light the panel shows."""
+    service = _service(tmp_path)
+    shutil.copy("tasks/visual_search.py", service.tasks)
+    _step(service, _open())
+
+    checked = _step(service, CheckRun(by=BY, task="visual_search.py", values=dict(SEARCH_VALUES)))
+    started = _step(service, _start(task="visual_search.py", values=dict(SEARCH_VALUES)))
+
+    items = {i.name: i for i in checked.preflight.items}
+    assert items["task checks"].result == "pass" and items["warnings"].result == "unknown"
+    assert started.run_index == 0
+    rows = _jsonl(service.root / "2027-01-14_01" / "xcon" / "warnings.jsonl")
+    # One warning naming each color asked for and the light the panel shows, each light once
+    # (the warnings-over-refusals review's M8): the search task's red and green.
+    (clipped,) = [r["detail"] for r in rows if r["code"] == "unrealizable-color"]
+    assert clipped.count(" ask for DKL(") == 2 and clipped.count("so the panel shows x=") == 2
+    assert len(items["warnings"].said) < 3_000, "5,392 with one per light and per isoluminant color"
+
+
 def test_a_task_whose_declarations_are_malformed_fails_its_preflight_and_the_service_goes_on(
     tmp_path,
 ):

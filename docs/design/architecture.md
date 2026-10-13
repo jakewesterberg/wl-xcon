@@ -505,7 +505,8 @@ checksum is the CIE's, ADR-0012), turned into CIE XYZ through the session's cali
 measured record through its primaries' spectra (ADR-0011). `check` holds every light to the panel
 by full conversion against every lit value of its background, and the exact drawer's last step
 turns each pixel into output levels through the calibration's measured, black-subtracted transfer
-(`exact.output_levels`), refusing one the panel cannot make. Each session's `config.json` records
+(`exact.output_levels`), clipping one the panel cannot make, whose light `exact.shown` gives and
+`check`'s `unrealizable-color` warning names (the PI, 2026-10-11, XC-352's A20). Each session's `config.json` records
 the observer, how its cone colors converted and which luminance their isoluminance held.
 
 ## Neural plane and stimulation

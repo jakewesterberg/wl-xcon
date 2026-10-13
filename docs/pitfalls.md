@@ -214,7 +214,11 @@ which refused it in recording; engine spec §7.2); isoluminance on the default i
 every session that the colours are only nominally isoluminant (XC-352's A19; §7.3). Since engine build A2 any other cone color converts on the default through
 the CIE's matrix, a use outside its definition that the warning names (A2's Q2), and on a
 measured calibration through its primaries' measured spectra; a cone color on a black
-background is refused. A measured calibration is taken with a **spectroradiometer** (engine spec §12 item 1),
+background is refused. **A light the panel cannot make is a warning naming the light it shows**
+(the PI, 2026-10-11, XC-352's A20): the clipping this pitfall is about is no longer silent, and
+the exact drawer clips it (`exact.output_levels`) and gives the light shown (`exact.shown`);
+recording that light per frame waits on the display process and the screen log (engine builds E
+and F). A measured calibration is taken with a **spectroradiometer** (engine spec §12 item 1),
 written as one JSON record (ADR-0011).
 
 **Whose luminous efficiency is still the risk.** Isoluminance is defined against a

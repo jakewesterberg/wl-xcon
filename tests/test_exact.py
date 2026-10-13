@@ -574,19 +574,32 @@ def test_a_straight_line_transfer_gives_the_weights_themselves():
     assert exact.output_levels(_pixels(light), panel)[0, 0] == pytest.approx(panel.weights(light))
 
 
-def test_a_pixel_the_panel_cannot_make_is_refused_never_clipped():
-    with pytest.raises(ValueError, match=r"^1 pixel\(s\) need a primary weight outside \[0, 1\]"):
-        exact.output_levels(_pixels(Gray(40.0), Gray(SRGB_WHITE_CD_M2 + 1.0)), SRGB)
+def test_a_pixel_the_panel_cannot_make_is_clipped_and_shown_as_the_light_it_makes():
+    """XC-352's A20 (the PI, 2026-10-11: "a warning, and the drawer records the light actually
+    shown beside the one asked for"): each primary weight is clipped to [0, 1], never refused, and
+    `shown` gives the light the clipped levels make -- the panel's white for a gray brighter than
+    it -- and the light asked for wherever the panel makes it."""
+    image = _pixels(Gray(40.0), Gray(SRGB_WHITE_CD_M2 + 1.0))
+
+    out = exact.output_levels(image, SRGB)
+    seen = exact.shown(image, SRGB)
+
+    assert out[0, 1] == pytest.approx((1.0, 1.0, 1.0), abs=1e-12)
+    assert seen.shape == image.shape
+    assert seen[0, 0] == pytest.approx(image[0, 0])
+    assert seen[0, 1] == pytest.approx(to_xyz(Gray(SRGB_WHITE_CD_M2)))
+    assert seen[0, 1, 1] < image[0, 1, 1]
 
 
-def test_a_pixel_that_is_not_a_number_is_refused_too():
-    """A NaN fails every comparison, so a range check written as "any weight out of range"
-    would pass it; this one asks that every weight be in range."""
+def test_a_pixel_that_is_not_a_number_is_refused_never_clipped():
+    """A NaN fails every comparison and has nothing to be clipped to: the drawer and `shown`
+    refuse it."""
     for bad in (np.nan, np.inf):
         image = _pixels(Gray(40.0), Gray(40.0))
         image[0, 1, 1] = bad
-        with pytest.raises(ValueError, match=r"need a primary weight outside"):
-            exact.output_levels(image, SRGB)
+        for drawn in (exact.output_levels, exact.shown):
+            with pytest.raises(ValueError, match=r"^1 pixel\(s\) need a primary weight that is not a number"):
+                drawn(image, SRGB)
 
 
 def _full(panel):
@@ -604,10 +617,11 @@ def test_a_weight_past_full_drive_within_the_tolerance_is_full_drive_exactly():
     assert out[0, 0].tolist() == [1.0, 1.0, 1.0]
 
 
-def test_a_refusal_names_the_farthest_weight_to_more_places_than_the_tolerance():
-    """`{:g}` printed a weight of 1.000002 as "1", a weight in range (the A2 final review's item
-    10)."""
+def test_a_weight_past_full_drive_beyond_the_tolerance_is_clipped_to_full_drive():
+    """Past `TOLERANCE` it is no rounding, and is clipped as any weight outside [0, 1] is
+    (XC-352's A20): full drive, which shows the panel's full white."""
     panel = measured()
+    image = np.array([[(1.0 + 2 * TOLERANCE) * _full(panel)]])
 
-    with pytest.raises(ValueError, match=r"\(the farthest 1\.000002\)"):
-        exact.output_levels(np.array([[(1.0 + 2 * TOLERANCE) * _full(panel)]]), panel)
+    assert exact.output_levels(image, panel)[0, 0].tolist() == [1.0, 1.0, 1.0]
+    assert exact.shown(image, panel)[0, 0] == pytest.approx(_full(panel))

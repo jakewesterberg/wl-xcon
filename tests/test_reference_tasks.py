@@ -390,20 +390,21 @@ def test_each_reference_task_lights_its_achromatic_stimuli_at_40_cd_m2(module, a
 def test_on_the_default_every_reference_task_runs_in_every_kind_with_its_warnings(name):
     """Spec §7.2-7.3 on the four tasks, as the PI revised COL-02 and COL-03 (2026-10-11, XC-352's
     A19 and A21): each runs on the default calibration in every session kind, recording included,
-    with its warnings -- the search task's isoluminant colors among them. **But the search task's
+    with its warnings -- the search task's isoluminant colors among them. **The search task's
     isoluminant red and green are just outside the sRGB standard's gamut** (a primary weight of
-    -0.003 to -0.006), which its isoluminance refusal hid until then: `unrealizable-color` still
-    refuses them here, until a light the panel cannot make is a warning (XC-352's A20)."""
+    -0.003 to -0.006), which its isoluminance refusal hid until then: `unrealizable-color` warns of
+    them, naming the light the panel shows (XC-352's A20)."""
     found = check(_load(name, REFERENCE[name]), _load("allocation", "ALLOCATION"),
                   geometry=GEOMETRY, calibration=SRGB)
 
     refusing = {f.code for f in found if any(f.refuses(kind) for kind in SESSION_KINDS)}
     warned = {f.code for f in found if f.is_warning}
+    assert refusing == set()
     if name == "visual_search":
-        assert refusing == {"unrealizable-color"}
-        assert warned == {"isoluminance-on-default", "color-on-default", "contrast-on-default"}
+        assert warned == {"isoluminance-on-default", "unrealizable-color", "color-on-default",
+                          "contrast-on-default"}
     else:
-        assert refusing == set() and warned == {"contrast-on-default"}
+        assert warned == {"contrast-on-default"}
 
 
 @pytest.fixture(scope="module")

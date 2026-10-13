@@ -1261,6 +1261,8 @@ def _color_faults(trial: Trial, panel: Calibration | None) -> list[Finding]:
     if panel is not None:
         findings += [f for f in _modulation_faults(trial, params, panel, backgrounds)
                      if f not in findings]
+        # One clip warning per task, each light once (`_clips`; the review's M8).
+        findings = _clips(findings)
     if panel is not None and panel.standard:
         findings += _default_faults(trial, params)
     return findings
@@ -1276,9 +1278,10 @@ def _modulation_faults(trial: Trial, params: dict[str, Param], panel: Calibratio
     value a parameter can take, the mean's own included (the plan's review, E-C1: a parameter in
     a cone mean reached `cone_xyz` unbound). **Against the background only** (the plan's call 18):
     drawn over another stimulus, a pattern's mean is that stimulus's light, and a sum of added
-    ones is not known here; the exact drawer refuses a pixel the panel cannot make
+    ones is not known here; the exact drawer clips a pixel the panel cannot make
     (`exact.output_levels`; XC-306). A window, a scotoma and a multiplier
-    draw no light of their own and are left out."""
+    draw no light of their own and are left out. **Each is one part of the task's one warning,
+    naming the light the panel shows** (`_unrealizable`, `_clips`; XC-352's A20)."""
     from wl_xcon.photometry import Michelson, Weber, cone_xyz
 
     combined = _combined(trial, params)
@@ -1288,7 +1291,8 @@ def _modulation_faults(trial: Trial, params: dict[str, Param], panel: Calibratio
         light = xyY(base.x, base.y, base.Y * factor)
         why = unrealizable(light, panel)
         if why is not None:
-            finding = Finding("unrealizable-color", f"{what}'s {said} reaches {light}: {why}")
+            finding = _unrealizable(f"{what}'s {said} reaches {light}", why, light, panel,
+                                    what=what)
             if finding not in findings:
                 findings.append(finding)
 
@@ -1511,14 +1515,92 @@ def _one_color(what: str, color, panel: Calibration | None, backgrounds: list) -
     # recorded with the session; a measured calibration names its own photometry's observer or
     # does not load (`Calibration`), so nothing is left for a finding here (engine build A2).
     if isinstance(color, CONE_COLORS):
-        return [Finding("unrealizable-color", f"{what} asks for {color} on a background of "
-                                              f"{background}: {why}")
+        return [_unrealizable(f"{what} asks for {color} on a background of {background}", why,
+                              color, panel, background, what=what)
                 for background in backgrounds
                 if (why := unrealizable(color, panel, background)) is not None]
     why = unrealizable(color, panel)
     if why is not None:
-        return [Finding("unrealizable-color", f"{what} asks for {color}: {why}")]
+        return [_unrealizable(f"{what} asks for {color}", why, color, panel, what=what)]
     return []
+
+
+def _unrealizable(said: str, why: str, light, panel: Calibration, background=None, *,
+                  what: str) -> Finding:
+    """A light the panel cannot make (engine spec §7.4; COL-08, COL-34, COL-36), `said` naming
+    `what` asks for it, and `why` what `photometry.unrealizable` said of it: **a warning naming the
+    primary weights it needs and the light the panel shows instead**, accepted in every session
+    kind (the PI, 2026-10-11, XC-352's A20: "a warning, and the drawer records the light actually
+    shown beside the one asked for"), which `warnings.jsonl` records with the light asked for once
+    it is accepted: one part of the task's one `unrealizable-color` warning (`_clips`), about
+    `what`. **A light that does not convert at all stays a refusal**, saying `why`: a cone color on
+    a calibration with no cone matrix, or against a black background, or a weight that is no
+    number, has no light to clip (`_clipped`)."""
+    clipped = _clipped(light, panel, background)
+    if clipped is None:
+        return Finding("unrealizable-color", f"{said}: {why}")
+    weights, shown = clipped
+    return Finding("unrealizable-color", (
+        f"{said}: primary weights {weights}, outside [0, 1], so the panel shows {shown}"),
+        blocking=False, accepted_in=SESSION_KINDS, subjects=(what,))
+
+
+def _clips(findings: list[Finding]) -> list[Finding]:
+    """**One `unrealizable-color` warning per task**, where its first part stood, naming each light
+    the panel cannot make, what asks for it and the light it shows (the warnings-over-refusals
+    review's M8: a warning per light ran the search task's warnings item to thousands of
+    characters). A light several things ask for is said once, naming each (`Finding.subjects`). A
+    light that does not convert at all stays its own refusal."""
+    parts = [f for f in findings if f.code == "unrealizable-color" and f.is_warning]
+    if not parts:
+        return findings
+    asking: dict[str, list[str]] = {}
+    for part in parts:
+        (what,) = part.subjects
+        asking.setdefault(part.detail[len(what):], []).append(what)
+    said = []
+    for rest, whats in asking.items():
+        if len(whats) > 1 and rest.startswith(" asks for "):
+            said.append(f"{', '.join(whats[:-1])} and {whats[-1]} ask for "
+                        f"{rest[len(' asks for '):]}")
+        else:
+            said += [what + rest for what in whats]
+    first = findings.index(parts[0])
+    rest = [f for f in findings if f not in parts]
+    return rest[:first] + [Finding("unrealizable-color", (
+        "; ".join(said) + "; the drawer clips each primary weight to [0, 1], and a clipped light "
+        "is neither the chromaticity nor the luminance asked for (engine spec §7.4)"),
+        blocking=False, accepted_in=SESSION_KINDS,
+        subjects=tuple(what for whats in asking.values() for what in whats))] + rest[first:]
+
+
+def _clipped(light, panel: Calibration, background=None) -> "tuple[tuple, str] | None":
+    """The primary weights `light` needs on `panel`, to three places, and the light the panel shows
+    for it, in words: its weights clipped to [0, 1], as the drawer clips a pixel (`exact.shown`)
+    -- or `None` when it names no light the panel can be asked for (a cone color that does not
+    convert, a weight that is no number)."""
+    import numpy as np
+
+    from wl_xcon import exact
+    from wl_xcon.photometry import cone_xyz, to_xyz
+
+    try:
+        if isinstance(light, CONE_COLORS):
+            if background is None:
+                return None
+            xyz = cone_xyz(light, panel, background)
+        elif isinstance(light, xyY):
+            xyz = to_xyz(light)
+        else:
+            return None
+        weights = tuple(round(float(w), 3) for w in panel.weights_of(xyz))
+        X, Y, Z = (float(v) for v in exact.shown(np.array([[xyz]], dtype=float), panel)[0, 0])
+    except (ValueError, TypeError, OverflowError):
+        return None
+    total = X + Y + Z
+    if not total > 0.0:
+        return weights, "black, every primary off"
+    return weights, f"x={X / total:.4f}, y={Y / total:.4f}, Y={Y:.4g} cd/m²"
 
 
 def _default_faults(trial: Trial, params: dict[str, Param]) -> list[Finding]:

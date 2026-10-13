@@ -17,7 +17,7 @@ warning (spec §19.2).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 #: What a session is for (engine spec §19.1; the PI, 2026-10-07: "Sessions say what they are
 #: for"), chosen when it opens. In this order wherever a list of them is written.
@@ -50,6 +50,12 @@ class Finding:
     #: refuses"). Empty for a refusal and for a review note, which no session accepts or
     #: refuses: it asks for a person's review of the task, not of the session.
     accepted_in: tuple[str, ...] = ()
+    #: **What it is about**, where that must be told apart from its sentence, which carries
+    #: numbers: the color each part of a task's one `unrealizable-color` warning names
+    #: (`check._clips`), and, for a value outside its declared range, whether a finding of
+    #: `check.BREAKS_A_RUN` is about something the declared ranges already give
+    #: (`check.beyond_range`). No part of its equality, nor of what a session accepts.
+    subjects: tuple[str, ...] = field(default=(), compare=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.accepted_in, tuple):

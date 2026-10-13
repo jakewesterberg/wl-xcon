@@ -10,10 +10,12 @@ photometry, and a claim nobody measured is a claim that is usually false.
 
 from dataclasses import replace
 
+import numpy as np
+
 import pytest
 
 from _calibrations import LINEAR, measured
-from wl_xcon import cones, look
+from wl_xcon import cones, exact, look
 from wl_xcon.check import _background_lights, check
 from wl_xcon.cones import CIE2006_10
 from wl_xcon.findings import SESSION_KINDS
@@ -29,6 +31,7 @@ from wl_xcon.photometry import (
     Gray,
     Michelson,
     Weber,
+    cone_xyz,
     to_xyz,
     xyY,
 )
@@ -90,7 +93,7 @@ def codes(trial, calibration=PANEL) -> set[str]:
     return {f.code for f in check(trial, calibration=calibration)}
 
 
-def test_a_colour_the_panel_cannot_produce_is_refused():
+def test_a_colour_the_panel_cannot_produce_is_found():
     """Outside the gamut is not a rendering artifact, it is a different stimulus.
 
     A monitor asked for a colour it cannot make clips, silently, and the clipped
@@ -106,7 +109,7 @@ def test_a_colour_inside_the_gamut_is_accepted():
     assert "unrealizable-color" not in codes(a_task(Disc(color=xyY(0.500, 0.400, 30.0))))
 
 
-def test_a_luminance_the_panel_cannot_reach_is_refused():
+def test_a_luminance_the_panel_cannot_reach_is_found():
     """Inside the gamut in chromaticity and still impossible in brightness."""
     assert "unrealizable-color" in codes(a_task(Disc(color=xyY(0.3127, 0.3290, 900.0))))
 
@@ -140,17 +143,30 @@ def test_isoluminance_is_a_named_observers_and_a_calibration_names_its_own():
                     transfer=(LINEAR,) * 3, observer="", measured_on="2026-08-31")
 
 
-def test_a_cone_color_the_panel_cannot_make_on_its_background_is_refused():
+def test_a_cone_color_the_panel_cannot_make_is_a_warning_naming_the_light_it_shows():
     """Full conversion, not a stored maximum (engine spec §7.4; COL-08): a red-green contrast the
-    old 0.85 gate passed is outside the panel's gamut."""
+    old 0.85 gate passed is outside the panel's gamut. **A warning, not a refusal** (COL-08, COL-34
+    and COL-36, revised by the PI on 2026-10-11, XC-352's A20: "a warning, and the drawer records
+    the light actually shown beside the one asked for"), accepted in every kind, its sentence
+    naming the light asked for and the light the panel shows -- the drawer's clipped light
+    (`exact.shown`) -- which `warnings.jsonl` records when it is accepted."""
+    panel = measured()
     trial = replace(a_task(Disc(color=DKL(l_m=-0.5))), background=GRAY_BG)
 
-    found = _found(trial, calibration=measured())
+    warning = _found(trial, calibration=panel)["unrealizable-color"]
 
-    assert found["unrealizable-color"].detail.startswith(
+    assert (warning.blocking, warning.accepted_in) == (False, SESSION_KINDS)
+    assert warning.detail.startswith(
         "Disc asks for DKL(lum=0.0, l_m=-0.5, s_lm=0.0) on a background of "
         "xyY(x=0.3127, y=0.329, Y=20.0)")
-    assert "outside [0, 1]" in found["unrealizable-color"].detail
+    assert "outside [0, 1]" in warning.detail
+    light = cone_xyz(DKL(l_m=-0.5), panel, xyY(*D65, 20.0))
+    X, Y, Z = exact.shown(np.array([[light]]), panel)[0, 0]
+    weights = tuple(round(float(w), 3) for w in panel.weights_of(light))
+    assert (f": primary weights {weights}, outside [0, 1], so the panel shows "
+            f"x={X / (X + Y + Z):.4f}, y={Y / (X + Y + Z):.4f}, Y={Y:.4g} cd/m²") in warning.detail
+    assert warning.detail.endswith(
+        "a clipped light is neither the chromaticity nor the luminance asked for (engine spec §7.4)")
     assert "unrealizable-color" not in _found(
         replace(a_task(Disc(color=DKL(l_m=0.08))), background=GRAY_BG), calibration=measured())
 
@@ -158,7 +174,9 @@ def test_a_cone_color_the_panel_cannot_make_on_its_background_is_refused():
 def test_a_cone_color_on_a_measured_calibration_without_spectra_is_refused():
     trial = replace(a_task(Disc(color=DKL(l_m=0.08))), background=GRAY_BG)
 
-    assert "measured without spectra" in _found(trial, calibration=PANEL)["unrealizable-color"].detail
+    refusal = _found(trial, calibration=PANEL)["unrealizable-color"]
+    # No light to clip: the color does not convert at all, which stays a refusal (XC-352's A20).
+    assert refusal.blocking and "measured without spectra" in refusal.detail
 
 
 def test_a_cone_color_is_realizable_or_not_by_its_background():
@@ -227,7 +245,8 @@ def test_a_cone_table_that_is_not_the_cies_refuses_cone_colors_and_nothing_else(
 
     assert panel.cones is None and "is not the CIE's file" in panel.cones_refused
     trial = replace(a_task(Disc(color=DKL(l_m=0.08))), background=GRAY_BG)
-    assert "is not the CIE's file" in _found(trial, calibration=panel)["unrealizable-color"].detail
+    refusal = _found(trial, calibration=panel)["unrealizable-color"]
+    assert refusal.blocking and "is not the CIE's file" in refusal.detail
     assert _found(a_task(Disc(color=xyY(0.3, 0.35, 20.0))), calibration=panel) == {}
 
 
@@ -279,7 +298,7 @@ def test_each_contrast_names_its_convention():
     assert Weber(0.3) != Michelson(0.3)
 
 
-def test_an_absolute_luminance_the_panel_cannot_reach_is_refused():
+def test_an_absolute_luminance_the_panel_cannot_reach_is_found():
     assert "unrealizable-color" in codes(a_task(Disc(color=Gray(900.0))))
 
 
@@ -293,6 +312,35 @@ def test_a_look_s_colors_are_checked_too():
     looks = look.Look(fill=look.Flat(color=Gray(10.0)),
                       outline=look.Outline(width=0.1, color=xyY(0.72, 0.28, 40.0)))
     assert "unrealizable-color" in codes(a_task(looks))
+
+
+def test_a_light_below_black_is_shown_as_black():
+    """A luminance below 0 has every primary weight below 0: clipped, the panel shows black."""
+    trial = replace(a_task(Disc(color=Gray(P("lum")))),
+                    params=[Param("lum", unit="cd/m2", low=-10.0, high=50.0)])
+
+    (warning,) = [f for f in check(trial, calibration=SRGB) if f.code == "unrealizable-color"]
+
+    assert warning.is_warning
+    assert "so the panel shows black, every primary off; the drawer clips" in warning.detail
+
+
+def test_every_light_the_panel_cannot_make_is_one_warning_saying_each_light_once():
+    """The warnings-over-refusals review's M8: one `unrealizable-color` warning per task, naming
+    each light the panel cannot make, what asks for it and the light it shows; a light that
+    several choices ask for is said once, naming each."""
+    red = xyY(0.72, 0.28, 40.0)
+    found = check(_choosing(Disc(size=1.0, color=red), Square(size=1.0, color=red),
+                            Disc(size=1.0, color=Gray(900.0))), calibration=SRGB)
+
+    (warning,) = [f for f in found if f.code == "unrealizable-color"]
+
+    assert warning.is_warning and warning.detail.count("so the panel shows") == 2
+    assert warning.detail.startswith(
+        "Disc (choice 1 of parameter 'looks') and Square (choice 2 of parameter 'looks') ask for "
+        "xyY(x=0.72, y=0.28, Y=40.0): primary weights")
+    assert ("; Disc (choice 3 of parameter 'looks') asks for xyY(x=0.3127, y=0.329, Y=900.0): "
+            "primary weights") in warning.detail
 
 
 def test_a_luminance_parameter_is_checked_at_both_ends_of_its_range():
@@ -463,11 +511,11 @@ def test_the_default_warning_says_nothing_of_cone_colors_a_task_does_not_use():
     assert "CIE's definition" not in found["color-on-default"].detail
 
 
-def test_a_cone_color_the_default_cannot_make_is_refused_on_it():
+def test_a_cone_color_the_default_cannot_make_is_a_warning_on_it():
     """Not isoluminant (`lum` 0.01), so it converts; the sRGB standard's red cannot go that low."""
     trial = replace(a_task(Disc(color=DKL(lum=0.01, l_m=-0.3))), background=GRAY_BG)
 
-    assert _found(trial)["unrealizable-color"].blocking
+    assert _found(trial)["unrealizable-color"].is_warning
 
 
 def test_a_dkl_color_that_can_be_isoluminant_is_warned_of_on_the_default_whatever_its_parameters():
@@ -927,17 +975,21 @@ def test_a_cone_contrast_names_a_color_on_the_default_as_an_xyy_does():
                                    xyY(0.3, 0.3, 1.7e308)])
 def test_a_color_whose_weights_overflow_is_unrealizable_not_realizable(color):
     """Finite components near the float maximum make weights of infinity or NaN; NaN fails both
-    range comparisons, so the test must fail closed."""
+    range comparisons, so the test must fail closed. **And it stays a refusal** (XC-352's A20):
+    no light can be clipped from a weight that is no number."""
     from wl_xcon.photometry import unrealizable
 
     assert unrealizable(color, measured(), xyY(*D65, 20.0)) is not None
+    trial = replace(a_task(Disc(color=color)), background=GRAY_BG)
+    (refusal,) = [f for f in check(trial, calibration=measured()) if f.code == "unrealizable-color"]
+    assert refusal.blocking and "the panel shows" not in refusal.detail
 
 
 
 # --- The lights a contrast makes, held to the panel's reach (engine build A2) -----------------
 
 
-def test_a_weber_light_brighter_than_the_panel_makes_on_its_background_is_refused():
+def test_a_weber_light_brighter_than_the_panel_makes_on_its_background_is_found():
     """A Weber light is its background times one plus its contrast: +3 on a 30 cd/m² gray is
     120 cd/m², past the sRGB standard's 80 cd/m² white."""
     bright = replace(a_task(Disc(contrast=Weber(3.0))), background=Gray(30.0))
@@ -951,7 +1003,7 @@ def test_a_weber_light_brighter_than_the_panel_makes_on_its_background_is_refuse
     assert "unrealizable-color" not in _found(fits)
 
 
-def test_a_grating_whose_brightest_bar_the_panel_cannot_make_is_refused():
+def test_a_grating_whose_brightest_bar_the_panel_cannot_make_is_found():
     """Michelson 0.8 about a 50 cd/m² gray peaks at 90 cd/m²; about 40, at 72."""
     gabor = Gabor(sf=1.0, sigma=1.0, contrast=Michelson(0.8))
     bright = replace(a_task(gabor), background=Gray(50.0))
@@ -1119,4 +1171,4 @@ def test_a_color_a_looks_fill_or_outline_parameter_offers_is_held_to_the_panels_
     by a fill or an outline parameter, is refused as one written into the `Look` is."""
     found = _found(_offered_by(written, DKL(lum=20.0)), calibration=measured())
 
-    assert found["unrealizable-color"].blocking
+    assert found["unrealizable-color"].is_warning
