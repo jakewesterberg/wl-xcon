@@ -1481,6 +1481,26 @@ def test_a_chaired_runs_head_warning_is_on_the_page_whole_before_it_is_accepted(
     assert "no head tracking, so" in panel and "(engine spec §20.1)" in panel
 
 
+def test_a_task_with_a_state_nothing_reaches_runs_and_is_asked_nothing_about_it(tmp_path):
+    """XC-352's A7 (the PI, 2026-10-11): dead code -- a state no transition reaches -- can never
+    take effect, so it is a review note: `wlx check` shows it, and at the rig it neither fails the
+    task checks nor joins the warnings a start accepts."""
+    service = _service(tmp_path)
+    text = Path("tasks/fixation_detection.py").read_text()
+    states = "    states=[\n"
+    assert text.count(states) == 1
+    (service.tasks / "orphaned.py").write_text(text.replace(
+        states, states + '        State("orphan", go=[On(After(1.0), Outcome.NO_RESPONSE)]),\n'))
+    _step(service, _open())
+
+    started = _step(service, _start(task="orphaned.py"))
+
+    items = {item["name"]: item for item in _runs(service.root)[0]["preflight"]}
+    assert items["task checks"]["result"] == "pass"
+    assert "unreachable-state" not in items["warnings"]["said"]
+    assert started.run_index == 0
+
+
 def test_a_task_whose_declarations_are_malformed_fails_its_preflight_and_the_service_goes_on(
     tmp_path,
 ):

@@ -184,13 +184,17 @@ def test_a_task_with_a_blocking_finding_exits_one(tmp_path, capsys):
         "t = Trial(start='a', states=[\n"
         "    State('a', go=[On(After(1.0), Outcome.CORRECT)]),\n"
         "    State('orphan', go=[On(After(1.0), Outcome.CORRECT)]),\n"
+        "    State('trap', go=[On(After(1.0), 'trap')]),\n"
         "])\n"
         "TASK = Task({'t': t}, default='t', choice=NO_CHOICE,\n"
         "            reaction_time=ReactionTime('a', (Outcome.CORRECT,), 'the wait'))\n"
     )
 
     assert main(["check", str(bad), "--rig", RIG_FILE]) == 1
-    assert "unreachable-state" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "refused  no-outcome-path" in out
+    # Dead code is a review note (XC-352's A7): shown, refusing nothing.
+    assert "review   unreachable-state" in out
 
 
 def test_an_unallocated_code_is_refused_without_an_allocation(capsys):
@@ -3428,6 +3432,7 @@ def test_a_task_refused_by_its_checks_records_that_the_session_did_not_start(
         "t = Trial(start='a', states=[\n"
         "    State('a', go=[On(After(1.0), Outcome.CORRECT)]),\n"
         "    State('orphan', go=[On(After(1.0), Outcome.CORRECT)]),\n"
+        "    State('trap', go=[On(After(1.0), 'trap')]),\n"
         "])\n"
         "TASK = Task({'t': t}, default='t', choice=NO_CHOICE,\n"
         "            reaction_time=ReactionTime('a', (Outcome.CORRECT,), 'the wait'))\n"

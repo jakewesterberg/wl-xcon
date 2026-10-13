@@ -264,7 +264,7 @@ def test_a_session_refuses_to_start_if_the_task_fails_its_checks(tmp_path):
     bad.write_text(
         "from wl_xcon.task import NO_CHOICE, After, On, Outcome, ReactionTime, State, Task, Trial\n"
         "t = Trial(start='a', states=[State('a', go=[On(After(1.0), Outcome.CORRECT)]),"
-        " State('orphan', go=[On(After(1.0), Outcome.CORRECT)])])\n"
+        " State('orphan', go=[On(After(1.0), Outcome.CORRECT)]), State('trap', go=[On(After(1.0), 'trap')])])\n"
         "TASK = Task({'t': t}, default='t', choice=NO_CHOICE,"
         " reaction_time=ReactionTime('a', (Outcome.CORRECT,), 'the wait'))\n"
     )
@@ -274,7 +274,7 @@ def test_a_session_refuses_to_start_if_the_task_fails_its_checks(tmp_path):
     try:
         _session(spec).run()
     except SystemExit as exit_:
-        assert "unreachable-state" in str(exit_)
+        assert "no-outcome-path" in str(exit_)
     else:
         raise AssertionError("a malformed task must not run")
 
@@ -588,7 +588,7 @@ def test_a_refused_run_leaves_the_last_runs_state_as_it_was(tmp_path):
     bad.write_text(
         "from wl_xcon.task import NO_CHOICE, After, On, Outcome, ReactionTime, State, Task, Trial\n"
         "t = Trial(start='a', states=[State('a', go=[On(After(1.0), Outcome.CORRECT)]),"
-        " State('orphan', go=[On(After(1.0), Outcome.CORRECT)])])\n"
+        " State('orphan', go=[On(After(1.0), Outcome.CORRECT)]), State('trap', go=[On(After(1.0), 'trap')])])\n"
         "TASK = Task({'t': t}, default='t', choice=NO_CHOICE,"
         " reaction_time=ReactionTime('a', (Outcome.CORRECT,), 'the wait'))\n"
     )
@@ -597,7 +597,7 @@ def test_a_refused_run_leaves_the_last_runs_state_as_it_was(tmp_path):
     values, rows = dict(session.spec.values), _runs(session)
     refused = RunSpec(task=str(bad), trials=3, seed=9, values={**VALUES, "fix_hold": 0.9})
 
-    with pytest.raises(SystemExit, match="unreachable-state: no transition reaches 'orphan'"):
+    with pytest.raises(SystemExit, match="no-outcome-path: state 'trap' cannot reach any terminal outcome"):
         session.run(refused)
 
     assert session.run_index == 0

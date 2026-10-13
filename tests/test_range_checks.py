@@ -80,7 +80,7 @@ def test_windows_that_overlap_only_at_an_extreme_of_a_range_are_refused():
     assert "overlapping-windows" in codes(trial)
 
 
-def test_a_later_after_that_can_never_fire_first_is_refused():
+def test_a_later_after_that_can_never_fire_first_is_a_review_note():
     """Two time bounds where one always wins.
 
     The second is dead code that reads as a safety net, so the state it was meant
@@ -106,6 +106,9 @@ def test_a_later_after_that_can_never_fire_first_is_refused():
     # an unreachable timeout, without saying which, sends the reader back to the
     # source -- which is the thing these findings exist to replace.
     assert "ABORT" in findings[0].detail
+    # A review note, never a refusal (XC-352's A7).
+    assert (findings[0].blocking, findings[0].accepted_in) == (False, ())
+    assert findings[0].detail.endswith("which is probably a mistake")
 
 
 def test_two_after_bounds_whose_ranges_cross_are_allowed():

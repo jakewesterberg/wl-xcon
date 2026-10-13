@@ -292,9 +292,10 @@ def test_overriding_a_shared_meaning_needs_a_note_saying_why():
     assert _codes(said) == set()
 
 
-def test_an_override_of_nothing_and_a_meaning_for_no_setting_are_refused():
-    """Review Focus 2: a meaning kept for a setting the task no longer declares is refused, and so
-    is an override of a name the shared list does not have."""
+def test_an_override_of_nothing_is_refused_and_a_meaning_for_no_setting_is_a_review_note():
+    """Review Focus 2: an override of a name the shared list does not have is refused; a meaning
+    kept for a setting the task no longer declares can never take effect, and is a review note,
+    never a refusal (XC-352's A7; the PI, 2026-10-11)."""
     stale = _whole(meanings={"contrast": Meaning(CLEAR_CUT, STIMULUS, raising=EASIER),
                              "speed": Meaning(CLEAR_CUT, STIMULUS, raising=HARDER)})
     overriding = _whole(meanings={"contrast": Meaning(CLEAR_CUT, STIMULUS, raising=EASIER,
@@ -302,6 +303,8 @@ def test_an_override_of_nothing_and_a_meaning_for_no_setting_are_refused():
 
     (found,) = _task_findings(stale)
     assert found.code == "meaning-for-nothing" and "'speed'" in found.detail
+    assert (found.blocking, found.accepted_in) == (False, ())
+    assert found.detail.endswith("which is probably a mistake")
     (found,) = _task_findings(overriding)
     assert found.code == "bad-meaning" and "'contrast'" in found.detail
 

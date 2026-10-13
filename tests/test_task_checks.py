@@ -61,6 +61,10 @@ def test_a_state_no_transition_can_reach_is_reported():
 
     assert [f.code for f in findings] == ["unreachable-state"]
     assert "orphan" in findings[0].detail
+    # A review note, never a refusal (XC-352's A7; the PI, 2026-10-11): `wlx check` shows it,
+    # and no session refuses or asks it.
+    assert (findings[0].blocking, findings[0].accepted_in) == (False, ())
+    assert findings[0].detail.endswith("which is probably a mistake")
 
 
 def test_a_state_with_no_time_bound_is_reported_as_an_unbounded_wait():
@@ -157,6 +161,8 @@ def test_a_transition_shadowed_by_an_earlier_identical_guard_is_reported():
 
     assert [f.code for f in findings] == ["shadowed-transition"]
     assert "decide" in findings[0].detail
+    assert (findings[0].blocking, findings[0].accepted_in) == (False, ())
+    assert findings[0].detail.endswith("which is probably a mistake")
 
 
 def test_a_task_emitting_an_unallocated_code_is_refused():

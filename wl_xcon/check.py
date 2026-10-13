@@ -1,4 +1,13 @@
-"""Load-time checks (S1 §9). A task failing any of these is refused at load."""
+"""Load-time checks (S1 §9). A task failing any of these is refused at load.
+
+**Three severities** (`findings.Finding`): a refusal (`blocking`); a warning, acceptable in the
+session kinds it names and asked once a session (engine spec §19.2); and a review note
+(`blocking=False`, no kinds), which `wlx check` shows and no session refuses or asks. Since the
+PI's rulings on XC-352 (2026-10-11: "warnings are more appropriate most of the time with an
+explanation of why it may not be a good idea to use a value or follow a path you may think to
+refuse. the experimenter needs free control most of the time"), dead code is a review note and a
+task the rig can run but should perhaps not is a warning saying why; a refusal is kept for what
+is unrunnable, undeclared or would make the record uninterpretable."""
 
 from __future__ import annotations
 
@@ -197,9 +206,12 @@ def _meaning_faults(task: Task) -> list[Finding]:
                 f"another setting the task declares")))
     for name in task.meanings:
         if name not in declared:
+            # A review note, never a refusal (XC-352's A7; the PI, 2026-10-11): it can never take
+            # effect.
             findings.append(Finding("meaning-for-nothing", (
                 f"the task declares a meaning for {name!r}, which none of its structures "
-                f"declares as a setting")))
+                f"declares as a setting: it can never take effect, which is probably a mistake"),
+                blocking=False))
     for ref in sorted(rewarded_through(task)):
         if ref not in BOUNDED:
             findings.append(Finding("undeclared-meaning", (
@@ -310,7 +322,8 @@ def _head_faults(task: Task, deployment: "Deployment | None") -> list[Finding]:
 
 
 def _unreachable_states(trial: Trial) -> list[Finding]:
-    """S1 §9 check 2: every state is reachable from the start state."""
+    """S1 §9 check 2: every state is reachable from the start state. One that is not can never
+    take effect: **a review note, never a refusal** (XC-352's A7; the PI, 2026-10-11)."""
     by_name = {state.name: state for state in trial.states}
     seen: set[str] = set()
     frontier = [trial.start]
@@ -323,7 +336,9 @@ def _unreachable_states(trial: Trial) -> list[Finding]:
             edge.to for edge in by_name[name].go if isinstance(edge.to, str)
         )
     return [
-        Finding("unreachable-state", f"no transition reaches {name!r}")
+        Finding("unreachable-state", (
+            f"no transition reaches {name!r}: it can never take effect, which is probably a "
+            f"mistake"), blocking=False)
         for name in (s.name for s in trial.states)
         if name not in seen
     ]
@@ -409,7 +424,8 @@ def _shadowed_transitions(trial: Trial) -> list[Finding]:
 
     That is dead code rather than a race, and it is a shape a generated task
     produces readily, since repeating a guard with a different destination looks
-    entirely reasonable in isolation.
+    entirely reasonable in isolation. **A review note, never a refusal** (XC-352's A7;
+    the PI, 2026-10-11).
     """
     findings: list[Finding] = []
     for state in trial.states:
@@ -420,7 +436,8 @@ def _shadowed_transitions(trial: Trial) -> list[Finding]:
                     Finding(
                         "shadowed-transition",
                         f"state {state.name!r} repeats guard {edge.guard!r}; "
-                        f"the later transition can never fire",
+                        f"the later transition can never fire, which is probably a mistake",
+                        blocking=False,
                     )
                 )
             seen.add(edge.guard)
@@ -2443,7 +2460,8 @@ def _unreachable_timeouts(trial: Trial) -> list[Finding]:
 
     It reads as a safety net, so the case it was meant to catch goes unprotected and
     nobody notices -- the line is right there. Ranges again: two bounds whose ranges
-    cross are both live, because either can win depending on the setting.
+    cross are both live, because either can win depending on the setting. **A review note,
+    never a refusal** (XC-352's A7; the PI, 2026-10-11): the state still has its other bound.
     """
     ranges = _ranges(trial)
     findings: list[Finding] = []
@@ -2465,7 +2483,9 @@ def _unreachable_timeouts(trial: Trial) -> list[Finding]:
                         "unreachable-timeout",
                         f"state {state.name!r} can never reach its "
                         f"{_target_name(edge.to)} timeout: another `After` on the "
-                        f"same state always fires first, for every legal setting",
+                        f"same state always fires first, for every legal setting, which is "
+                        f"probably a mistake",
+                        blocking=False,
                     )
                 )
     return findings
