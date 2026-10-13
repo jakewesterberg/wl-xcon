@@ -8,8 +8,10 @@ recorded"; "a warning appearing later asks again").
 **What this build lists:** the default calibration and a calibration past 30 days (spec §7.1,
 §7.10); a calibration that will not load, in whose place the default runs, and one dated after
 today (accepted in every kind since the PI's rulings on XC-352, 2026-10-11, E1 and E2: no kind
-accepted them, and every run's pre-flight failed on them, until then); a chaired session's free
-head (§5.9); a stereoscope's setup -- the nominal half-IPD, another animal's settings, a
+accepted them, and every run's pre-flight failed on them, until then); a resumed session's
+calibration, when it is not the one the session opened on (the warnings-over-refusals review's
+I2); a chaired session's free head (§5.9); a stereoscope's setup -- the nominal half-IPD,
+another animal's settings, a
 half-IPD outside the drawn optics -- and settings direct view ignores (the PI's rulings on
 XC-352, 2026-10-11, C6, C7, C8 and H4); a task's warnings, its load-time findings that
 are warnings (`luminance-step`, `color-on-default`, `contrast-on-default`, and, since the PI's
@@ -41,6 +43,7 @@ from wl_xcon.welfare import Deployment
 DEFAULT_CALIBRATION = "default calibration"
 CALIBRATION_AGE = "calibration age"
 CALIBRATION_RECORD = "calibration record"
+CALIBRATION_CHANGED = "calibration changed"
 HEAD_FREE = "head free"
 NOMINAL_HALF_IPD = "nominal half-IPD"
 OTHER_ANIMALS_SETTINGS = "another animal's settings"
@@ -156,6 +159,21 @@ def of_unloaded(refusal: str) -> list[Entry]:
         head = room // 3
         refusal = refusal[:head] + "…" + refusal[-(room - head - 1):]
     return [Entry(CALIBRATION_RECORD, refusal + tail, SESSION_KINDS)]
+
+
+def of_changed_calibration(opened_on: str | None, now: Calibration) -> list[Entry]:
+    """A stranded session resumed by a service that runs `now`, not the calibration it opened on,
+    whose id its `config.json` names (`opened_on`, `None` for none): **a warning in every kind,
+    never a refusal** (the warnings-over-refusals review's I2; the PI's rule of 2026-10-11), asked
+    with the resumed session's first run, naming both. The record stays interpretable: each run's
+    start row names the calibration it ran against."""
+    was = "no calibration" if opened_on is None else f"calibration {opened_on}"
+    standard = ", the sRGB standard, measured by nobody," if now.standard else ""
+    return [Entry(CALIBRATION_CHANGED, (
+        f"this session opened on {was}, which its config.json names, and is resumed on calibration "
+        f"{now.id}{standard} which this wlx taskd runs on: its runs from here are checked and "
+        f"drawn against {now.id}, and each run's start row in runs.jsonl names the calibration it "
+        f"ran against"), SESSION_KINDS)]
 
 
 def of_deployment(deployment: Deployment) -> list[Entry]:

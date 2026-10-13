@@ -998,6 +998,15 @@ class Service:
             )
             self._refuse(command.KIND, command.by, why)
             return
+        # **On another calibration than it opened on** (the warnings-over-refusals review's I2):
+        # config.json names the one the session opened with, and this service may run another --
+        # the default in the place of a record that no longer loads (XC-352's E1), or a new
+        # record. A warning, never a refusal (the PI's rule of 2026-10-11), asked with the
+        # resumed session's first run, naming both; each run's start row names the calibration
+        # it ran against, and the `session resumed` row the one it now runs on.
+        if restoration.calibration != session.spec.calibration.id:
+            session.spec.setup_warnings += tuple(warnlist.of_changed_calibration(
+                restoration.calibration, session.spec.calibration))
         try:
             session.resume(restoration, by=command.by, how="wlx taskd")
         except (Exceeded, TypeError, ValueError) as refused:

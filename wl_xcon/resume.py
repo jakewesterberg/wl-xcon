@@ -49,6 +49,11 @@ class Unresumable(Exception):
     """A folder that cannot be resumed; its message says why, for the page."""
 
 
+class _Damaged(Exception):
+    """A `warnings.jsonl` row that is not what `SessionRecord.warning` writes: left out of a
+    resume, its message saying why (XC-352's C11)."""
+
+
 def _cut(error: Exception) -> str:
     """What a reader said of a record it could not read, cut to `link.TEXT_LIMIT` characters
     and "…" as the file's quoted values are (`link._quoted`), shown as it is: why a session
@@ -83,6 +88,13 @@ class Restoration:
     stop_kind: str | None
     #: Each warning the session accepted, as `Session.warnings` gives it.
     accepted: tuple
+    #: Why each damaged `warnings.jsonl` row was left out of `accepted` (the PI, 2026-10-11,
+    #: XC-352's C11): its warning is asked again, and `Session.resume` says so.
+    damaged: tuple = ()
+    #: The id of the calibration `config.json` names, the one the session opened on, or `None`
+    #: for none: `Service._resume` warns when the service now runs another (the
+    #: warnings-over-refusals review's I2).
+    calibration: str | None = None
 
 
 def _rows(directory: Path, name: str) -> list[dict]:
@@ -98,18 +110,20 @@ def _rows(directory: Path, name: str) -> list[dict]:
 
 def _accepted(row: dict, number: int, session_kind: str) -> tuple:
     """Row `number` of `ACCEPTED_WARNINGS`, as `SessionRecord.warning` writes it, read back as
-    `Session.warnings` gives it -- or `Unresumable`, naming the field that is not what that
-    method writes (the engine B plan, call 12). **Nothing is coerced**, as `Service._resume`
-    says of the rest of the record: a damaged row is not what anyone accepted, so
-    `stranded.find` marks the session not resumable rather than restoring a guess. A field
-    the row lacks is a `KeyError`, which `read` names."""
+    `Session.warnings` gives it -- or `_Damaged`, naming the field that is not what that method
+    writes (the engine B plan, call 12). **Nothing is coerced**, as `Service._resume` says of
+    the rest of the record: a damaged row is not what anyone accepted, so it is left out and
+    its warning asked again (`_warnings`; XC-352's C11), never restored as a guess."""
 
-    def damaged(what: str) -> Unresumable:
-        return Unresumable(
-            f"its {ACCEPTED_WARNINGS} row {number} {what}, so what the session accepted "
-            f"cannot be known; end it instead"
-        )
+    def damaged(what: str) -> _Damaged:
+        return _Damaged(f"its {ACCEPTED_WARNINGS} row {number} {what}")
 
+    if not isinstance(row, dict):
+        raise damaged("is not a row")
+    missing = [name for name in ("code", "detail", "accepted_in", "session_kind", "by", "at")
+               if name not in row]
+    if missing:
+        raise damaged(f"has no {missing[0]!r}")
     code, detail, kinds, by, at = (
         row[name] for name in ("code", "detail", "accepted_in", "by", "at")
     )
@@ -139,6 +153,35 @@ def _accepted(row: dict, number: int, session_kind: str) -> tuple:
     except actors.NotAnActor as error:
         raise damaged(f"has a by that is not an actor's map or null ({_cut(error)})") from error
     return (code, detail, tuple(kinds), accepted_by, float(at))
+
+
+def _warnings(directory: Path, session_kind: str) -> tuple[tuple, tuple]:
+    """What the session accepted (`ACCEPTED_WARNINGS`), each row as `Session.warnings` gives it,
+    and why each damaged row was left out: **a damaged row never makes the record unresumable**
+    (the PI, 2026-10-11, XC-352's C11; it did until then) -- its warning is not carried, so it is
+    asked again, the safe direction. A row is numbered among the file's non-blank lines; half a
+    line, from a process that died writing it, is one that is not JSON. A file that cannot be
+    read at all is still `Unresumable`."""
+    path = directory / ACCEPTED_WARNINGS
+    if not path.exists():
+        return (), ()
+    try:
+        lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    except (OSError, ValueError) as error:
+        raise Unresumable(
+            f"its {ACCEPTED_WARNINGS} cannot be read ({_cut(error)}); end it instead") from error
+    accepted, damaged = [], []
+    for number, line in enumerate(lines, start=1):
+        try:
+            try:
+                row = json.loads(line)
+            except ValueError as error:
+                raise _Damaged(
+                    f"its {ACCEPTED_WARNINGS} row {number} is not JSON ({_cut(error)})") from error
+            accepted.append(_accepted(row, number, session_kind))
+        except _Damaged as why:
+            damaged.append(f"{why}, so it is not carried and its warning is asked again")
+    return tuple(accepted), tuple(damaged)
 
 
 def read(directory: Path, departure: float) -> Restoration:
@@ -284,10 +327,7 @@ def _read(directory: Path, departure: float) -> Restoration:
             f"session ended by {actors.shown(actors.read(ends[0]['by']))}, before any run"
         )
         stop_kind = "operator"
-    accepted = tuple(
-        _accepted(row, number, session_kind)
-        for number, row in enumerate(_rows(directory, ACCEPTED_WARNINGS), start=1)
-    )
+    accepted, damaged = _warnings(directory, session_kind)
     return Restoration(
         session_id=str(config["session_id"]),
         subject=str(config["subject"]),
@@ -309,4 +349,7 @@ def _read(directory: Path, departure: float) -> Restoration:
         stopped_because=stopped_because,
         stop_kind=stop_kind,
         accepted=accepted,
+        damaged=damaged,
+        calibration=(config["calibration"].get("id")
+                     if isinstance(config.get("calibration"), dict) else None),
     )

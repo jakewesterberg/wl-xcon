@@ -129,12 +129,18 @@ every block and trial number continuing, its out-of-cage limit the one the sessi
 It is refused, before anything is written: while a session is open; for an id that is not
 stranded, or one marked not resumable; when its record cannot carry it (written before XC-026,
 or before engine build B, so what the session is for is unknown; unreadable; a start row without
-its run numbers; a `config.json` naming another session than its folder, or a session kind other
-than training, piloting or recording; or a damaged `warnings.jsonl` row: a field missing, a code
+its run numbers; or a `config.json` naming another session than its folder, or a session kind
+other than training, piloting or recording) or names two animals. **A damaged `warnings.jsonl`
+row is left out, never a refusal** (the PI, 2026-10-11, XC-352's C11): a field missing, a code
 or detail that is not text, an `accepted_in` that is not a list of those kinds, a warning
 `warnlist.Entry` refuses (an empty code, a code holding ",", "(", ")" or "×", or a kind named
-twice), a `session_kind` other than `config.json`'s, an `at` that is not a finite number, or a
-`by` that is neither an actor's map nor null) or names two animals; when its animal's bounded
+twice), a `session_kind` other than `config.json`'s, an `at` that is not a finite number, a
+`by` that is neither an actor's map nor null, or half a line; its warning is asked again, and
+the resume says so on the changes feed and in its `session resumed` row, which names the
+calibration the session now runs on; one resumed on another calibration than its `config.json`
+names is a warning its first run asks to accept, naming both (the warnings-over-refusals
+review's I2), never a refusal.
+It is refused, too, when its animal's bounded
 config or settings will not load, or its bounds changed since it opened; when the animal is
 past its out-of-cage limit, on the recorded departure and that limit, after which the page
 offers only *end* for it; and when

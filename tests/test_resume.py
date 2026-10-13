@@ -422,12 +422,18 @@ def test_a_restoration_carries_what_the_session_accepted(tmp_path):
     )
 
 
-def test_a_damaged_accepted_warning_row_makes_a_record_unresumable(tmp_path):
+def test_a_damaged_accepted_warning_row_is_not_carried_and_the_record_is_resumed(tmp_path):
+    """XC-352's C11 (the PI, 2026-10-11): one damaged row no longer makes a record unresumable;
+    it is left out, and its warning is asked again (the safe direction), saying so."""
     directory = _folder(tmp_path)
-    _jsonl(directory / "warnings.jsonl", [{"code": "head free"}])
+    _jsonl(directory / "warnings.jsonl", [{"code": "head free"}, _accepted_row()])
 
-    with pytest.raises(Unresumable, match="KeyError"):
-        read(directory, DEPARTURE)
+    restored = read(directory, DEPARTURE)
+
+    assert [w[0] for w in restored.accepted] == ["head free"] and len(restored.accepted) == 1
+    assert restored.damaged == (
+        "its warnings.jsonl row 1 has no 'detail', so it is not carried and its warning is "
+        "asked again",)
 
 
 def _accepted_row(**over) -> dict:
@@ -469,22 +475,37 @@ def _accepted_row(**over) -> dict:
 ], ids=["code", "detail", "unknown-kind", "kinds-as-text", "kind-not-text", "kinds-as-object",
          "session-kind", "at-bool", "at-text", "at-infinite", "at-nan", "by-text",
          "by-extra-field", "code-with-a-count", "code-with-a-comma", "code-empty", "kind-twice"])
-def test_a_damaged_accepted_warning_row_is_refused_naming_its_field_never_coerced(
+def test_a_damaged_accepted_warning_row_is_left_out_naming_its_field_never_coerced(
     tmp_path, damage, named
 ):
     """The engine B plan, call 12: a `warnings.jsonl` row that is not what
-    `SessionRecord.warning` writes makes the record unresumable through `read`, so
-    `stranded.find` marks it so, rather than a resume `Session.resume` would then refuse or a
-    value coerced into something nobody accepted. The second row, after one that is whole."""
+    `SessionRecord.warning` writes is never coerced into something nobody accepted. **It is left
+    out, and the record resumed** (the PI, 2026-10-11, XC-352's C11; it made the record
+    unresumable until then): its warning is asked again, and why is said. The second row, after
+    one that is whole."""
     directory = _folder(tmp_path)
     _jsonl(directory / "warnings.jsonl",
            [_accepted_row(), _accepted_row(**{"code": "other", **damage})])
 
-    with pytest.raises(Unresumable) as refused:
-        read(directory, DEPARTURE)
+    restored = read(directory, DEPARTURE)
 
-    assert str(refused.value).startswith(f"its warnings.jsonl row 2 {named}")
-    assert str(refused.value).endswith("; end it instead")
+    assert [w[0] for w in restored.accepted] == ["head free"]
+    (why,) = restored.damaged
+    assert why.startswith(f"its warnings.jsonl row 2 {named}")
+    assert why.endswith(", so it is not carried and its warning is asked again")
+
+
+def test_a_torn_accepted_warning_row_is_left_out_and_the_rows_before_it_carried(tmp_path):
+    """XC-352's C11: half a line, a process that died writing it, is one damaged row."""
+    directory = _folder(tmp_path)
+    whole = json.dumps(_accepted_row()) + "\n" + json.dumps(_accepted_row(code="other"))
+    (directory / "warnings.jsonl").write_text(whole[: -len(whole) // 4])
+
+    restored = read(directory, DEPARTURE)
+
+    assert [w[0] for w in restored.accepted] == ["head free"]
+    (why,) = restored.damaged
+    assert why.startswith("its warnings.jsonl row 2 is not JSON (")
 
 
 @pytest.mark.parametrize("where", ["config-kind", "row-kind", "config-session-id"])
@@ -501,12 +522,17 @@ def test_a_value_of_ten_thousand_characters_is_quoted_cut(tmp_path, where):
     else:
         directory = _folder(tmp_path, config=_config(session_id=value))
 
-    with pytest.raises(Unresumable) as refused:
-        read(directory, DEPARTURE)
-
-    said = str(refused.value)
+    if where == "row-kind":
+        # A damaged row is left out since XC-352's C11, and why is said as cut.
+        (said,) = read(directory, DEPARTURE).damaged
+        assert said.endswith("asked again")
+    else:
+        with pytest.raises(Unresumable) as refused:
+            read(directory, DEPARTURE)
+        said = str(refused.value)
+        assert said.endswith("; end it instead")
     assert _quoted(value) in said and "k" * (TEXT_LIMIT + 1) not in said
-    assert said.endswith("; end it instead") and len(said) < 2 * TEXT_LIMIT + 200
+    assert len(said) < 2 * TEXT_LIMIT + 200
 
 
 def test_a_warning_accepted_by_nobody_at_a_whole_second_reads_back_as_written(tmp_path):

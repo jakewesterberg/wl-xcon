@@ -235,8 +235,10 @@ class SessionSpec:
     subject_settings: str = ""
     #: The warnings a stereoscope's setup was built with (the PI, 2026-10-11, XC-352's C6, C7
     #: and C8; `warnlist.of_setup`): the nominal half-IPD for an animal with no settings file,
-    #: another animal's settings, a half-IPD outside the drawn optics. A `wlx taskd` run's
-    #: pre-flight lists them (`Service._preflight`), accepted once a session.
+    #: another animal's settings, a half-IPD outside the drawn optics; and a resumed session's
+    #: calibration, when it is not the one it opened on (`Service._resume`; the
+    #: warnings-over-refusals review's I2). A `wlx taskd` run's pre-flight lists them
+    #: (`Service._preflight`), accepted once a session.
     setup_warnings: tuple = ()
     #: Rates per second, not per frame (S9/simulate). Roughly: acquires fixation
     #: within a few hundred ms, saccades to a target at a plausible latency, and
@@ -667,7 +669,12 @@ class Session:
         **A session whose runs were ended comes back waiting for its return** (the final
         review's I1; the PI, 2026-10-01: "Bring it back waiting"): End session was pressed
         before its process stopped, so no run starts again, and its head, released then by
-        `end_runs`, is not marked fixed again. Its return closes it as any other's does."""
+        `end_runs`, is not marked fixed again. Its return closes it as any other's does.
+
+        **A damaged `warnings.jsonl` row is left out** (`resume.read`; the PI, 2026-10-11,
+        XC-352's C11): its warning is asked again, and why is said on the changes feed, as a
+        `warning`, and in the `session resumed` row, which also names the calibration the
+        session now runs on (the warnings-over-refusals review's I2)."""
         if not self.service:
             raise RuntimeError("only a wlx taskd session is resumed (XC-026 spec §9)")
         if self.opened_wall_at is not None:
@@ -689,11 +696,17 @@ class Session:
         self.stopped_because, self.stop_kind = restoration.stopped_because, restoration.stop_kind
         now = self.wall_now()
         self.opened_wall_at = self.resumed_at = now
+        # The calibration it now runs on (the warnings-over-refusals review's I2): config.json
+        # keeps the one it opened on.
+        on = "none" if self.spec.calibration is None else self.spec.calibration.id
         self._note(
             "session resumed", now, by, how,
             reason=f"after its process stopped; its record was last written at "
-                   f"{_local(restoration.last_written_at)}",
+                   f"{_local(restoration.last_written_at)}; it runs on calibration {on}"
+                   + "".join(f"; {why}" for why in restoration.damaged),
         )
+        for why in restoration.damaged:
+            self._feed("warning", by, now, why)
         self._record = SessionRecord.open(
             self.spec.root, self.spec.session_id, self.spec.subject
         )

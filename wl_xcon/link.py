@@ -289,8 +289,9 @@ class ScheduledStop:
 class Control:
     """One recent control event for a console's changes feed (P4d-2b spec §5.1):
     from `taskd.Session.controls`. `kind` is `stop`, `pause`, `resume`, `mark`,
-    `note`, `schedule`, `cancel`, `scheduled_stop`, `set` (a staged setting applied) or
-    `reward` (a manual reward, given while paused);
+    `note`, `schedule`, `cancel`, `scheduled_stop`, `set` (a staged setting applied),
+    `reward` (a manual reward, given while paused) or `warning` (a warning said as it
+    happens, since the PI's rulings on XC-352, 2026-10-11);
     `by` is who sent it, `None` for a mark's stamp, whose sender arrives with its note;
     `at` is on the session's anchored clock; `said` is the sentence after the kind.
     The session record keeps every one (`record.CONTROLS`); this feed keeps the last

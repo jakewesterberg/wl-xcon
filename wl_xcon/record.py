@@ -322,9 +322,14 @@ class SessionRecord:
 
     def warning(self, *, code: str, detail: str, accepted_in: tuple, session_kind: str,
                 by: Actor | None, at: float, how: str, run: int | None) -> None:
-        """One accepted warning, as `taskd.Session.accept` gives it."""
-        with (self.directory / ACCEPTED_WARNINGS).open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps({
+        """One accepted warning, as `taskd.Session.accept` gives it, **on a line of its own**: a
+        last row a process died writing -- half a line, which a resume leaves out (XC-352's C11)
+        -- is ended first, so this row is never glued to it and lost with it (the
+        warnings-over-refusals review's I1)."""
+        path = self.directory / ACCEPTED_WARNINGS
+        torn = path.exists() and path.read_bytes()[-1:] not in (b"", b"\n")
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(("\n" if torn else "") + json.dumps({
                 "code": code, "detail": detail, "accepted_in": list(accepted_in),
                 "session_kind": session_kind, "by": actors.to_map_or_none(by), "at": at,
                 "at_local": _local(at), "how": how, "run": run,

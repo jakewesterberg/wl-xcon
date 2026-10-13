@@ -2969,40 +2969,36 @@ def test_a_resumed_session_gives_the_warnings_the_live_one_gave(tmp_path):
     assert live[-1] == ("head free", "the head is free", SESSION_KINDS, Box("ann"), WALL + 5.0)
 
 
-def test_a_torn_warnings_file_is_not_resumable_and_its_return_is_still_taken(tmp_path):
-    """The whole path, not the piece: a process that died writing an accepted warning leaves
-    half a line; `wlx taskd` starts again, `stranded.find` marks the session not resumable
-    with `resume.read`'s sentence, a resume is refused with it, and End session takes the
-    animal's return."""
+def test_a_torn_warnings_file_is_resumed_and_its_lost_warning_asked_again(tmp_path):
+    """XC-352's C11 (the PI, 2026-10-11), the whole path: a process that died writing an accepted
+    warning leaves half a line. `wlx taskd` starts again, the session is resumable, the resume
+    leaves the torn row out, saying so on the feed and in its `session resumed` row, and the next
+    run's pre-flight asks for that warning again. Until then the session could only be ended."""
     folders = _folders(tmp_path)
     first = _made(folders)
     _step(first, _open())
-    first.session.accept([Entry("head free", "the head is free", SESSION_KINDS)],
-                         by=BY, how="open", run=None)
     path = folders[2] / "2027-01-14_01" / "xcon" / "warnings.jsonl"
     whole = path.read_text()
     path.write_text(whole[: len(whole) // 2])
     second = _made(folders)
 
     (found,) = _step(second).stranded
-    assert (found.session_id, found.resumable) == ("2027-01-14_01", False)
-    assert found.left_at is not None, "its departure is read, so its return can be taken"
-    assert found.why.startswith("its warnings.jsonl cannot be read (")
-    assert _resume_refused(second, "2027-01-14_01") == found.why
-    frame = _step(second, _end(session_id="2027-01-14_01"))
+    resumed = _step(second, ResumeSession(by=BY, session_id="2027-01-14_01"))
+    checked = _step(second, CheckRun(by=BY, task=TASK, values=dict(VALUES)))
 
-    assert isinstance(frame, Idle) and second.stranded == []
-    assert _kinds(folders[2])[-1] == "returned"
+    assert found.resumable and resumed.phase == "between_runs"
+    said = [c.said for c in resumed.controls if c.kind == "warning"]
+    assert said and said[0].startswith("its warnings.jsonl row 1 is not JSON (")
+    (row,) = [r for r in _rows(folders[2]) if r["kind"] == "session resumed"]
+    assert "row 1 is not JSON" in row["reason"]
+    item = {i.name: i for i in checked.preflight.items}["warnings"]
+    assert item.result == "unknown" and "default calibration" in item.said
 
 
-def test_an_accepted_warning_whose_code_an_entry_refuses_is_not_resumable_and_its_return_is_taken(
-    tmp_path,
-):
-    """The engine B final review, the whole path: a `warnings.jsonl` row whose code holds "×",
-    which `Entry` refuses and `Session.resume` would have raised on after restoring the
-    departure. `wlx taskd` starts again, `stranded.find` marks the session not resumable with
-    `resume.read`'s sentence naming the row, a resume is refused with it, and End session takes
-    the animal's return."""
+def test_an_accepted_warning_whose_code_an_entry_refuses_is_left_out_of_a_resume(tmp_path):
+    """The engine B final review's case, since XC-352's C11: a `warnings.jsonl` row whose code
+    holds "×", which `Entry` refuses and `Session.resume` would have raised on after restoring
+    the departure. The session resumes, without that row, naming it on its feed."""
     folders = _folders(tmp_path)
     first = _made(folders)
     _step(first, _open())
@@ -3012,17 +3008,77 @@ def test_an_accepted_warning_whose_code_an_entry_refuses_is_not_resumable_and_it
     path.write_text("".join(json.dumps(row) + "\n" for row in rows))
     second = _made(folders)
 
-    (found,) = _step(second).stranded
-    assert (found.session_id, found.resumable) == ("2027-01-14_01", False)
-    assert found.why.startswith(
-        f"its warnings.jsonl row {len(rows)} is not a warning as the rig lists one (a warning's "
-        f"code never holds '×'"
-    )
-    assert _resume_refused(second, "2027-01-14_01") == found.why
-    frame = _step(second, _end(session_id="2027-01-14_01"))
+    resumed = _step(second, ResumeSession(by=BY, session_id="2027-01-14_01"))
 
-    assert isinstance(frame, Idle) and second.stranded == []
-    assert _kinds(folders[2])[-1] == "returned"
+    assert resumed.phase == "between_runs"
+    assert [w[0] for w in second.session.warnings] == [r["code"] for r in rows[:-1]]
+    assert any(c.kind == "warning" and c.said.startswith(
+        f"its warnings.jsonl row {len(rows)} is not a warning as the rig lists one (a warning's "
+        f"code never holds '×'") for c in resumed.controls)
+
+
+def test_a_warning_accepted_after_a_torn_row_is_on_a_line_of_its_own_and_resumed_again(tmp_path):
+    """The warnings-over-refusals review's I1, the whole path: a torn row is left out of a resume,
+    its warning is accepted again as the next run starts -- on a line of its own, not glued to
+    the fragment -- and a second resume carries that acceptance, leaving out the torn row alone."""
+    folders = _folders(tmp_path)
+    first = _made(folders)
+    _step(first, _open())
+    path = folders[2] / "2027-01-14_01" / "xcon" / "warnings.jsonl"
+    whole = path.read_text()
+    path.write_text(whole[: len(whole) // 2])
+    second = _made(folders)
+    _step(second, ResumeSession(by=BY, session_id="2027-01-14_01"))
+    assert _step(second, _start()).run_index == 0
+    _run_to_its_end(second)
+    third = _made(folders)
+
+    resumed = _step(third, ResumeSession(by=BY, session_id="2027-01-14_01"))
+
+    assert resumed.phase == "between_runs"
+    assert "default calibration" in [w[0] for w in third.session.warnings]
+    said = [c.said for c in resumed.controls if c.kind == "warning"]
+    assert len(said) == 1 and said[0].startswith("its warnings.jsonl row 1 is not JSON (")
+
+
+def test_a_session_resumed_on_another_calibration_asks_its_first_run_to_accept_that(tmp_path):
+    """The warnings-over-refusals review's I2: a session opened on a measured record that stops
+    loading while `wlx taskd` is down, so the service starts again on the default in its place
+    (XC-352's E1). The resume is not refused (the PI's rule of 2026-10-11): its `session resumed`
+    row names the calibration it now runs on, config.json keeps the one it opened on, and its
+    first run's pre-flight asks to accept the change, naming both, which the start records."""
+    today = date.fromtimestamp(WALL).isoformat()
+    panel = measured(measured_on=today, id=f"rig1@{today}")
+    record = tmp_path / "cal.json"
+    record.write_text(json.dumps({
+        "id": panel.id, "measured_on": panel.measured_on, "observer": OBSERVER,
+        "primaries": PRIMARIES, "background": BACKGROUND,
+        "transfer": {c: [list(p) for p in zip(LINEAR.levels, LINEAR.fractions)]
+                     for c in ("red", "green", "blue")},
+        "spectra": {name: list(getattr(SPECTRA, name)) for name in ("nm", "red", "green", "blue")},
+    }))
+    rig = dataclasses.replace(RIG, calibration=str(record))
+    folders = _folders(tmp_path)
+    first = _made(folders, rig=rig)
+    _step(first, _open())
+    record.write_text("{")
+    second = _made(folders, rig=rig)
+
+    _step(second, ResumeSession(by=BY, session_id="2027-01-14_01"))
+    checked = _step(second, CheckRun(by=BY, task=TASK, values=dict(VALUES)))
+    started = _step(second, _start())
+
+    assert first.calibration == panel and second.calibration is SRGB
+    (row,) = [r for r in _rows(folders[2]) if r["kind"] == "session resumed"]
+    assert "; it runs on calibration srgb-standard" in row["reason"]
+    folder = folders[2] / "2027-01-14_01" / "xcon"
+    assert json.loads((folder / "config.json").read_text())["calibration"]["id"] == panel.id
+    item = {i.name: i for i in checked.preflight.items}["warnings"]
+    assert (f"calibration changed: this session opened on calibration {panel.id}, which its "
+            f"config.json names, and is resumed on calibration srgb-standard") in item.said
+    assert started.run_index == 0
+    assert [r["how"] for r in _jsonl(folder / "warnings.jsonl")
+            if r["code"] == "calibration changed"] == ["start"]
 
 
 def test_a_resume_after_the_rigs_calibration_changed_names_the_new_one_on_each_later_run(tmp_path):

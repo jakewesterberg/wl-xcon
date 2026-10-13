@@ -186,7 +186,7 @@ _ACCEPTED = {
 }
 
 
-@pytest.mark.parametrize("where", ["config.json", "trials.jsonl", "a number", "a warning", "an actor"])
+@pytest.mark.parametrize("where", ["config.json", "trials.jsonl", "a number"])
 def test_a_readers_long_sentence_is_cut_in_why(tmp_path, monkeypatch, where):
     """XC-299: why a session cannot be resumed quoted what its reader said whole, and a reader's
     sentence can be anything: an `OSError`'s quotes the whole path, `float()`'s every character
@@ -209,17 +209,31 @@ def test_a_readers_long_sentence_is_cut_in_why(tmp_path, monkeypatch, where):
         (directory / "trial_starts.jsonl").write_text("{}\n")
         (directory / "trials.jsonl").write_text(json.dumps({"fluid_ml": long}) + "\n")
         start = "its record cannot be read (ValueError: could not convert string to float: "
-    elif where == "a warning":
-        (directory / "warnings.jsonl").write_text(json.dumps(_ACCEPTED) + "\n")
 
+    (found,) = stranded.find(tmp_path)
+
+    assert (found.left_at, found.resumable) == (WALL - 900, False)
+    assert found.why.startswith(start) and found.why.endswith("; end it instead")
+    assert long not in found.why and "…" in found.why
+
+
+@pytest.mark.parametrize("where", ["a warning", "an actor"])
+def test_a_damaged_warning_rows_long_sentence_is_cut_and_the_session_stays_resumable(
+    tmp_path, monkeypatch, where
+):
+    """XC-299's cut, for a damaged `warnings.jsonl` row, which leaves the session resumable since
+    XC-352's C11 (the PI, 2026-10-11): why it is not carried quotes what its reader said cut."""
+    long = "e" * 10_000
+    directory = _notes(tmp_path, "2027-01-13_01", ("departure", WALL - 900))
+    _config(directory)
+    (directory / "warnings.jsonl").write_text(json.dumps(_ACCEPTED) + "\n")
+    if where == "a warning":
         def refused(*_fields):
             raise ValueError(long)
 
         monkeypatch.setattr(resume, "Entry", refused)
         start = "its warnings.jsonl row 1 is not a warning as the rig lists one ("
-    elif where == "an actor":
-        (directory / "warnings.jsonl").write_text(json.dumps(_ACCEPTED) + "\n")
-
+    else:
         def not_one(_by):
             raise actor.NotAnActor(long)
 
@@ -229,10 +243,10 @@ def test_a_readers_long_sentence_is_cut_in_why(tmp_path, monkeypatch, where):
         start = "its warnings.jsonl row 1 has a by that is not an actor's map or null ("
 
     (found,) = stranded.find(tmp_path)
+    (why,) = resume.read(directory, WALL - 900).damaged
 
-    assert (found.left_at, found.resumable) == (WALL - 900, False)
-    assert found.why.startswith(start) and found.why.endswith("; end it instead")
-    assert long not in found.why and "…" in found.why
+    assert found.resumable
+    assert why.startswith(start) and long not in why and "…" in why
     assert len(found.why) <= TEXT_LIMIT + 150
 
 
