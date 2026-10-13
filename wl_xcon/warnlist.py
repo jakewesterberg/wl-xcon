@@ -13,7 +13,8 @@ calibration, when it is not the one the session opened on (the warnings-over-ref
 I2); a chaired session's free head (§5.9); a stereoscope's setup -- the nominal half-IPD,
 another animal's settings, a
 half-IPD outside the drawn optics -- and settings direct view ignores (the PI's rulings on
-XC-352, 2026-10-11, C6, C7, C8 and H4); a task's warnings, its load-time findings that
+XC-352, 2026-10-11, C6, C7, C8 and H4); a pause the allocation cannot mark (D5), accepted as it
+is taken; a task's warnings, its load-time findings that
 are warnings (`luminance-step`, `color-on-default`, `contrast-on-default`, and, since the PI's
 ruling of 2026-10-11, `head-not-fixed`); and today's
 pre-flight unknowns, the pump calibration and the eye tracker (S9a §10). **What later builds
@@ -49,6 +50,8 @@ NOMINAL_HALF_IPD = "nominal half-IPD"
 OTHER_ANIMALS_SETTINGS = "another animal's settings"
 HALF_IPD_OUTSIDE = "half-IPD outside the optics"
 SETTINGS_NOT_READ = "settings not read"
+#: A pause the allocation cannot mark (`taskd.Session._pause`; the PI, 2026-10-11, XC-352's D5).
+PAUSE_UNMARKED = "pause unmarked"
 #: The code of a row saying the warnings could not be listed at all (`service.Service`'s idle
 #: frame and its run's pre-flight; the engine B plan, calls 27 and 31): not a warning, so no
 #: console says it as one every run refuses.

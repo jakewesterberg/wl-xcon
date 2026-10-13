@@ -3485,12 +3485,14 @@ def test_a_resume_pressed_after_a_stop_is_refused_and_the_session_ends(tmp_path)
     assert session.stop_kind == "operator"
 
 
-def test_a_pause_is_refused_when_the_allocation_cannot_mark_it(tmp_path):
-    """A pause the recording cannot show is refused rather than taken silently: the
-    allocation must carry both `PAUSE` and `RESUME`, so the gap has two ends."""
+def test_a_pause_the_allocation_cannot_mark_holds_with_a_warning_never_a_refusal(tmp_path):
+    """XC-352's D5 (the PI, 2026-10-11): a pause the recording cannot show both ends of is taken,
+    with a warning, never refused: the allocation has no `RESUME`, so the gap's end is unmarked.
+    `PAUSE` is strobed, `RESUME` is not, the pause and its resume are in `controls.jsonl`, and the
+    warning is on the changes feed and in `warnings.jsonl`, accepted by who paused."""
     from dataclasses import replace
 
-    link = _Scripted()
+    link = _Scripted(script={2: [Resume(by=Box("sam"))]})
     link.queue(Pause(by=Box("jake")))
     session, wall = _walled(tmp_path, link, trials=2)
     link.wall = wall
@@ -3505,11 +3507,14 @@ def test_a_pause_is_refused_when_the_allocation_cannot_mark_it(tmp_path):
 
     session.run()
 
-    assert session.stop_kind == "completed"
-    ((name, _, why),) = session.refusals
-    assert name == "pause"
-    assert "no RESUME event code" in why
-    assert link.waits == []
+    assert session.stop_kind == "completed" and session.refusals == []
+    assert len(link.waits) == 2, "it held"
+    assert PAUSE_CODE in session.card.codes and RESUME_CODE not in session.card.codes
+    assert [row["kind"] for row in _controls_rows(session)] == ["pause", "resume"]
+    (warned,) = [c for c in session.controls if c[0] == "warning"]
+    assert "no RESUME event code" in warned[3] and "unexplained gap" in warned[3]
+    rows = [json.loads(line) for line in (session.directory / "warnings.jsonl").read_text().splitlines()]
+    assert [(r["code"], r["how"], r["by"]["name"]) for r in rows] == [("pause unmarked", "pause", "jake")]
 
 
 def test_the_paused_loop_waits_one_housekeeping_interval_at_a_time(tmp_path):

@@ -59,7 +59,7 @@ from wl_xcon.encode import (
     words_for_block,
     words_for_run,
 )
-from wl_xcon.findings import kind_named
+from wl_xcon.findings import SESSION_KINDS, kind_named
 from wl_xcon.geometry import Geometry
 from wl_xcon.levels import Levels
 from wl_xcon.photometry import Calibration, cone_record
@@ -68,7 +68,7 @@ from wl_xcon.scheduler import Block, Condition, Scheduler
 from wl_xcon.simulate import Census, Subject, Tally, prepare
 from wl_xcon.run import run_trial
 from wl_xcon.task import Entered, Exited, Outcome, Param, SaccadeTo, Task, Trial
-from wl_xcon.warnlist import Entry, sentence
+from wl_xcon.warnlist import PAUSE_UNMARKED, Entry, sentence
 from wl_xcon.welfare import (
     OUT_OF_CAGE,
     WARN_WITHIN_DEFAULT,
@@ -1193,10 +1193,13 @@ class Session:
         gap begins.
 
         **Refused, with the sentence, when it would not hold a session that can
-        resume and be seen to**: a session already stopping -- a `Stop` drained
-        ahead of this in the same pass (Review Focus 3) -- one already paused (a
-        double click), or an allocation without both `PAUSE` and `RESUME`, which
-        would leave a gap in the recording with an end nobody could find."""
+        resume**: a session already stopping -- a `Stop` drained ahead of this in the
+        same pass (Review Focus 3) -- or one already paused (a double click). **An
+        allocation without both `PAUSE` and `RESUME` holds it with a warning, never a
+        refusal** (the PI, 2026-10-11, XC-352's D5; refused until then): the recording
+        shows an unexplained gap, `controls.jsonl` says when the pause began and ended,
+        and the warning, on the changes feed, is accepted into `warnings.jsonl` by who
+        paused, once a session."""
         if self.stopped_because:
             self._refuse(
                 "pause",
@@ -1214,16 +1217,17 @@ class Session:
             return
         codes = {name: self._code(name) for name in ("PAUSE", "RESUME")}
         missing = [name for name, code in codes.items() if code is None]
-        if missing:
-            self._refuse(
-                "pause",
-                by,
-                f"this session's allocation has no {' or '.join(missing)} event code, "
-                f"so the recording could not show the pause; it is refused",
-            )
-            return
-        self.card.emit(codes["PAUSE"])
+        if codes["PAUSE"] is not None:
+            self.card.emit(codes["PAUSE"])
         self.paused_at = self._control("pause", by, f"paused at trial {index}", index)
+        if missing:
+            entry = Entry(PAUSE_UNMARKED, (
+                f"this session's allocation has no {' or '.join(missing)} event code, so the "
+                f"recording cannot show where a pause begins and ends: each pause leaves an "
+                f"unexplained gap in it, and when it began and ended are in controls.jsonl"),
+                SESSION_KINDS)
+            self._feed("warning", by, self.paused_at, entry.detail)
+            self.accept([entry], by=by, how="pause", run=self.run_index)
 
     def _resume(self, by: Actor, index: int) -> None:
         """End the pause: `_hold` returns and `run()` goes back to the top of its
@@ -1246,7 +1250,10 @@ class Session:
         if self.paused_at is None:
             self._refuse("resume", by, "the session is not paused; this resume changes nothing")
             return
-        self.card.emit(self.allocation.code_for("RESUME"))
+        code = self._code("RESUME")
+        if code is not None:
+            # Strobed when the allocation has it; otherwise the pause's warning said so (D5).
+            self.card.emit(code)
         held = self.wall_now() - self.paused_at
         self.paused_at = None
         self._control(
