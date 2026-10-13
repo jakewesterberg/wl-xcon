@@ -10,7 +10,7 @@ recorded"; "a warning appearing later asks again").
 today (accepted in every kind since the PI's rulings on XC-352, 2026-10-11, E1 and E2: no kind
 accepted them, and every run's pre-flight failed on them, until then); a resumed session's
 calibration, when it is not the one the session opened on (the warnings-over-refusals review's
-I2); a chaired session's free head (§5.9); a stereoscope's setup -- the nominal half-IPD,
+I2), and its half-IPD, when it is not the one it opened on (Task 7's review, I1); a chaired session's free head (§5.9); a stereoscope's setup -- the nominal half-IPD,
 another animal's settings, a
 half-IPD outside the drawn optics -- and settings direct view ignores (the PI's rulings on
 XC-352, 2026-10-11, C6, C7, C8 and H4); a pause the allocation cannot mark (D5), accepted as it
@@ -193,14 +193,14 @@ def of_changed_setup(
     rule of 2026-10-11), asked with the resumed session's first run, naming both. `config.json`
     keeps what it opened on; the `session resumed` row in welfare_notes.jsonl names what it now
     runs on."""
-    def words(cm: float, nominal: bool) -> str:
-        return f"{cm:g} cm ({'nominal' if nominal else 'from the animal' + chr(39) + 's settings'})"
-
+    opened = "nominal" if opened_nominal else "from the animal's settings"
+    # No file is read when it is nominal, so the sentence never says one was.
+    now = "nominal" if now_nominal else "from the settings file now read"
     return [Entry(SETUP_CHANGED, (
-        f"this session opened on a half-IPD of {words(opened_on_cm, opened_nominal)}, which its "
-        f"config.json names, and is resumed on {words(now_cm, now_nominal)}, from the settings "
-        f"file now read: its runs from here are drawn at {now_cm:g} cm, and the session resumed "
-        f"row in welfare_notes.jsonl names it"), SESSION_KINDS)]
+        f"this session opened on a half-IPD of {opened_on_cm:g} cm ({opened}), which its "
+        f"config.json names, and is resumed on {now_cm:g} cm ({now}): its runs from here are "
+        f"drawn at {now_cm:g} cm, and the session resumed row in welfare_notes.jsonl names it"),
+        SESSION_KINDS)]
 
 
 def of_deployment(deployment: Deployment) -> list[Entry]:

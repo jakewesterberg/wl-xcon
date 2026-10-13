@@ -3122,7 +3122,7 @@ def _settings_file(service, half) -> None:
                          f"SETTINGS = SubjectSettings(subject='REFERENCE', half_ipd_cm={half})\n")
 
 
-def _resumed_stereoscope(tmp_path, before, after):
+def _resumed_stereoscope(tmp_path, before, after, edit=None):
     """A stereoscope session opened on settings of `before` cm (`None`: no file), its process
     stopped, its file made `after` cm (`None`: removed), and `wlx taskd` started again and asked to
     resume it. Returns the new service, the first run's check, the folders and the task."""
@@ -3131,18 +3131,26 @@ def _resumed_stereoscope(tmp_path, before, after):
     _settings_file(first, before)
     task = _narrow(first)
     _step(first, _open(view="stereoscope"))
+    if edit is not None:
+        path = folders[2] / "2027-01-14_01" / "xcon" / "config.json"
+        config = json.loads(path.read_text())
+        edit(config)
+        path.write_text(json.dumps(config))
     second = _made(folders)
     _settings_file(second, after)
     _step(second, ResumeSession(by=BY, session_id="2027-01-14_01"))
     return second, _step(second, CheckRun(by=BY, task=task, values=dict(VALUES))), folders, task
 
 
-@pytest.mark.parametrize(("before", "after", "was", "now"), [
-    (1.7, None, "1.7 cm (from the animal's settings)", "1.6 cm (nominal)"),
-    (None, 1.8, "1.6 cm (nominal)", "1.8 cm (from the animal's settings)"),
-], ids=["file removed", "file added"])
+@pytest.mark.parametrize(("before", "after", "was", "now", "row"), [
+    (1.7, None, "1.7 cm (from the animal's settings)", "1.6 cm (nominal)", "1.6 cm (nominal)"),
+    (None, 1.8, "1.6 cm (nominal)", "1.8 cm (from the settings file now read)",
+     "1.8 cm (from the animal's settings)"),
+    (None, 1.6, "1.6 cm (nominal)", "1.6 cm (from the settings file now read)",
+     "1.6 cm (from the animal's settings)"),
+], ids=["file removed", "file added", "same cm, nominal then a file"])
 def test_a_stereoscope_session_resumed_on_another_half_ipd_asks_its_first_run_to_accept_that(
-    tmp_path, before, after, was, now
+    tmp_path, before, after, was, now, row
 ):
     """Task 7's review, I1: `_build` reads the animal's settings as they are now, so a resume
     can run on a half-IPD `config.json` does not name. A warning, never a refusal (the PI's rule
@@ -3153,15 +3161,27 @@ def test_a_stereoscope_session_resumed_on_another_half_ipd_asks_its_first_run_to
 
     item = {i.name: i for i in checked.preflight.items}["warnings"]
     assert (f"setup changed: this session opened on a half-IPD of {was}, which its config.json "
-            f"names, and is resumed on {now}") in item.said
+            f"names, and is resumed on {now}: its runs") in item.said
     assert started.run_index == 0
     folder = folders[2] / "2027-01-14_01" / "xcon"
     assert [r["how"] for r in _jsonl(folder / "warnings.jsonl") if r["code"] == "setup changed"] == ["start"]
-    (row,) = [r for r in _rows(folders[2]) if r["kind"] == "session resumed"]
-    assert f"; it runs on a half-IPD of {now}" in row["reason"]
+    (resumed,) = [r for r in _rows(folders[2]) if r["kind"] == "session resumed"]
+    assert f"; it runs on a half-IPD of {row}" in resumed["reason"]
     setup = json.loads((folder / "config.json").read_text())["setup"]
     assert (setup["half_ipd_cm"], setup["half_ipd_nominal"]) == (
         (before or 1.6), before is None)
+
+
+def test_a_record_with_a_half_ipd_and_no_nominal_flag_was_opened_from_a_file(tmp_path):
+    """Task 7's fix round 2, minor 1: records written before XC-352's C6 have `half_ipd_cm` and no
+    `half_ipd_nominal`, and a stereoscope open refused a missing file then, so it was read from one.
+    Resumed with that file removed, the session is on the nominal half-IPD, which it says."""
+    second, checked, _, _ = _resumed_stereoscope(
+        tmp_path, 1.7, None, edit=lambda config: config["setup"].pop("half_ipd_nominal"))
+
+    item = {i.name: i for i in checked.preflight.items}["warnings"]
+    assert ("setup changed: this session opened on a half-IPD of 1.7 cm (from the animal's "
+            "settings)") in item.said
 
 
 def test_a_stereoscope_session_resumed_on_the_same_half_ipd_asks_nothing_about_its_setup(tmp_path):

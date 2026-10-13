@@ -179,6 +179,9 @@ def test_a_resume_on_another_half_ipd_is_a_warning_naming_both_that_fits_a_note(
 
     assert (entry.code, entry.accepted_in) == ("setup changed", SESSION_KINDS)
     assert "opened on a half-IPD of 1.7 cm (from the animal's settings)" in entry.detail
-    assert "resumed on 1.6 cm (nominal)" in entry.detail
+    assert "resumed on 1.6 cm (nominal): its runs" in entry.detail
+    assert "settings file now read" not in entry.detail, "no file is read for the nominal one"
+    (read,) = warnlist.of_changed_setup(1.6, True, 1.8, False)
+    assert "resumed on 1.8 cm (from the settings file now read): its runs" in read.detail
     (longest,) = warnlist.of_changed_setup(1.234567, False, 3.456789, False)
     assert len(longest.detail) <= NOTE_LIMIT

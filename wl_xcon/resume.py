@@ -96,9 +96,11 @@ class Restoration:
     #: warnings-over-refusals review's I2).
     calibration: str | None = None
     #: The half-IPD `config.json`'s `setup` names, in cm, and whether it was the nominal one, the
-    #: stereoscope the session opened on: `None` for each when the record has none (direct view, or
-    #: a record written before XC-352's C6). `Service._resume` warns when the rebuilt session runs on
-    #: another (Task 7's review, I1).
+    #: stereoscope the session opened on. `half_ipd_cm` is `None` for a direct-view record, which
+    #: has none; `half_ipd_nominal` is `None` there too, and `False` for a stereoscope record
+    #: written before XC-352's C6, which opened from a settings file (a missing file was refused
+    #: until then). `Service._resume` warns when the rebuilt session runs on another (Task 7's
+    #: review, I1).
     half_ipd_cm: float | None = None
     half_ipd_nominal: bool | None = None
 
@@ -363,6 +365,9 @@ def _read(directory: Path, departure: float) -> Restoration:
             if isinstance(config["setup"].get("half_ipd_cm"), (int, float))
             and not isinstance(config["setup"]["half_ipd_cm"], bool)
             and math.isfinite(config["setup"]["half_ipd_cm"]) else None),
-        half_ipd_nominal=(config["setup"]["half_ipd_nominal"]
-                          if isinstance(config["setup"].get("half_ipd_nominal"), bool) else None),
+        half_ipd_nominal=(
+            config["setup"]["half_ipd_nominal"]
+            if isinstance(config["setup"].get("half_ipd_nominal"), bool)
+            else (False if isinstance(config["setup"].get("half_ipd_cm"), (int, float))
+                  and not isinstance(config["setup"]["half_ipd_cm"], bool) else None)),
     )

@@ -912,7 +912,9 @@ class Service:
         what `Session.resume` refuses before it writes. **One refused for being past its
         limit is then marked not resumable**, with the refusal's sentence, so the page
         offers only *end* (spec §5; fix round 1 of Task 7); a stranded session marked
-        not resumable, by this or by `stranded.find`, is refused with what it is marked."""
+        not resumable, by this or by `stranded.find`, is refused with what it is marked.
+        **One resumed on another calibration, or another half-IPD, than its `config.json`
+        names is a warning asked at its first run**, naming both, never a refusal."""
         if self.session is not None:
             self._refuse(command.KIND, command.by,
                          f"a session is open ({self.session.spec.session_id}); a stranded "
@@ -1011,8 +1013,9 @@ class Service:
                 restoration.calibration, session.spec.calibration))
         # **On another half-IPD than it opened on** (Task 7's review, I1): its settings file may
         # have been removed, added or changed while `wlx taskd` was down, and `_build` reads the
-        # file as it is now. The same warning, asked with its first run. A record with no half-IPD
-        # (direct view, or written before XC-352's C6) has nothing to compare, so adds none.
+        # file as it is now. The same warning, asked with its first run. A record with no
+        # half-IPD (direct view) has nothing to compare, so adds none; one written before XC-352's
+        # C6 has the half-IPD and no nominal flag, and `resume.read` reads it as opened from a file.
         geometry = session.spec.geometry
         if (geometry.view == "stereoscope" and restoration.half_ipd_cm is not None
                 and restoration.half_ipd_nominal is not None):
