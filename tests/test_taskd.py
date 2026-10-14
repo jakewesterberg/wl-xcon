@@ -1250,6 +1250,7 @@ def test_a_live_wait_longer_than_any_the_task_declares_is_staged_with_its_warnin
     assert session.staged[-1][:3] == ("fix_acquisition", VALUES["fix_acquisition"], 60.0)
     assert [row["code"] for row in _warned(session)] == ["outside-range", "longer-than-declared"]
 
+
 def test_a_live_write_to_an_undeclared_parameter_is_refused(tmp_path):
     """A typo must not become a parameter. `fix_hld` accepted silently is a session
     running the old value while the console shows the new one."""
@@ -3168,6 +3169,61 @@ def test_a_live_value_whose_widened_checks_raise_or_whose_warning_cannot_be_writ
         assert said in refusal[2] and session.spec.values["fix_window"] == VALUES["fix_window"]
 
 
+def test_a_live_value_is_checked_with_the_values_staged_ahead_of_it(tmp_path, monkeypatch):
+    """Task 11's minor (the final review, row 30): `_beyond_range` checks a value outside its
+    range with every value staged ahead of it, so two queued values that break the run only
+    together refuse the second. A stand-in check refuses the pair alone (the reference task has
+    no such pair); left out, the staged value was read as the session's own, and both staged."""
+    def judged(task, values, *args, **kwargs):
+        if values["fix_window"] == 7.0 and values["target_window"] == 9.0:
+            return [Finding("overlapping-windows", "the two windows collide")]
+        return [Finding("outside-range", "outside", blocking=False, accepted_in=SESSION_KINDS)]
+
+    monkeypatch.setattr("wl_xcon.taskd.beyond_range", judged)
+    session = _session(_spec(tmp_path, trials=4))
+    session.open()
+
+    session.set("fix_window", 7.0, by=Box("jake"))
+    with pytest.raises(Exceeded, match="refuse it: overlapping-windows: the two windows collide"):
+        session.set("target_window", 9.0, by=Box("jake"))
+    assert [name for name, *_ in session.staged] == ["fix_window"]
+
+
+def test_a_live_value_whose_warning_its_sessions_kind_does_not_accept_is_refused_saying_so(
+    tmp_path, monkeypatch
+):
+    """Task 11's minor (the final review, row 30): a warning outside the session's kind refuses
+    the value as the widened checks' own refusal (`Finding.refuses`), never only once its row
+    fails to be written. Every warning a check gives is accepted in every kind today, so a stand-
+    in limited to training and piloting is checked in a recording session."""
+    monkeypatch.setattr("wl_xcon.taskd.beyond_range", lambda *a, **k: [Finding(
+        "color-on-default", "names colors", blocking=False, accepted_in=NOT_RECORDING)])
+    session = _session(_spec(tmp_path, trials=4, session_kind="recording"))
+    session.open()
+
+    with pytest.raises(Exceeded, match="the load-time checks refuse it: color-on-default: names "
+                                       "colors; the previous value stands"):
+        session.set("fix_window", 7.0, by=Box("jake"))
+    assert not session.staged and _warned(session) == []
+
+
+def test_a_live_values_warning_is_said_once_on_the_feed_by_who_sent_it(tmp_path):
+    """Task 11's minor (the final review, row 30): each warning a value outside its range brings
+    is said on the changes feed by the person who sent it, and once a session, as
+    `warnings.jsonl` takes it once: the same value sent again says nothing new."""
+    session = _session(_spec(tmp_path, trials=4))
+    session.open()
+
+    session.set("fix_window", 7.0, by=Box("jake"))
+    session.set("fix_window", 7.0, by=Box("sam"))
+
+    warned = [c for c in session.controls if c[0] == "warning"]
+    assert [(kind, by) for kind, by, _, _ in warned] == [("warning", Box("jake"))]
+    assert warned[0][3].startswith("outside-range: 'fix_window' is 7 deg")
+    assert [(row["code"], row["by"]["name"]) for row in _warned(session)] == [
+        ("outside-range", "jake")]
+
+
 def test_a_type_error_in_a_setting_is_a_refusal_not_a_fault(tmp_path, monkeypatch):
     """The spec's second half of M8: `Session._command` refuses on a `TypeError` too,
     so no check `set` does not yet make can end a session with an animal in the
@@ -3639,6 +3695,39 @@ def test_a_pause_the_allocation_cannot_mark_holds_with_a_warning_never_a_refusal
     assert [row["kind"] for row in _controls_rows(session)] == ["pause", "resume"]
     (warned,) = [c for c in session.controls if c[0] == "warning"]
     assert "no RESUME event code" in warned[3] and "unexplained gap" in warned[3]
+    rows = [json.loads(line) for line in (session.directory / "warnings.jsonl").read_text().splitlines()]
+    assert [(r["code"], r["how"], r["by"]["name"]) for r in rows] == [("pause unmarked", "pause", "jake")]
+
+
+def test_each_pause_an_allocation_without_pause_cannot_mark_is_said_and_recorded_once(tmp_path):
+    """Task 9's minor (the final review, row 21): an allocation with no `PAUSE`, where the test
+    above leaves out `RESUME`, holds the session at each pause with the warning, never a
+    refusal: `RESUME` is strobed and `PAUSE` never; the warning is said on the changes feed at
+    each pause, and `warnings.jsonl` takes it once a session, by who first paused."""
+    from dataclasses import replace
+
+    link = _Scripted(script={2: [Resume(by=Box("sam")), Pause(by=Box("sam"))],
+                             4: [Resume(by=Box("jake"))]})
+    link.queue(Pause(by=Box("jake")))
+    session, wall = _walled(tmp_path, link, trials=2)
+    link.wall = wall
+    session.allocation = replace(
+        session.allocation,
+        task_events={
+            code: name
+            for code, name in session.allocation.task_events.items()
+            if name != "PAUSE"
+        },
+    )
+
+    session.run()
+
+    assert session.stop_kind == "completed" and session.refusals == []
+    assert PAUSE_CODE not in session.card.codes and session.card.codes.count(RESUME_CODE) == 2
+    assert [row["kind"] for row in _controls_rows(session)] == ["pause", "resume", "pause", "resume"]
+    warned = [c for c in session.controls if c[0] == "warning"]
+    assert [by for _, by, _, _ in warned] == [Box("jake"), Box("sam")]
+    assert all("no PAUSE event code" in said for *_, said in warned)
     rows = [json.loads(line) for line in (session.directory / "warnings.jsonl").read_text().splitlines()]
     assert [(r["code"], r["how"], r["by"]["name"]) for r in rows] == [("pause unmarked", "pause", "jake")]
 

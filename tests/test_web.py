@@ -1037,15 +1037,18 @@ def test_a_refusal_shows_on_its_parameters_card_with_its_sentence():
         frame(
             refusals=(
                 Refused("fix_hold", Box("jake"), "first"),
-                Refused("fix_hold", Box("jake"), "'fix_hold' is declared over [0.05, 2.0] s and 9 is outside it"),
+                # A refusal `Session.set` says today; a value outside its range is no longer
+                # refused for that alone since XC-352's D2 (Task 11's minor).
+                Refused("fix_hold", Box("jake"), "'fix_hold' takes a number (s); 'nine' is not "
+                        "one, so it is refused and the previous value stands"),
             )
         ),
         view(),
     )["params"]
 
     assert (
-        '<span class="rfs">last refused: &#x27;fix_hold&#x27; is declared over '
-        "[0.05, 2.0] s and 9 is outside it</span>"
+        '<span class="rfs">last refused: &#x27;fix_hold&#x27; takes a number (s); '
+        "&#x27;nine&#x27; is not one, so it is refused and the previous value stands</span>"
     ) in params
     assert "first" not in params
 
@@ -2608,7 +2611,9 @@ def test_with_no_session_open_the_tab_and_the_dialog_list_what_an_open_asks_to_a
 
 
 def test_a_warning_no_kind_accepts_is_shown_in_the_dialog_and_can_never_be_sent():
-    """The engine B plan, call 21: listed, marked, and carrying no `data-warn`."""
+    """The engine B plan, call 21: listed, marked, and carrying no `data-warn`. The rig lists
+    none since XC-352's E1 and E2 (the PI, 2026-10-11), which made a record that will not load,
+    call 21's case, a warning every kind accepts: the row is a stand-in."""
     refused = WarningRow("calibration record", "it is not JSON", (), None, None)
 
     panes = fragments(idle(warnings=(refused,)), view())

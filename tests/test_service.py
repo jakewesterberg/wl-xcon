@@ -353,6 +353,9 @@ def test_every_warning_an_open_can_be_asked_to_accept_reaches_the_frame_whole(tm
         assert [(w.code, w.detail) for w in offered] == [e.key for e in listed], name
         assert all(len(w.detail) <= NOTE_LIMIT for w in offered), name
         assert [w.code for w in offered] == expected[name], name
+        if name == "measured":
+            # The worst case is the one measured: its age has four digits (Task 6's minor).
+            assert "9999 days ago" in offered[0].detail
 
 
 @pytest.fixture
@@ -2076,10 +2079,11 @@ def test_a_runs_warnings_are_shown_whole_before_they_are_accepted_and_written_wh
 
 def test_every_warning_a_start_accepts_is_named_in_the_item_it_accepted(tmp_path, monkeypatch):
     """Fix round 1 of Task 12 (the review's probe): one acknowledgement of `warnings` accepts
-    every warning the item lists, so each is named in the item, whatever its cut takes. A
-    listing fault at the open leaves the default calibration owed with the visual search task's
-    two warnings, and the item's sentence before this fix put the third code past
-    `link.NOTE_LIMIT`, where the cut dropped it from the page while the start accepted it."""
+    every warning the item lists, so each is named in the item. A listing fault at the open
+    leaves the default calibration owed with the visual search task's two warnings, and the
+    item's sentence before this fix put the third code past `link.NOTE_LIMIT`, where the cut
+    the item then had dropped it from the page while the start accepted it; since XC-353 the
+    item is shown whole, uncut, and names each code first."""
     service = _service(tmp_path)
     shutil.copy("tasks/visual_search_training.py", service.tasks)
 

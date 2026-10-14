@@ -268,7 +268,8 @@ def test_wlx_check_and_wlx_run_fall_back_for_a_rig_whose_calibration_is_no_path(
 
 def _dated_after_today(tmp_path) -> str:
     """A rig naming a calibration record measured two days from now: its date or the host's
-    clock is wrong, and no session kind accepts it (call 20)."""
+    clock is wrong, a warning every kind accepts since XC-352's E2 (the PI, 2026-10-11), where
+    the engine B plan's call 20 had no kind accept it."""
     record = tmp_path / "cal.json"
     record.write_text(json.dumps({
         "id": "rig1", "measured_on": (datetime.now() + timedelta(days=2)).date().isoformat(),
@@ -388,6 +389,26 @@ def test_wlx_check_warns_of_settings_that_a_direct_view_check_ignores(capsys):
 
     out = capsys.readouterr().out
     assert "warning  settings not read" in out and "direct view reads nothing from it" in out
+
+
+def test_wlx_check_warns_of_a_half_ipd_outside_the_drawn_optics(tmp_path, capsys):
+    """XC-352's C7 (the PI, 2026-10-11: "outside the drawn optics, extrapolated"), through `wlx
+    check` (Task 7's review, M2: only `wlx run`'s path was tested): settings whose half-IPD is
+    outside the 1.5-1.9 cm the stereoscope is drawn for check the task against that animal's
+    field, extrapolated, with the warning that says so."""
+    wide = tmp_path / "wide.py"
+    wide.write_text(
+        "from wl_xcon.geometry import SubjectSettings\n"
+        "SETTINGS = SubjectSettings(subject='REFERENCE', half_ipd_cm=2.0)\n",
+        encoding="utf-8",
+    )
+
+    assert main(["check", _either_task(tmp_path, 10.0), "--rig", RIG_FILE, "--allocation",
+                 ALLOCATION, "--view", "stereoscope", "--subject-settings", str(wide)]) == 0
+
+    out = capsys.readouterr().out
+    assert "checked against: the stereoscope, half-IPD 2.00 cm" in out
+    assert "warning  half-IPD outside the optics" in out and "extrapolated" in out
 
 
 def test_wlx_check_of_an_either_task_on_an_unmeasured_direct_view_points_at_the_other(tmp_path):
@@ -2303,10 +2324,13 @@ def test_wlx_run_records_what_the_session_is_for(tmp_path):
     assert config["session_kind"] == "piloting"
 
 
-def test_wlx_run_refuses_a_task_written_for_the_other_setup_before_anything_is_recorded(tmp_path):
-    """Review Focus 1. A wrong pick is refused naming both setups, before the session
-    opens -- so no departure is marked for a session that cannot run, and no session
-    directory exists."""
+def test_wlx_run_refuses_a_task_the_other_setups_field_cannot_show_before_anything_is_recorded(
+    tmp_path,
+):
+    """Review Focus 1, revised by XC-352's A12 (the PI, 2026-10-11; the final review's M1): a
+    task written for the other setup is a warning, and one the chosen setup's field cannot show
+    is refused, before the session opens -- so no departure is marked for a session that cannot
+    run, and no session directory exists."""
     argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm())
     argv[argv.index("direct")] = "stereoscope"
     argv += ["--subject-settings", "tasks/reference_subject.py"]
@@ -3996,8 +4020,10 @@ def test_the_console_says_a_listing_fault_as_one_and_not_as_a_warning():
 
 
 def test_the_console_says_a_warning_no_kind_accepts_as_one_every_run_refuses():
-    """Call 21: a calibration record that will not load is listed on the idle frame with no
-    kinds, so nothing is asked of an open and every run's pre-flight fails on it."""
+    """Call 21: a warning no kind accepts is listed on the idle frame as one, so nothing is asked
+    of an open and every run's pre-flight fails on it. The rig lists none since XC-352's E1 and
+    E2 (the PI, 2026-10-11), which made a record that will not load, call 21's case, a warning
+    every kind accepts: the row is a stand-in."""
     unloaded = WarningRow("calibration record", "refused: the record is not JSON", (), None, None)
 
     shown = render(idle(warnings=(unloaded,)))

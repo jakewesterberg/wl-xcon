@@ -12,7 +12,7 @@ from _sessions import WALL, bounds
 from wl_xcon import actor, marks, resume, stranded
 from wl_xcon.actor import Box
 from wl_xcon.bounds import Exceeded
-from wl_xcon.link import TEXT_LIMIT, Stranded, _quoted
+from wl_xcon.link import Stranded, _quoted
 from wl_xcon.record import welfare_note
 from wl_xcon.resume import PREDATES
 
@@ -187,12 +187,14 @@ _ACCEPTED = {
 
 
 @pytest.mark.parametrize("where", ["config.json", "trials.jsonl", "a number"])
-def test_a_readers_long_sentence_is_cut_in_why(tmp_path, monkeypatch, where):
+def test_a_readers_long_sentence_is_cut_in_why(tmp_path, where):
     """XC-299: why a session cannot be resumed quoted what its reader said whole, and a reader's
-    sentence can be anything: an `OSError`'s quotes the whole path, `float()`'s every character
-    it could not read, and `Entry`'s and `actor.from_map`'s whatever a later change makes them
-    say. Each is cut to `link.TEXT_LIMIT` characters and "…" in `Stranded.why` now, as the
-    record's quoted values are, and the sentence around it is whole."""
+    sentence can be anything: an `OSError`'s quotes the whole path, and `float()`'s every
+    character it could not read. Each is cut to `link.TEXT_LIMIT` characters and "…" in
+    `Stranded.why` now, as the record's quoted values are, and the sentence around it is whole.
+    A damaged `warnings.jsonl` row, whose `Entry` or `actor.from_map` could say anything too,
+    leaves the session resumable since XC-352's C11, its sentence cut where it is said (below;
+    Task 8's review, M6)."""
     path = where in ("config.json", "trials.jsonl")
     # A folder name of 240 characters: an `OSError` quotes the path, which holds it whole.
     long = "s" * 240 if path else "e" * 10_000
@@ -245,9 +247,9 @@ def test_a_damaged_warning_rows_long_sentence_is_cut_and_the_session_stays_resum
     (found,) = stranded.find(tmp_path)
     (why,) = resume.read(directory, WALL - 900).damaged
 
-    assert found.resumable
+    # Resumable, so it has no why; why the row is left out is said in the resume, cut.
+    assert (found.resumable, found.why) == (True, "")
     assert why.startswith(start) and long not in why and "…" in why
-    assert len(found.why) <= TEXT_LIMIT + 150
 
 
 def test_a_restored_session_takes_its_return_under_the_rules_and_writes_its_rows(tmp_path):

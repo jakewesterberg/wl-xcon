@@ -32,7 +32,7 @@ import math
 import numpy as np
 
 from wl_xcon import look, viewport
-from wl_xcon.photometry import TOLERANCE, to_xyz
+from wl_xcon.photometry import to_xyz
 from wl_xcon.screen import NotYetDrawable, ResolvedFlat, ResolvedGrating
 
 SUPERSAMPLE = 4
@@ -312,9 +312,9 @@ def output_levels(image, calibration):
 def shown(image, calibration):
     """The light each pixel of a drawn eye is shown as on `calibration`'s panel, `(rows, cols, 3)`
     CIE XYZ in cd/m²: the light `output_levels`' clipped weights make -- the pixel itself wherever
-    the panel can make it, within `TOLERANCE` -- for a record to carry beside the light asked for
-    (XC-352's A20). Recording it per frame is the display process's and the screen log's
-    (engine builds E and F); `check`'s warning names it for each light it can see."""
+    the panel can make it, within `photometry.TOLERANCE` -- for a record to carry beside the light
+    asked for (XC-352's A20). Recording it per frame is the display process's and the screen
+    log's (engine builds E and F); `check`'s warning names it for each light it can see."""
     primaries, weights = _weights(image, calibration)
     return (np.clip(weights, 0.0, 1.0) @ primaries.T).reshape(np.shape(image))
 

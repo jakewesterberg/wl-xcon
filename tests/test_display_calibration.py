@@ -270,7 +270,13 @@ def test_a_rig_names_its_record_relative_to_its_own_folder(tmp_path):
     (json.dumps(_record(extra=1)), "extra"),
     (json.dumps(_record(transfer={c: [[0.0, 0.5], [0.5, 0.4], [1.0, 1.0]] for c in ("red", "green", "blue")})), "never fall"),
 ])
-def test_a_named_record_that_will_not_load_refuses_and_never_falls_back(tmp_path, content, said):
+def test_a_named_record_that_will_not_load_is_refused_by_its_loader_saying_why(
+    tmp_path, content, said
+):
+    """`_load_calibration` refuses, saying why, and puts nothing in the record's place itself:
+    its callers run on the default with a warning quoting that sentence (the PI, 2026-10-11,
+    XC-352's E1; `cli._calibration_or_default`, `service.Service`), where until then the session
+    was refused."""
     path = naming(tmp_path, "cal.json")
     if content is not None:
         (tmp_path / "cal.json").write_text(content)
@@ -283,6 +289,8 @@ def test_a_named_record_that_will_not_load_refuses_and_never_falls_back(tmp_path
 
 @pytest.mark.parametrize("calibration", [3, "", "  "])
 def test_a_calibration_that_is_not_a_path_is_refused(tmp_path, calibration):
+    """By its loader, as a record that will not load is; its callers fall back with E1's warning
+    for it too (the final review, row 13)."""
     path = naming(tmp_path, calibration)
 
     with pytest.raises(SystemExit, match="the path of a calibration record"):

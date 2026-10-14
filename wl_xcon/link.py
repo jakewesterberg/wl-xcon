@@ -233,9 +233,10 @@ class Staged:
 
 @dataclass(frozen=True, slots=True)
 class Refused:
-    """A console's command that `Session.set` rejected: an undeclared name, a value of
-    the wrong type, one past its ceiling, or one outside its declared range that the
-    load-time checks, widened to it, refuse (since XC-352's D2, 2026-10-11).
+    """A console's command that `Session.set` rejected: an undeclared name, one not
+    live-editable, a value not among its choices or of the wrong type, one past its
+    ceiling, or one outside its declared range that the load-time checks, widened to it,
+    refuse (since XC-352's D2, 2026-10-11; until then any value outside it).
 
     **Part of S9a §8's live change feed, the same as `Staged`.** Before this field
     existed, `Session.refusals` was in-memory only -- a person who mistyped a

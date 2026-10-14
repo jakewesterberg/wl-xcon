@@ -591,6 +591,23 @@ def test_a_pixel_the_panel_cannot_make_is_clipped_and_shown_as_the_light_it_make
     assert seen[0, 1, 1] < image[0, 1, 1]
 
 
+def test_a_light_past_one_primary_alone_is_clipped_in_that_channel_never_scaled_to_fit():
+    """Task 5's minor (the final review, row 11): the clip was pinned by a gray past white, all
+    three channels past full drive alike, which scaling the light to fit passes too. A light
+    past the red primary's full drive, its green and blue within theirs, is shown with red at
+    full drive and green and blue as asked -- its chromaticity moved toward green and blue,
+    what A20's warning names -- where a light scaled to fit keeps its chromaticity and loses
+    its luminance."""
+    red, green, blue = (np.array(to_xyz(p)) for p in (SRGB.red, SRGB.green, SRGB.blue))
+    asked = np.array([[1.3 * red + 0.5 * green + 0.2 * blue]])
+
+    seen = exact.shown(asked, SRGB)[0, 0]
+
+    assert seen == pytest.approx(red + 0.5 * green + 0.2 * blue)
+    assert not np.allclose(seen, asked[0, 0] / 1.3), "a light scaled to fit"
+    assert exact.output_levels(asked, SRGB)[0, 0, 0] == pytest.approx(1.0)
+
+
 def test_a_pixel_that_is_not_a_number_is_refused_never_clipped():
     """A NaN fails every comparison and has nothing to be clipped to: the drawer and `shown`
     refuse it."""

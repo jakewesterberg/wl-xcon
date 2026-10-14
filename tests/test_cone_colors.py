@@ -187,7 +187,8 @@ def test_a_cone_contrast_is_its_own_three_numbers():
 def test_a_record_says_how_its_cone_colors_became_light():
     """A2's Q2 and Q4: the observer's parameters, and the default's matrix as outside the CIE's
     definition, holding the standard's CIE 1931 Y (the review's S-I2); a measured calibration's
-    spectra and V_F,10; none without them."""
+    spectra and V_F,10; and without them the default's matrix on its measured light, outside the
+    CIE's definition too (XC-352's E3, the PI, 2026-10-11), where until then it converted none."""
     assert cone_record(SRGB) == {"observer": cones.CIE2006_10.record(), "via": VIA_STANDARD,
                                  "luminance": HELD_STANDARD, "dkl": DKL_NORMALIZATION}
     assert "outside the CIE's definition" in VIA_STANDARD
