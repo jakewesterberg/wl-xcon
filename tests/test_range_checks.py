@@ -7,8 +7,11 @@ experimenter cannot break it from the console.
 """
 
 import inspect
+import math
 from dataclasses import replace
 from pathlib import Path
+
+import pytest
 
 import wl_xcon.check as checking
 from _rig import DIRECT
@@ -39,6 +42,7 @@ from wl_xcon.task import (
     State,
     Stimulus,
     Trial,
+    Update,
     Window,
 )
 
@@ -645,8 +649,12 @@ def test_a_set_size_past_its_range_that_draws_its_objects_on_one_another_is_refu
             assert refusal.detail.startswith(
                 f"with 'set_size' at {n:g}, outside its declared range: array 'search' at {n:g} "
                 f"objects would put adjacent objects ")
-            assert (f"apart on its {ring}° ring, closer than its smallest object is across (1°), "
-                    f"so they would be drawn on one another") in refusal.detail
+            # The ring is a range, read at its least; the fix is the most it keeps apart there
+            # (the final re-review's m7): 1° objects, 31 on a 5° ring, 50 on an 8° one.
+            most = {5: 31, 8: 50}[ring]
+            assert (f"apart on its ring at its least, {ring}°, closer than its smallest object is "
+                    f"across (1°), so they would be drawn on one another, where at most {most} "
+                    f"stay apart; that breaks the run") in refusal.detail
             assert "a stop, a pause and the out-of-cage limit unheard" in refusal.detail
 
 
@@ -667,7 +675,7 @@ def test_a_set_size_past_its_range_whose_objects_stay_apart_on_the_tightest_ring
     assert [(f.code, f.blocking) for f in _on_the_rig(crowded, {"set_size": 32})] == [
         ("outside-range", False), ("crowded-array", False), ("overlapping-objects", True)]
     (refusal,) = [f for f in _on_the_rig(crowded, {"set_size": 32}) if f.blocking]
-    assert "0.98° apart on its 5° ring" in refusal.detail
+    assert "0.98° apart on its ring at its least, 5°" in refusal.detail
     three = (Disc(size=3.0, color=Gray(16.0)),)
     larger = _search(object_window=3.0, targets=three, distractors=three)
     assert [(f.code, f.blocking) for f in _on_the_rig(larger, {"set_size": 20})] == [
@@ -682,6 +690,96 @@ def test_a_set_size_past_its_range_whose_objects_stay_apart_on_the_tightest_ring
         ("outside-range", False)]
     (refusal,) = [f for f in beyond_range(triangles, {"set_size": 1000}) if f.blocking]
     assert "closer than its smallest object is across (0.5°)" in refusal.detail
+
+
+def _ring(ring: object, params=()) -> Task:
+    """Two to twelve 1° discs on a ring of radius `ring`, shown in one state, no windows."""
+    trial = Trial(
+        start="s",
+        params=[Param("set_size", unit="objects", low=2, high=12), *params],
+        states=[State("s", enter=[Show(Stimulus("x", at=(0.0, 0.0), looks=Array(
+            n=P("set_size"), radius=ring, target=0, looks=Disc(size=1.0),
+            among=Disc(size=1.0))))], go=[On(After(1.0), Outcome.NO_RESPONSE)])],
+    )
+    return Task({"s": trial}, default="s")
+
+
+def test_a_ring_given_by_choices_is_read_at_its_points_never_between_them():
+    """The final re-review's m1: `_overlapping_objects` read a ring given by choices as the
+    interval between them, so a ring of -8° or 8° reached 0 and thirteen objects were refused,
+    though every choice puts them 3.83° apart. Each choice is a point, as `_centres` reads a
+    window's coordinate, and the ring at its least is the least distance from 0 among them: 8°
+    for {8, 12} and for {-8, 8}, so thirteen are only outside the range. A literal ring is
+    itself, saying "its 8° ring"."""
+    for choices in ((8.0, 12.0), (-8.0, 8.0)):
+        task = _ring(P("ecc"), [Param("ecc", unit="deg", choices=choices)])
+        assert [(f.code, f.blocking) for f in beyond_range(task, {"set_size": 13})] == [
+            ("outside-range", False)], choices
+    (refusal,) = [f for f in beyond_range(_ring(8.0), {"set_size": 1000}) if f.blocking]
+    assert "0.05° apart on its 8° ring, closer than" in refusal.detail
+
+
+def test_the_most_a_ring_keeps_apart_is_named_and_none_when_not_even_two():
+    """The final re-review's m7: the refusal names the fix, the largest set size the ring at its
+    least keeps apart. A 0.4° ring keeps no two 1° discs apart (0.80° across a diameter)."""
+    (refusal,) = [f for f in beyond_range(_ring(0.4), {"set_size": 13}) if f.blocking]
+
+    assert ", where not even two stay apart; that breaks the run" in refusal.detail
+
+
+def test_an_array_shown_by_an_update_or_among_a_settings_choices_is_checked_too():
+    """The final re-review's m3: `_shown_arrays` reads an array an `Update` shows, and one among
+    a setting's choices, beside one a `Show` writes; each is held to its set size's highest at
+    load (`unbounded-set-size`) and past it (`overlapping-objects`)."""
+    unbounded = Param("set_size", unit="objects", low=2)
+    array = Array(n=P("set_size"), radius=8.0, target=0)
+    updated = Trial(start="s", params=[unbounded], states=[State("s", enter=[
+        Show(Stimulus("x", at=(0.0, 0.0), looks=Disc(size=1.0))), Update("x", looks=array)],
+        go=[On(After(1.0), Outcome.NO_RESPONSE)])])
+    chosen = Trial(start="s", params=[unbounded, Param(
+        "display", unit="appearance", choices=(Disc(size=1.0), array))], states=[State("s", enter=[
+            Show(Stimulus("x", at=(0.0, 0.0), looks=P("display")))],
+        go=[On(After(1.0), Outcome.NO_RESPONSE)])])
+
+    for trial in (updated, chosen):
+        assert "unbounded-set-size" in codes(trial)
+        bounded = Task({"s": replace(trial, params=[
+            Param("set_size", unit="objects", low=2, high=12), *trial.params[1:]])}, default="s")
+        assert [f.code for f in beyond_range(bounded, {"set_size": 1e9}) if f.blocking] == [
+            "overlapping-objects"]
+
+
+def test_a_set_size_with_a_choice_that_is_no_finite_number_is_refused_saying_how_to_fix_it():
+    """The final re-review's m7: a set size whose choices include one that is no finite number
+    has no highest (`_span`, failing closed), and its refusal names the fix."""
+    trial = _ring(8.0).structures["s"]
+    trial = replace(trial, params=[Param("set_size", unit="objects", choices=(2, math.inf))])
+
+    (refusal,) = [f for f in check(trial) if f.code == "unbounded-set-size"]
+
+    assert refusal.detail.endswith(
+        "; 'set_size' offers a choice that is no finite number; give every choice as a finite "
+        "number")
+
+
+def test_the_least_separation_over_crossed_choices_is_the_least_over_every_pair_of_points():
+    """The final re-review's m4: two windows each placed by choices on both axes were compared
+    region by region, every pair of the crossed choices (40 choices an axis took over a second).
+    The regions are a cross product, and the separation grows with each axis' gap, so the least
+    is the hypotenuse of the least gap on each axis: the same answer, read per axis."""
+    xs, ys, xs2, ys2 = (-10.0, 3.0, 9.0), (-4.0, 6.0), (1.0, 12.0), (-9.0, 2.5, 7.0)
+    declared = [Param("x", unit="deg", choices=xs), Param("y", unit="deg", choices=ys),
+                Param("x2", unit="deg", choices=xs2), Param("y2", unit="deg", choices=ys2),
+                Param("r", unit="deg", low=0.5, high=1.5)]
+    a = Window("a", at=(P("x"), P("y")), radius=P("r"), on="fix")
+    b = Window("b", at=(P("x2"), P("y2")), radius=1.0, on="fix")
+
+    brute = min(math.hypot(ax - bx, ay - by)
+                for ax in xs for ay in ys for bx in xs2 for by in ys2)
+
+    assert checking._closest_approach(a, b, {p.name: p for p in declared}) == (
+        pytest.approx(brute), 2.5)
+    assert brute == pytest.approx(math.hypot(2.0, 1.0))
 
 
 def _two_lights(brightest: float) -> Task:

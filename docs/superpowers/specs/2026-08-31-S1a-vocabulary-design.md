@@ -241,6 +241,9 @@ corrugation, and only that eye's. A stereogram declared for one eye is refused �
 monocular presentation of one half is a field of random dots with no disparity
 [@julesz1960binocular], and it would still run, still record, and still appear in a
 figure as a disparity condition.
+*The PI's rulings on XC-352, 2026-10-11 (A11)*: a warning, not a refusal. A monocular
+control is the experimenter's to choose, and the warning (`monocular-stereogram`) says its
+trials are not a disparity condition and are not to be analyzed as one (decisions.md STE-10).
 
 ## 11. Still open — the naming, which is the point
 
@@ -290,7 +293,10 @@ isoluminance claim — a macaque V(lambda) is not a human one [@dobkins2000compa
 refused outright. A rig that names no calibration runs on the default, the sRGB standard,
 measured by nobody (engine spec §7.1), which loads a task that names a colour in training and
 piloting with a warning and refuses it in recording (the PI, 2026-10-07 and 2026-10-08; engine
-spec §7.2); isoluminance still needs a measured calibration (§7.3). The instrument is a
+spec §7.2); isoluminance still needs a measured calibration (§7.3). *Revised by the PI's rulings
+on XC-352, 2026-10-11 (A21, A19)*: on the default such a task runs in recording too, with its
+warning, the record naming the default; and isoluminance on the default is a warning that the
+colours are only nominally isoluminant (decisions.md COL-02, COL-03). The instrument is a
 spectroradiometer (engine spec §12 item 1), not a photometer. The observer is named, not the
 animal's: isoluminance is the CIE 10° standard observer's V_F,10 (the PI, 2026-10-08, A2's Q5),
 and a per-animal measured null was declined (2026-10-07). So the risk this paragraph names

@@ -2688,12 +2688,16 @@ def _unbounded_set_sizes(trial: Trial) -> list[Finding]:
             continue  # a literal is its own highest; an undeclared setting is refused at load
         if math.isfinite(_span(array.n, params, 0.0)[1]):
             continue
+        # The fix: the missing limit, or, for choices, a choice that is a finite number (the
+        # final re-review's m7).
+        fix = (f"; {array.n.name!r} offers a choice that is no finite number; give every choice "
+               f"as a finite number" if params[array.n.name].choices
+               else _open_sides(((array.n, ("highest",)),), params))
         findings.append(Finding("unbounded-set-size", (
             f"array {name!r} can be shown with any number of objects: its set size has no "
             f"declared highest, so a console can send one too large to draw, and a run builds "
             f"every object and its window before a trial's first frame, where a large enough set "
-            f"size stalls it, a stop, a pause and the out-of-cage limit unheard"
-            + _open_sides(((array.n, ("highest",)),), params))))
+            f"size stalls it, a stop, a pause and the out-of-cage limit unheard" + fix)))
     return findings
 
 
@@ -2848,35 +2852,37 @@ def _closest_approach(a: Window, b: Window, params: dict[str, Param]) -> tuple[f
     (Task 10's review, I2): a target window over x 0-16° and y ±8° sits on a fixation window at
     the centre at (0, 0), while every corner is 8° or more from it. Settings shared between the
     axes or the windows are read as independent, which can only make the separation smaller: a
-    warning, never a pass."""
+    warning, never a pass.
 
-    def apart(one: tuple, other: tuple) -> float:
-        (x, y), (other_x, other_y) = one, other
-        return math.hypot(*(max(0.0, low - other_high, other_low - high)
-                            for (low, high), (other_low, other_high)
-                            in ((x, other_x), (y, other_y))))
+    **Read per axis** (the final re-review's m4): the regions are a cross product of each axis'
+    intervals, and the separation grows with each axis' gap, so the least over every pair of
+    regions is the hypotenuse of the least gap on each axis -- the same answer, without crossing
+    forty choices an axis into 2.5 million pairs. A whole position as one setting (`at=P("pos")`)
+    is still unpacked as a pair, and raises `TypeError` out of `check` (XC-156, filed; two tests
+    use such a task as one the checks cannot finish on)."""
+    (a_x, a_y), (b_x, b_y) = a.at, b.at
 
-    gap = min(apart(one, other)
-              for one in _centres(a.at, params) for other in _centres(b.at, params))
+    def gap(one: object, other: object) -> float:
+        return min(max(0.0, low - other_high, other_low - high)
+                   for low, high in _intervals(one, params)
+                   for other_low, other_high in _intervals(other, params))
+
     reach = _span(a.radius, params, 0.0)[1] + _span(b.radius, params, 0.0)[1]
-    return (gap, reach)
+    return (math.hypot(gap(a_x, b_x), gap(a_y, b_y)), reach)
 
 
-def _centres(at: object, params: dict[str, Param]) -> list[tuple[tuple, tuple]]:
-    """Every region a window's centre can be in, as an interval per axis (`_closest_approach`):
-    its coordinates' crossed, a literal or each choice of a setting a point and a range one
-    interval (`_span`). A whole position as one setting (`at=P("pos")`) is still unpacked as a
-    pair, and raises `TypeError` out of `check` (XC-156, filed; two tests use such a task as one
-    the checks cannot finish on)."""
-
-    def intervals(value: object) -> list[tuple[float, float]]:
-        param = params.get(value.name) if isinstance(value, P) else None
-        if param is not None and param.choices and all(_finite(c) for c in param.choices):
-            return [(float(c), float(c)) for c in param.choices]
-        return [_span(value, params)]
-
-    x, y = at
-    return [(one, other) for one in intervals(x) for other in intervals(y)]
+def _intervals(
+    value: object, params: dict[str, Param], least: float = -math.inf
+) -> list[tuple[float, float]]:
+    """The values a number can be, as intervals: a literal, or each choice of a setting, a point;
+    a range one interval (`_span`, with its `least`). Choices that are not all finite numbers are
+    read as `_span` reads them, failing closed. Read by `_closest_approach` for a window's
+    coordinate (the final review's I2) and by `_overlapping_objects` for a ring (the final
+    re-review's m1): a coordinate or a ring of -10° or 10° is never 0."""
+    param = params.get(value.name) if isinstance(value, P) else None
+    if param is not None and param.choices and all(_finite(c) for c in param.choices):
+        return [(float(c), float(c)) for c in param.choices]
+    return [_span(value, params, least)]
 
 
 def _overlapping_windows(trial: Trial) -> list[Finding]:
@@ -3041,10 +3047,13 @@ def _overlapping_objects(trial: Trial, raised: dict[str, float]) -> list[Finding
 
     **The reading** (I1: "the object size as the task declares it, the ring radius at its
     least"): adjacent centres `2 R sin(pi/n)` apart, `n` the value sent and `R` the least the
-    ring's radius can be, its distance from 0 (`_span`; 0 where its range reaches 0), against the
-    smallest object the array can show, so that the objects are drawn on one another on the
-    tightest ring whatever else the console sets (`_narrowest`). A set size sent below its lowest
-    draws fewer objects, further apart, and is never refused here."""
+    ring's radius can be, its distance from 0 -- each choice a point (`_intervals`; the final
+    re-review's m1), a range read at its least and 0 where it reaches 0, has no lowest or
+    crosses 0, a deliberate fail-closed for a degenerate ring (XC-378) -- against the smallest
+    object the array can show, so that the objects are drawn on one another on the tightest ring
+    whatever else the console sets (`_narrowest`). The sentence names the fix, the most that ring
+    keeps apart (`_most_apart`). A set size sent below its lowest draws fewer objects, further
+    apart, and is never refused here."""
     params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
     for name, array in _shown_arrays(trial, params):
@@ -3053,23 +3062,42 @@ def _overlapping_objects(trial: Trial, raised: dict[str, float]) -> list[Finding
         n = _whole(raised[array.n.name])
         if n < 2:
             continue
-        low, high = _span(array.radius, params, 0.0)
-        ring = 0.0 if low <= 0.0 <= high else min(abs(low), abs(high))
+        ring = min(0.0 if low <= 0.0 <= high else min(abs(low), abs(high))
+                   for low, high in _intervals(array.radius, params, 0.0))
         spacing = 2.0 * ring * math.sin(math.pi / n)
         size = min(_narrowest(array.looks, params), _narrowest(array.among, params))
         if spacing >= size:
             continue
+        most = _most_apart(ring, size)
         across = (f"closer than its smallest object is across ({size:g}°), so they would be drawn "
-                  f"on one another" if math.isfinite(size)
+                  f"on one another, where "
+                  + (f"at most {most} stay apart" if most >= 2 else "not even two stay apart")
+                  if math.isfinite(size)
                   else "and no object it can show declares a width this check can read, so "
                   "nothing shows them drawn apart")
+        on = (f"its {ring:g}° ring" if not isinstance(array.radius, P)
+              else f"its ring at its least, {ring:g}°")
         findings.append(Finding("overlapping-objects", (
             f"array {name!r} at {n:g} objects would put adjacent objects {spacing:.2f}° apart on "
-            f"its {ring:g}° ring, {across}; that breaks the run (XC-352's D2): a run builds "
-            f"every object and its window before a trial's first frame, so past where they "
-            f"overlap a larger set size only adds work, and far past it the run stalls there, a "
-            f"stop, a pause and the out-of-cage limit unheard until it is built")))
+            f"{on}, {across}; that breaks the run (XC-352's D2): a run builds every object and "
+            f"its window before a trial's first frame, so past where they overlap a larger set "
+            f"size only adds work, and far past it the run stalls there, a stop, a pause and the "
+            f"out-of-cage limit unheard until it is built")))
     return findings
+
+
+def _most_apart(ring: float, size: float) -> int:
+    """The most objects a ring of radius `ring` keeps apart, adjacent centres `2 R sin(pi/n)` at
+    least `size`: the fix an `overlapping-objects` refusal names (the final re-review's m7). 1
+    when not even two are, across its diameter."""
+    if not (ring > 0.0 and 0.0 < size <= 2.0 * ring):
+        return 1
+    most = max(2, math.floor(math.pi / math.asin(size / (2.0 * ring))))
+    while most > 2 and 2.0 * ring * math.sin(math.pi / most) < size:
+        most -= 1  # rounding at the boundary
+    while 2.0 * ring * math.sin(math.pi / (most + 1)) >= size:
+        most += 1
+    return most
 
 
 def _shown_arrays(trial: Trial, params: dict[str, Param]) -> list[tuple[str, Array]]:
