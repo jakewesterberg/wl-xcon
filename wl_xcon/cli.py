@@ -138,9 +138,10 @@ def _load_rig(path: Path) -> Rig:
 def _load_calibration(rig: Rig, rig_path) -> Calibration:
     """The color calibration a rig names (engine spec §7.1, §7.6), or the default -- the sRGB
     standard -- when it names none. **A named record that will not load refuses**, with its
-    sentence. Its callers put the default in its place with a warning saying why
-    (`_calibration_or_default`, `service.Service`; the PI, 2026-10-11, XC-352's E1), so no
-    session runs on an unmeasured panel its operator believes measured."""
+    sentence, and so does a field that is no record's path. Its callers put the default in its
+    place with a warning saying why (`_calibration_or_default`, `service.Service`; the PI,
+    2026-10-11, XC-352's E1), so no session runs on an unmeasured panel its operator believes
+    measured."""
     named = rig.calibration
     if named is None:
         return SRGB
@@ -159,17 +160,24 @@ def _load_calibration(rig: Rig, rig_path) -> Calibration:
 
 
 def _calibration_or_default(rig: Rig, rig_path) -> tuple[Calibration, str]:
-    """The calibration a rig names, with "" -- or, when the record will not load, **the default
-    in its place, with why** (the PI, 2026-10-11, XC-352's E1: "fall back to the default with a
+    """The calibration a rig names, with "" -- or, when it will not load, **the default in its
+    place, with why** (the PI, 2026-10-11, XC-352's E1: "fall back to the default with a
     warning"), which `warnlist.of_unloaded` makes the warning a session accepts. `wlx run` and
-    `wlx check` read the rig's calibration through this; a rig file's own refusal of its field
-    (not the path of a record) still stops them."""
+    `wlx check` read the rig's calibration through this, **for a record and for a field that is
+    no record's path alike**, as `wlx taskd` does (`service.Service`; the final review's row 13:
+    the field still stopped them, while `wlx taskd` ran on the default)."""
     try:
         return _load_calibration(rig, rig_path), ""
     except SystemExit as refused:
-        if not str(refused.code).startswith("refused: the calibration "):
-            raise
         return SRGB, str(refused.code)
+
+
+def _calibration_words(calibration: Calibration) -> str:
+    """A calibration as `wlx check` and `wlx run` say it: its id, and the sRGB standard's or when
+    it was measured."""
+    return f"{calibration.id} (" + (
+        "the sRGB standard, measured by nobody" if calibration.standard
+        else f"measured {calibration.measured_on}") + ")"
 
 
 def _load_subject_settings(path: Path) -> SubjectSettings:
@@ -966,11 +974,13 @@ def render(frame: _link.Telemetry | _link.Idle) -> str:
     # `None`s would be computing -- see this function's second paragraph.
     lines.append(f"  deployment: {_printable(frame.deployment)}")
     # Schema 15 (engine build B): what the session is for, its calibration, and the
-    # warnings it accepted -- wire text, so each through `_printable`.
+    # warnings it accepted -- wire text, so each through `_printable`. No calibration is a
+    # session given none, which since XC-352's E1 neither `wlx taskd` nor `wlx run` is:
+    # `Session.run` refuses to start a run without one.
     lines.append(f"  for: {_printable(frame.session_kind)}")
     lines.append(
         "  color calibration: "
-        + ("NONE LOADED -- every run's pre-flight fails on it" if frame.calibration is None
+        + ("NONE LOADED -- no run starts without one" if frame.calibration is None
            else _printable(frame.calibration))
     )
     lines.append(
@@ -1694,6 +1704,12 @@ def main(argv: list[str] | None = None) -> int:
         # the `Session`; not beside `out of cage:`, which sits inside the welfare
         # path. Without `--link` this is the only place the setup is said here.
         print(f"  setup: {_setup_words(geometry.view, geometry.half_ipd_cm)}")
+        # The calibration, as `wlx check` says it, and each warning the flag accepts, whole
+        # (the final review's row 16; XC-353: a warning is shown whole before it is accepted),
+        # through `_printable`: a task's warning quotes the task.
+        print(f"  calibration: {_printable(_calibration_words(calibration))}")
+        for entry in warnings:
+            print(f"  warning accepted: {_printable(entry.code)}: {_printable(entry.detail)}")
 
         values: dict[str, object] = {}
         for assignment in args.set:
@@ -2143,12 +2159,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     for geometry in geometries:
         print(f"checked against: {_setup_words(geometry.view, geometry.half_ipd_cm)}")
-    print(
-        f"calibration: {calibration.id} ("
-        + ("the sRGB standard, measured by nobody" if calibration.standard
-           else f"measured {calibration.measured_on}")
-        + ")"
-    )
+    print(f"calibration: {_calibration_words(calibration)}")
     # One list across the setups, each finding once: most findings are the task's own
     # and read the same in every setup, while check 8's name the field they failed in.
     findings: list = []

@@ -2,6 +2,7 @@
 and the session kinds it is acceptable in."""
 
 import re
+import unicodedata
 from datetime import date, timedelta
 
 import pytest
@@ -65,13 +66,45 @@ def test_a_calibration_that_will_not_load_is_a_warning_that_the_default_runs_in_
     assert (entry.code, entry.accepted_in) == ("calibration record", SESSION_KINDS)
     assert entry.detail.startswith(refusal)
     assert "this session runs on the default calibration, the sRGB standard" in entry.detail
+    # Said so it fits a rig whose calibration is no path as well as a record (the final review,
+    # row 13): `wlx run` and `wlx check` fall back for either, as `wlx taskd` does.
+    assert "until the rig's calibration is repaired and read again" in entry.detail
     assert len(long.detail) <= NOTE_LIMIT and "…" in long.detail
     # Cut in its middle: a record's refusal names its path first and why it would not load last.
     assert long.detail.startswith("refused: xxx")
     # The default's own warning says why it stands in, never that the rig names none (the
     # warnings-over-refusals review's M4).
     (default,) = warnlist.of_calibration(SRGB, TODAY, unloaded=True)
-    assert default.detail.startswith("the calibration record the rig names would not load, so ")
+    assert default.detail.startswith("the calibration the rig names would not load, so ")
+
+
+def test_a_refusal_too_long_to_quote_whole_keeps_its_head_and_its_tail():
+    """Task 6's minor (the final review, row 14): the middle cut was pinned by a refusal all of
+    one letter, whose kept tail cannot be told from its head. A record's refusal names its path
+    first and why it would not load last: the head keeps the first, the tail the second, and
+    the cut is between them, the sentence exactly `link.NOTE_LIMIT` long."""
+    refusal = ("refused: the calibration rig.py names, " + "/deep" * 200
+               + "/cal.json: it is not JSON (Expecting value)")
+
+    (entry,) = warnlist.of_unloaded(refusal)
+    head, cut, tail = entry.detail.partition("…")
+
+    assert cut and len(entry.detail) == NOTE_LIMIT
+    assert head.startswith("refused: the calibration rig.py names, /deep")
+    assert "/deep/deep/cal.json: it is not JSON (Expecting value); this session runs on the " \
+        "default" in tail
+
+
+def test_a_refusal_an_open_quotes_carries_no_control_character():
+    """Task 6's minor (the final review, row 15): the page sends an open's warning back exactly as
+    its HTML attribute gives it, and an attribute turns a carriage return into a line feed and a
+    NUL into U+FFFD, so a record whose bad key held either could never be accepted. Each control
+    character is U+FFFD before the cut, as the terminal says one (`cli._printable`)."""
+    (entry,) = warnlist.of_unloaded(
+        "refused: the calibration rig.py names, cal.json: it has a key 'a\rb\x00c\x1b\n'")
+
+    assert not [ch for ch in entry.detail if unicodedata.category(ch) == "Cc"]
+    assert "a key 'a\ufffdb\ufffdc\ufffd\ufffd'; this session runs on" in entry.detail
 
 
 def test_a_stereoscope_built_without_settings_is_a_warning_that_records_the_half_ipd_as_nominal():

@@ -443,7 +443,7 @@ def test_a_calibration_record_that_will_not_load_runs_sessions_on_the_default_wi
     assert (record.code, record.accepted_in, default.code) == (
         "calibration record", SESSION_KINDS, "default calibration")
     # The default's own sentence says why it stands in, not that the rig names none (M4).
-    assert default.detail.startswith("the calibration record the rig names would not load, so ")
+    assert default.detail.startswith("the calibration the rig names would not load, so ")
 
     unaccepted = _step(service, _open())
     assert service.session is None and "calibration record: refused: the calibration" in _refused(

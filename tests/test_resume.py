@@ -433,7 +433,9 @@ def test_a_restoration_carries_what_the_session_accepted(tmp_path):
 
 def test_a_damaged_accepted_warning_row_is_not_carried_and_the_record_is_resumed(tmp_path):
     """XC-352's C11 (the PI, 2026-10-11): one damaged row no longer makes a record unresumable;
-    it is left out, and its warning is asked again (the safe direction), saying so."""
+    it is left out, and its warning is asked again (the safe direction), saying so -- at the
+    session's next run, if it runs again: one resumed waiting for its return runs none (Task 8's
+    review, M4)."""
     directory = _folder(tmp_path)
     _jsonl(directory / "warnings.jsonl", [{"code": "head free"}, _accepted_row()])
 
@@ -442,7 +444,7 @@ def test_a_damaged_accepted_warning_row_is_not_carried_and_the_record_is_resumed
     assert [w[0] for w in restored.accepted] == ["head free"] and len(restored.accepted) == 1
     assert restored.damaged == (
         "its warnings.jsonl row 1 has no 'detail', so it is not carried and its warning is "
-        "asked again",)
+        "asked again at the session's next run, if it runs again",)
 
 
 def _accepted_row(**over) -> dict:
@@ -501,7 +503,8 @@ def test_a_damaged_accepted_warning_row_is_left_out_naming_its_field_never_coerc
     assert [w[0] for w in restored.accepted] == ["head free"]
     (why,) = restored.damaged
     assert why.startswith(f"its warnings.jsonl row 2 {named}")
-    assert why.endswith(", so it is not carried and its warning is asked again")
+    assert why.endswith(", so it is not carried and its warning is asked again at the "
+                        "session's next run, if it runs again")
 
 
 def test_a_torn_accepted_warning_row_is_left_out_and_the_rows_before_it_carried(tmp_path):
@@ -534,7 +537,7 @@ def test_a_value_of_ten_thousand_characters_is_quoted_cut(tmp_path, where):
     if where == "row-kind":
         # A damaged row is left out since XC-352's C11, and why is said as cut.
         (said,) = read(directory, DEPARTURE).damaged
-        assert said.endswith("asked again")
+        assert said.endswith("asked again at the session's next run, if it runs again")
     else:
         with pytest.raises(Unresumable) as refused:
             read(directory, DEPARTURE)

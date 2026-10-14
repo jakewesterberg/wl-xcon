@@ -2660,7 +2660,10 @@ def test_the_head_and_the_session_panel_say_what_it_is_for_and_its_calibration()
     assert '<span class="k">For</span><span class="v">training</span>' in panes["head-id"]
     assert "<dt>color calibration</dt><dd>srgb-standard</dd>" in panes["setup"]
     assert "<dt>for</dt><dd>training</dd>" in panes["setup"], "shown, never changed: fixed for the session"
-    assert "none loaded" in fragments(frame(calibration=None), view())["setup"]
+    # A session given none, which since XC-352's E1 neither `wlx taskd` nor `wlx run` is (the
+    # final review, row 17).
+    assert "none loaded: no run starts without one" in fragments(
+        frame(calibration=None), view())["setup"]
 
 
 def test_an_unknown_accepted_earlier_this_session_shows_who_accepted_it_and_no_box():

@@ -89,7 +89,8 @@ class Restoration:
     #: Each warning the session accepted, as `Session.warnings` gives it.
     accepted: tuple
     #: Why each damaged `warnings.jsonl` row was left out of `accepted` (the PI, 2026-10-11,
-    #: XC-352's C11): its warning is asked again, and `Session.resume` says so.
+    #: XC-352's C11): its warning is asked again at the session's next run, if it runs again
+    #: (one resumed waiting for its return runs none), and `Session.resume` says so.
     damaged: tuple = ()
     #: The id of the calibration `config.json` names, the one the session opened on, or `None`
     #: for none: `Service._resume` warns when the service now runs another (the
@@ -167,9 +168,9 @@ def _warnings(directory: Path, session_kind: str) -> tuple[tuple, tuple]:
     """What the session accepted (`ACCEPTED_WARNINGS`), each row as `Session.warnings` gives it,
     and why each damaged row was left out: **a damaged row never makes the record unresumable**
     (the PI, 2026-10-11, XC-352's C11; it did until then) -- its warning is not carried, so it is
-    asked again, the safe direction. A row is numbered among the file's non-blank lines; half a
-    line, from a process that died writing it, is one that is not JSON. A file that cannot be
-    read at all is still `Unresumable`."""
+    asked again at the session's next run, if it runs again, the safe direction. A row is
+    numbered among the file's non-blank lines; half a line, from a process that died writing
+    it, is one that is not JSON. A file that cannot be read at all is still `Unresumable`."""
     path = directory / ACCEPTED_WARNINGS
     if not path.exists():
         return (), ()
@@ -188,7 +189,8 @@ def _warnings(directory: Path, session_kind: str) -> tuple[tuple, tuple]:
                     f"its {ACCEPTED_WARNINGS} row {number} is not JSON ({_cut(error)})") from error
             accepted.append(_accepted(row, number, session_kind))
         except _Damaged as why:
-            damaged.append(f"{why}, so it is not carried and its warning is asked again")
+            damaged.append(f"{why}, so it is not carried and its warning is asked again at the "
+                           f"session's next run, if it runs again")
     return tuple(accepted), tuple(damaged)
 
 

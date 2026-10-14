@@ -3132,8 +3132,8 @@ def test_a_live_value_whose_widened_checks_raise_or_whose_warning_cannot_be_writ
     tmp_path, monkeypatch
 ):
     """Nothing but `Exceeded` leaves `set` for a value outside its range (`Session._command`
-    catches it alone): a check that raises, or a warning row that cannot be written, refuses the
-    value, and the session runs on."""
+    catches it alone): a check that raises, a finding no warning can be made of, or a warning row
+    that cannot be written, refuses the value, and the session runs on."""
     monkeypatch.setattr("wl_xcon.taskd.beyond_range", lambda *a, **k: 1 / 0)
     link = Simulated()
     link.queue(SetParameter(name="fix_window", value=7.0, by=Box("jake")))
@@ -3150,8 +3150,19 @@ def test_a_live_value_whose_widened_checks_raise_or_whose_warning_cannot_be_writ
     unwritten = _session(_spec(tmp_path / "unwritten", trials=3), link=link)
     unwritten.run()
 
+    monkeypatch.undo()
+    # Its warnings made into entries inside the same guard (Task 11's minor; the final review,
+    # row 31): a finding no `Entry` can carry refuses the value too.
+    monkeypatch.setattr("wl_xcon.taskd.of_findings", lambda found: [Entry("", "x", ())])
+    link = Simulated()
+    link.queue(SetParameter(name="fix_window", value=7.0, by=Box("jake")))
+    unlisted = _session(_spec(tmp_path / "unlisted", trials=3), link=link)
+    unlisted.run()
+
     for session, said in ((raised, "could not be run again with the range widened (ZeroDivisionError"),
-                          (unwritten, "its warning could not be recorded (OSError: disk full)")):
+                          (unwritten, "its warning could not be recorded (OSError: disk full)"),
+                          (unlisted, "its warning could not be recorded (ValueError: a warning's "
+                                     "code is text")):
         assert session.stop_kind == "completed"
         (refusal,) = session.refusals
         assert said in refusal[2] and session.spec.values["fix_window"] == VALUES["fix_window"]

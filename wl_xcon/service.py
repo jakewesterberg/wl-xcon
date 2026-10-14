@@ -392,11 +392,13 @@ class Service:
         self.subjects, self.tasks, self.root = Path(subjects), Path(tasks), Path(root)
         self.allocation, self.allocation_path = allocation, allocation_path
         #: The rig's color calibration (engine spec §7.1, §7.6), loaded once, here -- or **the
-        #: default, the sRGB standard, in the place of a record the rig names that will not
-        #: load**, `calibration_refused` saying why (the PI, 2026-10-11, XC-352's E1: "fall back
-        #: to the default with a warning"; `warnlist.of_unloaded`, which an open asks to accept).
-        #: **Which never stops `wlx taskd`** (the engine B plan, call 19): a stranded session's
-        #: return is taken only through a running service.
+        #: default, the sRGB standard, in the place of a calibration the rig names that will not
+        #: load**, a record or a field that is no record's path, `calibration_refused` saying why
+        #: (the PI, 2026-10-11, XC-352's E1: "fall back to the default with a warning";
+        #: `warnlist.of_unloaded`, which an open asks to accept), as `wlx run` and `wlx check`
+        #: fall back (`cli._calibration_or_default`). **Which never stops `wlx taskd`** (the
+        #: engine B plan, call 19): a stranded session's return is taken only through a running
+        #: service.
         self.calibration: Calibration = SRGB
         self.calibration_refused = ""
         try:

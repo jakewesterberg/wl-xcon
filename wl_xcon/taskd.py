@@ -672,7 +672,8 @@ class Session:
         `end_runs`, is not marked fixed again. Its return closes it as any other's does.
 
         **A damaged `warnings.jsonl` row is left out** (`resume.read`; the PI, 2026-10-11,
-        XC-352's C11): its warning is asked again, and why is said on the changes feed, as a
+        XC-352's C11): its warning is asked again at the session's next run, if it runs again,
+        and why is said on the changes feed, as a
         `warning`, and in the `session resumed` row, which also names the calibration the
         session now runs on (the warnings-over-refusals review's I2) and, through the
         stereoscope, its half-IPD (Task 7's review, I1)."""
@@ -1074,10 +1075,12 @@ class Session:
         and deployment. **Refused**, as `Exceeded` saying what breaks, when a finding refuses this
         session's kind; otherwise its warnings are accepted by `by` (`warnings.jsonl`, once each)
         and said on the changes feed, and `set` stages the value. **Nothing but `Exceeded` leaves
-        here** (`_command` catches it alone): a check that raises, or a warning that cannot be
-        written, refuses the value. Run between trials, as the command is drained, never in a
-        frame. Not welfare-critical: `set` calls it only for a task's own setting, never a
-        ceiling."""
+        here** (`_command` catches it alone): a check that raises, a finding no warning can be
+        made of, or a warning that cannot be written, refuses the value. A write that fails part
+        way leaves the warnings written before it accepted (`accept`), in `warnings.jsonl` though
+        the value was refused: each says what was asked, and is not asked again this session.
+        Run between trials, as the command is drained, never in a frame. Not welfare-critical:
+        `set` calls it only for a task's own setting, never a ceiling."""
         values = {**self.spec.values,
                   **{n: now for n, _, now, _, bounded in self._staged if not bounded},
                   name: value}
@@ -1099,9 +1102,9 @@ class Session:
                 + "; ".join(f"{f.code}: {f.detail}" for f in refusing)
                 + "; the previous value stands"
             )
-        entries = of_findings(found)
-        new = [entry for entry in entries if entry.key not in self._warnings]
         try:
+            entries = of_findings(found)
+            new = [entry for entry in entries if entry.key not in self._warnings]
             self.accept(entries, by=by, how="set", run=self.run_index)
         except Exception as broken:  # noqa: BLE001 -- see the docstring
             raise Exceeded(
@@ -1237,8 +1240,9 @@ class Session:
 
     def _code(self, name: str) -> int | None:
         """The code this session's allocation gives a framework event, or `None` when
-        it gives none. `Allocation.code_for` refuses rather than inventing a number;
-        a control that needs a code it does not have refuses in its turn (`_pause`),
+        it gives none. `Allocation.code_for` refuses rather than inventing a number; a
+        control without its code refuses in its turn (`_manual_reward`) or goes ahead
+        unstrobed -- a mark, and a pause with a warning (`_pause`, since XC-352's D5) --
         rather than raising out of the loop."""
         try:
             return self.allocation.code_for(name)

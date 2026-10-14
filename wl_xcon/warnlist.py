@@ -6,37 +6,42 @@ and `_start` for a run's in its pre-flight (spec §19.3: "Accepted once per sess
 recorded"; "a warning appearing later asks again").
 
 **What this build lists:** the default calibration and a calibration past 30 days (spec §7.1,
-§7.10); a calibration that will not load, in whose place the default runs, and one dated after
-today (accepted in every kind since the PI's rulings on XC-352, 2026-10-11, E1 and E2: no kind
-accepted them, and every run's pre-flight failed on them, until then); a resumed session's
-calibration, when it is not the one the session opened on (the warnings-over-refusals review's
-I2), and its half-IPD, when it is not the one it opened on (Task 7's review, I1); a chaired session's free head (§5.9); a stereoscope's setup -- the nominal half-IPD,
-another animal's settings, a
-half-IPD outside the drawn optics -- and settings direct view ignores (the PI's rulings on
-XC-352, 2026-10-11, C6, C7, C8 and H4); a pause the allocation cannot mark (D5), accepted as it
-is taken; a task's warnings, its load-time findings that
-are warnings (`luminance-step`, `color-on-default`, `contrast-on-default`, and, since the PI's
-rulings of 2026-10-11, `head-not-fixed`, `overlapping-windows`, `crowded-array`,
-`wrong-eye-criterion`, `monocular-stereogram`, `wrong-setup`, `isoluminance-on-default`,
-`unrealizable-color`, `cone-colors-without-spectra` and, for a starting value outside its range,
-`outside-range` and, for a wait longer than any the task declares, `longer-than-declared`, by
-his answer of 2026-10-12); and today's
-pre-flight unknowns, the pump calibration and the eye tracker (S9a §10). **What later builds
-add**, each waiting on the build named: dithering and a timing record older than a graphics
-change (E, V1); a pattern near the pixel limit, and a screen, mode or care-feature mismatch
-(E); frame-clock faults (E, F); a lossy image (A4).
+§7.10); a calibration that will not load -- a record, or a rig field that is no record's path
+-- in whose place the default runs, and one dated after today (accepted in every kind since the
+PI's rulings on XC-352, 2026-10-11, E1 and E2: no kind accepted them, and every run's pre-flight
+failed on them, until then); a resumed session's calibration, when it is not the one the
+session opened on (the warnings-over-refusals review's I2), and its half-IPD, when it is not
+the one it opened on (Task 7's review, I1); a chaired session's free head (§5.9); a
+stereoscope's setup -- the nominal half-IPD, another animal's settings, a half-IPD outside the
+drawn optics -- and settings direct view ignores (the PI's rulings on XC-352, 2026-10-11, C6,
+C7, C8 and H4); a pause the allocation cannot mark (D5), accepted as it is taken; a task's
+warnings, its load-time findings that are warnings (`luminance-step`, `color-on-default`,
+`contrast-on-default`, and, since the PI's rulings of 2026-10-11, `head-not-fixed`,
+`overlapping-windows`, `crowded-array`, `wrong-eye-criterion`, `monocular-stereogram`,
+`wrong-setup`, `isoluminance-on-default`, `unrealizable-color`, `cone-colors-without-spectra`
+and, for a value outside its declared range at a run's start or live, `outside-range` and, for
+a wait longer than any the task declares, `longer-than-declared`, by his answer of 2026-10-12);
+and today's pre-flight unknowns, the pump calibration and the eye tracker (S9a §10). **What
+later builds add**, each waiting on the build named: dithering and a timing record older than a
+graphics change (E, V1); a pattern near the pixel limit, and a screen, mode or care-feature
+mismatch (E); frame-clock faults (E, F); a lossy image (A4).
 
 **Not built: a warning appearing during a run outside its kinds** (spec §19.3's pause at the
 next trial). Nothing in this build can: the calibration is loaded once, as `wlx taskd` starts;
-a calibration's age is accepted in every kind; the rest are fixed when a run starts; and the two
-that can appear during a run since the PI's rulings on XC-352 (2026-10-11) -- a live value
-outside its declared range (`outside-range`, D2) and a pause the allocation cannot mark (D5) --
-are accepted in every kind, by whoever set the value or paused, as they happen. XC-276 waits on
-build E, the first that can.
+a calibration's age is accepted in every kind; the rest are fixed when a run starts; and those
+that can appear during a run since the PI's rulings on XC-352 (2026-10-11) are accepted as they
+happen, in every kind, by whoever set the value or paused: a pause the allocation cannot mark
+(D5), and a live value outside its declared range (D2) -- `outside-range`, `longer-than-declared`
+for a wait longer than any the task declares, and each warning the task's checks give widened
+to it and not as declared (`overlapping-windows`, `crowded-array`, `unrealizable-color`,
+`wrong-setup` and the rest, each prefixed "with 'x' at v, outside its declared range"); one its
+session's kind does not accept refuses the value instead (`taskd.Session._beyond_range`).
+XC-276 waits on build E, the first that can.
 """
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from datetime import date
@@ -129,9 +134,9 @@ def of_calibration(calibration: Calibration, today: date, unloaded: bool = False
     back (a calibration's id is at most `photometry.ID_LIMIT` characters). **`unloaded`**: the
     default stands in for a record the rig names that would not load (`of_unloaded`, listed
     first; XC-352's E1), and its sentence says so, not that the rig names none (the
-    warnings-over-refusals review's M4)."""
+    warnings-over-refusals review's M4) -- a record, or a field that is no record's path."""
     if calibration.standard:
-        why = ("the calibration record the rig names would not load" if unloaded
+        why = ("the calibration the rig names would not load" if unloaded
                else "the rig names no measured calibration")
         return [Entry(DEFAULT_CALIBRATION, (
             f"{why}, so colors and luminances are the sRGB "
@@ -154,16 +159,22 @@ def of_calibration(calibration: Calibration, today: date, unloaded: bool = False
 
 
 def of_unloaded(refusal: str) -> list[Entry]:
-    """A calibration record the rig names and that will not load, as `cli._load_calibration`
-    refused it: **a warning in every kind that the default runs in its place** (the PI,
-    2026-10-11, XC-352's E1: "fall back to the default with a warning"; no kind accepted it, and
-    every run's pre-flight failed on it, until then). The refusal is quoted cut in its middle, so
+    """A calibration the rig names and that will not load -- a record, or a field that is no
+    record's path -- as `cli._load_calibration` refused it: **a warning in every kind that the
+    default runs in its place** (the PI, 2026-10-11, XC-352's E1: "fall back to the default with a
+    warning"; no kind accepted it, and every run's pre-flight failed on it, until then), in
+    `wlx taskd`, `wlx run` and `wlx check` alike. The refusal is quoted cut in its middle, so
     the whole sentence stays within `link.NOTE_LIMIT`, which the open's form sends back, and keeps
-    why it would not load; `wlx taskd` prints it whole as it starts."""
+    why it would not load; `wlx taskd` prints it whole as it starts. **Each control character in
+    it is U+FFFD** (Task 6's review, minor): the page sends the sentence back exactly as its HTML
+    attribute gives it, and an attribute turns a carriage return into a line feed and a NUL into
+    U+FFFD, so a record whose bad key held either could never be accepted."""
     tail = (
         "; this session runs on the default calibration, the sRGB standard, in its place, until "
-        "the record is repaired and read again (wlx taskd reads it as it starts; engine spec §7.1)"
+        "the rig's calibration is repaired and read again (wlx taskd reads it as it starts; engine "
+        "spec §7.1)"
     )
+    refusal = "".join("\ufffd" if unicodedata.category(ch) == "Cc" else ch for ch in refusal)
     room = _link.NOTE_LIMIT - len(tail)
     if len(refusal) > room:
         # Its middle cut: a record's refusal names its path first and why it would not load last.

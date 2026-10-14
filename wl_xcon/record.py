@@ -118,10 +118,12 @@ RUNS = "runs.jsonl"
 TRIAL_STARTS = "trial_starts.jsonl"
 
 #: The warnings a session accepted (engine spec §19.3: "Accepted once per session, at open,
-#: recorded"): one row each, when it was accepted, by whom, how -- at the open, at a run's
-#: start, or by `wlx run --accept-warnings` -- in which run, and in what kind of session. Its
-#: sentence is `detail`, as a load-time finding's is. Uncapped: a row is a person's act, at
-#: most one per warning per session.
+#: recorded"): one row each, when it was accepted, by whom, how -- at the open (`open`), at a
+#: run's start (`start`), by `wlx run --accept-warnings`, or as it happened: a live value
+#: outside its declared range (`set`) and a pause the allocation cannot mark (`pause`), since
+#: XC-352's D2 and D5 -- in which run, and in what kind of session. Its sentence is `detail`,
+#: as a load-time finding's is. Uncapped: a row is a person's act, at most one per warning per
+#: session.
 ACCEPTED_WARNINGS = "warnings.jsonl"
 
 

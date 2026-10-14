@@ -244,6 +244,28 @@ def test_wlx_check_checks_on_the_default_when_the_record_will_not_load_saying_wh
     assert "warning  calibration record" in out and "not JSON" in out
 
 
+def test_wlx_check_and_wlx_run_fall_back_for_a_rig_whose_calibration_is_no_path(tmp_path, capsys):
+    """The final review's row 13 (Task 6's minor): a rig whose calibration is no record's path
+    (`calibration=3`) still stopped `wlx check` and `wlx run`, while `wlx taskd` ran its sessions
+    on the default in its place with E1's warning. The three agree now (the PI, 2026-10-11,
+    XC-352's E1: "fall back to the default with a warning"): the warning quotes why, and says the
+    default runs until the rig's calibration is repaired."""
+    rig = str(naming(tmp_path / "rig", 3))
+
+    assert main(["check", GOOD, "--rig", rig, "--allocation", ALLOCATION, "--view", "direct"]) == 0
+    out = capsys.readouterr().out
+    assert "calibration: srgb-standard (the sRGB standard, measured by nobody)" in out
+    assert "warning  calibration record" in out and "the path of a calibration record" in out
+    assert "until the rig's calibration is repaired and read again" in out
+    argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm())
+    argv[argv.index(RIG_FILE)] = rig
+
+    assert _main_uninterrupted(argv) == 0
+    folder = tmp_path / "2027-01-14_01" / "xcon"
+    codes = [json.loads(line)["code"] for line in (folder / "warnings.jsonl").read_text().splitlines()]
+    assert codes[:2] == ["calibration record", "default calibration"]
+
+
 def _dated_after_today(tmp_path) -> str:
     """A rig naming a calibration record measured two days from now: its date or the host's
     clock is wrong, and no session kind accepts it (call 20)."""
@@ -385,6 +407,23 @@ def test_wlx_run_says_which_setup_it_is_holding_the_session_to(tmp_path, capsys)
     assert main(_run_args(tmp_path, "--out-of-cage-at", _hhmm())) == 0
 
     assert "  setup: direct view" in capsys.readouterr().out.splitlines()
+
+
+def test_wlx_run_says_the_calibration_and_every_warning_its_flag_accepts(tmp_path, capsys):
+    """The final review's row 16 (Task 6's minor): `wlx run --accept-warnings` said the setup
+    alone, so the calibration a session ran on and the warnings the flag accepted were said
+    nowhere at the terminal, where XC-353's rule is that a warning is shown whole before it is
+    accepted. Each is said, the calibration as `wlx check` says it, and each warning whole, the
+    ones `warnings.jsonl` records, in its order."""
+    assert main(_run_args(tmp_path, "--out-of-cage-at", _hhmm())) == 0
+
+    out = capsys.readouterr().out.splitlines()
+    rows = [json.loads(line) for line in (
+        tmp_path / "2027-01-14_01" / "xcon" / "warnings.jsonl").read_text().splitlines()]
+    assert "  calibration: srgb-standard (the sRGB standard, measured by nobody)" in out
+    assert [line for line in out if line.startswith("  warning accepted: ")] == [
+        f"  warning accepted: {row['code']}: {row['detail']}" for row in rows]
+    assert [row["code"] for row in rows] == ["default calibration", "contrast-on-default"]
 
 
 def test_wlx_run_says_a_settings_file_that_refuses_itself_in_a_sentence(tmp_path):
@@ -2011,7 +2050,9 @@ def test_wlx_run_can_run_a_chaired_session_with_no_head_fixation(tmp_path, capsy
     # What this proves is that the session ran at all: before 2026-09-20 preflight
     # refused every rig session with no head-fixation mark.
     assert "ended:" in out
-    assert "chair" not in out
+    # No chair time is said. The warnings the flag accepts are (the final review's row 16),
+    # among them the head-free one, "a chaired session's head is free".
+    assert not [line for line in out.splitlines() if line.strip().startswith("chair")]
 
 
 def test_the_console_reports_a_chaired_sessions_chair_time_as_unmeasured(tmp_path):
@@ -3904,7 +3945,10 @@ def test_the_console_says_what_the_session_is_for_its_calibration_and_what_it_ac
 
     assert "  for: training" in shown and "  color calibration: srgb-standard" in shown
     assert "  warnings accepted: default calibration" in shown
-    assert "  color calibration: NONE LOADED" in render(_telemetry(calibration=None))
+    # A session given none, which since XC-352's E1 neither `wlx taskd` nor `wlx run` is: the
+    # default stands in for a calibration that will not load (the final review, row 17).
+    assert "  color calibration: NONE LOADED -- no run starts without one" in render(
+        _telemetry(calibration=None))
     assert "  an open asks to accept: default calibration" in render(idle())
 
 

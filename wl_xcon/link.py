@@ -233,8 +233,9 @@ class Staged:
 
 @dataclass(frozen=True, slots=True)
 class Refused:
-    """A console's command that `Session.set` rejected: an undeclared name, or one
-    outside its declared range or ceiling.
+    """A console's command that `Session.set` rejected: an undeclared name, a value of
+    the wrong type, one past its ceiling, or one outside its declared range that the
+    load-time checks, widened to it, refuse (since XC-352's D2, 2026-10-11).
 
     **Part of S9a §8's live change feed, the same as `Staged`.** Before this field
     existed, `Session.refusals` was in-memory only -- a person who mistyped a
@@ -360,9 +361,10 @@ class WarningRow:
         `color-on-default` names every colored choice, and a record that will not load is
         quoted with what its loader said -- and a frame is re-encoded at every trial boundary.
         The record keeps every word (`warnings.jsonl`). Every sentence an open can accept today
-        is within `NOTE_LIMIT` (the engine B plan, call 25: the default calibration's, 270
-        characters, is the longest, counted 2026-10-08), so an idle frame offers each whole, as
-        the open's form must send it back."""
+        is within `NOTE_LIMIT` (the engine B plan, call 25), so an idle frame offers each whole,
+        as the open's form must send it back: the longest, a calibration that will not load,
+        quotes why cut in its middle to fit (`warnlist.of_unloaded`, since XC-352's E1), where
+        the default calibration's, 270 characters, was the longest when counted on 2026-10-08."""
         return cls(cut(code, TEXT_LIMIT), cut(detail, NOTE_LIMIT), tuple(accepted_in), by, at)
 
 

@@ -753,9 +753,11 @@ def _preflight_pane(frame: Telemetry | Idle | None, view: View) -> str:
 def _warning_row(row) -> str:
     """One warning: its code and sentence, the kinds it is accepted in, and who accepted it
     and when -- nothing for one an open has yet to ask; a chaired session's says so. One no
-    kind accepts (the engine B plan, calls 19 and 21) is marked so and carries no `data-warn`,
-    so no form can send it as accepted; and a row saying the warnings could not be listed
-    (`UNLISTED`, calls 27 and 31) is said as that, being no warning."""
+    kind accepts is marked so and carries no `data-warn`, so no form can send it as accepted:
+    the rig lists none since XC-352's E1 and E2 (2026-10-11), which made a calibration that will
+    not load or is dated after today, the engine B plan's calls 19 and 21, a warning every kind
+    accepts. And a row saying the warnings could not be listed (`UNLISTED`, calls 27 and 31) is
+    said as that, being no warning."""
     if row.code == UNLISTED and not row.accepted_in:
         return (
             f'<div class="row" data-unlisted=""><span>{_e(row.code)}</span>'
@@ -1245,7 +1247,7 @@ def _setup(frame: Telemetry | None) -> str:
         ("display mode", _e(_setup_words(frame.view, frame.half_ipd_cm))),
         (
             "color calibration",
-            '<span class="nm">none loaded: every run\'s pre-flight fails on it</span>'
+            '<span class="nm">none loaded: no run starts without one</span>'
             if frame.calibration is None
             else _e(frame.calibration),
         ),
