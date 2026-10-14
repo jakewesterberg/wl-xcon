@@ -911,3 +911,50 @@ def test_a_target_index_with_one_bound_is_refused_at_load_and_widened_past_the_a
     (fewest,) = [f for f in check(sized) if f.code == "target-outside-array"]
     assert fewest.detail.startswith("state 'search' shows an array of as few as 0 objects")
     assert fewest.detail.endswith("; 'n' declares no lowest; declare both limits")
+
+
+def test_a_target_index_or_a_correlation_with_no_highest_is_refused_at_load_naming_it():
+    """The PI's answer of 2026-10-14 (the final review's I4: "Refuse at load") covers either
+    missing limit: a target index declared from 0 alone can pass any array, and a correlation
+    declared from -1 alone can pass +1, so each is refused at load, naming the setting, the
+    side it leaves open and the fix."""
+    (target,) = [f for f in check_task(_targeted(Param("ti", unit="index", low=0, start=0)))
+                 if f.code == "target-outside-array"]
+    (correlation,) = [f for f in check_task(_stereogram(Param("c", unit="r", low=-1.0, start=0.5)))
+                      if f.code == "impossible-correlation"]
+
+    assert target.blocking and "with a target index with no declared highest;" in target.detail
+    assert target.detail.endswith("; 'ti' declares no highest; declare both limits")
+    assert correlation.blocking and "whose correlation has no declared highest;" in (
+        correlation.detail)
+    assert correlation.detail.endswith("; 'c' declares no highest; declare both limits")
+
+
+def _set_size(declared: Param) -> Trial:
+    """`_windowless`'s array of 1° discs on a ring 8-12° out, its set size declared as
+    `declared`."""
+    trial = _windowless(6).structures["search"]
+    return replace(trial, params=[declared if p.name == "set_size" else p for p in trial.params])
+
+
+def test_a_set_size_declared_with_no_highest_is_refused_at_load_naming_it():
+    """The PI's answer of 2026-10-14 (the final review's I4), asked of "how many items the array
+    has" with a limit missing: "Refuse at load". A set size declared from 2 alone, or with neither
+    limit, can be any number a console sends, inside its range, so the check widened to a value
+    past its highest never runs -- and a run builds every object and its window before a trial's
+    first frame, so a large enough set size stalls it (the final fix wave's concern 1). Refused,
+    naming the setting, its open side and the fix; with neither limit, its open lowest is
+    `target-outside-array`'s to name. A set size declared with both limits, or by choices, loads."""
+    (open_high,) = [f for f in check(_set_size(Param("set_size", unit="objects", low=2)))
+                    if f.code == "unbounded-set-size"]
+    (neither,) = [f for f in check(_set_size(Param("set_size", unit="objects")))
+                  if f.code == "unbounded-set-size"]
+
+    assert open_high.blocking and open_high.detail.startswith(
+        "array 'search' can be shown with any number of objects: its set size has no declared "
+        "highest")
+    for refusal in (open_high, neither):
+        assert refusal.detail.endswith("; 'set_size' declares no highest; declare both limits")
+    for loads in (Param("set_size", unit="objects", low=2, high=6),
+                  Param("set_size", unit="objects", choices=(2, 6))):
+        assert "unbounded-set-size" not in codes(_set_size(loads))

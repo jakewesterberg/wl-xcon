@@ -198,7 +198,9 @@ Asked by the plan named below, before its build, and, the last, at its whole-bra
   "Refuse at load". The option he chose read: "The task author adds the missing limit, a
   one-line fix. Nothing changes for the experimenter at the rig. It matches how a color or a
   position with one missing limit is already refused at load." Each such refusal names the
-  setting and the fix ("'ti' declares no lowest; declare both limits"; decisions.md TSK-51).
+  setting and the fix ("'ti' declares no lowest; declare both limits"; decisions.md TSK-51), for
+  either missing limit: a set size with no highest is refused at load too
+  (`unbounded-set-size`), where it loaded before and a console could send it any number.
 
 How each was built, and the calls taken in building them: the plan named above. Of "Found on the
 way", the head-fixed default is fixed by XC-355 (the deployment fix, merged before that build); a

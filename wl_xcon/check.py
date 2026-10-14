@@ -89,6 +89,7 @@ def check(
         + _light_faults(trial)
         + _block_faults(trial)
         + _array_faults(trial)
+        + _unbounded_set_sizes(trial)
         + _stereogram_faults(trial)
         + _eye_faults(trial)
         + _overlapping_windows(trial)
@@ -2641,7 +2642,8 @@ def _array_faults(trial: Trial) -> list[Finding]:
     index with no highest past any, or with no lowest below 0, where the target window is
     never one of the objects. Read as 0, either passed at load and widened past its bound. The
     sentence then names the setting and the fix (`_open_sides`; the PI kept this refusal on
-    2026-10-14, the final review's I4).
+    2026-10-14, the final review's I4). A set size with no highest is refused too, by
+    `_unbounded_set_sizes`.
     """
     params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
@@ -2667,6 +2669,31 @@ def _array_faults(trial: Trial) -> list[Finding]:
                                    (looks.target, ("lowest", "highest"))), params),
                 )
             )
+    return findings
+
+
+def _unbounded_set_sizes(trial: Trial) -> list[Finding]:
+    """**A set size declared with no highest is refused at load** (the PI, 2026-10-14, asked of
+    "how many items the array has" missing a limit: "Refuse at load"; the final review's I4):
+    it can be any number a console sends, inside its range, so the checks widened to a value past
+    its highest never run (`beyond_range`, `_overlapping_objects`), and a run builds every object
+    and its window before a trial's first frame, so a large enough set size stalls it, a stop, a
+    pause and the out-of-cage limit unheard (the final fix wave's concern 1). One declared by
+    choices that are all finite numbers has a highest; one with a choice that is no finite number
+    has none, failing closed (`_span`). A set size with no lowest is `_array_faults`' to name."""
+    params = {p.name: p for p in trial.params}
+    findings: list[Finding] = []
+    for name, array in _shown_arrays(trial, params):
+        if not isinstance(array.n, P) or array.n.name not in params:
+            continue  # a literal is its own highest; an undeclared setting is refused at load
+        if math.isfinite(_span(array.n, params, 0.0)[1]):
+            continue
+        findings.append(Finding("unbounded-set-size", (
+            f"array {name!r} can be shown with any number of objects: its set size has no "
+            f"declared highest, so a console can send one too large to draw, and a run builds "
+            f"every object and its window before a trial's first frame, where a large enough set "
+            f"size stalls it, a stop, a pause and the out-of-cage limit unheard"
+            + _open_sides(((array.n, ("highest",)),), params))))
     return findings
 
 
