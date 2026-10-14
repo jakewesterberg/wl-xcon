@@ -699,8 +699,9 @@ luminance waits on build F (XC-305).
    outside the drawn optics -- and settings direct view ignores are listed (C6-C8, H4); a task's
    warnings gain `overlapping-windows`, `crowded-array`, `wrong-eye-criterion`,
    `monocular-stereogram`, `wrong-setup` (without stereo content), `isoluminance-on-default`,
-   `unrealizable-color`, `cone-colors-without-spectra` and `outside-range`, and `color-on-default`
-   and `contrast-on-default` are accepted in recording. No warning the rig lists refuses any kind.
+   `unrealizable-color`, `cone-colors-without-spectra`, `outside-range` and, by his answer of
+   2026-10-12, `longer-than-declared`, and `color-on-default` and `contrast-on-default` are
+   accepted in recording. No warning the rig lists refuses any kind.
 3. **Accepted once per session**, at open, recorded. **A warning appearing during a run that its kinds do
    not accept pauses the run at the next trial**, for the operator to accept (recorded) or stop (N§R6).
    Today's unknowns keep the 2026-09-19 rule: proceed on a recorded acknowledgment.
@@ -713,7 +714,11 @@ luminance waits on build F (XC-305).
    *The PI's rulings on XC-352, 2026-10-11*: two warnings can appear during a run, each accepted in
    every kind as it happens by whoever caused it: a live value outside its declared range (D2) and a
    pause the allocation cannot mark (D5); XC-276's pause stays for one outside its kinds. A run's
-   pre-flight shows every warning it asks to accept whole (XC-353).
+   pre-flight shows every warning it asks to accept whole (XC-353). *Noted 2026-10-14 (the build's
+   final review, M3)*: the live value's are `outside-range`, `longer-than-declared` for a wait
+   longer than any the task declares, and each warning the task's checks give widened to it and not
+   as declared (`overlapping-windows`, `crowded-array`, `unrealizable-color`, `wrong-setup` and the
+   rest, each saying the value); one outside the session's kind refuses the value instead.
 
 ## 20. Welfare
 

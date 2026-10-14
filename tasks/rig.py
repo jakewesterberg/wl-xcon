@@ -37,7 +37,8 @@ RIG = Rig(
     # optics drawing §5).
     mask_deg=12.0,
     # The half-IPDs the stereoscope is built for: IPD 30-38 mm, the optics drawing's
-    # eye-separation table (S0 §7.1.3). An animal outside it is refused.
+    # eye-separation table (S0 §7.1.3). An animal outside it runs with a warning that its
+    # field is extrapolated (the PI, 2026-10-11, XC-352's C7); it was refused until then.
     half_ipd_range_cm=(1.5, 1.9),
     # The PG27UCDM's published resolution, 3840 × 2160 (S0 §5.1).
     pixels=(3840, 2160),

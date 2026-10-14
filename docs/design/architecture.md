@@ -188,10 +188,10 @@ accepted is written once the service holds the session. A run's pre-flight has a
 a fail for a warning the session's kind does not accept (or for warnings that cannot be listed),
 otherwise an unknown acknowledged by name while any is not yet accepted this session, which names
 and says each whole, however long (XC-353; since 2026-10-11 no length fails it, XC-352's B1), and
-a pass once each is. The pre-flight's unknowns are acknowledged once a
-session and carried to its later runs while each one's sentence is unchanged, under the name of
-whoever acknowledged them; `_start` writes nothing, and what it accepted is written as the run
-starts, inside the run's containment.
+a pass once each is. The pre-flight's unknowns are acknowledged once a session and carried to its
+later runs while each one's sentence is unchanged, under the name of whoever acknowledged them;
+`_start` writes nothing, and what it accepted is written as the run starts, inside the run's
+containment.
 
 **The three `taskd` functions are `Session._ends`, `Session._hold` and
 `Session._manual_reward`** (P4d-2b b2a, 2026-09-28; the third since the PI's 2026-09-28
@@ -486,11 +486,13 @@ sensors' housings, or the stereoscope's viewport stopped by its mask.
 **A task says which setup it is written for**: `Trial.view`, `"direct"`, `"stereoscope"` or
 `"either"` (the default). Disparity, a random-dot stereogram or a stimulus shown to one eye needs
 `"stereoscope"`, a load-time finding at every load. Check 8 against the session's field, and the
-refusal of a task written for the other setup, need the session's geometry, and **the checks now
+finding for a task written for the other setup, need the session's geometry, and **the checks now
 run against the session's own field, from `--rig` and `--view`** (`wlx run` and `wlx check`,
 direct view part 2, 2026-09-29): a task that does not pass in the chosen setup is refused before
-the session opens. The setup is in the session record and in telemetry (schema 15; the setup
-since 9).
+the session opens. *Since the PI's rulings on XC-352 (2026-10-11, A12)* a task written for the
+other setup is a warning saying what that setup changes, not a refusal, unless it shows each eye
+its own image in direct view, which an unmirrored screen cannot show; its field still holds it.
+The setup is in the session record and in telemetry (schema 15; the setup since 9).
 
 Through the stereoscope each eye views one half of the panel through redirection mirrors
 [@wheatstone1838contributions; @cox2019temporal; @dougherty2021binocular]. Therefore one

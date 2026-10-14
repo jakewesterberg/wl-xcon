@@ -216,7 +216,9 @@ recommended minimal treatment for the sickest patients, who were the ones treate
   account id of whoever acted, signed in or picked, and names stay in wl.works, looked up when a person
   needs them. The rig's own logs keep the actor as written today, for the welfare record.
 - **Pause, stop, resume and a manual reward never need sign-in.** They are welfare actions, and they work
-  as they do today, for any actor.
+  as they do today, for any actor. *Clarified 2026-10-12, the PI (decisions.md TRN-07)*: at the rig PC's
+  own console. His choice read: "No sign-in at the rig PC's own console. From another computer, sign-in
+  is required, as built now, so nobody on the network can stop a session or give a reward unseen."
 - **Where the rule is checked**: a setting in `Session._command`'s ordinary part, after its `SetParameter`
   check and before the `try` around `set`, so the `held` pass-through above it and the welfare `except` line
   are untouched; a task switch in `Service._route`, before `_start`. `_command` holds two welfare-listed

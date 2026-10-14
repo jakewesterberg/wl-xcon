@@ -65,6 +65,10 @@ The rig's settings hold everything the geometry needs:
 
 A subject's `E` comes from its record. **From a per-animal settings file** (PI, 2026-09-29), named at session start with `--subject-settings` as the bounded config is with `--bounds`, and refused for another animal; `Rig.half_ipd_range_cm` refuses an `E` the stereoscope is not built for. **A field that is not the rig's is never used to pass a
 task.** The tests' fixtures stand for this rig, and say so.
+*The PI's rulings on XC-352, 2026-10-11 (C6, C7, C8)*: none of these refuses now. With no
+settings file the stereoscope is built for the optics drawing's nominal half-IPD, recorded as
+nominal; another animal's settings, and an `E` outside the range the stereoscope is drawn for,
+run with a warning saying so (`warnlist.of_setup`).
 
 **Degrees are the API**, as S4 already has it. The display module will map degrees to pixels
 per setup:
@@ -97,6 +101,10 @@ slice b3). `--rig` names the rig's settings, and a task that does not pass the l
   side-by-side images on an unmirrored screen are not a stimulus.
 - **A mismatch refuses to start**, naming both sides: a `"stereoscope"` task in direct view,
   or a `"direct"` task in the stereoscope.
+  *The PI's rulings on XC-352, 2026-10-11 (A12)*: a mismatch is a warning naming both sides and
+  what the other setup changes, unless a stereoscope task shows each eye its own image in direct
+  view, which an unmirrored screen cannot show and still refuses; the field check still holds
+  each task to the setup it runs in.
 
 **The residual risk is the operator's pick**, since nothing senses the device (§1 item 4).
 What limits it:

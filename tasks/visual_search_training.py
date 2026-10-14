@@ -1,14 +1,16 @@
 """Colour pop-out search, for training on the default calibration (engine build B).
 
 **The search task with ordinary colors.** `visual_search` shows the PI's 2023 red and green,
-isoluminant in the lab's observer on a 16 cd/m² gray, and runs only on a measured calibration
-that carries its primaries' spectra (engine spec §7.3; engine build A2); this variant shows the
-sRGB red and green primaries' colors instead, each at its own luminance, live-editable (the PI,
-N§4 batch 2: "a training variant uses ordinary red and green (no isoluminance claim)"; Question
-3). It loads on the default calibration in training and piloting, with the warning, and **a
-recording session refuses it** while the default is in use (spec §7.2). Both start at 15 cd/m²,
-equal by the sRGB standard's numbers and measured by nobody: not isoluminant for any observer,
-and nothing here claims they are.
+isoluminant in the lab's observer on a 16 cd/m² gray, and is meant for a measured calibration
+that carries its primaries' spectra (engine spec §7.3; engine build A2), running on the default
+with warnings that its colors are only nominally isoluminant (XC-352's A19 and A20); this
+variant shows the sRGB red and green primaries' colors instead, each at its own luminance,
+live-editable (the PI, N§4 batch 2: "a training variant uses ordinary red and green (no
+isoluminance claim)"; Question 3). It loads on the default calibration in every session kind,
+recording too, with the warning that its colors are nominal (the PI, 2026-10-11, XC-352's A21;
+a recording session refused it until then, spec §7.2). Both start at 15 cd/m², equal by the sRGB
+standard's numbers and measured by nobody: not isoluminant for any observer, and nothing here
+claims they are.
 
 Everything else -- states, windows, every other parameter, and the gray it is shown on (the
 engine A2 plan's Q1) -- is `visual_search`'s, and

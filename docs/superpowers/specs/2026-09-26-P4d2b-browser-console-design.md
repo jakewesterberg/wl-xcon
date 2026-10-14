@@ -784,7 +784,10 @@ left open; the welfare ones are in its summary for the PI.
   `--set` gives none. A `start` is a finite number (never a `bool`) inside the parameter's
   own declared range, or nothing: `Param` refuses any other as the task is built (the
   range since the final review, m2, since `wlx run` takes no pre-flight), so a task
-  declaring one fails to load and its pre-flight fails it.
+  declaring one fails to load and its pre-flight fails it. *Clarified 2026-10-14*: this is the
+  author's `Param.start`, still refused; a value *sent* outside the declared range, by `--set`
+  or a console, is XC-352's D2 (the PI, 2026-10-11), checked again with the range widened to it
+  and refused only for what breaks the run (S8 §3.1; decisions.md TSK-51).
   `fixation_detection` declares the values the mockup shows (the other reference tasks
   declare none yet, XC-183). A `wlx taskd` run of a task that uses a number with no value,
   or a parameter it never declares, is refused by its pre-flight, naming each (decision 2).
@@ -819,7 +822,8 @@ And by the branch's final review, which drove the page in a browser (2026-09-30)
   messages show in it.
 - **Choosing a task takes the pre-flight only between runs** (m1).
 - **A starting value outside its declared range is refused as the task loads** (m2),
-  above.
+  above. *Clarified 2026-10-14*: the author's `Param.start`; a value sent outside the range is
+  XC-352's D2's, above.
 
 ## 7. Not in this slice
 
