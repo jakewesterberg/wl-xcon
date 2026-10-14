@@ -3107,6 +3107,27 @@ def test_a_live_value_that_would_put_the_target_off_screen_is_refused_saying_so(
     assert session.spec.values["target_x"] == VALUES["target_x"] and _warned(session) == []
 
 
+def test_a_live_set_size_that_draws_the_array_on_itself_is_refused_and_a_larger_one_staged(
+    tmp_path,
+):
+    """The final review's I1, through `Session.set`: `visual_search` at a billion objects, which
+    the run would stall building, is refused, saying its objects would be drawn on one another,
+    and nothing is staged; at thirteen, past its twelve, it is staged with its warnings."""
+    values = {"fix_acquisition": 4.0, "fix_hold": 0.3, "response_deadline": 0.6,
+              "target_hold": 0.2, "fix_window": 2.0, "object_window": 0.5,
+              "array_eccentricity": 8.0, "set_size": 6, "target_index": 0,
+              "array_rotation": 0.0, "fix_luminance": 40.0}
+    session = _session(_spec(tmp_path, trials=3, task="tasks/visual_search.py", values=values))
+    session.open()
+
+    with pytest.raises(Exceeded, match="overlapping-objects: with 'set_size' at 1e\\+09, outside "
+                                       "its declared range: array 'search' at 1e\\+09 objects"):
+        session.set("set_size", 1e9, by=Box("console"))
+    assert not session.staged
+    session.set("set_size", 13, by=Box("console"))
+    assert session.staged[-1][:3] == ("set_size", 6, 13)
+
+
 def test_a_live_value_whose_widened_checks_raise_or_whose_warning_cannot_be_written_is_refused(
     tmp_path, monkeypatch
 ):

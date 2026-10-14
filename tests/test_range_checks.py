@@ -8,10 +8,14 @@ experimenter cannot break it from the console.
 
 import inspect
 from dataclasses import replace
+from pathlib import Path
 
 import wl_xcon.check as checking
+from _rig import DIRECT
+from tasks.allocation import ALLOCATION
 from wl_xcon import service
 from wl_xcon.check import BREAKS_A_RUN, beyond_range, check, check_task, widened
+from wl_xcon.cli import _load_task
 from wl_xcon.findings import SESSION_KINDS, Finding
 from wl_xcon.photometry import SRGB, Gray, Michelson, Weber
 from wl_xcon.run import run_trial
@@ -28,6 +32,7 @@ from wl_xcon.task import (
     Outcome,
     P,
     Param,
+    Polygon,
     SaccadeTo,
     Show,
     Square,
@@ -275,6 +280,20 @@ def test_an_array_whose_size_has_no_highest_or_is_chosen_is_checked_at_its_large
     assert "crowded-array" not in codes(sized(Param("set_size", unit="objects", choices=(2, 6))))
 
 
+def test_an_arrays_set_size_is_read_as_the_run_reads_it_a_whole_number():
+    """Task 10's re-review, minor: `_crowded_arrays` read a set size's highest as declared, so one
+    declared up to 12.5 was checked as 12.5 objects where the run draws twelve (`Array.positions`
+    reads `int`), as `_array_faults` and `_declared_window_names` read it (`_whole`): twelve
+    objects on an 8° ring are 4.14° apart, clear of two 2° windows, where 12.5 would be
+    3.98°."""
+    trial = _array_task(6).structures["search"]
+    sized = replace(trial, params=[
+        Param("set_size", unit="objects", low=2, high=12.5) if p.name == "set_size" else p
+        for p in trial.params])
+
+    assert "crowded-array" not in codes(sized)
+
+
 # --- A value outside its declared range (the PI, 2026-10-11, XC-352's D2) -------------------
 
 
@@ -357,6 +376,44 @@ def test_a_value_that_brings_a_window_onto_another_between_the_corners_of_its_ra
         "'fix', which can come within 0.00°")
     assert [(f.code, f.blocking) for f in beyond_range(_target_task(), {"target_x": 3.5})] == [
         ("outside-range", False)]
+
+
+def _chosen_target(xs: tuple) -> Task:
+    """A fixation window at the centre and a target window at x one of `xs` (choices), y 0, both
+    scored in one state, each radius declared over [0.5, 2]."""
+    trial = Trial(
+        start="wait",
+        params=[Param("target_x", unit="deg", choices=xs),
+                Param("fix_window", unit="deg", low=0.5, high=2.0, start=1.0),
+                Param("target_window", unit="deg", low=0.5, high=2.0, start=1.0)],
+        windows=[Window("fix", at=(0.0, 0.0), radius=P("fix_window"), on="fix"),
+                 Window("target", at=(P("target_x"), 0.0), radius=P("target_window"), on="fix")],
+        states=[State("wait", enter=[Show(FIX)], go=[
+            On(Hold("target", 0.1), Outcome.CORRECT),
+            On(Hold("fix", 0.1), Outcome.WRONG_TARGET),
+            On(After(1.0), Outcome.NO_RESPONSE),
+        ])],
+    )
+    return Task({"w": trial}, default="w")
+
+
+def test_a_window_placed_by_choices_is_at_each_choice_never_between_them():
+    """The final review's I2: a coordinate given by choices was read as the interval between its
+    least and greatest choice, so a target window at x -10° or 10° was said at load to come
+    within 0.00° of a fixation window at the centre (`overlapping-windows`), though it is always
+    10° from it and their radii sum to at most 4°; and `fix_window` sent at 9°, where the two
+    truly collide, was then the same pair only larger, a warning. **Each choice is a point**
+    (`_closest_approach`): nothing at load, and 9° refused, as it is with the target at -10° or
+    -8°."""
+    assert "overlapping-windows" not in {f.code for f in check_task(_chosen_target((-10.0, 10.0)))}
+    for xs, gap in (((-10.0, 10.0), "10.00"), ((-10.0, -8.0), "8.00")):
+        found = beyond_range(_chosen_target(xs), {"fix_window": 9.0})
+
+        (refusal,) = [f for f in found if f.blocking]
+        assert refusal.code == "overlapping-windows"
+        assert refusal.detail.startswith(
+            f"with 'fix_window' at 9, outside its declared range: state 'wait' scores 'target' "
+            f"and 'fix', which can come within {gap}° while their radii sum to 11.00°")
 
 
 def test_a_radius_declared_only_up_to_a_bound_is_refused_past_it_when_the_windows_then_collide():
@@ -528,6 +585,105 @@ def test_an_array_crowded_further_is_a_warning_and_one_newly_crowded_is_refused(
         ("outside-range", False), ("crowded-array", True)]
 
 
+def _search(object_window: float = 1.0, targets: tuple = (), distractors: tuple = ()) -> Task:
+    """`tasks/visual_search.py`, its 1° objects on a ring 5-14° out, with its object windows
+    declared up to `object_window`° (1° as written; at 3° it loads with `crowded-array` among
+    its warnings) and `targets` and `distractors` added to the choices of each."""
+    task = _load_task(Path(__file__).resolve().parents[1] / "tasks" / "visual_search.py")
+    trial = task.structures["search"]
+
+    def declared(param: Param) -> Param:
+        if param.name == "object_window":
+            return replace(param, high=object_window)
+        if param.name == "target_appearance":
+            return replace(param, choices=(*param.choices, *targets))
+        if param.name == "distractor_appearance":
+            return replace(param, choices=(*param.choices, *distractors))
+        return param
+
+    return replace(task, structures={
+        "search": replace(trial, params=[declared(p) for p in trial.params])})
+
+
+def _windowless(most: int, looks=Disc(), among=None) -> Task:
+    """Two to `most` objects, a target that looks like `looks` among distractors like `among` (1°
+    discs, and `looks`, unless said), on a ring 8-12° out, with no object windows."""
+    trial = Trial(
+        start="search",
+        params=[Param("set_size", unit="objects", low=2, high=most),
+                Param("array_eccentricity", unit="deg", low=8.0, high=12.0)],
+        states=[State("search", enter=[Show(Stimulus("search", at=(0.0, 0.0), looks=Array(
+            n=P("set_size"), radius=P("array_eccentricity"), target=0, looks=looks,
+            among=looks if among is None else among)))], go=[
+            On(After(1.0), Outcome.NO_RESPONSE),
+        ])],
+    )
+    return Task({"search": trial}, default="search")
+
+
+def _on_the_rig(task: Task, values: dict) -> list[Finding]:
+    """`beyond_range` as a session in direct view on the default calibration checks it, with the
+    reference allocation."""
+    return beyond_range(task, values, ALLOCATION, geometry=DIRECT, calibration=SRGB)
+
+
+def test_a_set_size_past_its_range_that_draws_its_objects_on_one_another_is_refused():
+    """The final review's I1: a set size sent past its range was judged only by what the
+    widened checks find, so an array already crowded at load (`crowded-array`, a warning since
+    A9), or one with no object windows, took 1000 or 1e9 objects with warnings alone -- and the
+    run then stalls building every object and its window before a trial's first frame, a stop,
+    a pause and the out-of-cage limit unheard: what D2 refuses. **Refused**, whatever the task
+    was accepted with, once adjacent objects on the tightest ring would sit closer than the
+    smallest object is across, saying so: `visual_search` with its object windows declared up to
+    3° (the review's probe), the crowded array of the I5 test, and an array with no windows."""
+    for task, ring in ((_search(object_window=3.0), 5), (_array_task(16), 8), (_windowless(6), 8)):
+        for n in (1000, 1e9):
+            found = _on_the_rig(task, {"set_size": n})
+
+            (refusal,) = [f for f in found if f.blocking]
+            assert refusal.code == "overlapping-objects"
+            assert refusal.detail.startswith(
+                f"with 'set_size' at {n:g}, outside its declared range: array 'search' at {n:g} "
+                f"objects would put adjacent objects ")
+            assert (f"apart on its {ring}° ring, closer than its smallest object is across (1°), "
+                    f"so they would be drawn on one another") in refusal.detail
+            assert "a stop, a pause and the out-of-cage limit unheard" in refusal.detail
+
+
+def test_a_set_size_past_its_range_whose_objects_stay_apart_on_the_tightest_ring_is_a_warning():
+    """I1's refusal reads the ring at its least and the objects at their smallest, never their
+    windows: on `visual_search`'s 5° ring, with its windows declared up to 3° (crowded at load,
+    so a larger array is a warning), 13 of its 1° objects and 31, 1.01° apart, are warnings,
+    and 32, 0.98° apart, refused; with a 3° target and a 3° distractor among its choices,
+    twenty objects 1.56° apart, the smallest still clear of each other, are a warning, as twenty
+    3° targets among 1° distractors are on an 8° ring, 2.50° apart; an array with no windows
+    takes thirteen with `outside-range` alone; and a 1° triangle, whose size is the circle
+    through its corners, is read by the 0.5° circle inside its sides: sixty on an 8° ring, 0.84°
+    apart, a warning, and a thousand refused."""
+    crowded = _search(object_window=3.0)
+    for n in (13, 31):
+        assert [(f.code, f.blocking) for f in _on_the_rig(crowded, {"set_size": n})] == [
+            ("outside-range", False), ("crowded-array", False)]
+    assert [(f.code, f.blocking) for f in _on_the_rig(crowded, {"set_size": 32})] == [
+        ("outside-range", False), ("crowded-array", False), ("overlapping-objects", True)]
+    (refusal,) = [f for f in _on_the_rig(crowded, {"set_size": 32}) if f.blocking]
+    assert "0.98° apart on its 5° ring" in refusal.detail
+    three = (Disc(size=3.0, color=Gray(16.0)),)
+    larger = _search(object_window=3.0, targets=three, distractors=three)
+    assert [(f.code, f.blocking) for f in _on_the_rig(larger, {"set_size": 20})] == [
+        ("outside-range", False), ("crowded-array", False)]
+    assert [(f.code, f.blocking) for f in beyond_range(
+        _windowless(6, looks=Disc(size=3.0), among=Disc(size=1.0)), {"set_size": 20})] == [
+        ("outside-range", False)]
+    assert [(f.code, f.blocking) for f in beyond_range(_windowless(6), {"set_size": 13})] == [
+        ("outside-range", False)]
+    triangles = _windowless(6, looks=Polygon(sides=3, size=1.0))
+    assert [(f.code, f.blocking) for f in beyond_range(triangles, {"set_size": 60})] == [
+        ("outside-range", False)]
+    (refusal,) = [f for f in beyond_range(triangles, {"set_size": 1000}) if f.blocking]
+    assert "closer than its smallest object is across (0.5°)" in refusal.detail
+
+
 def _two_lights(brightest: float) -> Task:
     """A disc lit by `disc`, over 10 to `brightest` cd/m², and a square by `square`, over 10 to
     50: the sRGB default's white is 80 cd/m²."""
@@ -688,7 +844,8 @@ def test_a_correlation_with_one_bound_is_refused_at_load_and_widened_past_one_re
     accepted, the run failing mid-trial, what D2 refuses. Read over what it can reach (`_span`),
     its undeclared lowest is without end: refused at load, saying so, and at 2 refused again,
     naming the value. A correlation declared over [-0.5, 0.5] passes at load, and sent at 0.9,
-    a correlation still, is only outside its range."""
+    a correlation still, is only outside its range. **The refusal names the setting and the fix**
+    (Task 10's re-review, minor; the PI kept the refusal on 2026-10-14, I4)."""
     one_bound = _stereogram(Param("c", unit="r", high=1.0, start=0.5))
     control = _stereogram(Param("c", unit="r", low=-0.5, high=0.5, start=0.2))
 
@@ -696,6 +853,7 @@ def test_a_correlation_with_one_bound_is_refused_at_load_and_widened_past_one_re
     (refusal,) = [f for f in beyond_range(one_bound, {"c": 2.0}) if f.blocking]
 
     assert declared.blocking and "whose correlation has no declared lowest;" in declared.detail
+    assert declared.detail.endswith("; 'c' declares no lowest; declare both limits")
     assert refusal.code == "impossible-correlation"
     assert refusal.detail.startswith(
         "with 'c' at 2, outside its declared range: state 'on' shows a stereogram whose "
@@ -726,7 +884,9 @@ def test_a_target_index_with_one_bound_is_refused_at_load_and_widened_past_the_a
     target window is none of the objects -- and sent at 6, past four objects, passed the widened
     check too, the run then failing as the trial expands its windows. Refused at load, saying
     its lowest is undeclared, and at 6 refused again, naming the value; one declared over [0, 1]
-    passes at load, and sent at 3, still one of the four, is only outside its range."""
+    passes at load, and sent at 3, still one of the four, is only outside its range. The refusal
+    names the setting and the fix, as a set size with no lowest does (Task 10's re-review, minor;
+    the PI kept the refusal on 2026-10-14, I4)."""
     one_bound = _targeted(Param("ti", unit="index", high=1, start=0))
     control = _targeted(Param("ti", unit="index", low=0, high=1, start=0))
 
@@ -736,6 +896,7 @@ def test_a_target_index_with_one_bound_is_refused_at_load_and_widened_past_the_a
     assert declared.blocking and (
         "with a target index reaching 1 that can be below 0, its lowest undeclared;"
         in declared.detail)
+    assert declared.detail.endswith("; 'ti' declares no lowest; declare both limits")
     assert refusal.code == "target-outside-array"
     assert refusal.detail.startswith(
         "with 'ti' at 6, outside its declared range: state 'search' shows an array of as few "
@@ -743,3 +904,10 @@ def test_a_target_index_with_one_bound_is_refused_at_load_and_widened_past_the_a
     assert "target-outside-array" not in {f.code for f in check_task(control)}
     assert [(f.code, f.blocking) for f in beyond_range(control, {"ti": 3})] == [
         ("outside-range", False)]
+    sized = replace(control.structures["search"], params=[
+        *control.params, Param("n", unit="objects", high=6, start=4)])
+    sized = replace(sized, states=[replace(sized.states[0], enter=[Show(Stimulus(
+        "search", at=(0.0, 0.0), looks=Array(n=P("n"), radius=8.0, target=P("ti"))))])])
+    (fewest,) = [f for f in check(sized) if f.code == "target-outside-array"]
+    assert fewest.detail.startswith("state 'search' shows an array of as few as 0 objects")
+    assert fewest.detail.endswith("; 'n' declares no lowest; declare both limits")

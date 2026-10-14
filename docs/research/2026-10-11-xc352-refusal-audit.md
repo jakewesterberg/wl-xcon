@@ -178,9 +178,9 @@ most of the time."
   E2, E3, B1, C8, C11, D5, H4.
 - **The 48 kept refusals stay.**
 
-## The PI's answers, 2026-10-12
+## The PI's answers, 2026-10-12 and 2026-10-14
 
-Asked by the plan named below, before its build:
+Asked by the plan named below, before its build, and, the last, at its whole-branch review:
 
 - **A value outside its range making a trial wait longer than the task's longest declared wait**:
   "Allow, with a warning". The option he chose read: "Any wait up to the trial cap: about 417 s
@@ -190,6 +190,15 @@ Asked by the plan named below, before its build:
   which refuses them without one: at the rig PC only. His choice read: "No sign-in at the rig PC's
   own console. From another computer, sign-in is required, as built now, so nobody on the network
   can stop a session or give a reward unseen. The decision log's wording is clarified."
+- **2026-10-14: a set size, a target index or a stereogram's correlation declared with only one
+  limit**, which the build refuses at load (`target-outside-array`, `impossible-correlation`;
+  it loaded before, its open side read as 0), where the plan's decisions he read said "No other
+  refusal changes" (the review's I4): keep that, or warn at load and check every value sent
+  widened?
+  "Refuse at load". The option he chose read: "The task author adds the missing limit, a
+  one-line fix. Nothing changes for the experimenter at the rig. It matches how a color or a
+  position with one missing limit is already refused at load." Each such refusal names the
+  setting and the fix ("'ti' declares no lowest; declare both limits"; decisions.md TSK-51).
 
 How each was built, and the calls taken in building them: the plan named above. Of "Found on the
 way", the head-fixed default is fixed by XC-355 (the deployment fix, merged before that build); a

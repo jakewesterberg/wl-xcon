@@ -1,4 +1,4 @@
-"""Load-time checks (S1 §9). A task failing any of these is refused at load.
+"""Load-time checks (S1 §9). A task failing one that blocks is refused at load.
 
 **Three severities** (`findings.Finding`): a refusal (`blocking`); a warning, acceptable in the
 session kinds it names and asked once a session (engine spec §19.2); and a review note
@@ -210,14 +210,15 @@ def widened(task: Task, values) -> Task:
     `values`, every structure alike: what the load-time checks are run again against for a value
     outside its range (the PI, 2026-10-11, XC-352's D2). A setting with choices, a value that is
     no finite number, a name the task does not declare and a value inside its range leave its
-    declaration as it is."""
+    declaration as it is. A starting value stays: widening only extends a range, so the start
+    `Param` held inside it is inside it still."""
     def wide(param: Param) -> Param:
         value = values.get(param.name)
         if not _outside(param, value):
             return param
         low = value if param.low is not None and value < param.low else param.low
         high = value if param.high is not None and value > param.high else param.high
-        return dataclasses.replace(param, low=low, high=high, start=None)
+        return dataclasses.replace(param, low=low, high=high)
 
     return dataclasses.replace(task, structures={
         name: dataclasses.replace(structure, params=[wide(p) for p in structure.params])
@@ -243,11 +244,14 @@ def beyond_range(
     the task widened to them gives that the task as declared does not, saying which values
     caused it: **refused** when it blocks, or when it is one `BREAKS_A_RUN` names about something
     the declared task's findings are not (`Finding.subjects`); otherwise a warning, among them a
-    value that only enlarges an overlap or a clip the task was accepted with at load. Nothing
-    when every value is inside its range. The ranges are what every load-time proof is made over
-    (S1 §9's "a check against declared ranges proves an experimenter cannot break it from the
-    console"), so the checks run again, twice, here: at a run's start (`preflight.beyond`) and on
-    a live edit (`Session.set`)."""
+    value that only enlarges an overlap or a clip the task was accepted with at load. **And a
+    set size above its highest whose objects would be drawn on one another is refused**,
+    whatever the task was accepted with (`_overlapping_objects`; the final review's I1). Nothing
+    when every value is inside its range. The declared ranges are what every load-time proof is
+    made over (the checks "Reasoning over the whole parameter space" below), which proves a value
+    inside them cannot break the task from the console and says nothing of one outside them, so
+    the checks run again, widened to it, twice: at a run's start (`preflight.beyond`) and on a
+    live edit (`Session.set`)."""
     declared = {param.name: param for param in task.params}
     outside = {name: value for name, value in values.items()
                if name in declared and _outside(declared[name], value)}
@@ -284,8 +288,8 @@ def beyond_range(
     # What the declared task's findings are about (the warnings-over-refusals review's I5): a
     # finding of `BREAKS_A_RUN` about the same thing, only larger, was accepted with the task.
     known = {(finding.code, subject) for finding in before for subject in finding.subjects}
-    for finding in check_task(widened(task, outside), allocation, components, geometry,
-                              calibration, deployment):
+    wide = widened(task, outside)
+    for finding in check_task(wide, allocation, components, geometry, calibration, deployment):
         # One the declared task gives, about the same things: equality leaves `subjects` out, and
         # a light a value newly asks for can be one the task's clip warning already says, word
         # for word (Task 10's review, I1).
@@ -299,6 +303,18 @@ def beyond_range(
             findings.append(Finding(finding.code, detail))
         else:
             findings.append(dataclasses.replace(finding, detail=detail))
+    # **A set size past its highest whose objects would be drawn on one another is refused**,
+    # whatever the declared task was accepted with (the final review's I1): no "same array, only
+    # larger" waives it, since what breaks is the size itself (`_overlapping_objects`).
+    raised = {name: value for name, value in outside.items()
+              if _finite(declared[name].high) and value > declared[name].high}
+    for name, structure in wide.structures.items():
+        where = f"in structure {name!r}: " if len(wide.structures) > 1 else ""
+        findings += [
+            Finding(finding.code,
+                    f"with {said}, outside its declared range: {where}{finding.detail}")
+            for finding in _overlapping_objects(structure, raised)
+        ]
     return findings
 
 
@@ -371,8 +387,8 @@ def _meaning_faults(task: Task) -> list[Finding]:
                 f"another setting the task declares")))
     for name in task.meanings:
         if name not in declared:
-            # A review note, never a refusal (XC-352's A7; the PI, 2026-10-11): it can never take
-            # effect.
+            # A review note, never a refusal (XC-352's A7; the PI, 2026-10-11): it can never
+            # take effect.
             findings.append(Finding("meaning-for-nothing", (
                 f"the task declares a meaning for {name!r}, which none of its structures "
                 f"declares as a setting: it can never take effect, which is probably a mistake"),
@@ -2623,7 +2639,9 @@ def _array_faults(trial: Trial) -> list[Finding]:
     undeclared cannot be proved inside the array**, so it gives this finding, saying so (Task
     10's review, fix round 2): a set size with no lowest can be no objects, and a target
     index with no highest past any, or with no lowest below 0, where the target window is
-    never one of the objects. Read as 0, either passed at load and widened past its bound.
+    never one of the objects. Read as 0, either passed at load and widened past its bound. The
+    sentence then names the setting and the fix (`_open_sides`; the PI kept this refusal on
+    2026-10-14, the final review's I4).
     """
     params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
@@ -2644,10 +2662,31 @@ def _array_faults(trial: Trial) -> list[Finding]:
                     f"state {state!r} shows an array of as few as {lowest_n} objects "
                     f"with a target index {index}; the target must be "
                     f"one of the objects for every setting the console allows, not "
-                    f"only the one it has today",
+                    f"only the one it has today"
+                    + _open_sides(((looks.n, ("lowest",)),
+                                   (looks.target, ("lowest", "highest"))), params),
                 )
             )
     return findings
+
+
+def _open_sides(values: tuple, params: dict[str, Param]) -> str:
+    """A refusal's last clause naming each setting among `values` -- `(value, sides)`, the sides
+    of its range the refusal turns on -- that declares a range and leaves one of those sides
+    open, and the fix: "; 'ti' declares no lowest; declare both limits", or "" for none. The PI
+    kept these refusals at load (2026-10-14, the final review's I4: "The task author adds the
+    missing limit, a one-line fix")."""
+    said: dict[str, list[str]] = {}
+    for value, sides in values:
+        param = params.get(value.name) if isinstance(value, P) else None
+        if param is None or param.choices:
+            continue
+        bounds = {"lowest": param.low, "highest": param.high}
+        for side in sides:
+            if not _finite(bounds[side]) and side not in said.get(value.name, []):
+                said.setdefault(value.name, []).append(side)
+    return "".join(f"; {name!r} declares no {' or '.join(sides)}"
+                   for name, sides in said.items()) + ("; declare both limits" if said else "")
 
 
 # --- Stereograms -----------------------------------------------------------
@@ -2658,8 +2697,9 @@ def _stereogram_faults(trial: Trial) -> list[Finding]:
 
     Its correlation is read over its declared range or its choices (`_span`): **a side it
     leaves undeclared reaches past -1 or +1**, so it gives `impossible-correlation`, saying
-    so; read as 0, it passed at load and widened past its bound (Task 10's review, fix
-    round 2).
+    so, naming the setting and the fix (`_open_sides`; the PI kept this refusal on 2026-10-14,
+    the final review's I4); read as 0, it passed at load and widened past its bound (Task 10's
+    review, fix round 2).
     """
     params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
@@ -2681,7 +2721,8 @@ def _stereogram_faults(trial: Trial) -> list[Finding]:
                     f"state {state!r} shows a stereogram whose correlation "
                     f"{' and '.join(said)}; correlation runs from -1 "
                     f"(anticorrelated) through 0 (uncorrelated) to +1. A value "
-                    f"outside that is not a stronger stimulus, it is not a stimulus",
+                    f"outside that is not a stronger stimulus, it is not a stimulus"
+                    + _open_sides(((looks.correlation, ("lowest", "highest")),), params),
                 )
             )
         if getattr(stimulus, "eye", "both") != "both":
@@ -2760,28 +2801,55 @@ def _eye_faults(trial: Trial) -> list[Finding]:
 # A task with live parameters is not one configuration, it is a space of them. A
 # check against current values proves the task happens not to be broken today; a
 # check against declared ranges proves an experimenter cannot break it from the
-# console between two trials.
+# console between two trials **with any value inside them**. Since XC-352's D2 a
+# console can send a value outside its range too, and that value is checked again
+# with the ranges widened to it (`beyond_range`).
 
 
 def _closest_approach(a: Window, b: Window, params: dict[str, Param]) -> tuple[float, float]:
     """Least possible centre separation, and greatest possible summed radius (`_span`).
 
-    **Per axis, the distance between the two centres' ranges**: 0 where they overlap, since a
-    value inside both puts the centres level on that axis, and otherwise the gap between their
-    nearer ends; the least separation is the hypotenuse of the two. The corners of the ranges
-    alone were wrong whenever the ranges overlap on an axis (Task 10's review, I2): a target
-    window over x 0-16° and y ±8° sits on a fixation window at the centre at (0, 0), while every
-    corner is 8° or more from it. Settings shared between the axes or the windows are read as
-    independent, which can only make the separation smaller: a warning, never a pass."""
-    (a_x, a_y), (b_x, b_y) = a.at, b.at
+    **Each centre is the regions it can be in** (`_centres`): a coordinate given by choices is
+    each choice, a point, and one given by a range is that interval, so a window at x -10° or
+    10° is never at 0 (the final review's I2: read as the interval between them, it was said to
+    come within 0.00° of a window at the centre, and a value sent past its range that made the
+    two truly collide was then the same pair only larger, a warning). **Between two regions, per
+    axis, the distance between their intervals**: 0 where they overlap, since a value inside both
+    puts the centres level on that axis, and otherwise the gap between their nearer ends; the
+    separation is the hypotenuse of the two, and the least over every pair of regions is the
+    answer. The corners of the ranges alone were wrong whenever the ranges overlap on an axis
+    (Task 10's review, I2): a target window over x 0-16° and y ±8° sits on a fixation window at
+    the centre at (0, 0), while every corner is 8° or more from it. Settings shared between the
+    axes or the windows are read as independent, which can only make the separation smaller: a
+    warning, never a pass."""
 
-    def apart(one: object, other: object) -> float:
-        low, high = _span(one, params)
-        other_low, other_high = _span(other, params)
-        return max(0.0, low - other_high, other_low - high)
+    def apart(one: tuple, other: tuple) -> float:
+        (x, y), (other_x, other_y) = one, other
+        return math.hypot(*(max(0.0, low - other_high, other_low - high)
+                            for (low, high), (other_low, other_high)
+                            in ((x, other_x), (y, other_y))))
 
+    gap = min(apart(one, other)
+              for one in _centres(a.at, params) for other in _centres(b.at, params))
     reach = _span(a.radius, params, 0.0)[1] + _span(b.radius, params, 0.0)[1]
-    return (math.hypot(apart(a_x, b_x), apart(a_y, b_y)), reach)
+    return (gap, reach)
+
+
+def _centres(at: object, params: dict[str, Param]) -> list[tuple[tuple, tuple]]:
+    """Every region a window's centre can be in, as an interval per axis (`_closest_approach`):
+    its coordinates' crossed, a literal or each choice of a setting a point and a range one
+    interval (`_span`). A whole position as one setting (`at=P("pos")`) is still unpacked as a
+    pair, and raises `TypeError` out of `check` (XC-156, filed; two tests use such a task as one
+    the checks cannot finish on)."""
+
+    def intervals(value: object) -> list[tuple[float, float]]:
+        param = params.get(value.name) if isinstance(value, P) else None
+        if param is not None and param.choices and all(_finite(c) for c in param.choices):
+            return [(float(c), float(c)) for c in param.choices]
+        return [_span(value, params)]
+
+    x, y = at
+    return [(one, other) for one in intervals(x) for other in intervals(y)]
 
 
 def _overlapping_windows(trial: Trial) -> list[Finding]:
@@ -2892,9 +2960,11 @@ def _crowded_arrays(trial: Trial) -> list[Finding]:
     The worst case is the most objects on the smallest ring with the largest windows:
     adjacent centres are `2 R sin(pi/n)` apart, and two windows touch when that
     falls below their summed radius. Each is read over its declared range or its choices
-    (`_span`): a count or a radius with no highest can be any size, and crowds; a ring with
-    no lowest can be 0 (Task 10's review, I2). **A warning, not a refusal** (XC-352's A9;
-    the PI, 2026-10-11), saying which settings crowd it.
+    (`_span`), the count as the run reads it, a whole number (`_whole`): a count or a radius
+    with no highest can be any size, and crowds; a ring with no lowest can be 0 (Task 10's
+    review, I2). **A warning, not a refusal** (XC-352's A9; the PI, 2026-10-11), saying which
+    settings crowd it. A set size sent past its range that draws the objects on one another,
+    windows or none, is refused (`_overlapping_objects`).
     """
     arrays = arrays_of(trial)
     params = {p.name: p for p in trial.params}
@@ -2905,7 +2975,7 @@ def _crowded_arrays(trial: Trial) -> list[Finding]:
         array = arrays.get(declared.of)
         if array is None:
             continue
-        most = _span(array.n, params, 0.0)[1]
+        most = _whole(_span(array.n, params, 0.0)[1])
         tightest = _span(array.radius, params, 0.0)[0]
         widest = _span(declared.radius, params, 0.0)[1]
         if most < 2:
@@ -2927,6 +2997,108 @@ def _crowded_arrays(trial: Trial) -> list[Finding]:
                 )
             )
     return findings
+
+
+def _overlapping_objects(trial: Trial, raised: dict[str, float]) -> list[Finding]:
+    """**A set size sent above its highest** (`raised`, by setting) **whose array would draw its
+    objects on one another, refused** (the final review's I1), with object windows or without:
+    what D2 refuses as breaking the run (the PI, 2026-10-11, XC-352's D2: "refuse only what would
+    break the run"). A run builds every object, and its window, before a trial's first frame
+    (`Array.positions`, `expand_windows`) and resolves each every frame, so a set size far past
+    its range stalls `taskd` there, a stop, a pause and the out-of-cage limit unheard until it is
+    built -- and `crowded-array` cannot say so: it reads windows, which an array need not have,
+    and the declared task's warning about the same array, only larger, waives it. No timing is
+    claimed: past where adjacent objects overlap a larger set size draws nothing more and only
+    adds work, and objects of any size above 0 overlap at some set size (`visual_search`'s 1°
+    objects on its 5° ring past 31, computed), so no set size is left to stall the run.
+
+    **The reading** (I1: "the object size as the task declares it, the ring radius at its
+    least"): adjacent centres `2 R sin(pi/n)` apart, `n` the value sent and `R` the least the
+    ring's radius can be, its distance from 0 (`_span`; 0 where its range reaches 0), against the
+    smallest object the array can show, so that the objects are drawn on one another on the
+    tightest ring whatever else the console sets (`_narrowest`). A set size sent below its lowest
+    draws fewer objects, further apart, and is never refused here."""
+    params = {p.name: p for p in trial.params}
+    findings: list[Finding] = []
+    for name, array in _shown_arrays(trial, params):
+        if not (isinstance(array.n, P) and array.n.name in raised):
+            continue
+        n = _whole(raised[array.n.name])
+        if n < 2:
+            continue
+        low, high = _span(array.radius, params, 0.0)
+        ring = 0.0 if low <= 0.0 <= high else min(abs(low), abs(high))
+        spacing = 2.0 * ring * math.sin(math.pi / n)
+        size = min(_narrowest(array.looks, params), _narrowest(array.among, params))
+        if spacing >= size:
+            continue
+        across = (f"closer than its smallest object is across ({size:g}°), so they would be drawn "
+                  f"on one another" if math.isfinite(size)
+                  else "and no object it can show declares a width this check can read, so "
+                  "nothing shows them drawn apart")
+        findings.append(Finding("overlapping-objects", (
+            f"array {name!r} at {n:g} objects would put adjacent objects {spacing:.2f}° apart on "
+            f"its {ring:g}° ring, {across}; that breaks the run (XC-352's D2): a run builds "
+            f"every object and its window before a trial's first frame, so past where they "
+            f"overlap a larger set size only adds work, and far past it the run stalls there, a "
+            f"stop, a pause and the out-of-cage limit unheard until it is built")))
+    return findings
+
+
+def _shown_arrays(trial: Trial, params: dict[str, Param]) -> list[tuple[str, Array]]:
+    """Every array a trial can show, with the stimulus that shows it: a `Show`'s looks or an
+    `Update`'s, as written or among a parameter's choices."""
+    found: list[tuple[str, Array]] = []
+
+    def walk(name: str, looks: object, inside: frozenset[str]) -> None:
+        if isinstance(looks, P):
+            param = params.get(looks.name)
+            if param is not None and looks.name not in inside:
+                for choice in param.choices:
+                    walk(name, choice, inside | {looks.name})
+        elif isinstance(looks, Array) and (name, looks) not in found:
+            found.append((name, looks))
+
+    for _, action in actions_of(trial):
+        if isinstance(action, Show):
+            walk(action.stimulus.name, action.stimulus.looks, frozenset())
+        elif isinstance(action, Update) and "looks" in action.changes():
+            walk(action.stimulus, action.looks, frozenset())
+    return found
+
+
+def _narrowest(
+    looks: object, params: dict[str, Param], inside: frozenset[str] = frozenset()
+) -> float:
+    """The least width, in degrees, an array's object can be drawn at: over each appearance
+    `looks` can be -- each choice of a parameter -- the narrowest of the full widths it declares
+    (`_SIZES`; a `Look`'s are its shape's), each at the least its setting allows (`_span`), and a
+    polygon's the circle inside its sides, its size being the circle through its corners. Each
+    object holds a disc that wide about its centre, so two whose centres are closer than it are
+    drawn on one another. **One that declares none** -- a `Blank`, a `Look` drawn by its points
+    or over the whole screen, an appearance a parameter offers none of -- **is without end**,
+    failing closed: nothing shows such objects drawn apart."""
+    from wl_xcon import look
+    from wl_xcon.task import Polygon
+
+    if isinstance(looks, P):
+        param = params.get(looks.name)
+        if param is None or looks.name in inside or not param.choices:
+            return math.inf
+        return min(_narrowest(choice, params, inside | {looks.name}) for choice in param.choices)
+    if isinstance(looks, look.Look):
+        return _narrowest(looks.shape, params, inside)
+    if not dataclasses.is_dataclass(looks):
+        return math.inf
+    # A size that is no number is refused at load (`_block_faults`), and read as nothing here.
+    widths = [getattr(looks, f.name) for f in dataclasses.fields(looks) if f.name in _SIZES]
+    least = min((_span(width, params, 0.0)[0] for width in widths
+                 if isinstance(width, P) or _finite(width)), default=math.inf)
+    if isinstance(looks, (Polygon, look.RegularPolygon)) and math.isfinite(least):
+        # Fewer than 3 sides, or sides that are no number, are refused at load (`_block_faults`).
+        sides = looks.sides if isinstance(looks.sides, P) or _finite(looks.sides) else 3.0
+        least *= math.cos(math.pi / max(3.0, _span(sides, params, 3.0)[0]))
+    return least
 
 
 # --- Which setup -------------------------------------------------------------

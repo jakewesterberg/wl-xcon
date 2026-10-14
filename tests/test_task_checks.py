@@ -922,11 +922,14 @@ def test_a_task_written_for_one_setup_is_a_warning_in_the_other_naming_both():
     Show(Stimulus("d", at=(1.0, 0.0), looks=LIT, disparity=0.2)),
     Show(Stimulus("l", at=(1.0, 0.0), looks=LIT, eye="left")),
     Show(Stimulus("p", at=(0.0, 0.0), looks=LIT, at_left=(1.0, 0.0), at_right=(-1.0, 0.0))),
-], ids=["a disparity", "one eye", "a position per eye"])
+    Update("s", at_left=(1.0, 0.0), at_right=(-1.0, 0.0)),
+], ids=["a disparity", "one eye", "a position per eye", "a position per eye by an update"])
 def test_a_stereoscope_task_that_shows_each_eye_its_own_image_is_refused_in_direct_view(shown):
     """What an unmirrored screen cannot show stays refused (XC-352's A12: "`needs-stereoscope`
     and the field check still refuse"): both eyes would see both images, so the record would
-    not describe what was shown."""
+    not describe what was shown. A position per eye given by an `Update` too (Task 3's review,
+    minor: without its case, `_per_eye_content`'s `Update` branch could go and the suite pass,
+    and such a task would run in direct view with a warning, failing mid-trial)."""
     (refusal,) = check(_task(shown, view="stereoscope"), geometry=DIRECT)
 
     assert refusal.code == "wrong-setup" and refusal.blocking
