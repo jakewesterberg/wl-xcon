@@ -46,7 +46,7 @@ def test_the_right_answers_are_the_two_the_codes_mark_correct():
 
 def test_every_answer_counts_a_correct_rejection_and_a_false_alarm_among_them():
     """§16.1; TSK-27: where withholding is an answer, a correct rejection and a false alarm are
-    answers. `scheduler.RESPONDED` left both out, so a block of catch trials never met its
+    answers. `scheduler.Counting.RESPONDED` left both out, so a block of catch trials never met its
     target (the engine C2a plan's first defect)."""
     for after in (SPENT, OWED):
         table = Counting(after_stimulus=after)

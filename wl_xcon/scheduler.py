@@ -29,23 +29,29 @@ from wl_xcon.task import (
 # given (`Scheduler.counting`): "run until ten correct" and "show the array a hundred times
 # regardless of accuracy" are both ordinary requirements, and a scheduler that picked one would
 # silently impose an experimental design on every task in the lab. **A block may count by a table
-# of its own instead** (TSK-26; `Block.counting`), and these are the named ones.
+# of its own instead** (TSK-26; `Block.counting`), and these are the named ones. **A structure
+# whose table withholds** (`Counting.withholding`: detection, go/no-go) makes no response an answer
+# -- a miss, the withholding design's wrong answer -- and a block's table here classes it as it
+# classes a false alarm (`Scheduler._class`).
 
 #: "Run until ten correct": only a right answer pays (`task.RIGHT`), and every other answer pays
 #: nothing and is not shown again -- the block's order draws its condition as it would -- as the
 #: PI ruled on 2026-08-31 ("wrong choice not" re-queued; §16.2: "Not repeated: wrong targets").
+#: A withholding structure's miss is such a wrong answer: unpaid, not shown again; otherwise
+#: no response is owed.
 CORRECT_ONLY = Counting(
     after_stimulus=OWED,
     outcomes={outcome.value: UNPAID for outcome in ANSWERS - RIGHT},
 )
 
 #: "Show the array a hundred times regardless of accuracy": every trial whose stimulus appeared
-#: pays -- an answer counted, a break or no response spent -- and one that ended before it is owed,
-#: since nothing was presented.
+#: pays -- an answer counted, a break or no response spent (a withholding structure's miss is an
+#: answer, counted) -- and one that ended before it is owed, since nothing was presented.
 PRESENTED = Counting(after_stimulus=SPENT)
 
 #: Every trial pays: the flat run's "run N trials" (`taskd.Session._plan`). An answer is counted and
-#: everything else spent, a trial that reached the longest trial too.
+#: everything else spent, a trial that reached the longest trial too; a withholding structure's no
+#: response is a miss, an answer, counted (the PI's decision 6).
 EVERY_TRIAL = Counting(
     after_stimulus=SPENT,
     outcomes={outcome.value: SPENT for outcome in Outcome if outcome not in ANSWERS},
@@ -240,7 +246,8 @@ class Scheduler:
 
     @property
     def _table(self) -> Counting | None:
-        """The open block's counting table, else the run's."""
+        """The open block's counting table, else the run's. (`_class` still asks the run's whether no
+        response is an answer: what counts as one is the structure's.)"""
         return self.block.counting if self.block.counting is not None else self.counting
 
     def _class(self, outcome: Outcome | None, shown: bool) -> str:
@@ -249,8 +256,15 @@ class Scheduler:
         answer counted, shown or not; the four of `task.REPEATED`, a hang and a break before the
         stimulus owed -- and an outcome each structure declares for raises: no default stands in
         for a declaration (the PI, 2026-10-11), and `check.check_task` refuses a run's structure
-        without one."""
+        without one. **Where the structure's table makes no response an answer** (`withholding`), a
+        block's own table classes `NO_RESPONSE` as it classes `FALSE_ALARM`, the withholding design's
+        other wrong answer, whatever it declares for no response: what counts as an answer is the
+        structure's, as `appears` is (the PI's decision 6, 2026-10-12, "'No response' ... is a miss
+        (counts, used up)"; the review of build C2a's Task 3)."""
         table = self._table
+        if (outcome is Outcome.NO_RESPONSE and self.block.counting is not None
+                and self.counting is not None and self.counting.withholding):
+            return self.block.counting.of(Outcome.FALSE_ALARM, shown)
         if table is not None:
             return table.of(outcome, shown)
         if outcome in ANSWERS:

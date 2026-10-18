@@ -1223,6 +1223,19 @@ def test_each_repeat_row_names_the_trial_it_shows_again_and_its_predecessor(tmp_
     assert [row["previous"] for row in rows] == [None] + [row["condition"] for row in rows[:-1]]
 
 
+def test_a_flat_run_counts_a_detection_tasks_miss_as_an_answer(tmp_path):
+    """The PI's decision 6, 2026-10-12: "'No response' in both detection tasks is a miss (counts,
+    used up)". A flat run counts by `EVERY_TRIAL`, which spends a no response; the structure
+    withholds, so the miss is an answer, counted, never an abort."""
+    session = _session(_spec(tmp_path, trials=400))
+
+    session.run()
+
+    misses = [row for row in _trial_rows(session) if row["outcome"] == "no_response"]
+    assert misses, "no miss at this seed"
+    assert all(row["counting"] == "counted" for row in misses)
+
+
 def test_a_session_without_blocks_runs_one_of_its_declared_length(tmp_path):
     """The flat session is the block session with one block, not a second code path.
     Two loops would be two places for the ceilings to be checked differently."""

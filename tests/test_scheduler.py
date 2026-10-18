@@ -659,3 +659,36 @@ def test_a_single_block_scheduler_is_done_when_that_block_is():
     scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
 
     assert scheduler.done
+
+
+@pytest.mark.parametrize("withholds, expected", [
+    (True, {"EVERY_TRIAL": COUNTED, "PRESENTED": COUNTED, "CORRECT_ONLY": UNPAID}),
+    (False, {"EVERY_TRIAL": SPENT, "PRESENTED": SPENT, "CORRECT_ONLY": OWED}),
+])
+@pytest.mark.parametrize("name", ["EVERY_TRIAL", "PRESENTED", "CORRECT_ONLY"])
+def test_no_response_is_the_structures_answer_under_a_blocks_table_too(name, withholds, expected):
+    """The PI's decision 6: where the structure withholds, no response is a miss -- an answer, as a
+    false alarm is -- whatever the block's table declares for it. Under "until N correct" it pays
+    nothing and is not shown again; where the structure does not withhold, the table's own class
+    stands."""
+    table = {"EVERY_TRIAL": EVERY_TRIAL, "PRESENTED": PRESENTED, "CORRECT_ONLY": CORRECT_ONLY}[name]
+    block = Block(name="b", conditions=[Condition("a", {}, target=3)], counting=table)
+    scheduler = Scheduler([block], seed=1,
+                          counting=Counting(after_stimulus=OWED, withholding=withholds))
+
+    assert scheduler.record(scheduler.next_trial().name, Outcome.NO_RESPONSE) == expected[name]
+    assert scheduler.requeued == (["a"] if expected[name] == OWED else [])
+
+
+def test_a_condition_already_paid_is_not_placed_again_when_a_trial_of_it_is_owed():
+    """`record` places a repeat only for a condition that still owes: two breaks owe it again, a
+    correct trial pays it, and a late trial of it that breaks leaves `requeued` as it was."""
+    block = Block(name="b", conditions=[Condition("a", {}, target=1)])
+    scheduler = Scheduler([block], seed=1, counting=Counting(after_stimulus=OWED))
+    for outcome in (Outcome.FIXATION_BREAK, Outcome.FIXATION_BREAK, Outcome.CORRECT):
+        scheduler.record(scheduler.next_trial().name, outcome)
+    assert scheduler.requeued == ["a", "a"] and scheduler.owed("a") == 0
+
+    assert scheduler.record("a", Outcome.FIXATION_BREAK) == OWED
+
+    assert scheduler.requeued == ["a", "a"]
