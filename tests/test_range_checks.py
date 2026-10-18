@@ -167,6 +167,8 @@ def test_an_after_that_can_beat_a_hold_on_its_state_is_a_warning():
     assert cut.is_warning and not cut.refuses("recording")
     assert "'verify'" in cut.detail and "NO_RESPONSE" in cut.detail
     assert "as soon as 0.1 s" in cut.detail and "up to 1 s" in cut.detail
+    # Each setting is named as the task wrote it, so the trainer knows which one to change.
+    assert "after `response_deadline`" in cut.detail and "takes `target_hold`" in cut.detail
     for bound in (3.0, P("target_hold")):
         assert "hold-cut-short" not in codes(verify(bound))
     # A timeout counted from a later event starts later, and is not compared.
@@ -202,6 +204,8 @@ def test_a_timeout_listed_before_its_hold_ties_it_and_wins():
         assert "hold-cut-short" not in codes(_ordered(True, bound, held))
         (cut,) = [f for f in check(_ordered(False, bound, held)) if f.code == "hold-cut-short"]
         assert cut.is_warning and "NO_RESPONSE" in cut.detail
+    # A literal is said in seconds.
+    assert "after 0.3 s" in cut.detail and "takes 0.3 s" in cut.detail
     # Lowest at most the hold's highest, with the timeout first, is warned too (1.0 == 1.0).
     assert "hold-cut-short" in codes(_ordered(False, 1.0))
     assert "hold-cut-short" not in codes(_ordered(True, 1.0))
