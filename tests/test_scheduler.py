@@ -220,9 +220,11 @@ def test_a_waiting_repeat_holds_its_conditions_draws_and_comes_early_when_nothin
     assert (third.name, scheduler.drawn.repeat_of, scheduler.drawn.at_once) == (names[0], 0, False)
 
 
-def test_a_repeat_still_waiting_when_its_block_ends_stays_with_that_block():
-    """A criterion can end a block while a repeat waits; the next block starts with none of the
-    last one's repeats, as it starts with none of its counts."""
+def test_a_repeat_still_waiting_when_its_block_is_left_stays_with_that_block():
+    """A block left while a repeat waits -- `advance` asks nothing of the block it leaves -- starts
+    the next with none of its repeats, as it starts with none of its counts. Since the PI's decision
+    of 2026-10-18 (a criterion block's targets are a minimum) no end rule leaves one so; this
+    guards `advance`."""
     first = Block(name="first", conditions=[Condition("a", {}, target=100),
                                             Condition("b", {}, target=100)], criterion=(1.0, 1))
     second = Block(name="second", conditions=[Condition("c", {}, target=1)])
@@ -230,7 +232,7 @@ def test_a_repeat_still_waiting_when_its_block_ends_stays_with_that_block():
     broke = scheduler.next_trial().name
     scheduler.record(broke, Outcome.FIXATION_BREAK)
     scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
-    assert scheduler.finished
+    assert scheduler._due and not scheduler.finished
 
     scheduler.advance()
 
@@ -560,13 +562,13 @@ def test_a_break_before_the_stimulus_appeared_is_owed_even_where_breaks_are_spen
 def test_a_spent_trial_pays_its_debt_and_is_no_answer_for_the_criterion():
     """§16.2: spent is "counted as presented and marked an abort", so a criterion judged on the
     answers does not see it."""
-    block = Block(name="b", conditions=[Condition("a", {}, target=100)], criterion=(0.5, 2))
+    block = Block(name="b", conditions=[Condition("a", {}, target=2)], criterion=(0.5, 2))
     scheduler = Scheduler([block], seed=1, counting=Counting(after_stimulus=SPENT))
 
     for outcome in (Outcome.CORRECT, Outcome.TARGET_BREAK):
         scheduler.record(scheduler.next_trial().name, outcome)
 
-    assert scheduler.owed("a") == 98
+    assert scheduler.owed("a") == 0
     assert not scheduler.finished, "one answer is not a window of two"
     scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
     assert scheduler.finished, "two correct answers are"
@@ -619,7 +621,7 @@ def test_a_wrong_answer_under_until_n_correct_pays_nothing_and_is_not_shown_agai
 def test_a_correct_rejection_is_right_for_the_criterion_and_the_correct_count():
     """`codes.py`: "A correct rejection *is* a correct trial", and the PI's rollup of 2026-09-26
     counts both: a criterion over a block of catch trials is met on correct rejections."""
-    block = Block(name="b", conditions=[Condition("catch", {}, target=100)], criterion=(1.0, 2))
+    block = Block(name="b", conditions=[Condition("catch", {}, target=2)], criterion=(1.0, 2))
     scheduler = Scheduler([block], seed=1, counting=Counting(after_stimulus=OWED, withholding=True))
 
     for _ in range(2):
@@ -1097,20 +1099,121 @@ def test_a_blocks_own_table_cannot_make_no_response_an_answer():
     assert list(scheduler._window) == []
 
 
-def test_a_drummed_block_that_ends_on_a_wrong_first_try_opens_the_next_with_its_own_condition():
-    """A criterion met on a wrong first try leaves a drum waiting; the next block must not draw it
-    (its condition is not the next block's: `next_trial` raised `StopIteration`)."""
-    blocks = [Block(name="A", conditions=[Condition("a", {}, target=100)], criterion=(0.5, 2),
+def test_a_block_left_with_a_drum_waiting_opens_the_next_with_its_own_condition():
+    """A drum waiting when its block is left -- `advance` asks nothing of the block it leaves -- is
+    not the next block's: its condition is not the next block's, and `next_trial` raised
+    `StopIteration`. Since the PI's "Finish the drum first" (2026-10-18) no end rule leaves a block
+    so -- a criterion met on a wrong answer waits for its drum -- so this leaves one on purpose,
+    and guards `advance`."""
+    blocks = [Block(name="A", conditions=[Condition("a", {}, target=1)], criterion=(0.5, 2),
                     drum=True),
               Block(name="B", conditions=[Condition("b", {}, target=2)])]
     scheduler = Scheduler(blocks, seed=1)
     for outcome in (Outcome.CORRECT, Outcome.WRONG_TARGET):
         scheduler.record(scheduler.next_trial().name, outcome)
-    assert scheduler.finished and scheduler.drum_tries == 1, "a drum is waiting"
+    assert not scheduler.finished and scheduler.drum_tries == 1, "the drum holds the block open"
 
     scheduler.advance()
 
     assert scheduler.next_trial().name == "b" and not scheduler.drawn.drummed
+
+
+def test_a_criterion_block_ends_only_once_its_criterion_is_met_and_every_target_is_used_up():
+    """The PI, 2026-10-18, "Both: criterion and every target": "The block ends only once the
+    criterion is met and every target is used up". Two right answers meet 100% over two, and the
+    block, owing four trials, goes on until it owes none; its criterion alone ended it."""
+    block = Block(name="b", conditions=[Condition("a", {}, target=3), Condition("b", {}, target=1)],
+                  criterion=(1.0, 2))
+    scheduler = Scheduler([block], seed=1)
+    for _ in range(2):
+        scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
+
+    assert list(scheduler._window) == [1, 1] and not scheduler.finished
+    for _ in range(2):
+        scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
+    assert scheduler.finished and [scheduler.owed(n) for n in "ab"] == [0, 0]
+
+
+def test_past_its_targets_a_criterion_block_draws_every_condition_until_the_criterion_is_met():
+    """The PI, 2026-10-18 (settling XC-364): "conditions keep coming until both hold". Every target
+    used up with the criterion unmet, the block draws all its conditions again, by its order, each
+    answer counted as ever and nothing owed -- where it had nothing left to draw and the run
+    faulted. A block without a criterion still draws nothing once its targets are used up."""
+    block = Block(name="b", conditions=[Condition(n, {}, target=1) for n in "ab"],
+                  criterion=(1.0, 3))
+    scheduler = Scheduler([block], seed=1)
+    kinds, drawn = [], []
+    for outcome in (Outcome.CORRECT, Outcome.CORRECT, Outcome.WRONG_TARGET, Outcome.CORRECT,
+                    Outcome.CORRECT, Outcome.CORRECT):
+        assert not scheduler.finished
+        drawn.append(scheduler.next_trial().name)
+        kinds.append(scheduler.record(drawn[-1], outcome))
+
+    assert scheduler.finished and set(drawn[2:]) == {"a", "b"}
+    assert kinds == [COUNTED] * 6 and [scheduler.owed(n) for n in "ab"] == [0, 0]
+    fixed = Scheduler([Block(name="b", conditions=[Condition(n, {}, target=1) for n in "ab"])],
+                      seed=1)
+    for _ in range(2):
+        fixed.record(fixed.next_trial().name, Outcome.CORRECT)
+    with pytest.raises(IndexError, match="no condition left to draw"):
+        fixed.next_trial()
+
+
+def test_a_drummed_criterion_block_goes_on_drumming_past_its_targets():
+    """Drumming acted only while a condition owed, so past its targets a training block -- a streak,
+    drummed -- stopped drumming: a wrong answer there comes back at once until it is right, as it
+    did before the target was used up."""
+    block = Block(name="b", conditions=[Condition("a", {}, target=1)], criterion=(1.0, 2),
+                  drum=True)
+    scheduler = Scheduler([block], seed=1)
+    drummed = []
+    for outcome in (Outcome.CORRECT, Outcome.WRONG_TARGET, Outcome.CORRECT, Outcome.CORRECT):
+        scheduler.record(scheduler.next_trial().name, outcome)
+        drummed.append(scheduler.drawn.drummed)
+
+    assert drummed == [False, False, True, False] and scheduler.finished
+
+
+@pytest.mark.parametrize(("drummed", "finished"), [
+    ((Outcome.CORRECT,), True),
+    ((Outcome.WRONG_TARGET, Outcome.CORRECT), False),
+])
+def test_a_drummed_block_met_on_a_wrong_answer_finishes_its_drum_first(drummed, finished):
+    """The PI, 2026-10-18, "Finish the drum first": "The block ends only after the drummed trial is
+    answered right. If the extra tries drop the percentage below the bar, the block carries on.
+    Training ends on a success." Four right answers then a wrong one make 80% of the last 5, and
+    the block waits for its drum: right at once, it ends there; wrong again, the percentage falls
+    below the bar, and the block carries on once the drum is right."""
+    block = Block(name="b", conditions=[Condition("a", {}, target=1)], criterion=(0.8, 5),
+                  drum=True)
+    scheduler = Scheduler([block], seed=1)
+    for outcome in (Outcome.CORRECT,) * 4 + (Outcome.WRONG_TARGET,):
+        scheduler.record(scheduler.next_trial().name, outcome)
+    assert list(scheduler._window) == [1, 1, 1, 1, 0] and scheduler.drum_tries == 1
+    assert not scheduler.finished, "met, but a drum is waiting"
+
+    for outcome in drummed:
+        scheduler.record(scheduler.next_trial().name, outcome)
+
+    assert scheduler.drum_tries == 0 and scheduler.finished is finished
+
+
+def test_stopping_a_drum_that_holds_a_met_block_open_is_this_blocks_switch():
+    """*Stop drumming* while a drum holds open a block whose criterion is met ends the drum, and the
+    block with it; the switch is this block's, so the next block's own drumming is not switched
+    off. Asked after *off* had dropped the drum, the carry called it the next block's (reachable
+    since the PI's "Finish the drum first", 2026-10-18)."""
+    blocks = [Block(name="A", conditions=[Condition("a", {}, target=1)], criterion=(0.5, 2),
+                    drum=True),
+              Block(name="B", conditions=[Condition("b", {}, target=2)], drum=True)]
+    scheduler = Scheduler(blocks, seed=1)
+    for outcome in (Outcome.CORRECT, Outcome.WRONG_TARGET):
+        scheduler.record(scheduler.next_trial().name, outcome)
+    assert not scheduler.finished and scheduler.drum_tries == 1
+
+    assert scheduler.drum("off") == "A" and scheduler.finished
+    scheduler.advance()
+    assert (scheduler.block.name, scheduler.drumming) == ("B", "block")
 
 
 def test_a_drummed_catch_condition_finishes_on_correct_rejections():

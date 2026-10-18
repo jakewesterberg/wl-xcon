@@ -145,8 +145,9 @@ class Block:
     conditions: list[Condition]
     #: `(proportion, window)` -- "80% correct over the last 20 answers", a percentage; a proportion
     #: of 1.0 is a streak, "N correct in a row" (the engine C2a plan, revised 2026-10-18). Judged on
-    #: answers only, every one (`Scheduler.record`). When absent, the block ends once every
-    #: condition is owed nothing.
+    #: answers only, every one (`Scheduler.record`). The block ends once every condition is owed
+    #: nothing and, with a criterion, the criterion is met too: **its targets are a minimum**
+    #: (`Scheduler.finished`).
     criterion: tuple[float, int] | None = None
     #: The table this block counts by, **replacing its structure's** (TSK-26: what counts is
     #: declared per block): `CORRECT_ONLY`, `PRESENTED`, `EVERY_TRIAL` or any `task.Counting` --
@@ -279,9 +280,21 @@ class Scheduler:
         self._queue.append(self._rng.choices(pending, weights=weights, k=1)[0])
 
     def _drawable(self, condition: str) -> bool:
-        """Whether an ordinary draw may give `condition`: it still owes, and no repeat of it is
-        waiting for its slot -- the repeat is its next trial (engine spec §16.3)."""
-        return self.owed(condition) > 0 and all(name != condition for _, _, name in self._due)
+        """Whether an ordinary draw may give `condition`: it still owes, or the block is past its
+        targets (`past_targets`), and no repeat of it is waiting for its slot -- the repeat is its
+        next trial (engine spec §16.3)."""
+        return ((self.owed(condition) > 0 or self.past_targets)
+                and all(name != condition for _, _, name in self._due))
+
+    @property
+    def past_targets(self) -> bool:
+        """Whether the open block ends on a criterion and every target is used up: **then every
+        condition of the block is drawn again, by its order, until the criterion is met** (the PI,
+        2026-10-18: "conditions keep coming until both hold"). Nothing is owed then, so a break is
+        not shown again and nothing is forgiven, but a drummed trial still comes back until it is
+        right (`record`)."""
+        return self.block.criterion is not None and all(
+            self.owed(c.name) == 0 for c in self.block.conditions)
 
     def _runs_long(self, condition: str) -> bool:
         """Whether `condition` next would make a run longer than a `Constrained` block allows."""
@@ -501,19 +514,30 @@ class Scheduler:
         switch made then is the next block's (the engineering review's Minor 10)."""
         if scope not in DRUM_SCOPES:
             raise ValueError(f"drumming is switched {', '.join(DRUM_SCOPES)}, not {scope!r}")
+        # Asked before *off* drops a drum that holds a met block open, which would meet its end
+        # rule: stopping such a drum is this block's switch (the PI, 2026-10-18: "Finish the drum
+        # first").
+        self._carried = self.finished and not self.done
         self._switched = scope
         if scope == "off":
             self._drum = None
-        self._carried = self.finished and not self.done
         return self.blocks[self._index + 1].name if self._carried else self.block.name
 
     @property
     def finished(self) -> bool:
+        """Whether the open block's end rule is met: every condition owes nothing, and where the
+        block ends on a criterion, the criterion is met too -- **its targets are a minimum** (the
+        PI, 2026-10-18, "Both: criterion and every target": "The block ends only once the criterion
+        is met and every target is used up; conditions keep coming until both hold") -- **and no
+        drum waits** ("Finish the drum first": "The block ends only after the drummed trial is
+        answered right. If the extra tries drop the percentage below the bar, the block carries on.
+        Training ends on a success.")."""
+        if self._drum is not None:
+            return False
         if self.block.criterion is not None:
             proportion, window = self.block.criterion
-            if len(self._window) < window:
+            if len(self._window) < window or sum(self._window) / len(self._window) < proportion:
                 return False
-            return sum(self._window) / len(self._window) >= proportion
         return all(self.owed(c.name) == 0 for c in self.block.conditions)
 
     def next_trial(self) -> Condition:
@@ -602,10 +626,12 @@ class Scheduler:
             # shown again either. A drummed answer ends the trial's count as well, so this comes
             # before the drum branch, which returns (the controller's ruling I3).
             counts.in_a_row = counts.rig = 0
-        if self.drumming and outcome not in RIGHT and self.owed(condition) > 0:
+        if (self.drumming and outcome not in RIGHT
+                and (self.owed(condition) > 0 or self.past_targets)):
             # **Drumming** (`Block.drum`): repeated until right -- a correct answer or a correct
             # rejection (`task.RIGHT`) -- at once, paying nothing, its failed tries in a row
-            # counted for the console's warning (`drum_tries`).
+            # counted for the console's warning (`drum_tries`); past a criterion block's targets
+            # too, where its conditions keep coming (`past_targets`).
             self.requeued.append(condition)
             self._drum = (condition, self._number - 1)
             self._tries = 1 if first_try else self._tries + 1

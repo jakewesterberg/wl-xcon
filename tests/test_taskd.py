@@ -1146,14 +1146,16 @@ def test_each_trial_records_the_condition_it_actually_ran(tmp_path):
     assert {row["block"] for row in rows} == {"near-far", "far-only"}
 
 
-def test_a_criterion_block_ends_on_performance_rather_than_on_a_count(tmp_path):
-    """The transition S8 §1 calls a length rule. A block whose criterion is met stops
-    early; the session moves on rather than ending."""
+def test_a_criterion_block_ends_once_its_criterion_and_its_target_both_hold(tmp_path):
+    """The transition S8 §1 calls a length rule. A block ends once its criterion is met and
+    its target is used up -- a minimum (the PI, 2026-10-18) -- and the session moves on
+    rather than ending. A criterion its target's 10 trials cannot meet, over 15 answers, keeps
+    the shaping block going past them (the controller's ruling M7)."""
     blocks = [
         Block(
             name="shaping",
-            conditions=[Condition("only", {}, target=10_000)],
-            criterion=(0.2, 10),
+            conditions=[Condition("only", {}, target=10)],
+            criterion=(0.2, 15),
             counting=EVERY_TRIAL,
         ),
         Block(name="test", conditions=[Condition("only", {}, target=5)]),
@@ -1165,6 +1167,7 @@ def test_a_criterion_block_ends_on_performance_rather_than_on_a_count(tmp_path):
 
     assert session.blocks_run == ["shaping", "test"]
     assert session.stopped_because == "every block is finished"
+    assert sum(row["block"] == "shaping" for row in _trial_rows(session)) > 10
 
 
 def test_each_trial_row_says_what_it_did_to_its_count_and_whether_its_stimulus_appeared(tmp_path):
