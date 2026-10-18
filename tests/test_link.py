@@ -32,6 +32,7 @@ from wl_xcon.link import (
     CheckRun,
     ClearOwed,
     CommandRefused,
+    ConditionRow,
     Control,
     Drum,
     Training,
@@ -58,6 +59,7 @@ from wl_xcon.link import (
     ScheduleStop,
     ScheduledStop,
     SchemaMismatch,
+    ShortfallRow,
     Simulated,
     SetParameter,
     Staged,
@@ -79,7 +81,8 @@ from wl_xcon.link import (
     encode,
 )
 from wl_xcon.photometry import SRGB
-from wl_xcon.scheduler import Block, Condition, Scheduler
+from wl_xcon.scheduler import EVERY_TRIAL, Block, Condition, Scheduler
+from wl_xcon.task import OWED, Counting, Outcome
 from wl_xcon.simulate import Tally
 from wl_xcon.welfare import Deployment, Simulated as Pump, Welfare
 
@@ -2105,7 +2108,7 @@ def test_schema_8_reads_the_pause_the_schedule_and_the_feed_from_the_session():
 
     telemetry = Telemetry.of(session, Tally(), _scheduler(), index=40)
 
-    assert telemetry.schema == SCHEMA == 15
+    assert telemetry.schema == SCHEMA == 16
     assert telemetry.paused_at == 1_700_000_100.0
     assert telemetry.scheduled_stop == ScheduledStop(
         kind="trials", target=48.0, by=Box("jake"), said="after trial 48"
@@ -2168,15 +2171,15 @@ def test_a_frame_carries_the_setup_the_session_runs_in():
     assert decode(encode(stereo)).view == "stereoscope"
     assert decode(encode(stereo)).half_ipd_cm == 1.6
     assert decode(encode(_telemetry())).half_ipd_cm is None
-    assert SCHEMA == 15
+    assert SCHEMA == 16
 
 
-def test_a_schema_7_frame_is_refused_by_a_schema_15_reader():
-    """§3's schema rule: a reader built for 15 refuses 7 by name, before touching a
+def test_a_schema_7_frame_is_refused_by_a_schema_16_reader():
+    """§3's schema rule: a reader built for 16 refuses 7 by name, before touching a
     field (`SchemaMismatch`), and says which it reads."""
     old = encode(replace(_telemetry(), schema=7))
 
-    with pytest.raises(SchemaMismatch, match="carried schema 7 and this console reads schema 15"):
+    with pytest.raises(SchemaMismatch, match="carried schema 7 and this console reads schema 16"):
         decode(old)
 
 
@@ -2270,7 +2273,7 @@ def test_schema_10_survives_the_wire_with_its_absences_intact():
         assert decode(encode(original)) == original
     assert type(decode(encode(populated)).preflight.items[0]) is PreflightItem
     assert type(decode(encode(populated)).question) is Question
-    assert SCHEMA == 15
+    assert SCHEMA == 16
 
 
 def test_a_session_before_its_first_run_has_no_block_task_or_counts():
@@ -2326,7 +2329,7 @@ def test_an_idle_frame_carries_the_last_closed_sessions_summary_across_the_wire(
     assert type(restored.closed) is Telemetry and restored.closed.phase == "closed"
     assert (restored.closed.fluid_today_ml, restored.closed.shortfall_ml) == (None, None)
     assert decode(encode(replace(idle, closed=None))).closed is None
-    assert SCHEMA == 15
+    assert SCHEMA == 16
 
 
 def test_idle_of_carries_what_it_is_given_as_the_closed_summary():
@@ -2348,7 +2351,7 @@ def test_an_idle_frame_of_another_schema_is_refused_by_name():
         )
     )
 
-    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 15"):
+    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 16"):
         decode(old)
 
 
@@ -2492,7 +2495,7 @@ def test_the_strips_levels_and_the_return_survive_the_wire():
     assert decode(encode(original)) == original
     # 12 added `performance` (the strip's session, task, run and block counts) and
     # `returned_at` (the recorded return).
-    assert SCHEMA == 15
+    assert SCHEMA == 16
 
 
 def test_a_frame_between_runs_carries_the_session_alone():
@@ -2562,7 +2565,7 @@ def test_the_instant_a_session_was_resumed_survives_the_wire_and_none_stays_none
     assert decode(encode(resumed)).resumed_at == 1_700_000_050.0
     assert decode(encode(_telemetry())).resumed_at is None
     # 13 added `Stranded.resumable` and `why`, and `Telemetry.resumed_at`.
-    assert SCHEMA == 15
+    assert SCHEMA == 16
 
 
 def test_the_frame_reads_the_resume_from_the_session():
@@ -2579,7 +2582,7 @@ def test_the_frame_reads_the_resume_from_the_session():
 def test_a_schema_13_frame_is_refused_by_name():
     """b2b (schema 14): a frame whose `by`s are strings is refused by its schema, by
     name, before any `by` is read."""
-    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 15"):
+    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 16"):
         decode(encode(replace(_telemetry(), schema=13)))
 
 
@@ -2616,10 +2619,104 @@ def test_schema_15_carries_the_kind_the_calibration_and_the_warnings_both_ways()
         warnings=(WarningRow("default calibration", "the standard's", SESSION_KINDS, None, None),),
     )
 
-    assert (sent.schema, decode(encode(sent))) == (15, sent)
+    assert (sent.schema, decode(encode(sent))) == (16, sent)
     assert type(decode(encode(sent)).warnings[0]) is WarningRow
     assert decode(encode(unloaded)).calibration is None
     assert decode(encode(idle)) == idle
+
+
+# ---------------------------------------------------------------------------
+# Schema 16 (engine build C2a): what is still owed, forgiven and drummed
+# ---------------------------------------------------------------------------
+
+
+def test_schema_16_carries_each_shortfall_drumming_the_training_aids_and_each_conditions_counts():
+    """Engine spec §16.6; the PI, 2026-10-11 and 2026-10-18: a cap's shortfall flagged as possible
+    avoidance, a cleared one with who cleared it, whether trials are drummed, the training aid
+    *clear* and the percentage setting, each condition's counts, and each level's drummed tries
+    with the right ones among them. A reader of 16 refuses 15."""
+    sent = _telemetry(
+        shortfalls=(ShortfallRow("b", "near", 3, "cap", True, None, 12),
+                    ShortfallRow("b", "far", 1, "cleared", False, Box("jake"), None)),
+        drumming="run",
+        clearable=False,
+        clearing=True,
+        first_answers=True,
+        conditions=(ConditionRow("near", 12, 15, 9, 4, 8, 2, 3, 1, True, 3, 2),),
+        trials=12,
+        aids=("drumming", "clear"),
+        streak=True,
+        past_targets=True,
+    )
+    sent = replace(sent, performance=replace(
+        sent.performance, session=Counts({"correct": 9}, 0, drummed=3, right_drummed=2)))
+
+    assert decode(encode(sent)) == sent
+    with pytest.raises(SchemaMismatch, match="carried schema 15 and this console reads schema 16"):
+        decode(encode(replace(sent, schema=15)))
+
+
+def test_a_frame_names_every_condition_of_the_open_block_and_its_scheduler_s_shortfalls():
+    """Engine spec §16.6: "owed" for every condition of the open block, a condition owing nothing
+    included -- it named only those queued, one under a block drawing with replacement -- and the
+    run's shortfalls and drumming, the training aid *clear* and the percentage setting, and each
+    condition's counts (the PI, 2026-10-18), read from the scheduler."""
+    block = Block(name="b", conditions=[Condition("near", {}, target=1),
+                                        Condition("far", {}, target=2)], drum=True)
+    scheduler = Scheduler(blocks=[block], seed=0, clearing=True)
+    scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
+    paid = scheduler.drawn.condition.name
+    other = "far" if paid == "near" else "near"
+    scheduler.clear(other, by=Box("jake"))
+
+    frame = Telemetry.of(_session_with(delivered_ml=1.0, already_today=None), Tally(), scheduler,
+                         index=1)
+
+    assert list(frame.owed) == ["near", "far"]
+    assert frame.owed[paid] == {"near": 0, "far": 1}[paid]
+    assert frame.owed[other] == {"near": 0, "far": 1}[other]
+    assert frame.shortfalls == (ShortfallRow("b", other, 1, "cleared", False, Box("jake"), 0),)
+    assert (frame.drumming, frame.clearing, frame.first_answers) == ("block", True, False)
+    assert (frame.trials, frame.aids, frame.streak, frame.past_targets) == (
+        1, ("drumming", "clear"), False, False)
+    assert [(row.condition, row.trials, row.right, row.owed, row.moved_past)
+            for row in frame.conditions] == [
+        (name, int(name == paid), int(name == paid), frame.owed[name], int(name == other))
+        for name in ("near", "far")]
+
+
+def test_a_frame_says_whether_a_trial_of_the_open_block_can_be_cleared():
+    """The engineering review's Minor 3: a plain run of N, whose every-trial table owes nothing,
+    offers no *clear* -- one would only shorten the run -- until its trials are drummed."""
+    flat = Scheduler([Block(name="session", conditions=[Condition("session", {}, target=5)],
+                            counting=EVERY_TRIAL)])
+    owing = Scheduler([Block(name="b", conditions=[Condition("near", {}, target=5)])],
+                      counting=Counting(after_stimulus=OWED))
+
+    def clearable(scheduler) -> bool:
+        session = _session_with(delivered_ml=1.0, already_today=None)
+        return Telemetry.of(session, Tally(), scheduler, index=1).clearable
+
+    assert (clearable(flat), clearable(owing)) == (False, True)
+    flat.drum("run")
+    assert clearable(flat)
+
+
+def test_a_frame_says_a_criterion_block_is_past_its_targets_and_whether_its_rule_is_a_streak():
+    """The controller's rulings on the plan's revision review: past a criterion block's targets the
+    page says it draws until the criterion is met, and in a block whose rule is a streak the
+    first-answers switch says it changes nothing (M4); neither once the criterion is met."""
+    block = Block(name="b", conditions=[Condition("near", {}, target=1)], criterion=(1.0, 2))
+    scheduler = Scheduler([block])
+
+    def frame() -> Telemetry:
+        session = _session_with(delivered_ml=1.0, already_today=None)
+        return Telemetry.of(session, Tally(), scheduler, index=1)
+
+    scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
+    assert (frame().past_targets, frame().streak) == (True, True)
+    scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
+    assert scheduler.finished and not frame().past_targets
 
 
 def test_a_schema_14_frame_of_either_shape_is_refused_by_name():
@@ -2629,7 +2726,7 @@ def test_a_schema_14_frame_of_either_shape_is_refused_by_name():
                 refusals_dropped=0, animals=(), offered_tasks=())
 
     for old in (replace(_telemetry(), schema=14), idle):
-        with pytest.raises(SchemaMismatch, match="carried schema 14 and this console reads schema 15"):
+        with pytest.raises(SchemaMismatch, match="carried schema 14 and this console reads schema 16"):
             decode(encode(old))
 
 

@@ -34,7 +34,9 @@ from _ports import endpoints as free_endpoints  # noqa: E402
 from _tls import client_context, material  # noqa: E402
 from wl_xcon import signin, warnlist, web  # noqa: E402
 from wl_xcon.findings import SESSION_KINDS  # noqa: E402
-from wl_xcon.link import ManualReward, OpenSession, Pause, WarningRow  # noqa: E402
+from wl_xcon.link import (  # noqa: E402
+    ClearOwed, Drum, ManualReward, OpenSession, Pause, Training, WarningRow,
+)
 from wl_xcon.photometry import SRGB  # noqa: E402
 from wl_xcon.warnlist import HEAD_FREE  # noqa: E402
 from wl_xcon.serve import Hub, Remote, _PageServer, make_handler, tls_context  # noqa: E402
@@ -233,6 +235,35 @@ def test_a_member_signs_in_and_a_pause_reaches_the_rig_as_theirs(rig):
     rig.wait_for(lambda: rig.dispatch.seen)
     assert isinstance(rig.dispatch.seen[-1], Pause)
     assert rig.dispatch.seen[-1].by.name == "Jake Westerberg"
+
+
+def test_a_member_clears_a_trial_and_switches_drumming_and_each_reaches_the_rig_as_theirs(rig):
+    """Engine build C2a: *clear one* and *clear the rest* on a condition of the Still-needed pane
+    send that condition, a drumming switch its scope, and a training switch its setting, each as
+    the signed-in member's (the PI, 2026-10-11 and 2026-10-18; the rest, the science review's D5).
+    *Clear* is offered while its training aid is on."""
+    rig.hub.offer(frame(clearing=True))
+    page = rig.browser_page()
+    page.click("#signin")
+    page.wait_for_selector(SIGNED_IN, timeout=10_000)
+
+    page.click('[data-cmd="clear"][data-condition="ecc 10"]:not([data-rest])')
+    rig.wait_for(lambda: rig.dispatch.seen)
+    page.click('[data-cmd="clear"][data-condition="ecc 10"][data-rest]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
+    page.click('[data-cmd="drum"][data-scope="run"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 3)
+    page.click('[data-cmd="training"][data-setting="first_answers"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 4)
+
+    one, rest, drummed, setting = rig.dispatch.seen
+    member = "Jake Westerberg"
+    assert (type(one), one.condition, one.rest, one.by.name) == (ClearOwed, "ecc 10", False, member)
+    assert (type(rest), rest.condition, rest.rest, rest.by.name) == (
+        ClearOwed, "ecc 10", True, member)
+    assert (type(drummed), drummed.scope, drummed.by.name) == (Drum, "run", member)
+    assert (type(setting), setting.setting, setting.on, setting.by.name) == (
+        Training, "first_answers", True, member)
 
 
 def test_a_state_that_was_not_started_here_is_refused(rig):

@@ -606,6 +606,20 @@ class Scheduler:
         else:
             self.first_answers = on
 
+    @property
+    def clearable(self) -> bool:
+        """Whether a trial of the open block can be owed, so a person may clear one from the
+        console (the engine C2a plan's engineering review, Minor 3): trials are drummed, or the
+        block's table -- or its structure's -- owes some outcome, before its stimulus or after. The
+        flat run's every-trial table owes none, so a plain "run N trials" offers no *clear*, where
+        one would only shorten the run."""
+        if self.drumming:
+            return True
+        table = self._table
+        if table is None:
+            return True
+        return OWED in {table.of(o, shown) for o in (*Outcome, None) for shown in (True, False)}
+
     def clear(self, condition: str, by: object = None, rest: bool = False) -> str | None:
         """Forgive one trial of `condition`'s debt in this block, or with `rest` all it still owes,
         as a person does from the console (the PI, 2026-10-11: "manually advance beyond or clear a

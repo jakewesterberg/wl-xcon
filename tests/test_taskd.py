@@ -1371,6 +1371,52 @@ def test_a_drum_failing_as_its_run_is_stopped_is_on_the_end_row(tmp_path, monkey
     assert (counts["failing"], counts["drummed"]) == (5, 4)
 
 
+def test_the_strips_counts_carry_each_levels_drummed_tries(tmp_path):
+    """The PI, 2026-10-18, "Show both": the strip's counts at the session, the task, the run and the
+    block carry their drummed tries and the right ones among them (telemetry schema 16), so the
+    page shows right first time beside right per presentation."""
+    block = Block(name="drill", conditions=[Condition("c", {}, target=20)], drum=True)
+    session = _session(_spec(tmp_path, trials=400, blocks=[block]))
+    seen = []
+    session.observe = lambda *_: seen.append(session.performance)
+
+    session.run()
+
+    rows = _trial_rows(session)
+    drummed = sum(row["drummed"] for row in rows)
+    right = sum(row["drummed"] and row["outcome"] == "correct" for row in rows)
+    last = seen[-1]
+    assert drummed > 0 and (last.run.drummed, last.run.right_drummed) == (drummed, right)
+    assert (last.session.drummed, last.task.drummed, last.block.drummed) == (drummed,) * 3
+
+
+def test_a_drummed_run_of_20_trials_shows_20_trials_and_its_presentations_beside(tmp_path):
+    """The PI, 2026-10-18, "200 trials; drummed repeats inside them" -- "The console would show
+    both: trials (200) and presentations (e.g. 260)" (the controller's ruling I1): a plain run of
+    20 trials, drummed from its start, is 20 trials and more presentations, on the page and on
+    /health, through the wire."""
+    from _frames import ENDPOINT, view
+
+    from wl_xcon.health import readings
+    from wl_xcon.link import decode, encode
+    from wl_xcon.web import fragments
+
+    link = _Drained({1: [Drum(scope="run", by=Box("jake"))]})
+    session = _session(_spec(tmp_path, trials=20), link=link)
+
+    session.run()
+
+    rows = _trial_rows(session)
+    last = decode(encode(link.published[-1]))
+    work = fragments(last, view())["rt-work"]
+    values = {row["key"]: row["value"] for row in readings(
+        last, frame_age_s=1.0, stale_after_s=30.0, rejected=None, endpoint=ENDPOINT)}
+    assert len(rows) > 20 and (last.trials, last.trial_index) == (20, len(rows))
+    assert (f'<span class="big">20</span><span class="unit">trials · {len(rows)} presentations'
+            f'</span>') in work
+    assert (values["trials"], values["presentations"]) == ("20", str(len(rows)))
+
+
 def test_a_runs_end_row_records_each_shortfall_its_cap_forgave(tmp_path):
     """Engine spec §16.6: the shortfall is recorded, on the run's end row, flagged as possible
     avoidance. A block whose own table allows no repeat forgives a condition's debt at its first

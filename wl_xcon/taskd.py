@@ -199,7 +199,8 @@ def _appeared(trial: Trial, result) -> bool:
 def _counts(tally) -> _link.Counts:
     """A tally as the strip's counts, by outcome's wire string as `Telemetry.outcomes`."""
     return _link.Counts(
-        outcomes={k.value: v for k, v in tally.outcomes.items()}, hangs=tally.hangs
+        outcomes={k.value: v for k, v in tally.outcomes.items()}, hangs=tally.hangs,
+        drummed=tally.drummed, right_drummed=tally.right_drummed,
     )
 
 

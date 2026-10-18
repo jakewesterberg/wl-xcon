@@ -43,7 +43,7 @@ from importlib import resources
 from wl_xcon import health as _health
 from wl_xcon.actor import Actor, Member
 from wl_xcon.cli import _clock, _moment, _setup_words
-from wl_xcon.link import RECENT_OUTCOMES, Counts, Idle, Question, Telemetry
+from wl_xcon.link import RECENT_OUTCOMES, ConditionRow, Counts, Idle, Question, Telemetry
 from wl_xcon.task import Family, Outcome
 from wl_xcon.warnlist import HEAD_FREE, UNLISTED
 
@@ -478,6 +478,20 @@ def _level(name: str, counts: Counts, note: str, *, none_yet: str | None = None)
     correct, trials = _correct_of(counts)
     if trials == 0:
         return (name, '<span class="u">—</span>', "", _e(note if none_yet is None else none_yet), "")
+    if counts.drummed:
+        # **Right first time beside right per presentation** (the PI, 2026-10-18, "Show both"): a
+        # trial and its drummed repeats are one trial, so where trials were drummed the line leads
+        # with the trials right first time, and its note gives every presentation's figure.
+        first, firsts = correct - counts.right_drummed, trials - counts.drummed
+        said = (f"right first time; {100.0 * correct / trials:.0f}% per presentation "
+                f"({correct} / {trials})")
+        return (
+            name,
+            f'{_e(first)}<span class="u"> / {_e(firsts)}</span>',
+            f"{100.0 * first / firsts:.0f}%",
+            _e(f"{note} · {said}" if note else said),
+            "",
+        )
     return (
         name,
         f'{_e(correct)}<span class="u"> / {_e(trials)}</span>',
@@ -491,7 +505,8 @@ def _performance(frame: Telemetry, view: View) -> str:
     """The strip's second cell (session-levels spec §6): session, task, this run, this
     block -- or, while no run goes, one line saying so (plan ruling 4)."""
     perf = frame.performance
-    rate = "" if view.trials_per_min is None else f"{view.trials_per_min:.1f}/min"
+    # Presentations per minute, drummed tries included, from `trial_index` (`serve`), and said so.
+    rate = "" if view.trials_per_min is None else f"{view.trials_per_min:.1f} presentations/min"
     rows = [_level("session", perf.session, rate, none_yet="no trials yet")]
     if perf.run is None:
         said = "between runs" if frame.phase == "between_runs" else "no run going"
@@ -578,6 +593,23 @@ def _resumed_sentence(resumed_at: float) -> str:
     return f"this session was resumed after its process stopped, at {_wall_minute(resumed_at)}"
 
 
+def _aids_banner(frame: Telemetry) -> str:
+    """The standing warning while a training aid is on and the run goes (the PI, 2026-10-18: "a
+    warning that training aids are on in the console"; outside a training session, "Allow it, with
+    a warning"): drumming, a block's or a trainer's, and *clear*, as the scheduler lists them
+    (`Telemetry.aids`, never recomputed here: the controller's smaller ruling). Every trial's row
+    marks them."""
+    on = list(frame.aids)
+    if not on or frame.phase != "running" or frame.stop_kind is not None:
+        return ""
+    aids = " and ".join(on)
+    if frame.session_kind == "training":
+        return _banner("info", "Training aid", _e(f"{aids} on: the record marks every trial"))
+    return _banner("warn", "Training aid", _e(
+        f"{aids} on in a {frame.session_kind} session, though training aids are meant for "
+        f"training sessions: the record marks every trial"))
+
+
 def _banners(frame: Telemetry | None, view: View) -> str:
     """A refused frame first, then the duration warning and the stop reason -- where
     a person looks when something is wrong. The stream's own banner (stale, lost) is
@@ -607,6 +639,7 @@ def _banners(frame: Telemetry | None, view: View) -> str:
         out.append(_question_banner(frame.question, view))
     if frame.resumed_at is not None:
         out.append(_banner("info", "Resumed", _e(_resumed_sentence(frame.resumed_at))))
+    out.append(_aids_banner(frame))
     if frame.stopped_because:
         tone = "crit" if frame.stop_kind in ("fault", "limit") else "info"
         tag = (
@@ -974,7 +1007,7 @@ def _trials(frame: Telemetry | None) -> str:
         f'<span><i class="tk f-{key}"></i>{label}</span>' for key, label in LEGEND
     )
     return (
-        f'<div class="sub">the last {len(recent)} of {_e(frame.trial_index)} trials, '
+        f'<div class="sub">the last {len(recent)} of {_e(frame.trial_index)} presentations, '
         f"oldest first</div>"
         f'<div class="ticks">{blanks}{ticks}</div><div class="legend">{legend}</div>'
     )
@@ -1014,24 +1047,120 @@ def _work(frame: Telemetry | None) -> str:
         f'<div class="fam"><h3>Hangs</h3><div class="kv"><span>hangs</span>'
         f'<span class="num">{_e(frame.hangs)}</span></div></div>'
     )
+    # **Trials, and the presentations beside them where they differ** (the PI, 2026-10-18: "The
+    # console would show both"; the controller's ruling I1): a trial and its drummed repeats one.
+    beside = (f" · {_e(frame.trial_index)} presentations" if frame.trials != frame.trial_index
+              else "")
     return (
-        f'<div class="selrow"><span class="big">{_e(frame.trial_index)}</span>'
-        f'<span class="unit">trials</span></div>'
+        f'<div class="selrow"><span class="big">{_e(frame.trials)}</span>'
+        f'<span class="unit">trials{beside}</span></div>'
         f'<div class="counts">{groups}{hangs}</div>{_fluid_and_supplement(frame)}'
     )
 
 
-def _need(frame: Telemetry | None) -> str:
-    """Still needed, by condition: `scheduler.owed` as published."""
+#: The drumming switches, each scope's label (`scheduler.DRUM_SCOPES`; the PI, 2026-10-11).
+DRUM_SWITCHES = (("block", "drum this block"), ("run", "drum this run"), ("off", "stop drumming"))
+
+#: Why a repeat limit forgave a condition's debt, as the pane says it (engine spec §16.6).
+_FORGIVEN = {
+    "cap": "possible avoidance: its failed repeats in a row reached its limit",
+    "rig": ("its repeat limit was reached with tries the rig lost (a lost tracker or a fault): not "
+            "flagged as avoidance"),
+}
+
+
+def _counted(row: ConditionRow) -> str:
+    """One condition's counts (the PI, 2026-10-18): its trials, a trial and its drummed repeats
+    one, and presentations; right and wrong answers and percent right first time; repeats placed;
+    trials moved past, with the possible-avoidance flag; drummed tries; and the failed run of its
+    trial being drummed now. What it owes is on its line above."""
+    first = f"{100.0 * row.right_first / row.trials:.0f}%" if row.trials else "—"
+    moved = f"{row.moved_past} moved past" + (" (possible avoidance)" if row.possible_avoidance
+                                              else "")
+    said = [f"{row.trials} trials", f"{row.presentations} presentations", f"{row.right} right",
+            f"{row.wrong} wrong", f"{first} right first time", f"{row.repeats} repeats", moved,
+            f"{row.drummed} drummed"]
+    if row.failing:
+        said.append(f"failing {row.failing} in a row")
+    return f'<div class="kv"><span class="nm">{_e(" · ".join(said))}</span></div>'
+
+
+def _need(frame: Telemetry | None, view: View) -> str:
+    """Still needed (engine spec §16.6): every condition of the open block with what it still owes
+    (`scheduler.owed`) and, beneath it, its counts (`_counted`); beside each owing any, while a run
+    runs, the training aid *clear* is on (`clearing`; the PI, 2026-10-18) and a trial of the block
+    can be owed (`clearable`), *clear one* (the PI, 2026-10-11: "there should be some way in the
+    console to manually advance beyond or clear a specific trial in the count") and, owing more
+    than one, *clear the rest* (the engine C2a plan's science review, D5); then the run's
+    shortfalls, a repeat limit's flagged as possible avoidance or named for the rig, a clear's with
+    who cleared it; then, while a run runs, drumming and its switches (the PI, 2026-10-11), and the
+    training switches: *clear* on or off, and how a percentage counts drummed answers."""
     if frame is None:
         return _NONE
-    if not frame.owed:
-        return '<span class="nm">nothing still needed</span>'
-    return "".join(
-        f'<div class="kv"><span class="mono">{_e(condition)}</span>'
-        f'<span class="num">{_e(count)}</span></div>'
-        for condition, count in frame.owed.items()
-    )
+    live = frame.phase == "running" and frame.stop_kind is None
+    counted = {row.condition: row for row in frame.conditions}
+
+    def clears(condition: str, count: int) -> str:
+        if not (live and frame.clearing and frame.clearable and count):
+            return ""
+        name, off = _e(condition), _gate(view)
+        one = (f'<button type="button" class="btn" data-cmd="clear" data-condition="{name}"{off}>'
+               f"clear one</button>")
+        rest = (f'<button type="button" class="btn" data-cmd="clear" data-condition="{name}" '
+                f'data-rest="1"{off}>clear the rest</button>')
+        return one + (rest if count > 1 else "")
+
+    rows = []
+    for condition, count in frame.owed.items():
+        rows.append(f'<div class="kv"><span class="mono">{_e(condition)}</span>'
+                    f'<span class="num">{_e(count)}</span>{clears(condition, count)}</div>')
+        if condition in counted:
+            rows.append(_counted(counted[condition]))
+    rows = rows or ['<span class="nm">nothing still needed</span>']
+    if frame.past_targets:
+        # Past a criterion block's targets nothing is owed, and every condition comes until the
+        # criterion is met (the PI, 2026-10-18; the controller's smaller ruling).
+        rows.append('<div class="kv"><span class="nm">every target used up: drawing until the '
+                    'criterion is met</span></div>')
+    for short in frame.shortfalls:
+        why = (f"cleared by {_who(short.by)}" if short.because == "cleared"
+               else _FORGIVEN.get(short.because, _e(short.because)))
+        rows.append(
+            f'<div class="kv"><span class="mono">{_e(short.condition)}</span>'
+            f'<span class="nm">{_e(short.trials)} short in {_e(short.block)} · {why}</span></div>'
+        )
+    if live:
+        now = {"block": "drumming this block", "run": "drumming this run"}.get(
+            frame.drumming, "not drumming")
+        switches = "".join(
+            f'<button type="button" class="btn" data-cmd="drum" data-scope="{scope}"{_gate(view)}>'
+            f"{label}</button>"
+            for scope, label in DRUM_SWITCHES
+            if scope != (frame.drumming or "off")
+        )
+        rows.append(f'<div class="kv"><span class="nm">{now}</span>{switches}</div>')
+        if frame.clearing:
+            # The controller's ruling M4: on where nothing in the run can be cleared, it says so.
+            said = ("clear is on" if frame.clearable
+                    else "clear is on, but nothing in this run can be cleared")
+            clear = (said, "0", "switch clear off")
+        else:
+            clear = ("clear is off", "1", "switch clear on")
+        judged = (("a percentage counts first answers only", "0", "count every answer")
+                  if frame.first_answers
+                  else ("a percentage counts every answer, drummed too", "1",
+                        "count first answers only"))
+        if frame.streak:
+            # The controller's ruling M4: a streak judges every try whatever the setting.
+            judged = (f"{judged[0]} -- a streak counts every try, so this changes nothing in this "
+                      f"block", *judged[1:])
+        for setting, (said, on, label) in (("clear", clear), ("first_answers", judged)):
+            rows.append(
+                f'<div class="kv"><span class="nm">{said}</span><button type="button" class="btn" '
+                f'data-cmd="training" data-setting="{setting}" data-on="{on}"{_gate(view)}>'
+                f"{label}</button></div>"
+            )
+    return "".join(rows)
 
 
 def _wrong(frame: Telemetry | None) -> str:
@@ -1486,7 +1615,7 @@ def fragments(frame: Telemetry | Idle | None, view: View) -> dict[str, str]:
         "controls": _controls(frame, view),
         "rt-trials": _trials(frame),
         "rt-work": _work(frame),
-        "rt-need": _need(frame),
+        "rt-need": _need(frame, view),
         "rt-wrong": _wrong(frame),
         "rt-health": _health_pane(frame, view),
         "rt-changes": _changes(frame),
@@ -2735,6 +2864,21 @@ _SCRIPT = """
       var cmd = button.getAttribute("data-cmd");
       if ((cmd === "pause" || cmd === "resume") && !toggleAllowed(e.detail)) { return; }
       if (cmd === "reward" && !rewardAllowed(e.detail)) { return; }
+      // A run's count and its drumming (engine build C2a), each naming what it is for.
+      if (cmd === "clear") {
+        post({ kind: "clear", condition: button.getAttribute("data-condition"),
+               rest: button.hasAttribute("data-rest") });
+        return;
+      }
+      if (cmd === "drum") {
+        post({ kind: "drum", scope: button.getAttribute("data-scope") });
+        return;
+      }
+      if (cmd === "training") {
+        post({ kind: "training", setting: button.getAttribute("data-setting"),
+               on: button.getAttribute("data-on") === "1" });
+        return;
+      }
       command(cmd);
       return;
     }
@@ -2980,7 +3124,7 @@ def page(
   </section>
   <div class="inline crit" id="stop-confirm" role="alertdialog" aria-label="confirm stop" hidden><span>stop at a trial boundary, after any commands already sent?</span><button class="btn danger" id="stop-yes" type="button">stop</button><button class="btn" id="stop-no" type="button">cancel</button></div>
   <div class="inline info" id="mark-form" role="dialog" aria-label="mark note" hidden><span>mark sent · note</span><input id="mark-note" maxlength="500" autocomplete="off" placeholder="Enter attaches it · Esc leaves the mark bare" aria-label="mark note"></div>
-  <div class="inline" id="sched-form"><span>scheduled stop</span><select id="sched-kind" aria-label="stop when"{off}><option value="clock">at HH:MM</option><option value="trials">after N more trials</option><option value="fluid">after mL this session</option></select><input id="sched-value" autocomplete="off" aria-label="stop at"{off}><button class="btn small" id="sched-set" type="button"{off}>set</button></div>
+  <div class="inline" id="sched-form"><span>scheduled stop</span><select id="sched-kind" aria-label="stop when"{off}><option value="clock">at HH:MM</option><option value="trials">after N more presentations, drummed tries included</option><option value="fluid">after mL this session</option></select><input id="sched-value" autocomplete="off" aria-label="stop at"{off}><button class="btn small" id="sched-set" type="button"{off}>set</button></div>
   <div class="shell">
     <div class="main">
       <input type="radio" name="tab" id="t-runtime" checked>

@@ -15,6 +15,10 @@ the same kind of reason: the frame is a direct-view session, which has none. Sch
 a running session's four levels, each level's counts distinct from every other's, and
 `returned_at` is `None`, like `paused_at`: a running session's animal has not gone back.
 Schema 13's `resumed_at` is `None` too: a session opened in this process, never resumed.
+Schema 16's `shortfalls` are none and `drumming` is `None`: an ordinary run, nothing forgiven and
+nothing drummed; `clearable` is true, a block whose trials can be owed; the training aid *clear*
+is off and a percentage counts every answer, as a run starts; no condition's counts are carried;
+as many trials as presentations, no aid on, no streak, and no block past its targets.
 """
 
 from __future__ import annotations
@@ -101,6 +105,16 @@ def frame(**overrides) -> Telemetry:
         warnings=(
             WarningRow("default calibration", "the sRGB standard's", SESSION_KINDS, Box("jake"), 1_699_999_000.0),
         ),
+        shortfalls=(),
+        drumming=None,
+        clearable=True,
+        clearing=False,
+        first_answers=False,
+        conditions=(),
+        trials=40,
+        aids=(),
+        streak=False,
+        past_targets=False,
     )
     return replace(base, **overrides) if overrides else base
 

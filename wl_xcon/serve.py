@@ -583,11 +583,21 @@ _SHAPES = {
     "start": frozenset({"task", "values", "trials", "acknowledged"}),
     "end": frozenset({"session_id", "returned", "confirm"}),
     "resume_session": frozenset({"session_id"}),
+    # Engine build C2a: a run's count and its drumming (the PI, 2026-10-11).
+    "clear": frozenset({"condition", "rest"}),
+    "drum": frozenset({"scope"}),
+    # The PI, 2026-10-18: the training aid *clear* and the percentage setting, switched.
+    "training": frozenset({"setting", "on"}),
 }
 _SCHEDULES = {"at": "clock", "trials": "trials", "ml": "fluid"}
 #: The kinds `wlx taskd` takes (open, check, start, end and resume_session) that the page sends by the wire's own field names, built
 #: by the wire's own function (`link._command_from`; the b3a-2 plan, decision 3).
 _SERVICE_KINDS = frozenset({"open", "check", "start", "end", "resume_session"})
+
+#: The kinds the page sends by the wire's own field names and builds by the wire's own function
+#: (`link._command_from`): the service's, and since engine build C2a a run's `clear`, `drum` and
+#: `training`, which go to the run as any control does.
+_WIRE_KINDS = _SERVICE_KINDS | {"clear", "drum", "training"}
 
 
 def _finite(value: int | float) -> bool:
@@ -655,7 +665,7 @@ def parse_command(data: object, actor: Member | None = None):
     extra = set(data) - allowed - _SHAPES[kind]
     if extra:
         raise BadCommand(f"a {kind} command takes no {', '.join(sorted(extra))}")
-    if kind in _SERVICE_KINDS:
+    if kind in _WIRE_KINDS:
         try:
             return _link._command_from({**data, "by": actors.to_map(by)})
         except _link.CommandRefused as refused:

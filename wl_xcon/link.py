@@ -45,7 +45,7 @@ import math
 import time
 import weakref
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import ClassVar, Protocol
 
 from wl_xcon import actor as actors
@@ -153,7 +153,20 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: unaccepted. A row's code longer than `TEXT_LIMIT` characters is cut to that many plus "…",
 #: and its sentence longer than `NOTE_LIMIT` the same way (`WarningRow.of`). A reader of 14
 #: refuses 15 and 15 refuses 14, by name, for both shapes.
-SCHEMA = 15
+#:
+#: 16 (engine build C2a): `Telemetry.shortfalls`, each condition's debt forgiven this run as a
+#: `ShortfallRow` -- by its repeat limit, flagged as possible avoidance or named for the rig, or
+#: cleared by a person (engine spec §16.6) -- `Telemetry.drumming`, `"block"`, `"run"` or `None`
+#: (the PI, 2026-10-11), and `Telemetry.clearable`, whether a trial of the open block can be owed.
+#: `owed` now names every condition of the open block, each with what it still owes, where it
+#: named only those queued. And the PI's decisions of 2026-10-18: `Telemetry.clearing` and
+#: `first_answers`, the training aid *clear* and the percentage setting; `Telemetry.conditions`,
+#: each condition's counts as `ConditionRow`s; each level's `Counts.drummed` and `right_drummed`;
+#: and `Telemetry.trials`, the run's trials, a trial and its drummed repeats one; `aids`, the
+#: training aids on; `streak`, whether the open block's rule is a streak; and `past_targets`,
+#: whether a criterion block draws past its targets. A reader of 15 refuses 16 and 16 refuses 15,
+#: by name.
+SCHEMA = 16
 
 #: How many refusals a session keeps, per source, and therefore how many one
 #: `Telemetry` frame can carry.
@@ -373,6 +386,44 @@ class WarningRow:
 
 
 @dataclass(frozen=True, slots=True)
+class ShortfallRow:
+    """One shortfall on a frame (engine spec §16.6; `scheduler.Shortfall`): trials of a condition's
+    debt forgiven in a block, `because` its repeat limit was reached -- by the animal's failures
+    (`possible_avoidance`) or with the rig's among them -- or a person cleared them (`by`), after
+    trial `after_trial` of the run, or before its first (`None`)."""
+
+    block: str
+    condition: str
+    trials: int
+    because: str
+    possible_avoidance: bool
+    by: Actor | None
+    after_trial: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class ConditionRow:
+    """One condition of the open block on a frame (`scheduler.ConditionReport`, its block the
+    frame's; the PI, 2026-10-18): its trials, a trial and its drummed repeats one, and
+    presentations; its right and wrong answers and the trials right first time; what it owes, its
+    repeats, the trials moved past and whether its limit flagged it as possible avoidance; its
+    drummed tries and the failed tries in a row of its trial being drummed now."""
+
+    condition: str
+    trials: int
+    presentations: int
+    right: int
+    wrong: int
+    right_first: int
+    owed: int
+    repeats: int
+    moved_past: int
+    possible_avoidance: bool
+    drummed: int
+    failing: int
+
+
+@dataclass(frozen=True, slots=True)
 class Stranded:
     """A session found under `--root` with a departure and no return (P4d-2b spec §6.1):
     its id, its animal, and the departure's instant -- `None`, with an empty subject,
@@ -462,6 +513,11 @@ class Counts:
 
     outcomes: dict
     hangs: int
+    #: Of those, a drum's repeats and the right ones among them (schema 16; the PI, 2026-10-18):
+    #: a trial and its drummed repeats are one trial, so the strip shows right first time beside
+    #: right per presentation. 0 where nothing was drummed.
+    drummed: int = 0
+    right_drummed: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -584,7 +640,8 @@ class Telemetry:
     #: this dict is what a msgpack-encoded message will carry.
     outcomes: dict
     hangs: int
-    #: `{condition: scheduler.owed(condition)}` for every condition currently queued.
+    #: `{condition: scheduler.owed(condition)}` for every condition of the open block, in the
+    #: block's order, zero included (schema 16; engine spec §16.6).
     owed: dict
     #: Every change accepted but not yet applied, from `session.staged` -- see
     #: `Staged`, whose `bounded` flag says which vocabulary the name belongs to, not
@@ -691,6 +748,36 @@ class Telemetry:
     #: `session.warnings`, as `WarningRow`s: every warning the session accepted, in order,
     #: each cut for the frame (`WarningRow.of`).
     warnings: tuple
+    #: `scheduler.shortfalls`, as `ShortfallRow`s, oldest first (schema 16; engine spec §16.6):
+    #: the run's forgiven debts, a repeat cap's flagged as possible avoidance.
+    shortfalls: tuple
+    #: `scheduler.drumming` (schema 16; the PI, 2026-10-11): `"block"`, `"run"`, or `None` while
+    #: trials are not drummed.
+    drumming: str | None
+    #: `scheduler.clearable` (schema 16): whether a trial of the open block can be owed, so the
+    #: page offers *clear one* (the engine C2a plan's engineering review, Minor 3).
+    clearable: bool
+    #: `scheduler.clearing` (schema 16; the PI, 2026-10-18): whether the training aid *clear* is on,
+    #: so the page offers *clear one* and its standing warning names it.
+    clearing: bool
+    #: `scheduler.first_answers` (schema 16): whether a percentage rule judges only each drummed
+    #: trial's first answer, the training setting; every answer while it is off.
+    first_answers: bool
+    #: `scheduler.block_report`, as `ConditionRow`s (schema 16; the PI, 2026-10-18): each condition
+    #: of the open block's counts, in the block's order.
+    conditions: tuple
+    #: `scheduler.trials` (schema 16; the PI, 2026-10-18): the run's trials so far, a trial and its
+    #: drummed repeats one, where `trial_index` counts every presentation (the controller's ruling
+    #: I1 on the plan's revision review).
+    trials: int
+    #: `scheduler.aids` (schema 16): the training aids on, which the page's standing warning names.
+    aids: tuple
+    #: `scheduler.streak` (schema 16): whether the open block's rule is a streak, so the page says
+    #: the first-answers switch changes nothing there (the controller's ruling M4).
+    streak: bool
+    #: `scheduler.past_targets`, while the block is not finished (schema 16): a criterion block
+    #: drawing every condition until its criterion is met.
+    past_targets: bool
 
     @classmethod
     def of(cls, session, tally, scheduler, index: int) -> "Telemetry":
@@ -788,7 +875,11 @@ class Telemetry:
             # true of a session that has not run, so they are empty, not `None`.
             outcomes={} if tally is None else {k.value: v for k, v in tally.outcomes.items()},
             hangs=0 if tally is None else tally.hangs,
-            owed={} if scheduler is None else {c: scheduler.owed(c) for c in scheduler.upcoming()},
+            owed=(
+                {}
+                if scheduler is None
+                else {c.name: scheduler.owed(c.name) for c in scheduler.block.conditions}
+            ),
             # `session.staged`, the public property -- never `session._staged`. This
             # module reaches into `Session` only through its declared surface; a
             # private attribute read across the module boundary is exactly the kind
@@ -854,6 +945,35 @@ class Telemetry:
             session_kind=session.spec.session_kind,
             calibration=None if session.spec.calibration is None else session.spec.calibration.id,
             warnings=tuple(WarningRow.of(*row) for row in session.warnings),
+            # Engine build C2a (schema 16): the run's scheduler's own.
+            shortfalls=(
+                ()
+                if scheduler is None
+                else tuple(
+                    ShortfallRow(s.block, s.condition, s.trials, s.because,
+                                 s.possible_avoidance, s.by, s.after_trial)
+                    for s in scheduler.shortfalls
+                )
+            ),
+            drumming=None if scheduler is None else scheduler.drumming,
+            clearable=scheduler is not None and scheduler.clearable,
+            clearing=scheduler is not None and scheduler.clearing,
+            first_answers=scheduler is not None and scheduler.first_answers,
+            conditions=(
+                ()
+                if scheduler is None
+                else tuple(
+                    ConditionRow(r.condition, r.trials, r.presentations, r.right, r.wrong,
+                                 r.right_first, r.owed, r.repeats, r.moved_past,
+                                 r.possible_avoidance, r.drummed, r.failing)
+                    for r in scheduler.block_report
+                )
+            ),
+            trials=0 if scheduler is None else scheduler.trials,
+            aids=() if scheduler is None else scheduler.aids,
+            streak=scheduler is not None and scheduler.streak,
+            past_targets=(scheduler is not None and scheduler.past_targets
+                          and not scheduler.finished),
         )
 
 
@@ -895,11 +1015,21 @@ def _question_in(data: dict | None) -> Question | None:
 
 
 def _counts_out(counts: Counts | None) -> dict | None:
-    return None if counts is None else {"outcomes": dict(counts.outcomes), "hangs": counts.hangs}
+    if counts is None:
+        return None
+    return {"outcomes": dict(counts.outcomes), "hangs": counts.hangs, "drummed": counts.drummed,
+            "right_drummed": counts.right_drummed}
 
 
 def _counts_in(data: dict | None) -> Counts | None:
-    return None if data is None else Counts(outcomes=dict(data["outcomes"]), hangs=data["hangs"])
+    if data is None:
+        return None
+    return Counts(outcomes=dict(data["outcomes"]), hangs=data["hangs"], drummed=data["drummed"],
+                  right_drummed=data["right_drummed"])
+
+
+#: A `ConditionRow`'s fields, in order: its wire keys (schema 16).
+_CONDITION_FIELDS = tuple(f.name for f in fields(ConditionRow))
 
 
 def _performance_out(performance: Performance) -> dict:
@@ -1071,6 +1201,24 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
         "session_kind": telemetry.session_kind,
         "calibration": telemetry.calibration,
         "warnings": _warnings_out(telemetry.warnings),
+        "shortfalls": [
+            {"block": s.block, "condition": s.condition, "trials": s.trials, "because": s.because,
+             "possible_avoidance": s.possible_avoidance, "by": actors.to_map_or_none(s.by),
+             "after_trial": s.after_trial}
+            for s in telemetry.shortfalls
+        ],
+        "drumming": telemetry.drumming,
+        "clearable": telemetry.clearable,
+        "clearing": telemetry.clearing,
+        "first_answers": telemetry.first_answers,
+        "conditions": [
+            {name: getattr(row, name) for name in _CONDITION_FIELDS}
+            for row in telemetry.conditions
+        ],
+        "trials": telemetry.trials,
+        "aids": list(telemetry.aids),
+        "streak": telemetry.streak,
+        "past_targets": telemetry.past_targets,
     }
 
 
@@ -1269,6 +1417,19 @@ def _telemetry_from(data: dict) -> Telemetry:
         session_kind=data["session_kind"],
         calibration=data["calibration"],
         warnings=_warnings_in(data["warnings"]),
+        shortfalls=tuple(
+            ShortfallRow(**{**s, "by": None if s["by"] is None else actors.from_map(s["by"])})
+            for s in data["shortfalls"]
+        ),
+        drumming=data["drumming"],
+        clearable=data["clearable"],
+        clearing=data["clearing"],
+        first_answers=data["first_answers"],
+        conditions=tuple(ConditionRow(**row) for row in data["conditions"]),
+        trials=data["trials"],
+        aids=tuple(data["aids"]),
+        streak=data["streak"],
+        past_targets=data["past_targets"],
     )
 
 

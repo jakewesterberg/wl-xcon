@@ -318,8 +318,12 @@ def readings(
         rows += [
             ("fluid_session", "Fluid this session", f"{frame.fluid_session_ml:.2f} mL"),
             ("supplement", "Supplement owed", _supplement_text(frame)),
-            ("trials", "Trials", str(frame.trial_index)),
+            ("trials", "Trials", str(frame.trials)),
         ]
+        if frame.trials != frame.trial_index:
+            # A trial and its drummed repeats are one trial (the PI, 2026-10-18), the presentations
+            # beside them (the controller's ruling I1).
+            rows.append(("presentations", "Presentations", str(frame.trial_index)))
         for key, label, counted in families(frame.outcomes):
             rows.append(
                 (
