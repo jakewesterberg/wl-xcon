@@ -201,8 +201,13 @@ conditions, and XC-078 carries the first to the build.
    and holds no lock. Records are flushed and `fsync`ed once per emit-loop iteration (`wl_sync/segment.py:110-113`),
    a 200 ms barcode frame plus a 1 s sleep (`cli.py:266-270`), so new records appear about every 1.2 s (wl-sync's
    figure from its code, not a measurement). A torn last line is dropped and read on the next pass, as
-   `wl_sync.log.read_log` does (`log.py:155`). *Forward note, not in wl-sync's files at `16d7a71`: wiring the RP1
-   backend into the run loop, `wl.yaml`'s next step, is expected to make it about every 1 s (UNVERIFIED).*
+   `wl_sync.log.read_log` does (`log.py:155`). *Amended 2026-10-18: wl-sync's Step A (`02b6271`, on its local main,
+   not yet pushed; read there) wires the RP1 backend into the run loop, which now runs once a second on the wall
+   clock's half seconds (`wl_sync/cli.py:247-254`), so new records appear about once a second (wl-sync's figure
+   from its code, not a measurement). The same loop calls `check_health()` every iteration and writes "capture
+   degraded, still recording: ..." to the journal once per episode (`cli.py:409-435`), so a dropped edge now
+   reaches the journal (item 8), still not the record itself. The unit still ships `--fake` until bench
+   acceptance (item 1).*
 5. **From another host, nothing makes it readable**, live or at session end. It lives at
    `/data/rig1/<YYYY-MM-DD>_01/seg-NNN.log` on the box's NVMe, and NAS transfer is outside its design (its
    continuous-recording design §9). wl-sync says a task-PC read needs the same new thing XC-087 asks for.

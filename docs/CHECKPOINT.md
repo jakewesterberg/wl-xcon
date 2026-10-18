@@ -9,8 +9,9 @@ distrust the reasoning. Numbers go stale, arguments do not.
 > written with**, `wl-expcontroller` and `wl_expcontroller/…` paths included, as the PI
 > ruled for dated documents; read `wl_expcontroller/taskd.py` there as `wl_xcon/taskd.py`.
 >
-> **This file describes `main`.** Its newest entry, "What moved on 2026-10-13 to 10-18: warnings over refusals
-> (XC-352) and the flake fix (XC-296)", is where to **start**: the PI's rulings on every refusal in the engine,
+> **This file describes `main`.** Its newest entry, "What moved later on 2026-10-18: XC-321 merged, wl-sync's
+> replies filed, C2a revised for how trials count", is where to **start**; the one below it, "What moved on
+> 2026-10-13 to 10-18: warnings over refusals (XC-352) and the flake fix (XC-296)", tells the PI's rulings on every refusal in the engine,
 > built, reviewed and merged on his approval of its welfare summary, the `test_serve` flake fixed, and build C2a
 > next, its plan approved. Below it, "What moved on 2026-10-12: C1 and the deployment fix merged; two plans
 > reviewed" (both plans approved since, the first built), then "What moved on 2026-10-11: engine build C1, the
@@ -417,6 +418,48 @@ figure was one low. In order:
   a path outside the workspace, and no credentials for it.
 
 ---
+
+## What moved later on 2026-10-18: XC-321 merged, wl-sync's replies filed, C2a revised for how trials count
+
+**On `main`:**
+- **XC-321 ask 1 merged** (`67d7028`, the PI's "Merge now"): every `controls.jsonl` and `parameter_changes.jsonl`
+  row carries `event_code`, the number its act strobed, `null` when it strobed nothing (a missing key, on older
+  rows, is unknown). wl-preproc asked for it to put the training records on the recording's clock and confirmed
+  the shape (it joins by count per number). **The one welfare-listed change, approved by the PI that day:**
+  `Session._manual_reward` passes `event_code=code` to its `_control` call, nothing else (byte- and AST-identical
+  without it; architecture.md records it). `_apply_staged` now strobes `PARAM_CHANGED` before writing its row and
+  looks the code up before applying anything. Its CI read clean (run 39135116206: 3592 on 3.11-3.13, twelve
+  shards "mutation gate passed", no survivor). **wl-preproc's later asks** are XC-356 (the manifest; writing
+  `xcon/DONE` at a stranded close touches welfare-listed `Service._close_stranded`, so it goes to the PI when
+  built), XC-382 (a task's `Mark` strobing a framework number, for a load-time warning) and XC-383 (each of C3,
+  C4 and C7 sends wl-preproc its file names and row shapes before building; no accuracy is stated for trial or
+  code instants until a `tools/` script has measured the rig clock).
+- **wl-sync's replies of 2026-10-18 filed** (`0c789eb`; its `HANDOVER-wl-expcontroller.md` at `9e60ed6`, every
+  cited line read): XC-089, XC-090, XC-091, XC-092 and XC-328 closed; XC-087 and XC-088 still open on its side;
+  XC-327 waits on wl-sync naming the PFI line for `PD1_COMP`'s copy and drawing the line-out. New: XC-384
+  (reading the delivered-line record into fluid reconciliation). XC-033's design check now carries a FLIR loaded
+  strobe high of 2.29 V against the fan-out board's 2.50 V threshold, for a bench measurement. wl-sync's Step A
+  (`02b6271`, local) makes its records visible about once a second and puts dropped edges in its journal.
+- **The PI's answers on them:** the audio tap's connection point, **"Decide at rig build"** (`7e05cd9`). **The
+  delivered line as proof of fluid: "Discuss first"** -- wl-sync says its `RWD_DLVR` record is what the reward
+  driver was told, not fluid received (an unpowered driver, an empty reservoir, a blocked line all record as
+  delivered), while S8 §5.1/§5.2/§6, pitfalls P17, S6 §4, architecture §7.4, REW-05/07, roadmap M6 and
+  `bounds.reconcile_report` treat it as fluid evidence. **Nothing is reworded until he has discussed it**;
+  `bounds.py` is welfare-listed, and `Welfare.reconcile` is called only by tests today.
+- **Backlog IDs:** Next free is XC-387 on every branch. XC-379 to XC-381, XC-386 and XC-387 are held by the
+  unmerged `engine-c2a`; XC-385 is unused. A merge takes the highest Next free.
+
+**On `engine-c2a`, not merged** (worktree `.claude/worktrees/engine-c2a`, ledger
+`.superpowers/sdd/2026-10-11-engine-c2a/progress.md` there, every PI answer quoted): the PI stopped the build at
+Task 8 to define how trials count, answered sixteen questions from a map of every count
+(`.superpowers/counting-map/`, page https://claude.ai/artifact/BqakD9ACmk48wvPq44Fd63), approved the revised plan
+(`dca697b`; amended `81a7259`) and answered three more on the reviews: a block that trains a hold or acquisition
+scores a broken hold or a failure to acquire as a miss **where the block says so** (decisions 17 and 19), and a
+percentage met on a wrong drummed answer **finishes the drum first** (18). Every task is built and reviewed but
+the last fix rounds: Task 10's and Task 11's are next, then the final whole-branch review, then the PI's merge.
+**Learned:** reviewers' probe copies must use absolute paths (two landed at a worktree root); subagent commits
+must carry the session's trailer lines, whatever model they run as; the plan's dry-run counts trail the branch
+once reviews add tests, so each dispatch states the offset.
 
 ## What moved on 2026-10-13 to 10-18: warnings over refusals (XC-352) and the flake fix (XC-296)
 
