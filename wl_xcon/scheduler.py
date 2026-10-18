@@ -19,68 +19,36 @@ import random
 from collections import deque
 from dataclasses import dataclass, field
 
-from wl_xcon.task import Outcome
+from wl_xcon.task import (
+    ANSWERS, COUNTED, OWED, REPEATED, RIGHT, SPENT, UNPAID, Counting, Outcome,
+)
 
-class Counting:
-    """Which outcomes pay a condition's debt. **Declared per block** (PI, 2026-08-31),
-    because the rule is task-specific and no single answer is right.
+# --- What pays a condition's debt (engine spec §16.1-16.2; engine build C2a) -------------------
+#
+# **Each trial structure declares its counting table** (`task.Counting`), which the scheduler is
+# given (`Scheduler.counting`): "run until ten correct" and "show the array a hundred times
+# regardless of accuracy" are both ordinary requirements, and a scheduler that picked one would
+# silently impose an experimental design on every task in the lab. **A block may count by a table
+# of its own instead** (TSK-26; `Block.counting`), and these are the named ones.
 
-    "Run until ten correct" and "show the array a hundred times regardless of
-    accuracy" are both ordinary requirements, and they disagree about every trial
-    that is not correct. A scheduler that picked one would silently impose an
-    experimental design on every task in the lab.
-    """
+#: "Run until ten correct": only a right answer pays (`task.RIGHT`), and every other answer pays
+#: nothing and is not shown again -- the block's order draws its condition as it would -- as the
+#: PI ruled on 2026-08-31 ("wrong choice not" re-queued; §16.2: "Not repeated: wrong targets").
+CORRECT_ONLY = Counting(
+    after_stimulus=OWED,
+    outcomes={outcome.value: UNPAID for outcome in ANSWERS - RIGHT},
+)
 
-    #: The animal chose. Wrong is still a datum about the condition.
-    RESPONDED = frozenset(
-        {
-            Outcome.CORRECT,
-            Outcome.WRONG_TARGET,
-            Outcome.EARLY_RESPONSE,
-            Outcome.LATE_RESPONSE,
-            Outcome.EARLY_ERROR,
-            Outcome.LATE_ERROR,
-        }
-    )
+#: "Show the array a hundred times regardless of accuracy": every trial whose stimulus appeared
+#: pays -- an answer counted, a break or no response spent -- and one that ended before it is owed,
+#: since nothing was presented.
+PRESENTED = Counting(after_stimulus=SPENT)
 
-    #: Only a correct trial pays. An error leaves the debt standing.
-    CORRECT_ONLY = frozenset({Outcome.CORRECT})
-
-    #: The stimulus was shown, however the trial ended. Excludes the failures that
-    #: happen *before* onset -- an animal that never fixated was never presented
-    #: with anything, which is the distinction this exists to draw.
-    PRESENTED = RESPONDED | {
-        Outcome.NO_RESPONSE,
-        Outcome.TARGET_BREAK,
-        Outcome.CATCH_BREAK,
-    }
-
-    #: Everything, including trials the animal never engaged with.
-    EVERY_TRIAL = frozenset(Outcome)
-
-
-#: Retained for readers of older commits; `Counting.RESPONDED` is the name now.
-COMPLETED = Counting.RESPONDED
-
-#: The default requeue policy: outcomes where the condition still owes a datum, so
-#: the trial comes back. Two families.
-#:
-#: **The animal failed to engage** rather than choosing wrongly -- it did not answer,
-#: so nothing was measured.
-#:
-#: **The rig failed**, which is not the animal's doing at all. These were added on
-#: 2026-09-01 with the outcomes themselves; without them a condition that lost a
-#: trial to a dropped camera would be silently one datum short, and the shortfall
-#: appears nowhere because a block ends when every condition is owed nothing.
-REQUEUED = frozenset(
-    {
-        Outcome.FIXATION_BREAK,
-        Outcome.NO_FIXATION,
-        Outcome.TARGET_BREAK,
-        Outcome.BLINK_BREAK,
-        Outcome.TRACKER_LOST,
-        Outcome.FAULT,
-    }
+#: Every trial pays: the flat run's "run N trials" (`taskd.Session._plan`). An answer is counted and
+#: everything else spent, a trial that reached the longest trial too.
+EVERY_TRIAL = Counting(
+    after_stimulus=SPENT,
+    outcomes={outcome.value: SPENT for outcome in Outcome if outcome not in ANSWERS},
 )
 
 
@@ -136,33 +104,40 @@ class Block:
     #: `(proportion, window)` -- "80% correct over the last 20 judged trials".
     #: When absent, the block ends once every condition is owed nothing.
     criterion: tuple[float, int] | None = None
-    #: Which outcomes pay a condition's debt.
-    counts_toward: frozenset = Counting.RESPONDED
-    #: Which outcomes are judged for the criterion. **Separate from the counter on
+    #: The table this block counts by, **replacing its structure's** (TSK-26: what counts is
+    #: declared per block): `CORRECT_ONLY`, `PRESENTED`, `EVERY_TRIAL` or any `task.Counting` --
+    #: a block training an animal to hold fixation may count a fixation break as an error that
+    #: pays its debt, while a block measuring a psychometric function must not. `None`, the
+    #: structure's own (`Scheduler.counting`).
+    counting: Counting | None = None
+    #: Which outcomes are judged for the criterion. **Separate from the counting on
     #: purpose**: a block may count every presentation toward its quota while judging
     #: performance only on completed choices, and conflating the two makes a
-    #: criterion track engagement rather than what the animal can do.
+    #: criterion track engagement rather than what the animal can do. `None`, the
+    #: outcomes its table counts as answers.
     criterion_over: frozenset | None = None
-    #: Which outcomes send the condition back into the queue. **Declared per block**,
-    #: because which aborts owe a datum is a task's judgement rather than the
-    #: framework's: a block training an animal to hold fixation may treat a fixation
-    #: break as a real error that pays its debt, while a block measuring a
-    #: psychometric function must not.
-    requeue_on: frozenset = REQUEUED
     order: Order = field(default_factory=Shuffled)
 
 
 @dataclass
 class Counts:
+    """One condition's counters in its block (TSK-28): trials drawn; answers counted (`completed`),
+    the correct among them; and trials spent, used up without an answer (engine spec §16.2)."""
+
     attempted: int = 0
     completed: int = 0
     correct: int = 0
+    spent: int = 0
 
 
 @dataclass
 class Scheduler:
     blocks: list[Block]
     seed: int = 0
+    #: The structure's counting table (`task.Trial.counting`), which a block's own replaces
+    #: (`Block.counting`). `None` answers only what every structure shares -- an answer counted,
+    #: the four of `task.REPEATED` owed -- and raises on what each declares (`_class`).
+    counting: Counting | None = None
     _rng: random.Random = field(init=False, repr=False)
     _counts: dict = field(init=False, default_factory=dict, repr=False)
     _queue: deque = field(init=False, default_factory=deque, repr=False)
@@ -215,18 +190,37 @@ class Scheduler:
         return self._counts[condition]
 
     def owed(self, condition: str) -> int:
-        """Target minus **completed**, never minus attempted.
-
-        An aborted trial produced no datum, so it left the condition owing exactly
-        what it owed before.
-        """
+        """Target minus what paid -- the answers counted and the trials spent -- **never minus
+        attempted**: an owed trial produced no datum, so it left the condition owing exactly what
+        it owed before."""
         target = next(c.target for c in self.block.conditions if c.name == condition)
-        return max(0, target - self._counts[condition].completed)
+        counts = self._counts[condition]
+        return max(0, target - counts.completed - counts.spent)
 
     @property
-    def _judged(self) -> frozenset:
-        block = self.block
-        return block.criterion_over if block.criterion_over is not None else block.counts_toward
+    def _table(self) -> Counting | None:
+        """The open block's counting table, else the run's."""
+        return self.block.counting if self.block.counting is not None else self.counting
+
+    def _class(self, outcome: Outcome | None, shown: bool) -> str:
+        """What `outcome` does to its condition's count, by the block's table or the structure's
+        (`task.Counting.of`). **With neither**, what every structure shares still answers -- an
+        answer counted, shown or not; the four of `task.REPEATED`, a hang and a break before the
+        stimulus owed -- and an outcome each structure declares for raises: no default stands in
+        for a declaration (the PI, 2026-10-11), and `check.check_task` refuses a run's structure
+        without one."""
+        table = self._table
+        if table is not None:
+            return table.of(outcome, shown)
+        if outcome in ANSWERS:
+            return COUNTED
+        if outcome is None or outcome in REPEATED or not shown:
+            return OWED
+        raise ValueError(
+            f"{outcome.value} ended a trial of block {self.block.name!r}, and neither the block "
+            f"nor its structure has a counting table saying what it does to the count (engine "
+            f"spec §16.2)"
+        )
 
     def upcoming(self) -> list[str]:
         return list(self._queue)
@@ -281,18 +275,28 @@ class Scheduler:
         self._counts[name].attempted += 1
         return next(c for c in self.block.conditions if c.name == name)
 
-    def record(self, condition: str, outcome: Outcome) -> None:
+    def record(self, condition: str, outcome: Outcome | None, shown: bool = True) -> str:
+        """Count one trial of `condition` by its table (engine spec §16.1-16.2), and return what it
+        did to the count: `COUNTED`, `SPENT`, `OWED` or `UNPAID`. `outcome` `None` is a trial that
+        reached the longest trial (`task.HANG_COUNTS_AS`); `shown`, whether its stimulus had
+        appeared (`task.Counting.of`). A right answer (`task.RIGHT`: correct, or a correct
+        rejection) is right for the criterion and the correct count."""
         counts = self._counts[condition]
-        if outcome in self.block.counts_toward:
+        kind = self._class(outcome, shown)
+        if kind == COUNTED:
             counts.completed += 1
-            counts.correct += outcome is Outcome.CORRECT
-        if outcome in self._judged:
-            self._window.append(1 if outcome is Outcome.CORRECT else 0)
+            counts.correct += outcome in RIGHT
+        elif kind == SPENT:
+            counts.spent += 1
+        over = self.block.criterion_over
+        if (outcome in over) if over is not None else kind == COUNTED:
+            self._window.append(1 if outcome in RIGHT else 0)
             if self.block.criterion is not None:
                 while len(self._window) > self.block.criterion[1]:
                     self._window.popleft()
-        if outcome not in self.block.counts_toward and outcome in self.block.requeue_on:
+        if kind == OWED and self.owed(condition) > 0:
             # End of the block, not immediately: an animal must not be able to make
             # an easy condition repeat by breaking on the hard one.
             self.requeued.append(condition)
             self._queue.append(condition)
+        return kind

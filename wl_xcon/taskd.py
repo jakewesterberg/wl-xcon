@@ -64,10 +64,10 @@ from wl_xcon.geometry import Geometry
 from wl_xcon.levels import Levels
 from wl_xcon.photometry import Calibration, cone_record
 from wl_xcon.record import XCON_DIRNAME, SessionRecord, _local, welfare_note
-from wl_xcon.scheduler import Block, Condition, Scheduler
+from wl_xcon.scheduler import EVERY_TRIAL, Block, Condition, Scheduler
 from wl_xcon.simulate import Census, Subject, Tally, prepare
 from wl_xcon.run import run_trial
-from wl_xcon.task import Entered, Exited, Outcome, Param, SaccadeTo, Task, Trial
+from wl_xcon.task import Entered, Exited, Param, SaccadeTo, Task, Trial
 from wl_xcon.warnlist import PAUSE_UNMARKED, Entry, of_findings, sentence
 from wl_xcon.welfare import (
     OUT_OF_CAGE,
@@ -142,6 +142,17 @@ def _next_occurrence(hhmm: str, wall: float) -> float:
     # Unreachable: tomorrow's `hhmm` is after `wall` on every calendar day. Said
     # rather than looped past, so a platform where it is not fails here, by name.
     raise ValueError(f"no occurrence of {hhmm} after {wall} within a day")
+
+
+def _appeared(trial: Trial, result) -> bool:
+    """Whether a trial's stimulus had appeared (engine spec §16.2, §16.4; the engine C2a plan's
+    call 4): it entered the state its structure's counting table names (`task.Counting.appears`;
+    the PI, 2026-10-13, "Task names it, required"), the target's or the array's, a cued task's
+    cue. A break before it is owed whatever the structure says of breaks (`task.Counting.of`),
+    and the trial's row records it. A structure with no table, or one naming no state -- a test's;
+    the load-time check refuses both in a task -- counts every trial as shown."""
+    table = trial.counting
+    return table is None or table.appears is None or table.appears in result.visited
 
 
 def _counts(tally) -> _link.Counts:
@@ -1943,8 +1954,9 @@ class Session:
                 # Every trial pays, including aborts. A flat "run N trials" means N
                 # trials, not N completed ones -- the completed-trial reading is what
                 # a condition target expresses, and a session that quietly ran on
-                # past its declared length would be a different session.
-                counts_toward=frozenset(Outcome),
+                # past its declared length would be a different session. A trial that
+                # reached the longest trial is one of the N (the engine C2a plan).
+                counting=EVERY_TRIAL,
             )
         ]
 
@@ -2228,7 +2240,9 @@ class Session:
         self.preflight = None
         self.question = None
 
-        scheduler = Scheduler(blocks=self._plan(run), seed=run.seed)
+        # Counted by the structure's table (engine spec §16.1; engine build C2a), which a block's
+        # own replaces.
+        scheduler = Scheduler(blocks=self._plan(run), seed=run.seed, counting=trial.counting)
         make_world = self.world if self.world is not None else self._agent(run)
         tally = Tally()
         self.blocks_run = [scheduler.block.name]
@@ -2474,7 +2488,8 @@ class Session:
                 self.card.emit(TRIAL_END)
                 tally.add(result)
                 levels.end_trial(result)
-                scheduler.record(condition.name, result.outcome)
+                shown = _appeared(trial, result)
+                counted = scheduler.record(condition.name, result.outcome, shown=shown)
                 # One string for the record and for a console's recent outcomes, so
                 # the two cannot disagree (P4d-2b spec §4.1).
                 recorded = result.outcome.value if result.outcome else "hang"
@@ -2485,6 +2500,8 @@ class Session:
                     params=values,
                     block=scheduler.block.name,
                     condition=condition.name,
+                    counting=counted,
+                    shown=shown,
                     run=self.run_index,
                     position=position,
                     # **The trial's whole commanded difference**, and `resume.read` adds it

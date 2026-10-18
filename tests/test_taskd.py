@@ -27,6 +27,7 @@ import textwrap
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -57,9 +58,9 @@ from wl_xcon.link import (
 )
 from wl_xcon.photometry import SRGB
 from wl_xcon.record import REFUSAL_LOG_LIMIT, SessionRecord
-from wl_xcon.scheduler import Block, Condition, Counting, Scheduler
+from wl_xcon.scheduler import EVERY_TRIAL, Block, Condition, Scheduler
 from wl_xcon.simulate import Tally
-from wl_xcon.task import Outcome
+from wl_xcon.task import OWED, After, Counting, On, Outcome, State, Trial
 from wl_xcon.taskd import PAUSE_HOUSEKEEPING_S, RunSpec, Session, SessionSpec
 from wl_xcon.warnlist import Entry
 from wl_xcon.welfare import Deployment, Simulated as Pump
@@ -1151,7 +1152,7 @@ def test_a_criterion_block_ends_on_performance_rather_than_on_a_count(tmp_path):
             name="shaping",
             conditions=[Condition("only", {}, target=10_000)],
             criterion=(0.2, 10),
-            counts_toward=Counting.EVERY_TRIAL,
+            counting=EVERY_TRIAL,
         ),
         Block(name="test", conditions=[Condition("only", {}, target=5)]),
     ]
@@ -1162,6 +1163,43 @@ def test_a_criterion_block_ends_on_performance_rather_than_on_a_count(tmp_path):
 
     assert session.blocks_run == ["shaping", "test"]
     assert session.stopped_because == "every block is finished"
+
+
+def test_each_trial_row_says_what_it_did_to_its_count_and_whether_its_stimulus_appeared(tmp_path):
+    """Engine spec §16.1-16.2, §16.4: a block counted by the reference task's own table -- no
+    response a miss, counted; a fixation break owed -- and every row says which, and whether the
+    target appeared (the trial entered `stim_on`, the state its table names)."""
+    block = Block(name="b", conditions=[Condition("c", {}, target=30)])
+    session = _session(_spec(tmp_path, trials=400, blocks=[block]))
+
+    session.run()
+
+    rows = _trial_rows(session)
+    said = {(row["outcome"], row["counting"], row["shown"]) for row in rows}
+    assert ("correct", "counted", True) in said
+    for kind in ("no_response", "no_fixation", "fixation_break"):
+        assert any(row["outcome"] == kind for row in rows), f"no {kind} row at this seed"
+    assert all(row["counting"] == "counted" for row in rows if row["outcome"] == "no_response")
+    assert all((row["counting"], row["shown"]) == ("owed", False)
+               for row in rows if row["outcome"] in ("no_fixation", "fixation_break"))
+    assert sum(row["counting"] == "counted" for row in rows) == 30
+
+
+def test_whether_a_trials_stimulus_appeared_is_read_from_the_state_its_table_names():
+    """The PI, 2026-10-13, "Task names it, required": "A cued task names the cue step." A trial that
+    ended in its cue's state presented something, whatever its reaction time's state; one whose
+    table names a later state had not. A structure with no table -- a test's, since the load-time
+    check refuses one in a task -- counts every trial as shown."""
+    from wl_xcon import taskd
+
+    cue = Trial(start="cue", states=[State("cue", go=[On(After(0.1), "go")]),
+                                     State("go", go=[On(After(0.1), Outcome.CORRECT)])],
+                counting=Counting(after_stimulus=OWED, appears="cue"))
+    later = dataclasses.replace(cue, counting=Counting(after_stimulus=OWED, appears="go"))
+    broke_in_cue = SimpleNamespace(visited=("cue",))
+
+    assert taskd._appeared(cue, broke_in_cue) and not taskd._appeared(later, broke_in_cue)
+    assert taskd._appeared(dataclasses.replace(cue, counting=None), broke_in_cue)
 
 
 def test_a_session_without_blocks_runs_one_of_its_declared_length(tmp_path):
@@ -5396,10 +5434,10 @@ def test_a_trial_that_reaches_no_outcome_is_still_closed(tmp_path, monkeypatch):
     """A trial `run_trial` returns from without an outcome -- a hang, at `max_frames`,
     which a task that passes `check()` can still reach, since check 4 exempts a state
     declared `unbounded=True` (a lever never pressed) -- strobes no outcome marker, and
-    it still ended: `TRIAL_END` closes it, and its line records `hang`. The second trial
-    runs whole, so the run's one trial is completed and the run ends. Both trials lie in
-    the run's one block, opened before the first and closed after the second
-    (session-levels spec §4)."""
+    it still ended: `TRIAL_END` closes it, and its line records `hang`. **It is one of a flat
+    run's two trials** (the engine C2a plan: a missed acquisition, which a flat run's every-trial
+    table spends), so the second runs whole and the run ends. Both trials lie in the run's one
+    block, opened before the first and closed after the second (session-levels spec §4)."""
     from wl_xcon import taskd
 
     real, calls = taskd.run_trial, []
@@ -5413,7 +5451,7 @@ def test_a_trial_that_reaches_no_outcome_is_still_closed(tmp_path, monkeypatch):
     monkeypatch.setattr(taskd, "run_trial", hangs_first)
     task = tmp_path / "one_state.py"
     task.write_text(ONE_STATE_TASK)
-    session = _session(_spec(tmp_path, trials=1, task=str(task), values={}))
+    session = _session(_spec(tmp_path, trials=2, task=str(task), values={}))
 
     session.run()
 
@@ -5426,7 +5464,8 @@ def test_a_trial_that_reaches_no_outcome_is_still_closed(tmp_path, monkeypatch):
         BLOCK_END,
         RUN_END_MARKER, RUN_END, 4129,
     ]
-    assert [row["outcome"] for row in _trial_rows(session)] == ["hang", "correct"]
+    assert [(row["outcome"], row["counting"]) for row in _trial_rows(session)] == [
+        ("hang", "spent"), ("correct", "counted")]
 
 
 def test_a_number_past_16_bits_is_strobed_whole_high_word_first(tmp_path):
@@ -5513,7 +5552,7 @@ def _plan(*names, each=2):
         Block(
             name=name,
             conditions=[Condition(name.lower(), {}, target=each)],
-            counts_toward=frozenset(Outcome),
+            counting=EVERY_TRIAL,
         )
         for name in names
     ]

@@ -234,6 +234,8 @@ class SessionRecord:
         position: Position,
         fluid_ml: float,
         last_reward_at: float | None,
+        counting: str | None = None,
+        shown: bool | None = None,
     ) -> None:
         """One trial's record, flushed before returning.
 
@@ -262,6 +264,10 @@ class SessionRecord:
         §8a item 3): what a resume adds up, written with the line as the trial ends,
         never in a frame. Required, as `position` is: a line without them leaves its
         session's fluid unknowable after a crash.
+
+        **And what it did to its condition's count, and whether its stimulus appeared** (engine
+        spec §16.1-16.2, §16.4; engine build C2a): `counting`, `counted`, `spent` or `owed`
+        (`task.Counting`), and `shown`; `None` where no scheduler counted it -- a census.
         """
         if self._trials is None:
             self._trials = (self.directory / "trials.jsonl").open("a", encoding="utf-8")
@@ -278,6 +284,8 @@ class SessionRecord:
                     "condition": condition,
                     "fluid_ml": fluid_ml,
                     "last_reward_at": last_reward_at,
+                    "counting": counting,
+                    "shown": shown,
                 },
                 sort_keys=True,
             )

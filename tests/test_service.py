@@ -55,9 +55,8 @@ from wl_xcon.link import (
 )
 from wl_xcon.photometry import ID_LIMIT, RECORD_FIELDS, SRGB
 from wl_xcon.record import welfare_note
-from wl_xcon.scheduler import Block, Condition
+from wl_xcon.scheduler import EVERY_TRIAL, Block, Condition
 from wl_xcon.service import Service, _fresh_seed
-from wl_xcon.task import Outcome
 from wl_xcon.taskd import Session
 from wl_xcon.warnlist import Entry
 from wl_xcon.web import fragments
@@ -3912,7 +3911,7 @@ def _xy_plan() -> list[Block]:
     run's third trial opens its second block."""
     return [
         Block(name=name, conditions=[Condition(name.lower(), {}, target=2)],
-              counts_toward=frozenset(Outcome))
+              counting=EVERY_TRIAL)
         for name in ("X", "Y")
     ]
 
