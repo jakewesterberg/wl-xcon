@@ -112,8 +112,9 @@ def check_task(
     """The load-time checks of a task object (engine spec §3.5; engine build C1): each trial
     structure's own (`check`), named by its structure where the task has several (the engine C1
     plan's call 13), then what the task declares across them -- one set of settings and one setup,
-    every setting's meaning (XC-288 §4.1), its reaction time and its choice (§4.3), and a content
-    its runs can record (§4.4). **What a caller holds a task to is this**; `check` is one
+    every setting's meaning (XC-288 §4.1), its reaction time and its choice (§4.3), a content its
+    runs can record (§4.4), and each structure's counting table (engine spec §16.1; engine build
+    C2a). **What a caller holds a task to is this**; `check` is one
     structure's part of it, and stays what a bare `Trial` is checked by.
 
     **Given the session's deployment**, a task that needs a fixed head is a warning in any but a
@@ -137,6 +138,7 @@ def check_task(
         + _choice_faults(task)
         + _hash_faults(task)
         + _head_faults(task, deployment)
+        + _counting_faults(task)
     )
 
 
@@ -482,6 +484,36 @@ def _hash_faults(task: Task) -> list[Finding]:
             f"the task's content could not be hashed ({unread}), so a run could not record which "
             f"version of it ran (XC-288 §4.4)"))]
     return []
+
+
+def _counting_faults(task: Task) -> list[Finding]:
+    """Each structure's counting table (engine spec §16.1-16.2; engine build C2a). **Refused when a
+    structure declares none**, an authoring rule (the PI, 2026-10-11: a break after the stimulus
+    has "no default; each task declares", and "the load-time check refuses a task that does not
+    say"): a missing table cannot be told from a forgotten one, and the scheduler would have no
+    answer for the first such break. **And when its table names no state its stimulus appears
+    in, or one the structure does not have** (the PI, 2026-10-13, "Task names it, required"):
+    whether a break came before anything was presented is read from that state."""
+    findings: list[Finding] = []
+    for name, structure in task.structures.items():
+        table = structure.counting
+        states = sorted(state.name for state in structure.states)
+        if table is None:
+            findings.append(Finding("undeclared-counting", (
+                f"structure {name!r} has no counting table, so nothing says whether a break after "
+                f"its stimulus is spent (used up) or owed (shown again); give it "
+                f"counting=Counting(after_stimulus=SPENT or OWED) (engine spec §16.2)")))
+        elif table.appears is None:
+            findings.append(Finding("undeclared-counting", (
+                f"structure {name!r}'s counting table does not name the state its stimulus "
+                f"appears in, so nothing says whether a break came before anything was presented; "
+                f"give it appears=, one of {', '.join(map(repr, states))} -- a cued task's cue")))
+        elif table.appears not in states:
+            findings.append(Finding("bad-counting", (
+                f"structure {name!r}'s counting table says its stimulus appears in "
+                f"{table.appears!r}, which is not one of its states "
+                f"({', '.join(map(repr, states))})")))
+    return findings
 
 
 def _head_faults(task: Task, deployment: "Deployment | None") -> list[Finding]:

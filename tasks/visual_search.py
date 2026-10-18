@@ -49,6 +49,8 @@ from wl_xcon.task import (
     STIMULUS,
     Choice,
     Meaning,
+    SPENT,
+    Counting,
     ReactionTime,
     Task,
     Trial,
@@ -98,6 +100,12 @@ search = Trial(
     start="await_fix",
     # Direct view, with the detection tasks: the lab's programme runs there.
     view="direct",
+    # Its counting table (the engine C2a plan's Appendix B, item 8): a break after the array
+    # appears -- leaving the target before its hold, no saccade -- is spent, used up and marked an
+    # abort: shown again, the array would repeat its target's color and position within a few
+    # trials, which is what priming of pop-out modulates; spent, the sequence stays as drawn. The
+    # array appears in `array_on`.
+    counting=Counting(after_stimulus=SPENT, appears="array_on"),
     background=BACKGROUND,
     windows=[
         Window("fix", at=(0.0, 0.0), radius=P("fix_window"), on="fix"),

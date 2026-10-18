@@ -27,6 +27,8 @@ from wl_xcon.task import (
     State,
     Stimulus,
     NO_CHOICE,
+    OWED,
+    Counting,
     ReactionTime,
     Task,
     Trial,
@@ -43,6 +45,12 @@ detection = Trial(
     # The first animal task runs in direct view (PI, 2026-09-28), and its ±16° is wider
     # than the stereoscope's mask.
     view="direct",
+    # Its counting table (engine spec §16.1-16.2; the engine C2a plan's Appendix B, item 5, as the
+    # PI confirmed it on 2026-10-13): the target appears in `stim_on`; withholding is an answer, so
+    # no response is a miss, counted as an answer (the PI, 2026-10-11); and a break after the
+    # target appears -- leaving it before its hold is complete (item 6), a long blink -- is owed,
+    # shown again.
+    counting=Counting(after_stimulus=OWED, appears="stim_on", withholding=True),
     windows=[
         Window("fix", at=(0.0, 0.0), radius=P("fix_window"), on="fix"),
         Window(

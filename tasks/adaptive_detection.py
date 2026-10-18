@@ -37,6 +37,8 @@ from wl_xcon.task import (
     NO_CHOICE,
     STIMULUS,
     Meaning,
+    OWED,
+    Counting,
     ReactionTime,
     Task,
     Trial,
@@ -49,6 +51,11 @@ adaptive_detection = Trial(
     start="await_fix",
     # Direct view, as `fixation_detection`: its ±16° is wider than the stereoscope's mask.
     view="direct",
+    # Its counting table (the engine C2a plan's Appendix B, item 7): the target appears in
+    # `stim_on`; no response is a miss (the PI, 2026-10-11), which steps the staircase's contrast
+    # up (2026-10-12); a break after the target appears, leaving it before its hold among them
+    # (item 6), left no answer, so it is owed, shown again at the staircase's contrast then.
+    counting=Counting(after_stimulus=OWED, appears="stim_on", withholding=True),
     windows=[
         Window("fix", at=(0.0, 0.0), radius=P("fix_window"), on="fix"),
         Window(

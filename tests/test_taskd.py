@@ -5239,11 +5239,14 @@ def test_a_trial_that_faults_keeps_its_number_and_the_next_trial_never_reuses_it
 #: A task with one state: `FIX_ON` on entering it, `CORRECT` 0.01 s later. No window, no
 #: reward and no parameter, so every code its session strobes is one these tests name.
 ONE_STATE_TASK = """
-from wl_xcon.task import NO_CHOICE, After, Mark, On, Outcome, ReactionTime, State, Task, Trial
+from wl_xcon.task import (
+    NO_CHOICE, OWED, After, Counting, Mark, On, Outcome, ReactionTime, State, Task, Trial,
+)
 
 trial = Trial(
     start="only",
     states=[State("only", enter=[Mark(4096)], go=[On(After(0.01), Outcome.CORRECT)])],
+    counting=Counting(after_stimulus=OWED, appears="only"),
 )
 TASK = Task(
     {"only": trial},

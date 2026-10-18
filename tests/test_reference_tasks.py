@@ -34,7 +34,10 @@ from wl_xcon.task import (
     HARDER,
     NOT_DIFFICULTY,
     NO_CHOICE,
+    OWED,
+    SPENT,
     STIMULUS,
+    Counting,
     Entered,
     Hold,
     Exited,
@@ -657,6 +660,32 @@ def test_each_reference_task_says_how_its_reaction_time_is_defined_and_what_it_o
         "array_on", ("verify", Outcome.WRONG_TARGET),
         (("search.target", "search.distractor"), "saccade"))
     assert declared("calibration") == ("await_fix", ("hold",), NO_CHOICE)
+
+
+#: **Appendix B of the engine C2a plan, as the PI confirmed it** on 2026-10-13 ("Accept, target
+#: break"), items 5 to 12: each reference task's counting table, each naming the state its
+#: stimulus appears in, none with a repeat limit (items 11 and 12).
+CONFIRMED_COUNTING = {
+    "fixation_detection": Counting(after_stimulus=OWED, appears="stim_on", withholding=True),
+    "adaptive_detection": Counting(after_stimulus=OWED, appears="stim_on", withholding=True),
+    "visual_search": Counting(after_stimulus=SPENT, appears="array_on"),
+    "visual_search_training": Counting(after_stimulus=OWED, appears="array_on"),
+    "calibration": Counting(after_stimulus=OWED, appears="await_fix"),
+}
+
+
+@pytest.mark.parametrize("name", sorted(TASK_FILES))
+def test_each_reference_task_counts_as_the_pi_confirmed(name):
+    """Engine spec §16.1-16.2; the PI, 2026-10-11: both detection tasks count no response as a
+    miss, and each task says what a break after its stimulus does. No reference task sets a repeat
+    limit (the PI: "no limit")."""
+    task = _load_task(TASKS / f"{name}.py")
+
+    assert task.trial.counting == CONFIRMED_COUNTING[name]
+    assert task.trial.counting.cap is None
+    assert "undeclared-counting" in {
+        f.code for f in check_task(replace(task, structures={
+            task.default: replace(task.trial, counting=None)}))}
 
 
 def test_a_search_task_that_says_nothing_of_its_choice_is_refused():

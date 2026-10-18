@@ -46,6 +46,8 @@ from wl_xcon.task import (
     HARDER,
     NO_CHOICE,
     Meaning,
+    OWED,
+    Counting,
     ReactionTime,
     Task,
     Trial,
@@ -59,6 +61,10 @@ TARGET = Stimulus(
 calibration = Trial(
     start="await_fix",
     view="direct",
+    # Its counting table (the engine C2a plan's Appendix B, item 10): a target is up from the
+    # trial's first frame, in `await_fix`, and one the animal broke on is owed, shown again: every
+    # target is fitted.
+    counting=Counting(after_stimulus=OWED, appears="await_fix"),
     windows=[
         Window(
             "cal",
