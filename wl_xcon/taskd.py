@@ -1921,11 +1921,13 @@ class Session:
                 self.spec.bounds.set(name, now, by=by)
             else:
                 self.spec.values[name] = now
+            # Strobed before its row is written, as every other writer does: a card that
+            # faults here leaves no row naming a code that never went out (XC-321 ask 1).
+            self.card.emit(code)
             if self._record is not None:
                 self._record.parameter_change(
                     self._sequence, name, was, now, by, run=self.run_index, event_code=code
                 )
-            self.card.emit(code)
             self._feed(
                 "set",
                 by,

@@ -300,6 +300,8 @@ what wl-preproc already ingests. These files are new or grown:
 | the timed event log (new) | Every state the task entered and left with its instant and why it left, and every code strobed with the instant it strobed. Instants are the session's wall clock; events inside a trial are frame offsets from the trial's start ([§3.2](superpowers/specs/2026-10-10-xc288-training-records-design.md#32-a-timed-event-log), [§3.11](superpowers/specs/2026-10-10-xc288-training-records-design.md#311-the-rigs-clock)) |
 | `controls.jsonl` | Pauses, stops, resumes, marks and manual rewards, **its writers and fields unchanged; its new rows gain an `id`**, so a reason row can point at a pause ([§3.10](superpowers/specs/2026-10-10-xc288-training-records-design.md#310-what-stays-where-it-is)) |
 
+*Amended 2026-10-18 (XC-321 ask 1, the PI's approval)*: every row of `controls.jsonl` and of `parameter_changes.jsonl` also carries `event_code`, the number its act strobed or `null` when it strobed nothing; a row written before lacks the key, which a reader takes as unknown. So `controls.jsonl`'s fields are no longer unchanged, and the change log's rows join to `PARAM_CHANGED` codes by that number, not by count alone.
+
 ## The ask
 
 1. **Read those four into the published dataset.** Today wl-preproc reads none of them (the spec's §6). The join

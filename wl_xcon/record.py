@@ -349,7 +349,8 @@ class SessionRecord:
         now: object,
         by: Actor,
         run: int | None = None,
-        event_code: int | None = None,
+        *,
+        event_code: int | None,
     ) -> None:
         """One live parameter change, joined to the recording by `sequence`.
 
@@ -392,7 +393,8 @@ class SessionRecord:
         by: Actor | None,
         at: float,
         trial_index: int,
-        event_code: int | None = None,
+        *,
+        event_code: int | None,
         **detail: object,
     ) -> None:
         """One console control, as it happened (P4d-2b spec §5.1).

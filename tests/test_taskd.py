@@ -5068,6 +5068,7 @@ def test_after_a_run_and_while_the_return_is_awaited_a_hand_reward_is_given_and_
         "0.15 mL of reward_correct, given while the animal's return is awaited",
     ]
     assert session.card.codes.count(REWARD_CODE) == 2
+    assert [r["event_code"] for r in _manual_rows(session)] == [REWARD_CODE] * 2
 
 
 def test_a_closed_session_refuses_a_hand_reward_and_gives_nothing(tmp_path):
@@ -6121,11 +6122,6 @@ def test_the_session_resumed_row_names_the_person_and_the_records_last_write(tmp
 # --- the code each controls and parameter-change row strobed (XC-321 ask 1) -----------------
 
 
-def _jsonl(session: Session, name: str) -> list[dict]:
-    path = session.directory / name
-    return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
-
-
 class _MarkOnWaitTwo(_Scripted):
     """A paused wait that carries an operator's mark signal on its second call."""
 
@@ -6181,7 +6177,7 @@ def test_each_controls_and_change_row_records_the_code_the_card_received_for_it(
     for row in rows:
         if row["kind"] in ("note", "schedule", "scheduled_stop", "cancel", "stop"):
             assert row["event_code"] is None, row["kind"]
-    changes = _jsonl(session, "parameter_changes.jsonl")
+    changes = _changes_so_far(session)
     assert [row["event_code"] for row in changes] == [4130] * len(changes) != []
     assert session.card.codes.count(4130) == len(changes)
 
@@ -6280,3 +6276,23 @@ def test_an_allocation_without_param_changed_raises_before_any_value_or_row(tmp_
 
     assert not (session.directory / "parameter_changes.jsonl").exists()
     assert session.spec.values == before, "no value was applied"
+
+
+def test_a_card_that_faults_on_param_changed_leaves_no_row_naming_it(tmp_path):
+    """A change is strobed before its row is written, so a card that fails on the strobe leaves
+    no `parameter_changes.jsonl` row claiming a code that never went out (XC-321 ask 1)."""
+
+    class _Faulty(Card):
+        def emit(self, code: int) -> None:
+            if code == 4130:
+                raise RuntimeError("card fault")
+            super().emit(code)
+
+    session = _session(_spec(tmp_path, trials=4))
+    session.card = _Faulty()
+    session.set("fix_hold", 0.5, by=Box("console"))
+
+    with pytest.raises(RuntimeError, match="card fault"):
+        session.run()
+
+    assert _changes_so_far(session) == []
