@@ -671,10 +671,10 @@ def test_a_cap_of_zero_forgives_at_the_first_owed_trial():
 
 def test_the_repeat_limit_counts_failed_repeats_in_a_row_and_resets_when_the_condition_pays():
     """The PI, 2026-10-12: "Tries in a row of one trial" -- "The condition is moved past after 3
-    failed repeats in a row, and the count resets once it is done." Counted over the block, a limit
-    of 2 flagged 73% of conditions at an ordinary 20% break rate with a cap of 3 (the science
-    review's O1); here two breaks, a correct trial, two breaks and a correct trial are four
-    repeats and no shortfall, and only a third failure in a row forgives."""
+    failed repeats in a row, and the count resets once it is done." Counted over the block instead,
+    the limit flagged conditions an animal merely broke on now and then (the science review's O1);
+    here two breaks, a correct trial, two breaks and a correct trial are four repeats and no
+    shortfall, and only a third failure in a row forgives."""
     run = (Outcome.FIXATION_BREAK, Outcome.FIXATION_BREAK, Outcome.CORRECT)
     paid = _breaking_on(cap=2, breaks=6, outcomes=run, target=5)
     moved_past = _breaking_on(cap=2, breaks=6, outcomes=run + run[:2] + run[:1], target=5)
@@ -710,28 +710,116 @@ def test_a_wrong_answer_left_unpaid_never_feeds_the_repeat_limit():
 
 
 def test_a_forgiven_conditions_waiting_repeat_is_not_drawn_and_none_is_placed_again():
-    """The placement guard (`record`: a repeat only while the condition owes anything) has its
-    consumer: a limit of 1 lets the first failure place a repeat, which waits; the second
-    failure, recorded before it is drawn, forgives the condition and takes the waiting repeat
-    with it. A third result for the forgiven condition places nothing, and the draws that follow
-    are the other condition's alone."""
+    """The placement guard (`record`: a repeat only while the condition owes anything) and
+    `_forgive`'s dropping of a waiting repeat have their consumer in a person's clear: `a` breaks
+    and its repeat waits; the rest of `a` is cleared, which takes the waiting repeat with it; the
+    draws that follow are `b`'s alone, and a late result for `a` places nothing. (Task 7's review,
+    minor 6: this test first recorded `a` three times with no draw between, which no run does.)"""
     scheduler = Scheduler(
         [Block(name="b", conditions=[Condition("a", {}, target=3), Condition("b", {}, target=40)])],
-        seed=1, counting=Counting(after_stimulus=OWED, cap=1))
+        seed=1, counting=Counting(after_stimulus=OWED))
+    for _ in range(5):
+        name = scheduler.next_trial().name
+        if name == "a":
+            break
+        scheduler.record(name, Outcome.CORRECT)
+    else:
+        raise AssertionError("the seed draws a within five trials")
+    scheduler.record("a", Outcome.FIXATION_BREAK)
+    assert [due[2] for due in scheduler._due] == ["a"], "the break's repeat waits"
 
-    scheduler.record("a", Outcome.FIXATION_BREAK)
-    assert [due[2] for due in scheduler._due] == ["a"], "the first failure's repeat waits"
-    scheduler.record("a", Outcome.FIXATION_BREAK)
-    scheduler.record("a", Outcome.FIXATION_BREAK)
+    assert scheduler.clear("a", rest=True) is None
     drawn = []
     for _ in range(12):
         name = scheduler.next_trial().name
         drawn.append(name)
         scheduler.record(name, Outcome.CORRECT)
+    scheduler.record("a", Outcome.FIXATION_BREAK)
 
     assert scheduler._due == [] and scheduler.requeued == ["a"]
     assert set(drawn) == {"b"} and scheduler.owed("a") == 0
-    assert [(s.condition, s.trials) for s in scheduler.shortfalls] == [("a", 3)]
+    assert [(s.condition, s.trials, s.because) for s in scheduler.shortfalls] == [("a", 3, CLEARED)]
+
+
+def test_any_answer_ends_a_trial_so_its_conditions_next_trial_counts_its_failures_from_0():
+    """The PI, 2026-10-18, "1: an answer ends the trial": the repeat limit counts failed tries of
+    one trial, and any answer, right or wrong, starts it over. Under "until N correct" a wrong
+    answer pays nothing, and the count went on through it: a break, a wrong answer and a break at a
+    limit of 1 forgave the whole debt as possible avoidance (Task 7's review, Important 1)."""
+    table = Counting(after_stimulus=OWED, outcomes={"wrong_target": UNPAID}, cap=1)
+    scheduler = Scheduler([Block(name="b", conditions=[Condition("a", {}, target=3)])], seed=1,
+                          counting=table)
+    for outcome in (Outcome.FIXATION_BREAK, Outcome.WRONG_TARGET, Outcome.FIXATION_BREAK):
+        scheduler.record(scheduler.next_trial().name, outcome)
+
+    assert (scheduler.shortfalls, scheduler.counts("a").in_a_row) == ([], 1)
+    scheduler.record(scheduler.next_trial().name, Outcome.FIXATION_BREAK)
+    assert [(s.because, s.trials) for s in scheduler.shortfalls] == [(CAP, 3)]
+
+
+def test_a_drummed_answer_ends_the_trial_too_so_the_next_break_is_a_new_trials_first_failure():
+    """The controller's ruling I3 on the revision's review: the reset sits above `record`'s drum
+    branch, which returns early, so the PI's "1: an answer ends the trial" holds for a drummed
+    answer as well. At a limit of 1, `x` breaks (failure 1, a repeat waits); drumming is switched
+    on and the repeat is answered wrong and drummed; drumming is switched off, which drops the
+    drum; `x`'s next trial breaks once -- the first failure of a new trial, so a repeat is placed
+    and nothing is forgiven."""
+    scheduler = Scheduler(
+        [Block(name="b", conditions=[Condition("x", {}, target=3), Condition("y", {}, target=40)])],
+        seed=1, counting=Counting(after_stimulus=OWED, cap=1))
+
+    def draw_x() -> None:
+        for _ in range(20):
+            name = scheduler.next_trial().name
+            if name == "x":
+                return
+            scheduler.record(name, Outcome.CORRECT)
+        raise AssertionError("x is drawn within twenty trials")
+
+    draw_x()
+    scheduler.record("x", Outcome.FIXATION_BREAK)
+    assert scheduler.counts("x").in_a_row == 1
+    scheduler.drum("block")
+    draw_x()
+    assert scheduler.record("x", Outcome.WRONG_TARGET) == OWED
+    assert scheduler.drawn is not None
+    scheduler.drum("off")
+    draw_x()
+    scheduler.record("x", Outcome.FIXATION_BREAK)
+
+    assert scheduler.shortfalls == []
+    assert scheduler.counts("x").in_a_row == 1
+
+
+def test_the_tasks_repeat_limit_holds_in_a_block_counted_by_its_own_table_unless_it_sets_one():
+    """The PI, 2026-10-18, "No: the task's limit applies unless the block sets its own": a block
+    counting by a named table, which sets no limit, keeps the structure's limit of 1; a block whose
+    own table sets 2 is moved past at its third failure in a row instead. A named table removed the
+    structure's limit."""
+    def moved_past(table) -> list:
+        block = Block(name="b", conditions=[Condition("a", {}, target=3)], counting=table)
+        scheduler = Scheduler([block], seed=1, counting=Counting(after_stimulus=OWED, cap=1))
+        for _ in range(5):
+            if scheduler.finished:
+                break
+            scheduler.record(scheduler.next_trial().name, Outcome.FIXATION_BREAK)
+        return [short.after_trial for short in scheduler.shortfalls]
+
+    assert moved_past(CORRECT_ONLY) == [1]
+    assert moved_past(Counting(after_stimulus=OWED, cap=2)) == [2]
+
+
+def test_a_rig_failure_anywhere_in_the_row_names_it_for_the_rig_and_an_ended_trial_forgets_it():
+    """Task 7's review, Important 2: a shortfall is flagged as possible avoidance only when every
+    failed try in the row was the animal's, so a lost tracker on the row's first try names it for
+    the rig as surely as one on its last; and an answer, ending the trial, clears the rig's
+    failures with the rest of its count, so the animal's own failures after it are flagged."""
+    first = _breaking_on(cap=1, breaks=2, outcomes=(Outcome.TRACKER_LOST, Outcome.FIXATION_BREAK))
+    ended = _breaking_on(cap=1, breaks=4, target=5, outcomes=(
+        Outcome.TRACKER_LOST, Outcome.CORRECT, Outcome.FIXATION_BREAK, Outcome.FIXATION_BREAK))
+
+    assert [(s.because, s.possible_avoidance) for s in first.shortfalls] == [(RIG, False)]
+    assert [(s.because, s.possible_avoidance) for s in ended.shortfalls] == [(CAP, True)]
 
 
 def test_a_cleared_trial_forgives_one_of_the_debt_and_drops_its_waiting_repeat():

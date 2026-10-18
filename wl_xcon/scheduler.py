@@ -170,10 +170,11 @@ class Block:
 class Counts:
     """One condition's counters in its block (TSK-28): trials drawn; answers counted (`completed`),
     the correct among them; trials spent, used up without an answer (engine spec §16.2); times it
-    was repeated (`repeats`; a drum's are not); its failed repeats in a row since it last paid
-    (`in_a_row`, which the repeat limit counts: §16.6 as the PI read it on 2026-10-12) and how
-    many of those failed tries the rig lost (`rig`); and trials of its debt forgiven, by the limit
-    or by a person (`forgiven`)."""
+    was repeated (`repeats`; a drum's are not); the failed tries in a row of its trial being shown
+    again, its first try's included, each of which placed a repeat (`in_a_row`, which the repeat
+    limit counts: §16.6 as the PI read it on 2026-10-12, and on 2026-10-18 "1: an answer ends the
+    trial"), and how many of those the rig lost (`rig`); and trials of its debt forgiven, by the
+    limit or by a person (`forgiven`)."""
 
     attempted: int = 0
     completed: int = 0
@@ -318,6 +319,17 @@ class Scheduler:
         """The open block's counting table, else the run's. (`_class` still asks the run's whether no
         response is an answer: what counts as one is the structure's.)"""
         return self.block.counting if self.block.counting is not None else self.counting
+
+    @property
+    def _cap(self) -> int | None:
+        """The open block's repeat limit: its own table's, **else the structure's** -- a block that
+        counts by a table of its own keeps the task's limit unless its table sets one (the PI,
+        2026-10-18: "No: the task's limit applies unless the block sets its own"). `None`, no
+        limit."""
+        own = self.block.counting
+        if own is not None and own.cap is not None:
+            return own.cap
+        return None if self.counting is None else self.counting.cap
 
     def _class(self, outcome: Outcome | None, shown: bool) -> str:
         """What `outcome` does to its condition's count, by the block's table or the structure's
@@ -499,9 +511,9 @@ class Scheduler:
         appeared (`task.Counting.of`). A right answer (`task.RIGHT`: correct, or a correct
         rejection) is right for the criterion and the correct count. While drumming, a trial that
         is not right is `OWED` and comes back at once, whatever its table says, and only a trial's
-        first answer is judged. An owed trial of a condition that has failed as many repeats in a row
-        as its table's limit allows (`task.Counting.cap`) is not repeated again: its remaining debt
-        is forgiven, a `Shortfall` (§16.6)."""
+        first answer is judged. An owed trial of a condition whose trial has failed as many tries in
+        a row as its limit allows (`task.Counting.cap`: the block's table's, else the structure's)
+        is not repeated again: its remaining debt is forgiven, a `Shortfall` (§16.6)."""
         counts = self._counts[condition]
         kind = self._class(outcome, shown)
         first_try = self.drawn is None or not self.drawn.drummed
@@ -519,6 +531,13 @@ class Scheduler:
             if self.block.criterion is not None:
                 while len(self._window) > self.block.criterion[1]:
                     self._window.popleft()
+        if kind != OWED:
+            # **The trial is over, so its failed tries in a row start again** (the PI, 2026-10-18,
+            # "1: an answer ends the trial": the limit counts failed tries of one trial, and any
+            # answer, right or wrong, starts it over), as they do when it is used up, which is not
+            # shown again either. A drummed answer ends the trial's count as well, so this comes
+            # before the drum branch, which returns (the controller's ruling I3).
+            counts.in_a_row = counts.rig = 0
         if self.drumming and outcome not in RIGHT and self.owed(condition) > 0:
             # **Drumming** (`Block.drum`): repeated until right -- a correct answer or a correct
             # rejection (`task.RIGHT`) -- at once, paying nothing, its failed tries in a row
@@ -532,14 +551,9 @@ class Scheduler:
             counts.correct += outcome in RIGHT
         elif kind == SPENT:
             counts.spent += 1
-        if kind in (COUNTED, SPENT):
-            # The condition paid, so its failed repeats in a row start again (the PI, 2026-10-12:
-            # "the count resets once it is done").
-            counts.in_a_row = counts.rig = 0
         if kind == OWED and self.owed(condition) > 0:
             counts.rig += outcome is not None and outcome.family is Family.RIG
-            table = self._table
-            cap = None if table is None else table.cap
+            cap = self._cap
             if cap is not None and counts.in_a_row >= cap:
                 # **Past its limit, the condition's remaining debt is forgiven** (§16.6; the PI,
                 # 2026-10-12: "moved past after 3 failed repeats in a row"), its shortfall
