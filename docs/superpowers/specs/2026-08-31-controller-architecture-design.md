@@ -635,7 +635,7 @@ verdict shape, published JSON Schemas — rather than inventing a second protoco
 |---|---|---|
 | ELN -> rig | subject, probe serials, `insertion_number`, `trajectory_id`, planned task, session intent | wl-works pushes a `prepare-session` action; three of six fields already exist in the bundle it sends `wl-preproc` |
 | rig -> wl-works, live | session, subject, task, state, trial counts, fluid against the day's **floor** (PI, 2026-09-06 — not a ceiling), time out of the cage against its ceiling, preflight result | **readings on `GET /health`**, polled at the protocol's 60 s cadence |
-| rig -> ELN, finished | trials run, performance by condition, fluid delivered, task and config versions, parameter-change log, abort census | **a file in the session directory**, ingested by `wl-preproc`, reaching the ELN by the path that already exists |
+| rig -> ELN, finished | trials run, performance by condition, ~~fluid delivered~~ fluid commanded *(corrected 2026-10-18, the PI: "Say 'fluid commanded'", S8 §5.1; asked of wl-works, XC-390)*, task and config versions, parameter-change log, abort census | **a file in the session directory**, ingested by `wl-preproc`, reaching the ELN by the path that already exists |
 
 The split is not arbitrary. `lab-host-protocol.md` declines a job-status endpoint and states
 that when progress becomes observable "it will be as a **reading**, because readings are the

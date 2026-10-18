@@ -83,7 +83,7 @@ transport, bearer token, `GET /health`, `POST /jobs`, same status codes and timi
 |---|---|---|
 | ELN → rig | subject, probe serials, `insertion_number`, `trajectory_id`, planned task, session intent | `prepare-session` action |
 | rig → wl-works, live | session, subject, task, state, trial counts, fluid against ceiling, preflight result | **readings on `GET /health`** |
-| rig → ELN, finished | trials run, performance by condition, fluid delivered, versions, parameter-change log, abort census | **a file in the session directory**, ingested by `wl-preproc` |
+| rig → ELN, finished | trials run, performance by condition, ~~fluid delivered~~ fluid commanded *(corrected 2026-10-18, the PI: "Say 'fluid commanded'", S8 §5.1; asked of wl-works, XC-390)*, versions, parameter-change log, abort census | **a file in the session directory**, ingested by `wl-preproc` |
 
 The split follows their own rules: new observables become *readings* rather than endpoints, and
 result upload is declined because *"wl.works pulls; this host never pushes."*

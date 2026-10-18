@@ -18,6 +18,10 @@ refuse.
 **And one from XC-288, opened 2026-10-10**: what the training-record file needs from wl.works,
 under "XC-288's training records", before the closing list of decisions.
 
+**And one from 2026-10-18, not yet delivered**: the ELN's session-finish row labels the rig's fluid
+figure "fluid commanded", not "fluid delivered", under "The ELN's session-finish row", before the
+list delivered 2026-10-11 (backlog XC-390).
+
 **Both build on a document that is itself proposed, not agreed.**
 `wl-preproc/docs/ops/lab-host-protocol.md` says so in its own opening line: it is written
 by wl-preproc, describes the host half, and is *"proposed to wl.works rather than written
@@ -522,6 +526,40 @@ holds no ELN notes; it holds the rig name and not the id) and is rebuilt when it
 Nothing here is blocked on an answer: the controller's v1 works with no ELN integration at
 all, writing everything to the session directory as it would anyway. This buys the ELN
 entry, not the recording.
+
+---
+
+# OPEN — The ELN's session-finish row: "fluid commanded", not "fluid delivered" (new, 2026-10-18)
+
+Opened 2026-10-18 on the PI's decision, backlog XC-390. Not yet delivered. Yours to accept, amend or refuse.
+
+## The finding
+
+A finished rig session reaches the ELN as a file in the session directory, ingested by `wl-preproc`
+([S10 §4](superpowers/specs/2026-08-31-S10-data-and-lab-integration-design.md#4-the-lab-host-endpoint);
+[controller architecture §12.3](superpowers/specs/2026-08-31-controller-architecture-design.md#123-wl-works-and-the-eln)).
+Both tables labelled its fluid figure "fluid delivered". That figure is the session's commanded total: what the task
+PC asked the pump for, reconciled against the sync box's delivered line. `wl-sync` stated on 2026-10-18 that the line
+is the signal sent to the reward driver: "It is not a measurement of fluid. An unpowered or unplugged driver, an
+empty reservoir and a blocked line all still record as delivered." The PI then ruled that it is **"A count of reward
+commands"**: "Exact count of times the pump was told to run, hand rewards included. Multiplied by the pump's
+calibration it gives fluid commanded, not fluid received, and the docs say so."
+([S8 §5.1](superpowers/specs/2026-08-31-S8-session-management-design.md#51-fluid-is-reconciled-not-tallied)).
+
+## The ask
+
+**Wherever the ELN shows or stores a rig session's fluid figure from the session-finish row, label it "fluid
+commanded", not "fluid delivered".** Asked whether the labels should say "fluid commanded", the PI answered on
+2026-10-18 **"Say 'fluid commanded'"**: "Matches your decision that the total is fluid commanded. The ELN row's
+label change is also sent to wl-works as an ask." wl-xcon's own specs carry the new label from the same day.
+
+## Why
+
+A label is a claim about the animal. "Delivered" reads as fluid the animal received, and this figure cannot show
+that: the line sits before the pump, so a pump that did not run, an empty reservoir or a blocked line still counts
+as a command. What the animal received is checked separately, by a reservoir reading at session start and end that
+the session summary compares with the commanded total, warning if they disagree (the PI, 2026-10-18; XC-389, which he
+requires before the first animal). That reading is not built yet and is not part of this ask.
 
 ---
 

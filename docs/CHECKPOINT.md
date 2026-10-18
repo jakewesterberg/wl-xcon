@@ -239,7 +239,10 @@ figure was one low. In order:
   maximum, 10 mL: a runaway-fluid fault bound rather than a dose cap (PI, 2026-09-19).
 - **`bounds.py` — welfare-critical, and pure.** Ceilings a task cannot express and a
   console cannot exceed, **and a daily fluid floor** — a minimum, not a budget. Fluid
-  reconciled against the delivered line rather than what we commanded. No clock, no
+  reconciled against the delivered line rather than what we commanded. *(Corrected
+  2026-10-18, the PI: the delivered line is a count of reward commands, so this reconciles
+  fluid commanded, hand rewards included, not fluid received; a reservoir reading at session
+  start and end checks what was received, XC-389, an M6 gate.)* No clock, no
   hardware, no state that outlives a question. `Floor` and `Ceiling` are different
   types so the two cannot be confused at a call site, which is exactly how the daily
   figure came to be compared with `>`. **`validate` and `set` are separate calls**
@@ -441,13 +444,36 @@ figure was one low. In order:
   strobe high of 2.29 V against the fan-out board's 2.50 V threshold, for a bench measurement. wl-sync's Step A
   (`02b6271`, local) makes its records visible about once a second and puts dropped edges in its journal.
 - **The PI's answers on them:** the audio tap's connection point, **"Decide at rig build"** (`7e05cd9`). **The
-  delivered line as proof of fluid: "Discuss first"** -- wl-sync says its `RWD_DLVR` record is what the reward
-  driver was told, not fluid received (an unpowered driver, an empty reservoir, a blocked line all record as
-  delivered), while S8 §5.1/§5.2/§6, pitfalls P17, S6 §4, architecture §7.4, REW-05/07, roadmap M6 and
-  `bounds.reconcile_report` treat it as fluid evidence. **Nothing is reworded until he has discussed it**;
-  `bounds.py` is welfare-listed, and `Welfare.reconcile` is called only by tests today.
-- **Backlog IDs:** Next free is XC-387 on every branch. XC-379 to XC-381, XC-386 and XC-387 are held by the
-  unmerged `engine-c2a`; XC-385 is unused. A merge takes the highest Next free.
+  delivered line as proof of fluid**, first "Discuss first" (wl-sync says its `RWD_DLVR` record is what the reward
+  driver was told, not fluid received: an unpowered driver, an empty reservoir, a blocked line all record as
+  delivered), **was decided the same day**, asked in the UI. Built on branch `fluid-commands` (worktree
+  `.claude/worktrees/fluid-commands`, two commits), **not merged: its two welfare-listed changes go to the PI as one
+  welfare item before it merges.** His five answers:
+  1. What our records call the line: **"A count of reward commands"** -- "Exact count of times the pump was told to
+     run, hand rewards included. Multiplied by the pump's calibration it gives fluid commanded, not fluid received,
+     and the docs say so." S8 §5.1/§5.2/§6, pitfalls P17, S6 §4, the controller architecture spec §7.4 (not
+     architecture.md, which has no §7.4), REW-05/07, roadmap M6 and the M0 review carry dated corrections.
+  2. Whether a session also checks fluid that left the reservoir: **"Reservoir reading, start and end"** -- "The
+     trainer enters the reservoir's level or weight at the start and end. The session summary compares it with the
+     commanded total and shows a warning if they disagree. Nothing is refused." A **"Volume in mL"**, read from the
+     reservoir's own marks; its threshold **"Decide when it's designed"**, from a measured spread. XC-389.
+  3. Whether it is built and in use before the first animal: **"Yes, before the first animal"** -- "An animal on
+     fluid control is never run with only the command count as its record of fluid." XC-389 is an M6 gate and
+     welfare-critical.
+  4. The welfare-listed text: `bounds.reconcile_report`'s fault message, **"Approve rewording"** (it now names the
+     wiring or a recording, never the pump or tubing, since the line sits before the pump; the module's AST is
+     identical with every string blanked), and the comments on `Welfare.commanded` and `Welfare.delivered`,
+     **"Approve the comment fix"** (commanded is what was asked for, not what the animal got; `welfare.py`'s AST is
+     identical), which joins the rewording as one welfare item.
+  5. The specs' "fluid delivered" for the commanded total: **"Say 'fluid commanded'"** -- "Matches your decision that
+     the total is fluid commanded. The ELN row's label change is also sent to wl-works as an ask." S9a §9, S10 §4
+     and the controller architecture spec §12.3 say so; the ask is XC-390, filed in
+     `pending-wl-works-amendments.md` and not yet delivered.
+
+  `Welfare.reconcile` is still called only by tests (reading the box's record is XC-384).
+- **Backlog IDs:** Next free is XC-391 (XC-389 and XC-390 are `fluid-commands`'; `main` reads XC-387 until that
+  branch merges). XC-379 to XC-381 and XC-386 to XC-388 are held by the unmerged `engine-c2a`; XC-385 is unused. A
+  merge takes the highest Next free.
 
 **On `engine-c2a`, not merged** (worktree `.claude/worktrees/engine-c2a`, ledger
 `.superpowers/sdd/2026-10-11-engine-c2a/progress.md` there, every PI answer quoted): the PI stopped the build at

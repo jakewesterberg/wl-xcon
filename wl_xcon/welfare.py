@@ -330,11 +330,18 @@ class Welfare:
     #: Rig or cage-side. **Required, with no default**, so that every construction
     #: site states which welfare limits apply to it -- see `Deployment`.
     deployment: Deployment
-    #: What this session has commanded. A **lower bound** on what the animal got
-    #: (P17), which is why it is never used alone.
+    #: What this session has commanded: what was asked for, not what the animal
+    #: got. A **lower bound** on the reward commands the sync box's delivered line
+    #: counts, since a hand reward bypasses this software (P17), which is why it is
+    #: never used alone. With a pump that does not run the animal gets less than
+    #: this, which the reservoir reading checks (XC-389; the PI, 2026-10-18).
     commanded: float = 0.0
-    #: The sync box's delivered-line figure, when readable. `None` until one
-    #: arrives; S8 open item 2 is whether that is continuous or only at close.
+    #: The sync box's delivered-line figure, when readable: a count of reward
+    #: commands, hand rewards included, which through the pump's calibration is
+    #: fluid commanded, not received (the PI, 2026-10-18). `None` until one
+    #: arrives. S8 open item 2 is answered (wl-sync, 2026-10-18): the record is
+    #: readable live on the sync box itself and from no other host, so nothing
+    #: here reads it yet (XC-384).
     delivered: float | None = None
     deliveries: int = 0
     #: The instant the last reward was commanded, kept once the pump returns: POSIX

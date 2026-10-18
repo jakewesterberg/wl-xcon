@@ -156,7 +156,10 @@ reconciled away.
 > and shows a warning if they disagree. Nothing is refused." The reading is a **"Volume in mL"**
 > ("Always read from the reservoir's own marks"), and the warning's threshold is **"Decide when
 > it's designed"** ("Set the threshold once there is a measured spread from real sessions (drips,
-> evaporation, reading error), rather than guessing now"). Not yet built: XC-389.
+> evaporation, reading error), rather than guessing now"). Not yet built: XC-389. Asked the same
+> day whether it is built and in use before the first animal session on the rig (roadmap M6), the
+> PI answered **"Yes, before the first animal"**: "An animal on fluid control is never run with only
+> the command count as its record of fluid." So it is an M6 gate.
 
 ### 5.2 A restart must not reset the day
 

@@ -64,7 +64,9 @@ session, including **stimulation tiers 1 and 2 with welfare interlocks live** an
 accounting reconciled against the delivered line *(a count of reward commands, so fluid
 commanded, not received: the PI, 2026-10-18, S8 §5.1; what was received is checked by a reservoir
 reading at session start and end, XC-389)*. Gate: PI approves; overnight synthetic
-soak (V5) passed on that exact build (P12).
+soak (V5) passed on that exact build (P12); **the reservoir reading at session start and end
+(XC-389) built and in use** *(gate added 2026-10-18, the PI: "Yes, before the first animal" —
+"An animal on fluid control is never run with only the command count as its record of fluid.")*.
 
 ## M7 — Data and lab integration
 Session outputs ingested by `wl-preproc`; `labhost` endpoint serving the session summary;

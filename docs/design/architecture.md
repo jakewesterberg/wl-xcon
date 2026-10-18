@@ -272,7 +272,10 @@ than an animal earning a ration. `reward_correct`'s maximum is the second kind a
 The sync box's delivered line is a count of reward commands that sits before the pump (S8 §5.1),
 so a commanded total above it says a command did not reach the line or a recording is wrong, and
 never that the pump or the tubing failed. A message-only change: the module's AST, every string
-blanked, is identical before and after.*
+blanked, is identical before and after. The same day he approved correcting the comments on
+`Welfare.commanded` and `Welfare.delivered` in `welfare.py` ("Approve the comment fix"):
+commanded is what was asked for, not what the animal got. Comments only: `welfare.py`'s AST is
+identical before and after.*
 
 `welfare.py` has all three: the day's running total, two clocks — the out-of-cage one that
 bounds the session and the restraint one that is recorded beside it — the wall they are both
