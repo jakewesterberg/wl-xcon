@@ -7,10 +7,9 @@ carrying the last closed session's summary since schema 11),
 the commands a console sends back (`SetParameter`, `Stop`, and since b3a the service's
 `OpenSession`, `CheckRun`, `StartRun` and `EndSession`, since XC-026 its
 `ResumeSession`, and since engine build C2a `ClearOwed`, `Drum` and `Training`; `Command`), the
-port a session
-publishes and drains through (`Link`, `Absent`, `Simulated`), its wire encoding
-(`encode`/`decode`, plus the command-side `_encode_command`/`_decode_command`), and
-the one live transport that carries all of it over a real socket (`ZmqLink`,
+port a session publishes and drains through (`Link`, `Absent`, `Simulated`), its wire
+encoding (`encode`/`decode`, plus the command-side `_encode_command`/`_decode_command`),
+and the one live transport that carries all of it over a real socket (`ZmqLink`,
 `ZmqConsole`). Nothing here is deferred to a later module -- an earlier version of
 this docstring said `encode`/`decode` would land "in a transport module", but Task 5's
 own brief puts them in this file instead, so that plan changed and this file is now

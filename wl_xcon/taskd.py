@@ -68,6 +68,7 @@ from wl_xcon.scheduler import (
     DRUM_SCOPES,
     DRUM_WARNING,
     EVERY_TRIAL,
+    TRAINING,
     Block,
     Condition,
     Scheduler,
@@ -170,13 +171,15 @@ def _hung(index: int, condition: str, counted: str, owed: int) -> str:
     )
 
 
-def _drum_warned(condition: str, index: int, owed: int) -> str:
+def _drum_warned(condition: str, index: int, owed: int, clearing: bool = False) -> str:
     """The changes feed's warning at a drummed trial's tenth failed try in a row (the PI,
     2026-10-12, "After 10 in a row"): drumming goes on. *Clear one* moves past the trial once the
     training aid is switched on (the PI, 2026-10-18) -- while its condition owes a trial; past a
     criterion block's targets it owes none, a clear there is refused, and only *stop drumming*
-    ends the drum (the controller's ruling M3 on the plan's revision review)."""
-    way = ("clear one moves past it once clear is switched on, stop drumming ends it" if owed
+    ends the drum (the controller's ruling M3 on the plan's revision review). Where *clear* is
+    already on, the sentence does not say to switch it on."""
+    once = "" if clearing else " once clear is switched on"
+    way = (f"clear one moves past it{once}, stop drumming ends it" if owed
            else "stop drumming ends it")
     return (f"{condition} has failed {DRUM_WARNING} tries in a row under drumming, the last trial "
             f"{index}; drumming goes on: {way}")
@@ -1603,18 +1606,32 @@ class Session:
         aid is meant for training sessions and works in the others, the console warning while one
         is on and every trial's row marking it). **A switch to the value already set is refused**,
         with its sentence, as a pause of a paused session is."""
+        if command.setting not in TRAINING:
+            self._refuse(
+                "training", command.by,
+                f"a training setting is {' or '.join(TRAINING)}, and {command.setting!r} is "
+                f"neither, so it is refused",
+            )
+            return
+        if not isinstance(command.on, bool):
+            self._refuse(
+                "training", command.by,
+                f"a 'training' command's on is true or false, and {command.on!r} is neither, so "
+                f"it is refused",
+            )
+            return
         scheduler = self._scheduler
+        name = "first answers only" if command.setting == "first_answers" else command.setting
         was = scheduler.clearing if command.setting == "clear" else scheduler.first_answers
         if was == command.on:
             # As a pause of a paused session is: nothing changes, so nothing is recorded.
             state = "on" if command.on else "off"
-            self._refuse("training", command.by,
-                         f"{command.setting} is already {state}, so nothing changed")
+            self._refuse("training", command.by, f"{name} is already {state}, so nothing changed")
             return
         scheduler.train(command.setting, command.on)
         self._control(
             "training", command.by,
-            f"{command.setting} {'on' if command.on else 'off'} for the rest of the run",
+            f"{name} {'on' if command.on else 'off'} for the rest of the run",
             index, setting=command.setting, was=was, now=command.on,
         )
 
@@ -2631,7 +2648,8 @@ class Session:
                     # **A warning on the changes feed** (the PI, 2026-10-12, "After 10 in a row"):
                     # drumming goes on, and the trainer may move past the trial or stop drumming.
                     self._feed("warning", None, self.wall_now(), _drum_warned(
-                        condition.name, index, scheduler.owed(condition.name)))
+                        condition.name, index, scheduler.owed(condition.name),
+                        scheduler.clearing))
                 # One string for the record and for a console's recent outcomes, so
                 # the two cannot disagree (P4d-2b spec §4.1).
                 recorded = result.outcome.value if result.outcome else "hang"

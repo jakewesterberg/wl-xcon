@@ -564,9 +564,10 @@ class Scheduler:
 
     @property
     def drumming_switched(self) -> str | None:
-        """What `drumming` reads for the block a switch made now is for, had none been made: the
-        next block's when the switch would be carried to it (`drum`; `advance` keeps a run's
-        switch and resets the rest, leaving the next block's own `drum`), else this one's."""
+        """What `drumming` reads for the block a switch made now is for, had this switch not been
+        made: the next block's when the switch would be carried to it (`drum`; `advance` keeps a
+        run's switch and resets the rest, leaving the next block's own `drum`, and keeps a switch
+        already carried), else this one's."""
         if self.finished and not self.done:
             if self._carried:
                 # A switch already carried to the next block in this drain: it is what that

@@ -3779,6 +3779,25 @@ def test_a_clear_or_a_drum_that_reached_the_session_off_the_wire_meets_the_wires
     assert all(row["drumming"] is None for row in _trial_rows(session))
 
 
+def test_a_training_switch_that_reached_the_session_off_the_wire_meets_the_wires_rule(tmp_path):
+    """Task 14's review, Minor 1: `_train` checks what the wire checks, as `_clear` and `_drum`
+    do, and refuses with the wire's sentence rather than raise or switch on a string."""
+    link = _Drained({1: [Training(setting="drum", on=True, by=Box("jake")),
+                         Training(setting="clear", on="yes", by=Box("jake"))]})
+    session = _session(_spec(tmp_path, trials=400, blocks=[_near_far()]), link=link)
+
+    session.run()
+
+    assert [(name, why) for name, _, why in session.refusals] == [
+        ("training", "a training setting is clear or first_answers, and 'drum' is neither, so it "
+                     "is refused"),
+        ("training", "a 'training' command's on is true or false, and 'yes' is neither, so it is "
+                     "refused")]
+    assert not [row for row in _controls_rows(session) if row["kind"] == "training"]
+    assert not session._scheduler.clearing
+    assert all(row["aids"] == [] for row in _trial_rows(session))
+
+
 def test_the_clears_feed_sentence_counts_its_trials_in_the_singular_and_the_plural(tmp_path):
     """Task 8's review, Minor 4: "the rest, 1 trial", "the rest, 2 trials"."""
     def said(target: int) -> str:
@@ -3820,6 +3839,37 @@ def test_clear_is_refused_until_a_trainer_switches_it_on_and_each_row_marks_the_
     assert rows[0]["aids"] == [] and {tuple(row["aids"]) for row in rows[1:]} == {("clear",)}
 
 
+def test_a_session_switches_clear_and_first_answers_on_and_off_and_refuses_a_repeat(tmp_path):
+    """The training switch along the session's own path, in both directions: each control row's
+    setting, what it was and is, and the trial it came before; the trial rows' aids; and a switch
+    to the value already set, or of an aid that is off, refused with its sentence. The feed says
+    "first answers only", the recorded setting stays `first_answers`."""
+    jake = Box("jake")
+    link = _Drained({1: [Training(setting="clear", on=True, by=jake)],
+                     3: [Training(setting="clear", on=False, by=jake),
+                         Training(setting="first_answers", on=True, by=jake)],
+                     4: [ClearOwed(condition="near", by=jake),
+                         Training(setting="first_answers", on=False, by=jake),
+                         Training(setting="first_answers", on=False, by=jake)]})
+    session = _session(_spec(tmp_path, trials=400, blocks=[_near_far()]), link=link)
+
+    session.run()
+
+    assert [(r["setting"], r["was"], r["now"], r["trial_index"]) for r in _controls_rows(session)
+            if r["kind"] == "training"] == [
+        ("clear", False, True, 0), ("clear", True, False, 2), ("first_answers", False, True, 2),
+        ("first_answers", True, False, 3)]
+    assert [said for kind, _, _, said in session.controls if kind == "training"] == [
+        "clear on for the rest of the run", "clear off for the rest of the run",
+        "first answers only on for the rest of the run",
+        "first answers only off for the rest of the run"]
+    assert [row["aids"] for row in _trial_rows(session)][:4] == [["clear"], ["clear"], [], []]
+    assert [why for _, _, why in session.refusals] == [
+        "clear is a training aid, and it is off in this run; a trainer switches it on to clear a "
+        "trial from the count",
+        "first answers only is already off, so nothing changed"]
+
+
 def test_a_blocks_drumming_works_in_a_piloting_session_and_its_rows_mark_it(tmp_path):
     """The PI, 2026-10-18, "Allow it, with a warning": a training aid is meant for training
     sessions, and in a piloting or recording one "it works, and the console shows a standing warning
@@ -3842,9 +3892,66 @@ def test_the_drum_warning_names_only_stop_drumming_where_the_condition_owes_noth
              "clear one moves past it once clear is switched on, stop drumming ends it")
 
     assert _drum_warned("c", 9, 1) == owing
+    assert _drum_warned("c", 9, 1, clearing=True) == (
+        "c has failed 10 tries in a row under drumming, the last trial 9; drumming goes on: "
+        "clear one moves past it, stop drumming ends it")
+    assert _drum_warned("c", 9, 0, clearing=True) == _drum_warned("c", 9, 0)
     assert _drum_warned("c", 9, 0) == (
         "c has failed 10 tries in a row under drumming, the last trial 9; drumming goes on: stop "
         "drumming ends it")
+
+
+def test_the_drum_warning_at_the_session_drops_once_clear_is_switched_on_where_clear_is_on(
+        tmp_path, monkeypatch):
+    """The wording, along the run loop's own call: where the condition owes a trial and *clear* is
+    already on, the warning says *clear one* moves past it, without "once clear is switched on"."""
+    from wl_xcon import taskd
+    real, calls = taskd.run_trial, []
+
+    def wrong_ten_times(*args, **kwargs):
+        calls.append(None)
+        result = real(*args, **kwargs)
+        if len(calls) > 10:
+            return result
+        return dataclasses.replace(result, outcome=Outcome.WRONG_TARGET)
+
+    monkeypatch.setattr(taskd, "run_trial", wrong_ten_times)
+    block = Block(name="drill", conditions=[Condition("c", {}, target=2)], drum=True)
+    link = _Drained({1: [Training(setting="clear", on=True, by=Box("jake"))]})
+    session = _session(_spec(tmp_path, trials=400, blocks=[block]), link=link)
+
+    session.run()
+
+    warned = [said for kind, by, _, said in session.controls if kind == "warning" and by is None]
+    assert warned == ["c has failed 10 tries in a row under drumming, the last trial 9; drumming "
+                      "goes on: clear one moves past it, stop drumming ends it"]
+
+
+def test_the_drum_warning_at_the_session_names_only_stop_drumming_past_a_blocks_targets(
+        tmp_path, monkeypatch):
+    """The controller's ruling M3, along the run loop's own call: a drummed streak block whose
+    target is one trial, ten wrong answers after its first right one. The condition owes nothing
+    by then, so the warning names only *stop drumming*, with *clear* on as with it off."""
+    from wl_xcon import taskd
+    real, calls = taskd.run_trial, []
+
+    def scripted(*args, **kwargs):
+        calls.append(None)
+        result = real(*args, **kwargs)
+        outcome = Outcome.WRONG_TARGET if 2 <= len(calls) <= 11 else Outcome.CORRECT
+        return dataclasses.replace(result, outcome=outcome)
+
+    monkeypatch.setattr(taskd, "run_trial", scripted)
+    block = Block(name="drill", conditions=[Condition("c", {}, target=1)], drum=True,
+                  criterion=(1.0, 3))
+    link = _Drained({5: [Training(setting="clear", on=True, by=Box("jake"))]})
+    session = _session(_spec(tmp_path, trials=400, blocks=[block]), link=link)
+
+    session.run()
+
+    warned = [said for kind, by, _, said in session.controls if kind == "warning" and by is None]
+    assert warned == ["c has failed 10 tries in a row under drumming, the last trial 10; drumming "
+                      "goes on: stop drumming ends it"]
 
 
 def test_a_pause_holds_the_session_at_a_boundary_and_resume_continues(tmp_path):
