@@ -123,8 +123,10 @@ detection = Trial(
                 # A bound even though the two guards above are exhaustive in
                 # practice: check 4 refuses a state that could wait forever, and
                 # "in practice" is exactly the reasoning that produced the S1
-                # bake-off's unbounded hold.
-                On(After(P("fix_acquisition")), Outcome.NO_FIXATION),
+                # bake-off's unbounded hold. 10 s, longer than any legal `fix_hold`,
+                # so a hold in progress is never cut off (the engine C2a plan), and no
+                # longer than `fix_acquisition`'s highest, which bounded it before.
+                On(After(10.0), Outcome.NO_FIXATION),
             ],
         ),
         State(
@@ -147,8 +149,16 @@ detection = Trial(
                         Reward("reward_correct"),
                     ],
                 ),
-                On(Exited("target"), Outcome.WRONG_TARGET),
-                On(After(P("response_deadline")), Outcome.NO_RESPONSE),
+                # Leaving the target before its hold is complete is a target break, a
+                # criterion not kept, never a wrong answer: this task shows no
+                # distractor (the PI, 2026-10-13, the engine C2a plan's Appendix B item
+                # 6). Its table shows it again.
+                On(Exited("target"), Outcome.TARGET_BREAK, do=[Mark(4120)]),
+                # The hold runs its own time; the deadline bounds the response, in
+                # `stim_on` (the engine C2a plan: a hold set past the deadline was cut
+                # off and scored a miss). 3 s is longer than any legal `target_hold`
+                # and no longer than the deadline's highest; check 4 needs a bound.
+                On(After(3.0), Outcome.NO_RESPONSE),
             ],
         ),
     ],

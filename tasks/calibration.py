@@ -116,8 +116,11 @@ calibration = Trial(
                 # Bounded even though the two guards above are exhaustive in
                 # practice, for the reason `fixation_detection` gives: check 4
                 # refuses a state that could wait forever, and "in practice" is the
-                # reasoning that produced the S1 bake-off's unbounded hold.
-                On(After(P("fix_acquisition")), Outcome.NO_FIXATION),
+                # reasoning that produced the S1 bake-off's unbounded hold. 10 s,
+                # longer than any legal `cal_hold`, so a hold in progress is never cut
+                # off (the engine C2a plan), and no longer than `fix_acquisition`'s
+                # highest, which bounded it before.
+                On(After(10.0), Outcome.NO_FIXATION),
             ],
         ),
     ],

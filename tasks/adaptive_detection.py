@@ -119,7 +119,8 @@ adaptive_detection = Trial(
             go=[
                 On(Hold("fix", P("fix_hold")), "stim_on"),
                 On(Exited("fix"), Outcome.FIXATION_BREAK, do=[Mark(4101)]),
-                On(After(P("fix_acquisition")), Outcome.NO_FIXATION, do=[Mark(4100)]),
+                # Longer than any legal `fix_hold`, as `fixation_detection` says.
+                On(After(10.0), Outcome.NO_FIXATION, do=[Mark(4100)]),
             ],
         ),
         State(
@@ -150,8 +151,11 @@ adaptive_detection = Trial(
                     Outcome.CORRECT,
                     do=[Mark(4099), Mark(4102), Reward("reward_correct")],
                 ),
-                On(Exited("target"), Outcome.WRONG_TARGET),
-                On(After(P("response_deadline")), Outcome.NO_RESPONSE),
+                # A target break, as `fixation_detection` says: not an answer, so it does
+                # not move the staircase.
+                On(Exited("target"), Outcome.TARGET_BREAK, do=[Mark(4120)]),
+                # The hold runs its own time, as `fixation_detection` says.
+                On(After(3.0), Outcome.NO_RESPONSE),
             ],
         ),
     ],
@@ -189,11 +193,13 @@ def next_params(
 ) -> dict[str, float]:
     """The next trial's values. Called at a trial boundary, never inside one.
 
-    Only completed trials move the staircase: an abort says nothing about
-    difficulty, and letting one move the estimate makes the target's contrast track
-    engagement rather than perception.
+    Only answers move the staircase -- a correct one, a wrong one, and a miss, an
+    incorrect answer (the PI, 2026-10-12: "A miss counts as an incorrect answer, so
+    after misses the target gets more visible"; TSK-33's default) -- because an abort
+    says nothing about difficulty, and letting one move the estimate makes the
+    target's contrast track engagement rather than perception.
     """
-    if last in (Outcome.CORRECT, Outcome.WRONG_TARGET):
+    if last in (Outcome.CORRECT, Outcome.WRONG_TARGET, Outcome.NO_RESPONSE):
         staircase.update(last is Outcome.CORRECT)
     return {
         "fix_acquisition": 4.0,

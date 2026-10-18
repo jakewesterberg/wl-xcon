@@ -23,7 +23,7 @@ from wl_xcon.cones import V_F10
 from wl_xcon.declarations import COMMON, OVERRIDE, OWN, SHARED, resolved
 from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.photometry import SRGB, SRGB_WHITE_CD_M2, DKL, Calibration, Gray, _apply3, xyY
-from wl_xcon.run import Recorded
+from wl_xcon.run import Recorded, Scripted, run_trial
 from wl_xcon.simulate import Subject, simulate
 from wl_xcon.task import (
     BACKGROUND,
@@ -163,10 +163,24 @@ def test_an_aborted_trial_does_not_move_the_staircase():
     next_params = _load("adaptive_detection", "next_params")
     staircase = module_staircase(value=0.5)
 
-    for outcome in (Outcome.NO_FIXATION, Outcome.FIXATION_BREAK, Outcome.NO_RESPONSE):
+    for outcome in (Outcome.NO_FIXATION, Outcome.FIXATION_BREAK, Outcome.TARGET_BREAK):
         next_params(staircase, target_eccentricity=10.0, last=outcome)
 
     assert staircase.value == 0.5
+
+
+def test_a_miss_steps_the_staircases_contrast_up():
+    """The PI, 2026-10-12, "Yes, a miss steps contrast up": "A miss counts as an incorrect answer,
+    so after misses the target gets more visible." It moved nothing, so below threshold the
+    staircase stepped down on corrects and never back up (the engine C2a plan's science review,
+    O3)."""
+    module_staircase = _load("adaptive_detection", "Staircase")
+    next_params = _load("adaptive_detection", "next_params")
+    staircase = module_staircase(value=0.5)
+
+    next_params(staircase, target_eccentricity=10.0, last=Outcome.NO_RESPONSE)
+
+    assert staircase.value > 0.5
 
 
 # --- Colour pop-out search -------------------------------------------------
@@ -686,6 +700,50 @@ def test_each_reference_task_counts_as_the_pi_confirmed(name):
     assert "undeclared-counting" in {
         f.code for f in check_task(replace(task, structures={
             task.default: replace(task.trial, counting=None)}))}
+
+
+@pytest.mark.parametrize("name", sorted(TASK_FILES))
+def test_no_reference_task_cuts_a_hold_short(name):
+    """The engine C2a plan (its science review, O2): no `After` can end a reference task's state
+    while a hold there may still be running, at any legal setting -- the fixation hold, the target
+    hold and calibration's -- so `hold-cut-short` finds nothing."""
+    task = _load_task(TASKS / f"{name}.py")
+
+    assert "hold-cut-short" not in {f.code for f in check_task(task)}
+
+
+@pytest.mark.parametrize("name", ["fixation_detection", "adaptive_detection"])
+def test_a_target_held_past_the_response_deadline_is_correct(name):
+    """The science review's O2: with `target_hold` set past `response_deadline` -- how a trainer
+    shapes a longer hold -- a target held to the end was scored `NO_RESPONSE`, a miss, because the
+    deadline ran from `verify`'s entry too. The deadline bounds the response; the hold runs its
+    own time. Gaze holds the fixation point, lands on the target at frame 45 and stays: the old
+    bound, 0.3 s from `verify`'s entry, ended it at frame 75; the hold's 0.9 s runs past it."""
+    trial = _load_task(TASKS / f"{name}.py").trial
+    world = Scripted({SaccadeTo("target"): 45},
+                     inside={f: "fix" if f <= 40 else "target" for f in range(1, 400)})
+    values = {**VALUES, "response_deadline": 0.3, "target_hold": 0.9}
+
+    result = run_trial(trial, world, 0.01, values=values, effects=Recorded())
+
+    assert result.outcome is Outcome.CORRECT and result.frames >= 45 + 90
+
+
+@pytest.mark.parametrize("name", ["fixation_detection", "adaptive_detection"])
+def test_leaving_the_target_before_its_hold_is_a_target_break(name):
+    """The PI, 2026-10-13, answering the engine C2a plan's Appendix B item 6 ("Accept, target
+    break"): in a task that shows no distractor, leaving the target before its hold is complete is
+    a criterion not kept, never a wrong answer -- a target break, shown again by its table and
+    moving no staircase -- and the task strobes why (`OUTCOME_TARGET_BREAK`, 4120). Gaze lands on
+    the target at frame 45 and leaves it at frame 60, before its 0.2 s hold."""
+    trial = _load_task(TASKS / f"{name}.py").trial
+    world = Scripted({SaccadeTo("target"): 45},
+                     inside={f: "fix" if f <= 40 else "target" for f in range(1, 60)})
+    effects = Recorded()
+
+    result = run_trial(trial, world, 0.01, values=VALUES, effects=effects)
+
+    assert result.outcome is Outcome.TARGET_BREAK and ("mark", 4120) in effects.log
 
 
 def test_a_search_task_that_says_nothing_of_its_choice_is_refused():

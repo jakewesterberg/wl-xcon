@@ -174,7 +174,8 @@ search = Trial(
             go=[
                 On(Hold("fix", P("fix_hold")), "array_on"),
                 On(Exited("fix"), Outcome.FIXATION_BREAK, do=[Mark(4101)]),
-                On(After(P("fix_acquisition")), Outcome.NO_FIXATION),
+                # Longer than any legal `fix_hold`, as `fixation_detection` says.
+                On(After(10.0), Outcome.NO_FIXATION),
             ],
         ),
         State(
@@ -203,7 +204,8 @@ search = Trial(
                     do=[Mark(4099), Mark(4110), Mark(4102), Reward("reward_correct")],
                 ),
                 On(Exited("search.target"), Outcome.TARGET_BREAK, do=[Mark(4120)]),
-                On(After(P("response_deadline")), Outcome.NO_RESPONSE, do=[Mark(4117)]),
+                # The hold runs its own time, as `fixation_detection` says.
+                On(After(3.0), Outcome.NO_RESPONSE, do=[Mark(4117)]),
             ],
         ),
     ],

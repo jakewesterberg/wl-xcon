@@ -99,6 +99,7 @@ def check(
         + _view_faults(trial, geometry)
         + _placement_faults(trial)
         + _trial_display_faults(trial)
+        + _holds_cut_short(trial)
     )
 
 
@@ -3006,6 +3007,49 @@ def _unreachable_timeouts(trial: Trial) -> list[Finding]:
                         blocking=False,
                     )
                 )
+    return findings
+
+
+def _holds_cut_short(trial: Trial) -> list[Finding]:
+    """A `Hold` that an `After` on the same state can beat, within their declared ranges, is a hold
+    cut off in progress: the trial ends on the timeout, scored as whatever it leads to, while the
+    animal is still holding (the engine C2a plan's science review, O2: a held target scored a miss
+    when `target_hold` was set past `response_deadline`). **A warning, never a refusal** (the PI,
+    2026-10-11: warnings over refusals), naming the state, the hold, the bound and their settings.
+    Only a plain `After` is compared -- one with a `since` starts later -- and a bound naming the
+    hold's own setting cannot beat it. Each setting is read through `_span`, as every range check
+    is: a side its range does not bound reaches as far as that side can go, so a hold with no
+    highest can be cut short by any timeout, and a timeout with no lowest can end at once."""
+    params = {p.name: p for p in trial.params}
+
+    def span(value) -> "tuple[float, float] | None":
+        if isinstance(value, P) or _is_number(value):
+            return _span(value, params, 0.0)
+        return None
+
+    def said(value) -> str:
+        return f"`{value.name}`" if isinstance(value, P) else f"{value:g} s"
+
+    findings: list[Finding] = []
+    for state in trial.states:
+        holds = [edge for edge in state.go if isinstance(edge.guard, Hold)]
+        bounds = [edge for edge in state.go
+                  if isinstance(edge.guard, After) and edge.guard.since is None]
+        for hold in holds:
+            for bound in bounds:
+                held, waits = span(hold.guard.seconds), span(bound.guard.seconds)
+                if held is None or waits is None or bound.guard.seconds == hold.guard.seconds:
+                    continue
+                if waits[0] < held[1]:
+                    longest = (f"up to {held[1]:g} s" if math.isfinite(held[1])
+                               else "with no longest declared")
+                    findings.append(Finding("hold-cut-short", (
+                        f"state {state.name!r} ends on its {_target_name(bound.to)} timeout after "
+                        f"{said(bound.guard.seconds)}, as soon as {waits[0]:g} s, while its "
+                        f"{hold.guard.window!r} hold takes {said(hold.guard.seconds)}, "
+                        f"{longest}: an animal still holding is cut off and scored "
+                        f"{_target_name(bound.to)}; bound the state by a wait longer than the "
+                        f"longest hold"), blocking=False, accepted_in=SESSION_KINDS))
     return findings
 
 
