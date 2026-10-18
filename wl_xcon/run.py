@@ -358,21 +358,36 @@ def _emit(actions: "list[Action]", effects: "Effects") -> None:
             effects.reward(action.ref.name)
 
 
+#: **The longest trial** (engine spec §6.8), in seconds: a trial that reaches it without an
+#: outcome ends there as a hang (`Result.outcome` `None`), which `taskd` records as `hang` and
+#: counts as a missed acquisition (`task.HANG_COUNTS_AS`; the PI, 2026-10-11, XC-287). Five
+#: minutes; longer presentations are the continuous mode's (§13.6).
+LONGEST_TRIAL_S = 300.0
+
+
+def longest_trial_frames(frame_period: float) -> int:
+    """`LONGEST_TRIAL_S` in whole frames at `frame_period` (engine spec §6.8: "the loop's frame cap
+    derived from 300 s at the session's rate"), to the nearest frame: 72,000 at 240 Hz and 36,000
+    at 120 Hz."""
+    return round(LONGEST_TRIAL_S / frame_period)
+
+
 def run_trial(
     trial: Trial,
     world: World,
     frame_period: float,
-    max_frames: int = 100_000,
+    max_frames: int | None = None,
     values: dict[str, float] | None = None,
     effects: "Effects | None" = None,
     each_frame: "Callable[[int], None] | None" = None,
 ) -> Result:
     """Run one trial to its outcome.
 
-    `max_frames` is a backstop, not a policy: a well-formed task cannot hang,
-    because check 3 proves every state reaches an outcome and check 4 proves every
-    wait is bounded. It exists so a task that skipped the checker fails a test
-    rather than a session.
+    **`max_frames` is the longest trial** (engine spec §6.8), `longest_trial_frames` at this
+    frame period unless a caller gives its own: five minutes at the session's rate, where the
+    100,000 frames it was until engine build C2a were about 417 s at 240 Hz. A well-formed task
+    reaches it only through a state declared `unbounded=True` -- check 4 proves every other wait
+    bounded -- or a bound longer than five minutes; the trial then ends with no outcome, a hang.
 
     `effects` is where marks and rewards go. It defaults to `Unwired`, which refuses:
     a task that commands neither never touches it, and one that does may not have the
@@ -386,6 +401,8 @@ def run_trial(
     not block, log or allocate when there is nothing to do; this loop does not check.
     """
     effects = Unwired() if effects is None else effects
+    if max_frames is None:
+        max_frames = longest_trial_frames(frame_period)
     by_name = {state.name: state for state in trial.states}
     current = by_name[trial.start]
     entered_at = 0

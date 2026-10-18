@@ -476,9 +476,11 @@ def test_a_wait_longer_than_any_the_task_declares_is_a_warning_that_stop_and_the
     assert found[1].detail.startswith(
         "'fix_acquisition' at 60 s is a wait longer than any the task declares (its longest, 10 s)")
     assert "they go unheard until that trial ends" in found[1].detail
-    # The cap it names is the loop's; build C2a's five-minute cap changes both (engine spec §6.8).
-    assert inspect.signature(run_trial).parameters["max_frames"].default == 100_000
-    assert "the trial cap, 100,000 frames (about 417 s at 240 Hz)" in found[1].detail
+    # The cap it names is the loop's, the longest trial: five minutes at the session's rate since
+    # engine build C2a (engine spec §6.8), where it was 100,000 frames, about 417 s at 240 Hz.
+    assert inspect.signature(run_trial).parameters["max_frames"].default is None
+    minutes = inspect.getmodule(run_trial).LONGEST_TRIAL_S / 60
+    assert f"and the longest trial ({minutes:g} minutes) ends any trial" in found[1].detail
     # Its 240 Hz is the rate `wlx taskd` runs at (Task 10's review, M4).
     assert service.FRAME_PERIOD == 1 / 240 and round(100_000 * service.FRAME_PERIOD) == 417
 

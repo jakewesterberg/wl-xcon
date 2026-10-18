@@ -66,8 +66,10 @@ from wl_xcon.photometry import Calibration, cone_record
 from wl_xcon.record import XCON_DIRNAME, SessionRecord, _local, welfare_note
 from wl_xcon.scheduler import EVERY_TRIAL, Block, Condition, Scheduler
 from wl_xcon.simulate import Census, Subject, Tally, prepare
-from wl_xcon.run import run_trial
-from wl_xcon.task import Entered, Exited, Param, SaccadeTo, Task, Trial
+from wl_xcon.run import LONGEST_TRIAL_S, run_trial
+from wl_xcon.task import (
+    COUNTED, OWED, SPENT, UNPAID, Entered, Exited, Param, SaccadeTo, Task, Trial,
+)
 from wl_xcon.warnlist import PAUSE_UNMARKED, Entry, of_findings, sentence
 from wl_xcon.welfare import (
     OUT_OF_CAGE,
@@ -142,6 +144,23 @@ def _next_occurrence(hhmm: str, wall: float) -> float:
     # Unreachable: tomorrow's `hhmm` is after `wall` on every calendar day. Said
     # rather than looped past, so a platform where it is not fails here, by name.
     raise ValueError(f"no occurrence of {hhmm} after {wall} within a day")
+
+
+def _hung(index: int, condition: str, counted: str, owed: int) -> str:
+    """What the console's changes feed says of a trial that reached the longest trial (engine spec
+    §6.8; the engine C2a plan, its science review's D4): which trial of which condition, and what
+    it did to the count -- a missed acquisition (the PI, 2026-10-11), shown again unless the table
+    says otherwise or a repeat limit forgave the condition's debt."""
+    did = {
+        OWED: "shown again" if owed else "owed, its condition's remaining debt forgiven",
+        SPENT: "used up as one of the run's trials",
+        COUNTED: "counted as an answer",
+        UNPAID: "left unpaid",
+    }[counted]
+    return (
+        f"trial {index} ({condition}) reached the longest trial, {LONGEST_TRIAL_S / 60:g} minutes, "
+        f"with no outcome: recorded as a hang, a missed acquisition, and {did}"
+    )
 
 
 def _appeared(trial: Trial, result) -> bool:
@@ -2491,6 +2510,12 @@ class Session:
                 levels.end_trial(result)
                 shown = _appeared(trial, result)
                 counted = scheduler.record(condition.name, result.outcome, shown=shown)
+                if result.outcome is None:
+                    # **A warning on the changes feed** (the engine C2a plan, its science review's
+                    # D4): five minutes with no outcome is a loop that failed or an animal that
+                    # never acquired, and the trainer hears which trial and what became of it.
+                    self._feed("warning", None, self.wall_now(), _hung(
+                        index, condition.name, counted, scheduler.owed(condition.name)))
                 # One string for the record and for a console's recent outcomes, so
                 # the two cannot disagree (P4d-2b spec §4.1).
                 recorded = result.outcome.value if result.outcome else "hang"

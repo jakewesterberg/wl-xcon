@@ -33,6 +33,7 @@ from wl_xcon.photometry import (
     unrealizable,
     xyY,
 )
+from wl_xcon.run import LONGEST_TRIAL_S
 from wl_xcon.task import (
     CHOSEN_BY,
     RDS,
@@ -152,10 +153,10 @@ def check_task(
 #: 10's review, I1); off screen (`stimulus-off-screen`) already blocks.
 BREAKS_A_RUN = ("overlapping-windows", "crowded-array", "unrealizable-color")
 
-#: The trial cap, as a `longer-than-declared` warning says it: `run.run_trial`'s `max_frames`
-#: backstop, 100,000 frames, about 417 s at the 240 Hz `wlx taskd` runs at (computed). Build C2a
-#: makes it five minutes at the session's rate (engine spec §6.8), and this changes with it.
-TRIAL_CAP = "the trial cap, 100,000 frames (about 417 s at 240 Hz)"
+#: The trial cap, as a `longer-than-declared` warning says it: the longest trial, five minutes at
+#: the session's rate (`run.LONGEST_TRIAL_S`, `run_trial`'s `max_frames` since engine build C2a;
+#: engine spec §6.8), where it was 100,000 frames, about 417 s at 240 Hz.
+TRIAL_CAP = f"the longest trial ({LONGEST_TRIAL_S / 60:g} minutes)"
 
 
 def _among(finding: Finding, findings: list[Finding]) -> bool:
@@ -263,8 +264,8 @@ def beyond_range(
     # **A wait longer than any the task declares is a warning**, one per wait (the PI, 2026-10-12,
     # on the plan's call 4: "Allow, with a warning"): stop, pause and the out-of-cage limit are
     # heard between trials, never inside one, until they are checked about once a second inside
-    # a trial (WEL-11; engine spec §6.8; XC-373), when this sentence changes, as it does with
-    # build C2a's five-minute cap (`TRIAL_CAP`).
+    # a trial (WEL-11; engine spec §6.8; XC-373), when this sentence changes; the trial cap it
+    # names is the longest trial, five minutes since engine build C2a (`TRIAL_CAP`).
     waits, longest = _waits(task)
     findings: list[Finding] = []
     for name, value in outside.items():

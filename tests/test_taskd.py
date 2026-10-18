@@ -5531,6 +5531,57 @@ def test_a_trial_that_reaches_the_longest_trial_is_shown_again_as_a_missed_acqui
                                                  ("correct", "counted", 0, True)]
 
 
+@pytest.mark.parametrize(("blocks", "said"), [
+    ([Block(name="b", conditions=[Condition("only", {}, target=1)])],
+     "trial 0 (only) reached the longest trial, 5 minutes, with no outcome: recorded as a hang, a "
+     "missed acquisition, and shown again"),
+    (None, "trial 0 (session) reached the longest trial, 5 minutes, with no outcome: recorded as a "
+           "hang, a missed acquisition, and used up as one of the run's trials"),
+], ids=["block", "plain run"])
+def test_a_trial_at_the_longest_trial_is_said_on_the_console(tmp_path, monkeypatch, blocks, said):
+    """The engine C2a plan's science review, D4, and the controller's ruling: a trial that ran five
+    minutes is a warning on the changes feed, naming the trial and what it did to the count -- shown
+    again in a block, used up in a plain run of N -- and nothing stops."""
+    from wl_xcon import taskd
+
+    real, calls = taskd.run_trial, []
+
+    def hangs_first(*args, **kwargs):
+        calls.append(None)
+        if len(calls) == 1:
+            return real(*args, max_frames=1, **kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(taskd, "run_trial", hangs_first)
+    task = tmp_path / "one_state.py"
+    task.write_text(ONE_STATE_TASK)
+    extra = {} if blocks is None else {"blocks": blocks}
+    session = _session(_spec(tmp_path, trials=2, task=str(task), values={}, **extra))
+
+    session.run()
+
+    assert [s for kind, by, _, s in session.controls if kind == "warning" and by is None] == [said]
+    assert session.stop_kind == "completed"
+
+
+@pytest.mark.parametrize(("counted", "owed", "ending"), [
+    ("owed", 2, "and shown again"),
+    ("owed", 0, "and owed, its condition's remaining debt forgiven"),
+    ("spent", 0, "and used up as one of the run's trials"),
+    ("counted", 0, "and counted as an answer"),
+    ("unpaid", 0, "and left unpaid"),
+], ids=["owed", "owed, debt forgiven", "spent", "counted", "unpaid"])
+def test_the_hang_warning_says_what_each_kind_of_count_did_to_the_trial(counted, owed, ending):
+    """`_hung`'s five sentences, each asserted: the console tells the trainer which trial of which
+    condition hung and which way the table counted it (the controller's ruling, pre-flight Q6)."""
+    from wl_xcon import taskd
+
+    said = taskd._hung(7, "near", counted, owed)
+
+    assert said.startswith("trial 7 (near) reached the longest trial, 5 minutes, with no outcome: ")
+    assert said.endswith(f"recorded as a hang, a missed acquisition, {ending}")
+
+
 def test_a_number_past_16_bits_is_strobed_whole_high_word_first(tmp_path):
     """Spec §2.2, the ceiling: the escape carries a uint32, and the session strobes the
     true number, never a truncated one -- a truncated number would name two trials in
