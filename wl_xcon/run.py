@@ -387,7 +387,8 @@ def run_trial(
     frame period unless a caller gives its own: five minutes at the session's rate, where the
     100,000 frames it was until engine build C2a were about 417 s at 240 Hz. A well-formed task
     reaches it only through a state declared `unbounded=True` -- check 4 proves every other wait
-    bounded -- or a bound longer than five minutes; the trial then ends with no outcome, a hang.
+    bounded -- or a bound longer than five minutes, or a chain of bounded states, or a cycle among
+    them, whose waits add up to more; the trial then ends with no outcome, a hang.
 
     `effects` is where marks and rewards go. It defaults to `Unwired`, which refuses:
     a task that commands neither never touches it, and one that does may not have the

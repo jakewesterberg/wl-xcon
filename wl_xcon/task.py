@@ -1422,7 +1422,7 @@ HANG_COUNTS_AS = Outcome.NO_FIXATION
 @dataclass(frozen=True, slots=True)
 class Counting:
     """One trial structure's counting table (engine spec §16.1-16.2): what each outcome does to its
-    condition's count, as four declarations.
+    condition's count, as five declarations.
 
     - `after_stimulus`: whether a break after the stimulus appears (`AFTER_STIMULUS`, and no
       response where withholding is not an answer) is `SPENT` -- used up, counted as presented

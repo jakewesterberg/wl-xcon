@@ -6154,19 +6154,102 @@ def test_a_hang_past_its_conditions_repeat_limit_says_its_debt_was_forgiven(
         ("only", 2, "cap")]
 
 
+def _hang_after_the_targets(tmp_path, monkeypatch, drum: bool) -> list[str]:
+    """A criterion block of one condition, target 1, "3 correct in a row": a right answer, a hang,
+    then right answers. Returns the changes feed's warnings of the run."""
+    from wl_xcon import taskd
+
+    real, calls = taskd.run_trial, []
+
+    def scripted(*args, **kwargs):
+        calls.append(None)
+        result = real(*args, **kwargs)
+        outcome = None if len(calls) == 2 else Outcome.CORRECT
+        return dataclasses.replace(result, outcome=outcome)
+
+    monkeypatch.setattr(taskd, "run_trial", scripted)
+    block = Block(name="drill", conditions=[Condition("c", {}, target=1)], criterion=(1.0, 3),
+                  drum=drum)
+    session = _session(_spec(tmp_path, trials=400, blocks=[block]))
+
+    session.run()
+
+    assert session.stop_kind == "completed"
+    return [said for kind, by, _, said in session.controls if kind == "warning" and by is None]
+
+
+_HANG = ("trial 1 (c) reached the longest trial, 5 minutes, with no outcome: recorded as a hang, "
+         "a missed acquisition, and ")
+
+
+def test_a_hang_past_a_criterion_blocks_targets_says_it_is_not_shown_again(tmp_path, monkeypatch):
+    """The final review's probe: past the targets nothing is owed and nothing is forgiven (no
+    shortfall is written), so the sentence says the block is past its targets, not that a debt was
+    forgiven."""
+    warned = _hang_after_the_targets(tmp_path, monkeypatch, drum=False)
+
+    assert warned == [_HANG + "not shown again: its block is past its targets"]
+
+
+def test_a_hang_under_drumming_past_the_targets_says_it_is_drummed_back(tmp_path, monkeypatch):
+    """The same run with drumming on: the hang is not right, so it is drummed straight back, and
+    the sentence says that, not that the block is past its targets."""
+    warned = _hang_after_the_targets(tmp_path, monkeypatch, drum=True)
+
+    assert warned == [_HANG + "drummed back at once"]
+
+
+def test_first_answers_only_ends_a_percentage_block_where_first_answers_decide(
+        tmp_path, monkeypatch):
+    """The path of the training setting `first_answers` (the PI, 2026-10-18), through a session: a
+    percentage block under drumming, "1 of the last 2", whose first trial is answered wrong, wrong
+    again and then right. Judging every answer, the window reads wrong, wrong, right and the block
+    would end at the third try; judging first answers only it reads the first wrong answer alone,
+    the drummed tries leave it, and the block ends one trial later, when the next trial's first
+    answer is right."""
+    from wl_xcon import taskd
+
+    real, calls = taskd.run_trial, []
+
+    def scripted(*args, **kwargs):
+        calls.append(None)
+        result = real(*args, **kwargs)
+        outcome = Outcome.WRONG_TARGET if len(calls) <= 2 else Outcome.CORRECT
+        return dataclasses.replace(result, outcome=outcome)
+
+    monkeypatch.setattr(taskd, "run_trial", scripted)
+    block = Block(name="drill", conditions=[Condition("c", {}, target=1)], criterion=(0.5, 2),
+                  drum=True)
+    link = _Drained({1: [Training(setting="first_answers", on=True, by=Box("jake"))]})
+    session = _session(_spec(tmp_path, trials=400, blocks=[block]), link=link)
+
+    session.run()
+
+    assert session.stop_kind == "completed"
+    assert [(row["outcome"], row["drummed"]) for row in _trial_rows(session)] == [
+        ("wrong_target", False), ("wrong_target", True), ("correct", True), ("correct", False)]
+
+
 @pytest.mark.parametrize(("counted", "owed", "ending"), [
     ("owed", 2, "and shown again"),
     ("owed", 0, "and owed, its condition's remaining debt forgiven"),
+    ("owed", 0, "and drummed back at once"),
+    ("owed", 2, "and drummed back at once"),
+    ("owed", 0, "and not shown again: its block is past its targets"),
     ("spent", 0, "and used up as one of the run's trials"),
-    ("counted", 0, "and counted as an answer"),
+    ("counted", 0, "and counted toward its condition"),
     ("unpaid", 0, "and left unpaid"),
-], ids=["owed", "owed, debt forgiven", "spent", "counted", "unpaid"])
+], ids=["owed", "owed, debt forgiven", "owed, drummed", "owed, drummed with debt", "owed, past",
+        "spent", "counted", "unpaid"])
 def test_the_hang_warning_says_what_each_kind_of_count_did_to_the_trial(counted, owed, ending):
-    """`_hung`'s five sentences, each asserted: the console tells the trainer which trial of which
-    condition hung and which way the table counted it (the controller's ruling, pre-flight Q6)."""
+    """`_hung`'s sentences, each asserted: the console tells the trainer which trial of which
+    condition hung and which way the table counted it (the controller's ruling, pre-flight Q6),
+    and for an owed trial what is true of it: forgiven only where a shortfall was written."""
     from wl_xcon import taskd
 
-    said = taskd._hung(7, "near", counted, owed)
+    said = taskd._hung(
+        7, "near", counted, owed,
+        drummed="drummed" in ending, forgiven="forgiven" in ending, past="past" in ending)
 
     assert said.startswith("trial 7 (near) reached the longest trial, 5 minutes, with no outcome: ")
     assert said.endswith(f"recorded as a hang, a missed acquisition, {ending}")

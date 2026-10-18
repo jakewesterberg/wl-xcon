@@ -2884,7 +2884,8 @@ _SCRIPT = """
       if (cmd === "reward" && !rewardAllowed(e.detail)) { return; }
       // A run's count and its drumming (engine build C2a), each naming what it is for.
       if (cmd === "clear") {
-        var clearKey = button.getAttribute("data-condition") + (button.hasAttribute("data-rest") ? "/rest" : "");
+        var clearKey = button.getAttribute("data-condition")
+          + (button.hasAttribute("data-rest") ? "/rest" : "");
         if (!clearAllowed(e.detail, clearKey)) { return; }
         post({ kind: "clear", condition: button.getAttribute("data-condition"),
                rest: button.hasAttribute("data-rest") });

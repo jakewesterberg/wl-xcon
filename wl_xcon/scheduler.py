@@ -214,9 +214,10 @@ class ConditionReport:
     the trials whose first try was right; what it still `owed`, the ordinary `repeats` placed, the
     trials `moved_past` -- forgiven by its repeat limit or a person's clear -- and whether its limit
     flagged it as `possible_avoidance`; its `drummed` tries, and `failing`, the failed tries in a
-    row of its trial being drummed now (one still in flight counts). **A run that ends in a fault can
-    leave these counts one try ahead of the lines written**: a try is counted by `Scheduler.record`
-    before its line is written, so a fault between the two leaves it counted and without a line."""
+    row of its trial being drummed now (one still in flight counts). **A run that ends in a fault
+    can leave these counts one try ahead of the lines written**: a try is counted by
+    `Scheduler.record` before its line is written, so a fault between the two leaves it counted
+    and without a line."""
 
     block: str
     condition: str

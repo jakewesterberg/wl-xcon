@@ -273,13 +273,14 @@ class SessionRecord:
 
         **And what it did to its condition's count, and whether its stimulus appeared** (engine
         spec §16.1-16.2, §16.4; engine build C2a): `counting`, `counted`, `spent`, `owed` or
-        `unpaid` (`task.Counting`), and `shown`; `None` where no scheduler counted it -- a census. **And
-        where it sits in the realized sequence** (§16.3-16.4): the `index` of the trial it shows
-        again (`repeat_of`), whether it came straight after that one (`at_once`), and the condition
-        of the trial before it in its block (`previous`), an aborted one included; and whether it
-        is a drum's repeat (`drummed`) and drumming was on as it was drawn (`drumming`, `"block"`
-        or `"run"`). **And the training aids on as it was drawn** (`aids`, a list: `"drumming"`,
-        `"clear"`; the PI, 2026-10-18: "the record marks it on every trial").
+        `unpaid` (`task.Counting`), and `shown`; `None` where no scheduler counted it -- a census.
+        **And where it sits in the realized sequence** (§16.3-16.4): the `index` of the trial it
+        shows again (`repeat_of`), whether it came straight after that one (`at_once`), and the
+        condition of the trial before it in its block (`previous`), an aborted one included; and
+        whether it is a drum's repeat (`drummed`) and drumming was on as it was drawn
+        (`drumming`, `"block"` or `"run"`). **And the training aids on as it was drawn** (`aids`,
+        a list: `"drumming"`, `"clear"`; the PI, 2026-10-18: "the record marks it on every
+        trial").
         """
         if self._trials is None:
             self._trials = (self.directory / "trials.jsonl").open("a", encoding="utf-8")

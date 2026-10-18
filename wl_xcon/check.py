@@ -3020,9 +3020,10 @@ def _holds_cut_short(trial: Trial) -> list[Finding]:
     hold's own setting cannot beat it **unless it is listed before the hold**: a state's edges are
     evaluated in order and a tie fires on one frame, so the first listed wins it (an `After` first
     is warned when its lowest is at most the hold's highest). It assumes the hold starts as the
-    state is entered; a state the gaze enters later is not modeled. Each setting is read through `_span`, as every range check
-    is: a side its range does not bound reaches as far as that side can go, so a hold with no
-    highest can be cut short by any timeout, and a timeout with no lowest can end at once."""
+    state is entered; a state the gaze enters later is not modeled. Each setting is read through
+    `_span`, as every range check is: a side its range does not bound reaches as far as that
+    side can go, so a hold with no highest can be cut short by any timeout, and a timeout with
+    no lowest can end at once."""
     params = {p.name: p for p in trial.params}
 
     def span(value) -> "tuple[float, float] | None":

@@ -2745,7 +2745,8 @@ def test_a_schema_14_frame_of_either_shape_is_refused_by_name():
                 refusals_dropped=0, animals=(), offered_tasks=())
 
     for old in (replace(_telemetry(), schema=14), idle):
-        with pytest.raises(SchemaMismatch, match="carried schema 14 and this console reads schema 16"):
+        with pytest.raises(
+                SchemaMismatch, match="carried schema 14 and this console reads schema 16"):
             decode(encode(old))
 
 

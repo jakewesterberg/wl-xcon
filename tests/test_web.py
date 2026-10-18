@@ -24,7 +24,23 @@ from _frames import frame, idle, view
 from wl_xcon.actor import Box, Member
 from wl_xcon.cli import _clock, _local
 from wl_xcon.findings import SESSION_KINDS
-from wl_xcon.link import NOTE_LIMIT, ConditionRow, Control, Counts, ParamRow, Performance, Preflight, PreflightItem, Question, Refused, ScheduledStop, ShortfallRow, Staged, Stranded, WarningRow
+from wl_xcon.link import (
+    NOTE_LIMIT,
+    ConditionRow,
+    Control,
+    Counts,
+    ParamRow,
+    Performance,
+    Preflight,
+    PreflightItem,
+    Question,
+    Refused,
+    ScheduledStop,
+    ShortfallRow,
+    Staged,
+    Stranded,
+    WarningRow,
+)
 from wl_xcon.warnlist import HEAD_FREE, UNLISTED
 from wl_xcon.web import (
     _CSS,
@@ -747,7 +763,8 @@ def test_clear_is_offered_only_while_the_training_aid_is_on_beside_the_training_
     assert 'data-cmd="clear" data-condition="near"' in on
     assert 'data-setting="clear" data-on="0">switch clear off' in on
     assert '<span class="nm">a percentage counts first answers only</span>' in on
-    assert 'data-setting="first_answers" data-on="0">the block\'s percentage: count every answer' in on
+    assert ('data-setting="first_answers" data-on="0">the block\'s percentage: '
+            'count every answer') in on
 
 
 def test_still_needed_shows_each_conditions_counts():
@@ -839,7 +856,8 @@ def test_the_pane_says_where_a_switch_changes_nothing_and_a_block_is_past_its_ta
     short = fragments(frame(shortfalls=(ShortfallRow("b", "ecc 10", 1, "cap", False, None, 2),)),
                       view())["rt-need"]
     assert '<span class="mono keep">ecc 10</span>' in short
-    assert ".kv > .keep { overflow-wrap: normal; white-space: nowrap; flex-shrink: 0; }" in _document()
+    assert (".kv > .keep { overflow-wrap: normal; white-space: nowrap; flex-shrink: 0; }"
+            in _document())
     # Only while a run is live: a stopped run draws nothing more.
     stopped = fragments(frame(owed={"near": 0}, past_targets=True, phase="stopped"), view())
     assert "drawing until" not in stopped["rt-need"]

@@ -843,10 +843,14 @@ def test_a_cleared_trial_forgives_one_of_the_debt_and_drops_its_waiting_repeat()
     assert scheduler.shortfalls == [Shortfall("b", broke, 1, CLEARED, 0, "jake")]
     assert not scheduler.shortfalls[0].possible_avoidance
     draws = []
-    while not scheduler.finished:
+    for _ in range(10):
+        if scheduler.finished:
+            break
         scheduler.next_trial()
         draws.append(scheduler.drawn)
         scheduler.record(scheduler.drawn.condition.name, Outcome.CORRECT)
+    else:
+        raise AssertionError("the block never finished within 10 trials")
     assert all(draw.repeat_of is None for draw in draws) and len(draws) == 3
     assert scheduler.clear("c") == "block 'b' has no condition 'c', so nothing is cleared"
     assert scheduler.clear(broke) == f"'{broke}' owes nothing in block 'b', so nothing is cleared"

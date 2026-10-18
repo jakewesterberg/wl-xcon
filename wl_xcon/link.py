@@ -163,9 +163,9 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: `first_answers`, the training aid *clear* and the percentage setting; `Telemetry.conditions`,
 #: each condition's counts as `ConditionRow`s; each level's `Counts.drummed` and `right_drummed`;
 #: and `Telemetry.trials`, the run's trials, a trial and its drummed repeats one; `aids`, the
-#: training aids on; `rule`, the kind of the open block's rule (`"streak"`, `"percentage"` or none); and `past_targets`,
-#: whether a criterion block draws past its targets. A reader of 15 refuses 16 and 16 refuses 15,
-#: by name.
+#: training aids on; `rule`, the kind of the open block's rule (`"streak"`, `"percentage"` or
+#: none); and `past_targets`, whether a criterion block draws past its targets. A reader of 15
+#: refuses 16 and 16 refuses 15, by name.
 SCHEMA = 16
 
 #: How many refusals a session keeps, per source, and therefore how many one
@@ -1657,8 +1657,8 @@ class ClearOwed:
     condition owes one trial fewer, or none, a repeat of it waiting or a drum's trial waiting is
     dropped, its failed tries in a row start over (the PI, 2026-10-18), and the run's end row
     records it as a shortfall with who cleared it (engine spec §16.6;
-    `scheduler.Scheduler.clear`). `taskd` refuses it, with the sentence, where the block has no
-    such condition and where the condition owes nothing."""
+    `scheduler.Scheduler.clear`). `taskd` refuses it, with the sentence, while *clear* is off
+    (`Training`), where the block has no such condition and where the condition owes nothing."""
 
     KIND: ClassVar[str] = "clear"
 

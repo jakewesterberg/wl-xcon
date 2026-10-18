@@ -154,15 +154,30 @@ def _next_occurrence(hhmm: str, wall: float) -> float:
     raise ValueError(f"no occurrence of {hhmm} after {wall} within a day")
 
 
-def _hung(index: int, condition: str, counted: str, owed: int) -> str:
+def _hung(index: int, condition: str, counted: str, owed: int, drummed: bool = False,
+          forgiven: bool = False, past: bool = False) -> str:
     """What the console's changes feed says of a trial that reached the longest trial (engine spec
     §6.8; the engine C2a plan, its science review's D4): which trial of which condition, and what
-    it did to the count -- a missed acquisition (the PI, 2026-10-11), shown again unless the table
-    says otherwise or a repeat limit forgave the condition's debt."""
+    it did to the count -- a missed acquisition (the PI, 2026-10-11). **For an owed trial it says
+    what is true of it**: `drummed` (a drum brings it straight back, whatever its condition
+    owes), shown again while the condition `owed` a trial still, `forgiven` where a repeat limit
+    wrote a shortfall, not shown again where the block is `past` its targets and nothing is owed.
+    A trial the table counts is *counted toward its condition*, not called an answer: under a
+    table that scores no fixation it is judged a miss (decision 19)."""
+    if drummed:
+        owing = "drummed back at once"
+    elif owed:
+        owing = "shown again"
+    elif forgiven:
+        owing = "owed, its condition's remaining debt forgiven"
+    elif past:
+        owing = "not shown again: its block is past its targets"
+    else:
+        owing = "owed nothing more"
     did = {
-        OWED: "shown again" if owed else "owed, its condition's remaining debt forgiven",
+        OWED: owing,
         SPENT: "used up as one of the run's trials",
-        COUNTED: "counted as an answer",
+        COUNTED: "counted toward its condition",
         UNPAID: "left unpaid",
     }[counted]
     return (
@@ -2638,13 +2653,17 @@ class Session:
                 tally.add(result, drummed=drawn.drummed)
                 levels.end_trial(result, drummed=drawn.drummed)
                 shown = _appeared(trial, result)
+                written = len(scheduler.shortfalls)
                 counted = scheduler.record(condition.name, result.outcome, shown=shown)
                 if result.outcome is None:
                     # **A warning on the changes feed** (the engine C2a plan, its science review's
                     # D4): five minutes with no outcome is a loop that failed or an animal that
                     # never acquired, and the trainer hears which trial and what became of it.
                     self._feed("warning", None, self.wall_now(), _hung(
-                        index, condition.name, counted, scheduler.owed(condition.name)))
+                        index, condition.name, counted, scheduler.owed(condition.name),
+                        drummed=scheduler.drum_tries > 0,
+                        forgiven=len(scheduler.shortfalls) > written,
+                        past=scheduler.past_targets))
                 if scheduler.drum_tries == DRUM_WARNING:
                     # **A warning on the changes feed** (the PI, 2026-10-12, "After 10 in a row"):
                     # drumming goes on, and the trainer may move past the trial or stop drumming.
