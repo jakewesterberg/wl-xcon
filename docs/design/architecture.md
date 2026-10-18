@@ -270,12 +270,17 @@ than an animal earning a ration. `reward_correct`'s maximum is the second kind a
 `out_of_cage`'s the first; a bounded config is expected to say which at each entry.
 *2026-10-18: the PI approved rewording `reconcile_report`'s fault message ("Approve rewording").
 The sync box's delivered line is a count of reward commands that sits before the pump (S8 §5.1),
-so a commanded total above it says a command did not reach the line or a recording is wrong, and
-never that the pump or the tubing failed. A message-only change: the module's AST, every string
-blanked, is identical before and after. The same day he approved correcting the comments on
-`Welfare.commanded` and `Welfare.delivered` in `welfare.py` ("Approve the comment fix"):
-commanded is what was asked for, not what the animal got. Comments only: `welfare.py`'s AST is
-identical before and after.*
+so a commanded total above it says a reward was counted but its pump call failed before it ran
+(`Welfare.deliver` charges first, by design; asked whether to add that cause, he chose "Add it"),
+or a command did not reach the line, or a recording is wrong, and never that the pump or the
+tubing failed. A message-only change: the module's AST, every string blanked, is identical before
+and after. In `welfare.py` the same day, text only: he approved correcting the comment on
+`Welfare.commanded` ("Approve the comment fix": commanded is what was asked for, not what the
+animal got); the comment on `Welfare.delivered` beside it was corrected too and asked about
+afterwards, and he kept it ("Keep it"); and he approved rewording `Welfare.total_today`'s
+docstring ("Approve rewording": the day's earlier figure from wl-works, water received by its
+rule, plus this session's commanded total). `welfare.py`'s AST is identical with that one
+docstring blanked.*
 
 `welfare.py` has all three: the day's running total, two clocks — the out-of-cage one that
 bounds the session and the restraint one that is recorded beside it — the wall they are both

@@ -160,18 +160,24 @@ def test_reconciliation_reports_the_divergence_rather_than_absorbing_it():
 
 def test_delivered_below_commanded_is_a_fault_not_a_reconciliation():
     """The delivered line is a count of reward commands, hand rewards included (the
-    PI, 2026-10-18), and every command we make passes through it, so it should never
-    count less than we commanded. If it does, a command did not reach the line or a
-    recording is wrong -- the line sits before the pump, so it can show neither a
-    pump nor a tubing fault -- and quietly using the smaller number would hide a
-    failing rig behind a plausible total."""
+    PI, 2026-10-18), and every command that reaches the pump passes through it, so
+    it should never count less than we commanded. If it does, a reward was counted
+    but its pump call failed before it ran (`Welfare.deliver` charges first, by
+    design), or a command did not reach the line, or a recording is wrong -- the
+    line sits before the pump, so it can show neither a pump nor a tubing fault --
+    and quietly using the smaller number would hide a failing rig behind a
+    plausible total."""
     report = reconcile_report(commanded=100.0, delivered=82.0)
 
     assert report.total == 100.0, "the larger figure is used, conservatively"
     assert report.fault is not None
     assert "less than commanded" in report.fault
+    assert "the pump call failed before it ran" in report.fault
     assert "the wiring or a recording is at fault" in report.fault
-    assert "pump" not in report.fault, "the line cannot show a pump fault"
+    assert "the pump, the line or the recording is faulty" not in report.fault, (
+        "the line cannot show a pump or tubing fault"
+    )
+    assert "tubing" not in report.fault
 
 
 # --- validation separated from application (PI, 2026-09-19) ------------------

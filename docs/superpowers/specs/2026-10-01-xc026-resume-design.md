@@ -102,8 +102,10 @@ On resume:
 - **A crash mid-trial** can miss only that trial's reward from the sum. That makes the shortfall,
   and so the supplement, come out larger, never smaller. *(Not the whole of it: §8a's
   correction of 2026-10-01 adds every trial that faulted.)*
-- **The pump's delivered line** is reconciled from the resume on. The restored part counts as
-  commanded (`reconcile_report` says so).
+- ~~**The pump's delivered line**~~ **The reward driver's line** (the sync box's delivered line) is
+  reconciled from the resume on. The restored part counts as commanded (`reconcile_report` says so).
+  *(Corrected 2026-10-18: the line is the signal sent to the reward driver, before the pump, and a
+  count of reward commands, not of fluid (the PI; S8 §5.1).)*
 - **A record written before this change** has no `fluid_ml`, no hand-reward `ml` and no
   `already_delivered_today`. It **cannot be resumed**: the page offers only *end*, saying why.
   Its fluid so far cannot be known, and it is never taken as zero.
@@ -226,7 +228,7 @@ none changes what the PI chose.
    end-of-session line. Schema 12 → 13.
 5. **The command's wire kind is `resume_session`**, since `resume` is already the pause's resume.
 
-Also, the pump's delivered line is not reconciled anywhere in production today
+Also, the ~~pump's delivered line~~ reward driver's line *(corrected 2026-10-18, as in §4)* is not reconciled anywhere in production today
 (`Welfare.reconcile` is called only by tests), so §4's sentence on it describes nothing to carry.
 The hand-reward row already carries `ml` (§4 item 2). Only its reading on resume is new.
 

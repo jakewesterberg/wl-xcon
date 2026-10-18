@@ -447,8 +447,9 @@ figure was one low. In order:
   delivered line as proof of fluid**, first "Discuss first" (wl-sync says its `RWD_DLVR` record is what the reward
   driver was told, not fluid received: an unpowered driver, an empty reservoir, a blocked line all record as
   delivered), **was decided the same day**, asked in the UI. Built on branch `fluid-commands` (worktree
-  `.claude/worktrees/fluid-commands`, two commits), **not merged: its two welfare-listed changes go to the PI as one
-  welfare item before it merges.** His five answers:
+  `.claude/worktrees/fluid-commands`, three commits, reviewed), **not merged: its welfare-listed changes
+  (`bounds.py`'s message; `welfare.py`'s two comments and one docstring) go to the PI as one welfare item before it
+  merges.** His answers:
   1. What our records call the line: **"A count of reward commands"** -- "Exact count of times the pump was told to
      run, hand rewards included. Multiplied by the pump's calibration it gives fluid commanded, not fluid received,
      and the docs say so." S8 §5.1/§5.2/§6, pitfalls P17, S6 §4, the controller architecture spec §7.4 (not
@@ -460,15 +461,29 @@ figure was one low. In order:
   3. Whether it is built and in use before the first animal: **"Yes, before the first animal"** -- "An animal on
      fluid control is never run with only the command count as its record of fluid." XC-389 is an M6 gate and
      welfare-critical.
-  4. The welfare-listed text: `bounds.reconcile_report`'s fault message, **"Approve rewording"** (it now names the
-     wiring or a recording, never the pump or tubing, since the line sits before the pump; the module's AST is
-     identical with every string blanked), and the comments on `Welfare.commanded` and `Welfare.delivered`,
-     **"Approve the comment fix"** (commanded is what was asked for, not what the animal got; `welfare.py`'s AST is
-     identical), which joins the rewording as one welfare item.
+  4. The welfare-listed text, one welfare item: `bounds.reconcile_report`'s fault message, **"Approve rewording"**
+     (it names the wiring or a recording, never the pump or tubing, since the line sits before the pump; the
+     module's AST is identical with every string blanked), with the cause "a reward was counted but the pump call
+     failed before it ran" added on the branch's review, **"Add it"** (`Welfare.deliver` charges first, by design);
+     the comment on `Welfare.commanded`, **"Approve the comment fix"** (commanded is what was asked for, not what the
+     animal got); the comment on `Welfare.delivered` beside it, corrected without asking and then asked about,
+     **"Keep it"** (made exactly true: today the box ships `--fake` and nothing records the real line); and
+     `Welfare.total_today`'s docstring, **"Approve rewording"** (the day's earlier figure from wl-works, water
+     received by its rule, plus this session's commanded total). `welfare.py`'s AST is identical with that one
+     docstring blanked.
   5. The specs' "fluid delivered" for the commanded total: **"Say 'fluid commanded'"** -- "Matches your decision that
-     the total is fluid commanded. The ELN row's label change is also sent to wl-works as an ask." S9a §9, S10 §4
-     and the controller architecture spec §12.3 say so; the ask is XC-390, filed in
-     `pending-wl-works-amendments.md` and not yet delivered.
+     the total is fluid commanded. The ELN row's label change is also sent to wl-works as an ask." S9a §9 (each
+     figure in that row labeled for what it is), S10 §4 and the controller architecture spec §12.3 say so; the ask
+     is XC-390, in `pending-wl-works-amendments.md`, with item 7.
+  6. Whether the floor check uses the reservoir drop once it is read: **"Yes, use the drop once read"** -- "Written
+     into the reservoir-reading feature (XC-389) as a requirement, designed and approved with you when it is built".
+  7. **wl-works' answer** (its brainstorm queue at `ee9a58f0`, read at its `153844d0`): an ELN water entry is water
+     received to every reader, summed against the animal's minimum, so a commanded figure filed there would make a
+     dry reservoir read as a watered animal. To each of its four recommendations the PI answered **"Agree"**: a water
+     entry always means water received, whoever writes it, with commanded shown beside it and never summed in;
+     until the reservoir reading exists nothing files water automatically, the experimenter typing what was
+     received; once it exists the reservoir drop is filed as the water entry; kiosks the same. Relayed to wl-works;
+     its XC-320 (b) "fluid delivered" ask is superseded. Recorded in XC-390's ask, S8 §5.1, S10 §4 and REW-05/07.
 
   `Welfare.reconcile` is still called only by tests (reading the box's record is XC-384).
 - **Backlog IDs:** Next free is XC-391 (XC-389 and XC-390 are `fluid-commands`'; `main` reads XC-387 until that

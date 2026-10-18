@@ -332,16 +332,19 @@ class Welfare:
     deployment: Deployment
     #: What this session has commanded: what was asked for, not what the animal
     #: got. A **lower bound** on the reward commands the sync box's delivered line
-    #: counts, since a hand reward bypasses this software (P17), which is why it is
-    #: never used alone. With a pump that does not run the animal gets less than
-    #: this, which the reservoir reading checks (XC-389; the PI, 2026-10-18).
+    #: counts, since a hand reward bypasses this software (P17) -- unless a reward
+    #: was counted here but its pump call failed before it ran, since `deliver`
+    #: charges before it calls the pump -- which is why it is never used alone.
+    #: With a pump that does not run the animal gets less than this, which the
+    #: reservoir reading checks (XC-389; the PI, 2026-10-18).
     commanded: float = 0.0
     #: The sync box's delivered-line figure, when readable: a count of reward
     #: commands, hand rewards included, which through the pump's calibration is
     #: fluid commanded, not received (the PI, 2026-10-18). `None` until one
-    #: arrives. S8 open item 2 is answered (wl-sync, 2026-10-18): the record is
-    #: readable live on the sync box itself and from no other host, so nothing
-    #: here reads it yet (XC-384).
+    #: arrives. S8 open item 2 is answered (wl-sync, 2026-10-18, its §5): today
+    #: nothing records the real line, since the box ships `--fake` (its §5 item
+    #: 1); once it does, the record is readable live on the sync box itself and
+    #: from no other host. Nothing here reads it (XC-384).
     delivered: float | None = None
     deliveries: int = 0
     #: The instant the last reward was commanded, kept once the pump returns: POSIX
@@ -445,7 +448,9 @@ class Welfare:
         return reconcile(self.commanded, self.delivered)
 
     def total_today(self) -> float | None:
-        """What the animal has had today, or `None` if nobody knows."""
+        """The day's earlier figure from wl-works, `already_today` -- water received,
+        by wl-works' rule (the PI, 2026-10-18) -- plus this session's commanded total,
+        `session_total`; or `None` if nobody knows."""
         if self.already_today is None:
             return None
         return self.already_today + self.session_total()

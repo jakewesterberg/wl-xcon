@@ -145,10 +145,12 @@ reconciled away.
 > Multiplied by the pump's calibration it gives fluid commanded, not fluid received, and the docs
 > say so." So the struck sentence above said more than the line can show. The reconciliation
 > stands as a reconciliation of commands: what it gives is fluid **commanded**, hand rewards
-> included, and never fluid received. Reading the record is XC-384, whose count is exact for a day
-> whose journal shows no dropped edge. The "occasional fault" is a wiring or recording fault: the
-> line sits before the pump, so a commanded total above it can show neither a pump nor a tubing
-> fault, and `bounds.reconcile_report`'s message says so since this date.
+> included, and never fluid received. Reading the record is XC-384, whose count is exact only for a
+> day whose journal shows no dropped edge. The "occasional fault" is a reward counted whose pump call
+> failed before it ran (`Welfare.deliver` charges before it calls the pump, by design), or a wiring
+> or recording fault: the line sits before the pump, so a commanded total above it can show neither
+> a pump nor a tubing fault, and `bounds.reconcile_report`'s message says so since this date (the
+> pump-call cause added the same day: asked whether to add it, the PI chose **"Add it"**).
 >
 > **What the animal received is checked by a reservoir reading at session start and end.** The PI,
 > the same day, chose **"Reservoir reading, start and end"**: "The trainer enters the reservoir's
@@ -159,7 +161,26 @@ reconciled away.
 > evaporation, reading error), rather than guessing now"). Not yet built: XC-389. Asked the same
 > day whether it is built and in use before the first animal session on the rig (roadmap M6), the
 > PI answered **"Yes, before the first animal"**: "An animal on fluid control is never run with only
-> the command count as its record of fluid." So it is an M6 gate.
+> the command count as its record of fluid." So it is an M6 gate. And asked "Once the reservoir
+> reading exists, should that check use the reservoir drop instead?" -- the floor check, which today
+> reads `Welfare.total_today`, the day's earlier figure plus this session's commanded total -- he
+> chose **"Yes, use the drop once read"**: "Written into the reservoir-reading feature (XC-389) as a
+> requirement, designed and approved with you when it is built".
+>
+> **An ELN water entry is water received** (the PI, 2026-10-18; XC-390). Asked about it the same day,
+> `wl-works` answered that an ELN water entry is water the animal received to every reader:
+> one figure, summed against the animal's minimum and raising or withholding its care staff's
+> `water_short`, `water_unrecorded` and `water_none_yet` warnings, so a commanded figure filed there
+> "would make a dry reservoir read as a watered animal" (its brainstorm queue at `ee9a58f0`, read at
+> its `153844d0`). It recommended four rules, and the PI answered **"Agree"** to each:
+>
+> 1. a water entry always means water received, whoever writes it; commanded is the rig's own
+>    record, shown beside it and never summed in;
+> 2. until the reservoir reading exists, nothing files water automatically: the experimenter types
+>    what was received, with commanded shown beside it, labeled commanded;
+> 3. once the reading exists, the reservoir drop is filed automatically as the water entry, with
+>    commanded beside it; how wide differences are handled is designed in `wl-works`' brainstorm;
+> 4. kiosks the same: no automatic kiosk water entry from a commanded total.
 
 ### 5.2 A restart must not reset the day
 

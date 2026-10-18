@@ -85,6 +85,14 @@ transport, bearer token, `GET /health`, `POST /jobs`, same status codes and timi
 | rig → wl-works, live | session, subject, task, state, trial counts, fluid against ceiling, preflight result | **readings on `GET /health`** |
 | rig → ELN, finished | trials run, performance by condition, ~~fluid delivered~~ fluid commanded *(corrected 2026-10-18, the PI: "Say 'fluid commanded'", S8 §5.1; asked of wl-works, XC-390)*, versions, parameter-change log, abort census | **a file in the session directory**, ingested by `wl-preproc` |
 
+> **Added 2026-10-18 (the PI; [S8 §5.1](2026-08-31-S8-session-management-design.md#51-fluid-is-reconciled-not-tallied), XC-390).**
+> The finished row's fluid figure is the session's commanded total, labeled "fluid commanded", and it
+> is never an ELN water entry: an ELN water entry is water the animal **received**, whoever writes it,
+> with commanded shown beside it and never summed in. Until the reservoir reading (XC-389) exists,
+> nothing files water automatically and the experimenter types what was received; once it exists, the
+> reservoir drop is filed as the water entry. These are wl-works' four recommendations, to each of
+> which the PI answered **"Agree"**; kiosks follow the same rule.
+
 The split follows their own rules: new observables become *readings* rather than endpoints, and
 result upload is declined because *"wl.works pulls; this host never pushes."*
 

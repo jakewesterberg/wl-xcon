@@ -272,8 +272,9 @@ def reconcile_report(commanded: float, delivered: float) -> Reconciliation:
         fault = (
             f"the delivered line recorded {delivered} against {commanded} commanded, "
             f"which is less than commanded -- not every reward command the task PC "
-            f"counted reached the sync box's line, so the wiring or a recording is at "
-            f"fault, and the larger figure is used until it is explained"
+            f"counted reached the sync box's line: a reward was counted but the pump "
+            f"call failed before it ran, or the wiring or a recording is at fault, "
+            f"and the larger figure is used until it is explained"
         )
     unexplained = max(0.0, delivered - commanded)
     return Reconciliation(
