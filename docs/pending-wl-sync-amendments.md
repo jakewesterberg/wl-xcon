@@ -272,7 +272,7 @@ copies (NI, 40 kHz). A misc BNC cannot be a third channel, since the sensors are
 
 # ANSWERED 2026-10-18, later — XC-327 is drawn (wl-sync `0683ad6`)
 
-Read 2026-10-18 from wl-sync's local `main` at `0683ad6` (not yet pushed there), with `git show`: its
+Read 2026-10-18 from wl-sync's local `main` at `0683ad6` (on its origin `main` since 2026-10-18), with `git show`: its
 `HANDOVER-wl-expcontroller.md`, section "7, later on 2026-10-18: XC-327 is drawn", and
 `hardware/breakout/line-out-and-pfi-copy.md`, which cites NI's X Series User Manual 370784K-01 (May 2019) and the
 PCIe-6343 Specifications 377873B-01 (May 2026) for every figure (both read by wl-sync 2026-10-18; we have not
