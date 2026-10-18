@@ -315,8 +315,9 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    is `run.LONGEST_TRIAL_S` at the session's rate (`run.longest_trial_frames`, `run_trial`'s default),
    where it was 100,000 frames, about 417 s at 240 Hz. A trial reaching it is recorded `hang` and
    counts as **a missed acquisition** (the PI, 2026-10-11: "it isn't a fixation break, it is a missed
-   acquisition"): owed like no fixation, so repeated like a fault, and one of a flat run's N (XC-287,
-   closed); the console's changes feed says which trial and what became of it, a warning. The
+   acquisition"): counted as no fixation is (`task.HANG_COUNTS_AS`), so owed by a structure's table and
+   repeated like a fault, while the flat run's table (`scheduler.EVERY_TRIAL`, every live run until
+   C2b) spends it and it is one of the N (XC-287, closed); the console's changes feed says which trial and what became of it, a warning. The
    once-a-second checks inside a long trial are not built (XC-373).
 9. **Between trials**: what the task declares (the background by default).
 10. **Contingent changes record their delay**: decision time minus the sample's capture time (on the eye
@@ -663,10 +664,12 @@ next k" -- "One rule for every block. Repeats don't pile up at the block's end."
 within the next k trials, k the block's number of conditions and at least 3 (the PI, 2026-10-12:
 "At least 3" -- "A repeat lands 2 or 3 trials later even in a two-condition block, so its position
 is not fixed"), never the very next, a slot no other waiting repeat holds; the repeat's condition is
-not drawn otherwise while it waits; when nothing else can be drawn the earliest waiting repeat comes
-now, at once when it is the trial just broken, which the row records. **Drumming** (the PI): a
-block, or a trainer from the console for a block or a run, brings every trial that is not right --
-a correct answer or a correct rejection -- straight back until it is, and after 10 failed tries in
+not drawn otherwise while it waits; when nothing else can be drawn a waiting repeat comes now, the
+earliest unless that is the trial just broken and another waits, so a repeat comes at once only when
+it is the last condition owed, which the row records. **Drumming** (the PI): a
+block, or a trainer from the console for a block or a run, brings every trial that is not right
+straight back until it is (that a correct rejection is right, ending a drum, is the controller's
+ruling I1 on the plan's engineering review, engineering), and after 10 failed tries in
 a row of one trial the console warns, drumming going on (the PI, 2026-10-12: "After 10 in a row").
 **Judging, as the PI defined it on 2026-10-18**: a block's rule judges answers only -- right or
 wrong, a miss among them where the task makes no response an answer -- and every answer, whatever
@@ -677,13 +680,13 @@ only" (recorded `first_answers`) is on ("Every answer"), within which his answer
 and 2026-10-18 ("Judge its first answer") hold; a criterion block ends only once its criterion is
 met and every target is used up, drawing every condition past them ("Both: criterion and every
 target"), and no drum waits ("Finish the drum first"); a block whose own table counts a broken hold
-as paying -- a hold-training block -- has it judged a miss ("Yes, where the block says so"), and
+as counted -- a hold-training block -- has it judged a miss ("Yes, where the block says so"), and
 so a failure to acquire the fixation point it counts, a trial that reached the longest trial among
 them (decision 19: "Same rule as broken holds ... Lost tracking and rig faults never count against
 the animal"); a
 trial and its drummed repeats are one trial ("200 trials; drummed repeats inside them"), and the
 console counts trials with the presentations beside them. **Drumming and *clear* are training aids** ("Drumming and 'clear'"): off unless a block
-declares drumming or a trainer switches either on, a standing warning on the console while one is
+declares drumming or a trainer switches either on, a standing banner on the console (a warning outside a training session) while one is
 on, in any kind of session ("Allow it, with a warning"), and every trial's row marking them; per-
 animal training profiles to load them are XC-379. **Item 4**
 -- each trial's row records the condition before it in its block, whether its stimulus appeared,
@@ -765,7 +768,7 @@ drummed repeats one, and its `presentations` the lines written.
    `monocular-stereogram`, `wrong-setup` (without stereo content), `isoluminance-on-default`,
    `unrealizable-color`, `cone-colors-without-spectra`, `outside-range` and, by his answer of
    2026-10-12, `longer-than-declared`, and, in engine build C2a, `hold-cut-short` (a timeout that
-   can end a state before its hold completes), and `color-on-default` and `contrast-on-default` are
+   can end a state before its hold completes, one listed before the hold that ties it included), and `color-on-default` and `contrast-on-default` are
    accepted in recording. No warning the rig lists refuses any kind.
 3. **Accepted once per session**, at open, recorded. **A warning appearing during a run that its kinds do
    not accept pauses the run at the next trial**, for the operator to accept (recorded) or stop (N§R6).
