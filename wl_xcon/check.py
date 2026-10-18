@@ -3017,7 +3017,10 @@ def _holds_cut_short(trial: Trial) -> list[Finding]:
     when `target_hold` was set past `response_deadline`). **A warning, never a refusal** (the PI,
     2026-10-11: warnings over refusals), naming the state, the hold, the bound and their settings.
     Only a plain `After` is compared -- one with a `since` starts later -- and a bound naming the
-    hold's own setting cannot beat it. Each setting is read through `_span`, as every range check
+    hold's own setting cannot beat it **unless it is listed before the hold**: a state's edges are
+    evaluated in order and a tie fires on one frame, so the first listed wins it (an `After` first
+    is warned when its lowest is at most the hold's highest). It assumes the hold starts as the
+    state is entered; a state the gaze enters later is not modeled. Each setting is read through `_span`, as every range check
     is: a side its range does not bound reaches as far as that side can go, so a hold with no
     highest can be cut short by any timeout, and a timeout with no lowest can end at once."""
     params = {p.name: p for p in trial.params}
@@ -3038,9 +3041,15 @@ def _holds_cut_short(trial: Trial) -> list[Finding]:
         for hold in holds:
             for bound in bounds:
                 held, waits = span(hold.guard.seconds), span(bound.guard.seconds)
-                if held is None or waits is None or bound.guard.seconds == hold.guard.seconds:
+                if held is None or waits is None:
                     continue
-                if waits[0] < held[1]:
+                # Edges are evaluated in order and a tie fires on one frame: a timeout listed
+                # first wins it, so it beats a hold up to its highest; listed after, it must
+                # fall short of the hold's highest, and its own setting never does.
+                first = state.go.index(bound) < state.go.index(hold)
+                if not first and bound.guard.seconds == hold.guard.seconds:
+                    continue
+                if waits[0] <= held[1] if first else waits[0] < held[1]:
                     longest = (f"up to {held[1]:g} s" if math.isfinite(held[1])
                                else "with no longest declared")
                     findings.append(Finding("hold-cut-short", (

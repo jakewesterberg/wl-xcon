@@ -764,7 +764,8 @@ drummed repeats one, and its `presentations` the lines written.
    warnings gain `overlapping-windows`, `crowded-array`, `wrong-eye-criterion`,
    `monocular-stereogram`, `wrong-setup` (without stereo content), `isoluminance-on-default`,
    `unrealizable-color`, `cone-colors-without-spectra`, `outside-range` and, by his answer of
-   2026-10-12, `longer-than-declared`, and `color-on-default` and `contrast-on-default` are
+   2026-10-12, `longer-than-declared`, and, in engine build C2a, `hold-cut-short` (a timeout that
+   can end a state before its hold completes), and `color-on-default` and `contrast-on-default` are
    accepted in recording. No warning the rig lists refuses any kind.
 3. **Accepted once per session**, at open, recorded. **A warning appearing during a run that its kinds do
    not accept pauses the run at the next trial**, for the operator to accept (recorded) or stop (N§R6).

@@ -32,6 +32,7 @@ from wl_xcon.task import (
     Hold,
     ObjectWindows,
     On,
+    Onscreen,
     Outcome,
     P,
     Param,
@@ -168,6 +169,42 @@ def test_an_after_that_can_beat_a_hold_on_its_state_is_a_warning():
     assert "as soon as 0.1 s" in cut.detail and "up to 1 s" in cut.detail
     for bound in (3.0, P("target_hold")):
         assert "hold-cut-short" not in codes(verify(bound))
+    # A timeout counted from a later event starts later, and is not compared.
+    since = After(P("response_deadline"), since=Onscreen("target"))
+    late = Trial(
+        start="verify",
+        params=[Param("target_hold", unit="s", low=0.05, high=1.0),
+                Param("response_deadline", unit="s", low=0.1, high=3.0)],
+        windows=[Window("target", at=(0.0, 0.0), radius=2.0, on="fix")],
+        states=[State("verify", enter=[Show(FIX)], go=[
+            On(Hold("target", P("target_hold")), Outcome.CORRECT),
+            On(since, Outcome.NO_RESPONSE),
+        ])],
+    )
+    assert "hold-cut-short" not in codes(late)
+
+
+def _ordered(hold_first: bool, bound, held=P("target_hold")) -> Trial:
+    edges = [On(Hold("target", held), Outcome.CORRECT), On(After(bound), Outcome.NO_RESPONSE)]
+    return Trial(
+        start="verify",
+        params=[Param("target_hold", unit="s", low=0.05, high=1.0)],
+        windows=[Window("target", at=(0.0, 0.0), radius=2.0, on="fix")],
+        states=[State("verify", enter=[Show(FIX)], go=edges if hold_first else edges[::-1])],
+    )
+
+
+def test_a_timeout_listed_before_its_hold_ties_it_and_wins():
+    """A hold and an `After` of equal length fire on the same frame, and a state's edges are
+    evaluated in order: the one listed first wins. A timeout on the hold's own setting, or an equal
+    literal, is no threat when the hold is listed first, and cuts every hold off when it is not."""
+    for bound, held in ((P("target_hold"), P("target_hold")), (0.3, 0.3)):
+        assert "hold-cut-short" not in codes(_ordered(True, bound, held))
+        (cut,) = [f for f in check(_ordered(False, bound, held)) if f.code == "hold-cut-short"]
+        assert cut.is_warning and "NO_RESPONSE" in cut.detail
+    # Lowest at most the hold's highest, with the timeout first, is warned too (1.0 == 1.0).
+    assert "hold-cut-short" in codes(_ordered(False, 1.0))
+    assert "hold-cut-short" not in codes(_ordered(True, 1.0))
 
 
 def test_a_hold_with_no_highest_is_cut_short_by_any_timeout():
