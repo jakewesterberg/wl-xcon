@@ -1224,7 +1224,7 @@ def test_each_repeat_row_names_the_trial_it_shows_again_and_its_predecessor(tmp_
 
 
 def test_a_flat_run_counts_a_detection_tasks_miss_as_an_answer(tmp_path):
-    """The PI's decision 6, 2026-10-12: "'No response' in both detection tasks is a miss (counts,
+    """The PI's decision 6, 2026-10-11: "'No response' in both detection tasks is a miss (counts,
     used up)". A flat run counts by `EVERY_TRIAL`, which spends a no response; the structure
     withholds, so the miss is an answer, counted, never an abort."""
     session = _session(_spec(tmp_path, trials=400))

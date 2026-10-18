@@ -682,7 +682,10 @@ def test_no_response_is_the_structures_answer_under_a_blocks_table_too(name, wit
 
 def test_a_condition_already_paid_is_not_placed_again_when_a_trial_of_it_is_owed():
     """`record` places a repeat only for a condition that still owes: two breaks owe it again, a
-    correct trial pays it, and a late trial of it that breaks leaves `requeued` as it was."""
+    correct trial pays it, and a late trial of it that breaks leaves `requeued` as it was. Called
+    directly: `next_trial` never draws a condition that owes nothing (`_drawable`), so the guard
+    is reached only once a console clear or a repeat limit can end a debt while a repeat of it
+    waits (`Scheduler.clear`, `_forgive`; engine build C2a's Tasks 7 and 8)."""
     block = Block(name="b", conditions=[Condition("a", {}, target=1)])
     scheduler = Scheduler([block], seed=1, counting=Counting(after_stimulus=OWED))
     for outcome in (Outcome.FIXATION_BREAK, Outcome.FIXATION_BREAK, Outcome.CORRECT):

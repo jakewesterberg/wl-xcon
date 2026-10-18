@@ -259,7 +259,7 @@ class Scheduler:
         without one. **Where the structure's table makes no response an answer** (`withholding`), a
         block's own table classes `NO_RESPONSE` as it classes `FALSE_ALARM`, the withholding design's
         other wrong answer, whatever it declares for no response: what counts as an answer is the
-        structure's, as `appears` is (the PI's decision 6, 2026-10-12, "'No response' ... is a miss
+        structure's, as `appears` is (the PI's decision 6, 2026-10-11, "'No response' ... is a miss
         (counts, used up)"; the review of build C2a's Task 3)."""
         table = self._table
         if (outcome is Outcome.NO_RESPONSE and self.block.counting is not None
