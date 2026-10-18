@@ -32,9 +32,12 @@ from wl_xcon.task import (
     HARDER,
     NEITHER,
     NOT_DIFFICULTY,
+    OWED,
+    SPENT,
     STIMULUS,
     UNCHANGED,
     After,
+    Counting,
     Meaning,
     On,
     Outcome,
@@ -181,6 +184,10 @@ DEFAULTS = {
     "ConeContrast": {"L": 0.0, "M": 0.0, "S": 0.0},
     "Contrast": {"value": REQUIRED},
     "Corrugation": {"sf": 0.5, "amplitude": 0.1, "orientation": 0.0, "phase": 0.0},
+    "Counting": {
+        "after_stimulus": REQUIRED, "appears": None, "withholding": False, "outcomes": {},
+        "cap": None,
+    },
     "Cross": {"size": 0.5, "thickness": 0.1, "contrast": None, "color": None},
     "Custom": {"name": REQUIRED},
     "DKL": {"lum": 0.0, "l_m": 0.0, "s_lm": 0.0},
@@ -318,6 +325,7 @@ DEFAULTS = {
         "background_left": None,
         "background_right": None,
         "periphery": "true_angle",
+        "counting": None,
     },
     "Update": {
         "stimulus": REQUIRED,
@@ -540,3 +548,18 @@ def test_needing_a_fixed_head_is_part_of_the_task_and_not_needing_one_changes_no
     unfixed = Task(plain.structures, default=plain.default, needs_fixed_head=False)
 
     assert content_hash(fixed) != content_hash(plain) == content_hash(unfixed)
+
+
+def test_a_structures_counting_table_is_part_of_the_tasks_content():
+    """Engine build C2a: what a break after the stimulus does changes what a run's count means, so
+    it moves the hash; a structure that declares none hashes as before the field existed."""
+    plain = _task(HOLD)
+    trial = plain.structures[plain.default]
+    spent = dataclasses.replace(trial, counting=Counting(after_stimulus=SPENT))
+    owed = dataclasses.replace(trial, counting=Counting(after_stimulus=OWED))
+
+    def of(structure):
+        return content_hash(Task({plain.default: structure}, default=plain.default))
+
+    assert len({of(trial), of(spent), of(owed)}) == 3
+    assert of(trial) == content_hash(plain)

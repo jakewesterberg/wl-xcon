@@ -441,6 +441,12 @@ class Trial:
     #: One of `PERIPHERY`.
     periphery: str = "true_angle"
 
+    #: Its counting table (engine spec §16.1; engine build C2a): what each outcome does to its
+    #: condition's count. `None` is undeclared, which `check.check_task` refuses in a task's
+    #: structure (the PI, 2026-10-11: "no default; each task declares"); a bare `Trial`, a test's
+    #: or `check`'s, needs none.
+    counting: "Counting | None" = None
+
 
 @dataclass(frozen=True, slots=True)
 class Bounded:
@@ -1338,6 +1344,164 @@ class NoChoice:
 
 
 NO_CHOICE = NoChoice()
+
+
+# --- Counting and repeats (engine spec §16; engine build C2a) ---------------------------------
+#
+# What each trial does to its condition's count, declared by each trial structure (§16.1: "One
+# table classifies every outcome, per trial structure"), so the scheduler never decides an
+# experimental design: "run until ten correct" and "show the array a hundred times" are both
+# ordinary (TSK-26).
+
+#: What a trial does to its condition's count (engine spec §16.1-16.2): **counted**, an answer,
+#: paying the condition's debt; **spent**, used up -- it pays the debt as a presentation and is
+#: marked an abort; **owed**, shown again later, paying nothing; **unpaid**, paying nothing and
+#: not shown again -- the block's order draws the condition as it would have -- which is what
+#: "run until ten correct" does with a wrong answer (the PI, 2026-08-31: "wrong choice not"
+#: re-queued; §16.2: "Not repeated: wrong targets").
+COUNTED = "counted"
+SPENT = "spent"
+OWED = "owed"
+UNPAID = "unpaid"
+COUNTING_CLASSES = (COUNTED, SPENT, OWED, UNPAID)
+
+#: The right answers: a correct trial, and a correct rejection, which `codes.py` marks correct
+#: too ("A correct rejection *is* a correct trial"). What ends a drum, and what a criterion and a
+#: condition's correct count count as right (`scheduler.Scheduler.record`).
+RIGHT = frozenset({Outcome.CORRECT, Outcome.CORRECT_REJECT})
+
+#: The answers, counted in every structure (§16.1; TSK-27): the responses to the target and to a
+#: distractor, early and late ones too, and a correct rejection and a false alarm, which a task
+#: produces only where withholding is an answer.
+ANSWERS = frozenset(
+    {
+        Outcome.CORRECT,
+        Outcome.EARLY_RESPONSE,
+        Outcome.LATE_RESPONSE,
+        Outcome.WRONG_TARGET,
+        Outcome.EARLY_ERROR,
+        Outcome.LATE_ERROR,
+        Outcome.CORRECT_REJECT,
+        Outcome.FALSE_ALARM,
+    }
+)
+
+#: Ending before the decision, the animal not engaging or the rig failing: owed by default (§16.2;
+#: TSK-29), so the condition still gets its datum.
+REPEATED = frozenset(
+    {Outcome.FIXATION_BREAK, Outcome.NO_FIXATION, Outcome.TRACKER_LOST, Outcome.FAULT}
+)
+
+#: The breaks after the stimulus appears (§16.2's "other breaks"): leaving the target, a catch
+#: trial's or a motion's break, a long blink, and looking elsewhere (`ABORT`, which is no break but
+#: ends a trial after the stimulus as one does). **No default** (the PI, 2026-10-11): each
+#: structure says whether they are spent or owed (`Counting.after_stimulus`). One that ends a trial
+#: before its stimulus appeared is owed, as a fixation break is, unless the table gives the outcome
+#: a class of its own (`Counting.of`).
+AFTER_STIMULUS = frozenset(
+    {
+        Outcome.TARGET_BREAK,
+        Outcome.CATCH_BREAK,
+        Outcome.MOTION_BREAK,
+        Outcome.BLINK_BREAK,
+        Outcome.ABORT,
+    }
+)
+
+#: What a trial that reached the longest trial counts as (engine spec §6.8; `run.LONGEST_TRIAL_S`):
+#: **a missed acquisition** (the PI, 2026-10-11: "it isn't a fixation break, it is a missed
+#: acquisition"), `NO_FIXATION`'s class -- owed unless the structure says otherwise, so it is
+#: repeated like a fault. Its record still says `hang` (§6.8), which `resume`, `health` and the
+#: page read.
+HANG_COUNTS_AS = Outcome.NO_FIXATION
+
+
+@dataclass(frozen=True, slots=True)
+class Counting:
+    """One trial structure's counting table (engine spec §16.1-16.2): what each outcome does to its
+    condition's count, as four declarations.
+
+    - `after_stimulus`: whether a break after the stimulus appears (`AFTER_STIMULUS`, and no
+      response where withholding is not an answer) is `SPENT` -- used up, counted as presented
+      and marked an abort -- or `OWED`, shown again. **Required, with no default** (the PI,
+      2026-10-11: "no default; each task declares"); `check.check_task` refuses a task's structure
+      without a table.
+    - `appears`: the state the stimulus appears in -- the target's or the array's, a cued task's
+      cue (the PI, 2026-10-13: "Task names it, required") -- so a break before the trial reached
+      it ended the trial before anything was presented. `check.check_task` refuses a task's
+      structure whose table names none, or a state it does not have; a table a block counts by
+      (`scheduler.Block.counting`) names none, the structure's own saying where its stimulus
+      appears.
+    - `withholding`: whether not answering is an answer here (detection, catch trials, go/no-go), so
+      no response is a miss, counted (§16.1; the PI, 2026-10-11, for both detection tasks).
+    - `outcomes`: an outcome's class where it differs from those rules, by its wire string
+      (`Outcome.value`): a training block counting a fixation break as an error, or "run until ten
+      correct" leaving every answer but a right one unpaid.
+    - `cap`: how many failed repeats in a row of one trial of a condition are allowed before its
+      remaining debt is forgiven, its shortfall recorded and shown (§16.6, as the PI read it on
+      2026-10-12: "The condition is moved past after 3 failed repeats in a row, and the count
+      resets once it is done"); `None`, no limit, repeated until done (the PI, 2026-10-11), with
+      the console's *clear* to move past one by hand.
+
+    Every answer (`ANSWERS`) is counted and every outcome of `REPEATED` owed, unless `outcomes` says
+    otherwise; `of` reads the table."""
+
+    after_stimulus: str
+    appears: "str | None" = None
+    withholding: bool = False
+    outcomes: "dict[str, str]" = field(default_factory=dict)
+    cap: "int | None" = None
+
+    def __post_init__(self) -> None:
+        if self.after_stimulus not in (SPENT, OWED):
+            raise ValueError(
+                f"a break after the stimulus is {SPENT} (used up) or {OWED} (shown again), not "
+                f"{self.after_stimulus!r}"
+            )
+        if self.appears is not None and (not isinstance(self.appears, str) or not self.appears):
+            raise ValueError(
+                f"a counting table's appears names the state its stimulus appears in, not "
+                f"{self.appears!r}"
+            )
+        if not isinstance(self.withholding, bool):
+            raise ValueError("a counting table's withholding is True or False")
+        if not isinstance(self.outcomes, dict):
+            raise ValueError("a counting table's outcomes are a dict of outcome names to classes")
+        names = {outcome.value for outcome in Outcome}
+        for name, kind in self.outcomes.items():
+            if name not in names:
+                raise ValueError(
+                    f"{name!r} is not an outcome; the outcomes are {', '.join(sorted(names))}"
+                )
+            if kind not in COUNTING_CLASSES:
+                raise ValueError(
+                    f"an outcome is {', '.join(COUNTING_CLASSES)}, and {name!r} is given {kind!r}"
+                )
+        if self.cap is not None and (
+            isinstance(self.cap, bool) or not isinstance(self.cap, int) or self.cap < 0
+        ):
+            raise ValueError(
+                f"a repeat cap is a whole number of repeats, 0 or more, or None for no limit; not "
+                f"{self.cap!r}"
+            )
+
+    def of(self, outcome: "Outcome | None", shown: bool = True) -> str:
+        """What `outcome` does to its condition's count. `None`, a trial that reached the longest
+        trial, counts as `HANG_COUNTS_AS`. `shown` is whether the trial's stimulus had appeared
+        (`taskd`: the trial entered the state the structure's table names, `appears`): a break
+        before it ended the trial before anything was presented, so it is owed, as a fixation
+        break is, whatever `after_stimulus` says -- though a class `outcomes` gives the outcome
+        still decides it."""
+        if outcome is None:
+            outcome = HANG_COUNTS_AS
+        declared = self.outcomes.get(outcome.value)
+        if declared is not None:
+            return declared
+        if outcome in ANSWERS or (outcome is Outcome.NO_RESPONSE and self.withholding):
+            return COUNTED
+        if outcome in REPEATED or not shown:
+            return OWED
+        return self.after_stimulus
 
 
 @dataclass(frozen=True, slots=True)
