@@ -218,6 +218,10 @@ this list because a plausible mistake in any — the limit asked on one path and
 other, a paused session that forgot to ask, a reward given while trials run, given outside
 a run where no session is open to count it, or paid from another entry — ends a session
 late or rewards an animal when nobody meant it to, and passes every refusal `welfare` has.
+*2026-10-18: the PI approved passing the `MANUAL_REWARD` number `_manual_reward` emitted into its
+`_control` call, so the reward's row in `controls.jsonl` says which code it strobed (wl-preproc's ask,
+XC-321 ask 1); a record-only change, since nothing about how much is given, when, or what is refused
+moved.*
 
 **The other two `taskd` functions are `Session.set`, whole, and `Session._schedule`; the
 line is `Session._command`'s `except (Exceeded, TypeError) as refused:`; and the `link`

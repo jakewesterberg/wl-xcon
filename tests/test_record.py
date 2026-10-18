@@ -258,7 +258,8 @@ def test_a_parameter_change_is_recorded_against_the_sequence_number_it_strobed(t
     values live here (S2 §5.2). If the two disagree the change cannot be placed on
     the recording clock at all, so the join is the whole point."""
     record = SessionRecord.open(tmp_path, session_id="2027-01-14_01", subject="A")
-    record.parameter_change(sequence=7, name="fix_hold", was=0.3, now=0.5, by=Box("console"))
+    record.parameter_change(sequence=7, name="fix_hold", was=0.3, now=0.5, by=Box("console"),
+                              event_code=4130)
 
     row = json.loads(
         (tmp_path / "2027-01-14_01" / "xcon" / "parameter_changes.jsonl")
@@ -273,8 +274,8 @@ def test_a_control_row_holds_its_actors_map_and_null_for_nobody(tmp_path):
     """b2b spec §6: the record writes `actor.to_map`'s form, and a mark's stamp, whose
     sender arrives with its note, is null -- never a placeholder name."""
     record = SessionRecord.open(tmp_path, session_id="2027-01-14_01", subject="A")
-    record.control("mark", None, 1_700_000_000.0, 3, mark=7)
-    record.control("pause", Box("jake"), 1_700_000_001.0, 3)
+    record.control("mark", None, 1_700_000_000.0, 3, event_code=4133, mark=7)
+    record.control("pause", Box("jake"), 1_700_000_001.0, 3, event_code=4131)
 
     stamp, pause = [
         json.loads(line) for line in (record.directory / CONTROLS).read_text().splitlines()
@@ -289,7 +290,7 @@ def test_a_control_row_refuses_a_by_that_is_a_string(tmp_path):
     record = SessionRecord.open(tmp_path, session_id="2027-01-14_01", subject="A")
 
     with pytest.raises(TypeError):
-        record.control("pause", "jake", 1_700_000_001.0, 3)
+        record.control("pause", "jake", 1_700_000_001.0, 3, event_code=4131)
 
 
 def test_a_crash_leaves_every_trial_written_so_far(tmp_path):
