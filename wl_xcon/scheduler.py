@@ -160,7 +160,7 @@ class Block:
     criterion_over: frozenset | None = None
     order: Order = field(default_factory=Shuffled)
     #: **Drumming** (the PI, 2026-10-11: "a training tool ... where a trial is repeated until
-    #: correct"): every trial of this block that is not correct comes back at once, paying nothing,
+    #: correct"): every trial of this block that is not right comes back at once, paying nothing,
     #: until it is. A trainer switches it on or off for a block or a run from the console as well
     #: (`Scheduler.drum`).
     drum: bool = False
@@ -239,6 +239,9 @@ class Scheduler:
     _carried: bool = field(init=False, default=False, repr=False)
     #: Failed tries in a row of the trial being drummed, its first try included.
     _tries: int = field(init=False, default=0, repr=False)
+    #: Whether this drum chain (a trial's first try and its drummed repeats) has had an answer
+    #: judged.
+    _answered: bool = field(init=False, default=False, repr=False)
 
     def __post_init__(self) -> None:
         self._rng = random.Random(self.seed)
@@ -477,7 +480,7 @@ class Scheduler:
         appeared (`task.Counting.of`). A right answer (`task.RIGHT`: correct, or a correct
         rejection) is right for the criterion and the correct count. While drumming, a trial that
         is not right is `OWED` and comes back at once, whatever its table says, and only a trial's
-        first try is judged. An owed trial of a condition that has failed as many repeats in a row
+        first answer is judged. An owed trial of a condition that has failed as many repeats in a row
         as its table's limit allows (`task.Counting.cap`) is not repeated again: its remaining debt
         is forgiven, a `Shortfall` (§16.6)."""
         counts = self._counts[condition]
@@ -485,9 +488,14 @@ class Scheduler:
         first_try = self.drawn is None or not self.drawn.drummed
         over = self.block.criterion_over
         judged = (outcome in over) if over is not None else kind == COUNTED
-        if judged and first_try:
-            # **Only a trial's first try is judged** (the PI, 2026-10-12, "Leave drummed repeats
-            # out"): a drum's repeat is recorded as what it was and never judged.
+        if first_try:
+            self._answered = False
+        if judged and not self._answered:
+            # **Only a trial's first answer is judged** (the PI, 2026-10-12, "Leave drummed repeats
+            # out", and 2026-10-18, "Judge its first answer"): a drum's repeat after a wrong answer
+            # is recorded as what it was and never judged; after a try that ended before any answer
+            # -- a break, no fixation, a hang -- it is the trial's first answer, and is judged.
+            self._answered = True
             self._window.append(1 if outcome in RIGHT else 0)
             if self.block.criterion is not None:
                 while len(self._window) > self.block.criterion[1]:

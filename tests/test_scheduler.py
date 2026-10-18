@@ -762,6 +762,7 @@ def test_a_drummed_trial_comes_back_at_once_until_it_is_correct():
     assert [(d.repeat_of, d.at_once, d.drummed, d.drumming) for d in draws] == [
         (0, True, True, "block"), (1, True, True, "block")]
     assert scheduler.owed(first.name) == 1 and scheduler.counts(first.name).spent == 0
+    assert scheduler.requeued == [first.name, first.name], "each failed try is logged as owed"
 
 
 def test_only_a_trials_first_try_is_judged_for_the_criterion_under_drumming():
@@ -778,6 +779,42 @@ def test_only_a_trials_first_try_is_judged_for_the_criterion_under_drumming():
     assert scheduler.drawn.drummed and not scheduler.finished, "one first try, not two"
     scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
     assert scheduler.finished, "two first tries, half of them right"
+
+
+def _chain(*outcomes) -> list:
+    """The criterion window after one drummed trial's tries, each of `outcomes` in turn."""
+    scheduler = Scheduler(
+        [Block(name="b", conditions=[Condition("a", {}, target=100)], criterion=(0.9, 5),
+               drum=True)], seed=1)
+    for outcome in outcomes:
+        scheduler.record(scheduler.next_trial().name, outcome)
+    return list(scheduler._window)
+
+
+def test_a_drummed_trials_first_answer_is_judged_when_its_first_try_ended_before_one():
+    """The PI, 2026-10-18, "Judge its first answer": "If the first try ends before any answer, the
+    first try that does answer is judged. Repeats after a wrong answer stay out." Leaving it out
+    left the harder trials of an animal that breaks when unsure out of its criterion."""
+    assert _chain(Outcome.FIXATION_BREAK, Outcome.CORRECT) == [1]
+    assert _chain(Outcome.FIXATION_BREAK, Outcome.WRONG_TARGET, Outcome.CORRECT) == [0]
+    assert _chain(Outcome.WRONG_TARGET, Outcome.CORRECT) == [0]
+    assert _chain(Outcome.CORRECT, Outcome.FIXATION_BREAK, Outcome.CORRECT) == [1, 1], "two trials"
+
+
+def test_a_drummed_block_that_ends_on_a_wrong_first_try_opens_the_next_with_its_own_condition():
+    """A criterion met on a wrong first try leaves a drum waiting; the next block must not draw it
+    (its condition is not the next block's: `next_trial` raised `StopIteration`)."""
+    blocks = [Block(name="A", conditions=[Condition("a", {}, target=100)], criterion=(0.5, 2),
+                    drum=True),
+              Block(name="B", conditions=[Condition("b", {}, target=2)])]
+    scheduler = Scheduler(blocks, seed=1)
+    for outcome in (Outcome.CORRECT, Outcome.WRONG_TARGET):
+        scheduler.record(scheduler.next_trial().name, outcome)
+    assert scheduler.finished and scheduler.drum_tries == 1, "a drum is waiting"
+
+    scheduler.advance()
+
+    assert scheduler.next_trial().name == "b" and not scheduler.drawn.drummed
 
 
 def test_a_drummed_catch_condition_finishes_on_correct_rejections():
@@ -840,7 +877,7 @@ def test_a_switch_made_as_a_block_finishes_is_for_the_next_block():
     """The loop drains a trainer's commands before it advances, so a switch that arrives as a block
     finishes is for the next block, and says which (the engineering review's Minor 10: it was
     lost, its control row naming the block that had ended)."""
-    blocks = [Block(name=n, conditions=[Condition(n.lower(), {}, target=1)]) for n in "AB"]
+    blocks = [Block(name=n, conditions=[Condition(n.lower(), {}, target=1)]) for n in "ABC"]
     scheduler = Scheduler(blocks, seed=1)
     scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
     assert scheduler.finished
@@ -849,6 +886,12 @@ def test_a_switch_made_as_a_block_finishes_is_for_the_next_block():
     scheduler.advance()
 
     assert (said, scheduler.block.name, scheduler.drumming) == ("B", "B", "block")
+    scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
+    scheduler.advance()
+    assert (scheduler.block.name, scheduler.drumming) == ("C", None), "the switch was B's alone"
+    scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
+    assert scheduler.done
+    assert scheduler.drum("off") == "C", "the last block has no next: the switch is its own"
 
 
 # --- block progression ------------------------------------------------------
