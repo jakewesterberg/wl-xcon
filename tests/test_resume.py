@@ -276,12 +276,13 @@ def test_a_restored_tally_counts_each_drummed_try_and_the_right_ones_among_them(
     _jsonl(directory / "trials.jsonl", [
         _line(1, "wrong_target", 0.0, None, run=0),
         {**_line(2, "correct", 0.2, DEPARTURE + 100, run=0), "drummed": True},
-        _line(3, "correct", 0.25, DEPARTURE + 300, run=1),
+        {**_line(3, "wrong_target", 0.22, DEPARTURE + 200, run=0), "drummed": True},
+        _line(4, "correct", 0.25, DEPARTURE + 300, run=1),
     ])
 
     tally = read(directory, DEPARTURE).levels.session_tally
 
-    assert (sum(tally.outcomes.values()), tally.drummed, tally.right_drummed) == (3, 1, 1)
+    assert (sum(tally.outcomes.values()), tally.drummed, tally.right_drummed) == (4, 2, 1)
 
 
 def test_a_restored_tally_counts_hangs(tmp_path):

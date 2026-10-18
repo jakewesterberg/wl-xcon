@@ -1156,11 +1156,27 @@ def test_a_hold_training_block_judges_a_broken_hold_it_scores_as_a_miss():
 
     assert list(scored._window) == [1] + [0] * 9 and not scored.finished
     assert list(plain._window) == [1] * 10
+    # A scored break is a miss in the condition's own counts too, not only in the window.
+    assert [(r.right, r.wrong) for r in scored.block_report] == [(10, 90)]
+    assert [(r.right, r.wrong) for r in plain.block_report] == [(10, 0)]
 
     for outcome in (Outcome.FAULT, Outcome.TRACKER_LOST):
         before = list(scored._window)
         scored.record(scored.next_trial().name, outcome)
         assert list(scored._window) == before
+
+
+def test_an_ordinary_repeat_is_a_trial_of_its_own_in_the_conditions_counts():
+    """Appendix B 19: "an ordinary repeat -- a break shown again a few trials later -- is a trial of
+    its own", counted with the trials and not with the one it repeats: a break, then its repeat
+    right, are two trials of which one was right first time."""
+    scheduler = Scheduler([Block(name="b", conditions=[Condition("a", {}, target=1)])], seed=1)
+    scheduler.record(scheduler.next_trial().name, Outcome.FIXATION_BREAK)
+    scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
+
+    (report,) = scheduler.block_report
+    assert scheduler.drawn.repeat_of is not None
+    assert (report.trials, report.right_first) == (2, 1)
 
 
 def test_a_block_that_trains_acquiring_fixation_judges_a_failure_to_acquire_it_scores_as_a_miss():

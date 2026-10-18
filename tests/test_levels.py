@@ -58,13 +58,13 @@ def test_a_drummed_try_is_counted_at_every_level_with_the_right_ones_among_them(
     levels = Levels()
     levels.start_run(FIX)
     for outcome, drummed in ((Outcome.WRONG_TARGET, False), (Outcome.CORRECT, True),
-                             (Outcome.CORRECT, False)):
+                             (Outcome.WRONG_TARGET, True), (Outcome.CORRECT, False)):
         levels.start_trial()
         levels.end_trial(_result(outcome), drummed=drummed)
 
     for tally in (levels.session_tally, levels.task_tallies["fixation_detection"],
                   levels.block_tally):
-        assert (sum(tally.outcomes.values()), tally.drummed, tally.right_drummed) == (3, 1, 1)
+        assert (sum(tally.outcomes.values()), tally.drummed, tally.right_drummed) == (4, 2, 1)
 
 
 def test_a_block_opens_with_its_first_trial():

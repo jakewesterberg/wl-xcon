@@ -214,7 +214,9 @@ class ConditionReport:
     the trials whose first try was right; what it still `owed`, the ordinary `repeats` placed, the
     trials `moved_past` -- forgiven by its repeat limit or a person's clear -- and whether its limit
     flagged it as `possible_avoidance`; its `drummed` tries, and `failing`, the failed tries in a
-    row of its trial being drummed now."""
+    row of its trial being drummed now (one still in flight counts). **A run that ends in a fault can
+    leave these counts one try ahead of the lines written**: a try is counted by `Scheduler.record`
+    before its line is written, so a fault between the two leaves it counted and without a line."""
 
     block: str
     condition: str
@@ -384,11 +386,16 @@ class Scheduler:
     def _report(self, condition: str) -> ConditionReport:
         counts = self._counts[condition]
         waiting = self._drum is not None and self._drum[0] == condition
+        # **A drummed try still in flight counts too**: `next_trial` cleared `_drum` at its draw, so
+        # a run that faults or is stopped mid-try would otherwise read 0 failed tries in a row.
+        flying = (self.drawn is not None and self.drawn.drummed
+                  and self.drawn.condition.name == condition
+                  and counts.attempted > counts.presented)
         return ConditionReport(
             self.block.name, condition, counts.trials, counts.presented, counts.right,
             counts.wrong, counts.right_first, self.owed(condition), counts.repeats,
             counts.forgiven, counts.flagged, counts.presented - counts.trials,
-            self.drum_tries if waiting else 0,
+            self._tries if waiting or flying else 0,
         )
 
     @property

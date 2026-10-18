@@ -1345,6 +1345,9 @@ def test_a_trial_that_faults_is_in_neither_the_end_rows_counts_nor_its_condition
     assert (end["stop_kind"], len(_trial_rows(session))) == ("fault", 4)
     assert (end["trials"], end["presentations"]) == (1, 4)
     assert (counts["trials"], counts["presentations"], counts["drummed"]) == (1, 4, 3)
+    # The fifth try is in flight, so the trial has failed four in a row (`next_trial` cleared the
+    # drum at its draw).
+    assert counts["failing"] == 4
 
 
 def test_a_drum_failing_as_its_run_is_stopped_is_on_the_end_row(tmp_path, monkeypatch):

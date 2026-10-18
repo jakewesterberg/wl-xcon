@@ -2791,7 +2791,11 @@ class Session:
                         # trial and its drummed repeats one, and presentations; its right and wrong
                         # answers and right first time; what it owes, its repeats, the trials moved
                         # past and the flag; its drummed tries, and the failed tries in a row
-                        # of one being drummed as the run ended.
+                        # of one being drummed as the run ended. **`presentations` here counts
+                        # tries recorded, not lines written**: a run ending in a fault can leave
+                        # these counts one try ahead of `trials.jsonl`, whose lines the end row's
+                        # own `presentations` counts (ruling M5; a fault between
+                        # `scheduler.record` and the line's write).
                         conditions=[
                             {
                                 "block": report.block,
