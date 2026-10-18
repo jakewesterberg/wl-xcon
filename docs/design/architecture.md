@@ -242,8 +242,8 @@ of a session (item 4); like `main`'s `confirmed=` line, it is one line, and with
 that function is ordinary. Since engine build C2a three branches of that rest, beside the pause,
 hand `ClearOwed`, `Drum` and `Training` to `Session._clear`, `_drum` and `_train`, which are not on
 this list and touch no reward, bounded setting, clock or pump; `_hold` drains through `_command`, so
-one sent while paused is applied while paused (the PI approved the first two with the plan and the
-third on 2026-10-18: the engine C2a plan's Appendix A, items 1 and 4). `_schedule` fixes the target `_ends` compares against — a
+one sent while paused is applied while paused (the PI approved the first two with the plan on 2026-10-13 and
+the third on 2026-10-18: the engine C2a plan's Appendix A, items 1 and 4). `_schedule` fixes the target `_ends` compares against — a
 trial count from the trial about to run, an instant on the session's clock, or mL this
 session, refused when already reached — so a wrong target ends a session early or late
 while every check in `_ends` passes.
