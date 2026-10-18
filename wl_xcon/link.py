@@ -163,7 +163,7 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: `first_answers`, the training aid *clear* and the percentage setting; `Telemetry.conditions`,
 #: each condition's counts as `ConditionRow`s; each level's `Counts.drummed` and `right_drummed`;
 #: and `Telemetry.trials`, the run's trials, a trial and its drummed repeats one; `aids`, the
-#: training aids on; `streak`, whether the open block's rule is a streak; and `past_targets`,
+#: training aids on; `rule`, the kind of the open block's rule (`"streak"`, `"percentage"` or none); and `past_targets`,
 #: whether a criterion block draws past its targets. A reader of 15 refuses 16 and 16 refuses 15,
 #: by name.
 SCHEMA = 16
@@ -772,9 +772,11 @@ class Telemetry:
     trials: int
     #: `scheduler.aids` (schema 16): the training aids on, which the page's standing warning names.
     aids: tuple
-    #: `scheduler.streak` (schema 16): whether the open block's rule is a streak, so the page says
-    #: the first-answers switch changes nothing there (the controller's ruling M4).
-    streak: bool
+    #: The kind of the open block's rule (schema 16): `"streak"`, `"percentage"` or `None` for a
+    #: block with no rule (a flat run of N). The first-answers switch acts only under a
+    #: percentage, so the page says it changes nothing under the other two (the controller's
+    #: ruling M4; Task 9's fix round, Important 3).
+    rule: str | None
     #: `scheduler.past_targets`, while the block is not finished (schema 16): a criterion block
     #: drawing every condition until its criterion is met.
     past_targets: bool
@@ -971,7 +973,8 @@ class Telemetry:
             ),
             trials=0 if scheduler is None else scheduler.trials,
             aids=() if scheduler is None else scheduler.aids,
-            streak=scheduler is not None and scheduler.streak,
+            rule=(None if scheduler is None or scheduler.block.criterion is None
+                  else "streak" if scheduler.streak else "percentage"),
             past_targets=(scheduler is not None and scheduler.past_targets
                           and not scheduler.finished),
         )
@@ -1217,7 +1220,7 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
         ],
         "trials": telemetry.trials,
         "aids": list(telemetry.aids),
-        "streak": telemetry.streak,
+        "rule": telemetry.rule,
         "past_targets": telemetry.past_targets,
     }
 
@@ -1428,7 +1431,7 @@ def _telemetry_from(data: dict) -> Telemetry:
         conditions=tuple(ConditionRow(**row) for row in data["conditions"]),
         trials=data["trials"],
         aids=tuple(data["aids"]),
-        streak=data["streak"],
+        rule=data["rule"],
         past_targets=data["past_targets"],
     )
 

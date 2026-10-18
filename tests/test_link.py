@@ -2641,17 +2641,23 @@ def test_schema_16_carries_each_shortfall_drumming_the_training_aids_and_each_co
         drumming="run",
         clearable=False,
         clearing=True,
-        first_answers=True,
+        first_answers=False,
         conditions=(ConditionRow("near", 12, 15, 9, 4, 8, 2, 3, 1, True, 3, 2),),
         trials=12,
         aids=("drumming", "clear"),
-        streak=True,
-        past_targets=True,
+        rule="percentage",
+        past_targets=False,
     )
     sent = replace(sent, performance=replace(
         sent.performance, session=Counts({"correct": 9}, 0, drummed=3, right_drummed=2)))
 
     assert decode(encode(sent)) == sent
+    # The paired booleans differ above, so a swap in the reader cannot go unseen; and each alone.
+    for alone in ("clearing", "first_answers", "past_targets"):
+        flags = {"clearing": False, "first_answers": False, "past_targets": False, alone: True}
+        only = replace(sent, rule="streak", **flags)
+        assert decode(encode(only)) == only
+    assert decode(encode(replace(sent, rule=None))).rule is None
     with pytest.raises(SchemaMismatch, match="carried schema 15 and this console reads schema 16"):
         decode(encode(replace(sent, schema=15)))
 
@@ -2677,8 +2683,8 @@ def test_a_frame_names_every_condition_of_the_open_block_and_its_scheduler_s_sho
     assert frame.owed[other] == {"near": 0, "far": 1}[other]
     assert frame.shortfalls == (ShortfallRow("b", other, 1, "cleared", False, Box("jake"), 0),)
     assert (frame.drumming, frame.clearing, frame.first_answers) == ("block", True, False)
-    assert (frame.trials, frame.aids, frame.streak, frame.past_targets) == (
-        1, ("drumming", "clear"), False, False)
+    assert (frame.trials, frame.aids, frame.rule, frame.past_targets) == (
+        1, ("drumming", "clear"), None, False)
     assert [(row.condition, row.trials, row.right, row.owed, row.moved_past)
             for row in frame.conditions] == [
         (name, int(name == paid), int(name == paid), frame.owed[name], int(name == other))
@@ -2702,6 +2708,19 @@ def test_a_frame_says_whether_a_trial_of_the_open_block_can_be_cleared():
     assert clearable(flat)
 
 
+def test_a_frame_names_the_open_blocks_rule_as_none_a_streak_or_a_percentage():
+    """Important 3 of Task 9's fix round: the first-answers switch acts only under a percentage,
+    so the frame carries the rule's kind -- a flat run of N has none."""
+    def rule(**block) -> str | None:
+        scheduler = Scheduler([Block(name="b", conditions=[Condition("near", {}, target=3)],
+                                     **block)])
+        session = _session_with(delivered_ml=1.0, already_today=None)
+        return Telemetry.of(session, Tally(), scheduler, index=1).rule
+
+    assert (rule(), rule(criterion=(1.0, 2)), rule(criterion=(0.8, 5))) == (
+        None, "streak", "percentage")
+
+
 def test_a_frame_says_a_criterion_block_is_past_its_targets_and_whether_its_rule_is_a_streak():
     """The controller's rulings on the plan's revision review: past a criterion block's targets the
     page says it draws until the criterion is met, and in a block whose rule is a streak the
@@ -2714,7 +2733,7 @@ def test_a_frame_says_a_criterion_block_is_past_its_targets_and_whether_its_rule
         return Telemetry.of(session, Tally(), scheduler, index=1)
 
     scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
-    assert (frame().past_targets, frame().streak) == (True, True)
+    assert (frame().past_targets, frame().rule) == (True, "streak")
     scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
     assert scheduler.finished and not frame().past_targets
 

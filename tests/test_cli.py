@@ -1182,13 +1182,13 @@ def _telemetry(**overrides) -> Telemetry:
         warnings=(),
         shortfalls=(),  # schema 16's: nothing forgiven, nothing drummed, a block that can owe,
         drumming=None,  # the training aids off, and no condition's counts; as many trials as
-        clearable=True,  # presentations; no streak, and no block past its targets
+        clearable=True,  # presentations; no rule, and no block past its targets
         clearing=False,
         first_answers=False,
         conditions=(),
         trials=3,
         aids=(),
-        streak=False,
+        rule=None,
         past_targets=False,
     )
     return replace(base, **overrides) if overrides else base

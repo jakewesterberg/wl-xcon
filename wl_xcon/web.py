@@ -1117,7 +1117,7 @@ def _need(frame: Telemetry | None, view: View) -> str:
         if condition in counted:
             rows.append(_counted(counted[condition]))
     rows = rows or ['<span class="nm">nothing still needed</span>']
-    if frame.past_targets:
+    if live and frame.past_targets:
         # Past a criterion block's targets nothing is owed, and every condition comes until the
         # criterion is met (the PI, 2026-10-18; the controller's smaller ruling).
         rows.append('<div class="kv"><span class="nm">every target used up: drawing until the '
@@ -1126,7 +1126,7 @@ def _need(frame: Telemetry | None, view: View) -> str:
         why = (f"cleared by {_who(short.by)}" if short.because == "cleared"
                else _FORGIVEN.get(short.because, _e(short.because)))
         rows.append(
-            f'<div class="kv"><span class="mono">{_e(short.condition)}</span>'
+            f'<div class="kv"><span class="mono keep">{_e(short.condition)}</span>'
             f'<span class="nm">{_e(short.trials)} short in {_e(short.block)} · {why}</span></div>'
         )
     if live:
@@ -1142,18 +1142,24 @@ def _need(frame: Telemetry | None, view: View) -> str:
         if frame.clearing:
             # The controller's ruling M4: on where nothing in the run can be cleared, it says so.
             said = ("clear is on" if frame.clearable
-                    else "clear is on, but nothing in this run can be cleared")
+                    else "clear is on, but nothing in this block can be cleared")
             clear = (said, "0", "switch clear off")
         else:
             clear = ("clear is off", "1", "switch clear on")
-        judged = (("a percentage counts first answers only", "0", "count every answer")
+        # The switch acts only in a block whose rule is a percentage (`Scheduler._first_answers`),
+        # so its label names the block's percentage, not the strip's, and a block with another
+        # rule, or none, says it changes nothing (the controller's ruling M4; Task 9's fix round).
+        judged = (("a percentage counts first answers only", "0",
+                   "the block's percentage: count every answer")
                   if frame.first_answers
                   else ("a percentage counts every answer, drummed too", "1",
-                        "count first answers only"))
-        if frame.streak:
-            # The controller's ruling M4: a streak judges every try whatever the setting.
+                        "the block's percentage: count first answers only"))
+        if frame.rule == "streak":
             judged = (f"{judged[0]} -- a streak counts every try, so this changes nothing in this "
                       f"block", *judged[1:])
+        elif frame.rule is None:
+            judged = ("this block has no percentage rule, so this changes nothing here",
+                      *judged[1:])
         for setting, (said, on, label) in (("clear", clear), ("first_answers", judged)):
             rows.append(
                 f'<div class="kv"><span class="nm">{said}</span><button type="button" class="btn" '
@@ -1815,6 +1821,8 @@ h3 { margin: 0; font-family: var(--cond); font-weight: 600; font-size: 11.5px; l
 .fam { display: grid; gap: 1px; align-content: start; }
 .kv { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
 .kv > span { min-width: 0; overflow-wrap: anywhere; }
+.kv > .keep { overflow-wrap: normal; white-space: nowrap; flex-shrink: 0; }
+.kv > .btn { flex-shrink: 0; }
 .owe { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; background: var(--accent-soft); border-radius: 6px; padding: 8px 10px; }
 .params { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
 .param { border: 1px solid var(--rule); border-radius: 5px; padding: 6px 8px; display: grid; gap: 2px; background: var(--surface-2); }
@@ -2433,6 +2441,10 @@ _SCRIPT = """
   // leaving the button live again before a double click's second click lands.
   var REWARD_HOLD_MS = 1000;
   var lastRewardAt = -Infinity;
+  // A clear is held as a reward is (Task 9's fix round): the button stays until the next trial
+  // boundary, so a double click, or two quick ones, cleared two trials. Kept per button -- the
+  // condition and whether it is *the rest* -- so *clear one* then *the rest* still go.
+  var lastClearAt = {};
   // P4d-2b b3a-2 (spec §6.2). The last open and the last return this page sent, kept so
   // an answer to the warning they raise re-sends the same typed time with it -- the rig
   // takes an answer only for the time it asked about (`service._unasked`); the unknown
@@ -2843,6 +2855,12 @@ _SCRIPT = """
     lastRewardAt = now;
     return true;
   }
+  function clearAllowed(detail, key) {
+    var now = performance.now();
+    if (detail > 1 || now - (lastClearAt[key] || -Infinity) < REWARD_HOLD_MS) { return false; }
+    lastClearAt[key] = now;
+    return true;
+  }
   function pauseOrResume() {
     var button = el("controls").querySelector('[data-cmd="pause"], [data-cmd="resume"]');
     // No click to read a detail from a key press, so 1 -- never a double on its own,
@@ -2866,6 +2884,8 @@ _SCRIPT = """
       if (cmd === "reward" && !rewardAllowed(e.detail)) { return; }
       // A run's count and its drumming (engine build C2a), each naming what it is for.
       if (cmd === "clear") {
+        var clearKey = button.getAttribute("data-condition") + (button.hasAttribute("data-rest") ? "/rest" : "");
+        if (!clearAllowed(e.detail, clearKey)) { return; }
         post({ kind: "clear", condition: button.getAttribute("data-condition"),
                rest: button.hasAttribute("data-rest") });
         return;

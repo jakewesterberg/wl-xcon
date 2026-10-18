@@ -266,6 +266,28 @@ def test_a_member_clears_a_trial_and_switches_drumming_and_each_reaches_the_rig_
         Training, "first_answers", True, member)
 
 
+def test_a_double_click_on_clear_one_clears_one_trial_and_a_training_switch_goes_off_as_well(rig):
+    """Important 1 of Task 9's fix round: a double click, or two quick clicks, on *clear one* sent
+    two commands; the page holds a second clear of the same button as it does a reward's. And the
+    switch goes *off* as well as on."""
+    rig.hub.offer(frame(clearing=True))
+    page = rig.browser_page()
+    page.click("#signin")
+    page.wait_for_selector(SIGNED_IN, timeout=10_000)
+    one = '[data-cmd="clear"][data-condition="ecc 10"]:not([data-rest])'
+
+    page.dblclick(one)
+    rig.wait_for(lambda: rig.dispatch.seen)
+    page.click(one)  # a quick second click, as the button stays until the next trial boundary
+    time.sleep(0.5)  # housekeeping: room for a wrong second send to arrive
+    assert [type(seen) for seen in rig.dispatch.seen] == [ClearOwed]
+
+    page.click('[data-cmd="training"][data-setting="clear"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
+    off = rig.dispatch.seen[1]
+    assert (type(off), off.setting, off.on) == (Training, "clear", False)
+
+
 def test_a_state_that_was_not_started_here_is_refused(rig):
     page = rig.browser_page()
     # A sign-in this tab did start, with a state of its own; the return carries another.

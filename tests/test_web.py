@@ -671,7 +671,7 @@ def test_still_needed_offers_to_clear_a_trial_of_each_condition_owing_one_while_
     trial in the count"; *clear the rest* beside it where a condition owes more than one (the
     science review's D5), while the training aid *clear* is on (the PI, 2026-10-18). A condition
     owing nothing has no button; nothing is offered once the run has ended, and away from where
-    controls work each is greyed."""
+    controls work each is grayed."""
     need = fragments(frame(owed={"near": 2, "far": 0, "mid": 1}, clearing=True), view())["rt-need"]
     ended = fragments(frame(owed={"near": 2}, stop_kind="completed", clearing=True),
                       view())["rt-need"]
@@ -734,19 +734,20 @@ def test_clear_is_offered_only_while_the_training_aid_is_on_beside_the_training_
     """The PI, 2026-10-18: *clear* is a training aid, off by default, and offered only while it is
     on; a switch turns it on or off, and another sets how a percentage counts drummed answers
     (Task 14's `link.Training`)."""
-    off = fragments(frame(owed={"near": 2}), view())["rt-need"]
-    on = fragments(frame(owed={"near": 2}, clearing=True, first_answers=True), view())["rt-need"]
+    off = fragments(frame(owed={"near": 2}, rule="percentage"), view())["rt-need"]
+    on = fragments(frame(owed={"near": 2}, clearing=True, first_answers=True, rule="percentage"),
+                   view())["rt-need"]
 
     assert 'data-cmd="clear"' not in off
     assert ('<span class="nm">clear is off</span><button type="button" class="btn" '
             'data-cmd="training" data-setting="clear" data-on="1">switch clear on</button>') in off
     assert ('<span class="nm">a percentage counts every answer, drummed too</span>'
             '<button type="button" class="btn" data-cmd="training" data-setting="first_answers" '
-            'data-on="1">count first answers only</button>') in off
+            'data-on="1">the block\'s percentage: count first answers only</button>') in off
     assert 'data-cmd="clear" data-condition="near"' in on
     assert 'data-setting="clear" data-on="0">switch clear off' in on
     assert '<span class="nm">a percentage counts first answers only</span>' in on
-    assert 'data-setting="first_answers" data-on="0">count every answer' in on
+    assert 'data-setting="first_answers" data-on="0">the block\'s percentage: count every answer' in on
 
 
 def test_still_needed_shows_each_conditions_counts():
@@ -825,15 +826,41 @@ def test_the_pane_says_where_a_switch_changes_nothing_and_a_block_is_past_its_ta
     nothing there; and past a criterion block's targets it says it draws until the criterion is met
     (the smaller ruling)."""
     flat = fragments(frame(owed={"session": 30}, clearable=False, clearing=True), view())["rt-need"]
-    streak = fragments(frame(streak=True), view())["rt-need"]
+    streak = fragments(frame(rule="streak"), view())["rt-need"]
     past = fragments(frame(owed={"near": 0}, past_targets=True), view())["rt-need"]
 
-    assert '<span class="nm">clear is on, but nothing in this run can be cleared</span>' in flat
+    assert '<span class="nm">clear is on, but nothing in this block can be cleared</span>' in flat
     assert ('<span class="nm">a percentage counts every answer, drummed too -- a streak counts '
             'every try, so this changes nothing in this block</span>') in streak
     assert ('<span class="nm">every target used up: drawing until the criterion is met</span>'
             in past)
     assert "drawing until" not in fragments(frame(), view())["rt-need"]
+    # A shortfall row's condition name keeps its words whole in a narrow pane (minor 9).
+    short = fragments(frame(shortfalls=(ShortfallRow("b", "ecc 10", 1, "cap", False, None, 2),)),
+                      view())["rt-need"]
+    assert '<span class="mono keep">ecc 10</span>' in short
+    assert ".kv > .keep { overflow-wrap: normal; white-space: nowrap; flex-shrink: 0; }" in _document()
+    # Only while a run is live: a stopped run draws nothing more.
+    stopped = fragments(frame(owed={"near": 0}, past_targets=True, phase="stopped"), view())
+    assert "drawing until" not in stopped["rt-need"]
+
+
+def test_the_first_answers_switch_names_the_blocks_rule_and_says_where_it_changes_nothing():
+    """Important 3 of Task 9's fix round: the switch acts only in a block whose rule is a
+    percentage. A flat run has no rule, a streak judges every try; each says so, and a percentage
+    block does not. The label names the block's percentage, not the strip's."""
+    none = fragments(frame(rule=None), view())["rt-need"]
+    streak = fragments(frame(rule="streak"), view())["rt-need"]
+    percentage = fragments(frame(rule="percentage"), view())["rt-need"]
+
+    nothing = "this block has no percentage rule, so this changes nothing here"
+    assert f'<span class="nm">{nothing}</span>' in none
+    assert nothing not in streak and nothing not in percentage
+    assert "so this changes nothing in this block" in streak
+    assert "changes nothing" not in percentage
+    assert 'data-on="1">the block\'s percentage: count first answers only' in percentage
+    on = fragments(frame(rule="percentage", first_answers=True), view())["rt-need"]
+    assert 'data-on="0">the block\'s percentage: count every answer' in on
 
 
 def test_the_health_pane_shows_what_wl_works_would_be_sent():
@@ -886,8 +913,12 @@ def test_every_telemetry_string_is_escaped():
     ))
     # `phase` is EVIL above, so the reward's unit, which the strip shows only while a
     # run goes (`_per_correct`), needs a running frame of its own.
+    # It also draws what a live run with *clear* on draws: the condition's *clear* buttons and a
+    # shortfall row whose reason is its own sentence, which are the strings escaped at `_need`.
     paying = frame(params=(ParamRow("reward_correct", EVIL, 0.0, 0.4, 0.15, True),),
-                   drumming="run", aids=("drumming",), session_kind=EVIL)
+                   drumming="run", aids=("drumming",), session_kind=EVIL,
+                   owed={EVIL: 3}, clearing=True,
+                   shortfalls=(ShortfallRow(EVIL, EVIL, 1, EVIL, False, None, 2),))
 
     text = "".join(fragments(evil, view(rejected=EVIL)).values()) + "".join(
         fragments(paying, view()).values()
