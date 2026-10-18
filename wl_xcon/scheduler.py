@@ -447,7 +447,7 @@ class Scheduler:
             self._drum = None
         elif waiting and (waiting[0][0] <= number or name is None or self._runs_long(name)):
             due = waiting[0]
-            if due[0] > number and due[1] == number - 1 and len(waiting) > 1:
+            if due[1] == number - 1 and len(waiting) > 1:
                 due = waiting[1]
             self._due.remove(due)
             _, repeat_of, name = due
