@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import random
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from wl_xcon.task import (
     ANSWERS, COUNTED, OWED, REPEATED, RIGHT, SPENT, UNPAID, Counting, Family, Outcome,
@@ -143,21 +143,19 @@ class Draw:
 class Block:
     name: str
     conditions: list[Condition]
-    #: `(proportion, window)` -- "80% correct over the last 20 judged trials".
-    #: When absent, the block ends once every condition is owed nothing.
+    #: `(proportion, window)` -- "80% correct over the last 20 answers", a percentage; a proportion
+    #: of 1.0 is a streak, "N correct in a row" (the engine C2a plan, revised 2026-10-18). Judged on
+    #: answers only, every one (`Scheduler.record`). When absent, the block ends once every
+    #: condition is owed nothing.
     criterion: tuple[float, int] | None = None
     #: The table this block counts by, **replacing its structure's** (TSK-26: what counts is
     #: declared per block): `CORRECT_ONLY`, `PRESENTED`, `EVERY_TRIAL` or any `task.Counting` --
     #: a block training an animal to hold fixation may count a fixation break as an error that
-    #: pays its debt, while a block measuring a psychometric function must not. `None`, the
-    #: structure's own (`Scheduler.counting`).
+    #: pays its debt -- and its rule then judges that break a miss (the PI, 2026-10-18, "Yes, where
+    #: the block says so"; `Scheduler._scored`) -- while a block measuring a psychometric function
+    #: must not. What is an answer stays the structure's: a block's own `withholding` is not read
+    #: (`Scheduler._class`). `None`, the structure's own (`Scheduler.counting`).
     counting: Counting | None = None
-    #: Which outcomes are judged for the criterion. **Separate from the counting on
-    #: purpose**: a block may count every presentation toward its quota while judging
-    #: performance only on completed choices, and conflating the two makes a
-    #: criterion track engagement rather than what the animal can do. `None`, the
-    #: outcomes its table counts as answers.
-    criterion_over: frozenset | None = None
     order: Order = field(default_factory=Shuffled)
     #: **Drumming** (the PI, 2026-10-11: "a training tool ... where a trial is repeated until
     #: correct"): every trial of this block that is not right comes back at once, paying nothing,
@@ -216,6 +214,10 @@ class Scheduler:
     #: (`Block.counting`). `None` answers only what every structure shares -- an answer counted,
     #: the four of `task.REPEATED` owed -- and raises on what each declares (`_class`).
     counting: Counting | None = None
+    #: **The training setting "first answers only"** (the PI, 2026-10-18): under drumming, a
+    #: percentage rule judges only each trial's first answer, where by default it judges every
+    #: answer in order ("Every answer"); a streak judges every answer either way. Off by default.
+    first_answers: bool = False
     _rng: random.Random = field(init=False, repr=False)
     _counts: dict = field(init=False, default_factory=dict, repr=False)
     _queue: deque = field(init=False, default_factory=deque, repr=False)
@@ -240,8 +242,7 @@ class Scheduler:
     _carried: bool = field(init=False, default=False, repr=False)
     #: Failed tries in a row of the trial being drummed, its first try included.
     _tries: int = field(init=False, default=0, repr=False)
-    #: Whether this drum chain (a trial's first try and its drummed repeats) has had an answer
-    #: judged.
+    #: Whether this drum chain (a trial's first try and its drummed repeats) has had an answer.
     _answered: bool = field(init=False, default=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -331,6 +332,43 @@ class Scheduler:
             return own.cap
         return None if self.counting is None else self.counting.cap
 
+    def _answer(self, outcome: Outcome | None) -> bool:
+        """Whether `outcome` is an answer, right or wrong (the PI, 2026-10-18): one of
+        `task.ANSWERS` -- a correct answer, a correct rejection, a wrong target, a false alarm, an
+        early or a late response or error -- or no response where the structure makes withholding
+        an answer, a miss (`Counting.withholding`, the structure's, as `_class` reads it). A trial
+        with no answer -- a break, no fixation, a lost tracker, a fault, a hang -- is none."""
+        if outcome in ANSWERS:
+            return True
+        return (outcome is Outcome.NO_RESPONSE and self.counting is not None
+                and self.counting.withholding)
+
+    def _scored(self, outcome: Outcome | None) -> bool:
+        """Whether the open block's own table scores `outcome` though it is no answer: a block
+        training a hold that counts a broken hold as an error that pays (`COUNTED`). Its rule judges
+        it wrong, never right (the PI, 2026-10-18, "Yes, where the block says so": "Only where a
+        block itself declares a broken hold as a scored trial (a hold-training block) does it count
+        as a miss toward the percentage. Everywhere else, breaks stay out, as you decided.")."""
+        own = self.block.counting
+        return (outcome is not None and own is not None
+                and own.outcomes.get(outcome.value) == COUNTED)
+
+    @property
+    def _first_answers(self) -> bool:
+        """Whether a rule judges only each trial's first answer: the training setting
+        `first_answers` is on and the block's rule is a percentage. **A rule of proportion 1.0 is a
+        streak**, "N correct in a row", which judges every answer in order whatever the setting
+        (the PI, 2026-10-18: "Every answer counts in order")."""
+        criterion = self.block.criterion
+        return self.first_answers and criterion is not None and criterion[0] < 1.0
+
+    @property
+    def streak(self) -> bool:
+        """Whether the open block's rule is a streak, "N correct in a row": a criterion of
+        proportion 1.0, which the training setting `first_answers` leaves judging every answer."""
+        criterion = self.block.criterion
+        return criterion is not None and criterion[0] >= 1.0
+
     def _class(self, outcome: Outcome | None, shown: bool) -> str:
         """What `outcome` does to its condition's count, by the block's table or the structure's
         (`task.Counting.of`). **With neither**, what every structure shares still answers -- an
@@ -341,11 +379,14 @@ class Scheduler:
         block's own table classes `NO_RESPONSE` as it classes `FALSE_ALARM`, the withholding design's
         other wrong answer, whatever it declares for no response: what counts as an answer is the
         structure's, as `appears` is (the PI's decision 6, 2026-10-11, "'No response' ... is a miss
-        (counts, used up)"; the review of build C2a's Task 3)."""
+        (counts, used up)"; the review of build C2a's Task 3). **Where the structure does not
+        withhold**, a block's table's own `withholding` is not read either: no response is no
+        answer under any block (the controller's ruling M8 on the plan's revision review)."""
         table = self._table
-        if (outcome is Outcome.NO_RESPONSE and self.block.counting is not None
-                and self.counting is not None and self.counting.withholding):
-            return self.block.counting.of(Outcome.FALSE_ALARM, shown)
+        if outcome is Outcome.NO_RESPONSE and self.block.counting is not None:
+            if self.counting is not None and self.counting.withholding:
+                return self.block.counting.of(Outcome.FALSE_ALARM, shown)
+            table = replace(self.block.counting, withholding=False)
         if table is not None:
             return table.of(outcome, shown)
         if outcome in ANSWERS:
@@ -524,28 +565,36 @@ class Scheduler:
         did to the count: `COUNTED`, `SPENT`, `OWED` or `UNPAID`. `outcome` `None` is a trial that
         reached the longest trial (`task.HANG_COUNTS_AS`); `shown`, whether its stimulus had
         appeared (`task.Counting.of`). A right answer (`task.RIGHT`: correct, or a correct
-        rejection) is right for the criterion and the correct count. While drumming, a trial that
-        is not right is `OWED` and comes back at once, whatever its table says, and only a trial's
-        first answer is judged. An owed trial of a condition whose trial has failed as many tries in
+        rejection) is right for a rule and the correct count. **Every answer is judged, and only
+        answers** (`_answer`; the PI, 2026-10-18), whatever the table says about paying. While
+        drumming, a trial that is not right is `OWED` and comes back at once, whatever its table
+        says; a streak judges each of its answers, and so does a percentage unless `first_answers`
+        is on. An owed trial of a condition whose trial has failed as many tries in
         a row as its limit allows (`task.Counting.cap`: the block's table's, else the structure's)
         is not repeated again: its remaining debt is forgiven, a `Shortfall` (§16.6)."""
         counts = self._counts[condition]
         kind = self._class(outcome, shown)
         first_try = self.drawn is None or not self.drawn.drummed
-        over = self.block.criterion_over
-        judged = (outcome in over) if over is not None else kind == COUNTED
+        judged = self._answer(outcome) or self._scored(outcome)
         if first_try:
             self._answered = False
-        if judged and not self._answered:
-            # **Only a trial's first answer is judged** (the PI, 2026-10-12, "Leave drummed repeats
-            # out", and 2026-10-18, "Judge its first answer"): a drum's repeat after a wrong answer
-            # is recorded as what it was and never judged; after a try that ended before any answer
-            # -- a break, no fixation, a hang -- it is the trial's first answer, and is judged.
-            self._answered = True
+        if judged and not (self._answered and self._first_answers):
+            # **Every answer is judged, and only answers** (the PI, 2026-10-18: a rule judges
+            # answers only, "whatever the counting says about paying", "until N correct" included):
+            # a trial with no answer -- a break, no fixation, a lost tracker, a hang -- neither adds
+            # to nor breaks a streak or a percentage -- **but where the block's own table scores
+            # it**, a hold-training block's broken hold, which is judged a miss (`_scored`; "Yes,
+            # where the block says so"). **Under drumming** a streak judges every answer in order,
+            # drummed tries included ("Every answer counts in order"), and so does a percentage by
+            # default ("Every answer"); with the training setting `first_answers`, a percentage
+            # judges only each trial's first answer -- after a try that ended before any answer,
+            # the first try that answers (2026-10-12, "Leave drummed repeats out"; 2026-10-18,
+            # "Judge its first answer").
             self._window.append(1 if outcome in RIGHT else 0)
             if self.block.criterion is not None:
                 while len(self._window) > self.block.criterion[1]:
                     self._window.popleft()
+        self._answered = self._answered or judged
         if kind != OWED:
             # **The trial is over, so its failed tries in a row start again** (the PI, 2026-10-18,
             # "1: an answer ends the trial": the limit counts failed tries of one trial, and any

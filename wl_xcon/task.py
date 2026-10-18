@@ -22,8 +22,11 @@ class Family(Enum):
     **Grouping, never a rollup.** A console shows each outcome that occurred with its
     count, under its family, and never sums a family into one number. Nothing here
     defines correct, error or aborted: that is the PI's to define -- fixed on this
-    enum or per task, and where `early_response`, `late_response` and `no_response`
-    fall is open (spec §3, 2026-09-26).
+    enum or per task. Where `early_response` and `late_response` fall, open since
+    2026-09-26 (spec §3), the PI settled on 2026-10-18: each is a wrong answer, judged
+    and never right ("Both wrong answers (as built)"); `no_response` is a miss where a
+    structure makes withholding an answer (`Counting.withholding`), and otherwise a
+    break after the stimulus.
 
     The values are the words a console prints.
     """

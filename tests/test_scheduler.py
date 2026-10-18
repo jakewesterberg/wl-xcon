@@ -408,22 +408,23 @@ def test_a_trial_that_never_reached_the_stimulus_is_not_a_presentation():
     assert scheduler.owed("near") == 3
 
 
-def test_the_criterion_window_can_use_a_different_rule_from_the_counter():
-    """They are different questions. A block may count every presentation toward
-    its quota while judging performance only on completed choices."""
-    block = Block(
-        name="main",
-        conditions=[Condition("near", {}, target=100)],
-        counting=PRESENTED,
-        criterion=(0.8, 2),
-        criterion_over=frozenset({Outcome.CORRECT, Outcome.WRONG_TARGET}),
-    )
-    scheduler = Scheduler([block], seed=1)
+def test_a_rule_judges_answers_only():
+    """The PI, 2026-10-18: a rule judges answers only -- right, or wrong, a miss among them where
+    the task makes no response an answer -- and "a trial with no answer neither adds to nor breaks a
+    streak or a percentage": a fixation break, and no response where the structure does not
+    withhold, are no answers, so the two right answers around them are in a row. Where it
+    withholds, no response is a miss, judged."""
+    def window(withholding: bool) -> list:
+        block = Block(name="b", conditions=[Condition("a", {}, target=100)], criterion=(1.0, 2))
+        scheduler = Scheduler([block], seed=1,
+                              counting=Counting(after_stimulus=SPENT, withholding=withholding))
+        for outcome in (Outcome.CORRECT, Outcome.FIXATION_BREAK, Outcome.NO_RESPONSE,
+                        Outcome.CORRECT):
+            scheduler.record(scheduler.next_trial().name, outcome)
+        return list(scheduler._window)
 
-    for outcome in (Outcome.CORRECT, Outcome.NO_RESPONSE, Outcome.CORRECT):
-        scheduler.record(scheduler.next_trial().name, outcome)
-
-    assert scheduler.finished, "two correct choices; the no-response was not judged"
+    assert window(withholding=False) == [1, 1]
+    assert window(withholding=True) == [0, 1]
 
 
 # --- order, declared per block --------------------------------------------------
@@ -974,27 +975,29 @@ def test_a_drummed_trial_comes_back_at_once_until_it_is_correct():
     assert scheduler.requeued == [first.name, first.name], "each failed try is logged as owed"
 
 
-def test_only_a_trials_first_try_is_judged_for_the_criterion_under_drumming():
+def test_only_a_trials_first_answer_is_judged_for_a_percentage_under_the_first_answers_setting():
     """The PI, 2026-10-12, "Leave drummed repeats out": "Only each trial's first try is judged for
-    the criterion. The repeats are still recorded as what they were." Judging the repeats let an
-    animal that always picks one side meet 60% over 30 at 50% true accuracy (the science review's
-    D2): lose-shift solves a correction trial."""
+    the criterion. The repeats are still recorded as what they were." Since 2026-10-18 the training
+    setting "first answers only", for a percentage rule. Judging the repeats let an animal that
+    always picks one side meet 60% over 30 at 50% true accuracy (the science review's D2):
+    lose-shift solves a correction trial."""
     scheduler = Scheduler(
         [Block(name="b", conditions=[Condition("a", {}, target=100)], criterion=(0.5, 2),
-               drum=True)], seed=1)
+               drum=True)], seed=1, first_answers=True)
     for outcome in (Outcome.WRONG_TARGET, Outcome.CORRECT):
         scheduler.record(scheduler.next_trial().name, outcome)
 
-    assert scheduler.drawn.drummed and not scheduler.finished, "one first try, not two"
+    assert scheduler.drawn.drummed and list(scheduler._window) == [0], "one first answer, not two"
     scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
-    assert scheduler.finished, "two first tries, half of them right"
+    assert list(scheduler._window) == [0, 1], "two first answers, half of them right"
 
 
 def _chain(*outcomes) -> list:
-    """The criterion window after one drummed trial's tries, each of `outcomes` in turn."""
+    """The criterion window after one drummed trial's tries, each of `outcomes` in turn, under the
+    training setting "first answers only"."""
     scheduler = Scheduler(
         [Block(name="b", conditions=[Condition("a", {}, target=100)], criterion=(0.9, 5),
-               drum=True)], seed=1)
+               drum=True)], seed=1, first_answers=True)
     for outcome in outcomes:
         scheduler.record(scheduler.next_trial().name, outcome)
     return list(scheduler._window)
@@ -1003,11 +1006,95 @@ def _chain(*outcomes) -> list:
 def test_a_drummed_trials_first_answer_is_judged_when_its_first_try_ended_before_one():
     """The PI, 2026-10-18, "Judge its first answer": "If the first try ends before any answer, the
     first try that does answer is judged. Repeats after a wrong answer stay out." Leaving it out
-    left the harder trials of an animal that breaks when unsure out of its criterion."""
+    left the harder trials of an animal that breaks when unsure out of its criterion. It holds under
+    the training setting "first answers only" (the PI, 2026-10-18), as does a repeat's break after
+    the wrong answer: still out."""
     assert _chain(Outcome.FIXATION_BREAK, Outcome.CORRECT) == [1]
     assert _chain(Outcome.FIXATION_BREAK, Outcome.WRONG_TARGET, Outcome.CORRECT) == [0]
     assert _chain(Outcome.WRONG_TARGET, Outcome.CORRECT) == [0]
+    assert _chain(Outcome.WRONG_TARGET, Outcome.FIXATION_BREAK, Outcome.CORRECT) == [0]
     assert _chain(Outcome.CORRECT, Outcome.FIXATION_BREAK, Outcome.CORRECT) == [1, 1], "two trials"
+
+
+def test_every_answer_is_judged_under_until_n_correct_too():
+    """The PI, 2026-10-18, "Yes, every answer counts in the 20" (settling XC-367): a wrong answer
+    under "until N correct" pays nothing, and is judged, so a percentage is not met by any run of
+    right answers."""
+    block = Block(name="b", conditions=[Condition("a", {}, target=100)], criterion=(0.8, 5),
+                  counting=CORRECT_ONLY)
+    scheduler = Scheduler([block], seed=1)
+    for outcome in (Outcome.WRONG_TARGET, Outcome.WRONG_TARGET, Outcome.CORRECT, Outcome.CORRECT,
+                    Outcome.CORRECT):
+        scheduler.record(scheduler.next_trial().name, outcome)
+
+    assert list(scheduler._window) == [0, 0, 1, 1, 1]
+
+
+@pytest.mark.parametrize("first_answers", [False, True])
+def test_a_streak_under_drumming_judges_every_answer_in_order(first_answers):
+    """The PI, 2026-10-18, "Every answer counts in order": "the wrong answer breaks the streak (back
+    to 0), and the drummed correct starts it again at 1. A streak can only be built from correct
+    answers in a row, whichever try they came on." A streak is a rule of proportion 1.0, "N correct
+    in a row", whatever the training setting says of a percentage."""
+    block = Block(name="b", conditions=[Condition("a", {}, target=100)], criterion=(1.0, 3),
+                  drum=True)
+    scheduler = Scheduler([block], seed=1, first_answers=first_answers)
+    for outcome in (Outcome.CORRECT, Outcome.WRONG_TARGET, Outcome.CORRECT, Outcome.CORRECT):
+        scheduler.record(scheduler.next_trial().name, outcome)
+
+    assert list(scheduler._window) == [0, 1, 1]
+
+
+@pytest.mark.parametrize(("first_answers", "judged"), [(False, [0, 1, 0, 1]), (True, [0, 0])])
+def test_a_percentage_under_drumming_judges_every_answer_unless_set_to_first_answers(
+        first_answers, judged):
+    """The PI, 2026-10-18: by default a percentage rule counts every answer in order, drummed tries
+    included ("Every answer"); the training setting "first answers only" judges each trial's first
+    answer, and a trial whose first try had no answer is judged by its first answer ("Judge its
+    first answer")."""
+    block = Block(name="b", conditions=[Condition("a", {}, target=100)], criterion=(0.5, 10),
+                  drum=True)
+    scheduler = Scheduler([block], seed=1, first_answers=first_answers)
+    for outcome in (Outcome.WRONG_TARGET, Outcome.CORRECT, Outcome.FIXATION_BREAK,
+                    Outcome.WRONG_TARGET, Outcome.CORRECT):
+        scheduler.record(scheduler.next_trial().name, outcome)
+
+    assert list(scheduler._window) == judged
+
+
+def test_a_hold_training_block_judges_a_broken_hold_it_scores_as_a_miss():
+    """The PI, 2026-10-18, "Yes, where the block says so": "Only where a block itself declares a
+    broken hold as a scored trial (a hold-training block) does it count as a miss toward the
+    percentage. Everywhere else, breaks stay out, as you decided." Judged on answers alone, "80%
+    held over the last 10" was met by any 10 holds with the animal breaking 9 times in 10 (the
+    revision's engineering review, I2). The same breaks under the structure's table stay out."""
+    def drill(block_table) -> Scheduler:
+        block = Block(name="hold", conditions=[Condition("a", {}, target=1000)],
+                      criterion=(0.8, 10), counting=block_table)
+        return Scheduler([block], seed=1, counting=Counting(after_stimulus=OWED))
+
+    scored = drill(Counting(after_stimulus=OWED, outcomes={"fixation_break": COUNTED}))
+    plain = drill(None)
+    for n in range(100):
+        outcome = Outcome.CORRECT if n % 10 == 0 else Outcome.FIXATION_BREAK
+        for scheduler in (scored, plain):
+            scheduler.record(scheduler.next_trial().name, outcome)
+
+    assert list(scored._window) == [1] + [0] * 9 and not scored.finished
+    assert list(plain._window) == [1] * 10
+
+
+def test_a_blocks_own_table_cannot_make_no_response_an_answer():
+    """The controller's ruling M8 on the plan's revision review: what is an answer is the
+    structure's, as `_answer` reads it. A block's table saying it withholds, over a structure that
+    does not, made no response a miss, counted; it is classed as that table classes any other
+    break after the stimulus, and no rule judges it."""
+    block = Block(name="b", conditions=[Condition("a", {}, target=3)], criterion=(1.0, 2),
+                  counting=Counting(after_stimulus=SPENT, withholding=True))
+    scheduler = Scheduler([block], seed=1, counting=Counting(after_stimulus=OWED))
+
+    assert scheduler.record(scheduler.next_trial().name, Outcome.NO_RESPONSE) == SPENT
+    assert list(scheduler._window) == []
 
 
 def test_a_drummed_block_that_ends_on_a_wrong_first_try_opens_the_next_with_its_own_condition():
