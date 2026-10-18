@@ -156,9 +156,9 @@ class Block:
     #: of 1.0 is a streak, "N correct in a row" (the engine C2a plan, revised 2026-10-18). Judged on
     #: every answer, and on a broken hold or a failure to acquire fixation where this block's own
     #: table scores it (`Scheduler._scored`); a percentage judges only each trial's first answer
-    #: under `first_answers`, a streak never. (`Scheduler.record`.) The block ends once every condition is owed
-    #: nothing and, with a criterion, the criterion is met too: **its targets are a minimum**
-    #: (`Scheduler.finished`).
+    #: under `first_answers`, a streak never. (`Scheduler.record`.) The block ends once every
+    #: condition is owed nothing and, with a criterion, the criterion is met too: **its targets are
+    #: a minimum** (`Scheduler.finished`).
     criterion: tuple[float, int] | None = None
     #: The table this block counts by, **replacing its structure's** (TSK-26: what counts is
     #: declared per block): `CORRECT_ONLY`, `PRESENTED`, `EVERY_TRIAL` or any `task.Counting` --
@@ -352,8 +352,13 @@ class Scheduler:
         2026-10-18: "conditions keep coming until both hold"). Nothing is owed then, so a break is
         not shown again and nothing is forgiven, but a drummed trial still comes back until it is
         right (`record`)."""
-        return self.block.criterion is not None and all(
-            self.owed(c.name) == 0 for c in self.block.conditions)
+        if self.block.criterion is None:
+            return False
+        # The terms of `owed`, read from the counts: `owed` finds its condition by name.
+        counts = self._counts
+        return all(
+            c.target <= counts[c.name].completed + counts[c.name].spent + counts[c.name].forgiven
+            for c in self.block.conditions)
 
     def _runs_long(self, condition: str) -> bool:
         """Whether `condition` next would make a run longer than a `Constrained` block allows."""
@@ -410,8 +415,8 @@ class Scheduler:
 
     @property
     def _table(self) -> Counting | None:
-        """The open block's counting table, else the run's. (`_class` still asks the run's whether no
-        response is an answer: what counts as one is the structure's.)"""
+        """The open block's counting table, else the run's. (`_class` still asks the run's whether
+        no response is an answer: what counts as one is the structure's.)"""
         return self.block.counting if self.block.counting is not None else self.counting
 
     @property
@@ -480,12 +485,13 @@ class Scheduler:
         stimulus owed -- and an outcome each structure declares for raises: no default stands in
         for a declaration (the PI, 2026-10-11), and `check.check_task` refuses a run's structure
         without one. **Where the structure's table makes no response an answer** (`withholding`), a
-        block's own table classes `NO_RESPONSE` as it classes `FALSE_ALARM`, the withholding design's
-        other wrong answer, whatever it declares for no response: what counts as an answer is the
-        structure's, as `appears` is (the PI's decision 6, 2026-10-11, "'No response' ... is a miss
-        (counts, used up)"; the review of build C2a's Task 3). **Where the structure does not
-        withhold**, a block's table's own `withholding` is not read either: no response is no
-        answer under any block (the controller's ruling M8 on the plan's revision review)."""
+        block's own table classes `NO_RESPONSE` as it classes `FALSE_ALARM`, the withholding
+        design's other wrong answer, whatever it declares for no response: what counts as an
+        answer is the structure's, as `appears` is (the PI's decision 6, 2026-10-11,
+        "'No response' ... is a miss (counts, used up)"; the review of build C2a's Task 3).
+        **Where the structure does not withhold**, a block's table's own `withholding` is not read
+        either: no response is no answer under any block (the controller's ruling M8 on the
+        plan's revision review)."""
         table = self._table
         if outcome is Outcome.NO_RESPONSE and self.block.counting is not None:
             if self.counting is not None and self.counting.withholding:
@@ -632,9 +638,10 @@ class Scheduler:
         """Switch drumming, as a trainer does from the console (the PI, 2026-10-11): `"block"` on
         until this block ends, `"run"` on until the run ends, `"off"` off until this block ends.
         Off drops a drum's trial waiting to come back; its condition stays owed and is drawn as
-        any other. **Returns the name of the block it is for**: this one, or the next when this
-        block's end rule is already met -- the loop drains commands before it advances, so a
-        switch made then is the next block's (the engineering review's Minor 10)."""
+        any other (past a criterion block's targets it owes nothing, and every condition is
+        drawn: `past_targets`). **Returns the name of the block it is for**: this one, or the next
+        when this block's end rule is already met -- the loop drains commands before it advances,
+        so a switch made then is the next block's (the engineering review's Minor 10)."""
         if scope not in DRUM_SCOPES:
             raise ValueError(f"drumming is switched {', '.join(DRUM_SCOPES)}, not {scope!r}")
         # Asked before *off* drops a drum that holds a met block open, which would meet its end
@@ -715,10 +722,10 @@ class Scheduler:
         appeared (`task.Counting.of`). A right answer (`task.RIGHT`: correct, or a correct
         rejection) is right for a rule and the correct count. **Every answer is judged** (`_answer`;
         the PI, 2026-10-18), whatever the table says about paying, **and nothing else but what the
-        block's own table scores**: a broken hold or a failure to acquire fixation (`_scored`). While
-        drumming, a trial that is not right is `OWED` and comes back at once, whatever its table
-        says; a streak judges each of its answers, and so does a percentage unless `first_answers`
-        is on. An owed trial of a condition whose trial has failed as many tries in
+        block's own table scores**: a broken hold or a failure to acquire fixation (`_scored`).
+        While drumming, a trial that is not right is `OWED` and comes back at once, whatever its
+        table says; a streak judges each of its answers, and so does a percentage unless
+        `first_answers` is on. An owed trial of a condition whose trial has failed as many tries in
         a row as its limit allows (`task.Counting.cap`: the block's table's, else the structure's)
         is not repeated again: its remaining debt is forgiven, a `Shortfall` (§16.6)."""
         counts = self._counts[condition]
@@ -746,12 +753,12 @@ class Scheduler:
             # no answer -- a break, no fixation, a lost tracker, a hang -- neither adds to nor
             # breaks a streak or a percentage -- **but where the block's own table scores it**, a
             # broken hold or a failure to acquire fixation, which is judged a miss (`_scored`;
-            # "Yes, where the block says so"). **Under drumming** a streak judges every answer in order,
-            # drummed tries included ("Every answer counts in order"), and so does a percentage by
-            # default ("Every answer"); with the training setting `first_answers`, a percentage
-            # judges only each trial's first answer -- after a try that ended before any answer,
-            # the first try that answers (2026-10-12, "Leave drummed repeats out"; 2026-10-18,
-            # "Judge its first answer").
+            # "Yes, where the block says so"). **Under drumming** a streak judges every answer in
+            # order, drummed tries included ("Every answer counts in order"), and so does a
+            # percentage by default ("Every answer"); with the training setting `first_answers`,
+            # a percentage judges only each trial's first answer -- after a try that ended before
+            # any answer, the first try that answers (2026-10-12, "Leave drummed repeats out";
+            # 2026-10-18, "Judge its first answer").
             self._window.append(1 if outcome in RIGHT else 0)
             if self.block.criterion is not None:
                 while len(self._window) > self.block.criterion[1]:

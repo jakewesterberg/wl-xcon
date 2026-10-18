@@ -1307,10 +1307,29 @@ def test_stopping_a_drum_that_holds_a_met_block_open_is_this_blocks_switch():
     for outcome in (Outcome.CORRECT, Outcome.WRONG_TARGET):
         scheduler.record(scheduler.next_trial().name, outcome)
     assert not scheduler.finished and scheduler.drum_tries == 1
+    assert scheduler.drumming_switched == "block"
 
     assert scheduler.drum("off") == "A" and scheduler.finished
     scheduler.advance()
     assert (scheduler.block.name, scheduler.drumming) == ("B", "block")
+
+
+def test_past_targets_agrees_with_what_each_condition_owes_through_a_run_of_mixed_outcomes():
+    """`past_targets` is read from the counts directly, not by asking `owed` of each condition; it
+    must say what `all(owed == 0)` says after every outcome, forgiving a trial included."""
+    block = Block(name="b", conditions=[Condition("a", {}, target=1), Condition("b", {}, target=2),
+                                        Condition("c", {}, target=0)], criterion=(1.0, 50))
+    scheduler = Scheduler([block], seed=1, clearing=True)
+    assert scheduler.clear("b", rest=True) is None
+    seen = {scheduler.past_targets}
+    outcomes = (Outcome.CORRECT, Outcome.WRONG_TARGET, Outcome.FIXATION_BREAK, Outcome.CORRECT)
+    for step in range(12):
+        name = scheduler.next_trial().name
+        scheduler.record(name, outcomes[step % len(outcomes)])
+        past = scheduler.past_targets
+        seen.add(past)
+        assert past == all(scheduler.owed(c.name) == 0 for c in block.conditions)
+    assert seen == {True, False}
 
 
 def test_a_drummed_catch_condition_finishes_on_correct_rejections():
