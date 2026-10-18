@@ -11,6 +11,19 @@ Report: onset lag (constant), onset variability (SD), duration error, dropped fr
 over >= 2 h under task-like load. Run at rig acceptance and after ANY graphics
 change (P4).
 
+> **Amended 2026-10-18: the top patch's sensor** (wl-sync's reply to XC-328,
+> [its answers](pending-wl-sync-amendments.md#answered-2026-10-18--wl-syncs-reply-at-9e60ed6)).
+> The scan delay that engine spec §6.5 asks of V1 needs a sensor at the top of the screen as well
+> as the bottom, and there is no third photodiode channel. `A_PD1` and `A_PD2` are identical copper,
+> so **keep `A_PD1`'s sensor on the bottom patch and move `A_PD2`'s to the top strip for the run**
+> (3.22 cm and dark in the stereoscope too). While it is there the flip patch is no frame clock,
+> so that run's dropped frames are not counted from it. **Compare the two edges at the same
+> fraction of each channel's own peak**: a display transition is slow, so a comparator edge moves
+> with its threshold, and unequal fractions bias top minus bottom. Either set both thresholds to
+> the same fraction of each channel's measured peak, or take a fixed-fraction crossing offline
+> from the analog copies the recording NI scans at 40 kHz. The patches are drawn by our display;
+> V1's other changes are listed in engine spec §22.
+
 ## V2 — Host output latency (TTL loopback)
 taskd asserts a TTL on software events; line looped into NIDQ. Report: distribution
 of software-decision-to-edge latency under idle and loaded conditions; compare
@@ -65,6 +78,15 @@ Tap the audio output electrically into a misc analog BNC recorded by NI; drive k
 onset sequences. Report: constant lag, onset variability, and the distribution of
 command-to-sound latency under task-like load. Re-run after any audio stack change, the
 same rule V1 applies to graphics (P4).
+
+> **Amended 2026-10-18: the tap is `A_MISC3`** (wl-sync's reply to XC-089, its breakout spec §12
+> item 12; [its answers](pending-wl-sync-amendments.md#answered-2026-10-18--wl-syncs-reply-at-9e60ed6)).
+> It reaches the recording NI as AI15 and **the task PC's own card as AI8**, the card whose
+> analog outputs play the sound (engine spec §9.1), so command to tap can be timed on that card's
+> one clock. Its range is ±5 V at ÷1 and ±10 V at ÷2 and it clips beyond, so where the tap is
+> taken matters: a line-level tap fits, a power amplifier's speaker terminals may not. **Where it
+> is taken is not yet chosen.** It has no anti-alias filter: onset timing is unaffected, but a
+> spectrum taken from the tap would alias at the 40 kHz scan.
 
 ## V8 — RHX backpressure headroom
 New (2026-08-31). The RHX guide states that a client failing to read data output quickly

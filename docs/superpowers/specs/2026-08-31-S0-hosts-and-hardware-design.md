@@ -859,6 +859,8 @@ pages. They were measured with the opto I/O at 5 V / 1 kΩ and the non-isolated 
 
 - the lamp stage, its part and its grounding;
 - Line 2's measured low level against the 2.50 V threshold;
+- each strobe line's measured high level against the same threshold, with a group wired as the rig will
+  be (added 2026-10-18 from wl-sync's reply to XC-092; see the note at the end of this section);
 - whether Lines 1 and 2 can both carry ExposureActive (C11; **UNVERIFIED** in Spinnaker);
 - the secondaries' trigger latency, which FLIR does not publish. The primary-to-secondary
   exposure skew is measured with every camera imaging one LED pulse;
@@ -873,6 +875,22 @@ back-terminated BNC outputs, 9 ns typical delay, $1,850 with its supply; and the
 **For wl-sync (an ask, not a change here).** Its `[flir_bfs_gpio]` pins the BFS-U3-200S6
 page's 0.87 V low. The 16S2 page gives 0.92 V unloaded and 0.86 V loaded at the same
 5 V / 1 kΩ. Its 2.50 V threshold still leaves 1.58 V of low margin, so nothing breaks.
+
+> **Answered 2026-10-18 (XC-092; [wl-sync's answers](../../pending-wl-sync-amendments.md#answered-2026-10-18--wl-syncs-reply-at-9e60ed6)),
+> and it opens a question for this board.** `[flir_bfs_gpio]` now carries the 16S2 page's table
+> verbatim beside the 200S6's (wl-sync `1e44658`), and the low margin above stands. **The same
+> 5 V / 1.0 kΩ row gives the opto output a "Load" high of 2.29 V, below the 2.50 V threshold**,
+> and FLIR do not define the load. wl-sync's reading: in FLIR's primary/secondary scheme the
+> primary's opto output also drives each secondary's opto input, and if that is the load, a
+> group strobe never crosses 2.50 V and gives no edges, with nothing else complaining. It is open
+> in its `hardware/breakout/frame-time-inputs.md` §4, pending a bench measurement with a group
+> wired as the rig will be, and **wl-sync says this board, copying that front end at 2.50 V,
+> inherits the question.** This section's wiring is not that scheme: Line 1 drives only wl-sync's
+> input (here, and §7.1 row 12 for the eye group), the secondaries take Line 0 from the '541, and
+> this board reads Line 2 on its own 5 V pull-up. So no opto input loads either strobe line here:
+> Line 1 would sit on the table's no-load column, and Line 2, not an opto output, is not in that
+> table at all. That is an INFERENCE from a term FLIR leave undefined, so the design check
+> measures each line's high, as listed above.
 
 ### 7.5 NVIDIA's session limit and the encoder
 

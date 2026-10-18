@@ -2,7 +2,11 @@
 
 Delivered 2026-10-11 as a dated section of wl-sync's `HANDOVER-wl-expcontroller.md` (`5ca9891`); answers are read there.
 
-**Eight are open.** The first two were opened 2026-08-31 while designing S3
+**Reply read 2026-10-18 (wl-sync `9e60ed6`): see "ANSWERED 2026-10-18" below.** Six of the eight are
+answered (XC-089 to XC-092, XC-327, XC-328); **XC-087 and XC-088, the two full sections below, stay open**,
+and XC-327 keeps a remainder (its PFI line and the line-out's grounding, at wl-sync's layout).
+
+**Eight were open on 2026-10-11.** The first two were opened 2026-08-31 while designing S3
 ([`superpowers/specs/2026-08-31-S3-sync-integration-design.md`](superpowers/specs/2026-08-31-S3-sync-integration-design.md)),
 and are the two full sections below. The other six are listed in "Also delivered 2026-10-11", below the
 second: XC-089 to XC-092, which this file omitted until then, and two asks of the engine spec (§21).
@@ -117,6 +121,9 @@ finished.
 
 # OPEN — also delivered 2026-10-11: XC-089 to XC-092, and two asks of the engine spec
 
+> **Answered 2026-10-18, except XC-087 and XC-088:** see "ANSWERED 2026-10-18" below.
+> The table below is what was asked, left as sent.
+
 wl-sync's handover section lists all eight as open ("Closed since last time: none"). Each is a short ask;
 the long reasoning is where the source column says.
 
@@ -137,9 +144,122 @@ construction (`docs/superpowers/specs/2026-08-13-syncbox-breakout-pcb-design.md:
 be a respin"). wl-sync also found no task-PC analog-output net in its `hardware/README.md`; the task PC's
 connector 0 carries nine analog inputs. XC-327 (a) may therefore be new copper or may be nothing. Amended in
 the engine spec on 2026-10-11. XC-286 is this repository's documents' side of the same decision.
+*(Settled 2026-10-18: new copper on wl-sync's board, and `A_MISC3` is the tap; see "ANSWERED 2026-10-18".)*
 
 **One correction to read before XC-090.** wl-sync's old handover still says 2.18 cm at ±17°; XC-090 supersedes
-it with 3.22 cm at the ±12° mask, top and bottom strips.
+it with 3.22 cm at the ±12° mask, top and bottom strips. *(wl-sync struck the old figures through and replaced
+them in place on 2026-10-18, `9e60ed6`.)*
+
+---
+
+# ANSWERED 2026-10-18 — wl-sync's reply at `9e60ed6`
+
+Read from wl-sync's `HANDOVER-wl-expcontroller.md`, section "2026-10-18: replies from wl-sync", at `9e60ed6`
+(it says it read wl-xcon at `a607414`), and from the hardware documents its commit `1e44658` changed: its breakout
+spec `docs/superpowers/specs/2026-08-13-syncbox-breakout-pcb-design.md` (§9.2's pin table, §12 items 11 and 12),
+`hardware/breakout/frame-time-inputs.md` §4 and `hardware/datasheet-params.toml` (`[flir_bfs_gpio]`). Its later
+`main`, `16d7a71`, changed only `wl.yaml`. Every source line cited below was read at `9e60ed6` with `git show`
+(2026-10-18); a figure that is wl-sync's reasoning rather than a line of its source is attributed to it.
+
+**XC-087, XC-088: not answered.** wl-sync says both turn on one mechanism, whatever tells the box the subject
+changed, which reverses its continuous-recording design's "a day is one session" (its §3) and `cli.day_directory`'s
+fixed `_01`, and needs a design decision there that this reply does not make. Both stay open, with one addition
+from XC-091 below: the reader XC-087 asks for is also what a task-PC read of the delivered line would need.
+
+**XC-089: `A_MISC3` is the audio verification tap** (its breakout spec §12 item 12). Not `A_MISC1`, the only misc
+input that also feeds the unfitted fourth comparator and DAC channel `VOUTD`
+(`hardware/gen/gen_breakout_comparators.py:373`). Range ±5 V at ÷1 and ±10 V at ÷2 by a ganged shunt
+(`gen_breakout_analog_frontend.py:107`); beyond it the signal clips, so a line-level tap fits and a tap at a power
+amplifier's speaker terminals may not. **Where the tap is taken is left to us.** No anti-alias filter (only the
+microphone has one, its spec §6.4): at the recording NI's 40 kHz scan, onset timing is unaffected but a spectral
+measurement of the tap would alias. It reaches the recording NI as AI15, **the task PC's own card as AI8**
+(Connector 0 pin 34, `gen_breakout_taskpc_digital.py:1050`), and Intan through the mux, outside its default eight.
+**For us:** XC-089 closes. V7 (XC-074) names the input, and since AI8 is on the card whose analog outputs play
+the sound, it can time command to tap on one clock. S4 §12 item 3 keeps where the tap is taken.
+
+**XC-090: fine as stated, on two conditions.** Nothing on wl-sync's board depends on where the patches sit; each
+comparator compares its TIA's output with a DAC-set threshold. The FDS100 is a TO-5 can 0.36 in across
+(`[fds100]`), so both sensors fit side by side in the 3.22 cm strip. **Condition 1:** the photodiode gain (its
+finding F3, `R38` = 180 kΩ, peak white near 2.0 V) assumes a sensor flush against a patch at least as large as its
+window; a smaller patch, or a sensor standing off the panel, gives a smaller signal, which thresholds (0.5 mV
+steps) can follow at bring-up. **Condition 2:** the housings are not wl-sync's; they stay with the rig build. The
+old 2.18 cm at ±17° is replaced in its handover. **For us:** XC-090 closes; optics drawing §8 item 3 records both
+conditions, and XC-078 carries the first to the build.
+
+**XC-091: readable live on the box itself, and from no other host.** Stated exactly, as asked:
+
+1. **Today nothing records the real line.** Without `--fake`, `wl-sync record` exits 2 (`wl_sync/cli.py:377`), the
+   unit ships with `--fake` (`deploy/wl-sync.service:22`), and the RP1 backend is built but not wired into the run
+   loop (`docs/next-session.md` §1, §2 Step A). The rest describes the run loop once it is.
+2. **What is recorded.** GPIO 23 (`rwd_dlvr`, `wl_sync/pins.py:32`) is an individually captured edge line
+   (`pins.py:40`): each rising and falling transition is an `E,<tick_us>,23,<level>` record, in the box's own
+   microsecond count, unwrapped within one segment; neither wall time nor the task PC's clock.
+3. **It is not a measurement of fluid.** `RWD_DLVR` is the reward-OR gate's output, the signal sent to the reward
+   driver from our commanded line or the panel's one-shot. An unpowered or unplugged driver, an empty reservoir
+   and a blocked line all still record as delivered.
+4. **On the box**, any process can open the open segment read-only: the writer opens it `"x"` (create-exclusive)
+   and holds no lock. Records are flushed and `fsync`ed once per emit-loop iteration (`wl_sync/segment.py:110-113`),
+   a 200 ms barcode frame plus a 1 s sleep (`cli.py:266-270`), so new records appear about every 1.2 s (wl-sync's
+   figure from its code, not a measurement). A torn last line is dropped and read on the next pass, as
+   `wl_sync.log.read_log` does (`log.py:155`). *Forward note, not in wl-sync's files at `16d7a71`: wiring the RP1
+   backend into the run loop, `wl.yaml`'s next step, is expected to make it about every 1 s (UNVERIFIED).*
+5. **From another host, nothing makes it readable**, live or at session end. It lives at
+   `/data/rig1/<YYYY-MM-DD>_01/seg-NNN.log` on the box's NVMe, and NAS transfer is outside its design (its
+   continuous-recording design §9). wl-sync says a task-PC read needs the same new thing XC-087 asks for.
+6. **There is no session end on the box.** It records all day, and a segment closes only when the process stops,
+   so a session-end read is a read of an open segment too.
+7. **A restart splits the record**: a new segment, header and clock epoch. Ticks in different segments cannot be
+   compared, a pulse straddling the restart is cut in two, and the gap is bounded only by the day's manifest.
+8. **A dropped edge is not marked in the file.** A kernel edge-buffer overflow is detected
+   (`wl_sync/rp1/gpio.py:127`) but not written to the segment; once Step A is wired it reaches the journal through
+   `check_health()`. **A pulse count from the file is exact only for a day whose journal shows no dropped-edge
+   error.** Marking it in the record would change the log format wl-preproc pins, and is not decided there.
+
+**For us:** XC-091 closes and S8 §8 item 2 records the answer. Reading the record into fluid reconciliation is
+XC-384, waiting on XC-087. Item 3 bears on S8 §5.1, which calls this record "the truth" about fluid; that is the
+PI's to weigh, and nothing in wl-xcon's welfare text or code is changed here.
+
+**XC-092: added, and it raises a question.** The 200S6 row was not meant to cover both: `[flir_bfs_gpio]` now
+carries the BFS-U3-16S2 page's table verbatim (wl-sync read it 2026-10-18; the BFS-U3-04S2 page has the same
+table), which splits every level into "No Load" and "Load". Our figures stand (0.92 V low unloaded, 0.86 V loaded,
+at 5 V / 1.0 kΩ: 1.58 V of margin under 2.50 V). **The same row's loaded high is 2.29 V, below the 2.50 V
+threshold.** FLIR do not define "Load". wl-sync's input is close to no load, but in FLIR's primary/secondary
+scheme the primary's opto output also drives each secondary's opto input; if that is "Load", a group strobe sits
+at 2.29 V and gives no frame-time edges, with nothing else complaining. Open in its `frame-time-inputs.md` §4,
+pending a bench measurement with a group wired as the rig will be; wl-sync says our S0 §7.4 fan-out board, which
+copies that front end at 2.50 V, inherits the question. **For us:** XC-092 closes and the question joins XC-033.
+Our wiring is not the scheme wl-sync reasons from: each group's Line 1 drives only wl-sync's input (S0 §7.1
+row 12, §7.4), the secondaries are driven on Line 0 by the fan-out board's '541, and the board reads the primary's
+Line 2, an open-drain output on its own 5 V pull-up that the opto-output table does not cover. So an opto-input
+load sits on neither line here; that is an inference from a term FLIR leave undefined, and the bench measurement
+decides (S0 §7.4).
+
+**XC-327: both parts committed for this board revision, before layout** (its breakout spec §12 item 11; sources
+it read 2026-10-18: NI X Series User Manual 370784K-01, Figure A-5 and §5 "AO Start Trigger Signal", and the
+PCIe-6343 Specifications 377873B-01). **(a)** The line-out goes on wl-sync's board and cannot be outside it: AO 0/1
+are on Connector 0 pins 22/21 (AO GND 55/54), both of the card's connectors are cabled into the board, and those
+pins are no-connect there today (`gen_breakout_taskpc_digital.py:1006`). It adds a connector body and a back-face
+panel hole. The outputs are ±10 V, 0.2 Ω, ±5 mA; keeping the amplitude inside the amplifier's input range is the
+engine's job. Grounding (AO GND is the card's analog return, the amplifier is mains-powered, and the board's BNCs
+are isolated) is settled when the copper is drawn. **(b)** `PD1_COMP` reaches the task PC on P0.27 (Connector 1
+pin 46, `gen_breakout_taskpc_digital.py:1104`), which cannot be an AO Start Trigger: NI's list names PFI 0–15,
+RTSI, internal triggers and the Change Detection Event, but no P0 line. Change Detection on P0.27 is listed but
+untested, with no NI latency figure, so **a second, buffered copy of `PD1_COMP` goes onto a Connector 0 PFI pin**
+(P0.27 stays); it needs a new buffer channel (the bank is 8 of 8), and wl-sync will name the PFI line in its
+handover when it is drawn. wl-sync also corrected its spec §9.2: all sixteen PFI lines are on Connector 0, and no
+wiring moves. **For us:** XC-327 stays, amended to what is left. Engine spec §9.1's "may be new copper or may be
+nothing" is settled: new copper.
+
+**XC-328: a rig procedure; no third channel.** `A_PD1` and `A_PD2` are identical copper and "task patch" and
+"flip patch" are roles, so for V1 keep `A_PD1` on the bottom patch and move `A_PD2`'s sensor to the top patch. The
+cost is no flip-patch frame clock during that run: acceptable for validation, not for a session. The top strip is
+3.22 cm and dark too. The cable is designed for 6 m and tested at 3 to 5 m (its spec §6.3.1), and the TIA is
+compensated to about 50 m of coax (finding M1), so an extra screen height of lead changes nothing.
+**The threshold caveat:** a display transition is slow, so a comparator edge moves with its threshold; if the two
+channels' thresholds sit at different fractions of their own peaks, top minus bottom is biased. Either set both
+to the same fraction of each channel's measured peak, or take a fixed-fraction crossing offline from the analog
+copies (NI, 40 kHz). A misc BNC cannot be a third channel, since the sensors are passive and need the board's TIA.
+**For us:** XC-328 closes; validation V1 carries the procedure and the caveat.
 
 ---
 

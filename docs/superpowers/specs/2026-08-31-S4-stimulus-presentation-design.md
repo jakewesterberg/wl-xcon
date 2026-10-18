@@ -248,6 +248,6 @@ the engine's own frame-interval accounting (parent §11.5) [@plant2004selfvalida
 |---|---|---|
 | 1 | Whether `TARGET_POSITION` ever needs a disparity field, or stereo targets stay in our record | nothing today; §3 avoids it |
 | 2 | Who writes `SessionManifest` — us, ingest, or wl.works | S10 |
-| 3 | Misc-BNC assignment for the audio tap | `wl-sync` |
+| 3 | ~~Misc-BNC assignment for the audio tap~~ **Answered 2026-10-18 (wl-sync, its breakout spec §12 item 12): `A_MISC3`**, recorded by the recording NI as AI15 and by the task PC's own card as AI8, beside the analog outputs that play the sound. It takes ±5 V at ÷1 and ±10 V at ÷2 and clips beyond, with no anti-alias filter (onset timing unaffected, a spectrum of the tap would alias). Remaining: **where the tap is taken**, which wl-sync leaves to us: a line-level tap fits that range, a power amplifier's speaker terminals may not ([wl-sync's answers](../../pending-wl-sync-amendments.md#answered-2026-10-18--wl-syncs-reply-at-9e60ed6)) | V7 |
 | 4 | Whether the kiosk shares the stimulus vocabulary or a subset | S13 |
 | 5 | Image-set versioning and where sets live on disk | S10 |

@@ -466,6 +466,13 @@ luminance waits on build F (XC-305).
 > asks, and the line-out may be new copper or may be nothing if the card's connector can feed the amplifier.
 > The decision itself (sound from two analog outputs of the PCIe-6343, started by the task-patch edge) is
 > unchanged. The text above is left as approved.
+
+> **Amended 2026-10-18 (wl-sync's reply, `9e60ed6`;
+> [its answers](../../pending-wl-sync-amendments.md#answered-2026-10-18--wl-syncs-reply-at-9e60ed6)):** the line-out is
+> new copper on wl-sync's board, committed before layout, and the tap is `A_MISC3`, which the task PC's card also
+> records (AI8). **`PD1_COMP` reaches the task PC on P0.27, which cannot start the analog output** (NI's AO Start
+> Trigger sources are PFI lines, RTSI, internal triggers and the Change Detection Event); wl-sync is adding a
+> buffered copy on a PFI line and will name it when the copper is drawn (XC-327). The decision is unchanged.
 2. **Simple sounds are made from parameters**, rebuilt from the record; files remain for recorded sounds.
 3. **Movie soundtracks** play when a task asks, in step with the frames.
 4. **Media live on lab storage** by checksum; the rig keeps a verified local copy; the set's identity is
