@@ -1202,6 +1202,27 @@ def test_whether_a_trials_stimulus_appeared_is_read_from_the_state_its_table_nam
     assert taskd._appeared(dataclasses.replace(cue, counting=None), broke_in_cue)
 
 
+def test_each_repeat_row_names_the_trial_it_shows_again_and_its_predecessor(tmp_path):
+    """Engine spec §16.3-16.4: a repeat's row names the trial it shows again -- the same condition,
+    owed -- at least two trials before it unless it came at once; every row names the condition of
+    the trial before it in its block, the first none."""
+    block = Block(name="b", conditions=[Condition(n, {"target_x": x}, target=8)
+                                         for n, x in (("near", 5.0), ("far", 12.0), ("mid", 8.0))])
+    session = _session(_spec(tmp_path, trials=400, blocks=[block]))
+
+    session.run()
+
+    rows = _trial_rows(session)
+    by_index = {row["index"]: row for row in rows}
+    repeats = [row for row in rows if row["repeat_of"] is not None]
+    assert repeats, "the seed gives the block a repeat"
+    for row in repeats:
+        shown_again = by_index[row["repeat_of"]]
+        assert (shown_again["condition"], shown_again["counting"]) == (row["condition"], "owed")
+        assert (row["index"] - row["repeat_of"] == 1) == row["at_once"]
+    assert [row["previous"] for row in rows] == [None] + [row["condition"] for row in rows[:-1]]
+
+
 def test_a_session_without_blocks_runs_one_of_its_declared_length(tmp_path):
     """The flat session is the block session with one block, not a second code path.
     Two loops would be two places for the ceilings to be checked differently."""
@@ -5466,6 +5487,35 @@ def test_a_trial_that_reaches_no_outcome_is_still_closed(tmp_path, monkeypatch):
     ]
     assert [(row["outcome"], row["counting"]) for row in _trial_rows(session)] == [
         ("hang", "spent"), ("correct", "counted")]
+
+
+def test_a_trial_that_reaches_the_longest_trial_is_shown_again_as_a_missed_acquisition(
+        tmp_path, monkeypatch):
+    """XC-287; the PI, 2026-10-11: "it isn't a fixation break, it is a missed acquisition" --
+    repeated like a fault. In a block of one condition owing one trial, the hang is owed and its
+    condition, the only one still owed, comes straight back; its line still says `hang`. A hang
+    neither counted nor came back before engine build C2a (the plan's fourth defect)."""
+    from wl_xcon import taskd
+
+    real, calls = taskd.run_trial, []
+
+    def hangs_first(*args, **kwargs):
+        calls.append(None)
+        if len(calls) == 1:
+            return real(*args, max_frames=1, **kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(taskd, "run_trial", hangs_first)
+    task = tmp_path / "one_state.py"
+    task.write_text(ONE_STATE_TASK)
+    block = Block(name="b", conditions=[Condition("only", {}, target=1)])
+    session = _session(_spec(tmp_path, trials=1, task=str(task), values={}, blocks=[block]))
+
+    session.run()
+
+    assert [(row["outcome"], row["counting"], row["repeat_of"], row["at_once"])
+            for row in _trial_rows(session)] == [("hang", "owed", None, False),
+                                                 ("correct", "counted", 0, True)]
 
 
 def test_a_number_past_16_bits_is_strobed_whole_high_word_first(tmp_path):

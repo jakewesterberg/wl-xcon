@@ -7,6 +7,8 @@ dropped frame.
 
 from __future__ import annotations
 
+import random
+
 import pytest
 
 from wl_xcon.scheduler import (
@@ -17,6 +19,7 @@ from wl_xcon.scheduler import (
     Condition,
     Constrained,
     Scheduler,
+    Shuffled,
     WithReplacement,
 )
 from wl_xcon.task import COUNTED, OWED, SPENT, UNPAID, Counting, Outcome
@@ -61,17 +64,195 @@ def test_owed_is_target_minus_completed_not_minus_attempted():
     assert scheduler.owed("far") == 10
 
 
-def test_a_fixation_break_is_requeued_at_the_end_of_the_block():
-    """The default ruled 2026-08-31. A broken fixation is a failure to engage and
-    the condition still owes a datum; end of block rather than immediately, so an
-    animal cannot make an easy condition repeat by breaking on the hard one."""
-    scheduler = Scheduler([_block()], seed=1)
+def _breaking(order, seed: int = 1, every: int = 3) -> list:
+    """The engine C2a plan's probe: three conditions owing five trials each, every `every`-th trial
+    a fixation break, run to the block's end. Each trial's `Draw`, in order."""
+    block = Block(
+        name="main", conditions=[Condition(name, {}, target=5) for name in "abc"], order=order)
+    scheduler = Scheduler([block], seed=seed)
+    draws = []
+    for _ in range(200):
+        if scheduler.finished:
+            return draws
+        scheduler.next_trial()
+        draws.append(scheduler.drawn)
+        broke = scheduler.drawn.number % every == 0
+        scheduler.record(scheduler.drawn.condition.name,
+                         Outcome.FIXATION_BREAK if broke else Outcome.CORRECT)
+    raise AssertionError("the block never ended in 200 trials")
 
+
+@pytest.mark.parametrize("order", [Shuffled(), WithReplacement(), Constrained(max_run=2)],
+                         ids=["shuffled", "with-replacement", "constrained"])
+@pytest.mark.parametrize("seed", [1, 2, 3])
+def test_a_repeat_comes_back_within_the_next_k_trials_and_never_the_very_next(order, seed):
+    """§16.3, superseding 2026-08-31's "end of the block"; the PI, 2026-10-11 and 2026-10-12: a
+    random slot within the next k trials, k the block's number of conditions and at least 3, never
+    the very next, in every block -- unless it is the only condition still owed, then at once, and
+    its draw says so. Appended to the queue, a repeat was the very next trial 8 times in 8 under
+    `WithReplacement` and `Constrained` and 3 in 8 under `Shuffled` (seed 1, every third trial a
+    break: the plan's third defect)."""
+    draws = _breaking(order, seed=seed)
+
+    repeats = [draw for draw in draws if draw.repeat_of is not None]
+    assert len(repeats) >= 5
+    assert {draw.condition.name for draw in draws} == {"a", "b", "c"}
+    for draw in repeats:
+        assert draws[draw.repeat_of].condition == draw.condition
+        gap = draw.number - draw.repeat_of
+        assert (gap == 1) == draw.at_once
+        assert 1 <= gap <= 3
+    assert not any(d.at_once for d in repeats[:3]), "early on, other conditions are still owed"
+
+
+def test_in_a_block_of_two_conditions_a_repeat_comes_two_or_three_trials_later():
+    """The PI, 2026-10-12, "At least 3": "A repeat lands 2 or 3 trials later even in a two-condition
+    block, so its position is not fixed." With k at least 2 the trial after a break was the other
+    condition and the one after that the repeat, 200 seeds in 200 (the science review's D3)."""
+    gaps = set()
+    for seed in range(20):
+        block = Block(name="b", conditions=[Condition(n, {}, target=6) for n in "ab"])
+        scheduler = Scheduler([block], seed=seed)
+        while not scheduler.finished:
+            scheduler.next_trial()
+            draw = scheduler.drawn
+            if draw.repeat_of is not None and not draw.at_once:
+                gaps.add(draw.number - draw.repeat_of)
+            broke = draw.number % 3 == 0
+            scheduler.record(draw.condition.name,
+                             Outcome.FIXATION_BREAK if broke else Outcome.CORRECT)
+
+    assert gaps == {2, 3}
+
+
+def test_no_repeat_waits_past_its_k_when_breaks_come_often():
+    """Each repeat takes a slot no other waiting repeat holds, so two never fall due together and
+    none waits past its window (the engineering review's Minor 2: 1.17% of repeats came later than
+    k with six conditions breaking half the time, when slots could be shared). When all k - 1
+    slots are held a repeat shares one (the plan's call 3), so the bound is the slot draw's; a
+    seeded probe of 464,202 repeats found none late."""
+    for seed in range(10):
+        breaks = random.Random(seed)
+        block = Block(name="b", conditions=[Condition(f"c{i}", {}, target=10) for i in range(6)])
+        scheduler = Scheduler([block], seed=seed)
+        while not scheduler.finished:
+            scheduler.next_trial()
+            draw = scheduler.drawn
+            if draw.repeat_of is not None:
+                assert 2 <= draw.number - draw.repeat_of <= 6 or draw.at_once, (seed, draw)
+            broke = breaks.random() < 0.5
+            scheduler.record(draw.condition.name,
+                             Outcome.FIXATION_BREAK if broke else Outcome.CORRECT)
+
+
+def test_the_only_condition_still_owed_repeats_at_once_and_its_draw_says_so():
+    """§16.3: "unless it is the only condition still owed, when it repeats at once, recorded"."""
+    block = Block(name="b", conditions=[Condition("a", {}, target=1), Condition("b", {}, target=1)])
+    scheduler = Scheduler([block], seed=1)
     first = scheduler.next_trial()
-    scheduler.record(first.name, Outcome.FIXATION_BREAK)
+    scheduler.record(first.name, Outcome.CORRECT)
+    second = scheduler.next_trial()
+    scheduler.record(second.name, Outcome.FIXATION_BREAK)
 
-    assert first.name in scheduler.requeued
-    assert scheduler.upcoming()[-1] == first.name
+    again = scheduler.next_trial()
+
+    assert again == second
+    assert (scheduler.drawn.condition, scheduler.drawn.number, scheduler.drawn.repeat_of,
+            scheduler.drawn.at_once) == (second, 2, 1, True)
+
+
+def test_a_waiting_repeat_holds_its_conditions_draws_and_comes_early_when_nothing_else_can():
+    """A condition whose repeat is waiting is not drawn otherwise: the repeat is its next trial.
+    When every condition still owed is waiting, the earliest repeat comes now, before its slot,
+    though not at once. (Seed 4 gives the first repeat slot 3, so trial 2 has nothing it could
+    draw but a waiting repeat.)"""
+    block = Block(name="b", conditions=[Condition("a", {}, target=1), Condition("b", {}, target=1),
+                                        Condition("c", {}, target=0)])
+    scheduler = Scheduler([block], seed=4)
+    names = []
+    for _ in range(2):
+        names.append(scheduler.next_trial().name)
+        scheduler.record(names[-1], Outcome.FIXATION_BREAK)
+
+    third = scheduler.next_trial()
+
+    assert sorted(names) == ["a", "b"], "each breaks once, neither drawn while its repeat waits"
+    assert (third.name, scheduler.drawn.repeat_of, scheduler.drawn.at_once) == (names[0], 0, False)
+
+
+def test_a_repeat_still_waiting_when_its_block_ends_stays_with_that_block():
+    """A criterion can end a block while a repeat waits; the next block starts with none of the
+    last one's repeats, as it starts with none of its counts."""
+    first = Block(name="first", conditions=[Condition("a", {}, target=100),
+                                            Condition("b", {}, target=100)], criterion=(1.0, 1))
+    second = Block(name="second", conditions=[Condition("c", {}, target=1)])
+    scheduler = Scheduler([first, second], seed=1)
+    broke = scheduler.next_trial().name
+    scheduler.record(broke, Outcome.FIXATION_BREAK)
+    scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
+    assert scheduler.finished
+
+    scheduler.advance()
+
+    assert [scheduler.next_trial().name for _ in range(2)] == ["c", "c"]
+
+
+def test_a_constrained_block_keeps_its_runs_short_while_two_conditions_are_owed():
+    """`Constrained(max_run=2)`: a repeat never makes a run of three while another condition can
+    be drawn instead, and across seeds a repeat's slot takes more than one position in its
+    window (k = 3: two or three trials on), as the PI's "random slot" has it."""
+    gaps = set()
+    for seed in (3, 4, 5, 6, 7):
+        block = Block(name="b", conditions=[Condition(n, {}, target=20) for n in "ab"],
+                      order=Constrained(max_run=2))
+        scheduler = Scheduler([block], seed=seed)
+        runs, last = [], None
+        for _ in range(200):
+            if scheduler.finished:
+                break
+            owing = sum(scheduler.owed(name) > 0 for name in "ab")
+            name = scheduler.next_trial().name
+            draw = scheduler.drawn
+            if draw.repeat_of is not None and not draw.at_once:
+                gaps.add(draw.number - draw.repeat_of)
+            runs.append((runs[-1][0] + 1 if name == last else 1, owing))
+            last = name
+            scheduler.record(name, Outcome.FIXATION_BREAK if draw.number % 2 == 0
+                             else Outcome.CORRECT)
+
+        assert max(length for length, owing in runs if owing == 2) <= 2
+    assert len(gaps) > 1, gaps
+
+
+def test_a_waiting_repeat_comes_early_rather_than_let_a_constrained_run_grow():
+    """`Constrained(max_run=1)`, `a` waiting for its slot and `b` the only other condition owed: a
+    second `b` in a row would break the block's limit, so `a`'s repeat comes first. (Seed 8 gives
+    `a`'s repeat slot 3.)"""
+    block = Block(name="b", conditions=[Condition("a", {}, target=5), Condition("b", {}, target=5),
+                                        Condition("c", {}, target=0)], order=Constrained(max_run=1))
+    scheduler = Scheduler([block], seed=8)
+    drawn = []
+    for outcome in (Outcome.FIXATION_BREAK, Outcome.CORRECT, Outcome.CORRECT):
+        drawn.append(scheduler.next_trial().name)
+        scheduler.record(drawn[-1], outcome)
+
+    assert drawn == ["a", "b", "a"]
+    assert scheduler.drawn.repeat_of == 0
+
+
+def test_each_draw_names_the_condition_before_it_in_its_block():
+    """§16.4: "the realized sequence is recorded either way: each trial's actual predecessor,
+    aborted ones included". A block's first trial has none."""
+    scheduler = Scheduler(blocks=_two_blocks(), seed=1)
+    seen = []
+    for outcome in (Outcome.FIXATION_BREAK, Outcome.CORRECT, Outcome.CORRECT):
+        seen.append((scheduler.next_trial().name, scheduler.drawn.previous))
+        scheduler.record(seen[-1][0], outcome)
+    scheduler.advance()
+    scheduler.next_trial()
+
+    assert seen == [("a", None), ("a", "a"), ("a", "a")]
+    assert (scheduler.drawn.previous, scheduler.drawn.number) == (None, 3)
 
 
 def test_a_wrong_choice_is_not_requeued():

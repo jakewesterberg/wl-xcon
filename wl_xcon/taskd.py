@@ -2424,6 +2424,7 @@ class Session:
                     continue
 
                 condition = scheduler.next_trial()
+                drawn = scheduler.drawn
                 values = {**self.spec.values, **condition.values}
                 world = make_world(trial, values, index)
                 # **The trial opens in the stream at the boundary, never in a frame**
@@ -2502,6 +2503,9 @@ class Session:
                     condition=condition.name,
                     counting=counted,
                     shown=shown,
+                    repeat_of=drawn.repeat_of,
+                    at_once=drawn.at_once,
+                    previous=drawn.previous,
                     run=self.run_index,
                     position=position,
                     # **The trial's whole commanded difference**, and `resume.read` adds it

@@ -98,6 +98,21 @@ class Condition:
 
 
 @dataclass(frozen=True, slots=True)
+class Draw:
+    """What `Scheduler.next_trial` drew, for the trial's row: the realized sequence (engine spec
+    §16.3-16.4; engine build C2a). `number` is the trial's place in the run, from 0 -- `taskd`'s
+    `index`; `repeat_of`, the number of the trial it shows again, or `None`; `at_once`, whether it
+    came straight after that trial, which §16.3 has recorded; `previous`, the condition of the
+    trial before it in its block, an aborted one included, or `None` for a block's first."""
+
+    condition: Condition
+    number: int
+    repeat_of: int | None = None
+    at_once: bool = False
+    previous: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class Block:
     name: str
     conditions: list[Condition]
@@ -145,6 +160,13 @@ class Scheduler:
     _window: deque = field(init=False, default_factory=deque, repr=False)
     _index: int = field(init=False, default=0, repr=False)
     _drawn: list = field(init=False, default_factory=list, repr=False)
+    #: Repeats waiting for their slot (engine spec §16.3): `(slot, repeat_of, condition)`, the
+    #: slot a trial number, at most one per condition, whose normal draws wait for it.
+    _due: list = field(init=False, default_factory=list, repr=False)
+    #: Trials drawn in this run: the next one's number (`Draw.number`).
+    _number: int = field(init=False, default=0, repr=False)
+    #: The last draw, which `taskd` writes into its trial's row.
+    drawn: Draw | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         self._rng = random.Random(self.seed)
@@ -162,7 +184,7 @@ class Scheduler:
         reconstructable -- a randomisation nobody can reproduce is one nobody can
         rule out as an explanation.
         """
-        pending = [c.name for c in self.block.conditions if self.owed(c.name) > 0]
+        pending = [c.name for c in self.block.conditions if self._drawable(c.name)]
         if not pending:
             return
         order = self.block.order
@@ -173,18 +195,37 @@ class Scheduler:
 
         weights = [order.weights.get(name, 1.0) for name in pending]
         if isinstance(order, Constrained):
-            allowed = [
-                name
-                for name in pending
-                if not (
-                    len(self._drawn) >= order.max_run
-                    and all(previous == name for previous in self._drawn[-order.max_run:])
-                )
-            ]
+            allowed = [name for name in pending if not self._runs_long(name)]
             if allowed:
                 pending = allowed
                 weights = [order.weights.get(name, 1.0) for name in pending]
         self._queue.append(self._rng.choices(pending, weights=weights, k=1)[0])
+
+    def _drawable(self, condition: str) -> bool:
+        """Whether an ordinary draw may give `condition`: it still owes, and no repeat of it is
+        waiting for its slot -- the repeat is its next trial (engine spec §16.3)."""
+        return self.owed(condition) > 0 and all(name != condition for _, _, name in self._due)
+
+    def _runs_long(self, condition: str) -> bool:
+        """Whether `condition` next would make a run longer than a `Constrained` block allows."""
+        order = self.block.order
+        return (
+            isinstance(order, Constrained)
+            and len(self._drawn) >= order.max_run
+            and all(previous == condition for previous in self._drawn[-order.max_run:])
+        )
+
+    def _peek(self) -> str | None:
+        """The next ordinary draw, left in the queue: entries that stopped being drawable since
+        they were queued are dropped, and the queue refilled once when empty; `None` when nothing
+        is drawable."""
+        for _ in range(2):
+            while self._queue and not self._drawable(self._queue[0]):
+                self._queue.popleft()
+            if self._queue:
+                return self._queue[0]
+            self._refill()
+        return None
 
     def counts(self, condition: str) -> Counts:
         return self._counts[condition]
@@ -255,6 +296,7 @@ class Scheduler:
         self._queue.clear()
         self._window.clear()
         self._drawn.clear()
+        self._due.clear()
         self._refill()
         return self.block
 
@@ -268,12 +310,37 @@ class Scheduler:
         return all(self.owed(c.name) == 0 for c in self.block.conditions)
 
     def next_trial(self) -> Condition:
-        if not self._queue:
-            self._refill()
-        name = self._queue.popleft()
+        """The next trial's condition, its `Draw` left in `drawn`. **The earliest waiting repeat
+        goes first** when its slot has come, when nothing else can be drawn, or when the ordinary
+        draw -- which gives no condition a repeat is waiting for -- would make a run longer than a
+        `Constrained` block allows (engine spec §16.3). A repeat cannot lengthen a run itself: its
+        condition is not drawn while it waits, and its slot is at least two trials on."""
+        number = self._number
+        waiting = sorted(self._due)
+        name, repeat_of = self._peek(), None
+        if waiting and (waiting[0][0] <= number or name is None or self._runs_long(name)):
+            due = waiting[0]
+            self._due.remove(due)
+            _, repeat_of, name = due
+        elif name is None:
+            raise IndexError(
+                f"block {self.block.name!r} has no condition left to draw and its end rule is not "
+                f"met"
+            )
+        else:
+            self._queue.popleft()
+        condition = next(c for c in self.block.conditions if c.name == name)
+        self.drawn = Draw(
+            condition,
+            number,
+            repeat_of=repeat_of,
+            at_once=repeat_of is not None and repeat_of == number - 1,
+            previous=self._drawn[-1] if self._drawn else None,
+        )
         self._drawn.append(name)
         self._counts[name].attempted += 1
-        return next(c for c in self.block.conditions if c.name == name)
+        self._number += 1
+        return condition
 
     def record(self, condition: str, outcome: Outcome | None, shown: bool = True) -> str:
         """Count one trial of `condition` by its table (engine spec §16.1-16.2), and return what it
@@ -295,8 +362,26 @@ class Scheduler:
                 while len(self._window) > self.block.criterion[1]:
                     self._window.popleft()
         if kind == OWED and self.owed(condition) > 0:
-            # End of the block, not immediately: an animal must not be able to make
-            # an easy condition repeat by breaking on the hard one.
             self.requeued.append(condition)
-            self._queue.append(condition)
+            self._repeat(condition)
         return kind
+
+    def _repeat(self, condition: str) -> None:
+        """Place the repeat of the trial just recorded (engine spec §16.3; the PI, 2026-10-11, and
+        2026-10-12 for every block): **a random slot within the next k trials, k the block's
+        number of conditions and at least 3, never the very next** -- so an animal cannot get an
+        easy condition by breaking on a hard one, nor the same display again by breaking on it, nor
+        know where a repeat comes in a block of two (the PI: "At least 3") -- **unless nothing else
+        can be drawn**: it is the only condition still owed, or every other is waiting too, when
+        the earliest waiting repeat comes first (`next_trial`), at once if it is this one, which
+        its row records (`Draw.at_once`). **The slot is one no other waiting repeat holds**, so
+        two never fall due on one trial and none waits past its window; only when every slot of
+        the window is held -- more than k - 2 earlier repeats waiting -- does it share one, and a
+        drum's trial, which goes before them all, can put one off by a trial. The slot is the
+        block's seeded generator's, so a session's order stays reproducible."""
+        number = self._number - 1
+        k = max(3, len(self.block.conditions))
+        held = {slot for slot, _, _ in self._due}
+        free = [slot for slot in range(number + 2, number + k + 1) if slot not in held]
+        slot = self._rng.choice(free) if free else number + self._rng.randint(2, k)
+        self._due.append((slot, number, condition))

@@ -236,6 +236,9 @@ class SessionRecord:
         last_reward_at: float | None,
         counting: str | None = None,
         shown: bool | None = None,
+        repeat_of: int | None = None,
+        at_once: bool = False,
+        previous: str | None = None,
     ) -> None:
         """One trial's record, flushed before returning.
 
@@ -267,7 +270,10 @@ class SessionRecord:
 
         **And what it did to its condition's count, and whether its stimulus appeared** (engine
         spec §16.1-16.2, §16.4; engine build C2a): `counting`, `counted`, `spent` or `owed`
-        (`task.Counting`), and `shown`; `None` where no scheduler counted it -- a census.
+        (`task.Counting`), and `shown`; `None` where no scheduler counted it -- a census. **And
+        where it sits in the realized sequence** (§16.3-16.4): the `index` of the trial it shows
+        again (`repeat_of`), whether it came straight after that one (`at_once`), and the condition
+        of the trial before it in its block (`previous`), an aborted one included.
         """
         if self._trials is None:
             self._trials = (self.directory / "trials.jsonl").open("a", encoding="utf-8")
@@ -286,6 +292,9 @@ class SessionRecord:
                     "last_reward_at": last_reward_at,
                     "counting": counting,
                     "shown": shown,
+                    "repeat_of": repeat_of,
+                    "at_once": at_once,
+                    "previous": previous,
                 },
                 sort_keys=True,
             )
