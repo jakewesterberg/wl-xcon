@@ -114,7 +114,9 @@ def test_in_a_block_of_two_conditions_a_repeat_comes_two_or_three_trials_later()
     for seed in range(20):
         block = Block(name="b", conditions=[Condition(n, {}, target=6) for n in "ab"])
         scheduler = Scheduler([block], seed=seed)
-        while not scheduler.finished:
+        for _ in range(200):
+            if scheduler.finished:
+                break
             scheduler.next_trial()
             draw = scheduler.drawn
             if draw.repeat_of is not None and not draw.at_once:
@@ -122,6 +124,8 @@ def test_in_a_block_of_two_conditions_a_repeat_comes_two_or_three_trials_later()
             broke = draw.number % 3 == 0
             scheduler.record(draw.condition.name,
                              Outcome.FIXATION_BREAK if broke else Outcome.CORRECT)
+        else:
+            raise AssertionError(f"seed {seed}: the block never ended in 200 trials")
 
     assert gaps == {2, 3}
 
@@ -129,14 +133,16 @@ def test_in_a_block_of_two_conditions_a_repeat_comes_two_or_three_trials_later()
 def test_no_repeat_waits_past_its_k_when_breaks_come_often():
     """Each repeat takes a slot no other waiting repeat holds, so two never fall due together and
     none waits past its window (the engineering review's Minor 2: 1.17% of repeats came later than
-    k with six conditions breaking half the time, when slots could be shared). When all k - 1
-    slots are held a repeat shares one (the plan's call 3), so the bound is the slot draw's; a
-    seeded probe of 464,202 repeats found none late."""
+    k with six conditions breaking half the time, when slots could be shared). The bound of k is
+    exact, drums aside: slot number + k is always free (see `Scheduler._repeat`); a seeded probe of
+    464,202 repeats found none late."""
     for seed in range(10):
         breaks = random.Random(seed)
         block = Block(name="b", conditions=[Condition(f"c{i}", {}, target=10) for i in range(6)])
         scheduler = Scheduler([block], seed=seed)
-        while not scheduler.finished:
+        for _ in range(2000):
+            if scheduler.finished:
+                break
             scheduler.next_trial()
             draw = scheduler.drawn
             if draw.repeat_of is not None:
@@ -144,6 +150,34 @@ def test_no_repeat_waits_past_its_k_when_breaks_come_often():
             broke = breaks.random() < 0.5
             scheduler.record(draw.condition.name,
                              Outcome.FIXATION_BREAK if broke else Outcome.CORRECT)
+        else:
+            raise AssertionError(f"seed {seed}: the block never ended in 2000 trials")
+
+
+def test_a_repeat_never_comes_straight_after_its_break_while_another_condition_is_owed():
+    """§16.3 and the PI's rule: at once only for the last condition owed. When every owed
+    condition is waiting and the earliest repeat is the one the last trial placed, the next
+    waiting one goes (the review's Important 1: seeds 1, 3, 14 and 19 put it straight back, `a`
+    after `a`, while `b` still owed)."""
+    for seed in range(20):
+        block = Block(name="b", conditions=[Condition("a", {}, target=1),
+                                            Condition("b", {}, target=1),
+                                            Condition("c", {}, target=0),
+                                            Condition("d", {}, target=0)])
+        scheduler = Scheduler([block], seed=seed)
+        for _ in range(50):
+            if scheduler.finished:
+                break
+            scheduler.next_trial()
+            draw = scheduler.drawn
+            if draw.at_once:
+                assert scheduler.owed(draw.condition.name) > 0
+                assert [n for n in "ab" if n != draw.condition.name and scheduler.owed(n) > 0
+                        ] == [], (seed, draw)
+            scheduler.record(draw.condition.name,
+                             Outcome.FIXATION_BREAK if draw.number < 2 else Outcome.CORRECT)
+        else:
+            raise AssertionError(f"seed {seed}: the block never ended in 50 trials")
 
 
 def test_the_only_condition_still_owed_repeats_at_once_and_its_draw_says_so():
@@ -174,6 +208,7 @@ def test_a_waiting_repeat_holds_its_conditions_draws_and_comes_early_when_nothin
     for _ in range(2):
         names.append(scheduler.next_trial().name)
         scheduler.record(names[-1], Outcome.FIXATION_BREAK)
+    assert min(scheduler._due)[0] == 3, "the seed's precondition: the first repeat's slot"
 
     third = scheduler.next_trial()
 
@@ -236,6 +271,8 @@ def test_a_waiting_repeat_comes_early_rather_than_let_a_constrained_run_grow():
     for outcome in (Outcome.FIXATION_BREAK, Outcome.CORRECT, Outcome.CORRECT):
         drawn.append(scheduler.next_trial().name)
         scheduler.record(drawn[-1], outcome)
+        if len(drawn) == 1:
+            assert scheduler._due[0][0] == 3, "the seed's precondition: the repeat's slot"
 
     assert drawn == ["a", "b", "a"]
     assert scheduler.drawn.repeat_of == 0

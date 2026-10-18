@@ -250,8 +250,8 @@ class Scheduler:
 
     def _peek(self) -> str | None:
         """The next ordinary draw, left in the queue: entries that stopped being drawable since
-        they were queued are dropped, and the queue refilled once when empty; `None` when nothing
-        is drawable."""
+        they were queued are dropped (an entry goes stale when Task 8's `clear` forgives a condition
+        still queued), and the queue refilled once when empty; `None` when nothing is drawable."""
         for _ in range(2):
             while self._queue and not self._drawable(self._queue[0]):
                 self._queue.popleft()
@@ -391,9 +391,12 @@ class Scheduler:
         """The next trial's condition, its `Draw` left in `drawn`. **The earliest waiting repeat
         goes first** when its slot has come, when nothing else can be drawn, or when the ordinary
         draw -- which gives no condition a repeat is waiting for -- would make a run longer than a
-        `Constrained` block allows (engine spec §16.3). A repeat cannot lengthen a run itself: its
-        condition is not drawn while it waits, and its slot is at least two trials on. **A drum's
-        trial goes before all of them**, at once."""
+        `Constrained` block allows (engine spec §16.3). **Except that a repeat taken early, its
+        slot not yet come, which the trial just recorded placed, gives way to the next waiting
+        one** when there is another: only the last condition owed repeats at once. A repeat taken
+        at its slot or early can make a run of two of its condition, at once or not; a
+        `Constrained` block's limit counts it as a draw. **A drum's trial goes before all of
+        them**, at once."""
         number = self._number
         waiting = sorted(self._due)
         drummed = self._drum is not None
@@ -402,6 +405,8 @@ class Scheduler:
             self._drum = None
         elif waiting and (waiting[0][0] <= number or name is None or self._runs_long(name)):
             due = waiting[0]
+            if due[0] > number and due[1] == number - 1 and len(waiting) > 1:
+                due = waiting[1]
             self._due.remove(due)
             _, repeat_of, name = due
         elif name is None:
@@ -471,15 +476,16 @@ class Scheduler:
         easy condition by breaking on a hard one, nor the same display again by breaking on it, nor
         know where a repeat comes in a block of two (the PI: "At least 3") -- **unless nothing else
         can be drawn**: it is the only condition still owed, or every other is waiting too, when
-        the earliest waiting repeat comes first (`next_trial`), at once if it is this one, which
-        its row records (`Draw.at_once`). **The slot is one no other waiting repeat holds**, so
-        two never fall due on one trial and none waits past its window; only when every slot of
-        the window is held -- more than k - 2 earlier repeats waiting -- does it share one, and a
-        drum's trial, which goes before them all, can put one off by a trial. The slot is the
-        block's seeded generator's, so a session's order stays reproducible."""
+        a waiting repeat comes first (`next_trial`: the earliest, but not this one while another
+        waits), at once only if it is the last, which its row records (`Draw.at_once`). **The
+        slot is one no other waiting repeat holds**, so two never fall due on one trial and none
+        waits past its window: every waiting repeat was placed at an earlier trial m with its
+        slot at most m + k, so slot number + k is always free. A drum's trials, which go before
+        them all, put the waiting repeats off by as many trials as it takes tries. The slot is
+        the block's seeded generator's, so a session's order stays reproducible."""
         number = self._number - 1
         k = max(3, len(self.block.conditions))
         held = {slot for slot, _, _ in self._due}
         free = [slot for slot in range(number + 2, number + k + 1) if slot not in held]
-        slot = self._rng.choice(free) if free else number + self._rng.randint(2, k)
+        slot = self._rng.choice(free)
         self._due.append((slot, number, condition))
