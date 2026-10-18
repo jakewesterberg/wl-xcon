@@ -191,13 +191,13 @@ class Shortfall:
     `because` its repeat limit was reached by the animal's own failures (`CAP`), which is **flagged
     as possible avoidance**; or reached with tries the rig lost among them (`RIG`), named so and
     never flagged; or a person cleared them from the console (`CLEARED`, by `by`). `after_trial`,
-    the number of the trial it happened after."""
+    the number of the trial it happened after, or `None` for a clear before the run's first."""
 
     block: str
     condition: str
     trials: int
     because: str
-    after_trial: int
+    after_trial: int | None
     by: object = None
 
     @property
@@ -405,6 +405,25 @@ class Scheduler:
         2026-10-12)."""
         return self._tries if self._drum is not None else 0
 
+    def clear(self, condition: str, by: object = None, rest: bool = False) -> str | None:
+        """Forgive one trial of `condition`'s debt in this block, or with `rest` all it still owes,
+        as a person does from the console (the PI, 2026-10-11: "manually advance beyond or clear a
+        specific trial in the count"; *the rest*, the engine C2a plan's science review, D5): a
+        repeat of it waiting, or a drum's trial, is dropped, and the clearing is a `Shortfall`
+        naming `by`. Returns why nothing was cleared -- the block has no such condition, or it owes
+        nothing -- or `None`."""
+        if condition not in self._counts:
+            return (
+                f"block {self.block.name!r} has no condition {condition!r}, so nothing is cleared"
+            )
+        owed = self.owed(condition)
+        if owed == 0:
+            return (
+                f"{condition!r} owes nothing in block {self.block.name!r}, so nothing is cleared"
+            )
+        self._forgive(condition, owed if rest else 1, CLEARED, by)
+        return None
+
     def drum(self, scope: str) -> str:
         """Switch drumming, as a trainer does from the console (the PI, 2026-10-11): `"block"` on
         until this block ends, `"run"` on until the run ends, `"off"` off until this block ends.
@@ -540,8 +559,9 @@ class Scheduler:
         self._due = [due for due in self._due if due[2] != condition]
         if self._drum is not None and self._drum[0] == condition:
             self._drum = None
-        self.shortfalls.append(
-            Shortfall(self.block.name, condition, trials, because, self._number - 1, by))
+        # A person's clear can come before the run's first trial, after none.
+        after = self._number - 1 if self._number else None
+        self.shortfalls.append(Shortfall(self.block.name, condition, trials, because, after, by))
 
     def _repeat(self, condition: str) -> None:
         """Place the repeat of the trial just recorded (engine spec §16.3; the PI, 2026-10-11, and

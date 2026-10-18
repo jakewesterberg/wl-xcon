@@ -44,6 +44,8 @@ from wl_xcon.link import (
     RECENT_OUTCOMES,
     REFUSAL_HISTORY,
     CancelScheduledStop,
+    ClearOwed,
+    Drum,
     ManualReward,
     Mark,
     Pause,
@@ -3516,6 +3518,122 @@ def _controls_rows(session: Session) -> list[dict]:
     if not path.exists():
         return []
     return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+class _Drained(Simulated):
+    """A link that queues `script[n]` as the `n`th drain begins: the commands reach the loop at
+    the boundary before trial `n - 1`."""
+
+    def __init__(self, script):
+        super().__init__()
+        self.script, self.drains = dict(script), 0
+
+    def drain(self) -> list:
+        self.drains += 1
+        for command in self.script.get(self.drains, ()):
+            self.queue(command)
+        return super().drain()
+
+
+def _near_far(**block) -> Block:
+    return Block(name="b", conditions=[Condition("near", {"target_x": 5.0}, target=4),
+                                       Condition("far", {"target_x": 12.0}, target=4)], **block)
+
+
+def test_a_person_clears_a_trial_from_a_conditions_count_and_it_is_recorded(tmp_path):
+    """The PI, 2026-10-11: "there should be some way in the console to manually advance beyond or
+    clear a specific trial in the count", recorded. The block owes `near` one trial fewer; the
+    control row and the run's end row say who and where; a clear of a condition the block does not
+    have is refused with the sentence, and changes nothing."""
+    link = _Drained({3: [ClearOwed(condition="near", by=Box("jake")),
+                         ClearOwed(condition="nowhere", by=Box("jake"))]})
+    session = _session(_spec(tmp_path, trials=400, blocks=[_near_far()]), link=link)
+
+    session.run()
+
+    rows = _trial_rows(session)
+    assert sum(r["condition"] == "near" and r["counting"] != "owed" for r in rows) == 3
+    assert sum(r["condition"] == "far" and r["counting"] != "owed" for r in rows) == 4
+    (cleared,) = [row for row in _controls_rows(session) if row["kind"] == "clear"]
+    assert (cleared["condition"], cleared["block"], cleared["by"], cleared["trial_index"]) == (
+        "near", "b", {"kind": "box", "name": "jake"}, 2)
+    (end,) = [row for row in _runs(session) if row["event"] == "end"]
+    assert [(s["condition"], s["trials"], s["because"], s["possible_avoidance"], s["by"],
+             s["after_trial"]) for s in end["shortfalls"]] == [
+        ("near", 1, "cleared", False, {"kind": "box", "name": "jake"}, 1)]
+    assert [(name, why) for name, _, why in session.refusals] == [
+        ("clear", "block 'b' has no condition 'nowhere', so nothing is cleared")]
+
+
+def test_a_clear_sent_while_paused_is_applied_at_once(tmp_path):
+    """The paused loop drains commands too (`_hold`), and a clear is applied there, before the
+    resume: routed beside the pause, outside `Session._command`'s welfare-listed parts."""
+    link = _Scripted(script={1: [ClearOwed(condition="near", by=Box("sam"))],
+                             2: [Resume(by=Box("sam"))]}, step=1.0)
+    link.queue(Pause(by=Box("jake")))
+    session, wall = _walled(tmp_path, link, trials=400, blocks=[_near_far()])
+    link.wall = wall
+
+    session.run()
+
+    kinds = [row["kind"] for row in _controls_rows(session)]
+    assert kinds[:3] == ["pause", "clear", "resume"]
+    assert session.stop_kind == "completed"
+
+
+def test_a_trainer_switches_drumming_on_for_the_run_and_every_row_says_so(tmp_path):
+    """The PI, 2026-10-11: drumming switched on by the trainer, and recorded: a control row naming
+    who switched it and to what, and every trial row from then on drawn while drumming."""
+    link = _Drained({1: [Drum(scope="run", by=Box("jake"))]})
+    session = _session(_spec(tmp_path, trials=400, blocks=[_near_far()]), link=link)
+
+    session.run()
+
+    (switched,) = [row for row in _controls_rows(session) if row["kind"] == "drum"]
+    assert (switched["scope"], switched["was"], switched["now"], switched["by"]) == (
+        "run", None, "run", {"kind": "box", "name": "jake"})
+    rows = _trial_rows(session)
+    assert {row["drumming"] for row in rows} == {"run"}
+    assert all(row["drummed"] == (before["outcome"] != "correct")
+               for before, row in zip(rows, rows[1:]))
+    assert any(row["drummed"] for row in rows), "the seed gives the run a trial that is not correct"
+
+
+def test_a_person_clears_the_rest_of_a_condition_and_it_is_recorded(tmp_path):
+    """The science review's D5 and the controller's ruling: beside *clear one*, *clear the rest of
+    this condition*, so a condition the animal refuses is moved past in one command, recorded as a
+    clear is: its control row says how many trials it cleared, and the end row's shortfall."""
+    link = _Drained({2: [ClearOwed(condition="far", by=Box("jake"), rest=True)]})
+    session = _session(_spec(tmp_path, trials=400, blocks=[_near_far()]), link=link)
+
+    session.run()
+
+    rows = _trial_rows(session)
+    (cleared,) = [row for row in _controls_rows(session) if row["kind"] == "clear"]
+    (end,) = [row for row in _runs(session) if row["event"] == "end"]
+    (short,) = end["shortfalls"]
+    paid = sum(r["condition"] == "far" and r["counting"] in ("counted", "spent") for r in rows)
+    assert (cleared["rest"], cleared["cleared"], cleared["owed"]) == (True, short["trials"], 0)
+    assert (short["condition"], short["because"], short["trials"] + paid) == ("far", "cleared", 4)
+    assert sum(r["condition"] == "near" and r["counting"] != "owed" for r in rows) == 4
+
+
+def test_a_drumming_switch_sent_as_a_block_ends_is_for_the_next_block(tmp_path):
+    """The engineering review's Minor 10: the loop drains commands before it advances, so a switch
+    that arrives as a block's last trial pays was reset by the advance, its row naming the block
+    that had ended. It is the next block's, and its row names that block."""
+    blocks = [Block(name="A", conditions=[Condition("a", {}, target=1)], counting=EVERY_TRIAL),
+              Block(name="B", conditions=[Condition("b", {}, target=3)])]
+    link = _Drained({2: [Drum(scope="block", by=Box("jake"))]})
+    session = _session(_spec(tmp_path, trials=400, blocks=blocks), link=link)
+
+    session.run()
+
+    (switched,) = [row for row in _controls_rows(session) if row["kind"] == "drum"]
+    rows = _trial_rows(session)
+    assert (switched["block"], switched["now"]) == ("B", "block")
+    assert [row["drumming"] for row in rows if row["block"] == "A"] == [None]
+    assert {row["drumming"] for row in rows if row["block"] == "B"} == {"block"}
 
 
 def test_a_pause_holds_the_session_at_a_boundary_and_resume_continues(tmp_path):

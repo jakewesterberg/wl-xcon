@@ -30,8 +30,10 @@ from wl_xcon.link import (
     Absent,
     CancelScheduledStop,
     CheckRun,
+    ClearOwed,
     CommandRefused,
     Control,
+    Drum,
     Counts,
     EndSession,
     FrameError,
@@ -1552,6 +1554,37 @@ def test_each_control_survives_the_wire_with_who_sent_it(command):
 
     assert restored == command
     assert type(restored) is type(command)
+
+
+@pytest.mark.parametrize(
+    "command", [ClearOwed(condition="near", by=Box("jake")),
+                ClearOwed(condition="near", by=Box("jake"), rest=True),
+                Drum(scope="run", by=Box("jake"))],
+    ids=["clear one", "clear the rest", "drum"])
+def test_clearing_a_trial_and_switching_drumming_survive_the_wire_with_who_sent_them(command):
+    """The PI, 2026-10-11: a console control to clear a trial from the count, and drumming switched
+    by the trainer (engine build C2a)."""
+    assert _decode_command(_encode_command(command)) == command
+    assert (ClearOwed.KIND, Drum.KIND) == ("clear", "drum")
+
+
+@pytest.mark.parametrize(
+    ("fields", "said"),
+    [
+        ({"kind": "clear", "condition": "", "by": JAKE}, "condition is text"),
+        ({"kind": "clear", "by": JAKE}, "condition is text"),
+        ({"kind": "clear", "condition": "near", "rest": "yes", "by": JAKE},
+         "rest is true or false"),
+        ({"kind": "drum", "scope": "on", "by": JAKE}, "block, run or off"),
+        ({"kind": "drum", "by": JAKE}, "block, run or off"),
+    ],
+)
+def test_a_malformed_clear_or_drum_is_refused_where_it_is_decoded(fields, said):
+    with pytest.raises(CommandRefused) as refused:
+        _decode_command(_packed(**fields))
+
+    assert refused.value.name == fields["kind"]
+    assert said in refused.value.why
 
 
 def test_the_controls_cross_a_real_socket_in_order(zmq_cleanup):

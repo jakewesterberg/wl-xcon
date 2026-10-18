@@ -13,6 +13,7 @@ import pytest
 
 from wl_xcon.scheduler import (
     CAP,
+    CLEARED,
     CORRECT_ONLY,
     DRUM_WARNING,
     EVERY_TRIAL,
@@ -731,6 +732,72 @@ def test_a_forgiven_conditions_waiting_repeat_is_not_drawn_and_none_is_placed_ag
     assert scheduler._due == [] and scheduler.requeued == ["a"]
     assert set(drawn) == {"b"} and scheduler.owed("a") == 0
     assert [(s.condition, s.trials) for s in scheduler.shortfalls] == [("a", 3)]
+
+
+def test_a_cleared_trial_forgives_one_of_the_debt_and_drops_its_waiting_repeat():
+    """The PI, 2026-10-11: "manually advance beyond or clear a specific trial in the count".
+    Clearing the trial a repeat is waiting for forgives one trial, records who did it, and the
+    repeat never comes; a clear of nothing owed, or of no condition of the block, is refused with a
+    sentence."""
+    block = Block(name="b", conditions=[Condition("a", {}, target=2), Condition("b", {}, target=2)])
+    scheduler = Scheduler([block], seed=1)
+    broke = scheduler.next_trial().name
+    scheduler.record(broke, Outcome.FIXATION_BREAK)
+
+    assert scheduler.clear(broke, by="jake") is None
+
+    assert scheduler.owed(broke) == 1
+    assert scheduler.shortfalls == [Shortfall("b", broke, 1, CLEARED, 0, "jake")]
+    assert not scheduler.shortfalls[0].possible_avoidance
+    draws = []
+    while not scheduler.finished:
+        scheduler.next_trial()
+        draws.append(scheduler.drawn)
+        scheduler.record(scheduler.drawn.condition.name, Outcome.CORRECT)
+    assert all(draw.repeat_of is None for draw in draws) and len(draws) == 3
+    assert scheduler.clear("c") == "block 'b' has no condition 'c', so nothing is cleared"
+    assert scheduler.clear(broke) == f"'{broke}' owes nothing in block 'b', so nothing is cleared"
+
+
+def test_clearing_a_drummed_trial_moves_past_it():
+    """"Advance beyond": the drum's trial waiting to come back is dropped with the trial cleared."""
+    scheduler = Scheduler([Block(name="b", conditions=[Condition("a", {}, target=2)], drum=True)],
+                          seed=1)
+    scheduler.record(scheduler.next_trial().name, Outcome.WRONG_TARGET)
+
+    scheduler.clear("a")
+    scheduler.next_trial()
+
+    assert not scheduler.drawn.drummed and scheduler.owed("a") == 1
+
+
+def test_clearing_the_rest_of_a_condition_forgives_all_it_still_owes():
+    """The science review's D5: a condition the animal refuses, owing many, is moved past at
+    once."""
+    block = Block(name="b", conditions=[Condition("a", {}, target=20),
+                                        Condition("b", {}, target=1)])
+    scheduler = Scheduler([block], seed=1)
+
+    assert scheduler.clear("a", by="jake", rest=True) is None
+
+    assert scheduler.owed("a") == 0
+    assert scheduler.shortfalls == [Shortfall("b", "a", 20, CLEARED, None, "jake")]
+
+
+def test_clearing_a_condition_that_is_queued_keeps_it_from_the_next_draw():
+    """A condition the shuffle has queued and a person then clears the rest of is not drawn: the
+    queue's entry went stale, and `_peek` drops it (the controller's ruling from Task 4's review)."""
+    block = Block(name="b", conditions=[Condition(name, {}, target=2) for name in "abc"],
+                  order=Shuffled())
+    scheduler = Scheduler([block], seed=1)
+    scheduler.next_trial()
+    scheduler.record(scheduler.drawn.condition.name, Outcome.CORRECT)
+    queued = scheduler.upcoming()[0]
+
+    assert scheduler.clear(queued, rest=True) is None
+    scheduler.next_trial()
+
+    assert scheduler.drawn.condition.name != queued
 
 
 # --- drumming (the PI, 2026-10-11) -----------------------------------------------

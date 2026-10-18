@@ -5,8 +5,8 @@ implements.** This file holds the message (`Telemetry`, `Staged`, `Refused`), th
 idle frame `wlx taskd` publishes while no session is open (`Idle`, since schema 10;
 carrying the last closed session's summary since schema 11),
 the commands a console sends back (`SetParameter`, `Stop`, and since b3a the service's
-`OpenSession`, `CheckRun`, `StartRun` and `EndSession`, and since XC-026 its
-`ResumeSession`; `Command`), the port a session
+`OpenSession`, `CheckRun`, `StartRun` and `EndSession`, since XC-026 its
+`ResumeSession`, and since engine build C2a `ClearOwed` and `Drum`; `Command`), the port a session
 publishes and drains through (`Link`, `Absent`, `Simulated`), its wire encoding
 (`encode`/`decode`, plus the command-side `_encode_command`/`_decode_command`), and
 the one live transport that carries all of it over a real socket (`ZmqLink`,
@@ -51,6 +51,7 @@ from typing import ClassVar, Protocol
 from wl_xcon import actor as actors
 from wl_xcon.actor import Actor
 from wl_xcon.findings import SESSION_KINDS
+from wl_xcon.scheduler import DRUM_SCOPES
 from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 
 #: Bumped whenever a field changes meaning or disappears. ADR-0003: "schema-versioned
@@ -1482,6 +1483,36 @@ class ResumeSession:
     session_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class ClearOwed:
+    """**Clear one trial of a condition's debt** in the open block, or with `rest` all it still owes
+    (the PI, 2026-10-11: "there should be some way in the console to manually advance beyond or
+    clear a specific trial in the count"; *the rest*, the engine C2a plan's science review, D5): the
+    condition owes one trial fewer, or none, a repeat of it waiting or a drum's trial waiting is
+    dropped, and the run's end row records it as a shortfall with who cleared it (engine spec
+    §16.6; `scheduler.Scheduler.clear`). `taskd` refuses it, with the sentence, where the block owes
+    the condition nothing."""
+
+    KIND: ClassVar[str] = "clear"
+
+    condition: str
+    by: Actor
+    rest: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class Drum:
+    """**Switch drumming** (the PI, 2026-10-11: drumming, "a training tool ... where a trial is
+    repeated until correct", switched on per block or run by the trainer, and recorded): `scope`
+    `"block"` or `"run"`, every trial that is not correct coming back at once until it is, or
+    `"off"` until the block ends (`scheduler.DRUM_SCOPES`; `Scheduler.drum`)."""
+
+    KIND: ClassVar[str] = "drum"
+
+    scope: str
+    by: Actor
+
+
 Command = (
     SetParameter
     | Stop
@@ -1496,6 +1527,8 @@ Command = (
     | StartRun
     | EndSession
     | ResumeSession
+    | ClearOwed
+    | Drum
 )
 
 #: The kinds of scheduled stop, in the order a person is offered them.
@@ -1563,9 +1596,9 @@ def check_schedule(kind: object, value: object) -> str | None:
 def _encode_command(command: Command) -> bytes:
     """A command to msgpack -- `SetParameter`, `Stop`, and since P4d-2b b2a `Pause`,
     `Resume`, `Mark`, `ScheduleStop`, `CancelScheduledStop` and `ManualReward`, and
-    since P4d-2b b3a `OpenSession`, `CheckRun`, `StartRun` and `EndSession`, and since
-    XC-026 `ResumeSession` -- tagged by kind so `_decode_command` knows which dataclass to
-    rebuild.
+    since P4d-2b b3a `OpenSession`, `CheckRun`, `StartRun` and `EndSession`, since
+    XC-026 `ResumeSession`, and since engine build C2a `ClearOwed` and `Drum` -- tagged by kind so
+    `_decode_command` knows which dataclass to rebuild.
 
     Private, unlike `encode`/`decode`: its callers are `ZmqConsole.send` and
     `ZmqCommands.deliver`, both in this same file, so this is an implementation detail
@@ -1635,6 +1668,11 @@ def _encode_command(command: Command) -> bytes:
             "by": actors.to_map(command.by),
             "session_id": command.session_id,
         }
+    elif isinstance(command, ClearOwed):
+        payload = {"kind": "clear", "by": actors.to_map(command.by), "condition": command.condition,
+                   "rest": command.rest}
+    elif isinstance(command, Drum):
+        payload = {"kind": "drum", "by": actors.to_map(command.by), "scope": command.scope}
     else:
         raise TypeError(f"no wire encoding for {command!r}")
     return msgpack.packb(payload, use_bin_type=True)
@@ -1991,6 +2029,25 @@ def _command_from(data: dict) -> Command:
     if kind == "resume_session":
         by = _actor(data.get("by"), kind)
         return ResumeSession(by=by, session_id=_word(data, "session_id", kind, by))
+    if kind == "clear":
+        by = _actor(data.get("by"), kind)
+        rest = data.get("rest", False)
+        if not isinstance(rest, bool):
+            raise CommandRefused(
+                "clear", by,
+                f"a 'clear' command's rest is true or false, and {_quoted(rest)} is neither, so it "
+                f"is refused",
+            )
+        return ClearOwed(condition=_word(data, "condition", kind, by), by=by, rest=rest)
+    if kind == "drum":
+        by = _actor(data.get("by"), kind)
+        if data.get("scope") not in DRUM_SCOPES:
+            raise CommandRefused(
+                "drum", by,
+                f"drumming is switched {', '.join(DRUM_SCOPES[:-1])} or {DRUM_SCOPES[-1]}, and "
+                f"{_quoted(data.get('scope'))} is none of them, so it is refused",
+            )
+        return Drum(scope=data["scope"], by=by)
     raise ValueError(f"unknown command kind on the wire: {_quoted(kind)}")
 
 

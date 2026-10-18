@@ -1516,6 +1516,43 @@ class Session:
             "cancel", by, f"cancelled the scheduled stop {said}", index, cancelled=said
         )
 
+    def _clear(self, command, index: int) -> None:
+        """**Clear one trial of a condition's debt, or the rest of it** (`link.ClearOwed`; the PI,
+        2026-10-11: "manually advance beyond or clear a specific trial in the count"), between
+        trials or while paused: the open block's scheduler forgives it (`Scheduler.clear`), the
+        run's end row records the shortfall with who cleared it, and `controls.jsonl` the control,
+        how many it cleared and what the condition still owes. **Refused with the sentence**, and
+        nothing changed, where the block owes the condition nothing."""
+        scheduler = self._scheduler
+        said = scheduler.clear(command.condition, by=command.by, rest=command.rest)
+        if said is not None:
+            self._refuse("clear", command.by, said)
+            return
+        cleared, owed = scheduler.shortfalls[-1].trials, scheduler.owed(command.condition)
+        what = f"the rest, {cleared} trials," if command.rest else "one trial"
+        self._control(
+            "clear", command.by,
+            f"cleared {what} of {command.condition} in block {scheduler.block.name}; it owes "
+            f"{owed}",
+            index, condition=command.condition, block=scheduler.block.name, rest=command.rest,
+            cleared=cleared, owed=owed,
+        )
+
+    def _drum(self, command, index: int) -> None:
+        """**Switch drumming** (`link.Drum`; the PI, 2026-10-11: "switched on per block or run by
+        the trainer", and recorded): the scheduler drums from the next trial (`Scheduler.drum`),
+        `controls.jsonl` records the switch with who made it, and every trial row says whether
+        drumming was on as it was drawn. Engine build C3's change log takes it over, with its
+        reason."""
+        scheduler = self._scheduler
+        was = scheduler.drumming
+        # The block it is for: this one, or the next when this one's end rule is already met.
+        block = scheduler.drum(command.scope)
+        self._control(
+            "drum", command.by, f"drumming {command.scope} in block {block}",
+            index, scope=command.scope, block=block, was=was, now=scheduler.drumming,
+        )
+
     def _ends(self, index: int) -> bool:
         """Whether the session must end at this boundary, with its reason and kind
         set. **One place for it**, asked between trials and on every pass of the
@@ -1830,6 +1867,12 @@ class Session:
             return
         if isinstance(command, _link.CancelScheduledStop):
             self._cancel(command.by, index)
+            return
+        if isinstance(command, _link.ClearOwed):
+            self._clear(command, index)
+            return
+        if isinstance(command, _link.Drum):
+            self._drum(command, index)
             return
         if not isinstance(command, _link.SetParameter):
             # A command this session has no branch for -- a newer console's -- is
