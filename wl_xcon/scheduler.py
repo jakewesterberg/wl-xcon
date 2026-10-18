@@ -183,8 +183,12 @@ class Counts:
     was repeated (`repeats`; a drum's are not); the failed tries in a row of its trial being shown
     again, its first try's included, each of which placed a repeat (`in_a_row`, which the repeat
     limit counts: §16.6 as the PI read it on 2026-10-12, and on 2026-10-18 "1: an answer ends the
-    trial"), and how many of those the rig lost (`rig`); and trials of its debt forgiven, by the
-    limit or by a person (`forgiven`)."""
+    trial"), and how many of those the rig lost (`rig`); trials of its debt forgiven, by the limit
+    or by a person (`forgiven`), and whether its limit flagged it as possible avoidance
+    (`flagged`). **And for the console and the run's end row** (the PI, 2026-10-18): its `trials`,
+    a trial and its drummed repeats one, and the tries recorded, every presentation (`presented`;
+    `attempted` counts every draw, a trial that faulted included); every answer, any try's, `right`
+    or `wrong`; and the trials whose first try was right (`right_first`)."""
 
     attempted: int = 0
     completed: int = 0
@@ -194,6 +198,37 @@ class Counts:
     in_a_row: int = 0
     rig: int = 0
     forgiven: int = 0
+    flagged: bool = False
+    trials: int = 0
+    presented: int = 0
+    right: int = 0
+    wrong: int = 0
+    right_first: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ConditionReport:
+    """One condition's counts in one block of the run, for the console and the run's end row (the
+    PI, 2026-10-18, decisions 15 and 16): its `trials`, a trial and its drummed repeats one, and its
+    `presentations`, every try; its answers `right` and `wrong`, every try's, and `right_first`,
+    the trials whose first try was right; what it still `owed`, the ordinary `repeats` placed, the
+    trials `moved_past` -- forgiven by its repeat limit or a person's clear -- and whether its limit
+    flagged it as `possible_avoidance`; its `drummed` tries, and `failing`, the failed tries in a
+    row of its trial being drummed now."""
+
+    block: str
+    condition: str
+    trials: int
+    presentations: int
+    right: int
+    wrong: int
+    right_first: int
+    owed: int
+    repeats: int
+    moved_past: int
+    possible_avoidance: bool
+    drummed: int
+    failing: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -263,6 +298,12 @@ class Scheduler:
     #: Whether this drum chain (a trial's first try and its drummed repeats) has had a judged
     #: trial: an answer, or what the block's own table scores (`_scored`).
     _answered: bool = field(init=False, default=False, repr=False)
+    #: The blocks left behind's `ConditionReport`s, in order (`report`).
+    _reports: list = field(init=False, default_factory=list, repr=False)
+    #: The run's trials so far, a trial and its drummed repeats one (the PI, 2026-10-18: "200
+    #: trials; drummed repeats inside them"): each try recorded that is no drum's repeat. What the
+    #: console and the run's end row count as trials (the controller's rulings I1 and M5).
+    trials: int = field(init=False, default=0)
 
     def __post_init__(self) -> None:
         self._rng = random.Random(self.seed)
@@ -334,6 +375,27 @@ class Scheduler:
                 return self._queue[0]
             self._refill()
         return None
+
+    def _report(self, condition: str) -> ConditionReport:
+        counts = self._counts[condition]
+        waiting = self._drum is not None and self._drum[0] == condition
+        return ConditionReport(
+            self.block.name, condition, counts.trials, counts.presented, counts.right,
+            counts.wrong, counts.right_first, self.owed(condition), counts.repeats,
+            counts.forgiven, counts.flagged, counts.presented - counts.trials,
+            self.drum_tries if waiting else 0,
+        )
+
+    @property
+    def block_report(self) -> tuple:
+        """The open block's `ConditionReport`s, one per condition in its order: the console's."""
+        return tuple(self._report(c.name) for c in self.block.conditions)
+
+    @property
+    def report(self) -> tuple:
+        """Every block's `ConditionReport`s so far, in order, the open one's last: what the run's
+        end row records (the PI, 2026-10-18: "written into the run's end record as well")."""
+        return tuple(self._reports) + self.block_report
 
     def counts(self, condition: str) -> Counts:
         return self._counts[condition]
@@ -469,6 +531,7 @@ class Scheduler:
                 f"block {self.block.name!r} is the last block; a session that ran "
                 f"off the end of its plan would draw from a block that does not exist"
             )
+        self._reports.extend(self.block_report)
         self._index += 1
         self._counts = {c.name: Counts() for c in self.block.conditions}
         self._queue.clear()
@@ -662,6 +725,19 @@ class Scheduler:
         kind = self._class(outcome, shown)
         first_try = self.drawn is None or not self.drawn.drummed
         judged = self._answer(outcome) or self._scored(outcome)
+        # A try recorded: a presentation, and a trial unless a drum brought it back (the PI,
+        # 2026-10-18, "200 trials; drummed repeats inside them"); an ordinary repeat, shown again a
+        # few trials later, is a trial of its own. Counted as each try ends, so a trial that
+        # faulted, which has no line, is in neither (the controller's ruling M5).
+        counts.presented += 1
+        counts.trials += first_try
+        self.trials += first_try
+        if judged:
+            # Every answer, any try's, right or wrong -- and a break the block's own table scores,
+            # wrong -- for the console and the end row.
+            counts.right += outcome in RIGHT
+            counts.wrong += outcome not in RIGHT
+        counts.right_first += first_try and outcome in RIGHT
         if first_try:
             self._answered = False
         if judged and not (self._answered and self._first_answers):
@@ -722,6 +798,7 @@ class Scheduler:
         """Forgive `trials` of `condition`'s debt in this block (§16.6): no repeat of it waits any
         longer, nor a drum's trial, and the shortfall is the run's record."""
         self._counts[condition].forgiven += trials
+        self._counts[condition].flagged |= because == CAP
         self._due = [due for due in self._due if due[2] != condition]
         if self._drum is not None and self._drum[0] == condition:
             self._drum = None

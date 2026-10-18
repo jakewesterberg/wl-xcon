@@ -141,12 +141,13 @@ class Levels:
         )
         return position, opened
 
-    def end_trial(self, result) -> None:
-        """Count a trial's outcome at the session, its task and its block. A trial that
-        faulted is never ended, so it counts nowhere: it has no outcome."""
-        self.session_tally.add(result)
-        self.task_tallies[self.task].add(result)
-        self.block_tally.add(result)
+    def end_trial(self, result, drummed: bool = False) -> None:
+        """Count a trial's outcome at the session, its task and its block, and whether it was a
+        drum's repeat (`drummed`), a presentation and no new trial (the PI, 2026-10-18). A trial
+        that faulted is never ended, so it counts nowhere: it has no outcome."""
+        self.session_tally.add(result, drummed)
+        self.task_tallies[self.task].add(result, drummed)
+        self.block_tally.add(result, drummed)
 
     def end_block(self) -> bool:
         """Close the open block, and say whether one was open (so `BLOCK_END` goes out)."""

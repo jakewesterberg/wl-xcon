@@ -22,6 +22,7 @@ from wl_xcon.scheduler import (
     TRAINING,
     Block,
     Condition,
+    ConditionReport,
     Constrained,
     Scheduler,
     Shortfall,
@@ -1387,6 +1388,43 @@ def test_a_switch_made_as_a_block_finishes_is_for_the_next_block():
     scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
     assert scheduler.done
     assert scheduler.drum("off") == "C", "the last block has no next: the switch is its own"
+
+
+def test_a_conditions_report_counts_a_drummed_trial_once_and_every_try_as_a_presentation():
+    """The PI, 2026-10-18: "A trial and its drummed repeats are one" trial, and per condition the
+    console shows "trials and presentations; right, wrong, % right (first time); owed, repeats,
+    moved past ...; drummed tries (and the current failed run)". Three trials, two of them drummed
+    to the right answer, are five presentations; one was right first time."""
+    scheduler = Scheduler([Block(name="b", conditions=[Condition("a", {}, target=3)], drum=True)],
+                          seed=1)
+    scheduler.record(scheduler.next_trial().name, Outcome.WRONG_TARGET)
+    failing = scheduler.block_report[0].failing
+    for outcome in (Outcome.CORRECT, Outcome.FIXATION_BREAK, Outcome.CORRECT, Outcome.CORRECT):
+        scheduler.record(scheduler.next_trial().name, outcome)
+
+    assert failing == 1 and scheduler.trials == 3
+    assert scheduler.block_report == (
+        ConditionReport("b", "a", trials=3, presentations=5, right=3, wrong=1, right_first=1,
+                        owed=0, repeats=0, moved_past=0, possible_avoidance=False, drummed=2,
+                        failing=0),)
+
+
+def test_the_report_keeps_every_blocks_counts_and_flags_a_condition_its_limit_moved_past():
+    """The PI, 2026-10-18: each condition's counts are "written into the run's end record as well",
+    every block's -- the scheduler kept a block's counts only until it advanced -- with the
+    possible-avoidance flag where a repeat limit moved the condition past."""
+    blocks = [Block(name="A", conditions=[Condition("a", {}, target=2)],
+                    counting=Counting(after_stimulus=OWED, cap=0)),
+              Block(name="B", conditions=[Condition("b", {}, target=1)])]
+    scheduler = Scheduler(blocks, seed=1)
+    scheduler.record(scheduler.next_trial().name, Outcome.FIXATION_BREAK)
+    assert scheduler.finished
+
+    scheduler.advance()
+    scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
+
+    assert [(r.block, r.condition, r.trials, r.moved_past, r.possible_avoidance, r.right)
+            for r in scheduler.report] == [("A", "a", 1, 2, True, 0), ("B", "b", 1, 0, False, 1)]
 
 
 # --- block progression ------------------------------------------------------

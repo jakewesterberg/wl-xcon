@@ -268,6 +268,22 @@ def test_a_session_ended_before_b2b_names_who_ended_it_as_written(tmp_path):
     assert ended.stopped_because == "session ended by jake (box, unverified), before any run"
 
 
+def test_a_restored_tally_counts_each_drummed_try_and_the_right_ones_among_them(tmp_path):
+    """The PI, 2026-10-18: a trial and its drummed repeats are one trial; a resumed session
+    rebuilds the strip's drummed tries from each line's `drummed`, and a line written before engine
+    build C2a, which has none, was a trial of its own."""
+    directory = _two_runs(tmp_path)
+    _jsonl(directory / "trials.jsonl", [
+        _line(1, "wrong_target", 0.0, None, run=0),
+        {**_line(2, "correct", 0.2, DEPARTURE + 100, run=0), "drummed": True},
+        _line(3, "correct", 0.25, DEPARTURE + 300, run=1),
+    ])
+
+    tally = read(directory, DEPARTURE).levels.session_tally
+
+    assert (sum(tally.outcomes.values()), tally.drummed, tally.right_drummed) == (3, 1, 1)
+
+
 def test_a_restored_tally_counts_hangs(tmp_path):
     directory = _two_runs(tmp_path)
     _jsonl(directory / "trials.jsonl", [_line(1, "hang", 0.0, None, run=0)])

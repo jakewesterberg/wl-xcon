@@ -2617,8 +2617,8 @@ class Session:
                 # the card may be what failed, and wl-preproc infers its end
                 # (`schema/events.py::_trial_stop_time`).
                 self.card.emit(TRIAL_END)
-                tally.add(result)
-                levels.end_trial(result)
+                tally.add(result, drummed=drawn.drummed)
+                levels.end_trial(result, drummed=drawn.drummed)
                 shown = _appeared(trial, result)
                 counted = scheduler.record(condition.name, result.outcome, shown=shown)
                 if result.outcome is None:
@@ -2744,7 +2744,10 @@ class Session:
                         self.wall_now(),
                         stopped_because=self.stopped_because,
                         stop_kind=self.stop_kind,
-                        trials=self._index,
+                        # The run's trials, a trial and its drummed repeats one, and its lines,
+                        # every presentation (the PI, 2026-10-18; the controller's ruling M5).
+                        trials=scheduler.trials,
+                        presentations=self._index,
                         blocks_run=list(self.blocks_run),
                         strobed=ended_strobed,
                         # **Each condition's debt forgiven** (engine spec §16.6): by its repeat
@@ -2763,6 +2766,30 @@ class Session:
                                 "by": to_map_or_none(short.by),
                             }
                             for short in scheduler.shortfalls
+                        ],
+                        # **Each condition's counts, block by block** (the PI, 2026-10-18: "All
+                        # of these are written into the run's end record as well"): its trials, a
+                        # trial and its drummed repeats one, and presentations; its right and wrong
+                        # answers and right first time; what it owes, its repeats, the trials moved
+                        # past and the flag; its drummed tries, and the failed tries in a row
+                        # of one being drummed as the run ended.
+                        conditions=[
+                            {
+                                "block": report.block,
+                                "condition": report.condition,
+                                "trials": report.trials,
+                                "presentations": report.presentations,
+                                "right": report.right,
+                                "wrong": report.wrong,
+                                "right_first": report.right_first,
+                                "owed": report.owed,
+                                "repeats": report.repeats,
+                                "moved_past": report.moved_past,
+                                "possible_avoidance": report.possible_avoidance,
+                                "drummed": report.drummed,
+                                "failing": report.failing,
+                            }
+                            for report in scheduler.report
                         ],
                     )
                 finally:

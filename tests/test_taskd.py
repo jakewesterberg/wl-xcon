@@ -63,7 +63,7 @@ from wl_xcon.photometry import SRGB
 from wl_xcon.record import REFUSAL_LOG_LIMIT, SessionRecord
 from wl_xcon.scheduler import EVERY_TRIAL, Block, Condition, Scheduler
 from wl_xcon.simulate import Tally
-from wl_xcon.task import OWED, After, Counting, On, Outcome, State, Trial
+from wl_xcon.task import ANSWERS, OWED, RIGHT, After, Counting, On, Outcome, State, Trial
 from wl_xcon.taskd import PAUSE_HOUSEKEEPING_S, RunSpec, Session, SessionSpec, _drum_warned
 from wl_xcon.warnlist import Entry
 from wl_xcon.welfare import Deployment, Simulated as Pump
@@ -1290,6 +1290,85 @@ def test_a_drummed_trial_that_fails_ten_tries_in_a_row_is_said_on_the_console(
     assert [row["outcome"] for row in rows[:10]] == ["wrong_target"] * 10
     assert [row["drummed"] for row in rows[:11]] == [False] + [True] * 10
     assert session.stop_kind == "completed"
+
+
+def test_a_runs_end_row_records_each_conditions_counts_a_drummed_trial_one_trial(tmp_path):
+    """The PI, 2026-10-18: "200 trials; drummed repeats inside them", and each condition's trials
+    and presentations, right and wrong answers and right first time, what it owes, its repeats, the
+    trials moved past and its drummed tries are "written into the run's end record as well". The
+    end row's `trials` counts trials and its `presentations` its lines (the controller's ruling
+    M5). The detection task withholds, so a miss is a wrong answer."""
+    block = Block(name="drill", conditions=[Condition("c", {}, target=20)], drum=True)
+    session = _session(_spec(tmp_path, trials=400, blocks=[block]))
+
+    session.run()
+
+    rows = _trial_rows(session)
+    (end,) = [row for row in _runs(session) if row["event"] == "end"]
+    (counts,) = end["conditions"]
+    wrong = {o.value for o in ANSWERS - RIGHT} | {"no_response"}
+    assert (counts["block"], counts["condition"], counts["trials"], counts["owed"]) == (
+        "drill", "c", 20, 0)
+    assert counts["presentations"] == len(rows) == end["presentations"]
+    assert end["trials"] == 20 and counts["failing"] == 0
+    assert counts["drummed"] == sum(row["drummed"] for row in rows) > 0
+    assert (counts["right"], counts["wrong"]) == (20, sum(row["outcome"] in wrong for row in rows))
+    assert counts["right_first"] == sum(row["outcome"] == "correct" and not row["drummed"]
+                                        for row in rows)
+    assert (counts["repeats"], counts["moved_past"], counts["possible_avoidance"]) == (0, 0, False)
+
+
+def test_a_trial_that_faults_is_in_neither_the_end_rows_counts_nor_its_conditions(
+        tmp_path, monkeypatch):
+    """The controller's ruling M5: a trial that faulted has no line, so it is counted in neither
+    the end row's `presentations` and `trials` nor its condition's. Here a trial's first try and
+    three drummed tries fail, and the fifth try faults."""
+    from wl_xcon import taskd
+
+    real, calls = taskd.run_trial, []
+
+    def wrong_then_a_fault(*args, **kwargs):
+        calls.append(None)
+        if len(calls) == 5:
+            raise RuntimeError("the card stopped answering")
+        return dataclasses.replace(real(*args, **kwargs), outcome=Outcome.WRONG_TARGET)
+
+    monkeypatch.setattr(taskd, "run_trial", wrong_then_a_fault)
+    block = Block(name="drill", conditions=[Condition("c", {}, target=20)], drum=True)
+    session = _session(_spec(tmp_path, trials=400, blocks=[block]))
+
+    with pytest.raises(RuntimeError, match="the card stopped answering"):
+        session.run()
+
+    (end,) = [row for row in _runs(session) if row["event"] == "end"]
+    (counts,) = end["conditions"]
+    assert (end["stop_kind"], len(_trial_rows(session))) == ("fault", 4)
+    assert (end["trials"], end["presentations"]) == (1, 4)
+    assert (counts["trials"], counts["presentations"], counts["drummed"]) == (1, 4, 3)
+
+
+def test_a_drum_failing_as_its_run_is_stopped_is_on_the_end_row(tmp_path, monkeypatch):
+    """The controller's ruling M6: `failing`, the failed tries in a row of a trial being drummed,
+    is on the end row's `conditions` too (decision 16: "all of them"): a run a person stops while
+    a trial has failed five tries."""
+    from wl_xcon import taskd
+
+    real = taskd.run_trial
+
+    def wrong(*args, **kwargs):
+        return dataclasses.replace(real(*args, **kwargs), outcome=Outcome.WRONG_TARGET)
+
+    monkeypatch.setattr(taskd, "run_trial", wrong)
+    block = Block(name="drill", conditions=[Condition("c", {}, target=20)], drum=True)
+    link = _Drained({6: [Stop(by=Box("jake"))]})
+    session = _session(_spec(tmp_path, trials=400, blocks=[block]), link=link)
+
+    session.run()
+
+    (end,) = [row for row in _runs(session) if row["event"] == "end"]
+    (counts,) = end["conditions"]
+    assert (end["stop_kind"], end["trials"], end["presentations"]) == ("operator", 1, 5)
+    assert (counts["failing"], counts["drummed"]) == (5, 4)
 
 
 def test_a_runs_end_row_records_each_shortfall_its_cap_forgave(tmp_path):
