@@ -103,19 +103,33 @@ class Condition:
     target: int
 
 
+#: What a trainer may switch drumming to (`Scheduler.drum`): on for the rest of the block, on for
+#: the rest of the run, or off for the rest of the block.
+DRUM_SCOPES = ("block", "run", "off")
+
+#: How many failed tries in a row of one drummed trial put a warning on the console (the PI,
+#: 2026-10-12, "After 10 in a row": "A warning on the console after 10 failed tries in a row");
+#: drumming goes on (`Scheduler.drum_tries`).
+DRUM_WARNING = 10
+
+
 @dataclass(frozen=True, slots=True)
 class Draw:
     """What `Scheduler.next_trial` drew, for the trial's row: the realized sequence (engine spec
     §16.3-16.4; engine build C2a). `number` is the trial's place in the run, from 0 -- `taskd`'s
     `index`; `repeat_of`, the number of the trial it shows again, or `None`; `at_once`, whether it
     came straight after that trial, which §16.3 has recorded; `previous`, the condition of the
-    trial before it in its block, an aborted one included, or `None` for a block's first."""
+    trial before it in its block, an aborted one included, or `None` for a block's first.
+    `drummed`, whether it is a drum's repeat, and `drumming`, whether drumming was on as it was
+    drawn -- `"block"` or `"run"` -- or `None` (`Scheduler.drumming`)."""
 
     condition: Condition
     number: int
     repeat_of: int | None = None
     at_once: bool = False
     previous: str | None = None
+    drummed: bool = False
+    drumming: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +152,11 @@ class Block:
     #: outcomes its table counts as answers.
     criterion_over: frozenset | None = None
     order: Order = field(default_factory=Shuffled)
+    #: **Drumming** (the PI, 2026-10-11: "a training tool ... where a trial is repeated until
+    #: correct"): every trial of this block that is not correct comes back at once, paying nothing,
+    #: until it is. A trainer switches it on or off for a block or a run from the console as well
+    #: (`Scheduler.drum`).
+    drum: bool = False
 
 
 @dataclass
@@ -173,6 +192,14 @@ class Scheduler:
     _number: int = field(init=False, default=0, repr=False)
     #: The last draw, which `taskd` writes into its trial's row.
     drawn: Draw | None = field(init=False, default=None)
+    #: A drum's trial to show at once: `(condition, repeat_of)`, or `None`.
+    _drum: tuple | None = field(init=False, default=None, repr=False)
+    #: What a trainer switched drumming to (`DRUM_SCOPES`), or `None` for the block's own.
+    _switched: str | None = field(init=False, default=None, repr=False)
+    #: Whether that switch came once this block's end rule was met, so it is the next block's.
+    _carried: bool = field(init=False, default=False, repr=False)
+    #: Failed tries in a row of the trial being drummed, its first try included.
+    _tries: int = field(init=False, default=0, repr=False)
 
     def __post_init__(self) -> None:
         self._rng = random.Random(self.seed)
@@ -311,8 +338,45 @@ class Scheduler:
         self._window.clear()
         self._drawn.clear()
         self._due.clear()
+        self._drum = None
+        if self._switched != "run" and not self._carried:
+            self._switched = None
+        self._carried = False
         self._refill()
         return self.block
+
+    @property
+    def drumming(self) -> str | None:
+        """Whether trials are drummed now (`Block.drum`): `"run"` when a trainer switched it on for
+        the run, `"block"` when for this block or the block declares it, `None` when it is off --
+        a trainer's *off* holds to the block's end, a declaring block's included."""
+        if self._switched in ("run", "block"):
+            return self._switched
+        if self._switched is None and self.block.drum:
+            return "block"
+        return None
+
+    @property
+    def drum_tries(self) -> int:
+        """Failed tries in a row of the trial being drummed, its first try included, or 0 when no
+        drum's trial waits: at `DRUM_WARNING` the console warns, and drumming goes on (the PI,
+        2026-10-12)."""
+        return self._tries if self._drum is not None else 0
+
+    def drum(self, scope: str) -> str:
+        """Switch drumming, as a trainer does from the console (the PI, 2026-10-11): `"block"` on
+        until this block ends, `"run"` on until the run ends, `"off"` off until this block ends.
+        Off drops a drum's trial waiting to come back; its condition stays owed and is drawn as
+        any other. **Returns the name of the block it is for**: this one, or the next when this
+        block's end rule is already met -- the loop drains commands before it advances, so a
+        switch made then is the next block's (the engineering review's Minor 10)."""
+        if scope not in DRUM_SCOPES:
+            raise ValueError(f"drumming is switched {', '.join(DRUM_SCOPES)}, not {scope!r}")
+        self._switched = scope
+        if scope == "off":
+            self._drum = None
+        self._carried = self.finished and not self.done
+        return self.blocks[self._index + 1].name if self._carried else self.block.name
 
     @property
     def finished(self) -> bool:
@@ -328,11 +392,15 @@ class Scheduler:
         goes first** when its slot has come, when nothing else can be drawn, or when the ordinary
         draw -- which gives no condition a repeat is waiting for -- would make a run longer than a
         `Constrained` block allows (engine spec §16.3). A repeat cannot lengthen a run itself: its
-        condition is not drawn while it waits, and its slot is at least two trials on."""
+        condition is not drawn while it waits, and its slot is at least two trials on. **A drum's
+        trial goes before all of them**, at once."""
         number = self._number
         waiting = sorted(self._due)
-        name, repeat_of = self._peek(), None
-        if waiting and (waiting[0][0] <= number or name is None or self._runs_long(name)):
+        drummed = self._drum is not None
+        name, repeat_of = self._drum if drummed else (self._peek(), None)
+        if drummed:
+            self._drum = None
+        elif waiting and (waiting[0][0] <= number or name is None or self._runs_long(name)):
             due = waiting[0]
             self._due.remove(due)
             _, repeat_of, name = due
@@ -350,6 +418,8 @@ class Scheduler:
             repeat_of=repeat_of,
             at_once=repeat_of is not None and repeat_of == number - 1,
             previous=self._drawn[-1] if self._drawn else None,
+            drummed=drummed,
+            drumming=self.drumming,
         )
         self._drawn.append(name)
         self._counts[name].attempted += 1
@@ -361,20 +431,34 @@ class Scheduler:
         did to the count: `COUNTED`, `SPENT`, `OWED` or `UNPAID`. `outcome` `None` is a trial that
         reached the longest trial (`task.HANG_COUNTS_AS`); `shown`, whether its stimulus had
         appeared (`task.Counting.of`). A right answer (`task.RIGHT`: correct, or a correct
-        rejection) is right for the criterion and the correct count."""
+        rejection) is right for the criterion and the correct count. While drumming, a trial that
+        is not right is `OWED` and comes back at once, whatever its table says, and only a trial's
+        first try is judged."""
         counts = self._counts[condition]
         kind = self._class(outcome, shown)
+        first_try = self.drawn is None or not self.drawn.drummed
+        over = self.block.criterion_over
+        judged = (outcome in over) if over is not None else kind == COUNTED
+        if judged and first_try:
+            # **Only a trial's first try is judged** (the PI, 2026-10-12, "Leave drummed repeats
+            # out"): a drum's repeat is recorded as what it was and never judged.
+            self._window.append(1 if outcome in RIGHT else 0)
+            if self.block.criterion is not None:
+                while len(self._window) > self.block.criterion[1]:
+                    self._window.popleft()
+        if self.drumming and outcome not in RIGHT and self.owed(condition) > 0:
+            # **Drumming** (`Block.drum`): repeated until right -- a correct answer or a correct
+            # rejection (`task.RIGHT`) -- at once, paying nothing, its failed tries in a row
+            # counted for the console's warning (`drum_tries`).
+            self.requeued.append(condition)
+            self._drum = (condition, self._number - 1)
+            self._tries = 1 if first_try else self._tries + 1
+            return OWED
         if kind == COUNTED:
             counts.completed += 1
             counts.correct += outcome in RIGHT
         elif kind == SPENT:
             counts.spent += 1
-        over = self.block.criterion_over
-        if (outcome in over) if over is not None else kind == COUNTED:
-            self._window.append(1 if outcome in RIGHT else 0)
-            if self.block.criterion is not None:
-                while len(self._window) > self.block.criterion[1]:
-                    self._window.popleft()
         if kind == OWED and self.owed(condition) > 0:
             self.requeued.append(condition)
             self._repeat(condition)

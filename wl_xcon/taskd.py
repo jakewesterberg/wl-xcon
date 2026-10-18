@@ -64,7 +64,7 @@ from wl_xcon.geometry import Geometry
 from wl_xcon.levels import Levels
 from wl_xcon.photometry import Calibration, cone_record
 from wl_xcon.record import XCON_DIRNAME, SessionRecord, _local, welfare_note
-from wl_xcon.scheduler import EVERY_TRIAL, Block, Condition, Scheduler
+from wl_xcon.scheduler import DRUM_WARNING, EVERY_TRIAL, Block, Condition, Scheduler
 from wl_xcon.simulate import Census, Subject, Tally, prepare
 from wl_xcon.run import LONGEST_TRIAL_S, run_trial
 from wl_xcon.task import (
@@ -2516,6 +2516,13 @@ class Session:
                     # never acquired, and the trainer hears which trial and what became of it.
                     self._feed("warning", None, self.wall_now(), _hung(
                         index, condition.name, counted, scheduler.owed(condition.name)))
+                if scheduler.drum_tries == DRUM_WARNING:
+                    # **A warning on the changes feed** (the PI, 2026-10-12, "After 10 in a row"):
+                    # drumming goes on, and the trainer may move past the trial or stop drumming.
+                    self._feed("warning", None, self.wall_now(), (
+                        f"{condition.name} has failed {DRUM_WARNING} tries in a row under "
+                        f"drumming, the last trial {index}; drumming goes on: clear one moves past "
+                        f"it, stop drumming ends it"))
                 # One string for the record and for a console's recent outcomes, so
                 # the two cannot disagree (P4d-2b spec §4.1).
                 recorded = result.outcome.value if result.outcome else "hang"
@@ -2531,6 +2538,8 @@ class Session:
                     repeat_of=drawn.repeat_of,
                     at_once=drawn.at_once,
                     previous=drawn.previous,
+                    drummed=drawn.drummed,
+                    drumming=drawn.drumming,
                     run=self.run_index,
                     position=position,
                     # **The trial's whole commanded difference**, and `resume.read` adds it

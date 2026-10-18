@@ -1236,6 +1236,55 @@ def test_a_flat_run_counts_a_detection_tasks_miss_as_an_answer(tmp_path):
     assert all(row["counting"] == "counted" for row in misses)
 
 
+def test_a_drummed_blocks_rows_say_which_trials_were_drummed(tmp_path):
+    """The PI, 2026-10-11: drumming is recorded. A block that declares it repeats every trial that
+    is not correct at once; each such row is followed by its drum, which names it, and every row of
+    the block says drumming was on."""
+    block = Block(name="drill", conditions=[Condition("c", {}, target=20)], drum=True)
+    session = _session(_spec(tmp_path, trials=400, blocks=[block]))
+
+    session.run()
+
+    rows = _trial_rows(session)
+    assert {row["drumming"] for row in rows} == {"block"}
+    assert [row["outcome"] for row in rows].count("correct") == 20
+    for before, row in zip(rows, rows[1:]):
+        assert row["drummed"] == (before["outcome"] != "correct")
+        if row["drummed"]:
+            assert (row["repeat_of"], row["at_once"]) == (before["index"], True)
+    assert any(row["drummed"] for row in rows), "the seed gives the block a trial not correct"
+
+
+def test_a_drummed_trial_that_fails_ten_tries_in_a_row_is_said_on_the_console(
+        tmp_path, monkeypatch):
+    """The PI, 2026-10-12, "After 10 in a row": "A warning on the console after 10 failed tries in a
+    row" of one drummed trial, naming it; drumming goes on, and every try is recorded as it was."""
+    from wl_xcon import taskd
+
+    real, calls = taskd.run_trial, []
+
+    def wrong_ten_times(*args, **kwargs):
+        calls.append(None)
+        result = real(*args, **kwargs)
+        if len(calls) > 10:
+            return result
+        return dataclasses.replace(result, outcome=Outcome.WRONG_TARGET)
+
+    monkeypatch.setattr(taskd, "run_trial", wrong_ten_times)
+    block = Block(name="drill", conditions=[Condition("c", {}, target=2)], drum=True)
+    session = _session(_spec(tmp_path, trials=400, blocks=[block]))
+
+    session.run()
+
+    rows = _trial_rows(session)
+    warned = [said for kind, by, _, said in session.controls if kind == "warning" and by is None]
+    assert warned == ["c has failed 10 tries in a row under drumming, the last trial 9; drumming "
+                      "goes on: clear one moves past it, stop drumming ends it"]
+    assert [row["outcome"] for row in rows[:10]] == ["wrong_target"] * 10
+    assert [row["drummed"] for row in rows[:11]] == [False] + [True] * 10
+    assert session.stop_kind == "completed"
+
+
 def test_a_session_without_blocks_runs_one_of_its_declared_length(tmp_path):
     """The flat session is the block session with one block, not a second code path.
     Two loops would be two places for the ceilings to be checked differently."""

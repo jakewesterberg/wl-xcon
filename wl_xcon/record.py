@@ -239,6 +239,8 @@ class SessionRecord:
         repeat_of: int | None = None,
         at_once: bool = False,
         previous: str | None = None,
+        drummed: bool = False,
+        drumming: str | None = None,
     ) -> None:
         """One trial's record, flushed before returning.
 
@@ -273,7 +275,9 @@ class SessionRecord:
         `unpaid` (`task.Counting`), and `shown`; `None` where no scheduler counted it -- a census. **And
         where it sits in the realized sequence** (§16.3-16.4): the `index` of the trial it shows
         again (`repeat_of`), whether it came straight after that one (`at_once`), and the condition
-        of the trial before it in its block (`previous`), an aborted one included.
+        of the trial before it in its block (`previous`), an aborted one included; and whether it
+        is a drum's repeat (`drummed`) and drumming was on as it was drawn (`drumming`, `"block"`
+        or `"run"`).
         """
         if self._trials is None:
             self._trials = (self.directory / "trials.jsonl").open("a", encoding="utf-8")
@@ -295,6 +299,8 @@ class SessionRecord:
                     "repeat_of": repeat_of,
                     "at_once": at_once,
                     "previous": previous,
+                    "drummed": drummed,
+                    "drumming": drumming,
                 },
                 sort_keys=True,
             )

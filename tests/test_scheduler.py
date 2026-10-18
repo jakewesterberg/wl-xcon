@@ -13,6 +13,7 @@ import pytest
 
 from wl_xcon.scheduler import (
     CORRECT_ONLY,
+    DRUM_WARNING,
     EVERY_TRIAL,
     PRESENTED,
     Block,
@@ -583,6 +584,124 @@ def test_a_correct_rejection_is_right_for_the_criterion_and_the_correct_count():
         scheduler.record(scheduler.next_trial().name, Outcome.CORRECT_REJECT)
 
     assert scheduler.finished and scheduler.counts("catch").correct == 2
+
+
+# --- drumming (the PI, 2026-10-11) -----------------------------------------------
+
+
+def _drummed(**block) -> Scheduler:
+    """Three conditions owing two trials each, by a table that spends breaks after the stimulus."""
+    return Scheduler(
+        [Block(name="b", conditions=[Condition(n, {}, target=2) for n in "abc"], **block)],
+        seed=1, counting=Counting(after_stimulus=SPENT),
+    )
+
+
+def test_a_drummed_trial_comes_back_at_once_until_it_is_correct():
+    """"A training tool ... where a trial is repeated until correct": a wrong answer, which counts
+    elsewhere, and a break, which this table spends, both pay nothing and bring the same condition
+    straight back; the correct one pays. Each repeat's draw says it was drummed."""
+    scheduler = _drummed(drum=True)
+    first = scheduler.next_trial()
+    draws = []
+    for outcome in (Outcome.WRONG_TARGET, Outcome.TARGET_BREAK, Outcome.CORRECT):
+        assert scheduler.record(scheduler.drawn.condition.name, outcome) == (
+            COUNTED if outcome is Outcome.CORRECT else OWED)
+        if outcome is not Outcome.CORRECT:
+            scheduler.next_trial()
+            draws.append(scheduler.drawn)
+
+    assert [d.condition for d in draws] == [first, first]
+    assert [(d.repeat_of, d.at_once, d.drummed, d.drumming) for d in draws] == [
+        (0, True, True, "block"), (1, True, True, "block")]
+    assert scheduler.owed(first.name) == 1 and scheduler.counts(first.name).spent == 0
+
+
+def test_only_a_trials_first_try_is_judged_for_the_criterion_under_drumming():
+    """The PI, 2026-10-12, "Leave drummed repeats out": "Only each trial's first try is judged for
+    the criterion. The repeats are still recorded as what they were." Judging the repeats let an
+    animal that always picks one side meet 60% over 30 at 50% true accuracy (the science review's
+    D2): lose-shift solves a correction trial."""
+    scheduler = Scheduler(
+        [Block(name="b", conditions=[Condition("a", {}, target=100)], criterion=(0.5, 2),
+               drum=True)], seed=1)
+    for outcome in (Outcome.WRONG_TARGET, Outcome.CORRECT):
+        scheduler.record(scheduler.next_trial().name, outcome)
+
+    assert scheduler.drawn.drummed and not scheduler.finished, "one first try, not two"
+    scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
+    assert scheduler.finished, "two first tries, half of them right"
+
+
+def test_a_drummed_catch_condition_finishes_on_correct_rejections():
+    """The controller's ruling on the engineering review's I1: a drum ends on a right answer, and a
+    catch trial's right answer is a correct rejection; drummed, the condition owed 2 after 50 of
+    them and its block never ended."""
+    block = Block(name="b", conditions=[Condition("catch", {}, target=2)], drum=True)
+    scheduler = Scheduler([block], seed=1,
+                          counting=Counting(after_stimulus=OWED, withholding=True))
+    for _ in range(2):
+        assert scheduler.record(scheduler.next_trial().name, Outcome.CORRECT_REJECT) == COUNTED
+
+    assert scheduler.finished and not scheduler.drawn.drummed
+
+
+def test_a_drummed_trials_failed_tries_in_a_row_are_counted_for_the_consoles_warning():
+    """The PI, 2026-10-12, "After 10 in a row": the first try and each drum's repeat that fails are
+    tries in a row of one trial; a right answer ends the run of them."""
+    scheduler = Scheduler([Block(name="b", conditions=[Condition("a", {}, target=2)], drum=True)],
+                          seed=1)
+    tries = []
+    for _ in range(DRUM_WARNING):
+        scheduler.record(scheduler.next_trial().name, Outcome.WRONG_TARGET)
+        tries.append(scheduler.drum_tries)
+    scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
+
+    assert tries == list(range(1, DRUM_WARNING + 1)) and DRUM_WARNING == 10
+    assert scheduler.drum_tries == 0
+
+
+def test_a_trainer_switches_drumming_for_a_block_or_a_run_or_off():
+    """The PI, 2026-10-11: "switched on per block or run by the trainer". On for the block ends with
+    it; on for the run carries on; off holds to the block's end, over a block that declares it, and
+    drops a drum waiting to come back."""
+    blocks = [Block(name=n, conditions=[Condition(n.lower(), {}, target=1)], drum=declared)
+              for n, declared in (("A", False), ("B", False), ("C", True), ("D", False))]
+    scheduler = Scheduler(blocks, seed=1)
+    seen = [scheduler.drumming]
+    scheduler.drum("block")
+    seen.append(scheduler.drumming)
+    scheduler.advance()
+    seen.append(scheduler.drumming)
+    scheduler.advance()
+    seen.append(scheduler.drumming)
+    scheduler.record(scheduler.next_trial().name, Outcome.WRONG_TARGET)
+    scheduler.drum("off")
+    seen.append(scheduler.drumming)
+    seen.append(scheduler.next_trial().name == "c" and scheduler.drawn.drummed)
+    scheduler.drum("run")
+    scheduler.record("c", Outcome.CORRECT)
+    scheduler.advance()
+    seen.append(scheduler.drumming)
+
+    assert seen == [None, "block", None, "block", None, False, "run"]
+    with pytest.raises(ValueError, match="drumming is switched block, run, off"):
+        scheduler.drum("on")
+
+
+def test_a_switch_made_as_a_block_finishes_is_for_the_next_block():
+    """The loop drains a trainer's commands before it advances, so a switch that arrives as a block
+    finishes is for the next block, and says which (the engineering review's Minor 10: it was
+    lost, its control row naming the block that had ended)."""
+    blocks = [Block(name=n, conditions=[Condition(n.lower(), {}, target=1)]) for n in "AB"]
+    scheduler = Scheduler(blocks, seed=1)
+    scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
+    assert scheduler.finished
+
+    said = scheduler.drum("block")
+    scheduler.advance()
+
+    assert (said, scheduler.block.name, scheduler.drumming) == ("B", "B", "block")
 
 
 # --- block progression ------------------------------------------------------
