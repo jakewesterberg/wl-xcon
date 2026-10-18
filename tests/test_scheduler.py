@@ -847,6 +847,59 @@ def test_a_cleared_trial_forgives_one_of_the_debt_and_drops_its_waiting_repeat()
     assert scheduler.clear(broke) == f"'{broke}' owes nothing in block 'b', so nothing is cleared"
 
 
+def test_clearing_one_trial_starts_its_conditions_failed_tries_over():
+    """The PI, 2026-10-18, "End that waiting trial; count starts over": *clear one* moves past the
+    trial whose repeat waits, and the condition's next trial counts its failures from 0, so a limit
+    of 1 does not forgive the rest of its debt at the condition's next failure."""
+    block = Block(name="b", conditions=[Condition("a", {}, target=3)])
+    scheduler = Scheduler([block], seed=1, counting=Counting(after_stimulus=OWED, cap=1))
+    scheduler.record(scheduler.next_trial().name, Outcome.FIXATION_BREAK)
+
+    assert scheduler.clear("a") is None
+    scheduler.record(scheduler.next_trial().name, Outcome.FIXATION_BREAK)
+
+    assert [s.because for s in scheduler.shortfalls] == [CLEARED]
+    assert (scheduler.owed("a"), scheduler.counts("a").in_a_row) == (2, 1)
+
+
+def test_clearing_one_trial_forgets_the_rigs_failures_in_its_row_too():
+    """Task 8's review, Important 1: decision 9 starts the trial's count over, the rig's failures
+    in the row with the animal's, so the animal's own failures after a clear are flagged."""
+    block = Block(name="b", conditions=[Condition("a", {}, target=3)])
+    scheduler = Scheduler([block], seed=1, counting=Counting(after_stimulus=OWED, cap=1))
+    scheduler.record(scheduler.next_trial().name, Outcome.TRACKER_LOST)
+
+    assert scheduler.clear("a") is None
+    for _ in range(2):
+        if scheduler.finished:
+            break
+        scheduler.record(scheduler.next_trial().name, Outcome.FIXATION_BREAK)
+
+    assert [(s.because, s.possible_avoidance) for s in scheduler.shortfalls] == [
+        ("cleared", False), ("cap", True)]
+
+
+def test_a_switch_made_as_a_block_ends_reads_against_the_next_block():
+    """Task 8's review, Important 2: `drumming_switched` is what `drumming` reads for the block a
+    switch made now is for, had none been made -- the next block's own `drum`, or a run's switch,
+    once this block's end rule is met; this block's reading before that."""
+    blocks = [Block(name="A", conditions=[Condition("a", {}, target=1)], counting=EVERY_TRIAL,
+                    drum=True),
+              Block(name="B", conditions=[Condition("b", {}, target=1)]),
+              Block(name="C", conditions=[Condition("c", {}, target=1)], drum=True)]
+    scheduler = Scheduler(blocks, seed=1)
+    assert scheduler.drumming_switched == "block"
+    scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
+    assert scheduler.finished and scheduler.drumming_switched is None
+    scheduler.drum("run")
+    assert scheduler.drumming_switched == "run"
+    scheduler.advance()
+    assert (scheduler.drumming, scheduler.drumming_switched) == ("run", "run")
+    scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
+    scheduler.drum("off")
+    assert scheduler.drumming_switched == "block"
+
+
 def test_clearing_a_drummed_trial_moves_past_it():
     """"Advance beyond": the drum's trial waiting to come back is dropped with the trial cleared."""
     scheduler = Scheduler([Block(name="b", conditions=[Condition("a", {}, target=2)], drum=True)],
@@ -874,7 +927,8 @@ def test_clearing_the_rest_of_a_condition_forgives_all_it_still_owes():
 
 def test_clearing_a_condition_that_is_queued_keeps_it_from_the_next_draw():
     """A condition the shuffle has queued and a person then clears the rest of is not drawn: the
-    queue's entry went stale, and `_peek` drops it (the controller's ruling from Task 4's review)."""
+    queue's entry went stale, and `_peek` drops it (the controller's ruling from Task 4's
+    review)."""
     block = Block(name="b", conditions=[Condition(name, {}, target=2) for name in "abc"],
                   order=Shuffled())
     scheduler = Scheduler([block], seed=1)

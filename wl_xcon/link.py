@@ -293,7 +293,8 @@ class Control:
     """One recent control event for a console's changes feed (P4d-2b spec §5.1):
     from `taskd.Session.controls`. `kind` is `stop`, `pause`, `resume`, `mark`,
     `note`, `schedule`, `cancel`, `scheduled_stop`, `set` (a staged setting applied),
-    `reward` (a manual reward, given while paused) or `warning` (a warning said as it
+    `reward` (a manual reward, given while paused), `clear` (a condition's debt cleared by a
+    person), `drum` (drumming switched by a trainer) or `warning` (a warning said as it
     happens, since the PI's rulings on XC-352, 2026-10-11);
     `by` is who sent it, `None` for a mark's stamp, whose sender arrives with its note;
     `at` is on the session's anchored clock; `said` is the sentence after the kind.
@@ -1489,9 +1490,10 @@ class ClearOwed:
     (the PI, 2026-10-11: "there should be some way in the console to manually advance beyond or
     clear a specific trial in the count"; *the rest*, the engine C2a plan's science review, D5): the
     condition owes one trial fewer, or none, a repeat of it waiting or a drum's trial waiting is
-    dropped, and the run's end row records it as a shortfall with who cleared it (engine spec
-    §16.6; `scheduler.Scheduler.clear`). `taskd` refuses it, with the sentence, where the block owes
-    the condition nothing."""
+    dropped, its failed tries in a row start over (the PI, 2026-10-18), and the run's end row
+    records it as a shortfall with who cleared it (engine spec §16.6;
+    `scheduler.Scheduler.clear`). `taskd` refuses it, with the sentence, where the block has no
+    such condition and where the condition owes nothing."""
 
     KIND: ClassVar[str] = "clear"
 

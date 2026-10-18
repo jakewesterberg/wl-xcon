@@ -3618,12 +3618,10 @@ def test_a_person_clears_the_rest_of_a_condition_and_it_is_recorded(tmp_path):
     assert sum(r["condition"] == "near" and r["counting"] != "owed" for r in rows) == 4
 
 
-def test_a_drumming_switch_sent_as_a_block_ends_is_for_the_next_block(tmp_path):
-    """The engineering review's Minor 10: the loop drains commands before it advances, so a switch
-    that arrives as a block's last trial pays was reset by the advance, its row naming the block
-    that had ended. It is the next block's, and its row names that block."""
-    blocks = [Block(name="A", conditions=[Condition("a", {}, target=1)], counting=EVERY_TRIAL),
-              Block(name="B", conditions=[Condition("b", {}, target=3)])]
+def _carried_switch(tmp_path, next_block: Block) -> dict:
+    """The control row of a `Drum("block")` sent as a drumming block A ends, before `next_block`."""
+    blocks = [Block(name="A", conditions=[Condition("a", {}, target=1)], counting=EVERY_TRIAL,
+                    drum=True), next_block]
     link = _Drained({2: [Drum(scope="block", by=Box("jake"))]})
     session = _session(_spec(tmp_path, trials=400, blocks=blocks), link=link)
 
@@ -3631,9 +3629,62 @@ def test_a_drumming_switch_sent_as_a_block_ends_is_for_the_next_block(tmp_path):
 
     (switched,) = [row for row in _controls_rows(session) if row["kind"] == "drum"]
     rows = _trial_rows(session)
-    assert (switched["block"], switched["now"]) == ("B", "block")
-    assert [row["drumming"] for row in rows if row["block"] == "A"] == [None]
+    assert [row["drumming"] for row in rows if row["block"] == "A"] == ["block"]
     assert {row["drumming"] for row in rows if row["block"] == "B"} == {"block"}
+    return switched
+
+
+def test_a_drumming_switch_sent_as_a_block_ends_is_for_the_next_block(tmp_path):
+    """The engineering review's Minor 10: the loop drains commands before it advances, so a switch
+    that arrives as a block's last trial pays was reset by the advance, its row naming the block
+    that had ended. It is the next block's, and its row names that block -- and says what
+    drumming read for *that* block before the switch (Task 8's review, Important 2), not the
+    ending block's: B does not drum, so the switch changed it."""
+    switched = _carried_switch(tmp_path, Block(name="B", conditions=[Condition("b", {}, target=3)]))
+
+    assert (switched["block"], switched["was"], switched["now"]) == ("B", None, "block")
+
+
+def test_a_carried_drumming_switch_says_so_when_the_next_block_drums_anyway(tmp_path):
+    """Task 8's review, Important 2: where the next block declares `drum`, the switch changes
+    nothing for it, and its row reads `was` as `"block"`."""
+    switched = _carried_switch(
+        tmp_path, Block(name="B", conditions=[Condition("b", {}, target=3)], drum=True))
+
+    assert (switched["block"], switched["was"], switched["now"]) == ("B", "block", "block")
+
+
+def test_a_clear_or_a_drum_that_reached_the_session_off_the_wire_meets_the_wires_rule(tmp_path):
+    """Task 8's review, Minor 3: `_clear` and `_drum` check what the wire checks, as `_schedule`
+    does, and refuse with the sentence rather than raise or act."""
+    link = _Drained({1: [ClearOwed(condition="near", by=Box("jake"), rest="yes"),
+                         Drum(scope="sometimes", by=Box("jake"))]})
+    session = _session(_spec(tmp_path, trials=400, blocks=[_near_far()]), link=link)
+
+    session.run()
+
+    assert [(name, why) for name, _, why in session.refusals] == [
+        ("clear", "a 'clear' command's rest is true or false, and 'yes' is neither, so it is "
+                  "refused"),
+        ("drum", "drumming is switched block, run or off, and 'sometimes' is none of them, so it "
+                 "is refused")]
+    assert not [row for row in _controls_rows(session) if row["kind"] in ("clear", "drum")]
+    assert all(row["drumming"] is None for row in _trial_rows(session))
+
+
+def test_the_clears_feed_sentence_counts_its_trials_in_the_singular_and_the_plural(tmp_path):
+    """Task 8's review, Minor 4: "the rest, 1 trial", "the rest, 2 trials"."""
+    def said(target: int) -> str:
+        block = Block(name="b", conditions=[Condition("a", {}, target=target),
+                                            Condition("z", {}, target=1)])
+        link = _Drained({1: [ClearOwed(condition="a", by=Box("jake"), rest=True)]})
+        session = _session(_spec(tmp_path / str(target), trials=400, blocks=[block]), link=link)
+        session.run()
+        (feed,) = [said for kind, _, _, said in session.controls if kind == "clear"]
+        return feed
+
+    assert said(1).startswith("cleared the rest, 1 trial, of a in block b")
+    assert said(2).startswith("cleared the rest, 2 trials, of a in block b")
 
 
 def test_a_pause_holds_the_session_at_a_boundary_and_resume_continues(tmp_path):

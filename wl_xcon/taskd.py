@@ -64,7 +64,14 @@ from wl_xcon.geometry import Geometry
 from wl_xcon.levels import Levels
 from wl_xcon.photometry import Calibration, cone_record
 from wl_xcon.record import XCON_DIRNAME, SessionRecord, _local, welfare_note
-from wl_xcon.scheduler import DRUM_WARNING, EVERY_TRIAL, Block, Condition, Scheduler
+from wl_xcon.scheduler import (
+    DRUM_SCOPES,
+    DRUM_WARNING,
+    EVERY_TRIAL,
+    Block,
+    Condition,
+    Scheduler,
+)
 from wl_xcon.simulate import Census, Subject, Tally, prepare
 from wl_xcon.run import LONGEST_TRIAL_S, run_trial
 from wl_xcon.task import (
@@ -1522,14 +1529,27 @@ class Session:
         trials or while paused: the open block's scheduler forgives it (`Scheduler.clear`), the
         run's end row records the shortfall with who cleared it, and `controls.jsonl` the control,
         how many it cleared and what the condition still owes. **Refused with the sentence**, and
-        nothing changed, where the block owes the condition nothing."""
+        nothing changed, where the block owes the condition nothing or has no such condition. A
+        clear starts the condition's failed tries in a row over (the PI, 2026-10-18). **The wire's
+        rule again**, so a command that reached the session another way meets it: a `rest` that is
+        not true or false is refused with its sentence, as `_schedule` does."""
+        if not isinstance(command.rest, bool):
+            self._refuse(
+                "clear", command.by,
+                f"a 'clear' command's rest is true or false, and {command.rest!r} is neither, so "
+                f"it is refused",
+            )
+            return
         scheduler = self._scheduler
         said = scheduler.clear(command.condition, by=command.by, rest=command.rest)
         if said is not None:
             self._refuse("clear", command.by, said)
             return
         cleared, owed = scheduler.shortfalls[-1].trials, scheduler.owed(command.condition)
-        what = f"the rest, {cleared} trials," if command.rest else "one trial"
+        what = (
+            f"the rest, {cleared} trial{'' if cleared == 1 else 's'}," if command.rest
+            else "one trial"
+        )
         self._control(
             "clear", command.by,
             f"cleared {what} of {command.condition} in block {scheduler.block.name}; it owes "
@@ -1543,9 +1563,19 @@ class Session:
         the trainer", and recorded): the scheduler drums from the next trial (`Scheduler.drum`),
         `controls.jsonl` records the switch with who made it, and every trial row says whether
         drumming was on as it was drawn. Engine build C3's change log takes it over, with its
-        reason."""
+        reason. **The wire's rule again**, so a command that reached the session another way meets
+        it: a `scope` that is none of `DRUM_SCOPES` is refused with its sentence. `was` is what
+        drumming read for the block the switch is for before it (`Scheduler.drumming_switched`),
+        which is the next block's when the switch is carried to it."""
+        if command.scope not in DRUM_SCOPES:
+            self._refuse(
+                "drum", command.by,
+                f"drumming is switched {', '.join(DRUM_SCOPES[:-1])} or {DRUM_SCOPES[-1]}, and "
+                f"{command.scope!r} is none of them, so it is refused",
+            )
+            return
         scheduler = self._scheduler
-        was = scheduler.drumming
+        was = scheduler.drumming_switched
         # The block it is for: this one, or the next when this one's end rule is already met.
         block = scheduler.drum(command.scope)
         self._control(

@@ -411,6 +411,17 @@ class Scheduler:
         return None
 
     @property
+    def drumming_switched(self) -> str | None:
+        """What `drumming` reads for the block a switch made now is for, had none been made: the
+        next block's when the switch would be carried to it (`drum`; `advance` keeps a run's
+        switch and resets the rest, leaving the next block's own `drum`), else this one's."""
+        if self.finished and not self.done:
+            if self._switched == "run":
+                return "run"
+            return "block" if self.blocks[self._index + 1].drum else None
+        return self.drumming
+
+    @property
     def drum_tries(self) -> int:
         """Failed tries in a row of the trial being drummed, its first try included, or 0 when no
         drum's trial waits: at `DRUM_WARNING` the console warns, and drumming goes on (the PI,
@@ -421,9 +432,9 @@ class Scheduler:
         """Forgive one trial of `condition`'s debt in this block, or with `rest` all it still owes,
         as a person does from the console (the PI, 2026-10-11: "manually advance beyond or clear a
         specific trial in the count"; *the rest*, the engine C2a plan's science review, D5): a
-        repeat of it waiting, or a drum's trial, is dropped, and the clearing is a `Shortfall`
-        naming `by`. Returns why nothing was cleared -- the block has no such condition, or it owes
-        nothing -- or `None`."""
+        repeat of it waiting, or a drum's trial, is dropped, its failed tries in a row start over
+        (the PI, 2026-10-18), and the clearing is a `Shortfall` naming `by`. Returns why nothing was
+        cleared -- the block has no such condition, or it owes nothing -- or `None`."""
         if condition not in self._counts:
             return (
                 f"block {self.block.name!r} has no condition {condition!r}, so nothing is cleared"
@@ -434,6 +445,10 @@ class Scheduler:
                 f"{condition!r} owes nothing in block {self.block.name!r}, so nothing is cleared"
             )
         self._forgive(condition, owed if rest else 1, CLEARED, by)
+        # **The trial moved past is over, so its count starts over** (the PI, 2026-10-18, "End that
+        # waiting trial; count starts over"), as an answer ends a trial.
+        counts = self._counts[condition]
+        counts.in_a_row = counts.rig = 0
         return None
 
     def drum(self, scope: str) -> str:
