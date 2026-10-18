@@ -100,7 +100,9 @@ reaction times, not realistic gaze traces; replayed recordings cover what a synt
 cannot.
 
 **Data:** the session record is streamed, not accumulated · fluid reconciles against the sync
-box's delivered line. ~~and reward is refused if the daily total cannot be reconstructed after a
+box's delivered line *(a count of reward commands, so fluid commanded, not received: the PI,
+2026-10-18, S8 §5.1; what was received is checked by a reservoir reading at session start and end,
+XC-389)*. ~~and reward is refused if the daily total cannot be reconstructed after a
 restart~~ — **withdrawn 2026-09-06 by the PI: fluid has a floor, not a ceiling.** Refusing
 delivery on an uncountable day would stop paying an animal that is working; the day's
 *shortfall* becomes unreportable instead, and a person supplies the figure. The design now

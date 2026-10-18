@@ -321,7 +321,11 @@ delivered-without-commanded.
 
 **Therefore our fluid total is a lower bound** (pitfalls **P17**). Real accounting
 reconciles against the sync box's record of the delivered line. Stating this now prevents
-a silent welfare error later.
+a silent welfare error later. *(Corrected 2026-10-18 by the PI: the delivered line is "A count
+of reward commands", hand rewards included, which through the pump's calibration gives fluid
+commanded, not fluid received, since an unpowered driver, an empty reservoir or a blocked line
+still records as delivered (`wl-sync`, 2026-10-18). What the animal received is checked by a
+reservoir reading at session start and end, XC-389, not yet built; S8 §5.1.)*
 
 ### 7.5 Remote and programmatic access
 

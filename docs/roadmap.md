@@ -61,7 +61,9 @@ terminal — **attempted early and repeatedly from M1 onward**, not first tried 
 ## M6 — First real task, first animal
 One production task (fixation -> detection) end-to-end on the bench and then in a pilot
 session, including **stimulation tiers 1 and 2 with welfare interlocks live** and fluid
-accounting reconciled against the delivered line. Gate: PI approves; overnight synthetic
+accounting reconciled against the delivered line *(a count of reward commands, so fluid
+commanded, not received: the PI, 2026-10-18, S8 §5.1; what was received is checked by a reservoir
+reading at session start and end, XC-389)*. Gate: PI approves; overnight synthetic
 soak (V5) passed on that exact build (P12).
 
 ## M7 — Data and lab integration

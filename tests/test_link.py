@@ -118,7 +118,7 @@ def _session_with(
     fixed value distinct from it. **This distinction is load-bearing.** Once
     `.delivered` is set, `session_total()` reconciles to `max(commanded, delivered)`
     (`bounds.reconcile`), so with `commanded` small and `delivered` the larger figure
-    -- never the reverse, which `reconcile_report` treats as a pump fault rather than
+    -- never the reverse, which `reconcile_report` treats as a fault rather than
     a smaller total -- `session_total()` lands on `delivered_ml`, distinct from
     `commanded`. Set `commanded=delivered_ml` instead (an earlier version of this
     fixture did, and left `.delivered` at its default `None`) and `session_total()`

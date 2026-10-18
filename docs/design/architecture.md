@@ -268,6 +268,11 @@ protocol figure**: it is either that, or a *fault bound* set far above anything 
 would ask for, so that what it refuses is software commanding an impossible quantity rather
 than an animal earning a ration. `reward_correct`'s maximum is the second kind and
 `out_of_cage`'s the first; a bounded config is expected to say which at each entry.
+*2026-10-18: the PI approved rewording `reconcile_report`'s fault message ("Approve rewording").
+The sync box's delivered line is a count of reward commands that sits before the pump (S8 §5.1),
+so a commanded total above it says a command did not reach the line or a recording is wrong, and
+never that the pump or the tubing failed. A message-only change: the module's AST, every string
+blanked, is identical before and after.*
 
 `welfare.py` has all three: the day's running total, two clocks — the out-of-cage one that
 bounds the session and the restraint one that is recorded beside it — the wall they are both

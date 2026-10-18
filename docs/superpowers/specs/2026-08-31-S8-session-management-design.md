@@ -126,12 +126,37 @@ Two structural properties, not conventions:
 ### 5.1 Fluid is reconciled, not tallied
 
 Our commanded total is a **lower bound** (P17): the panel button bypasses us entirely and reaches
-the pump through the board's OR gate. The truth is the sync box's record of the *delivered* line.
+the pump through the board's OR gate. ~~The truth is the sync box's record of the *delivered* line.~~
+**Corrected 2026-10-18 (the PI): that record is a count of reward commands, hand rewards included,
+which through the pump's calibration (V10) gives fluid commanded, not fluid received** (below).
 
 So fluid accounting **reconciles against the sync box's delivered-line record**, continuously
 where available and at minimum at session end. A divergence between commanded and delivered is
 information — usually manual rewards, occasionally a fault — and is reported rather than
 reconciled away.
+
+> **Corrected 2026-10-18 by the PI: the delivered line counts reward commands; it does not
+> measure fluid.** `wl-sync` stated that day ([its reply on XC-091](../../pending-wl-sync-amendments.md#answered-2026-10-18--wl-syncs-reply-at-9e60ed6),
+> item 3; its handover at `9e60ed6`, §5 item 3) that `RWD_DLVR` is the reward-OR gate's output, the
+> signal sent to the reward driver from our commanded line or the panel's one-shot: "It is not a
+> measurement of fluid. An unpowered or unplugged driver, an empty reservoir and a blocked line all
+> still record as delivered." Asked what our records should call it, the PI chose **"A count of
+> reward commands"**: "Exact count of times the pump was told to run, hand rewards included.
+> Multiplied by the pump's calibration it gives fluid commanded, not fluid received, and the docs
+> say so." So the struck sentence above said more than the line can show. The reconciliation
+> stands as a reconciliation of commands: what it gives is fluid **commanded**, hand rewards
+> included, and never fluid received. Reading the record is XC-384, whose count is exact for a day
+> whose journal shows no dropped edge. The "occasional fault" is a wiring or recording fault: the
+> line sits before the pump, so a commanded total above it can show neither a pump nor a tubing
+> fault, and `bounds.reconcile_report`'s message says so since this date.
+>
+> **What the animal received is checked by a reservoir reading at session start and end.** The PI,
+> the same day, chose **"Reservoir reading, start and end"**: "The trainer enters the reservoir's
+> level or weight at the start and end. The session summary compares it with the commanded total
+> and shows a warning if they disagree. Nothing is refused." The reading is a **"Volume in mL"**
+> ("Always read from the reservoir's own marks"), and the warning's threshold is **"Decide when
+> it's designed"** ("Set the threshold once there is a measured spread from real sessions (drips,
+> evaporation, reading error), rather than guessing now"). Not yet built: XC-389.
 
 ### 5.2 A restart must not reset the day
 
@@ -143,7 +168,10 @@ supplement afterwards — is then computed against a figure that describes half 
    This is the lesson `wl-sync` learned when its own recorder held a whole day in memory.
 2. **On restart, the daily total is reconstructed from the sync box's delivered-line record**,
    which survives our crash independently. That is the whole reason the reconciliation in §5.1
-   exists rather than being a nicety.
+   exists rather than being a nicety. *(Corrected 2026-10-18, the PI, §5.1: that record is a
+   count of reward commands, so what it reconstructs is the day's fluid **commanded**, hand
+   rewards included, not fluid received; a reservoir reading at session start and end checks what
+   was received, XC-389.)*
 3. ~~**If it cannot be reconstructed, reward is refused until a human confirms a figure.**~~
    **Reversed 2026-09-06.** That rule follows from a ceiling, and there is no ceiling. Under a
    floor the argument runs the other way: an unknown day leaves the *shortfall* unreportable, and
@@ -750,7 +778,7 @@ for the thing the zero *means*.
 | Question | Answer |
 |---|---|
 | Is the log lost? | No — streamed |
-| Is fluid lost? | No — reconstructed from the delivered line; the session pays on regardless (§5.2 item 3) |
+| Is fluid lost? | No — reconstructed from the delivered line; the session pays on regardless (§5.2 item 3). *(Corrected 2026-10-18, the PI, §5.1: the delivered line is a count of reward commands, so what it reconstructs is fluid commanded, hand rewards included, not fluid received; what was received is checked by a reservoir reading at session start and end, XC-389.)* |
 | Is the duration clock lost? | **Yes, and by ruling rather than by omission** (PI, 2026-09-20, closing open item 8). The out-of-cage marks are operator-entered and get no event code, so a restart cannot reconstruct them and a person re-supplies the departure — by typing the same clock time they typed the first time, which is exactly as good as the original |
 | Does the session resume? | The session **continues**; block and trial indices carry forward from the record |
 | Does calibration survive? | The gaze mapping is reloaded by version; if the optics moved, it does not (S5 §6) |
@@ -796,7 +824,7 @@ Everything else may change without a welfare review. These four may not.
 | # | Item | Blocks |
 |---|---|---|
 | 1 | Arbitration rule between console and control-API writers (§3.3) | S9 |
-| 2 | ~~Whether the sync box's delivered-line record is readable by us live, or only at session end~~ **Answered 2026-10-18 by `wl-sync`** ([its answers](../../pending-wl-sync-amendments.md#answered-2026-10-18--wl-syncs-reply-at-9e60ed6), XC-091): on the box itself any process can read the open segment while it is written, new records appearing once per write loop; **from another host nothing makes it readable, live or at session end**, and a task-PC read needs the same reader as XC-087. The box has no session end (it records all day), a restart splits the record into segments on separate clocks, and an edge lost to a buffer overflow is not marked in the file. Today the box does not record the real line at all: it runs only with `--fake` until its RP1 backend is wired into its run loop. **wl-sync also states that the line records what the reward driver was told, not fluid delivered**: an unpowered driver, an empty reservoir or a blocked line still records as delivered. This row records the answer only; §5.1 is unchanged. Remaining: reading the record, XC-384 | §5.1's "continuously" — **less urgent since 2026-09-06**: with a floor rather than a ceiling nothing in-session depends on it, and session-end is enough to compute a supplement |
+| 2 | ~~Whether the sync box's delivered-line record is readable by us live, or only at session end~~ **Answered 2026-10-18 by `wl-sync`** ([its answers](../../pending-wl-sync-amendments.md#answered-2026-10-18--wl-syncs-reply-at-9e60ed6), XC-091): on the box itself any process can read the open segment while it is written, new records appearing once per write loop; **from another host nothing makes it readable, live or at session end**, and a task-PC read needs the same reader as XC-087. The box has no session end (it records all day), a restart splits the record into segments on separate clocks, and an edge lost to a buffer overflow is not marked in the file. Today the box does not record the real line at all: it runs only with `--fake` until its RP1 backend is wired into its run loop. **wl-sync also states that the line records what the reward driver was told, not fluid delivered**: an unpowered driver, an empty reservoir or a blocked line still records as delivered. This row records the answer only; §5.1 is unchanged *(until 2026-10-18, when the PI corrected it: the line is a count of reward commands, and what the animal received is checked by a reservoir reading, XC-389)*. Remaining: reading the record, XC-384 | §5.1's "continuously" — **less urgent since 2026-09-06**: with a floor rather than a ceiling nothing in-session depends on it, and session-end is enough to compute a supplement |
 | 6 | ~~**Is a runaway-fluid fault limit wanted?**~~ **Answered 2026-09-19 (PI): yes, and it is `reward_correct`'s maximum.** Set to **10 mL** — far above any dose, so what it refuses is software delivering litres, not an animal earning a ration. `Ceiling` therefore no longer means "a protocol figure" at every entry: `bounds.Ceiling` names the two kinds, and a bounded config states at each entry which it is — `tasks/reference_bounds.py` labels `reward_correct` a fault bound and `out_of_cage` a protocol figure. The *value* beside it stays a placeholder until there are animals | ✔ |
 | 7 | ~~**There is no session-length maximum**~~ **Done 2026-09-19.** `max_trials` is gone — from `welfare`, from `must_stop`, from `tasks/reference_bounds.py` and from every document that said two ceilings end a session. Per-condition targets were always `scheduler`'s (`Counts`, `owed()`, `upcoming()`), which the console renders as *still needed by condition*. The clock question that blocked it is answered in the same change: `welfare.must_stop` reads **out-of-cage time** against an eight-hour ceiling (the PI corrected the twelve recorded here on 2026-10-01), and chair time is recorded and bounds nothing. See §5.2 item 4 | ✔ |
 | 8 | ~~**The out-of-cage marks have no event code** (§5.2 item 4). The clock that now bounds a session has no hardware record, so a restart cannot reconstruct it — the gap `HEAD_FIXED` closed for chair time. Two codes in 4096–32767 would close it; allocation is S2's and `wl-preproc`'s under ADR-0007~~ **Answered 2026-09-20 (PI): no codes.** The marks are **operator-entered rather than measured**, so a hardware timestamp would add precision to a number that never had it; our own log and the session directory already carry them. The consequence he accepted: a restart re-asks a person for the departure time (§6). No longer an ask on S2 or `wl-preproc` | ✔ |

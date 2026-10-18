@@ -80,8 +80,15 @@ output drives `wl-juicer` and is separately recorded as *delivered*.
 - A console "give reward" **commands through the normal path**, so it appears as commanded *and*
   delivered. A panel press appears as delivered-without-commanded, which is how a hand-delivered
   reward stays countable.
-- **Our commanded total is a lower bound on fluid delivered** (P17). Welfare accounting
+- **Our commanded total is a lower bound on ~~fluid delivered~~ the reward commands the
+  delivered line counts** (P17). Welfare accounting
   reconciles against the sync box's record of the delivered line, never against our intent.
+  *(Corrected 2026-10-18 by the PI: that record is **"A count of reward commands"** — "Exact
+  count of times the pump was told to run, hand rewards included. Multiplied by the pump's
+  calibration it gives fluid commanded, not fluid received, and the docs say so." It counts what
+  the OR gate sent `wl-juicer`, which an unpowered driver, an empty reservoir or a blocked line
+  still records as delivered (`wl-sync`, 2026-10-18). What the animal received is checked by a
+  reservoir reading at session start and end, XC-389, not yet built; S8 §5.1.)*
 - **Volume is time** [@calapai2017cagebased], so the pump calibration (ml per ms) is what
   makes the accounting mean
   anything. It is measured per rig, re-measured on a schedule, and its identity is recorded in
