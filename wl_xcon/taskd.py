@@ -1216,18 +1216,22 @@ class Session:
         feed: str,
         index: int,
         at: float | None = None,
+        event_code: int | None = None,
         **detail: object,
     ) -> float:
         """One control event: onto the changes feed, saying `feed`, and into the
         session record, at `at` on the session's anchored clock -- now, unless the
         event was stamped earlier (a mark, in its frame) -- which it returns (P4d-2b
         spec §5.1). `index` is the trial it happened in or, between trials, the trial
-        about to run; `detail` is the record row's own fields."""
+        about to run; `event_code` is the number this event strobed, `None` when it strobed
+        nothing, written on the row (XC-321 ask 1); `detail` is the record row's own fields."""
         if at is None:
             at = self.wall_now()
         self._feed(kind, by, at, feed)
         if self._record is not None:
-            self._record.control(kind, by, at, index, run=self.run_index, **detail)
+            self._record.control(
+                kind, by, at, index, event_code=event_code, run=self.run_index, **detail
+            )
         return at
 
     def _feed(self, kind: str, by: Actor | None, at: float, said: str) -> None:
@@ -1281,7 +1285,9 @@ class Session:
         missing = [name for name, code in codes.items() if code is None]
         if codes["PAUSE"] is not None:
             self.card.emit(codes["PAUSE"])
-        self.paused_at = self._control("pause", by, f"paused at trial {index}", index)
+        self.paused_at = self._control(
+            "pause", by, f"paused at trial {index}", index, event_code=codes["PAUSE"]
+        )
         if missing:
             entry = Entry(PAUSE_UNMARKED, (
                 f"this session's allocation has no {' or '.join(missing)} event code, so the "
@@ -1319,7 +1325,8 @@ class Session:
         held = self.wall_now() - self.paused_at
         self.paused_at = None
         self._control(
-            "resume", by, f"resumed after {_clock(held)} paused", index, paused_s=held
+            "resume", by, f"resumed after {_clock(held)} paused", index,
+            event_code=code, paused_s=held,
         )
 
     def _stamp(self, mark: int, frame: int | None) -> None:
@@ -1361,6 +1368,7 @@ class Session:
                 )
             self._control(
                 "mark", None, said, index, at=at,
+                event_code=self._mark_code if strobed else None,
                 mark=mark, number=number, frame=frame, strobed=strobed,
             )
             self._stamped[mark] = (number, index, frame, at)
@@ -1693,6 +1701,7 @@ class Session:
             f"{ml:g} mL of {MANUAL_REWARD_ENTRY}, {where}",
             index,
             at=self.welfare.last_delivery_wall_at,
+            event_code=code,
             ml=ml,
             entry=MANUAL_REWARD_ENTRY,
             where=where,
@@ -1902,6 +1911,10 @@ class Session:
         """
         if not self._staged:
             return
+        # Looked up once, before anything is applied or written: an allocation without it
+        # raises here, not after the first value is applied and its row written (XC-321
+        # ask 1; the orphan row a `wlx run` session used to leave).
+        code = self.allocation.code_for("PARAM_CHANGED")
         for name, was, now, by, bounded in self._staged:
             self._sequence += 1
             if bounded:
@@ -1910,9 +1923,9 @@ class Session:
                 self.spec.values[name] = now
             if self._record is not None:
                 self._record.parameter_change(
-                    self._sequence, name, was, now, by, run=self.run_index
+                    self._sequence, name, was, now, by, run=self.run_index, event_code=code
                 )
-            self.card.emit(self.allocation.code_for("PARAM_CHANGED"))
+            self.card.emit(code)
             self._feed(
                 "set",
                 by,
@@ -1988,11 +2001,15 @@ class Session:
         if not self.stopped_because:
             self.stopped_because = f"session ended by {by}, before any run"
             self.stop_kind = "operator"
-        if self.welfare.fixed_wall_at is not None and self.welfare.released_wall_at is None:
+        released = (
+            self.welfare.fixed_wall_at is not None and self.welfare.released_wall_at is None
+        )
+        if released:
             self.head_released(self.wall_now())
         self.phase = "awaiting_return"
         self._control(
-            "end", by, f"session ended by {by}: waiting for the animal's return", self._index
+            "end", by, f"session ended by {by}: waiting for the animal's return", self._index,
+            event_code=self._code("HEAD_RELEASED") if released else None,
         )
 
     def accept(self, entries, *, by: Actor | None, how: str, run: int | None) -> None:

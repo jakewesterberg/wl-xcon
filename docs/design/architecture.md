@@ -212,7 +212,10 @@ of that function's rule: a change to it is a change requiring review (the b3a-2 
 review, m3; the page's `web._hand_reward_now` repeats it, pinned equal by a test).
 `Session._command` hands every reward to `_manual_reward` first, in every phase, with
 `held`, which only `_hold` sets — so a change to that pass-through is also a change to
-welfare-critical behavior. All
+welfare-critical behavior. *2026-10-18: the PI approved passing the `MANUAL_REWARD` number
+`_manual_reward` emitted into its `_control` call, so the reward's row in `controls.jsonl` says
+which code it strobed (wl-preproc's ask, XC-321 ask 1); a record-only change, since nothing about
+how much is given, when, or what is refused moved.* All
 three call `welfare` unchanged, and none holds a clock or a limit of its own; they are on
 this list because a plausible mistake in any — the limit asked on one path and not the
 other, a paused session that forgot to ask, a reward given while trials run, given outside

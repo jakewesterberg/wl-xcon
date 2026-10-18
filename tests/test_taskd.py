@@ -1215,7 +1215,7 @@ def test_a_live_write_is_recorded_with_its_origin(tmp_path):
     assert changes == [
         {
             "sequence": 1, "name": "fix_hold", "was": 0.3, "now": 0.5,
-            "by": {"kind": "box", "name": "console"}, "run": 0,
+            "by": {"kind": "box", "name": "console"}, "run": 0, "event_code": 4130,
         }
     ]
 
@@ -6116,3 +6116,167 @@ def test_the_session_resumed_row_names_the_person_and_the_records_last_write(tmp
     (row,) = [r for r in rows if r["kind"] == "session resumed"]
     assert row["by"] == {"kind": "box", "name": "jake"} and row["how"] == "test"
     assert _local(written) in row["reason"]
+
+
+# --- the code each controls and parameter-change row strobed (XC-321 ask 1) -----------------
+
+
+def _jsonl(session: Session, name: str) -> list[dict]:
+    path = session.directory / name
+    return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+
+class _MarkOnWaitTwo(_Scripted):
+    """A paused wait that carries an operator's mark signal on its second call."""
+
+    def idle(self, timeout: float) -> int:
+        super().idle(timeout)
+        return 9 if len(self.waits) == 2 else 0
+
+
+def _framework_codes(session: Session) -> list[int]:
+    """What the card received of the codes a controls row can name, in the order it did."""
+    named = {PAUSE_CODE, RESUME_CODE, MARK_CODE, REWARD_CODE}
+    return [code for code in session.card.codes if code in named]
+
+
+def test_each_controls_and_change_row_records_the_code_the_card_received_for_it(tmp_path):
+    """XC-321 ask 1 (wl-preproc's ask, the PI's approval 2026-10-18): a session that pauses,
+    marks, gives a manual reward while paused, resumes, applies a staged change, schedules a stop
+    and is ended, writes on each row the number its act strobed -- the card's own record of what
+    it received is the oracle -- and `null` on the rows that strobed nothing."""
+    link = _MarkOnWaitTwo(
+        script={
+            1: [
+                ManualReward(by=Box("jake")),
+                SetParameter(name="fix_hold", value=0.5, by=Box("jake")),
+                ScheduleStop("trials", 2, by=Box("jake")),
+            ],
+            3: [
+                Mark(mark=9, note="restless", by=Box("jake"), pressed_at=None, received_at=None),
+                Resume(by=Box("sam")),
+            ],
+        },
+        step=10.0,
+    )
+    link.queue(Pause(by=Box("jake")))
+    session, wall = _walled(tmp_path, link, trials=8)
+    link.wall = wall
+
+    session.run()
+
+    rows = _controls_rows(session)
+    assert [row["kind"] for row in rows] == [
+        "pause", "reward", "schedule", "mark", "note", "resume", "scheduled_stop",
+    ]
+    assert all("event_code" in row for row in rows), "the key is on every row"
+    coded = [(row["kind"], row["event_code"]) for row in rows if row["event_code"] is not None]
+    assert [code for _, code in coded] == _framework_codes(session), (
+        "each row's number is the one the card received for it, in order"
+    )
+    assert {kind for kind, _ in coded} == {"pause", "mark", "reward", "resume"}
+    for kind, code in coded:
+        assert code == {"pause": PAUSE_CODE, "mark": MARK_CODE, "reward": REWARD_CODE,
+                        "resume": RESUME_CODE}[kind]
+    for row in rows:
+        if row["kind"] in ("note", "schedule", "scheduled_stop", "cancel", "stop"):
+            assert row["event_code"] is None, row["kind"]
+    changes = _jsonl(session, "parameter_changes.jsonl")
+    assert [row["event_code"] for row in changes] == [4130] * len(changes) != []
+    assert session.card.codes.count(4130) == len(changes)
+
+
+def test_a_stop_row_and_an_unstrobed_end_row_read_null(tmp_path):
+    link = Simulated()
+    session = _service_session(tmp_path, link=link, deployment=Deployment.RIG_CHAIRED)
+    link.queue(Stop(by=Box("jake")))
+    run = _run_spec(trials=3)
+    run.task = str(_sessions.head_free_task(tmp_path / "task"))
+    session.run(run)
+    session.end_runs(Box("jake"))
+
+    rows = {row["kind"]: row for row in _controls_rows(session)}
+    assert rows["stop"]["event_code"] is None
+    assert rows["end"]["event_code"] is None, "a chaired session releases no head"
+    assert 4129 not in session.card.codes
+
+
+def test_ending_the_runs_records_the_head_released_code_it_strobed(tmp_path):
+    session = _service_session(tmp_path)
+
+    session.end_runs(Box("jake"))
+
+    (end,) = _controls_rows(session)
+    assert (end["kind"], end["event_code"]) == ("end", 4129)
+    assert session.card.codes[-1] == 4129
+
+
+def test_an_allocation_without_pause_writes_null_on_the_pause_row_and_warns_as_before(tmp_path):
+    from dataclasses import replace
+
+    link = _Scripted(script={2: [Resume(by=Box("sam"))]})
+    link.queue(Pause(by=Box("jake")))
+    session, wall = _walled(tmp_path, link, trials=2)
+    link.wall = wall
+    session.allocation = replace(
+        session.allocation,
+        task_events={
+            code: name for code, name in session.allocation.task_events.items() if name != "PAUSE"
+        },
+    )
+
+    session.run()
+
+    pause, resume = _controls_rows(session)
+    assert (pause["kind"], pause["event_code"]) == ("pause", None)
+    assert (resume["kind"], resume["event_code"]) == ("resume", RESUME_CODE)
+    warned = [c for c in session.controls if c[0] == "warning"]
+    assert len(warned) == 1 and "no PAUSE event code" in warned[0][3]
+
+
+def test_a_mark_the_allocation_cannot_code_writes_null_beside_strobed_false(tmp_path):
+    from dataclasses import replace
+
+    link = _MarkOnWaitTwo(script={3: [Resume(by=Box("jake"))]})
+    link.queue(Pause(by=Box("jake")))
+    session, wall = _walled(tmp_path, link, trials=1)
+    link.wall = wall
+    session.allocation = replace(
+        session.allocation,
+        task_events={
+            code: name
+            for code, name in session.allocation.task_events.items()
+            if name != "OPERATOR_MARK"
+        },
+    )
+    session._mark_code = session._code("OPERATOR_MARK")
+
+    session.run()
+
+    (stamp,) = [row for row in _controls_rows(session) if row["kind"] == "mark"]
+    assert (stamp["strobed"], stamp["event_code"]) == (False, None)
+
+
+def test_an_allocation_without_param_changed_raises_before_any_value_or_row(tmp_path):
+    """XC-321 ask 1: `_apply_staged` looks the code up before its loop, so an allocation
+    without `PARAM_CHANGED` raises before the first value is applied or its row written. It
+    used to apply the value and write the row, then raise at the strobe -- an orphan row."""
+    from dataclasses import replace
+
+    session = _session(_spec(tmp_path, trials=4))
+    session.allocation = replace(
+        session.allocation,
+        task_events={
+            code: name
+            for code, name in session.allocation.task_events.items()
+            if name != "PARAM_CHANGED"
+        },
+    )
+    session.set("fix_hold", 0.5, by=Box("console"))
+    before = dict(session.spec.values)
+
+    with pytest.raises(KeyError, match="PARAM_CHANGED"):
+        session.run()
+
+    assert not (session.directory / "parameter_changes.jsonl").exists()
+    assert session.spec.values == before, "no value was applied"

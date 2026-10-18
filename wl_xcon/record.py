@@ -79,8 +79,12 @@ WELFARE_NOTES = "welfare_notes.jsonl"
 #:
 #: **Its own file**, for `WELFARE_NOTES`' reason: a row in `parameter_changes.jsonl`
 #: carries a `sequence` for joining to a `PARAM_CHANGED` code, and these join to their
-#: own codes (`PAUSE`, `RESUME`, `OPERATOR_MARK`, `MANUAL_REWARD`) by order and
-#: instant, or to nothing.
+#: own codes (`PAUSE`, `RESUME`, `OPERATOR_MARK`, `MANUAL_REWARD`, `HEAD_RELEASED`) by
+#: each row's `event_code`, the number its act strobed, or `null` when it strobed nothing
+#: (wl-preproc's ask, approved by the PI 2026-10-18, XC-321 ask 1; the join was "by
+#: order and instant" until then, which fails when an allocation lacks a code or a
+#: resumed session comes back on another). A row written before that lacks the key,
+#: which a reader takes as unknown.
 #: **Uncapped**, unlike `refusals.jsonl`: each row is something that happened, made
 #: by whoever can reach the session's link -- this machine alone, since `ZmqLink`
 #: binds loopback only by default: the box's own page through `wlx serve`, or `wlx
@@ -345,13 +349,16 @@ class SessionRecord:
         now: object,
         by: Actor,
         run: int | None = None,
+        event_code: int | None = None,
     ) -> None:
         """One live parameter change, joined to the recording by `sequence`.
 
         The `PARAM_CHANGE` escape is to carry that number and nothing else: the values
         live here (S2 §5.2). **Not yet**: until XC-008, `Session` strobes the
         payload-less `PARAM_CHANGED` word, so a row joins its code by count, the n-th
-        row to the n-th code. If the two ever disagree the change cannot be placed on
+        row to the n-th code -- and since XC-321 ask 1 by `event_code` besides, the number
+        that row strobed (`PARAM_CHANGED`'s), `null` when it strobed nothing and absent on
+        a row written before that. If the two ever disagree the change cannot be placed on
         the recording clock at all, so the join is the entire point of both halves.
 
         `by` records the origin -- console, control API, or the task -- because one
@@ -372,6 +379,7 @@ class SessionRecord:
                         "now": now,
                         "by": actors.to_map(by),
                         "run": run,
+                        "event_code": event_code,
                     },
                     sort_keys=True,
                 )
@@ -379,15 +387,24 @@ class SessionRecord:
             )
 
     def control(
-        self, kind: str, by: Actor | None, at: float, trial_index: int, **detail: object
+        self,
+        kind: str,
+        by: Actor | None,
+        at: float,
+        trial_index: int,
+        event_code: int | None = None,
+        **detail: object,
     ) -> None:
         """One console control, as it happened (P4d-2b spec §5.1).
 
         `at` is the instant `taskd` acted on it, **on the session's anchored clock**
         (`Session.wall_now`), written as the number and as local clock time with its
         zone, as `welfare_note` writes its instants. `trial_index` is the trial it
-        happened in or, between trials, the trial about to run. `detail` is the row's
-        own fields -- a mark's frame and its three instants, a schedule's target --
+        happened in or, between trials, the trial about to run. `event_code` is the number
+        the act strobed, `null` in the row when it strobed nothing (a note, a schedule, a
+        pause the allocation has no code for), written on every row so wl-preproc joins a
+        row to its code by it (XC-321 ask 1, the PI's approval 2026-10-18). `detail` is the
+        row's own fields -- a mark's frame and its three instants, a schedule's target --
         written as given and never interpreted here."""
         with (self.directory / CONTROLS).open("a", encoding="utf-8") as handle:
             handle.write(
@@ -398,6 +415,7 @@ class SessionRecord:
                         "at": at,
                         "at_local": _local(at),
                         "trial_index": trial_index,
+                        "event_code": event_code,
                         **detail,
                     },
                     sort_keys=True,

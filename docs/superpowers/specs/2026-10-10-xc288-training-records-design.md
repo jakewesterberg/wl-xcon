@@ -142,6 +142,10 @@ step could not be taken.
 re-shaping with a manual reward while paused go in free-text notes (a mark's note, or the ELN), as Q2 put
 off-rig training (the PI, 2026-10-10, Q14, offered against one tap at the rig from a short list).
 
+*Amended 2026-10-18 (XC-321 ask 1, the PI's approval)*: each row also carries `event_code`, the number its
+act strobed (`PARAM_CHANGED`'s for a setting) or `null` when it strobed nothing, so wl-preproc joins a row to
+its code by it rather than by count; a row written before this lacks the key, which a reader takes as unknown.
+
 Each row carries:
 
 - **its `change` id**, unique in the session. **A preset is one row per setting it moved**, all sharing one
@@ -277,6 +281,9 @@ when it was written. The asks are in §7; until they are met, the file says it h
 
 `controls.jsonl`, `welfare_notes.jsonl`, `warnings.jsonl` and `refusals.jsonl` keep their writers and their
 fields. `controls.jsonl`'s new rows gain an `id`, and pauses and stops gain reasons only by new rows (§3.5).
+*Amended 2026-10-18 (XC-321 ask 1, the PI's approval)*: every `controls.jsonl` row gains `event_code`, the
+number its act strobed or `null` when it strobed nothing (a note, a schedule, a pause whose allocation lacks the
+code); its writers are otherwise unchanged.
 The welfare-listed code this touches is in §9.
 
 ### 3.11 The rig's clock
