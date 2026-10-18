@@ -177,6 +177,9 @@ Only the third is already handled (`A_MIC` into NI).
   visible. The output is **electrically tapped into one of the three unassigned misc analog BNC
   inputs**, giving sound onset on the NI clock without room-acoustics smearing (parent §8.5).
   Protocol **V7**.
+  *(Amended 2026-10-18, later: the sound leaves the task PC card's AO 0 and AO 1 at wl-sync's line-out J57 and
+  starts on the task patch's edge from PFI 7; the engine must never configure PFI 7 as an output nor route it to a
+  counter, and must keep the amplitude inside the amplifier's range. Engine spec §9.1, XC-327.)*
 - Sounds are declared assets, resident before an epoch, like images.
 - Every sound onset emits `AUDIO_ON` / `AUDIO_OFF` (S2 §5.1), so audio events reach the recording
   clock through the same path as everything else.

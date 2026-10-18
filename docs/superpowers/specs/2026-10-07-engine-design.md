@@ -473,6 +473,25 @@ luminance waits on build F (XC-305).
 > records (AI8). **`PD1_COMP` reaches the task PC on P0.27, which cannot start the analog output** (NI's AO Start
 > Trigger sources are PFI lines, RTSI, internal triggers and the Change Detection Event); wl-sync is adding a
 > buffered copy on a PFI line and will name it when the copper is drawn (XC-327). The decision is unchanged.
+
+> **Amended 2026-10-18, later (wl-sync's `0683ad6`, its `HANDOVER-wl-expcontroller.md` section 7 and
+> `hardware/breakout/line-out-and-pfi-copy.md`; [our reading](../../pending-wl-sync-amendments.md#answered-2026-10-18-later--xc-327-is-drawn-wl-sync-0683ad6)):
+> XC-327 is drawn and closed.** The line-out is **J57, a dual BNC on the back face**: first port AO 0 (left),
+> second AO 1 (right), Connector 0 pins 22 and 21, each through 100 Ω (under 1% of amplitude into a line input of
+> 10 kΩ or more, wl-sync's calculation), shells on AO GND only. The buffered copy of `PD1_COMP` is **on PFI 7**
+> (Connector 0 pin 38; 3.3 V high against the card's V_IH of 2.2 V, about 0.2 V low against V_IL of 0.8 V, wl-sync's
+> design figures); P0.27 still carries `PD1_COMP`. **The engine's hardware configuration of the card therefore
+> carries two obligations**, which no code of ours meets yet because none configures an NI line (checked
+> 2026-10-18); they bind build G's audio output and the card's configuration at rig bring-up:
+> 1. **Start the analog output from `/Dev/PFI7`, never configure PFI 7 as an output, and never route it to a
+>    counter.** The sync board drives that pin; a counter task with default routing would drive its own
+>    default output pins (PFI 12 to 15, why PFI 7 was chosen) or take PFI 7 as counter 3's AUX input.
+> 2. **Keep the analog-output amplitude inside the amplifier's input range.** The card swings ±10 V
+>    (0.2 Ω, ±5 mA); nothing between it and the amplifier limits the amplitude except the 100 Ω series resistor.
+>
+> The unverified item "which connector carries the 6343's analog outputs" (the list of unverified hardware facts after §24) is answered on paper by wl-sync's
+> citation of NI's Figure A-5 (Connector 0), not by a card on a bench. No latency is claimed for the start
+> trigger: V7 measures it. The decision is unchanged.
 2. **Simple sounds are made from parameters**, rebuilt from the record; files remain for recorded sounds.
 3. **Movie soundtracks** play when a task asks, in step with the frames.
 4. **Media live on lab storage** by checksum; the rig keeps a verified local copy; the set's identity is
@@ -799,7 +818,7 @@ summary before its build merges:
 - **wl-xtasks**: the task object's format (§3.5; defined in wl-xcon by engine build C1, the PI's approval of its plan being wl-xtasks' agreement, 2026-10-11) and plans (build C2); allocation of `STIMULUS_ON`, `STIMULUS_OFF`,
   `STIMULUS_CHANGED` and the anchor code (§8.3, §8.4).
 - **wl-sync**: a two-channel line-out from the task PC card's analog outputs, started by the task-patch
-  edge (§9.1); top-and-bottom test patches for V1's scan-out measurement (§6.5).
+  edge (§9.1; drawn 2026-10-18 as J57, with the start trigger on PFI 7, XC-327 closed); top-and-bottom test patches for V1's scan-out measurement (§6.5).
 
 > **Sent 2026-10-11** (the PI: "Send all now"), as dated sections of the siblings' handover files: wl-preproc
 > `7183347`, wl-sync `5ca9891`, wl-xtasks `0486476` (a new file there). Backlog XC-197 and XC-323 to XC-326

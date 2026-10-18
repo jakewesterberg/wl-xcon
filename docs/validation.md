@@ -88,6 +88,15 @@ same rule V1 applies to graphics (P4).
 > is taken is the PI's to decide at rig build** (2026-10-18, "Decide at rig build"). It has no anti-alias filter: onset timing is unaffected, but a
 > spectrum taken from the tap would alias at the 40 kHz scan.
 
+> **Amended 2026-10-18, later: the rig side of V7 is drawn** (wl-sync `0683ad6`, XC-327;
+> [our reading](pending-wl-sync-amendments.md#answered-2026-10-18-later--xc-327-is-drawn-wl-sync-0683ad6)). The
+> sound leaves the task PC card's AO 0 and AO 1 at **J57, a dual BNC on wl-sync's back face** (each through
+> 100 Ω; shells on AO GND only), and the analog output starts on the task patch's edge, taken from **PFI 7**, a
+> buffered copy of `PD1_COMP` (P0.27 unchanged). V7 drives the engine's real path, so the run needs the engine to
+> honor two rules, or it measures a configuration the sessions will not use: PFI 7 is never an output and never
+> routed to a counter, and the amplitude stays inside the amplifier's input range. **V7 also measures the start
+> trigger's contribution**; no latency figure for it exists in wl-sync's documents or ours.
+
 ## V8 — RHX backpressure headroom
 New (2026-08-31). The RHX guide states that a client failing to read data output quickly
 enough will fill the output buffer and **halt data acquisition** (P14). Run the closed-loop

@@ -3,8 +3,9 @@
 Delivered 2026-10-11 as a dated section of wl-sync's `HANDOVER-wl-expcontroller.md` (`5ca9891`); answers are read there.
 
 **Reply read 2026-10-18 (wl-sync `9e60ed6`): see "ANSWERED 2026-10-18" below.** Six of the eight are
-answered (XC-089 to XC-092, XC-327, XC-328); **XC-087 and XC-088, the two full sections below, stay open**,
-and XC-327 keeps a remainder (its PFI line and the line-out's grounding, at wl-sync's layout).
+answered (XC-089 to XC-092, XC-327, XC-328); **XC-087 and XC-088, the two full sections below, stay open**.
+XC-327 kept a remainder (its PFI line and the line-out's grounding); **wl-sync drew both later on 2026-10-18 and
+XC-327 is closed**: see "ANSWERED 2026-10-18, later" below.
 
 **Eight were open on 2026-10-11.** The first two were opened 2026-08-31 while designing S3
 ([`superpowers/specs/2026-08-31-S3-sync-integration-design.md`](superpowers/specs/2026-08-31-S3-sync-integration-design.md)),
@@ -254,6 +255,7 @@ untested, with no NI latency figure, so **a second, buffered copy of `PD1_COMP` 
 handover when it is drawn. wl-sync also corrected its spec §9.2: all sixteen PFI lines are on Connector 0, and no
 wiring moves. **For us:** XC-327 stays, amended to what is left. Engine spec §9.1's "may be new copper or may be
 nothing" is settled: new copper.
+*(The remainder was drawn later the same day and XC-327 closed; see "ANSWERED 2026-10-18, later" below.)*
 
 **XC-328: a rig procedure; no third channel.** `A_PD1` and `A_PD2` are identical copper and "task patch" and
 "flip patch" are roles, so for V1 keep `A_PD1` on the bottom patch and move `A_PD2`'s sensor to the top patch. The
@@ -265,6 +267,61 @@ channels' thresholds sit at different fractions of their own peaks, top minus bo
 to the same fraction of each channel's measured peak, or take a fixed-fraction crossing offline from the analog
 copies (NI, 40 kHz). A misc BNC cannot be a third channel, since the sensors are passive and need the board's TIA.
 **For us:** XC-328 closes; validation V1 carries the procedure and the caveat.
+
+---
+
+# ANSWERED 2026-10-18, later — XC-327 is drawn (wl-sync `0683ad6`)
+
+Read 2026-10-18 from wl-sync's local `main` at `0683ad6` (not yet pushed there), with `git show`: its
+`HANDOVER-wl-expcontroller.md`, section "7, later on 2026-10-18: XC-327 is drawn", and
+`hardware/breakout/line-out-and-pfi-copy.md`, which cites NI's X Series User Manual 370784K-01 (May 2019) and the
+PCIe-6343 Specifications 377873B-01 (May 2026) for every figure (both read by wl-sync 2026-10-18; we have not
+re-read NI's documents). The line-out's reference designator, J57, is named in the handover, its breakout spec's
+§12 and its netlist contract, not in the line-out document. **XC-327 closes.** What remains is wl-sync's layout.
+
+**The PFI copy of `PD1_COMP` is on PFI 7: Connector 0 pin 38 (P1.7) of the task PC card.** It is `PD1_COMP`
+through a spare channel of the `SN74LVC541A` level shifter on wl-sync's `pi-interface` sheet, then 100 Ω. P0.27
+(Connector 1 pin 46) still carries `PD1_COMP` exactly as before; the control loop keeps reading it there.
+- **The engine routes `ao/StartTrigger` from `/Dev/PFI7`** (the line-out document's wording; `Dev` is the card's
+  device name).
+- **The engine must never configure PFI 7 as an output.** The board drives it. PFI 7 was chosen because PFI 12 to
+  15 are the card's default counter outputs (NI manual Table 7-9, as wl-sync cites it): a counter task with default
+  routing would drive one of those pins against the board. **PFI 7 is counter 3's AUX input by default; the engine
+  must leave it unrouted to any counter** (the handover's instruction; the line-out document says only that it is
+  an input by default).
+- **Levels at the card, wl-sync's figures:** high 3.3 V against the 6343's V_IH minimum of 2.2 V (a 1.1 V margin);
+  low about 0.2 V against V_IL maximum of 0.8 V (377873B-01, Digital I/O; 50 kΩ pull-down). These are wl-sync's
+  design figures from its parts' specifications, not a measurement of the built board.
+
+**The line-out is J57, a dual BNC on the back face** (Amphenol RF 031-6575 per its BOM).
+- **First port: AO 0 (left); second port: AO 1 (right)** (Connector 0 pins 22 and 21). Each passes through 100 Ω,
+  which costs under 1% of amplitude into a line input of 10 kΩ or more (wl-sync's calculation). The panel labels
+  will say which is which.
+- **The shells are on AO GND (Connector 0 pins 55 and 54) and nothing else on the board.** NI ties AO GND to D GND
+  on the card ("All three ground references, AI GND, AO GND and D GND, are connected on the device", manual Table
+  3-1, as wl-sync quotes it), so the amplifier's ground meets the card's regardless; the board keeps the audio
+  return current off its own planes. There are no clamp diodes.
+- The card's analog outputs are ±10 V, 0.2 Ω, ±5 mA (377873B-01, Analog Output). **Keeping the amplitude inside the
+  amplifier's input range stays the engine's job.**
+
+**One change from wl-sync's 2026-10-18 proposal:** the proposal tied a Connector 0 digital ground pin so the PFI
+edge returned beside its signal. Drawing it showed that would make Connector 0 a second component on both of the
+board's grounds after its star-point net tie (its AISENSE is on AGND), so it was reversed: the PFI edge returns
+through Connector 1's digital ground, in the parallel cable. That changes nothing for us. wl-sync's spec §9.2
+therefore now has one digital line riding the analog cable, accepted for a line that changes at stimulus rate.
+
+**Where this lands for us.** No code of ours configures an NI line yet (nothing under `wl_xcon/` or `tools/`
+names DAQmx or a PFI line, checked 2026-10-18), so the two engine obligations below bind the code that will: build
+G's audio output and the task PC card's configuration at rig bring-up.
+1. Never configure PFI 7 as an output, and never route it to a counter.
+2. Keep AO amplitude inside the amplifier's input range.
+
+Both are recorded in [engine spec §9.1](superpowers/specs/2026-10-07-engine-design.md#9-media-and-sound-n6-nr5-nr6)
+(amendment of 2026-10-18, later), with validation V7 and S4 §8 brought into line. Backlog XC-327 is removed; XC-074
+now waits on the rig. Not yet verified by anyone: that a start trigger on PFI 7 starts the analog output with the
+latency the design needs (no figure exists; V7 measures it) and that the card runs on the lab's Linux (pitfall P10).
+
+---
 
 ---
 
