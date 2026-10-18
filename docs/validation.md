@@ -85,7 +85,7 @@ same rule V1 applies to graphics (P4).
 > analog outputs play the sound (engine spec §9.1), so command to tap can be timed on that card's
 > one clock. Its range is ±5 V at ÷1 and ±10 V at ÷2 and it clips beyond, so where the tap is
 > taken matters: a line-level tap fits, a power amplifier's speaker terminals may not. **Where it
-> is taken is not yet chosen.** It has no anti-alias filter: onset timing is unaffected, but a
+> is taken is the PI's to decide at rig build** (2026-10-18, "Decide at rig build"). It has no anti-alias filter: onset timing is unaffected, but a
 > spectrum taken from the tap would alias at the 40 kHz scan.
 
 ## V8 — RHX backpressure headroom
