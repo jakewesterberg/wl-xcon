@@ -1108,6 +1108,7 @@ def test_a_streak_under_drumming_judges_every_answer_in_order(first_answers):
         scheduler.record(scheduler.next_trial().name, outcome)
 
     assert list(scheduler._window) == [0, 1, 1]
+    assert scheduler.streak
 
 
 @pytest.mark.parametrize(("first_answers", "judged"), [(False, [0, 1, 0, 1]), (True, [0, 0])])
@@ -1125,6 +1126,7 @@ def test_a_percentage_under_drumming_judges_every_answer_unless_set_to_first_ans
         scheduler.record(scheduler.next_trial().name, outcome)
 
     assert list(scheduler._window) == judged
+    assert not scheduler.streak
 
 
 def test_a_hold_training_block_judges_a_broken_hold_it_scores_as_a_miss():
@@ -1132,13 +1134,19 @@ def test_a_hold_training_block_judges_a_broken_hold_it_scores_as_a_miss():
     broken hold as a scored trial (a hold-training block) does it count as a miss toward the
     percentage. Everywhere else, breaks stay out, as you decided." Judged on answers alone, "80%
     held over the last 10" was met by any 10 holds with the animal breaking 9 times in 10 (the
-    revision's engineering review, I2). The same breaks under the structure's table stay out."""
+    revision's engineering review, I2). The same breaks under the structure's table stay out, even
+    where the structure's own table would score them (the block's table is the one read), and a
+    rig failure never counts against the animal, whatever the block's table pays it (decision 19:
+    "Lost tracking and rig faults never count against the animal")."""
     def drill(block_table) -> Scheduler:
         block = Block(name="hold", conditions=[Condition("a", {}, target=1000)],
                       criterion=(0.8, 10), counting=block_table)
-        return Scheduler([block], seed=1, counting=Counting(after_stimulus=OWED))
+        return Scheduler([block], seed=1,
+                         counting=Counting(after_stimulus=OWED,
+                                           outcomes={"fixation_break": COUNTED}))
 
-    scored = drill(Counting(after_stimulus=OWED, outcomes={"fixation_break": COUNTED}))
+    scored = drill(Counting(after_stimulus=OWED, outcomes={
+        "fixation_break": COUNTED, "fault": COUNTED, "tracker_lost": COUNTED}))
     plain = drill(None)
     for n in range(100):
         outcome = Outcome.CORRECT if n % 10 == 0 else Outcome.FIXATION_BREAK
@@ -1147,6 +1155,31 @@ def test_a_hold_training_block_judges_a_broken_hold_it_scores_as_a_miss():
 
     assert list(scored._window) == [1] + [0] * 9 and not scored.finished
     assert list(plain._window) == [1] * 10
+
+    for outcome in (Outcome.FAULT, Outcome.TRACKER_LOST):
+        before = list(scored._window)
+        scored.record(scored.next_trial().name, outcome)
+        assert list(scored._window) == before
+
+
+def test_a_block_that_trains_acquiring_fixation_judges_a_failure_to_acquire_it_scores_as_a_miss():
+    """The PI, 2026-10-18, decision 19, "Yes, where the block says so": a block training looking at
+    the fixation point at all counts a failure to acquire it as a miss, a trial that timed out
+    waiting at the longest trial included (`task.HANG_COUNTS_AS`, which counts as no fixation).
+    A default table leaves both out."""
+    def drill(block_table) -> Scheduler:
+        block = Block(name="look", conditions=[Condition("a", {}, target=1000)],
+                      criterion=(0.8, 10), counting=block_table)
+        return Scheduler([block], seed=1)
+
+    scored = drill(Counting(after_stimulus=OWED, outcomes={"no_fixation": COUNTED}))
+    plain = drill(None)
+    for scheduler in (scored, plain):
+        scheduler.record(scheduler.next_trial().name, Outcome.NO_FIXATION)
+        scheduler.record(scheduler.next_trial().name, None)
+
+    assert list(scored._window) == [0, 0]
+    assert list(plain._window) == []
 
 
 def test_a_blocks_own_table_cannot_make_no_response_an_answer():
