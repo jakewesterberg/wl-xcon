@@ -6,7 +6,8 @@ idle frame `wlx taskd` publishes while no session is open (`Idle`, since schema 
 carrying the last closed session's summary since schema 11),
 the commands a console sends back (`SetParameter`, `Stop`, and since b3a the service's
 `OpenSession`, `CheckRun`, `StartRun` and `EndSession`, since XC-026 its
-`ResumeSession`, and since engine build C2a `ClearOwed` and `Drum`; `Command`), the port a session
+`ResumeSession`, and since engine build C2a `ClearOwed`, `Drum` and `Training`; `Command`), the
+port a session
 publishes and drains through (`Link`, `Absent`, `Simulated`), its wire encoding
 (`encode`/`decode`, plus the command-side `_encode_command`/`_decode_command`), and
 the one live transport that carries all of it over a real socket (`ZmqLink`,
@@ -51,7 +52,7 @@ from typing import ClassVar, Protocol
 from wl_xcon import actor as actors
 from wl_xcon.actor import Actor
 from wl_xcon.findings import SESSION_KINDS
-from wl_xcon.scheduler import DRUM_SCOPES
+from wl_xcon.scheduler import DRUM_SCOPES, TRAINING
 from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 
 #: Bumped whenever a field changes meaning or disappears. ADR-0003: "schema-versioned
@@ -294,7 +295,8 @@ class Control:
     from `taskd.Session.controls`. `kind` is `stop`, `pause`, `resume`, `mark`,
     `note`, `schedule`, `cancel`, `scheduled_stop`, `set` (a staged setting applied),
     `reward` (a manual reward, given while paused), `clear` (a condition's debt cleared by a
-    person), `drum` (drumming switched by a trainer) or `warning` (a warning said as it
+    person), `drum` (drumming switched by a trainer), `training` (a training setting
+    switched by a trainer) or `warning` (a warning said as it
     happens, since the PI's rulings on XC-352, 2026-10-11);
     `by` is who sent it, `None` for a mark's stamp, whose sender arrives with its note;
     `at` is on the session's anchored clock; `said` is the sentence after the kind.
@@ -1515,6 +1517,20 @@ class Drum:
     by: Actor
 
 
+@dataclass(frozen=True, slots=True)
+class Training:
+    """**Switch a training setting on or off** for the rest of the run (the PI, 2026-10-18):
+    `setting` `"clear"`, the training aid that lets a person clear a trial from the count, off by
+    default, or `"first_answers"`, whether a percentage rule judges only each drummed trial's first
+    answer (`scheduler.TRAINING`; `Scheduler.train`). Recorded with who switched it."""
+
+    KIND: ClassVar[str] = "training"
+
+    setting: str
+    on: bool
+    by: Actor
+
+
 Command = (
     SetParameter
     | Stop
@@ -1531,6 +1547,7 @@ Command = (
     | ResumeSession
     | ClearOwed
     | Drum
+    | Training
 )
 
 #: The kinds of scheduled stop, in the order a person is offered them.
@@ -1599,8 +1616,8 @@ def _encode_command(command: Command) -> bytes:
     """A command to msgpack -- `SetParameter`, `Stop`, and since P4d-2b b2a `Pause`,
     `Resume`, `Mark`, `ScheduleStop`, `CancelScheduledStop` and `ManualReward`, and
     since P4d-2b b3a `OpenSession`, `CheckRun`, `StartRun` and `EndSession`, since
-    XC-026 `ResumeSession`, and since engine build C2a `ClearOwed` and `Drum` -- tagged by kind so
-    `_decode_command` knows which dataclass to rebuild.
+    XC-026 `ResumeSession`, and since engine build C2a `ClearOwed`, `Drum` and `Training` -- tagged
+    by kind so `_decode_command` knows which dataclass to rebuild.
 
     Private, unlike `encode`/`decode`: its callers are `ZmqConsole.send` and
     `ZmqCommands.deliver`, both in this same file, so this is an implementation detail
@@ -1675,6 +1692,9 @@ def _encode_command(command: Command) -> bytes:
                    "rest": command.rest}
     elif isinstance(command, Drum):
         payload = {"kind": "drum", "by": actors.to_map(command.by), "scope": command.scope}
+    elif isinstance(command, Training):
+        payload = {"kind": "training", "by": actors.to_map(command.by), "setting": command.setting,
+                   "on": command.on}
     else:
         raise TypeError(f"no wire encoding for {command!r}")
     return msgpack.packb(payload, use_bin_type=True)
@@ -2050,6 +2070,21 @@ def _command_from(data: dict) -> Command:
                 f"{_quoted(data.get('scope'))} is none of them, so it is refused",
             )
         return Drum(scope=data["scope"], by=by)
+    if kind == "training":
+        by = _actor(data.get("by"), kind)
+        if data.get("setting") not in TRAINING:
+            raise CommandRefused(
+                "training", by,
+                f"a training setting is {' or '.join(TRAINING)}, and "
+                f"{_quoted(data.get('setting'))} is neither, so it is refused",
+            )
+        if not isinstance(data.get("on"), bool):
+            raise CommandRefused(
+                "training", by,
+                f"a 'training' command's on is true or false, and {_quoted(data.get('on'))} is "
+                f"neither, so it is refused",
+            )
+        return Training(setting=data["setting"], on=data["on"], by=by)
     raise ValueError(f"unknown command kind on the wire: {_quoted(kind)}")
 
 

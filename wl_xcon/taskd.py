@@ -170,6 +170,18 @@ def _hung(index: int, condition: str, counted: str, owed: int) -> str:
     )
 
 
+def _drum_warned(condition: str, index: int, owed: int) -> str:
+    """The changes feed's warning at a drummed trial's tenth failed try in a row (the PI,
+    2026-10-12, "After 10 in a row"): drumming goes on. *Clear one* moves past the trial once the
+    training aid is switched on (the PI, 2026-10-18) -- while its condition owes a trial; past a
+    criterion block's targets it owes none, a clear there is refused, and only *stop drumming*
+    ends the drum (the controller's ruling M3 on the plan's revision review)."""
+    way = ("clear one moves past it once clear is switched on, stop drumming ends it" if owed
+           else "stop drumming ends it")
+    return (f"{condition} has failed {DRUM_WARNING} tries in a row under drumming, the last trial "
+            f"{index}; drumming goes on: {way}")
+
+
 def _appeared(trial: Trial, result) -> bool:
     """Whether a trial's stimulus had appeared (engine spec §16.2, §16.4; the engine C2a plan's
     call 4): it entered the state its structure's counting table names (`task.Counting.appears`;
@@ -1583,6 +1595,29 @@ class Session:
             index, scope=command.scope, block=block, was=was, now=scheduler.drumming,
         )
 
+    def _train(self, command, index: int) -> None:
+        """**Switch a training setting** (`link.Training`; the PI, 2026-10-18): the training aid
+        *clear*, off by default, or the setting "first answers only" for a percentage rule under
+        drumming, on or off for the rest of the run (`Scheduler.train`); `controls.jsonl` records
+        it with who switched it. In every kind of session ("Allow it, with a warning": a training
+        aid is meant for training sessions and works in the others, the console warning while one
+        is on and every trial's row marking it). **A switch to the value already set is refused**,
+        with its sentence, as a pause of a paused session is."""
+        scheduler = self._scheduler
+        was = scheduler.clearing if command.setting == "clear" else scheduler.first_answers
+        if was == command.on:
+            # As a pause of a paused session is: nothing changes, so nothing is recorded.
+            state = "on" if command.on else "off"
+            self._refuse("training", command.by,
+                         f"{command.setting} is already {state}, so nothing changed")
+            return
+        scheduler.train(command.setting, command.on)
+        self._control(
+            "training", command.by,
+            f"{command.setting} {'on' if command.on else 'off'} for the rest of the run",
+            index, setting=command.setting, was=was, now=command.on,
+        )
+
     def _ends(self, index: int) -> bool:
         """Whether the session must end at this boundary, with its reason and kind
         set. **One place for it**, asked between trials and on every pass of the
@@ -1903,6 +1938,9 @@ class Session:
             return
         if isinstance(command, _link.Drum):
             self._drum(command, index)
+            return
+        if isinstance(command, _link.Training):
+            self._train(command, index)
             return
         if not isinstance(command, _link.SetParameter):
             # A command this session has no branch for -- a newer console's -- is
@@ -2592,10 +2630,8 @@ class Session:
                 if scheduler.drum_tries == DRUM_WARNING:
                     # **A warning on the changes feed** (the PI, 2026-10-12, "After 10 in a row"):
                     # drumming goes on, and the trainer may move past the trial or stop drumming.
-                    self._feed("warning", None, self.wall_now(), (
-                        f"{condition.name} has failed {DRUM_WARNING} tries in a row under "
-                        f"drumming, the last trial {index}; drumming goes on: clear one moves past "
-                        f"it, stop drumming ends it"))
+                    self._feed("warning", None, self.wall_now(), _drum_warned(
+                        condition.name, index, scheduler.owed(condition.name)))
                 # One string for the record and for a console's recent outcomes, so
                 # the two cannot disagree (P4d-2b spec §4.1).
                 recorded = result.outcome.value if result.outcome else "hang"
@@ -2613,6 +2649,7 @@ class Session:
                     previous=drawn.previous,
                     drummed=drawn.drummed,
                     drumming=drawn.drumming,
+                    aids=drawn.aids,
                     run=self.run_index,
                     position=position,
                     # **The trial's whole commanded difference**, and `resume.read` adds it

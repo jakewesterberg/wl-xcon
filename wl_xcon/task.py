@@ -1443,8 +1443,9 @@ class Counting:
     - `cap`: how many failed repeats in a row of one trial of a condition are allowed before its
       remaining debt is forgiven, its shortfall recorded and shown (§16.6, as the PI read it on
       2026-10-12: "The condition is moved past after 3 failed repeats in a row, and the count
-      resets once it is done"); `None`, no limit, repeated until done (the PI, 2026-10-11), with
-      the console's *clear* to move past one by hand.
+      resets once it is done"): any trial not shown again ends the count (the PI, 2026-10-18).
+      `None`, no limit, repeated until done (the PI, 2026-10-11), with the console's *clear* --
+      a training aid a trainer switches on (the PI, 2026-10-18) -- to move past one by hand.
 
     Every answer (`ANSWERS`) is counted and every outcome of `REPEATED` owed, unless `outcomes` says
     otherwise; `of` reads the table."""

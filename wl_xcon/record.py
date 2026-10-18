@@ -241,6 +241,7 @@ class SessionRecord:
         previous: str | None = None,
         drummed: bool = False,
         drumming: str | None = None,
+        aids: tuple = (),
     ) -> None:
         """One trial's record, flushed before returning.
 
@@ -277,7 +278,8 @@ class SessionRecord:
         again (`repeat_of`), whether it came straight after that one (`at_once`), and the condition
         of the trial before it in its block (`previous`), an aborted one included; and whether it
         is a drum's repeat (`drummed`) and drumming was on as it was drawn (`drumming`, `"block"`
-        or `"run"`).
+        or `"run"`). **And the training aids on as it was drawn** (`aids`, a list: `"drumming"`,
+        `"clear"`; the PI, 2026-10-18: "the record marks it on every trial").
         """
         if self._trials is None:
             self._trials = (self.directory / "trials.jsonl").open("a", encoding="utf-8")
@@ -301,6 +303,7 @@ class SessionRecord:
                     "previous": previous,
                     "drummed": drummed,
                     "drumming": drumming,
+                    "aids": list(aids),
                 },
                 sort_keys=True,
             )

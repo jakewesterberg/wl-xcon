@@ -19,6 +19,7 @@ from wl_xcon.scheduler import (
     EVERY_TRIAL,
     PRESENTED,
     RIG,
+    TRAINING,
     Block,
     Condition,
     Constrained,
@@ -720,7 +721,7 @@ def test_a_forgiven_conditions_waiting_repeat_is_not_drawn_and_none_is_placed_ag
     minor 6: this test first recorded `a` three times with no draw between, which no run does.)"""
     scheduler = Scheduler(
         [Block(name="b", conditions=[Condition("a", {}, target=3), Condition("b", {}, target=40)])],
-        seed=1, counting=Counting(after_stimulus=OWED))
+        seed=1, counting=Counting(after_stimulus=OWED), clearing=True)
     for _ in range(5):
         name = scheduler.next_trial().name
         if name == "a":
@@ -831,7 +832,7 @@ def test_a_cleared_trial_forgives_one_of_the_debt_and_drops_its_waiting_repeat()
     repeat never comes; a clear of nothing owed, or of no condition of the block, is refused with a
     sentence."""
     block = Block(name="b", conditions=[Condition("a", {}, target=2), Condition("b", {}, target=2)])
-    scheduler = Scheduler([block], seed=1)
+    scheduler = Scheduler([block], seed=1, clearing=True)
     broke = scheduler.next_trial().name
     scheduler.record(broke, Outcome.FIXATION_BREAK)
 
@@ -855,7 +856,8 @@ def test_clearing_one_trial_starts_its_conditions_failed_tries_over():
     trial whose repeat waits, and the condition's next trial counts its failures from 0, so a limit
     of 1 does not forgive the rest of its debt at the condition's next failure."""
     block = Block(name="b", conditions=[Condition("a", {}, target=3)])
-    scheduler = Scheduler([block], seed=1, counting=Counting(after_stimulus=OWED, cap=1))
+    scheduler = Scheduler([block], seed=1, counting=Counting(after_stimulus=OWED, cap=1),
+                          clearing=True)
     scheduler.record(scheduler.next_trial().name, Outcome.FIXATION_BREAK)
 
     assert scheduler.clear("a") is None
@@ -869,7 +871,8 @@ def test_clearing_one_trial_forgets_the_rigs_failures_in_its_row_too():
     """Task 8's review, Important 1: decision 9 starts the trial's count over, the rig's failures
     in the row with the animal's, so the animal's own failures after a clear are flagged."""
     block = Block(name="b", conditions=[Condition("a", {}, target=3)])
-    scheduler = Scheduler([block], seed=1, counting=Counting(after_stimulus=OWED, cap=1))
+    scheduler = Scheduler([block], seed=1, counting=Counting(after_stimulus=OWED, cap=1),
+                          clearing=True)
     scheduler.record(scheduler.next_trial().name, Outcome.TRACKER_LOST)
 
     assert scheduler.clear("a") is None
@@ -899,14 +902,37 @@ def test_a_switch_made_as_a_block_ends_reads_against_the_next_block():
     scheduler.advance()
     assert (scheduler.drumming, scheduler.drumming_switched) == ("run", "run")
     scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
+    assert scheduler.drumming_switched == "run"
     scheduler.drum("off")
-    assert scheduler.drumming_switched == "block"
+    # The off is pending for block C now, which declares drum: it reads what the switch makes it.
+    assert scheduler.drumming_switched is None
+
+
+@pytest.mark.parametrize("next_drums", [False, True])
+@pytest.mark.parametrize(("first", "second", "second_was"),
+                         [("block", "off", "block"), ("off", "block", None)])
+def test_a_second_switch_in_one_drain_reads_the_first_one_pending(
+        next_drums, first, second, second_was):
+    """Task 8's re-review, minor: a switch already carried to the next block (`_carried`) is what
+    the next switch's `drumming_switched` reads, not the next block's own `drum`."""
+    blocks = [Block(name="A", conditions=[Condition("a", {}, target=1)], counting=EVERY_TRIAL),
+              Block(name="B", conditions=[Condition("b", {}, target=1)], drum=next_drums)]
+    scheduler = Scheduler(blocks, seed=1)
+    scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
+    assert scheduler.finished
+
+    assert scheduler.drumming_switched == ("block" if next_drums else None)
+    assert scheduler.drum(first) == "B"
+    assert scheduler.drumming_switched == second_was
+    scheduler.drum(second)
+    scheduler.advance()
+    assert scheduler.drumming == (None if second == "off" else "block")
 
 
 def test_clearing_a_drummed_trial_moves_past_it():
     """"Advance beyond": the drum's trial waiting to come back is dropped with the trial cleared."""
     scheduler = Scheduler([Block(name="b", conditions=[Condition("a", {}, target=2)], drum=True)],
-                          seed=1)
+                          seed=1, clearing=True)
     scheduler.record(scheduler.next_trial().name, Outcome.WRONG_TARGET)
 
     scheduler.clear("a")
@@ -920,7 +946,7 @@ def test_clearing_the_rest_of_a_condition_forgives_all_it_still_owes():
     once."""
     block = Block(name="b", conditions=[Condition("a", {}, target=20),
                                         Condition("b", {}, target=1)])
-    scheduler = Scheduler([block], seed=1)
+    scheduler = Scheduler([block], seed=1, clearing=True)
 
     assert scheduler.clear("a", by="jake", rest=True) is None
 
@@ -934,7 +960,7 @@ def test_clearing_a_condition_that_is_queued_keeps_it_from_the_next_draw():
     review)."""
     block = Block(name="b", conditions=[Condition(name, {}, target=2) for name in "abc"],
                   order=Shuffled())
-    scheduler = Scheduler([block], seed=1)
+    scheduler = Scheduler([block], seed=1, clearing=True)
     scheduler.next_trial()
     scheduler.record(scheduler.drawn.condition.name, Outcome.CORRECT)
     queued = scheduler.upcoming()[0]
@@ -943,6 +969,43 @@ def test_clearing_a_condition_that_is_queued_keeps_it_from_the_next_draw():
     scheduler.next_trial()
 
     assert scheduler.drawn.condition.name != queued
+
+
+def test_clear_is_a_training_aid_off_until_a_trainer_switches_it_on():
+    """The PI, 2026-10-18, "Drumming and 'clear'": clearing trials from the count is a training
+    aid, off by default; a clear while it is off is refused with a sentence and changes nothing --
+    a control not switched on, not a refusal of a task. The trainer switches it on, and off, for the
+    rest of the run, and the percentage setting beside it; nothing else is switched so."""
+    scheduler = Scheduler([Block(name="b", conditions=[Condition("a", {}, target=3)])], seed=1)
+    off = ("clear is a training aid, and it is off in this run; a trainer switches it on to clear "
+           "a trial from the count")
+
+    assert scheduler.clear("a") == off and scheduler.shortfalls == []
+    scheduler.train("clear", True)
+    assert scheduler.clear("a") is None and scheduler.owed("a") == 2
+    scheduler.train("clear", False)
+    scheduler.train("first_answers", True)
+    assert scheduler.clear("a") == off and scheduler.first_answers
+    assert TRAINING == ("clear", "first_answers")
+    with pytest.raises(ValueError, match="a training setting is clear or first_answers"):
+        scheduler.train("drum", True)
+
+
+def test_each_draw_names_the_training_aids_on_as_it_was_drawn():
+    """The PI, 2026-10-18: while a training aid is on "the record marks it on every trial" --
+    drumming, by a block's declaration or a trainer's switch, and *clear*. The percentage setting is
+    no aid; its switch is in the control rows."""
+    scheduler = Scheduler([Block(name="b", conditions=[Condition("a", {}, target=5)])], seed=1)
+    seen = []
+    for switch in (None, ("clear", True), ("drum", "run"), ("first_answers", True)):
+        if switch is not None and switch[0] == "drum":
+            scheduler.drum(switch[1])
+        elif switch is not None:
+            scheduler.train(*switch)
+        seen.append(scheduler.next_trial() and scheduler.drawn.aids)
+        scheduler.record("a", Outcome.CORRECT)
+
+    assert seen == [(), ("clear",), ("drumming", "clear"), ("drumming", "clear")]
 
 
 # --- drumming (the PI, 2026-10-11) -----------------------------------------------

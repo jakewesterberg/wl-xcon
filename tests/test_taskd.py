@@ -57,13 +57,14 @@ from wl_xcon.link import (
     Simulated,
     Stop,
     Telemetry,
+    Training,
 )
 from wl_xcon.photometry import SRGB
 from wl_xcon.record import REFUSAL_LOG_LIMIT, SessionRecord
 from wl_xcon.scheduler import EVERY_TRIAL, Block, Condition, Scheduler
 from wl_xcon.simulate import Tally
 from wl_xcon.task import OWED, After, Counting, On, Outcome, State, Trial
-from wl_xcon.taskd import PAUSE_HOUSEKEEPING_S, RunSpec, Session, SessionSpec
+from wl_xcon.taskd import PAUSE_HOUSEKEEPING_S, RunSpec, Session, SessionSpec, _drum_warned
 from wl_xcon.warnlist import Entry
 from wl_xcon.welfare import Deployment, Simulated as Pump
 import _sessions
@@ -1284,7 +1285,8 @@ def test_a_drummed_trial_that_fails_ten_tries_in_a_row_is_said_on_the_console(
     rows = _trial_rows(session)
     warned = [said for kind, by, _, said in session.controls if kind == "warning" and by is None]
     assert warned == ["c has failed 10 tries in a row under drumming, the last trial 9; drumming "
-                      "goes on: clear one moves past it, stop drumming ends it"]
+                      "goes on: clear one moves past it once clear is switched on, stop drumming "
+                      "ends it"]
     assert [row["outcome"] for row in rows[:10]] == ["wrong_target"] * 10
     assert [row["drummed"] for row in rows[:11]] == [False] + [True] * 10
     assert session.stop_kind == "completed"
@@ -3548,7 +3550,8 @@ def test_a_person_clears_a_trial_from_a_conditions_count_and_it_is_recorded(tmp_
     clear a specific trial in the count", recorded. The block owes `near` one trial fewer; the
     control row and the run's end row say who and where; a clear of a condition the block does not
     have is refused with the sentence, and changes nothing."""
-    link = _Drained({3: [ClearOwed(condition="near", by=Box("jake")),
+    link = _Drained({3: [Training(setting="clear", on=True, by=Box("jake")),
+                         ClearOwed(condition="near", by=Box("jake")),
                          ClearOwed(condition="nowhere", by=Box("jake"))]})
     session = _session(_spec(tmp_path, trials=400, blocks=[_near_far()]), link=link)
 
@@ -3571,7 +3574,8 @@ def test_a_person_clears_a_trial_from_a_conditions_count_and_it_is_recorded(tmp_
 def test_a_clear_sent_while_paused_is_applied_at_once(tmp_path):
     """The paused loop drains commands too (`_hold`), and a clear is applied there, before the
     resume: routed beside the pause, outside `Session._command`'s welfare-listed parts."""
-    link = _Scripted(script={1: [ClearOwed(condition="near", by=Box("sam"))],
+    link = _Scripted(script={1: [Training(setting="clear", on=True, by=Box("sam")),
+                                 ClearOwed(condition="near", by=Box("sam"))],
                              2: [Resume(by=Box("sam"))]}, step=1.0)
     link.queue(Pause(by=Box("jake")))
     session, wall = _walled(tmp_path, link, trials=400, blocks=[_near_far()])
@@ -3580,7 +3584,7 @@ def test_a_clear_sent_while_paused_is_applied_at_once(tmp_path):
     session.run()
 
     kinds = [row["kind"] for row in _controls_rows(session)]
-    assert kinds[:3] == ["pause", "clear", "resume"]
+    assert kinds[:4] == ["pause", "training", "clear", "resume"]
     assert session.stop_kind == "completed"
 
 
@@ -3606,7 +3610,8 @@ def test_a_person_clears_the_rest_of_a_condition_and_it_is_recorded(tmp_path):
     """The science review's D5 and the controller's ruling: beside *clear one*, *clear the rest of
     this condition*, so a condition the animal refuses is moved past in one command, recorded as a
     clear is: its control row says how many trials it cleared, and the end row's shortfall."""
-    link = _Drained({2: [ClearOwed(condition="far", by=Box("jake"), rest=True)]})
+    link = _Drained({2: [Training(setting="clear", on=True, by=Box("jake")),
+                         ClearOwed(condition="far", by=Box("jake"), rest=True)]})
     session = _session(_spec(tmp_path, trials=400, blocks=[_near_far()]), link=link)
 
     session.run()
@@ -3657,6 +3662,26 @@ def test_a_carried_drumming_switch_says_so_when_the_next_block_drums_anyway(tmp_
     assert (switched["block"], switched["was"], switched["now"]) == ("B", "block", "block")
 
 
+@pytest.mark.parametrize("next_drums", [False, True])
+@pytest.mark.parametrize(("first", "second", "second_was"),
+                         [("block", "off", "block"), ("off", "block", None)])
+def test_two_drumming_switches_drained_at_one_block_end_read_the_pending_one(
+        tmp_path, next_drums, first, second, second_was):
+    """Task 8's re-review, minor: the second switch of one drain is for the block the first was
+    carried to, so its `was` is the pending switch's, not the next block's own declaration."""
+    blocks = [Block(name="A", conditions=[Condition("a", {}, target=1)], counting=EVERY_TRIAL,
+                    drum=True),
+              Block(name="B", conditions=[Condition("b", {}, target=3)], drum=next_drums)]
+    link = _Drained({2: [Drum(scope=first, by=Box("jake")), Drum(scope=second, by=Box("jake"))]})
+    session = _session(_spec(tmp_path, trials=400, blocks=blocks), link=link)
+
+    session.run()
+
+    one, two = [row for row in _controls_rows(session) if row["kind"] == "drum"]
+    assert (one["block"], one["was"]) == ("B", "block" if next_drums else None)
+    assert (two["block"], two["was"]) == ("B", second_was)
+
+
 def test_a_clear_or_a_drum_that_reached_the_session_off_the_wire_meets_the_wires_rule(tmp_path):
     """Task 8's review, Minor 3: `_clear` and `_drum` check what the wire checks, as `_schedule`
     does, and refuse with the sentence rather than raise or act."""
@@ -3680,7 +3705,8 @@ def test_the_clears_feed_sentence_counts_its_trials_in_the_singular_and_the_plur
     def said(target: int) -> str:
         block = Block(name="b", conditions=[Condition("a", {}, target=target),
                                             Condition("z", {}, target=1)])
-        link = _Drained({1: [ClearOwed(condition="a", by=Box("jake"), rest=True)]})
+        link = _Drained({1: [Training(setting="clear", on=True, by=Box("jake")),
+                             ClearOwed(condition="a", by=Box("jake"), rest=True)]})
         session = _session(_spec(tmp_path / str(target), trials=400, blocks=[block]), link=link)
         session.run()
         (feed,) = [said for kind, _, _, said in session.controls if kind == "clear"]
@@ -3688,6 +3714,58 @@ def test_the_clears_feed_sentence_counts_its_trials_in_the_singular_and_the_plur
 
     assert said(1).startswith("cleared the rest, 1 trial, of a in block b")
     assert said(2).startswith("cleared the rest, 2 trials, of a in block b")
+
+
+def test_clear_is_refused_until_a_trainer_switches_it_on_and_each_row_marks_the_aids_on(tmp_path):
+    """The PI, 2026-10-18: *clear* is a training aid, off by default; refused with the sentence
+    until a trainer switches it on, which `controls.jsonl` records with who; and every trial's row
+    marks the aids on as it was drawn. A second switch to the same value is refused with its
+    sentence, as a pause of a paused session is, and records nothing."""
+    link = _Drained({1: [ClearOwed(condition="near", by=Box("jake"))],
+                     2: [Training(setting="clear", on=True, by=Box("jake")),
+                         Training(setting="clear", on=True, by=Box("jake"))],
+                     3: [ClearOwed(condition="near", by=Box("jake"))]})
+    session = _session(_spec(tmp_path, trials=400, blocks=[_near_far()]), link=link)
+
+    session.run()
+
+    assert [(name, why) for name, _, why in session.refusals] == [
+        ("clear", "clear is a training aid, and it is off in this run; a trainer switches it on "
+                  "to clear a trial from the count"),
+        ("training", "clear is already on, so nothing changed")]
+    (switched,) = [row for row in _controls_rows(session) if row["kind"] == "training"]
+    assert (switched["setting"], switched["was"], switched["now"], switched["by"],
+            switched["trial_index"]) == ("clear", False, True, {"kind": "box", "name": "jake"}, 1)
+    assert [row["kind"] for row in _controls_rows(session)] == ["training", "clear"]
+    rows = _trial_rows(session)
+    assert rows[0]["aids"] == [] and {tuple(row["aids"]) for row in rows[1:]} == {("clear",)}
+
+
+def test_a_blocks_drumming_works_in_a_piloting_session_and_its_rows_mark_it(tmp_path):
+    """The PI, 2026-10-18, "Allow it, with a warning": a training aid is meant for training
+    sessions, and in a piloting or recording one "it works, and the console shows a standing warning
+    ... The record says so on every trial." Nothing refuses it."""
+    block = Block(name="drill", conditions=[Condition("c", {}, target=10)], drum=True)
+    session = _session(_spec(tmp_path, trials=400, blocks=[block], session_kind="piloting"))
+
+    session.run()
+
+    rows = _trial_rows(session)
+    assert {tuple(row["aids"]) for row in rows} == {("drumming",)}
+    assert any(row["drummed"] for row in rows) and session.stop_kind == "completed"
+
+
+def test_the_drum_warning_names_only_stop_drumming_where_the_condition_owes_nothing():
+    """The controller's ruling M3 on the plan's revision review: past a criterion block's targets
+    the drummed condition owes nothing, so *clear one* would be refused there; the warning after
+    ten failed tries names only *stop drumming*. Where it owes, *clear one* once switched on."""
+    owing = ("c has failed 10 tries in a row under drumming, the last trial 9; drumming goes on: "
+             "clear one moves past it once clear is switched on, stop drumming ends it")
+
+    assert _drum_warned("c", 9, 1) == owing
+    assert _drum_warned("c", 9, 0) == (
+        "c has failed 10 tries in a row under drumming, the last trial 9; drumming goes on: stop "
+        "drumming ends it")
 
 
 def test_a_pause_holds_the_session_at_a_boundary_and_resume_continues(tmp_path):

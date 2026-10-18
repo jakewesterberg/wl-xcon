@@ -119,6 +119,12 @@ DRUM_SCOPES = ("block", "run", "off")
 #: drumming goes on (`Scheduler.drum_tries`).
 DRUM_WARNING = 10
 
+#: What a trainer switches on and off from the console (`Scheduler.train`; the PI, 2026-10-18):
+#: **the training aid *clear***, whether a person may clear a trial from a condition's count, and
+#: **the training setting "first answers only"**, how drummed answers count toward a percentage
+#: rule. Drumming, the other training aid, has its own switch (`DRUM_SCOPES`).
+TRAINING = ("clear", "first_answers")
+
 
 @dataclass(frozen=True, slots=True)
 class Draw:
@@ -128,7 +134,8 @@ class Draw:
     came straight after that trial, which §16.3 has recorded; `previous`, the condition of the
     trial before it in its block, an aborted one included, or `None` for a block's first.
     `drummed`, whether it is a drum's repeat, and `drumming`, whether drumming was on as it was
-    drawn -- `"block"` or `"run"` -- or `None` (`Scheduler.drumming`)."""
+    drawn -- `"block"` or `"run"` -- or `None` (`Scheduler.drumming`); `aids`, the training aids on
+    as it was drawn (`Scheduler.aids`)."""
 
     condition: Condition
     number: int
@@ -137,6 +144,7 @@ class Draw:
     previous: str | None = None
     drummed: bool = False
     drumming: str | None = None
+    aids: tuple = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,8 +225,14 @@ class Scheduler:
     counting: Counting | None = None
     #: **The training setting "first answers only"** (the PI, 2026-10-18): under drumming, a
     #: percentage rule judges only each trial's first answer, where by default it judges every
-    #: answer in order ("Every answer"); a streak judges every answer either way. Off by default.
+    #: answer in order ("Every answer"); a streak judges every answer either way. Off by default;
+    #: a trainer switches it from the console (`train`).
     first_answers: bool = False
+    #: **The training aid *clear*** (the PI, 2026-10-18, "Drumming and 'clear'"): whether a
+    #: person may clear a trial from a condition's count (`clear`). Off by default -- until
+    #: per-animal training profiles exist (XC-379), every run starts with it off -- and a trainer
+    #: switches it from the console (`train`).
+    clearing: bool = False
     _rng: random.Random = field(init=False, repr=False)
     _counts: dict = field(init=False, default_factory=dict, repr=False)
     _queue: deque = field(init=False, default_factory=deque, repr=False)
@@ -470,6 +484,10 @@ class Scheduler:
         next block's when the switch would be carried to it (`drum`; `advance` keeps a run's
         switch and resets the rest, leaving the next block's own `drum`), else this one's."""
         if self.finished and not self.done:
+            if self._carried:
+                # A switch already carried to the next block in this drain: it is what that
+                # block reads (`advance` keeps it), not that block's own declaration.
+                return self._switched if self._switched in ("run", "block") else None
             if self._switched == "run":
                 return "run"
             return "block" if self.blocks[self._index + 1].drum else None
@@ -482,13 +500,40 @@ class Scheduler:
         2026-10-12)."""
         return self._tries if self._drum is not None else 0
 
+    @property
+    def aids(self) -> tuple:
+        """The training aids on now (the PI, 2026-10-18, "Drumming and 'clear'"): `"drumming"`
+        while trials are drummed, by a block's declaration or a trainer's switch, and `"clear"`
+        while a person may clear a trial from the count. Each trial's row marks them (`Draw.aids`),
+        and the console shows a standing warning while any is on."""
+        return tuple(name for name, on in (("drumming", self.drumming is not None),
+                                           ("clear", self.clearing)) if on)
+
+    def train(self, setting: str, on: bool) -> None:
+        """Switch a training setting on or off for the rest of the run, as a trainer does from the
+        console (the PI, 2026-10-18; `TRAINING`): `"clear"`, the training aid that lets a person
+        clear a trial from the count, or `"first_answers"`, which judges only each drummed trial's
+        first answer for a percentage rule. Both are off as a run starts."""
+        if setting not in TRAINING:
+            raise ValueError(f"a training setting is {' or '.join(TRAINING)}, not {setting!r}")
+        if setting == "clear":
+            self.clearing = on
+        else:
+            self.first_answers = on
+
     def clear(self, condition: str, by: object = None, rest: bool = False) -> str | None:
         """Forgive one trial of `condition`'s debt in this block, or with `rest` all it still owes,
         as a person does from the console (the PI, 2026-10-11: "manually advance beyond or clear a
         specific trial in the count"; *the rest*, the engine C2a plan's science review, D5): a
         repeat of it waiting, or a drum's trial, is dropped, its failed tries in a row start over
         (the PI, 2026-10-18), and the clearing is a `Shortfall` naming `by`. Returns why nothing was
-        cleared -- the block has no such condition, or it owes nothing -- or `None`."""
+        cleared -- *clear* is off (`clearing`: a control not switched on, never a refusal of a
+        task), the block has no such condition, or it owes nothing -- or `None`."""
+        if not self.clearing:
+            return (
+                "clear is a training aid, and it is off in this run; a trainer switches it on to "
+                "clear a trial from the count"
+            )
         if condition not in self._counts:
             return (
                 f"block {self.block.name!r} has no condition {condition!r}, so nothing is cleared"
@@ -578,6 +623,7 @@ class Scheduler:
             previous=self._drawn[-1] if self._drawn else None,
             drummed=drummed,
             drumming=self.drumming,
+            aids=self.aids,
         )
         self._drawn.append(name)
         self._counts[name].attempted += 1

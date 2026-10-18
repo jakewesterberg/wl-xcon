@@ -34,6 +34,7 @@ from wl_xcon.link import (
     CommandRefused,
     Control,
     Drum,
+    Training,
     Counts,
     EndSession,
     FrameError,
@@ -1585,6 +1586,32 @@ def test_a_malformed_clear_or_drum_is_refused_where_it_is_decoded(fields, said):
 
     assert refused.value.name == fields["kind"]
     assert said in refused.value.why
+
+
+@pytest.mark.parametrize("command", [Training(setting="clear", on=True, by=Box("jake")),
+                                     Training(setting="first_answers", on=False, by=Box("jake"))])
+def test_a_training_switch_survives_the_wire_with_who_sent_it(command):
+    """The PI, 2026-10-18: the training aid *clear* and the percentage setting, each switched on and
+    off by a trainer, recorded with who."""
+    assert _decode_command(_encode_command(command)) == command
+    assert Training.KIND == "training"
+
+
+@pytest.mark.parametrize(
+    ("fields", "said"),
+    [
+        ({"kind": "training", "setting": "drum", "on": True, "by": JAKE},
+         "a training setting is clear or first_answers"),
+        ({"kind": "training", "on": True, "by": JAKE},
+         "a training setting is clear or first_answers"),
+        ({"kind": "training", "setting": "clear", "on": "yes", "by": JAKE}, "on is true or false"),
+    ],
+)
+def test_a_malformed_training_switch_is_refused_where_it_is_decoded(fields, said):
+    with pytest.raises(CommandRefused) as refused:
+        _decode_command(_packed(**fields))
+
+    assert refused.value.name == "training" and said in refused.value.why
 
 
 def test_the_controls_cross_a_real_socket_in_order(zmq_cleanup):
