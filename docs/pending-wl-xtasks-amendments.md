@@ -58,6 +58,14 @@ is imposed. Whether the format's version is checked by a manifest there is for w
 **Blocks** wl-xcon build C (with I), only if item 2 turns up a need; the approval of C's plan is the agreement.
 Backlog XC-329.
 
+*Engine build C2a, 2026-10-18*: the format gains one required declaration, **each trial structure's
+counting table** (`Trial.counting`, a `task.Counting`; [the plan](superpowers/plans/2026-10-11-engine-c2a.md),
+Task 1): whether a break after the stimulus appears is used up or shown again -- with no default, the
+load-time check refusing a structure without one (the PI, 2026-10-11) -- the state its stimulus
+appears in, required too, a cued task's cue (the PI, 2026-10-13), whether withholding is an answer,
+any outcome's own class, and a repeat limit. Every task wl-xtasks writes declares one per
+structure. Information, under item 1; nothing new is asked.
+
 ---
 
 # OPEN — event codes for build F: `STIMULUS_ON`, `STIMULUS_OFF`, `STIMULUS_CHANGED`, and the anchor code
