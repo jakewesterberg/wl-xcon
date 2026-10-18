@@ -1285,6 +1285,30 @@ def test_a_drummed_trial_that_fails_ten_tries_in_a_row_is_said_on_the_console(
     assert session.stop_kind == "completed"
 
 
+def test_a_runs_end_row_records_each_shortfall_its_cap_forgave(tmp_path):
+    """Engine spec §16.6: the shortfall is recorded, on the run's end row, flagged as possible
+    avoidance. A block whose own table allows no repeat forgives a condition's debt at its first
+    owed trial: the row names the block, the condition, the trials forgiven and the trial after
+    which they were, an owed one."""
+    table = Counting(after_stimulus=OWED, withholding=True, cap=0)
+    block = Block(name="b", counting=table,
+                  conditions=[Condition(n, {"target_x": x}, target=10)
+                              for n, x in (("near", 5.0), ("far", 12.0))])
+    session = _session(_spec(tmp_path, trials=400, blocks=[block]))
+
+    session.run()
+
+    (end,) = [row for row in _runs(session) if row["event"] == "end"]
+    rows = {row["index"]: row for row in _trial_rows(session)}
+    assert end["shortfalls"], "the seed breaks on a condition"
+    for short in end["shortfalls"]:
+        assert (short["block"], short["because"], short["possible_avoidance"], short["by"]) == (
+            "b", "cap", True, None)
+        assert rows[short["after_trial"]]["condition"] == short["condition"]
+        assert rows[short["after_trial"]]["counting"] == "owed"
+    assert session.stopped_because == "every block is finished"
+
+
 def test_a_session_without_blocks_runs_one_of_its_declared_length(tmp_path):
     """The flat session is the block session with one block, not a second code path.
     Two loops would be two places for the ceilings to be checked differently."""
@@ -5611,6 +5635,38 @@ def test_a_trial_at_the_longest_trial_is_said_on_the_console(tmp_path, monkeypat
 
     assert [s for kind, by, _, s in session.controls if kind == "warning" and by is None] == [said]
     assert session.stop_kind == "completed"
+
+
+def test_a_hang_past_its_conditions_repeat_limit_says_its_debt_was_forgiven(
+        tmp_path, monkeypatch):
+    """Task 5's sentence reached through a run: a trial that ran the longest trial is owed, and a
+    table whose `cap` is 0 allows no repeat, so the condition's remaining debt is forgiven (§16.6)
+    and the console's changes feed says so, where `_hung` was only unit-tested with owed 0."""
+    from wl_xcon import taskd
+
+    real, calls = taskd.run_trial, []
+
+    def hangs_first(*args, **kwargs):
+        calls.append(None)
+        if len(calls) == 1:
+            return real(*args, max_frames=1, **kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(taskd, "run_trial", hangs_first)
+    task = tmp_path / "one_state.py"
+    task.write_text(ONE_STATE_TASK)
+    block = Block(name="b", counting=Counting(after_stimulus=OWED, cap=0),
+                  conditions=[Condition("only", {}, target=2)])
+    session = _session(_spec(tmp_path, trials=2, task=str(task), values={}, blocks=[block]))
+
+    session.run()
+
+    assert [s for kind, by, _, s in session.controls if kind == "warning" and by is None] == [
+        "trial 0 (only) reached the longest trial, 5 minutes, with no outcome: recorded as a "
+        "hang, a missed acquisition, and owed, its condition's remaining debt forgiven"]
+    (end,) = [row for row in _runs(session) if row["event"] == "end"]
+    assert [(s["condition"], s["trials"], s["because"]) for s in end["shortfalls"]] == [
+        ("only", 2, "cap")]
 
 
 @pytest.mark.parametrize(("counted", "owed", "ending"), [

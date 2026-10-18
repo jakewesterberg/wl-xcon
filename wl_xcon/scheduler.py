@@ -20,7 +20,7 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from wl_xcon.task import (
-    ANSWERS, COUNTED, OWED, REPEATED, RIGHT, SPENT, UNPAID, Counting, Outcome,
+    ANSWERS, COUNTED, OWED, REPEATED, RIGHT, SPENT, UNPAID, Counting, Family, Outcome,
 )
 
 # --- What pays a condition's debt (engine spec §16.1-16.2; engine build C2a) -------------------
@@ -103,6 +103,13 @@ class Condition:
     target: int
 
 
+#: Why a condition's debt was forgiven (`Shortfall.because`): its repeat limit was reached
+#: (`task.Counting.cap`) by the animal's own failures, or with tries the rig lost among them -- a
+#: lost tracker or a fault (`task.Family.RIG`) -- or a person cleared trials of it.
+CAP = "cap"
+RIG = "rig"
+CLEARED = "cleared"
+
 #: What a trainer may switch drumming to (`Scheduler.drum`): on for the rest of the block, on for
 #: the rest of the run, or off for the rest of the block.
 DRUM_SCOPES = ("block", "run", "off")
@@ -162,12 +169,42 @@ class Block:
 @dataclass
 class Counts:
     """One condition's counters in its block (TSK-28): trials drawn; answers counted (`completed`),
-    the correct among them; and trials spent, used up without an answer (engine spec §16.2)."""
+    the correct among them; trials spent, used up without an answer (engine spec §16.2); times it
+    was repeated (`repeats`; a drum's are not); its failed repeats in a row since it last paid
+    (`in_a_row`, which the repeat limit counts: §16.6 as the PI read it on 2026-10-12) and how
+    many of those failed tries the rig lost (`rig`); and trials of its debt forgiven, by the limit
+    or by a person (`forgiven`)."""
 
     attempted: int = 0
     completed: int = 0
     correct: int = 0
     spent: int = 0
+    repeats: int = 0
+    in_a_row: int = 0
+    rig: int = 0
+    forgiven: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class Shortfall:
+    """Trials of a condition's debt forgiven in a block, recorded and shown (engine spec §16.6):
+    `because` its repeat limit was reached by the animal's own failures (`CAP`), which is **flagged
+    as possible avoidance**; or reached with tries the rig lost among them (`RIG`), named so and
+    never flagged; or a person cleared them from the console (`CLEARED`, by `by`). `after_trial`,
+    the number of the trial it happened after."""
+
+    block: str
+    condition: str
+    trials: int
+    because: str
+    after_trial: int
+    by: object = None
+
+    @property
+    def possible_avoidance(self) -> bool:
+        """§16.6: a condition the animal itself failed past its limit is flagged as possible
+        avoidance; one the rig failed on is not (the engine C2a plan's engineering review, M4)."""
+        return self.because == CAP
 
 
 @dataclass
@@ -196,6 +233,8 @@ class Scheduler:
     _drum: tuple | None = field(init=False, default=None, repr=False)
     #: What a trainer switched drumming to (`DRUM_SCOPES`), or `None` for the block's own.
     _switched: str | None = field(init=False, default=None, repr=False)
+    #: The run's shortfalls, every block's, in order (§16.6), which its end row records.
+    shortfalls: list = field(init=False, default_factory=list)
     #: Whether that switch came once this block's end rule was met, so it is the next block's.
     _carried: bool = field(init=False, default=False, repr=False)
     #: Failed tries in a row of the trial being drummed, its first try included.
@@ -264,12 +303,12 @@ class Scheduler:
         return self._counts[condition]
 
     def owed(self, condition: str) -> int:
-        """Target minus what paid -- the answers counted and the trials spent -- **never minus
-        attempted**: an owed trial produced no datum, so it left the condition owing exactly what
-        it owed before."""
+        """Target minus what paid -- the answers counted and the trials spent -- and what was
+        forgiven (§16.6), **never minus attempted**: an owed trial produced no datum, so it left
+        the condition owing exactly what it owed before."""
         target = next(c.target for c in self.block.conditions if c.name == condition)
         counts = self._counts[condition]
-        return max(0, target - counts.completed - counts.spent)
+        return max(0, target - counts.completed - counts.spent - counts.forgiven)
 
     @property
     def _table(self) -> Counting | None:
@@ -438,7 +477,9 @@ class Scheduler:
         appeared (`task.Counting.of`). A right answer (`task.RIGHT`: correct, or a correct
         rejection) is right for the criterion and the correct count. While drumming, a trial that
         is not right is `OWED` and comes back at once, whatever its table says, and only a trial's
-        first try is judged."""
+        first try is judged. An owed trial of a condition that has failed as many repeats in a row
+        as its table's limit allows (`task.Counting.cap`) is not repeated again: its remaining debt
+        is forgiven, a `Shortfall` (§16.6)."""
         counts = self._counts[condition]
         kind = self._class(outcome, shown)
         first_try = self.drawn is None or not self.drawn.drummed
@@ -464,10 +505,35 @@ class Scheduler:
             counts.correct += outcome in RIGHT
         elif kind == SPENT:
             counts.spent += 1
+        if kind in (COUNTED, SPENT):
+            # The condition paid, so its failed repeats in a row start again (the PI, 2026-10-12:
+            # "the count resets once it is done").
+            counts.in_a_row = counts.rig = 0
         if kind == OWED and self.owed(condition) > 0:
-            self.requeued.append(condition)
-            self._repeat(condition)
+            counts.rig += outcome is not None and outcome.family is Family.RIG
+            table = self._table
+            cap = None if table is None else table.cap
+            if cap is not None and counts.in_a_row >= cap:
+                # **Past its limit, the condition's remaining debt is forgiven** (§16.6; the PI,
+                # 2026-10-12: "moved past after 3 failed repeats in a row"), its shortfall
+                # recorded -- flagged as possible avoidance only when the animal failed each try.
+                self._forgive(condition, self.owed(condition), RIG if counts.rig else CAP)
+            else:
+                counts.repeats += 1
+                counts.in_a_row += 1
+                self.requeued.append(condition)
+                self._repeat(condition)
         return kind
+
+    def _forgive(self, condition: str, trials: int, because: str, by: object = None) -> None:
+        """Forgive `trials` of `condition`'s debt in this block (§16.6): no repeat of it waits any
+        longer, nor a drum's trial, and the shortfall is the run's record."""
+        self._counts[condition].forgiven += trials
+        self._due = [due for due in self._due if due[2] != condition]
+        if self._drum is not None and self._drum[0] == condition:
+            self._drum = None
+        self.shortfalls.append(
+            Shortfall(self.block.name, condition, trials, because, self._number - 1, by))
 
     def _repeat(self, condition: str) -> None:
         """Place the repeat of the trial just recorded (engine spec §16.3; the PI, 2026-10-11, and

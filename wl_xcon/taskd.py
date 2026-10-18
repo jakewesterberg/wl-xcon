@@ -45,7 +45,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from wl_xcon import link as _link
-from wl_xcon.actor import Actor
+from wl_xcon.actor import Actor, to_map_or_none
 from wl_xcon.bounds import Bounds, Exceeded, _finite
 from wl_xcon.check import beyond_range, check_task
 from wl_xcon.cli import _clock, _load_allocation, _load_task, _printable, _shown
@@ -2637,6 +2637,23 @@ class Session:
                         trials=self._index,
                         blocks_run=list(self.blocks_run),
                         strobed=ended_strobed,
+                        # **Each condition's debt forgiven** (engine spec §16.6): by its repeat
+                        # limit, flagged as possible avoidance when the animal's own failures
+                        # reached it, or named for the rig, or cleared by a person. On the end
+                        # row, never a row of its own: wl-preproc reports any `runs.jsonl` row but
+                        # a start or an end as a problem (its `events/rigruns.py`).
+                        shortfalls=[
+                            {
+                                "block": short.block,
+                                "condition": short.condition,
+                                "trials": short.trials,
+                                "because": short.because,
+                                "possible_avoidance": short.possible_avoidance,
+                                "after_trial": short.after_trial,
+                                "by": to_map_or_none(short.by),
+                            }
+                            for short in scheduler.shortfalls
+                        ],
                     )
                 finally:
                     try:
