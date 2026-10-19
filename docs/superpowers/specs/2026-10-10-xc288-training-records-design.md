@@ -127,6 +127,13 @@ training session with no sync box running, this log is the only timing there is.
   polling thread with `CLOCK_MONOTONIC` arrival stamps. The sample's instant is whichever holds.
 - **In a recording session the eye PC's file remains the official record** (S5 §3), and the rig's copy is
   labeled a copy wherever it appears. In a training session it may be the only gaze there is.
+- *Amended 2026-10-19 (the PI, "Events and every sample"; his rule of that day that every position and size is
+  forward-calculated at its own location, never from an average pixels-per-degree):* **every polled sample also
+  stores its true eccentricity and polar angle** beside its calibrated position (which is per screen axis,
+  `(atan(X/D), atan(Y/D))`, so `√(x² + y²)` overstates eccentricity off the axes: 28.28° for 27.24° at (20°, 20°));
+  **each detected saccade stores its true amplitude, its true direction in the eye's frame at its start, and its
+  start and landing points' true eccentricity and polar angle**, matched with wl-preproc's offline detector (backlog
+  XC-398, XC-400).
 
 ### 3.4 One change log
 
