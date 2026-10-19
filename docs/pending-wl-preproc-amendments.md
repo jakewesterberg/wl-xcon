@@ -466,3 +466,16 @@ sample.** A proposal, yours to change:
    and publish first; wl-xcon matches and its contract tests read your new fixtures.
 
 Nothing on the wire changes. Until both sides move, the two keep matching as they do today.
+
+**Widened the same day** (the PI, asked how far true angle goes in the eye-movement coding, answered **"Events and
+every sample"**): each detected saccade and fixation also carries its **true direction** (in the eye's frame at its
+start; `atan2(dy, dx)` on the screen's axes bends off center) and its **endpoints' true eccentricity and polar angle**,
+`atan(√(tan²x + tan²y))` and `atan2(tan y, tan x)`; and **each eye sample carries its true eccentricity and polar
+angle** beside its per-axis position. The rig's own eye records follow your definitions (XC-400). And, separately,
+**each shown stimulus's true eccentricity and polar angle** will be on its trial's row (XC-399): its field names and
+shape come to you before they are written.
+
+**Your reply (2026-10-19):** a written spec first, since `np.hypot` also sits in six other detectors and the seven-way
+agreement, the main sequence and stored detections read the same coordinates; and versioned contract fixtures, v1 the
+per-axis behavior (which our `tests/test_saccade.py` reads instead of importing your live code, before anything
+changes), v2 the true-angle one beside it, never replacing it.
