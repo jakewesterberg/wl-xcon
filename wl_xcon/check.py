@@ -3597,7 +3597,14 @@ def _trial_display_faults(trial: Trial) -> list[Finding]:
     from wl_xcon.task import PERIPHERY
 
     findings: list[Finding] = []
-    if trial.periphery not in PERIPHERY:
+    if trial.periphery == "center_scale":
+        findings.append(Finding("center-scale-retired", (
+            'periphery="center_scale" draws every stimulus at the screen center\'s size per '
+            'degree, which the PI retired on 2026-10-19 ("Every stimulus is drawn in true visual '
+            'angle; a task declaring center scale is refused at load"): remove it, or write '
+            '"true_angle", and each stimulus is drawn in true visual angle about its own '
+            "direction, the same size wherever it is")))
+    elif trial.periphery not in PERIPHERY:
         findings.append(Finding("bad-periphery", (
             f"periphery {trial.periphery!r} is not one of {', '.join(PERIPHERY)}")))
     if trial.view != "stereoscope" and (

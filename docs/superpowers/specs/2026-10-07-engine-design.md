@@ -270,7 +270,10 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    first with (x, y) beside it; the console and the record follow after engine build C2b (STE-29).
 2. **Sizes**: one size number is the full width; each block's definition states it.
 3. **Away from the center**: true visual angle (default) or the screen center's
-   scale, declared per task.
+   scale, declared per task. *Note, 2026-10-19 (the PI, "Retire it"):* "Every stimulus is drawn in
+   true visual angle; a task declaring center scale is refused at load." The screen center's scale is
+   gone: `periphery="center_scale"` is refused, saying so and what to write instead, and
+   `periphery` keeps its one value, `"true_angle"` (STE-06's revision).
 4. **Disparity**: in degrees, near negative [@tanabe2004rejection]. **The per-eye formula is pinned**:
    left eye at x − d/2, right eye at x + d/2, so d < 0 shifts the left eye's image right (crossed,
    near). **A per-eye position** is that eye's own direction in degrees (its viewport, after the

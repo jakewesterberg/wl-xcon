@@ -81,10 +81,3 @@ def test_the_local_frame_has_x_right_and_y_up():
     assert float(w[0]) == pytest.approx(2.0) and abs(float(u[0])) < 1e-9
     u, w = viewport.local_true_angle(viewport.center(2.0, 0.0)[None, :], c)
     assert float(u[0]) == pytest.approx(2.0) and abs(float(w[0])) < 1e-9
-
-
-def test_center_scale_uses_the_center_s_cm_per_degree_everywhere():
-    d, k = 50.0, 50.0 * math.pi / 180
-    x = np.array([d * math.tan(math.radians(30.0)) + k])
-    u, w = viewport.local_center_scale(x, np.array([0.0]), 30.0, 0.0, d)
-    assert float(u[0]) == pytest.approx(1.0) and float(w[0]) == pytest.approx(0.0)

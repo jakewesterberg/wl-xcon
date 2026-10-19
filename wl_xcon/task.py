@@ -940,8 +940,11 @@ class ObjectWindows:
 COMBINE = ("cover", "add", "window", "scotoma", "multiply")
 
 #: How sizes behave away from the center (engine spec §5.3): each stimulus subtends its
-#: declared degrees wherever it is, or every stimulus uses the screen center's scale.
-PERIPHERY = ("true_angle", "center_scale")
+#: declared degrees wherever it is. **The screen center's scale, `"center_scale"`, is retired**
+#: (the PI, 2026-10-19, "Retire it": "Every stimulus is drawn in true visual angle; a task
+#: declaring center scale is refused at load"; `check`'s `center-scale-retired`). The field keeps
+#: its one value so a task that writes the default loads, and every task hashes, as before.
+PERIPHERY = ("true_angle",)
 
 
 @dataclass(frozen=True, slots=True)

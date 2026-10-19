@@ -9,7 +9,7 @@ frames come from it, and analysis rebuilds any recorded frame from it.
 
 1. Sample it on a regular `SUPERSAMPLE × SUPERSAMPLE` grid (`viewport.sample_cm`).
 2. For each item that eye sees, bottom layer first: put each sample in the item's local
-   frame (true visual angle or center scale), turned by `−orientation`, and find its
+   frame (true visual angle about its own direction), turned by `−orientation`, and find its
    signed distance `d` to the shape (negative inside). Coverage needs only the zero set
    and the sign, since step 3 divides by the gradient, but edges and outlines read `d`
    as degrees, so every shape's `d` is a distance in degrees at least to first order.
@@ -164,11 +164,12 @@ def edge_profile(edge, d, u, w):
 def _local(item, x_cm, y_cm, vp, periphery):
     """Each sample in the item's own frame, turned by −orientation."""
     xd, yd = item.at_right if vp.eye == "right" else item.at_left
-    if periphery == "center_scale":
-        u, w = viewport.local_center_scale(x_cm, y_cm, xd, yd, vp.distance_cm)
-    else:
-        u, w = viewport.local_true_angle(viewport.directions(x_cm, y_cm, vp.distance_cm),
-                                         viewport.center(xd, yd))
+    if periphery != "true_angle":
+        # The backstop for a screen `check` never saw: the screen center's scale is retired.
+        raise ValueError(f"periphery {periphery!r} is retired: every stimulus is drawn in true "
+                         f"visual angle (the PI, 2026-10-19); `check` refuses it at load")
+    u, w = viewport.local_true_angle(viewport.directions(x_cm, y_cm, vp.distance_cm),
+                                     viewport.center(xd, yd))
     th = math.radians(item.orientation)
     return u * math.cos(th) + w * math.sin(th), -u * math.sin(th) + w * math.cos(th)
 
