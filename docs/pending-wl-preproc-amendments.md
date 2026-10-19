@@ -431,3 +431,38 @@ run**, and a real-time client on the Intan host cannot condition on event identi
 that machine's digital inputs. Our neural plane must therefore learn trial state over the
 message bus rather than off the wire. No change requested; noted so the constraint is written
 down somewhere before someone assumes otherwise.
+
+---
+
+# OPEN — saccades in true visual angle, online and offline together (new, 2026-10-19)
+
+Opened 2026-10-19 on the PI's decision, backlog XC-398. Yours to accept, amend or refuse.
+
+## The finding
+
+The PI ruled on 2026-10-19 that a stimulus is forward-calculated for its own location, never from an average
+pixels-per-degree ("it changes subtly as a function of eccentricity of the stimulus and the exact distance the observer
+is from the monitor"). Calibrated gaze, here and in wl-preproc's reading of it, is in degrees per axis: a point `(X, Y)`
+cm from straight ahead at distance `D` is `(atan(X/D), atan(Y/D))`, so its direction is `normalize(tan x, tan y, 1)`.
+Distances taken in those coordinates shrink off center: a 2° step straight up from (20°, 0°) is 1.879° of visual
+angle, from (30°, 0°) 1.732°. wl-xcon's gaze windows and stimulus-spacing checks now measure the true angle between
+directions (its branch `true-angle-windows`, `geometry.separation_deg`). **Saccade detection does not**, on either side,
+and on purpose: our `saccade.py` mirrors your detector exactly (Engbert–Kliegl velocities per axis, the elliptic test,
+and `_amplitude` as your `measure.amplitude`'s `np.hypot`), so online and offline detection agree (S5 §5), and your 1°
+microsaccade cut assumes it. Asked whether to keep that match or move both to true angle, the PI answered **"Change
+both repos"**: "Ask wl-preproc to move its detector and size to true angle too, then change ours to match; contract
+tests in both change."
+
+## The ask
+
+**Move saccade detection and saccade size to true visual angle, and say what you choose so wl-xcon matches it to the
+sample.** A proposal, yours to change:
+1. **Size**: the angle between the first and last usable samples' directions, `atan2(|u × v|, u · v)`.
+2. **Velocity**: each sample's angular velocity in the local frame at the window's center sample, its rightward and
+   upward axes (as wl-xcon's `viewport.local_true_angle` builds them), so the elliptic test keeps its two thresholds,
+   horizontal and vertical noise still scaled apart.
+3. **The 1° microsaccade cut**, read in true angle (unchanged at the center; larger in screen degrees off center).
+4. **The shared contract fixtures** that pin our detector to yours, updated on both sides in one exchange: you change
+   and publish first; wl-xcon matches and its contract tests read your new fixtures.
+
+Nothing on the wire changes. Until both sides move, the two keep matching as they do today.
