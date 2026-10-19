@@ -43,7 +43,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from wl_xcon.findings import Finding
-from wl_xcon.geometry import Geometry
+from wl_xcon.geometry import Geometry, separation_deg
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle avoided at runtime
     from wl_xcon.scheduler import Condition as SchedulerCondition
@@ -253,7 +253,9 @@ def fit_eye(
     residual = design @ coefficients - degrees
     rms = float(np.sqrt((residual**2).sum(axis=1).mean()))
 
-    outer = max(math.hypot(*t) for t in targets)
+    # How far out the targets reach: each one's true visual angle from straight ahead (the PI,
+    # 2026-10-19), as far as a window there holds gaze (`gaze.Tracked.in_window`).
+    outer = max(separation_deg(0.0, 0.0, x, y) for x, y in targets)
     if tested_eccentricity_deg is not None and outer < tested_eccentricity_deg:
         findings.append(
             Finding(

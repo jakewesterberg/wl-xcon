@@ -275,6 +275,14 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    not transfer directly. A clause that suppression "lessens within 5-25 ms" of the saccade's end,
    cited to Saunders & Woods, was left out: it is their summary of other studies).
 7. **Gaze windows may be any shape**, including a stimulus's own outline grown by a margin.
+   *Note, 2026-10-19 (the PI):* **a window is measured in true visual angle at its own location**
+   ("Measure each window as the true angle between where the eye points and the window's center,
+   at its own location"; and of the whole display, "forward calculated for that specific location
+   rather than using ppd averages"). Gaze is inside when the angle at the eye between its direction
+   and the center's is at most the radius (`geometry.separation_deg`), never per-axis degrees or a
+   mean pixels per degree, and the load checks that measure how far apart two windows, or an
+   array's object windows, can come measure it the same way. Per axis, a 2° window at (20°, 0°)
+   had been 1.879° tall (STE-27).
 8. **Off the field**: only when declared; check 8 grows to test extents (XC-143, XC-144).
 9. **Head-free chaired sessions**: nominal head position, recorded and listed; a task may require a
    fixed head.

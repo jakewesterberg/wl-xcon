@@ -10,6 +10,7 @@ or a clock can be wrong without any single module being wrong.
 from __future__ import annotations
 
 import json
+import math
 import os
 import random
 
@@ -155,6 +156,96 @@ def test_gaze_in_degrees_decides_a_window():
     # Just outside the 2 deg radius, on the diagonal: 2.5 deg away.
     outside = Tracked(_tracker_at(7.77, -5.77), mapping, calibration, 0.008, values)
     assert not outside.in_window("cal", frame=0)
+
+
+# ---------------------------------------------------------------------------
+# A window is measured in true visual angle at its own location
+# ---------------------------------------------------------------------------
+#
+# The PI, 2026-10-19: "Measure each window as the true angle between where the eye points
+# and the window's center, at its own location." Each gaze point below is built from a
+# direction, never from per-axis degrees: per-axis arithmetic is what is under test, and a
+# point placed with it would agree with it by construction.
+
+
+def _direction(x_deg: float, y_deg: float) -> tuple[float, float, float]:
+    """A position's direction from the eye, `D · tan` per axis (`viewport.center`), unit."""
+    t = (math.tan(math.radians(x_deg)), math.tan(math.radians(y_deg)), 1.0)
+    norm = math.sqrt(sum(c * c for c in t))
+    return (t[0] / norm, t[1] / norm, t[2] / norm)
+
+
+def _away(center, angle_deg: float, toward, turn_deg: float = 0.0) -> tuple[float, float]:
+    """The position `angle_deg` of true visual angle from `center`: along the great circle
+    toward the position `toward`, turned `turn_deg` about the center's own direction."""
+    c, w = _direction(*center), _direction(*toward)
+    dot = sum(a * b for a, b in zip(c, w))
+    t0 = [b - dot * a for a, b in zip(c, w)]
+    norm = math.sqrt(sum(v * v for v in t0))
+    t0 = [v / norm for v in t0]
+    t90 = (c[1] * t0[2] - c[2] * t0[1], c[2] * t0[0] - c[0] * t0[2], c[0] * t0[1] - c[1] * t0[0])
+    turn, angle = math.radians(turn_deg), math.radians(angle_deg)
+    t = [math.cos(turn) * a + math.sin(turn) * b for a, b in zip(t0, t90)]
+    d = [math.cos(angle) * a + math.sin(angle) * b for a, b in zip(c, t)]
+    return (math.degrees(math.atan2(d[0], d[2])), math.degrees(math.atan2(d[1], d[2])))
+
+
+def _window_world(gaze, center, radius: float = 2.0, mapping: Mapping | None = None) -> Tracked:
+    """The calibration task's `cal` window at `center`, the animal looking at `gaze`."""
+    values = {"target_x": center[0], "target_y": center[1], "cal_window": radius,
+              "fix_acquisition": 3.0, "cal_hold": 0.2}
+    return Tracked(_tracker_at(*gaze), mapping or _fitted_mapping(), calibration, 0.008, values)
+
+
+@pytest.mark.parametrize("center, toward, turn", [
+    ((20.0, 0.0), (20.0, 10.0), 0.0),
+    ((30.0, 0.0), (30.0, 10.0), 0.0),
+    ((20.0, 20.0), (40.0, 40.0), 0.0),
+    ((20.0, 20.0), (40.0, 40.0), 90.0),
+], ids=["straight up at 20", "straight up at 30", "out along the diagonal", "across the diagonal"])
+def test_a_window_holds_gaze_by_true_visual_angle_at_its_own_location(center, toward, turn):
+    """A 2° window holds gaze 1.99° from its center and not gaze 2.01° away, in every
+    direction and wherever it is. The per-axis test, `hypot(x - cx, y - cy)`, made a 2° window
+    at (20°, 0°) 1.879° tall, at (30°, 0°) 1.732° tall, and at (20°, 20°) 1.778° deep along the
+    diagonal and 2.013° wide across it: smaller than declared in most directions off center, and
+    larger in one."""
+    inside = _away(center, 1.99, toward, turn)
+    outside = _away(center, 2.01, toward, turn)
+
+    assert _window_world(inside, center).in_window("cal", frame=0)
+    assert not _window_world(outside, center).in_window("cal", frame=0)
+
+
+@pytest.mark.parametrize("bearing", range(0, 360, 45))
+def test_a_window_straight_ahead_is_as_it_was(bearing):
+    """The control, which passes under the per-axis test too: straight ahead a per-axis degree
+    is a degree of visual angle to within 0.0004° at 2°, so a window at (0°, 0°) is unchanged."""
+    toward = (10.0 * math.cos(math.radians(bearing)), 10.0 * math.sin(math.radians(bearing)))
+
+    assert _window_world(_away((0.0, 0.0), 1.99, toward), (0.0, 0.0)).in_window("cal", frame=0)
+    assert not _window_world(_away((0.0, 0.0), 2.01, toward), (0.0, 0.0)).in_window(
+        "cal", frame=0)
+
+
+def test_every_window_in_the_field_holds_gaze_by_true_visual_angle():
+    """Seeded, over direct view's whole field: a window anywhere in it, 0.5-8° in radius, holds
+    gaze 0.5% inside its radius in any direction and not gaze 0.5% outside it."""
+    rng = random.Random(20261019)
+    mapping = _fitted_mapping()
+    wrong = []
+    for _ in range(200):
+        center = (rng.uniform(-DIRECT.half_field_h_deg, DIRECT.half_field_h_deg),
+                  rng.uniform(-DIRECT.half_field_v_deg, DIRECT.half_field_v_deg))
+        radius, turn = rng.uniform(0.5, 8.0), rng.uniform(0.0, 360.0)
+        toward = (center[0], center[1] + 10.0)
+        inside = _away(center, 0.995 * radius, toward, turn)
+        outside = _away(center, 1.005 * radius, toward, turn)
+        if not _window_world(inside, center, radius, mapping).in_window("cal", frame=0):
+            wrong.append(("missed", center, radius, turn))
+        if _window_world(outside, center, radius, mapping).in_window("cal", frame=0):
+            wrong.append(("held", center, radius, turn))
+
+    assert wrong == []
 
 
 def test_a_window_is_missed_when_the_map_is_the_wrong_one():

@@ -27,6 +27,7 @@ the moment it becomes someone's active job. Review this file at every milestone 
 | **P20** | **Generated structure nobody reads** | Medium | Anything a parameter generates — array items, their windows — needs a check, because no author will ever look at it |
 | **P21** | **A guardrail nothing calls, behind a comment that went stale** | **High** | A safety component needs a *consumer* in the same commit, and a test that the consumer is on the only path — see expanded note |
 | **P22** | **A browser page that can write is a page any site can try to make write** | **High** | Spec §2's four checks on every write, the `Host` check on every request, the rig's own validation behind them — see expanded note |
+| **P23** | **A coordinate read as a distance** | Medium | Every angle at the eye between two positions is true visual angle, measured where they are; a mean pixels per degree reaches no drawing, window or check — see expanded note |
 
 ## Expanded notes
 
@@ -337,3 +338,17 @@ decodes it (M8) and `bounds` holds every ceiling whoever asks. The actor recorde
 box is the box's map (`{"kind": "box", "name": …}`), shown as `NAME (box, unverified)`, because a forgeable name that looks verified is worse
 than none (S9a §6). Signed-in writes from other machines are b2b's, and bring their own
 token checks.
+
+**P23 — A coordinate read as a distance.** Positions are degrees mapped to the panel by
+`D · tan` per axis (STE-01), which makes them coordinates: off the axes a per-axis degree is
+not a degree of visual angle. Until 2026-10-19 the gaze window tested `hypot(x - cx, y - cy)`
+in those coordinates, so a 2° window at (20°, 0°) was 1.879° tall and one at (20°, 20°) 2.013°
+wide across the diagonal, and the load checks that compare how far apart windows can come with
+their radii measured the same way. Nothing looked wrong: at the center, where tests put their
+windows, every window was as declared. Other packages make the same error as one pixels per
+degree for the whole screen. Mitigation (the PI, 2026-10-19; STE-27): every angle between two
+positions is the angle between their directions, where they are (`geometry.separation_deg`,
+and `least_separation_deg` and `ring_spacing_deg` built on it); `Geometry.pixels_per_degree`
+stays a reported mean, and a test that asks the parser fails if anything else in `wl_xcon/`
+names it; and the tests place gaze from directions, never from per-axis degrees, so they
+cannot agree with per-axis arithmetic by construction.

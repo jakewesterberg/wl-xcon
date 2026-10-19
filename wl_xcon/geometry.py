@@ -22,6 +22,13 @@ viewable". Feeding the rounded diagonal through the 16:9 fractions puts each edg
 as it is in centimeters, and a housing's rectangle on the panel is a region in degrees the
 same way.
 
+**An angle at the eye is true visual angle, measured where it is** (the PI, 2026-10-19: "it
+is forward calculated for that specific location rather than using ppd averages"). Per-axis
+degrees are coordinates, not distances: how far gaze is from a window's center, or one window
+or object from another, is the angle between their directions (`separation_deg`,
+`least_separation_deg`, `ring_spacing_deg`), and `Geometry.pixels_per_degree` is a reported
+mean nothing draws, scores or checks with.
+
 Every number here is derived from `2026-08-31-stereoscope-optics-drawing.md` §3,
 S0 §5.2 and the direct-view spec §2, and the tests assert the agreement. **They are
 computed, not measured.** V9 measures each eye's real path per animal, because the
@@ -30,6 +37,8 @@ mirror carriage is adjustable and the two paths are equal only if the mirrors ar
 
 from __future__ import annotations
 
+import heapq
+import itertools
 import math
 from dataclasses import dataclass
 
@@ -249,7 +258,14 @@ class Geometry:
         """S0 §5.2's mean across one viewport, so `horizontal_pixels` is the viewport's:
         half the panel through the stereoscope, all of it in direct view. Across the
         viewport's own extent, not the mask's: the mask covers pixels, it does not
-        rescale them."""
+        rescale them.
+
+        **A reported mean, never a scale anything is drawn, scored or checked with** (the PI,
+        2026-10-19: forward calculated "for that specific location rather than using ppd
+        averages"). A degree spans more pixels away from the center than at it, so no
+        drawing, window or check path may read this: positions go through `D · tan` per axis
+        and shapes through `viewport`, and angles between positions are `separation_deg`'s.
+        `tests/test_geometry.py` asks the parser that nothing else in `wl_xcon/` names it."""
         return horizontal_pixels / (2 * self._viewport_deg(self.half_width_cm))
 
     def can_show(self, x_deg: float, y_deg: float) -> bool:
@@ -365,3 +381,153 @@ class SubjectSettings:
                 f"half_ipd_cm={self.half_ipd_cm!r} is not a half-IPD: half the distance "
                 f"between the eyes' centers, in cm, a positive number"
             )
+
+
+# --- Angles at the eye -------------------------------------------------------------------------
+#
+# The PI, 2026-10-19: "when a stimulus is presented at a specific position and size, ... it is
+# forward calculated for that specific location rather than using ppd averages." Positions map
+# to the panel by `D · tan` per axis and a shape is drawn in true visual angle about its own
+# direction (`viewport`); a gaze window, and every load check that measures how far apart two
+# positions are, is measured here, in true visual angle where the two positions are.
+
+#: Where a side a range leaves without end is read to: past 90° a degree on an axis names no
+#: direction ahead of the eye, and at 90° every position on the other axis is one direction.
+_SIDE_DEG = 90.0
+
+
+def separation_deg(x1: float, y1: float, x2: float, y2: float) -> float:
+    """The true visual angle, in degrees, between two positions: the angle at the eye between
+    the directions they name.
+
+    A position `(x, y)` is the direction `(tan x, tan y, 1)` (`D · tan` per axis,
+    `viewport.center`), taken here as its multiple by `cos x cos y`, `(sin x cos y, cos x sin y,
+    cos x cos y)`: the same direction for every position a screen shows, and one that continues
+    past the side of the field where `tan`'s period would wrap a position past 90° (a broken gaze
+    map's, never a stimulus's) to the far side. The angle is `atan2(|u × v|, u · v)`, exact at
+    small angles, where `acos` of a dot product loses its digits.
+
+    **On the trial loop's hot path** (`gaze.Tracked.in_window`, every frame): floats and
+    `math` only, no numpy and no container.
+    """
+    ax, ay = math.radians(x1), math.radians(y1)
+    bx, by = math.radians(x2), math.radians(y2)
+    cos_ax, cos_ay, cos_bx, cos_by = math.cos(ax), math.cos(ay), math.cos(bx), math.cos(by)
+    ux = math.sin(ax) * cos_ay
+    uy = cos_ax * math.sin(ay)
+    uz = cos_ax * cos_ay
+    vx = math.sin(bx) * cos_by
+    vy = cos_bx * math.sin(by)
+    vz = cos_bx * cos_by
+    across = math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx)
+    return math.degrees(math.atan2(across, ux * vx + uy * vy + uz * vz))
+
+
+def least_separation_deg(xs_a, ys_a, xs_b, ys_b) -> float:
+    """The least true visual angle between any position of one region and any of another: a
+    region is every `(x, y)` with `x` in one of its intervals `xs` and `y` in one of its `ys`,
+    each `(low, high)` in degrees, a point being `(v, v)`. What `check._closest_approach` asks of
+    two windows whose centers are settings.
+
+    **Two rectangles** in degrees are two rectangles on the tangent plane, so each is a convex
+    patch of directions bounded by four arcs of great circles: they are 0° apart where they
+    overlap, and otherwise as far apart as a corner of one is from an edge of the other
+    (`_rectangles_apart`). **Many** -- a coordinate given by choices is a point for each -- are
+    searched best first, each group of intervals bounded below by its hull's distance, so the
+    first pair of single intervals reached is the least, and forty choices an axis are never
+    crossed into 2.5 million pairs (the final re-review's m4). A side without end is read to
+    90° (`_SIDE_DEG`).
+    """
+    sides = tuple(tuple(sorted((_to_side(low), _to_side(high)) for low, high in side))
+                  for side in (xs_a, ys_a, xs_b, ys_b))
+    if not all(sides):
+        raise ValueError("a region has at least one interval on each axis")
+    order = itertools.count()
+    queue = [(_bound(sides), next(order), sides)]
+    while queue:
+        bound, _, node = heapq.heappop(queue)
+        longest = max(range(4), key=lambda i: len(node[i]))
+        if len(node[longest]) == 1:
+            return bound
+        half = len(node[longest]) // 2
+        for part in (node[longest][:half], node[longest][half:]):
+            child = node[:longest] + (part,) + node[longest + 1:]
+            heapq.heappush(queue, (_bound(child), next(order), child))
+    raise AssertionError("unreachable: a search over non-empty sides ends at a leaf")
+
+
+def ring_spacing_deg(radius: float, n: float) -> float:
+    """The least true visual angle between neighbors of `n` objects spaced evenly at per-axis
+    offsets of `radius` degrees about (0°, 0°), where `task.Array.positions` places them and
+    `task.ObjectWindows` their windows, **over every phase** the ring can be turned to.
+
+    Per axis neighbors are `2 R sin(π/n)` apart at every phase; in true visual angle the ring
+    is nearer together where it crosses an axis, the vertical a degree there spanning `cos x` of
+    one, and further apart across a diagonal. The per-axis map has the square's symmetries, so a
+    pair's spacing is even about each axis and each diagonal, and the least is at one of the
+    two: checked at every degree of phase, from 2 to 1000 objects on rings out to 44°
+    (`tests/test_geometry.py`). `n` without end gives 0.
+    """
+    half = math.pi / n
+    return min(
+        separation_deg(radius * math.cos(center - half), radius * math.sin(center - half),
+                       radius * math.cos(center + half), radius * math.sin(center + half))
+        for center in (0.0, math.pi / 4)
+    )
+
+
+def _to_side(value: float) -> float:
+    return max(-_SIDE_DEG, min(_SIDE_DEG, float(value)))
+
+
+def _bound(node) -> float:
+    """The least angle any pair of rectangles in `node` can reach: that between the hulls of its
+    intervals, which hold every one of them. Exact when each side is one interval."""
+    hulls = [(side[0][0], max(high for _, high in side)) for side in node]
+    return _rectangles_apart(*hulls)
+
+
+def _rectangles_apart(ax, ay, bx, by) -> float:
+    """The least true visual angle between the rectangles `ax × ay` and `bx × by`.
+
+    Rectangles that overlap on both axes share a position. Otherwise the least is from a corner
+    of one to an edge of the other: were both ends of the shortest arc inside edges, that arc
+    would meet both great circles square, and the one arc that does joins the points where each
+    circle is furthest from the other, where moving along the edge brings them closer."""
+    if ax[0] <= bx[1] and bx[0] <= ax[1] and ay[0] <= by[1] and by[0] <= ay[1]:
+        return 0.0
+    if ax[0] == ax[1] and ay[0] == ay[1] and bx[0] == bx[1] and by[0] == by[1]:
+        return separation_deg(ax[0], ay[0], bx[0], by[0])
+    return min(
+        min(_to_rectangle(x, y, bx, by) for x in set(ax) for y in set(ay)),
+        min(_to_rectangle(x, y, ax, ay) for x in set(bx) for y in set(by)),
+    )
+
+
+def _to_rectangle(x: float, y: float, xs, ys) -> float:
+    """The least true visual angle from `(x, y)` to the edges of the rectangle `xs × ys`. The
+    axes trade places for its top and bottom: swapping them reflects every direction in one
+    plane, which keeps every angle."""
+    return min(
+        _to_edge(x, y, xs[0], ys), _to_edge(x, y, xs[1], ys),
+        _to_edge(y, x, ys[0], xs), _to_edge(y, x, ys[1], xs),
+    )
+
+
+def _to_edge(x: float, y: float, edge_x: float, ys) -> float:
+    """The least true visual angle from `(x, y)` to the edge `edge_x × ys`, an arc of the great
+    circle every position at `edge_x` lies on.
+
+    Along that circle's half ahead of the eye the angle falls to the foot of the perpendicular
+    from `(x, y)` and rises after it, so the least over the edge is at the foot, held to the
+    edge's ends. The foot is ahead of the eye when `1 + tan(edge_x) tan(x) > 0`, that is when
+    `x` is within 90° of `edge_x`, and its height is then `tan y (1 + tan² edge_x) / (1 +
+    tan(edge_x) tan(x))` on the tangent plane; otherwise the angle only rises from the ends
+    inward, and the least is at one of them."""
+    low, high = ys
+    t_edge, t_x = math.tan(math.radians(edge_x)), math.tan(math.radians(x))
+    ahead = 1.0 + t_edge * t_x
+    if ahead > 0.0:
+        foot = math.degrees(math.atan(math.tan(math.radians(y)) * (1.0 + t_edge * t_edge) / ahead))
+        return separation_deg(x, y, edge_x, min(max(foot, low), high))
+    return min(separation_deg(x, y, edge_x, low), separation_deg(x, y, edge_x, high))

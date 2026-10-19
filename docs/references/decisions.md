@@ -505,6 +505,11 @@ entry has its three lines, that every link names a file that exists, and that ev
 - **Where:** [S13 §3](../superpowers/specs/2026-08-31-S13-kiosk-design.md#3-what-is-present).
 - **Basis:** Engineering default; no published basis needed.
 
+### STE-27 — No average pixels per degree: every position, size and gaze window is forward-calculated at its own location, and every angle at the eye between two positions is true visual angle
+- **Decided:** 2026-10-19, the PI: "we should be careful that when a stimulus is presented at a specific position and size, that it is forward calculated for that specific location rather than using ppd averages"; asked how to fix the gaze windows, "Fix now, side branch": "Measure each window as the true angle between where the eye points and the window's center, at its own location."
+- **Where:** [engine spec §5 item 7](../superpowers/specs/2026-10-07-engine-design.md#5-where-n2-nr5), its note of 2026-10-19; `wl_xcon/geometry.py` (`separation_deg`, `least_separation_deg`, `ring_spacing_deg`, and `Geometry.pixels_per_degree`, a reported mean nothing draws, scores or checks with); `wl_xcon/gaze.py` (`Tracked.in_window`); `wl_xcon/check.py` (`_closest_approach`, `_crowded_arrays`); `wl_xcon/calibration.py` (how far `fit_eye`'s targets reach); [pitfalls, P23](../pitfalls.md).
+- **Basis:** PI decision. Positions were already mapped by `D · tan` per axis (STE-01) and shapes drawn in true visual angle about their own direction by default (STE-06); this carries the rule to gaze windows (EYE-22) and to every load check that measures how far apart two positions are. The size of the error it removes is geometry, our arithmetic: tested per axis, a 2° window at (20°, 0°) was 1.879° tall in true visual angle, at (30°, 0°) 1.732°, and at (20°, 20°) 1.778° deep along the diagonal and 2.013° wide across it. No published source was sought.
+
 ## Eye tracking and calibration
 
 ### EYE-01 — The eye tracker is OpenIrisDPI (digital dual-Purkinje, 500 Hz binocular) on its own PC; in-vivo macaque precision 0.39-0.44 arcmin against 1.55-1.82 for pupil-CR on the same rig

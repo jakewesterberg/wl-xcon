@@ -18,7 +18,7 @@ import math
 from wl_xcon.codes import PROVISIONAL, Allocation
 from wl_xcon.components import Registry
 from wl_xcon.findings import SESSION_KINDS, Finding
-from wl_xcon.geometry import VIEWS, Geometry
+from wl_xcon.geometry import VIEWS, Geometry, least_separation_deg, ring_spacing_deg
 from wl_xcon.photometry import (
     CONE_COLORS,
     D65,
@@ -2878,31 +2878,23 @@ def _closest_approach(a: Window, b: Window, params: dict[str, Param]) -> tuple[f
     each choice, a point, and one given by a range is that interval, so a window at x -10° or
     10° is never at 0 (the final review's I2: read as the interval between them, it was said to
     come within 0.00° of a window at the centre, and a value sent past its range that made the
-    two truly collide was then the same pair only larger, a warning). **Between two regions, per
-    axis, the distance between their intervals**: 0 where they overlap, since a value inside both
-    puts the centres level on that axis, and otherwise the gap between their nearer ends; the
-    separation is the hypotenuse of the two, and the least over every pair of regions is the
-    answer. The corners of the ranges alone were wrong whenever the ranges overlap on an axis
-    (Task 10's review, I2): a target window over x 0-16° and y ±8° sits on a fixation window at
-    the centre at (0, 0), while every corner is 8° or more from it. Settings shared between the
-    axes or the windows are read as independent, which can only make the separation smaller: a
-    warning, never a pass.
+    two truly collide was then the same pair only larger, a warning). The corners of the ranges
+    alone were wrong whenever the ranges overlap on an axis (Task 10's review, I2): a target
+    window over x 0-16° and y ±8° sits on a fixation window at the center at (0, 0), while every
+    corner is 8° or more from it. Settings shared between the axes or the windows are read as
+    independent, which can only make the separation smaller: a warning, never a pass.
 
-    **Read per axis** (the final re-review's m4): the regions are a cross product of each axis'
-    intervals, and the separation grows with each axis' gap, so the least over every pair of
-    regions is the hypotenuse of the least gap on each axis -- the same answer, without crossing
-    forty choices an axis into 2.5 million pairs. A whole position as one setting (`at=P("pos")`)
-    is still unpacked as a pair, and raises `TypeError` out of `check` (XC-156, filed; two tests
-    use such a task as one the checks cannot finish on)."""
+    **The separation is true visual angle, where the centers are** (the PI, 2026-10-19), as a
+    window holds gaze (`gaze.Tracked.in_window`): the least over every pair of regions, searched
+    without crossing forty choices an axis into 2.5 million pairs (the final re-review's m4;
+    `geometry.least_separation_deg`). Per axis, the hypotenuse of the gaps misread it off the
+    axes: windows at (25°, 0°) and (25°, 4.2°) are 3.81° apart, not 4.2°. A whole position as
+    one setting (`at=P("pos")`) is still unpacked as a pair, and raises `TypeError` out of
+    `check` (XC-156, filed; two tests use such a task as one the checks cannot finish on)."""
     (a_x, a_y), (b_x, b_y) = a.at, b.at
-
-    def gap(one: object, other: object) -> float:
-        return min(max(0.0, low - other_high, other_low - high)
-                   for low, high in _intervals(one, params)
-                   for other_low, other_high in _intervals(other, params))
-
     reach = _span(a.radius, params, 0.0)[1] + _span(b.radius, params, 0.0)[1]
-    return (math.hypot(gap(a_x, b_x), gap(a_y, b_y)), reach)
+    return (least_separation_deg(_intervals(a_x, params), _intervals(a_y, params),
+                                 _intervals(b_x, params), _intervals(b_y, params)), reach)
 
 
 def _intervals(
@@ -3078,8 +3070,10 @@ def _crowded_arrays(trial: Trial) -> list[Finding]:
     check rather than an author's eye.
 
     The worst case is the most objects on the smallest ring with the largest windows:
-    adjacent centres are `2 R sin(pi/n)` apart, and two windows touch when that
-    falls below their summed radius. Each is read over its declared range or its choices
+    adjacent centers are `geometry.ring_spacing_deg` apart, in true visual angle where
+    `ObjectWindows.expand` puts the windows, about (0°, 0°), at the ring's nearest phase (the PI,
+    2026-10-19; per axis it was `2 R sin(pi/n)`), and two windows touch when that falls below
+    their summed radius. Each is read over its declared range or its choices
     (`_span`), the count as the run reads it, a whole number (`_whole`): a count or a radius
     with no highest can be any size, and crowds; a ring with no lowest can be 0 (Task 10's
     review, I2). **A warning, not a refusal** (XC-352's A9; the PI, 2026-10-11), saying which
@@ -3100,7 +3094,7 @@ def _crowded_arrays(trial: Trial) -> list[Finding]:
         widest = _span(declared.radius, params, 0.0)[1]
         if most < 2:
             continue
-        spacing = 2.0 * tightest * math.sin(math.pi / most)
+        spacing = ring_spacing_deg(tightest, most)
         if spacing < 2.0 * widest:
             objects = "any number of" if math.isinf(most) else f"{int(most)}"
             windows = "of any" if math.isinf(widest) else f"of {widest:g}°"

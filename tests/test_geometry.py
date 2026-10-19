@@ -12,14 +12,26 @@ the suite as a collection error rather than as a failed assertion.
 
 from __future__ import annotations
 
+import ast
 import math
+import random
 from dataclasses import replace
+from pathlib import Path
 
+import numpy as np
 import pytest
 
 from _rig import DIRECT, RIG as STAND_IN_RIG
 from tasks.rig import RIG
-from wl_xcon.geometry import NOMINAL_HALF_IPD_CM, Geometry, SubjectSettings
+from wl_xcon import geometry
+from wl_xcon.geometry import (
+    NOMINAL_HALF_IPD_CM,
+    Geometry,
+    SubjectSettings,
+    least_separation_deg,
+    ring_spacing_deg,
+    separation_deg,
+)
 
 #: The PG27UCDM through the stereoscope, the screen at 50 cm, `E` = 1.6 cm
 #: (S0 §5.1, §5.2; PI 2026-09-27, 2026-09-28).
@@ -420,3 +432,171 @@ def test_a_stereoscope_with_no_half_ipd_has_no_vergence_offset_to_give():
     bare = Geometry(panel_width_cm=58.997, panel_height_cm=33.293, viewing_distance_cm=63.15)
     with pytest.raises(ValueError, match="half-IPD"):
         bare.vergence_half_deg
+
+
+# --- Angles at the eye, measured where they are (the PI, 2026-10-19) -------------------------
+#
+# "We should be careful that when a stimulus is presented at a specific position and size, that
+# it is forward calculated for that specific location rather than using ppd averages." Every
+# expectation below is computed from directions, `D · tan` per axis (`viewport.center`), by an
+# arithmetic of its own: numpy's dot products, never `geometry`'s cross product.
+
+
+def _directions(points) -> np.ndarray:
+    t = np.array([[math.tan(math.radians(x)), math.tan(math.radians(y)), 1.0] for x, y in points])
+    return t / np.linalg.norm(t, axis=1, keepdims=True)
+
+
+def _least_by_dots(ps, qs) -> float:
+    """The least angle between any of `ps` and any of `qs`, by the largest dot product."""
+    dots = np.clip(_directions(ps) @ _directions(qs).T, -1.0, 1.0)
+    return math.degrees(math.acos(dots.max()))
+
+
+def test_separation_is_the_angle_at_the_eye_between_two_positions():
+    """Seeded, over ±40° on each axis: `separation_deg` is the angle between the two positions'
+    directions, the same either way round; along the horizontal meridian and the vertical one,
+    which are great circles, it is the difference in degrees."""
+    rng = random.Random(20261019)
+    for _ in range(500):
+        p = (rng.uniform(-40.0, 40.0), rng.uniform(-40.0, 40.0))
+        q = (rng.uniform(-40.0, 40.0), rng.uniform(-40.0, 40.0))
+        expected = _least_by_dots([p], [q])
+        if expected < 0.5:
+            continue  # `acos` loses digits near 0°; the next test covers small angles
+        assert separation_deg(*p, *q) == pytest.approx(expected, abs=1e-9)
+        assert separation_deg(*q, *p) == pytest.approx(separation_deg(*p, *q), abs=1e-12)
+    assert separation_deg(-13.0, 0.0, 27.5, 0.0) == pytest.approx(40.5, abs=1e-12)
+    assert separation_deg(0.0, 18.0, 0.0, -6.25) == pytest.approx(24.25, abs=1e-12)
+
+
+def test_separation_keeps_its_digits_at_small_angles():
+    """`atan2(|u × v|, u · v)` rather than `acos(u · v)`: 1e-6° from (20°, 20°), built from the
+    direction, reads 1e-6° to six significant figures, where `acos` of the dot product can read
+    only 0, 0.854e-6°, 1.207e-6° and so on, a float's steps below 1, and reads this one as
+    0.854e-6°."""
+    c = _directions([(20.0, 20.0)])[0]
+    up = np.cross(c, np.cross(np.array([0.0, 1.0, 0.0]), c))
+    up /= np.linalg.norm(up)
+    a = math.radians(1e-6)
+    d = math.cos(a) * c + math.sin(a) * up
+    q = (math.degrees(math.atan2(d[0], d[2])), math.degrees(math.atan2(d[1], d[2])))
+
+    assert separation_deg(20.0, 20.0, *q) == pytest.approx(1e-6, rel=1e-6)
+
+
+def test_a_position_past_90_degrees_continues_past_the_side_rather_than_wrapping():
+    """No screen shows a position past 90° on an axis, but a broken gaze map can report one: it
+    is 10° on from 85°, where `tan`'s period would put it on the far side of the field."""
+    assert separation_deg(85.0, 0.0, 95.0, 0.0) == pytest.approx(10.0, abs=1e-9)
+    assert separation_deg(-85.0, 0.0, 95.0, 0.0) > 90.0
+
+
+def test_the_least_separation_between_sets_of_points_is_the_least_over_every_pair():
+    """Seeded: windows placed by choices on each axis, 1-6 an axis, anywhere in ±30°."""
+    rng = random.Random(7)
+    for _ in range(200):
+        sides = [sorted(rng.uniform(-30.0, 30.0) for _ in range(rng.randint(1, 6)))
+                 for _ in range(4)]
+        a = [(x, y) for x in sides[0] for y in sides[1]]
+        b = [(x, y) for x in sides[2] for y in sides[3]]
+        found = least_separation_deg(*([(v, v) for v in side] for side in sides))
+        assert found == pytest.approx(_least_by_dots(a, b), abs=1e-7)
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_the_least_separation_to_a_range_is_never_more_than_any_point_in_it_reaches(seed):
+    """A window at a point, another anywhere over a range on each axis, 2-20° wide, both in ±30°:
+    the least is no more than the least over an 801 × 801 grid of the range (never overstated,
+    which would pass a pair that can overlap), and no less than that grid's least by more than
+    its spacing allows: where the least lies along an edge the grid's error is second order in
+    its spacing, and a point inside the range is 0° from it."""
+    rng = random.Random(seed)
+    p = (rng.uniform(-30.0, 30.0), rng.uniform(-30.0, 30.0))
+    x0, y0 = rng.uniform(-30.0, 10.0), rng.uniform(-30.0, 10.0)
+    xs, ys = (x0, x0 + rng.uniform(2.0, 20.0)), (y0, y0 + rng.uniform(2.0, 20.0))
+    tx, ty = (np.tan(np.radians(np.linspace(*side, 801))) for side in (xs, ys))
+    grid = np.stack(np.broadcast_arrays(tx[:, None], ty[None, :], 1.0), axis=-1).reshape(-1, 3)
+    grid = grid / np.linalg.norm(grid, axis=1, keepdims=True)
+    swept = math.degrees(math.acos(min(1.0, float((grid @ _directions([p])[0]).max()))))
+
+    found = least_separation_deg([(p[0], p[0])], [(p[1], p[1])], [xs], [ys])
+
+    if xs[0] <= p[0] <= xs[1] and ys[0] <= p[1] <= ys[1]:
+        assert found == 0.0
+    else:
+        half_step = 1.1 * max(xs[1] - xs[0], ys[1] - ys[0]) / 800 / 2
+        assert swept - half_step ** 2 / (2 * found) - 1e-9 <= found <= swept + 1e-9
+
+
+def test_two_ranges_are_as_far_apart_as_a_corner_of_either_and_the_others_edge():
+    """A window anywhere over x 0-10°, y 0-1°, and another over x 4-5°, y 3-4°: the nearest pair
+    is the second's lower corners and the first's top edge, so a search from one region's
+    corners alone reads them about 4.5° apart, and it is the same either way round. The least of
+    a 4001-point grid along that top edge from each lower corner is the least the two can
+    reach: along the second's lower edge the angle to the first's falls toward the side of the
+    field, where the two edges' great circles meet."""
+    edge = [(x, 1.0) for x in np.linspace(0.0, 10.0, 4001)]
+    swept = min(_least_by_dots([corner], edge) for corner in ((4.0, 3.0), (5.0, 3.0)))
+
+    one_way = least_separation_deg([(0.0, 10.0)], [(0.0, 1.0)], [(4.0, 5.0)], [(3.0, 4.0)])
+    other_way = least_separation_deg([(4.0, 5.0)], [(3.0, 4.0)], [(0.0, 10.0)], [(0.0, 1.0)])
+
+    assert one_way == other_way
+    assert swept - 1e-5 <= one_way <= swept + 1e-9
+
+
+def test_regions_that_share_a_position_are_0_apart_and_a_side_without_end_reaches_90():
+    """Overlapping regions are 0° apart. A side a range leaves without end is read to 90°, where
+    a degree stops naming a direction ahead of the eye: a window anywhere from x 4° outward is 4°
+    from one at the center, and two that both run outward at heights 5° and -5° meet out there,
+    where every height on that axis is one direction."""
+    assert least_separation_deg([(-5.0, 5.0)], [(0.0, 3.0)], [(4.0, 9.0)], [(2.0, 2.0)]) == 0.0
+    assert least_separation_deg([(4.0, math.inf)], [(0.0, 0.0)], [(0.0, 0.0)], [(0.0, 0.0)]) == (
+        pytest.approx(4.0, abs=1e-9))
+    assert least_separation_deg([(0.0, math.inf)], [(5.0, 5.0)], [(0.0, math.inf)],
+                                [(-5.0, -5.0)]) == pytest.approx(0.0, abs=1e-9)
+
+
+def test_a_rings_neighbors_are_nearest_where_it_crosses_an_axis_or_a_diagonal():
+    """`ring_spacing_deg`: the least true angle between neighbors of a ring placed per axis about
+    the center (`task.Array.positions`), over every phase. The per-axis map has the square's
+    symmetries, so a pair's spacing is even about the axes and the diagonals; that the least is
+    at one of them is checked here over every phase, at a degree's steps, from 2 to 1000
+    objects on rings out to 44°. Twelve on a 20° ring are 10.35° apart per axis and 9.77° where
+    the ring crosses an axis."""
+    def pair(radius, n, center):
+        half = math.pi / n
+        return _least_by_dots(
+            [(radius * math.cos(center - half), radius * math.sin(center - half))],
+            [(radius * math.cos(center + half), radius * math.sin(center + half))])
+
+    for radius in (1.0, 5.0, 12.0, 20.0, 30.0, 44.0):
+        for n in (2, 3, 4, 5, 6, 7, 8, 12, 16, 24, 64, 1000):
+            swept = min(pair(radius, n, math.radians(step)) for step in range(0, 91))
+            assert ring_spacing_deg(radius, n) == pytest.approx(swept, abs=1e-7)
+            assert ring_spacing_deg(radius, n) <= swept + 1e-9
+
+    assert ring_spacing_deg(20.0, 12) == pytest.approx(9.7727, abs=1e-4)
+    assert 2 * 20.0 * math.sin(math.pi / 12) == pytest.approx(10.3528, abs=1e-4)
+    assert ring_spacing_deg(8.0, math.inf) == 0.0
+
+
+def test_the_mean_pixels_per_degree_reaches_no_drawing_window_or_check():
+    """`Geometry.pixels_per_degree` is S0 §5.2's reported mean, and a mean is what the PI ruled
+    out of every position, size and window (2026-10-19). Nothing in `wl_xcon/` names it, as an
+    attribute, a name, an import or a string, but its own definition; asked of the parser, so
+    a comment or a docstring that mentions it is not a use."""
+    root = Path(geometry.__file__).parent
+    named = []
+    for path in sorted(root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if ((isinstance(node, ast.Attribute) and node.attr == "pixels_per_degree")
+                    or (isinstance(node, ast.Name) and node.id == "pixels_per_degree")
+                    or (isinstance(node, ast.alias) and node.name == "pixels_per_degree")
+                    or (isinstance(node, ast.Constant) and node.value == "pixels_per_degree")):
+                named.append(f"{path.relative_to(root)}:{node.lineno}")
+
+    assert named == []
+    assert hasattr(Geometry, "pixels_per_degree")
