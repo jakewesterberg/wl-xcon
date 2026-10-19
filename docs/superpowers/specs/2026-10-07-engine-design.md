@@ -267,7 +267,8 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    (x, y). A task file that computes a position as (e·cos θ, e·sin θ) itself, less than e out off
    the axes (7.975° for 8° at 45°), is a load-time warning in every session kind
    (`computed-position`). The review report shows every position as eccentricity and direction
-   first with (x, y) beside it; the console and the record follow after engine build C2b (STE-29).
+   first with (x, y) beside it; the console follows after engine build C2b (XC-401), and the
+   record, each stimulus's true eccentricity and direction beside its (x, y) (XC-399) (STE-29).
 2. **Sizes**: one size number is the full width; each block's definition states it.
 3. **Away from the center**: true visual angle (default) or the screen center's
    scale, declared per task. *Note, 2026-10-19 (the PI, "Retire it"):* "Every stimulus is drawn in
@@ -283,9 +284,9 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    *Note, 2026-10-19 (the PI, "Keep longitude, say so"):* the per-eye shift is in per-axis horizontal
    degrees, so d is the difference in **azimuth longitude** between the eyes' images: "exact in its own
    convention and a standard definition of horizontal disparity", and not the true angle between them off
-   the horizontal meridian. The review report names the convention beside every disparity, and each
-   session's `config.json` records it (`setup.disparity_convention`), so an analysis knows what d means
-   (STE-07's note).
+   the horizontal meridian. The review report states the convention once, above its stimuli table,
+   and each session's `config.json` records it (`setup.disparity_convention`), so an analysis knows what
+   d means (STE-07's note).
 5. **Linked positions**: declared per link, moving with the other stimulus or placed once at onset.
 6. **Gaze-anchored stimuli**: the gaze rule selectable (newest, default; smoothed; predicted)
    [@santini2007eyeris; @crane1985generationv; @saunders2014direct], each frame's sample age recorded;

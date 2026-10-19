@@ -29,6 +29,7 @@ from wl_xcon.geometry import (
     Geometry,
     SubjectSettings,
     least_separation_deg,
+    polar_deg,
     ring_spacing_deg,
     separation_deg,
 )
@@ -778,3 +779,113 @@ def test_two_polar_regions_are_as_far_apart_as_every_pair_of_their_positions(see
     found = least_separation_deg([ea], [ta], [eb], [tb], polar_a=True, polar_b=True)
 
     assert swept - 0.05 <= found <= swept + 1e-9
+
+
+# --- The search between two windows ends in closed forms (the review of commits 2-5, item 1) ---
+#
+# A load check runs between two trials for a value a console sends past its range
+# (`taskd.Session._beyond_range`), where stop, pause and the out-of-cage limit wait on it; so no
+# pair of single intervals is left to a slow search.
+
+
+def test_a_negative_eccentricity_is_the_same_position_a_half_turn_round_in_closed_form(
+        monkeypatch):
+    """The review's case: a thin sector at eccentricities -5.96° to -5.94°, 37° to 176°, against one
+    at 16.9° to 18.5°, 197° to 341°, ran the search to its 200,000-node limit. A negative
+    eccentricity at θ is the same position at its negation and θ + 180°, so the pair is two
+    sectors, in closed form: no node is searched, and the answer is the one for the sector
+    written the other way."""
+    def searched(*_):
+        raise AssertionError("searched a pair that has a closed form")
+
+    monkeypatch.setattr(geometry, "_halves", searched)
+    negative = least_separation_deg([(-5.96, -5.94)], [(37.0, 176.0)], [(16.9, 18.5)],
+                                    [(197.0, 341.0)], polar_a=True, polar_b=True)
+    turned = least_separation_deg([(5.94, 5.96)], [(217.0, 356.0)], [(16.9, 18.5)],
+                                  [(197.0, 341.0)], polar_a=True, polar_b=True)
+    straddling = least_separation_deg([(-3.0, 4.0)], [(30.0, 30.0)], [(4.0, 16.0)],
+                                      [(-8.0, 8.0)], polar_a=True)
+
+    assert negative == turned
+    region = [polar_deg(e, t) for e in np.linspace(-5.96, -5.94, 5)
+              for t in np.linspace(37.0, 176.0, 1401)]
+    other = [polar_deg(e, t) for e in np.linspace(16.9, 18.5, 33)
+             for t in np.linspace(197.0, 341.0, 1441)]
+    swept = min(_least_by_dots(region, other[k::11]) for k in range(11))
+    assert swept - 0.01 <= negative <= swept + 1e-9
+    # An eccentricity from -3° to 4° at 30° is two parts, 0° to 3° at 210° and 0° to 4° at 30°.
+    line = [polar_deg(e, 30.0) for e in np.linspace(-3.0, 4.0, 701)]
+    window = [(x, y) for x in np.linspace(4.0, 16.0, 241) for y in np.linspace(-8.0, 8.0, 321)]
+    swept = min(_least_by_dots(line, window[k::13]) for k in range(13))
+    assert swept - 0.02 <= straddling <= swept + 1e-9
+
+
+@pytest.mark.parametrize("seed", range(6))
+def test_a_sector_and_a_rectangle_are_apart_in_closed_form_never_more_than_any_pair(seed,
+                                                                                  monkeypatch):
+    """`_sector_to_rectangle`, with no node searched: never more than a fine sweep of both finds,
+    and within its spacing's error of it; a thin rectangle crossing an annulus with no corner of
+    either inside the other is 0° from it."""
+    from wl_xcon.geometry import polar_deg
+
+    def searched(*_):
+        raise AssertionError("searched a pair that has a closed form")
+
+    monkeypatch.setattr(geometry, "_halves", searched)
+    rng = random.Random(500 + seed)
+    e0 = rng.uniform(-15.0, 25.0)
+    es = (e0, e0 + rng.uniform(0.0, 8.0))
+    t0 = rng.uniform(-180.0, 180.0)
+    ts = (t0, t0 + rng.uniform(0.0, 300.0))
+    x0, y0 = rng.uniform(-30.0, 30.0), rng.uniform(-20.0, 20.0)
+    xs, ys = (x0, x0 + rng.uniform(0.0, 15.0)), (y0, y0 + rng.uniform(0.0, 10.0))
+    sector = [polar_deg(e, t) for e in np.linspace(*es, 33) for t in np.linspace(*ts, 601)]
+    box = [(x, y) for x in np.linspace(*xs, 61) for y in np.linspace(*ys, 41)]
+    swept = min(_least_by_dots(sector[k::7], box) for k in range(7))
+
+    found = least_separation_deg([es], [ts], [xs], [ys], polar_a=True)
+
+    assert swept - 0.1 <= found <= swept + 1e-9
+    assert least_separation_deg([(8.0, 10.0)], [(0.0, 360.0)], [(-0.05, 0.05)], [(-20.0, 20.0)],
+                                polar_a=True) == 0.0
+
+
+def test_a_search_past_its_limit_answers_with_a_bound_never_more_than_the_least(monkeypatch):
+    """`_SEARCH_LIMIT` guards a load check against lists of intervals no test has met: past it, the
+    least bound left is the answer, never more than the least. With the limit at 0 and 3 nodes,
+    a window over forty choices across and a range up, against one over a range across and
+    thirty choices up, is never read farther apart than the whole search reads it."""
+    rng = random.Random(9)
+    sides = ([(v, v) for v in sorted(rng.uniform(-30, 30) for _ in range(40))], [(-4.0, 6.0)],
+             [(12.0, 20.0)], [(v, v) for v in sorted(rng.uniform(-15, 15) for _ in range(30))])
+    least = least_separation_deg(*sides)
+    for limit in (0, 3, 30):
+        monkeypatch.setattr(geometry, "_SEARCH_LIMIT", limit)
+        assert 0.0 <= least_separation_deg(*sides) <= least + 1e-12
+
+
+def test_a_search_over_lists_and_sectors_ends_well_inside_its_limit(monkeypatch):
+    """The worst the review found for a sector against a rectangle, 46,565 nodes, needs none now;
+    a polar window over twelve directions and two eccentricity ranges, against one over twenty
+    places across and a range up, ends in far fewer nodes than `_SEARCH_LIMIT`."""
+    count = [0]
+    halves = geometry._halves
+
+    def counting(*args):
+        count[0] += 1
+        return halves(*args)
+
+    monkeypatch.setattr(geometry, "_halves", counting)
+    least_separation_deg([(2.0, 4.0), (9.0, 11.0)], [(t, t) for t in range(0, 360, 30)],
+                         [(v, v) for v in range(-20, 20, 2)], [(-3.0, 3.0)], polar_a=True)
+
+    assert 0 < count[0] < geometry._SEARCH_LIMIT // 10
+
+
+def test_a_rectangle_passing_through_a_sector_away_from_its_foot_meets_it():
+    """A strip 8.6°-8.7° up across ±20° passes through a sector 9°-11° out at 60°-70°, near x 4°,
+    with no corner of either inside the other (the sector's are 7.8°, 8.5°, 9.6° and 10.4° up)
+    and away from the strip's foot from straight ahead at (0°, 8.6°): the cuts where the strip
+    crosses the sector's radial lines are what find that they meet."""
+    assert least_separation_deg([(9.0, 11.0)], [(60.0, 70.0)], [(-20.0, 20.0)], [(8.6, 8.7)],
+                                polar_a=True) == 0.0

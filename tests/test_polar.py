@@ -253,3 +253,46 @@ def test_cos_and_sin_outside_a_position_and_the_reference_tasks_draw_no_warning(
     for name in ("adaptive_detection", "calibration", "fixation_detection", "visual_search",
                  "visual_search_training"):
         assert _computed(TASKS / f"{name}.py") == [], name
+
+
+def test_an_update_s_position_in_its_place_and_trigonometry_inside_a_polar(tmp_path):
+    """The review of commits 2-5, items 2 and 3: an `Update` takes its position in its second
+    place too, as `Stimulus` and `Window` do, and `cos` there is found; and a `Polar` whose own
+    fields are computed with `cos` or `sin` is an eccentricity and a direction however computed,
+    so nothing inside one is warned of."""
+    path = _task_file(tmp_path, '''\
+        from wl_xcon.task import Polar, Update
+        ECC = math.degrees(math.acos(math.cos(0.2) * math.cos(0.1)))
+        TRIAL = Trial(
+            start="on",
+            states=[State("on", enter=[
+                Show(Stimulus("p", at=Polar(ECC, 30.0), looks=Disc())),
+                Show(Stimulus("r", at=Polar(math.degrees(math.acos(c(0.3))), 0.0), looks=Disc())),
+                Update("p", (8 * math.cos(0.5), 0.0)),
+            ], go=[On(After(1.0), Outcome.NO_RESPONSE)])],
+        )
+        ''')
+
+    found = _computed(path)
+
+    assert [f.detail.split(":")[0] for f in found] == ["line 13"]
+    assert "an update's position" in found[0].detail
+
+
+@pytest.mark.parametrize("farthest, shown", [(16.0, True), (25.0, False)])
+def test_a_whole_point_setting_of_polar_choices_is_measured_at_each(farthest, shown):
+    """The review's item 4: a whole-point setting whose choices are `Polar` values was refused by
+    check 8 as a position it could not bound. Each choice is converted and measured like any
+    other: 8° right and `farthest` up, in direct view's 18.4° vertical field."""
+    trial = Trial(
+        start="on",
+        params=[Param("pos", unit="deg", choices=(_polar(8.0, 0.0), _polar(farthest, 90.0)))],
+        states=[State("on", enter=[Show(Stimulus("t", at=P("pos"), looks=Disc(
+            size=0.5, color=Gray(40.0))))], go=[On(After(1.0), Outcome.NO_RESPONSE)])],
+    )
+
+    found = [f for f in check(trial, geometry=DIRECT) if f.code == "stimulus-off-screen"]
+
+    assert bool(found) is not shown
+    if found:
+        assert "which can reach 0.0, 25.0" in found[0].detail

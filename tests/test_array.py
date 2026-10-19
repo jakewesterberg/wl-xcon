@@ -391,3 +391,15 @@ def test_check_8_reads_an_array_s_true_circle_where_it_reaches_on_the_panel(heig
 
     assert all(DIRECT.can_show(*p) for p in reached) is shown
     assert refused is not shown
+
+
+def test_the_aliases_name_the_target_and_every_other_object():
+    """`<of>.target` is the target's window and `<of>.distractor` every other object's, for the
+    set size the trial runs at."""
+    members = ObjectWindows(of="search", radius=1.0).members(
+        Array(n=P("set_size"), radius=8.0, target=P("target_index")),
+        {"set_size": 6, "target_index": 2})
+
+    assert members == {"search.target": ("search.2",),
+                       "search.distractor": ("search.0", "search.1", "search.3", "search.4",
+                                             "search.5")}

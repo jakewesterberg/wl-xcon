@@ -484,9 +484,10 @@ def _chosen(guard: object) -> "str | None":
     return getattr(guard, "window", None) or getattr(guard, "device", None)
 
 
-#: The constructors that take a position, with where it sits among their positional arguments
-#: (`None`: by keyword only), and the keywords that name one.
-_PLACED = {"Stimulus": (1, "a stimulus's"), "Window": (1, "a window's"), "Update": (None, "an update's")}
+#: The constructors that take a position, with where it sits among their positional arguments,
+#: and the keywords that name one.
+_PLACED = {"Stimulus": (1, "a stimulus's"), "Window": (1, "a window's"),
+           "Update": (1, "an update's")}
 _POSITION_KEYWORDS = ("at", "at_left", "at_right")
 _TRIGONOMETRY = ("cos", "sin")
 
@@ -499,13 +500,15 @@ def _computed_positions(source: Path) -> list[Finding]:
     file is read with the parser, never a pattern over its text (CLAUDE.md).
 
     **What it finds**: a call of `math`'s or numpy's `cos` or `sin`, by any name the file imports
-    it as, inside a position -- `Stimulus`'s and `Window`'s, by keyword or in its place, and the
-    `at`, `at_left` and `at_right` of each and of an `Update` -- written there, through a name the
+    it as, inside a position -- `Stimulus`'s, `Window`'s and `Update`'s, by keyword or in its
+    place, and the `at`, `at_left` and `at_right` of each -- written there, through a name the
     file assigns at its top level, or among the choices of a setting a position names by `P`.
-    **What it misses**: a position a function returns, one assigned inside a function or in
-    another module, a name assigned twice (it reads the last), anything reached through
-    `getattr`, `eval` or a loop that builds the trial, and trigonometry by another route
-    (`cmath`, `scipy`, `numpy.exp(1j·θ)`). A warning in every session kind, never a refusal."""
+    **What it passes**: anything inside a `Polar(...)`, whose fields are an eccentricity and a
+    direction however they are computed. **What it misses**: a position a function returns, one
+    assigned inside a function or in another module, a name assigned twice (it reads the last),
+    anything reached through `getattr`, `eval` or a loop that builds the trial, and trigonometry
+    by another route (`cmath`, `scipy`, `numpy.exp(1j·θ)`). A warning in every session kind,
+    never a refusal."""
     try:
         tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
     except (OSError, SyntaxError, UnicodeDecodeError):
@@ -518,18 +521,26 @@ def _computed_positions(source: Path) -> list[Finding]:
         elif isinstance(node, ast.ImportFrom) and node.module in ("math", "numpy"):
             functions |= {a.asname or a.name for a in node.names if a.name in _TRIGONOMETRY}
 
+    def called(node: ast.Call) -> str | None:
+        func = node.func
+        return func.id if isinstance(func, ast.Name) else (
+            func.attr if isinstance(func, ast.Attribute) else None)
+
+    def outside_polar(node: ast.AST):
+        """Every node of `node` but those inside a `Polar(...)`."""
+        if isinstance(node, ast.Call) and called(node) == "Polar":
+            return
+        yield node
+        for child in ast.iter_child_nodes(node):
+            yield from outside_polar(child)
+
     def trigonometry(expression: ast.AST) -> bool:
         return any(
             isinstance(call, ast.Call) and (
                 (isinstance(call.func, ast.Name) and call.func.id in functions)
                 or (isinstance(call.func, ast.Attribute) and call.func.attr in _TRIGONOMETRY
                     and isinstance(call.func.value, ast.Name) and call.func.value.id in modules))
-            for call in ast.walk(expression))
-
-    def called(node: ast.Call) -> str | None:
-        func = node.func
-        return func.id if isinstance(func, ast.Name) else (
-            func.attr if isinstance(func, ast.Attribute) else None)
+            for call in outside_polar(expression))
 
     assigned = {target.id: (statement.value, statement.lineno) for statement in tree.body
                 if isinstance(statement, ast.Assign)
@@ -556,10 +567,10 @@ def _computed_positions(source: Path) -> list[Finding]:
             how = None
             if trigonometry(position):
                 how = ""
-            for name in (n.id for n in ast.walk(position) if isinstance(n, ast.Name)):
+            for name in (n.id for n in outside_polar(position) if isinstance(n, ast.Name)):
                 if how is None and name in assigned and trigonometry(assigned[name][0]):
                     how = f" through `{name}` (line {assigned[name][1]})"
-            for call in ast.walk(position):
+            for call in outside_polar(position):
                 if (how is None and isinstance(call, ast.Call) and called(call) == "P"
                         and call.args and isinstance(call.args[0], ast.Constant)
                         and call.args[0].value in chosen
@@ -984,12 +995,15 @@ def _points(at: object, params: dict[str, Param]) -> list[tuple[float, float]]:
     """Every centre a position can take.
 
     A pair is each coordinate's values, crossed. A **whole position as one
-    parameter** (`at=P("pos")`) is the points it offers as choices; indexing it as a
-    pair was a `TypeError` that would have crashed `taskd`'s load (XC-036). A range,
-    or choices that are not points, names no place to test.
+    parameter** (`at=P("pos")`) is the points it offers as choices, a `Polar` of numbers
+    converted (`polar_deg`); indexing it as a pair was a `TypeError` that would have crashed
+    `taskd`'s load (XC-036). A range, or choices that are not points, names no place to test.
     """
     if isinstance(at, P):
-        offered = _domain(at, params)
+        offered = [polar_deg(float(point.eccentricity), float(point.direction))
+                   if isinstance(point, Polar) and _is_number(point.eccentricity)
+                   and _is_number(point.direction) else point
+                   for point in _domain(at, params)]
         if not all(
             isinstance(point, (tuple, list))
             and len(point) == 2
@@ -3219,8 +3233,8 @@ def _crowded_arrays(trial: Trial) -> list[Finding]:
     adjacent centers are `2·asin(sin R·sin(π/n))` apart (`geometry.ring_spacing_deg`), the
     objects on a true circle about the array's own direction and each window where its object is
     drawn, at any phase and position (the PI, 2026-10-19, "True circle"; XC-397), and two
-    windows touch when that falls below their summed radius. Each is read over its declared range or its choices
-    (`_span`), the count as the run reads it, a whole number (`_whole`): a count or a radius
+    windows touch when that falls below their summed radius. Each is read over its declared
+    range or its choices (`_span`), the count as the run reads it, a whole number (`_whole`): a count or a radius
     with no highest can be any size, and crowds; a ring with no lowest can be 0 (Task 10's
     review, I2). **A warning, not a refusal** (XC-352's A9; the PI, 2026-10-11), saying which
     settings crowd it. A set size sent past its range that draws the objects on one another,

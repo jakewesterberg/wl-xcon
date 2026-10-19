@@ -923,7 +923,7 @@ class ObjectWindows:
 
     def members(self, array: Array, values: dict) -> "dict[str, tuple[str, ...]]":
         """Alias name to the concrete object windows that satisfy it."""
-        n = len(array.positions(values))
+        n = int(_value(array.n, values))
         target = int(_value(array.target, values))
         return {
             f"{self.of}.target": (f"{self.of}.{target}",),

@@ -376,7 +376,7 @@ def _items(stimulus, order, lights, geometry, onset) -> list[Item]:
         return [
             _item(stimulus, f"{stimulus.name}.{i}", (order, i), looks.object_looks(i, values),
                   object_at(i), lights, geometry, onset)
-            for i in range(len(looks.positions(values)))
+            for i in range(int(_value(looks.n, values)))
         ]
     return [_item(stimulus, stimulus.name, (order, 0), looks, lambda center: center, lights,
                   geometry, onset)]
