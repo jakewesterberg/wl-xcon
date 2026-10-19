@@ -32,6 +32,7 @@ from wl_xcon.task import (
     Hold,
     ObjectWindows,
     On,
+    Onscreen,
     Outcome,
     P,
     Param,
@@ -142,6 +143,110 @@ def test_a_later_after_that_can_never_fire_first_is_a_review_note():
     # A review note, never a refusal (XC-352's A7).
     assert (findings[0].blocking, findings[0].accepted_in) == (False, ())
     assert findings[0].detail.endswith("which is probably a mistake")
+
+
+def test_an_after_that_can_beat_a_hold_on_its_state_is_a_warning():
+    """The engine C2a plan's science review, O2: `verify` raced `Hold(target_hold)` against
+    `After(response_deadline)`, both from the state's entry, and their ranges crossed, so a hold set
+    past the deadline was cut off and scored a miss. A warning, accepted in every session kind (the
+    PI, 2026-10-11: warnings over refusals); a bound longer than the longest hold, or the hold's own
+    setting, is not one."""
+    def verify(bound) -> Trial:
+        return Trial(
+            start="verify",
+            params=[Param("target_hold", unit="s", low=0.05, high=1.0),
+                    Param("response_deadline", unit="s", low=0.1, high=3.0)],
+            windows=[Window("target", at=(0.0, 0.0), radius=2.0, on="fix")],
+            states=[State("verify", enter=[Show(FIX)], go=[
+                On(Hold("target", P("target_hold")), Outcome.CORRECT),
+                On(After(bound), Outcome.NO_RESPONSE),
+            ])],
+        )
+
+    (cut,) = [f for f in check(verify(P("response_deadline"))) if f.code == "hold-cut-short"]
+    assert cut.is_warning and not cut.refuses("recording")
+    assert "'verify'" in cut.detail and "NO_RESPONSE" in cut.detail
+    assert "as soon as 0.1 s" in cut.detail and "up to 1 s" in cut.detail
+    # Each setting is named as the task wrote it, so the trainer knows which one to change.
+    assert "after `response_deadline`" in cut.detail and "takes `target_hold`" in cut.detail
+    for bound in (3.0, P("target_hold")):
+        assert "hold-cut-short" not in codes(verify(bound))
+    # A timeout counted from a later event starts later, and is not compared.
+    since = After(P("response_deadline"), since=Onscreen("target"))
+    late = Trial(
+        start="verify",
+        params=[Param("target_hold", unit="s", low=0.05, high=1.0),
+                Param("response_deadline", unit="s", low=0.1, high=3.0)],
+        windows=[Window("target", at=(0.0, 0.0), radius=2.0, on="fix")],
+        states=[State("verify", enter=[Show(FIX)], go=[
+            On(Hold("target", P("target_hold")), Outcome.CORRECT),
+            On(since, Outcome.NO_RESPONSE),
+        ])],
+    )
+    assert "hold-cut-short" not in codes(late)
+
+
+def _ordered(hold_first: bool, bound, held=P("target_hold")) -> Trial:
+    edges = [On(Hold("target", held), Outcome.CORRECT), On(After(bound), Outcome.NO_RESPONSE)]
+    return Trial(
+        start="verify",
+        params=[Param("target_hold", unit="s", low=0.05, high=1.0)],
+        windows=[Window("target", at=(0.0, 0.0), radius=2.0, on="fix")],
+        states=[State("verify", enter=[Show(FIX)], go=edges if hold_first else edges[::-1])],
+    )
+
+
+def test_a_timeout_listed_before_its_hold_ties_it_and_wins():
+    """A hold and an `After` of equal length fire on the same frame, and a state's edges are
+    evaluated in order: the one listed first wins. A timeout on the hold's own setting, or an equal
+    literal, is no threat when the hold is listed first, and cuts every hold off when it is not."""
+    for bound, held in ((P("target_hold"), P("target_hold")), (0.3, 0.3)):
+        assert "hold-cut-short" not in codes(_ordered(True, bound, held))
+        (cut,) = [f for f in check(_ordered(False, bound, held)) if f.code == "hold-cut-short"]
+        assert cut.is_warning and "NO_RESPONSE" in cut.detail
+    # A literal is said in seconds.
+    assert "after 0.3 s" in cut.detail and "takes 0.3 s" in cut.detail
+    # Lowest at most the hold's highest, with the timeout first, is warned too (1.0 == 1.0).
+    assert "hold-cut-short" in codes(_ordered(False, 1.0))
+    assert "hold-cut-short" not in codes(_ordered(True, 1.0))
+
+
+def test_a_hold_with_no_highest_is_cut_short_by_any_timeout():
+    """A hold whose setting declares no highest can take any length, so a plain timeout can end it:
+    warned, and the warning says no longest is declared rather than naming a number."""
+    trial = Trial(
+        start="verify",
+        params=[Param("target_hold", unit="s", low=0.05),
+                Param("response_deadline", unit="s", low=0.1, high=3.0)],
+        windows=[Window("target", at=(0.0, 0.0), radius=2.0, on="fix")],
+        states=[State("verify", enter=[Show(FIX)], go=[
+            On(Hold("target", P("target_hold")), Outcome.CORRECT),
+            On(After(P("response_deadline")), Outcome.NO_RESPONSE),
+        ])],
+    )
+
+    (cut,) = [f for f in check(trial) if f.code == "hold-cut-short"]
+
+    assert cut.is_warning and "with no longest declared" in cut.detail
+
+
+def test_a_timeout_declaring_only_a_lowest_below_the_holds_highest_is_a_warning():
+    """A timeout whose setting declares only a lowest can end anywhere above it, so one starting
+    below the hold's highest can beat the hold: warned."""
+    trial = Trial(
+        start="verify",
+        params=[Param("target_hold", unit="s", low=0.05, high=1.0),
+                Param("response_deadline", unit="s", low=0.5)],
+        windows=[Window("target", at=(0.0, 0.0), radius=2.0, on="fix")],
+        states=[State("verify", enter=[Show(FIX)], go=[
+            On(Hold("target", P("target_hold")), Outcome.CORRECT),
+            On(After(P("response_deadline")), Outcome.NO_RESPONSE),
+        ])],
+    )
+
+    (cut,) = [f for f in check(trial) if f.code == "hold-cut-short"]
+
+    assert cut.is_warning and "as soon as 0.5 s" in cut.detail and "up to 1 s" in cut.detail
 
 
 def test_two_after_bounds_whose_ranges_cross_are_allowed():
@@ -459,9 +564,14 @@ def _waiting_task() -> Task:
 
 
 def test_a_wait_outside_its_range_but_within_the_tasks_longest_is_a_warning():
-    """`fix_hold` at 8 s is outside its 0.05-2 s and within the 10 s the task already waits."""
-    assert [(f.code, f.blocking) for f in beyond_range(_waiting_task(), {"fix_hold": 8.0})] == [
-        ("outside-range", False)]
+    """`fix_hold` at 8 s is outside its 0.05-2 s and within the 10 s the task already waits. Since
+    engine build C2a it is a second warning too, `hold-cut-short`: the state's `fix_acquisition`
+    timeout, from 0.5 s, can end a hold that now takes up to 8 s."""
+    found = beyond_range(_waiting_task(), {"fix_hold": 8.0})
+
+    assert [(f.code, f.blocking) for f in found] == [
+        ("outside-range", False), ("hold-cut-short", False)]
+    assert "up to 8 s" in found[1].detail
 
 
 def test_a_wait_longer_than_any_the_task_declares_is_a_warning_that_stop_and_the_limit_go_unheard():
@@ -476,9 +586,11 @@ def test_a_wait_longer_than_any_the_task_declares_is_a_warning_that_stop_and_the
     assert found[1].detail.startswith(
         "'fix_acquisition' at 60 s is a wait longer than any the task declares (its longest, 10 s)")
     assert "they go unheard until that trial ends" in found[1].detail
-    # The cap it names is the loop's; build C2a's five-minute cap changes both (engine spec §6.8).
-    assert inspect.signature(run_trial).parameters["max_frames"].default == 100_000
-    assert "the trial cap, 100,000 frames (about 417 s at 240 Hz)" in found[1].detail
+    # The cap it names is the loop's, the longest trial: five minutes at the session's rate since
+    # engine build C2a (engine spec §6.8), where it was 100,000 frames, about 417 s at 240 Hz.
+    assert inspect.signature(run_trial).parameters["max_frames"].default is None
+    minutes = inspect.getmodule(run_trial).LONGEST_TRIAL_S / 60
+    assert f"and the longest trial ({minutes:g} minutes) ends any trial" in found[1].detail
     # Its 240 Hz is the rate `wlx taskd` runs at (Task 10's review, M4).
     assert service.FRAME_PERIOD == 1 / 240 and round(100_000 * service.FRAME_PERIOD) == 417
 
@@ -510,13 +622,16 @@ def test_a_wait_with_no_highest_makes_no_wait_longer_than_any_the_task_declares(
     """Task 10's review, M1: a wait setting with no highest was left out of the task's longest
     wait, so one sent below its lowest was "a wait longer than any the task declares (its
     longest, 0 s)". With no highest a wait can be any length, so no value of any wait is longer
-    than one the task declares. Its `outside-range` warning names the one bound declared (M2)."""
+    than one the task declares. Its `outside-range` warning names the one bound declared (M2).
+    Since engine build C2a it also draws `hold-cut-short`: a timeout declared with a lowest of 1.0
+    only, sent at 0.5, can now end before the hold, a true warning."""
     task = _timing_out(Param("timeout", unit="s", low=1.0, start=2.0))
 
     below = beyond_range(task, {"timeout": 0.5})
 
     assert [f.code for f in beyond_range(task, {"fix_acquisition": 600.0})] == ["outside-range"]
-    assert [(f.code, f.blocking) for f in below] == [("outside-range", False)]
+    assert [(f.code, f.blocking) for f in below] == [
+        ("outside-range", False), ("hold-cut-short", False)]
     assert below[0].detail.startswith(
         "'timeout' is 0.5 s, below its declared 1.0, so the task was not designed for it")
     assert "None" not in below[0].detail

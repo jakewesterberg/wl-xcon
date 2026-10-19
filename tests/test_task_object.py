@@ -5,6 +5,8 @@ reaction time is defined."""
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from wl_xcon.check import check, check_task
@@ -21,9 +23,11 @@ from wl_xcon.task import (
     NEITHER,
     NO_CHOICE,
     NOT_DIFFICULTY,
+    OWED,
     STIMULUS,
     After,
     Choice,
+    Counting,
     Disc,
     Meaning,
     On,
@@ -65,6 +69,7 @@ def _trial(*params: Param, view: str = "either", hold: Param = HOLD,
             ),
             State("chose", go=[On(After(0.1), Outcome.CORRECT, do=[Reward(rewarded)])]),
         ],
+        counting=Counting(after_stimulus=OWED, appears="wait"),
     )
 
 
@@ -196,7 +201,8 @@ def test_a_tasks_settings_are_its_structures_union_the_defaults_first():
 TASK_CODES = frozenset({
     "parameter-mismatch", "view-mismatch", "undeclared-meaning", "override-without-why",
     "bad-meaning", "meaning-for-nothing", "no-reaction-time", "bad-reaction-time",
-    "undeclared-choice", "bad-choice", "unhashable-task", "head-not-fixed",
+    "undeclared-choice", "bad-choice", "unhashable-task", "head-not-fixed", "undeclared-counting",
+    "bad-counting",
 })
 TIMED = ReactionTime("wait", ("chose",), "from entering wait to a saccade landing on the target")
 
@@ -226,6 +232,40 @@ def _codes(task: Task, **kwargs) -> set[str]:
 def test_a_task_that_declares_everything_adds_no_finding_of_its_own():
     assert _task_findings(_whole()) == []
     assert all(f.blocking for f in _task_findings(_whole(reaction_time=None, choice=None)))
+
+
+def test_a_structure_that_does_not_say_what_its_breaks_do_is_refused_naming_it():
+    """The PI, 2026-10-11: a break after the stimulus has "no default; each task declares", and the
+    load-time check refuses a task that does not say -- an authoring rule. Each structure without a
+    table is named; a bare `Trial` checked alone needs none."""
+    declared = _trial(CONTRAST)
+    bare = dataclasses.replace(declared, counting=None)
+
+    (refused,) = _task_findings(_whole(structures={"main": bare}))
+    both = _task_findings(_whole(structures={"main": declared, "cued": bare}))
+
+    assert refused.code == "undeclared-counting" and refused.blocking
+    assert "'main'" in refused.detail and "after_stimulus=SPENT or OWED" in refused.detail
+    assert [f.detail.split(" has ")[0] for f in both] == ["structure 'cued'"]
+    assert "undeclared-counting" not in {f.code for f in check_task(_whole())}
+    assert "undeclared-counting" not in {f.code for f in check(bare)}
+
+
+def test_a_structure_whose_table_does_not_say_where_its_stimulus_appears_is_refused_naming_it():
+    """The PI, 2026-10-13, "Task names it, required": "Each task's counting table names the step
+    where its stimulus appears, and the load check refuses a table without one." A table naming no
+    state, or one the structure does not have, is refused, saying which structure and why."""
+    declared = _trial(CONTRAST)
+    silent = dataclasses.replace(declared, counting=Counting(after_stimulus=OWED))
+    elsewhere = dataclasses.replace(declared, counting=Counting(after_stimulus=OWED, appears="cue"))
+
+    (none,) = _task_findings(_whole(structures={"main": silent}))
+    (unknown,) = _task_findings(_whole(structures={"main": elsewhere}))
+
+    assert (none.code, none.blocking) == ("undeclared-counting", True)
+    assert "'main'" in none.detail and "appears=" in none.detail
+    assert (unknown.code, unknown.blocking) == ("bad-counting", True)
+    assert "'cue'" in unknown.detail and "'chose', 'wait'" in unknown.detail
 
 
 def test_each_structures_findings_name_it_when_the_task_has_several():

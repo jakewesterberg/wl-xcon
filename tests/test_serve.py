@@ -47,6 +47,8 @@ from wl_xcon.link import (
     SCHEMA,
     CancelScheduledStop,
     CheckRun,
+    ClearOwed,
+    Drum,
     EndSession,
     Idle,
     ManualReward,
@@ -58,6 +60,7 @@ from wl_xcon.link import (
     ScheduleStop,
     SetParameter,
     StartRun,
+    Training,
     Stop,
     Telemetry,
     Unacknowledged,
@@ -2469,6 +2472,13 @@ def test_a_body_longer_than_the_limit_or_without_a_length_is_refused_unread():
         ({"kind": "note", "by": "jake", "mark": 7, "note": "bubble"},
          MarkNote(mark=7, note="bubble", by=Box("jake"))),
         ({"kind": "reward", "by": "jake"}, ManualReward(by=Box("jake"))),
+        ({"kind": "clear", "by": "jake", "condition": "near"},
+         ClearOwed(condition="near", by=Box("jake"))),
+        ({"kind": "clear", "by": "jake", "condition": "near", "rest": True},
+         ClearOwed(condition="near", by=Box("jake"), rest=True)),
+        ({"kind": "drum", "by": "jake", "scope": "block"}, Drum(scope="block", by=Box("jake"))),
+        ({"kind": "training", "by": "jake", "setting": "clear", "on": True},
+         Training(setting="clear", on=True, by=Box("jake"))),
     ],
 )
 def test_each_command_the_page_sends_parses_to_what_the_rig_is_sent(body, expected):
@@ -2478,6 +2488,23 @@ def test_each_command_the_page_sends_parses_to_what_the_rig_is_sent(body, expect
 def test_a_parse_refusal_is_a_bad_command():
     with pytest.raises(BadCommand):
         parse_command({"kind": "pause", "by": ""})
+
+
+@pytest.mark.parametrize(
+    ("body", "said"),
+    [
+        ({"kind": "clear", "by": "jake"}, "condition is text"),
+        ({"kind": "clear", "by": "jake", "condition": "near", "trials": 2}, "takes no trials"),
+        ({"kind": "drum", "by": "jake", "scope": "always"}, "block, run or off"),
+        ({"kind": "training", "by": "jake", "setting": "always", "on": True},
+         "a training setting is clear or first_answers"),
+    ],
+)
+def test_a_clear_or_a_drum_the_page_sends_is_held_to_the_wires_rules(body, said):
+    """Engine build C2a: built by the wire's own function, as the service's commands are, so the
+    page hears the rig's sentence before anything is queued; the training switch too."""
+    with pytest.raises(BadCommand, match=said):
+        parse_command(body)
 
 
 # --- P4d-2b b3a-2: the service's commands from the page ------------------------------

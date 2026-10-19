@@ -44,6 +44,8 @@ from wl_xcon.task import (
     STIMULUS,
     Choice,
     Meaning,
+    OWED,
+    Counting,
     ReactionTime,
     Task,
     Trial,
@@ -74,6 +76,10 @@ search = Trial(
     start="await_fix",
     # Direct view, with the detection tasks: the lab's programme runs there.
     view="direct",
+    # Its counting table (the engine C2a plan's Appendix B, item 9): a training variant, so a break
+    # after the array appears (in `array_on`) is owed, shown again, and each condition is
+    # practised as planned; no repeat limit (item 12, the PI, 2026-10-13).
+    counting=Counting(after_stimulus=OWED, appears="array_on"),
     background=Gray(16.0),  # visual_search.BACKGROUND (the engine A2 plan's Q1)
     windows=[
         Window("fix", at=(0.0, 0.0), radius=P("fix_window"), on="fix"),
@@ -147,7 +153,8 @@ search = Trial(
             go=[
                 On(Hold("fix", P("fix_hold")), "array_on"),
                 On(Exited("fix"), Outcome.FIXATION_BREAK, do=[Mark(4101)]),
-                On(After(P("fix_acquisition")), Outcome.NO_FIXATION),
+                # Longer than any legal `fix_hold`, as `fixation_detection` says.
+                On(After(10.0), Outcome.NO_FIXATION),
             ],
         ),
         State(
@@ -176,7 +183,8 @@ search = Trial(
                     do=[Mark(4099), Mark(4110), Mark(4102), Reward("reward_correct")],
                 ),
                 On(Exited("search.target"), Outcome.TARGET_BREAK, do=[Mark(4120)]),
-                On(After(P("response_deadline")), Outcome.NO_RESPONSE, do=[Mark(4117)]),
+                # The hold runs its own time, as `fixation_detection` says.
+                On(After(3.0), Outcome.NO_RESPONSE, do=[Mark(4117)]),
             ],
         ),
     ],

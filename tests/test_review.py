@@ -8,6 +8,8 @@ deliverable, not a convenience.
 
 from __future__ import annotations
 
+import dataclasses
+
 from wl_xcon.declarations import COMMON, content_hash
 from wl_xcon.review import render, render_task
 from wl_xcon.task import (
@@ -15,6 +17,7 @@ from wl_xcon.task import (
     BACKGROUND,
     CLEAR_CUT,
     Choice,
+    Counting,
     EASIER,
     EXPECTED,
     HARDER,
@@ -30,6 +33,7 @@ from wl_xcon.task import (
     ReactionTime,
     Reward,
     SaccadeTo,
+    SPENT,
     STIMULUS,
     State,
     Task,
@@ -190,6 +194,27 @@ def test_the_report_names_the_task_by_its_content_and_its_bounded_settings():
     assert f"Content: `{content_hash(_reviewed())}`" in out
     assert "### Bounded settings it rewards through" in out
     assert "| reward_correct | neither | not a difficulty setting |" in out
+
+
+def test_the_report_shows_what_each_trial_does_to_its_conditions_count():
+    """Engine build C2a (its plan's engineering review, Minor 8): the counting table changes what a
+    run's count means, so a reviewer confirms it -- every outcome's class once the stimulus has
+    appeared and before, the hang's, whether withholding is an answer, the repeat limit -- and a
+    structure without one says so, as the load-time check refuses it."""
+    table = Counting(after_stimulus=SPENT, appears="hold", withholding=True, cap=3)
+    holding = dataclasses.replace(HOLDING, counting=table)
+    out = render_task(_reviewed(structures={"other": OTHER, "holding": holding}))
+
+    assert "### What each trial does to its condition's count" in out
+    assert "| Outcome | After the stimulus appears | Before it |" in out
+    assert "| target_break | used up | shown again |" in out
+    assert "| no_response | counted | counted |" in out
+    assert "| fixation_break | shown again | shown again |" in out
+    assert "| hang (the five-minute cap) | shown again | shown again |" in out
+    assert "Structure `holding`: its stimulus appears in `hold`; withholding is an answer" in out
+    assert "a repeat limit of 3 failed repeats in a row" in out
+    assert "Structure `other`: **no counting table**" in out
+    assert out.index("### What each trial does") < out.index("## Structure `holding`")
 
 
 def test_each_structure_is_drawn_under_its_own_heading_the_default_first():

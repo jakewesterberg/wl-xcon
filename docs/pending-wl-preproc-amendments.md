@@ -401,6 +401,24 @@ both eyes is the cost it flagged. This is an answer to send, not an open item he
 
 ---
 
+# OPEN — engine build C2a: each trial's count and each run's shortfalls
+
+Opened 2026-10-18 by engine build C2a ([its plan](superpowers/plans/2026-10-11-engine-c2a.md), "Calls taken in this plan", calls 10 and 11), backlog XC-365. Read against wl-preproc's `wl_preproc/events/rigtrials.py` (`_FIELDS`) and `rigruns.py` through the worktree's `wl-preproc` link, 2026-10-11 (an export, `ecd1616`), and read again 2026-10-18 in wl-preproc's main at `9f78a3e` (committed 2026-10-18), where the six required fields and the end row's `.get` reads are as described below.
+
+## What changed on our side
+
+Each `trials.jsonl` line keeps the six fields wl-preproc requires and gains eight beside them: `counting` (`counted`, `spent`, `owed` or `unpaid`: what the trial did to its condition's count), `shown` (whether its stimulus had appeared), `repeat_of` (the `index` of the trial it shows again), `at_once` (whether it came straight after that one), `previous` (the condition before it in its block), `drummed` (a drum's repeat), `drumming` (`block`, `run` or null) and `aids` (the training aids on as it was drawn: `drumming`, `clear`). Each `runs.jsonl` **end** row gains `shortfalls`: a list of `{block, condition, trials, because, possible_avoidance, after_trial, by}`, `because` one of `cap`, `rig` or `cleared`; `conditions`: a list of each block's per-condition `{block, condition, trials, presentations, right, wrong, right_first, owed, repeats, moved_past, possible_avoidance, drummed, failing}`, a trial and its drummed repeats one trial (the PI, 2026-10-18); and `presentations`, its lines, while its `trials` now counts trials, a trial and its drummed repeats one -- before C2a the two were equal. A trial that faulted has no line and is not in `presentations`; because a try is counted before its line is written, a run that ended in a fault can leave `trials` and the per-condition counts one try ahead of the lines. **`counting` records what the trial paid, not whether it was an answer**: under drumming every try that is not right is recorded `owed`, wrong answers included, and past a criterion block's targets, where nothing is owed, an `owed` line means "not shown again" unless drumming brought it back at once, which the next line's `drummed` and `repeat_of` say. Judge answers by `outcome`, never by `counting`. `controls.jsonl` gains three row kinds beside its existing ones, each with the common `kind`, `by`, `at`, `at_local`, `trial_index` and `run`: `clear` (a person's clearing from the count: `condition`, `block`, `rest`, `cleared`, the trials cleared, and `owed`, what the condition still owes), `drum` (a drumming switch: `scope`, `block`, the block it is for, `was` and `now`, what drumming read before and after) and `training` (a training switch: `setting`, `clear` or `first_answers`, `was` and `now`). **The `training` rows are the only record of when "first answers only" was on**: a trial's `aids` lists `drumming` and `clear` but not that setting, and it changes how a percentage rule judges the drummed tries. No new `runs.jsonl` row kind: the shortfalls ride the end row, since wl-preproc reports any row but a start or an end as a problem.
+
+## The ask
+
+**Read them into the published dataset**, so an analysis can tell what each trial paid (`counting`; it is not the answer, which `outcome` says), tell a spent trial from an answer, follow the realized sequence, tell a trial run under a training aid, and see each condition's counts, its forgiven debt and whether it was flagged as possible avoidance. Both readers tolerate the fields today (a trial line's extra fields are ignored; an end row is read with `.get`), so nothing breaks before this is done.
+
+## What is deliberately not asked for
+
+No new escape, code or marker: nothing here is strobed. No change to the six required trial fields.
+
+---
+
 # Not an ask — one consequence recorded
 
 `contracts/events.py` states that Intan RHS receives the strobe only, because its 16 digital

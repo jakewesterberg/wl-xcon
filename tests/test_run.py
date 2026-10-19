@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import pytest
 
-from wl_xcon.run import Quiet, Recorded, Scripted, run_trial
+from wl_xcon.run import (
+    LONGEST_TRIAL_S, Quiet, Recorded, Scripted, longest_trial_frames, run_trial,
+)
 from wl_xcon.task import (
     After,
     Entered,
@@ -28,6 +30,27 @@ from wl_xcon.task import (
     Trial,
     Window,
 )
+
+
+def test_the_longest_trial_is_five_minutes_at_the_sessions_rate():
+    """Engine spec §6.8: "the loop's frame cap derived from 300 s at the session's rate" (XC-287).
+    It was 100,000 frames whatever the rate, about 417 s at 240 Hz."""
+    assert LONGEST_TRIAL_S == 300.0
+    assert longest_trial_frames(1 / 240) == 72_000
+    assert longest_trial_frames(1 / 120) == 36_000
+    assert longest_trial_frames(0.7) == 429, "to the nearest frame: 428.57"
+
+
+@pytest.mark.parametrize("frame_period", [1.0, 0.5])
+def test_a_trial_that_reaches_the_longest_trial_ends_there_with_no_outcome(frame_period):
+    """A wait the five minutes cut short: the trial ends at the cap, a hang, whatever its own
+    bound. (Slow frames keep the test to a few hundred.)"""
+    trial = Trial(start="wait", states=[State("wait", go=[On(After(400.0), Outcome.CORRECT)])])
+
+    result = run_trial(trial, world=Quiet(), frame_period=frame_period)
+
+    assert result.outcome is None
+    assert result.frames == round(300 / frame_period)
 
 
 def test_a_time_guard_fires_on_the_first_frame_at_or_past_its_deadline():

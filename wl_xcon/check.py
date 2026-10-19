@@ -33,6 +33,7 @@ from wl_xcon.photometry import (
     unrealizable,
     xyY,
 )
+from wl_xcon.run import LONGEST_TRIAL_S
 from wl_xcon.task import (
     CHOSEN_BY,
     RDS,
@@ -98,6 +99,7 @@ def check(
         + _view_faults(trial, geometry)
         + _placement_faults(trial)
         + _trial_display_faults(trial)
+        + _holds_cut_short(trial)
     )
 
 
@@ -112,8 +114,9 @@ def check_task(
     """The load-time checks of a task object (engine spec §3.5; engine build C1): each trial
     structure's own (`check`), named by its structure where the task has several (the engine C1
     plan's call 13), then what the task declares across them -- one set of settings and one setup,
-    every setting's meaning (XC-288 §4.1), its reaction time and its choice (§4.3), and a content
-    its runs can record (§4.4). **What a caller holds a task to is this**; `check` is one
+    every setting's meaning (XC-288 §4.1), its reaction time and its choice (§4.3), a content its
+    runs can record (§4.4), and each structure's counting table (engine spec §16.1; engine build
+    C2a). **What a caller holds a task to is this**; `check` is one
     structure's part of it, and stays what a bare `Trial` is checked by.
 
     **Given the session's deployment**, a task that needs a fixed head is a warning in any but a
@@ -137,6 +140,7 @@ def check_task(
         + _choice_faults(task)
         + _hash_faults(task)
         + _head_faults(task, deployment)
+        + _counting_faults(task)
     )
 
 
@@ -150,10 +154,10 @@ def check_task(
 #: 10's review, I1); off screen (`stimulus-off-screen`) already blocks.
 BREAKS_A_RUN = ("overlapping-windows", "crowded-array", "unrealizable-color")
 
-#: The trial cap, as a `longer-than-declared` warning says it: `run.run_trial`'s `max_frames`
-#: backstop, 100,000 frames, about 417 s at the 240 Hz `wlx taskd` runs at (computed). Build C2a
-#: makes it five minutes at the session's rate (engine spec §6.8), and this changes with it.
-TRIAL_CAP = "the trial cap, 100,000 frames (about 417 s at 240 Hz)"
+#: The trial cap, as a `longer-than-declared` warning says it: the longest trial, five minutes at
+#: the session's rate (`run.LONGEST_TRIAL_S`, `run_trial`'s `max_frames` since engine build C2a;
+#: engine spec §6.8), where it was 100,000 frames, about 417 s at 240 Hz.
+TRIAL_CAP = f"the longest trial ({LONGEST_TRIAL_S / 60:g} minutes)"
 
 
 def _among(finding: Finding, findings: list[Finding]) -> bool:
@@ -261,8 +265,8 @@ def beyond_range(
     # **A wait longer than any the task declares is a warning**, one per wait (the PI, 2026-10-12,
     # on the plan's call 4: "Allow, with a warning"): stop, pause and the out-of-cage limit are
     # heard between trials, never inside one, until they are checked about once a second inside
-    # a trial (WEL-11; engine spec §6.8; XC-373), when this sentence changes, as it does with
-    # build C2a's five-minute cap (`TRIAL_CAP`).
+    # a trial (WEL-11; engine spec §6.8; XC-373), when this sentence changes; the trial cap it
+    # names is the longest trial, five minutes since engine build C2a (`TRIAL_CAP`).
     waits, longest = _waits(task)
     findings: list[Finding] = []
     for name, value in outside.items():
@@ -482,6 +486,36 @@ def _hash_faults(task: Task) -> list[Finding]:
             f"the task's content could not be hashed ({unread}), so a run could not record which "
             f"version of it ran (XC-288 §4.4)"))]
     return []
+
+
+def _counting_faults(task: Task) -> list[Finding]:
+    """Each structure's counting table (engine spec §16.1-16.2; engine build C2a). **Refused when a
+    structure declares none**, an authoring rule (the PI, 2026-10-11: a break after the stimulus
+    has "no default; each task declares", and "the load-time check refuses a task that does not
+    say"): a missing table cannot be told from a forgotten one, and the scheduler would have no
+    answer for the first such break. **And when its table names no state its stimulus appears
+    in, or one the structure does not have** (the PI, 2026-10-13, "Task names it, required"):
+    whether a break came before anything was presented is read from that state."""
+    findings: list[Finding] = []
+    for name, structure in task.structures.items():
+        table = structure.counting
+        states = sorted(state.name for state in structure.states)
+        if table is None:
+            findings.append(Finding("undeclared-counting", (
+                f"structure {name!r} has no counting table, so nothing says whether a break after "
+                f"its stimulus is spent (used up) or owed (shown again); give it "
+                f"counting=Counting(after_stimulus=SPENT or OWED) (engine spec §16.2)")))
+        elif table.appears is None:
+            findings.append(Finding("undeclared-counting", (
+                f"structure {name!r}'s counting table does not name the state its stimulus "
+                f"appears in, so nothing says whether a break came before anything was presented; "
+                f"give it appears=, one of {', '.join(map(repr, states))} -- a cued task's cue")))
+        elif table.appears not in states:
+            findings.append(Finding("bad-counting", (
+                f"structure {name!r}'s counting table says its stimulus appears in "
+                f"{table.appears!r}, which is not one of its states "
+                f"({', '.join(map(repr, states))})")))
+    return findings
 
 
 def _head_faults(task: Task, deployment: "Deployment | None") -> list[Finding]:
@@ -2973,6 +3007,59 @@ def _unreachable_timeouts(trial: Trial) -> list[Finding]:
                         blocking=False,
                     )
                 )
+    return findings
+
+
+def _holds_cut_short(trial: Trial) -> list[Finding]:
+    """A `Hold` that an `After` on the same state can beat, within their declared ranges, is a hold
+    cut off in progress: the trial ends on the timeout, scored as whatever it leads to, while the
+    animal is still holding (the engine C2a plan's science review, O2: a held target scored a miss
+    when `target_hold` was set past `response_deadline`). **A warning, never a refusal** (the PI,
+    2026-10-11: warnings over refusals), naming the state, the hold, the bound and their settings.
+    Only a plain `After` is compared -- one with a `since` starts later -- and a bound naming the
+    hold's own setting cannot beat it **unless it is listed before the hold**: a state's edges are
+    evaluated in order and a tie fires on one frame, so the first listed wins it (an `After` first
+    is warned when its lowest is at most the hold's highest). It assumes the hold starts as the
+    state is entered; a state the gaze enters later is not modeled. Each setting is read through
+    `_span`, as every range check is: a side its range does not bound reaches as far as that
+    side can go, so a hold with no highest can be cut short by any timeout, and a timeout with
+    no lowest can end at once."""
+    params = {p.name: p for p in trial.params}
+
+    def span(value) -> "tuple[float, float] | None":
+        if isinstance(value, P) or _is_number(value):
+            return _span(value, params, 0.0)
+        return None
+
+    def said(value) -> str:
+        return f"`{value.name}`" if isinstance(value, P) else f"{value:g} s"
+
+    findings: list[Finding] = []
+    for state in trial.states:
+        holds = [edge for edge in state.go if isinstance(edge.guard, Hold)]
+        bounds = [edge for edge in state.go
+                  if isinstance(edge.guard, After) and edge.guard.since is None]
+        for hold in holds:
+            for bound in bounds:
+                held, waits = span(hold.guard.seconds), span(bound.guard.seconds)
+                if held is None or waits is None:
+                    continue
+                # Edges are evaluated in order and a tie fires on one frame: a timeout listed
+                # first wins it, so it beats a hold up to its highest; listed after, it must
+                # fall short of the hold's highest, and its own setting never does.
+                first = state.go.index(bound) < state.go.index(hold)
+                if not first and bound.guard.seconds == hold.guard.seconds:
+                    continue
+                if waits[0] <= held[1] if first else waits[0] < held[1]:
+                    longest = (f"up to {held[1]:g} s" if math.isfinite(held[1])
+                               else "with no longest declared")
+                    findings.append(Finding("hold-cut-short", (
+                        f"state {state.name!r} ends on its {_target_name(bound.to)} timeout after "
+                        f"{said(bound.guard.seconds)}, as soon as {waits[0]:g} s, while its "
+                        f"{hold.guard.window!r} hold takes {said(hold.guard.seconds)}, "
+                        f"{longest}: an animal still holding is cut off and scored "
+                        f"{_target_name(bound.to)}; bound the state by a wait longer than the "
+                        f"longest hold"), blocking=False, accepted_in=SESSION_KINDS))
     return findings
 
 

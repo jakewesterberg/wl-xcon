@@ -544,6 +544,19 @@ def test_counts_are_grouped_by_family_and_never_summed():
     ]
 
 
+def test_trials_count_a_trial_and_its_drummed_repeats_once_with_presentations_beside():
+    """The PI, 2026-10-18: "The console would show both: trials (200) and presentations (e.g.
+    260)" (the controller's ruling I1): /health's Trials counts trials, a trial and its drummed
+    repeats one, and a Presentations reading stands beside it where they differ."""
+    def values(**over) -> dict:
+        return {row["key"]: row["value"] for row in readings(
+            frame(**over), frame_age_s=1.0, stale_after_s=30.0, rejected=None, endpoint=ENDPOINT)}
+
+    assert (values(trials=20, trial_index=25)["trials"],
+            values(trials=20, trial_index=25)["presentations"]) == ("20", "25")
+    assert "presentations" not in values()
+
+
 def test_the_strips_rollup_never_reaches_health():
     """The PI's one rollup -- `correct` plus `correct_reject` -- is the strip's alone
     (2026-09-26, spec §3). `/health` counts every outcome as it occurred."""
@@ -552,6 +565,7 @@ def test_the_strips_rollup_never_reaches_health():
         for r in readings(
             frame(
                 trial_index=10,
+                trials=10,
                 outcomes={"correct": 3, "correct_reject": 2, "no_fixation": 5},
             ),
             frame_age_s=1.0,

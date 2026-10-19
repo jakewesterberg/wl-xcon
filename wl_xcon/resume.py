@@ -25,7 +25,7 @@ from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.levels import Levels, task_name
 from wl_xcon.record import ACCEPTED_WARNINGS, CONTROLS, RUNS, TRIAL_STARTS
 from wl_xcon.simulate import Tally
-from wl_xcon.task import Outcome
+from wl_xcon.task import RIGHT, Outcome
 from wl_xcon.warnlist import Entry
 from wl_xcon.welfare import OUT_OF_CAGE
 
@@ -305,6 +305,12 @@ def _read(directory: Path, departure: float) -> Restoration:
                 tally.hangs += 1
             else:
                 tally.outcomes[Outcome(line["outcome"])] += 1
+            # A drum's repeat is a presentation and no new trial (the PI, 2026-10-18); a line
+            # written before engine build C2a has no `drummed`, and was a trial of its own.
+            if line.get("drummed"):
+                tally.drummed += 1
+                right = line["outcome"] != "hang" and Outcome(line["outcome"]) in RIGHT
+                tally.right_drummed += right
 
     # The values the last run started with, then the changes made during it: a change in
     # an earlier run is already in the last start row (`runs.jsonl`'s `bounded`). **The

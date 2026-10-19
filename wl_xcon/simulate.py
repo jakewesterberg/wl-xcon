@@ -28,6 +28,7 @@ from wl_xcon.task import (
     Exited,
     Guard,
     Outcome,
+    RIGHT,
     Remembered,
     Task,
     Trial,
@@ -279,8 +280,13 @@ class Tally:
     responses: Counter = field(default_factory=Counter)
     visited: set = field(default_factory=set)
     hangs: int = 0
+    #: Of those, a drum's repeats -- presentations and no new trials (the PI, 2026-10-18) -- and
+    #: the right ones among them, so a session's strip shows right first time beside right per
+    #: presentation. A census drums nothing.
+    drummed: int = 0
+    right_drummed: int = 0
 
-    def add(self, result: Result) -> None:
+    def add(self, result: Result, drummed: bool = False) -> None:
         self.visited.update(result.visited)
         for scored in result.scored:
             self.responses[(scored.window, scored.scored_as)] += 1
@@ -288,6 +294,9 @@ class Tally:
             self.hangs += 1
         else:
             self.outcomes[result.outcome] += 1
+        if drummed:
+            self.drummed += 1
+            self.right_drummed += result.outcome in RIGHT
 
     def census(self) -> Census:
         return Census(

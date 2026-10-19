@@ -311,6 +311,14 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    trial reaching it is recorded as today's `"hang"` category, which `resume`, `health` and the page
    already read. Longer presentations use the continuous mode (§13.6). **Inside a long trial, stop,
    pause and the welfare limits are checked about once a second**, off the frame path (N§R6).
+   *Engine build C2a, 2026-10-18* (plan `docs/superpowers/plans/2026-10-11-engine-c2a.md`): the cap
+   is `run.LONGEST_TRIAL_S` at the session's rate (`run.longest_trial_frames`, `run_trial`'s default),
+   where it was 100,000 frames, about 417 s at 240 Hz. A trial reaching it is recorded `hang` and
+   counts as **a missed acquisition** (the PI, 2026-10-11: "it isn't a fixation break, it is a missed
+   acquisition"): counted as no fixation is (`task.HANG_COUNTS_AS`), so owed by a structure's table and
+   repeated like a fault, while the flat run's table (`scheduler.EVERY_TRIAL`, every live run until
+   C2b) spends it and it is one of the N (XC-287, closed); the console's changes feed says which trial and what became of it, a warning. The
+   once-a-second checks inside a long trial are not built (XC-373).
 9. **Between trials**: what the task declares (the background by default).
 10. **Contingent changes record their delay**: decision time minus the sample's capture time (on the eye
     PC's clock once aligned), plus the frame's start, plus V1's scan delay at the stimulus's height,
@@ -664,6 +672,65 @@ luminance waits on build F (XC-305).
 7. *Stated limitation*: conditions the animal breaks on more often drift toward the end of a block, so
    condition can covary with time in the block; position in the block is in the record.
 
+*Engine build C2a, 2026-10-18* (plan `docs/superpowers/plans/2026-10-11-engine-c2a.md`; the PI's
+decisions of 2026-10-11, his answers of 2026-10-12 and his confirmation of the plan's Appendix B):
+**items 1 and 2** -- each trial structure declares its table (`task.Counting`): answers counted
+(correct rejections and false alarms among them); a fixation break, no fixation, a lost tracker and
+a fault owed; a break after the stimulus appears spent or owed as the task says, **with no
+default**, `check.check_task` refusing a structure without a table; no response a miss, counted,
+where the task says withholding is an answer (both detection tasks, the PI); and per outcome
+otherwise where it says so, a wrong answer under "until N correct" unpaid and never placed as a
+repeat, as the 2026-08-31 rule above has it. The stimulus has appeared once the trial entered the
+state its table names (`Counting.appears`; the PI, 2026-10-13: "Task names it, required", a cued
+task naming its cue), which the load-time check requires; a break before that is owed. A block may
+count by a table of its
+own (`Block.counting`: `CORRECT_ONLY`, `PRESENTED`, `EVERY_TRIAL`, the flat run's). **Item 3** --
+"later" is the same for every order type and end rule (the PI, 2026-10-12: "Same rule, within the
+next k" -- "One rule for every block. Repeats don't pile up at the block's end."): a random slot
+within the next k trials, k the block's number of conditions and at least 3 (the PI, 2026-10-12:
+"At least 3" -- "A repeat lands 2 or 3 trials later even in a two-condition block, so its position
+is not fixed"), never the very next, a slot no other waiting repeat holds; the repeat's condition is
+not drawn otherwise while it waits; when nothing else can be drawn a waiting repeat comes now, the
+earliest unless that is the trial just broken and another waits, so a repeat comes at once only when
+it is the last condition owed, which the row records. **Drumming** (the PI): a
+block, or a trainer from the console for a block or a run, brings every trial that is not right
+straight back until it is (that a correct rejection is right, ending a drum, is the controller's
+ruling I1 on the plan's engineering review, engineering), and after 10 failed tries in
+a row of one trial the console warns, drumming going on (the PI, 2026-10-12: "After 10 in a row").
+**Judging, as the PI defined it on 2026-10-18**: a block's rule judges answers only -- right or
+wrong, a miss among them where the task makes no response an answer -- and every answer, whatever
+the table says about paying ("2: only answers make or break a streak"; "Yes, every answer counts in
+the 20"); under drumming a streak (a rule of proportion 1.0) judges every answer in order ("Every
+answer counts in order"), and a percentage does too unless the training setting "first answers
+only" (recorded `first_answers`) is on ("Every answer"), within which his answers of 2026-10-12 ("Leave drummed repeats out")
+and 2026-10-18 ("Judge its first answer") hold; a criterion block ends only once its criterion is
+met and every target is used up, drawing every condition past them ("Both: criterion and every
+target"), and no drum waits ("Finish the drum first"); a block whose own table counts a broken hold
+as counted -- a hold-training block -- has it judged a miss ("Yes, where the block says so"), and
+so a failure to acquire the fixation point it counts, a trial that reached the longest trial among
+them (decision 19: "Same rule as broken holds ... Lost tracking and rig faults never count against
+the animal"); a
+trial and its drummed repeats are one trial ("200 trials; drummed repeats inside them"), and the
+console counts trials with the presentations beside them. **Drumming and *clear* are training aids** ("Drumming and 'clear'"): off unless a block
+declares drumming or a trainer switches either on, a standing banner on the console (a warning outside a training session) while one is
+on, in any kind of session ("Allow it, with a warning"), and every trial's row marking them; per-
+animal training profiles to load them are XC-379. **Item 4**
+-- each trial's row records the condition before it in its block, whether its stimulus appeared,
+the trial it repeats and whether it came at once; the repeat rule of blocks whose order is the
+design waits for those orders (C3, XC-361). **Item 5** waits for drawn values (C3, XC-362).
+**Item 6, amended** (the PI, 2026-10-12): a task's repeat limit counts "Tries in a row of one trial"
+-- "The condition is moved past after 3 failed repeats in a row, and the count resets once it is
+done" -- and on 2026-10-18 "1: an answer ends the trial": any answer, right or wrong, starts the
+count over; **none unless a task sets one** (the PI, 2026-10-11), and the task's limit holds in a
+block that counts by its own table unless that table sets one ("No: the task's limit applies unless
+the block sets its own"); past it the remaining debt is forgiven, flagged as possible avoidance when
+the animal's own outcomes reached it and named for the rig when a lost tracker or a fault was among
+the tries; a person clears one trial of a condition's count, or the rest, from the console, once
+*clear* is switched on, and *clear one* starts the count over ("End that waiting trial; count
+starts over"); all are each run's end row's `shortfalls` and the page's Still-needed pane, beside
+each condition's counts (the PI, 2026-10-18); the end row's `trials` counts trials, a trial and its
+drummed repeats one, and its `presentations` the lines written.
+
 ## 17. Parameters and live control (N§14, N§R7)
 
 1. **The order of values**: task start < run value < condition or drawn value < procedure < live edit,
@@ -726,7 +793,8 @@ luminance waits on build F (XC-305).
    warnings gain `overlapping-windows`, `crowded-array`, `wrong-eye-criterion`,
    `monocular-stereogram`, `wrong-setup` (without stereo content), `isoluminance-on-default`,
    `unrealizable-color`, `cone-colors-without-spectra`, `outside-range` and, by his answer of
-   2026-10-12, `longer-than-declared`, and `color-on-default` and `contrast-on-default` are
+   2026-10-12, `longer-than-declared`, and, in engine build C2a, `hold-cut-short` (a timeout that
+   can end a state before its hold completes, one listed before the hold that ties it included), and `color-on-default` and `contrast-on-default` are
    accepted in recording. No warning the rig lists refuses any kind.
 3. **Accepted once per session**, at open, recorded. **A warning appearing during a run that its kinds do
    not accept pauses the run at the next trial**, for the operator to accept (recorded) or stop (N§R6).
@@ -836,7 +904,8 @@ summary before its build merges:
   alignment target to the monocular grids, the disparity check kept.
 - **S5 §7**: the session-start calibration is the rig's rule; the stereoscope's is the monocular grids.
 - **S6 §1**: two analog outputs of the 6343 allocated to audio.
-- **S8**: §2 and §8 item 3 (repeats, counting); §3.2 (instant parameters); §3.4 (the value order).
+- **S8**: §2 and §8 item 3 (repeats, counting; amended by engine build C2a); §3.2 (instant
+  parameters); §3.4 (the value order).
 - **validation.md**: V1 (top and bottom patches, the 10-bit path, panel latency), V7, V12 item 3 (the
   pause screen).
 - **architecture.md**: the display process, the screen description, the task object, the warnings list,
@@ -883,7 +952,7 @@ The PI's order: **definition first, display by January**.
   > of an array or a layout (§4.1, §4.4). The text above is left as approved.
 - **Formats designed in their builds**: the shared-memory layout (E), the generator protocol (H), the
   continuous mode's record (K), the task object's exact shape (C1, defined in wl-xcon, 2026-10-11), "later" per order
-  type (C).
+  type (C2a: one rule for every block, the PI's, §16's note).
 - **Every UNVERIFIED hardware fact**: the panel's scan-out, sRGB mode, care features and maintenance
   control; the 10-bit path; the ABL level; NVIDIA's present timing on this card; which connector carries
   the 6343's analog outputs. Measured at V1, V9, bring-up or the spike, never assumed.

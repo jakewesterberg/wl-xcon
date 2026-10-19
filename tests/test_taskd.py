@@ -27,6 +27,7 @@ import textwrap
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -43,6 +44,8 @@ from wl_xcon.link import (
     RECENT_OUTCOMES,
     REFUSAL_HISTORY,
     CancelScheduledStop,
+    ClearOwed,
+    Drum,
     ManualReward,
     Mark,
     Pause,
@@ -54,13 +57,14 @@ from wl_xcon.link import (
     Simulated,
     Stop,
     Telemetry,
+    Training,
 )
 from wl_xcon.photometry import SRGB
 from wl_xcon.record import REFUSAL_LOG_LIMIT, SessionRecord
-from wl_xcon.scheduler import Block, Condition, Counting, Scheduler
+from wl_xcon.scheduler import EVERY_TRIAL, Block, Condition, Scheduler
 from wl_xcon.simulate import Tally
-from wl_xcon.task import Outcome
-from wl_xcon.taskd import PAUSE_HOUSEKEEPING_S, RunSpec, Session, SessionSpec
+from wl_xcon.task import ANSWERS, OWED, RIGHT, After, Counting, On, Outcome, State, Trial
+from wl_xcon.taskd import PAUSE_HOUSEKEEPING_S, RunSpec, Session, SessionSpec, _drum_warned
 from wl_xcon.warnlist import Entry
 from wl_xcon.welfare import Deployment, Simulated as Pump
 import _sessions
@@ -1143,15 +1147,17 @@ def test_each_trial_records_the_condition_it_actually_ran(tmp_path):
     assert {row["block"] for row in rows} == {"near-far", "far-only"}
 
 
-def test_a_criterion_block_ends_on_performance_rather_than_on_a_count(tmp_path):
-    """The transition S8 §1 calls a length rule. A block whose criterion is met stops
-    early; the session moves on rather than ending."""
+def test_a_criterion_block_ends_once_its_criterion_and_its_target_both_hold(tmp_path):
+    """The transition S8 §1 calls a length rule. A block ends once its criterion is met and
+    its target is used up -- a minimum (the PI, 2026-10-18) -- and the session moves on
+    rather than ending. A criterion its target's 10 trials cannot meet, over 15 answers, keeps
+    the shaping block going past them (the controller's ruling M7)."""
     blocks = [
         Block(
             name="shaping",
-            conditions=[Condition("only", {}, target=10_000)],
-            criterion=(0.2, 10),
-            counts_toward=Counting.EVERY_TRIAL,
+            conditions=[Condition("only", {}, target=10)],
+            criterion=(0.2, 15),
+            counting=EVERY_TRIAL,
         ),
         Block(name="test", conditions=[Condition("only", {}, target=5)]),
     ]
@@ -1161,6 +1167,280 @@ def test_a_criterion_block_ends_on_performance_rather_than_on_a_count(tmp_path):
     session.run()
 
     assert session.blocks_run == ["shaping", "test"]
+    assert session.stopped_because == "every block is finished"
+    assert sum(row["block"] == "shaping" for row in _trial_rows(session)) > 10
+
+
+def test_each_trial_row_says_what_it_did_to_its_count_and_whether_its_stimulus_appeared(tmp_path):
+    """Engine spec §16.1-16.2, §16.4: a block counted by the reference task's own table -- no
+    response a miss, counted; a fixation break owed -- and every row says which, and whether the
+    target appeared (the trial entered `stim_on`, the state its table names)."""
+    block = Block(name="b", conditions=[Condition("c", {}, target=30)])
+    session = _session(_spec(tmp_path, trials=400, blocks=[block]))
+
+    session.run()
+
+    rows = _trial_rows(session)
+    said = {(row["outcome"], row["counting"], row["shown"]) for row in rows}
+    assert ("correct", "counted", True) in said
+    for kind in ("no_response", "no_fixation", "fixation_break"):
+        assert any(row["outcome"] == kind for row in rows), f"no {kind} row at this seed"
+    assert all(row["counting"] == "counted" for row in rows if row["outcome"] == "no_response")
+    assert all((row["counting"], row["shown"]) == ("owed", False)
+               for row in rows if row["outcome"] in ("no_fixation", "fixation_break"))
+    assert sum(row["counting"] == "counted" for row in rows) == 30
+
+
+def test_whether_a_trials_stimulus_appeared_is_read_from_the_state_its_table_names():
+    """The PI, 2026-10-13, "Task names it, required": "A cued task names the cue step." A trial that
+    ended in its cue's state presented something, whatever its reaction time's state; one whose
+    table names a later state had not. A structure with no table -- a test's, since the load-time
+    check refuses one in a task -- counts every trial as shown."""
+    from wl_xcon import taskd
+
+    cue = Trial(start="cue", states=[State("cue", go=[On(After(0.1), "go")]),
+                                     State("go", go=[On(After(0.1), Outcome.CORRECT)])],
+                counting=Counting(after_stimulus=OWED, appears="cue"))
+    later = dataclasses.replace(cue, counting=Counting(after_stimulus=OWED, appears="go"))
+    broke_in_cue = SimpleNamespace(visited=("cue",))
+
+    assert taskd._appeared(cue, broke_in_cue) and not taskd._appeared(later, broke_in_cue)
+    assert taskd._appeared(dataclasses.replace(cue, counting=None), broke_in_cue)
+
+
+def test_each_repeat_row_names_the_trial_it_shows_again_and_its_predecessor(tmp_path):
+    """Engine spec §16.3-16.4: a repeat's row names the trial it shows again -- the same condition,
+    owed -- at least two trials before it unless it came at once; every row names the condition of
+    the trial before it in its block, the first none."""
+    block = Block(name="b", conditions=[Condition(n, {"target_x": x}, target=8)
+                                         for n, x in (("near", 5.0), ("far", 12.0), ("mid", 8.0))])
+    session = _session(_spec(tmp_path, trials=400, blocks=[block]))
+
+    session.run()
+
+    rows = _trial_rows(session)
+    by_index = {row["index"]: row for row in rows}
+    repeats = [row for row in rows if row["repeat_of"] is not None]
+    assert repeats, "the seed gives the block a repeat"
+    for row in repeats:
+        shown_again = by_index[row["repeat_of"]]
+        assert (shown_again["condition"], shown_again["counting"]) == (row["condition"], "owed")
+        assert (row["index"] - row["repeat_of"] == 1) == row["at_once"]
+    assert [row["previous"] for row in rows] == [None] + [row["condition"] for row in rows[:-1]]
+
+
+def test_a_flat_run_counts_a_detection_tasks_miss_as_an_answer(tmp_path):
+    """The PI's decision 6, 2026-10-11: "'No response' in both detection tasks is a miss (counts,
+    used up)". A flat run counts by `EVERY_TRIAL`, which spends a no response; the structure
+    withholds, so the miss is an answer, counted, never an abort."""
+    session = _session(_spec(tmp_path, trials=400))
+
+    session.run()
+
+    misses = [row for row in _trial_rows(session) if row["outcome"] == "no_response"]
+    assert misses, "no miss at this seed"
+    assert all(row["counting"] == "counted" for row in misses)
+
+
+def test_a_drummed_blocks_rows_say_which_trials_were_drummed(tmp_path):
+    """The PI, 2026-10-11: drumming is recorded. A block that declares it repeats every trial that
+    is not correct at once; each such row is followed by its drum, which names it, and every row of
+    the block says drumming was on."""
+    block = Block(name="drill", conditions=[Condition("c", {}, target=20)], drum=True)
+    session = _session(_spec(tmp_path, trials=400, blocks=[block]))
+
+    session.run()
+
+    rows = _trial_rows(session)
+    assert {row["drumming"] for row in rows} == {"block"}
+    assert [row["outcome"] for row in rows].count("correct") == 20
+    for before, row in zip(rows, rows[1:]):
+        assert row["drummed"] == (before["outcome"] != "correct")
+        if row["drummed"]:
+            assert (row["repeat_of"], row["at_once"]) == (before["index"], True)
+    assert any(row["drummed"] for row in rows), "the seed gives the block a trial not correct"
+
+
+def test_a_drummed_trial_that_fails_ten_tries_in_a_row_is_said_on_the_console(
+        tmp_path, monkeypatch):
+    """The PI, 2026-10-12, "After 10 in a row": "A warning on the console after 10 failed tries in a
+    row" of one drummed trial, naming it; drumming goes on, and every try is recorded as it was."""
+    from wl_xcon import taskd
+
+    real, calls = taskd.run_trial, []
+
+    def wrong_ten_times(*args, **kwargs):
+        calls.append(None)
+        result = real(*args, **kwargs)
+        if len(calls) > 10:
+            return result
+        return dataclasses.replace(result, outcome=Outcome.WRONG_TARGET)
+
+    monkeypatch.setattr(taskd, "run_trial", wrong_ten_times)
+    block = Block(name="drill", conditions=[Condition("c", {}, target=2)], drum=True)
+    session = _session(_spec(tmp_path, trials=400, blocks=[block]))
+
+    session.run()
+
+    rows = _trial_rows(session)
+    warned = [said for kind, by, _, said in session.controls if kind == "warning" and by is None]
+    assert warned == ["c has failed 10 tries in a row under drumming, the last trial 9; drumming "
+                      "goes on: clear one moves past it once clear is switched on, stop drumming "
+                      "ends it"]
+    assert [row["outcome"] for row in rows[:10]] == ["wrong_target"] * 10
+    assert [row["drummed"] for row in rows[:11]] == [False] + [True] * 10
+    assert session.stop_kind == "completed"
+
+
+def test_a_runs_end_row_records_each_conditions_counts_a_drummed_trial_one_trial(tmp_path):
+    """The PI, 2026-10-18: "200 trials; drummed repeats inside them", and each condition's trials
+    and presentations, right and wrong answers and right first time, what it owes, its repeats, the
+    trials moved past and its drummed tries are "written into the run's end record as well". The
+    end row's `trials` counts trials and its `presentations` its lines (the controller's ruling
+    M5). The detection task withholds, so a miss is a wrong answer."""
+    block = Block(name="drill", conditions=[Condition("c", {}, target=20)], drum=True)
+    session = _session(_spec(tmp_path, trials=400, blocks=[block]))
+
+    session.run()
+
+    rows = _trial_rows(session)
+    (end,) = [row for row in _runs(session) if row["event"] == "end"]
+    (counts,) = end["conditions"]
+    wrong = {o.value for o in ANSWERS - RIGHT} | {"no_response"}
+    assert (counts["block"], counts["condition"], counts["trials"], counts["owed"]) == (
+        "drill", "c", 20, 0)
+    assert counts["presentations"] == len(rows) == end["presentations"]
+    assert end["trials"] == 20 and counts["failing"] == 0
+    assert counts["drummed"] == sum(row["drummed"] for row in rows) > 0
+    assert (counts["right"], counts["wrong"]) == (20, sum(row["outcome"] in wrong for row in rows))
+    assert counts["right_first"] == sum(row["outcome"] == "correct" and not row["drummed"]
+                                        for row in rows)
+    assert (counts["repeats"], counts["moved_past"], counts["possible_avoidance"]) == (0, 0, False)
+
+
+def test_a_trial_that_faults_is_in_neither_the_end_rows_counts_nor_its_conditions(
+        tmp_path, monkeypatch):
+    """The controller's ruling M5: a trial that faulted has no line, so it is counted in neither
+    the end row's `presentations` and `trials` nor its condition's. Here a trial's first try and
+    three drummed tries fail, and the fifth try faults."""
+    from wl_xcon import taskd
+
+    real, calls = taskd.run_trial, []
+
+    def wrong_then_a_fault(*args, **kwargs):
+        calls.append(None)
+        if len(calls) == 5:
+            raise RuntimeError("the card stopped answering")
+        return dataclasses.replace(real(*args, **kwargs), outcome=Outcome.WRONG_TARGET)
+
+    monkeypatch.setattr(taskd, "run_trial", wrong_then_a_fault)
+    block = Block(name="drill", conditions=[Condition("c", {}, target=20)], drum=True)
+    session = _session(_spec(tmp_path, trials=400, blocks=[block]))
+
+    with pytest.raises(RuntimeError, match="the card stopped answering"):
+        session.run()
+
+    (end,) = [row for row in _runs(session) if row["event"] == "end"]
+    (counts,) = end["conditions"]
+    assert (end["stop_kind"], len(_trial_rows(session))) == ("fault", 4)
+    assert (end["trials"], end["presentations"]) == (1, 4)
+    assert (counts["trials"], counts["presentations"], counts["drummed"]) == (1, 4, 3)
+    # The fifth try is in flight, so the trial has failed four in a row (`next_trial` cleared the
+    # drum at its draw).
+    assert counts["failing"] == 4
+
+
+def test_a_drum_failing_as_its_run_is_stopped_is_on_the_end_row(tmp_path, monkeypatch):
+    """The controller's ruling M6: `failing`, the failed tries in a row of a trial being drummed,
+    is on the end row's `conditions` too (decision 16: "all of them"): a run a person stops while
+    a trial has failed five tries."""
+    from wl_xcon import taskd
+
+    real = taskd.run_trial
+
+    def wrong(*args, **kwargs):
+        return dataclasses.replace(real(*args, **kwargs), outcome=Outcome.WRONG_TARGET)
+
+    monkeypatch.setattr(taskd, "run_trial", wrong)
+    block = Block(name="drill", conditions=[Condition("c", {}, target=20)], drum=True)
+    link = _Drained({6: [Stop(by=Box("jake"))]})
+    session = _session(_spec(tmp_path, trials=400, blocks=[block]), link=link)
+
+    session.run()
+
+    (end,) = [row for row in _runs(session) if row["event"] == "end"]
+    (counts,) = end["conditions"]
+    assert (end["stop_kind"], end["trials"], end["presentations"]) == ("operator", 1, 5)
+    assert (counts["failing"], counts["drummed"]) == (5, 4)
+
+
+def test_the_strips_counts_carry_each_levels_drummed_tries(tmp_path):
+    """The PI, 2026-10-18, "Show both": the strip's counts at the session, the task, the run and the
+    block carry their drummed tries and the right ones among them (telemetry schema 16), so the
+    page shows right first time beside right per presentation."""
+    block = Block(name="drill", conditions=[Condition("c", {}, target=20)], drum=True)
+    session = _session(_spec(tmp_path, trials=400, blocks=[block]))
+    seen = []
+    session.observe = lambda *_: seen.append(session.performance)
+
+    session.run()
+
+    rows = _trial_rows(session)
+    drummed = sum(row["drummed"] for row in rows)
+    right = sum(row["drummed"] and row["outcome"] == "correct" for row in rows)
+    last = seen[-1]
+    assert drummed > 0 and (last.run.drummed, last.run.right_drummed) == (drummed, right)
+    assert (last.session.drummed, last.task.drummed, last.block.drummed) == (drummed,) * 3
+
+
+def test_a_drummed_run_of_20_trials_shows_20_trials_and_its_presentations_beside(tmp_path):
+    """The PI, 2026-10-18, "200 trials; drummed repeats inside them" -- "The console would show
+    both: trials (200) and presentations (e.g. 260)" (the controller's ruling I1): a plain run of
+    20 trials, drummed from its start, is 20 trials and more presentations, on the page and on
+    /health, through the wire."""
+    from _frames import ENDPOINT, view
+
+    from wl_xcon.health import readings
+    from wl_xcon.link import decode, encode
+    from wl_xcon.web import fragments
+
+    link = _Drained({1: [Drum(scope="run", by=Box("jake"))]})
+    session = _session(_spec(tmp_path, trials=20), link=link)
+
+    session.run()
+
+    rows = _trial_rows(session)
+    last = decode(encode(link.published[-1]))
+    work = fragments(last, view())["rt-work"]
+    values = {row["key"]: row["value"] for row in readings(
+        last, frame_age_s=1.0, stale_after_s=30.0, rejected=None, endpoint=ENDPOINT)}
+    assert len(rows) > 20 and (last.trials, last.trial_index) == (20, len(rows))
+    assert (f'<span class="big">20</span><span class="unit">trials · {len(rows)} presentations'
+            f'</span>') in work
+    assert (values["trials"], values["presentations"]) == ("20", str(len(rows)))
+
+
+def test_a_runs_end_row_records_each_shortfall_its_cap_forgave(tmp_path):
+    """Engine spec §16.6: the shortfall is recorded, on the run's end row, flagged as possible
+    avoidance. A block whose own table allows no repeat forgives a condition's debt at its first
+    owed trial: the row names the block, the condition, the trials forgiven and the trial after
+    which they were, an owed one."""
+    table = Counting(after_stimulus=OWED, withholding=True, cap=0)
+    block = Block(name="b", counting=table,
+                  conditions=[Condition(n, {"target_x": x}, target=10)
+                              for n, x in (("near", 5.0), ("far", 12.0))])
+    session = _session(_spec(tmp_path, trials=400, blocks=[block]))
+
+    session.run()
+
+    (end,) = [row for row in _runs(session) if row["event"] == "end"]
+    rows = {row["index"]: row for row in _trial_rows(session)}
+    assert end["shortfalls"], "the seed breaks on a condition"
+    for short in end["shortfalls"]:
+        assert (short["block"], short["because"], short["possible_avoidance"], short["by"]) == (
+            "b", "cap", True, None)
+        assert rows[short["after_trial"]]["condition"] == short["condition"]
+        assert rows[short["after_trial"]]["counting"] == "owed"
     assert session.stopped_because == "every block is finished"
 
 
@@ -3373,6 +3653,356 @@ def _controls_rows(session: Session) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
+class _Drained(Simulated):
+    """A link that queues `script[n]` as the `n`th drain begins: the commands reach the loop at
+    the boundary before trial `n - 1`."""
+
+    def __init__(self, script):
+        super().__init__()
+        self.script, self.drains = dict(script), 0
+
+    def drain(self) -> list:
+        self.drains += 1
+        for command in self.script.get(self.drains, ()):
+            self.queue(command)
+        return super().drain()
+
+
+def _near_far(**block) -> Block:
+    return Block(name="b", conditions=[Condition("near", {"target_x": 5.0}, target=4),
+                                       Condition("far", {"target_x": 12.0}, target=4)], **block)
+
+
+def test_a_person_clears_a_trial_from_a_conditions_count_and_it_is_recorded(tmp_path):
+    """The PI, 2026-10-11: "there should be some way in the console to manually advance beyond or
+    clear a specific trial in the count", recorded. The block owes `near` one trial fewer; the
+    control row and the run's end row say who and where; a clear of a condition the block does not
+    have is refused with the sentence, and changes nothing."""
+    link = _Drained({3: [Training(setting="clear", on=True, by=Box("jake")),
+                         ClearOwed(condition="near", by=Box("jake")),
+                         ClearOwed(condition="nowhere", by=Box("jake"))]})
+    session = _session(_spec(tmp_path, trials=400, blocks=[_near_far()]), link=link)
+
+    session.run()
+
+    rows = _trial_rows(session)
+    assert sum(r["condition"] == "near" and r["counting"] != "owed" for r in rows) == 3
+    assert sum(r["condition"] == "far" and r["counting"] != "owed" for r in rows) == 4
+    (cleared,) = [row for row in _controls_rows(session) if row["kind"] == "clear"]
+    assert (cleared["condition"], cleared["block"], cleared["by"], cleared["trial_index"]) == (
+        "near", "b", {"kind": "box", "name": "jake"}, 2)
+    (end,) = [row for row in _runs(session) if row["event"] == "end"]
+    assert [(s["condition"], s["trials"], s["because"], s["possible_avoidance"], s["by"],
+             s["after_trial"]) for s in end["shortfalls"]] == [
+        ("near", 1, "cleared", False, {"kind": "box", "name": "jake"}, 1)]
+    assert [(name, why) for name, _, why in session.refusals] == [
+        ("clear", "block 'b' has no condition 'nowhere', so nothing is cleared")]
+
+
+def test_a_clear_sent_while_paused_is_applied_at_once(tmp_path):
+    """The paused loop drains commands too (`_hold`), and a clear is applied there, before the
+    resume: routed beside the pause, outside `Session._command`'s welfare-listed parts."""
+    link = _Scripted(script={1: [Training(setting="clear", on=True, by=Box("sam")),
+                                 ClearOwed(condition="near", by=Box("sam"))],
+                             2: [Resume(by=Box("sam"))]}, step=1.0)
+    link.queue(Pause(by=Box("jake")))
+    session, wall = _walled(tmp_path, link, trials=400, blocks=[_near_far()])
+    link.wall = wall
+
+    session.run()
+
+    kinds = [row["kind"] for row in _controls_rows(session)]
+    assert kinds[:4] == ["pause", "training", "clear", "resume"]
+    assert session.stop_kind == "completed"
+
+
+def test_a_trainer_switches_drumming_on_for_the_run_and_every_row_says_so(tmp_path):
+    """The PI, 2026-10-11: drumming switched on by the trainer, and recorded: a control row naming
+    who switched it and to what, and every trial row from then on drawn while drumming."""
+    link = _Drained({1: [Drum(scope="run", by=Box("jake"))]})
+    session = _session(_spec(tmp_path, trials=400, blocks=[_near_far()]), link=link)
+
+    session.run()
+
+    (switched,) = [row for row in _controls_rows(session) if row["kind"] == "drum"]
+    assert (switched["scope"], switched["was"], switched["now"], switched["by"]) == (
+        "run", None, "run", {"kind": "box", "name": "jake"})
+    rows = _trial_rows(session)
+    assert {row["drumming"] for row in rows} == {"run"}
+    assert all(row["drummed"] == (before["outcome"] != "correct")
+               for before, row in zip(rows, rows[1:]))
+    assert any(row["drummed"] for row in rows), "the seed gives the run a trial that is not correct"
+
+
+def test_a_person_clears_the_rest_of_a_condition_and_it_is_recorded(tmp_path):
+    """The science review's D5 and the controller's ruling: beside *clear one*, *clear the rest of
+    this condition*, so a condition the animal refuses is moved past in one command, recorded as a
+    clear is: its control row says how many trials it cleared, and the end row's shortfall."""
+    link = _Drained({2: [Training(setting="clear", on=True, by=Box("jake")),
+                         ClearOwed(condition="far", by=Box("jake"), rest=True)]})
+    session = _session(_spec(tmp_path, trials=400, blocks=[_near_far()]), link=link)
+
+    session.run()
+
+    rows = _trial_rows(session)
+    (cleared,) = [row for row in _controls_rows(session) if row["kind"] == "clear"]
+    (end,) = [row for row in _runs(session) if row["event"] == "end"]
+    (short,) = end["shortfalls"]
+    paid = sum(r["condition"] == "far" and r["counting"] in ("counted", "spent") for r in rows)
+    assert (cleared["rest"], cleared["cleared"], cleared["owed"]) == (True, short["trials"], 0)
+    assert (short["condition"], short["because"], short["trials"] + paid) == ("far", "cleared", 4)
+    assert sum(r["condition"] == "near" and r["counting"] != "owed" for r in rows) == 4
+
+
+def _carried_switch(tmp_path, next_block: Block) -> dict:
+    """The control row of a `Drum("block")` sent as a drumming block A ends, before `next_block`."""
+    blocks = [Block(name="A", conditions=[Condition("a", {}, target=1)], counting=EVERY_TRIAL,
+                    drum=True), next_block]
+    link = _Drained({2: [Drum(scope="block", by=Box("jake"))]})
+    session = _session(_spec(tmp_path, trials=400, blocks=blocks), link=link)
+
+    session.run()
+
+    (switched,) = [row for row in _controls_rows(session) if row["kind"] == "drum"]
+    rows = _trial_rows(session)
+    assert [row["drumming"] for row in rows if row["block"] == "A"] == ["block"]
+    assert {row["drumming"] for row in rows if row["block"] == "B"} == {"block"}
+    return switched
+
+
+def test_a_drumming_switch_sent_as_a_block_ends_is_for_the_next_block(tmp_path):
+    """The engineering review's Minor 10: the loop drains commands before it advances, so a switch
+    that arrives as a block's last trial pays was reset by the advance, its row naming the block
+    that had ended. It is the next block's, and its row names that block -- and says what
+    drumming read for *that* block before the switch (Task 8's review, Important 2), not the
+    ending block's: B does not drum, so the switch changed it."""
+    switched = _carried_switch(tmp_path, Block(name="B", conditions=[Condition("b", {}, target=3)]))
+
+    assert (switched["block"], switched["was"], switched["now"]) == ("B", None, "block")
+
+
+def test_a_carried_drumming_switch_says_so_when_the_next_block_drums_anyway(tmp_path):
+    """Task 8's review, Important 2: where the next block declares `drum`, the switch changes
+    nothing for it, and its row reads `was` as `"block"`."""
+    switched = _carried_switch(
+        tmp_path, Block(name="B", conditions=[Condition("b", {}, target=3)], drum=True))
+
+    assert (switched["block"], switched["was"], switched["now"]) == ("B", "block", "block")
+
+
+@pytest.mark.parametrize("next_drums", [False, True])
+@pytest.mark.parametrize(("first", "second", "second_was"),
+                         [("block", "off", "block"), ("off", "block", None)])
+def test_two_drumming_switches_drained_at_one_block_end_read_the_pending_one(
+        tmp_path, next_drums, first, second, second_was):
+    """Task 8's re-review, minor: the second switch of one drain is for the block the first was
+    carried to, so its `was` is the pending switch's, not the next block's own declaration."""
+    blocks = [Block(name="A", conditions=[Condition("a", {}, target=1)], counting=EVERY_TRIAL,
+                    drum=True),
+              Block(name="B", conditions=[Condition("b", {}, target=3)], drum=next_drums)]
+    link = _Drained({2: [Drum(scope=first, by=Box("jake")), Drum(scope=second, by=Box("jake"))]})
+    session = _session(_spec(tmp_path, trials=400, blocks=blocks), link=link)
+
+    session.run()
+
+    one, two = [row for row in _controls_rows(session) if row["kind"] == "drum"]
+    assert (one["block"], one["was"]) == ("B", "block" if next_drums else None)
+    assert (two["block"], two["was"]) == ("B", second_was)
+
+
+def test_a_clear_or_a_drum_that_reached_the_session_off_the_wire_meets_the_wires_rule(tmp_path):
+    """Task 8's review, Minor 3: `_clear` and `_drum` check what the wire checks, as `_schedule`
+    does, and refuse with the sentence rather than raise or act."""
+    link = _Drained({1: [ClearOwed(condition="near", by=Box("jake"), rest="yes"),
+                         Drum(scope="sometimes", by=Box("jake"))]})
+    session = _session(_spec(tmp_path, trials=400, blocks=[_near_far()]), link=link)
+
+    session.run()
+
+    assert [(name, why) for name, _, why in session.refusals] == [
+        ("clear", "a 'clear' command's rest is true or false, and 'yes' is neither, so it is "
+                  "refused"),
+        ("drum", "drumming is switched block, run or off, and 'sometimes' is none of them, so it "
+                 "is refused")]
+    assert not [row for row in _controls_rows(session) if row["kind"] in ("clear", "drum")]
+    assert all(row["drumming"] is None for row in _trial_rows(session))
+
+
+def test_a_training_switch_that_reached_the_session_off_the_wire_meets_the_wires_rule(tmp_path):
+    """Task 14's review, Minor 1: `_train` checks what the wire checks, as `_clear` and `_drum`
+    do, and refuses with the wire's sentence rather than raise or switch on a string."""
+    link = _Drained({1: [Training(setting="drum", on=True, by=Box("jake")),
+                         Training(setting="clear", on="yes", by=Box("jake"))]})
+    session = _session(_spec(tmp_path, trials=400, blocks=[_near_far()]), link=link)
+
+    session.run()
+
+    assert [(name, why) for name, _, why in session.refusals] == [
+        ("training", "a training setting is clear or first_answers, and 'drum' is neither, so it "
+                     "is refused"),
+        ("training", "a 'training' command's on is true or false, and 'yes' is neither, so it is "
+                     "refused")]
+    assert not [row for row in _controls_rows(session) if row["kind"] == "training"]
+    assert not session._scheduler.clearing
+    assert all(row["aids"] == [] for row in _trial_rows(session))
+
+
+def test_the_clears_feed_sentence_counts_its_trials_in_the_singular_and_the_plural(tmp_path):
+    """Task 8's review, Minor 4: "the rest, 1 trial", "the rest, 2 trials"."""
+    def said(target: int) -> str:
+        block = Block(name="b", conditions=[Condition("a", {}, target=target),
+                                            Condition("z", {}, target=1)])
+        link = _Drained({1: [Training(setting="clear", on=True, by=Box("jake")),
+                             ClearOwed(condition="a", by=Box("jake"), rest=True)]})
+        session = _session(_spec(tmp_path / str(target), trials=400, blocks=[block]), link=link)
+        session.run()
+        (feed,) = [said for kind, _, _, said in session.controls if kind == "clear"]
+        return feed
+
+    assert said(1).startswith("cleared the rest, 1 trial, of a in block b")
+    assert said(2).startswith("cleared the rest, 2 trials, of a in block b")
+
+
+def test_clear_is_refused_until_a_trainer_switches_it_on_and_each_row_marks_the_aids_on(tmp_path):
+    """The PI, 2026-10-18: *clear* is a training aid, off by default; refused with the sentence
+    until a trainer switches it on, which `controls.jsonl` records with who; and every trial's row
+    marks the aids on as it was drawn. A second switch to the same value is refused with its
+    sentence, as a pause of a paused session is, and records nothing."""
+    link = _Drained({1: [ClearOwed(condition="near", by=Box("jake"))],
+                     2: [Training(setting="clear", on=True, by=Box("jake")),
+                         Training(setting="clear", on=True, by=Box("jake"))],
+                     3: [ClearOwed(condition="near", by=Box("jake"))]})
+    session = _session(_spec(tmp_path, trials=400, blocks=[_near_far()]), link=link)
+
+    session.run()
+
+    assert [(name, why) for name, _, why in session.refusals] == [
+        ("clear", "clear is a training aid, and it is off in this run; a trainer switches it on "
+                  "to clear a trial from the count"),
+        ("training", "clear is already on, so nothing changed")]
+    (switched,) = [row for row in _controls_rows(session) if row["kind"] == "training"]
+    assert (switched["setting"], switched["was"], switched["now"], switched["by"],
+            switched["trial_index"]) == ("clear", False, True, {"kind": "box", "name": "jake"}, 1)
+    assert [row["kind"] for row in _controls_rows(session)] == ["training", "clear"]
+    rows = _trial_rows(session)
+    assert rows[0]["aids"] == [] and {tuple(row["aids"]) for row in rows[1:]} == {("clear",)}
+
+
+def test_a_session_switches_clear_and_first_answers_on_and_off_and_refuses_a_repeat(tmp_path):
+    """The training switch along the session's own path, in both directions: each control row's
+    setting, what it was and is, and the trial it came before; the trial rows' aids; and a switch
+    to the value already set, or of an aid that is off, refused with its sentence. The feed says
+    "first answers only", the recorded setting stays `first_answers`."""
+    jake = Box("jake")
+    link = _Drained({1: [Training(setting="clear", on=True, by=jake)],
+                     3: [Training(setting="clear", on=False, by=jake),
+                         Training(setting="first_answers", on=True, by=jake)],
+                     4: [ClearOwed(condition="near", by=jake),
+                         Training(setting="first_answers", on=False, by=jake),
+                         Training(setting="first_answers", on=False, by=jake)]})
+    session = _session(_spec(tmp_path, trials=400, blocks=[_near_far()]), link=link)
+
+    session.run()
+
+    assert [(r["setting"], r["was"], r["now"], r["trial_index"]) for r in _controls_rows(session)
+            if r["kind"] == "training"] == [
+        ("clear", False, True, 0), ("clear", True, False, 2), ("first_answers", False, True, 2),
+        ("first_answers", True, False, 3)]
+    assert [said for kind, _, _, said in session.controls if kind == "training"] == [
+        "clear on for the rest of the run", "clear off for the rest of the run",
+        "first answers only on for the rest of the run",
+        "first answers only off for the rest of the run"]
+    assert [row["aids"] for row in _trial_rows(session)][:4] == [["clear"], ["clear"], [], []]
+    assert [why for _, _, why in session.refusals] == [
+        "clear is a training aid, and it is off in this run; a trainer switches it on to clear a "
+        "trial from the count",
+        "first answers only is already off, so nothing changed"]
+
+
+def test_a_blocks_drumming_works_in_a_piloting_session_and_its_rows_mark_it(tmp_path):
+    """The PI, 2026-10-18, "Allow it, with a warning": a training aid is meant for training
+    sessions, and in a piloting or recording one "it works, and the console shows a standing warning
+    ... The record says so on every trial." Nothing refuses it."""
+    block = Block(name="drill", conditions=[Condition("c", {}, target=10)], drum=True)
+    session = _session(_spec(tmp_path, trials=400, blocks=[block], session_kind="piloting"))
+
+    session.run()
+
+    rows = _trial_rows(session)
+    assert {tuple(row["aids"]) for row in rows} == {("drumming",)}
+    assert any(row["drummed"] for row in rows) and session.stop_kind == "completed"
+
+
+def test_the_drum_warning_names_only_stop_drumming_where_the_condition_owes_nothing():
+    """The controller's ruling M3 on the plan's revision review: past a criterion block's targets
+    the drummed condition owes nothing, so *clear one* would be refused there; the warning after
+    ten failed tries names only *stop drumming*. Where it owes, *clear one* once switched on."""
+    owing = ("c has failed 10 tries in a row under drumming, the last trial 9; drumming goes on: "
+             "clear one moves past it once clear is switched on, stop drumming ends it")
+
+    assert _drum_warned("c", 9, 1) == owing
+    assert _drum_warned("c", 9, 1, clearing=True) == (
+        "c has failed 10 tries in a row under drumming, the last trial 9; drumming goes on: "
+        "clear one moves past it, stop drumming ends it")
+    assert _drum_warned("c", 9, 0, clearing=True) == _drum_warned("c", 9, 0)
+    assert _drum_warned("c", 9, 0) == (
+        "c has failed 10 tries in a row under drumming, the last trial 9; drumming goes on: stop "
+        "drumming ends it")
+
+
+def test_the_drum_warning_at_the_session_drops_once_clear_is_switched_on_where_clear_is_on(
+        tmp_path, monkeypatch):
+    """The wording, along the run loop's own call: where the condition owes a trial and *clear* is
+    already on, the warning says *clear one* moves past it, without "once clear is switched on"."""
+    from wl_xcon import taskd
+    real, calls = taskd.run_trial, []
+
+    def wrong_ten_times(*args, **kwargs):
+        calls.append(None)
+        result = real(*args, **kwargs)
+        if len(calls) > 10:
+            return result
+        return dataclasses.replace(result, outcome=Outcome.WRONG_TARGET)
+
+    monkeypatch.setattr(taskd, "run_trial", wrong_ten_times)
+    block = Block(name="drill", conditions=[Condition("c", {}, target=2)], drum=True)
+    link = _Drained({1: [Training(setting="clear", on=True, by=Box("jake"))]})
+    session = _session(_spec(tmp_path, trials=400, blocks=[block]), link=link)
+
+    session.run()
+
+    warned = [said for kind, by, _, said in session.controls if kind == "warning" and by is None]
+    assert warned == ["c has failed 10 tries in a row under drumming, the last trial 9; drumming "
+                      "goes on: clear one moves past it, stop drumming ends it"]
+
+
+def test_the_drum_warning_at_the_session_names_only_stop_drumming_past_a_blocks_targets(
+        tmp_path, monkeypatch):
+    """The controller's ruling M3, along the run loop's own call: a drummed streak block whose
+    target is one trial, ten wrong answers after its first right one. The condition owes nothing
+    by then, so the warning names only *stop drumming*, with *clear* on as with it off."""
+    from wl_xcon import taskd
+    real, calls = taskd.run_trial, []
+
+    def scripted(*args, **kwargs):
+        calls.append(None)
+        result = real(*args, **kwargs)
+        outcome = Outcome.WRONG_TARGET if 2 <= len(calls) <= 11 else Outcome.CORRECT
+        return dataclasses.replace(result, outcome=outcome)
+
+    monkeypatch.setattr(taskd, "run_trial", scripted)
+    block = Block(name="drill", conditions=[Condition("c", {}, target=1)], drum=True,
+                  criterion=(1.0, 3))
+    link = _Drained({5: [Training(setting="clear", on=True, by=Box("jake"))]})
+    session = _session(_spec(tmp_path, trials=400, blocks=[block]), link=link)
+
+    session.run()
+
+    warned = [said for kind, by, _, said in session.controls if kind == "warning" and by is None]
+    assert warned == ["c has failed 10 tries in a row under drumming, the last trial 10; drumming "
+                      "goes on: stop drumming ends it"]
+
+
 def test_a_pause_holds_the_session_at_a_boundary_and_resume_continues(tmp_path):
     """Spec §5.1: at the next trial boundary the loop holds -- no trial runs -- and
     resume continues. Both are strobed so the recording shows the gap, and nothing
@@ -5240,11 +5870,14 @@ def test_a_trial_that_faults_keeps_its_number_and_the_next_trial_never_reuses_it
 #: A task with one state: `FIX_ON` on entering it, `CORRECT` 0.01 s later. No window, no
 #: reward and no parameter, so every code its session strobes is one these tests name.
 ONE_STATE_TASK = """
-from wl_xcon.task import NO_CHOICE, After, Mark, On, Outcome, ReactionTime, State, Task, Trial
+from wl_xcon.task import (
+    NO_CHOICE, OWED, After, Counting, Mark, On, Outcome, ReactionTime, State, Task, Trial,
+)
 
 trial = Trial(
     start="only",
     states=[State("only", enter=[Mark(4096)], go=[On(After(0.01), Outcome.CORRECT)])],
+    counting=Counting(after_stimulus=OWED, appears="only"),
 )
 TASK = Task(
     {"only": trial},
@@ -5394,10 +6027,10 @@ def test_a_trial_that_reaches_no_outcome_is_still_closed(tmp_path, monkeypatch):
     """A trial `run_trial` returns from without an outcome -- a hang, at `max_frames`,
     which a task that passes `check()` can still reach, since check 4 exempts a state
     declared `unbounded=True` (a lever never pressed) -- strobes no outcome marker, and
-    it still ended: `TRIAL_END` closes it, and its line records `hang`. The second trial
-    runs whole, so the run's one trial is completed and the run ends. Both trials lie in
-    the run's one block, opened before the first and closed after the second
-    (session-levels spec §4)."""
+    it still ended: `TRIAL_END` closes it, and its line records `hang`. **It is one of a flat
+    run's two trials** (the engine C2a plan: a missed acquisition, which a flat run's every-trial
+    table spends), so the second runs whole and the run ends. Both trials lie in the run's one
+    block, opened before the first and closed after the second (session-levels spec §4)."""
     from wl_xcon import taskd
 
     real, calls = taskd.run_trial, []
@@ -5411,7 +6044,7 @@ def test_a_trial_that_reaches_no_outcome_is_still_closed(tmp_path, monkeypatch):
     monkeypatch.setattr(taskd, "run_trial", hangs_first)
     task = tmp_path / "one_state.py"
     task.write_text(ONE_STATE_TASK)
-    session = _session(_spec(tmp_path, trials=1, task=str(task), values={}))
+    session = _session(_spec(tmp_path, trials=2, task=str(task), values={}))
 
     session.run()
 
@@ -5424,7 +6057,203 @@ def test_a_trial_that_reaches_no_outcome_is_still_closed(tmp_path, monkeypatch):
         BLOCK_END,
         RUN_END_MARKER, RUN_END, 4129,
     ]
-    assert [row["outcome"] for row in _trial_rows(session)] == ["hang", "correct"]
+    assert [(row["outcome"], row["counting"]) for row in _trial_rows(session)] == [
+        ("hang", "spent"), ("correct", "counted")]
+
+
+def test_a_trial_that_reaches_the_longest_trial_is_shown_again_as_a_missed_acquisition(
+        tmp_path, monkeypatch):
+    """XC-287; the PI, 2026-10-11: "it isn't a fixation break, it is a missed acquisition" --
+    repeated like a fault. In a block of one condition owing one trial, the hang is owed and its
+    condition, the only one still owed, comes straight back; its line still says `hang`. A hang
+    neither counted nor came back before engine build C2a (the plan's fourth defect)."""
+    from wl_xcon import taskd
+
+    real, calls = taskd.run_trial, []
+
+    def hangs_first(*args, **kwargs):
+        calls.append(None)
+        if len(calls) == 1:
+            return real(*args, max_frames=1, **kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(taskd, "run_trial", hangs_first)
+    task = tmp_path / "one_state.py"
+    task.write_text(ONE_STATE_TASK)
+    block = Block(name="b", conditions=[Condition("only", {}, target=1)])
+    session = _session(_spec(tmp_path, trials=1, task=str(task), values={}, blocks=[block]))
+
+    session.run()
+
+    assert [(row["outcome"], row["counting"], row["repeat_of"], row["at_once"])
+            for row in _trial_rows(session)] == [("hang", "owed", None, False),
+                                                 ("correct", "counted", 0, True)]
+
+
+@pytest.mark.parametrize(("blocks", "said"), [
+    ([Block(name="b", conditions=[Condition("only", {}, target=1)])],
+     "trial 0 (only) reached the longest trial, 5 minutes, with no outcome: recorded as a hang, a "
+     "missed acquisition, and shown again"),
+    (None, "trial 0 (session) reached the longest trial, 5 minutes, with no outcome: recorded as a "
+           "hang, a missed acquisition, and used up as one of the run's trials"),
+], ids=["block", "plain run"])
+def test_a_trial_at_the_longest_trial_is_said_on_the_console(tmp_path, monkeypatch, blocks, said):
+    """The engine C2a plan's science review, D4, and the controller's ruling: a trial that ran five
+    minutes is a warning on the changes feed, naming the trial and what it did to the count -- shown
+    again in a block, used up in a plain run of N -- and nothing stops."""
+    from wl_xcon import taskd
+
+    real, calls = taskd.run_trial, []
+
+    def hangs_first(*args, **kwargs):
+        calls.append(None)
+        if len(calls) == 1:
+            return real(*args, max_frames=1, **kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(taskd, "run_trial", hangs_first)
+    task = tmp_path / "one_state.py"
+    task.write_text(ONE_STATE_TASK)
+    extra = {} if blocks is None else {"blocks": blocks}
+    session = _session(_spec(tmp_path, trials=2, task=str(task), values={}, **extra))
+
+    session.run()
+
+    assert [s for kind, by, _, s in session.controls if kind == "warning" and by is None] == [said]
+    assert session.stop_kind == "completed"
+
+
+def test_a_hang_past_its_conditions_repeat_limit_says_its_debt_was_forgiven(
+        tmp_path, monkeypatch):
+    """Task 5's sentence reached through a run: a trial that ran the longest trial is owed, and a
+    table whose `cap` is 0 allows no repeat, so the condition's remaining debt is forgiven (§16.6)
+    and the console's changes feed says so, where `_hung` was only unit-tested with owed 0."""
+    from wl_xcon import taskd
+
+    real, calls = taskd.run_trial, []
+
+    def hangs_first(*args, **kwargs):
+        calls.append(None)
+        if len(calls) == 1:
+            return real(*args, max_frames=1, **kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(taskd, "run_trial", hangs_first)
+    task = tmp_path / "one_state.py"
+    task.write_text(ONE_STATE_TASK)
+    block = Block(name="b", counting=Counting(after_stimulus=OWED, cap=0),
+                  conditions=[Condition("only", {}, target=2)])
+    session = _session(_spec(tmp_path, trials=2, task=str(task), values={}, blocks=[block]))
+
+    session.run()
+
+    assert [s for kind, by, _, s in session.controls if kind == "warning" and by is None] == [
+        "trial 0 (only) reached the longest trial, 5 minutes, with no outcome: recorded as a "
+        "hang, a missed acquisition, and owed, its condition's remaining debt forgiven"]
+    (end,) = [row for row in _runs(session) if row["event"] == "end"]
+    assert [(s["condition"], s["trials"], s["because"]) for s in end["shortfalls"]] == [
+        ("only", 2, "cap")]
+
+
+def _hang_after_the_targets(tmp_path, monkeypatch, drum: bool) -> list[str]:
+    """A criterion block of one condition, target 1, "3 correct in a row": a right answer, a hang,
+    then right answers. Returns the changes feed's warnings of the run."""
+    from wl_xcon import taskd
+
+    real, calls = taskd.run_trial, []
+
+    def scripted(*args, **kwargs):
+        calls.append(None)
+        result = real(*args, **kwargs)
+        outcome = None if len(calls) == 2 else Outcome.CORRECT
+        return dataclasses.replace(result, outcome=outcome)
+
+    monkeypatch.setattr(taskd, "run_trial", scripted)
+    block = Block(name="drill", conditions=[Condition("c", {}, target=1)], criterion=(1.0, 3),
+                  drum=drum)
+    session = _session(_spec(tmp_path, trials=400, blocks=[block]))
+
+    session.run()
+
+    assert session.stop_kind == "completed"
+    return [said for kind, by, _, said in session.controls if kind == "warning" and by is None]
+
+
+_HANG = ("trial 1 (c) reached the longest trial, 5 minutes, with no outcome: recorded as a hang, "
+         "a missed acquisition, and ")
+
+
+def test_a_hang_past_a_criterion_blocks_targets_says_it_is_not_shown_again(tmp_path, monkeypatch):
+    """The final review's probe: past the targets nothing is owed and nothing is forgiven (no
+    shortfall is written), so the sentence says the block is past its targets, not that a debt was
+    forgiven."""
+    warned = _hang_after_the_targets(tmp_path, monkeypatch, drum=False)
+
+    assert warned == [_HANG + "not shown again: its block is past its targets"]
+
+
+def test_a_hang_under_drumming_past_the_targets_says_it_is_drummed_back(tmp_path, monkeypatch):
+    """The same run with drumming on: the hang is not right, so it is drummed straight back, and
+    the sentence says that, not that the block is past its targets."""
+    warned = _hang_after_the_targets(tmp_path, monkeypatch, drum=True)
+
+    assert warned == [_HANG + "drummed back at once"]
+
+
+def test_first_answers_only_ends_a_percentage_block_where_first_answers_decide(
+        tmp_path, monkeypatch):
+    """The path of the training setting `first_answers` (the PI, 2026-10-18), through a session: a
+    percentage block under drumming, "1 of the last 2", whose first trial is answered wrong, wrong
+    again and then right. Judging every answer, the window reads wrong, wrong, right and the block
+    would end at the third try; judging first answers only it reads the first wrong answer alone,
+    the drummed tries leave it, and the block ends one trial later, when the next trial's first
+    answer is right."""
+    from wl_xcon import taskd
+
+    real, calls = taskd.run_trial, []
+
+    def scripted(*args, **kwargs):
+        calls.append(None)
+        result = real(*args, **kwargs)
+        outcome = Outcome.WRONG_TARGET if len(calls) <= 2 else Outcome.CORRECT
+        return dataclasses.replace(result, outcome=outcome)
+
+    monkeypatch.setattr(taskd, "run_trial", scripted)
+    block = Block(name="drill", conditions=[Condition("c", {}, target=1)], criterion=(0.5, 2),
+                  drum=True)
+    link = _Drained({1: [Training(setting="first_answers", on=True, by=Box("jake"))]})
+    session = _session(_spec(tmp_path, trials=400, blocks=[block]), link=link)
+
+    session.run()
+
+    assert session.stop_kind == "completed"
+    assert [(row["outcome"], row["drummed"]) for row in _trial_rows(session)] == [
+        ("wrong_target", False), ("wrong_target", True), ("correct", True), ("correct", False)]
+
+
+@pytest.mark.parametrize(("counted", "owed", "ending"), [
+    ("owed", 2, "and shown again"),
+    ("owed", 0, "and owed, its condition's remaining debt forgiven"),
+    ("owed", 0, "and drummed back at once"),
+    ("owed", 2, "and drummed back at once"),
+    ("owed", 0, "and not shown again: its block is past its targets"),
+    ("spent", 0, "and used up as one of the run's trials"),
+    ("counted", 0, "and counted toward its condition"),
+    ("unpaid", 0, "and left unpaid"),
+], ids=["owed", "owed, debt forgiven", "owed, drummed", "owed, drummed with debt", "owed, past",
+        "spent", "counted", "unpaid"])
+def test_the_hang_warning_says_what_each_kind_of_count_did_to_the_trial(counted, owed, ending):
+    """`_hung`'s sentences, each asserted: the console tells the trainer which trial of which
+    condition hung and which way the table counted it (the controller's ruling, pre-flight Q6),
+    and for an owed trial what is true of it: forgiven only where a shortfall was written."""
+    from wl_xcon import taskd
+
+    said = taskd._hung(
+        7, "near", counted, owed,
+        drummed="drummed" in ending, forgiven="forgiven" in ending, past="past" in ending)
+
+    assert said.startswith("trial 7 (near) reached the longest trial, 5 minutes, with no outcome: ")
+    assert said.endswith(f"recorded as a hang, a missed acquisition, {ending}")
 
 
 def test_a_number_past_16_bits_is_strobed_whole_high_word_first(tmp_path):
@@ -5511,7 +6340,7 @@ def _plan(*names, each=2):
         Block(
             name=name,
             conditions=[Condition(name.lower(), {}, target=each)],
-            counts_toward=frozenset(Outcome),
+            counting=EVERY_TRIAL,
         )
         for name in names
     ]

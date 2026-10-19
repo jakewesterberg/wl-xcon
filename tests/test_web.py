@@ -24,7 +24,23 @@ from _frames import frame, idle, view
 from wl_xcon.actor import Box, Member
 from wl_xcon.cli import _clock, _local
 from wl_xcon.findings import SESSION_KINDS
-from wl_xcon.link import NOTE_LIMIT, Control, Counts, ParamRow, Performance, Preflight, PreflightItem, Question, Refused, ScheduledStop, Staged, Stranded, WarningRow
+from wl_xcon.link import (
+    NOTE_LIMIT,
+    ConditionRow,
+    Control,
+    Counts,
+    ParamRow,
+    Performance,
+    Preflight,
+    PreflightItem,
+    Question,
+    Refused,
+    ScheduledStop,
+    ShortfallRow,
+    Staged,
+    Stranded,
+    WarningRow,
+)
 from wl_xcon.warnlist import HEAD_FREE, UNLISTED
 from wl_xcon.web import (
     _CSS,
@@ -331,7 +347,7 @@ def test_the_strip_has_two_cells():
 def test_correct_trials_shows_the_session_its_task_this_run_and_this_block():
     strip = fragments(frame(), view(trials_per_min=12.0))["strip"]
     assert '30<span class="u"> / 40</span>' in strip and "75%" in strip
-    assert "12.0/min" in strip
+    assert "12.0 presentations/min" in strip
     assert "fixation_detection" in strip and "2 runs" in strip
     assert "this run" in strip and "run 3" in strip
     assert "block 27 · near" in strip
@@ -666,6 +682,205 @@ def test_still_needed_lists_each_condition_and_its_count():
     assert '<span class="mono">catch</span><span class="num">2</span>' in need
 
 
+def test_still_needed_offers_to_clear_a_trial_of_each_condition_owing_one_while_a_run_runs():
+    """The PI, 2026-10-11: "some way in the console to manually advance beyond or clear a specific
+    trial in the count"; *clear the rest* beside it where a condition owes more than one (the
+    science review's D5), while the training aid *clear* is on (the PI, 2026-10-18). A condition
+    owing nothing has no button; nothing is offered once the run has ended, and away from where
+    controls work each is grayed."""
+    need = fragments(frame(owed={"near": 2, "far": 0, "mid": 1}, clearing=True), view())["rt-need"]
+    ended = fragments(frame(owed={"near": 2}, stop_kind="completed", clearing=True),
+                      view())["rt-need"]
+    lan = fragments(frame(owed={"near": 2}, clearing=True), view(can_write=False))["rt-need"]
+
+    one = '<button type="button" class="btn" data-cmd="clear" data-condition="near">clear one'
+    assert one in need
+    assert 'data-cmd="clear" data-condition="near" data-rest="1">clear the rest' in need
+    assert 'data-condition="far"' not in need
+    assert 'data-condition="mid">clear one' in need
+    assert 'data-condition="mid" data-rest' not in need
+    assert 'data-cmd="clear"' not in ended and 'data-cmd="drum"' not in ended
+    assert 'data-cmd="training"' not in ended
+    assert 'data-cmd="clear" data-condition="near" disabled' in lan
+
+
+def test_still_needed_offers_no_clear_where_nothing_of_the_block_can_be_owed():
+    """The engineering review's Minor 3: a plain "run N trials", whose every trial pays, owes
+    nothing to move past, so *clear one* would only shorten it; the counts and the drumming
+    switches stay."""
+    need = fragments(frame(owed={"session": 30}, clearable=False, clearing=True), view())["rt-need"]
+
+    assert 'data-cmd="clear"' not in need and '<span class="num">30</span>' in need
+    assert 'data-cmd="drum"' in need
+
+
+def test_still_needed_shows_each_shortfall_a_caps_flagged_as_possible_avoidance():
+    """Engine spec §16.6: "its shortfall recorded, shown and flagged as possible avoidance"; one
+    the rig made is named for the rig and not flagged (the engineering review's M4); a cleared one
+    says who cleared it."""
+    need = fragments(frame(shortfalls=(
+        ShortfallRow("b", "near", 3, "cap", True, None, 12),
+        ShortfallRow("b", "mid", 2, "rig", False, None, 15),
+        ShortfallRow("b", "far", 1, "cleared", False, Box("jake"), 20),
+    )), view())["rt-need"]
+
+    assert ("3 short in b · possible avoidance: its failed repeats in a row reached its "
+            "limit") in need
+    assert ("2 short in b · its repeat limit was reached with tries the rig lost (a lost tracker "
+            "or a fault): not flagged as avoidance") in need
+    assert ('1 short in b · cleared by <span class="who-b">jake <span class="nm">(box, unverified)'
+            in need)
+
+
+@pytest.mark.parametrize(
+    ("drumming", "said", "offered"),
+    [(None, "not drumming", ["block", "run"]), ("block", "drumming this block", ["run", "off"]),
+     ("run", "drumming this run", ["block", "off"])],
+)
+def test_still_needed_says_whether_trials_are_drummed_and_offers_the_other_switches(
+        drumming, said, offered):
+    """The PI, 2026-10-11: drumming switched on per block or run by the trainer."""
+    need = fragments(frame(drumming=drumming), view())["rt-need"]
+
+    assert f'<span class="nm">{said}</span>' in need
+    assert re.findall(r'data-cmd="drum" data-scope="(\w+)"', need) == offered
+
+
+def test_clear_is_offered_only_while_the_training_aid_is_on_beside_the_training_switches():
+    """The PI, 2026-10-18: *clear* is a training aid, off by default, and offered only while it is
+    on; a switch turns it on or off, and another sets how a percentage counts drummed answers
+    (Task 14's `link.Training`)."""
+    off = fragments(frame(owed={"near": 2}, rule="percentage"), view())["rt-need"]
+    on = fragments(frame(owed={"near": 2}, clearing=True, first_answers=True, rule="percentage"),
+                   view())["rt-need"]
+
+    assert 'data-cmd="clear"' not in off
+    assert ('<span class="nm">clear is off</span><button type="button" class="btn" '
+            'data-cmd="training" data-setting="clear" data-on="1">switch clear on</button>') in off
+    assert ('<span class="nm">a percentage counts every answer, drummed too</span>'
+            '<button type="button" class="btn" data-cmd="training" data-setting="first_answers" '
+            'data-on="1">the block\'s percentage: count first answers only</button>') in off
+    assert 'data-cmd="clear" data-condition="near"' in on
+    assert 'data-setting="clear" data-on="0">switch clear off' in on
+    assert '<span class="nm">a percentage counts first answers only</span>' in on
+    assert ('data-setting="first_answers" data-on="0">the block\'s percentage: '
+            'count every answer') in on
+
+
+def test_still_needed_shows_each_conditions_counts():
+    """The PI, 2026-10-18: per condition, "trials and presentations; right, wrong, and percent right
+    first time; owed, repeats placed, and moved past, with the possible-avoidance flag; drummed
+    tries", and the failed run of its trial being drummed now. A condition with no trial yet has no
+    percentage."""
+    need = fragments(frame(owed={"near": 2, "far": 0}, conditions=(
+        ConditionRow("near", 12, 15, 9, 4, 8, 2, 3, 1, True, 3, 2),
+        ConditionRow("far", 0, 0, 0, 0, 0, 0, 0, 0, False, 0, 0))), view())["rt-need"]
+
+    assert ('<div class="kv"><span class="nm">12 trials · 15 presentations · 9 right · 4 wrong · '
+            '67% right first time · 3 repeats · 1 moved past (possible avoidance) · 3 drummed · '
+            'failing 2 in a row</span></div>') in need
+    assert ('<span class="nm">0 trials · 0 presentations · 0 right · 0 wrong · — right first time '
+            '· 0 repeats · 0 moved past · 0 drummed</span>') in need
+
+
+@pytest.mark.parametrize(("kind", "tone", "said"), [
+    ("training", "info", "drumming and clear on: the record marks every trial"),
+    ("recording", "warn", "drumming and clear on in a recording session, though training aids are "
+                          "meant for training sessions: the record marks every trial"),
+])
+def test_a_standing_warning_says_a_training_aid_is_on_in_the_words_for_the_sessions_kind(
+        kind, tone, said):
+    """The PI, 2026-10-18: "a warning that training aids are on in the console", and in a piloting
+    or recording session "a standing warning that a training aid is on in a non-training session".
+    None while no aid is on, nor once the run has ended."""
+    aids = ("drumming", "clear")
+    on = fragments(frame(drumming="run", clearing=True, aids=aids, session_kind=kind),
+                   view())["banners"]
+    ended = fragments(frame(drumming="run", clearing=True, aids=aids, stop_kind="completed",
+                            stopped_because="every block is finished"), view())["banners"]
+
+    assert (f'<div class="banner {tone}"><span class="tag">Training aid</span><span>{said}'
+            f'</span></div>') in on
+    assert "Training aid" not in fragments(frame(), view())["banners"]
+    assert "Training aid" not in ended
+
+
+def test_the_strip_shows_right_first_time_beside_right_per_presentation_where_trials_were_drummed():
+    """The PI, 2026-10-18, "Show both": "right first time (per trial, a trial and its drummed
+    repeats one) and right per presentation (every try)". A level with drummed tries leads with
+    right first time; one with none shows its one figure, as before."""
+    perf = replace(frame().performance, run=Counts({"correct": 12, "wrong_target": 8}, 0,
+                                                    drummed=6, right_drummed=4))
+    strip = fragments(replace(frame(), performance=perf), view())["strip"]
+
+    assert ('8<span class="u"> / 14</span></span><span class="n">57%</span>'
+            '<span class="x">run 3 · right first time; 60% per presentation (12 / 20)</span>'
+            ) in strip
+    assert '30<span class="u"> / 40</span>' in strip, "the session's line, nothing drummed"
+
+
+def test_working_counts_trials_with_the_presentations_beside_where_drumming_made_them_differ():
+    """The PI, 2026-10-18: "The console would show both: trials (200) and presentations (e.g.
+    260)" -- a trial and its drummed repeats are one trial (the controller's ruling I1). What
+    counts presentations says so: the ticks, which list lines; the strip's rate; and the
+    scheduled stop, which counts presentations, drummed tries included, as the PI kept it."""
+    parts = fragments(frame(trials=20, trial_index=25), view(trials_per_min=12.0))
+    plain = fragments(frame(), view())
+    document = page(plain, stale_after_s=30.0, nonce="n0nce", can_write=True)
+
+    assert ('<span class="big">20</span><span class="unit">trials · 25 presentations</span>'
+            in parts["rt-work"])
+    assert '<span class="big">40</span><span class="unit">trials</span>' in plain["rt-work"]
+    assert "the last 3 of 25 presentations, oldest first" in parts["rt-trials"]
+    assert "12.0 presentations/min" in parts["strip"]
+    assert ('<option value="trials">after N more presentations, drummed tries included</option>'
+            in document)
+
+
+def test_the_pane_says_where_a_switch_changes_nothing_and_a_block_is_past_its_targets():
+    """The controller's ruling M4: with *clear* on where nothing in the run can be cleared, the
+    pane says so, and the first-answers switch, in a block whose rule is a streak, says it changes
+    nothing there; and past a criterion block's targets it says it draws until the criterion is met
+    (the smaller ruling)."""
+    flat = fragments(frame(owed={"session": 30}, clearable=False, clearing=True), view())["rt-need"]
+    streak = fragments(frame(rule="streak"), view())["rt-need"]
+    past = fragments(frame(owed={"near": 0}, past_targets=True), view())["rt-need"]
+
+    assert '<span class="nm">clear is on, but nothing in this block can be cleared</span>' in flat
+    assert ('<span class="nm">a percentage counts every answer, drummed too -- a streak counts '
+            'every try, so this changes nothing in this block</span>') in streak
+    assert ('<span class="nm">every target used up: drawing until the criterion is met</span>'
+            in past)
+    assert "drawing until" not in fragments(frame(), view())["rt-need"]
+    # A shortfall row's condition name keeps its words whole in a narrow pane (minor 9).
+    short = fragments(frame(shortfalls=(ShortfallRow("b", "ecc 10", 1, "cap", False, None, 2),)),
+                      view())["rt-need"]
+    assert '<span class="mono keep">ecc 10</span>' in short
+    assert (".kv > .keep { overflow-wrap: normal; white-space: nowrap; flex-shrink: 0; }"
+            in _document())
+    # Only while a run is live: a stopped run draws nothing more.
+    stopped = fragments(frame(owed={"near": 0}, past_targets=True, phase="stopped"), view())
+    assert "drawing until" not in stopped["rt-need"]
+
+
+def test_the_first_answers_switch_names_the_blocks_rule_and_says_where_it_changes_nothing():
+    """Important 3 of Task 9's fix round: the switch acts only in a block whose rule is a
+    percentage. A flat run has no rule, a streak judges every try; each says so, and a percentage
+    block does not. The label names the block's percentage, not the strip's."""
+    none = fragments(frame(rule=None), view())["rt-need"]
+    streak = fragments(frame(rule="streak"), view())["rt-need"]
+    percentage = fragments(frame(rule="percentage"), view())["rt-need"]
+
+    nothing = "this block has no percentage rule, so this changes nothing here"
+    assert f'<span class="nm">{nothing}</span>' in none
+    assert nothing not in streak and nothing not in percentage
+    assert "so this changes nothing in this block" in streak
+    assert "changes nothing" not in percentage
+    assert 'data-on="1">the block\'s percentage: count first answers only' in percentage
+    on = fragments(frame(rule="percentage", first_answers=True), view())["rt-need"]
+    assert 'data-on="0">the block\'s percentage: count every answer' in on
+
+
 def test_the_health_pane_shows_what_wl_works_would_be_sent():
     pane = fragments(frame(duration_warning="warning text"), view())["rt-health"]
 
@@ -696,6 +911,8 @@ def test_every_telemetry_string_is_escaped():
         bounds_config=EVIL,
         outcomes={EVIL: 1, "correct": 2},
         owed={EVIL: 3},
+        shortfalls=(ShortfallRow(EVIL, EVIL, 1, "cleared", False, Box(EVIL), 2),),
+        clearable=True,
         recent_outcomes=(EVIL, "correct"),
         staged=(Staged(EVIL, 0.1, 0.2, Box(EVIL), False),),
         refusals=(Refused(EVIL, Box(EVIL), EVIL),),
@@ -714,7 +931,12 @@ def test_every_telemetry_string_is_escaped():
     ))
     # `phase` is EVIL above, so the reward's unit, which the strip shows only while a
     # run goes (`_per_correct`), needs a running frame of its own.
-    paying = frame(params=(ParamRow("reward_correct", EVIL, 0.0, 0.4, 0.15, True),))
+    # It also draws what a live run with *clear* on draws: the condition's *clear* buttons and a
+    # shortfall row whose reason is its own sentence, which are the strings escaped at `_need`.
+    paying = frame(params=(ParamRow("reward_correct", EVIL, 0.0, 0.4, 0.15, True),),
+                   drumming="run", aids=("drumming",), session_kind=EVIL,
+                   owed={EVIL: 3}, clearing=True,
+                   shortfalls=(ShortfallRow(EVIL, EVIL, 1, EVIL, False, None, 2),))
 
     text = "".join(fragments(evil, view(rejected=EVIL)).values()) + "".join(
         fragments(paying, view()).values()

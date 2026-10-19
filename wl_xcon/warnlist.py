@@ -18,9 +18,10 @@ C7, C8 and H4); a pause the allocation cannot mark (D5), accepted as it is taken
 warnings, its load-time findings that are warnings (`luminance-step`, `color-on-default`,
 `contrast-on-default`, and, since the PI's rulings of 2026-10-11, `head-not-fixed`,
 `overlapping-windows`, `crowded-array`, `wrong-eye-criterion`, `monocular-stereogram`,
-`wrong-setup`, `isoluminance-on-default`, `unrealizable-color`, `cone-colors-without-spectra`
-and, for a value outside its declared range at a run's start or live, `outside-range` and, for
-a wait longer than any the task declares, `longer-than-declared`, by his answer of 2026-10-12);
+`wrong-setup`, `isoluminance-on-default`, `unrealizable-color`, `cone-colors-without-spectra`,
+`hold-cut-short` (engine build C2a) and, for a value outside its declared range at a run's start
+or live, `outside-range` and, for a wait longer than any the task declares,
+`longer-than-declared`, by his answer of 2026-10-12);
 and today's pre-flight unknowns, the pump calibration and the eye tracker (S9a §10). **What
 later builds add**, each waiting on the build named: dithering and a timing record older than a
 graphics change (E, V1); a pattern near the pixel limit, and a screen, mode or care-feature

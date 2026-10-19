@@ -45,7 +45,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from wl_xcon import link as _link
-from wl_xcon.actor import Actor
+from wl_xcon.actor import Actor, to_map_or_none
 from wl_xcon.bounds import Bounds, Exceeded, _finite
 from wl_xcon.check import beyond_range, check_task
 from wl_xcon.cli import _clock, _load_allocation, _load_task, _printable, _shown
@@ -64,10 +64,20 @@ from wl_xcon.geometry import Geometry
 from wl_xcon.levels import Levels
 from wl_xcon.photometry import Calibration, cone_record
 from wl_xcon.record import XCON_DIRNAME, SessionRecord, _local, welfare_note
-from wl_xcon.scheduler import Block, Condition, Scheduler
+from wl_xcon.scheduler import (
+    DRUM_SCOPES,
+    DRUM_WARNING,
+    EVERY_TRIAL,
+    TRAINING,
+    Block,
+    Condition,
+    Scheduler,
+)
 from wl_xcon.simulate import Census, Subject, Tally, prepare
-from wl_xcon.run import run_trial
-from wl_xcon.task import Entered, Exited, Outcome, Param, SaccadeTo, Task, Trial
+from wl_xcon.run import LONGEST_TRIAL_S, run_trial
+from wl_xcon.task import (
+    COUNTED, OWED, SPENT, UNPAID, Entered, Exited, Param, SaccadeTo, Task, Trial,
+)
 from wl_xcon.warnlist import PAUSE_UNMARKED, Entry, of_findings, sentence
 from wl_xcon.welfare import (
     OUT_OF_CAGE,
@@ -144,10 +154,68 @@ def _next_occurrence(hhmm: str, wall: float) -> float:
     raise ValueError(f"no occurrence of {hhmm} after {wall} within a day")
 
 
+def _hung(index: int, condition: str, counted: str, owed: int, drummed: bool = False,
+          forgiven: bool = False, past: bool = False) -> str:
+    """What the console's changes feed says of a trial that reached the longest trial (engine spec
+    §6.8; the engine C2a plan, its science review's D4): which trial of which condition, and what
+    it did to the count -- a missed acquisition (the PI, 2026-10-11). **For an owed trial it says
+    what is true of it**: `drummed` (a drum brings it straight back, whatever its condition
+    owes), shown again while the condition `owed` a trial still, `forgiven` where a repeat limit
+    wrote a shortfall, not shown again where the block is `past` its targets and nothing is owed.
+    A trial the table counts is *counted toward its condition*, not called an answer: under a
+    table that scores no fixation it is judged a miss (decision 19)."""
+    if drummed:
+        owing = "drummed back at once"
+    elif owed:
+        owing = "shown again"
+    elif forgiven:
+        owing = "owed, its condition's remaining debt forgiven"
+    elif past:
+        owing = "not shown again: its block is past its targets"
+    else:
+        owing = "owed nothing more"
+    did = {
+        OWED: owing,
+        SPENT: "used up as one of the run's trials",
+        COUNTED: "counted toward its condition",
+        UNPAID: "left unpaid",
+    }[counted]
+    return (
+        f"trial {index} ({condition}) reached the longest trial, {LONGEST_TRIAL_S / 60:g} minutes, "
+        f"with no outcome: recorded as a hang, a missed acquisition, and {did}"
+    )
+
+
+def _drum_warned(condition: str, index: int, owed: int, clearing: bool = False) -> str:
+    """The changes feed's warning at a drummed trial's tenth failed try in a row (the PI,
+    2026-10-12, "After 10 in a row"): drumming goes on. *Clear one* moves past the trial once the
+    training aid is switched on (the PI, 2026-10-18) -- while its condition owes a trial; past a
+    criterion block's targets it owes none, a clear there is refused, and only *stop drumming*
+    ends the drum (the controller's ruling M3 on the plan's revision review). Where *clear* is
+    already on, the sentence does not say to switch it on."""
+    once = "" if clearing else " once clear is switched on"
+    way = (f"clear one moves past it{once}, stop drumming ends it" if owed
+           else "stop drumming ends it")
+    return (f"{condition} has failed {DRUM_WARNING} tries in a row under drumming, the last trial "
+            f"{index}; drumming goes on: {way}")
+
+
+def _appeared(trial: Trial, result) -> bool:
+    """Whether a trial's stimulus had appeared (engine spec §16.2, §16.4; the engine C2a plan's
+    call 4): it entered the state its structure's counting table names (`task.Counting.appears`;
+    the PI, 2026-10-13, "Task names it, required"), the target's or the array's, a cued task's
+    cue. A break before it is owed whatever the structure says of breaks (`task.Counting.of`),
+    and the trial's row records it. A structure with no table, or one naming no state -- a test's;
+    the load-time check refuses both in a task -- counts every trial as shown."""
+    table = trial.counting
+    return table is None or table.appears is None or table.appears in result.visited
+
+
 def _counts(tally) -> _link.Counts:
     """A tally as the strip's counts, by outcome's wire string as `Telemetry.outcomes`."""
     return _link.Counts(
-        outcomes={k.value: v for k, v in tally.outcomes.items()}, hangs=tally.hangs
+        outcomes={k.value: v for k, v in tally.outcomes.items()}, hangs=tally.hangs,
+        drummed=tally.drummed, right_drummed=tally.right_drummed,
     )
 
 
@@ -1494,6 +1562,103 @@ class Session:
             "cancel", by, f"cancelled the scheduled stop {said}", index, cancelled=said
         )
 
+    def _clear(self, command, index: int) -> None:
+        """**Clear one trial of a condition's debt, or the rest of it** (`link.ClearOwed`; the PI,
+        2026-10-11: "manually advance beyond or clear a specific trial in the count"), between
+        trials or while paused: the open block's scheduler forgives it (`Scheduler.clear`), the
+        run's end row records the shortfall with who cleared it, and `controls.jsonl` the control,
+        how many it cleared and what the condition still owes. **Refused with the sentence**, and
+        nothing changed, where the block owes the condition nothing or has no such condition. A
+        clear starts the condition's failed tries in a row over (the PI, 2026-10-18). **The wire's
+        rule again**, so a command that reached the session another way meets it: a `rest` that is
+        not true or false is refused with its sentence, as `_schedule` does."""
+        if not isinstance(command.rest, bool):
+            self._refuse(
+                "clear", command.by,
+                f"a 'clear' command's rest is true or false, and {command.rest!r} is neither, so "
+                f"it is refused",
+            )
+            return
+        scheduler = self._scheduler
+        said = scheduler.clear(command.condition, by=command.by, rest=command.rest)
+        if said is not None:
+            self._refuse("clear", command.by, said)
+            return
+        cleared, owed = scheduler.shortfalls[-1].trials, scheduler.owed(command.condition)
+        what = (
+            f"the rest, {cleared} trial{'' if cleared == 1 else 's'}," if command.rest
+            else "one trial"
+        )
+        self._control(
+            "clear", command.by,
+            f"cleared {what} of {command.condition} in block {scheduler.block.name}; it owes "
+            f"{owed}",
+            index, condition=command.condition, block=scheduler.block.name, rest=command.rest,
+            cleared=cleared, owed=owed,
+        )
+
+    def _drum(self, command, index: int) -> None:
+        """**Switch drumming** (`link.Drum`; the PI, 2026-10-11: "switched on per block or run by
+        the trainer", and recorded): the scheduler drums from the next trial (`Scheduler.drum`),
+        `controls.jsonl` records the switch with who made it, and every trial row says whether
+        drumming was on as it was drawn. Engine build C3's change log takes it over, with its
+        reason. **The wire's rule again**, so a command that reached the session another way meets
+        it: a `scope` that is none of `DRUM_SCOPES` is refused with its sentence. `was` is what
+        drumming read for the block the switch is for before it (`Scheduler.drumming_switched`),
+        which is the next block's when the switch is carried to it."""
+        if command.scope not in DRUM_SCOPES:
+            self._refuse(
+                "drum", command.by,
+                f"drumming is switched {', '.join(DRUM_SCOPES[:-1])} or {DRUM_SCOPES[-1]}, and "
+                f"{command.scope!r} is none of them, so it is refused",
+            )
+            return
+        scheduler = self._scheduler
+        was = scheduler.drumming_switched
+        # The block it is for: this one, or the next when this one's end rule is already met.
+        block = scheduler.drum(command.scope)
+        self._control(
+            "drum", command.by, f"drumming {command.scope} in block {block}",
+            index, scope=command.scope, block=block, was=was, now=scheduler.drumming,
+        )
+
+    def _train(self, command, index: int) -> None:
+        """**Switch a training setting** (`link.Training`; the PI, 2026-10-18): the training aid
+        *clear*, off by default, or the setting "first answers only" for a percentage rule under
+        drumming, on or off for the rest of the run (`Scheduler.train`); `controls.jsonl` records
+        it with who switched it. In every kind of session ("Allow it, with a warning": a training
+        aid is meant for training sessions and works in the others, the console warning while one
+        is on and every trial's row marking it). **A switch to the value already set is refused**,
+        with its sentence, as a pause of a paused session is."""
+        if command.setting not in TRAINING:
+            self._refuse(
+                "training", command.by,
+                f"a training setting is {' or '.join(TRAINING)}, and {command.setting!r} is "
+                f"neither, so it is refused",
+            )
+            return
+        if not isinstance(command.on, bool):
+            self._refuse(
+                "training", command.by,
+                f"a 'training' command's on is true or false, and {command.on!r} is neither, so "
+                f"it is refused",
+            )
+            return
+        scheduler = self._scheduler
+        name = "first answers only" if command.setting == "first_answers" else command.setting
+        was = scheduler.clearing if command.setting == "clear" else scheduler.first_answers
+        if was == command.on:
+            # As a pause of a paused session is: nothing changes, so nothing is recorded.
+            state = "on" if command.on else "off"
+            self._refuse("training", command.by, f"{name} is already {state}, so nothing changed")
+            return
+        scheduler.train(command.setting, command.on)
+        self._control(
+            "training", command.by,
+            f"{name} {'on' if command.on else 'off'} for the rest of the run",
+            index, setting=command.setting, was=was, now=command.on,
+        )
+
     def _ends(self, index: int) -> bool:
         """Whether the session must end at this boundary, with its reason and kind
         set. **One place for it**, asked between trials and on every pass of the
@@ -1810,6 +1975,15 @@ class Session:
         if isinstance(command, _link.CancelScheduledStop):
             self._cancel(command.by, index)
             return
+        if isinstance(command, _link.ClearOwed):
+            self._clear(command, index)
+            return
+        if isinstance(command, _link.Drum):
+            self._drum(command, index)
+            return
+        if isinstance(command, _link.Training):
+            self._train(command, index)
+            return
         if not isinstance(command, _link.SetParameter):
             # A command this session has no branch for -- a newer console's -- is
             # refused under its kind, as `drain` refuses an unknown kind on the
@@ -1958,8 +2132,9 @@ class Session:
                 # Every trial pays, including aborts. A flat "run N trials" means N
                 # trials, not N completed ones -- the completed-trial reading is what
                 # a condition target expresses, and a session that quietly ran on
-                # past its declared length would be a different session.
-                counts_toward=frozenset(Outcome),
+                # past its declared length would be a different session. A trial that
+                # reached the longest trial is one of the N (the engine C2a plan).
+                counting=EVERY_TRIAL,
             )
         ]
 
@@ -2247,7 +2422,9 @@ class Session:
         self.preflight = None
         self.question = None
 
-        scheduler = Scheduler(blocks=self._plan(run), seed=run.seed)
+        # Counted by the structure's table (engine spec §16.1; engine build C2a), which a block's
+        # own replaces.
+        scheduler = Scheduler(blocks=self._plan(run), seed=run.seed, counting=trial.counting)
         make_world = self.world if self.world is not None else self._agent(run)
         tally = Tally()
         self.blocks_run = [scheduler.block.name]
@@ -2429,6 +2606,7 @@ class Session:
                     continue
 
                 condition = scheduler.next_trial()
+                drawn = scheduler.drawn
                 values = {**self.spec.values, **condition.values}
                 world = make_world(trial, values, index)
                 # **The trial opens in the stream at the boundary, never in a frame**
@@ -2491,9 +2669,26 @@ class Session:
                 # the card may be what failed, and wl-preproc infers its end
                 # (`schema/events.py::_trial_stop_time`).
                 self.card.emit(TRIAL_END)
-                tally.add(result)
-                levels.end_trial(result)
-                scheduler.record(condition.name, result.outcome)
+                tally.add(result, drummed=drawn.drummed)
+                levels.end_trial(result, drummed=drawn.drummed)
+                shown = _appeared(trial, result)
+                written = len(scheduler.shortfalls)
+                counted = scheduler.record(condition.name, result.outcome, shown=shown)
+                if result.outcome is None:
+                    # **A warning on the changes feed** (the engine C2a plan, its science review's
+                    # D4): five minutes with no outcome is a loop that failed or an animal that
+                    # never acquired, and the trainer hears which trial and what became of it.
+                    self._feed("warning", None, self.wall_now(), _hung(
+                        index, condition.name, counted, scheduler.owed(condition.name),
+                        drummed=scheduler.drum_tries > 0,
+                        forgiven=len(scheduler.shortfalls) > written,
+                        past=scheduler.past_targets))
+                if scheduler.drum_tries == DRUM_WARNING:
+                    # **A warning on the changes feed** (the PI, 2026-10-12, "After 10 in a row"):
+                    # drumming goes on, and the trainer may move past the trial or stop drumming.
+                    self._feed("warning", None, self.wall_now(), _drum_warned(
+                        condition.name, index, scheduler.owed(condition.name),
+                        scheduler.clearing))
                 # One string for the record and for a console's recent outcomes, so
                 # the two cannot disagree (P4d-2b spec §4.1).
                 recorded = result.outcome.value if result.outcome else "hang"
@@ -2504,6 +2699,14 @@ class Session:
                     params=values,
                     block=scheduler.block.name,
                     condition=condition.name,
+                    counting=counted,
+                    shown=shown,
+                    repeat_of=drawn.repeat_of,
+                    at_once=drawn.at_once,
+                    previous=drawn.previous,
+                    drummed=drawn.drummed,
+                    drumming=drawn.drumming,
+                    aids=drawn.aids,
                     run=self.run_index,
                     position=position,
                     # **The trial's whole commanded difference**, and `resume.read` adds it
@@ -2598,9 +2801,57 @@ class Session:
                         self.wall_now(),
                         stopped_because=self.stopped_because,
                         stop_kind=self.stop_kind,
-                        trials=self._index,
+                        # The run's trials, a trial and its drummed repeats one, and its lines,
+                        # every presentation (the PI, 2026-10-18; the controller's ruling M5).
+                        trials=scheduler.trials,
+                        presentations=self._index,
                         blocks_run=list(self.blocks_run),
                         strobed=ended_strobed,
+                        # **Each condition's debt forgiven** (engine spec §16.6): by its repeat
+                        # limit, flagged as possible avoidance when the animal's own failures
+                        # reached it, or named for the rig, or cleared by a person. On the end
+                        # row, never a row of its own: wl-preproc reports any `runs.jsonl` row but
+                        # a start or an end as a problem (its `events/rigruns.py`).
+                        shortfalls=[
+                            {
+                                "block": short.block,
+                                "condition": short.condition,
+                                "trials": short.trials,
+                                "because": short.because,
+                                "possible_avoidance": short.possible_avoidance,
+                                "after_trial": short.after_trial,
+                                "by": to_map_or_none(short.by),
+                            }
+                            for short in scheduler.shortfalls
+                        ],
+                        # **Each condition's counts, block by block** (the PI, 2026-10-18: "All
+                        # of these are written into the run's end record as well"): its trials, a
+                        # trial and its drummed repeats one, and presentations; its right and wrong
+                        # answers and right first time; what it owes, its repeats, the trials moved
+                        # past and the flag; its drummed tries, and the failed tries in a row
+                        # of one being drummed as the run ended. **`presentations` here counts
+                        # tries recorded, not lines written**: a run ending in a fault can leave
+                        # these counts one try ahead of `trials.jsonl`, whose lines the end row's
+                        # own `presentations` counts (ruling M5; a fault between
+                        # `scheduler.record` and the line's write).
+                        conditions=[
+                            {
+                                "block": report.block,
+                                "condition": report.condition,
+                                "trials": report.trials,
+                                "presentations": report.presentations,
+                                "right": report.right,
+                                "wrong": report.wrong,
+                                "right_first": report.right_first,
+                                "owed": report.owed,
+                                "repeats": report.repeats,
+                                "moved_past": report.moved_past,
+                                "possible_avoidance": report.possible_avoidance,
+                                "drummed": report.drummed,
+                                "failing": report.failing,
+                            }
+                            for report in scheduler.report
+                        ],
                     )
                 finally:
                     try:

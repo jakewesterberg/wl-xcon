@@ -51,6 +51,22 @@ def test_the_spec_worked_example_numbers_every_level():
     )
 
 
+def test_a_drummed_try_is_counted_at_every_level_with_the_right_ones_among_them():
+    """The PI, 2026-10-18: a trial and its drummed repeats are one trial, and the strip shows right
+    first time beside right per presentation. Each level counts every presentation, as before,
+    and its drummed tries and the right ones among them besides."""
+    levels = Levels()
+    levels.start_run(FIX)
+    for outcome, drummed in ((Outcome.WRONG_TARGET, False), (Outcome.CORRECT, True),
+                             (Outcome.WRONG_TARGET, True), (Outcome.CORRECT, False)):
+        levels.start_trial()
+        levels.end_trial(_result(outcome), drummed=drummed)
+
+    for tally in (levels.session_tally, levels.task_tallies["fixation_detection"],
+                  levels.block_tally):
+        assert (sum(tally.outcomes.values()), tally.drummed, tally.right_drummed) == (4, 2, 1)
+
+
 def test_a_block_opens_with_its_first_trial():
     levels = Levels()
     levels.start_run(FIX)

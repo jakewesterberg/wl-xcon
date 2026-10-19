@@ -5,11 +5,11 @@ implements.** This file holds the message (`Telemetry`, `Staged`, `Refused`), th
 idle frame `wlx taskd` publishes while no session is open (`Idle`, since schema 10;
 carrying the last closed session's summary since schema 11),
 the commands a console sends back (`SetParameter`, `Stop`, and since b3a the service's
-`OpenSession`, `CheckRun`, `StartRun` and `EndSession`, and since XC-026 its
-`ResumeSession`; `Command`), the port a session
-publishes and drains through (`Link`, `Absent`, `Simulated`), its wire encoding
-(`encode`/`decode`, plus the command-side `_encode_command`/`_decode_command`), and
-the one live transport that carries all of it over a real socket (`ZmqLink`,
+`OpenSession`, `CheckRun`, `StartRun` and `EndSession`, since XC-026 its
+`ResumeSession`, and since engine build C2a `ClearOwed`, `Drum` and `Training`; `Command`), the
+port a session publishes and drains through (`Link`, `Absent`, `Simulated`), its wire
+encoding (`encode`/`decode`, plus the command-side `_encode_command`/`_decode_command`),
+and the one live transport that carries all of it over a real socket (`ZmqLink`,
 `ZmqConsole`). Nothing here is deferred to a later module -- an earlier version of
 this docstring said `encode`/`decode` would land "in a transport module", but Task 5's
 own brief puts them in this file instead, so that plan changed and this file is now
@@ -45,12 +45,13 @@ import math
 import time
 import weakref
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import ClassVar, Protocol
 
 from wl_xcon import actor as actors
 from wl_xcon.actor import Actor
 from wl_xcon.findings import SESSION_KINDS
+from wl_xcon.scheduler import DRUM_SCOPES, TRAINING
 from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 
 #: Bumped whenever a field changes meaning or disappears. ADR-0003: "schema-versioned
@@ -152,7 +153,20 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: unaccepted. A row's code longer than `TEXT_LIMIT` characters is cut to that many plus "…",
 #: and its sentence longer than `NOTE_LIMIT` the same way (`WarningRow.of`). A reader of 14
 #: refuses 15 and 15 refuses 14, by name, for both shapes.
-SCHEMA = 15
+#:
+#: 16 (engine build C2a): `Telemetry.shortfalls`, each condition's debt forgiven this run as a
+#: `ShortfallRow` -- by its repeat limit, flagged as possible avoidance or named for the rig, or
+#: cleared by a person (engine spec §16.6) -- `Telemetry.drumming`, `"block"`, `"run"` or `None`
+#: (the PI, 2026-10-11), and `Telemetry.clearable`, whether a trial of the open block can be owed.
+#: `owed` now names every condition of the open block, each with what it still owes, where it
+#: named only those queued. And the PI's decisions of 2026-10-18: `Telemetry.clearing` and
+#: `first_answers`, the training aid *clear* and the percentage setting; `Telemetry.conditions`,
+#: each condition's counts as `ConditionRow`s; each level's `Counts.drummed` and `right_drummed`;
+#: and `Telemetry.trials`, the run's trials, a trial and its drummed repeats one; `aids`, the
+#: training aids on; `rule`, the kind of the open block's rule (`"streak"`, `"percentage"` or
+#: none); and `past_targets`, whether a criterion block draws past its targets. A reader of 15
+#: refuses 16 and 16 refuses 15, by name.
+SCHEMA = 16
 
 #: How many refusals a session keeps, per source, and therefore how many one
 #: `Telemetry` frame can carry.
@@ -292,7 +306,9 @@ class Control:
     """One recent control event for a console's changes feed (P4d-2b spec §5.1):
     from `taskd.Session.controls`. `kind` is `stop`, `pause`, `resume`, `mark`,
     `note`, `schedule`, `cancel`, `scheduled_stop`, `set` (a staged setting applied),
-    `reward` (a manual reward, given while paused) or `warning` (a warning said as it
+    `reward` (a manual reward, given while paused), `clear` (a condition's debt cleared by a
+    person), `drum` (drumming switched by a trainer), `training` (a training setting
+    switched by a trainer) or `warning` (a warning said as it
     happens, since the PI's rulings on XC-352, 2026-10-11);
     `by` is who sent it, `None` for a mark's stamp, whose sender arrives with its note;
     `at` is on the session's anchored clock; `said` is the sentence after the kind.
@@ -367,6 +383,44 @@ class WarningRow:
         quotes why cut in its middle to fit (`warnlist.of_unloaded`, since XC-352's E1), where
         the default calibration's, 270 characters, was the longest when counted on 2026-10-08."""
         return cls(cut(code, TEXT_LIMIT), cut(detail, NOTE_LIMIT), tuple(accepted_in), by, at)
+
+
+@dataclass(frozen=True, slots=True)
+class ShortfallRow:
+    """One shortfall on a frame (engine spec §16.6; `scheduler.Shortfall`): trials of a condition's
+    debt forgiven in a block, `because` its repeat limit was reached -- by the animal's failures
+    (`possible_avoidance`) or with the rig's among them -- or a person cleared them (`by`), after
+    trial `after_trial` of the run, or before its first (`None`)."""
+
+    block: str
+    condition: str
+    trials: int
+    because: str
+    possible_avoidance: bool
+    by: Actor | None
+    after_trial: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class ConditionRow:
+    """One condition of the open block on a frame (`scheduler.ConditionReport`, its block the
+    frame's; the PI, 2026-10-18): its trials, a trial and its drummed repeats one, and
+    presentations; its right and wrong answers and the trials right first time; what it owes, its
+    repeats, the trials moved past and whether its limit flagged it as possible avoidance; its
+    drummed tries and the failed tries in a row of its trial being drummed now."""
+
+    condition: str
+    trials: int
+    presentations: int
+    right: int
+    wrong: int
+    right_first: int
+    owed: int
+    repeats: int
+    moved_past: int
+    possible_avoidance: bool
+    drummed: int
+    failing: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -459,6 +513,11 @@ class Counts:
 
     outcomes: dict
     hangs: int
+    #: Of those, a drum's repeats and the right ones among them (schema 16; the PI, 2026-10-18):
+    #: a trial and its drummed repeats are one trial, so the strip shows right first time beside
+    #: right per presentation. 0 where nothing was drummed.
+    drummed: int = 0
+    right_drummed: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -581,7 +640,8 @@ class Telemetry:
     #: this dict is what a msgpack-encoded message will carry.
     outcomes: dict
     hangs: int
-    #: `{condition: scheduler.owed(condition)}` for every condition currently queued.
+    #: `{condition: scheduler.owed(condition)}` for every condition of the open block, in the
+    #: block's order, zero included (schema 16; engine spec §16.6).
     owed: dict
     #: Every change accepted but not yet applied, from `session.staged` -- see
     #: `Staged`, whose `bounded` flag says which vocabulary the name belongs to, not
@@ -688,6 +748,38 @@ class Telemetry:
     #: `session.warnings`, as `WarningRow`s: every warning the session accepted, in order,
     #: each cut for the frame (`WarningRow.of`).
     warnings: tuple
+    #: `scheduler.shortfalls`, as `ShortfallRow`s, oldest first (schema 16; engine spec §16.6):
+    #: the run's forgiven debts, a repeat cap's flagged as possible avoidance.
+    shortfalls: tuple
+    #: `scheduler.drumming` (schema 16; the PI, 2026-10-11): `"block"`, `"run"`, or `None` while
+    #: trials are not drummed.
+    drumming: str | None
+    #: `scheduler.clearable` (schema 16): whether a trial of the open block can be owed, so the
+    #: page offers *clear one* (the engine C2a plan's engineering review, Minor 3).
+    clearable: bool
+    #: `scheduler.clearing` (schema 16; the PI, 2026-10-18): whether the training aid *clear* is on,
+    #: so the page offers *clear one* and its standing warning names it.
+    clearing: bool
+    #: `scheduler.first_answers` (schema 16): whether a percentage rule judges only each drummed
+    #: trial's first answer, the training setting; every answer while it is off.
+    first_answers: bool
+    #: `scheduler.block_report`, as `ConditionRow`s (schema 16; the PI, 2026-10-18): each condition
+    #: of the open block's counts, in the block's order.
+    conditions: tuple
+    #: `scheduler.trials` (schema 16; the PI, 2026-10-18): the run's trials so far, a trial and its
+    #: drummed repeats one, where `trial_index` counts every presentation (the controller's ruling
+    #: I1 on the plan's revision review).
+    trials: int
+    #: `scheduler.aids` (schema 16): the training aids on, which the page's standing warning names.
+    aids: tuple
+    #: The kind of the open block's rule (schema 16): `"streak"`, `"percentage"` or `None` for a
+    #: block with no rule (a flat run of N). The first-answers switch acts only under a
+    #: percentage, so the page says it changes nothing under the other two (the controller's
+    #: ruling M4; Task 9's fix round, Important 3).
+    rule: str | None
+    #: `scheduler.past_targets`, while the block is not finished (schema 16): a criterion block
+    #: drawing every condition until its criterion is met.
+    past_targets: bool
 
     @classmethod
     def of(cls, session, tally, scheduler, index: int) -> "Telemetry":
@@ -785,7 +877,11 @@ class Telemetry:
             # true of a session that has not run, so they are empty, not `None`.
             outcomes={} if tally is None else {k.value: v for k, v in tally.outcomes.items()},
             hangs=0 if tally is None else tally.hangs,
-            owed={} if scheduler is None else {c: scheduler.owed(c) for c in scheduler.upcoming()},
+            owed=(
+                {}
+                if scheduler is None
+                else {c.name: scheduler.owed(c.name) for c in scheduler.block.conditions}
+            ),
             # `session.staged`, the public property -- never `session._staged`. This
             # module reaches into `Session` only through its declared surface; a
             # private attribute read across the module boundary is exactly the kind
@@ -851,6 +947,36 @@ class Telemetry:
             session_kind=session.spec.session_kind,
             calibration=None if session.spec.calibration is None else session.spec.calibration.id,
             warnings=tuple(WarningRow.of(*row) for row in session.warnings),
+            # Engine build C2a (schema 16): the run's scheduler's own.
+            shortfalls=(
+                ()
+                if scheduler is None
+                else tuple(
+                    ShortfallRow(s.block, s.condition, s.trials, s.because,
+                                 s.possible_avoidance, s.by, s.after_trial)
+                    for s in scheduler.shortfalls
+                )
+            ),
+            drumming=None if scheduler is None else scheduler.drumming,
+            clearable=scheduler is not None and scheduler.clearable,
+            clearing=scheduler is not None and scheduler.clearing,
+            first_answers=scheduler is not None and scheduler.first_answers,
+            conditions=(
+                ()
+                if scheduler is None
+                else tuple(
+                    ConditionRow(r.condition, r.trials, r.presentations, r.right, r.wrong,
+                                 r.right_first, r.owed, r.repeats, r.moved_past,
+                                 r.possible_avoidance, r.drummed, r.failing)
+                    for r in scheduler.block_report
+                )
+            ),
+            trials=0 if scheduler is None else scheduler.trials,
+            aids=() if scheduler is None else scheduler.aids,
+            rule=(None if scheduler is None or scheduler.block.criterion is None
+                  else "streak" if scheduler.streak else "percentage"),
+            past_targets=(scheduler is not None and scheduler.past_targets
+                          and not scheduler.finished),
         )
 
 
@@ -892,11 +1018,21 @@ def _question_in(data: dict | None) -> Question | None:
 
 
 def _counts_out(counts: Counts | None) -> dict | None:
-    return None if counts is None else {"outcomes": dict(counts.outcomes), "hangs": counts.hangs}
+    if counts is None:
+        return None
+    return {"outcomes": dict(counts.outcomes), "hangs": counts.hangs, "drummed": counts.drummed,
+            "right_drummed": counts.right_drummed}
 
 
 def _counts_in(data: dict | None) -> Counts | None:
-    return None if data is None else Counts(outcomes=dict(data["outcomes"]), hangs=data["hangs"])
+    if data is None:
+        return None
+    return Counts(outcomes=dict(data["outcomes"]), hangs=data["hangs"], drummed=data["drummed"],
+                  right_drummed=data["right_drummed"])
+
+
+#: A `ConditionRow`'s fields, in order: its wire keys (schema 16).
+_CONDITION_FIELDS = tuple(f.name for f in fields(ConditionRow))
 
 
 def _performance_out(performance: Performance) -> dict:
@@ -1068,6 +1204,24 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
         "session_kind": telemetry.session_kind,
         "calibration": telemetry.calibration,
         "warnings": _warnings_out(telemetry.warnings),
+        "shortfalls": [
+            {"block": s.block, "condition": s.condition, "trials": s.trials, "because": s.because,
+             "possible_avoidance": s.possible_avoidance, "by": actors.to_map_or_none(s.by),
+             "after_trial": s.after_trial}
+            for s in telemetry.shortfalls
+        ],
+        "drumming": telemetry.drumming,
+        "clearable": telemetry.clearable,
+        "clearing": telemetry.clearing,
+        "first_answers": telemetry.first_answers,
+        "conditions": [
+            {name: getattr(row, name) for name in _CONDITION_FIELDS}
+            for row in telemetry.conditions
+        ],
+        "trials": telemetry.trials,
+        "aids": list(telemetry.aids),
+        "rule": telemetry.rule,
+        "past_targets": telemetry.past_targets,
     }
 
 
@@ -1266,6 +1420,19 @@ def _telemetry_from(data: dict) -> Telemetry:
         session_kind=data["session_kind"],
         calibration=data["calibration"],
         warnings=_warnings_in(data["warnings"]),
+        shortfalls=tuple(
+            ShortfallRow(**{**s, "by": None if s["by"] is None else actors.from_map(s["by"])})
+            for s in data["shortfalls"]
+        ),
+        drumming=data["drumming"],
+        clearable=data["clearable"],
+        clearing=data["clearing"],
+        first_answers=data["first_answers"],
+        conditions=tuple(ConditionRow(**row) for row in data["conditions"]),
+        trials=data["trials"],
+        aids=tuple(data["aids"]),
+        rule=data["rule"],
+        past_targets=data["past_targets"],
     )
 
 
@@ -1482,6 +1649,51 @@ class ResumeSession:
     session_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class ClearOwed:
+    """**Clear one trial of a condition's debt** in the open block, or with `rest` all it still owes
+    (the PI, 2026-10-11: "there should be some way in the console to manually advance beyond or
+    clear a specific trial in the count"; *the rest*, the engine C2a plan's science review, D5): the
+    condition owes one trial fewer, or none, a repeat of it waiting or a drum's trial waiting is
+    dropped, its failed tries in a row start over (the PI, 2026-10-18), and the run's end row
+    records it as a shortfall with who cleared it (engine spec §16.6;
+    `scheduler.Scheduler.clear`). `taskd` refuses it, with the sentence, while *clear* is off
+    (`Training`), where the block has no such condition and where the condition owes nothing."""
+
+    KIND: ClassVar[str] = "clear"
+
+    condition: str
+    by: Actor
+    rest: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class Drum:
+    """**Switch drumming** (the PI, 2026-10-11: drumming, "a training tool ... where a trial is
+    repeated until correct", switched on per block or run by the trainer, and recorded): `scope`
+    `"block"` or `"run"`, every trial that is not correct coming back at once until it is, or
+    `"off"` until the block ends (`scheduler.DRUM_SCOPES`; `Scheduler.drum`)."""
+
+    KIND: ClassVar[str] = "drum"
+
+    scope: str
+    by: Actor
+
+
+@dataclass(frozen=True, slots=True)
+class Training:
+    """**Switch a training setting on or off** for the rest of the run (the PI, 2026-10-18):
+    `setting` `"clear"`, the training aid that lets a person clear a trial from the count, off by
+    default, or `"first_answers"`, whether a percentage rule judges only each drummed trial's first
+    answer (`scheduler.TRAINING`; `Scheduler.train`). Recorded with who switched it."""
+
+    KIND: ClassVar[str] = "training"
+
+    setting: str
+    on: bool
+    by: Actor
+
+
 Command = (
     SetParameter
     | Stop
@@ -1496,6 +1708,9 @@ Command = (
     | StartRun
     | EndSession
     | ResumeSession
+    | ClearOwed
+    | Drum
+    | Training
 )
 
 #: The kinds of scheduled stop, in the order a person is offered them.
@@ -1563,9 +1778,9 @@ def check_schedule(kind: object, value: object) -> str | None:
 def _encode_command(command: Command) -> bytes:
     """A command to msgpack -- `SetParameter`, `Stop`, and since P4d-2b b2a `Pause`,
     `Resume`, `Mark`, `ScheduleStop`, `CancelScheduledStop` and `ManualReward`, and
-    since P4d-2b b3a `OpenSession`, `CheckRun`, `StartRun` and `EndSession`, and since
-    XC-026 `ResumeSession` -- tagged by kind so `_decode_command` knows which dataclass to
-    rebuild.
+    since P4d-2b b3a `OpenSession`, `CheckRun`, `StartRun` and `EndSession`, since
+    XC-026 `ResumeSession`, and since engine build C2a `ClearOwed`, `Drum` and `Training` -- tagged
+    by kind so `_decode_command` knows which dataclass to rebuild.
 
     Private, unlike `encode`/`decode`: its callers are `ZmqConsole.send` and
     `ZmqCommands.deliver`, both in this same file, so this is an implementation detail
@@ -1635,6 +1850,14 @@ def _encode_command(command: Command) -> bytes:
             "by": actors.to_map(command.by),
             "session_id": command.session_id,
         }
+    elif isinstance(command, ClearOwed):
+        payload = {"kind": "clear", "by": actors.to_map(command.by), "condition": command.condition,
+                   "rest": command.rest}
+    elif isinstance(command, Drum):
+        payload = {"kind": "drum", "by": actors.to_map(command.by), "scope": command.scope}
+    elif isinstance(command, Training):
+        payload = {"kind": "training", "by": actors.to_map(command.by), "setting": command.setting,
+                   "on": command.on}
     else:
         raise TypeError(f"no wire encoding for {command!r}")
     return msgpack.packb(payload, use_bin_type=True)
@@ -1991,6 +2214,40 @@ def _command_from(data: dict) -> Command:
     if kind == "resume_session":
         by = _actor(data.get("by"), kind)
         return ResumeSession(by=by, session_id=_word(data, "session_id", kind, by))
+    if kind == "clear":
+        by = _actor(data.get("by"), kind)
+        rest = data.get("rest", False)
+        if not isinstance(rest, bool):
+            raise CommandRefused(
+                "clear", by,
+                f"a 'clear' command's rest is true or false, and {_quoted(rest)} is neither, so it "
+                f"is refused",
+            )
+        return ClearOwed(condition=_word(data, "condition", kind, by), by=by, rest=rest)
+    if kind == "drum":
+        by = _actor(data.get("by"), kind)
+        if data.get("scope") not in DRUM_SCOPES:
+            raise CommandRefused(
+                "drum", by,
+                f"drumming is switched {', '.join(DRUM_SCOPES[:-1])} or {DRUM_SCOPES[-1]}, and "
+                f"{_quoted(data.get('scope'))} is none of them, so it is refused",
+            )
+        return Drum(scope=data["scope"], by=by)
+    if kind == "training":
+        by = _actor(data.get("by"), kind)
+        if data.get("setting") not in TRAINING:
+            raise CommandRefused(
+                "training", by,
+                f"a training setting is {' or '.join(TRAINING)}, and "
+                f"{_quoted(data.get('setting'))} is neither, so it is refused",
+            )
+        if not isinstance(data.get("on"), bool):
+            raise CommandRefused(
+                "training", by,
+                f"a 'training' command's on is true or false, and {_quoted(data.get('on'))} is "
+                f"neither, so it is refused",
+            )
+        return Training(setting=data["setting"], on=data["on"], by=by)
     raise ValueError(f"unknown command kind on the wire: {_quoted(kind)}")
 
 

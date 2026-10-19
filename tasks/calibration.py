@@ -46,6 +46,8 @@ from wl_xcon.task import (
     HARDER,
     NO_CHOICE,
     Meaning,
+    OWED,
+    Counting,
     ReactionTime,
     Task,
     Trial,
@@ -59,6 +61,10 @@ TARGET = Stimulus(
 calibration = Trial(
     start="await_fix",
     view="direct",
+    # Its counting table (the engine C2a plan's Appendix B, item 10): a target is up from the
+    # trial's first frame, in `await_fix`, and one the animal broke on is owed, shown again: every
+    # target is fitted.
+    counting=Counting(after_stimulus=OWED, appears="await_fix"),
     windows=[
         Window(
             "cal",
@@ -110,8 +116,11 @@ calibration = Trial(
                 # Bounded even though the two guards above are exhaustive in
                 # practice, for the reason `fixation_detection` gives: check 4
                 # refuses a state that could wait forever, and "in practice" is the
-                # reasoning that produced the S1 bake-off's unbounded hold.
-                On(After(P("fix_acquisition")), Outcome.NO_FIXATION),
+                # reasoning that produced the S1 bake-off's unbounded hold. 10 s,
+                # longer than any legal `cal_hold`, so a hold in progress is never cut
+                # off (the engine C2a plan), and no longer than `fix_acquisition`'s
+                # highest, which bounded it before.
+                On(After(10.0), Outcome.NO_FIXATION),
             ],
         ),
     ],

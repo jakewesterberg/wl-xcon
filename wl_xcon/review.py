@@ -15,6 +15,10 @@ from __future__ import annotations
 from dataclasses import fields, is_dataclass
 
 from wl_xcon.task import (
+    COUNTED,
+    OWED,
+    SPENT,
+    UNPAID,
     arrays_of,
     After,
     Background,
@@ -304,7 +308,8 @@ def render_task(task: Task, allocation_names: dict[int, str] | None = None) -> s
     task's content hash, each setting's role, meaning and where it comes from -- the shared list,
     the task's own, or the task's override of the shared list with why (the PI, 2026-10-11) -- the
     bounded settings it rewards through, how its reaction time is defined, what it offers to
-    choose, and whether it needs a fixed head. **Then each trial structure**, the default first,
+    choose, whether it needs a fixed head, and what each trial does to its condition's count
+    (engine build C2a). **Then each trial structure**, the default first,
     as `render` draws one, a heading level down. Nothing is checked first, as `wlx review` checks
     nothing: an undeclared meaning is shown as one, and a content that cannot be hashed says so."""
     from wl_xcon.declarations import BOUNDED, OVERRIDE, content_hash, resolved, rewarded_through
@@ -371,12 +376,46 @@ def render_task(task: Task, allocation_names: dict[int, str] | None = None) -> s
         else "Runs with the head fixed or free; a chaired session lists its free head as a warning."
     )
     lines += ["### Head", "", head, ""]
+    lines += _counting(task)
     for name in (task.default, *(other for other in task.structures if other != task.default)):
         heading = f"## Structure `{name}`"
         if name == task.default:
             heading += ", the default: its runs play it until plans exist (engine build C2)"
         lines += [heading, "", _demoted(render(task.structures[name], allocation_names)), ""]
     return "\n".join(lines)
+
+
+#: A counting class in the words the PI confirms it in (the engine C2a plan's Appendix B).
+_CLASS_WORDS = {COUNTED: "counted", SPENT: "used up", OWED: "shown again", UNPAID: "pays nothing"}
+
+
+def _counting(task: Task) -> list[str]:
+    """What each trial does to its condition's count, structure by structure (engine spec
+    §16.1-16.2; engine build C2a): the state its stimulus appears in; every outcome's class once
+    the stimulus has appeared and before it, and a hang's; whether withholding is an answer; the
+    repeat limit. A structure without a table, or whose table names no such state, says so, which
+    the load-time check refuses (`undeclared-counting`)."""
+    lines = ["### What each trial does to its condition's count", ""]
+    for name in (task.default, *(other for other in task.structures if other != task.default)):
+        table = task.structures[name].counting
+        if table is None:
+            lines += [f"Structure `{name}`: **no counting table**, which the load-time check "
+                      f"refuses.", ""]
+            continue
+        appears = (f"its stimulus appears in `{table.appears}`" if table.appears is not None
+                   else "**it names no state its stimulus appears in**")
+        withholding = ("withholding is an answer, so no response is a miss" if table.withholding
+                       else "withholding is no answer")
+        limit = ("no repeat limit: a condition is repeated until done" if table.cap is None
+                 else f"a repeat limit of {table.cap} failed repeats in a row")
+        lines += [f"Structure `{name}`: {appears}; {withholding}; {limit}.", "",
+                  "| Outcome | After the stimulus appears | Before it |", "|---|---|---|"]
+        rows = [(outcome.value, outcome) for outcome in Outcome]
+        for said, outcome in [*rows, ("hang (the five-minute cap)", None)]:
+            lines.append(f"| {said} | {_CLASS_WORDS[table.of(outcome)]} "
+                         f"| {_CLASS_WORDS[table.of(outcome, shown=False)]} |")
+        lines.append("")
+    return lines
 
 
 def _demoted(text: str) -> str:
