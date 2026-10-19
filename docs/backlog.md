@@ -15,7 +15,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 **Finding one.** Grep the ID, a package (`P9`, `b3`), a repository (`wl-sync`) or a file. The sections: brainstorms the PI asked to have later; features no plan covers yet; defects and review findings deliberately not fixed; debt (cleanup, stale wording, test hygiene); anything that needs the rig or other hardware, measurements included; and asks of, or waits on, other repositories.
 
-**Next free ID: XC-402.**
+**Next free ID: XC-403.**
 
 ## Brainstorms queued for the PI
 
@@ -109,6 +109,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 ## Deferred defects
 
+- **XC-402** An array's object windows are built once per trial from its `Show`'s position (`task.expand_windows`), so an `Update` that moves the array mid-trial moves its objects but not their windows, and the animal is scored where the objects were. — 2026-10-19, [engine spec §5](superpowers/specs/2026-10-07-engine-design.md#5-where-n2-nr5) (item 7, gaze windows; found on the `true-angle-windows` branch) — waits on: nothing
 - **XC-397** `ObjectWindows.expand` (`task.py`) puts an array's object windows on its ring about (0°, 0°), not about the array's own position (`Array.positions` is relative to it and `screen` adds it when drawing), so an array shown off center is scored against windows where its objects are not (an array at (10°, 5°): windows at (3°, 0°), (0°, 3°), ... while its objects are drawn at (13°, 5°), ...); `check._crowded_arrays` reads the ring where the windows are. No reference task is affected (each centers its array at (0°, 0°)). With it, the PI chose on 2026-10-19 that an array places its objects on a true circle of visual angle about its own direction ("True circle"), not by per-axis offsets (an 8° ring's object at 45° is 7.975° out today); both are built on the `true-angle-windows` branch. — 2026-10-19, [the `true-angle-windows` branch's survey](superpowers/specs/2026-10-07-engine-design.md#5-where-n2-nr5) (engine spec §5) — waits on: the `true-angle-windows` branch
 - **XC-145** A missing `--rig` or `--subject-settings` path (like `--bounds`, `--allocation` or the task path) is a `FileNotFoundError` traceback rather than a refusal sentence. — 2026-09-29, [cli.py's `_load_named`](../wl_xcon/cli.py) — waits on: nothing
 - **XC-039** A change staged on a session's last pass is never applied and never recorded, a record gap on the reward path. — 2026-09-19, [next-session §6 item 2](next-session.md#6-p4d-2a-is-on-main-p4d-2b-b1-is-built-b2-is-next) — waits on: nothing
