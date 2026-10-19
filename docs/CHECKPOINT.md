@@ -579,7 +579,10 @@ drum and training rows), XC-365 (wl-preproc to read the new trial and end-row fi
 condition beside nonzero targets; two conditions of one block with one name), XC-387 (`wlx console` and schema 16,
 waiting on a decision that the terminal console is kept). wl-xtasks is told of the counting table under its item 1
 in `docs/pending-wl-xtasks-amendments.md` (information; nothing asked). **Next free XC-391**, as `fluid-commands`
-left it; nothing here was filed as XC-389 or XC-390.
+left it; nothing here was filed as XC-389 or XC-390. *(Later on 2026-10-19: wl-preproc's three asks for a session
+timed without the sync box -- every word the card sent in the timed event log, each resumed process's open instant,
+and clock pairs -- filed as XC-391 to XC-393, all for build C7; the session's own open is already `welfare_notes.jsonl`'s
+`session opened` row. Next free XC-394.)*
 
 **Found on the way:**
 - A held target stretched past 3 s by tracker stalls ends as no response and steps `adaptive_detection`'s staircase
