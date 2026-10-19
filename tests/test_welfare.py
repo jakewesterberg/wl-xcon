@@ -274,7 +274,7 @@ def test_a_delivered_line_below_commanded_is_a_fault_and_the_larger_figure_stand
     welfare.reconcile(delivered=0.5)
 
     assert welfare.total_today() == pytest.approx(1.5)
-    assert "faulty" in welfare.report().fault
+    assert "at fault" in welfare.report().fault
 
 
 def test_reconciliation_is_what_the_shortfall_is_computed_from():

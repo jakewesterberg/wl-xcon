@@ -21,7 +21,7 @@ the moment it becomes someone's active job. Review this file at every milestone 
 | **P14** | **RHX TCP backpressure halts acquisition** | **High** | Bounded dedicated reader; drop-oldest; budgeted channel/rate; falling-behind is a loud alarm |
 | **P15** | **Model-authored tasks are plausibly wrong** | **High** | Declarative within-trial layer; allocated-not-invented codes; simulated sessions; demo mode; review by rendered diagram |
 | **P16** | **Live parameter change becomes an undocumented discontinuity** | **High** | Full per-trial parameter snapshot; event-coded changes; atomic ITI application; provenance on every write |
-| **P17** | **Our fluid total is a lower bound, not a total** | Medium | Reconcile against the sync box's record of the delivered line, never against commanded — under a floor this is what stops a top-up being asked for fluid already given by hand |
+| **P17** | **Our fluid total is a lower bound, not a total** | Medium | Reconcile against the sync box's record of the delivered line, never against commanded — under a floor this is what stops a top-up being asked for fluid already given by hand. That record is a count of reward commands, so it gives fluid commanded, not received; a reservoir reading at session start and end checks what was received (XC-389; corrected 2026-10-18, the PI) |
 | **P18** | **Correct graph, wrong experiment** | **High** | Gates must inspect different *objects*, not the same one three ways — see expanded note |
 | **P19** | **A colour nobody measured reaches a methods section** | **High** | Device-independent colour only, checked against the rig's calibration; on the default sRGB calibration a warning in every session kind, the record naming the default; isoluminance against a named observer, which the methods section states — see expanded note |
 | **P20** | **Generated structure nobody reads** | Medium | Anything a parameter generates — array items, their windows — needs a check, because no author will ever look at it |
@@ -164,7 +164,8 @@ set; and every write records its origin and actor through one validated path.
 
 **P17 — Fluid accounting floor.** The panel's manual reward button bypasses our software
 entirely — debounced, monostabled, OR'd with our commanded line, recorded as *delivered*.
-Our commanded total is therefore a lower bound on fluid delivered. Welfare accounting
+Our commanded total is therefore a lower bound on the reward commands the delivered line counts
+*(corrected 2026-10-18: this said "a lower bound on fluid delivered"; see below)*. Welfare accounting
 reconciles against the sync box's record of the delivered line. Recording commanded and
 delivered separately is what makes a hand-delivered reward countable at all, and training
 days are exactly when an unlogged one would become a silent confound.
@@ -176,6 +177,18 @@ ceiling on earned reward (PI) [@nc3rs2012refining; @gray2016physiological]. The
 reconciliation matters just as much under a floor and in
 the same direction — a shortfall computed from what we *commanded* would ask for a top-up the
 animal has already had from the panel button.
+
+*Corrected 2026-10-18 (the PI).* The delivered line does not measure fluid. `wl-sync` stated that
+day that it is the reward-OR gate's output, the signal sent to the reward driver: "It is not a
+measurement of fluid. An unpowered or unplugged driver, an empty reservoir and a blocked line all
+still record as delivered." The PI's ruling is that it is **"A count of reward commands"**: "Exact
+count of times the pump was told to run, hand rewards included. Multiplied by the pump's
+calibration it gives fluid commanded, not fluid received, and the docs say so." So the
+reconciliation above counts hand rewards as commands, and it cannot show a pump that did not run
+or a line that did not flow. What the animal received is checked by a reservoir reading at session
+start and end, in mL from the reservoir's own marks, which the session summary compares with the
+commanded total, warning if they disagree and refusing nothing (the PI, the same day; its
+threshold set at design from a measured spread; not yet built, XC-389).
 
 
 **P18 — Correct graph, wrong experiment.** For a long stretch every load-time check

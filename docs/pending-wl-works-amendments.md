@@ -18,6 +18,11 @@ refuse.
 **And one from XC-288, opened 2026-10-10**: what the training-record file needs from wl.works,
 under "XC-288's training records", before the closing list of decisions.
 
+**And one from 2026-10-18**: the ELN's session-finish row labels the rig's fluid figure "fluid
+commanded", not "fluid delivered", and an ELN water entry is only ever water received (wl-works'
+answer that day, and the PI's four rulings on it, relayed to wl-works), under "The ELN's
+session-finish row", before the list delivered 2026-10-11 (backlog XC-390).
+
 **Both build on a document that is itself proposed, not agreed.**
 `wl-preproc/docs/ops/lab-host-protocol.md` says so in its own opening line: it is written
 by wl-preproc, describes the host half, and is *"proposed to wl.works rather than written
@@ -73,7 +78,7 @@ Proposed readings, in the existing readings format:
 | `task` | `detection-v3`, with its version | What is running right now |
 | `state` | `running` / `paused` / `idle` / `fault` | Whether a person needs to walk to the rig |
 | `trials` | `340 attempted / 318 completed` | Progress, current by nature |
-| `fluid` | `142 mL of a 250 mL ceiling` | Welfare-relevant, and stale-by-a-minute is fine |
+| `fluid` | `142 mL commanded` *(corrected 2026-10-18: this said "142 mL of a 250 mL ceiling"; there is no fluid ceiling since 2026-09-06, the PI, and the figure is the session's commanded total, not fluid received)* | Welfare-relevant, and stale-by-a-minute is fine |
 | `preflight` | `pass`, with its timestamp | Whether the last start-up check was clean |
 
 At the protocol's proposed 60 s poll cadence this gives wl-works a live rig dashboard for
@@ -522,6 +527,70 @@ holds no ELN notes; it holds the rig name and not the id) and is rebuilt when it
 Nothing here is blocked on an answer: the controller's v1 works with no ELN integration at
 all, writing everything to the session directory as it would anyway. This buys the ELN
 entry, not the recording.
+
+---
+
+# OPEN — The ELN's session-finish row: "fluid commanded", not "fluid delivered" (new, 2026-10-18)
+
+Opened 2026-10-18 on the PI's decision, backlog XC-390. Raised with wl-works the same day, which answered and
+queued a brainstorm on what a session's water entry records (its `ee9a58f0`); the PI's rulings on its answer were
+relayed to it that day. Yours to accept, amend or refuse.
+
+## The finding
+
+A finished rig session reaches the ELN as a file in the session directory, ingested by `wl-preproc`
+([S10 §4](superpowers/specs/2026-08-31-S10-data-and-lab-integration-design.md#4-the-lab-host-endpoint);
+[controller architecture §12.3](superpowers/specs/2026-08-31-controller-architecture-design.md#123-wl-works-and-the-eln)).
+Both tables labeled its fluid figure "fluid delivered". That figure is the session's commanded total: what the task
+PC asked the pump for, reconciled against the sync box's delivered line. `wl-sync` stated on 2026-10-18 that the line
+is the signal sent to the reward driver: "It is not a measurement of fluid. An unpowered or unplugged driver, an
+empty reservoir and a blocked line all still record as delivered." The PI then ruled that it is **"A count of reward
+commands"**: "Exact count of times the pump was told to run, hand rewards included. Multiplied by the pump's
+calibration it gives fluid commanded, not fluid received, and the docs say so."
+([S8 §5.1](superpowers/specs/2026-08-31-S8-session-management-design.md#51-fluid-is-reconciled-not-tallied)).
+
+## The ask
+
+**Wherever the ELN shows or stores a rig session's fluid figure from the session-finish row, label it "fluid
+commanded", not "fluid delivered".** Asked whether the labels should say "fluid commanded", the PI answered on
+2026-10-18 **"Say 'fluid commanded'"**: "Matches your decision that the total is fluid commanded. The ELN row's
+label change is also sent to wl-works as an ask." wl-xcon's own specs carry the new label from the same day.
+
+## Why
+
+A label is a claim about the animal. "Delivered" reads as fluid the animal received, and this figure cannot show
+that: the line sits before the pump, so a pump that did not run, an empty reservoir or a blocked line still counts
+as a command. What the animal received is checked separately, by a reservoir reading at session start and end that
+the session summary compares with the commanded total, warning if they disagree (the PI, 2026-10-18; XC-389, which he
+requires before the first animal). That reading is not built yet and is not part of this ask.
+
+## wl-works' answer (2026-10-18)
+
+An ELN water entry (`animal_water_entry`) is water the animal **received**, to every reader: one figure, no status,
+summed under water control against the animal's minimum, and raising or withholding the care staff's `water_short`,
+`water_unrecorded` and `water_none_yet` warnings. So a commanded figure filed as water "would make a dry reservoir read
+as a watered animal". It named what this touches in its own designs: its session-record spec §5.3, which files a
+kiosk session's "delivered total" automatically as a *Kiosk* water entry; its handover's XC-320 (b), which asks
+wl-xcon for that figure; the `fluid_delivered_today_ml` envelope, named *delivered*; and 11a-1's run water, typed by
+a person, where someone copying the rig's display would file commanded as received. It recommended four rules (its brainstorm queue at `ee9a58f0`; the facts read at its
+`153844d0`).
+
+## The PI's rulings on it (2026-10-18)
+
+He answered **"Agree"** to each of the four, and they were relayed to wl-works that day:
+
+1. **A water entry always means water received, whoever writes it.** Commanded is the rig's own record, shown beside
+   it and never summed in.
+2. **Until the reservoir reading exists, nothing files water automatically.** The experimenter types what was
+   received, with commanded shown beside it, labeled commanded.
+3. **Once the reading exists, the reservoir drop is filed automatically as the water entry**, with commanded beside
+   it. How wide differences are handled is designed in wl-works' brainstorm.
+4. **Kiosks the same:** no automatic kiosk water entry from a commanded total.
+
+**So wl-works' XC-320 (b) ask, that the kiosk publish each session's "fluid delivered", is superseded**: a kiosk's
+figure is its commanded total, labeled so, and by rule 4 it is never filed as water automatically. The rig's side
+of rule 3 waits on XC-389, which is also where the floor check moves to the reservoir drop once it is read (the PI,
+2026-10-18, "Yes, use the drop once read").
 
 ---
 
