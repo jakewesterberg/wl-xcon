@@ -569,7 +569,10 @@ and 3.13 at every run; every verdict caught (`run.display` inert) but one: **`ch
 `hold-cut-short`'s text, which no test read. `e2ed03a` (tests only) asserts the named (`response_deadline`,
 `target_hold`) and literal (0.3 s) forms; `said` broken by hand to return `[]` (the harness's own mutant), `None` and
 `''` fails two tests each, restored. Its run `39167275737`: 3808 on 3.11 to 3.13, the gate selecting nothing (tests
-only). **The nightly full sweep re-sweeps `check` on `main`**: read it before trusting `said` as caught.
+only). **The nightly full sweep re-sweeps `check` on `main`**: read it before trusting `said` as caught. *(Dated note, 2026-10-19:
+`main`'s push run of the merge, `39218053534` at `da22ee2`, swept the whole C2a range -- eighteen modules, 651
+caught, `run.display` inert, every shard "mutation gate passed", 3815 on 3.11 to 3.13 -- and caught `said`, 2
+failed. The fluid merge's, `39216154392` at `c0a5da0`: 88 caught, `emit` inert, 3592.)*
 
 **Backlog.** Closed: XC-287; XC-364 and XC-367 close unfiled (decisions 6 and 2 settled both). Filed: XC-361 and
 XC-362 (C3: a designed order's repeat rule; a repeat's drawn values), XC-363 (C3's change log takes over the clear,
