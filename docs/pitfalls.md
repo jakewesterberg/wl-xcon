@@ -27,7 +27,7 @@ the moment it becomes someone's active job. Review this file at every milestone 
 | **P20** | **Generated structure nobody reads** | Medium | Anything a parameter generates — array items, their windows — needs a check, because no author will ever look at it |
 | **P21** | **A guardrail nothing calls, behind a comment that went stale** | **High** | A safety component needs a *consumer* in the same commit, and a test that the consumer is on the only path — see expanded note |
 | **P22** | **A browser page that can write is a page any site can try to make write** | **High** | Spec §2's four checks on every write, the `Host` check on every request, the rig's own validation behind them — see expanded note |
-| **P23** | **A coordinate read as a distance** | Medium | Every angle at the eye between two positions is true visual angle, measured where they are; a mean pixels per degree reaches no drawing, window or check — see expanded note |
+| **P23** | **A coordinate read as a distance** | Medium | The angles the engine measures between positions are true visual angle, measured where they are, and what is still per axis is named (STE-27); a mean pixels per degree is used by no drawing, window or check by name — see expanded note |
 
 ## Expanded notes
 
@@ -345,14 +345,21 @@ not a degree of visual angle. Until 2026-10-19 the gaze window tested `hypot(x -
 in those coordinates, so a 2° window at (20°, 0°) was 1.879° tall and one at (20°, 20°) 2.013°
 wide across the diagonal, and the load checks that compare how far apart windows can come with
 their radii measured the same way. Nothing looked wrong: at the center, where tests put their
-windows, every window was as declared. Other packages make the same error as one pixels per
-degree for the whole screen. Mitigation (the PI, 2026-10-19; STE-27): every angle between two
-positions is the angle between their directions, where they are (`geometry.separation_deg`,
-and `least_separation_deg` built on it), and an array is a true circle about its own direction
-(STE-28, `ring_spacing_deg`); `Geometry.pixels_per_degree`
-stays a reported mean, and a test that asks the parser fails if anything else in `wl_xcon/`
-names it; and the tests place gaze from directions, never from per-axis degrees, so they
-cannot agree with per-axis arithmetic by construction. **The same error in a task file** is a
+windows, every window was as declared. The same error is common elsewhere as one pixels per
+degree for the whole screen (the PI, 2026-10-19: "In other experimental control software
+packages, we use a set ppd for the entire monitor"). Mitigation (the PI, 2026-10-19; STE-27):
+the angles the engine measures between positions -- gaze to a window's center, window to
+window, an array's neighbors, how far calibration targets reach -- are the angles between their
+directions, where they are (`geometry.separation_deg`, and `least_separation_deg` built on it),
+an array is a true circle about its own direction (STE-28, `ring_spacing_deg`), and the screen
+center's scale is retired (STE-06). **Still per axis**, each for a reason STE-27 names: saccade
+detection and size (with wl-preproc, XC-398), the calibration's RMS residual, disparity (azimuth
+longitude, STE-07), the two eyes' mean, check 8's field test, and the stereoscope's gaze frame
+(XC-005). `Geometry.pixels_per_degree` stays a reported mean, and a test that asks the parser
+fails if anything else in `wl_xcon/` names it -- **by name only**: a `getattr` by string,
+`vars(type(g))`, or the mean recomputed inline gets past it, and `tasks/` is not scanned. The
+tests place gaze from directions, never from per-axis degrees, so they cannot agree with
+per-axis arithmetic by construction. **The same error in a task file** is a
 position computed as `(e·cos θ, e·sin θ)`, which is per axis too: 7.975° out for 8° at 45°. Since
 2026-10-19 positions are written as `Polar(eccentricity, direction)` by default and converted
 exactly (STE-29), and the load check reads the task file with the parser and warns of `cos` or

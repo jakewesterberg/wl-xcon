@@ -500,6 +500,53 @@ def test_crowding_is_read_where_the_objects_are_and_agrees_with_every_pair_of_wi
     assert (least < 2 * window) is crowded
 
 
+
+@pytest.mark.parametrize("window, crowded", [(2.05, False), (2.07, True)])
+def test_an_off_center_array_is_read_where_its_objects_and_windows_are(window, crowded):
+    """The review of the first commit, I2: an array at (20°, 10°) with twelve objects on an 8°
+    ring was drawn per axis about its position, its neighbors there 3.65° apart, while the checks
+    read 4.10° (about the origin, where the windows were) or 4.14° (per axis). On a true circle
+    about its own direction (XC-397; the PI's "True circle") they are 4.13° apart there as
+    everywhere, which is what `crowded-array` reads, and what every pair of the windows
+    `expand_windows` makes there says, at any phase."""
+    trial = _search_at((20.0, 10.0), 8.0, 12, window)
+    least = min(_true_angle(p, q)
+                for phase in (0.0, 10.0, 37.0)
+                for centers in ([w.at for w in expand_windows(trial, {"phase": phase})[0]
+                                 if w.name.split(".")[1].isdigit()],)
+                for i, p in enumerate(centers) for q in centers[i + 1:])
+
+    found = [f for f in check(trial) if f.code == "crowded-array"]
+
+    assert least == pytest.approx(4.1286, abs=1e-4)
+    assert bool(found) is crowded is (least < 2 * window)
+    if found:
+        assert "12 objects on a 8° ring, 4.13° apart" in found[0].detail
+
+
+@pytest.mark.parametrize("size, refused", [(4.1, False), (4.15, True)])
+def test_objects_of_an_off_center_array_are_drawn_on_one_another_as_their_positions_say(
+        size, refused):
+    """`overlapping-objects` and `_most_apart`, for twelve discs on an 8° ring about (20°, 10°),
+    sent past a highest of six: 4.13° apart, so 4.1° discs are drawn apart and 4.15° ones on one
+    another, the refusal naming eleven as the most that ring keeps apart, as the positions
+    `Array.positions` gives there say."""
+    ring = Array(n=P("set_size"), radius=8.0, target=0, looks=Disc(size=size),
+                 among=Disc(size=size))
+    task = Task({"s": Trial(start="s", params=[Param("set_size", unit="objects", low=2, high=6)],
+                            states=[State("s", enter=[Show(Stimulus("x", at=(20.0, 10.0),
+                                                                    looks=ring))],
+                                          go=[On(After(1.0), Outcome.NO_RESPONSE)])])},
+                default="s")
+    positions = ring.positions({"set_size": 12}, at=(20.0, 10.0))
+    least = min(_true_angle(p, q) for p, q in zip(positions, positions[1:] + positions[:1]))
+
+    blocking = [f for f in beyond_range(task, {"set_size": 12}) if f.blocking]
+
+    assert bool(blocking) is refused is (least < size)
+    if blocking:
+        assert "at most 11 stay apart" in blocking[0].detail
+
 @pytest.mark.parametrize("sent", [231, 232, 240, 251, 252])
 def test_objects_drawn_on_one_another_are_refused_as_every_pair_of_them_says(sent):
     """`overlapping-objects` refuses a set size sent past its range exactly when two of the

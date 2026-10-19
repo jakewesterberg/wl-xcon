@@ -42,6 +42,8 @@ import itertools
 import math
 from dataclasses import dataclass
 
+import numpy as np
+
 #: The two setups a session can run in (direct-view spec §3). The operator picks one at
 #: session start; a task's `Trial.view` names one of these, or `"either"`.
 VIEWS = ("direct", "stereoscope")
@@ -450,7 +452,8 @@ def least_separation_deg(xs_a, ys_a, xs_b, ys_b, *, polar_a: bool = False,
     are never crossed into 2.5 million pairs (the final re-review's m4); a polar sector against
     a rectangle, which has no closed form here, is halved until the bound is within
     `_TOLERANCE` of a pair of positions found, and that bound, never more than the least, is
-    the answer. A side without end is read to 90° (`_SIDE_DEG`), a direction without end as
+    the answer. Two regions of points alone are compared pair by pair with numpy instead
+    (`_pointwise`). A side without end is read to 90° (`_SIDE_DEG`), a direction without end as
     every direction.
     """
     sides = (_region(xs_a, polar_a, False), _region(ys_a, polar_a, True),
@@ -458,6 +461,9 @@ def least_separation_deg(xs_a, ys_a, xs_b, ys_b, *, polar_a: bool = False,
     if not all(sides):
         raise ValueError("a region has at least one interval on each axis")
     polar = (polar_a, polar_b)
+    pointwise = _pointwise(sides, polar)
+    if pointwise is not None:
+        return pointwise
     order = itertools.count()
     queue = [(*_bound(sides, polar), next(order), sides)]
     best = math.inf
@@ -471,6 +477,36 @@ def least_separation_deg(xs_a, ys_a, xs_b, ys_b, *, polar_a: bool = False,
         for child in _halves(node, polar):
             heapq.heappush(queue, (*_bound(child, polar), next(order), child))
     raise AssertionError("unreachable: the search returns from within its loop")
+
+
+#: The most pairs `_pointwise` compares at once, a float64 matrix of them in memory (32 MB).
+_PAIRWISE_LIMIT = 4_000_000
+
+
+def _pointwise(sides, polar) -> float | None:
+    """**When both regions are points** -- every coordinate a literal or a setting's choices --
+    the least over every pair, by numpy's pairwise dot products (at load and between trials,
+    never in a frame): the pairs whose dot product is within 1e-12 of the greatest, which holds
+    the nearest pair whatever the rounding, measured exactly by `separation_deg`. `None` for a
+    region with a range in it, or more than `_PAIRWISE_LIMIT` pairs, which the search takes."""
+    if not all(low == high for side in sides for low, high in side):
+        return None
+    regions = []
+    for first, second, is_polar in ((sides[0], sides[1], polar[0]), (sides[2], sides[3], polar[1])):
+        regions.append([polar_deg(e, t) if is_polar else (e, t)
+                        for e, _ in first for t, _ in second])
+    if len(regions[0]) * len(regions[1]) > _PAIRWISE_LIMIT:
+        return None
+    a, b = (np.radians(np.array(region, dtype=float)) for region in regions)
+
+    def unit(r: np.ndarray) -> np.ndarray:
+        x, y = r[:, 0], r[:, 1]
+        v = np.stack([np.sin(x) * np.cos(y), np.cos(x) * np.sin(y), np.cos(x) * np.cos(y)], axis=1)
+        return v / np.linalg.norm(v, axis=1, keepdims=True)
+
+    dots = unit(a) @ unit(b).T
+    nearest = np.argwhere(dots >= dots.max() - 1e-12)
+    return min(separation_deg(*regions[0][i], *regions[1][j]) for i, j in nearest)
 
 
 #: How close a bound must come to a pair of positions found before a search between a polar

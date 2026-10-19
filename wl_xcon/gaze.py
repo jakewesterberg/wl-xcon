@@ -157,8 +157,8 @@ class Tracked:
         # placed as every stimulus is (EYE-10): in direct view, directions from straight ahead.
         # Through the stereoscope each eye sees in its own viewport's degrees, the vergence
         # offset away per axis, which moves this angle by up to 0.72% of it over the ±12° mask
-        # (computed, for gaze within 8° of the center); which frame an eye's map is in is the
-        # stereoscope calibration task's to settle (XC-005).
+        # (computed, for gaze within 8° of the window's center); which frame an eye's map is in
+        # is the stereoscope calibration task's to settle (XC-005).
         return separation_deg(x, y, cx, cy) <= radius
 
     def happened(self, guard: Guard, state: str, frame: int) -> bool:

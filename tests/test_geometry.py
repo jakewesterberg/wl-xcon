@@ -492,8 +492,14 @@ def test_a_position_past_90_degrees_continues_past_the_side_rather_than_wrapping
     assert separation_deg(-85.0, 0.0, 95.0, 0.0) > 90.0
 
 
-def test_the_least_separation_between_sets_of_points_is_the_least_over_every_pair():
-    """Seeded: windows placed by choices on each axis, 1-6 an axis, anywhere in ±30°."""
+@pytest.mark.parametrize("pairwise", [True, False], ids=["numpy pairwise", "best-first search"])
+def test_the_least_separation_between_sets_of_points_is_the_least_over_every_pair(
+        pairwise, monkeypatch):
+    """Seeded: windows placed by choices on each axis, 1-6 an axis, anywhere in ±30°: by numpy's
+    pairwise dot products, as such regions are measured, and by the best-first search, which
+    takes them past `_PAIRWISE_LIMIT` pairs (the review of the first commit's item 4)."""
+    if not pairwise:
+        monkeypatch.setattr(geometry, "_PAIRWISE_LIMIT", 0)
     rng = random.Random(7)
     for _ in range(200):
         sides = [sorted(rng.uniform(-30.0, 30.0) for _ in range(rng.randint(1, 6)))
@@ -503,6 +509,21 @@ def test_the_least_separation_between_sets_of_points_is_the_least_over_every_pai
         found = least_separation_deg(*([(v, v) for v in side] for side in sides))
         assert found == pytest.approx(_least_by_dots(a, b), abs=1e-7)
 
+
+
+def test_regions_of_choices_on_one_axis_and_a_range_on_the_other_are_searched_exactly():
+    """A window at one of five heights over a range across, and one at one of four places across
+    over a range of heights: no closed form for the pair, so the search splits their lists of
+    intervals; it finds the least a fine sweep of both finds, and never more."""
+    xs_a, ys_a = [(-12.0, -2.0)], [(v, v) for v in (-9.0, -4.0, 1.5, 6.0, 11.0)]
+    xs_b, ys_b = [(v, v) for v in (3.0, 7.5, 14.0, 21.0)], [(-6.0, 9.0)]
+    a = [(x, y) for x in np.linspace(*xs_a[0], 401) for y, _ in ys_a]
+    b = [(x, y) for x, _ in xs_b for y in np.linspace(*ys_b[0], 601)]
+    swept = min(_least_by_dots(a, b[k::5]) for k in range(5))
+
+    found = least_separation_deg(xs_a, ys_a, xs_b, ys_b)
+
+    assert swept - 1e-3 <= found <= swept + 1e-9
 
 @pytest.mark.parametrize("seed", range(12))
 def test_the_least_separation_to_a_range_is_never_more_than_any_point_in_it_reaches(seed):
