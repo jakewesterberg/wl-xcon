@@ -184,9 +184,11 @@ def test_the_stimuli_table_shows_how_each_stimulus_is_placed_and_combined():
 
     assert ("| State | Stimulus | Position° (cyclopean, or each eye's) | Disparity° | Eye | Layer "
             "| Combination | Opacity |") in artifact
-    assert "| `on` | `pair` | L (2, 0) / R (-2, 0.5) | 0 | both | 0 | cover | 1 |" in artifact
-    # A parameter by its name, as everywhere else in the report.
-    assert "| `on` | `glow` | (ecc, 1) | 0 | both | 2 | add | 0.5 |" in artifact
+    # Eccentricity and direction first, (x, y) beside them (the PI, 2026-10-19).
+    assert ("| `on` | `pair` | L 2° at 0° · (x, y) (2, 0) / R 2.061° at 165.969° · (x, y) "
+            "(-2, 0.5) | 0 | both | 0 | cover | 1 |") in artifact
+    # A parameter by its name, as everywhere else in the report: a pair holding one per axis.
+    assert "| `on` | `glow` | (x, y) (ecc, 1) | 0 | both | 2 | add | 0.5 |" in artifact
     # Once, above the table, each eye's on the stereoscope.
     assert artifact.count("Background:") == 1
     assert "Background: left eye Gray(20); right eye Gray(20)" in artifact

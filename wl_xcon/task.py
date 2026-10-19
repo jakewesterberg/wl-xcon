@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 import math
 from enum import Enum
 
+from wl_xcon.geometry import on_circle_deg, polar_deg
 from wl_xcon.photometry import Color, Contrast
 
 
@@ -219,6 +220,40 @@ REMEMBERED = Remembered()
 
 
 @dataclass(frozen=True, slots=True)
+class Polar:
+    """**A position as its eccentricity and direction: how a task writes one by default** (the
+    PI, 2026-10-19: "Polar first, x-y allowed"). `Polar(8, 45)` is 8° of visual angle from
+    straight ahead, 45° counter-clockwise from rightward (engine spec §5.1's convention: 0°
+    right, counter-clockwise positive, +y up), converted exactly to the per-axis degrees the
+    screen is drawn in (`geometry.polar_deg`). Accepted wherever a position is: a stimulus's,
+    each eye's own, an `Update`'s, a window's center and an array's center; either field may be
+    a setting. A pair `(x, y)` stays for axis-aligned designs -- a grid, a meridian, the
+    calibration constellation -- and is per axis: `(8·cos 45°, 8·sin 45°)` is 7.975° out, not
+    8°, which is why a task file that computes a position from `cos` and `sin` is warned at
+    load (`check`'s `computed-position`).
+
+    Named for the coordinates it holds, as `Disc` and `Array` are for what they draw; its fields
+    are the PI's words, "at eccentricity e, direction θ", the direction an angle as a grating's
+    drift direction is."""
+
+    eccentricity: "float | P"
+    direction: "float | P"
+
+
+def position_of(at: object, values: dict) -> tuple[float, float]:
+    """A position as the per-axis degrees everything downstream reads -- the screen, the gaze
+    windows, the checks: a `Polar` converted exactly (`geometry.polar_deg`), a pair coordinate by
+    coordinate, a whole-point setting as its value is. On the trial loop's path (a window's
+    center, every frame), so floats and `math` only."""
+    if isinstance(at, P):
+        at = _value(at, values)
+    if isinstance(at, Polar):
+        return polar_deg(float(_value(at.eccentricity, values)),
+                         float(_value(at.direction, values)))
+    return (float(_value(at[0], values)), float(_value(at[1], values)))
+
+
+@dataclass(frozen=True, slots=True)
 class Window:
     """A named region gaze, a joystick or a touch is tested against.
 
@@ -228,7 +263,8 @@ class Window:
     """
 
     name: str
-    at: "tuple[float, float] | P"
+    #: Its center: a `Polar` by default, or a per-axis pair (`Polar`'s docstring says when).
+    at: "Polar | tuple[float, float] | P"
     radius: "float | P"
     #: The stimulus this window scores, by name -- or `REMEMBERED` when nothing is
     #: displayed there on purpose. **Unset is refused at load**, because the whole
@@ -813,8 +849,6 @@ class Array(Appearance):
         (`geometry.ring_spacing_deg`). Object `i` is at `phase + 360 i / n` degrees
         counter-clockwise from the array's local rightward axis, the frame a shape's orientation
         is drawn in (`geometry.on_circle_deg`; `viewport.local_true_angle`)."""
-        from wl_xcon.geometry import on_circle_deg
-
         n = int(_value(self.n, values))
         radius = float(_value(self.radius, values))
         phase = float(_value(self.phase, values))
@@ -859,11 +893,9 @@ class ObjectWindows:
 
     def expand(self, array: Array, values: dict, at: object = (0.0, 0.0)) -> "list[Window]":
         """Each object's window, centered where the object is drawn: on the array's true circle
-        about `at`, the array stimulus's own position, a pair or a whole-point setting (XC-397:
-        each window was on the ring about (0°, 0°) wherever the array was)."""
-        if isinstance(at, P):
-            at = _value(at, values)
-        at = array.positions(values, (float(_value(at[0], values)), float(_value(at[1], values))))
+        about `at`, the array stimulus's own position in any form (`position_of`; XC-397: each
+        window was on the ring about (0°, 0°) wherever the array was)."""
+        at = array.positions(values, position_of(at, values))
         target = int(_value(array.target, values))
         windows = [
             Window(f"{self.of}.{i}", at=xy, radius=self.radius, on=self.of, eye=self.eye)
@@ -916,6 +948,9 @@ PERIPHERY = ("true_angle", "center_scale")
 class Stimulus:
     """Something on the display: a position, an appearance, and how it is shown.
 
+    **Its position is written as eccentricity and direction by default**, `Polar(8, 45)`, or as
+    a per-axis pair for an axis-aligned design (the PI, 2026-10-19; `Polar`).
+
     **One class, because the structure of a task does not change when the things in
     it change.** Position is cyclopean degrees; the display module maps it to
     per-eye viewport pixels using measured optics, so a task never names a pixel and
@@ -928,7 +963,7 @@ class Stimulus:
     #: Positional and required: an anonymous stimulus can be put up and never
     #: referred to again, which is the whole of what went wrong.
     name: str
-    at: "tuple[float, float] | P"
+    at: "Polar | tuple[float, float] | P"
     looks: "Appearance | P" = field(default_factory=Disc)
     disparity: "float | P" = 0.0
     #: `"both"`, `"left"` or `"right"`. Monocular and dichoptic presentation are
@@ -944,8 +979,8 @@ class Stimulus:
     #: Each eye's own direction in degrees, after the vergence offset (engine spec §5.4),
     #: for dichoptic designs that place each eye's image themselves. Both or neither,
     #: never with a disparity, and only on the stereoscope; the checker refuses the rest.
-    at_left: "tuple[float, float] | P | None" = None
-    at_right: "tuple[float, float] | P | None" = None
+    at_left: "Polar | tuple[float, float] | P | None" = None
+    at_right: "Polar | tuple[float, float] | P | None" = None
 
     # Mapping a cyclopean position to each eye's direction (disparity, then the vergence
     # offset) is `screen.resolve`'s (engine build A1), from the session's `Geometry`; a
@@ -1003,14 +1038,14 @@ class Update(Action):
     """
 
     stimulus: str
-    at: "tuple[float, float] | P | Unchanged" = UNCHANGED
+    at: "Polar | tuple[float, float] | P | Unchanged" = UNCHANGED
     looks: "Appearance | P | Unchanged" = UNCHANGED
     disparity: "float | P | Unchanged" = UNCHANGED
     eye: "str | Unchanged" = UNCHANGED
     layer: "int | Unchanged" = UNCHANGED
     opacity: "float | P | Unchanged" = UNCHANGED
-    at_left: "tuple[float, float] | P | Unchanged" = UNCHANGED
-    at_right: "tuple[float, float] | P | Unchanged" = UNCHANGED
+    at_left: "Polar | tuple[float, float] | P | Unchanged" = UNCHANGED
+    at_right: "Polar | tuple[float, float] | P | Unchanged" = UNCHANGED
 
     def changes(self) -> dict:
         """The properties this actually sets. Empty means the action does nothing,

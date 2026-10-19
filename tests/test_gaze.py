@@ -897,3 +897,30 @@ def test_the_fit_uses_the_hold_and_not_the_whole_trial(tmp_path):
     # exactly. Samples from before acquisition would show up here as error.
     world = Tracked(_tracker_at(6.0, -4.0), mapping, calibration, frame_period)
     assert world.gaze("left", 0) == pytest.approx((6.0, -4.0), abs=1e-6)
+
+
+def test_a_window_whose_center_is_a_polar_position_holds_gaze_by_true_visual_angle():
+    """A window written as its eccentricity and direction (the PI, 2026-10-19), here 20° out at
+    120° by its settings, is scored where that position is: gaze 1.99° from it in true visual
+    angle is inside its 2° radius and 2.01° is outside, in any direction."""
+    from wl_xcon.task import After, Disc, Hold, On, Outcome, P, Polar, Show, State, Stimulus
+    from wl_xcon.task import Trial, Window
+
+    trial = Trial(
+        start="on",
+        windows=[Window("w", at=Polar(P("ecc"), P("dir")), radius=2.0, on="s")],
+        states=[State("on", enter=[Show(Stimulus("s", at=Polar(P("ecc"), P("dir"))))],
+                      go=[On(Hold("w", 0.1), Outcome.CORRECT), On(After(1.0), Outcome.ABORT)])],
+    )
+    values = {"ecc": 20.0, "dir": 120.0}
+    t = math.tan(math.radians(20.0))
+    center = (math.degrees(math.atan(t * math.cos(math.radians(120.0)))),
+              math.degrees(math.atan(t * math.sin(math.radians(120.0)))))
+    mapping = _fitted_mapping()
+    for turn in (0.0, 45.0, 90.0, 200.0):
+        toward = (center[0], center[1] + 10.0)
+        inside = Tracked(_tracker_at(*_away(center, 1.99, toward, turn)), mapping, trial, 0.008,
+                         values)
+        outside = Tracked(_tracker_at(*_away(center, 2.01, toward, turn)), mapping, trial, 0.008,
+                          values)
+        assert inside.in_window("w", frame=0) and not outside.in_window("w", frame=0)

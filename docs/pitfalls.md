@@ -352,4 +352,10 @@ and `least_separation_deg` built on it), and an array is a true circle about its
 (STE-28, `ring_spacing_deg`); `Geometry.pixels_per_degree`
 stays a reported mean, and a test that asks the parser fails if anything else in `wl_xcon/`
 names it; and the tests place gaze from directions, never from per-axis degrees, so they
-cannot agree with per-axis arithmetic by construction.
+cannot agree with per-axis arithmetic by construction. **The same error in a task file** is a
+position computed as `(e·cos θ, e·sin θ)`, which is per axis too: 7.975° out for 8° at 45°. Since
+2026-10-19 positions are written as `Polar(eccentricity, direction)` by default and converted
+exactly (STE-29), and the load check reads the task file with the parser and warns of `cos` or
+`sin` in a position (`computed-position`): written there, through a name the file assigns at its
+top level, or among a position setting's choices. It does not see a position a function returns
+or one built in another module.

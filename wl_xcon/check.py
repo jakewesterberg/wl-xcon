@@ -11,15 +11,18 @@ is unrunnable, undeclared or would make the record uninterpretable."""
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 import itertools
 import math
+from pathlib import Path
 
 from wl_xcon.codes import PROVISIONAL, Allocation
 from wl_xcon.components import Registry
 from wl_xcon.findings import SESSION_KINDS, Finding
 from wl_xcon.geometry import (
-    VIEWS, Geometry, circle_extent_deg, least_separation_deg, ring_spacing_deg,
+    VIEWS, Geometry, circle_extent_deg, least_separation_deg, polar_box_deg, polar_deg,
+    ring_spacing_deg,
 )
 from wl_xcon.photometry import (
     CONE_COLORS,
@@ -52,6 +55,7 @@ from wl_xcon.task import (
     Outcome,
     P,
     Param,
+    Polar,
     Remembered,
     SaccadeTo,
     Show,
@@ -112,6 +116,7 @@ def check_task(
     geometry: Geometry | None = None,
     calibration: Calibration | None = None,
     deployment: Deployment | None = None,
+    source: Path | str | None = None,
 ) -> list[Finding]:
     """The load-time checks of a task object (engine spec §3.5; engine build C1): each trial
     structure's own (`check`), named by its structure where the task has several (the engine C1
@@ -123,7 +128,9 @@ def check_task(
 
     **Given the session's deployment**, a task that needs a fixed head is a warning in any but a
     head-fixed one, never a refusal (engine spec §20.1; XC-277; the PI, 2026-10-11); without one --
-    `wlx check`, the review report -- nothing is said of it."""
+    `wlx check`, the review report -- nothing is said of it. **Given the file it was loaded
+    from**, a position the file computes from `cos` and `sin` is a warning (`computed-position`;
+    the PI, 2026-10-19)."""
     several = len(task.structures) > 1
     findings: list[Finding] = []
     for name, structure in task.structures.items():
@@ -143,6 +150,7 @@ def check_task(
         + _hash_faults(task)
         + _head_faults(task, deployment)
         + _counting_faults(task)
+        + ([] if source is None else _computed_positions(Path(source)))
     )
 
 
@@ -474,6 +482,98 @@ def _choice_faults(task: Task) -> list[Finding]:
 def _chosen(guard: object) -> "str | None":
     """The window -- or, for a lever, the device -- a choosing guard names."""
     return getattr(guard, "window", None) or getattr(guard, "device", None)
+
+
+#: The constructors that take a position, with where it sits among their positional arguments
+#: (`None`: by keyword only), and the keywords that name one.
+_PLACED = {"Stimulus": (1, "a stimulus's"), "Window": (1, "a window's"), "Update": (None, "an update's")}
+_POSITION_KEYWORDS = ("at", "at_left", "at_right")
+_TRIGONOMETRY = ("cos", "sin")
+
+
+def _computed_positions(source: Path) -> list[Finding]:
+    """**A position a task file computes from `cos` and `sin` itself, a warning** (the PI,
+    2026-10-19: "the load check warns where a task computes a position as e·cosθ itself"): per
+    axis, `(e·cos θ, e·sin θ)` is less than `e` out off the axes, 7.975° for 8° at 45°, and
+    `Polar(e, θ)` is converted exactly. By load the task object holds only the numbers, so the
+    file is read with the parser, never a pattern over its text (CLAUDE.md).
+
+    **What it finds**: a call of `math`'s or numpy's `cos` or `sin`, by any name the file imports
+    it as, inside a position -- `Stimulus`'s and `Window`'s, by keyword or in its place, and the
+    `at`, `at_left` and `at_right` of each and of an `Update` -- written there, through a name the
+    file assigns at its top level, or among the choices of a setting a position names by `P`.
+    **What it misses**: a position a function returns, one assigned inside a function or in
+    another module, a name assigned twice (it reads the last), anything reached through
+    `getattr`, `eval` or a loop that builds the trial, and trigonometry by another route
+    (`cmath`, `scipy`, `numpy.exp(1j·θ)`). A warning in every session kind, never a refusal."""
+    try:
+        tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+    except (OSError, SyntaxError, UnicodeDecodeError):
+        return []
+    modules: set[str] = set()
+    functions: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules |= {a.asname or a.name for a in node.names if a.name in ("math", "numpy")}
+        elif isinstance(node, ast.ImportFrom) and node.module in ("math", "numpy"):
+            functions |= {a.asname or a.name for a in node.names if a.name in _TRIGONOMETRY}
+
+    def trigonometry(expression: ast.AST) -> bool:
+        return any(
+            isinstance(call, ast.Call) and (
+                (isinstance(call.func, ast.Name) and call.func.id in functions)
+                or (isinstance(call.func, ast.Attribute) and call.func.attr in _TRIGONOMETRY
+                    and isinstance(call.func.value, ast.Name) and call.func.value.id in modules))
+            for call in ast.walk(expression))
+
+    def called(node: ast.Call) -> str | None:
+        func = node.func
+        return func.id if isinstance(func, ast.Name) else (
+            func.attr if isinstance(func, ast.Attribute) else None)
+
+    assigned = {target.id: (statement.value, statement.lineno) for statement in tree.body
+                if isinstance(statement, ast.Assign)
+                for target in statement.targets if isinstance(target, ast.Name)}
+    chosen: dict[str, tuple[ast.AST, int]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and called(node) == "Param":
+            name = next((a.value for a in node.args[:1] if isinstance(a, ast.Constant)), None)
+            name = next((k.value.value for k in node.keywords if k.arg == "name"
+                         and isinstance(k.value, ast.Constant)), name)
+            choices = next((k.value for k in node.keywords if k.arg == "choices"), None)
+            if isinstance(name, str) and choices is not None:
+                chosen[name] = (choices, node.lineno)
+
+    found: dict[tuple[int, str], Finding] = {}
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and called(node) in _PLACED):
+            continue
+        place, whose = _PLACED[called(node)]
+        given = [k.value for k in node.keywords if k.arg in _POSITION_KEYWORDS]
+        if place is not None and len(node.args) > place:
+            given.append(node.args[place])
+        for position in given:
+            how = None
+            if trigonometry(position):
+                how = ""
+            for name in (n.id for n in ast.walk(position) if isinstance(n, ast.Name)):
+                if how is None and name in assigned and trigonometry(assigned[name][0]):
+                    how = f" through `{name}` (line {assigned[name][1]})"
+            for call in ast.walk(position):
+                if (how is None and isinstance(call, ast.Call) and called(call) == "P"
+                        and call.args and isinstance(call.args[0], ast.Constant)
+                        and call.args[0].value in chosen
+                        and trigonometry(chosen[call.args[0].value][0])):
+                    how = (f" through the choices of setting {call.args[0].value!r} "
+                           f"(line {chosen[call.args[0].value][1]})")
+            if how is not None:
+                found[(position.lineno, how)] = Finding("computed-position", (
+                    f"line {position.lineno}: {whose} position{how} is computed from cos or sin "
+                    f"per axis, as (e·cos θ, e·sin θ), which is less than e out off the axes "
+                    f"(7.975° for 8° at 45°); write it as Polar(eccentricity, direction), which "
+                    f"the rig converts exactly (the PI, 2026-10-19)"),
+                    blocking=False, accepted_in=SESSION_KINDS)
+    return [found[key] for key in sorted(found)]
 
 
 def _hash_faults(task: Task) -> list[Finding]:
@@ -898,7 +998,34 @@ def _points(at: object, params: dict[str, Param]) -> list[tuple[float, float]]:
         ):
             raise _Unbounded(at.name)
         return [(float(x), float(y)) for x, y in offered]
+    if isinstance(at, Polar):
+        # Every direction a range allows, not its ends alone: 20° out over 0° to 120° is 20° up
+        # at 90°. The corners of each piece's per-axis box (`polar_box_deg`), which a field, a
+        # per-axis rectangle, holds exactly when it holds the piece.
+        return [(x, y)
+                for es in _polar_sides(at.eccentricity, params, bounded=True)
+                for ds in _polar_sides(at.direction, params, bounded=False)
+                for xs, ys in (polar_box_deg(es, ds),) for x in xs for y in ys]
     return [(x, y) for x in _numbers(at[0], params) for y in _numbers(at[1], params)]
+
+
+def _polar_sides(
+    value: object, params: dict[str, Param], bounded: bool
+) -> list[tuple[float, float]]:
+    """The values a polar position's eccentricity or direction can take, as intervals: a literal
+    or each choice a point, a range one interval. One check 8 cannot bound is `_Unbounded`, as
+    every other is, but for a direction (`bounded` false), which without bounds is every one."""
+    if not isinstance(value, P):
+        return [(float(value), float(value))]
+    param = params.get(value.name)
+    if param is not None and param.choices and all(_finite(c) for c in param.choices):
+        return [(float(c), float(c)) for c in param.choices]
+    if (param is not None and not param.choices and _finite(param.low)
+            and _finite(param.high)):
+        return [(float(param.low), float(param.high))]
+    if bounded:
+        raise _Unbounded(value.name)
+    return [(-180.0, 180.0)]
 
 
 def _form_reach(patch: RDS, params: dict[str, Param]) -> tuple[float, float]:
@@ -1101,6 +1228,9 @@ def _offscreen_stimuli(trial: Trial, geometry: Geometry | None) -> list[Finding]
 def _described(at: object) -> str:
     if isinstance(at, P):
         return at.name
+    if isinstance(at, Polar):
+        return "eccentricity " + ", direction ".join(
+            v.name if isinstance(v, P) else f"{v:g}" for v in (at.eccentricity, at.direction))
     return ", ".join(f"{v.name}" if isinstance(v, P) else f"{v:g}" for v in at)
 
 
@@ -2890,16 +3020,27 @@ def _closest_approach(a: Window, b: Window, params: dict[str, Param]) -> tuple[f
     independent, which can only make the separation smaller: a warning, never a pass.
 
     **The separation is true visual angle, where the centers are** (the PI, 2026-10-19), as a
-    window holds gaze (`gaze.Tracked.in_window`): the least over every pair of regions, searched
+    window holds gaze (`gaze.Tracked.in_window`), a center written as a `Polar` read as every
+    eccentricity and direction its values allow: the least over every pair of regions, searched
     without crossing forty choices an axis into 2.5 million pairs (the final re-review's m4;
     `geometry.least_separation_deg`). Per axis, the hypotenuse of the gaps misread it off the
     axes: windows at (25°, 0°) and (25°, 4.2°) are 3.81° apart, not 4.2°. A whole position as
     one setting (`at=P("pos")`) is still unpacked as a pair, and raises `TypeError` out of
     `check` (XC-156, filed; two tests use such a task as one the checks cannot finish on)."""
-    (a_x, a_y), (b_x, b_y) = a.at, b.at
+    (a_1, a_2, a_polar), (b_1, b_2, b_polar) = (_centers(window.at) for window in (a, b))
     reach = _span(a.radius, params, 0.0)[1] + _span(b.radius, params, 0.0)[1]
-    return (least_separation_deg(_intervals(a_x, params), _intervals(a_y, params),
-                                 _intervals(b_x, params), _intervals(b_y, params)), reach)
+    return (least_separation_deg(_intervals(a_1, params), _intervals(a_2, params),
+                                 _intervals(b_1, params), _intervals(b_2, params),
+                                 polar_a=a_polar, polar_b=b_polar), reach)
+
+
+def _centers(at: object) -> tuple[object, object, bool]:
+    """A window's center as two values and whether they are an eccentricity and a direction
+    (a `Polar`) rather than a per-axis pair."""
+    if isinstance(at, Polar):
+        return at.eccentricity, at.direction, True
+    x, y = at
+    return x, y, False
 
 
 def _intervals(

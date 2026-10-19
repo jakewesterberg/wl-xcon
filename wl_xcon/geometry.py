@@ -431,37 +431,272 @@ def separation_deg(x1: float, y1: float, x2: float, y2: float) -> float:
     return math.degrees(math.atan2(across, ux * vx + uy * vy + uz * vz))
 
 
-def least_separation_deg(xs_a, ys_a, xs_b, ys_b) -> float:
+def least_separation_deg(xs_a, ys_a, xs_b, ys_b, *, polar_a: bool = False,
+                         polar_b: bool = False) -> float:
     """The least true visual angle between any position of one region and any of another: a
     region is every `(x, y)` with `x` in one of its intervals `xs` and `y` in one of its `ys`,
-    each `(low, high)` in degrees, a point being `(v, v)`. What `check._closest_approach` asks of
-    two windows whose centers are settings.
+    each `(low, high)` in degrees, a point being `(v, v)`; or, `polar_a` or `polar_b` set, every
+    `polar_deg(e, θ)` with `e` in one of its first intervals and θ in one of its second. What
+    `check._closest_approach` asks of two windows whose centers are settings.
 
     **Two rectangles** in degrees are two rectangles on the tangent plane, so each is a convex
     patch of directions bounded by four arcs of great circles: they are 0° apart where they
     overlap, and otherwise as far apart as a corner of one is from an edge of the other
-    (`_rectangles_apart`). **Many** -- a coordinate given by choices is a point for each -- are
-    searched best first, each group of intervals bounded below by its hull's distance, so the
-    first pair of single intervals reached is the least, and forty choices an axis are never
-    crossed into 2.5 million pairs (the final re-review's m4). A side without end is read to
-    90° (`_SIDE_DEG`).
+    (`_rectangles_apart`). A point and a polar sector, and two polar sectors, are as far apart
+    as their nearest eccentricities along a direction they share, else as their facing radial
+    edges (`_to_sector`, `_sectors_apart`). **Many** -- a coordinate given by choices is a point
+    for each -- are searched best first, each group of intervals bounded below by the distance
+    between the boxes that hold it (`polar_box_deg` for a polar one), so forty choices an axis
+    are never crossed into 2.5 million pairs (the final re-review's m4); a polar sector against
+    a rectangle, which has no closed form here, is halved until the bound is within
+    `_TOLERANCE` of a pair of positions found, and that bound, never more than the least, is
+    the answer. A side without end is read to 90° (`_SIDE_DEG`), a direction without end as
+    every direction.
     """
-    sides = tuple(tuple(sorted((_to_side(low), _to_side(high)) for low, high in side))
-                  for side in (xs_a, ys_a, xs_b, ys_b))
+    sides = (_region(xs_a, polar_a, False), _region(ys_a, polar_a, True),
+             _region(xs_b, polar_b, False), _region(ys_b, polar_b, True))
     if not all(sides):
         raise ValueError("a region has at least one interval on each axis")
+    polar = (polar_a, polar_b)
     order = itertools.count()
-    queue = [(_bound(sides), next(order), sides)]
-    while queue:
-        bound, _, node = heapq.heappop(queue)
-        longest = max(range(4), key=lambda i: len(node[i]))
-        if len(node[longest]) == 1:
+    queue = [(*_bound(sides, polar), next(order), sides)]
+    best = math.inf
+    for searched in itertools.count():
+        bound, exact, _, node = heapq.heappop(queue)
+        if exact or bound >= best - _TOLERANCE or searched > _SEARCH_LIMIT:
             return bound
+        best = min(best, _found(node, polar))
+        if bound >= best - _TOLERANCE:
+            return bound
+        for child in _halves(node, polar):
+            heapq.heappush(queue, (*_bound(child, polar), next(order), child))
+    raise AssertionError("unreachable: the search returns from within its loop")
+
+
+#: How close a bound must come to a pair of positions found before a search between a polar
+#: sector and a rectangle stops, in degrees: the answer is the bound, at most this below the least.
+_TOLERANCE = 1e-6
+#: The most nodes such a search expands before it answers with its bound so far, which is never
+#: more than the least: a guard against a case no test has found, not an expected stop.
+_SEARCH_LIMIT = 200_000
+
+
+def polar_deg(eccentricity: float, direction: float) -> tuple[float, float]:
+    """The position `eccentricity` degrees of visual angle from straight ahead, `direction`
+    degrees counter-clockwise from rightward (engine spec §5.1's convention), as per-axis
+    degrees: the direction `(sin e cos θ, sin e sin θ, cos e)`, so `atan(tan e cos θ)` across
+    and `atan(tan e sin θ)` up (the PI, 2026-10-19: "A task can say 'at eccentricity e, direction
+    θ' and the rig converts it exactly").
+
+    **Past 90°**, where `atan(tan e …)` would wrap the position onto the far side of the field
+    and a field could show it, it is the same direction as `separation_deg` reads per-axis
+    degrees, continued past the side on the axis it leans along: `e` from straight ahead, and
+    past every field. The other axis then reads as `separation_deg`'s form does past the side,
+    its sign turned; no screen shows such a position, and check 8 refuses it."""
+    e, t = math.radians(eccentricity), math.radians(direction)
+    vx = math.sin(e) * math.cos(t)
+    vy = math.sin(e) * math.sin(t)
+    vz = math.cos(e)
+    if vz > 0.0:
+        return (math.degrees(math.atan2(vx, vz)), math.degrees(math.atan2(vy, vz)))
+    if abs(vx) >= abs(vy):
+        return (math.degrees(math.atan2(vx, vz)),
+                math.degrees(math.atan(vy / vz)) if vz else 0.0)
+    return (math.degrees(math.atan(vx / vz)) if vz else 0.0,
+            math.degrees(math.atan2(vy, vz)))
+
+
+def polar_box_deg(eccentricities, directions) -> tuple[tuple[float, float], tuple[float, float]]:
+    """The per-axis box, `((x0, x1), (y0, y1))`, holding every `polar_deg(e, θ)` with `e` in the
+    interval `eccentricities` and θ in `directions`: its extremes wherever they fall, between the
+    ends of the direction's range included (20° out over 0° to 120° reaches 20° up, at 90°).
+    Across is `atan(tan e · cos θ)`, a product of two independent ranges, so its extremes are
+    among the products of their ends, `cos θ` reaching ±1 where the range holds 0° or 180°; up
+    likewise with `sin θ`. Eccentricity is read to 90° either way (`_SIDE_DEG`): past it a
+    position is past the side of every field."""
+    low, high = sorted(max(-_SIDE_DEG, min(_SIDE_DEG, float(v))) for v in eccentricities)
+    tans = (math.tan(math.radians(low)), math.tan(math.radians(high)))
+
+    def extent(shares: tuple[float, float]) -> tuple[float, float]:
+        products = [a * b for a in tans for b in shares]
+        return (math.degrees(math.atan(min(products))), math.degrees(math.atan(max(products))))
+
+    start, stop = directions
+    return extent(_cosine_range(start, stop, 0.0)), extent(_cosine_range(start, stop, 90.0))
+
+
+def _cosine_range(start: float, stop: float, peak: float) -> tuple[float, float]:
+    """The least and greatest `cos(θ − peak)` for θ from `start` to `stop` degrees."""
+    if not stop - start < 360.0:
+        return (-1.0, 1.0)
+    ends = [math.cos(math.radians(v - peak)) for v in (start, stop)]
+    return (-1.0 if _holds(start, stop, peak + 180.0) else min(ends),
+            1.0 if _holds(start, stop, peak) else max(ends))
+
+
+def _holds(start: float, stop: float, angle: float) -> bool:
+    """Whether `angle`, or one a whole turn from it, lies from `start` to `stop` degrees."""
+    return math.ceil((start - angle) / 360.0) <= math.floor((stop - angle) / 360.0)
+
+
+def _region(intervals, polar: bool, second: bool) -> tuple:
+    """One side of a region, sorted: an axis read to 90° either way, an eccentricity likewise,
+    and a direction whose range has no end, or turns all the way round, as every direction."""
+    if polar and second:
+        return tuple(sorted((-180.0, 180.0) if not (math.isfinite(low) and math.isfinite(high)
+                                                     and high - low < 360.0) else (low, high)
+                            for low, high in intervals))
+    return tuple(sorted((_to_side(low), _to_side(high)) for low, high in intervals))
+
+
+def _found(node, polar) -> float:
+    """An angle two positions of `node` are apart, so never less than its least: from a corner of
+    each side's first piece, its intervals' lower ends, to the other side's first piece, where
+    a point and a piece have a closed form (`_exact`)."""
+    found = math.inf
+    for one, other, one_polar, other_polar in ((node[:2], node[2:], polar[0], polar[1]),
+                                               (node[2:], node[:2], polar[1], polar[0])):
+        (e, t) = (one[0][0][0], one[1][0][0])
+        corner = polar_deg(e, t) if one_polar else (e, t)
+        point = ((corner[0], corner[0]), (corner[1], corner[1]))
+        apart = _exact((point[:1], point[1:], other[0][:1], other[1][:1]), (False, other_polar))
+        if apart is not None:
+            found = min(found, apart)
+    return found
+
+
+def _halves(node, polar):
+    """Two nodes that between them hold every pair `node` does: its longest list of intervals
+    halved, or, every list a single interval, the widest continuous polar one."""
+    longest = max(range(4), key=lambda i: len(node[i]))
+    if len(node[longest]) > 1:
         half = len(node[longest]) // 2
-        for part in (node[longest][:half], node[longest][half:]):
-            child = node[:longest] + (part,) + node[longest + 1:]
-            heapq.heappush(queue, (_bound(child), next(order), child))
-    raise AssertionError("unreachable: a search over non-empty sides ends at a leaf")
+        return [node[:longest] + (part,) + node[longest + 1:]
+                for part in (node[longest][:half], node[longest][half:])]
+    reach = [0.0] * 4
+    for side, is_polar in ((0, polar[0]), (2, polar[1])):
+        if is_polar:
+            (e0, e1), (t0, t1) = node[side][0], node[side + 1][0]
+            reach[side] = e1 - e0
+            reach[side + 1] = (t1 - t0) * math.sin(math.radians(max(abs(e0), abs(e1))))
+    widest = max(range(4), key=lambda i: reach[i])
+    low, high = node[widest][0]
+    middle = (low + high) / 2.0
+    return [node[:widest] + (((low, middle),),) + node[widest + 1:],
+            node[:widest] + (((middle, high),),) + node[widest + 1:]]
+
+
+def _bound(node, polar) -> tuple[float, bool]:
+    """The least angle any pair of positions in `node` can reach, and whether it is exact: that
+    between the boxes holding each side's intervals (`polar_box_deg` for a polar side), which hold
+    every one of them, and exact where single intervals have a closed form (`_exact`)."""
+    if all(len(side) == 1 for side in node):
+        exact = _exact(node, polar)
+        if exact is not None:
+            return exact, True
+    boxes = []
+    for first, second, is_polar in ((node[0], node[1], polar[0]), (node[2], node[3], polar[1])):
+        hulls = [(side[0][0], max(high for _, high in side)) for side in (first, second)]
+        boxes.extend(polar_box_deg(*hulls) if is_polar else hulls)
+    return _rectangles_apart(*boxes), False
+
+
+def _exact(node, polar) -> float | None:
+    """The least between two single pieces where it has a closed form: two rectangles; a point
+    and anything; two polar sectors whose eccentricities are not below 0. `None` for a polar
+    sector against a rectangle."""
+    (a1,), (a2,), (b1,), (b2,) = node
+    a = _point_of(a1, a2, polar[0])
+    b = _point_of(b1, b2, polar[1])
+    if a is not None and b is not None:
+        return separation_deg(*a, *b)
+    if not polar[0] and not polar[1]:
+        return _rectangles_apart(a1, a2, b1, b2)
+    if a is not None and polar[1] and b1[0] >= 0.0:
+        return _to_sector(*a, b1, b2)
+    if b is not None and polar[0] and a1[0] >= 0.0:
+        return _to_sector(*b, a1, a2)
+    if a is not None and not polar[1]:
+        return _rectangles_apart((a[0], a[0]), (a[1], a[1]), b1, b2)
+    if b is not None and not polar[0]:
+        return _rectangles_apart(a1, a2, (b[0], b[0]), (b[1], b[1]))
+    if polar[0] and polar[1] and a1[0] >= 0.0 and b1[0] >= 0.0:
+        return _sectors_apart(a1, a2, b1, b2)
+    return None
+
+
+def _point_of(first, second, polar: bool) -> tuple[float, float] | None:
+    """The per-axis position a piece is when both its intervals are single values."""
+    if first[0] != first[1] or second[0] != second[1]:
+        return None
+    return polar_deg(first[0], second[0]) if polar else (first[0], second[0])
+
+
+def polar_of_deg(x: float, y: float) -> tuple[float, float]:
+    """A per-axis position's eccentricity and direction, in degrees: `polar_deg`'s inverse, the
+    direction in (-180°, 180°]."""
+    ax, ay = math.radians(x), math.radians(y)
+    ux = math.sin(ax) * math.cos(ay)
+    uy = math.cos(ax) * math.sin(ay)
+    uz = math.cos(ax) * math.cos(ay)
+    return (math.degrees(math.atan2(math.hypot(ux, uy), uz)), math.degrees(math.atan2(uy, ux)))
+
+
+def _to_sector(x: float, y: float, eccentricities, directions) -> float:
+    """The least true visual angle from `(x, y)` to every position at an eccentricity from
+    `eccentricities` (not below 0) and a direction from `directions`.
+
+    Every position is at least as far from `(x, y)` as their eccentricities differ (the triangle
+    on straight ahead), and along its own direction it is that far: so a point whose direction
+    the sector holds is as far as its eccentricity is from the sector's. Any other is nearest a
+    radial edge: along an arc at one eccentricity the angle only grows away from its direction."""
+    eccentricity, direction = polar_of_deg(x, y)
+    e0, e1 = eccentricities
+    start, stop = directions
+    if eccentricity == 0.0 or not stop - start < 360.0 or _holds(start, stop, direction):
+        return max(0.0, e0 - eccentricity, eccentricity - e1)
+    return min(_to_meridian(x, y, eccentricities, edge) for edge in (start, stop))
+
+
+def _to_meridian(x: float, y: float, eccentricities, direction: float) -> float:
+    """The least true visual angle from `(x, y)` to the radial edge at `direction`, eccentricity
+    over `eccentricities`: an arc of the great circle through straight ahead, along which the
+    angle falls to the foot of the perpendicular and rises after, so the least is at the foot
+    held to the edge's ends, or at an end."""
+    ax, ay = math.radians(x), math.radians(y)
+    ux = math.sin(ax) * math.cos(ay)
+    uy = math.cos(ax) * math.sin(ay)
+    uz = math.cos(ax) * math.cos(ay)
+    t = math.radians(direction)
+    foot = math.degrees(math.atan2(ux * math.cos(t) + uy * math.sin(t), uz))
+    e0, e1 = eccentricities
+    return min(separation_deg(x, y, *polar_deg(e, direction))
+               for e in (e0, e1, min(max(foot, e0), e1)))
+
+
+def _sectors_apart(eccentricities_a, directions_a, eccentricities_b, directions_b) -> float:
+    """The least true visual angle between two polar sectors, eccentricities not below 0: as far
+    as their eccentricities are apart where their directions meet; otherwise the angle between
+    any two positions grows with the angle between their directions, so it is the least between
+    the two radial edges that face each other across the narrower gap."""
+    (a0, a1), (s0, s1) = eccentricities_a, directions_a
+    (b0, b1), (t0, t1) = eccentricities_b, directions_b
+    if (a0 == 0.0 and b0 == 0.0) or not (s1 - s0 < 360.0 and t1 - t0 < 360.0) or _holds(
+            s0, s1, t0) or _holds(t0, t1, s0):
+        return max(0.0, a0 - b1, b0 - a1)
+
+    def gap(one: float, other: float) -> float:
+        return (other - one) % 360.0
+
+    # The narrower of the two gaps between the ranges, and the edges facing across it.
+    if gap(s1, t0) <= gap(t1, s0):
+        edge_a, edge_b = s1, t0
+    else:
+        edge_a, edge_b = s0, t1
+    return min(
+        min(_to_meridian(*polar_deg(e, edge_a), eccentricities_b, edge_b) for e in (a0, a1)),
+        min(_to_meridian(*polar_deg(e, edge_b), eccentricities_a, edge_a) for e in (b0, b1)),
+    )
 
 
 def ring_spacing_deg(radius: float, n: float) -> float:
@@ -531,13 +766,6 @@ def circle_extent_deg(x: float, y: float, radius: float) -> tuple[float, float]:
 
 def _to_side(value: float) -> float:
     return max(-_SIDE_DEG, min(_SIDE_DEG, float(value)))
-
-
-def _bound(node) -> float:
-    """The least angle any pair of rectangles in `node` can reach: that between the hulls of its
-    intervals, which hold every one of them. Exact when each side is one interval."""
-    hulls = [(side[0][0], max(high for _, high in side)) for side in node]
-    return _rectangles_apart(*hulls)
 
 
 def _rectangles_apart(ax, ay, bx, by) -> float:

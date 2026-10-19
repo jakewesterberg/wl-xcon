@@ -267,6 +267,7 @@ DEFAULTS = {
         "aperture": 5.0,
         "color": None,
     },
+    "Polar": {"eccentricity": REQUIRED, "direction": REQUIRED},
     "Polygon": {"sides": 3, "size": 1.0, "orientation": 0.0, "contrast": None, "color": None},
     "Pressed": {"device": REQUIRED},
     "RDS": {

@@ -46,6 +46,7 @@ from wl_xcon.task import (
     Stimulus,
     Trial,
     expand_windows,
+    position_of,
 )
 
 
@@ -135,10 +136,8 @@ class Tracked:
         declared = self._windows.get(window)
         if declared is None:
             return False
-        centre = declared.at
-        if isinstance(centre, P):
-            centre = self._values[centre.name]
-        cx, cy = (_resolve(c, self._values) for c in centre)
+        # Its center in any form a task writes it, a `Polar` converted exactly (`position_of`).
+        cx, cy = position_of(declared.at, self._values)
         radius = _resolve(declared.radius, self._values)
 
         which = ("left", "right") if eye == "both" else (eye,)

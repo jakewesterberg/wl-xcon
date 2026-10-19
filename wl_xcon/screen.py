@@ -20,6 +20,7 @@ from wl_xcon import look
 from wl_xcon.photometry import CONE_COLORS, D65, Gray, Michelson, Weber, cone_xyz, to_xyz, xyY
 from wl_xcon.task import (
     Annulus, Array, Bar, Blank, Cross, Disc, Gabor, Grating, P, Polygon, Square, _value,
+    position_of,
 )
 
 SCHEMA = 1
@@ -290,9 +291,8 @@ def _fill(fill, lights, orientation=0.0, lit=True):
 
 
 def _position(value, values) -> tuple[float, float]:
-    if isinstance(value, P):
-        value = _value(value, values)
-    return (_num(value[0], values), _num(value[1], values))
+    """A position in any form a task writes it, as per-axis degrees (`task.position_of`)."""
+    return position_of(value, values)
 
 
 def _eyes(stimulus, values, geometry, place):

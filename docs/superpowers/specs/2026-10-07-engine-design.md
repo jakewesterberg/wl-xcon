@@ -257,6 +257,17 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    screen; default its center). **Math convention** for every angle: 0° right, counter-clockwise
    positive, +y up; a bar's orientation 0° is horizontal; a grating's orientation names its bars, its
    drift direction is a separate angle. A test pins +y as up in the drawing.
+   *Note, 2026-10-19 (the PI):* **positions are written as eccentricity and direction by default**
+   ("Polar first, x-y allowed": "Tasks write positions as eccentricity and direction by default; (x,
+   y) stays for axis-aligned designs (grids, meridians, the calibration constellation)"), as
+   `Polar(eccentricity, direction)`, the direction in this convention, either a number or a
+   setting, wherever a position is accepted. The rig converts it exactly ("A task can say 'at
+   eccentricity e, direction θ' and the rig converts it exactly"): x = atan(tan e·cos θ), y =
+   atan(tan e·sin θ), so nothing downstream sees anything but (x, y), and the data contracts keep
+   (x, y). A task file that computes a position as (e·cos θ, e·sin θ) itself, less than e out off
+   the axes (7.975° for 8° at 45°), is a load-time warning in every session kind
+   (`computed-position`). The review report shows every position as eccentricity and direction
+   first with (x, y) beside it; the console and the record follow after engine build C2b (STE-29).
 2. **Sizes**: one size number is the full width; each block's definition states it.
 3. **Away from the center**: true visual angle (default) or the screen center's
    scale, declared per task.

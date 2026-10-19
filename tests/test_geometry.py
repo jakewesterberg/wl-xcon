@@ -641,3 +641,119 @@ def test_the_mean_pixels_per_degree_reaches_no_drawing_window_or_check():
 
     assert named == []
     assert hasattr(Geometry, "pixels_per_degree")
+
+
+# --- A position written as its eccentricity and direction (the PI, 2026-10-19) ----------------
+
+
+def test_a_polar_position_is_its_direction_as_per_axis_degrees():
+    """`polar_deg(e, θ)`: the direction `(sin e cos θ, sin e sin θ, cos e)`, as per-axis degrees,
+    `atan(tan e cos θ)` across and `atan(tan e sin θ)` up, θ in the math convention (0° right,
+    counter-clockwise positive, +y up; engine spec §5.1). (8 cos 45°, 8 sin 45°) per axis is
+    7.975° out; the polar position is 8°."""
+    from wl_xcon.geometry import polar_deg
+
+    for e in (0.0, 0.5, 8.0, 20.0, 45.0, 89.0):
+        for theta in (0.0, 30.0, 45.0, 90.0, 135.0, 200.0, -60.0):
+            x, y = polar_deg(e, theta)
+            t, c, s = math.tan(math.radians(e)), math.cos(math.radians(theta)), math.sin(
+                math.radians(theta))
+            assert (x, y) == pytest.approx(
+                (math.degrees(math.atan(t * c)), math.degrees(math.atan(t * s))), abs=1e-9)
+            assert _least_by_dots([(0.0, 0.0)], [(x, y)]) == pytest.approx(e, abs=1e-6)
+    assert polar_deg(8.0, 45.0) == pytest.approx((5.6753, 5.6753), abs=1e-4)
+    assert _least_by_dots([(0.0, 0.0)], [(8 * math.cos(math.pi / 4), 8 * math.sin(math.pi / 4))]) \
+        == pytest.approx(7.975, abs=1e-3)
+
+
+def test_a_polar_position_past_90_degrees_is_past_the_side_never_wrapped_onto_the_field():
+    """No screen shows a position 90° or more out, but a setting can reach one: past 90° `atan(tan
+    e cos θ)` would wrap it onto the far side of the field, where check 8 would pass it. Here it
+    stays its own direction as `separation_deg` reads per-axis degrees, `e` from straight ahead,
+    and past the side on the axis it leans along, so no field can show it."""
+    from wl_xcon.geometry import polar_deg
+
+    for e in (90.0, 100.0, 135.0, 170.0, 179.0):
+        for theta in (0.0, 20.0, 45.0, 90.0, 160.0, 180.0, 250.0, -45.0):
+            x, y = polar_deg(e, theta)
+            assert separation_deg(0.0, 0.0, x, y) == pytest.approx(e, abs=1e-6)
+            assert max(abs(x), abs(y)) >= 90.0 - 1e-9
+            assert not DIRECT.can_show(x, y)
+
+
+@pytest.mark.parametrize("es, thetas", [
+    ((8.0, 8.0), (0.0, 360.0)), ((2.0, 16.0), (-30.0, 120.0)), ((5.0, 12.0), (100.0, 260.0)),
+    ((20.0, 20.0), (0.0, 120.0)), ((0.0, 10.0), (45.0, 45.0))])
+def test_a_polar_regions_reach_on_each_axis_is_its_bounding_box(es, thetas):
+    """`polar_box_deg((e0, e1), (θ0, θ1))`: the per-axis box every position at an eccentricity in
+    the first and a direction in the second lies in, its extremes wherever they fall, between
+    the ends of the direction's range included (20° at 90° is 20° up, though neither 0° nor
+    120° is). No sampled position lies outside it, and its edges are reached."""
+    from wl_xcon.geometry import polar_box_deg, polar_deg
+
+    sampled = np.array([polar_deg(e, t) for e in np.linspace(*es, 41)
+                        for t in np.linspace(*thetas, 721)])
+    (x0, x1), (y0, y1) = polar_box_deg(es, thetas)
+
+    assert sampled[:, 0].min() >= x0 - 1e-9 and sampled[:, 0].max() <= x1 + 1e-9
+    assert sampled[:, 1].min() >= y0 - 1e-9 and sampled[:, 1].max() <= y1 + 1e-9
+    assert (x0, x1, y0, y1) == pytest.approx(
+        (sampled[:, 0].min(), sampled[:, 0].max(), sampled[:, 1].min(), sampled[:, 1].max()),
+        abs=0.02)
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_the_least_separation_with_a_polar_region_is_never_more_than_any_of_its_positions(seed):
+    """A window whose center is a polar region (an eccentricity over a range and a direction over
+    another) against one at a point and one over a per-axis range: the least is never more than
+    a fine sweep of the region finds, and within its spacing's error of it; at a point at the
+    region's own center, every direction at one eccentricity is that far, exactly."""
+    from wl_xcon.geometry import polar_deg
+
+    rng = random.Random(seed)
+    e0 = rng.uniform(1.0, 20.0)
+    es = (e0, e0 + rng.uniform(0.0, 6.0))
+    t0 = rng.uniform(-180.0, 180.0)
+    thetas = (t0, t0 + rng.uniform(5.0, 300.0))
+    region = np.array([polar_deg(e, t) for e in np.linspace(*es, 61)
+                       for t in np.linspace(*thetas, 1201)])
+    point = (rng.uniform(-25.0, 25.0), rng.uniform(-18.0, 18.0))
+    box = ((point[0] - 1.0, point[0] + 2.0), (point[1] - 0.5, point[1] + 0.5))
+
+    to_point = least_separation_deg([es], [thetas], [(point[0], point[0])],
+                                    [(point[1], point[1])], polar_a=True)
+    swept = _least_by_dots([point], [tuple(p) for p in region])
+    assert swept - 0.01 <= to_point <= swept + 1e-9
+
+    corners = [(x, y) for x in np.linspace(*box[0], 31) for y in np.linspace(*box[1], 11)]
+    to_box = least_separation_deg([es], [thetas], [box[0]], [box[1]], polar_a=True)
+    swept = min(_least_by_dots(corners, [tuple(p) for p in region[k::7]]) for k in range(7))
+    assert swept - 0.05 <= to_box <= swept + 1e-9
+
+    assert least_separation_deg([(8.0, 8.0)], [(0.0, 360.0)], [(0.0, 0.0)], [(0.0, 0.0)],
+                                polar_a=True) == pytest.approx(8.0, abs=1e-9)
+
+
+@pytest.mark.parametrize("seed", range(10))
+def test_two_polar_regions_are_as_far_apart_as_every_pair_of_their_positions(seed):
+    """Two windows whose centers are polar regions, each an eccentricity over a range and a
+    direction over another: the least, which has a closed form for sectors about one center
+    (`_sectors_apart`), is never more than a fine sweep of both finds and within its spacing's
+    error of it."""
+    from wl_xcon.geometry import polar_deg
+
+    rng = random.Random(100 + seed)
+
+    def sector():
+        e0 = rng.uniform(0.0, 20.0)
+        t0 = rng.uniform(-180.0, 180.0)
+        return (e0, e0 + rng.uniform(0.0, 8.0)), (t0, t0 + rng.uniform(0.0, 150.0))
+
+    (ea, ta), (eb, tb) = sector(), sector()
+    a = [polar_deg(e, t) for e in np.linspace(*ea, 41) for t in np.linspace(*ta, 301)]
+    b = [polar_deg(e, t) for e in np.linspace(*eb, 41) for t in np.linspace(*tb, 301)]
+    swept = min(_least_by_dots(a, b[k::9]) for k in range(9))
+
+    found = least_separation_deg([ea], [ta], [eb], [tb], polar_a=True, polar_b=True)
+
+    assert swept - 0.05 <= found <= swept + 1e-9

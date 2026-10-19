@@ -214,6 +214,23 @@ def test_wlx_check_marks_a_warning_with_the_kinds_it_is_accepted_in(capsys):
     assert "(accepted in training, piloting, recording)" in out
 
 
+
+def test_wlx_check_reads_the_task_file_for_a_position_built_from_cos_and_sin(
+        tmp_path, capsys):
+    """The PI, 2026-10-19: "the load check warns where a task computes a position as e·cosθ
+    itself". `wlx check` reads the file it loaded with the parser and says so, a warning in every
+    kind, naming the line and `Polar`."""
+    source = Path(GOOD).read_text(encoding="utf-8").replace(
+        'FIX = Stimulus("fix", at=(0.0, 0.0),', 'FIX = Stimulus("fix", at=(math.cos(0.0) - 1.0, 0.0),')
+    path = tmp_path / "computed.py"
+    path.write_text("import math\n" + source, encoding="utf-8")
+
+    assert main(["check", str(path), "--rig", RIG_FILE, "--allocation", ALLOCATION,
+                 "--view", "direct"]) == 0
+
+    out = capsys.readouterr().out
+    assert "warning  computed-position" in out and "Polar(eccentricity, direction)" in out
+
 @pytest.mark.parametrize("kind, code", [("training", 0), ("piloting", 0), ("recording", 1)])
 def test_wlx_check_for_a_kind_refuses_a_warning_that_kind_does_not_accept(kind, code, monkeypatch):
     """No finding is accepted in fewer kinds since COL-02's revision (the PI, 2026-10-11), so a
@@ -446,6 +463,24 @@ def test_wlx_run_says_the_calibration_and_every_warning_its_flag_accepts(tmp_pat
         f"  warning accepted: {row['code']}: {row['detail']}" for row in rows]
     assert [row["code"] for row in rows] == ["default calibration", "contrast-on-default"]
 
+
+
+def test_wlx_run_accepts_and_records_a_position_its_task_file_computes_from_cos_and_sin(tmp_path):
+    """`wlx run` reads the file it loads as `wlx check` does (the PI, 2026-10-19): a position built
+    from `cos` and `sin` is a warning its flag accepts, recorded in `warnings.jsonl` with the
+    rest."""
+    source = Path("tasks/fixation_detection.py").read_text(encoding="utf-8").replace(
+        'FIX = Stimulus("fix", at=(0.0, 0.0),', 'FIX = Stimulus("fix", at=(math.cos(0.0) - 1.0, 0.0),')
+    path = tmp_path / "computed.py"
+    path.write_text("import math\n" + source, encoding="utf-8")
+    argv = [str(path) if a == "tasks/fixation_detection.py" else a
+            for a in _run_args(tmp_path, "--out-of-cage-at", _hhmm())]
+
+    assert main(argv) == 0
+
+    rows = [json.loads(line) for line in
+            (tmp_path / "2027-01-14_01" / "xcon" / "warnings.jsonl").read_text().splitlines()]
+    assert "computed-position" in [row["code"] for row in rows]
 
 def test_wlx_run_says_a_settings_file_that_refuses_itself_in_a_sentence(tmp_path):
     """A settings object refuses bad values as the file builds it: that is a refusal
