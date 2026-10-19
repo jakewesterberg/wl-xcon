@@ -18,7 +18,9 @@ import math
 from wl_xcon.codes import PROVISIONAL, Allocation
 from wl_xcon.components import Registry
 from wl_xcon.findings import SESSION_KINDS, Finding
-from wl_xcon.geometry import VIEWS, Geometry, least_separation_deg, ring_spacing_deg
+from wl_xcon.geometry import (
+    VIEWS, Geometry, circle_extent_deg, least_separation_deg, ring_spacing_deg,
+)
 from wl_xcon.photometry import (
     CONE_COLORS,
     D65,
@@ -947,16 +949,19 @@ def _reachable(
         for sign in signs:
             centres = bases[sign]
             if isinstance(looks, Array):
-                # An array's objects sit on a ring around the stimulus position, so the
-                # thing that can leave the field is an *object*, never the centre. The
-                # extreme is the widest legal radius: with n a parameter too, every
+                # An array's objects sit on a true circle about the stimulus position
+                # (`Array.positions`), so the thing that can leave the field is an *object*,
+                # never the center: the corners of the circle's box in per-axis degrees, which
+                # off the axes reaches further than its radius (`geometry.circle_extent_deg`).
+                # The extreme is the widest legal radius: with n a parameter too, every
                 # smaller set is a subset of those positions.
                 widest = max(_numbers(looks.radius, params))
                 centres = [
-                    (x + dx, y + dy)
+                    (x + sx * across, y + sy * up)
                     for x, y in centres
-                    for dx in (widest, -widest, 0.0)
-                    for dy in (widest, -widest, 0.0)
+                    for across, up in (circle_extent_deg(x, y, widest),)
+                    for sx in (1.0, -1.0, 0.0)
+                    for sy in (1.0, -1.0, 0.0)
                 ]
             reached.extend(
                 (x + sign * (d / 2 - shift), y) for x, y in centres for d in (min(half), max(half))
@@ -3070,10 +3075,10 @@ def _crowded_arrays(trial: Trial) -> list[Finding]:
     check rather than an author's eye.
 
     The worst case is the most objects on the smallest ring with the largest windows:
-    adjacent centers are `geometry.ring_spacing_deg` apart, in true visual angle where
-    `ObjectWindows.expand` puts the windows, about (0°, 0°), at the ring's nearest phase (the PI,
-    2026-10-19; per axis it was `2 R sin(pi/n)`), and two windows touch when that falls below
-    their summed radius. Each is read over its declared range or its choices
+    adjacent centers are `2·asin(sin R·sin(π/n))` apart (`geometry.ring_spacing_deg`), the
+    objects on a true circle about the array's own direction and each window where its object is
+    drawn, at any phase and position (the PI, 2026-10-19, "True circle"; XC-397), and two
+    windows touch when that falls below their summed radius. Each is read over its declared range or its choices
     (`_span`), the count as the run reads it, a whole number (`_whole`): a count or a radius
     with no highest can be any size, and crowds; a ring with no lowest can be 0 (Task 10's
     review, I2). **A warning, not a refusal** (XC-352's A9; the PI, 2026-10-11), saying which
@@ -3127,7 +3132,8 @@ def _overlapping_objects(trial: Trial, raised: dict[str, float]) -> list[Finding
     objects on its 5° ring past 31, computed), so no set size is left to stall the run.
 
     **The reading** (I1: "the object size as the task declares it, the ring radius at its
-    least"): adjacent centres `2 R sin(pi/n)` apart, `n` the value sent and `R` the least the
+    least"): adjacent centers `2·asin(sin R·sin(π/n))` apart on the array's true circle
+    (`geometry.ring_spacing_deg`; the PI, 2026-10-19), `n` the value sent and `R` the least the
     ring's radius can be, its distance from 0 -- each choice a point (`_intervals`; the final
     re-review's m1), a range read at its least and 0 where it reaches 0, has no lowest or
     crosses 0, a deliberate fail-closed for a degenerate ring (XC-378) -- against the smallest
@@ -3145,7 +3151,7 @@ def _overlapping_objects(trial: Trial, raised: dict[str, float]) -> list[Finding
             continue
         ring = min(0.0 if low <= 0.0 <= high else min(abs(low), abs(high))
                    for low, high in _intervals(array.radius, params, 0.0))
-        spacing = 2.0 * ring * math.sin(math.pi / n)
+        spacing = ring_spacing_deg(ring, n)
         size = min(_narrowest(array.looks, params), _narrowest(array.among, params))
         if spacing >= size:
             continue
@@ -3168,15 +3174,17 @@ def _overlapping_objects(trial: Trial, raised: dict[str, float]) -> list[Finding
 
 
 def _most_apart(ring: float, size: float) -> int:
-    """The most objects a ring of radius `ring` keeps apart, adjacent centres `2 R sin(pi/n)` at
-    least `size`: the fix an `overlapping-objects` refusal names (the final re-review's m7). 1
-    when not even two are, across its diameter."""
-    if not (ring > 0.0 and 0.0 < size <= 2.0 * ring):
+    """The most objects a ring of radius `ring` keeps apart, adjacent centers
+    `2·asin(sin R·sin(π/n))` at least `size` (`geometry.ring_spacing_deg`): the fix an
+    `overlapping-objects` refusal names (the final re-review's m7). 1 when not even two are,
+    across its diameter."""
+    if not (ring > 0.0 and 0.0 < size <= ring_spacing_deg(ring, 2)):
         return 1
-    most = max(2, math.floor(math.pi / math.asin(size / (2.0 * ring))))
-    while most > 2 and 2.0 * ring * math.sin(math.pi / most) < size:
+    share = math.sin(math.radians(size / 2.0)) / math.sin(math.radians(ring))
+    most = max(2, math.floor(math.pi / math.asin(min(1.0, share))))
+    while most > 2 and ring_spacing_deg(ring, most) < size:
         most -= 1  # rounding at the boundary
-    while 2.0 * ring * math.sin(math.pi / (most + 1)) >= size:
+    while ring_spacing_deg(ring, most + 1) >= size:
         most += 1
     return most
 

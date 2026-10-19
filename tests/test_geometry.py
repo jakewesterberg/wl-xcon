@@ -558,28 +558,69 @@ def test_regions_that_share_a_position_are_0_apart_and_a_side_without_end_reache
                                 [(-5.0, -5.0)]) == pytest.approx(0.0, abs=1e-9)
 
 
-def test_a_rings_neighbors_are_nearest_where_it_crosses_an_axis_or_a_diagonal():
-    """`ring_spacing_deg`: the least true angle between neighbors of a ring placed per axis about
-    the center (`task.Array.positions`), over every phase. The per-axis map has the square's
-    symmetries, so a pair's spacing is even about the axes and the diagonals; that the least is
-    at one of them is checked here over every phase, at a degree's steps, from 2 to 1000
-    objects on rings out to 44°. Twelve on a 20° ring are 10.35° apart per axis and 9.77° where
-    the ring crosses an axis."""
-    def pair(radius, n, center):
-        half = math.pi / n
-        return _least_by_dots(
-            [(radius * math.cos(center - half), radius * math.sin(center - half))],
-            [(radius * math.cos(center + half), radius * math.sin(center + half))])
+def _true_circle(center, radius: float, thetas) -> np.ndarray:
+    """Directions `radius`° of visual angle from `center`, at each angle in `thetas` (degrees)
+    counter-clockwise from its local rightward axis, the frame `viewport.local_true_angle` uses:
+    built here from the frame's definition, not from `geometry`."""
+    c = _directions([center])[0]
+    ex = np.array([1.0, 0.0, 0.0]) - c[0] * c
+    ex /= np.linalg.norm(ex)
+    ey = np.cross(c, ex)
+    t = np.radians(np.asarray(thetas, dtype=float))[:, None]
+    r = math.radians(radius)
+    return math.cos(r) * c + math.sin(r) * (np.cos(t) * ex + np.sin(t) * ey)
 
-    for radius in (1.0, 5.0, 12.0, 20.0, 30.0, 44.0):
-        for n in (2, 3, 4, 5, 6, 7, 8, 12, 16, 24, 64, 1000):
-            swept = min(pair(radius, n, math.radians(step)) for step in range(0, 91))
-            assert ring_spacing_deg(radius, n) == pytest.approx(swept, abs=1e-7)
-            assert ring_spacing_deg(radius, n) <= swept + 1e-9
 
-    assert ring_spacing_deg(20.0, 12) == pytest.approx(9.7727, abs=1e-4)
-    assert 2 * 20.0 * math.sin(math.pi / 12) == pytest.approx(10.3528, abs=1e-4)
+def _degrees_of(v: np.ndarray) -> np.ndarray:
+    return np.degrees(np.stack([np.arctan2(v[:, 0], v[:, 2]), np.arctan2(v[:, 1], v[:, 2])], axis=1))
+
+
+def test_a_true_circles_neighbors_are_2_asin_sin_r_sin_pi_over_n_apart():
+    """`ring_spacing_deg`: an array's objects sit on a true circle about its own direction (the PI,
+    2026-10-19, "True circle"), so neighbors are `2·asin(sin R·sin(π/n))` apart at any phase and
+    wherever the array is: twelve on a 20° ring 10.16°, where per axis they were 10.35° apart and
+    9.77° where that ring crossed an axis."""
+    for center in ((0.0, 0.0), (10.0, 5.0), (25.0, -15.0)):
+        for radius in (1.0, 5.0, 12.0, 20.0):
+            for n in (2, 3, 5, 12, 64):
+                ring = _degrees_of(_true_circle(center, radius, 17.0 + 360.0 * np.arange(n) / n))
+                apart = [_least_by_dots([tuple(p)], [tuple(q)])
+                         for p, q in zip(ring, np.roll(ring, -1, axis=0))]
+                assert apart == pytest.approx([ring_spacing_deg(radius, n)] * n, abs=1e-7)
+
+    assert ring_spacing_deg(20.0, 12) == pytest.approx(10.1571, abs=1e-4)
     assert ring_spacing_deg(8.0, math.inf) == 0.0
+
+
+def test_a_position_on_a_circle_is_its_radius_away_at_its_angle_in_the_local_frame():
+    """`on_circle_deg(x, y, r, θ)`: the position `r`° of visual angle from `(x, y)`, `θ` degrees
+    counter-clockwise from its local rightward axis, which `task.Array.positions` places an
+    array's objects with."""
+    from wl_xcon.geometry import on_circle_deg
+
+    for center in ((0.0, 0.0), (10.0, 5.0), (-20.0, 20.0)):
+        thetas = np.arange(0.0, 360.0, 15.0)
+        expected = _degrees_of(_true_circle(center, 7.5, thetas))
+        found = np.array([on_circle_deg(*center, 7.5, theta) for theta in thetas])
+        assert found == pytest.approx(expected, abs=1e-9)
+
+
+@pytest.mark.parametrize("center", [(0.0, 0.0), (20.0, 10.0), (-25.0, 15.0), (12.0, -18.0)])
+def test_a_true_circles_reach_on_each_axis_is_its_bounding_box(center):
+    """`circle_extent_deg(x, y, r)`: how far a true circle of `r`° about `(x, y)` reaches on each
+    axis, in per-axis degrees, either side (check 8 tests the box's corners against the field):
+    `asin(sin r / √(1 − c_y²))` across and `asin(sin r / √(1 − c_x²))` up, `c` the center's unit
+    direction. No point of the circle, at a tenth of a degree's steps, lies beyond it, and the
+    farthest comes within that step's error of it."""
+    from wl_xcon.geometry import circle_extent_deg
+
+    ring = _degrees_of(_true_circle(center, 8.0, np.arange(0.0, 360.0, 0.1)))
+    reach = np.abs(ring - np.array(center)).max(axis=0)
+
+    across, up = circle_extent_deg(*center, 8.0)
+
+    assert reach[0] <= across + 1e-9 and reach[1] <= up + 1e-9
+    assert (across, up) == pytest.approx(tuple(reach), abs=1e-5)
 
 
 def test_the_mean_pixels_per_degree_reaches_no_drawing_window_or_check():

@@ -26,6 +26,7 @@ from wl_xcon.photometry import SRGB, Gray, Michelson, Weber
 from wl_xcon.run import run_trial
 from wl_xcon.task import (
     RDS,
+    expand_windows,
     Task,
     After,
     Array,
@@ -461,25 +462,65 @@ def test_an_arrays_set_size_is_read_as_the_run_reads_it_a_whole_number():
     assert "crowded-array" not in codes(sized)
 
 
-def test_an_array_clear_per_axis_but_crowded_in_true_visual_angle_is_found():
-    """Object windows are measured in true visual angle where they are (the PI, 2026-10-19), as
-    every window is: twelve objects on a 20° ring are 10.35° apart per axis, clear of two 5°
-    windows, but where the ring crosses an axis its neighbors are 9.77° apart in true visual
-    angle (`geometry.ring_spacing_deg`), and their windows overlap."""
-    trial = Trial(
+def _search_at(at, radius: float, n: int, window: float) -> Trial:
+    """`n` objects on a ring of `radius`° about `at`, turned by `phase`, each with a window of
+    `window`° in radius."""
+    return Trial(
         start="search",
-        windows=[ObjectWindows(of="search", radius=5.0)],
-        states=[State("search", enter=[Show(Stimulus("search", at=(0.0, 0.0), looks=Array(
-            n=12, radius=20.0, target=0)))], go=[
+        params=[Param("phase", unit="deg", low=0.0, high=360.0)],
+        windows=[ObjectWindows(of="search", radius=window)],
+        states=[State("search", enter=[Show(Stimulus("search", at=at, looks=Array(
+            n=n, radius=radius, target=0, phase=P("phase"))))], go=[
             On(SaccadeTo("search.target"), Outcome.CORRECT),
             On(After(1.0), Outcome.NO_RESPONSE),
         ])],
     )
 
-    warning = found(trial, "crowded-array")
 
-    assert "can put 12 objects on a 20° ring, 9.77° apart, with windows of 5° radius" in (
-        warning.detail)
+@pytest.mark.parametrize("radius, n, window, crowded", [
+    (20.0, 12, 5.0, False), (20.0, 12, 5.1, True), (8.0, 12, 2.0, False), (8.0, 13, 2.0, True)])
+def test_crowding_is_read_where_the_objects_are_and_agrees_with_every_pair_of_windows(
+        radius, n, window, crowded):
+    """An array's objects sit on a true circle about its own direction (the PI, 2026-10-19,
+    "True circle"), and their windows where they are drawn (XC-397), so neighbors are
+    `2·asin(sin R·sin(π/n))` apart at any phase and position: twelve on a 20° ring 10.16°, clear
+    of two 5° windows and not of two 5.1° ones. `crowded-array` says so exactly when the least
+    angle between any two of the windows `expand_windows` makes, over phases and wherever the
+    array is, is below their summed radius."""
+    least = math.inf
+    for at in ((0.0, 0.0), (12.0, 6.0)):
+        trial = _search_at(at, radius, n, window)
+        for phase in (0.0, 7.0, 22.5, 45.0):
+            centers = [w.at for w in expand_windows(trial, {"phase": phase})[0]
+                       if w.name.split(".")[1].isdigit()]
+            least = min(least, min(_true_angle(p, q) for i, p in enumerate(centers)
+                                   for q in centers[i + 1:]))
+        assert ("crowded-array" in codes(trial)) is crowded
+
+    assert (least < 2 * window) is crowded
+
+
+@pytest.mark.parametrize("sent", [231, 232, 240, 251, 252])
+def test_objects_drawn_on_one_another_are_refused_as_every_pair_of_them_says(sent):
+    """`overlapping-objects` refuses a set size sent past its range exactly when two of the
+    objects it would draw, 1° discs on a 40° ring, are closer than a disc is wide, by every pair
+    of the positions `Array.positions` gives them; and names the most the ring keeps apart,
+    231, by the same arithmetic. Per axis it allowed 251."""
+    ring = Array(n=P("set_size"), radius=40.0, target=0)
+
+    def neighbors(n: int) -> float:
+        positions = ring.positions({"set_size": n})
+        return min(_true_angle(p, q) for p, q in zip(positions, positions[1:] + positions[:1]))
+
+    least = neighbors(sent)
+    kept = max(k for k in range(200, 300) if neighbors(k) >= 1.0)
+
+    refused = [f for f in beyond_range(_ring(40.0), {"set_size": sent}) if f.blocking]
+
+    assert bool(refused) is (least < 1.0)
+    assert kept == 231
+    if refused:
+        assert f"at most {kept} stay apart" in refused[0].detail
 
 
 # --- A value outside its declared range (the PI, 2026-10-11, XC-352's D2) -------------------

@@ -295,25 +295,25 @@ def _position(value, values) -> tuple[float, float]:
     return (_num(value[0], values), _num(value[1], values))
 
 
-def _eyes(stimulus, values, geometry, offset):
+def _eyes(stimulus, values, geometry, place):
     """Each eye's own direction, in degrees (engine spec §5.4): per-eye positions as
     given; otherwise the left eye at `x − d/2 + v` and the right at `x + d/2 − v`, `v`
-    the vergence offset (zero in direct view)."""
-    dx, dy = offset
+    the vergence offset (zero in direct view). `place` takes the stimulus's position to the
+    item's: itself, or an array's object on its true circle about it (`Array.positions`)."""
     if stimulus.eye != "both" and geometry.view != "stereoscope":
         raise ValueError(f"{stimulus.name!r} is shown to the {stimulus.eye} eye only outside "
                          f"the stereoscope")
     if stimulus.at_left is not None:
         if geometry.view != "stereoscope":
             raise ValueError(f"{stimulus.name!r} has per-eye positions outside the stereoscope")
-        (lx, ly), (rx, ry) = _position(stimulus.at_left, values), _position(stimulus.at_right, values)
-        return (lx + dx, ly + dy), (rx + dx, ry + dy)
-    x, y = _position(stimulus.at, values)
+        return (place(_position(stimulus.at_left, values)),
+                place(_position(stimulus.at_right, values)))
+    x, y = place(_position(stimulus.at, values))
     d = _num(stimulus.disparity, values)
     if d and geometry.view != "stereoscope":
         raise ValueError(f"{stimulus.name!r} has a disparity outside the stereoscope")
     v = geometry.vergence_half_deg
-    return (x + dx - d / 2 + v, y + dy), (x + dx + d / 2 - v, y + dy)
+    return (x - d / 2 + v, y), (x + d / 2 - v, y)
 
 
 def _edge(edge, fill, lit, name):
@@ -332,7 +332,7 @@ def _edge(edge, fill, lit, name):
     return edge
 
 
-def _item(stimulus, name, order, looks, offset, lights, geometry, onset) -> Item:
+def _item(stimulus, name, order, looks, place, lights, geometry, onset) -> Item:
     values = lights.values
     expanded = as_look(looks, values)
     orientation = _num(expanded.orientation, values)
@@ -345,7 +345,7 @@ def _item(stimulus, name, order, looks, offset, lights, geometry, onset) -> Item
                                   xyz=lights.xyz(expanded.outline.color))
         if outline.xyz is None:
             raise ValueError(f"{name!r}'s outline has no light; an outline is drawn in a color")
-    at_left, at_right = _eyes(stimulus, values, geometry, offset)
+    at_left, at_right = _eyes(stimulus, values, geometry, place)
     return Item(
         name=name, order=order, layer=stimulus.layer, combine=stimulus.combine,
         opacity=_num(stimulus.opacity, values), eye=stimulus.eye,
@@ -362,12 +362,24 @@ def _items(stimulus, order, lights, geometry, onset) -> list[Item]:
     if isinstance(looks, Blank):
         return []
     if isinstance(looks, Array):
+        # Each object on the array's true circle about the position it is drawn from, each eye's
+        # own where it has one; the ring is computed once a position.
+        rings: dict = {}
+
+        def object_at(i):
+            def place(center):
+                if center not in rings:
+                    rings[center] = looks.positions(values, center)
+                return rings[center][i]
+            return place
+
         return [
             _item(stimulus, f"{stimulus.name}.{i}", (order, i), looks.object_looks(i, values),
-                  offset, lights, geometry, onset)
-            for i, offset in enumerate(looks.positions(values))
+                  object_at(i), lights, geometry, onset)
+            for i in range(len(looks.positions(values)))
         ]
-    return [_item(stimulus, stimulus.name, (order, 0), looks, (0.0, 0.0), lights, geometry, onset)]
+    return [_item(stimulus, stimulus.name, (order, 0), looks, lambda center: center, lights,
+                  geometry, onset)]
 
 
 def resolve(visible, values, trial, geometry, *, frame_period, frame=0, onsets=None,

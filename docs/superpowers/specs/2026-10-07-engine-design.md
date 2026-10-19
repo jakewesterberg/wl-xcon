@@ -177,6 +177,12 @@ be saved too, and those frames come from the exact drawer.
 - **Layouts**: a ring; a grid; listed positions; positions drawn between trials from a seed with spacing
   rules; several rings or clusters. **Each item is its own stimulus**: target and distractor are roles
   [@westerberg2023feedforward].
+  *Note, 2026-10-19 (the PI, "True circle"):* **a ring is a true circle of visual angle about the
+  array's own direction**: "every object exactly R from the array's center in visual angle, wherever
+  the array is; spacing 2·asin(sin R·sin(π/n))". Object i sits at the phase plus 360 i / n degrees
+  counter-clockwise from the array's local rightward axis, the frame a shape's orientation is drawn in,
+  and its window where it is drawn (XC-397). Per axis, an 8° ring's object at 45° had been 7.975° out
+  (STE-28).
 - **The busiest display is thousands of elements**; the GPU drawer batches them (§10).
 
 ### 4.5 Text and curves
@@ -260,6 +266,12 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    vergence offset); a stimulus carrying both per-eye positions and a disparity is refused. Both the
    formula and the sign are pinned in the exact drawer's tests, and the sign is verified in an animal by
    its vergence response to a disparity step [@busettini1996shortlatency] (S4 §10 item 6, kept).
+   *Note, 2026-10-19 (the PI, "Keep longitude, say so"):* the per-eye shift is in per-axis horizontal
+   degrees, so d is the difference in **azimuth longitude** between the eyes' images: "exact in its own
+   convention and a standard definition of horizontal disparity", and not the true angle between them off
+   the horizontal meridian. The review report names the convention beside every disparity, and each
+   session's `config.json` records it (`setup.disparity_convention`), so an analysis knows what d means
+   (STE-07's note).
 5. **Linked positions**: declared per link, moving with the other stimulus or placed once at onset.
 6. **Gaze-anchored stimuli**: the gaze rule selectable (newest, default; smoothed; predicted)
    [@santini2007eyeris; @crane1985generationv; @saunders2014direct], each frame's sample age recorded;

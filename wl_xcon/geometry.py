@@ -52,6 +52,14 @@ VIEWS = ("direct", "stereoscope")
 #: nominal"; `warnlist.of_setup`). **Not a measurement** (STE-20).
 NOMINAL_HALF_IPD_CM = 1.6
 
+#: What a disparity `d` means (the PI, 2026-10-19, "Keep longitude, say so"; STE-07): each eye's
+#: image is shifted `∓d/2` in per-axis horizontal degrees, the angle about the vertical axis, so
+#: `d` is the difference in **azimuth longitude** between the two eyes' images -- exact in that
+#: convention, a standard definition of horizontal disparity, and not the true angle between the
+#: images off the horizontal meridian (about `d·cos y` at elevation `y`). The review report and
+#: each session's `config.json` name it, so an analysis knows what `d` means.
+DISPARITY_CONVENTION = "azimuth-longitude"
+
 
 @dataclass(frozen=True, slots=True)
 class Housing:
@@ -457,23 +465,68 @@ def least_separation_deg(xs_a, ys_a, xs_b, ys_b) -> float:
 
 
 def ring_spacing_deg(radius: float, n: float) -> float:
-    """The least true visual angle between neighbors of `n` objects spaced evenly at per-axis
-    offsets of `radius` degrees about (0°, 0°), where `task.Array.positions` places them and
-    `task.ObjectWindows` their windows, **over every phase** the ring can be turned to.
+    """How far apart neighbors are among `n` objects spaced evenly on a true circle of `radius`
+    degrees of visual angle, as `task.Array.positions` places an array's objects about its own
+    direction (the PI, 2026-10-19, "True circle"): `2·asin(sin R·sin(π/n))`, the chord of the
+    circle on the sphere, at any phase and wherever the array is. `n` without end gives 0; a
+    negative `radius`, read by `check._crowded_arrays` as the least a range declares, gives a
+    negative spacing, which no check reads as apart."""
+    return math.degrees(2.0 * math.asin(math.sin(math.radians(radius)) * math.sin(math.pi / n)))
 
-    Per axis neighbors are `2 R sin(π/n)` apart at every phase; in true visual angle the ring
-    is nearer together where it crosses an axis, the vertical a degree there spanning `cos x` of
-    one, and further apart across a diagonal. The per-axis map has the square's symmetries, so a
-    pair's spacing is even about each axis and each diagonal, and the least is at one of the
-    two: checked at every degree of phase, from 2 to 1000 objects on rings out to 44°
-    (`tests/test_geometry.py`). `n` without end gives 0.
-    """
-    half = math.pi / n
-    return min(
-        separation_deg(radius * math.cos(center - half), radius * math.sin(center - half),
-                       radius * math.cos(center + half), radius * math.sin(center + half))
-        for center in (0.0, math.pi / 4)
-    )
+
+def on_circle_deg(x: float, y: float, radius: float, angle: float) -> tuple[float, float]:
+    """The position `radius` degrees of true visual angle from `(x, y)`, `angle` degrees
+    counter-clockwise from its local rightward axis: where `task.Array.positions` puts an
+    array's object, an array about `(x, y)` being a true circle of visual angle about that
+    direction (the PI, 2026-10-19, "True circle").
+
+    **The local frame is the one a shape is drawn in** (`viewport.local_true_angle`): rightward
+    is the screen's rightward axis brought onto the plane square to the center's direction, and
+    upward is square to both, so an array's phase is read as a bar's orientation is. The object
+    is `cos r·c + sin r·(cos θ·e_x + sin θ·e_y)`, as per-axis degrees, `atan2` of each axis
+    against the axis ahead."""
+    ax, ay = math.radians(x), math.radians(y)
+    cx = math.sin(ax) * math.cos(ay)
+    cy = math.cos(ax) * math.sin(ay)
+    cz = math.cos(ax) * math.cos(ay)
+    norm = math.sqrt(cx * cx + cy * cy + cz * cz)
+    cx, cy, cz = cx / norm, cy / norm, cz / norm
+    # Rightward: the screen's x axis less its share along the center's direction.
+    ex, ey, ez = 1.0 - cx * cx, -cx * cy, -cx * cz
+    norm = math.sqrt(ex * ex + ey * ey + ez * ez)
+    ex, ey, ez = ex / norm, ey / norm, ez / norm
+    # Upward: the center's direction crossed with rightward.
+    ux, uy, uz = cy * ez - cz * ey, cz * ex - cx * ez, cx * ey - cy * ex
+    r, t = math.radians(radius), math.radians(angle)
+    along, across = math.cos(r), math.sin(r)
+    vx = along * cx + across * (math.cos(t) * ex + math.sin(t) * ux)
+    vy = along * cy + across * (math.cos(t) * ey + math.sin(t) * uy)
+    vz = along * cz + across * (math.cos(t) * ez + math.sin(t) * uz)
+    return (math.degrees(math.atan2(vx, vz)), math.degrees(math.atan2(vy, vz)))
+
+
+def circle_extent_deg(x: float, y: float, radius: float) -> tuple[float, float]:
+    """How far a true circle of `radius` degrees of visual angle about `(x, y)` reaches on each
+    axis, either side of the center, in per-axis degrees: what check 8 holds an array's ring to.
+
+    A per-axis `x` is the angle about the vertical axis, so the circle's leftmost and rightmost
+    points are where planes through the vertical axis touch its cone: `asin(sin r / √(1 − c_y²))`
+    either side of `x`, `c` the center's unit direction; and up and down `asin(sin r / √(1 −
+    c_x²))` either side of `y`. Off the axes it reaches further than `r` across the way the
+    center sits: about (20°, 10°), an 8° circle 8.50° up. A circle wide enough to hold an axis's
+    pole reaches 90°."""
+    ax, ay = math.radians(x), math.radians(y)
+    cx = math.sin(ax) * math.cos(ay)
+    cy = math.cos(ax) * math.sin(ay)
+    cz = math.cos(ax) * math.cos(ay)
+    norm2 = cx * cx + cy * cy + cz * cz
+    reach = abs(math.sin(math.radians(radius)))
+
+    def side(share: float) -> float:
+        ratio = reach / math.sqrt(1.0 - share * share / norm2)
+        return 90.0 if ratio >= 1.0 else math.degrees(math.asin(ratio))
+
+    return (side(cy), side(cx))
 
 
 def _to_side(value: float) -> float:

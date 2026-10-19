@@ -802,18 +802,23 @@ class Array(Appearance):
     #: Randomising it between trials is what stops an animal learning positions.
     phase: "float | P" = 0.0
 
-    def positions(self, values: dict) -> "list[tuple[float, float]]":
-        """Object centres, in cyclopean degrees relative to the stimulus position."""
+    def positions(
+        self, values: dict, at: "tuple[float, float]" = (0.0, 0.0)
+    ) -> "list[tuple[float, float]]":
+        """Object centers, in the degrees `at` is given in, for an array whose center is `at`.
+
+        **A true circle of visual angle about the array's own direction** (the PI, 2026-10-19,
+        "True circle": "every object exactly R from the array's center in visual angle,
+        wherever the array is"), so neighbors are `2·asin(sin R·sin(π/n))` apart at any phase
+        (`geometry.ring_spacing_deg`). Object `i` is at `phase + 360 i / n` degrees
+        counter-clockwise from the array's local rightward axis, the frame a shape's orientation
+        is drawn in (`geometry.on_circle_deg`; `viewport.local_true_angle`)."""
+        from wl_xcon.geometry import on_circle_deg
+
         n = int(_value(self.n, values))
         radius = float(_value(self.radius, values))
-        phase = math.radians(float(_value(self.phase, values)))
-        return [
-            (
-                radius * math.cos(phase + 2 * math.pi * i / n),
-                radius * math.sin(phase + 2 * math.pi * i / n),
-            )
-            for i in range(n)
-        ]
+        phase = float(_value(self.phase, values))
+        return [on_circle_deg(at[0], at[1], radius, phase + 360.0 * i / n) for i in range(n)]
 
     def object_looks(self, index: int, values: dict) -> "Appearance | P":
         target = int(_value(self.target, values))
@@ -852,8 +857,13 @@ class ObjectWindows:
     radius: "float | P"
     eye: str = "both"
 
-    def expand(self, array: Array, values: dict) -> "list[Window]":
-        at = array.positions(values)
+    def expand(self, array: Array, values: dict, at: object = (0.0, 0.0)) -> "list[Window]":
+        """Each object's window, centered where the object is drawn: on the array's true circle
+        about `at`, the array stimulus's own position, a pair or a whole-point setting (XC-397:
+        each window was on the ring about (0°, 0°) wherever the array was)."""
+        if isinstance(at, P):
+            at = _value(at, values)
+        at = array.positions(values, (float(_value(at[0], values)), float(_value(at[1], values))))
         target = int(_value(array.target, values))
         windows = [
             Window(f"{self.of}.{i}", at=xy, radius=self.radius, on=self.of, eye=self.eye)
@@ -1148,16 +1158,18 @@ def expand_windows(
     `actions_of` gives: a checker that inspected a different set of windows from the
     one the loop scores would be validating a task nobody runs.
     """
-    arrays = arrays_of(trial)
+    # Each array with the position its `Show` gives it, so its objects' windows are where it is.
+    shown = {action.stimulus.name: action.stimulus for _, action in actions_of(trial)
+             if isinstance(action, Show) and isinstance(action.stimulus.looks, Array)}
     windows: list[Window] = []
     aliases: dict[str, tuple[str, ...]] = {}
     for declared in trial.windows:
         if isinstance(declared, ObjectWindows):
-            array = arrays.get(declared.of)
-            if array is None:
+            stimulus = shown.get(declared.of)
+            if stimulus is None:
                 continue
-            windows.extend(declared.expand(array, values))
-            aliases.update(declared.members(array, values))
+            windows.extend(declared.expand(stimulus.looks, values, stimulus.at))
+            aliases.update(declared.members(stimulus.looks, values))
         else:
             windows.append(declared)
     return windows, aliases

@@ -287,7 +287,9 @@ def render(trial: Trial, allocation_names: dict[int, str] | None = None) -> str:
     else:
         # On the stereoscope a cyclopean position is drawn at ± the vergence offset; an
         # L / R row is already each eye's own direction (engine spec §5.4).
-        lines += ["| State | Stimulus | Position° (cyclopean, or each eye's) | Disparity° | Eye "
+        lines += ["Disparity° is azimuth-longitude disparity: the left eye's image at x − d/2 and "
+                  "the right eye's at x + d/2, in per-axis horizontal degrees (STE-07).", "",
+                  "| State | Stimulus | Position° (cyclopean, or each eye's) | Disparity° | Eye "
                   "| Layer | Combination | Opacity |",
                   "|---|---|---|---|---|---|---|---|"]
         for name, stimulus in stimuli:

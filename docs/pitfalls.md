@@ -348,7 +348,8 @@ their radii measured the same way. Nothing looked wrong: at the center, where te
 windows, every window was as declared. Other packages make the same error as one pixels per
 degree for the whole screen. Mitigation (the PI, 2026-10-19; STE-27): every angle between two
 positions is the angle between their directions, where they are (`geometry.separation_deg`,
-and `least_separation_deg` and `ring_spacing_deg` built on it); `Geometry.pixels_per_degree`
+and `least_separation_deg` built on it), and an array is a true circle about its own direction
+(STE-28, `ring_spacing_deg`); `Geometry.pixels_per_degree`
 stays a reported mean, and a test that asks the parser fails if anything else in `wl_xcon/`
 names it; and the tests place gaze from directions, never from per-axis degrees, so they
 cannot agree with per-axis arithmetic by construction.
