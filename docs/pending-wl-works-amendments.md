@@ -154,6 +154,12 @@ optional — a rig that receives neither behaves exactly as it does today.
 > sites from SpikeGLX on the rig. **What stands:** `prepare-session` itself, now carrying no plan
 > fields, and the day's delivered fluid as an envelope (`fluid_delivered_today_ml`). Backlog
 > XC-100.
+>
+> **Renamed 2026-10-19 by wl.works** (its handover's "2026-10-19: wl.works's answer on a session's water —
+> four asks", asks 3 and 4): the field is `water_received_today_ml`, the day's water the animal received;
+> the envelope inside is unchanged (`value_ml`, `as_of`, `sources_included`, `complete`), and `complete`
+> is false while any of the animal's rig sessions that day is held for a person, which the rig reads as
+> absence. Backlog XC-100.
 
 ## Why it reaches wl-works
 
@@ -591,6 +597,25 @@ He answered **"Agree"** to each of the four, and they were relayed to wl-works t
 figure is its commanded total, labeled so, and by rule 4 it is never filed as water automatically. The rig's side
 of rule 3 waits on XC-389, which is also where the floor check moves to the reservoir drop once it is read (the PI,
 2026-10-18, "Yes, use the drop once read").
+
+## wl.works' answer (2026-10-19)
+
+Its brainstorm on what a session's water records was ruled by the PI on 2026-10-19 (wl.works' spec
+`docs/superpowers/specs/2026-10-19-a-sessions-water-received-and-commanded-design.md`; its handover's section
+"2026-10-19: wl.works's answer on a session's water — four asks", read at its `main` `638697ab`, unpushed when read).
+His four answers above stand. What he added there: **a wide difference is held for a person**: when the rig's session
+summary says the reservoir drop and the commanded total disagree, by the threshold XC-389 sets (wl.works holds none of
+its own), or a session arrives without that verdict, wl.works files no water and asks a person what the animal
+received; **the drop files itself only when the end reading was entered by a `Member` signed in through wl.works**,
+so until a rig has its https page (XC-151, XC-152) every session from it is held and its water typed by hand, as
+today; water given outside the pump stays typed in wl.works beside the drop; fluid commanded is never typed there,
+only shown, labeled *fluid commanded*, once read.
+
+**Its four asks of wl-xcon**, filed: **1** a list of the rig's sessions, `GET /sessions?since=<cursor>`, with the
+readings, the verdict and who entered the end reading, and whether a session can change after its end (XC-394);
+**2** the kiosk's listing, the same less who entered the reading (XC-395); **3** the day's water envelope renamed
+`water_received_today_ml`, and **4** its `complete` false while a session is held, read as absence (both on XC-100).
+wl.works asked for no reply until this is taken up.
 
 ---
 

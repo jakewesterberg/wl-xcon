@@ -582,7 +582,10 @@ in `docs/pending-wl-xtasks-amendments.md` (information; nothing asked). **Next f
 left it; nothing here was filed as XC-389 or XC-390. *(Later on 2026-10-19: wl-preproc's three asks for a session
 timed without the sync box -- every word the card sent in the timed event log, each resumed process's open instant,
 and clock pairs -- filed as XC-391 to XC-393, all for build C7; the session's own open is already `welfare_notes.jsonl`'s
-`session opened` row. Next free XC-394.)*
+`session opened` row. Then wl.works' four asks after the PI ruled on a session's water there (a wide difference held
+for a person; the drop filed only when a signed-in `Member` entered the end reading): a session listing with the
+readings and our verdict, XC-394; the kiosk's, XC-395; the day's envelope renamed `water_received_today_ml` and its
+`complete` false while a session is held, on XC-100. Next free XC-396.)*
 
 **Found on the way:**
 - A held target stretched past 3 s by tracker stalls ends as no response and steps `adaptive_detection`'s staircase
