@@ -404,3 +404,99 @@ def test_in_flight_is_false_on_a_still_eye():
     for t, g in zip(at, gaze):
         detector.accept(t, g)
     assert not detector.in_flight
+
+
+# ---------------------------------------------------------------------------
+# Contract: the thresholds companion
+# ---------------------------------------------------------------------------
+#
+# wl-preproc `065da53`, `docs/fixtures/saccade/v1-thresholds.json`, frozen beside v1 and
+# vendored the same way (byte-identical, SHA-256 pinned, and pinned to the v1 file it
+# accompanies). **What it pins that v1's traces do not:** v1's runs are far enough from
+# the ellipse that lambda and the ellipse's limit can drift a little without changing
+# one. The companion gives each v1 trace's thresholds (`eta_deg_s`), and two
+# near-threshold traces whose movements sit 0.95-1.6x the ellipse-crossing speed, on
+# which lambda off by 5% either way, or the limit at 1.1 or 1.5, changes the runs.
+#
+# **The two definitions of eta differ, and this is deliberate here.** Theirs is
+# lambda * median_scale over the velocity at every sample the mask leaves usable,
+# including the two zero-filled samples at each edge and any window touching a masked
+# sample. Ours drops incomplete windows (they are `None`), so ours moves by about
+# 0.1-0.2% on the 1200-sample traces (up to 2.4% on v1's 400-sample ones) and changes no run. Hence two checks: ours against `eta_deg_s` at rel 3e-3,
+# and theirs recomputed from the fixture's own velocities, with `median_scale`, to 1e-12.
+# Which one is meant is for the XC-398 spec to settle; until then this pins the runs
+# exactly and the thresholds both ways.
+
+_COMPANION = Path(__file__).parent / "fixtures" / "wl-preproc" / "saccade-v1-thresholds.json"
+_COMPANION_SHA256 = "f6da9801eb3f196b50ba546710b27816879acc46011ac117ff7ddbdeaad56e8e"
+
+_TH = json.loads(_COMPANION.read_bytes())
+_NEAR = {t["name"]: t for t in _TH["near_threshold_traces"]}
+_ETA_CASES = [(n, _TRACES[n], e["eta_deg_s"]) for n, e in ((e["name"], e) for e in _TH["v1_traces"])]
+_ETA_CASES += [(n, t, t["eta_deg_s"]) for n, t in _NEAR.items()]
+
+
+def test_the_vendored_companion_is_the_one_wl_preproc_published():
+    assert hashlib.sha256(_COMPANION.read_bytes()).hexdigest() == _COMPANION_SHA256
+    assert _TH["companion_to"]["sha256"] == _FIXTURE_SHA256
+    assert (_TH["version"], _TH["geometry"]) == (1, "per-axis")
+    assert _TH["companion_to"]["file"] == "v1.json"
+    assert [e["name"] for e in _TH["v1_traces"]] == list(_TRACES)
+    assert list(_NEAR) == ["near-threshold-horizontal", "near-threshold-oblique"]
+    for t in _NEAR.values():
+        assert len(t["gaze_deg"]) == 1200 and len(t["runs"]) == 3
+
+
+@pytest.mark.parametrize("name", list(_NEAR))
+def test_near_threshold_velocity_is_their_velocity(name):
+    trace = _NEAR[name]
+    gaze, at = _ours_on(trace)
+    mine = velocity(gaze, at, Params())
+    n = len(gaze)
+    answered = 0
+    for i in range(n):
+        window_present = 2 <= i < n - 2 and all(gaze[j] is not None for j in range(i - 2, i + 3))
+        assert (mine[i] is not None) == window_present, f"sample {i}"
+        if mine[i] is None:
+            continue
+        answered += 1
+        assert mine[i][0] == pytest.approx(trace["velocity_deg_s"][i][0], rel=1e-9)
+        assert mine[i][1] == pytest.approx(trace["velocity_deg_s"][i][1], rel=1e-9)
+    assert answered > n // 2
+
+
+@pytest.mark.parametrize("name", list(_NEAR))
+def test_our_detector_finds_the_near_threshold_intervals_exactly(name):
+    """Exactly, not approximately: these runs are the ones lambda +/-5% or the ellipse's
+    limit at 1.1 moves, so an exact match is what makes a drifted constant fail."""
+    trace = _NEAR[name]
+    gaze, at = _ours_on(trace)
+    expected = [(r["start"], r["stop"]) for r in trace["runs"]]
+    assert [(s.start, s.stop) for s in detect(gaze, at)] == expected
+
+
+@pytest.mark.parametrize("name,trace,eta", _ETA_CASES, ids=[c[0] for c in _ETA_CASES])
+def test_our_thresholds_are_theirs_within_the_window_rule(name, trace, eta):
+    """Ours (`thresholds` over our velocities, incomplete windows excluded) against their
+    `eta_deg_s`. The difference is the dropped edge and masked windows, so it scales with
+    their share of the trace: measured 0.04-0.2% on the 1200-sample near-threshold traces
+    (bound rel 3e-3, as wl-preproc suggested) but up to 2.4% on v1's 400-sample traces,
+    where the four zero-filled edge samples are 1% of the usable set and move the median.
+    Bound rel 3e-2 there. Still far inside the 5% that moves a run."""
+    gaze, at = _ours_on(trace)
+    mine = thresholds(velocity(gaze, at, Params()), Params())
+    rel = 3e-3 if len(gaze) >= 1200 else 3e-2
+    assert mine[0] == pytest.approx(eta[0], rel=rel)
+    assert mine[1] == pytest.approx(eta[1], rel=rel)
+
+
+@pytest.mark.parametrize("name,trace,eta", _ETA_CASES, ids=[c[0] for c in _ETA_CASES])
+def test_their_thresholds_follow_their_stated_rule(name, trace, eta):
+    """Their rule, built here from the fixture's own velocities and mask: lambda times
+    `median_scale` over every unmasked sample, zero-filled edges included. Our
+    `median_scale` and `DEFAULT_LAMBDA` must reproduce their `eta_deg_s` to 1e-12."""
+    available = trace["available"] or [None] * len(trace["velocity_deg_s"])
+    usable = [v for v, mask in zip(trace["velocity_deg_s"], available) if mask is None]
+    for axis in (0, 1):
+        rebuilt = DEFAULT_LAMBDA * median_scale([float(v[axis]) for v in usable])
+        assert rebuilt == pytest.approx(eta[axis], rel=1e-12)
