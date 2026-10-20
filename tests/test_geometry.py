@@ -953,3 +953,40 @@ def test_a_region_reaching_the_side_is_never_read_farther_than_its_positions(see
 
     assert to_box <= _least_true(sector, box) + 1e-9
     assert to_side <= _least_true(sector, [side]) + 1e-9
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_a_region_reaching_the_side_is_read_no_nearer_than_its_eccentricities_allow(seed):
+    """A polar region from 3°-30° out to 90° or without end, in any span of directions, against a
+    per-axis region near the center: never read more than the least, and never nearer than the
+    gap between their eccentricities, which no pair of their positions is nearer than (the
+    triangle through straight ahead)."""
+    rng = random.Random(1300 + seed)
+    e0 = rng.uniform(3.0, 30.0)
+    high = rng.choice([90.0, math.inf])
+    t0 = rng.uniform(-180.0, 180.0)
+    thetas = (t0, t0 + rng.uniform(10.0, 360.0))
+    x0, y0 = rng.uniform(-4.0, 2.0), rng.uniform(-4.0, 2.0)
+    xs, ys = (x0, x0 + rng.uniform(0.0, 2.0)), (y0, y0 + rng.uniform(0.0, 2.0))
+    sector = [(e, t) for e in np.linspace(e0, 90.0, 89) for t in np.linspace(*thetas, 361)]
+    box = [(x, y) for x in np.linspace(*xs, 21) for y in np.linspace(*ys, 21)]
+    farthest = max(_least_by_dots([(0.0, 0.0)], [corner])
+                   for corner in ((xs[0], ys[0]), (xs[0], ys[1]), (xs[1], ys[0]), (xs[1], ys[1])))
+
+    found = least_separation_deg([(e0, high)], [thetas], [xs], [ys], polar_a=True)
+
+    assert max(0.0, e0 - farthest) - 1e-9 <= found <= _least_true(sector, box) + 1e-9
+
+def test_a_rectangles_eccentricities_are_its_nearest_point_and_its_farthest_corner():
+    """`_eccentricities`, the gap's per-axis side: a rectangle over ±3° across and 10°-12° up is
+    10° out at its nearest, (0°, 10°) on an edge, not a corner (10.4°), and as far out as its
+    farthest corner; one holding straight ahead is 0° out at its nearest; a side at 90° is 90°
+    out."""
+    from wl_xcon.geometry import _eccentricities
+
+    least, greatest = _eccentricities((-3.0, 3.0), (10.0, 12.0))
+    assert least == pytest.approx(10.0, abs=1e-12)
+    assert greatest == pytest.approx(_least_by_dots([(0.0, 0.0)], [(3.0, 12.0)]), abs=1e-9)
+    assert _eccentricities((-1.0, 1.0), (-2.0, 0.5)) == pytest.approx(
+        (0.0, _least_by_dots([(0.0, 0.0)], [(1.0, -2.0)])), abs=1e-9)
+    assert _eccentricities((20.0, 90.0), (-5.0, 5.0))[1] == pytest.approx(90.0, abs=1e-9)

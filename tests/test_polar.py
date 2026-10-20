@@ -320,3 +320,43 @@ def test_windows_whose_centers_reach_the_side_are_found_to_overlap(highest):
     )
 
     assert "overlapping-windows" in {f.code for f in check(trial)}
+
+
+def _fixation_and_target(lowest: float, highest, directions) -> Trial:
+    """A fixation window anywhere over ±1° on each axis and a target window `lowest`° out or more,
+    to `highest` (or without end), over `directions`, each 1° in radius, scored in one state."""
+    return Trial(
+        start="w",
+        params=[Param("ecc", unit="deg", low=lowest, high=highest),
+                Param("dir", unit="deg", low=directions[0], high=directions[1]),
+                Param("fx", unit="deg", low=-1.0, high=1.0),
+                Param("fy", unit="deg", low=-1.0, high=1.0)],
+        windows=[Window("t", at=_polar(P("ecc"), P("dir")), radius=1.0, on="s"),
+                 Window("f", at=(P("fx"), P("fy")), radius=1.0, on="s")],
+        states=[State("w", enter=[Show(Stimulus("s", at=(0.0, 0.0), looks=Disc()))],
+                      go=[On(Hold("t", 0.1), Outcome.CORRECT),
+                          On(Hold("f", 0.1), Outcome.WRONG_TARGET),
+                          On(After(1.0), Outcome.NO_RESPONSE)])],
+    )
+
+
+@pytest.mark.parametrize("highest", [90.0, None])
+@pytest.mark.parametrize("directions", [(-180.0, 180.0), (0.0, 90.0)])
+def test_a_window_reaching_the_side_is_read_by_its_eccentricity_from_one_at_the_center(
+        highest, directions):
+    """The check of the side-of-field commit: a target window 5° out or more, reaching 90° or
+    without end, and a fixation window over ±1°, each 1° in radius, are at least 5° less the
+    fixation window's farthest corner, 1.414° out, apart: 3.586°, beyond the 2° their radii sum
+    to. The boxes that hold a region reaching 90° held the center too, and read them 0° apart;
+    the eccentricities' gap, which no pair is nearer than, reads them as they are."""
+    assert "overlapping-windows" not in {
+        f.code for f in check(_fixation_and_target(5.0, highest, directions))}
+
+
+def test_a_window_reaching_the_side_that_does_come_within_reach_is_still_found():
+    """2.5° out or more instead: the gap is 1.086°, under the 2° the radii sum to, and a target at
+    2.5° and 45° meets the fixation window's corner direction there."""
+    (found,) = [f for f in check(_fixation_and_target(2.5, None, (-180.0, 180.0)))
+                if f.code == "overlapping-windows"]
+
+    assert "which can come within 1.09°" in found.detail

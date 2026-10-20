@@ -628,12 +628,18 @@ def _halves(node):
 def _bound(node, polar) -> tuple[float, bool]:
     """The least angle any pair of positions in `node` can reach, and whether it is exact: that
     between the boxes holding each side's intervals (`polar_box_deg` for a polar side), which hold
-    every one of them, and exact where single intervals have a closed form (`_exact`)."""
+    every one of them, and exact where single intervals have a closed form (`_exact`).
+
+    **With a polar side, no less than the gap between the two sides' eccentricities**: two
+    positions are at least as far apart as their eccentricities differ (the triangle through
+    straight ahead). A box holding a sector that reaches 90° can hold the center too and read 0°
+    where the sector is 5° out or more; the gap reads it as it is."""
     if all(len(side) == 1 for side in node):
         exact = _exact(node, polar)
         if exact is not None:
             return exact, True
     boxes = []
+    reaches = []
     for first, second, is_polar in ((node[0], node[1], polar[0]), (node[2], node[3], polar[1])):
         hulls = [(side[0][0], max(high for _, high in side)) for side in (first, second)]
         if is_polar and hulls[0][0] >= _SIDE_DEG:
@@ -641,7 +647,21 @@ def _bound(node, polar) -> tuple[float, bool]:
             return 0.0, False
         # A polar box holds every position short of 90° out, and so bounds those at it too.
         boxes.extend(polar_box_deg(*hulls) if is_polar else hulls)
-    return _rectangles_apart(*boxes), False
+        reaches.append(hulls[0] if is_polar else _eccentricities(*hulls))
+    bound = _rectangles_apart(*boxes)
+    if polar[0] or polar[1]:
+        (a0, a1), (b0, b1) = reaches
+        bound = max(bound, a0 - b1, b0 - a1)
+    return bound, False
+
+
+def _eccentricities(xs, ys) -> tuple[float, float]:
+    """The least and greatest eccentricity of a per-axis rectangle: 0 where it holds straight
+    ahead, else the angle from there to its nearest point (`_rectangles_apart`); and the
+    farthest of its corners, a side at 90° being 90° out (the angle from straight ahead is
+    convex over the hemisphere ahead, so it is greatest at a corner)."""
+    least = _rectangles_apart((0.0, 0.0), (0.0, 0.0), xs, ys)
+    return least, max(polar_of_deg(x, y)[0] for x in xs for y in ys)
 
 
 def _exact(node, polar) -> float | None:
