@@ -402,7 +402,11 @@ class SubjectSettings:
 # positions are, is measured here, in true visual angle where the two positions are.
 
 #: Where a side a range leaves without end is read to: past 90° a degree on an axis names no
-#: direction ahead of the eye, and at 90° every position on the other axis is one direction.
+#: direction ahead of the eye, and at 90° every position on the other axis is one direction. So
+#: per-axis degrees cannot say where a polar position 90° out lies (`polar_deg(90, θ)` is
+#: (±90°, ±90°) whatever θ is): the closed forms measure polar positions by their directions
+#: (`_polar_unit`), and give a polar sector reaching 90° against a rectangle no closed form
+#: (`_exact`), so the boxes that hold it bound it, failing closed.
 _SIDE_DEG = 90.0
 
 
@@ -511,8 +515,13 @@ def _pointwise(sides, polar) -> float | None:
     the least over every pair, by numpy's pairwise dot products (at load and between trials,
     never in a frame): the pairs whose dot product is within 1e-12 of the greatest, which holds
     the nearest pair whatever the rounding, measured exactly by `separation_deg`. `None` for a
-    region with a range in it, or more than `_PAIRWISE_LIMIT` pairs, which the search takes."""
+    region with a range in it, a polar point 90° out (`_SIDE_DEG`), or more than
+    `_PAIRWISE_LIMIT` pairs, which the search takes."""
     if not all(low == high for side in sides for low, high in side):
+        return None
+    if any(is_polar and abs(low) >= _SIDE_DEG
+           for first, is_polar in ((sides[0], polar[0]), (sides[2], polar[1]))
+           for low, _ in first):
         return None
     regions = []
     for first, second, is_polar in ((sides[0], sides[1], polar[0]), (sides[2], sides[3], polar[1])):
@@ -627,14 +636,19 @@ def _bound(node, polar) -> tuple[float, bool]:
     boxes = []
     for first, second, is_polar in ((node[0], node[1], polar[0]), (node[2], node[3], polar[1])):
         hulls = [(side[0][0], max(high for _, high in side)) for side in (first, second)]
+        if is_polar and hulls[0][0] >= _SIDE_DEG:
+            # Wholly 90° out, where no per-axis box holds a position: 0°, failing closed.
+            return 0.0, False
+        # A polar box holds every position short of 90° out, and so bounds those at it too.
         boxes.extend(polar_box_deg(*hulls) if is_polar else hulls)
     return _rectangles_apart(*boxes), False
 
 
 def _exact(node, polar) -> float | None:
     """The least between two single pieces, in closed form: two rectangles; a point and anything;
-    two polar sectors, and a polar sector and a rectangle, eccentricities not below 0 (`_parts`
-    makes them so). `None` otherwise, which no part reaches."""
+    two polar sectors, and a polar sector short of the side and a rectangle, eccentricities not
+    below 0 (`_parts` makes them so). `None` for a sector reaching 90° against a rectangle, or
+    a polar point 90° out against one (`_SIDE_DEG`), which the boxes that hold them bound."""
     (a1,), (a2,), (b1,), (b2,) = node
     a = _point_of(a1, a2, polar[0])
     b = _point_of(b1, b2, polar[1])
@@ -652,18 +666,41 @@ def _exact(node, polar) -> float | None:
         return _rectangles_apart(a1, a2, (b[0], b[0]), (b[1], b[1]))
     if polar[0] and polar[1] and a1[0] >= 0.0 and b1[0] >= 0.0:
         return _sectors_apart(a1, a2, b1, b2)
-    if polar[0] and not polar[1] and a1[0] >= 0.0:
+    if polar[0] and not polar[1] and 0.0 <= a1[0] and a1[1] < _SIDE_DEG:
         return _sector_to_rectangle(a1, a2, b1, b2)
-    if polar[1] and not polar[0] and b1[0] >= 0.0:
+    if polar[1] and not polar[0] and 0.0 <= b1[0] and b1[1] < _SIDE_DEG:
         return _sector_to_rectangle(b1, b2, a1, a2)
     return None
 
 
 def _point_of(first, second, polar: bool) -> tuple[float, float] | None:
-    """The per-axis position a piece is when both its intervals are single values."""
+    """The per-axis position a piece is when both its intervals are single values, and per-axis
+    degrees can say where it is: never a polar one 90° out (`_SIDE_DEG`)."""
     if first[0] != first[1] or second[0] != second[1]:
         return None
+    if polar and abs(first[0]) >= _SIDE_DEG:
+        return None
     return polar_deg(first[0], second[0]) if polar else (first[0], second[0])
+
+
+def _unit(x: float, y: float) -> tuple[float, float, float]:
+    """A per-axis position's direction, as `separation_deg` reads it (not of unit length)."""
+    ax, ay = math.radians(x), math.radians(y)
+    return (math.sin(ax) * math.cos(ay), math.cos(ax) * math.sin(ay), math.cos(ax) * math.cos(ay))
+
+
+def _polar_unit(eccentricity: float, direction: float) -> tuple[float, float, float]:
+    """A polar position's unit direction, `(sin e cos θ, sin e sin θ, cos e)`, which says where it
+    is at 90° out too, where per-axis degrees cannot."""
+    e, t = math.radians(eccentricity), math.radians(direction)
+    return (math.sin(e) * math.cos(t), math.sin(e) * math.sin(t), math.cos(e))
+
+
+def _angle(u, v) -> float:
+    """The angle between two directions, in degrees: `atan2(|u × v|, u · v)`, as `separation_deg`."""
+    across = math.hypot(u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2],
+                        u[0] * v[1] - u[1] * v[0])
+    return math.degrees(math.atan2(across, u[0] * v[0] + u[1] * v[1] + u[2] * v[2]))
 
 
 def polar_of_deg(x: float, y: float) -> tuple[float, float]:
@@ -689,28 +726,25 @@ def _to_sector(x: float, y: float, eccentricities, directions) -> float:
     start, stop = directions
     if eccentricity == 0.0 or not stop - start < 360.0 or _holds(start, stop, direction):
         return max(0.0, e0 - eccentricity, eccentricity - e1)
-    return min(_to_meridian(x, y, eccentricities, edge) for edge in (start, stop))
+    return min(_to_meridian(_unit(x, y), eccentricities, edge) for edge in (start, stop))
 
 
-def _to_meridian(x: float, y: float, eccentricities, direction: float) -> float:
-    """The least true visual angle from `(x, y)` to the radial edge at `direction`, eccentricity
-    over `eccentricities`: an arc of the great circle through straight ahead, along which the
-    angle falls to the foot of the perpendicular and rises after, so the least is at the foot
-    held to the edge's ends, or at an end."""
-    ax, ay = math.radians(x), math.radians(y)
-    ux = math.sin(ax) * math.cos(ay)
-    uy = math.cos(ax) * math.sin(ay)
-    uz = math.cos(ax) * math.cos(ay)
+def _to_meridian(u, eccentricities, direction: float) -> float:
+    """The least true visual angle from the direction `u` to the radial edge at `direction`,
+    eccentricity over `eccentricities`: an arc of the great circle through straight ahead, along
+    which the angle falls to the foot of the perpendicular and rises after, so the least is at
+    the foot held to the edge's ends, or at an end. Each is measured by its direction
+    (`_polar_unit`), so an edge reaching 90° out is measured where it is."""
+    ux, uy, uz = u
     t = math.radians(direction)
     foot = math.degrees(math.atan2(ux * math.cos(t) + uy * math.sin(t), uz))
     e0, e1 = eccentricities
-    return min(separation_deg(x, y, *polar_deg(e, direction))
-               for e in (e0, e1, min(max(foot, e0), e1)))
+    return min(_angle(u, _polar_unit(e, direction)) for e in (e0, e1, min(max(foot, e0), e1)))
 
 
 def _sector_to_rectangle(eccentricities, directions, xs, ys) -> float:
-    """The least true visual angle between a polar sector (eccentricities not below 0) and the
-    rectangle `xs × ys`.
+    """The least true visual angle between a polar sector (eccentricities not below 0, short of
+    90°: `_SIDE_DEG`) and the rectangle `xs × ys`.
 
     The angle from a position to the sector has no positive minimum inside the rectangle (moving
     toward the sector lowers it), so the least is 0 where they meet and otherwise on the
@@ -792,8 +826,8 @@ def _sectors_apart(eccentricities_a, directions_a, eccentricities_b, directions_
     else:
         edge_a, edge_b = s0, t1
     return min(
-        min(_to_meridian(*polar_deg(e, edge_a), eccentricities_b, edge_b) for e in (a0, a1)),
-        min(_to_meridian(*polar_deg(e, edge_b), eccentricities_a, edge_a) for e in (b0, b1)),
+        min(_to_meridian(_polar_unit(e, edge_a), eccentricities_b, edge_b) for e in (a0, a1)),
+        min(_to_meridian(_polar_unit(e, edge_b), eccentricities_a, edge_a) for e in (b0, b1)),
     )
 
 

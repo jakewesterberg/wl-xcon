@@ -673,8 +673,6 @@ def test_a_polar_position_is_its_direction_as_per_axis_degrees():
     `atan(tan e cos θ)` across and `atan(tan e sin θ)` up, θ in the math convention (0° right,
     counter-clockwise positive, +y up; engine spec §5.1). (8 cos 45°, 8 sin 45°) per axis is
     7.975° out; the polar position is 8°."""
-    from wl_xcon.geometry import polar_deg
-
     for e in (0.0, 0.5, 8.0, 20.0, 45.0, 89.0):
         for theta in (0.0, 30.0, 45.0, 90.0, 135.0, 200.0, -60.0):
             x, y = polar_deg(e, theta)
@@ -693,8 +691,6 @@ def test_a_polar_position_past_90_degrees_is_past_the_side_never_wrapped_onto_th
     e cos θ)` would wrap it onto the far side of the field, where check 8 would pass it. Here it
     stays its own direction as `separation_deg` reads per-axis degrees, `e` from straight ahead,
     and past the side on the axis it leans along, so no field can show it."""
-    from wl_xcon.geometry import polar_deg
-
     for e in (90.0, 100.0, 135.0, 170.0, 179.0):
         for theta in (0.0, 20.0, 45.0, 90.0, 160.0, 180.0, 250.0, -45.0):
             x, y = polar_deg(e, theta)
@@ -711,7 +707,7 @@ def test_a_polar_regions_reach_on_each_axis_is_its_bounding_box(es, thetas):
     the first and a direction in the second lies in, its extremes wherever they fall, between
     the ends of the direction's range included (20° at 90° is 20° up, though neither 0° nor
     120° is). No sampled position lies outside it, and its edges are reached."""
-    from wl_xcon.geometry import polar_box_deg, polar_deg
+    from wl_xcon.geometry import polar_box_deg
 
     sampled = np.array([polar_deg(e, t) for e in np.linspace(*es, 41)
                         for t in np.linspace(*thetas, 721)])
@@ -730,8 +726,6 @@ def test_the_least_separation_with_a_polar_region_is_never_more_than_any_of_its_
     another) against one at a point and one over a per-axis range: the least is never more than
     a fine sweep of the region finds, and within its spacing's error of it; at a point at the
     region's own center, every direction at one eccentricity is that far, exactly."""
-    from wl_xcon.geometry import polar_deg
-
     rng = random.Random(seed)
     e0 = rng.uniform(1.0, 20.0)
     es = (e0, e0 + rng.uniform(0.0, 6.0))
@@ -762,8 +756,6 @@ def test_two_polar_regions_are_as_far_apart_as_every_pair_of_their_positions(see
     direction over another: the least, which has a closed form for sectors about one center
     (`_sectors_apart`), is never more than a fine sweep of both finds and within its spacing's
     error of it."""
-    from wl_xcon.geometry import polar_deg
-
     rng = random.Random(100 + seed)
 
     def sector():
@@ -826,8 +818,6 @@ def test_a_sector_and_a_rectangle_are_apart_in_closed_form_never_more_than_any_p
     """`_sector_to_rectangle`, with no node searched: never more than a fine sweep of both finds,
     and within its spacing's error of it; a thin rectangle crossing an annulus with no corner of
     either inside the other is 0° from it."""
-    from wl_xcon.geometry import polar_deg
-
     def searched(*_):
         raise AssertionError("searched a pair that has a closed form")
 
@@ -850,18 +840,30 @@ def test_a_sector_and_a_rectangle_are_apart_in_closed_form_never_more_than_any_p
                                 polar_a=True) == 0.0
 
 
-def test_a_search_past_its_limit_answers_with_a_bound_never_more_than_the_least(monkeypatch):
-    """`_SEARCH_LIMIT` guards a load check against lists of intervals no test has met: past it, the
-    least bound left is the answer, never more than the least. With the limit at 0 and 3 nodes,
-    a window over forty choices across and a range up, against one over a range across and
-    thirty choices up, is never read farther apart than the whole search reads it."""
+def test_a_search_past_its_limit_stops_there_with_a_bound_never_more_than_the_least(monkeypatch):
+    """`_SEARCH_LIMIT` guards a load check against lists of intervals no test has met: the search
+    expands no more nodes than it, and the least bound left is then the answer, never more than
+    the least. A window over forty choices across and a range up, against one over a range
+    across and thirty choices up, takes more than three nodes in full; at a limit of 3 it
+    expands 3, and at 0, 3 and 30 is never read farther apart than the whole search reads it."""
     rng = random.Random(9)
     sides = ([(v, v) for v in sorted(rng.uniform(-30, 30) for _ in range(40))], [(-4.0, 6.0)],
              [(12.0, 20.0)], [(v, v) for v in sorted(rng.uniform(-15, 15) for _ in range(30))])
+    count = [0]
+    halves = geometry._halves
+
+    def counting(*args):
+        count[0] += 1
+        return halves(*args)
+
+    monkeypatch.setattr(geometry, "_halves", counting)
     least = least_separation_deg(*sides)
+    assert count[0] > 3
     for limit in (0, 3, 30):
         monkeypatch.setattr(geometry, "_SEARCH_LIMIT", limit)
+        count[0] = 0
         assert 0.0 <= least_separation_deg(*sides) <= least + 1e-12
+        assert count[0] <= limit
 
 
 def test_a_search_over_lists_and_sectors_ends_well_inside_its_limit(monkeypatch):
@@ -889,3 +891,65 @@ def test_a_rectangle_passing_through_a_sector_away_from_its_foot_meets_it():
     crosses the sector's radial lines are what find that they meet."""
     assert least_separation_deg([(9.0, 11.0)], [(60.0, 70.0)], [(-20.0, 20.0)], [(8.6, 8.7)],
                                 polar_a=True) == 0.0
+
+
+# --- Positions at the side of the field (the review of the fix commit, item 1) -----------------
+#
+# Per-axis degrees cannot say where a position 90° out lies: `polar_deg(90, θ)` is (±90, ±90)
+# whatever θ is. A least measured through it could be more than the least; these hold the closed
+# forms to true directions there.
+
+
+def _true_directions(points):
+    """Directions from eccentricity and direction pairs, never through per-axis degrees."""
+    e = np.radians(np.array([p[0] for p in points]))
+    t = np.radians(np.array([p[1] for p in points]))
+    return np.stack([np.sin(e) * np.cos(t), np.sin(e) * np.sin(t), np.cos(e)], axis=1)
+
+
+def _least_true(polar_points, axis_points) -> float:
+    dots = np.clip(_true_directions(polar_points) @ _directions(axis_points).T, -1.0, 1.0)
+    return math.degrees(math.acos(dots.max()))
+
+
+def test_a_position_at_the_side_is_measured_by_its_direction():
+    """(90°, 0°) per axis is the direction straight to the right; a sector 80°-90° out at 10°-20°
+    comes within 10° of it, at 90° out and 10°, which per-axis degrees could not say."""
+    from wl_xcon.geometry import _to_sector
+
+    assert _to_sector(90.0, 0.0, (80.0, 90.0), (10.0, 20.0)) == pytest.approx(10.0, abs=1e-9)
+    assert least_separation_deg([(80.0, 90.0)], [(10.0, 20.0)], [(90.0, 90.0)], [(0.0, 0.0)],
+                                polar_a=True) == pytest.approx(10.0, abs=1e-9)
+    # A polar position 90° out at 30°, as a choice, is 30° from straight right.
+    assert least_separation_deg([(90.0, 90.0)], [(30.0, 30.0)], [(90.0, 90.0)], [(0.0, 0.0)],
+                                polar_a=True) == pytest.approx(30.0, abs=1e-9)
+    # Wholly 90° out against a rectangle, where no per-axis box holds it: never more than the least.
+    box = [(x, y) for x in np.linspace(80.0, 90.0, 41) for y in np.linspace(10.0, 20.0, 41)]
+    assert least_separation_deg([(90.0, 90.0)], [(25.0, 35.0)], [(80.0, 90.0)], [(10.0, 20.0)],
+                                polar_a=True) <= _least_true(
+        [(90.0, t) for t in np.linspace(25.0, 35.0, 101)], box) + 1e-9
+
+
+@pytest.mark.parametrize("seed", range(10))
+def test_a_region_reaching_the_side_is_never_read_farther_than_its_positions(seed):
+    """Seeded: a polar region whose eccentricity reaches 88°-90° or has no end, against a per-axis
+    region reaching the side, and against a point at it: the least read is never more than a
+    sweep of true directions finds."""
+    rng = random.Random(900 + seed)
+    e0 = rng.uniform(40.0, 88.0)
+    high = rng.choice([90.0, math.inf, rng.uniform(88.0, 90.0)])
+    t0 = rng.uniform(-180.0, 180.0)
+    thetas = (t0, t0 + rng.uniform(1.0, 120.0))
+    xs = sorted((rng.choice([90.0, -90.0]), rng.uniform(-90.0, 90.0)))
+    ys = sorted((rng.uniform(-90.0, 90.0), rng.uniform(-90.0, 90.0)))
+    sector = [(e, t) for e in np.linspace(e0, min(high, 90.0), 61)
+              for t in np.linspace(*thetas, 241)]
+    box = [(x, y) for x in np.linspace(*xs, 91) for y in np.linspace(*ys, 91)]
+    side = (xs[0], 0.0) if abs(xs[0]) == 90.0 else (xs[1], 0.0)
+
+    to_box = least_separation_deg([(e0, high)], [thetas], [tuple(xs)], [tuple(ys)], polar_a=True)
+    to_side = least_separation_deg([(e0, high)], [thetas], [(side[0], side[0])],
+                                   [(side[1], side[1])], polar_a=True)
+
+    assert to_box <= _least_true(sector, box) + 1e-9
+    assert to_side <= _least_true(sector, [side]) + 1e-9

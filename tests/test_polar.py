@@ -296,3 +296,27 @@ def test_a_whole_point_setting_of_polar_choices_is_measured_at_each(farthest, sh
     assert bool(found) is not shown
     if found:
         assert "which can reach 0.0, 25.0" in found[0].detail
+
+
+@pytest.mark.parametrize("highest", [90.0, None])
+def test_windows_whose_centers_reach_the_side_are_found_to_overlap(highest):
+    """The review of the fix commit, item 1: a window 48.44° out or more, to 90° or without end, at
+    -159.7° to -124.46°, and one over 76.23°-82.08° across and -90° to -49.04° up, each 19° in
+    radius, can come 34.46° apart, under the 38° their radii sum to; read through per-axis
+    degrees at the side, where (±90°, ±90°) stands for every direction 90° out, they were said
+    45° apart and passed."""
+    trial = Trial(
+        start="w",
+        params=[Param("ecc", unit="deg", low=48.44, high=highest),
+                Param("dir", unit="deg", low=-159.7, high=-124.46),
+                Param("dx", unit="deg", low=76.23, high=82.08),
+                Param("dy", unit="deg", low=-90.0, high=-49.04)],
+        windows=[Window("t", at=_polar(P("ecc"), P("dir")), radius=19.0, on="s"),
+                 Window("d", at=(P("dx"), P("dy")), radius=19.0, on="s")],
+        states=[State("w", enter=[Show(Stimulus("s", at=(0.0, 0.0), looks=Disc()))],
+                      go=[On(Hold("t", 0.1), Outcome.CORRECT),
+                          On(Hold("d", 0.1), Outcome.WRONG_TARGET),
+                          On(After(1.0), Outcome.NO_RESPONSE)])],
+    )
+
+    assert "overlapping-windows" in {f.code for f in check(trial)}
