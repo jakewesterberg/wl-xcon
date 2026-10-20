@@ -223,8 +223,8 @@ def test_a_remembered_window_needs_no_stimulus():
 
 
 def test_the_simulator_takes_a_task_object_and_plays_its_default_structure():
-    """Engine spec §3.5 (engine build C1): the simulator takes the task object and plays the
-    structure its runs play until plans exist (build C2), its default."""
+    """Engine spec §3.5 (engine build C1): the simulator takes the task object and plays its default
+    structure, the plain run's; a census per condition and block is build C8's."""
     other = Trial(start="only", states=[State("only", go=[On(After(0.05), Outcome.NO_RESPONSE)])])
     task = Task({"other": other, "detection": DETECTION}, default="detection")
 

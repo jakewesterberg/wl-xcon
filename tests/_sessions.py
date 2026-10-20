@@ -167,3 +167,24 @@ def polar_task(folder: Path, *, name: str = "polar") -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
     return path
+
+
+def planned_task(folder: Path, plans: str = "{}", *, name: str = "planned",
+                 structures: str = "TASK.structures") -> Path:
+    """The reference detection task with plans (engine build C2b), written into `folder` as
+    `NAME.py`: `plans` is Python source for its plans dict, and `structures` for its structures
+    dict, each free to name `detection`, its one trial structure, and every word of the plan
+    vocabulary. Engine test material, run only in the simulator: no reference task declares a
+    plan, since real plans are set with the PI in wl-xtasks."""
+    text = Path("tasks/fixation_detection.py").read_text() + (
+        "\n\nimport dataclasses as _dataclasses\n"
+        "from wl_xcon.task import (\n"
+        "    NO_LIMIT, SPENT, Balanced, Block, ByCriterion, Condition, Constrained, Cyclic,\n"
+        "    Fixed, Plan, Random, WithReplacement,\n"
+        ")\n"
+        f"TASK = _dataclasses.replace(TASK, structures={structures}, plans={plans})\n"
+    )
+    path = Path(folder) / f"{name}.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path

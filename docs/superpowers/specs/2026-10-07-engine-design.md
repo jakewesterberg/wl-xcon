@@ -626,6 +626,9 @@ luminance waits on build F (XC-305).
    *Engine build C1, 2026-10-11*: a task object holds several structures, its settings one set and
    its structures written for one setup; a condition naming its own is build C2's, and until then a
    run plays one block of the default structure.
+   *Engine build C2b, 2026-10-20*: each condition names its structure (`Condition.structure`), the
+   default where it names none, and is counted by that structure's table unless its block has its
+   own; a trial's row names the structure it played.
 4. **Interludes** (a recalibration, a quick RF map, a rest): the run steps aside and returns to the same
    block. An interlude's trials keep the session's trial numbering but belong to no block, and record the
    task they ran.
@@ -667,6 +670,12 @@ luminance waits on build F (XC-305).
    (N§R2, offered against: not counting it). The parameter-change code goes out, and **the trial table
    carries an "overridden" flag** that wl-preproc reads (an ask, §21), so grouping by condition number
    cannot silently include overridden trials. The console shows which conditions an edit overrides.
+   *Engine build C2b, 2026-10-20*: built but for the console's showing which conditions an edit
+   overrides (build C3's live-edit layer): a value edited live in a run wins over the condition's
+   for the rest of the run, setting it back not undoing that, and each trial's row lists the
+   values overridden (`overridden`); until C3, the edit's line on the changes feed names the
+   conditions it overrides. Condition numbers (item 5) wait for the registry, build C5 (the PI, 2026-10-19: "Wait for the
+   registry").
 
 ## 15. Adaptivity (N§12)
 

@@ -232,8 +232,9 @@ class Subject:
 
 
 def _structure(of: "Trial | Task") -> Trial:
-    """The trial structure a simulation plays: a task's default, until build C2's plans name others
-    (engine spec §3.5: the simulator takes the task object), or a bare trial."""
+    """The trial structure a simulation plays: a task's default (engine spec §3.5: the simulator
+    takes the task object), or a bare trial. A census per condition and block, a plan's structures
+    among them, is build C8's (engine spec §18.1); a run plays each condition's own (`taskd`)."""
     return of.trial if isinstance(of, Task) else of
 
 

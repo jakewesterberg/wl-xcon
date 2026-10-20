@@ -154,6 +154,20 @@ def _next_occurrence(hhmm: str, wall: float) -> float:
     raise ValueError(f"no occurrence of {hhmm} after {wall} within a day")
 
 
+def _overriding(blocks, name: str) -> str:
+    """What a live edit of `name` now overrides, for its line on the changes feed (engine spec
+    §14.7; the engine C2b plan's science review, I5): the conditions of the run's blocks that set
+    it, whose value the edit replaces for the rest of the run -- setting it back does not undo
+    that -- since the console's own showing of them is build C3's. Empty when none sets it."""
+    named = list(dict.fromkeys(
+        condition.name for block in blocks for condition in block.conditions
+        if name in condition.values))
+    if not named:
+        return ""
+    return (f"; for the rest of the run it overrides the value condition"
+            f"{'s' if len(named) > 1 else ''} {', '.join(named)} set")
+
+
 def _hung(index: int, condition: str, counted: str, owed: int, drummed: bool = False,
           forgiven: bool = False, past: bool = False) -> str:
     """What the console's changes feed says of a trial that reached the longest trial (engine spec
@@ -2097,6 +2111,9 @@ class Session:
                 self.spec.bounds.set(name, now, by=by)
             else:
                 self.spec.values[name] = now
+                # A live edit, which wins over a value a condition sets for the rest of the run
+                # (engine spec §14.7).
+                self._edited |= {name}
             # Strobed before its row is written, as every other writer does: a card that
             # faults here leaves no row naming a code that never went out (XC-321 ask 1).
             self.card.emit(code)
@@ -2108,13 +2125,17 @@ class Session:
                 "set",
                 by,
                 self.wall_now(),
-                f"{name} {_shown(was)} → {_shown(now)}, from trial {index}",
+                f"{name} {_shown(was)} → {_shown(now)}, from trial {index}"
+                + ("" if bounded else _overriding(self._scheduler.blocks, name)),
             )
         self._staged.clear()
 
     # --- running ----------------------------------------------------------
 
     _task: Task | None = field(init=False, default=None, repr=False)
+    #: The settings edited live in the run in progress (`_apply_staged`), which win over a value a
+    #: condition sets for the rest of the run (engine spec §14.7; engine build C2b).
+    _edited: frozenset = field(init=False, default=frozenset(), repr=False)
     #: `_task`'s settings by name, built once as it is taken (`_take`).
     _declared: dict[str, Param] = field(init=False, default_factory=dict, repr=False)
 
@@ -2394,8 +2415,6 @@ class Session:
         # config go on. A change staged before `run()` is not dropped here: it applies
         # at this run's first boundary, as a live write always has.
         self._take(task)
-        # The structure this run plays: the default, until build C2's plans name others.
-        trial = task.trial
         self._run = run
         # **The task's own starting values, under the run's** (P4d-2b spec §6.2:
         # "Starting values are the task's own"; S8 §3.4's task layer; the b3a-2 plan,
@@ -2423,10 +2442,15 @@ class Session:
         self._recent.clear()
         self.preflight = None
         self.question = None
+        # The settings edited live in this run, which win over a condition's (engine spec §14.7).
+        self._edited = frozenset()
 
-        # Counted by the structure's table (engine spec §16.1; engine build C2a), which a block's
-        # own replaces.
-        scheduler = Scheduler(blocks=self._plan(run), seed=run.seed, counting=trial.counting)
+        # Counted by each condition's structure's table (engine spec §16.1; engine build C2a; each
+        # condition naming its structure since C2b), which a block's own replaces.
+        scheduler = Scheduler(
+            blocks=self._plan(run), seed=run.seed, counting=task.trial.counting,
+            countings={name: structure.counting for name, structure in task.structures.items()},
+        )
         make_world = self.world if self.world is not None else self._agent(run)
         tally = Tally()
         self.blocks_run = [scheduler.block.name]
@@ -2609,7 +2633,20 @@ class Session:
 
                 condition = scheduler.next_trial()
                 drawn = scheduler.drawn
-                values = {**self.spec.values, **condition.values}
+                # **The structure its condition names**, or the task's default (engine spec §13.3;
+                # the PI, 2026-10-07: "each condition names its own; interleaving them in a block
+                # is ordinary"); `check_task` refuses a condition naming one the task lacks.
+                structure = condition.structure or task.default
+                trial = task.structures[structure]
+                # **A live edit to a value a condition sets wins** (engine spec §14.7; §17.1's
+                # order: the task's start, the run's value, the condition's, a live edit), and the
+                # trial still counts toward its condition; its row names each value overridden.
+                overridden = sorted(name for name in condition.values if name in self._edited)
+                values = {
+                    **self.spec.values,
+                    **{name: value for name, value in condition.values.items()
+                       if name not in self._edited},
+                }
                 world = make_world(trial, values, index)
                 # **The trial opens in the stream at the boundary, never in a frame**
                 # (XC-155; S1 §4's between-trial surface): `TRIAL_START`, then its number
@@ -2701,6 +2738,8 @@ class Session:
                     params=values,
                     block=scheduler.block.name,
                     condition=condition.name,
+                    structure=structure,
+                    overridden=tuple(overridden),
                     counting=counted,
                     shown=shown,
                     repeat_of=drawn.repeat_of,

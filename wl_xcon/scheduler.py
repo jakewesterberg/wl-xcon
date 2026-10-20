@@ -189,7 +189,7 @@ class Shortfall:
 class Scheduler:
     blocks: list[Block]
     seed: int = 0
-    #: The structure's counting table (`task.Trial.counting`), which a block's own replaces
+    #: The default structure's counting table (`task.Trial.counting`), which a block's own replaces
     #: (`Block.counting`). `None` answers only what every structure shares -- an answer counted,
     #: the four of `task.REPEATED` owed -- and raises on what each declares (`_class`).
     counting: Counting | None = None
@@ -203,6 +203,11 @@ class Scheduler:
     #: per-animal training profiles exist (XC-379), every run starts with it off -- and a trainer
     #: switches it from the console (`train`).
     clearing: bool = False
+    #: **Each structure's counting table, by the structure's name** (engine build C2b): a condition
+    #: naming a structure (`task.Condition.structure`) counts by that one's, unless its block
+    #: counts by a table of its own; a condition naming none, or one missing here, by `counting`'s
+    #: (the PI, 2026-10-07: "each condition names its own" structure).
+    countings: dict = field(default_factory=dict)
     _rng: random.Random = field(init=False, repr=False)
     _counts: dict = field(init=False, default_factory=dict, repr=False)
     _queue: deque = field(init=False, default_factory=deque, repr=False)
@@ -350,35 +355,47 @@ class Scheduler:
         counts = self._counts[condition]
         return max(0, target - counts.completed - counts.spent - counts.forgiven)
 
-    @property
-    def _table(self) -> Counting | None:
-        """The open block's counting table, else the run's. (`_class` still asks the run's whether
-        no response is an answer: what counts as one is the structure's.)"""
-        return self.block.counting if self.block.counting is not None else self.counting
+    def _structure(self, condition: str) -> Counting | None:
+        """The counting table of the structure `condition` plays (engine build C2b): the one it
+        names (`task.Condition.structure`, read in `countings`), else the default's (`counting`).
+        What counts as an answer, and the repeat limit where its block sets none, are its."""
+        named = next(c for c in self.block.conditions if c.name == condition).structure
+        if named is None:
+            return self.counting
+        return self.countings.get(named, self.counting)
 
-    @property
-    def _cap(self) -> int | None:
-        """The open block's repeat limit: its own table's, **else the structure's** -- a block that
-        counts by a table of its own keeps the task's limit unless its table sets one (the PI,
-        2026-10-18: "No: the task's limit applies unless the block sets its own") -- a number, or
-        `task.NO_LIMIT`, which removes it (XC-380). `None`, no limit."""
+    def _table(self, condition: str) -> Counting | None:
+        """The table `condition`'s trials count by: its block's own, else its structure's.
+        (`_class` still asks the structure's whether no response is an answer: what counts as one
+        is the structure's.)"""
+        own = self.block.counting
+        return own if own is not None else self._structure(condition)
+
+    def _cap(self, condition: str) -> int | None:
+        """`condition`'s repeat limit in the open block: its block's own table's, **else its
+        structure's** -- a block that counts by a table of its own keeps the task's limit unless its
+        table sets one (the PI, 2026-10-18: "No: the task's limit applies unless the block sets its
+        own") -- a number, or `task.NO_LIMIT`, which removes it (XC-380). `None`, no limit."""
         own = self.block.counting
         if own is not None and own.cap is not None:
             return None if own.cap == NO_LIMIT else own.cap
-        if self.counting is None or self.counting.cap == NO_LIMIT:
+        structure = self._structure(condition)
+        if structure is None or structure.cap == NO_LIMIT:
             return None
-        return self.counting.cap
+        return structure.cap
 
-    def _answer(self, outcome: Outcome | None) -> bool:
+    def _answer(self, outcome: Outcome | None, condition: str) -> bool:
         """Whether `outcome` is an answer, right or wrong (the PI, 2026-10-18): one of
         `task.ANSWERS` -- a correct answer, a correct rejection, a wrong target, a false alarm, an
-        early or a late response or error -- or no response where the structure makes withholding
-        an answer, a miss (`Counting.withholding`, the structure's, as `_class` reads it). A trial
-        with no answer -- a break, no fixation, a lost tracker, a fault, a hang -- is none."""
+        early or a late response or error -- or no response where `condition`'s structure makes
+        withholding an answer, a miss (`Counting.withholding`, the structure's, as `_class` reads
+        it). A trial with no answer -- a break, no fixation, a lost tracker, a fault, a hang -- is
+        none."""
         if outcome in ANSWERS:
             return True
-        return (outcome is Outcome.NO_RESPONSE and self.counting is not None
-                and self.counting.withholding)
+        structure = self._structure(condition)
+        return (outcome is Outcome.NO_RESPONSE and structure is not None
+                and structure.withholding)
 
     def _scored(self, outcome: Outcome | None) -> bool:
         """Whether the open block's own table scores `outcome` though it is no answer, so its rule
@@ -417,8 +434,8 @@ class Scheduler:
         criterion = self.block.criterion
         return criterion is not None and criterion[0] >= 1.0
 
-    def _class(self, outcome: Outcome | None, shown: bool) -> str:
-        """What `outcome` does to its condition's count, by the block's table or the structure's
+    def _class(self, outcome: Outcome | None, shown: bool, condition: str) -> str:
+        """What `outcome` does to `condition`'s count, by the block's table or its structure's
         (`task.Counting.of`). **With neither**, what every structure shares still answers -- an
         answer counted, shown or not; the four of `task.REPEATED`, a hang and a break before the
         stimulus owed -- and an outcome each structure declares for raises: no default stands in
@@ -431,9 +448,10 @@ class Scheduler:
         **Where the structure does not withhold**, a block's table's own `withholding` is not read
         either: no response is no answer under any block (the controller's ruling M8 on the
         plan's revision review)."""
-        table = self._table
+        table = self._table(condition)
+        structure = self._structure(condition)
         if outcome is Outcome.NO_RESPONSE and self.block.counting is not None:
-            if self.counting is not None and self.counting.withholding:
+            if structure is not None and structure.withholding:
                 return self.block.counting.of(Outcome.FALSE_ALARM, shown)
             table = replace(self.block.counting, withholding=False)
         if table is not None:
@@ -549,15 +567,18 @@ class Scheduler:
     def clearable(self) -> bool:
         """Whether a trial of the open block can be owed, so a person may clear one from the
         console (the engine C2a plan's engineering review, Minor 3): trials are drummed, or the
-        block's table -- or its structure's -- owes some outcome, before its stimulus or after. The
-        flat run's every-trial table owes none, so a plain "run N trials" offers no *clear*, where
-        one would only shorten the run."""
+        block's table -- or a structure's its conditions play -- owes some outcome, before its
+        stimulus or after. The flat run's every-trial table owes none, so a plain "run N trials"
+        offers no *clear*, where one would only shorten the run."""
         if self.drumming:
             return True
-        table = self._table
-        if table is None:
-            return True
-        return OWED in {table.of(o, shown) for o in (*Outcome, None) for shown in (True, False)}
+        tables = {id(table): table for table in
+                  (self._table(c.name) for c in self.block.conditions)}.values()
+        return any(
+            table is None
+            or OWED in {table.of(o, shown) for o in (*Outcome, None) for shown in (True, False)}
+            for table in tables
+        )
 
     def clear(self, condition: str, by: object = None, rest: bool = False) -> str | None:
         """Forgive one trial of `condition`'s debt in this block, or with `rest` all it still owes,
@@ -683,9 +704,9 @@ class Scheduler:
         a row as its limit allows (`task.Counting.cap`: the block's table's, else the structure's)
         is not repeated again: its remaining debt is forgiven, a `Shortfall` (§16.6)."""
         counts = self._counts[condition]
-        kind = self._class(outcome, shown)
+        kind = self._class(outcome, shown, condition)
         first_try = self.drawn is None or not self.drawn.drummed
-        judged = self._answer(outcome) or self._scored(outcome)
+        judged = self._answer(outcome, condition) or self._scored(outcome)
         # A try recorded: a presentation, and a trial unless a drum brought it back (the PI,
         # 2026-10-18, "200 trials; drummed repeats inside them"); an ordinary repeat, shown again a
         # few trials later, is a trial of its own. Counted as each try ends, so a trial that
@@ -742,7 +763,7 @@ class Scheduler:
             counts.spent += 1
         if kind == OWED and self.owed(condition) > 0:
             counts.rig += outcome is not None and outcome.family is Family.RIG
-            cap = self._cap
+            cap = self._cap(condition)
             if cap is not None and counts.in_a_row >= cap:
                 # **Past its limit, the condition's remaining debt is forgiven** (§16.6; the PI,
                 # 2026-10-12: "moved past after 3 failed repeats in a row"), its shortfall

@@ -270,6 +270,8 @@ class SessionRecord:
         drummed: bool = False,
         drumming: str | None = None,
         aids: tuple = (),
+        structure: str | None = None,
+        overridden: tuple = (),
     ) -> None:
         """One trial's record, flushed before returning.
 
@@ -308,7 +310,10 @@ class SessionRecord:
         whether it is a drum's repeat (`drummed`) and drumming was on as it was drawn
         (`drumming`, `"block"` or `"run"`). **And the training aids on as it was drawn** (`aids`,
         a list: `"drumming"`, `"clear"`; the PI, 2026-10-18: "the record marks it on every
-        trial").
+        trial"). **And the trial structure it played** (`structure`, its condition's or the task's
+        default; engine build C2b), and **the values its condition set that a live edit
+        overrode** (`overridden`, a list of names; engine spec §14.7: "the trial table carries an
+        'overridden' flag"), so a grouping by condition can leave them out.
         """
         if self._trials is None:
             self._trials = (self.directory / "trials.jsonl").open("a", encoding="utf-8")
@@ -333,6 +338,8 @@ class SessionRecord:
                     "drummed": drummed,
                     "drumming": drumming,
                     "aids": list(aids),
+                    "structure": structure,
+                    "overridden": list(overridden),
                 },
                 sort_keys=True,
                 default=_written,

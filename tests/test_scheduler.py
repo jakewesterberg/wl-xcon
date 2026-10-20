@@ -814,6 +814,65 @@ def test_the_tasks_repeat_limit_holds_in_a_block_counted_by_its_own_table_unless
     assert moved_past(Counting(after_stimulus=OWED, cap=2)) == [2]
 
 
+def _mixed(**block) -> Scheduler:
+    """A block of two conditions, `detect` naming the `detection` structure -- breaks after its
+    stimulus used up, no response a miss, no repeat -- and `search` naming none, so playing the
+    default's: breaks shown again, no response no answer, no limit (engine build C2b)."""
+    detection = Counting(after_stimulus=SPENT, withholding=True, cap=0)
+    search = Counting(after_stimulus=OWED)
+    mixed = Block(name="mixed", conditions=[
+        Condition("detect", {}, target=5, structure="detection"),
+        Condition("search", {}, target=5),
+    ], **block)
+    return Scheduler([mixed], seed=1, counting=search, countings={"detection": detection})
+
+
+def test_each_condition_counts_by_the_table_of_the_structure_it_plays():
+    """Engine build C2b (the PI, 2026-10-07: "a task declares several trial structures; each
+    condition names its own; interleaving them in a block is ordinary"): a condition naming a
+    structure counts by that structure's table -- what a break after its stimulus does, whether no
+    response is an answer, its repeat limit -- and one naming none by the default's."""
+    scheduler = _mixed()
+
+    assert scheduler.record("detect", Outcome.TARGET_BREAK) == SPENT
+    assert scheduler.record("search", Outcome.TARGET_BREAK) == OWED
+    assert scheduler.record("detect", Outcome.NO_RESPONSE) == COUNTED
+    assert scheduler.record("search", Outcome.NO_RESPONSE) == OWED
+    # `detect`'s structure moves a condition past at its first failure in a row; `search`'s has
+    # no limit, so its failures were placed as repeats.
+    assert scheduler.record("detect", Outcome.FIXATION_BREAK) == OWED
+    assert [(s.condition, s.because) for s in scheduler.shortfalls] == [("detect", CAP)]
+    assert scheduler.counts("search").repeats == 2
+    # And judged by it: `detect`'s miss is a wrong answer, `search`'s no response no answer.
+    assert (scheduler.counts("detect").wrong, scheduler.counts("search").wrong) == (1, 0)
+
+
+def test_a_blocks_own_table_replaces_each_structures_and_each_structure_says_what_is_an_answer():
+    """A block counting by its own table counts every condition by it, whatever structure each
+    plays; whether no response is an answer stays each structure's (the controller's ruling M8 on
+    the engine C2a plan's revision): a miss under `detect`, used up as no answer under `search`."""
+    scheduler = _mixed(counting=PRESENTED)
+
+    assert scheduler.record("detect", Outcome.TARGET_BREAK) == SPENT
+    assert scheduler.record("search", Outcome.TARGET_BREAK) == SPENT
+    assert scheduler.record("detect", Outcome.NO_RESPONSE) == COUNTED
+    assert scheduler.record("search", Outcome.NO_RESPONSE) == SPENT
+
+
+def test_a_block_offers_clear_when_any_structure_its_conditions_play_can_owe():
+    """`clearable` (the engine C2a plan's Minor 3) asks every structure the open block's conditions
+    play: a block of conditions all playing a structure that owes nothing offers no *clear*; one
+    more condition playing a structure that owes, and it does."""
+    def offered(*structures) -> bool:
+        block = Block(name="b", conditions=[
+            Condition(f"c{n}", {}, target=1, structure=name) for n, name in enumerate(structures)])
+        return Scheduler([block], seed=1, counting=Counting(after_stimulus=OWED),
+                         countings={"flat": EVERY_TRIAL}).clearable
+
+    assert offered("flat", "flat") is False
+    assert offered("flat", None) is True
+
+
 def test_a_blocks_no_limit_removes_its_tasks_repeat_limit():
     """XC-380 (engine build C2b): a block's own table says "no limit" with `NO_LIMIT`, where `None`
     keeps the task's -- so a hold-training block can repeat a trial until it is done though its

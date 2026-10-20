@@ -62,7 +62,7 @@ from wl_xcon.link import (
 from wl_xcon.photometry import SRGB
 from wl_xcon.record import REFUSAL_LOG_LIMIT, SessionRecord
 from wl_xcon.scheduler import EVERY_TRIAL, Block, Condition, Scheduler
-from wl_xcon.simulate import Tally
+from wl_xcon.simulate import Subject, Tally, prepare
 from wl_xcon.task import ANSWERS, OWED, RIGHT, After, Counting, On, Outcome, State, Trial
 from wl_xcon.taskd import PAUSE_HOUSEKEEPING_S, RunSpec, Session, SessionSpec, _drum_warned
 from wl_xcon.warnlist import Entry
@@ -1157,6 +1157,79 @@ def test_a_settings_polar_value_is_recorded_wherever_a_value_is_and_reads_back(t
     ((was, now),) = [(row["was"], row["now"]) for row in _parameter_changes(session)]
     assert (was, now) == (right, oblique)
     assert resume.read(session.directory, session.welfare.left_cage_wall_at).run_index == 0
+
+
+def test_each_condition_plays_the_structure_it_names_and_its_row_says_which(tmp_path):
+    """Engine spec §13.3 (the PI, 2026-10-07: "each condition names its own; interleaving them in a
+    block is ordinary"; engine build C2b): each trial is built and run from its condition's
+    structure, the task's default for one naming none, and its row names the structure played."""
+    path = _sessions.planned_task(tmp_path, structures=(
+        '{"detection": detection, "spent": _dataclasses.replace(detection, counting='
+        '_dataclasses.replace(detection.counting, after_stimulus=SPENT))}'))
+    task = _load_task(path)
+    block = Block(name="mixed", conditions=[Condition("plain", {}, target=3),
+                                            Condition("used", {}, target=3, structure="spent")])
+    spec = _spec(tmp_path, task=str(path), trials=400, blocks=[block])
+    subject = Subject(seed=1, hazards=spec.hazards, engagement=spec.engagement, lapse=spec.lapse)
+    played = []
+
+    def world(trial, values, index):
+        played.append(trial)
+        subject.new_trial()
+        prepare(subject, trial, spec.frame_period, values)
+        return subject
+
+    session = _session(spec)
+    session.world = world
+
+    session.run()
+
+    rows = _trial_rows(session)
+    assert {(row["condition"], row["structure"]) for row in rows} == {
+        ("plain", "detection"), ("used", "spent")}
+    assert [trial.counting for trial in played] == [
+        task.structures[row["structure"]].counting for row in rows]
+
+
+def test_a_live_edit_wins_over_a_conditions_value_and_its_rows_say_so(tmp_path):
+    """Engine spec §14.7 (§17.1's order: the task's start, the run's value, the condition's, a live
+    edit): "A live edit to a value a condition sets wins, and the trial still counts toward its
+    condition", the trial table carrying an "overridden" flag. A value the condition does not set
+    is overridden by nothing; before the edit the condition's value holds."""
+    link = _Drained({3: [SetParameter(name="target_x", value=12.0, by=Box("jake"))]})
+    spec = _spec(tmp_path, trials=400, blocks=[
+        Block(name="b", conditions=[Condition("near", {"target_x": 5.0}, target=6)])])
+    session = _session(spec, link=link)
+
+    session.run()
+
+    rows = _trial_rows(session)
+    assert [(row["params"]["target_x"], row["overridden"]) for row in rows[:3]] == [
+        (5.0, [])] * 3
+    assert {(row["params"]["target_x"], tuple(row["overridden"])) for row in rows[3:]} == {
+        (12.0, ("target_x",))}
+    assert {row["condition"] for row in rows} == {"near"}
+    assert session.stopped_because == "every block is finished"
+
+
+def test_a_live_edits_feed_line_names_the_conditions_it_now_overrides(tmp_path):
+    """The engine C2b plan's science review, I5: until the console shows which conditions an edit
+    overrides (build C3), the edit's line on the changes feed names them -- every condition of the
+    run's blocks that sets the value -- and an edit of a value no condition sets names none."""
+    link = _Drained({1: [SetParameter(name="target_x", value=12.0, by=Box("jake")),
+                         SetParameter(name="target_y", value=2.0, by=Box("jake"))]})
+    spec = _spec(tmp_path, trials=400, blocks=[
+        Block(name="b", conditions=[Condition("near", {"target_x": 5.0}, target=2),
+                                    Condition("far", {"target_x": 9.0}, target=2)])])
+    session = _session(spec, link=link)
+
+    session.run()
+
+    assert [said for kind, _, _, said in session.controls if kind == "set"] == [
+        "target_x 10.00 → 12.00, from trial 1; for the rest of the run it overrides the value "
+        "conditions near, far set",
+        "target_y 0.00 → 2.00, from trial 1",
+    ]
 
 
 def test_each_trial_records_the_condition_it_actually_ran(tmp_path):
