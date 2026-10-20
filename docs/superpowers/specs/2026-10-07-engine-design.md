@@ -117,6 +117,9 @@ XC-288 §4.1), what it offers to choose and how its reaction time is defined (XC
 whether it needs a fixed head (§20.1). `Session.set` validates against the union of its structures' settings;
 the loader, the checks (`check.check_task`), the pre-flight, the review report and the simulator
 take it. Plans (C2), procedures (D) and stages (C7) join it as fields of their own.
+*Engine build C2b, 2026-10-20* (plan `docs/superpowers/plans/2026-10-19-engine-c2b.md`): plans
+joined it (`Task.plans`), and the default structure is the plain run's and a condition's that names
+none.
 
 ## 4. What can be shown (N§1)
 

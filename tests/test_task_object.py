@@ -1,7 +1,7 @@
 """The task object (engine spec §3.5; engine build C1): a task file's one `Task` -- its trial
-structures by name, the default one its runs play until plans exist (build C2), and what XC-288 §4
-has a task declare about itself: what each setting means, what it offers to choose, and how its
-reaction time is defined."""
+structures by name, the default one the plain run plays, its plans (engine build C2b), and what
+XC-288 §4 has a task declare about itself: what each setting means, what it offers to choose, and
+how its reaction time is defined."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import dataclasses
 
 import pytest
 
+from wl_xcon import scheduler, task as vocabulary
 from wl_xcon.check import check, check_task
 from wl_xcon.cli import _load_task
 from wl_xcon.findings import SESSION_KINDS, Finding
@@ -26,7 +27,9 @@ from wl_xcon.task import (
     OWED,
     STIMULUS,
     After,
+    Block,
     Choice,
+    Condition,
     Counting,
     Disc,
     Meaning,
@@ -34,6 +37,7 @@ from wl_xcon.task import (
     Outcome,
     P,
     Param,
+    Plan,
     ReactionTime,
     Reward,
     SaccadeTo,
@@ -186,6 +190,51 @@ def test_a_task_refuses_a_shape_it_cannot_be():
     ]:
         with pytest.raises(ValueError):
             Task({"a": a}, default="a", **wrong)
+
+
+@pytest.mark.parametrize(
+    ("plans", "said"),
+    [
+        ([("hold", "a plan")], "a dict of plan names to Plans"),
+        ({"": "a plan"}, "named by text"),
+        ({"hold": "a plan"}, "is a Plan, not str"),
+    ],
+)
+def test_a_tasks_plans_are_refused_as_built_when_malformed(plans, said):
+    """Engine build C2b: a task's plans are a dict of names to `Plan`s, refused as built otherwise,
+    as its structures are."""
+    with pytest.raises(ValueError, match=said):
+        Task({"a": _trial()}, default="a", plans=plans)
+
+
+@pytest.mark.parametrize(
+    ("fields", "said"),
+    [
+        ({"blocks": (Block("b", []),)}, "a list of Blocks"),
+        ({"blocks": [Block("b", []), "b"]}, "a list of Blocks"),
+        ({"blocks": [], "order": "fixed"}, "a BlockOrder"),
+        ({"blocks": [], "time_limit_s": "10 minutes"}, "a number of seconds"),
+        ({"blocks": [], "time_limit_s": True}, "a number of seconds"),
+    ],
+)
+def test_a_plan_is_refused_as_built_when_malformed(fields, said):
+    """Its shape as it is built; what it declares -- an empty plan, a limit of no time -- at load
+    (`check.check_task`)."""
+    with pytest.raises(ValueError, match=said):
+        Plan(**fields)
+
+
+def test_the_block_vocabulary_is_the_tasks_and_the_scheduler_plays_it():
+    """Engine build C2b: a plan's blocks are declared in the task object, so `Block`, `Condition`
+    and the orders are the task's vocabulary, the classes the format pins hold
+    (`tests/test_declarations.py`); the scheduler imports the same classes under its old names."""
+    for name in ("Order", "Shuffled", "WithReplacement", "Constrained", "Condition", "Block"):
+        assert getattr(scheduler, name) is getattr(vocabulary, name)
+        assert getattr(vocabulary, name).__module__ == "wl_xcon.task"
+    plan = Plan([Block("b", [Condition("c", {}, target=1, structure="a")])])
+    task = Task({"a": _trial()}, default="a", plans={"p": plan})
+    assert task.plans["p"].blocks[0].conditions[0].structure == "a"
+    assert Task({"a": _trial()}, default="a").plans == {}
 
 
 def test_a_tasks_settings_are_its_structures_union_the_defaults_first():

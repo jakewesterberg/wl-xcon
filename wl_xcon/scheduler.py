@@ -19,9 +19,11 @@ import random
 from collections import deque
 from dataclasses import dataclass, field, replace
 
+# The block vocabulary is the task's (engine build C2b): a plan's blocks are declared in its task
+# object, and imported here, where they are played, under the names they always had here.
 from wl_xcon.task import (
-    ANSWERS, COUNTED, HANG_COUNTS_AS, OWED, REPEATED, RIGHT, SPENT, UNPAID, Counting, Family,
-    Outcome,
+    ANSWERS, COUNTED, HANG_COUNTS_AS, NO_LIMIT, OWED, REPEATED, RIGHT, SPENT, UNPAID, Block,
+    Condition, Constrained, Counting, Family, Order, Outcome, Shuffled, WithReplacement,
 )
 
 # --- What pays a condition's debt (engine spec §16.1-16.2; engine build C2a) -------------------
@@ -57,51 +59,6 @@ EVERY_TRIAL = Counting(
     after_stimulus=SPENT,
     outcomes={outcome.value: SPENT for outcome in Outcome if outcome not in ANSWERS},
 )
-
-
-@dataclass(frozen=True, slots=True)
-class Order:
-    """How the next condition is chosen. **Declared per block** (PI, 2026-08-31)."""
-
-
-@dataclass(frozen=True, slots=True)
-class Shuffled(Order):
-    """Every still-owed condition once per pass, in random order.
-
-    Balance as the block progresses, and a bound on how long an animal waits for any
-    condition. Partly predictable near the end of a pass, when few remain.
-    """
-
-
-@dataclass(frozen=True, slots=True)
-class WithReplacement(Order):
-    """Each trial drawn independently, optionally weighted.
-
-    No sequential predictability, and it supports conditions wanted rarely -- catch
-    trials, probes. Balance only in expectation, so the counters matter more.
-    """
-
-    weights: dict = field(default_factory=dict)
-
-
-@dataclass(frozen=True, slots=True)
-class Constrained(Order):
-    """Drawn with replacement, refusing runs longer than `max_run`.
-
-    What most search and attention designs actually use, because an animal exploits
-    runs: three of the same target position in a row and it stops searching and
-    starts predicting.
-    """
-
-    max_run: int = 2
-    weights: dict = field(default_factory=dict)
-
-
-@dataclass(frozen=True, slots=True)
-class Condition:
-    name: str
-    values: dict
-    target: int
 
 
 #: Why a condition's debt was forgiven (`Shortfall.because`): its repeat limit was reached
@@ -146,34 +103,6 @@ class Draw:
     drummed: bool = False
     drumming: str | None = None
     aids: tuple = ()
-
-
-@dataclass(frozen=True, slots=True)
-class Block:
-    name: str
-    conditions: list[Condition]
-    #: `(proportion, window)` -- "80% correct over the last 20 answers", a percentage; a proportion
-    #: of 1.0 is a streak, "N correct in a row" (the engine C2a plan, revised 2026-10-18). Judged on
-    #: every answer, and on a broken hold or a failure to acquire fixation where this block's own
-    #: table scores it (`Scheduler._scored`); a percentage judges only each trial's first answer
-    #: under `first_answers`, a streak never. (`Scheduler.record`.) The block ends once every
-    #: condition is owed nothing and, with a criterion, the criterion is met too: **its targets are
-    #: a minimum** (`Scheduler.finished`).
-    criterion: tuple[float, int] | None = None
-    #: The table this block counts by, **replacing its structure's** (TSK-26: what counts is
-    #: declared per block): `CORRECT_ONLY`, `PRESENTED`, `EVERY_TRIAL` or any `task.Counting` --
-    #: a block training an animal to hold fixation may count a fixation break as an error that
-    #: pays its debt -- and its rule then judges that break a miss (the PI, 2026-10-18, "Yes, where
-    #: the block says so"; `Scheduler._scored`) -- while a block measuring a psychometric function
-    #: must not. What is an answer stays the structure's: a block's own `withholding` is not read
-    #: (`Scheduler._class`). `None`, the structure's own (`Scheduler.counting`).
-    counting: Counting | None = None
-    order: Order = field(default_factory=Shuffled)
-    #: **Drumming** (the PI, 2026-10-11: "a training tool ... where a trial is repeated until
-    #: correct"): every trial of this block that is not right comes back at once, paying nothing,
-    #: until it is. A trainer switches it on or off for a block or a run from the console as well
-    #: (`Scheduler.drum`).
-    drum: bool = False
 
 
 @dataclass
@@ -431,12 +360,14 @@ class Scheduler:
     def _cap(self) -> int | None:
         """The open block's repeat limit: its own table's, **else the structure's** -- a block that
         counts by a table of its own keeps the task's limit unless its table sets one (the PI,
-        2026-10-18: "No: the task's limit applies unless the block sets its own"). `None`, no
-        limit."""
+        2026-10-18: "No: the task's limit applies unless the block sets its own") -- a number, or
+        `task.NO_LIMIT`, which removes it (XC-380). `None`, no limit."""
         own = self.block.counting
         if own is not None and own.cap is not None:
-            return own.cap
-        return None if self.counting is None else self.counting.cap
+            return None if own.cap == NO_LIMIT else own.cap
+        if self.counting is None or self.counting.cap == NO_LIMIT:
+            return None
+        return self.counting.cap
 
     def _answer(self, outcome: Outcome | None) -> bool:
         """Whether `outcome` is an answer, right or wrong (the PI, 2026-10-18): one of

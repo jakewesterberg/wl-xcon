@@ -26,6 +26,7 @@ from wl_xcon.task import (
     Exited,
     Meaning,
     NO_CHOICE,
+    NO_LIMIT,
     On,
     P,
     Param,
@@ -215,6 +216,16 @@ def test_the_report_shows_what_each_trial_does_to_its_conditions_count():
     assert "a repeat limit of 3 failed repeats in a row" in out
     assert "Structure `other`: **no counting table**" in out
     assert out.index("### What each trial does") < out.index("## Structure `holding`")
+
+
+def test_a_tables_no_limit_is_shown_as_no_limit():
+    """XC-380 (engine build C2b): `NO_LIMIT` reads as no repeat limit, never as a number."""
+    table = Counting(after_stimulus=SPENT, appears="hold", cap=NO_LIMIT)
+    holding = dataclasses.replace(HOLDING, counting=table)
+    out = render_task(_reviewed(structures={"holding": holding}))
+
+    assert "no repeat limit: a condition is repeated until done" in out
+    assert "a repeat limit of no limit" not in out
 
 
 def test_each_structure_is_drawn_under_its_own_heading_the_default_first():

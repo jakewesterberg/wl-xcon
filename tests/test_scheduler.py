@@ -29,7 +29,7 @@ from wl_xcon.scheduler import (
     Shuffled,
     WithReplacement,
 )
-from wl_xcon.task import COUNTED, OWED, SPENT, UNPAID, Counting, Outcome
+from wl_xcon.task import COUNTED, NO_LIMIT, OWED, SPENT, UNPAID, Counting, Outcome
 
 
 def _block(**kwargs) -> Block:
@@ -812,6 +812,27 @@ def test_the_tasks_repeat_limit_holds_in_a_block_counted_by_its_own_table_unless
 
     assert moved_past(CORRECT_ONLY) == [1]
     assert moved_past(Counting(after_stimulus=OWED, cap=2)) == [2]
+
+
+def test_a_blocks_no_limit_removes_its_tasks_repeat_limit():
+    """XC-380 (engine build C2b): a block's own table says "no limit" with `NO_LIMIT`, where `None`
+    keeps the task's -- so a hold-training block can repeat a trial until it is done though its
+    task moves a condition past at its second failure in a row. In a structure's own table the two
+    say the same."""
+    def moved_past(block_cap, structure_cap=1) -> list:
+        table = Counting(after_stimulus=OWED, cap=block_cap)
+        block = Block(name="b", conditions=[Condition("a", {}, target=3)], counting=table)
+        scheduler = Scheduler([block], seed=1,
+                              counting=Counting(after_stimulus=OWED, cap=structure_cap))
+        for _ in range(6):
+            if scheduler.finished:
+                break
+            scheduler.record(scheduler.next_trial().name, Outcome.FIXATION_BREAK)
+        return [short.after_trial for short in scheduler.shortfalls]
+
+    assert moved_past(None) == [1]
+    assert moved_past(NO_LIMIT) == []
+    assert moved_past(None, structure_cap=NO_LIMIT) == []
 
 
 def test_a_rig_failure_anywhere_in_the_row_names_it_for_the_rig_and_an_ended_trial_forgets_it():

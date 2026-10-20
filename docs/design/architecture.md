@@ -366,8 +366,9 @@ Event codes are **allocated in `wl-exptasks`, never invented in a task**; valida
 an unregistered code at load time.
 
 **The task object, since engine build C1.** A task file defines one `Task` (`wl_xcon/task.py`;
-engine spec §3.5): its trial structures by name, the default one a run plays until plans exist
-(build C2), what each of its settings means (XC-288 §4.1: clear-cut with a direction, expected with
+engine spec §3.5): its trial structures by name, the default one -- the plain run's, and a
+condition's that names none -- its plans (since engine build C2b, below), what each of its
+settings means (XC-288 §4.1: clear-cut with a direction, expected with
 a direction and a note, or not a difficulty setting; and whether the setting is a criterion or a
 stimulus), what it offers to choose (or `NO_CHOICE`) and how its reaction time is defined (§4.3),
 and whether it needs a fixed head. The common settings' meanings are declared once, in

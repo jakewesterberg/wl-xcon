@@ -16,6 +16,7 @@ from dataclasses import fields, is_dataclass
 
 from wl_xcon.task import (
     COUNTED,
+    NO_LIMIT,
     OWED,
     SPENT,
     UNPAID,
@@ -431,7 +432,8 @@ def _counting(task: Task) -> list[str]:
                    else "**it names no state its stimulus appears in**")
         withholding = ("withholding is an answer, so no response is a miss" if table.withholding
                        else "withholding is no answer")
-        limit = ("no repeat limit: a condition is repeated until done" if table.cap is None
+        limit = ("no repeat limit: a condition is repeated until done"
+                 if table.cap in (None, NO_LIMIT)
                  else f"a repeat limit of {table.cap} failed repeats in a row")
         lines += [f"Structure `{name}`: {appears}; {withholding}; {limit}.", "",
                   "| Outcome | After the stimulus appears | Before it |", "|---|---|---|"]
