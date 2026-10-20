@@ -60,7 +60,7 @@ from wl_xcon.encode import (
     words_for_run,
 )
 from wl_xcon.findings import SESSION_KINDS, kind_named
-from wl_xcon.geometry import Geometry
+from wl_xcon.geometry import DISPARITY_CONVENTION, Geometry
 from wl_xcon.levels import Levels
 from wl_xcon.photometry import Calibration, cone_record
 from wl_xcon.record import XCON_DIRNAME, SessionRecord, _local, welfare_note
@@ -832,6 +832,8 @@ class Session:
                 "half_field_deg": [geometry.half_field_h_deg, geometry.half_field_v_deg],
                 "mask_deg": geometry.mask_deg,
                 "housings": [dataclasses.asdict(h) for h in geometry.housings],
+                # What a disparity d means in this record (the PI, 2026-10-19; STE-07).
+                "disparity_convention": DISPARITY_CONVENTION,
             },
         }
 

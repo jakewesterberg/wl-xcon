@@ -2,10 +2,10 @@
 
 **Positions map to the panel by `D · tan`, per axis**, as `geometry` holds: a sample
 `(x_cm, y_cm)` from the eye's straight-ahead point is the direction `(x, y, D)`. A
-stimulus's own shape is drawn in a local frame centered on it: in **true visual angle**
+stimulus's own shape is drawn in a local frame centered on it, in **true visual angle**:
 the frame is azimuthal-equidistant about the stimulus's direction, so a 2° disc subtends
-2° wherever it is; in **center scale** it is the screen's own centimeters at the
-center's `D·π/180` cm per degree, as many labs draw (spec §5.3).
+2° wherever it is (spec §5.3). The screen center's scale, which many labs draw at, was retired
+on 2026-10-19 (the PI: "Every stimulus is drawn in true visual angle").
 
 Through the stereoscope each eye sees its half of the panel at the folded path `D`, its
 axis through the half's center (optics drawing §3). The vergence offset is not here:
@@ -86,11 +86,3 @@ def local_true_angle(v, c):
     theta = np.degrees(np.arctan2(tn, cos_t))
     safe = np.where(tn > 0, tn, 1.0)
     return theta * (t @ ex) / safe, theta * (t @ ey) / safe
-
-
-def local_center_scale(x_cm, y_cm, x_deg, y_deg, distance_cm):
-    """Centimeters from the stimulus's center, at the screen center's cm per degree."""
-    k = distance_cm * math.pi / 180.0
-    xc = distance_cm * math.tan(math.radians(x_deg))
-    yc = distance_cm * math.tan(math.radians(y_deg))
-    return (x_cm - xc) / k, (y_cm - yc) / k

@@ -8,9 +8,11 @@ experimenter cannot break it from the console.
 
 import inspect
 import math
+import random
 from dataclasses import replace
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 import wl_xcon.check as checking
@@ -24,6 +26,7 @@ from wl_xcon.photometry import SRGB, Gray, Michelson, Weber
 from wl_xcon.run import run_trial
 from wl_xcon.task import (
     RDS,
+    expand_windows,
     Task,
     After,
     Array,
@@ -112,6 +115,62 @@ def test_windows_that_overlap_only_at_an_extreme_of_a_range_are_found():
         params=[Param("fix_window", unit="deg", low=0.5, high=5.0)],
     )
     assert "overlapping-windows" in codes(trial)
+
+
+# --- Windows are measured in true visual angle, where they are (the PI, 2026-10-19) ---------
+#
+# A window holds gaze within its radius of true visual angle at its own location
+# (`gaze.Tracked.in_window`), so two windows overlap when the true angle between their centers
+# falls below their summed radius: per-axis degrees overstate that angle off the axes in most
+# directions, and understate it across a diagonal.
+
+
+def test_windows_apart_per_axis_that_overlap_in_true_visual_angle_are_found():
+    """Two 2° windows at (25°, 0°) and (25°, 4.2°) are 4.2° apart per axis, beyond the 4° their
+    radii sum to, and 3.81° apart in true visual angle: a gaze position between them is in
+    both."""
+    warning = found(two_windows((25.0, 0.0), 2.0, (25.0, 4.2), 2.0), "overlapping-windows")
+
+    assert "which can come within 3.81° while their radii sum to 4.00°" in warning.detail
+
+
+def test_windows_that_overlap_per_axis_but_not_in_true_visual_angle_are_accepted():
+    """Across the diagonal at (20°, 20°) a per-axis degree is more than a degree of visual angle:
+    windows at (18°, 22°) and (22°, 18°) are 5.66° apart per axis and 5.69° in true visual
+    angle, so two of 2.84° do not overlap."""
+    assert "overlapping-windows" not in codes(
+        two_windows((18.0, 22.0), 2.84, (22.0, 18.0), 2.84))
+
+
+def test_a_window_whose_center_is_a_range_is_found_at_its_true_nearest():
+    """A target window anywhere over x 10-30° at y 5°, and a window at (20°, 0°): per axis the
+    nearest center is (20°, 5°), 5° away, beyond the 4.85° their radii sum to; in true visual
+    angle the nearest is at x 20.14°, 4.70° away (`geometry.least_separation_deg`), the least a
+    fine sweep along the range finds."""
+    trial = two_windows((20.0, 0.0), 3.45, (P("tx"), 5.0), 1.4,
+                        params=[Param("tx", unit="deg", low=10.0, high=30.0)])
+    swept = min(_true_angle((20.0, 0.0), (10.0 + 20.0 * k / 20000, 5.0)) for k in range(20001))
+
+    warning = found(trial, "overlapping-windows")
+    gap, _ = checking._closest_approach(trial.windows[0], trial.windows[1],
+                                        {p.name: p for p in trial.params})
+
+    assert "which can come within 4.70°" in warning.detail
+    assert gap == pytest.approx(swept, abs=1e-6) and gap <= swept
+
+
+def _direction_of(x: float, y: float) -> list[float]:
+    """A position's direction from the eye, `D · tan` per axis (`viewport.center`), unit."""
+    t = (math.tan(math.radians(x)), math.tan(math.radians(y)), 1.0)
+    n = math.sqrt(sum(c * c for c in t))
+    return [c / n for c in t]
+
+
+def _true_angle(p: tuple[float, float], q: tuple[float, float]) -> float:
+    """The angle at the eye between two positions, by the dot product of their directions:
+    independent of `geometry`, and fine away from 0°, where `acos` loses digits."""
+    dot = sum(a * b for a, b in zip(_direction_of(*p), _direction_of(*q)))
+    return math.degrees(math.acos(max(-1.0, min(1.0, dot))))
 
 
 def test_a_later_after_that_can_never_fire_first_is_a_review_note():
@@ -393,14 +452,122 @@ def test_an_arrays_set_size_is_read_as_the_run_reads_it_a_whole_number():
     """Task 10's re-review, minor: `_crowded_arrays` read a set size's highest as declared, so one
     declared up to 12.5 was checked as 12.5 objects where the run draws twelve (`Array.positions`
     reads `int`), as `_array_faults` and `_declared_window_names` read it (`_whole`): twelve
-    objects on an 8° ring are 4.14° apart, clear of two 2° windows, where 12.5 would be
-    3.98°."""
+    objects on an 8° ring are 4.10° apart in true visual angle where the ring crosses an axis,
+    clear of two 2° windows, where 12.5 would be 3.94°."""
     trial = _array_task(6).structures["search"]
     sized = replace(trial, params=[
         Param("set_size", unit="objects", low=2, high=12.5) if p.name == "set_size" else p
         for p in trial.params])
 
     assert "crowded-array" not in codes(sized)
+
+
+def _search_at(at, radius: float, n: int, window: float) -> Trial:
+    """`n` objects on a ring of `radius`° about `at`, turned by `phase`, each with a window of
+    `window`° in radius."""
+    return Trial(
+        start="search",
+        params=[Param("phase", unit="deg", low=0.0, high=360.0)],
+        windows=[ObjectWindows(of="search", radius=window)],
+        states=[State("search", enter=[Show(Stimulus("search", at=at, looks=Array(
+            n=n, radius=radius, target=0, phase=P("phase"))))], go=[
+            On(SaccadeTo("search.target"), Outcome.CORRECT),
+            On(After(1.0), Outcome.NO_RESPONSE),
+        ])],
+    )
+
+
+@pytest.mark.parametrize("radius, n, window, crowded", [
+    (20.0, 12, 5.0, False), (20.0, 12, 5.1, True), (8.0, 12, 2.0, False), (8.0, 13, 2.0, True)])
+def test_crowding_is_read_where_the_objects_are_and_agrees_with_every_pair_of_windows(
+        radius, n, window, crowded):
+    """An array's objects sit on a true circle about its own direction (the PI, 2026-10-19,
+    "True circle"), and their windows where they are drawn (XC-397), so neighbors are
+    `2·asin(sin R·sin(π/n))` apart at any phase and position: twelve on a 20° ring 10.16°, clear
+    of two 5° windows and not of two 5.1° ones. `crowded-array` says so exactly when the least
+    angle between any two of the windows `expand_windows` makes, over phases and wherever the
+    array is, is below their summed radius."""
+    least = math.inf
+    for at in ((0.0, 0.0), (12.0, 6.0)):
+        trial = _search_at(at, radius, n, window)
+        for phase in (0.0, 7.0, 22.5, 45.0):
+            centers = [w.at for w in expand_windows(trial, {"phase": phase})[0]
+                       if w.name.split(".")[1].isdigit()]
+            least = min(least, min(_true_angle(p, q) for i, p in enumerate(centers)
+                                   for q in centers[i + 1:]))
+        assert ("crowded-array" in codes(trial)) is crowded
+
+    assert (least < 2 * window) is crowded
+
+
+
+@pytest.mark.parametrize("window, crowded", [(2.05, False), (2.07, True)])
+def test_an_off_center_array_is_read_where_its_objects_and_windows_are(window, crowded):
+    """The review of the first commit, I2: an array at (20°, 10°) with twelve objects on an 8°
+    ring was drawn per axis about its position, its neighbors there 3.65° apart, while the checks
+    read 4.10° (about the origin, where the windows were) or 4.14° (per axis). On a true circle
+    about its own direction (XC-397; the PI's "True circle") they are 4.13° apart there as
+    everywhere, which is what `crowded-array` reads, and what every pair of the windows
+    `expand_windows` makes there says, at any phase."""
+    trial = _search_at((20.0, 10.0), 8.0, 12, window)
+    least = min(_true_angle(p, q)
+                for phase in (0.0, 10.0, 37.0)
+                for centers in ([w.at for w in expand_windows(trial, {"phase": phase})[0]
+                                 if w.name.split(".")[1].isdigit()],)
+                for i, p in enumerate(centers) for q in centers[i + 1:])
+
+    found = [f for f in check(trial) if f.code == "crowded-array"]
+
+    assert least == pytest.approx(4.1286, abs=1e-4)
+    assert bool(found) is crowded is (least < 2 * window)
+    if found:
+        assert "12 objects on a 8° ring, 4.13° apart" in found[0].detail
+
+
+@pytest.mark.parametrize("size, refused", [(4.1, False), (4.15, True)])
+def test_objects_of_an_off_center_array_are_drawn_on_one_another_as_their_positions_say(
+        size, refused):
+    """`overlapping-objects` and `_most_apart`, for twelve discs on an 8° ring about (20°, 10°),
+    sent past a highest of six: 4.13° apart, so 4.1° discs are drawn apart and 4.15° ones on one
+    another, the refusal naming eleven as the most that ring keeps apart, as the positions
+    `Array.positions` gives there say."""
+    ring = Array(n=P("set_size"), radius=8.0, target=0, looks=Disc(size=size),
+                 among=Disc(size=size))
+    task = Task({"s": Trial(start="s", params=[Param("set_size", unit="objects", low=2, high=6)],
+                            states=[State("s", enter=[Show(Stimulus("x", at=(20.0, 10.0),
+                                                                    looks=ring))],
+                                          go=[On(After(1.0), Outcome.NO_RESPONSE)])])},
+                default="s")
+    positions = ring.positions({"set_size": 12}, at=(20.0, 10.0))
+    least = min(_true_angle(p, q) for p, q in zip(positions, positions[1:] + positions[:1]))
+
+    blocking = [f for f in beyond_range(task, {"set_size": 12}) if f.blocking]
+
+    assert bool(blocking) is refused is (least < size)
+    if blocking:
+        assert "at most 11 stay apart" in blocking[0].detail
+
+@pytest.mark.parametrize("sent", [231, 232, 240, 251, 252])
+def test_objects_drawn_on_one_another_are_refused_as_every_pair_of_them_says(sent):
+    """`overlapping-objects` refuses a set size sent past its range exactly when two of the
+    objects it would draw, 1° discs on a 40° ring, are closer than a disc is wide, by every pair
+    of the positions `Array.positions` gives them; and names the most the ring keeps apart,
+    231, by the same arithmetic. Per axis it allowed 251."""
+    ring = Array(n=P("set_size"), radius=40.0, target=0)
+
+    def neighbors(n: int) -> float:
+        positions = ring.positions({"set_size": n})
+        return min(_true_angle(p, q) for p, q in zip(positions, positions[1:] + positions[:1]))
+
+    least = neighbors(sent)
+    kept = max(k for k in range(200, 300) if neighbors(k) >= 1.0)
+
+    refused = [f for f in beyond_range(_ring(40.0), {"set_size": sent}) if f.blocking]
+
+    assert bool(refused) is (least < 1.0)
+    assert kept == 231
+    if refused:
+        assert f"at most {kept} stay apart" in refused[0].detail
 
 
 # --- A value outside its declared range (the PI, 2026-10-11, XC-352's D2) -------------------
@@ -880,8 +1047,10 @@ def test_a_set_size_with_a_choice_that_is_no_finite_number_is_refused_saying_how
 def test_the_least_separation_over_crossed_choices_is_the_least_over_every_pair_of_points():
     """The final re-review's m4: two windows each placed by choices on both axes were compared
     region by region, every pair of the crossed choices (40 choices an axis took over a second).
-    The regions are a cross product, and the separation grows with each axis' gap, so the least
-    is the hypotenuse of the least gap on each axis: the same answer, read per axis."""
+    In true visual angle (the PI, 2026-10-19) the least is the least over every pair of points,
+    and the search for it never crosses forty choices an axis into 2.5 million pairs
+    (`geometry.least_separation_deg`): the same answer as every pair, below with three and with
+    forty."""
     xs, ys, xs2, ys2 = (-10.0, 3.0, 9.0), (-4.0, 6.0), (1.0, 12.0), (-9.0, 2.5, 7.0)
     declared = [Param("x", unit="deg", choices=xs), Param("y", unit="deg", choices=ys),
                 Param("x2", unit="deg", choices=xs2), Param("y2", unit="deg", choices=ys2),
@@ -889,12 +1058,26 @@ def test_the_least_separation_over_crossed_choices_is_the_least_over_every_pair_
     a = Window("a", at=(P("x"), P("y")), radius=P("r"), on="fix")
     b = Window("b", at=(P("x2"), P("y2")), radius=1.0, on="fix")
 
-    brute = min(math.hypot(ax - bx, ay - by)
+    brute = min(_true_angle((ax, ay), (bx, by))
                 for ax in xs for ay in ys for bx in xs2 for by in ys2)
 
     assert checking._closest_approach(a, b, {p.name: p for p in declared}) == (
-        pytest.approx(brute), 2.5)
-    assert brute == pytest.approx(math.hypot(2.0, 1.0))
+        pytest.approx(brute, abs=1e-9), 2.5)
+    # Per axis the least was hypot(2, 1), between (3°, 6°) and (1°, 7°).
+    assert brute < math.hypot(2.0, 1.0)
+
+    rng = random.Random(40)
+    forty = [sorted(rng.uniform(-30.0, 30.0) for _ in range(40)) for _ in range(4)]
+    declared = [Param(name, unit="deg", choices=tuple(chosen))
+                for name, chosen in zip(("x", "y", "x2", "y2"), forty)]
+    every = [np.array([_direction_of(x, y) for x in xs for y in ys])
+             for xs, ys in ((forty[0], forty[1]), (forty[2], forty[3]))]
+    dots = np.clip(every[0] @ every[1].T, -1.0, 1.0)
+
+    gap, _ = checking._closest_approach(a, b, {p.name: p for p in declared})
+
+    assert gap == pytest.approx(math.degrees(math.acos(dots.max())), abs=1e-9)
+
 
 
 def _two_lights(brightest: float) -> Task:

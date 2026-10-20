@@ -29,7 +29,8 @@ def test_the_new_placement_fields_default_to_an_ordinary_stimulus():
     s = Stimulus("fix", at=(0.0, 0.0))
     assert (s.layer, s.combine, s.opacity, s.at_left, s.at_right) == (0, "cover", 1.0, None, None)
     assert COMBINE == ("cover", "add", "window", "scotoma", "multiply")
-    assert PERIPHERY == ("true_angle", "center_scale")
+    # The screen center's scale is retired (the PI, 2026-10-19); the field keeps its one value.
+    assert PERIPHERY == ("true_angle",)
 
 
 def test_an_update_lists_the_new_fields_it_sets_and_nothing_else():

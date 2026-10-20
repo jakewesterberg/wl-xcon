@@ -86,6 +86,21 @@ def test_the_task_item_returns_its_findings_checked_against_the_calibration():
     assert [f.code for f in findings] == ["contrast-on-default"]
 
 
+
+def test_the_task_item_warns_of_a_position_its_file_computes_from_cos_and_sin(tmp_path):
+    """The path a `wlx taskd` session takes (the PI, 2026-10-19): the pre-flight's task item reads
+    the task file it loaded, so a position built from `cos` and `sin` is a warning it returns, to
+    be accepted with the others, and never this item's fail."""
+    source = TASK.read_text(encoding="utf-8").replace(
+        'FIX = Stimulus("fix", at=(0.0, 0.0),', 'FIX = Stimulus("fix", at=(math.cos(0.0) - 1.0, 0.0),')
+    path = tmp_path / "computed.py"
+    path.write_text("import math\n" + source, encoding="utf-8")
+
+    item, _, findings = preflight.task(path, ALLOCATION, DIRECT, SRGB)
+
+    assert item.result == "pass"
+    assert "computed-position" in [f.code for f in findings]
+
 A = Entry("a", "one", NOT_RECORDING)
 B = Entry("b", "two", SESSION_KINDS)
 

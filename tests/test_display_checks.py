@@ -448,6 +448,25 @@ def test_an_unknown_periphery_and_a_per_eye_background_off_the_stereoscope_are_r
     assert "per-eye-background" in _refused(_one(LIT, view="direct", background_left=GRAY_BG))
 
 
+
+def test_a_task_declaring_the_screen_center_s_scale_is_refused_saying_why_and_what_instead():
+    """The PI, 2026-10-19 ("Retire it"): "Every stimulus is drawn in true visual angle; a task
+    declaring center scale is refused at load." Refused, never a warning, naming his rule and the
+    fix; a task that writes the default, `"true_angle"`, still loads as before."""
+    (refusal,) = [f for f in check(_one(LIT, periphery="center_scale"))
+                  if f.code == "center-scale-retired"]
+
+    assert refusal.blocking
+    assert refusal.detail == (
+        'periphery="center_scale" draws every stimulus at the screen center\'s size per degree, '
+        'which the PI retired on 2026-10-19 ("Every stimulus is drawn in true visual angle; a '
+        'task declaring center scale is refused at load"): remove it, or write "true_angle", and '
+        "each stimulus is drawn in true visual angle about its own direction, the same size "
+        "wherever it is")
+    assert {"center-scale-retired", "bad-periphery"} & _refused(_one(LIT)) == set()
+    assert {"center-scale-retired", "bad-periphery"} & _refused(
+        _one(LIT, periphery="true_angle")) == set()
+
 def test_a_background_s_parameter_must_be_declared():
     assert "undeclared-parameter" in _refused(_one(LIT, background=Gray(P("bg"))))
 

@@ -83,13 +83,14 @@ def test_a_disc_far_off_axis_subtends_its_declared_angle():
     assert angles[image[..., 1] < 20.0].min() == pytest.approx(1.0, abs=0.04)
 
 
-def test_true_angle_and_center_scale_differ_off_axis():
+def test_the_drawer_draws_nothing_at_the_retired_center_scale():
+    """The screen center's scale was retired (the PI, 2026-10-19, "Retire it"): `check` refuses a
+    task declaring it at load, and the drawer, the backstop for a screen it never saw, raises
+    rather than draw one in true visual angle as though it had been asked to."""
     disc = Stimulus("d", at=(25.0, 0.0), looks=Disc(size=2.0, color=Gray(40.0)))
-    region = (1650, 480, 1790, 600)
-    true, _ = _draw([disc], pixels=(1920, 1080), region=region)
-    flat, _ = _draw([disc], pixels=(1920, 1080), region=region,
-                    trial=Trial(start="s", states=[], periphery="center_scale"))
-    assert flat[..., 1].sum() < 0.9 * true[..., 1].sum()
+    with pytest.raises(ValueError, match="center_scale.* retired"):
+        _draw([disc], pixels=(1920, 1080), region=(1650, 480, 1790, 600),
+              trial=Trial(start="s", states=[], periphery="center_scale"))
 
 
 def test_a_bar_narrower_than_a_pixel_keeps_its_light():

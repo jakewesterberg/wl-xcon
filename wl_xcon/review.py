@@ -86,11 +86,34 @@ def _guard_label(guard: Guard) -> str:
 
 
 def _point_label(at: object) -> str:
-    """A position: a pair coordinate by coordinate, or one parameter by its name. Anything
-    else is shown as written: a position's shape is not checked at load (XC-272), and an
-    artifact that raises shows nothing at all."""
+    """A position, **eccentricity and direction first, its per-axis (x, y) beside them** (the PI,
+    2026-10-19, "Polar first, x-y allowed"): `8° at 45° · (x, y) (5.675, 5.675)`, a `Polar` as
+    written and a pair converted exactly (`geometry.polar_deg`'s inverse), each to a
+    thousandth; a value a setting holds by its name, and a pair holding one per axis alone, as
+    no number converts. Anything else is shown as written: a position's shape is not checked at
+    load (XC-272), and an artifact that raises shows nothing at all."""
+    from wl_xcon.geometry import polar_deg, polar_of_deg
+    from wl_xcon.task import Polar
+
+    def number(value) -> bool:
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+    def deg(value: float) -> str:
+        return f"{round(value, 3) + 0.0:g}"
+
+    if isinstance(at, Polar):
+        e, d = at.eccentricity, at.direction
+        polar = " at ".join(f"{_value_label(v)}°" if number(v) else _value_label(v) for v in (e, d))
+        if not (number(e) and number(d)):
+            return polar
+        x, y = polar_deg(e, d)
+        return f"{polar} · (x, y) ({deg(x)}, {deg(y)})"
     if isinstance(at, tuple) and len(at) == 2:
-        return f"({_value_label(at[0])}, {_value_label(at[1])})"
+        pair = f"(x, y) ({_value_label(at[0])}, {_value_label(at[1])})"
+        if not (number(at[0]) and number(at[1])):
+            return pair
+        e, d = polar_of_deg(float(at[0]), float(at[1]))
+        return (f"{deg(e)}°" + (f" at {deg(d)}°" if round(e, 3) else "") + f" · {pair}")
     return _value_label(at)
 
 
@@ -287,7 +310,9 @@ def render(trial: Trial, allocation_names: dict[int, str] | None = None) -> str:
     else:
         # On the stereoscope a cyclopean position is drawn at ± the vergence offset; an
         # L / R row is already each eye's own direction (engine spec §5.4).
-        lines += ["| State | Stimulus | Position° (cyclopean, or each eye's) | Disparity° | Eye "
+        lines += ["Disparity° is azimuth-longitude disparity: the left eye's image at x − d/2 and "
+                  "the right eye's at x + d/2, in per-axis horizontal degrees (STE-07).", "",
+                  "| State | Stimulus | Position° (cyclopean, or each eye's) | Disparity° | Eye "
                   "| Layer | Combination | Opacity |",
                   "|---|---|---|---|---|---|---|---|"]
         for name, stimulus in stimuli:

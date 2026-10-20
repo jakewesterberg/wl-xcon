@@ -91,7 +91,7 @@ def task(path: Path, allocation, geometry, calibration, deployment=None) -> tupl
         )
     try:
         findings = check_task(loaded, allocation, geometry=geometry, calibration=calibration,
-                              deployment=deployment)
+                              deployment=deployment, source=path)
         blocking = [f for f in findings if f.blocking]
     except Exception as broken:  # noqa: BLE001 -- the checks run on code; their fault is this item's
         # Fix round 1 of Task 8: `check` can raise on a task shape it does not expect

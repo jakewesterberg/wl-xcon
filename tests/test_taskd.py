@@ -3077,6 +3077,9 @@ def test_the_config_snapshot_records_the_setup_it_ran_in(tmp_path):
     assert len(config["setup"]["housings"]) == 2
     assert config["versions"]["rig"] == "tests/_rig.py"
     assert config["versions"]["subject_settings"] == ""
+    # What a disparity d means in this record (the PI, 2026-10-19, "Keep longitude, say so"): the
+    # two eyes' images d apart in azimuth longitude, per-axis horizontal degrees (STE-07).
+    assert config["setup"]["disparity_convention"] == "azimuth-longitude"
 
 
 def test_a_session_cannot_be_specified_without_a_field():

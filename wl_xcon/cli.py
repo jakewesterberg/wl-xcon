@@ -1662,6 +1662,7 @@ def main(argv: list[str] | None = None) -> int:
             geometry=geometry,
             calibration=calibration,
             deployment=deployment,
+            source=args.task,
         )
         # By the session's kind (engine spec §19.2): a warning its kind does not accept
         # refuses here too.
@@ -2164,7 +2165,8 @@ def main(argv: list[str] | None = None) -> int:
     # and read the same in every setup, while check 8's name the field they failed in.
     findings: list = []
     for geometry in geometries or [None]:
-        for finding in check_task(task, allocation, geometry=geometry, calibration=calibration):
+        for finding in check_task(task, allocation, geometry=geometry, calibration=calibration,
+                                  source=args.task):
             if finding not in findings:
                 findings.append(finding)
     # **The calibration's own warnings first**, as `wlx run` lists them: a record that will not

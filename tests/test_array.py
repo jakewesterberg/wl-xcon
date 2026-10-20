@@ -35,10 +35,12 @@ def test_set_size_is_a_parameter_the_array_expands_at_run_time():
     positions = array.positions({"set_size": 6, "target_index": 2})
 
     assert len(positions) == 6
-    # Evenly spaced on a ring of the declared radius.
+    # Evenly spaced on a ring of the declared radius, in visual angle (the PI, 2026-10-19): about
+    # straight ahead each object's bearing is `atan2(tan y, tan x)`.
     for x, y in positions:
-        assert math.isclose(math.hypot(x, y), 8.0, abs_tol=1e-9)
-    angles = sorted(math.atan2(y, x) % (2 * math.pi) for x, y in positions)
+        assert math.isclose(_apart((0.0, 0.0), (x, y)), 8.0, abs_tol=1e-9)
+    angles = sorted(math.atan2(math.tan(math.radians(y)), math.tan(math.radians(x))) % (2 * math.pi)
+                    for x, y in positions)
     gaps = [b - a for a, b in zip(angles, angles[1:])]
     assert all(math.isclose(g, 2 * math.pi / 6, abs_tol=1e-9) for g in gaps)
 
@@ -274,3 +276,130 @@ def test_a_search_task_simulates():
     )
     assert census.outcomes[Outcome.CORRECT] > 0
     assert census.uncovered(trial) == set()
+
+
+# --- A true circle about the array's own direction (the PI, 2026-10-19: "True circle") -------
+#
+# "Every object exactly R from the array's center in visual angle, wherever the array is;
+# spacing 2·asin(sin R·sin(π/n))." Every expectation here is computed from directions, `D · tan`
+# per axis, with numpy's dot products: never with `geometry`'s own arithmetic.
+
+
+def _unit(x: float, y: float):
+    import numpy as np
+
+    t = np.array([math.tan(math.radians(x)), math.tan(math.radians(y)), 1.0])
+    return t / np.linalg.norm(t)
+
+
+def _apart(p, q) -> float:
+    """The angle at the eye between two positions; fine away from 0°."""
+    import numpy as np
+
+    return math.degrees(math.acos(float(np.clip(_unit(*p) @ _unit(*q), -1.0, 1.0))))
+
+
+@pytest.mark.parametrize("at", [(0.0, 0.0), (10.0, 5.0), (20.0, 20.0)])
+def test_every_object_is_its_ring_s_radius_from_the_array_s_center_in_visual_angle(at):
+    """Wherever the array is, each of its objects is R degrees of visual angle from its center,
+    and neighbors are `2·asin(sin R·sin(π/n))` apart at any phase (the PI, 2026-10-19). Per axis,
+    an 8° ring's object at 45° about (0°, 0°) was 7.975° out."""
+    array = Array(n=7, radius=8.0, target=0, phase=P("phase"))
+    for phase in (0.0, 13.0, 45.0):
+        positions = (array.positions({"phase": phase}) if at == (0.0, 0.0)
+                     else array.positions({"phase": phase}, at=at))
+        out = [_apart(at, p) for p in positions]
+        spacing = [_apart(p, q) for p, q in zip(positions, positions[1:] + positions[:1])]
+
+        assert out == pytest.approx([8.0] * 7, abs=1e-9)
+        expected = math.degrees(2 * math.asin(math.sin(math.radians(8.0)) * math.sin(math.pi / 7)))
+        assert spacing == pytest.approx([expected] * 7, abs=1e-9)
+
+
+def test_the_object_at_phase_theta_is_theta_counter_clockwise_from_the_array_s_rightward_axis():
+    """Which object sits where, pinned: object i is at `phase + 360 i / n` degrees counter-clockwise
+    from the array's local rightward axis, in the frame a shape's orientation is drawn in
+    (`viewport.local_true_angle`), so in that frame it is `(R cos θ, R sin θ)`."""
+    import numpy as np
+
+    from wl_xcon import viewport
+
+    array = Array(n=5, radius=6.0, target=0, phase=30.0)
+    c = viewport.center(10.0, 5.0)
+    for i, (x, y) in enumerate(array.positions({}, at=(10.0, 5.0))):
+        u, w = viewport.local_true_angle(np.array([_unit(x, y)]), c)
+        theta = math.radians(30.0 + 360.0 * i / 5)
+        assert (float(u[0]), float(w[0])) == pytest.approx(
+            (6.0 * math.cos(theta), 6.0 * math.sin(theta)), abs=1e-9)
+
+
+def test_each_object_s_window_is_where_the_object_is_drawn():
+    """XC-397: an array at (10°, 5°) had its windows on its ring about (0°, 0°), at (3°, 0°),
+    (0°, 3°), ..., while its objects were drawn at (13°, 5°), ... Each window `<of>.<i>` is
+    now centered where `screen` draws object i, and the target's alias where the target is."""
+    from _rig import DIRECT
+    from wl_xcon import screen
+    from wl_xcon.photometry import Gray
+    from wl_xcon.task import expand_windows
+
+    trial = Trial(
+        start="on",
+        windows=[ObjectWindows(of="search", radius=1.0)],
+        params=[Param("x", unit="deg", low=0.0, high=20.0), Param("phase", unit="deg", low=0.0,
+                                                                   high=360.0)],
+        states=[State("on", enter=[Show(Stimulus(
+            "search", at=(P("x"), 5.0),
+            looks=Array(n=4, radius=3.0, target=2, phase=P("phase"),
+                        looks=Disc(size=0.5, color=Gray(40.0)),
+                        among=Disc(size=0.5, color=Gray(40.0)))))],
+            go=[On(SaccadeTo("search.target"), Outcome.CORRECT),
+                On(After(1.0), Outcome.NO_RESPONSE)])],
+    )
+    values = {"x": 10.0, "phase": 20.0}
+
+    windows = {w.name: w.at for w in expand_windows(trial, values)[0]}
+    drawn = screen.resolve({"search": trial.states[0].enter[0].stimulus}, values, trial, DIRECT,
+                           frame_period=1 / 240)
+
+    for item in drawn.items:
+        assert windows[item.name] == pytest.approx(item.at_left, abs=1e-12)
+        assert _apart((10.0, 5.0), windows[item.name]) == pytest.approx(3.0, abs=1e-9)
+    assert windows["search.target"] == windows["search.2"]
+
+
+@pytest.mark.parametrize("height, shown", [(9.5, True), (10.2, False)])
+def test_check_8_reads_an_array_s_true_circle_where_it_reaches_on_the_panel(height, shown):
+    """An 8° ring about (20°, `height`°) in direct view, whose field reaches 18.41° up. About its
+    own direction the ring reaches 8.50° up there, not 8°: at 10.2° it crosses the field's top
+    edge, at 18.70°, where a per-axis square of ±8° stayed inside at 18.2°, and at 9.5° it stays
+    in at 18.00°. Check 8 refuses it exactly when some phase puts an object past the edge, by the
+    positions `Array.positions` gives."""
+    from _rig import DIRECT
+
+    trial = Trial(
+        start="on",
+        params=[Param("phase", unit="deg", low=0.0, high=360.0)],
+        states=[State("on", enter=[Show(Stimulus("ring", at=(20.0, height), looks=Array(
+            n=8, radius=8.0, target=0, phase=P("phase"), looks=Disc(size=0.5),
+            among=Disc(size=0.5))))], go=[On(After(1.0), Outcome.ABORT)])],
+    )
+    reached = [p for phase in range(0, 360, 2)
+               for p in Array(n=8, radius=8.0, target=0, phase=float(phase)).positions(
+                   {}, at=(20.0, height))]
+
+    refused = "stimulus-off-screen" in {f.code for f in check(trial, geometry=DIRECT)}
+
+    assert all(DIRECT.can_show(*p) for p in reached) is shown
+    assert refused is not shown
+
+
+def test_the_aliases_name_the_target_and_every_other_object():
+    """`<of>.target` is the target's window and `<of>.distractor` every other object's, for the
+    set size the trial runs at."""
+    members = ObjectWindows(of="search", radius=1.0).members(
+        Array(n=P("set_size"), radius=8.0, target=P("target_index")),
+        {"set_size": 6, "target_index": 2})
+
+    assert members == {"search.target": ("search.2",),
+                       "search.distractor": ("search.0", "search.1", "search.3", "search.4",
+                                             "search.5")}

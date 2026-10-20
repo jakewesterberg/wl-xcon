@@ -177,6 +177,12 @@ be saved too, and those frames come from the exact drawer.
 - **Layouts**: a ring; a grid; listed positions; positions drawn between trials from a seed with spacing
   rules; several rings or clusters. **Each item is its own stimulus**: target and distractor are roles
   [@westerberg2023feedforward].
+  *Note, 2026-10-19 (the PI, "True circle"):* **a ring is a true circle of visual angle about the
+  array's own direction**: "every object exactly R from the array's center in visual angle, wherever
+  the array is; spacing 2·asin(sin R·sin(π/n))". Object i sits at the phase plus 360 i / n degrees
+  counter-clockwise from the array's local rightward axis, the frame a shape's orientation is drawn in,
+  and its window where it is drawn (XC-397). Per axis, an 8° ring's object at 45° had been 7.975° out
+  (STE-28).
 - **The busiest display is thousands of elements**; the GPU drawer batches them (§10).
 
 ### 4.5 Text and curves
@@ -251,15 +257,36 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    screen; default its center). **Math convention** for every angle: 0° right, counter-clockwise
    positive, +y up; a bar's orientation 0° is horizontal; a grating's orientation names its bars, its
    drift direction is a separate angle. A test pins +y as up in the drawing.
+   *Note, 2026-10-19 (the PI):* **positions are written as eccentricity and direction by default**
+   ("Polar first, x-y allowed": "Tasks write positions as eccentricity and direction by default; (x,
+   y) stays for axis-aligned designs (grids, meridians, the calibration constellation)"), as
+   `Polar(eccentricity, direction)`, the direction in this convention, either a number or a
+   setting, wherever a position is accepted. The rig converts it exactly ("A task can say 'at
+   eccentricity e, direction θ' and the rig converts it exactly"): x = atan(tan e·cos θ), y =
+   atan(tan e·sin θ), so nothing downstream sees anything but (x, y), and the data contracts keep
+   (x, y). A task file that computes a position as (e·cos θ, e·sin θ) itself, less than e out off
+   the axes (7.975° for 8° at 45°), is a load-time warning in every session kind
+   (`computed-position`). The review report shows every position as eccentricity and direction
+   first with (x, y) beside it; the console follows after engine build C2b (XC-401), and the
+   record, each stimulus's true eccentricity and direction beside its (x, y) (XC-399) (STE-29).
 2. **Sizes**: one size number is the full width; each block's definition states it.
 3. **Away from the center**: true visual angle (default) or the screen center's
-   scale, declared per task.
+   scale, declared per task. *Note, 2026-10-19 (the PI, "Retire it"):* "Every stimulus is drawn in
+   true visual angle; a task declaring center scale is refused at load." The screen center's scale is
+   gone: `periphery="center_scale"` is refused, saying so and what to write instead, and
+   `periphery` keeps its one value, `"true_angle"` (STE-06's revision).
 4. **Disparity**: in degrees, near negative [@tanabe2004rejection]. **The per-eye formula is pinned**:
    left eye at x − d/2, right eye at x + d/2, so d < 0 shifts the left eye's image right (crossed,
    near). **A per-eye position** is that eye's own direction in degrees (its viewport, after the
    vergence offset); a stimulus carrying both per-eye positions and a disparity is refused. Both the
    formula and the sign are pinned in the exact drawer's tests, and the sign is verified in an animal by
    its vergence response to a disparity step [@busettini1996shortlatency] (S4 §10 item 6, kept).
+   *Note, 2026-10-19 (the PI, "Keep longitude, say so"):* the per-eye shift is in per-axis horizontal
+   degrees, so d is the difference in **azimuth longitude** between the eyes' images: "exact in its own
+   convention and a standard definition of horizontal disparity", and not the true angle between them off
+   the horizontal meridian. The review report states the convention once, above its stimuli table,
+   and each session's `config.json` records it (`setup.disparity_convention`), so an analysis knows what
+   d means (STE-07's note).
 5. **Linked positions**: declared per link, moving with the other stimulus or placed once at onset.
 6. **Gaze-anchored stimuli**: the gaze rule selectable (newest, default; smoothed; predicted)
    [@santini2007eyeris; @crane1985generationv; @saunders2014direct], each frame's sample age recorded;
@@ -275,6 +302,14 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    not transfer directly. A clause that suppression "lessens within 5-25 ms" of the saccade's end,
    cited to Saunders & Woods, was left out: it is their summary of other studies).
 7. **Gaze windows may be any shape**, including a stimulus's own outline grown by a margin.
+   *Note, 2026-10-19 (the PI):* **a window is measured in true visual angle at its own location**
+   ("Measure each window as the true angle between where the eye points and the window's center,
+   at its own location"; and of the whole display, "forward calculated for that specific location
+   rather than using ppd averages"). Gaze is inside when the angle at the eye between its direction
+   and the center's is at most the radius (`geometry.separation_deg`), never per-axis degrees or a
+   mean pixels per degree, and the load checks that measure how far apart two windows, or an
+   array's object windows, can come measure it the same way. Per axis, a 2° window at (20°, 0°)
+   had been 1.879° tall (STE-27).
 8. **Off the field**: only when declared; check 8 grows to test extents (XC-143, XC-144).
 9. **Head-free chaired sessions**: nominal head position, recorded and listed; a task may require a
    fixed head.

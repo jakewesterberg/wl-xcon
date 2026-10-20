@@ -29,13 +29,13 @@ carried across would let a quiet trial set a noisy one's sensitivity.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping as MappingType
 
 from wl_xcon.calibration import Collector, Mapping, MappingLog
 from wl_xcon.eye import Replay, Tracker
+from wl_xcon.geometry import separation_deg
 from wl_xcon.saccade import Detector, Saccade
 from wl_xcon.task import (
     Guard,
@@ -46,6 +46,7 @@ from wl_xcon.task import (
     Stimulus,
     Trial,
     expand_windows,
+    position_of,
 )
 
 
@@ -135,10 +136,8 @@ class Tracked:
         declared = self._windows.get(window)
         if declared is None:
             return False
-        centre = declared.at
-        if isinstance(centre, P):
-            centre = self._values[centre.name]
-        cx, cy = (_resolve(c, self._values) for c in centre)
+        # Its center in any form a task writes it, a `Polar` converted exactly (`position_of`).
+        cx, cy = position_of(declared.at, self._values)
         radius = _resolve(declared.radius, self._values)
 
         which = ("left", "right") if eye == "both" else (eye,)
@@ -151,7 +150,16 @@ class Tracked:
         # wants one eye says so, which is what `Window.eye` exists for.
         x = sum(p[0] for p in positions) / len(positions)
         y = sum(p[1] for p in positions) / len(positions)
-        return math.hypot(x - cx, y - cy) <= radius
+        # **True visual angle, at the window's own location** (the PI, 2026-10-19): the angle
+        # at the eye between where it points and the window's center. Per axis,
+        # `hypot(x - cx, y - cy)` made a 2° window at (20°, 0°) 1.879° tall. Gaze and window
+        # are both cyclopean degrees mapped by `D · tan` per axis, the map fitted to targets
+        # placed as every stimulus is (EYE-10): in direct view, directions from straight ahead.
+        # Through the stereoscope each eye sees in its own viewport's degrees, the vergence
+        # offset away per axis, which moves this angle by up to 0.72% of it over the ±12° mask
+        # (computed, for gaze within 8° of the window's center); which frame an eye's map is in
+        # is the stereoscope calibration task's to settle (XC-005).
+        return separation_deg(x, y, cx, cy) <= radius
 
     def happened(self, guard: Guard, state: str, frame: int) -> bool:
         if isinstance(guard, SaccadeOnset):

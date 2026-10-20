@@ -287,6 +287,23 @@ def test_extrapolation_beyond_the_targets_is_reported():
     assert not [f for f in findings if f.blocking]
 
 
+def test_how_far_the_targets_reach_is_their_true_eccentricity():
+    """How far out the constellation reaches is the true visual angle from straight ahead to
+    its farthest target (the PI, 2026-10-19: every angle at the eye forward-calculated where it
+    is). A 3x3 grid and its four intermediates with corners at (±11.455°, ±11.455°) reach 16.20°
+    per axis but 15.99° in true visual angle, so windows out to 16.1° lie beyond it."""
+    c = 11.455
+    grid = [(sx * c, sy * c) for sx in (-1.0, 0.0, 1.0) for sy in (-1.0, 0.0, 1.0)]
+    grid += [(sx * c / 2, sy * c / 2) for sx in (-1.0, 1.0) for sy in (-1.0, 1.0)]
+    fixations = tuple(Fixation(raw=(3.0 * x + 100.0, -2.0 * y + 50.0), target=(x, y))
+                      for x, y in grid)
+
+    _, findings = fit_eye(fixations, tested_eccentricity_deg=16.1)
+
+    assert [f.detail[:60] for f in findings if f.code == "constellation-inside-tested-region"] == [
+        "targets reach 15.99 deg but windows can land out to 16.10 de"]
+
+
 def test_a_constellation_that_spans_the_tested_region_reports_nothing():
     fixations = _fixations(constellation(GEOMETRY))
     _, findings = fit_eye(fixations, tested_eccentricity_deg=16.0)

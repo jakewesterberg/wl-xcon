@@ -184,14 +184,29 @@ def test_the_stimuli_table_shows_how_each_stimulus_is_placed_and_combined():
 
     assert ("| State | Stimulus | Position° (cyclopean, or each eye's) | Disparity° | Eye | Layer "
             "| Combination | Opacity |") in artifact
-    assert "| `on` | `pair` | L (2, 0) / R (-2, 0.5) | 0 | both | 0 | cover | 1 |" in artifact
-    # A parameter by its name, as everywhere else in the report.
-    assert "| `on` | `glow` | (ecc, 1) | 0 | both | 2 | add | 0.5 |" in artifact
+    # Eccentricity and direction first, (x, y) beside them (the PI, 2026-10-19).
+    assert ("| `on` | `pair` | L 2° at 0° · (x, y) (2, 0) / R 2.061° at 165.969° · (x, y) "
+            "(-2, 0.5) | 0 | both | 0 | cover | 1 |") in artifact
+    # A parameter by its name, as everywhere else in the report: a pair holding one per axis.
+    assert "| `on` | `glow` | (x, y) (ecc, 1) | 0 | both | 2 | add | 0.5 |" in artifact
     # Once, above the table, each eye's on the stereoscope.
     assert artifact.count("Background:") == 1
     assert "Background: left eye Gray(20); right eye Gray(20)" in artifact
     assert artifact.index("Background:") < artifact.index("| State | Stimulus |")
 
+
+
+def test_the_stimuli_table_says_what_its_disparity_means():
+    """The PI, 2026-10-19 ("Keep longitude, say so"): a disparity is exact in its own convention,
+    the eyes' images d apart in azimuth longitude, per-axis horizontal degrees, and the report
+    names it wherever it states one, so an analysis knows what d means (STE-07)."""
+    from wl_xcon.geometry import DISPARITY_CONVENTION
+
+    artifact = render(TRIAL)
+
+    said = artifact.index(f"Disparity° is {DISPARITY_CONVENTION} disparity")
+    assert said < artifact.index("| State | Stimulus | Position°")
+    assert artifact.count("azimuth-longitude") == 1
 
 def test_an_unset_background_is_said_to_be_black():
     assert "Background: black (default)" in render(TRIAL)
