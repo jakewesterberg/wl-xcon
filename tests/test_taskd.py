@@ -1128,6 +1128,37 @@ def test_a_session_runs_its_blocks_in_order_and_stops_when_they_are_done(tmp_pat
     assert sum(census.outcomes.values()) >= 16
 
 
+def test_a_settings_polar_value_is_recorded_wherever_a_value_is_and_reads_back(tmp_path):
+    """The PI, 2026-10-20, "Both, polar first": a run whose setting holds a polar position
+    (`task.Polar`, since true visual angle merged) writes it wherever a value is written -- its
+    start row's layers and resolved values, each trial row's `params`, a live change's
+    `parameter_changes.jsonl` row -- as its eccentricity and direction with its (x, y) beside them,
+    where the run faulted writing its start row, a `Polar` not being JSON. A resume reads the
+    record back as it reads any other."""
+    from wl_xcon import resume
+    from wl_xcon.geometry import polar_deg
+    from wl_xcon.task import Polar
+
+    path = _sessions.polar_task(tmp_path)
+    link = _Drained({2: [SetParameter(name="target_pos", value=Polar(8.0, 45.0), by=Box("jake"))]})
+    session = _session(_spec(tmp_path, task=str(path), trials=4, values={
+        **_spec(tmp_path).values, "target_pos": Polar(8.0, 0.0)}), link=link)
+
+    session.run()
+
+    x, y = polar_deg(8.0, 45.0)
+    right = {"eccentricity": 8.0, "direction": 0.0, "x": 8.0, "y": 0.0}
+    oblique = {"eccentricity": 8.0, "direction": 45.0, "x": x, "y": y}
+    start, _ = _runs(session)
+    assert start["resolved"]["target_pos"] == start["layers"]["run"]["target_pos"] == right
+    placed = [row["params"]["target_pos"] for row in _trial_rows(session)]
+    assert placed[0] == right and placed[-1] == oblique
+    assert all(value in (right, oblique) for value in placed)
+    ((was, now),) = [(row["was"], row["now"]) for row in _parameter_changes(session)]
+    assert (was, now) == (right, oblique)
+    assert resume.read(session.directory, session.welfare.left_cage_wall_at).run_index == 0
+
+
 def test_each_trial_records_the_condition_it_actually_ran(tmp_path):
     """S8 §3.3: the complete resolved parameter set per trial, not a pointer to "the
     config". A condition's overrides are exactly what a pointer would lose."""

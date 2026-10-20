@@ -190,6 +190,30 @@ def welfare_note(
         )
 
 
+def _written(value: object) -> object:
+    """**A value `json` cannot write, as the record writes it** (`json.dumps`'s `default`): a
+    setting's value that is a polar position, a `task.Polar` -- since true visual angle merged, a
+    setting whose value is a whole position may offer `Polar` values, and a plan's condition may
+    set one -- **recorded as its eccentricity and direction, with the per-axis (x, y) the screen
+    is drawn in beside them** (the PI, 2026-10-20, "Both, polar first": "Recorded as eccentricity
+    and direction with (x, y) beside"): `{"eccentricity": 8.0, "direction": 45.0, "x": 5.675...,
+    "y": 5.675...}`, (x, y) converted exactly (`geometry.polar_deg`), so a reader that wants either
+    has it without converting. The keys are `Polar`'s own field names, which a reader rebuilds it
+    from, and the (x, y) every per-axis position is written in. A position written as a pair is a
+    two-item list, as it always was. **Anything else raises `TypeError`**, as `json` does: a
+    `Polar` holding a setting is no value, and a record never writes a stand-in for one."""
+    from wl_xcon.geometry import polar_deg
+    from wl_xcon.task import Polar
+
+    def number(field: object) -> bool:
+        return isinstance(field, (int, float)) and not isinstance(field, bool)
+
+    if isinstance(value, Polar) and number(value.eccentricity) and number(value.direction):
+        x, y = polar_deg(float(value.eccentricity), float(value.direction))
+        return {"eccentricity": value.eccentricity, "direction": value.direction, "x": x, "y": y}
+    raise TypeError(f"the record writes no {type(value).__name__} value ({value!r})")
+
+
 def _local(posix_seconds: float) -> str:
     """A POSIX instant as this host's local clock time, with its zone named.
 
@@ -311,6 +335,7 @@ class SessionRecord:
                     "aids": list(aids),
                 },
                 sort_keys=True,
+                default=_written,
             )
             + "\n"
         )
@@ -333,7 +358,7 @@ class SessionRecord:
         written as `taskd.Session.open` gives them. What varies by run -- the task, its
         values, its layers -- is in `runs.jsonl`."""
         (self.directory / "config.json").write_text(
-            json.dumps(fixed, indent=2, sort_keys=True), encoding="utf-8"
+            json.dumps(fixed, indent=2, sort_keys=True, default=_written), encoding="utf-8"
         )
 
     def run_row(self, event: str, run: int, at: float, **fields: object) -> None:
@@ -349,6 +374,7 @@ class SessionRecord:
                 json.dumps(
                     {"event": event, "run": run, "at": at, "at_local": _local(at), **fields},
                     sort_keys=True,
+                    default=_written,
                 )
                 + "\n"
             )
@@ -410,6 +436,7 @@ class SessionRecord:
                         "event_code": event_code,
                     },
                     sort_keys=True,
+                    default=_written,
                 )
                 + "\n"
             )
@@ -448,6 +475,7 @@ class SessionRecord:
                         **detail,
                     },
                     sort_keys=True,
+                    default=_written,
                 )
                 + "\n"
             )
