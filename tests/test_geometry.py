@@ -990,3 +990,107 @@ def test_a_rectangles_eccentricities_are_its_nearest_point_and_its_farthest_corn
     assert _eccentricities((-1.0, 1.0), (-2.0, 0.5)) == pytest.approx(
         (0.0, _least_by_dots([(0.0, 0.0)], [(1.0, -2.0)])), abs=1e-9)
     assert _eccentricities((20.0, 90.0), (-5.0, 5.0))[1] == pytest.approx(90.0, abs=1e-9)
+
+
+# --- Each fast path is what answers (CI's mutation gate, 2026-10-20) ---------------------------
+#
+# `_pointwise`, `_point_of` and `_exact` answer what the search, or the boxes, would answer more
+# slowly or more loosely, so a `return None` in one of them hid behind a correct answer from
+# elsewhere. Here the search is made to raise, so a fast path that stepped aside fails; and each
+# closed form is held to an answer the boxes alone do not give.
+
+
+@pytest.fixture
+def no_search(monkeypatch):
+    def searched(*_):
+        raise AssertionError("searched a pair a fast path answers")
+
+    monkeypatch.setattr(geometry, "_halves", searched)
+
+
+def _boundary(points_of_edge, count: int = 2001):
+    return [p for edge in points_of_edge for p in edge(np.linspace(0.0, 1.0, count))]
+
+
+def test_two_regions_of_choices_alone_are_compared_pairwise_with_no_search(no_search):
+    """`_pointwise`: windows placed by choices on both axes, several each, per axis and polar."""
+    xs, ys, xs2, ys2 = (-10.0, 3.0, 9.0), (-4.0, 6.0), (1.0, 12.0), (-9.0, 2.5, 7.0)
+    per_axis = least_separation_deg([(v, v) for v in xs], [(v, v) for v in ys],
+                                    [(v, v) for v in xs2], [(v, v) for v in ys2])
+    es, ts = (4.0, 9.0), (0.0, 45.0, 200.0)
+    polar = least_separation_deg([(v, v) for v in es], [(v, v) for v in ts],
+                                 [(v, v) for v in xs2], [(v, v) for v in ys2], polar_a=True)
+
+    assert per_axis == pytest.approx(_least_by_dots(
+        [(x, y) for x in xs for y in ys], [(x, y) for x in xs2 for y in ys2]), abs=1e-9)
+    assert polar == pytest.approx(_least_by_dots(
+        [polar_deg(e, t) for e in es for t in ts], [(x, y) for x in xs2 for y in ys2]), abs=1e-9)
+
+
+def test_every_pair_of_single_pieces_is_answered_in_closed_form(no_search):
+    """`_exact`, and `_point_of` within it: a point against a sector, a sector against a sector and
+    against a rectangle, each answered with no search, and exactly, where the boxes that hold them
+    read nearer (5.015°, 15.760°, 8.850°): two sectors 8°-9° out at 0°-10° and 180°-190° are
+    `2 asin(sin 8° sin 85°)` apart, and the rest are what a fine sweep of their edges finds."""
+    point = least_separation_deg([(5.0, 6.0)], [(80.0, 100.0)], [(2.0, 2.0)], [(0.0, 0.0)],
+                                 polar_a=True)
+    sectors = least_separation_deg([(8.0, 9.0)], [(0.0, 10.0)], [(8.0, 9.0)], [(180.0, 190.0)],
+                                   polar_a=True, polar_b=True)
+    to_box = least_separation_deg([(10.0, 12.0)], [(80.0, 100.0)], [(-1.0, 1.0)], [(-1.0, 1.0)],
+                                  polar_a=True)
+
+    def arc(e0, e1, t0, t1):
+        return [lambda s: [polar_deg(e0 + (e1 - e0) * v, t0) for v in s],
+                lambda s: [polar_deg(e0 + (e1 - e0) * v, t1) for v in s],
+                lambda s: [polar_deg(e0, t0 + (t1 - t0) * v) for v in s],
+                lambda s: [polar_deg(e1, t0 + (t1 - t0) * v) for v in s]]
+
+    square = [lambda s: [(-1.0 + 2.0 * v, -1.0) for v in s], lambda s: [(-1.0 + 2.0 * v, 1.0) for v in s],
+              lambda s: [(-1.0, -1.0 + 2.0 * v) for v in s], lambda s: [(1.0, -1.0 + 2.0 * v) for v in s]]
+    edge = _boundary(arc(5.0, 6.0, 80.0, 100.0), 20001)
+    assert point == pytest.approx(_least_by_dots([(2.0, 0.0)], edge), abs=1e-6)
+    # A point at the side against a sector reaching it: (90°, 0°), straight right, is 10° from
+    # 90° out at 10°, which only the point's own closed form reads (the boxes read nearer).
+    assert least_separation_deg([(80.0, 90.0)], [(10.0, 20.0)], [(90.0, 90.0)], [(0.0, 0.0)],
+                                polar_a=True) == pytest.approx(10.0, abs=1e-9)
+    assert sectors == pytest.approx(math.degrees(2.0 * math.asin(
+        math.sin(math.radians(8.0)) * math.sin(math.radians(85.0)))), abs=1e-9)
+    sector_edge = _boundary(arc(10.0, 12.0, 80.0, 100.0))
+    square_edge = _boundary(square)
+    swept = min(_least_by_dots(sector_edge[k::4], square_edge) for k in range(4))
+    assert swept - 1e-4 <= to_box <= swept + 1e-9
+
+
+# --- A piece wholly 90° out is read by its eccentricity too (the final check of 4c1c591) ------
+
+
+def test_a_window_90_degrees_out_is_read_no_nearer_than_its_eccentricity_allows():
+    """A target window whose eccentricity choice is exactly 90°, in any direction, and a fixation
+    window over ±1°, each 1° in radius: at least 90° less the fixation window's farthest corner,
+    1.414° out, apart, so no `overlapping-windows`; it was read 0°. And a window 90° out at 0°,
+    straight right, against one over 80°-90° across and ±5° up, which holds that direction, still
+    reads 0°."""
+    from wl_xcon.check import check
+    from wl_xcon.task import (After, Disc, Hold, On, Outcome, P, Param, Polar, Show, State,
+                              Stimulus, Trial, Window)
+
+    trial = Trial(
+        start="w",
+        params=[Param("ecc", unit="deg", choices=(90.0,)),
+                Param("dir", unit="deg", low=-180.0, high=180.0),
+                Param("fx", unit="deg", low=-1.0, high=1.0),
+                Param("fy", unit="deg", low=-1.0, high=1.0)],
+        windows=[Window("t", at=Polar(P("ecc"), P("dir")), radius=1.0, on="s"),
+                 Window("f", at=(P("fx"), P("fy")), radius=1.0, on="s")],
+        states=[State("w", enter=[Show(Stimulus("s", at=(0.0, 0.0), looks=Disc()))],
+                      go=[On(Hold("t", 0.1), Outcome.CORRECT),
+                          On(Hold("f", 0.1), Outcome.WRONG_TARGET),
+                          On(After(1.0), Outcome.NO_RESPONSE)])],
+    )
+
+    assert "overlapping-windows" not in {f.code for f in check(trial)}
+    assert least_separation_deg([(90.0, 90.0)], [(-180.0, 180.0)], [(-1.0, 1.0)], [(-1.0, 1.0)],
+                                polar_a=True) == pytest.approx(
+        90.0 - _least_by_dots([(0.0, 0.0)], [(1.0, 1.0)]), abs=1e-9)
+    assert least_separation_deg([(90.0, 90.0)], [(0.0, 0.0)], [(80.0, 90.0)], [(-5.0, 5.0)],
+                                polar_a=True) == 0.0

@@ -633,22 +633,23 @@ def _bound(node, polar) -> tuple[float, bool]:
     **With a polar side, no less than the gap between the two sides' eccentricities**: two
     positions are at least as far apart as their eccentricities differ (the triangle through
     straight ahead). A box holding a sector that reaches 90° can hold the center too and read 0°
-    where the sector is 5° out or more; the gap reads it as it is."""
+    where the sector is 5° out or more; the gap reads it as it is. A side wholly 90° out, which no
+    per-axis box holds, is read by the gap alone, and 0° where there is none."""
     if all(len(side) == 1 for side in node):
         exact = _exact(node, polar)
         if exact is not None:
             return exact, True
     boxes = []
     reaches = []
+    at_side = False
     for first, second, is_polar in ((node[0], node[1], polar[0]), (node[2], node[3], polar[1])):
         hulls = [(side[0][0], max(high for _, high in side)) for side in (first, second)]
-        if is_polar and hulls[0][0] >= _SIDE_DEG:
-            # Wholly 90° out, where no per-axis box holds a position: 0°, failing closed.
-            return 0.0, False
+        # Wholly 90° out, no per-axis box holds a position: read by the gap alone, or 0°.
+        at_side = at_side or (is_polar and hulls[0][0] >= _SIDE_DEG)
         # A polar box holds every position short of 90° out, and so bounds those at it too.
         boxes.extend(polar_box_deg(*hulls) if is_polar else hulls)
         reaches.append(hulls[0] if is_polar else _eccentricities(*hulls))
-    bound = _rectangles_apart(*boxes)
+    bound = 0.0 if at_side else _rectangles_apart(*boxes)
     if polar[0] or polar[1]:
         (a0, a1), (b0, b1) = reaches
         bound = max(bound, a0 - b1, b0 - a1)
