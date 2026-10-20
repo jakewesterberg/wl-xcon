@@ -1,7 +1,7 @@
 """Saccade detection: ours against theirs, and online against batch.
 
 Three layers, and the ordering is the argument. `velocity` and `median_scale` are
-`wl-preproc`'s, so they are checked against the originals. `detect` must agree with
+`wl-preproc`'s, so they are checked against its pinned, versioned fixtures. `detect` must agree with
 their detector interval for interval, because S5 §5 chose this algorithm *specifically*
 so that online-versus-offline disagreement measures staleness and latency rather than
 two different methods -- a claim that is worth nothing unless the two really are the
@@ -11,10 +11,11 @@ expectation, so the online path is only ever compared with the shared algorithm.
 
 from __future__ import annotations
 
-import inspect
+import hashlib
+import json
 import math
-import os
 import random
+from pathlib import Path
 
 import pytest
 
@@ -263,92 +264,118 @@ def test_indices_stay_absolute_once_the_buffer_has_been_trimmed():
 
 
 # ---------------------------------------------------------------------------
-# Contract: wl-preproc's own detector
+# Contract: wl-preproc's pinned fixtures
 # ---------------------------------------------------------------------------
+#
+# **Vendored and versioned, not imported.** This section used to import wl-preproc's
+# live `engbert_kliegl` and `velocity`, which meant the moment wl-preproc moved its
+# detector to true visual angle (XC-398) this repository's main would have gone red
+# for a change that is theirs to make, and ours to follow in our own commit. So
+# wl-preproc publishes fixtures -- inputs and their detector's outputs -- by version,
+# and a published version is never edited: v1 pins today's per-axis behavior
+# (wl-preproc `10ea913`, `docs/fixtures/saccade/v1.json`). v2, the true-angle one, is
+# pinned in the commit that moves `saccade.py` to true angle (XC-398), beside v1 until
+# nothing here needs v1 any more. The copy is byte-identical and its SHA-256 is
+# asserted, so a copy that drifts fails rather than quietly redefining "theirs".
+# Nothing here needs wl-preproc importable.
 
-_REQUIRED = os.environ.get("WLX_REQUIRE_PREPROC") == "1"
+_FIXTURE = Path(__file__).parent / "fixtures" / "wl-preproc" / "saccade-v1.json"
+_FIXTURE_SHA256 = "f94ea3a32521e7c5bdfb80040f10fe82303f76550296145b21fbeb94d9667666"
 
-try:
-    import numpy as np
-
-    from wl_preproc.eye.detect import engbert_kliegl as theirs
-    from wl_preproc.eye.detect import velocity as their_velocity
-except ImportError as exc:  # pragma: no cover - exercised by the CI job
-    if _REQUIRED:
-        raise AssertionError(
-            f"WLX_REQUIRE_PREPROC=1 but wl-preproc is not importable ({exc}). S5 §5 "
-            f"chose this algorithm because it is theirs; if our reimplementation "
-            f"drifts from it, online-versus-offline disagreement stops measuring "
-            f"latency and starts measuring the drift"
-        ) from exc
-    theirs = None
-
-_contract = pytest.mark.skipif(theirs is None, reason="wl-preproc checkout not beside this repo")
+_V1 = json.loads(_FIXTURE.read_bytes())
+_TRACES = {t["name"]: t for t in _V1["traces"]}
 
 
-@_contract
+def _ours_on(trace):
+    """Our detector's input from a fixture trace. Ours takes no mask: a sample the
+    tracker did not deliver is `None` in the gaze, which `velocity` and `detect`
+    treat as unknown. Their `available` is `None` where a detector may label and the
+    mask's name where it may not, so the mapping is exact: masked -> `None`."""
+    gaze = [
+        None if mask is not None else (float(x), float(y))
+        for (x, y), mask in zip(trace["gaze_deg"], trace["available"] or [None] * len(trace["gaze_deg"]))
+    ]
+    at = [i / _V1["fs_hz"] for i in range(len(gaze))]
+    return gaze, at
+
+
+def test_the_vendored_fixture_is_the_one_wl_preproc_published():
+    assert hashlib.sha256(_FIXTURE.read_bytes()).hexdigest() == _FIXTURE_SHA256
+    assert (_V1["version"], _V1["geometry"], _V1["fs_hz"]) == (1, "per-axis", 500.0)
+    assert len(_V1["traces"]) == 8 and len(_V1["median_scale"]) == 6
+
+
 def test_our_defaults_are_their_defaults():
-    assert DEFAULT_LAMBDA == theirs.DEFAULT_LAMBDA
-    assert DEFAULT_MIN_DURATION_SAMPLES == theirs.DEFAULT_MIN_DURATION_SAMPLES
+    assert DEFAULT_LAMBDA == _V1["defaults"]["lambda"]
+    assert DEFAULT_MIN_DURATION_SAMPLES == _V1["defaults"]["min_duration_samples"]
+    assert Params().lambda_ == _V1["defaults"]["lambda"]
+    assert Params().min_duration_samples == _V1["defaults"]["min_duration_samples"]
 
 
-@_contract
-def test_our_median_scale_is_theirs():
-    rng = np.random.default_rng(11)
-    for values in (
-        np.array([1.0, 1.0, 1.0, 1.0]),
-        np.array([0.1, -0.1, 0.2, -0.2]),
-        rng.normal(0, 3, 200),
-        rng.normal(0, 0.01, 51),
-        np.array([]),
-    ):
-        assert median_scale(list(values)) == pytest.approx(
-            theirs._median_scale(values), abs=1e-12
-        )
+@pytest.mark.parametrize("case", _V1["median_scale"], ids=lambda c: c["name"])
+def test_our_median_scale_is_theirs(case):
+    assert median_scale(list(case["values"])) == pytest.approx(case["scale"], abs=1e-12)
 
 
-@_contract
-def test_our_velocity_is_their_velocity_on_an_evenly_sampled_trace():
+@pytest.mark.parametrize("name", list(_TRACES))
+def test_our_velocity_is_their_velocity(name):
     """Ours derives `fs` from the window's own timestamps because the protocol is
     poll-based; on an evenly sampled trace that must reduce to their fixed-rate
-    estimator exactly, or the two detectors are differentiating differently and
-    every comparison between them is partly about smoothing."""
-    gaze, at = _trace([(200, 10, 8.0, 0.0)])
+    estimator, or the two detectors are differentiating differently and every
+    comparison between them is partly about smoothing.
+
+    Ours is `None` where the five-sample window is not fully present -- the two edge
+    samples at each end, and any window touching a masked sample -- where theirs is
+    0.0 at the edges (an array has to hold something). So: equal to rel 1e-9 wherever
+    ours has an answer, `None` only where it should be, and their edge values are 0."""
+    trace = _TRACES[name]
+    gaze, at = _ours_on(trace)
+    theirs_v = trace["velocity_deg_s"]
     mine = velocity(gaze, at, Params())
-    theirs_v = their_velocity.velocity(np.array(gaze), FS)
-    for n in range(2, len(gaze) - 2):
-        assert mine[n][0] == pytest.approx(theirs_v[n][0], rel=1e-9)
-        assert mine[n][1] == pytest.approx(theirs_v[n][1], rel=1e-9)
+    n = len(gaze)
+    assert len(theirs_v) == n
+    answered = 0
+    for i in range(n):
+        window_present = 2 <= i < n - 2 and all(gaze[j] is not None for j in range(i - 2, i + 3))
+        assert (mine[i] is not None) == window_present, f"sample {i}"
+        if mine[i] is None:
+            if i < 2 or i >= n - 2:
+                assert theirs_v[i] == [0.0, 0.0], f"edge sample {i}"
+            continue
+        answered += 1
+        assert mine[i][0] == pytest.approx(theirs_v[i][0], rel=1e-9)
+        assert mine[i][1] == pytest.approx(theirs_v[i][1], rel=1e-9)
+    assert answered > n // 2
 
 
-@_contract
-def test_our_detector_finds_the_intervals_theirs_finds():
+@pytest.mark.parametrize("name", list(_TRACES))
+def test_our_detector_finds_the_intervals_theirs_finds(name):
     """The claim S5 §5 rests on. Their detector labels by amplitude and ours does not
     -- labelling is offline analysis, not something a task guard needs -- so the
-    contract is over the intervals, which is the detection itself."""
-    gaze, at = _trace([(150, 10, 6.0, 0.0), (400, 12, -7.0, 3.0)], n=700)
+    contract is over the intervals, which is the detection itself. Their `label` is
+    not compared for that reason.
+
+    The blink trace is run with its masked samples as `None` gaze (see `_ours_on`);
+    the detector must still find both saccades on either side of the blink and none
+    inside it."""
+    trace = _TRACES[name]
+    gaze, at = _ours_on(trace)
     mine = detect(gaze, at)
+    expected = [(r["start"], r["stop"]) for r in trace["runs"]]
+    assert expected, "a fixture trace with no run would prove nothing"
+    assert [(s.start, s.stop) for s in mine] == expected
 
-    array = np.array(gaze)
-    their_v = their_velocity.velocity(array, FS)
-    available = [None] * len(gaze)
 
-    # **Their signature is not the contract; the intervals are.** On 2026-09-05 the
-    # sibling checkout moved onto a feature branch where `detect_engbert_kliegl` had
-    # gained an `fs_hz` argument -- "accepted and unused", for uniformity across
-    # detectors -- while `origin/main`, which CI checks out, still had the four-argument
-    # form. So this test failed locally and passed in CI, for a change to neither
-    # detector's behaviour. Adapting the CALL keeps the behavioural assertion below
-    # running against both, which is the thing worth protecting; a signature mismatch
-    # would otherwise present as a detection disagreement, which is what this test is
-    # supposed to mean.
-    parameters = inspect.signature(theirs.detect_engbert_kliegl).parameters
-    arguments = [array, their_v, available]
-    if "fs_hz" in parameters:
-        arguments.append(FS)
-    their_runs = theirs.detect_engbert_kliegl(*arguments, theirs.DEFAULT_EK_PARAMS)
-
-    assert [(s.start, s.stop) for s in mine] == [(r.start, r.stop) for r in their_runs]
+@pytest.mark.parametrize("name", list(_TRACES))
+def test_our_amplitude_is_their_amplitude(name):
+    """Per-axis today, so these are the same start-to-end distance. **Not bit-exact:**
+    on two traces ours is 1 ulp from theirs (`math.hypot` against `np.hypot`), so this
+    allows 4 ulp and no more -- far below anything a threshold or a label can see."""
+    trace = _TRACES[name]
+    gaze, at = _ours_on(trace)
+    mine = detect(gaze, at)
+    for found, run in zip(mine, trace["runs"]):
+        assert abs(found.amplitude_deg - run["amplitude_deg"]) <= 4 * math.ulp(run["amplitude_deg"])
 
 
 def test_in_flight_tracks_the_open_run_not_the_confirmation():

@@ -1,1 +1,2 @@
 wl_xcon/cie/* -text
+tests/fixtures/wl-preproc/* -text

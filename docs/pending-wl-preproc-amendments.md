@@ -478,4 +478,4 @@ shape come to you before they are written.
 **Your reply (2026-10-19):** a written spec first, since `np.hypot` also sits in six other detectors and the seven-way
 agreement, the main sequence and stored detections read the same coordinates; and versioned contract fixtures, v1 the
 per-axis behavior (which our `tests/test_saccade.py` reads instead of importing your live code, before anything
-changes), v2 the true-angle one beside it, never replacing it.
+changes), v2 the true-angle one beside it, never replacing it. *(2026-10-19: v1 is vendored here at `tests/fixtures/wl-preproc/saccade-v1.json` from `10ea913` and pinned by SHA-256; `tests/test_saccade.py` no longer imports your detector.)*
