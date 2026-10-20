@@ -66,6 +66,17 @@ appears in, required too, a cued task's cue (the PI, 2026-10-13), whether withho
 any outcome's own class, and a repeat limit. Every task wl-xtasks writes declares one per
 structure. Information, under item 1; nothing new is asked.
 
+*Engine build C2b, 2026-10-20*: the format gains **plans** (`Task.plans`, a dict of names to
+`task.Plan`s; [the plan](superpowers/plans/2026-10-19-engine-c2b.md), Task 2): each plan its block
+types (`task.Block`: conditions, a criterion, a number of trials, a time limit, its own counting
+table, drumming), how they follow (`Fixed`, `Cyclic`, `Balanced`, `Random`, or `ByCriterion`, a
+training progression with a fall-back rule) and a run time limit; and **each condition names the
+trial structure it plays** (`Condition.structure`, the task's default when it names none). The
+operator chooses a plan at run start. **A plan is not a stage** (XC-288 §4.2): a stage is where an
+animal stands in its training across sessions, with an id that lasts across task versions; a plan
+is what one run plays. A task with no plans keeps its plain run. Information, under item 1;
+nothing new is asked, and the `TaskTypeCode` in `BLOCK_START` stays 0 until wl-xtasks allocates.
+
 ---
 
 # OPEN — event codes for build F: `STIMULUS_ON`, `STIMULUS_OFF`, `STIMULUS_CHANGED`, and the anchor code
