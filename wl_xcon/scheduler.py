@@ -22,8 +22,9 @@ from dataclasses import dataclass, field, replace
 # The block vocabulary is the task's (engine build C2b): a plan's blocks are declared in its task
 # object, and imported here, where they are played, under the names they always had here.
 from wl_xcon.task import (
-    ANSWERS, COUNTED, HANG_COUNTS_AS, NO_LIMIT, OWED, REPEATED, RIGHT, SPENT, UNPAID, Block,
-    Condition, Constrained, Counting, Family, Order, Outcome, Shuffled, WithReplacement,
+    ANSWERS, COUNTED, HANG_COUNTS_AS, NO_LIMIT, OWED, REPEATED, RIGHT, SPENT, UNPAID, Balanced,
+    Block, BlockOrder, ByCriterion, Condition, Constrained, Counting, Cyclic, Family, Fixed, Order,
+    Outcome, Random, Shuffled, WithReplacement,
 )
 
 # --- What pays a condition's debt (engine spec §16.1-16.2; engine build C2a) -------------------
@@ -67,6 +68,26 @@ EVERY_TRIAL = Counting(
 CAP = "cap"
 RIG = "rig"
 CLEARED = "cleared"
+#: ... or its block's time ran out with it still owed (engine build C2b; the PI, 2026-10-19,
+#: "Finish trial, then end": "Trials it still owed are recorded as not run, 'time ran out'"),
+#: forgiving nothing: the run's end row reads it beside the condition's counts.
+TIME = "time"
+#: ... or the run's own time limit ran out with its block open (`task.Plan.time_limit_s`; the engine
+#: C2b plan's science review, I3), recorded apart from a block's own, so the record and the console
+#: say whose time it was; forgiving nothing too.
+RUN_TIME = "run_time"
+
+#: Why a block ended (`BlockEnd.ended`; engine build C2b): its own end rule was met (`RULE`: every
+#: target used up, and its criterion and number of trials where it declares them), its time ran
+#: out (`TIME`), its plan's fall-back rule was met (`FALL_BACK`), a person moved the run on to the
+#: next block or back one (`NEXT`, `BACK`), the run's own time limit ended the run with it open
+#: (`RUN_TIME`), or the run ended with it open otherwise (`RUN`: a stop, a limit, a fault, or the
+#: plan unable to go on).
+RULE = "rule"
+FALL_BACK = "fall_back"
+NEXT = "next"
+BACK = "back"
+RUN = "run"
 
 #: What a trainer may switch drumming to (`Scheduler.drum`): on for the rest of the block, on for
 #: the rest of the run, or off for the rest of the block.
@@ -103,6 +124,28 @@ class Draw:
     drummed: bool = False
     drumming: str | None = None
     aids: tuple = ()
+
+
+@dataclass(frozen=True, slots=True)
+class BlockEnd:
+    """How one block of the run ended, for the run's end row (engine build C2b): its `block` type's
+    name, why it `ended` (`RULE`, `TIME`, `FALL_BACK`, `NEXT`, `BACK`, `RUN_TIME` or `RUN`), `by`
+    whom when a person moved it, and `after_trial`, the number of the last trial drawn before it
+    ended, or `None` when the run drew none. **And where it stands** (the engine C2b plan's
+    engineering review, I4): `position`, its place in the run's sequence of blocks, from 0 -- a
+    training progression's stage -- and `block_in_session`, its number in the session's stream,
+    the one its `BLOCK_START` carried, or `None` for a block that ran no trial, which the stream
+    neither opens nor closes. **And `passed_at`**, at a training progression's top stage, the
+    trial after which its rule was first met, its animal working on past it, or `None` (the
+    science review, I1)."""
+
+    block: str
+    ended: str
+    by: object = None
+    after_trial: int | None = None
+    position: int = 0
+    block_in_session: int | None = None
+    passed_at: int | None = None
 
 
 @dataclass
@@ -208,7 +251,37 @@ class Scheduler:
     #: counts by a table of its own; a condition naming none, or one missing here, by `counting`'s
     #: (the PI, 2026-10-07: "each condition names its own" structure).
     countings: dict = field(default_factory=dict)
+    #: **How the blocks follow one another** (`task.BlockOrder`; engine spec §13.5; engine build
+    #: C2b): `Fixed`, each once in order, by default. A random order draws from a generator of its
+    #: own, seeded from `seed`, so it replays and leaves every condition's draw as it was.
+    order: BlockOrder = field(default_factory=Fixed)
     _rng: random.Random = field(init=False, repr=False)
+    _order_rng: random.Random = field(init=False, repr=False)
+    #: The open block's place in the run's sequence of blocks, from 0, and the block types that
+    #: sequence has drawn so far, by index into `blocks`, for a random order.
+    _position: int = field(init=False, default=0, repr=False)
+    _sequence: list = field(init=False, default_factory=list, repr=False)
+    #: Whether the open block's time has run out (`expire`).
+    _expired: bool = field(init=False, default=False, repr=False)
+    #: The open block's last answers judged, 1 right and 0 wrong, as long as a `ByCriterion`
+    #: order's fall-back rule's window: what that rule reads.
+    _back: deque = field(init=False, default_factory=deque, repr=False)
+    #: How each block left behind ended, in order, and whether the open one's end is recorded
+    #: (`close`): the run's end row's.
+    ended: list = field(init=False, default_factory=list)
+    closed: bool = field(init=False, default=False)
+    #: The block types opened since the last trial was drawn or a person's move (the progress
+    #: check, `stalled`).
+    _opened: set = field(init=False, default_factory=set, repr=False)
+    #: **The open block's number in the session's stream** (`levels.Position.block_in_session`),
+    #: which the loop gives as the block's first trial opens it with `BLOCK_START` (`taskd`), or
+    #: `None` while it has run no trial: what its `BlockEnd` records.
+    in_session: int | None = field(init=False, default=None)
+    #: At a training progression's top stage, the trial after which its rule was first met
+    #: (`ends`), or `None`: what its `BlockEnd` records and the console shows.
+    passed_at: int | None = field(init=False, default=None)
+    #: How many times the run's plan fell back a stage (`FALL_BACK`), for the console's plan row.
+    fell_back: int = field(init=False, default=0)
     _counts: dict = field(init=False, default_factory=dict, repr=False)
     _queue: deque = field(init=False, default_factory=deque, repr=False)
     requeued: list = field(init=False, default_factory=list)
@@ -244,6 +317,13 @@ class Scheduler:
 
     def __post_init__(self) -> None:
         self._rng = random.Random(self.seed)
+        self._order_rng = random.Random(f"blocks:{self.seed}")
+        first = self._type_at(0)
+        if first is None:
+            raise IndexError("a plan with no block to start has nothing to run")
+        self._index = first
+        self._opened = {first}
+        self._back = self._fall_back_window()
         self._counts = {c.name: Counts() for c in self.block.conditions}
         self._refill()
 
@@ -251,6 +331,186 @@ class Scheduler:
     def block(self) -> Block:
         return self.blocks[self._index]
 
+    def _type_at(self, position: int) -> int | None:
+        """The block type the run's `position`th block is, by index into `blocks`, or `None` past
+        the plan's end (engine spec §13.5): **in order once** (`Fixed`); **over and over**
+        (`Cyclic`), its `cycles` passes; **in shuffled rounds** (`Balanced`: each round every type
+        once, the last round partial where the count is not whole rounds); **each drawn at
+        random** (`Random`); **stage by stage** (`ByCriterion`, which moves up and back by its
+        rules, `_next_position`). A random sequence is drawn as far as it is read, from
+        `_order_rng`, and kept, so the same position is always the same type; a balanced round
+        never starts with the type the round before it ended with."""
+        n = len(self.blocks)
+        order = self.order
+        if position < 0:
+            return None
+        if isinstance(order, Cyclic):
+            if order.cycles is not None and position >= order.cycles * n:
+                return None
+            return position % n
+        if isinstance(order, (Balanced, Random)):
+            if order.blocks is not None and position >= order.blocks:
+                return None
+            while len(self._sequence) <= position:
+                if isinstance(order, Balanced):
+                    round_ = list(range(n))
+                    self._order_rng.shuffle(round_)
+                    if self._sequence and round_[0] == self._sequence[-1] and n > 1:
+                        # **Never back-to-back** (the PI, 2026-10-19: "Each new round starts with
+                        # a different type than the last one played, so every block boundary is a
+                        # real switch; still balanced in counts"): the round turned by one, still
+                        # a round, drawing nothing more from the seed.
+                        round_ = round_[1:] + round_[:1]
+                    self._sequence.extend(round_)
+                else:
+                    self._sequence.append(self._order_rng.randrange(n))
+            return self._sequence[position]
+        return position if position < n else None
+
+    def _next_position(self, reason: str) -> int | None:
+        """Where the run's sequence goes as the open block ends for `reason`: back one for a
+        fall-back or a person's *back one*, else on one. `None` before the first."""
+        if reason in (FALL_BACK, BACK):
+            return self._position - 1 if self._position > 0 else None
+        return self._position + 1
+
+    def _fall_back_window(self) -> deque:
+        rule = self.order.fall_back if isinstance(self.order, ByCriterion) else None
+        return deque(maxlen=rule[1] if rule is not None and rule[1] >= 1 else 0)
+
+    @property
+    def _top(self) -> bool:
+        """Whether the open block is a training progression's top stage (`ByCriterion`), where the
+        animal keeps working once its rule is met (the PI, 2026-10-19, "Same, but top keeps
+        going")."""
+        return isinstance(self.order, ByCriterion) and self._position == len(self.blocks) - 1
+
+    @property
+    def _falls_back(self) -> bool:
+        """Whether a training progression's fall-back rule is met (`ByCriterion.fall_back`): fewer
+        than its proportion of the last window's answers right, judged once that many answers are
+        in (the PI, 2026-10-19: "under 50% over the last 20", answers only) -- **each trial's first
+        answer only** ("First answer only"; `record`) -- at any stage but the first, which has none
+        below it."""
+        if not isinstance(self.order, ByCriterion) or self.order.fall_back is None:
+            return False
+        proportion, window = self.order.fall_back
+        return (self._position > 0 and window >= 1 and len(self._back) >= window
+                and sum(self._back) / len(self._back) < proportion)
+
+    @property
+    def ends(self) -> str | None:
+        """**Why the open block ends at this boundary**, or `None` while it goes on (engine spec
+        §13.5; engine build C2b): `RULE` once its own end rule is met (`finished`) -- **but at a
+        training progression's top stage the animal keeps working**, its conditions drawn again
+        (`past_targets`); `FALL_BACK` once its plan's fall-back rule is met; `TIME` once its time
+        has run out (`expire`). **Never while a drummed trial waits** (the PI, 2026-10-18 and
+        2026-10-19: "Finish the drum first"): that trial comes back until it is right, then the
+        block ends. A met rule counts before a fall-back -- at the top stage too, which works on
+        while its rule holds -- and either before the time. **The top stage's rule met the first
+        time is noted** (`passed_at`; the engine C2b plan's science review, I1): the record and
+        the console say when it passed."""
+        if self._drum is not None:
+            return None
+        if self.finished and not self._top:
+            return RULE
+        self._note_passed()
+        if self._falls_back and not self.finished:
+            return FALL_BACK
+        if self._expired:
+            return TIME
+        return None
+
+    def _note_passed(self) -> None:
+        """Note the trial after which a training progression's top stage first met its rule
+        (`passed_at`; the engine C2b plan's science review, I1), asked at every boundary (`ends`)
+        and before every draw (`next_trial`), so it names the trial that met it whoever asks.
+        `None` while it has not, or when it was met before the run's first trial."""
+        if self.passed_at is None and self._top and self.finished:
+            self.passed_at = self._number - 1 if self._number else None
+
+    @property
+    def following(self) -> Block | None:
+        """The block the open one is followed by if it ends now (`ends`), or `None` while it goes on
+        and when the plan is done then."""
+        reason = self.ends
+        if reason is None:
+            return None
+        position = self._next_position(reason)
+        index = None if position is None else self._type_at(position)
+        return None if index is None else self.blocks[index]
+
+    @property
+    def next_block(self) -> Block | None:
+        """The block the plan goes on to when the open one ends on its own rule or its time -- the
+        next stage up in a training progression -- or `None` where the plan ends there: what the
+        console shows as next (engine build C2b)."""
+        index = self._type_at(self._position + 1)
+        return None if index is None else self.blocks[index]
+
+    def expire(self) -> None:
+        """The open block's time has run out (`Block.time_limit_s`; the PI, 2026-10-19), read by the
+        loop between trials on the time trials ran, pauses not counting: it ends at this boundary,
+        or once a drummed trial waiting is right (`ends`)."""
+        self._expired = True
+
+    @property
+    def expired(self) -> bool:
+        return self._expired
+
+    @property
+    def drum_waiting(self) -> str | None:
+        """The condition whose drummed trial waits to come back until it is right, or `None`: what
+        holds a block's end (`ends`) and, in the loop, the run's time limit (the PI, 2026-10-19,
+        "Finish the drum first", for both), and what a person's move drops."""
+        return None if self._drum is None else self._drum[0]
+
+    def because(self, reason: str) -> str:
+        """Why the open block ends for `reason`, in words and with its numbers, for the console's
+        changes feed (the engine C2b plan's science review, I2: "S2 -> S1: 8 of last 20 right"):
+        its rule and what met it, the fall-back and the first answers that met it, or whose time
+        ran out."""
+        if reason == RULE:
+            met = []
+            if self.block.criterion is not None:
+                right = sum(self._window)
+                met.append(f"{right} right in a row" if self.streak
+                           else f"{right} of its last {len(self._window)} answers right")
+            if self.block.trials is not None:
+                met.append(f"{self.block_trials} trials run")
+            return "its rule met: " + ", ".join(met + ["every target used up"])
+        if reason == FALL_BACK:
+            proportion = self.order.fall_back[0]
+            return (f"fell back: {sum(self._back)} of its last {len(self._back)} first answers "
+                    f"right, under {proportion:.0%}")
+        if reason == TIME:
+            return "its time ran out" + ("" if self.finished else ", its rule not met")
+        if reason == RUN_TIME:
+            return "the run's time ran out"
+        return {NEXT: "moved on by hand", BACK: "moved back by hand"}.get(reason, "the run ended")
+
+    @property
+    def block_trials(self) -> int:
+        """The open block's trials so far, a trial and its drummed repeats one: what its number of
+        trials counts (`Block.trials`)."""
+        return sum(counts.trials for counts in self._counts.values())
+
+    @property
+    def stalled(self) -> bool:
+        """**The per-advance progress check** (engine spec §13.5: "`taskd`'s guard against a
+        spinning plan becomes a per-advance progress check"; engine build C2b): since the last
+        trial drawn, or a person's last move, the plan has opened every one of its block types and
+        each ended before it drew a trial, so no block it can open will draw one and moving on again
+        would spin. The run then ends, saying why (the PI, 2026-10-19, "End run with a
+        sentence")."""
+        return self._opened >= set(range(len(self.blocks)))
+
+    @property
+    def drawable(self) -> bool:
+        """Whether the open block can draw a trial now: a drummed trial waits, a repeat waits, or a
+        condition can be drawn by its order (`_peek`). A block that cannot, and does not end, has
+        nothing to show (the PI, 2026-10-19: the run ends, saying why)."""
+        return self._drum is not None or bool(self._due) or self._peek() is not None
     def _refill(self) -> None:
         """Queue the next draw, however this block declares its order.
 
@@ -267,12 +527,19 @@ class Scheduler:
             self._queue.extend(pending)
             return
 
-        weights = [order.weights.get(name, 1.0) for name in pending]
+        # **A condition of weight 0 is never drawn** (the engine C2b plan's engineering review,
+        # I2), so it is left out: a block whose every condition still drawable weighs 0 has nothing
+        # to draw (`drawable`), and the loop ends the run with its sentence where
+        # `random.choices` raised. The rest draw as the seed gave them: a weight of 0 was never
+        # chosen.
+        pending = [name for name in pending if order.weights.get(name, 1.0) > 0]
+        if not pending:
+            return
         if isinstance(order, Constrained):
             allowed = [name for name in pending if not self._runs_long(name)]
             if allowed:
                 pending = allowed
-                weights = [order.weights.get(name, 1.0) for name in pending]
+        weights = [order.weights.get(name, 1.0) for name in pending]
         self._queue.append(self._rng.choices(pending, weights=weights, k=1)[0])
 
     def _drawable(self, condition: str) -> bool:
@@ -284,12 +551,14 @@ class Scheduler:
 
     @property
     def past_targets(self) -> bool:
-        """Whether the open block ends on a criterion and every target is used up: **then every
-        condition of the block is drawn again, by its order, until the criterion is met** (the PI,
-        2026-10-18: "conditions keep coming until both hold"). Nothing is owed then, so a break is
-        not shown again and nothing is forgiven, but a drummed trial still comes back until it is
-        right (`record`)."""
-        if self.block.criterion is None:
+        """Whether the open block ends on a criterion or a number of trials, or is a training
+        progression's top stage, and every target is used up: **then every condition of the block
+        is drawn again, by its order, until the criterion is met** (the PI, 2026-10-18: "conditions
+        keep coming until both hold"), the number of trials is run (engine build C2b), or -- at the
+        top stage -- until a time limit, a stop or the session's end (the PI, 2026-10-19, "Same, but
+        top keeps going"). Nothing is owed then, so a break is not shown again and nothing is
+        forgiven, but a drummed trial still comes back until it is right (`record`)."""
+        if self.block.criterion is None and self.block.trials is None and not self._top:
             return False
         # The terms of `owed`, read from the counts: `owed` finds its condition by name.
         counts = self._counts
@@ -471,42 +740,104 @@ class Scheduler:
 
     @property
     def done(self) -> bool:
-        """Every block finished, which is when the *session* runs out of plan.
+        """The open block ends now and the plan has no block after it: the *run* is out of plan.
 
         Separate from `finished`, which has always been about the current block
         alone. Nothing advanced past a block until 2026-09-06, so a two-block
         scheduler ran its first block forever -- and nothing noticed, because
-        `taskd` never imported this module.
+        `taskd` never imported this module. **Since engine build C2b** the block after
+        it is its plan's order's (`ends`, `following`): a training progression's top
+        stage is never done by its rule, only by its time.
         """
-        return self._index >= len(self.blocks) - 1 and self.finished
+        return self.ends is not None and self.following is None
 
-    def advance(self) -> Block:
-        """Move to the next block, and start it empty.
+    def advance(self, reason: str = RULE, by: object = None) -> Block:
+        """Move to the block the plan's order gives as the open one ends for `reason` (`ends`, or a
+        person's `NEXT` or `BACK`), and start it empty; the open block's end is recorded (`close`).
 
         **Counters and the criterion window are reset**, because they are properties
         of a block and not of a session: a criterion carried across would be met
         before its own block had run a trial, on evidence from a different task
         configuration entirely. `requeued` is not reset -- it is the session's log of
-        what had to be run again, and that reads across blocks.
+        what had to be run again, and that reads across blocks. **A block falling back
+        or stepped back to starts fresh too** (the PI, 2026-10-19: "Move back one stage,
+        starting it fresh").
         """
-        if self._index >= len(self.blocks) - 1:
+        position = self._next_position(reason)
+        index = None if position is None else self._type_at(position)
+        if index is None:
             raise IndexError(
                 f"block {self.block.name!r} is the last block; a session that ran "
                 f"off the end of its plan would draw from a block that does not exist"
+                if reason not in (FALL_BACK, BACK)
+                else f"block {self.block.name!r} is the plan's first; there is no block before it"
             )
         self._reports.extend(self.block_report)
-        self._index += 1
+        self.close(reason, by)
+        self.fell_back += reason == FALL_BACK
+        self._position, self._index = position, index
+        self.closed = False
+        if reason in (NEXT, BACK):
+            # **A person's move is not the plan spinning** (the engine C2b plan's engineering
+            # review, I1): the progress check counts afresh from it, so a block moved to that owes
+            # nothing cannot make a plan whose other blocks draw look stalled.
+            self._opened = {index}
+        else:
+            self._opened.add(index)
+        self.in_session = None
+        self.passed_at = None
         self._counts = {c.name: Counts() for c in self.block.conditions}
         self._queue.clear()
         self._window.clear()
+        self._back = self._fall_back_window()
         self._drawn.clear()
         self._due.clear()
         self._drum = None
+        self._expired = False
         if self._switched != "run" and not self._carried:
             self._switched = None
         self._carried = False
         self._refill()
         return self.block
+
+    def close(self, reason: str, by: object = None) -> None:
+        """Record how the open block ended (`BlockEnd`), once: by `advance`, or by the run as it
+        ends with the block open. **A block its time ended writes what it still owed as not run**
+        (the PI, 2026-10-19: "Trials it still owed are recorded as not run, 'time ran out'"): a
+        `Shortfall` per condition owing, `because` `TIME` -- or `RUN_TIME`, the run's time --
+        forgiving nothing."""
+        if self.closed:
+            return
+        after = self._number - 1 if self._number else None
+        if reason in (TIME, RUN_TIME):
+            for c in self.block.conditions:
+                owed = self.owed(c.name)
+                if owed:
+                    self.shortfalls.append(Shortfall(self.block.name, c.name, owed, reason, after))
+        self.ended.append(BlockEnd(self.block.name, reason, by, after, self._position,
+                                   self.in_session, self.passed_at))
+        self.closed = True
+
+    def move(self, step: str, by: object = None) -> str | None:
+        """**A person moves the run on to the next block, or back one** (the PI, 2026-10-19,
+        "'Next' and 'back one'": "Both directions by hand, each recorded with who"): `NEXT` to the
+        block the plan's order gives next, the next stage up in a training progression; `BACK` to
+        the block before the open one in the run's sequence, the stage below, started fresh. At
+        once, a drummed trial waiting dropped. Returns why nothing moved -- there is no such block
+        -- or `None`."""
+        if step not in (NEXT, BACK):
+            raise ValueError(f"a block is moved {NEXT} or {BACK}, not {step!r}")
+        position = self._next_position(step)
+        if position is None or self._type_at(position) is None:
+            return (
+                f"block {self.block.name!r} is the last its plan gives, so there is no next block; "
+                f"stop ends the run"
+                if step == NEXT
+                else f"block {self.block.name!r} is the first of the run's blocks, so there is no "
+                f"block before it"
+            )
+        self.advance(step, by)
+        return None
 
     @property
     def drumming(self) -> str | None:
@@ -525,14 +856,15 @@ class Scheduler:
         made: the next block's when the switch would be carried to it (`drum`; `advance` keeps a
         run's switch and resets the rest, leaving the next block's own `drum`, and keeps a switch
         already carried), else this one's."""
-        if self.finished and not self.done:
+        following = self.following
+        if following is not None:
             if self._carried:
                 # A switch already carried to the next block in this drain: it is what that
                 # block reads (`advance` keeps it), not that block's own declaration.
                 return self._switched if self._switched in ("run", "block") else None
             if self._switched == "run":
                 return "run"
-            return "block" if self.blocks[self._index + 1].drum else None
+            return "block" if following.drum else None
         return self.drumming
 
     @property
@@ -622,16 +954,18 @@ class Scheduler:
         # Asked before *off* drops a drum that holds a met block open, which would meet its end
         # rule: stopping such a drum is this block's switch (the PI, 2026-10-18: "Finish the drum
         # first").
-        self._carried = self.finished and not self.done
+        following = self.following
+        self._carried = following is not None
         self._switched = scope
         if scope == "off":
             self._drum = None
-        return self.blocks[self._index + 1].name if self._carried else self.block.name
+        return following.name if following is not None else self.block.name
 
     @property
     def finished(self) -> bool:
         """Whether the open block's end rule is met: every condition owes nothing, and where the
-        block ends on a criterion, the criterion is met too -- **its targets are a minimum** (the
+        block ends on a criterion or a number of trials, those are met too -- **its targets are a
+        minimum** (the
         PI, 2026-10-18, "Both: criterion and every target": "The block ends only once the criterion
         is met and every target is used up; conditions keep coming until both hold") -- **and no
         drum waits** ("Finish the drum first": "The block ends only after the drummed trial is
@@ -643,6 +977,10 @@ class Scheduler:
             proportion, window = self.block.criterion
             if len(self._window) < window or sum(self._window) / len(self._window) < proportion:
                 return False
+        if self.block.trials is not None and self.block_trials < self.block.trials:
+            # **A number of trials** (engine spec §13.5; engine build C2b): run that many, and
+            # every target used up too -- its targets are a minimum, as under a criterion.
+            return False
         return all(self.owed(c.name) == 0 for c in self.block.conditions)
 
     def next_trial(self) -> Condition:
@@ -655,6 +993,7 @@ class Scheduler:
         at its slot or early can make a run of two of its condition, at once or not; a
         `Constrained` block's limit counts it as a draw. **A drum's trial goes before all of
         them**, at once."""
+        self._note_passed()
         number = self._number
         waiting = sorted(self._due)
         drummed = self._drum is not None
@@ -688,6 +1027,7 @@ class Scheduler:
         self._drawn.append(name)
         self._counts[name].attempted += 1
         self._number += 1
+        self._opened = set()
         return condition
 
     def record(self, condition: str, outcome: Outcome | None, shown: bool = True) -> str:
@@ -738,6 +1078,14 @@ class Scheduler:
             if self.block.criterion is not None:
                 while len(self._window) > self.block.criterion[1]:
                     self._window.popleft()
+        if judged and not self._answered:
+            # **The fall-back rule judges each trial's first answer only** (the PI, 2026-10-19,
+            # "First answer only": "so one stubborn trial can't demote a stage the animal is
+            # otherwise doing well in"), whatever the stage's own rule is and however it counts
+            # drummed tries -- after a try that ended before any answer, the first try that
+            # answers -- and a broken hold the block's own table scores is judged here as it is
+            # toward moving up ("Yes, the same").
+            self._back.append(1 if outcome in RIGHT else 0)
         self._answered = self._answered or judged
         if kind != OWED:
             # **The trial is over, so its failed tries in a row start again** (the PI, 2026-10-18,

@@ -15,7 +15,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 **Finding one.** Grep the ID, a package (`P9`, `b3`), a repository (`wl-sync`) or a file. The sections: brainstorms the PI asked to have later; features no plan covers yet; defects and review findings deliberately not fixed; debt (cleanup, stale wording, test hygiene); anything that needs the rig or other hardware, measurements included; and asks of, or waits on, other repositories.
 
-**Next free ID: XC-405.**
+**Next free ID: XC-406.**
 
 ## Brainstorms queued for the PI
 
@@ -39,6 +39,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 - **XC-012** Write the task's event-code table into the session directory, so nothing downstream must re-derive it from the task. — 2026-09-19, [CHECKPOINT, "The console design"](CHECKPOINT.md#the-console-design-brainstormed-and-settled) — waits on: nothing
 - **XC-013** Demo mode: run a task with keyboard and mouse gaze (roadmap M1; P4d-2b slice b4); designed 2026-10-06 and parked, its spec's §14 listing what changes before it is built. — 2026-08-31, [demo-mode spec §14](superpowers/specs/2026-10-06-demo-mode-design.md#14-parked-2026-10-07-what-the-reviews-found-and-what-comes-first) — waits on: engine build B, then XC-207 and XC-242, then the reference tasks made right (PI, 2026-10-07)
 - **XC-146** An automatic simulated subject an operator sets up in behavioral terms (accuracy, median RT and its spread, fixation-break and no-response rates) at session start, on the command line and later the page, that performs any task through the same path as demo mode, with the census reporting the achieved figures beside the requested ones; `simulate.Subject` already plays sessions headless, with its rates fixed in code. — 2026-09-29, PI request, [XC-013's roadmap M1](roadmap.md#m1--simulated-skeleton) — waits on: nothing
+- **XC-405** Let a run of a training progression start at the stage an animal reached, not its first, once the animal's stage is carried from session to session (the training records, XC-288; per-animal training profiles, XC-379); until then a trainer moves it up stage by stage with *next block*. — 2026-10-19, [engine C2b plan, "Not in C2b"](superpowers/plans/2026-10-19-engine-c2b.md#not-in-c2b) — waits on: XC-288 and XC-379
 - **XC-183** Declare starting values (`Param.start`) in `adaptive_detection`, `visual_search`, `visual_search_training` and `calibration`, so `wlx taskd` runs them from the page; until then each one's pre-flight refuses its run, naming every number it uses with no value. — 2026-09-30, [b3a-2 plan, decision 1](superpowers/plans/2026-09-30-p4d2b-b3a2-page-sessions.md#plan-decisions) — waits on: nothing
 - **XC-184** The console's manual reward after a `wlx run` session's run, while its return is awaited at the terminal (spec §6.0's "awaiting the return"); `await_return` drains the link on a thread beside the terminal's, so a reward must not land after the return is recorded (welfare-critical). — 2026-09-30, [b3a-2 plan, decision 4](superpowers/plans/2026-09-30-p4d2b-b3a2-page-sessions.md#plan-decisions) — waits on: nothing
 - **XC-014** Operator documentation, how to run a session for a tech or student, with the D4 acceptance test (a stranger runs a session). — 2026-08-31, [roadmap M1](roadmap.md#m1--simulated-skeleton) — waits on: nothing
