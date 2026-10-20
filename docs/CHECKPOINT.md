@@ -437,7 +437,15 @@ merged tree, none skipped. **Next: build C2b**: rebuild its approved plan (`.sup
 checkout, git-ignored; drafted and dry-run on `ff1fad6`, 3961 passed) on this `main`, re-anchoring its edits around
 this entry's `check.py`, `task.py`, `screen.py`, `review.py` and `gaze.py` changes and renumbering its backlog items
 from Next free; dry-run it again; commit it as the build's first step on `engine-c2b`; build it subagent-driven (the
-PI's choice). Every PI answer it builds is quoted in `.superpowers/c2b-plan/answers.md`.
+PI's choice). Every PI answer it builds is quoted in `.superpowers/c2b-plan/answers.md`. *(Dated note, 2026-10-20: the plan
+was rebuilt on this `main` and amended with the PI's **"Both, polar first"** (a setting's `Polar` value, which faulted the
+run at `record.run_row`, is recorded as eccentricity and direction with (x, y) beside) as its Task 2: 12 tasks, dry-run
+from its text on `e988553`, 4140 passed. **The build is under way** on branch `engine-c2b` (worktree
+`.claude/worktrees/engine-c2b`; plan committed `08840b6`; ledger `.superpowers/sdd/2026-10-19-engine-c2b/progress.md`
+there, which says where to resume): Tasks 1 to 4 complete, reviewed clean and pushed (`888980a`); Task 5 implemented,
+its review next. Paused there by the PI to conserve tokens. Also waiting: branch `saccade-thresholds` (`a3bd4bb`,
+wl-preproc's v1 thresholds companion vendored; review Approved), its CI and the PI's merge; and `main`'s push run
+`39403758920` on the two merges, and every `engine-c2b` run, to be read shard by shard.)*
 
 **The PI's rule (2026-10-19)**: "in other experimental control software packages, we use a set ppd for the entire
 monitor, but that of course changes subtely as a function of eccentricity of the stimulus and the exact distance the
