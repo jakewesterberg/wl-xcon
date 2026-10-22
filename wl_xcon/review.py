@@ -544,7 +544,9 @@ def _plans(task: Task) -> list[str]:
                 ends.append(f"or its time runs out at {_seconds(block.time_limit_s)}")
             counts = ("its own table" if block.counting is not None
                       else "each condition's structure's table")
-            lines.append(f"| {block.name} | {_cell('; '.join(ends))} | "
+            # Every name through `_cell`, so a bar in one is never a new column (the final review
+            # of engine build C2b, T11).
+            lines.append(f"| {_cell(f'{block.name}')} | {_cell('; '.join(ends))} | "
                          f"{_cell(_block_order(block.order))} | {counts} | "
                          f"{'yes' if block.drum else 'no'} |")
         lines += ["", "| Block | Condition | Structure | Target | Values |",
@@ -553,9 +555,9 @@ def _plans(task: Task) -> list[str]:
             for condition in block.conditions:
                 values = ", ".join(f"{k} = {_set_label(v)}"
                                    for k, v in condition.values.items()) or "none"
-                lines.append(f"| {block.name} | {condition.name} | "
-                             f"{condition.structure or task.default} | {condition.target} | "
-                             f"{_cell(values)} |")
+                lines.append(f"| {_cell(f'{block.name}')} | {_cell(f'{condition.name}')} | "
+                             f"{_cell(f'{condition.structure or task.default}')} | "
+                             f"{condition.target} | {_cell(values)} |")
         lines.append("")
     return lines
 

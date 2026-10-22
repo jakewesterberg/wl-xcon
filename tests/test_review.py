@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import dataclasses
 
+import pytest
+
 from wl_xcon.declarations import COMMON, content_hash
 from wl_xcon.review import render, render_task
 from wl_xcon.task import (
@@ -41,12 +43,15 @@ from wl_xcon.task import (
     Condition,
     Constrained,
     Cyclic,
+    Fixed,
     Plan,
+    Random,
     STIMULUS,
     State,
     Task,
     Trial,
     Window,
+    WithReplacement,
 )
 
 TRIAL = Trial(
@@ -289,6 +294,50 @@ def test_the_plan_tables_say_a_time_in_whole_minutes_and_a_balanced_order_never_
             "seed, never one type twice in a row: 4 blocks. The run ends at the first pause "
             "between trials after 1 minute of trials.") in out
     assert "or its time runs out at 3 minutes 20 s" in out
+
+
+NEAR = Condition("near", {"contrast": 0.9}, target=4)
+
+
+@pytest.mark.parametrize(
+    ("plan", "said"),
+    [
+        (Plan([Block("b", [NEAR])], order=Random(blocks=3)),
+         "Each block a type drawn at random from the run's seed: 3 blocks. No run time limit."),
+        (Plan([Block("b", [NEAR])], order=Random()),
+         "Each block a type drawn at random from the run's seed: until a time limit, a stop or the "
+         "out-of-cage limit."),
+        (Plan([Block("b", [NEAR])], order=Fixed()), "Each block once, in order. No run time limit."),
+        (Plan([Block("b", [NEAR])], order=Cyclic()),
+         "In order, over and over: until a time limit, a stop or the out-of-cage limit."),
+        (Plan([Block("b", [NEAR])], order=Balanced()),
+         "never one type twice in a row: round after round until a time limit, a stop or the "
+         "out-of-cage limit."),
+        (Plan([Block("b", [NEAR], criterion=(0.8, 10))], order=ByCriterion()),
+         "up one when a stage's rule is met or its time runs out; no fall-back; the top stage"),
+        (Plan([Block("b", [NEAR], order=WithReplacement())]),
+         "| b | every target used up | drawn with replacement | each condition's structure's "
+         "table | no |"),
+        (Plan([Block("b", [NEAR], order=WithReplacement(weights={"near": 2.0}))]),
+         "| b | every target used up | drawn with replacement, weighted {'near': 2.0} |"),
+        (Plan([Block("b", [NEAR], order=Constrained(max_run=1, weights={"near": 2.0}))]),
+         "| drawn with replacement, runs of at most 1, weighted {'near': 2.0} |"),
+        (Plan([Block("b", [Condition("bare", {}, target=4)])]), "| b | bare | holding | 4 | none |"),
+        # A bar in a block's, a condition's or a structure's name is escaped, never a new column.
+        (Plan([Block("a|b", [Condition("c|d", {}, target=1, structure="x|y")])]),
+         "| a\\|b | c\\|d | x\\|y | 1 | none |"),
+        (Plan([Block("a|b", [NEAR])]),
+         "| a\\|b | every target used up | shuffled passes |"),
+    ],
+)
+def test_the_plan_tables_say_each_order_draw_and_value_as_declared(plan, said):
+    """The final review of engine build C2b, T11: the plan tables' branches the other tests leave
+    unread -- a random and a fixed order, a count of none for each order that takes one, no
+    fall-back, a draw with replacement, weights, a condition setting nothing -- and a name with a
+    bar in it, which `_cell` escapes as it escapes every other cell."""
+    structures = {"other": OTHER, "holding": HOLDING, "x|y": OTHER}
+
+    assert said in render_task(_reviewed(structures=structures, plans={"p": plan}))
 
 
 def test_a_tables_no_limit_is_shown_as_no_limit():
