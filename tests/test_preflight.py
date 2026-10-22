@@ -19,7 +19,7 @@ from wl_xcon.cli import _load_allocation, _load_task
 from wl_xcon.findings import NOT_RECORDING, SESSION_KINDS
 from wl_xcon.link import NOTE_LIMIT, Preflight, PreflightItem
 from wl_xcon.photometry import SRGB
-from wl_xcon.task import P, Param, Task
+from wl_xcon.task import Block, Condition, P, Param, Plan, Task
 from wl_xcon.warnlist import Entry
 from wl_xcon.welfare import Absent, Deployment, Simulated
 
@@ -642,8 +642,9 @@ def test_a_task_whose_setting_says_nothing_of_what_it_means_fails_its_preflight(
 
 
 def test_a_run_needs_a_value_for_every_number_any_of_its_structures_uses():
-    """The engine C1 plan's call 15: a run's starting values cover every trial structure its task
-    can play, failing closed, until build C2's plans name the ones a run plays."""
+    """The engine C1 plan's call 15: a plain run's starting values cover every trial structure its
+    task can play, failing closed; a run of a plan, the structures its conditions play (engine
+    build C2b, below)."""
     trial = _trial()
     cued = dataclasses.replace(
         trial,
@@ -657,3 +658,64 @@ def test_a_run_needs_a_value_for_every_number_any_of_its_structures_uses():
     assert item.result == "fail"
     assert "'cue_delay' is used by the task and has no starting value" in item.said
     assert preflight.values(task, {"cue_delay": 0.2}).result == "pass"
+
+
+def test_a_run_of_a_plan_needs_values_for_the_structures_its_conditions_play_only():
+    """Engine build C2b: a plan's run plays the structures its conditions name, so a number only
+    another structure uses needs no starting value; and a number every condition playing its
+    structure sets is given by the plan."""
+    trial = _trial()
+    cued = dataclasses.replace(
+        trial,
+        params=[*trial.params, Param("cue_delay", unit="s", low=0.0, high=1.0)],
+        windows=[dataclasses.replace(trial.windows[0], radius=P("cue_delay")), *trial.windows[1:]],
+    )
+    plain = Plan([Block("b", [Condition("c", {}, target=1)])])
+    cueing = Plan([Block("b", [Condition("c", {"cue_delay": 0.2}, target=1, structure="cued"),
+                               Condition("d", {}, target=1)])])
+    half = Plan([Block("b", [Condition("c", {"cue_delay": 0.2}, target=1, structure="cued"),
+                             Condition("d", {}, target=1, structure="cued")])])
+    task = Task({"detection": trial, "cued": cued}, default="detection",
+                plans={"plain": plain, "cueing": cueing, "half": half})
+
+    assert preflight.values(task, {}, plan="plain").result == "pass"
+    assert preflight.values(task, {}, plan="cueing").result == "pass"
+    item = preflight.values(task, {}, plan="half")
+    assert item.result == "fail" and "'cue_delay' is used by the task" in item.said
+
+
+def test_a_plan_its_task_does_not_declare_fails_the_task_checks(tmp_path):
+    """Engine build C2b: so `gate` refuses a start naming one, `Service._start` unchanged in
+    that."""
+    path = _sessions.planned_task(tmp_path, '{"short": Plan([Block("b", [Condition("c", {}, '
+                                            'target=1)])])}')
+
+    named, _, _ = preflight.task(path, ALLOCATION, DIRECT, SRGB, plan="short")
+    missing, _, _ = preflight.task(path, ALLOCATION, DIRECT, SRGB, plan="long")
+
+    assert named.result == "pass"
+    assert missing.result == "fail"
+    assert missing.said == "the task declares no plan 'long'; its plans are 'short'"
+
+
+def test_each_conditions_values_are_held_to_their_ranges_as_starting_values_are(tmp_path):
+    """Engine build C2b, under the PI's rule of 2026-10-11 (XC-352's D2): a value a condition sets
+    outside its range is a warning naming the condition, and one that would break the run -- a
+    target off the screen -- fails the starting values, naming it too."""
+    path = _sessions.planned_task(tmp_path, (
+        '{"wide": Plan([Block("b", [Condition("near", {"target_x": 5.0}, target=1), '
+        'Condition("past", {"target_x": 17.0}, target=1)])]), '
+        '"off": Plan([Block("b", [Condition("away", {"target_x": 16.0, "target_y": 40.0}, '
+        'target=1)])])}'))
+    task = _load_task(path)
+
+    wide = preflight.beyond(task, {}, ALLOCATION, DIRECT, SRGB, None, plan="wide")
+    off = preflight.beyond(task, {}, ALLOCATION, DIRECT, SRGB, None, plan="off")
+
+    assert [f.code for f in wide] == ["outside-range"]
+    assert wide[0].detail.startswith("in plan 'wide', block 'b', condition 'past': 'target_x'")
+    assert not wide[0].blocking
+    refused = [f for f in off if f.blocking]
+    assert refused and all("condition 'away'" in f.detail for f in refused)
+    assert preflight.values(task, {}, refused, plan="off").result == "fail"
+    assert preflight.beyond(task, {}, ALLOCATION, DIRECT, SRGB, None) == []

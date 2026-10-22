@@ -166,7 +166,17 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: training aids on; `rule`, the kind of the open block's rule (`"streak"`, `"percentage"` or
 #: none); and `past_targets`, whether a criterion block draws past its targets. A reader of 15
 #: refuses 16 and 16 refuses 15, by name.
-SCHEMA = 16
+#:
+#: 17 (engine build C2b): `Telemetry.plan`, the plan the run plays by its name in the task, or
+#: `None` for the plain run; `next_block`, the block its plan goes on to as the open one ends on
+#: its rule or its time; `block_left_s` and `run_left_s`, the seconds of trials left before the
+#: open block's and the run's time limits, `None` with no limit, a pause not counting;
+#: `trials_to_run`, the open block's number of trials, `None` without one; `passed_at`, the trial
+#: after which a training progression's top stage first met its rule, `None` until it has; and
+#: `fell_back`, the times the run's plan fell back a stage; and `Preflight.plan` and `plans`, the
+#: plan a pre-flight was taken for and the plans its task declares, in order, which the page's
+#: picker offers. A reader of 16 refuses 17 and 17 refuses 16, by name.
+SCHEMA = 17
 
 #: How many refusals a session keeps, per source, and therefore how many one
 #: `Telemetry` frame can carry.
@@ -337,10 +347,15 @@ class PreflightItem:
 @dataclass(frozen=True, slots=True)
 class Preflight:
     """The pre-flight of a run about to start (spec §6.3: "the run about to start
-    carries its pre-flight results"): its task file, and its items in order."""
+    carries its pre-flight results"): its task file, and its items in order. **And its plan**
+    (schema 17; engine build C2b): the plan it was taken for, `None` for the plain run, and the
+    plans its task declares, in order, which the page's picker offers -- known only once the
+    task is loaded, which the pre-flight does."""
 
     task: str
     items: tuple
+    plan: str | None = None
+    plans: tuple = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -780,6 +795,27 @@ class Telemetry:
     #: `scheduler.past_targets`, while the block is not finished (schema 16): a criterion block
     #: drawing every condition until its criterion is met.
     past_targets: bool
+    #: The plan the run plays, by its name in the task, or `None` for the plain run (schema 17;
+    #: engine build C2b).
+    plan: str | None
+    #: `scheduler.next_block`'s name (schema 17): the block the plan goes on to as the open one
+    #: ends on its rule or its time -- a training progression's next stage up -- or `None` where
+    #: the plan ends there.
+    next_block: str | None
+    #: The seconds of trials left before the open block's time limit and the run's (schema 17),
+    #: on the time trials ran, a pause not counting (the PI, 2026-10-19); `None` with no limit.
+    block_left_s: float | None
+    run_left_s: float | None
+    #: The open block's number of trials (`task.Block.trials`), `None` without one (schema 17): what
+    #: a block past its targets draws on to, with its criterion (`rule`).
+    trials_to_run: int | None
+    #: `scheduler.passed_at` (schema 17): the trial after which a training progression's top stage
+    #: first met its rule, its animal working on past it, or `None` (the engine C2b plan's science
+    #: review, I1).
+    passed_at: int | None
+    #: `scheduler.fell_back` (schema 17): how many times the run's plan fell back a stage (the
+    #: science review, I2).
+    fell_back: int
 
     @classmethod
     def of(cls, session, tally, scheduler, index: int) -> "Telemetry":
@@ -977,6 +1013,15 @@ class Telemetry:
                   else "streak" if scheduler.streak else "percentage"),
             past_targets=(scheduler is not None and scheduler.past_targets
                           and not scheduler.finished),
+            # Engine build C2b (schema 17): the run's plan and its time, read from the session.
+            plan=session.plan,
+            next_block=(None if scheduler is None or scheduler.next_block is None
+                        else scheduler.next_block.name),
+            block_left_s=None if scheduler is None else session.left("block"),
+            run_left_s=None if scheduler is None else session.left("run"),
+            trials_to_run=None if scheduler is None else scheduler.block.trials,
+            passed_at=None if scheduler is None else scheduler.passed_at,
+            fell_back=0 if scheduler is None else scheduler.fell_back,
         )
 
 
@@ -990,6 +1035,8 @@ def _preflight_out(preflight: Preflight | None) -> dict | None:
     return {
         "task": preflight.task,
         "items": [{"name": i.name, "result": i.result, "said": i.said} for i in preflight.items],
+        "plan": preflight.plan,
+        "plans": list(preflight.plans),
     }
 
 
@@ -1222,6 +1269,13 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
         "aids": list(telemetry.aids),
         "rule": telemetry.rule,
         "past_targets": telemetry.past_targets,
+        "plan": telemetry.plan,
+        "next_block": telemetry.next_block,
+        "block_left_s": telemetry.block_left_s,
+        "run_left_s": telemetry.run_left_s,
+        "trials_to_run": telemetry.trials_to_run,
+        "passed_at": telemetry.passed_at,
+        "fell_back": telemetry.fell_back,
     }
 
 
@@ -1410,6 +1464,8 @@ def _telemetry_from(data: dict) -> Telemetry:
             else Preflight(
                 task=data["preflight"]["task"],
                 items=tuple(PreflightItem(**i) for i in data["preflight"]["items"]),
+                plan=data["preflight"]["plan"],
+                plans=tuple(data["preflight"]["plans"]),
             )
         ),
         question=_question_in(data["question"]),
@@ -1433,6 +1489,13 @@ def _telemetry_from(data: dict) -> Telemetry:
         aids=tuple(data["aids"]),
         rule=data["rule"],
         past_targets=data["past_targets"],
+        plan=data["plan"],
+        next_block=data["next_block"],
+        block_left_s=data["block_left_s"],
+        run_left_s=data["run_left_s"],
+        trials_to_run=data["trials_to_run"],
+        passed_at=data["passed_at"],
+        fell_back=data["fell_back"],
     )
 
 
@@ -1600,20 +1663,24 @@ class OpenSession:
 @dataclass(frozen=True, slots=True)
 class CheckRun:
     """Take a run's pre-flight without starting it (spec §6.2: "Pre-flight is shown
-    before the run starts"): a task file under `--tasks` and its starting values."""
+    before the run starts"): a task file under `--tasks`, its starting values, and since
+    engine build C2b the plan it would play, by its name in the task (`None`, the plain run)."""
 
     KIND: ClassVar[str] = "check"
 
     by: Actor
     task: str
     values: dict
+    plan: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class StartRun:
     """Start a run: its task, starting values and trial count, and **the unknown
     pre-flight items this person acknowledges, by name** (S9a §10). The service takes
-    the pre-flight again when this arrives, and starts nothing unless it passes."""
+    the pre-flight again when this arrives, and starts nothing unless it passes. **And
+    the plan it plays** (engine spec §13.1; engine build C2b), by its name in the task, or
+    `None` for the plain run of `trials` trials; a planned run's lengths are its plan's."""
 
     KIND: ClassVar[str] = "start"
 
@@ -1622,6 +1689,7 @@ class StartRun:
     values: dict
     trials: int
     acknowledged: tuple
+    plan: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1834,7 +1902,7 @@ def _encode_command(command: Command) -> bytes:
     elif isinstance(command, (CheckRun, StartRun)):
         payload = {
             "kind": command.KIND, "by": actors.to_map(command.by), "task": command.task,
-            "values": dict(command.values),
+            "values": dict(command.values), "plan": command.plan,
         }
         if isinstance(command, StartRun):
             payload["trials"] = command.trials
@@ -2177,8 +2245,10 @@ def _command_from(data: dict) -> Command:
         by = _actor(data.get("by"), kind)
         task = _word(data, "task", kind, by)
         values = _values(data, kind, by)
+        # The plan, by its name in the task, or none for the plain run (engine build C2b).
+        plan = _word(data, "plan", kind, by, optional=True)
         if kind == "check":
-            return CheckRun(by=by, task=task, values=values)
+            return CheckRun(by=by, task=task, values=values, plan=plan)
         trials = data.get("trials")
         if isinstance(trials, bool) or not isinstance(trials, int) or not 1 <= trials <= TRIALS_LIMIT:
             raise CommandRefused(
@@ -2197,7 +2267,8 @@ def _command_from(data: dict) -> Command:
                 f"a run's acknowledged items are at most {ACKNOWLEDGED_LIMIT} names, and "
                 f"{_quoted(acknowledged)} is not that, so it is refused",
             )
-        return StartRun(by=by, task=task, values=values, trials=trials, acknowledged=tuple(acknowledged))
+        return StartRun(by=by, task=task, values=values, trials=trials,
+                        acknowledged=tuple(acknowledged), plan=plan)
     if kind == "end":
         by = _actor(data.get("by"), "end")
         confirm = data.get("confirm", False)

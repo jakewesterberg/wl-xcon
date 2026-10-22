@@ -579,8 +579,8 @@ _SHAPES = {
         "session_id", "animal", "deployment", "view", "session_kind", "departure",
         "delivered_today", "answer", "amend_to", "amend_reason", "accepted",
     }),
-    "check": frozenset({"task", "values"}),
-    "start": frozenset({"task", "values", "trials", "acknowledged"}),
+    "check": frozenset({"task", "values", "plan"}),
+    "start": frozenset({"task", "values", "trials", "acknowledged", "plan"}),
     "end": frozenset({"session_id", "returned", "confirm"}),
     "resume_session": frozenset({"session_id"}),
     # Engine build C2a: a run's count and its drumming (the PI, 2026-10-11).

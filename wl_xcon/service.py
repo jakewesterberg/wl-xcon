@@ -1084,7 +1084,8 @@ class Service:
             return None
         return path
 
-    def _preflight(self, session: Session, task: Path, values: dict) -> tuple:
+    def _preflight(self, session: Session, task: Path, values: dict,
+                   plan: str | None = None) -> tuple:
         """Spec §6.2's items, taken now, in order -- the out-of-cage item always among
         them, since `preflight.gate` refuses a pre-flight without it.
 
@@ -1095,13 +1096,15 @@ class Service:
         own check raises, so the gate blocks on its fail, never on its absence.
 
         **It returns the run's warnings not yet accepted too**, for `_start` to hand to the
-        run."""
+        run. **Taken for `plan`**, by its name in the task, or the plain run (engine build C2b):
+        a plan the task lacks fails the task checks item, and the starting values cover the
+        structures the plan's conditions play, each condition's values held to their ranges."""
         settings = Path(session.spec.subject_settings) if session.spec.subject_settings else None
         owed: list = []
         try:
             item, loaded, findings = _preflight.task(
                 task, self.allocation, session.spec.geometry, session.spec.calibration,
-                deployment=session.spec.deployment,
+                deployment=session.spec.deployment, plan=plan,
             )
             checked = (item,)
         except Exception as broken:  # noqa: BLE001 -- see the docstring
@@ -1109,7 +1112,7 @@ class Service:
         # Starting values outside their declared ranges, checked widened (XC-352's D2): its
         # warnings join the run's, and what breaks the run fails the starting values item.
         beyond = _preflight.beyond(loaded, values, self.allocation, session.spec.geometry,
-                                   session.spec.calibration, session.spec.deployment)
+                                   session.spec.calibration, session.spec.deployment, plan)
 
         def warned():
             try:
@@ -1145,7 +1148,8 @@ class Service:
                 *_contained((_preflight.WARNINGS,), warned),
                 *_contained(
                     (_preflight.STARTING_VALUES,),
-                    lambda: _preflight.values(loaded, values, [f for f in beyond if f.blocking]),
+                    lambda: _preflight.values(loaded, values, [f for f in beyond if f.blocking],
+                                              plan),
                 ),
                 *_contained(
                     (_preflight.BOUNDED_CONFIG,)
@@ -1162,6 +1166,8 @@ class Service:
                     lambda: _preflight.unmeasured(session.pump),
                 ),
             ),
+            plan=plan,
+            plans=() if loaded is None else tuple(loaded.plans),
         ), owed
 
     def _check(self, command: _link.CheckRun) -> None:
@@ -1171,7 +1177,7 @@ class Service:
             return
         task = self._task(command.task, "check", command.by)
         if task is not None:
-            session.preflight, _ = self._preflight(session, task, command.values)
+            session.preflight, _ = self._preflight(session, task, command.values, command.plan)
 
     def _start(self, command: _link.StartRun) -> None:
         """**Welfare-critical.** Accept a run (spec §6.2): the pre-flight **taken now**,
@@ -1179,8 +1185,8 @@ class Service:
         items this person acknowledged by name (`preflight.gate`); only then is the run
         kept to start once this pass has published, with a seed drawn for it and the
         pre-flight as its start row records it -- who acknowledged each unknown
-        (`preflight.rows`). Its block plan and conditions come from the task program or
-        are chosen at the rig, and until either exists (XC-207) a run is one block.
+        (`preflight.rows`). It plays the plan the start names among its task's (XC-207;
+        engine build C2b), which its pre-flight is taken for, or with none the plain run.
 
         **A run past the out-of-cage limit is refused here, before `RUN_START`**
         (carried from Task 3): `Session.run` refuses none -- `welfare.preflight` checks no
@@ -1200,7 +1206,7 @@ class Service:
         task = self._task(command.task, "start", command.by)
         if task is None:
             return
-        checked, owed = self._preflight(session, task, command.values)
+        checked, owed = self._preflight(session, task, command.values, command.plan)
         session.preflight = checked
         # **Accepted once per session** (engine spec §19.3, §20.1): an unknown item accepted at
         # an earlier run, with the same sentence, counts as acknowledged here, under the name of
@@ -1230,6 +1236,7 @@ class Service:
                 trials=command.trials,
                 seed=self._seed(),
                 values=dict(command.values),
+                plan=command.plan,
             ),
             _preflight.rows(checked, command.by, command.acknowledged, carried),
             command.by,

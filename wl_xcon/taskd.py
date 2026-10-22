@@ -2351,6 +2351,25 @@ class Session:
         """One frame of this session as it stands, for a caller between its runs."""
         self._publish()
 
+    @property
+    def plan(self) -> str | None:
+        """The plan the run in progress, or the last one, plays, by its name in its task; `None`
+        for the plain run, or before any run (engine build C2b)."""
+        return None if self._run is None else self._run.plan
+
+    def left(self, which: str) -> float | None:
+        """The seconds of trials left before the open block's time limit (`"block"`) or the run's
+        (`"run"`), on the time trials ran, a pause not counting (the PI, 2026-10-19); `None` with
+        no limit, or before any run (engine build C2b): what the console shows."""
+        scheduler, plan = self._scheduler, self._played
+        if scheduler is None or plan is None:
+            return None
+        if which == "block":
+            limit, since = scheduler.block.time_limit_s, self._block_from
+        else:
+            limit, since = plan.time_limit_s, self._run_from
+        return None if limit is None else max(0.0, limit - (self._elapsed - since))
+
     def _after_service_run(self) -> None:
         """A service session's run is over (the b3a-1 plan, decisions 1 and 2): back
         between runs, where nothing applies a staged change, so any left is dropped and

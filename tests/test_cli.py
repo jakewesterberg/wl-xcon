@@ -1225,6 +1225,13 @@ def _telemetry(**overrides) -> Telemetry:
         aids=(),
         rule=None,
         past_targets=False,
+        plan=None,
+        next_block=None,
+        block_left_s=None,
+        run_left_s=None,
+        trials_to_run=None,
+        passed_at=None,
+        fell_back=0,
     )
     return replace(base, **overrides) if overrides else base
 

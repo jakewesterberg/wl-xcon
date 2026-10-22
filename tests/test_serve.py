@@ -2546,11 +2546,23 @@ PAGE = Box("jake")
             by=PAGE, task="fixation_detection.py", values={}, trials=3,
             acknowledged=("pump calibration", "eye tracker"),
         )),
+        # Engine build C2b: the plan, by its name in the task, or none for the plain run.
+        ({"kind": "check", "by": "jake", "task": "planned.py", "values": {}, "plan": "train"},
+         CheckRun(by=PAGE, task="planned.py", values={}, plan="train")),
+        ({**START_BODY, "plan": "train"}, StartRun(
+            by=PAGE, task="fixation_detection.py", values={}, trials=3,
+            acknowledged=("pump calibration", "eye tracker"), plan="train",
+        )),
+        ({**START_BODY, "plan": None}, StartRun(
+            by=PAGE, task="fixation_detection.py", values={}, trials=3,
+            acknowledged=("pump calibration", "eye tracker"),
+        )),
         ({**END_BODY, "session_id": "2027-01-14_01", "returned": "now"},
          EndSession(by=PAGE, session_id="2027-01-14_01", returned="now", confirm=False)),
         (END_BODY, EndSession(by=PAGE, session_id=None, returned=None, confirm=False)),
     ],
-    ids=["open", "open-amended", "check", "start", "end-with-return", "end-return-later"],
+    ids=["open", "open-amended", "check", "start", "check-plan", "start-plan", "start-plain",
+         "end-with-return", "end-return-later"],
 )
 def test_each_session_command_the_page_sends_is_the_one_the_wire_would_decode(body, expected):
     """The b3a-2 plan, decision 3: a page's body is built by the wire's own function, so
@@ -2576,6 +2588,7 @@ def test_each_session_command_the_page_sends_is_the_one_the_wire_would_decode(bo
         ({"kind": "check", "by": "jake", "task": "", "values": {}}, "task is text of 1 to 200"),
         ({"kind": "check", "by": "jake", "task": "t.py", "values": [1]}, "at most 64 named settings"),
         ({**START_BODY, "trials": "3"}, "trials are a whole number from 1"),
+        ({**START_BODY, "plan": ""}, "a 'start' command's plan is text of 1 to 200 characters"),
         ({**START_BODY, "trials": True}, "trials are a whole number from 1"),
         ({**START_BODY, "acknowledged": "pump calibration"}, "acknowledged items are at most 16 names"),
         ({**START_BODY, "values": {"fix_hold": True}}, "a setting is a finite number"),
