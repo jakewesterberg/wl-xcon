@@ -35,7 +35,8 @@ from _tls import client_context, material  # noqa: E402
 from wl_xcon import signin, warnlist, web  # noqa: E402
 from wl_xcon.findings import SESSION_KINDS  # noqa: E402
 from wl_xcon.link import (  # noqa: E402
-    ClearOwed, Drum, ManualReward, OpenSession, Pause, Training, WarningRow,
+    BackBlock, CheckRun, ClearOwed, Drum, ManualReward, NextBlock, OpenSession, Pause, Preflight,
+    PreflightItem, StartRun, Training, WarningRow,
 )
 from wl_xcon.photometry import SRGB  # noqa: E402
 from wl_xcon.warnlist import HEAD_FREE  # noqa: E402
@@ -1236,3 +1237,89 @@ def test_the_new_session_dialog_scrolls_to_its_button_in_a_short_window(rig):
     assert taller, "the dialog must be taller than the window for this to test scrolling"
     page.click("#dn-ok")  # Playwright scrolls the button into view first
     rig.wait_for(lambda: _opens(rig))
+
+# --- Plans (engine build C2b) ----------------------------------------------------------------
+
+
+def _between_runs(**over):
+    """A `wlx taskd` session between runs offering a task with plans, its first run ended."""
+    fields = dict(phase="between_runs", service=True, run_index=0, stop_kind="completed",
+                  stopped_because="every block is finished",
+                  offered_tasks=("fixation_detection.py", "planned.py"))
+    fields.update(over)
+    return frame(**fields)
+
+
+def _checks(rig) -> list:
+    return [seen for seen in rig.dispatch.seen if isinstance(seen, CheckRun)]
+
+
+def test_choosing_a_task_preselects_its_first_plan_and_start_sends_the_plan_its_preflight_is_for(
+        rig):
+    """The PI, 2026-10-19, "Preselect first, keep plain": choosing a task takes its pre-flight,
+    and once that brings the task's plans the page preselects the first, takes the pre-flight for
+    it and hides the plain run's trials box; *start run* then sends that plan, as the member's.
+    Test the path through the page's own script: the select, the frame, the swap, the post."""
+    rig.hub.offer(_between_runs())
+    page = rig.browser_page()
+    _sign_in(page)
+    page.select_option("#task-sel", "planned.py")
+    rig.wait_for(lambda: _checks(rig))
+    passing = (PreflightItem("task checks", "pass", "planned.py passes its load-time checks"),)
+    rig.hub.offer(_between_runs(preflight=Preflight("planned.py", passing, plan=None,
+                                                    plans=("train", "test"))))
+    rig.wait_for(lambda: len(_checks(rig)) == 2)
+    rig.hub.offer(_between_runs(preflight=Preflight("planned.py", passing, plan="train",
+                                                    plans=("train", "test"))))
+    page.wait_for_selector('[data-cmd="start"][data-plan="train"]:not([disabled])')
+    hidden = page.evaluate('document.getElementById("run-trials").closest("label").hidden')
+    page.click('[data-cmd="start"]')
+    rig.wait_for(lambda: any(isinstance(seen, StartRun) for seen in rig.dispatch.seen))
+
+    first, second = _checks(rig)
+    started = next(seen for seen in rig.dispatch.seen if isinstance(seen, StartRun))
+    assert (first.task, first.plan, second.task, second.plan) == (
+        "planned.py", None, "planned.py", "train")
+    assert hidden is True
+    assert (started.task, started.plan, started.by.name) == (
+        "planned.py", "train", "Jake Westerberg")
+
+
+def test_the_only_task_offered_has_its_first_plan_preselected_as_its_plans_arrive(rig):
+    """The engineering review, I3: on a rig offering one task, the task selector never changes, so
+    the page preselected nothing. Its plans arrive with the pre-flight the pill takes, and the
+    first is preselected then and its pre-flight taken -- once: the plan's own pre-flight leaves
+    it standing."""
+    rig.hub.offer(_between_runs(offered_tasks=("planned.py",)))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('[data-cmd="check"]')
+    rig.wait_for(lambda: _checks(rig))
+    passing = (PreflightItem("task checks", "pass", "planned.py passes its load-time checks"),)
+    rig.hub.offer(_between_runs(offered_tasks=("planned.py",), preflight=Preflight(
+        "planned.py", passing, plan=None, plans=("train", "test"))))
+    rig.wait_for(lambda: len(_checks(rig)) == 2)
+    rig.hub.offer(_between_runs(offered_tasks=("planned.py",), preflight=Preflight(
+        "planned.py", passing, plan="train", plans=("train", "test"))))
+    page.wait_for_selector('[data-cmd="start"][data-plan="train"]:not([disabled])')
+
+    assert page.evaluate('document.getElementById("plan-sel").value') == "train"
+    assert [(check.task, check.plan) for check in _checks(rig)] == [
+        ("planned.py", None), ("planned.py", "train")]
+
+
+def test_next_block_and_back_one_reach_the_rig_as_the_members(rig):
+    """The PI, 2026-10-19, "'Next' and 'back one'": "Both directions by hand, each recorded with
+    who"."""
+    rig.hub.offer(frame(plan="train", block="easy", next_block="hard"))
+    page = rig.browser_page()
+    _sign_in(page)
+
+    page.click('[data-cmd="next_block"]')
+    rig.wait_for(lambda: rig.dispatch.seen)
+    page.click('[data-cmd="back_block"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
+
+    moved, back = rig.dispatch.seen
+    assert (type(moved), moved.by.name) == (NextBlock, "Jake Westerberg")
+    assert (type(back), back.by.name) == (BackBlock, "Jake Westerberg")

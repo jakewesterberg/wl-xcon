@@ -54,6 +54,7 @@ from wl_xcon.web import (
     FRAGMENT_IDS,
     LEGEND,
     NO_MARK_ENDPOINT,
+    PLAIN_RUN,
     REWARD_ONLY_PAUSED,
     RUN_TRIALS,
     SIGN_IN_FIRST,
@@ -844,7 +845,8 @@ def test_the_pane_says_where_a_switch_changes_nothing_and_a_block_is_past_its_ta
     (the smaller ruling)."""
     flat = fragments(frame(owed={"session": 30}, clearable=False, clearing=True), view())["rt-need"]
     streak = fragments(frame(rule="streak"), view())["rt-need"]
-    past = fragments(frame(owed={"near": 0}, past_targets=True), view())["rt-need"]
+    past = fragments(frame(owed={"near": 0}, past_targets=True, rule="percentage"),
+                     view())["rt-need"]
 
     assert '<span class="nm">clear is on, but nothing in this block can be cleared</span>' in flat
     assert ('<span class="nm">a percentage counts every answer, drummed too -- a streak counts '
@@ -1825,8 +1827,8 @@ def test_the_preflight_panel_shows_each_item_its_result_and_no_unplanned_warning
     assert '<span class="st untested" title="unknown"></span><span>eye tracker</span>' in shown
     assert "past &lt;the&gt; limit" in shown
     assert (
-        '<div class="sub">for fixation_detection.py · a fail blocks the run; each unknown '
-        "starts it only on your acknowledgement, by name, written into runs.jsonl</div>"
+        '<div class="sub">for fixation_detection.py · the plain run · a fail blocks the run; each '
+        "unknown starts it only on your acknowledgement, by name, written into runs.jsonl</div>"
     ) in shown
     assert "unplanned" not in shown and "timing tier" not in shown
     assert 'data-task="fixation_detection.py"' in shown
@@ -1859,13 +1861,13 @@ def test_between_runs_start_run_carries_the_shown_preflights_task_and_waits_for_
     failing = fragments(_between(preflight=FAILING), view())["controls"]
 
     assert (
-        '<button type="button" class="btn go" data-cmd="start" data-task="" disabled '
+        '<button type="button" class="btn go" data-cmd="start" data-task="" data-plan="" disabled '
         'title="take the pre-flight first: choose a task, or press the pre-flight pill">'
         "start run</button>"
     ) in none
     assert (
         '<button type="button" class="btn go" data-cmd="start" '
-        'data-task="fixation_detection.py">start run</button>'
+        'data-task="fixation_detection.py" data-plan="">start run</button>'
     ) in ready
     assert 'disabled title="pre-flight: out of cage failing">start run</button>' in failing
     # No unplanned-run warning beside it (the PI, 2026-10-01, through wl-works).
@@ -2215,7 +2217,7 @@ def test_away_from_the_box_every_session_form_is_greyed():
     lan = page(fragments(_between(preflight=PREFLIGHT), view(can_write=False)), stale_after_s=30.0, nonce="n0nce")
 
     for control in (
-        "task-sel", "run-trials", "dn-subject", "dn-deployment", "dn-view", "dn-left",
+        "task-sel", "plan-sel", "run-trials", "dn-subject", "dn-deployment", "dn-view", "dn-left",
         "dn-id", "dn-given", "dn-ok", "end-return", "end-yes", "ret-at", "ret-yes",
         "amend-to", "amend-why", "amend-yes",
     ):
@@ -2271,7 +2273,8 @@ def test_a_frame_keeps_the_option_chosen_in_a_select():
     option a person chose stays chosen while it is still offered."""
     swap = _function("swap")
 
-    assert 'var chosen = node && node.tagName === "SELECT" ? node.value : null;' in swap
+    assert ('var chosen = node && node.tagName === "SELECT" && id !== "plan-sel" ? node.value : '
+            "null;") in swap
     assert swap.index("var chosen") < swap.index("node.innerHTML = html;") < swap.index(
         "choose(node, chosen);"
     )
@@ -2300,13 +2303,15 @@ def test_start_sends_the_task_whose_preflight_is_shown_and_only_while_it_is_chos
 
     assert "var button = el(\"controls\").querySelector('[data-cmd=\"start\"]');" in start
     assert 'var task = button ? button.getAttribute("data-task") : "";' in start
-    assert "if (!task || task !== chosenTask()) {" in start
+    assert 'var plan = button ? (button.getAttribute("data-plan") || null) : null;' in start
+    assert "if (!task || task !== chosenTask() || plan !== chosenPlan()) {" in start
     assert "if (!Number.isInteger(trials) || trials < 1) {" in start
     assert (
-        'post({ kind: "start", task: task, values: {}, trials: trials, acknowledged: acknowledged });'
+        'post({ kind: "start", task: task, values: {}, trials: trials, '
+        'acknowledged: acknowledged,\n           plan: plan });'
     ) in start
-    assert 'post({ kind: "check", task: task, values: {} });' in _function("takePreflight")
-    assert 'else if (e.target.id === "task-sel") { if (betweenRuns()) { takePreflight(false); } }' in _SCRIPT
+    assert 'post({ kind: "check", task: task, values: {}, plan: chosenPlan() });' in _function(
+        "takePreflight")
 
 
 def test_a_new_session_is_sent_with_every_field_the_dialog_asks_as_typed():
@@ -2972,3 +2977,113 @@ def test_a_carried_row_with_no_actor_does_not_say_by_nobody():
     pane = fragments(shown, view())["preflight"]
 
     assert "accepted earlier this session at " in pane and "by  at" not in pane
+
+# --- Plans (engine build C2b) ----------------------------------------------------------------
+
+PLANNED = Preflight(
+    "planned.py",
+    (PreflightItem("task checks", "pass", "planned.py passes its load-time checks"),),
+    plan="train",
+    plans=("train", "test"),
+)
+
+
+def test_the_plan_picker_offers_the_tasks_plans_then_the_plain_run_the_shown_preflights_chosen():
+    """The PI, 2026-10-19, "Preselect first, keep plain": the task's plans in order, then the plain
+    run as one more labeled choice; the plan the shown pre-flight was taken for selected, so a wrong
+    plan shows; no pre-flight, the plain run alone."""
+    planned = fragments(_between(preflight=PLANNED), view())["plan-sel"]
+    plain = fragments(_between(preflight=PREFLIGHT), view())["plan-sel"]
+
+    assert planned == (
+        '<option value="train" data-for="planned.py" selected>plan train</option>'
+        '<option value="test" data-for="planned.py">plan test</option>'
+        f'<option value="" data-for="planned.py">{PLAIN_RUN}</option>'
+    )
+    assert plain == (
+        f'<option value="" data-for="fixation_detection.py" selected>{PLAIN_RUN}</option>')
+    assert fragments(_between(), view())["plan-sel"] == f'<option value="">{PLAIN_RUN}</option>'
+    # The science review, I8: "every trial paying" read as "every trial rewarded".
+    assert PLAIN_RUN == "plain run: the trials below, each counted once, none shown again"
+    assert fragments(idle(), view())["plan-sel"] == f'<option value="">{PLAIN_RUN}</option>'
+    assert 'data-plan="train"' in fragments(_between(preflight=PLANNED), view())["controls"]
+    assert "for planned.py · plan train · a fail blocks" in fragments(
+        _between(preflight=PLANNED), view())["preflight"]
+
+
+def test_a_tasks_first_plan_is_preselected_once_its_plans_arrive_and_a_plan_hides_the_trials():
+    """The page learns a task's plans from its pre-flight, so choosing a task takes the plain run's
+    first, then -- that task's plans arrived -- preselects its first plan and takes its pre-flight;
+    a person's own choice of plan, the plain run included, stands."""
+    preselect = _function("preselect")
+
+    assert "if (task && task === chosenTask() && task !== plansOf) {" in preselect
+    assert "if (first.value && !select.value && betweenRuns()) {" in preselect
+    assert "select.value = first.value;" in preselect and "takePreflight(false);" in preselect
+    assert 'if (id === "plan-sel") { preselect(); }' in _function("swap")
+    assert ('if (betweenRuns()) { plansOf = null; el("plan-sel").value = ""; '
+            "takePreflight(false); }") in _SCRIPT
+    assert 'else if (e.target.id === "plan-sel") {\n      plansOf = chosenTask();' in _SCRIPT
+    assert ('el("run-trials").closest("label").hidden = Boolean(chosenPlan());'
+            in _function("showTrials"))
+
+
+def test_a_running_plan_shows_its_block_what_comes_next_its_time_left_and_the_moves():
+    """Engine build C2b: the plan, the open block, the next, the time left before the block's and
+    the run's limits, and *next block* and *back one* (the PI, 2026-10-19), *next block* greyed at
+    the plan's last block; a plain run shows none of it."""
+    running = fragments(frame(plan="train", block="easy", next_block="hard", block_left_s=125.0,
+                              run_left_s=1800.0), view())["rt-need"]
+    last = fragments(frame(plan="train", block="hard", next_block=None), view())["rt-need"]
+
+    assert ("plan train · block easy · 2:05 of the block&#x27;s time left · 30:00 of the "
+            "run&#x27;s time left · next: hard") in running
+    assert '<button type="button" class="btn" data-cmd="next_block">next block</button>' in running
+    assert '<button type="button" class="btn" data-cmd="back_block">back one</button>' in running
+    assert ('data-cmd="next_block" disabled title="this block is the last its plan gives"'
+            in last and "the plan&#x27;s last block" in last)
+    assert 'data-cmd="next_block"' not in fragments(frame(), view())["rt-need"]
+
+
+def test_what_a_blocks_time_left_owed_is_said_as_not_run():
+    """The PI, 2026-10-19: trials a block still owed when its time ran out are "recorded as not
+    run, 'time ran out'"."""
+    shown = fragments(frame(shortfalls=(ShortfallRow("easy", "near", 3, "time", False, None, 40),)),
+                      view())["rt-need"]
+
+    assert "3 short in easy · not run: its block's time ran out" in shown
+
+
+def test_what_the_runs_time_left_owed_is_said_as_the_runs():
+    """The plan's science review, I3: the console's label says whose time ran out."""
+    shown = fragments(frame(shortfalls=(
+        ShortfallRow("easy", "near", 3, "run_time", False, None, 40),)), view())["rt-need"]
+
+    assert "3 short in easy · not run: the run's time ran out" in shown
+
+
+def test_a_block_past_its_targets_says_what_it_draws_until_and_a_passed_top_stage_says_so():
+    """The plan's science review, I1: "drawing until the criterion is met" was said of a block of
+    a number of trials too, and a top stage passed said nothing; each now says what is true -- its
+    criterion, its number of trials, or both -- and a training progression's passed top stage
+    says when it passed and that the animal keeps working."""
+    def need(**over) -> str:
+        return fragments(frame(past_targets=True, **over), view())["rt-need"]
+
+    assert "every target used up: drawing until the criterion is met<" in need(rule="percentage")
+    assert "every target used up: drawing until 200 trials are run<" in need(trials_to_run=200)
+    assert ("drawing until the criterion is met and 200 trials are run" in
+            need(rule="streak", trials_to_run=200))
+    passed = fragments(frame(plan="train", block="hard", passed_at=41), view())["rt-need"]
+    assert "top stage passed at trial 41; keeps working" in passed
+    assert "drawing until" not in passed
+
+
+def test_the_plan_row_counts_how_often_the_plan_fell_back():
+    """The plan's science review, I2: a move-back count in the plan row."""
+    def row(fell_back) -> str:
+        return fragments(frame(plan="train", block="easy", fell_back=fell_back), view())["rt-need"]
+
+    assert "fell back" not in row(0)
+    assert "the plan&#x27;s last block · fell back once" in row(1)
+    assert " · fell back 3 times" in row(3)

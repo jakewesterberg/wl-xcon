@@ -117,6 +117,7 @@ FRAGMENT_IDS = (
     "strip",
     "banners",
     "task-sel",
+    "plan-sel",
     "pf-pill",
     "controls",
     "rt-trials",
@@ -178,11 +179,14 @@ REWARD_ONLY_PAUSED = "a manual reward is given only while the session is paused:
 #: milliseconds: the mockup's debounce (spec §5.2), housekeeping and not a
 #: measurement. The page's script reads it from `<body>`.
 DEBOUNCE_MS = 600
-#: The trials a run is offered with: `wlx run --trials`'s default (`cli`), since a run from
-#: the page is `wlx run`'s flat run of N trials, one block, until a task program or the rig
-#: gives a block plan (XC-207; the b3a-2 plan, decision 6). A starting figure the person
-#: changes, not a rule or a measurement.
+#: The trials the plain run is offered with: `wlx run --trials`'s default (`cli`), the flat run
+#: of N trials, one block (the b3a-2 plan, decision 6). A run of one of its task's plans has its
+#: plan's lengths, and the box is hidden while a plan is chosen (engine build C2b). A starting
+#: figure the person changes, not a rule or a measurement.
 RUN_TRIALS = 1000
+#: The plain run as the plan picker offers it (the PI, 2026-10-19, "Preselect first, keep plain":
+#: "the plain run stays as one more labeled choice").
+PLAIN_RUN = "plain run: the trials below, each counted once, none shown again"
 #: What *end session* asks before it is sent (the mockup's `end-confirm`, P4d-2b spec
 #: §6.2): what ending does here, the head's release now and the return now or later (the
 #: b3a-1 plan, decision 6) -- not the mockup's "the in-session clock stops, and the code
@@ -655,6 +659,24 @@ def _banners(frame: Telemetry | None, view: View) -> str:
 # --- the run's task and its pre-flight (P4d-2b b3a-2) ------------------------------
 
 
+def _plans(frame: Telemetry | Idle | None) -> str:
+    """The plan picker's options (engine build C2b; the PI, 2026-10-19, "Preselect first, keep
+    plain"): the plans the shown pre-flight's task declares, in order, then the plain run, one
+    more labeled choice; the plan the pre-flight was taken for selected, so a wrong one shows. Each
+    names the task it is for (`data-for`): the page's script preselects a task's first plan once
+    that task's own plans arrive with its pre-flight. No pre-flight shown, the plain run alone."""
+    preflight = None if frame is None or isinstance(frame, Idle) else frame.preflight
+    if preflight is None:
+        return f'<option value="">{_e(PLAIN_RUN)}</option>'
+    task = _e(preflight.task)
+
+    def option(value: str, label: str) -> str:
+        chosen = " selected" if (preflight.plan or "") == value else ""
+        return f'<option value="{_e(value)}" data-for="{task}"{chosen}>{_e(label)}</option>'
+
+    return "".join(option(name, f"plan {name}") for name in preflight.plans) + option("", PLAIN_RUN)
+
+
 def _options(names, none: str, choose: str | None = None) -> str:
     """A select's options, one per name, or one empty option saying why there is none.
     A frame re-renders them; the page's script keeps the option a person chose (the
@@ -774,11 +796,14 @@ def _preflight_pane(frame: Telemetry | Idle | None, view: View) -> str:
             "pill</span>"
         )
     task = _e(frame.preflight.task)
+    # The plan it was taken for (engine build C2b): a wrong one shows here and in the start row.
+    plan = ("the plain run" if frame.preflight.plan is None
+            else f"plan {_e(frame.preflight.plan)}")
     carried = _accepted(frame)
     rows = "".join(_pf_row(item, view, carried) for item in frame.preflight.items)
     return (
-        f'<div class="sub">for {task} · a fail blocks the run; each unknown starts it only '
-        "on your acknowledgement, by name, written into runs.jsonl</div>"
+        f'<div class="sub">for {task} · {plan} · a fail blocks the run; each unknown starts it '
+        "only on your acknowledgement, by name, written into runs.jsonl</div>"
         f'<div class="pf" data-task="{task}">{rows}</div>'
     )
 
@@ -911,10 +936,12 @@ def _start_button(frame: Telemetry, view: View) -> str:
         failing = [i.name for i in preflight.items if i.result not in ("pass", "unknown")]
         why = f"pre-flight: {', '.join(failing)} failing" if failing else None
     task = "" if preflight is None else preflight.task
+    # The plan it was taken for, which the script sends with it (engine build C2b).
+    plan = "" if preflight is None or preflight.plan is None else preflight.plan
     off = _gate(view, "" if why is None else f' disabled title="{_e(why)}"')
     return (
-        f'<button type="button" class="btn go" data-cmd="start" data-task="{_e(task)}"'
-        f"{off}>start run</button>"
+        f'<button type="button" class="btn go" data-cmd="start" data-task="{_e(task)}" '
+        f'data-plan="{_e(plan)}"{off}>start run</button>'
     )
 
 
@@ -1061,12 +1088,52 @@ def _work(frame: Telemetry | None) -> str:
 #: The drumming switches, each scope's label (`scheduler.DRUM_SCOPES`; the PI, 2026-10-11).
 DRUM_SWITCHES = (("block", "drum this block"), ("run", "drum this run"), ("off", "stop drumming"))
 
-#: Why a repeat limit forgave a condition's debt, as the pane says it (engine spec §16.6).
+#: Why a repeat limit forgave a condition's debt, as the pane says it (engine spec §16.6), and
+#: since engine build C2b what a block's time left owed (the PI, 2026-10-19: "recorded as not
+#: run, 'time ran out'").
 _FORGIVEN = {
     "cap": "possible avoidance: its failed repeats in a row reached its limit",
     "rig": ("its repeat limit was reached with tries the rig lost (a lost tracker or a fault): not "
             "flagged as avoidance"),
+    "time": "not run: its block's time ran out",
+    # Whose time ran out, said (the engine C2b plan's science review, I3).
+    "run_time": "not run: the run's time ran out",
 }
+
+
+def _left(seconds: float) -> str:
+    """Seconds of trials left, as minutes and seconds."""
+    whole = int(seconds)
+    return f"{whole // 60}:{whole % 60:02d}"
+
+
+def _plan_row(frame: Telemetry, view: View) -> str:
+    """The run's plan (engine build C2b): its name, the open block and the one its plan goes on
+    to, the time left before the block's and the run's limits, a pause not counting (the PI,
+    2026-10-19), and *next block* and *back one* (the PI, 2026-10-19, "'Next' and 'back one'":
+    "Both directions by hand, each recorded with who"), *next block* greyed, saying why, at the
+    plan's last block. The rig refuses *back one* at the run's first block, saying so. And how
+    often a training progression fell back a stage (the plan's science review, I2)."""
+    said = [f"plan {frame.plan}", f"block {frame.block}"]
+    if frame.block_left_s is not None:
+        said.append(f"{_left(frame.block_left_s)} of the block's time left")
+    if frame.run_left_s is not None:
+        said.append(f"{_left(frame.run_left_s)} of the run's time left")
+    said.append(f"next: {frame.next_block}" if frame.next_block is not None
+                else "the plan's last block")
+    if frame.fell_back:
+        # How often the plan moved the animal back a stage (the plan's science review, I2).
+        said.append("fell back once" if frame.fell_back == 1
+                    else f"fell back {frame.fell_back} times")
+    nothing = ("" if frame.next_block is not None
+               else ' disabled title="this block is the last its plan gives"')
+    return (
+        f'<div class="kv"><span class="nm">{_e(" · ".join(said))}</span>'
+        f'<button type="button" class="btn" data-cmd="next_block"{_gate(view, nothing)}>'
+        f"next block</button>"
+        f'<button type="button" class="btn" data-cmd="back_block"{_gate(view)}>back one</button>'
+        f"</div>"
+    )
 
 
 def _counted(row: ConditionRow) -> str:
@@ -1117,11 +1184,22 @@ def _need(frame: Telemetry | None, view: View) -> str:
         if condition in counted:
             rows.append(_counted(counted[condition]))
     rows = rows or ['<span class="nm">nothing still needed</span>']
-    if live and frame.past_targets:
-        # Past a criterion block's targets nothing is owed, and every condition comes until the
-        # criterion is met (the PI, 2026-10-18; the controller's smaller ruling).
-        rows.append('<div class="kv"><span class="nm">every target used up: drawing until the '
-                    'criterion is met</span></div>')
+    if live and frame.plan is not None:
+        rows.insert(0, _plan_row(frame, view))
+    if live and frame.passed_at is not None:
+        # A training progression's top stage passed, its animal working on (the PI, 2026-10-19,
+        # "Same, but top keeps going"; the plan's science review, I1).
+        rows.append(f'<div class="kv"><span class="nm">top stage passed at trial '
+                    f'{_e(frame.passed_at)}; keeps working</span></div>')
+    elif live and frame.past_targets:
+        # Past its targets nothing is owed, and every condition comes until what else ends the
+        # block is met: its criterion, its number of trials, or both (the PI, 2026-10-18; the
+        # plan's science review, I1).
+        until = " and ".join(said for said, on in (
+            ("the criterion is met", frame.rule is not None),
+            (f"{frame.trials_to_run} trials are run", frame.trials_to_run is not None)) if on)
+        rows.append(f'<div class="kv"><span class="nm">every target used up: drawing until '
+                    f'{_e(until or "its rule is met")}</span></div>')
     for short in frame.shortfalls:
         why = (f"cleared by {_who(short.by)}" if short.because == "cleared"
                else _FORGIVEN.get(short.because, _e(short.because)))
@@ -1597,6 +1675,7 @@ def _idle(frame: Idle, view: View) -> dict[str, str]:
     panes["rt-health"] = _health_pane(frame, view)
     panes["rt-changes"] = _idle_refusals(frame)
     panes["task-sel"] = _options(frame.offered_tasks, "no task offered")
+    panes["plan-sel"] = _plans(None)
     panes["setup"] = _idle_setup(frame, view)
     panes["dn-subject"] = _options(frame.animals, "no animal offered", "choose the animal")
     panes["warnings"] = _warnings_pane(frame)
@@ -1617,6 +1696,7 @@ def fragments(frame: Telemetry | Idle | None, view: View) -> dict[str, str]:
         "strip": _strip(frame, view),
         "banners": _banners(frame, view),
         "task-sel": _options(() if frame is None else frame.offered_tasks, "no task offered"),
+        "plan-sel": _plans(frame),
         "pf-pill": _pf_pill(frame, view),
         "controls": _controls(frame, view),
         "rt-trials": _trials(frame),
@@ -2488,13 +2568,15 @@ _SCRIPT = """
   function swap(id, html) {
     if (id === "params" && busy()) { heldParams = html; return; }
     var node = el(id);
-    var chosen = node && node.tagName === "SELECT" ? node.value : null;
+    // The plan picker shows the plan its pre-flight was taken for, so a frame's choice stands.
+    var chosen = node && node.tagName === "SELECT" && id !== "plan-sel" ? node.value : null;
     if (node) { node.innerHTML = html; }
     if (chosen !== null) { choose(node, chosen); }
     // Before the hooks: `holdReward` must see a button as the sign-in leaves it.
     applySignIn();
     if (id === "controls") { holdReward(); }
     if (id === "preflight") { restoreAcks(); }
+    if (id === "plan-sel") { preselect(); }
     if (id === "end-actions") { settleOpen(); }
   }
   function release() {
@@ -2722,6 +2804,27 @@ _SCRIPT = """
   // field is a static element no frame replaces; each form sends one command through
   // `post`, the one `fetch`, which adds who sent it.
   function chosenTask() { return el("task-sel").value; }
+  // Engine build C2b (the PI, 2026-10-19, "Preselect first, keep plain"): the plan a run plays,
+  // the empty choice the plain run; a task's first plan preselected once, as its plans first
+  // arrive with a plain run's pre-flight -- the task chosen or the only one offered (the
+  // engineering review, I3) -- a choice made since standing; the trials box hidden while a plan
+  // is chosen. `plansOf`, the task whose plans the page has offered.
+  var plansOf = null;
+  function chosenPlan() { return el("plan-sel").value || null; }
+  function showTrials() { el("run-trials").closest("label").hidden = Boolean(chosenPlan()); }
+  function preselect() {
+    var select = el("plan-sel");
+    var first = select.options[0];
+    var task = first ? first.getAttribute("data-for") : null;
+    if (task && task === chosenTask() && task !== plansOf) {
+      plansOf = task;
+      if (first.value && !select.value && betweenRuns()) {
+        select.value = first.value;
+        takePreflight(false);
+      }
+    }
+    showTrials();
+  }
   function betweenRuns() {
     // The pre-flight pill is a button only between runs (`_pf_pill`).
     return Boolean(el("pf-pill").querySelector('[data-cmd="check"]'));
@@ -2730,15 +2833,17 @@ _SCRIPT = """
     var task = chosenTask();
     acked = {};
     if (!task) { tell("not sent: no task is offered to check", "crit"); return; }
-    post({ kind: "check", task: task, values: {} });
+    post({ kind: "check", task: task, values: {}, plan: chosenPlan() });
     if (showPanel) { el("t-setup").checked = true; }
   }
   function startRun() {
     var button = el("controls").querySelector('[data-cmd="start"]');
     var task = button ? button.getAttribute("data-task") : "";
+    var plan = button ? (button.getAttribute("data-plan") || null) : null;
     var trials = Number(el("run-trials").value.trim());
-    if (!task || task !== chosenTask()) {
-      tell("not sent: the pre-flight shown is not for the task chosen; take its pre-flight first (the pre-flight pill)", "crit");
+    if (!task || task !== chosenTask() || plan !== chosenPlan()) {
+      tell("not sent: the pre-flight shown is not for the task and plan chosen; " +
+           "take its pre-flight first (the pre-flight pill)", "crit");
       return;
     }
     if (!Number.isInteger(trials) || trials < 1) {
@@ -2751,7 +2856,8 @@ _SCRIPT = """
     });
     acked = {};
     restoreAcks();
-    post({ kind: "start", task: task, values: {}, trials: trials, acknowledged: acknowledged });
+    post({ kind: "start", task: task, values: {}, trials: trials, acknowledged: acknowledged,
+           plan: plan });
   }
   function openNew() {
     el("dn-msg").textContent = "";
@@ -2913,7 +3019,14 @@ _SCRIPT = """
     if (!e.target.matches) { return; }
     if (e.target.matches("input[data-param]")) { schedule(e.target); }
     else if (e.target.matches("input[data-ack]")) { acked[e.target.getAttribute("data-ack")] = e.target.checked; }
-    else if (e.target.id === "task-sel") { if (betweenRuns()) { takePreflight(false); } }
+    else if (e.target.id === "task-sel") {
+      if (betweenRuns()) { plansOf = null; el("plan-sel").value = ""; takePreflight(false); }
+    }
+    else if (e.target.id === "plan-sel") {
+      plansOf = chosenTask();
+      showTrials();
+      if (betweenRuns()) { takePreflight(false); }
+    }
   });
   document.addEventListener("focusout", function () { setTimeout(release, 0); });
   document.addEventListener("keydown", function (e) {
@@ -3135,6 +3248,7 @@ def page(
   <div class="inline info" id="amend-form" role="dialog" aria-label="amend the departure" hidden><span>amend the departure · the corrected time</span><input id="amend-to" autocomplete="off" placeholder="HH:MM, or 2027-01-13T22:40" aria-label="the corrected departure"{off}><span>why</span><input id="amend-why" maxlength="500" autocomplete="off" aria-label="why it is amended"{off}><span class="nm">your name is recorded with it</span><button class="btn small primary" id="amend-yes" type="button"{off}>send amendment</button><button class="btn small" id="amend-no" type="button">cancel</button></div>
   <section class="controlbar glass" aria-label="controls">
     <label class="tsel" for="task-sel"><span class="k">Task</span><select id="task-sel" aria-label="task"{off}>{p['task-sel']}</select></label>
+    <label class="tsel" for="plan-sel"><span class="k">Plan</span><select id="plan-sel" aria-label="plan"{off}>{p['plan-sel']}</select></label>
     <label class="tsel" for="run-trials"><span class="k">Trials</span><input class="field mono" id="run-trials" value="{RUN_TRIALS}" inputmode="numeric" autocomplete="off" aria-label="trials"{off}></label>
     <span id="pf-pill">{p['pf-pill']}</span>
     <span class="sep" aria-hidden="true"></span>

@@ -4187,7 +4187,8 @@ def test_page_e2e_open_a_session_run_it_twice_and_end_it(tmp_path, monkeypatch, 
     ]
     assert "take the pre-flight first" in before["controls"]
     assert '<option value="fixation_detection.py">' in before["task-sel"]
-    assert 'data-task="fixation_detection.py">start run</button>' in checked["controls"]
+    assert ('data-task="fixation_detection.py" data-plan="">start run</button>'
+            in checked["controls"])
     assert "pre-flight · 3 to acknowledge" in checked["pf-pill"]
 
 
