@@ -148,7 +148,9 @@ def test_a_polar_value_is_written_as_its_eccentricity_and_direction_with_its_x_y
 
     assert row["params"] == {"pos": {"eccentricity": 8.0, "direction": 45.0, "x": x, "y": y},
                              "pair": [5.0, 0.0]}
-    with pytest.raises(TypeError, match="Polar"):
+    # The record's own refusal, never json's "Object of type Polar is not JSON serializable" (the
+    # final review of engine build C2b, T2).
+    with pytest.raises(TypeError, match="^the record writes no Polar value"):
         record.trial(
             index=2, outcome="correct", params={"pos": Polar(P("ecc"), 45.0)}, run=0,
             position=Position.lone(2), fluid_ml=0.0, last_reward_at=None,

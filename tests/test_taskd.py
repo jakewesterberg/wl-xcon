@@ -1216,6 +1216,28 @@ def test_a_live_edit_wins_over_a_conditions_value_and_its_rows_say_so(tmp_path):
     assert session.stopped_because == "every block is finished"
 
 
+def test_setting_a_value_back_to_the_conditions_does_not_hand_control_back(tmp_path):
+    """The engine C2b plan's Appendix B, item 1, confirmed by the PI on 2026-10-19: "setting the
+    value back does not hand control back to the condition; it stays yours until the run ends"
+    (the final review, T4). A live edit, then the value set back to the condition's own: every row
+    after the edit still names the value overridden, the condition's value and the person's now
+    the same."""
+    link = _Drained({3: [SetParameter(name="target_x", value=12.0, by=Box("jake"))],
+                     6: [SetParameter(name="target_x", value=5.0, by=Box("jake"))]})
+    spec = _spec(tmp_path, trials=400, blocks=[
+        Block(name="b", conditions=[Condition("near", {"target_x": 5.0}, target=9)])])
+    session = _session(spec, link=link)
+
+    session.run()
+
+    rows = [(row["params"]["target_x"], row["overridden"]) for row in _trial_rows(session)]
+    assert rows[:3] == [(5.0, [])] * 3
+    edited = rows[3:].index((5.0, ["target_x"]))
+    assert edited >= 1 and rows[3:3 + edited] == [(12.0, ["target_x"])] * edited
+    assert rows[3 + edited:] == [(5.0, ["target_x"])] * (len(rows) - 3 - edited)
+    assert [row["now"] for row in _parameter_changes(session)] == [12.0, 5.0]
+
+
 def test_a_live_edits_feed_line_names_the_conditions_it_now_overrides(tmp_path):
     """The engine C2b plan's science review, I5: until the console shows which conditions an edit
     overrides (build C3), the edit's line on the changes feed names them -- every condition of the
@@ -7614,12 +7636,13 @@ def test_a_person_moves_a_run_on_a_block_and_back_one_and_each_is_recorded_with_
     assert [(e["block"], e["ended"], e["by"]) for e in end["block_ends"]] == [
         ("a", "next", kim), ("b", "back", kim), ("a", "rule", None), ("b", "rule", None),
         ("c", "rule", None)]
-    moves = [(row["kind"], row["block"], row["to"], row["event_code"])
+    moves = [(row["kind"], row["block"], row["to"], row["event_code"], row["by"])
              for row in _controls_rows(session) if row["kind"] in ("next_block", "back_block")]
     # The engineering review, C1: a move's row names no code -- every block that ends on its own
     # strobes `BLOCK_END` with no row, so wl-preproc could not time the n-th row naming 3 by the
-    # n-th 3 -- and it is timed by its own instant; the stream still closes each block left.
-    assert moves == [("next_block", "a", "b", None), ("back_block", "b", "a", None)]
+    # n-th 3 -- and it is timed by its own instant; the stream still closes each block left. Each
+    # row says who moved it (the final review, T9).
+    assert moves == [("next_block", "a", "b", None, kim), ("back_block", "b", "a", None, kim)]
     rows = _trial_rows(session)
     assert [row["block"] for row in rows[:4]] == ["a", "b", "b", "a"]
     assert sum(row["block"] == "a" for row in rows) == 5, "one before next, four once back"
@@ -7644,6 +7667,29 @@ def test_a_move_back_before_a_blocks_first_trial_does_not_end_its_run_as_stalled
     assert session.blocks_run == ["a", "b", "a", "b"]
     assert [e["ended"] for e in end["block_ends"]] == ["rule", "back", "rule", "rule"]
     assert len(_trial_rows(session)) == 3 and end["end_reason"] == "plan_done"
+    # A block left before it ran a trial was never opened in the stream, so the move closes
+    # nothing: an unconditional `BLOCK_END` would be unpaired, against wl-preproc's framing (the
+    # final review, T9). Only `b`'s second time, which ran its three trials, is framed.
+    assert _block_words(session.card.codes) == [("run", 1), ("start", 1), "end", "run end"]
+
+
+def test_a_move_into_a_timed_block_starts_its_time_afresh(tmp_path, monkeypatch):
+    """The engine C2b plan's Task 9 (the final review, T9): a person's move starts the block moved
+    to on its own time, as an advance does. Each trial lasts 1.5 s on the trial clock; `a` runs
+    three before *next*, 4.5 s, and `b`'s 4 s limit, counted from the move, ends it after its own
+    three -- counted from the run's start it would be over before `b`'s first."""
+    _scripted_trials(monkeypatch, [Outcome.CORRECT] * 400, frames=240)
+    link = _Drained({4: [NextBlock(by=Box("kim"))]})
+    session = _planned(tmp_path, (
+        '{"two": Plan([Block("a", [Condition("x", {"target_x": 5.0}, target=500)]), '
+        'Block("b", [Condition("y", {"target_x": 12.0}, target=500)], time_limit_s=4.0)])}'),
+        plan="two", link=link)
+
+    session.run()
+
+    (_, end) = _runs(session)
+    assert [row["block"] for row in _trial_rows(session)] == ["a"] * 3 + ["b"] * 3
+    assert [(e["block"], e["ended"]) for e in end["block_ends"]] == [("a", "next"), ("b", "time")]
 
 
 def test_a_move_that_drops_a_drummed_trial_says_so_in_its_row(tmp_path, monkeypatch):

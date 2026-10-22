@@ -1417,6 +1417,8 @@ def test_a_page_not_signed_in_sends_and_says_nothing_as_it_loads(rig):
 
     assert _checks(rig) == []
     assert page.evaluate('document.getElementById("sent").textContent.trim()') == ""
+    # Nor is a plan preselected on a page that cannot send (the final review, T10).
+    assert page.evaluate('document.getElementById("plan-sel").value') == ""
 
 
 def test_a_double_click_on_next_block_or_back_one_is_one_move(rig):
