@@ -251,8 +251,8 @@ this list and touch no reward, bounded setting, clock or pump; `_hold` drains th
 one sent while paused is applied while paused (the PI approved the first two with the plan on 2026-10-13 and
 the third on 2026-10-18: the engine C2a plan's Appendix A, items 1 and 4).
 Since engine build C2b two more hand `NextBlock` and `BackBlock` to `Session._move`, likewise off
-this list, touching no reward, bounded setting, clock or pump (the engine C2b plan's Appendix A,
-item 2).
+this list, touching no reward, bounded setting, welfare clock or pump (the engine C2b plan's
+Appendix A, item 2, approved by the PI, 2026-10-19).
 `_schedule` fixes the target `_ends` compares against — a
 trial count from the trial about to run, an instant on the session's clock, or mL this
 session, refused when already reached — so a wrong target ends a session early or late
