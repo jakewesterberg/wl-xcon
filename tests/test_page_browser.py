@@ -1238,6 +1238,7 @@ def test_the_new_session_dialog_scrolls_to_its_button_in_a_short_window(rig):
     page.click("#dn-ok")  # Playwright scrolls the button into view first
     rig.wait_for(lambda: _opens(rig))
 
+
 # --- Plans (engine build C2b) ----------------------------------------------------------------
 
 
@@ -1323,3 +1324,120 @@ def test_next_block_and_back_one_reach_the_rig_as_the_members(rig):
     moved, back = rig.dispatch.seen
     assert (type(moved), moved.by.name) == (NextBlock, "Jake Westerberg")
     assert (type(back), back.by.name) == (BackBlock, "Jake Westerberg")
+
+
+ONE_TASK = ("planned.py",)
+PASSING = (PreflightItem("task checks", "pass", "planned.py passes its load-time checks"),)
+
+
+def _plans_of(plan, **over):
+    """A between-runs frame offering the one task with plans, its pre-flight taken for `plan`."""
+    return _between_runs(offered_tasks=ONE_TASK, preflight=Preflight(
+        "planned.py", PASSING, plan=plan, plans=("train", "test")), **over)
+
+
+def _preselected(rig, page):
+    """The one-task rig's first run offered: the pill's plain pre-flight, its plans arriving, the
+    first preselected and its pre-flight taken."""
+    page.click('[data-cmd="check"]')
+    rig.wait_for(lambda: len(_checks(rig)) == 1)
+    rig.hub.offer(_plans_of(None))
+    rig.wait_for(lambda: len(_checks(rig)) == 2)
+    rig.hub.offer(_plans_of("train"))
+    page.wait_for_selector('[data-cmd="start"][data-plan="train"]:not([disabled])')
+
+
+def test_a_later_run_on_a_one_task_rig_preselects_the_first_plan_again(rig):
+    """The task's first review, I1a: taskd clears the pre-flight at run start, so the next run's
+    plans came back to a page that had "already" offered them, and nothing was preselected. A run
+    is a plan's while it runs -- the bar shows that plan, the Trials box hidden -- and the next
+    run's plain pre-flight, on the pill, preselects the task's first plan (the PI, 2026-10-19:
+    "The task's first plan is preselected")."""
+    rig.hub.offer(_between_runs(offered_tasks=ONE_TASK))
+    page = rig.browser_page()
+    _sign_in(page)
+    _preselected(rig, page)
+
+    rig.hub.offer(frame(plan="train", block="easy", next_block="hard", offered_tasks=ONE_TASK,
+                        preflight=None))
+    page.wait_for_selector('[data-cmd="next_block"]', state="attached")
+    during = page.evaluate('[document.getElementById("plan-sel").value, '
+                           'document.getElementById("run-trials").closest("label").hidden]')
+    rig.hub.offer(_between_runs(offered_tasks=ONE_TASK, run_index=1))
+    page.wait_for_selector('[data-cmd="next_block"]', state="detached")
+    page.click('[data-cmd="check"]')
+    rig.wait_for(lambda: len(_checks(rig)) == 3)
+    rig.hub.offer(_plans_of(None, run_index=1))
+    rig.wait_for(lambda: len(_checks(rig)) == 4)
+
+    assert during == ["train", True]
+    assert [(check.task, check.plan) for check in _checks(rig)] == [
+        ("planned.py", None), ("planned.py", "train"), ("planned.py", None),
+        ("planned.py", "train")]
+    assert page.evaluate('document.getElementById("plan-sel").value') == "train"
+
+
+def test_a_reload_after_an_explicit_plain_choice_keeps_the_plain_run(rig):
+    """The task's first review, I1b: the plain run, chosen by a person, stood only until the page
+    was reloaded, when it preselected the first plan again and took its pre-flight. Only a
+    pre-flight this page asked for arms the preselection."""
+    rig.hub.offer(_between_runs(offered_tasks=ONE_TASK))
+    page = rig.browser_page()
+    _sign_in(page)
+    _preselected(rig, page)
+    page.select_option("#plan-sel", "")
+    rig.wait_for(lambda: len(_checks(rig)) == 3)
+    rig.hub.offer(_plans_of(None))
+    page.wait_for_selector('[data-cmd="start"][data-plan=""]:not([disabled])')
+
+    page.reload()
+    page.wait_for_selector("#plan-sel option", state="attached")
+    page.wait_for_timeout(1500)
+
+    assert len(_checks(rig)) == 3
+    assert page.evaluate('document.getElementById("plan-sel").value') == ""
+
+
+def test_a_page_not_signed_in_sends_and_says_nothing_as_it_loads(rig):
+    """The task's first review, I1c: a page with no one signed in preselected a task's plan on
+    load and said "not sent: sign in". Opening a page asks for nothing."""
+    rig.hub.offer(_plans_of(None))
+    page = rig.browser_page()
+    page.wait_for_selector("#plan-sel option", state="attached")
+    page.wait_for_timeout(1500)
+
+    assert _checks(rig) == []
+    assert page.evaluate('document.getElementById("sent").textContent.trim()') == ""
+
+
+def test_a_double_click_on_next_block_or_back_one_is_one_move(rig):
+    """The task's first review, I2: pause, reward and clear are held against a double click; the
+    moves between blocks are too. A second, different move is the synchronization: it arrives
+    after the first double click's second click would have."""
+    rig.hub.offer(frame(plan="train", block="easy", next_block="hard"))
+    page = rig.browser_page()
+    _sign_in(page)
+
+    page.dblclick('[data-cmd="next_block"]')
+    rig.wait_for(lambda: rig.dispatch.seen)
+    page.dblclick('[data-cmd="back_block"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) >= 2)
+    page.wait_for_timeout(800)
+
+    assert [type(seen) for seen in rig.dispatch.seen] == [NextBlock, BackBlock]
+
+
+def test_a_plan_start_ignores_the_hidden_trials_box(rig):
+    """The task's first review, M4: the Trials box is hidden while a plan is chosen, so a bad value
+    left in it must not refuse a plan's start and point at a box the person cannot see."""
+    rig.hub.offer(_between_runs(offered_tasks=ONE_TASK))
+    page = rig.browser_page()
+    _sign_in(page)
+    _preselected(rig, page)
+
+    page.evaluate('document.getElementById("run-trials").value = "many"')
+    page.click('[data-cmd="start"]')
+    rig.wait_for(lambda: any(isinstance(seen, StartRun) for seen in rig.dispatch.seen))
+
+    started = next(seen for seen in rig.dispatch.seen if isinstance(seen, StartRun))
+    assert (started.task, started.plan) == ("planned.py", "train")

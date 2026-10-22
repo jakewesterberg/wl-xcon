@@ -664,9 +664,13 @@ def _plans(frame: Telemetry | Idle | None) -> str:
     plain"): the plans the shown pre-flight's task declares, in order, then the plain run, one
     more labeled choice; the plan the pre-flight was taken for selected, so a wrong one shows. Each
     names the task it is for (`data-for`): the page's script preselects a task's first plan once
-    that task's own plans arrive with its pre-flight. No pre-flight shown, the plain run alone."""
+    that task's own plans arrive with its pre-flight. No pre-flight shown, the plain run alone --
+    but while a plan runs, that run's plan, so the bar never reads the plain run's label over a
+    plan's run."""
     preflight = None if frame is None or isinstance(frame, Idle) else frame.preflight
     if preflight is None:
+        if frame is not None and not isinstance(frame, Idle) and frame.plan is not None:
+            return f'<option value="{_e(frame.plan)}" selected>plan {_e(frame.plan)}</option>'
         return f'<option value="">{_e(PLAIN_RUN)}</option>'
     task = _e(preflight.task)
 
@@ -1161,7 +1165,10 @@ def _need(frame: Telemetry | None, view: View) -> str:
     than one, *clear the rest* (the engine C2a plan's science review, D5); then the run's
     shortfalls, a repeat limit's flagged as possible avoidance or named for the rig, a clear's with
     who cleared it; then, while a run runs, drumming and its switches (the PI, 2026-10-11), and the
-    training switches: *clear* on or off, and how a percentage counts drummed answers."""
+    training switches: *clear* on or off, and how a percentage counts drummed answers. While a plan
+    runs the pane leads with the plan's row (`_plan_row`), and a block past its targets says what it
+    draws until -- its criterion, its number of trials or both -- or, once a training progression's
+    top stage has passed, that it keeps working (engine build C2b)."""
     if frame is None:
         return _NONE
     live = frame.phase == "running" and frame.stop_kind is None
@@ -2805,20 +2812,23 @@ _SCRIPT = """
   // `post`, the one `fetch`, which adds who sent it.
   function chosenTask() { return el("task-sel").value; }
   // Engine build C2b (the PI, 2026-10-19, "Preselect first, keep plain"): the plan a run plays,
-  // the empty choice the plain run; a task's first plan preselected once, as its plans first
-  // arrive with a plain run's pre-flight -- the task chosen or the only one offered (the
-  // engineering review, I3) -- a choice made since standing; the trials box hidden while a plan
-  // is chosen. `plansOf`, the task whose plans the page has offered.
-  var plansOf = null;
+  // the empty choice the plain run; a task's first plan preselected when the plans come back to
+  // this page's own plain pre-flight request -- the task chosen, the only one offered (the
+  // engineering review, I3), or the next run's -- a choice made since standing; the trials box
+  // hidden while a plan is chosen. `awaiting`, the task whose plain pre-flight this page asked
+  // for and has not yet had its plans from: a reload, or another member's pre-flight, arms
+  // nothing (the task's first review, I1).
+  var awaiting = null;
   function chosenPlan() { return el("plan-sel").value || null; }
   function showTrials() { el("run-trials").closest("label").hidden = Boolean(chosenPlan()); }
   function preselect() {
     var select = el("plan-sel");
     var first = select.options[0];
     var task = first ? first.getAttribute("data-for") : null;
-    if (task && task === chosenTask() && task !== plansOf) {
-      plansOf = task;
-      if (first.value && !select.value && betweenRuns()) {
+    // Nothing here reads the pre-flight pill, which a frame swaps after this select.
+    if (task && task === awaiting && task === chosenTask() && !select.value) {
+      awaiting = null;
+      if (first.value) {
         select.value = first.value;
         takePreflight(false);
       }
@@ -2833,6 +2843,8 @@ _SCRIPT = """
     var task = chosenTask();
     acked = {};
     if (!task) { tell("not sent: no task is offered to check", "crit"); return; }
+    // A plain run's pre-flight is how the page learns the task's plans: arm the preselection.
+    awaiting = chosenPlan() === null && signedIn() ? task : null;
     post({ kind: "check", task: task, values: {}, plan: chosenPlan() });
     if (showPanel) { el("t-setup").checked = true; }
   }
@@ -2846,7 +2858,9 @@ _SCRIPT = """
            "take its pre-flight first (the pre-flight pill)", "crit");
       return;
     }
-    if (!Number.isInteger(trials) || trials < 1) {
+    // The trials box is hidden while a plan is chosen, and a plan's lengths are its own.
+    if (plan) { trials = Number.isInteger(trials) && trials >= 1 ? trials : 1; }
+    else if (!Number.isInteger(trials) || trials < 1) {
       tell("not sent: a run's trials are a whole number from 1", "crit");
       return;
     }
@@ -2987,6 +3001,12 @@ _SCRIPT = """
     if (button && !button.disabled) {
       var cmd = button.getAttribute("data-cmd");
       if ((cmd === "pause" || cmd === "resume") && !toggleAllowed(e.detail)) { return; }
+      // The moves between blocks, held as a clear is: a double click is one move.
+      if (cmd === "next_block" || cmd === "back_block") {
+        if (!clearAllowed(e.detail, cmd)) { return; }
+        post({ kind: cmd });
+        return;
+      }
       if (cmd === "reward" && !rewardAllowed(e.detail)) { return; }
       // A run's count and its drumming (engine build C2a), each naming what it is for.
       if (cmd === "clear") {
@@ -3020,12 +3040,13 @@ _SCRIPT = """
     if (e.target.matches("input[data-param]")) { schedule(e.target); }
     else if (e.target.matches("input[data-ack]")) { acked[e.target.getAttribute("data-ack")] = e.target.checked; }
     else if (e.target.id === "task-sel") {
-      if (betweenRuns()) { plansOf = null; el("plan-sel").value = ""; takePreflight(false); }
+      if (betweenRuns()) { el("plan-sel").value = ""; takePreflight(false); }
     }
     else if (e.target.id === "plan-sel") {
-      plansOf = chosenTask();
       showTrials();
       if (betweenRuns()) { takePreflight(false); }
+      // The person chose: the pre-flight this takes arms nothing.
+      awaiting = null;
     }
   });
   document.addEventListener("focusout", function () { setTimeout(release, 0); });

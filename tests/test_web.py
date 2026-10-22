@@ -2978,6 +2978,7 @@ def test_a_carried_row_with_no_actor_does_not_say_by_nobody():
 
     assert "accepted earlier this session at " in pane and "by  at" not in pane
 
+
 # --- Plans (engine build C2b) ----------------------------------------------------------------
 
 PLANNED = Preflight(
@@ -3017,13 +3018,19 @@ def test_a_tasks_first_plan_is_preselected_once_its_plans_arrive_and_a_plan_hide
     a person's own choice of plan, the plain run included, stands."""
     preselect = _function("preselect")
 
-    assert "if (task && task === chosenTask() && task !== plansOf) {" in preselect
-    assert "if (first.value && !select.value && betweenRuns()) {" in preselect
+    assert "if (task && task === awaiting && task === chosenTask() && !select.value) {" in preselect
+    assert "awaiting = null;" in preselect and "if (first.value) {" in preselect
     assert "select.value = first.value;" in preselect and "takePreflight(false);" in preselect
+    # The pre-flight pill is swapped after this select in the same frame: nothing here reads it.
+    assert "betweenRuns" not in preselect
+    assert "awaiting = chosenPlan() === null && signedIn() ? task : null;" in _function(
+        "takePreflight")
     assert 'if (id === "plan-sel") { preselect(); }' in _function("swap")
-    assert ('if (betweenRuns()) { plansOf = null; el("plan-sel").value = ""; '
-            "takePreflight(false); }") in _SCRIPT
-    assert 'else if (e.target.id === "plan-sel") {\n      plansOf = chosenTask();' in _SCRIPT
+    assert 'if (betweenRuns()) { el("plan-sel").value = ""; takePreflight(false); }' in _SCRIPT
+    assert ("      if (betweenRuns()) { takePreflight(false); }\n"
+            "      // The person chose: the pre-flight this takes arms nothing.\n"
+            "      awaiting = null;") in _SCRIPT
+    assert "plansOf" not in _SCRIPT
     assert ('el("run-trials").closest("label").hidden = Boolean(chosenPlan());'
             in _function("showTrials"))
 
@@ -3074,9 +3081,12 @@ def test_a_block_past_its_targets_says_what_it_draws_until_and_a_passed_top_stag
     assert "every target used up: drawing until 200 trials are run<" in need(trials_to_run=200)
     assert ("drawing until the criterion is met and 200 trials are run" in
             need(rule="streak", trials_to_run=200))
-    passed = fragments(frame(plan="train", block="hard", passed_at=41), view())["rt-need"]
+    # Past its targets too, so "drawing until" is absent because the passed line replaced it.
+    passed = fragments(frame(plan="train", block="hard", passed_at=41, past_targets=True,
+                             rule="percentage"), view())["rt-need"]
     assert "top stage passed at trial 41; keeps working" in passed
     assert "drawing until" not in passed
+
 
 
 def test_the_plan_row_counts_how_often_the_plan_fell_back():
@@ -3087,3 +3097,50 @@ def test_the_plan_row_counts_how_often_the_plan_fell_back():
     assert "fell back" not in row(0)
     assert "the plan&#x27;s last block · fell back once" in row(1)
     assert " · fell back 3 times" in row(3)
+
+
+def test_a_run_that_is_not_running_shows_neither_the_plan_row_nor_a_passed_top_stage():
+    """The row and the passed-stage line are for a live run: a run that is stopping, or a session
+    between runs, carries its last plan and passed trial on a frame and shows neither."""
+    for over in (dict(stop_kind="completed", stopped_because="every block is finished"),
+                 dict(phase="between_runs", service=True, stop_kind="completed",
+                      stopped_because="every block is finished")):
+        shown = fragments(frame(plan="train", block="hard", next_block=None, passed_at=41,
+                                **over), view())["rt-need"]
+        assert "plan train" not in shown and 'data-cmd="next_block"' not in shown
+        assert "top stage passed" not in shown
+
+
+def test_a_plans_and_a_blocks_names_are_escaped_where_the_page_shows_them():
+    """A plan's name reaches the picker and the plan row, a block's the row; each is escaped."""
+    name = "a<b>&c"
+    picker = fragments(_between(preflight=Preflight(
+        "planned.py", PLANNED.items, plan=name, plans=(name,))), view())["plan-sel"]
+    row = fragments(frame(plan=name, block="x<y&z", next_block="n<m"), view())["rt-need"]
+    running = fragments(frame(plan=name, block="b"), view())["plan-sel"]
+
+    assert "a&lt;b&gt;&amp;c" in picker and "a<b>" not in picker
+    assert "a&lt;b&gt;&amp;c" in row and "x&lt;y&amp;z" in row and "n&lt;m" in row
+    assert "<b>" not in row and "x<y" not in row
+    assert running == '<option value="a&lt;b&gt;&amp;c" selected>plan a&lt;b&gt;&amp;c</option>'
+
+
+def test_the_picker_shows_the_plan_that_runs_not_the_plain_runs_label():
+    """The task's first review, I1a: while a plan runs, the bar must not read the plain run's label
+    over it; a plain run, and the time between runs, still read the plain run."""
+    running = fragments(frame(plan="train", block="easy"), view())["plan-sel"]
+
+    assert running == '<option value="train" selected>plan train</option>'
+    assert fragments(frame(), view())["plan-sel"] == f'<option value="">{PLAIN_RUN}</option>'
+    assert fragments(_between(), view())["plan-sel"] == f'<option value="">{PLAIN_RUN}</option>'
+
+
+def test_the_moves_between_blocks_are_held_against_a_double_click_and_a_plan_start_skips_trials():
+    """The task's first review, I2 and M4, in the script's own text; the browser tests drive it."""
+    click = _SCRIPT
+    start = _function("startRun")
+
+    assert 'if (cmd === "next_block" || cmd === "back_block") {' in click
+    assert "if (!clearAllowed(e.detail, cmd)) { return; }" in click
+    assert "if (plan) { trials = Number.isInteger(trials) && trials >= 1 ? trials : 1; }" in start
+    assert "else if (!Number.isInteger(trials) || trials < 1) {" in start
