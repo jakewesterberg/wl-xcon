@@ -16,6 +16,7 @@ import json
 import threading
 import time
 from datetime import date
+from http.server import ThreadingHTTPServer
 
 import pytest
 
@@ -1336,6 +1337,14 @@ def _plans_of(plan, **over):
         "planned.py", PASSING, plan=plan, plans=("train", "test")), **over)
 
 
+def _after_a_frame_is_processed(rig, page):
+    """Wait until the page has swapped in a frame offered after it loaded. `preselect` runs inside
+    that synchronous swap and sets `#plan-sel` before it posts anything, so what the page would
+    have sent on a frame is sent, or not, by the time this returns; no fixed wait."""
+    rig.hub.offer(_plans_of(None, stopped_because="marker"))
+    page.wait_for_function('document.body.textContent.includes("marker")')
+
+
 def _preselected(rig, page):
     """The one-task rig's first run offered: the pill's plain pre-flight, its plans arriving, the
     first preselected and its pre-flight taken."""
@@ -1363,14 +1372,16 @@ def test_a_later_run_on_a_one_task_rig_preselects_the_first_plan_again(rig):
     page.wait_for_selector('[data-cmd="next_block"]', state="attached")
     during = page.evaluate('[document.getElementById("plan-sel").value, '
                            'document.getElementById("run-trials").closest("label").hidden]')
-    rig.hub.offer(_between_runs(offered_tasks=ONE_TASK, run_index=1))
+    # As taskd sends it: between runs the frame still carries the last run's plan.
+    rig.hub.offer(_between_runs(offered_tasks=ONE_TASK, run_index=1, plan="train", block="easy"))
     page.wait_for_selector('[data-cmd="next_block"]', state="detached")
+    plain_between = page.evaluate('document.getElementById("plan-sel").value')
     page.click('[data-cmd="check"]')
     rig.wait_for(lambda: len(_checks(rig)) == 3)
     rig.hub.offer(_plans_of(None, run_index=1))
     rig.wait_for(lambda: len(_checks(rig)) == 4)
 
-    assert during == ["train", True]
+    assert during == ["train", True] and plain_between == ""
     assert [(check.task, check.plan) for check in _checks(rig)] == [
         ("planned.py", None), ("planned.py", "train"), ("planned.py", None),
         ("planned.py", "train")]
@@ -1391,8 +1402,7 @@ def test_a_reload_after_an_explicit_plain_choice_keeps_the_plain_run(rig):
     page.wait_for_selector('[data-cmd="start"][data-plan=""]:not([disabled])')
 
     page.reload()
-    page.wait_for_selector("#plan-sel option", state="attached")
-    page.wait_for_timeout(1500)
+    _after_a_frame_is_processed(rig, page)
 
     assert len(_checks(rig)) == 3
     assert page.evaluate('document.getElementById("plan-sel").value') == ""
@@ -1403,8 +1413,7 @@ def test_a_page_not_signed_in_sends_and_says_nothing_as_it_loads(rig):
     load and said "not sent: sign in". Opening a page asks for nothing."""
     rig.hub.offer(_plans_of(None))
     page = rig.browser_page()
-    page.wait_for_selector("#plan-sel option", state="attached")
-    page.wait_for_timeout(1500)
+    _after_a_frame_is_processed(rig, page)
 
     assert _checks(rig) == []
     assert page.evaluate('document.getElementById("sent").textContent.trim()') == ""
@@ -1441,3 +1450,75 @@ def test_a_plan_start_ignores_the_hidden_trials_box(rig):
 
     started = next(seen for seen in rig.dispatch.seen if isinstance(seen, StartRun))
     assert (started.task, started.plan) == ("planned.py", "train")
+
+
+class _BoxRig:
+    """The rig PC's own page: http on loopback, no wl.works sign-in, the operator named in the
+    page's own storage (b3a-2)."""
+
+    def __init__(self, browser) -> None:
+        self.dispatch = _Dispatch()
+        self.hub = Hub(steady=_Clock(), endpoint=ENDPOINT)
+        port = int(free_endpoints(1)[0].rsplit(":", 1)[1])
+        self.server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(
+            self.hub, token=TOKEN, stale_after_s=30.0, dispatch=self.dispatch))
+        self._thread = threading.Thread(target=self.server.serve_forever,
+                                        kwargs={"poll_interval": 0.05}, daemon=True)
+        self._thread.start()
+        self._context = browser.new_context()
+        self._context.add_init_script(
+            "window.localStorage.setItem('wlx-console-name', 'Box Op')")
+        self.page = self._context.new_page()
+        self.page.set_default_timeout(WAIT_S * 1000)
+        self.url = f"http://127.0.0.1:{port}/"
+
+    def wait_for(self, predicate, seconds: float = WAIT_S) -> None:
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            if predicate():
+                return
+            time.sleep(0.05)
+        pytest.fail(f"timed out after {seconds:g} s waiting for a condition")
+
+    def close(self) -> None:
+        for step in (self._context.close, self.server.shutdown, self.server.server_close,
+                     self.hub.close):
+            try:
+                step()
+            except Exception:
+                pass
+
+
+@pytest.fixture
+def box():
+    with browser() as launched:
+        made = _BoxRig(launched)
+        try:
+            yield made
+        finally:
+            made.close()
+
+
+def test_the_rig_pcs_own_page_preselects_the_first_plan_and_keeps_a_plain_choice(box):
+    """The task's first review, fix round 2: the rig PC's page has no wl.works sign-in, so
+    "signed in" was never true there and the preselection was never armed. It is armed where the
+    page can send; the operator's own plain choice then stands."""
+    box.hub.offer(_between_runs(offered_tasks=ONE_TASK))
+    box.page.goto(box.url)
+    box.page.wait_for_selector('[data-cmd="check"]:not([disabled])')
+    box.page.click('[data-cmd="check"]')
+    box.wait_for(lambda: len(_checks(box)) == 1)
+    box.hub.offer(_plans_of(None))
+    box.wait_for(lambda: len(_checks(box)) == 2)
+    box.hub.offer(_plans_of("train"))
+    box.page.wait_for_selector('[data-cmd="start"][data-plan="train"]:not([disabled])')
+    box.page.select_option("#plan-sel", "")
+    box.wait_for(lambda: len(_checks(box)) == 3)
+    box.hub.offer(_plans_of(None))
+    box.page.wait_for_selector('[data-cmd="start"][data-plan=""]:not([disabled])')
+    box.hub.offer(_plans_of(None, stopped_because="marker"))
+    box.page.wait_for_function('document.body.textContent.includes("marker")')
+
+    assert [(check.task, check.plan) for check in _checks(box)] == [
+        ("planned.py", None), ("planned.py", "train"), ("planned.py", None)]
+    assert box.page.evaluate('document.getElementById("plan-sel").value') == ""

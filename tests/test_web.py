@@ -3023,8 +3023,8 @@ def test_a_tasks_first_plan_is_preselected_once_its_plans_arrive_and_a_plan_hide
     assert "select.value = first.value;" in preselect and "takePreflight(false);" in preselect
     # The pre-flight pill is swapped after this select in the same frame: nothing here reads it.
     assert "betweenRuns" not in preselect
-    assert "awaiting = chosenPlan() === null && signedIn() ? task : null;" in _function(
-        "takePreflight")
+    assert ("awaiting = chosenPlan() === null && (signinPage ? signedIn() : canWrite) ? task : "
+            "null;") in _function("takePreflight")
     assert 'if (id === "plan-sel") { preselect(); }' in _function("swap")
     assert 'if (betweenRuns()) { el("plan-sel").value = ""; takePreflight(false); }' in _SCRIPT
     assert ("      if (betweenRuns()) { takePreflight(false); }\n"
@@ -3088,7 +3088,6 @@ def test_a_block_past_its_targets_says_what_it_draws_until_and_a_passed_top_stag
     assert "drawing until" not in passed
 
 
-
 def test_the_plan_row_counts_how_often_the_plan_fell_back():
     """The plan's science review, I2: a move-back count in the plan row."""
     def row(fell_back) -> str:
@@ -3133,6 +3132,12 @@ def test_the_picker_shows_the_plan_that_runs_not_the_plain_runs_label():
     assert running == '<option value="train" selected>plan train</option>'
     assert fragments(frame(), view())["plan-sel"] == f'<option value="">{PLAIN_RUN}</option>'
     assert fragments(_between(), view())["plan-sel"] == f'<option value="">{PLAIN_RUN}</option>'
+    # Between runs, and while a run stops, the frame still carries the last run's plan (taskd's
+    # `Session.plan`), which is not the next run's: the plain run is shown.
+    for over in (dict(phase="between_runs", service=True, stop_kind="completed"),
+                 dict(stop_kind="completed")):
+        assert fragments(frame(plan="train", block="easy", **over), view())["plan-sel"] == (
+            f'<option value="">{PLAIN_RUN}</option>')
 
 
 def test_the_moves_between_blocks_are_held_against_a_double_click_and_a_plan_start_skips_trials():

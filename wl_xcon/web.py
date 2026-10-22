@@ -666,10 +666,12 @@ def _plans(frame: Telemetry | Idle | None) -> str:
     names the task it is for (`data-for`): the page's script preselects a task's first plan once
     that task's own plans arrive with its pre-flight. No pre-flight shown, the plain run alone --
     but while a plan runs, that run's plan, so the bar never reads the plain run's label over a
-    plan's run."""
+    plan's run. Only while it runs: between runs the frame still carries the last run's plan
+    (`Session.plan`, "the run in progress, or the last one"), not what the next run plays."""
     preflight = None if frame is None or isinstance(frame, Idle) else frame.preflight
     if preflight is None:
-        if frame is not None and not isinstance(frame, Idle) and frame.plan is not None:
+        if (frame is not None and not isinstance(frame, Idle) and frame.plan is not None
+                and frame.phase == "running" and frame.stop_kind is None):
             return f'<option value="{_e(frame.plan)}" selected>plan {_e(frame.plan)}</option>'
         return f'<option value="">{_e(PLAIN_RUN)}</option>'
     task = _e(preflight.task)
@@ -2844,7 +2846,9 @@ _SCRIPT = """
     acked = {};
     if (!task) { tell("not sent: no task is offered to check", "crit"); return; }
     // A plain run's pre-flight is how the page learns the task's plans: arm the preselection.
-    awaiting = chosenPlan() === null && signedIn() ? task : null;
+    // Armed only where this page can send: the sign-in page signed in, the rig PC's own page
+    // (no sign-in) able to write.
+    awaiting = chosenPlan() === null && (signinPage ? signedIn() : canWrite) ? task : null;
     post({ kind: "check", task: task, values: {}, plan: chosenPlan() });
     if (showPanel) { el("t-setup").checked = true; }
   }
