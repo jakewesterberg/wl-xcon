@@ -801,10 +801,11 @@ class Telemetry:
     plan: str | None
     #: `scheduler.next_block`'s name (schema 17): the block the plan goes on to as the open one
     #: ends on its rule or its time -- a training progression's next stage up -- or `None` where
-    #: the plan ends there.
+    #: the plan ends there, and between runs, when no block is open.
     next_block: str | None
     #: The seconds of trials left before the open block's time limit and the run's (schema 17),
-    #: on the time trials ran, a pause not counting (the PI, 2026-10-19); `None` with no limit.
+    #: on the time trials ran, a pause not counting (the PI, 2026-10-19); `None` with no limit,
+    #: and between runs, when no block is open.
     block_left_s: float | None
     run_left_s: float | None
     #: The open block's number of trials (`task.Block.trials`), `None` without one (schema 17): what
@@ -1016,10 +1017,13 @@ class Telemetry:
                           and not scheduler.finished),
             # Engine build C2b (schema 17): the run's plan and its time, read from the session.
             plan=session.plan,
-            next_block=(None if scheduler is None or scheduler.next_block is None
-                        else scheduler.next_block.name),
-            block_left_s=None if scheduler is None else session.left("block"),
-            run_left_s=None if scheduler is None else session.left("run"),
+            # The open block's, so none between runs: the scheduler a finished run leaves stays.
+            next_block=(None if scheduler is None or session.phase != "running"
+                        or scheduler.next_block is None else scheduler.next_block.name),
+            block_left_s=(None if scheduler is None or session.phase != "running"
+                          else session.left("block")),
+            run_left_s=(None if scheduler is None or session.phase != "running"
+                        else session.left("run")),
             trials_to_run=None if scheduler is None else scheduler.block.trials,
             passed_at=None if scheduler is None else scheduler.passed_at,
             fell_back=0 if scheduler is None else scheduler.fell_back,

@@ -125,6 +125,19 @@ def test_a_plan_that_cannot_run_is_refused_saying_which_and_why(plan, said):
     assert all(found[0].refuses(kind) for kind in SESSION_KINDS)
 
 
+def test_a_plan_named_past_what_a_start_can_carry_is_refused_saying_so():
+    """The wire takes a plan's name as 1 to 200 characters (`link._command_from`), so a longer one
+    could be offered on the page and never started: refused at load, in every kind of session."""
+    ok = Plan([Block("b", [NEAR])])
+
+    assert _findings(**{"x" * 200: ok}) == []
+    found = _findings(**{"x" * 201: ok})
+
+    assert [f.code for f in found] == ["bad-plan"], found
+    assert "its name is 201 characters, and a plan's name is 1 to 200" in found[0].detail
+    assert all(found[0].refuses(kind) for kind in SESSION_KINDS)
+
+
 @pytest.mark.parametrize(
     ("plan", "code", "said"),
     [

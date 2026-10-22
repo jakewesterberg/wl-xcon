@@ -2840,7 +2840,7 @@ def test_a_check_and_a_start_carry_the_plan_by_its_name_or_none_for_the_plain_ru
                            "plan": wrong})
 
 
-def test_a_frame_names_the_runs_plan_its_next_block_and_its_time_left(tmp_path):
+def test_a_frame_names_the_runs_plan_its_next_block_and_its_time_left():
     """`Telemetry.of` reads the session's plan and time left (`Session.plan`, `Session.left`) and
     the scheduler's next block, recomputing nothing."""
     session = SimpleNamespace(**{**vars(_session_with(1.25, 3.0)), "plan": "train",

@@ -17,6 +17,7 @@ import itertools
 import math
 from pathlib import Path
 
+from wl_xcon.actor import TEXT_LIMIT
 from wl_xcon.codes import PROVISIONAL, Allocation
 from wl_xcon.components import Registry
 from wl_xcon.findings import SESSION_KINDS, Finding
@@ -712,6 +713,13 @@ def _plan_faults(task: Task) -> list[Finding]:
 
     for name, plan in task.plans.items():
         order = plan.order
+        if not isinstance(name, str) or not 0 < len(name) <= TEXT_LIMIT:
+            # The wire carries a plan's name as text of 1 to `TEXT_LIMIT` characters, so a longer
+            # one could be offered on the page and never started (the review of Task 8, Minor 3).
+            refuse(name if isinstance(name, str) and name else "?",
+                   f"its name is {len(name) if isinstance(name, str) else 0} characters, and a "
+                   f"plan's name is 1 to {TEXT_LIMIT}, the most a start can carry over the link; "
+                   f"give it a shorter name")
         if not plan.blocks:
             refuse(name, "it has no blocks, so a run of it would have nothing to play; give it "
                          "blocks=[Block(...), ...]")

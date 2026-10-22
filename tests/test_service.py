@@ -4775,3 +4775,105 @@ def test_a_timed_plan_ends_its_run_as_designed_and_the_session_stays_open(tmp_pa
     assert frame.stopped_because == "the plan's time limit is reached: 10 s of trials"
     again = _step(service, _start())
     assert again.run_index == 1 and again.stop_kind == "completed"
+
+
+def _running(service) -> list:
+    """The frames a run published while it was running."""
+    return [f for f in service.link.published if f.phase == "running"]
+
+
+def test_a_timed_plans_frames_count_the_run_time_left_down_to_nothing(tmp_path):
+    """`Session.left`, through a real session: the run's time limit read against the time its
+    trials ran (the PI, 2026-10-19), 10 s at the first frame and none at the last; none of it
+    between runs, when no block is open."""
+    service = _service(tmp_path)
+    planned_task(service.tasks, _PLANS)
+    _step(service, _open())
+
+    done = _step(service, _start(task="planned.py", plan="timed"))
+
+    frames = _running(service)
+    assert (frames[0].run_left_s, frames[0].block_left_s) == (10.0, None)
+    assert frames[-1].run_left_s == 0.0
+    assert [f.run_left_s for f in frames] == sorted((f.run_left_s for f in frames), reverse=True)
+    assert (done.phase, done.plan) == ("between_runs", "timed")
+    assert (done.run_left_s, done.block_left_s, done.next_block) == (None, None, None)
+
+
+def test_a_blocks_time_limit_counts_from_the_block_not_the_run(tmp_path):
+    """`Session.left("block")` reads the open block's limit against the time its trials began
+    from, not the run's: the second block's 3 s begin at 3 s whatever the first took."""
+    service = _service(tmp_path)
+    planned_task(service.tasks, (
+        '{"t": Plan([Block("a", [Condition("n", {"target_x": 5.0}, target=500)], '
+        'time_limit_s=4.0), Block("b", [Condition("f", {"target_x": 12.0}, target=500)], '
+        'time_limit_s=3.0)], '
+        'time_limit_s=10.0)}'))
+    _step(service, _open())
+
+    done = _step(service, _start(task="planned.py", plan="t"))
+
+    frames = _running(service)
+    assert [(f.block, f.block_left_s, f.run_left_s) for f in frames[:3]] == [
+        ("a", 4.0, 10.0), ("a", 0.0, 5.5), ("b", 3.0, 5.5)]
+    assert frames[0].next_block == "b" and frames[-1].next_block is None
+    assert frames[-1].block_left_s == 0.0
+    # Between runs no block is open: the last run's are not kept (the review, Minor 4).
+    assert done.phase == "between_runs" and done.block == "b"
+    assert (done.next_block, done.block_left_s, done.run_left_s) == (None, None, None)
+
+
+def test_a_run_ended_with_blocks_still_to_come_names_no_next_block_between_runs(tmp_path):
+    """The scheduler a run leaves is kept, and its next block with it; the frame says none, since
+    no block is open (the review of Task 8, Minor 4)."""
+    service = _service(tmp_path)
+    planned_task(service.tasks, (
+        '{"t": Plan([Block("a", [Condition("n", {"target_x": 5.0}, target=500)]), '
+        'Block("b", [Condition("f", {"target_x": 12.0}, target=500)])], time_limit_s=3.0)}'))
+    _step(service, _open())
+
+    done = _step(service, _start(task="planned.py", plan="t"))
+
+    frames = _running(service)
+    assert frames[-1].block == "a" and frames[-1].next_block == "b"
+    assert (done.phase, done.stop_kind) == ("between_runs", "completed")
+    assert (done.next_block, done.block_left_s, done.run_left_s) == (None, None, None)
+
+
+def test_a_start_whose_condition_puts_a_target_off_the_screen_is_refused_naming_it(tmp_path):
+    """The path, not the piece (CLAUDE.md): `_start` takes its pre-flight for the plan, and
+    `beyond` and `values` hold each condition's values to their ranges -- the only guard a planned
+    run has against a target off the screen."""
+    service = _service(tmp_path)
+    planned_task(service.tasks, (
+        '{"off": Plan([Block("b", [Condition("away", {"target_x": 16.0, "target_y": 40.0}, '
+        'target=1)])])}'))
+    _step(service, _open())
+
+    frame = _step(service, _start(task="planned.py", plan="off"))
+
+    assert frame.run_index is None and _runs(service.root) == []
+    assert "pre-flight failed, so the run does not start" in _refused(frame)[-1]
+    assert "condition 'away'" in _refused(frame)[-1]
+
+
+def test_a_plan_whose_conditions_all_set_a_number_runs_without_it_sent_a_plain_run_does_not(
+        tmp_path):
+    """A number every condition of the plan sets needs no starting value (`values`, given the plan);
+    the plain run of the same values lacks it and is refused."""
+    service = _service(tmp_path)
+    path = planned_task(service.tasks, '{"set": Plan([Block("b", [Condition("c", '
+                                       '{"target_x": 5.0}, target=1)])])}')
+    path.write_text(path.read_text() + (
+        "\n_trial = TASK.structures['detection']\n"
+        "TASK = _dataclasses.replace(TASK, structures={'detection': _dataclasses.replace(\n"
+        "    _trial, params=[_dataclasses.replace(p, start=None) if p.name == 'target_x' else p\n"
+        "                    for p in _trial.params])})\n"))
+    _step(service, _open())
+    sent = {k: v for k, v in VALUES.items() if k != "target_x"}
+
+    plain = _step(service, _start(task="planned.py", values=dict(sent)))
+    planned = _step(service, _start(task="planned.py", values=dict(sent), plan="set"))
+
+    assert plain.run_index is None and "'target_x' is used by the task" in _refused(plain)[-1]
+    assert (planned.phase, planned.stop_kind) == ("between_runs", "completed")
