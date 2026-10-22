@@ -4,17 +4,17 @@ on:
   push:
   pull_request:
   schedule:
-    # The full sweep, nightly, sharded twelve ways by function across the
-    # `mutation-full` matrix below. Not decoration: the per-push gate (`mutation`,
-    # below) selects on changed files and never escalates on GLOBAL, which cannot
-    # see a test deleted from `test_a.py` that was the only thing covering a
-    # function in `b.py`. Nothing in a diff makes that visible, and this is what
-    # catches it.
+    # The full sweep, nightly, sharded twenty-four ways by function (twelve until
+    # 2026-10-22) across the `mutation-full` matrix below. Not decoration: the
+    # per-push gate (`mutation`, below) selects on changed files and never
+    # escalates on GLOBAL, which cannot see a test deleted from `test_a.py` that
+    # was the only thing covering a function in `b.py`. Nothing in a diff makes
+    # that visible, and this is what catches it.
     - cron: "17 3 * * *"
   workflow_dispatch:
     # The "run the full sweep now" button: the same sharded full sweep the nightly
     # runs, on demand, for before a big merge -- see docs/CHECKPOINT.md's CI row for
-    # the alternative when twelve parallel Actions jobs are not available (a local
+    # the alternative when twenty-four parallel Actions jobs are not available (a local
     # sweep run as parallel lanes in separate `git archive` copies of the tree; the
     # harness mutates files in place, so separate copies are what let the lanes run
     # at once).
@@ -109,10 +109,12 @@ jobs:
     # `scheduler` and `findings` while CHECKPOINT described "a mutation gate over
     # every module".
     #
-    # **Sharded since 2026-09-29** (XC-141), the same `--shard K/12` split the
-    # nightly uses, applied to whatever `--changed-only` selected. **Twelve ways and
-    # by function since 2026-10-01** (the PI's call of 2026-09-30): `serve` alone
-    # held a shard for 2h42m in run 36737681413. A merge push diffs against the
+    # **Sharded since 2026-09-29** (XC-141), the `--shard K/N` split the nightly
+    # uses, applied to whatever `--changed-only` selected. **Twelve ways and by
+    # function since 2026-10-01** (the PI's call of 2026-09-30): `serve` alone held
+    # a shard for 2h42m in run 36737681413. **Still twelve** when the nightly went
+    # to twenty-four on 2026-10-22 (the PI: "Push runs stay at 12"; see
+    # `mutation-full`). A merge push diffs against the
     # previous `main`, so a long branch's whole range is its changed set.
     # b2a's merge (run `36497082927`) selected eight modules and ran into the
     # 360-minute limit in one job, and was cancelled with 200 caught and none
@@ -164,29 +166,45 @@ jobs:
 
   mutation-full:
     # The full sweep -- every module in RETURNS, nothing left out by a diff -- split
-    # twelve ways so no single job approaches the six-hour default that made this job
-    # necessary (see the `mutation` job's comment for the measurement and the
+    # twenty-four ways so no single job reaches the six-hour default that made this
+    # job necessary (see the `mutation` job's comment for the measurement and the
     # GitHub docs citation). Nightly (`schedule`), and on demand
     # (`workflow_dispatch`) before a big merge, so a branch does not have to wait
     # for 03:17 UTC to get the check `--changed-only` cannot give it -- including a
     # GLOBAL change, which the `mutation` job now explicitly does not cover.
     # `fail-fast: false` so one red shard does not cancel, and hide, the other
-    # eleven's results.
+    # twenty-three's results.
     #
-    # **Twelve ways and by function since 2026-09-30** (PI; six ways by whole module
-    # before): `serve` alone held a shard for 2h42m in run 36737681413. Each shard is
-    # `tools/mutation_gate.py --shard K/12`'s K-th of twelve contiguous chunks of
-    # every selected function (modules by name, then `mutate.py --all`'s own
-    # order), the chunks differing in size by at most one, so a module can be cut
-    # between two shards; each runs `mutate.py --all --only <its part>` per module
-    # it touches. Deterministic, so the same K always names the same functions
-    # regardless of which runner computes it.
+    # **By function since 2026-09-30, twelve ways then** (PI; six ways by whole
+    # module before): `serve` alone held a shard for 2h42m in run 36737681413. Each
+    # shard is `tools/mutation_gate.py --shard K/24`'s K-th of twenty-four
+    # contiguous chunks of every selected function (modules by name, then
+    # `mutate.py --all`'s own order), the chunks differing in size by at most one,
+    # so a module can be cut between two shards; each runs `mutate.py --all --only
+    # <its part>` per module it touches. Deterministic, so the same K always names
+    # the same functions regardless of which runner computes it.
+    #
+    # **Twenty-four ways since 2026-10-22, twelve before.** At twelve the sweep
+    # outgrew the limit: 964 functions, 80-81 a shard, and every mutant a whole suite
+    # of about four minutes (run 39749961790's shard 4: baselines 232-237 s, its
+    # first five mutants 225-235 s). The nightlies of 2026-10-20, 21 and 22 (runs
+    # 39395156378, 39571238638, 39749961790) had 2, 8 and 7 of their 12 shards
+    # cancelled at six hours; that shard 4 stopped at 77 of its 81, all caught. The
+    # PI chose "Both" (2026-10-22): "Split the nightly into 24 shards of ~40
+    # functions, about 3 hours each, well inside the limit and with room for growth.
+    # No change to what a verdict means. Push runs stay at 12." -- and with it
+    # XC-313, a mutant's suite stopped at its third failure (`tools/mutate.py`'s
+    # `MUTANT_MAXFAIL`), which costs the logs each caught mutant's total failed
+    # count. His three hours is an estimate; the first twenty-four-shard nightly is
+    # its measurement. `tests/test_mutation_gate.py` reads this file and holds each
+    # job's matrix to its own `--shard K/N`.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+                13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -198,7 +216,7 @@ jobs:
           repository: jakewesterberg/wl-preproc
           path: wl-preproc
       - run: pip install -e ".[dev,contract,console,signin]"
-      - name: Mutation gate (function shard ${{ matrix.shard }}/12)
+      - name: Mutation gate (function shard ${{ matrix.shard }}/24)
         env:
           WLX_REQUIRE_PREPROC: "1"
-        run: python tools/mutation_gate.py --all --shard ${{ matrix.shard }}/12
+        run: python tools/mutation_gate.py --all --shard ${{ matrix.shard }}/24

@@ -14,6 +14,7 @@ import functools
 import importlib.util
 import os
 import random
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -164,9 +165,10 @@ def test_the_returns_flag_matches_what_the_module_needs():
 #: means the functions a sweep would really mutate.
 _MODULES = sorted(gate.RETURNS)
 
-#: Every count CI or a person could plausibly ask for, then one past the work
-#: itself (the package held 566 functions on 2026-09-30).
-_COUNTS = [*range(1, 13), 100, 1000]
+#: Every count CI or a person could plausibly ask for -- a push runs 12, the nightly
+#: 24 since 2026-10-22 -- then one past the work itself (the package held 566
+#: functions on 2026-09-30, 964 on 2026-10-22).
+_COUNTS = [*range(1, 13), 24, 100, 1000]
 
 
 @functools.cache
@@ -434,7 +436,8 @@ def test_shard_combined_with_changed_only_slices_only_the_smaller_selection():
     partitions the functions of whatever modules were already selected, never
     re-expanding them back to the full `RETURNS` set. The push job pairs
     `--changed-only` with `--shard` (XC-141), so a merge push's selection is cut
-    across twelve machines by function exactly as the nightly's is."""
+    across twelve machines by function, as the nightly's is across twenty-four
+    (twelve until 2026-10-22)."""
     modules, _ = gate.select(
         ["wl_xcon/dio.py", "wl_xcon/eye.py"], changed_only=True
     )
@@ -528,12 +531,17 @@ def test_a_failing_part_fails_the_shard_and_names_its_module(monkeypatch, capsys
     assert f"MUTATION GATE FAILED: {failing}" in capsys.readouterr().out
 
 
-def test_twelve_shards_through_mutate_run_every_function_exactly_once(monkeypatch):
+@pytest.mark.parametrize("n", [12, 24], ids=["push", "nightly"])
+def test_the_shard_counts_ci_runs_through_mutate_run_every_function_exactly_once(
+    monkeypatch, n
+):
     """Test the path, not the piece. Each shard's real commands are handed to
     `tools/mutate.py`'s own `main()` -- its `--only` parsing and refusal included --
-    with only the suite runs and the neutering stubbed. Across the twelve, every
+    with only the suite runs and the neutering stubbed. Across the `n`, every
     function the package has is mutated once, in order, and every call brackets
-    its part with one baseline and one restored suite."""
+    its part with one baseline and one restored suite. Twelve is a push's count and
+    twenty-four the nightly's since 2026-10-22; `test_each_mutation_job_runs_...`
+    holds the workflow to both."""
     spec = importlib.util.spec_from_file_location(
         "wlx_mutate_for_gate_test", gate.ROOT / "tools" / "mutate.py"
     )
@@ -563,12 +571,56 @@ def test_twelve_shards_through_mutate_run_every_function_exactly_once(monkeypatc
         return subprocess.CompletedProcess(command, mutate_tool.main())
 
     monkeypatch.setattr(gate.subprocess, "run", through_mutate)
-    for k in range(1, 13):
-        monkeypatch.setattr(sys, "argv", ["mutation_gate.py", "--all", "--shard", f"{k}/12"])
+    for k in range(1, n + 1):
+        monkeypatch.setattr(sys, "argv", ["mutation_gate.py", "--all", "--shard", f"{k}/{n}"])
         assert gate.main() == 0, k
 
     assert mutated == _targets()
     assert len(suites) == 2 * len(calls)
+
+
+# ---------------------------------------------------------------------------
+# The workflow's two matrices (PI, 2026-10-22, "Both": the nightly 24 shards, a
+# push still 12). A matrix and its own `--shard K/N` are written apart, so they
+# can disagree, and the cheap way is silent: twelve jobs of `K/24` sweep half the
+# functions in a run that reads green.
+# ---------------------------------------------------------------------------
+
+_WORKFLOW = gate.ROOT / ".github" / "workflows" / "ci.yml"
+_SHARD = "${{ matrix.shard }}"
+
+
+def _gate_shards(job: str) -> list[tuple[int, int]]:
+    """`job`'s matrix as the `(K, N)` each of its entries hands the gate, read the
+    way a runner would: the YAML parsed, `${{ matrix.shard }}` replaced by the
+    entry, the command split by `shlex`, and its `--shard` parsed by the gate's own
+    `parse_shard`. The step's name, which is what a log shows, must say the same."""
+    import yaml  # the `contract` extra, which every CI job installs
+
+    spec = yaml.safe_load(_WORKFLOW.read_text())["jobs"][job]
+    steps = [step for step in spec["steps"] if "tools/mutation_gate.py" in step.get("run", "")]
+    assert len(steps) == 1, steps
+    (command,) = [
+        line for line in steps[0]["run"].splitlines() if "tools/mutation_gate.py" in line
+    ]
+    shards = []
+    for k in spec["strategy"]["matrix"]["shard"]:
+        argv = shlex.split(command.replace(_SHARD, str(k)))
+        k_n = gate.parse_shard(argv[argv.index("--shard") + 1])
+        assert f"{_SHARD}/{k_n[1]})" in steps[0]["name"], steps[0]["name"]
+        shards.append(k_n)
+    return shards
+
+
+@pytest.mark.parametrize(
+    ("job", "n"), [("mutation", 12), ("mutation-full", 24)], ids=["push", "nightly"]
+)
+def test_each_mutation_job_runs_every_shard_of_its_own_count_once(job, n):
+    """Each K from 1 to N once, every job of a matrix naming the same N, and that N
+    the PI's: 24 for the nightly, whose twelve outgrew GitHub's 360-minute job
+    limit (2, 8 and 7 of 12 shards cancelled on 2026-10-20, 21 and 22), and 12 for
+    a push ("Push runs stay at 12")."""
+    assert _gate_shards(job) == [(k, n) for k in range(1, n + 1)]
 
 
 def test_main_with_a_shard_past_the_function_count_says_so_and_passes(monkeypatch, capsys):

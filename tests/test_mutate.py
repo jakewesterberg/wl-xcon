@@ -20,6 +20,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -656,10 +657,11 @@ _SLEEPS_FIRST = (
 )
 
 
-def _toy_mutant(monkeypatch, tmp_path, suite_source):
+def _toy_mutant(monkeypatch, tmp_path, suite_source, calls=None):
     """`mutate` end to end on a scratch module, its suite a toy one in `tmp_path`:
     the real `_run_suite`, the real plugin and the real progress reader, with only
-    the directory pytest runs in moved off the repository."""
+    the directory pytest runs in moved off the repository. Each suite run's keyword
+    arguments are appended to `calls`, when given."""
     suite = tmp_path / "suite"
     suite.mkdir()
     (suite / "test_toy.py").write_text(suite_source)
@@ -669,9 +671,13 @@ def _toy_mutant(monkeypatch, tmp_path, suite_source):
     monkeypatch.setattr(mutate_tool, "_clear_pycache", lambda: None)
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
     real = mutate_tool._run_suite
-    monkeypatch.setattr(
-        mutate_tool, "_run_suite", lambda **kwargs: real(suite, **kwargs)
-    )
+
+    def run(**kwargs):
+        if calls is not None:
+            calls.append(kwargs)
+        return real(suite, **kwargs)
+
+    monkeypatch.setattr(mutate_tool, "_run_suite", run)
     return target
 
 
@@ -679,13 +685,16 @@ def test_a_suite_killed_after_a_test_failed_is_caught_naming_it_and_the_one_runn
     monkeypatch, tmp_path
 ):
     """A test noticed before the limit, so it is a catch -- and the line says which
-    test noticed and which was still running when the suite was stopped."""
-    target = _toy_mutant(monkeypatch, tmp_path, _FAILS_THEN_SLEEPS)
+    test noticed and which was still running when the suite was stopped. Under
+    `--maxfail=3` (XC-313, 2026-10-22), which a single failure does not reach."""
+    calls = []
+    target = _toy_mutant(monkeypatch, tmp_path, _FAILS_THEN_SLEEPS, calls)
 
     caught, summary = mutate_tool.mutate(
         target, "covered", "[]", limit=_TOY_LIMIT, of=3
     )
 
+    assert calls == [{"timeout": _TOY_LIMIT, "maxfail": 3}], calls
     assert caught is True, summary
     assert summary.startswith(f"timed out after {_TOY_LIMIT}s, 1 failed before it"), summary
     assert "2 of 3 tests done" in summary, summary
@@ -698,13 +707,17 @@ def test_a_suite_killed_before_any_test_failed_is_timed_out_naming_the_one_runni
     monkeypatch, tmp_path
 ):
     """Nothing noticed before the limit. That is the harness noticing, not a test,
-    and it is the verdict that used to read `caught`."""
-    target = _toy_mutant(monkeypatch, tmp_path, _SLEEPS_FIRST)
+    and it is the verdict that used to read `caught`. Under `--maxfail=3` (XC-313,
+    2026-10-22): a stop that comes only at a failure cannot rescue a suite that has
+    none."""
+    calls = []
+    target = _toy_mutant(monkeypatch, tmp_path, _SLEEPS_FIRST, calls)
 
     caught, summary = mutate_tool.mutate(
         target, "covered", "[]", limit=_TOY_LIMIT, of=3
     )
 
+    assert calls == [{"timeout": _TOY_LIMIT, "maxfail": 3}], calls
     assert caught is mutate_tool.TIMED_OUT, summary
     assert summary.startswith(f"timed out after {_TOY_LIMIT}s, no test failed"), summary
     assert "1 of 3 tests done" in summary, summary
@@ -946,3 +959,110 @@ def test_the_progress_plugin_writes_only_when_its_variable_names_a_file(tmp_path
         ("failed", "test_toy.py::test_fails"),
         ("finished", "test_toy.py::test_fails"),
     ]
+
+
+# ---------------------------------------------------------------------------
+# A mutant's suite stops at its third failure (XC-313; the PI's "Stop at 3
+# failures", 2026-10-22, chosen with the nightly's 24 shards). A caught line loses
+# the total failed count and keeps its verdict and the tests behind the first three
+# failures; the unmutated runs keep the whole suite. `MUTANT_MAXFAIL` says what
+# pytest does with the flag, read in its source.
+# ---------------------------------------------------------------------------
+
+_UNMUTATED = "def covered():\n    return [1]\n"
+
+
+def test_only_a_mutants_suite_is_stopped_at_its_third_failure(monkeypatch, tmp_path, capsys):
+    """`--maxfail=3` on the mutant's run and on neither unmutated one. Those two are
+    there to show the whole suite passing, and a red one names every test that
+    failed -- how the 2026-09-25 flake was found (run 36115579357); stopped, it would
+    name three. Read at the subprocess, through `main`, `mutate` and `_run_suite`, so
+    what is tested is the command pytest is given, with the module as it was on disk
+    while that command ran."""
+    target = tmp_path / "module.py"
+    target.write_text(_UNMUTATED)
+    monkeypatch.setattr(mutate_tool, "SENTINEL", tmp_path / "sentinel.json")
+    monkeypatch.setattr(mutate_tool, "_clear_pycache", lambda: None)
+    monkeypatch.setattr(mutate_tool, "_restore_any_interrupted_run", lambda: None)
+    commands = []
+
+    def run(command, *, env, **_):
+        mutated = target.read_text() != _UNMUTATED
+        commands.append((mutated, command))
+        # What the plugin writes, so the baseline is not refused as blind.
+        with open(env[mutate_tool.PROGRESS_ENV], "a", encoding="utf-8") as out:
+            out.write(json.dumps({"event": "start", "nodeid": "t.py::a", "at": 0.0}) + "\n")
+            out.write(json.dumps({"event": "finished", "nodeid": "t.py::a"}) + "\n")
+        stdout = "1 failed in 0.01s\n" if mutated else "1 passed in 0.01s\n"
+        return subprocess.CompletedProcess(command, int(mutated), stdout=stdout, stderr="")
+
+    monkeypatch.setattr(
+        mutate_tool,
+        "subprocess",
+        SimpleNamespace(run=run, TimeoutExpired=subprocess.TimeoutExpired),
+    )
+    monkeypatch.setattr("sys.argv", ["mutate.py", str(target), "covered"])
+
+    assert mutate_tool.main() == 0
+
+    stops = [
+        (mutated, [arg for arg in command if arg.startswith("--maxfail")])
+        for mutated, command in commands
+    ]
+    assert stops == [(False, []), (True, ["--maxfail=3"]), (False, [])], commands
+    baseline_line = next(
+        line for line in capsys.readouterr().out.splitlines() if line.startswith("baseline:")
+    )
+    assert "or at 3 failures (--maxfail=3)" in baseline_line, baseline_line
+
+
+_FAILS_FIVE_TIMES = "def test_passes():\n    pass\n" + "".join(
+    f"def test_fails_{n}():\n    assert {n} == 0\n" for n in range(1, 6)
+)
+
+
+def test_a_mutant_stopped_at_its_third_failure_is_caught_naming_those_three(
+    monkeypatch, tmp_path
+):
+    """Real pytest, its stop banner and all. pytest prints the short summary, then
+    `!!! stopping after 3 failures !!!`, then the stats line, so the line's summary
+    must still be the stats and its names still the short summary's. The fourth
+    and fifth failures never run: a line reading `5 failed` or `+2 more` would mean
+    the flag never reached pytest."""
+    target = _toy_mutant(monkeypatch, tmp_path, _FAILS_FIVE_TIMES)
+
+    caught, summary = mutate_tool.mutate(target, "covered", "[]", limit=60, of=6)
+
+    assert caught is True, summary
+    assert summary.startswith("3 failed, 1 passed in "), summary
+    assert summary.endswith(
+        "  <- test_toy.py::test_fails_1, test_toy.py::test_fails_2, test_toy.py::test_fails_3"
+    ), summary
+    assert target.read_text() == _UNMUTATED
+
+
+#: Longer than `_TOY_LIMIT` so a loaded machine cannot reach it before three toy
+#: failures; only the broken case waits it out.
+_STOP_LIMIT = 15
+
+_FAILS_THRICE_THEN_SLEEPS = (
+    "import time\n"
+    + "".join(f"def test_fails_{n}():\n    assert {n} == 0\n" for n in range(1, 4))
+    + f"def test_sleeps():\n    time.sleep({_TOY_SLEEP})\n"
+)
+
+
+def test_three_failures_before_a_hang_stop_the_suite_there_not_at_the_limit(
+    monkeypatch, tmp_path
+):
+    """Where the stop meets XC-275's limit. Without it this suite runs into the sleep
+    and is killed, `timed out after 15s, 3 failed before it`: caught, after a whole
+    limit. With it pytest stops at the third failure, never reaches the sleep, and
+    the line is a finished run's."""
+    target = _toy_mutant(monkeypatch, tmp_path, _FAILS_THRICE_THEN_SLEEPS)
+
+    caught, summary = mutate_tool.mutate(target, "covered", "[]", limit=_STOP_LIMIT, of=4)
+
+    assert caught is True, summary
+    assert summary.startswith("3 failed in "), summary
+    assert "timed out" not in summary, summary

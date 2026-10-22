@@ -3,7 +3,8 @@
 
 A test that passes whether or not the behaviour exists is worse than no test: it
 reports safety it cannot provide. This script neuters one function -- replacing its
-body with `return []` -- runs the suite, and restores.
+body with `return []` -- runs the suite, stopping it at its third failure
+(`MUTANT_MAXFAIL`), and restores.
 
 **It clears `__pycache__` around every step, and that is the whole reason it is a
 script rather than three shell lines.** Doing this by hand left stale bytecode from
@@ -144,6 +145,57 @@ SUITE_ARGV = ["-m", "pytest", "-q", "-p", "no:cacheprovider", "-rfE"]
 #: How many failing tests a mutant's line names before it only counts the rest.
 NAMED = 3
 
+#: **A mutant's suite stops at its third failure** (`--maxfail=3`; XC-313, the PI's "Stop
+#: at 3 failures", 2026-10-22, chosen with the nightly's 24 shards). A caught mutant ran
+#: the whole suite however early its first failure came -- about four minutes a mutant in
+#: CI, the baseline's own time (run 39749961790's shard 4) -- and twelve shards of 80-81
+#: functions ran past GitHub's 360-minute job limit: 2, 8 and 7 of 12 cancelled on
+#: 2026-10-20, 21 and 22 (runs 39395156378, 39571238638, 39749961790). How much this
+#: shortens a shard is not measured; the first nightly under it is that measurement.
+#:
+#: **What a log loses**: the total failed count. A caught mutant's line reads at most
+#: about `3 failed` (or `errors`), its `passed` counts only the tests run before the stop,
+#: and failures after the third are not run, so a line can no longer show real failures
+#: behind three errors. **What it keeps**: the verdict, and the tests behind the first
+#: three failures, named by `_caught_by` from the short summary as before.
+#:
+#: **The mutant's run only.** The baseline and the restored run are there to show the
+#: whole suite passing, and a red one names every test that failed -- how the 2026-09-25
+#: flake was found. A stop there would name three.
+#:
+#: What pytest does with it, read on 2026-10-22 in the source of pytest 9.1.1, the
+#: version CI installs (run 39749961790's log), and of 9.0.2, which do not differ here
+#: (9.1.1 adds only a `--max-warnings` check to `pytest_sessionfinish`); the end-to-end
+#: tests in `tests/test_mutate.py` run whichever pytest is installed, so CI checks its own:
+#:
+#: - `_pytest/main.py`, `Session.pytest_runtest_logreport`: every failed report counts,
+#:   a call's, a setup's or a teardown's, and collection errors too
+#:   (`pytest_collectreport` is the same function). A test failing in its call and its
+#:   teardown counts twice, so a stopped run can name two tests, one of them twice.
+#: - `pytest_runtestloop` checks after each test's whole setup-call-teardown, and raises
+#:   `Session.Failed`; `wrap_session` makes that exit code 1. Non-zero, so caught, exactly
+#:   as before. After a third collection error `Session.pytest_collectstart` raises the
+#:   same `Failed` at the next collector, so collection stops there (exit 1, where collection
+#:   errors otherwise exit 2): caught either way, XC-312's class unchanged.
+#: - `_pytest/terminal.py`, `TerminalReporter.pytest_sessionfinish`: the short summary,
+#:   then the `!!! stopping after 3 failures !!!` banner, then the stats line. So the
+#:   stats line is still stdout's last (`_run_suite`'s summary), and the banner, which
+#:   starts with neither `FAILED ` nor `ERROR `, is not read as a failure (`_failures`).
+#:
+#: **The limit (XC-275) reads the same.** pytest stops only *at* the third failure, so a
+#: suite with no failure before the limit runs exactly as it did and is still `TIMED
+#: OUT`; one with one or two is still caught by name; one with three stops there, before
+#: the limit, and is read as a finished run.
+#:
+#: **No xdist here.** `SUITE_ARGV` has no `-n`, `pyproject.toml` no `addopts`, and CI's
+#: mutation jobs do not install pytest-xdist. Under it, the stop is less exact: its
+#: controller counts the workers' failures as they report them and, at three, sends
+#: each worker a shutdown that it reaches only after the tests it was already handed
+#: (`xdist/dsession.py`'s `_handlefailures` and `triggershutdown`, `xdist/remote.py`'s
+#: `pytest_runtestloop`, read in pytest-xdist 3.8.0), so more than three could be named,
+#: which `_caught_by` already counts as `+N more`.
+MUTANT_MAXFAIL = 3
+
 
 class SuiteRun(NamedTuple):
     """One run of the suite: whether it passed, pytest's final line, one line per
@@ -172,12 +224,20 @@ class SuiteRun(NamedTuple):
     running_for: float = 0.0
 
 
-def _run_suite(cwd: Path = ROOT, *, timeout: float = SUITE_TIMEOUT_SECONDS) -> SuiteRun:
-    """Run the suite once, with the progress plugin loaded, and stop it at `timeout`.
+def _run_suite(
+    cwd: Path = ROOT,
+    *,
+    timeout: float = SUITE_TIMEOUT_SECONDS,
+    maxfail: int | None = None,
+) -> SuiteRun:
+    """Run the suite once, with the progress plugin loaded, and stop it at `timeout`
+    -- and, given `maxfail`, at that many failures (`MUTANT_MAXFAIL`; only `mutate`
+    gives it).
 
     `cwd` is only ever the repository in use; it is a parameter so a test can run
     this, end to end, against a three-test suite rather than this one.
     """
+    stop = [] if maxfail is None else [f"--maxfail={maxfail}"]
     _clear_pycache()
     handle, name = tempfile.mkstemp(prefix="wlx-suite-progress-", suffix=".jsonl")
     os.close(handle)
@@ -191,7 +251,7 @@ def _run_suite(cwd: Path = ROOT, *, timeout: float = SUITE_TIMEOUT_SECONDS) -> S
     try:
         try:
             result = subprocess.run(
-                [sys.executable, *SUITE_ARGV, "-p", PROGRESS_PLUGIN],
+                [sys.executable, *SUITE_ARGV, *stop, "-p", PROGRESS_PLUGIN],
                 cwd=cwd,
                 capture_output=True,
                 text=True,
@@ -511,7 +571,9 @@ def mutate(
     `TIMED_OUT` if the suite ran past `limit` before any test failed. A suite that
     ran past `limit` *after* a test failed is a catch, and the line names the tests
     that failed and the one still running (`_how_far`, where `of` is the baseline's
-    test count).
+    test count). The suite stops at its third failure (`MUTANT_MAXFAIL`, since
+    2026-10-22), so a caught line counts at most about three: the total is gone, and
+    the tests behind those three are named.
 
     A name defined more than once -- `satisfied`, implemented by every `World` --
     has **all** its definitions neutered together. Bailing on the ambiguity was the
@@ -545,7 +607,7 @@ def mutate(
         SENTINEL.write_text(
             json.dumps({"path": str(path), "original": original, "mutated": mutated})
         )
-        run = _run_suite(timeout=limit)
+        run = _run_suite(timeout=limit, maxfail=MUTANT_MAXFAIL)
         if run.timed_out:
             if not run.failures:
                 return TIMED_OUT, f"{run.summary}, no test failed before it; {_how_far(run, of)}"
@@ -649,10 +711,12 @@ def main() -> int:
             f"Check {PROGRESS_PLUGIN_DIR / (PROGRESS_PLUGIN + '.py')} loads."
         )
     limit = _mutant_limit(baseline.seconds)
+    # The stop is printed with the limit, so a log that reads `3 failed` says why.
     print(
         f"baseline: {baseline.summary}; mutants stopped after {limit:.0f}s "
         f"({LIMIT_FACTOR} x this run's {baseline.seconds:.0f}s, never under "
-        f"{SUITE_TIMEOUT_SECONDS}s)\n"
+        f"{SUITE_TIMEOUT_SECONDS}s) or at {MUTANT_MAXFAIL} failures "
+        f"(--maxfail={MUTANT_MAXFAIL})\n"
     )
 
     survivors = []
