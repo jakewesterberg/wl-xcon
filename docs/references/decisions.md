@@ -1220,6 +1220,11 @@ entry has its three lines, that every link names a file that exists, and that ev
 - **Where:** [engine spec §14](../superpowers/specs/2026-10-07-engine-design.md#14-variation-n11-nr1-nr2) item 5; backlog XC-197.
 - **Basis:** PI decision; no published source.
 
+### TSK-62 — A person moves a run on to its next block, or back one, from the console, each recorded with who
+- **Decided:** 2026-10-19, the PI: "'Next' and 'back one'" -- "Both directions by hand, each recorded with who; two new commands." That *back one* plays the block before the open one in the run's sequence, started fresh, that both act at once, a drummed trial waiting dropped and named in the move's row, and that the move's row names no event code (its `BLOCK_END` timed by the stream, the row by its own instant), are engineering ([the engine C2b plan](../superpowers/plans/2026-10-19-engine-c2b.md#calls), call 26).
+- **Where:** [`wl_xcon/link.py`](../../wl_xcon/link.py) (`NextBlock`, `BackBlock`); [`wl_xcon/taskd.py`](../../wl_xcon/taskd.py) (`Session._move`); [`wl_xcon/scheduler.py`](../../wl_xcon/scheduler.py) (`Scheduler.move`).
+- **Basis:** PI decision; no published source.
+
 ## Recording and events
 
 ### REC-01 — Anything scientifically meaningful becomes an edge or word in a recorded stream; hardware timestamps are for analysis, software ones for control; our log carries meaning, not the timing record

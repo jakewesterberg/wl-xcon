@@ -65,9 +65,11 @@ from wl_xcon.levels import Levels
 from wl_xcon.photometry import Calibration, cone_record
 from wl_xcon.record import XCON_DIRNAME, SessionRecord, _local, welfare_note
 from wl_xcon.scheduler import (
+    BACK,
     DRUM_SCOPES,
     DRUM_WARNING,
     EVERY_TRIAL,
+    NEXT,
     RULE,
     RUN,
     RUN_TIME,
@@ -1710,6 +1712,42 @@ class Session:
             index, setting=command.setting, was=was, now=command.on,
         )
 
+    def _move(self, command, index: int, step: str) -> None:
+        """**A person moves the run on to its next block, or back one** (`link.NextBlock`,
+        `link.BackBlock`; engine build C2b; the PI, 2026-10-19, "'Next' and 'back one'": "Both
+        directions by hand, each recorded with who"), between trials or while paused: the scheduler
+        moves (`Scheduler.move`), the open block closes in the stream (`BLOCK_END`, where it ran a
+        trial) as an advance's does, its time starts afresh, and `controls.jsonl` records who moved
+        it from which block to which, and a drummed trial waiting that the move dropped (the plan's
+        science review, M5), the run's end row how the block ended. **The row names no event
+        code** (the engineering review, C1): wl-preproc times the n-th row naming a code by the
+        n-th time that code was strobed, and every block that ends on its own strobes `BLOCK_END`
+        with no row, so a move's row is timed by its own instant. **Refused with the sentence**,
+        nothing changed, where there is no such block: a plain run is one block, and the first or
+        last block of a plan has none before or after it."""
+        scheduler = self._scheduler
+        if self._run is not None and self._run.plan is None and not self._run.blocks:
+            self._refuse(command.KIND, command.by, (
+                "a plain run is one block, so there is no block to move to; a run of one of the "
+                "task's plans moves between its blocks"))
+            return
+        was, dropped = scheduler.block.name, scheduler.drum_waiting
+        said = scheduler.move(step, command.by)
+        if said is not None:
+            self._refuse(command.KIND, command.by, said)
+            return
+        if self._levels.end_block():
+            self.card.emit(BLOCK_END)
+        self.blocks_run.append(scheduler.block.name)
+        self._block_from = self._elapsed
+        what = "next block" if step == NEXT else "back one"
+        self._control(
+            command.KIND, command.by,
+            f"{what}: from block {was} to block {scheduler.block.name}"
+            + ("" if dropped is None else f"; the drummed trial of {dropped} waiting was dropped"),
+            index, block=was, to=scheduler.block.name, dropped=dropped,
+        )
+
     def _ends(self, index: int) -> bool:
         """Whether the session must end at this boundary, with its reason and kind
         set. **One place for it**, asked between trials and on every pass of the
@@ -2034,6 +2072,12 @@ class Session:
             return
         if isinstance(command, _link.Training):
             self._train(command, index)
+            return
+        if isinstance(command, _link.NextBlock):
+            self._move(command, index, NEXT)
+            return
+        if isinstance(command, _link.BackBlock):
+            self._move(command, index, BACK)
             return
         if not isinstance(command, _link.SetParameter):
             # A command this session has no branch for -- a newer console's -- is

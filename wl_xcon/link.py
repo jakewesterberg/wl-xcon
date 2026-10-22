@@ -6,8 +6,9 @@ idle frame `wlx taskd` publishes while no session is open (`Idle`, since schema 
 carrying the last closed session's summary since schema 11),
 the commands a console sends back (`SetParameter`, `Stop`, and since b3a the service's
 `OpenSession`, `CheckRun`, `StartRun` and `EndSession`, since XC-026 its
-`ResumeSession`, and since engine build C2a `ClearOwed`, `Drum` and `Training`; `Command`), the
-port a session publishes and drains through (`Link`, `Absent`, `Simulated`), its wire
+`ResumeSession`, since engine build C2a `ClearOwed`, `Drum` and `Training`, and since C2b
+`NextBlock` and `BackBlock`; `Command`), the port a session publishes and drains through
+(`Link`, `Absent`, `Simulated`), its wire
 encoding (`encode`/`decode`, plus the command-side `_encode_command`/`_decode_command`),
 and the one live transport that carries all of it over a real socket (`ZmqLink`,
 `ZmqConsole`). Nothing here is deferred to a later module -- an earlier version of
@@ -1762,6 +1763,28 @@ class Training:
     by: Actor
 
 
+@dataclass(frozen=True, slots=True)
+class NextBlock:
+    """**Move the run on to its next block** (engine build C2b; the PI, 2026-10-19, "'Next' and
+    'back one'": "Both directions by hand, each recorded with who"): the block its plan's order
+    gives next, a training progression's next stage up, at the boundary the command reaches, or
+    at once while paused (`scheduler.Scheduler.move`)."""
+
+    KIND: ClassVar[str] = "next_block"
+
+    by: Actor
+
+
+@dataclass(frozen=True, slots=True)
+class BackBlock:
+    """**Move the run back one block** (engine build C2b; the PI, 2026-10-19): the block before the
+    open one in the run's sequence, a training progression's stage below, started fresh."""
+
+    KIND: ClassVar[str] = "back_block"
+
+    by: Actor
+
+
 Command = (
     SetParameter
     | Stop
@@ -1779,6 +1802,8 @@ Command = (
     | ClearOwed
     | Drum
     | Training
+    | NextBlock
+    | BackBlock
 )
 
 #: The kinds of scheduled stop, in the order a person is offered them.
@@ -1847,7 +1872,8 @@ def _encode_command(command: Command) -> bytes:
     """A command to msgpack -- `SetParameter`, `Stop`, and since P4d-2b b2a `Pause`,
     `Resume`, `Mark`, `ScheduleStop`, `CancelScheduledStop` and `ManualReward`, and
     since P4d-2b b3a `OpenSession`, `CheckRun`, `StartRun` and `EndSession`, since
-    XC-026 `ResumeSession`, and since engine build C2a `ClearOwed`, `Drum` and `Training` -- tagged
+    XC-026 `ResumeSession`, since engine build C2a `ClearOwed`, `Drum` and `Training`, and since
+    C2b `NextBlock` and `BackBlock` -- tagged
     by kind so `_decode_command` knows which dataclass to rebuild.
 
     Private, unlike `encode`/`decode`: its callers are `ZmqConsole.send` and
@@ -1871,7 +1897,9 @@ def _encode_command(command: Command) -> bytes:
             "value": command.value,
             "by": actors.to_map(command.by),
         }
-    elif isinstance(command, (Stop, Pause, Resume, CancelScheduledStop, ManualReward)):
+    elif isinstance(
+        command, (Stop, Pause, Resume, CancelScheduledStop, ManualReward, NextBlock, BackBlock)
+    ):
         payload = {"kind": command.KIND, "by": actors.to_map(command.by)}
     elif isinstance(command, Mark):
         payload = {
@@ -2141,7 +2169,8 @@ def _command_from(data: dict) -> Command:
         return SetParameter(name=name, value=_setting(data.get("value"), name, by), by=by)
     simple = {
         command.KIND: command
-        for command in (Stop, Pause, Resume, CancelScheduledStop, ManualReward)
+        for command in (Stop, Pause, Resume, CancelScheduledStop, ManualReward, NextBlock,
+                        BackBlock)
     }
     if kind in simple:
         return simple[kind](by=_actor(data.get("by"), kind))

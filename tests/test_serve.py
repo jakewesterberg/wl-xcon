@@ -45,6 +45,7 @@ from wl_xcon.link import (
     CONNECT_TIMEOUT_S,
     REPLY_TIMEOUT_S,
     SCHEMA,
+    BackBlock,
     CancelScheduledStop,
     CheckRun,
     ClearOwed,
@@ -53,6 +54,7 @@ from wl_xcon.link import (
     Idle,
     ManualReward,
     Mark,
+    NextBlock,
     NotDelivered,
     OpenSession,
     Pause,
@@ -2479,6 +2481,8 @@ def test_a_body_longer_than_the_limit_or_without_a_length_is_refused_unread():
         ({"kind": "drum", "by": "jake", "scope": "block"}, Drum(scope="block", by=Box("jake"))),
         ({"kind": "training", "by": "jake", "setting": "clear", "on": True},
          Training(setting="clear", on=True, by=Box("jake"))),
+        ({"kind": "next_block", "by": "jake"}, NextBlock(by=Box("jake"))),
+        ({"kind": "back_block", "by": "jake"}, BackBlock(by=Box("jake"))),
     ],
 )
 def test_each_command_the_page_sends_parses_to_what_the_rig_is_sent(body, expected):
@@ -2498,6 +2502,7 @@ def test_a_parse_refusal_is_a_bad_command():
         ({"kind": "drum", "by": "jake", "scope": "always"}, "block, run or off"),
         ({"kind": "training", "by": "jake", "setting": "always", "on": True},
          "a training setting is clear or first_answers"),
+        ({"kind": "next_block", "by": "jake", "block": "far"}, "takes no block"),
     ],
 )
 def test_a_clear_or_a_drum_the_page_sends_is_held_to_the_wires_rules(body, said):

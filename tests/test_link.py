@@ -29,6 +29,7 @@ from wl_xcon.link import (
     REFUSAL_HISTORY,
     Absent,
     CancelScheduledStop,
+    BackBlock,
     CheckRun,
     ClearOwed,
     CommandRefused,
@@ -63,6 +64,7 @@ from wl_xcon.link import (
     Simulated,
     SetParameter,
     Staged,
+    NextBlock,
     StartRun,
     Stop,
     Stranded,
@@ -1573,6 +1575,17 @@ def test_clearing_a_trial_and_switching_drumming_survive_the_wire_with_who_sent_
     by the trainer (engine build C2a)."""
     assert _decode_command(_encode_command(command)) == command
     assert (ClearOwed.KIND, Drum.KIND) == ("clear", "drum")
+
+
+@pytest.mark.parametrize("command", [NextBlock(by=Box("jake")), BackBlock(by=Box("jake"))],
+                         ids=["next block", "back one"])
+def test_moving_a_block_on_or_back_survives_the_wire_with_who_sent_it(command):
+    """The PI, 2026-10-19, "'Next' and 'back one'": two commands, each recorded with who (engine
+    build C2b)."""
+    restored = _decode_command(_encode_command(command))
+
+    assert restored == command and type(restored) is type(command)
+    assert (NextBlock.KIND, BackBlock.KIND) == ("next_block", "back_block")
 
 
 @pytest.mark.parametrize(

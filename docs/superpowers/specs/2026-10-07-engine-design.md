@@ -676,7 +676,8 @@ drew a trial since the last one, or a block that cannot draw and does not end, e
 sentence ("End run with a sentence"), recorded as the run's end, not a crash. Item 5's citation of
 [@berger2018standardized] beside "fall-back", and §15's beside progressions that "may step back",
 rest on automated progression through levels from each animal's progress, which its abstract
-states; that it steps back is UNVERIFIED (TSK-57). Interludes (item 4) are build C6's; the
+states; that it steps back is UNVERIFIED (TSK-57). A person moves a run on a block or back one
+("'Next' and 'back one'"), recorded with who. Interludes (item 4) are build C6's; the
 operator's edits (item 2), C3's.
 
 ## 14. Variation (N§11, N§R1, N§R2)

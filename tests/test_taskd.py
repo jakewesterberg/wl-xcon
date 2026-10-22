@@ -43,11 +43,13 @@ from wl_xcon.link import (
     CONTROL_HISTORY,
     RECENT_OUTCOMES,
     REFUSAL_HISTORY,
+    BackBlock,
     CancelScheduledStop,
     ClearOwed,
     Drum,
     ManualReward,
     Mark,
+    NextBlock,
     Pause,
     Preflight,
     PreflightItem,
@@ -7586,3 +7588,110 @@ def test_a_run_naming_a_plan_its_task_lacks_is_refused_before_it_starts(tmp_path
         session.run()
 
     assert not (session.directory / "runs.jsonl").exists()
+
+
+# --- A person moves the run on a block, or back one (engine build C2b) ---------------------
+
+#: Three block types of one condition each, every condition owed four trials.
+_THREE = ('{"three": Plan([Block("a", [Condition("x", {"target_x": 5.0}, target=4)]), '
+          'Block("b", [Condition("y", {"target_x": 8.0}, target=4)]), '
+          'Block("c", [Condition("z", {"target_x": 12.0}, target=4)])])}')
+
+
+def test_a_person_moves_a_run_on_a_block_and_back_one_and_each_is_recorded_with_who(tmp_path):
+    """The PI, 2026-10-19, "'Next' and 'back one'": "Both directions by hand, each recorded with
+    who". *Next* leaves `a` after its first trial; *back one*, after two trials of `b`, plays `a`
+    again, started fresh; the stream closes each block as it is left, and the controls and the end
+    row say who."""
+    link = _Drained({2: [NextBlock(by=Box("kim"))], 4: [BackBlock(by=Box("kim"))]})
+    session = _planned(tmp_path, _THREE, plan="three", link=link)
+
+    session.run()
+
+    (_, end) = _runs(session)
+    assert session.blocks_run == ["a", "b", "a", "b", "c"]
+    kim = {"kind": "box", "name": "kim"}
+    assert [(e["block"], e["ended"], e["by"]) for e in end["block_ends"]] == [
+        ("a", "next", kim), ("b", "back", kim), ("a", "rule", None), ("b", "rule", None),
+        ("c", "rule", None)]
+    moves = [(row["kind"], row["block"], row["to"], row["event_code"])
+             for row in _controls_rows(session) if row["kind"] in ("next_block", "back_block")]
+    # The engineering review, C1: a move's row names no code -- every block that ends on its own
+    # strobes `BLOCK_END` with no row, so wl-preproc could not time the n-th row naming 3 by the
+    # n-th 3 -- and it is timed by its own instant; the stream still closes each block left.
+    assert moves == [("next_block", "a", "b", None), ("back_block", "b", "a", None)]
+    rows = _trial_rows(session)
+    assert [row["block"] for row in rows[:4]] == ["a", "b", "b", "a"]
+    assert sum(row["block"] == "a" for row in rows) == 5, "one before next, four once back"
+    assert _block_words(session.card.codes) == [
+        ("run", 1), ("start", 1), "end", ("start", 2), "end", ("start", 3), "end", ("start", 4),
+        "end", ("start", 5), "end", "run end"]
+
+
+def test_a_move_back_before_a_blocks_first_trial_does_not_end_its_run_as_stalled(tmp_path):
+    """The engineering review, I1 (its fuzz's seed 167): a fixed plan whose first block owes
+    nothing and whose second owes three; a person moves back one before the second's first trial,
+    the first ends on its rule again, and the second plays its three -- where the run ended with
+    "the plan can draw no further trial", false for the second."""
+    link = _Drained({2: [BackBlock(by=Box("kim"))]})
+    session = _planned(tmp_path, (
+        '{"two": Plan([Block("a", [Condition("x", {"target_x": 5.0}, target=0)]), '
+        'Block("b", [Condition("y", {"target_x": 12.0}, target=3)])])}'), plan="two", link=link)
+
+    session.run()
+
+    (_, end) = _runs(session)
+    assert session.blocks_run == ["a", "b", "a", "b"]
+    assert [e["ended"] for e in end["block_ends"]] == ["rule", "back", "rule", "rule"]
+    assert len(_trial_rows(session)) == 3 and end["end_reason"] == "plan_done"
+
+
+def test_a_move_that_drops_a_drummed_trial_says_so_in_its_row(tmp_path, monkeypatch):
+    """The science review, M5: a person's move acts at once, dropping a drummed trial waiting to
+    come back (the engineering call; Appendix B), and its row says which."""
+    _scripted_trials(monkeypatch, [Outcome.WRONG_TARGET] + [Outcome.CORRECT] * 50)
+    link = _Drained({2: [NextBlock(by=Box("kim"))]})
+    session = _planned(tmp_path, (
+        '{"drill": Plan([Block("a", [Condition("x", {"target_x": 5.0}, target=4)], drum=True), '
+        'Block("b", [Condition("y", {"target_x": 12.0}, target=2)])])}'), plan="drill", link=link)
+
+    session.run()
+
+    (row,) = [row for row in _controls_rows(session) if row["kind"] == "next_block"]
+    assert (row["block"], row["to"], row["dropped"]) == ("a", "b", "x")
+    (said,) = [said for kind, _, _, said in session.controls if kind == "next_block"]
+    assert said == "next block: from block a to block b; the drummed trial of x waiting was dropped"
+
+
+def test_a_move_with_no_block_to_go_to_is_refused_with_its_sentence_and_changes_nothing(tmp_path):
+    """A plain run is one block; a plan's first block has none before it."""
+    plain = _session(_spec(tmp_path / "plain", trials=3), link=_Drained(
+        {1: [NextBlock(by=Box("kim"))]}))
+    planned = _planned(tmp_path / "planned", _THREE, plan="three", link=_Drained(
+        {1: [BackBlock(by=Box("kim"))]}))
+
+    plain.run()
+    planned.run()
+
+    assert [why for _, _, why in plain.refusals] == [
+        "a plain run is one block, so there is no block to move to; a run of one of the task's "
+        "plans moves between its blocks"]
+    assert [why for _, _, why in planned.refusals] == [
+        "block 'a' is the first of the run's blocks, so there is no block before it"]
+    assert planned.blocks_run == ["a", "b", "c"]
+
+
+def test_a_move_sent_while_paused_is_applied_at_once(tmp_path):
+    """As a clear or a drumming switch is: `_hold` drains it into `Session._command`, beside the
+    pause, outside its welfare-listed parts, so the run resumes in the block moved to."""
+    link = _Scripted(script={1: [NextBlock(by=Box("kim"))], 2: [Resume(by=Box("kim"))]})
+    path = _sessions.planned_task(tmp_path, _THREE)
+    session, _ = _walled(tmp_path, link, task=str(path), plan="three", trials=400)
+    link.queue(Pause(by=Box("kim")))
+
+    session.run()
+
+    kinds = [row["kind"] for row in _controls_rows(session)]
+    assert kinds[:3] == ["pause", "next_block", "resume"]
+    assert _trial_rows(session)[0]["block"] == "b"
+    assert session.blocks_run == ["a", "b", "c"]
