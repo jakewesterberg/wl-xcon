@@ -197,7 +197,7 @@ jobs:
     # stopped at its third failure (`tools/mutate.py`'s `MUTANT_MAXFAIL`), which
     # costs the logs each caught mutant's total failed count. His three hours is an
     # estimate; the first twenty-four-shard nightly is its measurement, and whether
-    # its 27 jobs queue (XC-404). `tests/test_mutation_gate.py` reads this file and
+    # its 27 jobs queue (XC-407). `tests/test_mutation_gate.py` reads this file and
     # holds each job's matrix to its own `--shard K/N`.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
