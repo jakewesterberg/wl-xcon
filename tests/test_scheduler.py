@@ -37,7 +37,7 @@ from wl_xcon.scheduler import (
     WithReplacement,
 )
 from wl_xcon.task import (
-    COUNTED, NO_LIMIT, OWED, SPENT, UNPAID, Balanced, ByCriterion, Counting, Cyclic, Outcome,
+    COUNTED, NO_LIMIT, OWED, SPENT, UNPAID, Balanced, ByCriterion, Counting, Cyclic, Fixed, Outcome,
     Random,
 )
 
@@ -1743,7 +1743,7 @@ def test_a_random_block_order_leaves_every_conditions_draw_as_the_seed_gives_it(
             scheduler.record(names[-1], Outcome.CORRECT)
         return names
 
-    assert draws() == draws(order=Random(blocks=1)) == draws(order=Balanced(blocks=1))
+    assert draws() == draws(order=Random(blocks=1))
 
 
 def _stages(fall_back=(0.5, 4)) -> Scheduler:
@@ -2068,7 +2068,6 @@ def test_each_block_end_is_said_with_its_numbers():
     assert timed.because(RUN_TIME) == "the run's time ran out"
 
 
-
 def _fuzzed(seed: int) -> Scheduler:
     """A random plan: one to four block types of one to three conditions, targets 0 to 3, each
     perhaps a criterion, a number of trials, drumming and a condition order; and a random block
@@ -2111,6 +2110,10 @@ def test_no_random_plan_draws_from_nowhere_ends_a_block_on_a_drum_or_moves_a_sta
             if ending is not None:
                 assert scheduler._drum is None, case
                 if scheduler.stalled:
+                    assert all(
+                        b.criterion is None and b.trials is None
+                        and all(c.target == 0 for c in b.conditions) for b in scheduler.blocks
+                    ), f"a false stall, case {case}"
                     break
                 was = scheduler._position
                 scheduler.advance(ending)
@@ -2129,3 +2132,121 @@ def test_no_random_plan_draws_from_nowhere_ends_a_block_on_a_drum_or_moves_a_sta
                 scheduler.expire()
         else:
             assert isinstance(scheduler.order, ByCriterion), case
+
+
+def test_a_timed_stages_fall_back_met_as_its_time_runs_out_moves_back():
+    """A fall-back is judged before a stage's time: S2 with four wrong first answers, its time
+    run out, falls back to S1 rather than moving on."""
+    scheduler = _stages()
+    _answer(scheduler, Outcome.CORRECT, Outcome.CORRECT, Outcome.CORRECT)
+    scheduler.advance(scheduler.ends)
+    _answer(scheduler, *[Outcome.WRONG_TARGET] * 4)
+    scheduler.expire()
+
+    assert scheduler.ends == FALL_BACK
+    assert scheduler.advance(scheduler.ends).name == "S1"
+
+
+def test_a_stage_moved_on_by_its_time_starts_its_own_clock():
+    scheduler = _stages()
+    _answer(scheduler, Outcome.FIXATION_BREAK)
+    scheduler.expire()
+    assert scheduler.expired
+    scheduler.advance(scheduler.ends)
+
+    assert scheduler.ends is None and not scheduler.expired
+
+
+def test_a_plan_whose_block_drew_since_it_opened_every_type_has_not_stalled():
+    scheduler = Scheduler([_one("A", target=0), _one("B")], seed=1, order=Cyclic())
+    scheduler.advance(scheduler.ends)
+    _answer(scheduler, Outcome.CORRECT)
+    assert scheduler.ends == RULE and not scheduler.stalled
+    scheduler.advance(scheduler.ends)
+
+    assert scheduler.ends == RULE and not scheduler.stalled
+
+
+def test_a_balanced_order_leaves_every_conditions_draw_as_the_seed_gives_it():
+    blocks = [Block(name=n, conditions=[Condition(c, {}, target=3) for c in "xyz"]) for n in "AB"]
+
+    def draws(**order) -> list[str]:
+        scheduler = Scheduler(blocks, seed=5, **order)
+        names = []
+        for _ in range(9):
+            names.append(scheduler.next_trial().name)
+            scheduler.record(names[-1], Outcome.CORRECT)
+        return names
+
+    assert draws() == draws(order=Balanced(blocks=1))
+
+
+def test_a_stage_below_the_top_records_no_pass_after_a_fall_back_from_it():
+    blocks = [_one("S1"), _one("S2", criterion=(1.0, 2))]
+    scheduler = Scheduler(blocks, seed=1, order=ByCriterion(fall_back=(0.6, 4)))
+    _answer(scheduler, Outcome.CORRECT)
+    scheduler.advance(scheduler.ends)
+    _answer(scheduler, Outcome.WRONG_TARGET, Outcome.WRONG_TARGET, Outcome.CORRECT,
+            Outcome.CORRECT)
+    assert scheduler.ends is None and scheduler.passed_at is not None
+    _answer(scheduler, Outcome.WRONG_TARGET)
+    scheduler.advance(scheduler.ends)
+
+    assert scheduler.passed_at is None
+
+
+def test_next_block_names_the_block_the_plan_goes_on_to_and_none_at_its_end():
+    scheduler = _stages()
+    assert scheduler.next_block.name == "S2"
+    _answer(scheduler, Outcome.CORRECT, Outcome.CORRECT, Outcome.CORRECT)
+    scheduler.advance(scheduler.ends)
+    scheduler.advance(RULE)
+    assert scheduler.block.name == "S3" and scheduler.next_block is None
+    cyclic = Scheduler([_one("A"), _one("B")], seed=1, order=Cyclic(cycles=1))
+    assert cyclic.next_block.name == "B"
+    cyclic.advance(RULE)
+    assert cyclic.next_block is None
+
+
+def test_expired_is_false_until_expire_and_false_again_after_the_block_moves_on():
+    scheduler = Scheduler([_one("A"), _one("B")], seed=1)
+    assert scheduler.expired is False
+    scheduler.expire()
+    assert scheduler.expired is True
+    scheduler.advance(TIME)
+    assert scheduler.expired is False
+
+
+def test_drum_waiting_names_the_condition_whose_drummed_trial_waits_until_it_is_right():
+    scheduler = Scheduler([_one("A", target=3, drum=True)], seed=1)
+    assert scheduler.drum_waiting is None
+    _answer(scheduler, Outcome.WRONG_TARGET)
+    assert scheduler.drum_waiting == "a"
+    _answer(scheduler, Outcome.CORRECT)
+    assert scheduler.drum_waiting is None
+
+
+def test_a_block_end_is_recorded_once_whoever_closes_it_again():
+    scheduler = Scheduler([_one("A", target=3)], seed=1)
+    scheduler.close(TIME)
+    scheduler.close(RUN_TIME)
+
+    assert scheduler.ended == [BlockEnd("A", TIME, None, None)]
+    assert [s.because for s in scheduler.shortfalls] == [TIME]
+
+
+def test_a_persons_clear_starts_the_progress_check_afresh():
+    """A Cyclic plan, A owing nothing and B owing two: B cleared to nothing before its first trial
+    ends on its rule, but that is a person's doing, not the plan spinning, so it has not stalled."""
+    scheduler = Scheduler([_one("A", target=0), _one("B", target=2)], seed=1, order=Cyclic())
+    scheduler.clearing = True
+    scheduler.advance(scheduler.ends)
+    assert scheduler.clear("b", by="kim", rest=True) is None
+
+    assert scheduler.ends == RULE and not scheduler.stalled
+
+
+@pytest.mark.parametrize("order", [Fixed(), Cyclic(), Balanced(), Random(), ByCriterion()])
+def test_a_plan_with_no_blocks_is_refused_plainly_whatever_its_order(order):
+    with pytest.raises(IndexError, match="no block to start"):
+        Scheduler([], seed=1, order=order)

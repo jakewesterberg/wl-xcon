@@ -342,6 +342,8 @@ class Scheduler:
         never starts with the type the round before it ended with."""
         n = len(self.blocks)
         order = self.order
+        if n == 0:
+            raise IndexError("a plan with no block to start has nothing to run")
         if position < 0:
             return None
         if isinstance(order, Cyclic):
@@ -939,6 +941,10 @@ class Scheduler:
         # waiting trial; count starts over"), as an answer ends a trial.
         counts = self._counts[condition]
         counts.in_a_row = counts.rig = 0
+        # **A person's clear is not the plan spinning** (the engine C2b plan's Task 5 review): the
+        # progress check counts afresh from it, as from a move (`advance`), so a block cleared to
+        # nothing owed cannot make a plan whose other blocks draw look stalled.
+        self._opened = {self._index}
         return None
 
     def drum(self, scope: str) -> str:
@@ -965,9 +971,9 @@ class Scheduler:
     def finished(self) -> bool:
         """Whether the open block's end rule is met: every condition owes nothing, and where the
         block ends on a criterion or a number of trials, those are met too -- **its targets are a
-        minimum** (the
-        PI, 2026-10-18, "Both: criterion and every target": "The block ends only once the criterion
-        is met and every target is used up; conditions keep coming until both hold") -- **and no
+        minimum** (the PI, 2026-10-18, "Both: criterion and every target": "The block ends only
+        once the criterion is met and every target is used up; conditions keep coming until both
+        hold") -- **and no
         drum waits** ("Finish the drum first": "The block ends only after the drummed trial is
         answered right. If the extra tries drop the percentage below the bar, the block carries on.
         Training ends on a success.")."""
