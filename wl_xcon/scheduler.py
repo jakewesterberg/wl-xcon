@@ -8,9 +8,11 @@ rather than a dropped frame.
 the rig** (XC-207). S3 §7 had them planned in wl.works before a session, with
 `wl-preproc` quarantining a block wl.works did not plan; the PI retired that on
 2026-10-01, through wl-works, which sends the rig no day's plan, and wl-preproc withdrew
-the quarantine. This schedules *within* the blocks a run is given and never invents
-one; until a task program or the rig gives them, a run is one block (`taskd._plan`).
-Changing condition weights or geometry is free; changing task is a new run.
+the quarantine. **Since engine build C2b a task declares its plans** (`task.Plan`,
+`task.Task.plans`) and the operator chooses one as a run starts; this plays the chosen
+plan's blocks in its order (`task.BlockOrder`) and never invents one, and a run with no
+plan chosen is one block (`taskd.Session._plan`). Changing condition weights or geometry
+is free; changing task is a new run.
 """
 
 from __future__ import annotations

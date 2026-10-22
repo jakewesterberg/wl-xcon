@@ -409,14 +409,35 @@ row records the shortfalls, each condition's counts, and the run's `trials`, a t
 drummed repeats one, beside its `presentations`, the lines written. A trial that reaches the longest
 trial, five minutes at the session's rate (`run.LONGEST_TRIAL_S`), is a missed acquisition
 (`task.HANG_COUNTS_AS`, counted as no fixation is), owed by its structure's table and one of the N
-in a plain "run N trials" run (every live run until C2b), whose table (`scheduler.EVERY_TRIAL`)
+in a plain "run N trials" run, whose table (`scheduler.EVERY_TRIAL`)
 spends every non-answer, and said on the console. A hold runs its own time: the load-time check warns where a timeout on its
 state can cut it short, a timeout listed before the hold that ties it included (`hold-cut-short`).
 
-A session is a sequence of **blocks** (condition set, parameter overrides, length rule,
-transition) and **interludes** (sub-tasks such as calibration that the session enters and
-leaves without ending). Token economies require session-scoped state and a persistent
-display layer that per-trial scenes do not reset.
+**Plans and blocks, since engine build C2b.** A task declares its plans (`Task.plans`; engine spec
+§13.1), and a run plays the one it is started with -- `wlx run --plan` -- or with none the plain
+run.
+A plan is its block types (`task.Block`: a named set of conditions, each naming the trial
+structure it plays and counted by that structure's table unless its block has its own; ending once
+every target is used up and, as declared, a criterion is met, a number of trials is run, or its
+time runs out), how they follow (`Fixed`, `Cyclic`, `Balanced` -- shuffled rounds within the run --
+`Random`, or `ByCriterion`, a training progression that moves up on a stage's rule or its time,
+back one on a fall-back rule, and keeps its top stage going) and a run time limit. A block is one
+stretch of trials under one type inside one run, opened by `BLOCK_START` before its first trial
+and closed by `BLOCK_END` after its last. **Time limits are read between trials, in the run loop,
+never in `Session._ends`**: on the time trials ran, pauses not counting; a drummed trial waiting
+finishes first; neither is a welfare limit, and a run they end is `completed`, never `limit`, its
+end row saying why (`end_reason`). A plan that can draw no further trial ends its run with a
+sentence (the per-advance progress check).
+A live edit wins over a value a condition sets (engine spec §14.7). The load-time checks refuse a
+plan that cannot run (`bad-plan`) and warn of one that may not do what was meant. Each run's start
+row names its plan and writes it as declared, its end row says how each block ended and which block
+of the stream it was (`block_ends`), and each trial's row names the structure it played and any
+value a live edit overrode.
+
+A session is a sequence of runs, each a sequence of **blocks**, and **interludes** (sub-tasks
+such as calibration that the session enters and leaves without ending; engine build C6). Token
+economies require session-scoped state and a persistent display layer that per-trial scenes do
+not reset.
 
 ## Message contracts (draft v0)
 

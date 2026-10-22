@@ -653,6 +653,32 @@ luminance waits on build F (XC-305).
 9. **When the animal stops working**: an alert; a console checkbox with a trial count turns on
    auto-pause (a system-actor pause, §11.3).
 
+*Engine build C2b, 2026-10-22* (plan `docs/superpowers/plans/2026-10-19-engine-c2b.md`; the PI's
+answers of 2026-10-19): **items 1, 5 and 8 built** -- a task's plans in its task object, chosen at
+run start (`wlx run --plan`); block orders fixed, cyclic, balanced in shuffled rounds within each
+run ("Shuffled rounds") and plain random ("Both, as two choices"), each random order drawn from the
+run's recorded seed, a balanced round never starting with the type just played ("Never
+back-to-back"), and by criterion: up on a stage's own rule, back one stage, started fresh, on the
+plan's fall-back rule, judged once its window of answers is in and on each trial's first answer
+only ("First answer only"; a broken hold where the stage scores one, "Yes, the same"), the top
+stage working on ("Same, but top keeps going"), and a stage whose time runs out moving on whether
+or not it passed ("Move on anyway"), the top stage's own time limit ending the run. A block ends on
+every target
+used up and, as declared, a criterion, a number of trials (a trial and its drummed repeats one) or
+a time limit. **Time limits** -- a block's and the run's, the run's written in the plan ("Yes, in
+the plan") -- are read between trials on the time trials ran, pauses not counting ("Pauses don't
+count"): the trial in flight finishes and pays ("Finish trial, then end"), a drummed trial waiting
+is answered right first ("Finish the drum first", for both), and what a block still owed is
+recorded as not run, "time ran out", the run's time apart from a block's own; neither is a welfare
+limit, and a run they end is `completed`, never the out-of-cage stop's `limit`, its end row saying
+why (`end_reason`). **The per-advance progress check**: a plan whose every block ended before it
+drew a trial since the last one, or a block that cannot draw and does not end, ends the run with a
+sentence ("End run with a sentence"), recorded as the run's end, not a crash. Item 5's citation of
+[@berger2018standardized] beside "fall-back", and §15's beside progressions that "may step back",
+rest on automated progression through levels from each animal's progress, which its abstract
+states; that it steps back is UNVERIFIED (TSK-57). Interludes (item 4) are build C6's; the
+operator's edits (item 2), C3's.
+
 ## 14. Variation (N§11, N§R1, N§R2)
 
 1. **Named conditions plus drawn values.** [@asaad2008flexible] A parameter is set by a condition or

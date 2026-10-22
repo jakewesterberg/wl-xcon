@@ -4171,3 +4171,27 @@ def test_render_keeps_a_box_name_typed_like_a_members_a_box_name():
     )
 
     assert "by Jake Westerberg (wl.works) (box, unverified)" in render(frame)
+
+
+def test_wlx_run_plays_the_plan_it_names_and_its_start_row_says_which(tmp_path):
+    """Engine build C2b: `wlx run --plan NAME` runs one of the task's plans by its name; its start
+    row names it, and the plain run's trial count is not the plan's."""
+    planned = _sessions.planned_task(tmp_path, (
+        '{"short": Plan([Block("near", [Condition("near", {"target_x": 5.0}, target=2)])])}'))
+    argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm(), "--plan", "short")
+    argv[argv.index("tasks/fixation_detection.py")] = str(planned)
+
+    assert _main_uninterrupted(argv) == 0
+
+    rows = (tmp_path / "2027-01-14_01" / "xcon" / "runs.jsonl").read_text().splitlines()
+    start = json.loads(rows[0])
+    assert (start["plan"], start["trials"], start["blocks"]) == ("short", None, ["near"])
+
+
+def test_wlx_run_refuses_a_plan_its_task_does_not_declare_before_anything_is_recorded(tmp_path):
+    argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm(), "--plan", "nope")
+
+    with pytest.raises(SystemExit, match="the task declares no plan nope; its plans are none"):
+        main(argv)
+
+    assert not (tmp_path / "2027-01-14_01").exists()

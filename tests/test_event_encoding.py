@@ -85,8 +85,8 @@ def test_our_payload_framing_matches_theirs_exactly(escape, value):
     decoding -- a checksum convention that is self-consistent but not theirs, or a
     word order that reads back the same because both halves were swapped.
 
-    **`CONDITION` too, although nothing emits it yet** (XC-197, which waits on real
-    conditions, from a task program or chosen at the rig, XC-207): `words_for` has framed
+    **`CONDITION` too, although nothing emits it yet** (XC-197, whose numbers wait for the
+    condition registry, build C5): `words_for` has framed
     it since it was written, and no test read that framing against theirs until XC-155.
     """
     their = wl_preproc_events.Escape[escape]

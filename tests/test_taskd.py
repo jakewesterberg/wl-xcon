@@ -35,7 +35,7 @@ from wl_xcon.actor import Box
 from wl_xcon.bounds import Bounds, Ceiling, Exceeded, Floor
 from wl_xcon.cli import _load_task
 from wl_xcon.codes import BLOCK_END
-from wl_xcon.declarations import content_hash
+from wl_xcon.declarations import canonical, content_hash
 from wl_xcon.dio import Simulated as Card
 from wl_xcon.encode import BLOCK_START, UNALLOCATED_TASK_CODE, words_for_block
 from wl_xcon.findings import NOT_RECORDING, SESSION_KINDS, Finding
@@ -64,7 +64,10 @@ from wl_xcon.record import REFUSAL_LOG_LIMIT, SessionRecord
 from wl_xcon.scheduler import EVERY_TRIAL, Block, Condition, Scheduler
 from wl_xcon.simulate import Subject, Tally, prepare
 from wl_xcon.task import ANSWERS, OWED, RIGHT, After, Counting, On, Outcome, State, Trial
-from wl_xcon.taskd import PAUSE_HOUSEKEEPING_S, RunSpec, Session, SessionSpec, _drum_warned
+from wl_xcon.run import LONGEST_TRIAL_S
+from wl_xcon.taskd import (
+    PAUSE_HOUSEKEEPING_S, RunSpec, Session, SessionSpec, _drum_warned, _minutes,
+)
 from wl_xcon.warnlist import Entry
 from wl_xcon.welfare import Deployment, Simulated as Pump
 import _sessions
@@ -7232,3 +7235,318 @@ def test_a_card_that_faults_on_param_changed_leaves_no_row_naming_it(tmp_path):
         session.run()
 
     assert _changes_so_far(session) == []
+
+
+# --- A run plays the plan it names (engine build C2b) -----------------------------------------
+
+#: Two block types of `fixation_detection`'s one condition each, near then far.
+_TWO = ('[Block("near", [Condition("near", {"target_x": 5.0}, target=2)]), '
+        'Block("far", [Condition("far", {"target_x": 12.0}, target=2)])]')
+
+
+def _planned(tmp_path, plans: str, *, plan: str, link=None, **spec) -> Session:
+    path = _sessions.planned_task(tmp_path, plans)
+    return _session(_spec(tmp_path, task=str(path), plan=plan, trials=400, **spec), link=link)
+
+
+def test_a_run_plays_the_plan_it_names_and_its_rows_record_it(tmp_path):
+    """Engine spec §13.1 (the PI, 2026-10-07: "the operator chooses at run start among the plans it
+    declares"): the run plays the named plan's blocks in its order; its start row names the plan,
+    whose blocks its task's content hash holds, and records no trial count of its own; its end row
+    says how each block ended."""
+    session = _planned(tmp_path, f'{{"short": Plan({_TWO}), "other": Plan({_TWO}[::-1])}}',
+                       plan="short")
+
+    session.run()
+
+    start, end = _runs(session)
+    assert (start["plan"], start["trials"], start["blocks"]) == ("short", None, ["near", "far"])
+    assert session.blocks_run == ["near", "far"]
+    assert session.stopped_because == "every block is finished"
+    assert [(e["block"], e["ended"], e["by"]) for e in end["block_ends"]] == [
+        ("near", "rule", None), ("far", "rule", None)]
+    assert {row["block"] for row in _trial_rows(session)} == {"near", "far"}
+
+
+def test_a_condition_setting_a_polar_position_plays_it_and_its_rows_record_it_polar_first(
+        tmp_path):
+    """The PI, 2026-10-20, "Both, polar first", through a plan: a condition may set a setting that
+    holds a whole position to one of its `Polar` choices (since true visual angle merged); its
+    trials play it, and each row records it as its eccentricity and direction with its (x, y)
+    beside them."""
+    from wl_xcon.geometry import polar_deg
+
+    path = _sessions.polar_task(tmp_path)
+    path.write_text(path.read_text() + (
+        "\nfrom wl_xcon.task import Block, Condition, Plan\n"
+        "TASK = _polar_dataclasses.replace(TASK, plans={'places': Plan([Block('b', [\n"
+        "    Condition('right', {'target_pos': Polar(8.0, 0.0)}, target=2),\n"
+        "    Condition('oblique', {'target_pos': Polar(8.0, 45.0)}, target=2)])])})\n"))
+    session = _session(_spec(tmp_path, task=str(path), plan="places", trials=400))
+
+    session.run()
+
+    x, y = polar_deg(8.0, 45.0)
+    assert {row["condition"]: row["params"]["target_pos"] for row in _trial_rows(session)} == {
+        "right": {"eccentricity": 8.0, "direction": 0.0, "x": 8.0, "y": 0.0},
+        "oblique": {"eccentricity": 8.0, "direction": 45.0, "x": x, "y": y}}
+    assert session.stopped_because == "every block is finished"
+
+
+def test_a_plain_run_records_no_plan_and_its_trial_count(tmp_path):
+    session = _session(_spec(tmp_path, trials=3))
+
+    session.run()
+
+    start, end = _runs(session)
+    assert (start["plan"], start["plan_form"], start["trials"], start["blocks"]) == (
+        None, None, 3, None)
+    assert end["block_ends"] == [{"block": "session", "ended": "rule", "by": None,
+                                  "after_trial": 2, "block_in_session": 1, "position": 0,
+                                  "passed_at": None}]
+    assert end["end_reason"] == "plan_done"
+
+
+def test_a_cyclic_plan_runs_until_its_time_limit_and_ends_as_designed_not_as_the_welfare_stop(
+        tmp_path):
+    """The PI, 2026-10-19, "Yes, in the plan": the run ends at the first pause between trials after
+    its time; neither it nor a block's limit is a welfare limit, so its stop is `completed`, never
+    `limit`, the out-of-cage welfare stop's kind. What the open block still owed is recorded as not
+    run, "time ran out"."""
+    session = _planned(tmp_path, f'{{"loop": Plan({_TWO}, order=Cyclic(), time_limit_s=30.0)}}',
+                       plan="loop")
+
+    session.run()
+
+    (_, end) = _runs(session)
+    assert session.stop_kind == "completed"
+    assert session.stopped_because == "the plan's time limit is reached: 30 s of trials"
+    assert session.blocks_run[:4] == ["near", "far", "near", "far"]
+    assert end["block_ends"][-1]["ended"] == "run_time" and end["end_reason"] == "plan_time"
+    owed = [s for s in end["shortfalls"] if s["because"] in ("time", "run_time")]
+    assert all(s["block"] == session.blocks_run[-1] and s["because"] == "run_time" for s in owed)
+    # Read between trials: the run overran its limit by no more than the trial in flight.
+    assert 30.0 <= session.now() < 30.0 + 2 * LONGEST_TRIAL_S
+
+
+def test_a_blocks_time_limit_ends_it_between_trials_and_records_what_it_owed_as_not_run(tmp_path):
+    """The PI, 2026-10-19, "Finish trial, then end": the trial in flight finishes and pays if
+    earned; the block ends at the next pause between trials; trials it still owed are recorded as
+    not run, "time ran out"; a fixed plan then plays its next block."""
+    session = _planned(tmp_path, (
+        '{"timed": Plan([Block("long", [Condition("near", {"target_x": 5.0}, target=500)], '
+        'time_limit_s=10.0), Block("far", [Condition("far", {"target_x": 12.0}, target=2)])])}'),
+        plan="timed")
+
+    session.run()
+
+    (_, end) = _runs(session)
+    assert session.blocks_run == ["long", "far"]
+    assert [e["ended"] for e in end["block_ends"]] == ["time", "rule"]
+    (short,) = [s for s in end["shortfalls"] if s["because"] == "time"]
+    assert (short["block"], short["condition"]) == ("long", "near") and short["trials"] > 0
+    assert not short["possible_avoidance"]
+
+
+def test_time_paused_does_not_count_against_a_plans_time_limit(tmp_path):
+    """The PI, 2026-10-19, "Pauses don't count": the clock runs only while trials run, so a pause
+    longer than the limit leaves the run its minutes of work, and the welfare-listed paused loop
+    (`Session._hold`) reads no time limit."""
+    link = _Scripted(script={12: [Resume(by=Box("jake"))]}, step=5.0)
+    path = _sessions.planned_task(tmp_path, f'{{"loop": Plan({_TWO}, order=Cyclic(), '
+                                            f'time_limit_s=20.0)}}')
+    session, wall = _walled(tmp_path, link, task=str(path), plan="loop", trials=400)
+    link.wall = wall
+    link.queue(Pause(by=Box("jake")))
+
+    session.run()
+
+    assert len(link.waits) == 12, "paused for 60 s of wall, three times the limit"
+    assert session.stopped_because == "the plan's time limit is reached: 20 s of trials"
+    assert len(_trial_rows(session)) > 0
+
+
+def test_a_plan_that_can_draw_no_further_trial_ends_its_run_with_a_sentence(tmp_path):
+    """The PI, 2026-10-19, "End run with a sentence": "The run ends cleanly, saying why in plain
+    words; the session stays open so the operator can start another run at once. Recorded as the
+    run's end, not a crash." A cyclic plan whose every block owes nothing would advance forever;
+    the per-advance progress check ends it. Its passes are bounded (`_Scripted`, Ruling 10), so
+    without the check the run faults rather than spinning the suite."""
+    session = _planned(tmp_path, (
+        '{"empty": Plan([Block("a", [Condition("x", {}, target=0)]), '
+        'Block("b", [Condition("y", {}, target=0)])], order=Cyclic(), time_limit_s=60.0)}'),
+        plan="empty", link=_Scripted())
+
+    session.run()
+
+    (_, end) = _runs(session)
+    assert session.stop_kind == "completed"
+    assert session.stopped_because == (
+        "the plan can draw no further trial: since the run's last trial each of its blocks (a, b) "
+        "ended before it drew one, so the run ends here")
+    assert end["trials"] == 0 and session.blocks_run == ["a", "b"]
+    assert [e["ended"] for e in end["block_ends"]] == ["rule", "run"]
+    assert end["end_reason"] == "stalled"
+
+
+def test_a_block_that_cannot_draw_and_does_not_end_ends_its_run_with_a_sentence(tmp_path):
+    """The PI, 2026-10-19, "End run with a sentence": a block that can draw nothing and whose rule
+    is not met -- here a criterion over no conditions, given in code past the load-time check that
+    refuses it in a task (XC-381) -- ends the run saying why, where `next_trial` faulted it."""
+    session = _session(_spec(tmp_path, trials=400,
+                             blocks=[Block(name="empty", conditions=[], criterion=(0.8, 5))]))
+
+    session.run()
+
+    assert session.stop_kind == "completed"
+    assert session.stopped_because == (
+        "block empty has no condition left to draw and its end rule is not met, so the run ends "
+        "here")
+    assert [e["ended"] for e in _runs(session)[1]["block_ends"]] == ["run"]
+    assert _runs(session)[1]["end_reason"] == "cannot_draw"
+
+
+def test_a_training_progression_moves_up_falls_back_and_keeps_its_top_stage_in_a_run(
+        tmp_path, monkeypatch):
+    """The PI, 2026-10-19 ("Same, but top keeps going"), through a run: two right answers pass
+    stage one; three wrong at stage two fall back to stage one, started fresh; two right pass it
+    again; at the top the animal keeps working until the run's time limit."""
+    from wl_xcon import taskd
+
+    real, calls = taskd.run_trial, []
+    script = [Outcome.CORRECT] * 2 + [Outcome.WRONG_TARGET] * 3 + [Outcome.CORRECT] * 200
+
+    def scripted(*args, **kwargs):
+        calls.append(None)
+        return dataclasses.replace(real(*args, **kwargs), outcome=script[len(calls) - 1])
+
+    monkeypatch.setattr(taskd, "run_trial", scripted)
+    session = _planned(tmp_path, (
+        '{"train": Plan([Block("one", [Condition("near", {"target_x": 5.0}, target=1)], '
+        'criterion=(1.0, 2)), Block("two", [Condition("far", {"target_x": 12.0}, target=1)], '
+        'criterion=(1.0, 2))], order=ByCriterion(fall_back=(0.5, 3)), time_limit_s=40.0)}'),
+        plan="train")
+
+    session.run()
+
+    (_, end) = _runs(session)
+    assert session.blocks_run == ["one", "two", "one", "two"]
+    assert [e["ended"] for e in end["block_ends"]] == ["rule", "fall_back", "rule", "run_time"]
+    assert session.stopped_because == "the plan's time limit is reached: 40 s of trials"
+    # The science review, I1: the top stage's rule was met after trial 8, and it worked on.
+    assert end["block_ends"][-1]["passed_at"] == 8 and end["block_ends"][-1]["after_trial"] > 8
+    # I2: each move to another block is said on the changes feed, with its numbers.
+    assert [said for kind, _, _, said in session.controls if kind == "block"] == [
+        "one → two: its rule met: 2 right in a row, every target used up",
+        "two → one: fell back: 0 of its last 3 first answers right, under 50%",
+        "one → two: its rule met: 2 right in a row, every target used up",
+    ]
+
+
+def _scripted_trials(monkeypatch, outcomes, frames: int | None = None) -> None:
+    """Every trial `run_trial` runs ends with the next of `outcomes`, and lasts `frames` frames
+    when given -- so a run's trial clock reads exactly frames at the frame period and the ITI."""
+    from wl_xcon import taskd
+
+    real, calls = taskd.run_trial, []
+
+    def scripted(*args, **kwargs):
+        calls.append(None)
+        result = dataclasses.replace(real(*args, **kwargs), outcome=outcomes[len(calls) - 1])
+        return result if frames is None else dataclasses.replace(result, frames=frames)
+
+    monkeypatch.setattr(taskd, "run_trial", scripted)
+
+
+def test_a_runs_time_limit_finishes_a_drummed_trial_first(tmp_path, monkeypatch):
+    """The PI, 2026-10-19, "Finish the drum first", for a run's time limit: "Same as a block's
+    limit: 'Training ends on a success.'" A drummed trial still coming back when the run's time is
+    up comes back until it is right; the run ends at the boundary after it, its last line that
+    drummed trial, right."""
+    _scripted_trials(monkeypatch, [Outcome.WRONG_TARGET] * 30 + [Outcome.CORRECT] * 100)
+    session = _planned(tmp_path, (
+        '{"drill": Plan([Block("drill", [Condition("near", {"target_x": 5.0}, target=500)], '
+        'drum=True)], time_limit_s=5.0)}'), plan="drill")
+
+    session.run()
+
+    rows = _trial_rows(session)
+    assert len(rows) == 31, "thirty tries of one trial, the time up after the first ten"
+    assert (rows[-1]["outcome"], rows[-1]["drummed"]) == ("correct", True)
+    assert session.stopped_because == "the plan's time limit is reached: 5 s of trials"
+    assert session._elapsed - session._run_from >= 15.0
+
+
+def test_a_rule_met_as_the_runs_time_runs_out_closes_its_block_as_met(tmp_path, monkeypatch):
+    """The science review, I3: a stage passed on the run's last trial is recorded as passed
+    (`rule`), not as the run's time; a block the run's time ends unmet is the run's time's
+    (`run_time`), apart from a block's own (`time`). Each trial lasts 1 s and its 0.5 s ITI, so
+    the run's 7.4 s are up after the fifth -- the trial that meets the rule."""
+    _scripted_trials(monkeypatch, [Outcome.WRONG_TARGET] * 2 + [Outcome.CORRECT] * 100,
+                     frames=240)
+    session = _planned(tmp_path, (
+        '{"two": Plan([Block("a", [Condition("near", {"target_x": 5.0}, target=1)], '
+        'criterion=(1.0, 3)), Block("b", [Condition("far", {"target_x": 12.0}, target=1)])], '
+        'time_limit_s=7.4)}'), plan="two")
+
+    session.run()
+
+    (_, end) = _runs(session)
+    assert len(_trial_rows(session)) == 5
+    assert [(e["block"], e["ended"]) for e in end["block_ends"]] == [("a", "rule")]
+    assert end["end_reason"] == "plan_time"
+
+
+def test_each_block_end_names_its_block_in_the_stream_and_its_place_in_the_run(tmp_path):
+    """The engineering review, I4: `block_ends` joins the stream's blocks by `block_in_session`,
+    the number each block's `BLOCK_START` carried, null for a block that ran no trial and so was
+    never opened in the stream; `position` is its place in the run's sequence."""
+    session = _planned(tmp_path, (
+        '{"three": Plan([Block("a", [Condition("x", {"target_x": 5.0}, target=2)]), '
+        'Block("b", [Condition("y", {"target_x": 8.0}, target=0)]), '
+        'Block("c", [Condition("z", {"target_x": 12.0}, target=2)])])}'), plan="three")
+
+    session.run()
+
+    (_, end) = _runs(session)
+    assert [(e["block"], e["block_in_session"], e["position"]) for e in end["block_ends"]] == [
+        ("a", 1, 0), ("b", None, 1), ("c", 2, 2)]
+    opened = [word[1] for word in _block_words(session.card.codes)
+              if isinstance(word, tuple) and word[0] == "start"]
+    assert opened == [e["block_in_session"] for e in end["block_ends"]
+                      if e["block_in_session"] is not None]
+    assert {row["block"]: row["block_in_session"] for row in _trial_rows(session)} == {
+        "a": 1, "c": 2}
+
+
+def test_the_start_row_carries_the_plan_as_declared(tmp_path):
+    """The science review, I4: the start row names the plan and writes it as declared, in the form
+    the content hash reads it, so the record tells a balanced plan from a random one without the
+    task file; `blocks` is the plan's block types as declared."""
+    path = _sessions.planned_task(tmp_path, f'{{"mixed": Plan({_TWO}, order=Balanced(blocks=4))}}')
+    session = _session(_spec(tmp_path, task=str(path), plan="mixed", trials=400))
+
+    session.run()
+
+    (start, _) = _runs(session)
+    plan = _load_task(path).plans["mixed"]
+    assert start["plan_form"] == json.loads(json.dumps(canonical(plan)))
+    assert start["plan_form"]["fields"]["order"] == {"class": "Balanced",
+                                                     "fields": {"blocks": 4}}
+    assert start["blocks"] == ["near", "far"]
+
+
+def test_a_time_limit_is_said_in_whole_minutes_and_seconds():
+    """The engineering review, Minor 4: "1 minutes" and "3.33333 minutes" were said."""
+    assert [_minutes(s) for s in (45, 60, 200, 3600)] == [
+        "45 s", "1 minute", "3 minutes 20 s", "60 minutes"]
+
+
+def test_a_run_naming_a_plan_its_task_lacks_is_refused_before_it_starts(tmp_path):
+    """The backstop for a caller that took no pre-flight, as for a blocking finding."""
+    session = _planned(tmp_path, f'{{"short": Plan({_TWO})}}', plan="long")
+
+    with pytest.raises(SystemExit, match="the task declares no plan long; its plans are short"):
+        session.run()
+
+    assert not (session.directory / "runs.jsonl").exists()

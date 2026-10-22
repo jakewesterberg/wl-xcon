@@ -1266,7 +1266,15 @@ def main(argv: list[str] | None = None) -> int:
     runner.add_argument("--root", type=Path, required=True)
     runner.add_argument("--session-id", required=True)
     runner.add_argument("--subject", required=True)
-    runner.add_argument("--trials", type=int, default=1000)
+    runner.add_argument("--trials", type=int, default=1000,
+                        help="the plain run's length; a run of a plan (--plan) has its plan's")
+    runner.add_argument(
+        "--plan",
+        default=None,
+        metavar="NAME",
+        help="run one of the task's plans by its name (engine spec §13.1); without it the plain "
+        "run of --trials trials",
+    )
     runner.add_argument("--seed", type=int, default=1)
     runner.add_argument("--set", action="append", default=[], metavar="NAME=VALUE")
     runner.add_argument(
@@ -1656,8 +1664,9 @@ def main(argv: list[str] | None = None) -> int:
         # The task object, held to its declarations and, since engine build C1, to the session's
         # deployment: a task that needs a fixed head is a warning in any session not declared
         # head-fixed (`RIG_FIXED`; XC-277; the PI, 2026-10-11), accepted with the others below.
+        task = _load_task(args.task)
         findings = check_task(
-            _load_task(args.task),
+            task,
             _load_allocation(args.allocation),
             geometry=geometry,
             calibration=calibration,
@@ -1671,6 +1680,13 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit(
                 "task refused, session not started, nothing recorded:\n"
                 + "\n".join(f"  {_printable(f.code)}: {_printable(f.detail)}" for f in refusals)
+            )
+        # The plan named, refused here too, before the session opens (engine build C2b).
+        if args.plan is not None and args.plan not in task.plans:
+            raise SystemExit(
+                f"task refused, session not started, nothing recorded: the task declares no plan "
+                f"{_printable(args.plan)}; its plans are "
+                + (", ".join(_printable(name) for name in task.plans) or "none")
             )
 
         # **The warnings this session runs with** (engine spec §19.2-19.3): the calibration's,
@@ -1811,6 +1827,7 @@ def main(argv: list[str] | None = None) -> int:
                         session_id=args.session_id,
                         subject=args.subject,
                         trials=args.trials,
+                        plan=args.plan,
                         frame_period=1 / 240,
                         seed=args.seed,
                         values=values,
