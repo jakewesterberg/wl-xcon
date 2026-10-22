@@ -835,6 +835,9 @@ drummed repeats one, and its `presentations` the lines written.
    own, or an override with why), the bounded settings it rewards through, its reaction time, its
    choice and whether it needs a fixed head (`review.render_task`) -- then each structure. Its plan
    tables, census and timing diagram, and keeping each version's report, are builds C2 and C8's.
+   *Engine build C2b, 2026-10-22*: the plan in tables built -- each plan's order and time limit,
+   each block's end rules, draw, table and drumming, each condition's structure, target and
+   values.
 2. **Simulation is advised, not enforced.**
 3. **The simulated animal** follows declared functions [@wichmann2001psychometric; @carpenter1995neural]
    with named profiles: perfect, chance, an incorrect strategy, normal (85% correct), trying to break the

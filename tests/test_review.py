@@ -35,6 +35,13 @@ from wl_xcon.task import (
     Reward,
     SaccadeTo,
     SPENT,
+    Block,
+    Balanced,
+    ByCriterion,
+    Condition,
+    Constrained,
+    Cyclic,
+    Plan,
     STIMULUS,
     State,
     Task,
@@ -216,6 +223,72 @@ def test_the_report_shows_what_each_trial_does_to_its_conditions_count():
     assert "a repeat limit of 3 failed repeats in a row" in out
     assert "Structure `other`: **no counting table**" in out
     assert out.index("### What each trial does") < out.index("## Structure `holding`")
+
+
+def test_the_report_shows_each_plan_in_tables():
+    """Engine spec §18.1, "the plan in tables" (engine build C2b): each plan's order and run time
+    limit; each block's end rules, how it draws its conditions, what it counts by and whether it
+    drums; each condition's structure, target and values. A task with none says so."""
+    plans = {
+        "train": Plan(
+            [Block("easy", [Condition("near", {"contrast": 0.9}, target=10)],
+                   criterion=(0.8, 20), time_limit_s=300.0, drum=True),
+             Block("hard", [Condition("far", {"contrast": 0.2}, target=10, structure="other")],
+                   criterion=(1.0, 5), trials=40, counting=Counting(after_stimulus=SPENT),
+                   order=Constrained(max_run=2))],
+            order=ByCriterion(fall_back=(0.5, 20)), time_limit_s=1800.0),
+        "loop": Plan([Block("easy", [Condition("near", {}, target=4)])], order=Cyclic(cycles=3)),
+    }
+    out = render_task(_reviewed(plans=plans))
+
+    assert "### Plans" in out and "#### Plan `train`" in out and "#### Plan `loop`" in out
+    assert ("A training progression, stage by stage from the first: up one when a stage's rule is "
+            "met or its time runs out; back one, started fresh, under 50% right over the last 20 "
+            "first answers; the top stage keeps working until a time limit, a stop or the "
+            "session's end. "
+            "The run ends at the first pause between trials after 30 minutes of trials.") in out
+    assert ("| easy | every target used up; 80% right over the last 20 answers; or its time runs "
+            "out at 5 minutes | shuffled passes | each condition's structure's table | yes |"
+            in out)
+    assert ("| hard | every target used up; 5 right in a row; 40 trials run | drawn with "
+            "replacement, runs of at most 2 | its own table | no |") in out
+    assert "| train | " not in out
+    assert "| easy | near | holding | 10 | contrast = 0.9 |" in out
+    assert "| hard | far | other | 10 | contrast = 0.2 |" in out
+    assert "In order, over and over: 3 passes. No run time limit." in out
+    assert out.index("### Plans") < out.index("## Structure `holding`")
+    assert "None: the plain run only" in render_task(_reviewed())
+
+
+def test_a_conditions_position_is_shown_eccentricity_and_direction_first():
+    """The PI, 2026-10-19, "Polar first, x-y allowed": a value a condition sets that is a position
+    -- a whole-point setting's `Polar` or pair -- is shown in the plan's table as every position in
+    the report is, eccentricity and direction first and its (x, y) beside them; a number as
+    written."""
+    from wl_xcon.task import Polar
+
+    plans = {"places": Plan([Block("b", [
+        Condition("oblique", {"pos": Polar(8.0, 45.0), "contrast": 0.5}, target=2),
+        Condition("right", {"pos": (5.0, 0.0)}, target=2)])])}
+    out = render_task(_reviewed(plans=plans))
+
+    assert ("| b | oblique | holding | 2 | pos = 8° at 45° · (x, y) (5.675, 5.675), "
+            "contrast = 0.5 |") in out
+    assert "| b | right | holding | 2 | pos = 5° at 0° · (x, y) (5, 0) |" in out
+
+
+def test_the_plan_tables_say_a_time_in_whole_minutes_and_a_balanced_order_never_back_to_back():
+    """The engineering review, Minor 4 ("1 minutes", "3.33333 minutes"), and the PI's "Never
+    back-to-back" (2026-10-19), as the report says them."""
+    plans = {"mixed": Plan([Block("a", [Condition("near", {}, target=4)], time_limit_s=200.0),
+                            Block("b", [Condition("far", {}, target=4)])],
+                           order=Balanced(blocks=4), time_limit_s=60.0)}
+    out = render_task(_reviewed(plans=plans))
+
+    assert ("In shuffled rounds within the run, each block type once a round, drawn from the run's "
+            "seed, never one type twice in a row: 4 blocks. The run ends at the first pause "
+            "between trials after 1 minute of trials.") in out
+    assert "or its time runs out at 3 minutes 20 s" in out
 
 
 def test_a_tables_no_limit_is_shown_as_no_limit():
