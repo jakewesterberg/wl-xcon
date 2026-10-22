@@ -60,6 +60,7 @@ from wl_xcon.task import (
     Mark,
     NoChoice,
     ObjectWindows,
+    Order,
     Outcome,
     P,
     Param,
@@ -132,8 +133,8 @@ def check_task(
     plan's call 13), then what the task declares across them -- one set of settings and one setup,
     every setting's meaning (XC-288 §4.1), its reaction time and its choice (§4.3), a content its
     runs can record (§4.4), each structure's counting table (engine spec §16.1; engine build
-    C2a), and its plans (§13; engine build C2b). **What a caller holds a task to is this**; `check` is one
-    structure's part of it, and stays what a bare `Trial` is checked by.
+    C2a), and its plans (§13; engine build C2b). **What a caller holds a task to is this**;
+    `check` is one structure's part of it, and stays what a bare `Trial` is checked by.
 
     **Given the session's deployment**, a task that needs a fixed head is a warning in any but a
     head-fixed one, never a refusal (engine spec §20.1; XC-277; the PI, 2026-10-11); without one --
@@ -672,7 +673,8 @@ def _plan_faults(task: Task) -> list[Finding]:
         by classing every answer counted or spent, so a wrong one is never shown again -- it ends
         once its targets are used up, or its number of trials run if that is more. `None` where a
         criterion, or an answer that does not pay, can keep it going."""
-        if block.criterion is not None:
+        if block.criterion is not None or not isinstance(block.conditions, list) or not all(
+                isinstance(c, Condition) for c in block.conditions):
             return None
         for condition in block.conditions:
             structure = task.structures.get(condition.structure or task.default)
@@ -737,13 +739,17 @@ def _plan_faults(task: Task) -> list[Finding]:
             # no fall-back rule moves it back** (the plan's science review, C3): an animal that
             # never meets an untimed stage's rule works on there, and a fall-back can move a run of
             # timed stages up and back forever.
-            why = (f"an animal that never meets the rule of stage {untimed[0]!r}, which has no "
-                   f"time limit, works on there" if untimed
+            top = plan.blocks[-1].name
+            why = ((f"stage {top!r} is the top stage and has no time limit, so an animal that "
+                    f"meets its rule works on there" if untimed == [top] else
+                    f"an animal that never meets the rule of stage {untimed[0]!r}, which has no "
+                    f"time limit, works on there") if untimed
                    else "its fall-back rule can move a run up and back between its timed stages "
                         "forever")
             endless = bool(untimed) or fall_back is not None
         else:
-            why = "a count of none repeats its blocks"
+            why = ("a count of none repeats its blocks without end; give the order a count -- "
+                   "cycles= or blocks= -- and it ends after that many")
             endless = isinstance(order, (Cyclic, Balanced, Random)) and counted is None
         if endless and plan.time_limit_s is None:
             warn("endless-plan", name, (
@@ -781,7 +787,7 @@ def _plan_faults(task: Task) -> list[Finding]:
                         f"stage {block.name!r} judges its last {judged} answers and the fall-back "
                         f"rule the last {window} first answers, so it can be passed while the "
                         f"fall-back's are under its bar -- a move up counts first -- and the stage "
-                        f"above can move the animal straight back"))
+                        f"above can then move the animal back down"))
         if isinstance(order, Balanced) and counted is not None and counted % len(plan.blocks):
             warn("unbalanced-plan", name, (
                 f"{counted} blocks of {len(plan.blocks)} block types are not whole rounds, so its "
@@ -809,12 +815,25 @@ def _plan_faults(task: Task) -> list[Finding]:
                              f"(proportion, window): a proportion above 0 and at most 1, over a "
                              f"window of 1 or more answers")
             if not count(block.trials):
-                refuse(name, f"{where}'s number of trials is {block.trials!r}, a whole number from "
-                             f"1, or None")
+                refuse(name, f"{where}'s number of trials is {block.trials!r}; a number of "
+                             f"trials is a whole number from 1, or None")
             if not seconds(block.time_limit_s):
-                refuse(name, f"{where}'s time limit is {block.time_limit_s!r}, a number of seconds "
-                             f"above zero, or None")
+                refuse(name, f"{where}'s time limit is {block.time_limit_s!r}; a time limit is a "
+                             f"number of seconds above zero, or None")
+            if not isinstance(block.order, Order):
+                refuse(name, f"{where}'s order is {block.order!r}, and a block's order is how its "
+                             f"conditions follow one another: Shuffled(), WithReplacement(), or "
+                             f"Constrained(); the order of the blocks is the plan's, order=")
+            elif isinstance(block.order, Constrained) and (
+                    isinstance(block.order.max_run, bool)
+                    or not isinstance(block.order.max_run, int)):
+                refuse(name, f"{where}'s longest run is {block.order.max_run!r}, and it is a whole "
+                             f"number of trials, 1 or more")
             weights = getattr(block.order, "weights", {})
+            if not isinstance(weights, dict):
+                refuse(name, f"{where}'s weights are {weights!r}, and weights are a dict of "
+                             f"condition name to a number: {{'near': 2.0}}")
+                weights = {}
             if any(not _finite(w) or w < 0 for w in weights.values()) or (
                     weights and conditions
                     and not any(weights.get(c.name, 1.0) > 0 for c in conditions)):
@@ -831,8 +850,15 @@ def _plan_faults(task: Task) -> list[Finding]:
                         f"use up its targets and end on its rule, and once the others are paid a "
                         f"run of it ends, saying it can draw no further trial; give each a weight "
                         f"above 0, or a target of 0"))
-            if isinstance(block.order, Constrained) and (
-                    not isinstance(block.order.max_run, int) or block.order.max_run < 1):
+            stray = [key for key in weights if key not in named]
+            if stray:
+                warn("unknown-weight", name, (
+                    f"{where}'s weights name {', '.join(map(repr, stray))}, which no condition of "
+                    f"the block is called, so they weigh nothing; check the spelling against "
+                    f"{', '.join(map(repr, named))}"))
+            if isinstance(block.order, Constrained) and isinstance(
+                    block.order.max_run, int) and not isinstance(
+                    block.order.max_run, bool) and block.order.max_run < 1:
                 warn("no-run-limit", name, (
                     f"{where}'s longest run is {block.order.max_run!r}, which limits no run of one "
                     f"condition; give it 1 or more"))
@@ -840,8 +866,8 @@ def _plan_faults(task: Task) -> list[Finding]:
                 of = f"{where}'s condition {condition.name!r}"
                 if (isinstance(condition.target, bool) or not isinstance(condition.target, int)
                         or condition.target < 0):
-                    refuse(name, f"{of} has target {condition.target!r}, a whole number of 0 or "
-                                 f"more")
+                    refuse(name, f"{of} has target {condition.target!r}; a target is a whole "
+                                 f"number of 0 or more")
                 if condition.structure is not None and condition.structure not in task.structures:
                     refuse(name, f"{of} plays structure {condition.structure!r}, which the task "
                                  f"does not have ({', '.join(map(repr, task.structures))})")
@@ -858,12 +884,14 @@ def _plan_faults(task: Task) -> list[Finding]:
                         refuse(name, f"{of} sets {setting!r} to {value!r}, and it takes a number "
                                      f"({param.unit})")
             targets = [c.target for c in conditions if isinstance(c.target, int)]
-            if block.criterion is not None and 0 in targets and any(targets):
+            if (block.criterion is not None or block.trials is not None) and (
+                    0 in targets and any(targets)):
                 zero = ", ".join(repr(c.name) for c in conditions if c.target == 0)
                 warn("late-condition", name, (
-                    f"{where} ends on a criterion and its condition(s) {zero} have target 0 beside "
-                    f"others owed trials: a condition is drawn only while it is owed, or once "
-                    f"every target is used up, so {zero} come only after the others' targets "
+                    f"{where} ends on a criterion or a number of trials and its "
+                    f"condition(s) {zero} have target 0 beside others owed trials: a "
+                    f"condition is drawn only while it is owed, or once every target is used "
+                    f"up, so {zero} come only after the others' targets "
                     f"(XC-386)"))
             if (block.criterion is None and block.trials is None
                     and all(c.target == 0 for c in conditions)):

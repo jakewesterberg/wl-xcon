@@ -17,7 +17,7 @@ import pytest
 from wl_xcon.check import check_task
 from wl_xcon.cli import _load_task
 from wl_xcon.findings import SESSION_KINDS
-from wl_xcon.scheduler import EVERY_TRIAL
+from wl_xcon.scheduler import CORRECT_ONLY, EVERY_TRIAL
 from wl_xcon.task import (
     OWED,
     Balanced,
@@ -36,7 +36,7 @@ BASE = _load_task(Path("tasks/fixation_detection.py"))
 #: The codes this file's checks give; the reference task gives none of them.
 PLAN_CODES = {"bad-plan", "endless-plan", "unbalanced-plan", "late-condition", "empty-block",
               "block-table-unread", "no-run-limit", "weightless-condition", "fall-back-unjudged",
-              "fall-back-bounce"}
+              "fall-back-bounce", "unknown-weight"}
 
 NEAR = Condition("near", {"target_x": 5.0}, target=4)
 FAR = Condition("far", {"target_x": 12.0}, target=4, structure="detection")
@@ -90,11 +90,27 @@ def test_a_plan_the_rig_can_run_adds_no_finding():
         (Plan([Block("b", [NEAR])], order=ByCriterion(fall_back=(0.5, 0)), time_limit_s=60.0),
          "its fall-back rule is (0.5, 0)"),
         (Plan([Block("b", [NEAR], trials=0)]), "number of trials is 0"),
-        (Plan([Block("b", [NEAR], time_limit_s=0.0)]), "time limit is 0.0, a number of seconds"),
+        (Plan([Block("b", [NEAR], time_limit_s=0.0)]),
+         "time limit is 0.0; a time limit is a number of seconds"),
         (Plan([Block("b", [NEAR])], time_limit_s=-5.0), "its time limit is -5.0"),
         (Plan([Block("b", [NEAR])], order=Cyclic(cycles=0)), "its order's count is 0"),
         (Plan([Block("b", [NEAR], order=WithReplacement(weights={"near": -1.0}))]),
          "weights are {'near': -1.0}"),
+        # The review's I1: slips the scheduler cannot start a run on.
+        (Plan([Block("b", [NEAR, FAR], order=Constrained(max_run=None))]),
+         "longest run is None, and it is a whole number of trials, 1 or more"),
+        (Plan([Block("b", [NEAR, FAR], order=Constrained(max_run=2.5))]),
+         "longest run is 2.5, and it is a whole number"),
+        (Plan([Block("b", [NEAR, FAR], order=Constrained(max_run=True))]),
+         "longest run is True, and it is a whole number"),
+        (Plan([Block("b", [NEAR, FAR], order=Random())]),
+         "order is Random(blocks=None), and a block's order is how its conditions follow"),
+        # The review's I2: refused, not a traceback.
+        (Plan([Block("b", [NEAR, FAR], order=WithReplacement(weights=None))]),
+         "weights are None, and weights are a dict"),
+        (Plan([Block("easy", [NEAR]), Block("mid", (NEAR,)), Block("hard", [FAR])],
+              order=ByCriterion(fall_back=(0.5, 10)), time_limit_s=600.0),
+         "and a block's conditions are a list of Conditions"),
         (Plan([Block("b", [NEAR], order=WithReplacement(weights={"near": 0.0}))]),
          "at least one condition's above 0"),
     ],
@@ -119,7 +135,20 @@ def test_a_plan_that_cannot_run_is_refused_saying_which_and_why(plan, said):
          "count of none repeats its blocks"),
         (Plan([Block("b", [NEAR])], order=Random()), "endless-plan", "no time limit"),
         (Plan([Block("b", [NEAR], criterion=(0.8, 10))], order=ByCriterion()), "endless-plan",
-         "never meets the rule of stage 'b', which has no time limit"),
+         "stage 'b' is the top stage and has no time limit, so an animal that meets its rule "
+         "works on there"),
+        (Plan([Block("a", [NEAR], criterion=(0.8, 10)),
+               Block("b", [FAR], criterion=(0.8, 10), time_limit_s=60.0)], order=ByCriterion()),
+         "endless-plan", "an animal that never meets the rule of stage 'a', which has no time "
+         "limit"),
+        (Plan([Block("b", [NEAR])], order=Cyclic()), "endless-plan",
+         "cycles= or blocks= -- and it ends after that many"),
+        # The review's M4: a number of trials holds a target-0 condition back as a criterion does.
+        (Plan([Block("b", [NEAR, dataclasses.replace(FAR, target=0)], trials=12)]),
+         "late-condition", "ends on a criterion or a number of trials"),
+        # The review's M7: a weight naming no condition of the block.
+        (Plan([Block("b", [NEAR, FAR], order=WithReplacement(weights={"nera": 0.0}))]),
+         "unknown-weight", "weights name 'nera', which no condition of the block is called"),
         (Plan([Block("a", [NEAR]), Block("b", [FAR])], order=Balanced(blocks=5)),
          "unbalanced-plan", "5 blocks of 2 block types are not whole rounds"),
         (Plan([Block("b", [dataclasses.replace(NEAR, target=0)]), Block("c", [FAR])]),
@@ -183,3 +212,27 @@ def test_a_training_progression_ends_of_itself_only_with_every_stage_timed_and_n
         p=Plan(all_timed, order=ByCriterion(fall_back=(0.5, 10))))[0].detail
     assert codes(all_timed, order=ByCriterion()) == []
     assert codes(stages, order=ByCriterion(fall_back=(0.5, 10)), time_limit_s=1800.0) == []
+
+
+def test_a_middle_stage_that_cannot_end_before_the_fall_back_window_is_not_warned():
+    """The review's M3: `most_answers` warns only where every answer pays and the stage ends within
+    the window. A stage counting by `CORRECT_ONLY` leaves a wrong answer unpaid, so it can run on;
+    one that withholds with a miss left unpaid the same; one with `trials=` at or above the window
+    is judged by it; one whose targets reach the window the same."""
+    unpaid_miss = dataclasses.replace(BASE.structures["detection"].counting, outcomes={
+        "no_response": "unpaid"})
+    detection = dataclasses.replace(BASE.structures["detection"], counting=unpaid_miss)
+    task = dataclasses.replace(BASE, structures={"detection": detection})
+
+    def codes(mid: Block, base=BASE) -> list:
+        plan = Plan([Block("easy", [NEAR]), mid, Block("hard", [FAR])],
+                    order=ByCriterion(fall_back=(0.5, 10)), time_limit_s=600.0)
+        return [f.code for f in check_task(dataclasses.replace(base, plans={"p": plan}))
+                if f.code in PLAN_CODES]
+
+    small = dataclasses.replace(NEAR, target=2)
+    assert codes(Block("mid", [small])) == ["fall-back-unjudged"]
+    assert codes(Block("mid", [small], counting=CORRECT_ONLY)) == []
+    assert codes(Block("mid", [small]), task) == []
+    assert codes(Block("mid", [small], trials=10)) == []
+    assert codes(Block("mid", [dataclasses.replace(NEAR, target=10)])) == []
