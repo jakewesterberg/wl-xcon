@@ -64,7 +64,6 @@ from wl_xcon.record import REFUSAL_LOG_LIMIT, SessionRecord
 from wl_xcon.scheduler import EVERY_TRIAL, Block, Condition, Scheduler
 from wl_xcon.simulate import Subject, Tally, prepare
 from wl_xcon.task import ANSWERS, OWED, RIGHT, After, Counting, On, Outcome, State, Trial
-from wl_xcon.run import LONGEST_TRIAL_S
 from wl_xcon.taskd import (
     PAUSE_HOUSEKEEPING_S, RunSpec, Session, SessionSpec, _drum_warned, _minutes,
 )
@@ -7308,25 +7307,27 @@ def test_a_plain_run_records_no_plan_and_its_trial_count(tmp_path):
 
 
 def test_a_cyclic_plan_runs_until_its_time_limit_and_ends_as_designed_not_as_the_welfare_stop(
-        tmp_path):
+        tmp_path, monkeypatch):
     """The PI, 2026-10-19, "Yes, in the plan": the run ends at the first pause between trials after
     its time; neither it nor a block's limit is a welfare limit, so its stop is `completed`, never
     `limit`, the out-of-cage welfare stop's kind. What the open block still owed is recorded as not
     run, "time ran out"."""
-    session = _planned(tmp_path, f'{{"loop": Plan({_TWO}, order=Cyclic(), time_limit_s=30.0)}}',
+    _scripted_trials(monkeypatch, [Outcome.CORRECT] * 400, frames=240)
+    session = _planned(tmp_path, f'{{"loop": Plan({_TWO}, order=Cyclic(), time_limit_s=31.0)}}',
                        plan="loop")
 
     session.run()
 
     (_, end) = _runs(session)
     assert session.stop_kind == "completed"
-    assert session.stopped_because == "the plan's time limit is reached: 30 s of trials"
+    assert session.stopped_because == "the plan's time limit is reached: 31 s of trials"
     assert session.blocks_run[:4] == ["near", "far", "near", "far"]
     assert end["block_ends"][-1]["ended"] == "run_time" and end["end_reason"] == "plan_time"
     owed = [s for s in end["shortfalls"] if s["because"] in ("time", "run_time")]
     assert all(s["block"] == session.blocks_run[-1] and s["because"] == "run_time" for s in owed)
-    # Read between trials: the run overran its limit by no more than the trial in flight.
-    assert 30.0 <= session.now() < 30.0 + 2 * LONGEST_TRIAL_S
+    # Read between trials: each trial is 1 s and its 0.5 s ITI, so the 21st is the first boundary
+    # at or past 31 s: the run overran by 0.5 s, less than the trial in flight.
+    assert session._elapsed - session._run_from == 31.5
 
 
 def test_a_blocks_time_limit_ends_it_between_trials_and_records_what_it_owed_as_not_run(tmp_path):
@@ -7346,6 +7347,41 @@ def test_a_blocks_time_limit_ends_it_between_trials_and_records_what_it_owed_as_
     (short,) = [s for s in end["shortfalls"] if s["because"] == "time"]
     assert (short["block"], short["condition"]) == ("long", "near") and short["trials"] > 0
     assert not short["possible_avoidance"]
+    # Framed in the stream (Task 7's review, Minor 2): each block opens and closes, the one ended
+    # by its time as well as the one ended by its rule.
+    assert _block_words(session.card.codes) == [
+        ("run", 1), ("start", 1), "end", ("start", 2), "end", "run end"]
+
+
+def test_a_block_the_runs_time_ends_is_framed_in_the_stream_like_any_other(tmp_path, monkeypatch):
+    """Task 7's review, Minor 2: a block ended by the run's time is closed by its `BLOCK_END`."""
+    _scripted_trials(monkeypatch, [Outcome.CORRECT] * 400, frames=240)
+    session = _planned(tmp_path, (
+        '{"one": Plan([Block("a", [Condition("near", {"target_x": 5.0}, target=500)])], '
+        'time_limit_s=7.0)}'), plan="one")
+
+    session.run()
+
+    assert _runs(session)[1]["block_ends"][-1]["ended"] == "run_time"
+    assert _block_words(session.card.codes) == [("run", 1), ("start", 1), "end", "run end"]
+
+
+def test_a_clear_that_finishes_a_block_does_not_stall_a_plan_that_can_still_draw(
+        tmp_path, monkeypatch):
+    """Task 7's review, Important 1: a one-block cyclic plan, its block cleared by a person after
+    the first trial, goes on to its time limit; it is not "stalled" (the clear moves past a trial
+    as an answer does)."""
+    _scripted_trials(monkeypatch, [Outcome.CORRECT] * 400)
+    link = _Drained({2: [Training(setting="clear", on=True, by=Box("jake")),
+                         ClearOwed(condition="near", by=Box("jake"))]})
+    session = _planned(tmp_path, (
+        '{"loop": Plan([Block("a", [Condition("near", {"target_x": 5.0}, target=2)])], '
+        'order=Cyclic(), time_limit_s=20.0)}'), plan="loop", link=link)
+
+    session.run()
+
+    assert _runs(session)[1]["end_reason"] == "plan_time"
+    assert len(_trial_rows(session)) > 3
 
 
 def test_time_paused_does_not_count_against_a_plans_time_limit(tmp_path):

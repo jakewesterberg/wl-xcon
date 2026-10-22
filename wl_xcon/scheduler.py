@@ -944,9 +944,10 @@ class Scheduler:
         counts = self._counts[condition]
         counts.in_a_row = counts.rig = 0
         # **A person's clear is not the plan spinning** (the engine C2b plan's Task 5 review): the
-        # progress check counts afresh from it, as from a move (`advance`), so a block cleared to
-        # nothing owed cannot make a plan whose other blocks draw look stalled.
-        self._opened = {self._index}
+        # progress check counts afresh from it, as an answer ends a trial: the open block is not
+        # one "opened since the last trial", so a block cleared to nothing owed cannot make a
+        # plan that can still draw look stalled (Task 7's review, Important 1).
+        self._opened = set()
         return None
 
     def drum(self, scope: str) -> str:

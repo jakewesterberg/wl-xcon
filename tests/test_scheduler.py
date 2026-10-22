@@ -2244,6 +2244,9 @@ def test_a_persons_clear_starts_the_progress_check_afresh():
     assert scheduler.clear("b", by="kim", rest=True) is None
 
     assert scheduler.ends == RULE and not scheduler.stalled
+    # And the move on from it: A owes nothing and ends at once, but the plan can still draw (B).
+    scheduler.advance(scheduler.ends)
+    assert scheduler.ends == RULE and not scheduler.stalled
 
 
 @pytest.mark.parametrize("order", [Fixed(), Cyclic(), Balanced(), Random(), ByCriterion()])
