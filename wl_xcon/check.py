@@ -52,6 +52,7 @@ from wl_xcon.task import (
     ByCriterion,
     Condition,
     Constrained,
+    Counting,
     Custom,
     Cyclic,
     Entered,
@@ -61,7 +62,6 @@ from wl_xcon.task import (
     Mark,
     NoChoice,
     ObjectWindows,
-    Order,
     Outcome,
     P,
     Param,
@@ -70,6 +70,7 @@ from wl_xcon.task import (
     Remembered,
     SaccadeTo,
     Show,
+    Shuffled,
     Stimulus,
     Task,
     Touched,
@@ -77,6 +78,7 @@ from wl_xcon.task import (
     Unchanged,
     Update,
     Window,
+    WithReplacement,
     actions_of,
     arrays_of,
 )
@@ -653,18 +655,22 @@ def _plan_faults(task: Task) -> list[Finding]:
     by; XC-388); a condition playing a structure the task lacks, or setting a value the task
     cannot take; a block that can never end -- a criterion or a number of trials over no
     conditions (XC-381); a criterion, a fall-back rule, a number of trials, a count or a time
-    limit that is no rule at all; weights that are no weights. **Warned**, accepted in every kind
-    of session, what runs but may not do what was meant, each saying why: a criterion block
-    mixing a target-0 condition with others (XC-386); a plan with no end of its own and no run
-    time limit -- a training progression's own end only where every stage has a time limit and no
-    fall-back rule moves it back (the plan's science review, C3); a balanced count that is not
-    whole rounds (the PI, 2026-10-19); a block over before it starts; a block's own table saying
-    where its stimulus appears or whether withholding is an answer, which only a structure says;
-    a run limit of none; a condition of weight 0 owed trials, which is never drawn (the
-    engineering review, I2); a fall-back rule never judged -- on a plan of one stage, or at a
-    stage that always ends before its window is in (Minor 3); and a progression prone to move up
-    and back between two stages (the science review, M2). A condition's value outside its range
-    is the pre-flight's to re-check widened (`preflight.beyond`)."""
+    limit that is no rule at all; weights that are no weights; and, each of which would fault the
+    run or the check (the final review of engine build C2b, I1-I3), a block's order that is not
+    one the scheduler draws by, its own counting table that is no table, a condition's values
+    that are not settings named by text, and a block type or condition named by anything but
+    text. **Warned**, accepted in every kind of session, what runs but may not do what was meant,
+    each saying why: a criterion block mixing a target-0 condition with others (XC-386); a plan
+    with no end of its own and no run time limit -- a training progression's own end only where
+    every stage has a time limit and no fall-back rule moves it back (the plan's science review,
+    C3); a balanced count that is not whole rounds (the PI, 2026-10-19); a block over before it
+    starts; a block's own table saying where its stimulus appears or whether withholding is an
+    answer, which only a structure says; a run limit of none; a condition of weight 0 owed
+    trials, which is never drawn (the engineering review, I2); a fall-back rule never judged --
+    on a plan of one stage, or at a stage that always ends before its window is in (Minor 3); and
+    a progression prone to move up and back between two stages (the science review, M2). A
+    condition's value outside its range is the pre-flight's to re-check widened
+    (`preflight.beyond`)."""
     findings: list[Finding] = []
     declared = {param.name: param for param in task.params}
 
@@ -675,9 +681,12 @@ def _plan_faults(task: Task) -> list[Finding]:
         once its targets are used up, or its number of trials run if that is more. `None` where a
         criterion, or an answer that does not pay, can keep it going."""
         if block.criterion is not None or not isinstance(block.conditions, list) or not all(
-                isinstance(c, Condition) for c in block.conditions):
+                isinstance(c, Condition) for c in block.conditions) or not isinstance(
+                block.counting, (Counting, type(None))):
             return None
         for condition in block.conditions:
+            if not isinstance(condition.structure, (str, type(None))):
+                return None
             structure = task.structures.get(condition.structure or task.default)
             table = block.counting if block.counting is not None else (
                 None if structure is None else structure.counting)
@@ -691,11 +700,17 @@ def _plan_faults(task: Task) -> list[Finding]:
         targets = sum(c.target for c in block.conditions if isinstance(c.target, int))
         return max(targets, block.trials if isinstance(block.trials, int) else 0)
 
+    def quoted(plan: str) -> str:
+        """A plan's name as a finding quotes it: one longer than a start can carry cut to its
+        first characters (the final review's T8: the sentence lands in the page's pre-flight
+        line, and the rest of it says what is wrong)."""
+        return repr(plan if len(plan) <= TEXT_LIMIT else plan[:40] + "…")
+
     def refuse(plan: str, said: str) -> None:
-        findings.append(Finding("bad-plan", f"plan {plan!r}: {said}"))
+        findings.append(Finding("bad-plan", f"plan {quoted(plan)}: {said}"))
 
     def warn(code: str, plan: str, said: str) -> None:
-        findings.append(Finding(code, f"plan {plan!r}: {said}", blocking=False,
+        findings.append(Finding(code, f"plan {quoted(plan)}: {said}", blocking=False,
                                 accepted_in=SESSION_KINDS))
 
     def rule(value: object) -> bool:
@@ -724,7 +739,9 @@ def _plan_faults(task: Task) -> list[Finding]:
             refuse(name, "it has no blocks, so a run of it would have nothing to play; give it "
                          "blocks=[Block(...), ...]")
             continue
-        names = [block.name for block in plan.blocks]
+        # Only text names are compared: one of anything else is refused below, and numbers and
+        # text cannot be sorted together (the final review's I3).
+        names = [block.name for block in plan.blocks if isinstance(block.name, str)]
         for twice in sorted({n for n in names if names.count(n) > 1}):
             refuse(name, f"two of its block types are named {twice!r}, and each trial's row names "
                          f"its block's type by its name (wl-preproc reads it so); name each once")
@@ -756,8 +773,11 @@ def _plan_faults(task: Task) -> list[Finding]:
                         "forever")
             endless = bool(untimed) or fall_back is not None
         else:
-            why = ("a count of none repeats its blocks without end; give the order a count -- "
-                   "cycles= or blocks= -- and it ends after that many")
+            # Each order's own count (the final review's T6, N4): `Cyclic` counts cycles,
+            # `Balanced` and `Random` blocks.
+            why = (f"a count of none repeats its blocks without end; give the order a count -- "
+                   f"{'cycles=' if isinstance(order, Cyclic) else 'blocks='} -- and it ends "
+                   f"after that many")
             endless = isinstance(order, (Cyclic, Balanced, Random)) and counted is None
         if endless and plan.time_limit_s is None:
             warn("endless-plan", name, (
@@ -803,12 +823,28 @@ def _plan_faults(task: Task) -> list[Finding]:
                 f"seed, and they run once more than the rest"))
         for block in plan.blocks:
             where = f"block {block.name!r}"
+            if not isinstance(block.name, str):
+                # Each trial's row names its block's type by its name (wl-preproc reads it so):
+                # a number there is written as a number (the final review's I3).
+                refuse(name, f"a block type is named {block.name!r}, which is not text, and each "
+                             f"trial's row names its block's type by its name; name it by text, "
+                             f"such as 'easy'")
             if not isinstance(block.conditions, list) or not all(
                     isinstance(c, Condition) for c in block.conditions):
                 refuse(name, f"{where}'s conditions are {block.conditions!r}, and a block's "
                              f"conditions are a list of Conditions")
                 continue
             conditions = list(block.conditions)
+            untexted = [c.name for c in conditions if not isinstance(c.name, str)]
+            if untexted:
+                # A trial's condition is recorded by its name (TSK-61): one named by a number is
+                # written as a number in `trials.jsonl`'s `condition`, and one named by a list
+                # cannot be counted by name (the final review's I3).
+                for odd in untexted:
+                    refuse(name, f"{where} has a condition named {odd!r}, which is not text, and "
+                                 f"each trial's row names its condition by its name; name it by "
+                                 f"text, such as 'near'")
+                continue
             named = [c.name for c in conditions]
             for twice in sorted({n for n in named if named.count(n) > 1}):
                 refuse(name, f"{where} has two conditions named {twice!r}: they would share one "
@@ -828,7 +864,9 @@ def _plan_faults(task: Task) -> list[Finding]:
             if not seconds(block.time_limit_s):
                 refuse(name, f"{where}'s time limit is {block.time_limit_s!r}; a time limit is a "
                              f"number of seconds above zero, or None")
-            if not isinstance(block.order, Order):
+            if not isinstance(block.order, (Shuffled, WithReplacement, Constrained)):
+                # The three the scheduler draws by: anything else, a bare `Order()` among them,
+                # faulted the block's first draw (the final review's I1).
                 refuse(name, f"{where}'s order is {block.order!r}, and a block's order is how its "
                              f"conditions follow one another: Shuffled(), WithReplacement(), or "
                              f"Constrained(); the order of the blocks is the plan's, order=")
@@ -862,8 +900,9 @@ def _plan_faults(task: Task) -> list[Finding]:
             if stray:
                 warn("unknown-weight", name, (
                     f"{where}'s weights name {', '.join(map(repr, stray))}, which no condition of "
-                    f"the block is called, so they weigh nothing; check the spelling against "
-                    f"{', '.join(map(repr, named))}"))
+                    f"the block is called, so they weigh nothing; "
+                    + (f"check the spelling against {', '.join(map(repr, named))}" if named
+                       else "the block has no conditions")))
             if isinstance(block.order, Constrained) and isinstance(
                     block.order.max_run, int) and not isinstance(
                     block.order.max_run, bool) and block.order.max_run < 1:
@@ -876,13 +915,23 @@ def _plan_faults(task: Task) -> list[Finding]:
                         or condition.target < 0):
                     refuse(name, f"{of} has target {condition.target!r}; a target is a whole "
                                  f"number of 0 or more")
-                if condition.structure is not None and condition.structure not in task.structures:
+                if condition.structure is not None and (
+                        not isinstance(condition.structure, str)
+                        or condition.structure not in task.structures):
                     refuse(name, f"{of} plays structure {condition.structure!r}, which the task "
                                  f"does not have ({', '.join(map(repr, task.structures))})")
-                values = condition.values if isinstance(condition.values, dict) else {}
+                values = condition.values
+                if not isinstance(values, dict):
+                    # Its values are read as a dict at its first trial (the final review's I3).
+                    refuse(name, f"{of} sets {values!r}, and a condition's values are a dict of "
+                                 f"setting name to value: {{'target_x': 5.0}}")
+                    values = {}
                 for setting, value in values.items():
                     param = declared.get(setting)
-                    if param is None:
+                    if not isinstance(setting, str):
+                        refuse(name, f"{of} sets a value keyed {setting!r}, and a condition names "
+                                     f"each setting it sets by text, as the task declares it")
+                    elif param is None:
                         refuse(name, f"{of} sets {setting!r}, which is no setting the task "
                                      f"declares; a condition sets the task's own settings")
                     elif param.choices and value not in param.choices:
@@ -908,7 +957,13 @@ def _plan_faults(task: Task) -> list[Finding]:
                     f"{where} owes no trial -- {none} -- and has no criterion or number of trials, "
                     f"so a block of it ends before it draws a trial"))
             own = block.counting
-            if own is not None and (own.appears is not None or own.withholding):
+            if own is not None and not isinstance(own, Counting):
+                # Read as a table at the block's first trial, and by the checks above (the final
+                # review's I2).
+                refuse(name, f"{where}'s own counting table is {own!r}, and a block counts by a "
+                             f"Counting -- CORRECT_ONLY, PRESENTED, EVERY_TRIAL or one of its own "
+                             f"-- or None for each condition's structure's")
+            elif own is not None and (own.appears is not None or own.withholding):
                 warn("block-table-unread", name, (
                     f"{where}'s own counting table says "
                     + " and ".join(said for said, on in (

@@ -27,6 +27,7 @@ from wl_xcon.task import (
     Constrained,
     Counting,
     Cyclic,
+    Order,
     Plan,
     Random,
     WithReplacement,
@@ -113,6 +114,43 @@ def test_a_plan_the_rig_can_run_adds_no_finding():
          "and a block's conditions are a list of Conditions"),
         (Plan([Block("b", [NEAR], order=WithReplacement(weights={"near": 0.0}))]),
          "at least one condition's above 0"),
+        # The final review's T6, N1: a middle stage of text, where `most_answers` reads each
+        # condition's structure, refused rather than raising.
+        (Plan([Block("easy", [NEAR]), Block("mid", ["near"]), Block("hard", [FAR])],
+              order=ByCriterion(fall_back=(0.5, 10)), time_limit_s=600.0),
+         "block 'mid''s conditions are ['near'], and a block's conditions are a list of "
+         "Conditions"),
+        # The final review's I1: an order the scheduler cannot draw from faulted the first draw.
+        (Plan([Block("b", [NEAR, FAR], order=Order())]),
+         "order is Order(), and a block's order is how its conditions follow"),
+        # The final review's I2: a block's own table that is no table raised in the check.
+        (Plan([Block("b", [NEAR], counting="spent")]),
+         "block 'b''s own counting table is 'spent', and a block counts by a Counting"),
+        (Plan([Block("easy", [NEAR]), Block("mid", [NEAR], counting="spent"), Block("hard", [FAR])],
+              order=ByCriterion(fall_back=(0.5, 10)), time_limit_s=600.0),
+         "block 'mid''s own counting table is 'spent'"),
+        # The final review's I3: values that are no dict faulted the first trial; a value keyed by
+        # anything but text, and a block or condition named by anything but text, which each
+        # trial's row names it by -- an int written as a number in trials.jsonl's `condition`.
+        (Plan([Block("b", [Condition("c", [("target_x", 5.0)], target=1)])]),
+         "block 'b''s condition 'c' sets [('target_x', 5.0)], and a condition's values are a "
+         "dict of setting name to value"),
+        (Plan([Block("b", [Condition("c", {1: 5.0}, target=1)])]),
+         "block 'b''s condition 'c' sets a value keyed 1, and a condition names each setting it "
+         "sets by text"),
+        (Plan([Block("b", [Condition(1, {"target_x": 5.0}, target=1)])]),
+         "block 'b' has a condition named 1, which is not text, and each trial's row names its "
+         "condition by its name; name it by text, such as 'near'"),
+        (Plan([Block("b", [Condition(["x"], {"target_x": 5.0}, target=1)])]),
+         "block 'b' has a condition named ['x'], which is not text"),
+        (Plan([Block(2, [NEAR])]),
+         "a block type is named 2, which is not text, and each trial's row names its block's type "
+         "by its name; name it by text, such as 'easy'"),
+        (Plan([Block("b", [dataclasses.replace(NEAR, structure=["x"])])]),
+         "plays structure ['x'], which the task does not have"),
+        (Plan([Block("easy", [NEAR]), Block("mid", [dataclasses.replace(NEAR, structure=["x"])]),
+               Block("hard", [FAR])], order=ByCriterion(fall_back=(0.5, 10)), time_limit_s=600.0),
+         "block 'mid''s condition 'near' plays structure ['x']"),
     ],
 )
 def test_a_plan_that_cannot_run_is_refused_saying_which_and_why(plan, said):
@@ -138,6 +176,16 @@ def test_a_plan_named_past_what_a_start_can_carry_is_refused_saying_so():
     assert all(found[0].refuses(kind) for kind in SESSION_KINDS)
 
 
+def test_a_refusal_quotes_an_over_long_plan_name_cut_short():
+    """The final review's T8: the refusal lands in the page's pre-flight line, so a name of
+    thousands of characters is quoted by its first characters only, and the sentence after it
+    still says what is wrong."""
+    (found,) = _findings(**{"x" * 5000: Plan([Block("b", [NEAR])])})
+
+    assert found.detail.startswith(f"plan {'x' * 40 + '…'!r}: its name is 5000 characters")
+    assert len(found.detail) < 250
+
+
 @pytest.mark.parametrize(
     ("plan", "code", "said"),
     [
@@ -154,8 +202,13 @@ def test_a_plan_named_past_what_a_start_can_carry_is_refused_saying_so():
                Block("b", [FAR], criterion=(0.8, 10), time_limit_s=60.0)], order=ByCriterion()),
          "endless-plan", "an animal that never meets the rule of stage 'a', which has no time "
          "limit"),
+        # The final review's T6, N4: each order's own count named.
         (Plan([Block("b", [NEAR])], order=Cyclic()), "endless-plan",
-         "cycles= or blocks= -- and it ends after that many"),
+         "give the order a count -- cycles= -- and it ends after that many"),
+        (Plan([Block("b", [NEAR])], order=Balanced()), "endless-plan",
+         "give the order a count -- blocks= -- and it ends after that many"),
+        (Plan([Block("b", [NEAR])], order=Random()), "endless-plan",
+         "give the order a count -- blocks= -- and it ends after that many"),
         # The review's M4: a number of trials holds a target-0 condition back as a criterion does.
         (Plan([Block("b", [NEAR, dataclasses.replace(FAR, target=0)], trials=12)]),
          "late-condition", "ends on a criterion or a number of trials"),
@@ -204,6 +257,28 @@ def test_a_plan_that_runs_but_may_not_do_what_was_meant_is_a_warning_saying_why(
     assert [f.code for f in found] == [code], found
     assert said in found[0].detail
     assert not found[0].blocking and set(found[0].accepted_in) == set(SESSION_KINDS)
+
+
+def test_names_of_text_and_of_numbers_together_are_refused_and_never_raise():
+    """The final review's I3: two block types named by one number beside two named by one text
+    raised sorting the names; each number is refused, and the text named twice is."""
+    found = _findings(p=Plan([Block(1, [NEAR]), Block(1, [FAR]), Block("a", [NEAR]),
+                              Block("a", [FAR])]))
+
+    assert [f.code for f in found] == ["bad-plan"] * 3
+    assert "two of its block types are named 'a'" in found[0].detail
+    assert all("a block type is named 1, which is not text" in f.detail for f in found[1:])
+
+
+def test_a_weight_on_a_block_of_no_conditions_says_the_block_has_none():
+    """The final review's T6, N4: `unknown-weight` on a block with no conditions ended "check
+    the spelling against " with nothing after it."""
+    found = _findings(p=Plan([Block("b", [], order=WithReplacement(weights={"x": 1.0}))]))
+
+    (weight,) = [f for f in found if f.code == "unknown-weight"]
+    assert weight.detail.endswith(
+        "block 'b''s weights name 'x', which no condition of the block is called, so they weigh "
+        "nothing; the block has no conditions")
 
 
 def test_a_training_progression_ends_of_itself_only_with_every_stage_timed_and_no_fall_back():
