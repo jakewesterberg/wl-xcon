@@ -175,8 +175,12 @@ NAMED = 3
 #: - `pytest_runtestloop` checks after each test's whole setup-call-teardown, and raises
 #:   `Session.Failed`; `wrap_session` makes that exit code 1. Non-zero, so caught, exactly
 #:   as before. After a third collection error `Session.pytest_collectstart` raises the
-#:   same `Failed` at the next collector, so collection stops there (exit 1, where collection
-#:   errors otherwise exit 2): caught either way, XC-312's class unchanged.
+#:   same `Failed` at the next collector, so collection stops there (exit 1, where
+#:   collection errors otherwise exit 2). When the third came from the last module
+#:   collected there is no next collector: `pytest_runtestloop` raises `Interrupted`, the
+#:   exit is 2, and both banners print, `stopping after 3 failures` and `Interrupted: 3
+#:   errors during collection`, before the stats line. Non-zero either way, so caught
+#:   either way, XC-312's class unchanged (`tests/test_mutate.py` runs both).
 #: - `_pytest/terminal.py`, `TerminalReporter.pytest_sessionfinish`: the short summary,
 #:   then the `!!! stopping after 3 failures !!!` banner, then the stats line. So the
 #:   stats line is still stdout's last (`_run_suite`'s summary), and the banner, which
@@ -184,8 +188,12 @@ NAMED = 3
 #:
 #: **The limit (XC-275) reads the same.** pytest stops only *at* the third failure, so a
 #: suite with no failure before the limit runs exactly as it did and is still `TIMED
-#: OUT`; one with one or two is still caught by name; one with three stops there, before
-#: the limit, and is read as a finished run.
+#: OUT`; one with one or two is still caught by name; one with three runs no further
+#: test and is read as a finished run -- unless something hangs after the stop. pytest
+#: then tears down every fixture (`_pytest/runner.py`'s `runtestprotocol` passes no next
+#: item once `shouldfail` is set), so a session or module fixture whose teardown hangs
+#: still runs the suite to the limit, and the line reads `timed out after Ns, 3 failed
+#: before it`, caught by name as before.
 #:
 #: **No xdist here.** `SUITE_ARGV` has no `-n`, `pyproject.toml` no `addopts`, and CI's
 #: mutation jobs do not install pytest-xdist. Under it, the stop is less exact: its

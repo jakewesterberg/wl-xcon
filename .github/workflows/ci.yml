@@ -186,18 +186,19 @@ jobs:
     #
     # **Twenty-four ways since 2026-10-22, twelve before.** At twelve the sweep
     # outgrew the limit: 964 functions, 80-81 a shard, and every mutant a whole suite
-    # of about four minutes (run 39749961790's shard 4: baselines 232-237 s, its
-    # first five mutants 225-235 s). The nightlies of 2026-10-20, 21 and 22 (runs
-    # 39395156378, 39571238638, 39749961790) had 2, 8 and 7 of their 12 shards
-    # cancelled at six hours; that shard 4 stopped at 77 of its 81, all caught. The
-    # PI chose "Both" (2026-10-22): "Split the nightly into 24 shards of ~40
-    # functions, about 3 hours each, well inside the limit and with room for growth.
-    # No change to what a verdict means. Push runs stay at 12." -- and with it
-    # XC-313, a mutant's suite stopped at its third failure (`tools/mutate.py`'s
-    # `MUTANT_MAXFAIL`), which costs the logs each caught mutant's total failed
-    # count. His three hours is an estimate; the first twenty-four-shard nightly is
-    # its measurement. `tests/test_mutation_gate.py` reads this file and holds each
-    # job's matrix to its own `--shard K/N`.
+    # of about four minutes (run 39749961790's shard 4: its unmutated runs,
+    # baselines and restores, 232-237 s; its first five mutants 225-235 s). The
+    # nightlies of 2026-10-20, 21 and 22 (runs 39395156378, 39571238638,
+    # 39749961790) had 2, 8 and 7 of their 12 shards cancelled at six hours; that
+    # shard 4 stopped at 77 of its 81, all caught. The PI chose "Both"
+    # (2026-10-22): "Split the nightly into 24 shards of ~40 functions, about 3 hours
+    # each, well inside the limit and with room for growth. No change to what a
+    # verdict means. Push runs stay at 12." -- and with it XC-313, a mutant's suite
+    # stopped at its third failure (`tools/mutate.py`'s `MUTANT_MAXFAIL`), which
+    # costs the logs each caught mutant's total failed count. His three hours is an
+    # estimate; the first twenty-four-shard nightly is its measurement, and whether
+    # its 27 jobs queue (XC-404). `tests/test_mutation_gate.py` reads this file and
+    # holds each job's matrix to its own `--shard K/N`.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     strategy:

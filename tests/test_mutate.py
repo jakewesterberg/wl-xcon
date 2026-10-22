@@ -1066,3 +1066,56 @@ def test_three_failures_before_a_hang_stop_the_suite_there_not_at_the_limit(
     assert caught is True, summary
     assert summary.startswith("3 failed in "), summary
     assert "timed out" not in summary, summary
+
+
+#: A test file that uses the module under mutation at import, as the three files that
+#: build `tests/_calibrations.py`'s spectra do (XC-312): neutered to `return []`,
+#: `covered()[0]` raises while pytest collects the file, before any test runs.
+_USES_AT_IMPORT = (
+    "from toy_target import covered\n"
+    "FIRST = covered()[0]\n"
+    "def test_uses_it():\n"
+    "    assert FIRST == 1\n"
+)
+
+
+def _collection_mutant(monkeypatch, tmp_path, files):
+    """`mutate` end to end, as `_toy_mutant`, on a module that `files` test files
+    import -- it sits beside them, where pytest's default import mode finds it."""
+    suite = tmp_path / "suite"
+    suite.mkdir()
+    for n in range(1, files + 1):
+        (suite / f"test_uses_{n}.py").write_text(_USES_AT_IMPORT)
+    target = suite / "toy_target.py"
+    target.write_text(_UNMUTATED)
+    monkeypatch.setattr(mutate_tool, "SENTINEL", tmp_path / "sentinel.json")
+    monkeypatch.setattr(mutate_tool, "_clear_pycache", lambda: None)
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    real = mutate_tool._run_suite
+    monkeypatch.setattr(mutate_tool, "_run_suite", lambda **kwargs: real(suite, **kwargs))
+    return target
+
+
+@pytest.mark.parametrize(
+    "files", [5, 3], ids=["stopped-at-the-next-file", "third-error-in-the-last-file"]
+)
+def test_a_mutant_failing_only_at_collection_is_caught_naming_at_most_three_files(
+    monkeypatch, tmp_path, files
+):
+    """XC-312's class under the stop: every failure is a collection error and no test
+    runs. With files left to collect, the third error stops collection at the next one
+    (exit 1); when the third is the last file there is no next one, and pytest exits 2,
+    `Interrupted: 3 errors during collection`, both banners above its stats line. Each
+    must read caught, `3 errors`, naming the three files -- and five files without the
+    stop would read `5 errors ... +2 more`."""
+    target = _collection_mutant(monkeypatch, tmp_path, files)
+    unmutated = mutate_tool._run_suite(timeout=60)
+    # The errors below are the mutation's: unmutated, every file imports and passes.
+    assert unmutated.passed and unmutated.summary.startswith(f"{files} passed"), unmutated
+
+    caught, summary = mutate_tool.mutate(target, "covered", "[]", limit=60)
+
+    assert caught is True, summary
+    assert summary.startswith("3 errors in "), summary
+    assert summary.endswith("  <- test_uses_1.py, test_uses_2.py, test_uses_3.py"), summary
+    assert target.read_text() == _UNMUTATED
