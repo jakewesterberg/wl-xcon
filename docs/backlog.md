@@ -15,7 +15,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 **Finding one.** Grep the ID, a package (`P9`, `b3`), a repository (`wl-sync`) or a file. The sections: brainstorms the PI asked to have later; features no plan covers yet; defects and review findings deliberately not fixed; debt (cleanup, stale wording, test hygiene); anything that needs the rig or other hardware, measurements included; and asks of, or waits on, other repositories.
 
-**Next free ID: XC-408.**
+**Next free ID: XC-410.**
 
 ## Brainstorms queued for the PI
 
@@ -109,6 +109,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 ## Deferred defects
 
+- **XC-409** The simulated animal is not reproducible from its seed across processes: `simulate.Subject._tick` (simulate.py:~186) walks `list(self._windows)`, a set of window names whose order follows `PYTHONHASHSEED`, and draws from its seeded generator in that order, so one seed gives different outcomes per process (a fuzz seed ran 33 or 34 trials). Since 2026-08-31; the scheduler's block and condition orders still replay from the seed. Fix: iterate `sorted(self._windows)` -- it changes every simulated sequence, so it goes in its own commit with its own test, not inside a build. — 2026-10-22, [engine C2b's final review](superpowers/plans/2026-10-19-engine-c2b.md) (the fix wave's re-review) — waits on: nothing
 - **XC-402** An array's object windows are built once per trial from its `Show`'s position (`task.expand_windows`), so an `Update` that moves the array mid-trial moves its objects but not their windows, and the animal is scored where the objects were. — 2026-10-19, [engine spec §5](superpowers/specs/2026-10-07-engine-design.md#5-where-n2-nr5) (item 7, gaze windows; found on the `true-angle-windows` branch) — waits on: nothing
 - **XC-145** A missing `--rig` or `--subject-settings` path (like `--bounds`, `--allocation` or the task path) is a `FileNotFoundError` traceback rather than a refusal sentence. — 2026-09-29, [cli.py's `_load_named`](../wl_xcon/cli.py) — waits on: nothing
 - **XC-039** A change staged on a session's last pass is never applied and never recorded, a record gap on the reward path. — 2026-09-19, [next-session §6 item 2](next-session.md#6-p4d-2a-is-on-main-p4d-2b-b1-is-built-b2-is-next) — waits on: nothing
