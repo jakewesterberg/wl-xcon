@@ -174,9 +174,10 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: open block's and the run's time limits, `None` with no limit, a pause not counting;
 #: `trials_to_run`, the open block's number of trials, `None` without one; `passed_at`, the trial
 #: after which a training progression's top stage first met its rule, `None` until it has; and
-#: `fell_back`, the times the run's plan fell back a stage; and `Preflight.plan` and `plans`, the
-#: plan a pre-flight was taken for and the plans its task declares, in order, which the page's
-#: picker offers. A reader of 16 refuses 17 and 17 refuses 16, by name.
+#: `fell_back`, the times the run's plan fell back a stage -- none of these six between runs, when
+#: no block is open; and `Preflight.plan` and `plans`, the plan a pre-flight was taken for and the
+#: plans its task declares, in order, which the page's picker offers. A reader of 16 refuses 17
+#: and 17 refuses 16, by name.
 SCHEMA = 17
 
 #: How many refusals a session keeps, per source, and therefore how many one
@@ -809,14 +810,15 @@ class Telemetry:
     block_left_s: float | None
     run_left_s: float | None
     #: The open block's number of trials (`task.Block.trials`), `None` without one (schema 17): what
-    #: a block past its targets draws on to, with its criterion (`rule`).
+    #: a block past its targets draws on to, with its criterion (`rule`); `None` between runs, when
+    #: no block is open.
     trials_to_run: int | None
     #: `scheduler.passed_at` (schema 17): the trial after which a training progression's top stage
     #: first met its rule, its animal working on past it, or `None` (the engine C2b plan's science
-    #: review, I1).
+    #: review, I1), and `None` between runs.
     passed_at: int | None
     #: `scheduler.fell_back` (schema 17): how many times the run's plan fell back a stage (the
-    #: science review, I2).
+    #: science review, I2); 0 between runs.
     fell_back: int
 
     @classmethod
@@ -1024,9 +1026,13 @@ class Telemetry:
                           else session.left("block")),
             run_left_s=(None if scheduler is None or session.phase != "running"
                         else session.left("run")),
-            trials_to_run=None if scheduler is None else scheduler.block.trials,
-            passed_at=None if scheduler is None else scheduler.passed_at,
-            fell_back=0 if scheduler is None else scheduler.fell_back,
+            # The open run's too (the final review of engine build C2b, M1): the page, `/health`
+            # and `wlx console` read none of them between runs.
+            trials_to_run=(None if scheduler is None or session.phase != "running"
+                           else scheduler.block.trials),
+            passed_at=(None if scheduler is None or session.phase != "running"
+                       else scheduler.passed_at),
+            fell_back=0 if scheduler is None or session.phase != "running" else scheduler.fell_back,
         )
 
 

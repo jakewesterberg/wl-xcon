@@ -2876,3 +2876,29 @@ def test_a_frame_says_when_a_top_stage_passed_how_often_the_plan_fell_back_and_i
     frame = Telemetry.of(session, Tally(), scheduler, 0)
 
     assert (frame.trials_to_run, frame.passed_at, frame.fell_back) == (5, 7, 1)
+
+
+def test_between_runs_a_frame_carries_none_of_the_finished_runs_block_fields():
+    """The final review of engine build C2b, M1: the scheduler a finished run leaves stays, and
+    with it its open block's number of trials, its top stage's pass and its fall-backs; between
+    runs no block is open, so the frame says none of them, as it says no next block and no time
+    left -- the page, `/health` and `wlx console` read none of them then."""
+    session = SimpleNamespace(**{**vars(_session_with(1.25, 3.0)), "plan": "train",
+                                 "phase": "between_runs", "stop_kind": "completed",
+                                 "left": lambda which: 30.0})
+    stages = [Block("easy", [Condition("a", {}, target=1)], criterion=(1.0, 1)),
+              Block("hard", [Condition("b", {}, target=1)], criterion=(1.0, 1), trials=5)]
+    scheduler = Scheduler(stages, seed=0, order=ByCriterion(fall_back=(0.5, 1)))
+    for outcome in (Outcome.CORRECT, Outcome.WRONG_TARGET, Outcome.CORRECT):
+        scheduler.record(scheduler.next_trial().name, outcome)
+        if scheduler.ends is not None:
+            scheduler.advance(scheduler.ends)
+    for _ in range(5):
+        scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
+    assert scheduler.ends is None
+    assert (scheduler.block.trials, scheduler.passed_at, scheduler.fell_back) == (5, 7, 1)
+
+    frame = Telemetry.of(session, Tally(), scheduler, 0)
+
+    assert (frame.next_block, frame.block_left_s, frame.run_left_s) == (None, None, None)
+    assert (frame.trials_to_run, frame.passed_at, frame.fell_back) == (None, None, 0)

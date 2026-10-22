@@ -515,6 +515,7 @@ class Scheduler:
         condition can be drawn by its order (`_peek`). A block that cannot, and does not end, has
         nothing to show (the PI, 2026-10-19: the run ends, saying why)."""
         return self._drum is not None or bool(self._due) or self._peek() is not None
+
     def _refill(self) -> None:
         """Queue the next draw, however this block declares its order.
 
@@ -976,10 +977,9 @@ class Scheduler:
         block ends on a criterion or a number of trials, those are met too -- **its targets are a
         minimum** (the PI, 2026-10-18, "Both: criterion and every target": "The block ends only
         once the criterion is met and every target is used up; conditions keep coming until both
-        hold") -- **and no
-        drum waits** ("Finish the drum first": "The block ends only after the drummed trial is
-        answered right. If the extra tries drop the percentage below the bar, the block carries on.
-        Training ends on a success.")."""
+        hold") -- **and no drum waits** ("Finish the drum first": "The block ends only after the
+        drummed trial is answered right. If the extra tries drop the percentage below the bar, the
+        block carries on. Training ends on a success.")."""
         if self._drum is not None:
             return False
         if self.block.criterion is not None:
