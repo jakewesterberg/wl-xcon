@@ -507,6 +507,11 @@ controls caught. **The PI approved A1** (`Service._start`'s three lines) **and A
 Approved; 4000 on 3.11-3.13. The first 24-shard night is measured by XC-407. `saccade-thresholds` merged the same day
 (wl-preproc's frozen threshold companion beside v1). Engine build C2b is built on `engine-c2b`, every task
 reviewed, its final review's fix wave in; it merges on the PI's decision.)*
+*(Dated note, 2026-10-27, closes XC-407: the first 24-shard nightlies read clean shard by shard --
+run `39926224377` (10-23) and `40478519949` (10-27): 24 of 24 shards "mutation gate passed", 961 caught, 3 inert, none
+survived, 4025 on 3.11-3.13; the nights of 10-24 to 10-26 succeeded too. By GitHub's job timestamps: the slowest
+shard, 17, ran 2.25 h and 2.29 h; up to 7 of the 27 jobs queued for about 53 minutes before starting (the account's
+concurrent-job cap), the median wait none; the whole run 3.0 h and 2.5 h, inside the 6-hour job limit.)*
 
 **Learned:**
 - **A branch pushed several times is read run by run**: the changed-only gate sweeps only what changed since the
