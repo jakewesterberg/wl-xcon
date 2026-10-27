@@ -67,7 +67,7 @@ any outcome's own class, and a repeat limit. Every task wl-xtasks writes declare
 structure. Information, under item 1; nothing new is asked.
 
 *Engine build C2b, 2026-10-20*: the format gains **plans** (`Task.plans`, a dict of names to
-`task.Plan`s; [the plan](superpowers/plans/2026-10-19-engine-c2b.md), Task 2): each plan its block
+`task.Plan`s; [the plan](superpowers/plans/2026-10-19-engine-c2b.md), Task 3): each plan its block
 types (`task.Block`: conditions, a criterion, a number of trials, a time limit, its own counting
 table, drumming), how they follow (`Fixed`, `Cyclic`, `Balanced`, `Random`, or `ByCriterion`, a
 training progression with a fall-back rule) and a run time limit; and **each condition names the

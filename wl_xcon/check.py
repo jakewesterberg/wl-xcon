@@ -666,9 +666,10 @@ def _plan_faults(task: Task) -> list[Finding]:
     C3); a balanced count that is not whole rounds (the PI, 2026-10-19); a block over before it
     starts; a block's own table saying where its stimulus appears or whether withholding is an
     answer, which only a structure says; a run limit of none; a condition of weight 0 owed
-    trials, which is never drawn (the engineering review, I2); a fall-back rule never judged --
-    on a plan of one stage, or at a stage that always ends before its window is in (Minor 3); and
-    a progression prone to move up and back between two stages (the science review, M2). A
+    trials, which is never drawn (the engineering review, I2); weights naming no condition of
+    their block, which weigh nothing (Task 6's review); a fall-back rule never judged -- on a plan
+    of one stage, or at a stage that always ends before its window is in (Minor 3); and a
+    progression prone to move up and back between two stages (the science review, M2). A
     condition's value outside its range is the pre-flight's to re-check widened
     (`preflight.beyond`)."""
     findings: list[Finding] = []
