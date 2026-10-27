@@ -1391,11 +1391,12 @@ def _visible_on_entry(trial: Trial) -> dict[str, frozenset[str]]:
 
 
 def _windows_left_behind(trial: Trial) -> list[Finding]:
-    """**An array's object window asked about after an `Update` that can draw the array as no
-    array, warned** (the XC-402 review, I2; the controller's ruling of 2026-10-27, pending the
-    PI). No objects are drawn then, so their windows stay where the objects were last drawn
-    (`task.placements`), and gaze there is scored as on them: right for a memory-guided design that
-    blanks the array on purpose, wrong if it was not meant. A `Hide` of the array is refused
+    """**An array's object window asked about after an `Update` or a `Show` that can draw the
+    array as no array, warned** (the XC-402 review, I2, and its round-1 re-review; the
+    controller's ruling of 2026-10-27, pending the PI). No objects are drawn then, so their
+    windows stay where the objects were last drawn (`task.placements`), and gaze there is scored
+    as on them: right for a memory-guided design that blanks the array on purpose, wrong if it was
+    not meant. A `Hide` of the array is refused
     instead (`nothing-to-look-at`). A **may** analysis, unlike `_visible_on_entry`'s must: one
     path into a state on which the array is drawn as no array is enough to say so. An appearance a
     setting holds counts as no array when any of its choices is not one, or it has none. A warning
@@ -1415,13 +1416,17 @@ def _windows_left_behind(trial: Trial) -> list[Finding]:
         return not isinstance(looks, Array)
 
     def after(blanked: frozenset[str], actions: list) -> frozenset[str]:
+        # A `Show` as an `Update`: one that draws the array as no array leaves its windows behind
+        # too, shown again after a `Hide` (the round-1 re-review).
         for action in actions:
             if isinstance(action, Show) and action.stimulus.name in families:
-                blanked = blanked - {action.stimulus.name}
+                name, looks = action.stimulus.name, action.stimulus.looks
             elif (isinstance(action, Update) and action.stimulus in families
                   and "looks" in action.changes()):
-                blanked = (blanked | {action.stimulus} if no_array(action.looks)
-                           else blanked - {action.stimulus})
+                name, looks = action.stimulus, action.looks
+            else:
+                continue
+            blanked = blanked | {name} if no_array(looks) else blanked - {name}
         return blanked
 
     entry: dict[str, frozenset[str]] = {state.name: frozenset() for state in trial.states}
@@ -1452,10 +1457,10 @@ def _windows_left_behind(trial: Trial) -> list[Finding]:
                 finding = Finding(
                     "windows-left-behind",
                     f"state {state.name!r} scores {window!r}, an object window of array {of!r}, "
-                    f"after an update that can draw {of!r} as no array; its object windows stay "
-                    f"where its objects were last drawn, and gaze there is scored as on them: "
-                    f"right for a memory-guided design that blanks the array on purpose, wrong "
-                    f"if it was not meant (a Hide of the array is refused instead)",
+                    f"after a Show or an Update that can draw {of!r} as no array; its object "
+                    f"windows stay where its objects were last drawn, and gaze there is scored "
+                    f"as on them: right for a memory-guided design that blanks the array on "
+                    f"purpose, wrong if it was not meant (a Hide of the array is refused instead)",
                     blocking=False,
                     accepted_in=SESSION_KINDS,
                 )

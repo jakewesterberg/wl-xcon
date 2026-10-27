@@ -191,15 +191,24 @@ class Tracked:
         if isinstance(guard, SaccadeTo):
             if self._pending is None or self._in_flight:
                 return False
-            if not self._landed(self._members.get(guard.window, (guard.window,)), frame):
+            # On every frame an unclaimed saccade is pending (XC-410), so nothing is built here: an
+            # alias's objects are `_members`' own tuple, and a window is judged as it is.
+            members = self._members.get(guard.window)
+            if members is None:
+                declared = self._windows.get(guard.window)
+                landed = declared is not None and self.in_window(guard.window, frame,
+                                                                 declared.eye)
+            else:
+                landed = self._landed(members, frame)
+            if not landed:
                 return False
             self._pending = None
             return True
         return False
 
     def _landed(self, names: "tuple[str, ...]", frame: int) -> bool:
-        """Whether gaze is inside any of the windows `names`, each judged for its own eye: one
-        window, or the objects an array's alias names (`_members`)."""
+        """Whether gaze is inside any of the windows `names`, the objects an array's alias names
+        (`_members`), each judged for its own eye."""
         for name in names:
             declared = self._windows.get(name)
             if declared is not None and self.in_window(name, frame, declared.eye):

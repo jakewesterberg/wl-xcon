@@ -20,10 +20,9 @@ warnings, its load-time findings that are warnings (`luminance-step`, `color-on-
 `overlapping-windows`, `crowded-array`, `wrong-eye-criterion`, `monocular-stereogram`,
 `wrong-setup`, `isoluminance-on-default`, `unrealizable-color`, `cone-colors-without-spectra`,
 `hold-cut-short` (engine build C2a), `windows-left-behind` (2026-10-27, an array's object
-window scored after an `Update` that can draw it as no array) and, for a value outside its
-declared range at a run's start or live, `outside-range` and, for a wait longer than any the
-task declares,
-`longer-than-declared`, by his answer of 2026-10-12);
+window scored after a `Show` or an `Update` that can draw it as no array) and, for a value outside
+its declared range at a run's start or live, `outside-range` and, for a wait longer than any the
+task declares, `longer-than-declared`, by his answer of 2026-10-12);
 and today's pre-flight unknowns, the pump calibration and the eye tracker (S9a §10). **What
 later builds add**, each waiting on the build named: dithering and a timing record older than a
 graphics change (E, V1); a pattern near the pixel limit, and a screen, mode or care-feature

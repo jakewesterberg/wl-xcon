@@ -478,3 +478,29 @@ def test_an_object_window_asked_after_an_update_draws_no_array_is_warned():
     assert "windows-left-behind" not in codes(_updated(Update("search", looks=Array(n=4))))
     assert "windows-left-behind" not in codes(_updated(Update("search", looks=Blank()),
                                                        held="fix"))
+
+
+def test_an_object_window_asked_after_a_show_draws_no_array_is_warned():
+    """The same for a `Show`: shown, hidden, and shown again as `Blank()`, the array draws no
+    objects, so its windows stay where the objects were last drawn (the round-1 re-review). Shown
+    again as an array, it is not warned."""
+    from wl_xcon.task import Blank, Hide, Hold
+
+    def again(looks) -> Trial:
+        ring = Array(n=4, radius=3.0, target=1)
+        return Trial(
+            start="shown",
+            windows=[ObjectWindows(of="search", radius=1.0)],
+            states=[
+                State("shown", enter=[Show(Stimulus("search", at=(0.0, 0.0), looks=ring))],
+                      go=[On(After(0.04), "hidden")]),
+                State("hidden", enter=[Hide("search")], go=[On(After(0.04), "again")]),
+                State("again", enter=[Show(Stimulus("search", at=(0.0, 0.0), looks=looks))],
+                      go=[On(Hold("search.1", 0.05), Outcome.CORRECT),
+                          On(After(0.5), Outcome.NO_RESPONSE)]),
+            ],
+        )
+
+    warned = [f for f in check(again(Blank())) if f.code == "windows-left-behind"]
+    assert len(warned) == 1 and not warned[0].blocking
+    assert "windows-left-behind" not in {f.code for f in check(again(Array(n=4, radius=3.0)))}

@@ -1405,3 +1405,18 @@ def test_a_saccade_to_a_distractor_is_judged_for_the_eye_its_family_scores():
 
     assert run_trial(trial, world, 0.002, values={}, effects=Recorded()).outcome is \
         Outcome.WRONG_TARGET
+
+
+def test_judging_a_saccade_builds_nothing_in_its_frame():
+    """`happened` runs on every frame an unclaimed saccade is pending (XC-410), so judging where
+    it landed builds no tuple, list, dict or set: the bytecode of the two functions on that path
+    has no `BUILD_` instruction (the round-1 re-review). What `in_window` builds, it builds for
+    the loop's membership every frame too."""
+    import dis
+
+    built = sorted({(function.__name__, instruction.opname)
+                    for function in (Tracked.happened, Tracked._landed)
+                    for instruction in dis.get_instructions(function)
+                    if instruction.opname.startswith("BUILD_")})
+
+    assert built == []
