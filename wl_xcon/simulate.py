@@ -183,7 +183,10 @@ class Subject:
             return
         enter = self._per_frame(self.hazards.get(Entered, 0.0))
         leave = self._per_frame(self.hazards.get(Exited, 0.0))
-        for window in list(self._windows):
+        # Name order, not the set's: a string's hash follows the process's PYTHONHASHSEED, and
+        # the draws below come from one seeded generator, so set order made one seed play a
+        # different animal in every process (XC-409). Name order is the only one the windows carry.
+        for window in sorted(self._windows):
             if window in self._inside:
                 # A stimulus that disappears takes the animal's gaze with it.
                 # Conservative on purpose: an animal *can* hold gaze on a blank
