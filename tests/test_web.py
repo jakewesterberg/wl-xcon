@@ -3002,7 +3002,9 @@ def test_the_plan_picker_offers_the_tasks_plans_then_the_plain_run_the_shown_pre
         f'<option value="" data-for="planned.py">{PLAIN_RUN}</option>'
     )
     assert plain == (
-        f'<option value="" data-for="fixation_detection.py" selected>{PLAIN_RUN}</option>')
+        # The frame's run (run_index 0, plain) was of this task: repeated, so marked `data-last`.
+        f'<option value="" data-for="fixation_detection.py" data-last selected>'
+        f"{PLAIN_RUN}</option>")
     assert fragments(_between(), view())["plan-sel"] == f'<option value="">{PLAIN_RUN}</option>'
     # The science review, I8: "every trial paying" read as "every trial rewarded".
     assert PLAIN_RUN == "plain run: the trials below, each counted once, none shown again"
@@ -3156,7 +3158,14 @@ def test_the_option_for_the_plan_last_run_is_marked_when_it_is_the_same_tasks_an
     assert "data-last" not in picker(plan="gone", task="tasks/planned.py")
     assert "data-last" not in picker(plan="test", task="tasks/other.py")
     assert "data-last" not in picker(plan="test", task=None)
-    assert "data-last" not in picker(plan=None, task="tasks/planned.py")
+    # A plain last run is repeated: the plain run's option is the marked one. No run yet -- the
+    # session's first -- marks none.
+    plain = picker(plan=None, task="tasks/planned.py", run_index=1)
+    assert (f'<option value="" data-for="planned.py" data-last selected>{PLAIN_RUN}</option>'
+            in plain)
+    assert plain.count("data-last") == 1
+    assert "data-last" not in picker(plan=None, task="tasks/planned.py", run_index=None)
+    assert "data-last" not in picker(plan="test", task="tasks/planned.py", run_index=None)
 
 
 def test_the_moves_between_blocks_are_held_against_a_double_click_and_a_plan_start_skips_trials():

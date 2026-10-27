@@ -1435,6 +1435,33 @@ def test_a_later_run_on_a_one_task_rig_preselects_the_first_plan_again(rig):
     assert page.evaluate('document.getElementById("plan-sel").value') == "test"
 
 
+def test_a_plain_last_run_is_repeated_as_the_plain_run_but_the_first_run_gets_the_first_plan(rig):
+    """The PI, 2026-10-22, "The plan last run" -- "Repeats what the operator just ran": a session
+    whose last run of this task was the plain run keeps the plain run for the next, the first plan
+    being only for the session's first run (Q9; `_preselected` is that first run)."""
+    rig.hub.offer(_between_runs(offered_tasks=ONE_TASK))
+    page = rig.browser_page()
+    _sign_in(page)
+    _preselected(rig, page)
+    page.select_option("#plan-sel", "")
+    rig.wait_for(lambda: len(_checks(rig)) == 3)
+
+    rig.hub.offer(_between_runs(offered_tasks=ONE_TASK, run_index=1, plan=None,
+                                task="tasks/planned.py"))
+    page.wait_for_selector('[data-cmd="check"]:not([disabled])')
+    page.click('[data-cmd="check"]')
+    rig.wait_for(lambda: len(_checks(rig)) == 4)
+    again = dict(run_index=1, plan=None, task="tasks/planned.py")
+    rig.hub.offer(_plans_of(None, **again))
+    rig.hub.offer(_plans_of(None, stopped_because=FRAME_MARKER, **again))
+    _marker_shown(page)
+
+    assert [(check.task, check.plan) for check in _checks(rig)] == [
+        ("planned.py", None), ("planned.py", "train"), ("planned.py", None),
+        ("planned.py", None)]
+    assert page.evaluate('document.getElementById("plan-sel").value') == ""
+
+
 def test_a_last_plan_no_longer_among_the_tasks_plans_falls_back_to_its_first(rig):
     """The PI, 2026-10-22: the plan last run is preselected "if it is still among the task's
     plans"; the task was edited between the runs, so the first is."""

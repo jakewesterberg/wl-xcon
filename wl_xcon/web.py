@@ -671,7 +671,9 @@ def _plans(frame: Telemetry | Idle | None) -> str:
     (`Session.plan`, "the run in progress, or the last one"), not what the next run plays.
     That last plan is what a session's second and later runs preselect (the PI, 2026-10-22, "The
     plan last run"): the option for it, when the frame's last run was of this pre-flight's task,
-    is marked `data-last`, and the first run's frame, with no last plan, marks none."""
+    is marked `data-last` -- the plain run's too, when the last run was plain, which is then
+    repeated -- and a frame with no run yet (`run_index` is `None`), the first run's, marks
+    none."""
     preflight = None if frame is None or isinstance(frame, Idle) else frame.preflight
     if preflight is None:
         if (frame is not None and not isinstance(frame, Idle) and frame.plan is not None
@@ -680,12 +682,12 @@ def _plans(frame: Telemetry | Idle | None) -> str:
         return f'<option value="">{_e(PLAIN_RUN)}</option>'
     task = _e(preflight.task)
     # The frame's task is the run's file path, the pre-flight's the name the page offered it by.
-    last = (frame.plan if frame.task is not None and PurePath(frame.task).name == preflight.task
-            else None)
+    ran = (frame.run_index is not None and frame.task is not None
+           and PurePath(frame.task).name == preflight.task)
 
     def option(value: str, label: str) -> str:
         chosen = " selected" if (preflight.plan or "") == value else ""
-        again = " data-last" if last is not None and last == value else ""
+        again = " data-last" if ran and (frame.plan or "") == value else ""
         return f'<option value="{_e(value)}" data-for="{task}"{again}{chosen}>{_e(label)}</option>'
 
     return "".join(option(name, f"plan {name}") for name in preflight.plans) + option("", PLAIN_RUN)
