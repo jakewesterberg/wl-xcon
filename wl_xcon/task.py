@@ -1196,9 +1196,11 @@ def expand_windows(
 ) -> "tuple[list[Window], dict[str, tuple[str, ...]]]":
     """A trial's windows with every array family expanded, plus alias membership.
 
-    One definition, used by the runner and the checker both, for the reason
-    `actions_of` gives: a checker that inspected a different set of windows from the
-    one the loop scores would be validating a task nobody runs.
+    One definition, used by the trial loop, the gaze world and the simulator alike
+    (`run.run_trial`, `gaze.Tracked`, `simulate.prepare`), for the reason `actions_of`
+    gives: a world scoring a different set of windows from the one the loop asks about
+    would be scoring a task nobody runs. The load checks do not read it: they reason over
+    every value a setting allows, where this builds the windows for one trial's values.
 
     **An array's object windows here are where its last `Show` puts it**, which is where they
     are until it is first drawn: from then they follow it, wherever a `Show` or an `Update` draws

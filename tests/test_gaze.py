@@ -1128,6 +1128,42 @@ def test_an_update_of_set_size_moves_the_objects_and_who_the_distractors_are(
     assert _run(trial, {}, [drawn] * 200).outcome is outcome
 
 
+def test_an_object_a_smaller_set_no_longer_has_holds_nothing_where_it_was():
+    """Object 5 of eight, named directly rather than through an alias: after an update to four
+    objects it has no window, and gaze where it was drawn holds nothing (the review's R1). Kept
+    from the eight-object placement, it would still hold gaze there."""
+    shown = Stimulus("search", at=(0.0, 0.0), looks=replace(_RING, n=8))
+    update = Update("search", looks=_RING)
+    trial = _then_moved(shown, update, held="search.5")
+
+    assert _run(trial, {}, [_drawn(shown, {}, trial)["search.5"]] * 200).outcome is \
+        Outcome.NO_RESPONSE
+
+
+def test_two_updates_in_turn_place_the_windows_where_both_put_the_objects():
+    """Moved by one update and its ring grown by a later one: the windows are where both put
+    the objects, an update's position paired with another update's appearance (the review's R4),
+    not where the move alone did."""
+    shown = Stimulus("search", at=(0.0, 0.0), looks=_RING)
+    move, grow = Update("search", at=(10.0, 5.0)), Update("search", looks=replace(_RING, radius=7.0))
+    trial = Trial(
+        start="shown",
+        windows=[ObjectWindows(of="search", radius=1.0)],
+        states=[
+            State("shown", enter=[Show(shown)], go=[On(After(0.024), "moved")]),
+            State("moved", enter=[move], go=[On(After(0.024), "grown")]),
+            State("grown", enter=[grow], go=[On(Hold("search.1", _HOLD), Outcome.CORRECT),
+                                             On(After(0.5), Outcome.NO_RESPONSE)]),
+        ],
+    )
+    both = _drawn(_moved(_moved(shown, move), grow), {}, trial)["search.1"]
+
+    result = _run(trial, {}, [both] * 200)
+
+    assert result.visited == ("shown", "moved", "grown")
+    assert result.outcome is Outcome.CORRECT
+
+
 @pytest.mark.parametrize("on, outcome", [
     ("search.3", Outcome.CORRECT), ("search.1", Outcome.NO_RESPONSE),
 ], ids=["the new target", "the old target"])

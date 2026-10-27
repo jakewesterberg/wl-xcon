@@ -279,6 +279,12 @@ I1, 2026-10-14). The rule generalises — **when a feature exists to stop a huma
 something out, it also stops a human reviewing it.**
 *Renamed 2026-10-11: `ObjectWindows` was `ItemWindows`, and an array's objects its items (the PI,
 confirming engine build C1's plan's Appendix B: "i prefer object to item").*
+*Added 2026-10-27 (XC-402):* an `Update` generates an array too, since an array's windows follow
+an `Update` that changes it, and it was the instance this time: an `Update`'s array escaped the
+target and crowding checks, which read only a `Show`'s, so an `Update` with its target outside its
+objects loaded and then raised at a trial's start. Both now read every array a `Show` or an
+`Update` gives (`check._array_actions`); naming an object only an `Update`'s array has is still
+refused as undeclared (XC-411), and the review report's windows table omits such windows (XC-411).
 
 **P21 — A guardrail nothing calls, behind a comment that went stale.** Two instances,
 found together on 2026-09-06 and both a week old.
