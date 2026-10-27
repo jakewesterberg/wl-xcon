@@ -69,7 +69,7 @@ are detected at the display surface.
 | Component | Runs on | Language | Job | Simulator |
 |---|---|---|---|---|
 | `taskd` | Task PC (Linux) | Python | Trial execution, display, gaze logic, DIO, session record; since P4d-2b b3a also `wlx taskd`, the rig service that holds one animal's session across runs, opened, run and ended from a console (`service.py`); and since engine build B, what a session is for and its warnings list: the imperfections it runs with, each acceptable in some session kinds, accepted once a session and recorded in `warnings.jsonl` (`warnlist.py`) | Full headless run against replayed/synthetic inputs |
-| `console` | The control box, in a browser on the LAN | Python server + web client | Experimenter UI, live plots, parameter writes, preflight, test screens. **The box authenticates and records the actor** — anybody attached has full access, with visibility rather than a lock (S9a §8); `wl-works` lists devices and links to them, and carries no welfare-affecting action (ADR-0008). **The link exists** (`wl_xcon/link.py`, P4d-1, 2026-09-19): `taskd` holds a `Link` port, drained and published once per trial boundary and never per frame, whose live implementation (`ZmqLink`) binds a ZMQ PUB socket for `Telemetry`, a REP socket for its commands — `SetParameter` and `Stop`, and since P4d-2b b2a `Pause`, `Resume`, `Mark` (a mark's note), `ScheduleStop`, `CancelScheduledStop` and `ManualReward` (a manual reward: while paused and, in a `wlx taskd` session, between runs and while the return is awaited), and since P4d-2b b3a `OpenSession`, `CheckRun`, `StartRun` and `EndSession`, and since XC-026 (2026-10-01) `ResumeSession` (wire kind `resume_session`: a stranded session resumed from its record), which `wlx taskd` acts on and a `wlx run` session refuses — which the page sends since b3a-2 — from its forms, and since XC-026 from the stranded banner's *resume session* button, and since engine build C2a, from its Still-needed pane, `ClearOwed` (`clear`: one trial, or the rest, cleared from a condition's count), `Drum` (`drum`: drumming switched for a block or a run) and `Training` (`training`: the training aid *clear*, or the setting that judges only each drummed trial's first answer for a percentage, switched on or off) — through `POST /commands`, built by the wire's own rules (`link._command_from`), and whose closed session's summary `wlx taskd`'s idle frame carries until the next session opens (telemetry schema 16, `link.SCHEMA`; the summary since 11) — each checked where it is decoded — and, given a third endpoint, a PULL socket for an operator's mark signal, which the trial loop checks once per frame (ADR-0003's transport, untouched: a third socket on the same link). `ZmqConsole` is the other end. Reached today by `wlx run --link PUB,REP` or `wlx taskd --link PUB,REP` and a terminal client, `wlx console --sub PUB --req REP --as WHO`. **The browser console exists** (P4d-2b slice b1, 2026-09-26, read-only then; the box's writes since b2a and its session forms since b3a-2, below): `wlx serve --link PUB,REP --http HOST:PORT --health-token-file PATH` is its own process — a stdlib `ThreadingHTTPServer`, one `ZmqConsole` on a telemetry thread, server-sent events to each browser from a bounded queue, and every pane rendered in Python (`web.py`) so the page's script only swaps fragments. The wl-works fonts are bundled and served by the box, so the page never reaches the internet (PI, 2026-09-26). Reads are open to the LAN. **Writes come from the box** (P4d-2b slice b2a, 2026-09-28): `POST /commands` is accepted only from a loopback peer, with a `Host` naming loopback, the page's own `Origin` and `Content-Type: application/json` (spec §2), and recorded as the box's actor map (`{"kind": "box", "name": …}`) and shown as `NAME (box, unverified)`; every request is answered only when its `Host` names this console (`--allow-host` adds names). `wlx serve` owns each socket on one thread — a read-only telemetry thread, a command thread whose REQ socket waits for `taskd`'s acknowledgment (*sent*, *not delivered*, *busy*), and a mark thread that sends the signal ahead of every command. Writes from people signed in to wl-works are b2b slice 2, below | Runs against a fake `taskd` (`link.Simulated`), or a real one over loopback sockets |
+| `console` | The control box, in a browser on the LAN | Python server + web client | Experimenter UI, live plots, parameter writes, preflight, test screens. **The box authenticates and records the actor** — anybody attached has full access, with visibility rather than a lock (S9a §8); `wl-works` lists devices and links to them, and carries no welfare-affecting action (ADR-0008). **The link exists** (`wl_xcon/link.py`, P4d-1, 2026-09-19): `taskd` holds a `Link` port, drained and published once per trial boundary and never per frame, whose live implementation (`ZmqLink`) binds a ZMQ PUB socket for `Telemetry`, a REP socket for its commands — `SetParameter` and `Stop`, and since P4d-2b b2a `Pause`, `Resume`, `Mark` (a mark's note), `ScheduleStop`, `CancelScheduledStop` and `ManualReward` (a manual reward: while paused and, in a `wlx taskd` session, between runs and while the return is awaited), and since P4d-2b b3a `OpenSession`, `CheckRun`, `StartRun` and `EndSession`, and since XC-026 (2026-10-01) `ResumeSession` (wire kind `resume_session`: a stranded session resumed from its record), which `wlx taskd` acts on and a `wlx run` session refuses — which the page sends since b3a-2 — from its forms, and since XC-026 from the stranded banner's *resume session* button, and since engine build C2a, from its Still-needed pane, `ClearOwed` (`clear`: one trial, or the rest, cleared from a condition's count), `Drum` (`drum`: drumming switched for a block or a run) and `Training` (`training`: the training aid *clear*, or the setting that judges only each drummed trial's first answer for a percentage, switched on or off), and since engine build C2b `NextBlock` (`next_block`) and `BackBlock` (`back_block`: the run moved on a block, or back one, by hand) — through `POST /commands`, built by the wire's own rules (`link._command_from`), and whose closed session's summary `wlx taskd`'s idle frame carries until the next session opens (telemetry schema 17, `link.SCHEMA`; the summary since 11) — each checked where it is decoded — and, given a third endpoint, a PULL socket for an operator's mark signal, which the trial loop checks once per frame (ADR-0003's transport, untouched: a third socket on the same link). `ZmqConsole` is the other end. Reached today by `wlx run --link PUB,REP` or `wlx taskd --link PUB,REP` and a terminal client, `wlx console --sub PUB --req REP --as WHO`. **The browser console exists** (P4d-2b slice b1, 2026-09-26, read-only then; the box's writes since b2a and its session forms since b3a-2, below): `wlx serve --link PUB,REP --http HOST:PORT --health-token-file PATH` is its own process — a stdlib `ThreadingHTTPServer`, one `ZmqConsole` on a telemetry thread, server-sent events to each browser from a bounded queue, and every pane rendered in Python (`web.py`) so the page's script only swaps fragments. The wl-works fonts are bundled and served by the box, so the page never reaches the internet (PI, 2026-09-26). Reads are open to the LAN. **Writes come from the box** (P4d-2b slice b2a, 2026-09-28): `POST /commands` is accepted only from a loopback peer, with a `Host` naming loopback, the page's own `Origin` and `Content-Type: application/json` (spec §2), and recorded as the box's actor map (`{"kind": "box", "name": …}`) and shown as `NAME (box, unverified)`; every request is answered only when its `Host` names this console (`--allow-host` adds names). `wlx serve` owns each socket on one thread — a read-only telemetry thread, a command thread whose REQ socket waits for `taskd`'s acknowledgment (*sent*, *not delivered*, *busy*), and a mark thread that sends the signal ahead of every command. Writes from people signed in to wl-works are b2b slice 2, below | Runs against a fake `taskd` (`link.Simulated`), or a real one over loopback sockets |
 | `neurofeatd` | Acquisition PC | C++ | SpikeGLX `fetchLatest` on the filtered AP stream -> MUA features -> ZMQ PUB | Synthetic feature publisher |
 | `rhxfeatd` | Intan host | C++/Rust | RHX Spike Output socket -> features -> ZMQ PUB; bounded reader | Synthetic spike-raster publisher |
 | `labhost` | Task PC | Python | The pull-only endpoint wl-works polls — **a surface of `console` since 2026-09-19, not its own process** (S9a §7): same server, separate path, separate auth. Served as `GET /health` by `wlx serve` (`health.py`, P4d-2b b1): `HealthResponse` schema 1, contract-tested against wl-preproc's own model; a bearer token read from a file outside the repository, compared with `hmac.compare_digest`, one `401` for every credential failure — the rules of wl-preproc's `responder/handler.py`. Exactly one reading is featured, the most urgent (PI, 2026-09-26), because wl-works shows only the first | Contract tests |
@@ -174,7 +174,9 @@ item always among its items — so a run past the limit is refused before `RUN_S
 `Session.run` refuses none — and hands the run, for its start row, who acknowledged each
 unknown (since engine build B, the name of whoever acknowledged it at an earlier run of the
 session when it is carried, below), writing nothing itself; a mistake in it starts a run that
-should not start.
+should not start. Since engine build C2b it hands the run the plan its start names, its pre-flight
+taken for that plan -- a plan the task lacks fails that pre-flight's task checks, which the gate
+refuses -- three lines (the engine C2b plan's Appendix A, item 1).
 
 **`Service._open` and `Service._start` and the warnings list** (engine build B: approved by the
 PI as planned on 2026-10-08, and as built on the day he approves its welfare summary): an open is
@@ -247,7 +249,11 @@ that function is ordinary. Since engine build C2a three branches of that rest, b
 hand `ClearOwed`, `Drum` and `Training` to `Session._clear`, `_drum` and `_train`, which are not on
 this list and touch no reward, bounded setting, clock or pump; `_hold` drains through `_command`, so
 one sent while paused is applied while paused (the PI approved the first two with the plan on 2026-10-13 and
-the third on 2026-10-18: the engine C2a plan's Appendix A, items 1 and 4). `_schedule` fixes the target `_ends` compares against — a
+the third on 2026-10-18: the engine C2a plan's Appendix A, items 1 and 4).
+Since engine build C2b two more hand `NextBlock` and `BackBlock` to `Session._move`, likewise off
+this list, touching no reward, bounded setting, welfare clock or pump (the engine C2b plan's
+Appendix A, item 2, approved by the PI, 2026-10-19).
+`_schedule` fixes the target `_ends` compares against — a
 trial count from the trial about to run, an instant on the session's clock, or mL this
 session, refused when already reached — so a wrong target ends a session early or late
 while every check in `_ends` passes.
@@ -366,8 +372,9 @@ Event codes are **allocated in `wl-exptasks`, never invented in a task**; valida
 an unregistered code at load time.
 
 **The task object, since engine build C1.** A task file defines one `Task` (`wl_xcon/task.py`;
-engine spec §3.5): its trial structures by name, the default one a run plays until plans exist
-(build C2), what each of its settings means (XC-288 §4.1: clear-cut with a direction, expected with
+engine spec §3.5): its trial structures by name, the default one -- the plain run's, and a
+condition's that names none -- its plans (since engine build C2b, below), what each of its
+settings means (XC-288 §4.1: clear-cut with a direction, expected with
 a direction and a note, or not a difficulty setting; and whether the setting is a criterion or a
 stimulus), what it offers to choose (or `NO_CHOICE`) and how its reaction time is defined (§4.3),
 and whether it needs a fixed head. The common settings' meanings are declared once, in
@@ -408,14 +415,38 @@ row records the shortfalls, each condition's counts, and the run's `trials`, a t
 drummed repeats one, beside its `presentations`, the lines written. A trial that reaches the longest
 trial, five minutes at the session's rate (`run.LONGEST_TRIAL_S`), is a missed acquisition
 (`task.HANG_COUNTS_AS`, counted as no fixation is), owed by its structure's table and one of the N
-in a plain "run N trials" run (every live run until C2b), whose table (`scheduler.EVERY_TRIAL`)
+in a plain "run N trials" run, whose table (`scheduler.EVERY_TRIAL`)
 spends every non-answer, and said on the console. A hold runs its own time: the load-time check warns where a timeout on its
 state can cut it short, a timeout listed before the hold that ties it included (`hold-cut-short`).
 
-A session is a sequence of **blocks** (condition set, parameter overrides, length rule,
-transition) and **interludes** (sub-tasks such as calibration that the session enters and
-leaves without ending). Token economies require session-scoped state and a persistent
-display layer that per-trial scenes do not reset.
+**Plans and blocks, since engine build C2b.** A task declares its plans (`Task.plans`; engine spec
+§13.1), and the operator chooses one at run start -- from the page, its pre-flight taken for
+it, the task's first preselected for a session's first run and the plan last run for its later
+ones (a plain last run repeated as the plain run), the plain run one more choice, or
+`wlx run --plan` -- or none, the plain run.
+A plan is its block types (`task.Block`: a named set of conditions, each naming the trial
+structure it plays and counted by that structure's table unless its block has its own; ending once
+every target is used up and, as declared, a criterion is met, a number of trials is run, or its
+time runs out), how they follow (`Fixed`, `Cyclic`, `Balanced` -- shuffled rounds within the run --
+`Random`, or `ByCriterion`, a training progression that moves up on a stage's rule or its time,
+back one on a fall-back rule, and keeps its top stage going) and a run time limit. A block is one
+stretch of trials under one type inside one run, opened by `BLOCK_START` before its first trial
+and closed by `BLOCK_END` after its last. **Time limits are read between trials, in the run loop,
+never in `Session._ends`**: on the time trials ran, pauses not counting; a drummed trial waiting
+finishes first; neither is a welfare limit, and a run they end is `completed`, never `limit`, its
+end row saying why (`end_reason`). A plan that can draw no further trial ends its run with a
+sentence (the per-advance progress check).
+A person moves a run on a block, or back one, from the console.
+A live edit wins over a value a condition sets (engine spec §14.7). The load-time checks refuse a
+plan that cannot run (`bad-plan`) and warn of one that may not do what was meant. Each run's start
+row names its plan and writes it as declared, its end row says how each block ended and which block
+of the stream it was (`block_ends`), and each trial's row names the structure it played and any
+value a live edit overrode.
+
+A session is a sequence of runs, each a sequence of **blocks**, and **interludes** (sub-tasks
+such as calibration that the session enters and leaves without ending; engine build C6). Token
+economies require session-scoped state and a persistent display layer that per-trial scenes do
+not reset.
 
 ## Message contracts (draft v0)
 
@@ -544,7 +575,7 @@ direct view part 2, 2026-09-29): a task that does not pass in the chosen setup i
 the session opens. *Since the PI's rulings on XC-352 (2026-10-11, A12)* a task written for the
 other setup is a warning saying what that setup changes, not a refusal, unless it shows each eye
 its own image in direct view, which an unmirrored screen cannot show; its field still holds it.
-The setup is in the session record and in telemetry (schema 16; the setup since 9).
+The setup is in the session record and in telemetry (schema 17; the setup since 9).
 
 Through the stereoscope each eye views one half of the panel through redirection mirrors
 [@wheatstone1838contributions; @cox2019temporal; @dougherty2021binocular]. Therefore one

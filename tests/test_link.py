@@ -29,6 +29,7 @@ from wl_xcon.link import (
     REFUSAL_HISTORY,
     Absent,
     CancelScheduledStop,
+    BackBlock,
     CheckRun,
     ClearOwed,
     CommandRefused,
@@ -63,6 +64,7 @@ from wl_xcon.link import (
     Simulated,
     SetParameter,
     Staged,
+    NextBlock,
     StartRun,
     Stop,
     Stranded,
@@ -82,7 +84,7 @@ from wl_xcon.link import (
 )
 from wl_xcon.photometry import SRGB
 from wl_xcon.scheduler import EVERY_TRIAL, Block, Condition, Scheduler
-from wl_xcon.task import OWED, Counting, Outcome
+from wl_xcon.task import OWED, ByCriterion, Counting, Outcome
 from wl_xcon.simulate import Tally
 from wl_xcon.welfare import Deployment, Simulated as Pump, Welfare
 
@@ -214,6 +216,9 @@ def _session_with(
         resumed_at=None,
         # `Session.warnings` (schema 15): nothing accepted yet.
         warnings=(),
+        # `Session.plan` and `Session.left` (schema 17): the plain run, no time limit.
+        plan=None,
+        left=lambda which: None,
     )
 
 
@@ -1572,6 +1577,17 @@ def test_clearing_a_trial_and_switching_drumming_survive_the_wire_with_who_sent_
     assert (ClearOwed.KIND, Drum.KIND) == ("clear", "drum")
 
 
+@pytest.mark.parametrize("command", [NextBlock(by=Box("jake")), BackBlock(by=Box("jake"))],
+                         ids=["next block", "back one"])
+def test_moving_a_block_on_or_back_survives_the_wire_with_who_sent_it(command):
+    """The PI, 2026-10-19, "'Next' and 'back one'": two commands, each recorded with who (engine
+    build C2b)."""
+    restored = _decode_command(_encode_command(command))
+
+    assert restored == command and type(restored) is type(command)
+    assert (NextBlock.KIND, BackBlock.KIND) == ("next_block", "back_block")
+
+
 @pytest.mark.parametrize(
     ("fields", "said"),
     [
@@ -2108,7 +2124,7 @@ def test_schema_8_reads_the_pause_the_schedule_and_the_feed_from_the_session():
 
     telemetry = Telemetry.of(session, Tally(), _scheduler(), index=40)
 
-    assert telemetry.schema == SCHEMA == 16
+    assert telemetry.schema == SCHEMA == 17
     assert telemetry.paused_at == 1_700_000_100.0
     assert telemetry.scheduled_stop == ScheduledStop(
         kind="trials", target=48.0, by=Box("jake"), said="after trial 48"
@@ -2171,15 +2187,15 @@ def test_a_frame_carries_the_setup_the_session_runs_in():
     assert decode(encode(stereo)).view == "stereoscope"
     assert decode(encode(stereo)).half_ipd_cm == 1.6
     assert decode(encode(_telemetry())).half_ipd_cm is None
-    assert SCHEMA == 16
+    assert SCHEMA == 17
 
 
-def test_a_schema_7_frame_is_refused_by_a_schema_16_reader():
-    """§3's schema rule: a reader built for 16 refuses 7 by name, before touching a
+def test_a_schema_7_frame_is_refused_by_a_schema_17_reader():
+    """§3's schema rule: a reader built for 17 refuses 7 by name, before touching a
     field (`SchemaMismatch`), and says which it reads."""
     old = encode(replace(_telemetry(), schema=7))
 
-    with pytest.raises(SchemaMismatch, match="carried schema 7 and this console reads schema 16"):
+    with pytest.raises(SchemaMismatch, match="carried schema 7 and this console reads schema 17"):
         decode(old)
 
 
@@ -2273,7 +2289,7 @@ def test_schema_10_survives_the_wire_with_its_absences_intact():
         assert decode(encode(original)) == original
     assert type(decode(encode(populated)).preflight.items[0]) is PreflightItem
     assert type(decode(encode(populated)).question) is Question
-    assert SCHEMA == 16
+    assert SCHEMA == 17
 
 
 def test_a_session_before_its_first_run_has_no_block_task_or_counts():
@@ -2329,7 +2345,7 @@ def test_an_idle_frame_carries_the_last_closed_sessions_summary_across_the_wire(
     assert type(restored.closed) is Telemetry and restored.closed.phase == "closed"
     assert (restored.closed.fluid_today_ml, restored.closed.shortfall_ml) == (None, None)
     assert decode(encode(replace(idle, closed=None))).closed is None
-    assert SCHEMA == 16
+    assert SCHEMA == 17
 
 
 def test_idle_of_carries_what_it_is_given_as_the_closed_summary():
@@ -2351,7 +2367,7 @@ def test_an_idle_frame_of_another_schema_is_refused_by_name():
         )
     )
 
-    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 16"):
+    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 17"):
         decode(old)
 
 
@@ -2495,7 +2511,7 @@ def test_the_strips_levels_and_the_return_survive_the_wire():
     assert decode(encode(original)) == original
     # 12 added `performance` (the strip's session, task, run and block counts) and
     # `returned_at` (the recorded return).
-    assert SCHEMA == 16
+    assert SCHEMA == 17
 
 
 def test_a_frame_between_runs_carries_the_session_alone():
@@ -2565,7 +2581,7 @@ def test_the_instant_a_session_was_resumed_survives_the_wire_and_none_stays_none
     assert decode(encode(resumed)).resumed_at == 1_700_000_050.0
     assert decode(encode(_telemetry())).resumed_at is None
     # 13 added `Stranded.resumable` and `why`, and `Telemetry.resumed_at`.
-    assert SCHEMA == 16
+    assert SCHEMA == 17
 
 
 def test_the_frame_reads_the_resume_from_the_session():
@@ -2582,7 +2598,7 @@ def test_the_frame_reads_the_resume_from_the_session():
 def test_a_schema_13_frame_is_refused_by_name():
     """b2b (schema 14): a frame whose `by`s are strings is refused by its schema, by
     name, before any `by` is read."""
-    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 16"):
+    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 17"):
         decode(encode(replace(_telemetry(), schema=13)))
 
 
@@ -2619,7 +2635,7 @@ def test_schema_15_carries_the_kind_the_calibration_and_the_warnings_both_ways()
         warnings=(WarningRow("default calibration", "the standard's", SESSION_KINDS, None, None),),
     )
 
-    assert (sent.schema, decode(encode(sent))) == (16, sent)
+    assert (sent.schema, decode(encode(sent))) == (17, sent)
     assert type(decode(encode(sent)).warnings[0]) is WarningRow
     assert decode(encode(unloaded)).calibration is None
     assert decode(encode(idle)) == idle
@@ -2658,7 +2674,7 @@ def test_schema_16_carries_each_shortfall_drumming_the_training_aids_and_each_co
         only = replace(sent, rule="streak", **flags)
         assert decode(encode(only)) == only
     assert decode(encode(replace(sent, rule=None))).rule is None
-    with pytest.raises(SchemaMismatch, match="carried schema 15 and this console reads schema 16"):
+    with pytest.raises(SchemaMismatch, match="carried schema 15 and this console reads schema 17"):
         decode(encode(replace(sent, schema=15)))
 
 
@@ -2746,7 +2762,7 @@ def test_a_schema_14_frame_of_either_shape_is_refused_by_name():
 
     for old in (replace(_telemetry(), schema=14), idle):
         with pytest.raises(
-                SchemaMismatch, match="carried schema 14 and this console reads schema 16"):
+                SchemaMismatch, match="carried schema 14 and this console reads schema 17"):
             decode(encode(old))
 
 
@@ -2782,3 +2798,107 @@ def test_a_frame_cuts_a_warnings_sentence_and_code_as_the_wire_cuts_its_other_te
     assert (whole.code, whole.detail) == ("c" * TEXT_LIMIT, "y" * NOTE_LIMIT)
     assert (cut.accepted_in, cut.by, cut.at) == (SESSION_KINDS, Box("jake"), 1.0)
     assert WarningRow.of("c", "x" * 5_000, (), None, None).detail == "x" * NOTE_LIMIT + "…"
+
+
+# ---------------------------------------------------------------------------
+# Schema 17 (engine build C2b): the plan a run plays, its next block and its time left
+# ---------------------------------------------------------------------------
+
+
+def test_schema_17_carries_the_plan_the_next_block_the_time_left_and_the_plans_offered():
+    """Engine build C2b: the plan the run plays, the block it goes on to, the seconds of trials
+    left before the block's and the run's time limits, and a pre-flight's plan and the plans its
+    task offers. A reader of 17 refuses 16 by name."""
+    preflight = Preflight(task="planned.py", items=(PreflightItem("task checks", "pass", "ok"),),
+                          plan="train", plans=("train", "test"))
+    sent = _telemetry(plan="train", next_block="hard", block_left_s=12.5, run_left_s=600.0,
+                      trials_to_run=200, passed_at=41, fell_back=2, preflight=preflight)
+
+    assert decode(encode(sent)) == sent
+    assert decode(encode(replace(sent, plan=None, next_block=None, block_left_s=None,
+                                 run_left_s=None, preflight=replace(preflight, plan=None,
+                                                                    plans=())))).plan is None
+    with pytest.raises(SchemaMismatch, match="carried schema 16 and this console reads schema 17"):
+        decode(encode(replace(sent, schema=16)))
+
+
+def test_a_check_and_a_start_carry_the_plan_by_its_name_or_none_for_the_plain_run():
+    """Engine build C2b: decoded by the wire's own rules, the plan is text of 1 to `TEXT_LIMIT`
+    characters, or absent for the plain run; refused otherwise, naming the field."""
+    check = CheckRun(by=Box("jake"), task="planned.py", values={}, plan="train")
+    start = StartRun(by=Box("jake"), task="planned.py", values={}, trials=5, acknowledged=(),
+                     plan="train")
+    plain = StartRun(by=Box("jake"), task="planned.py", values={}, trials=5, acknowledged=())
+
+    for command in (check, start, plain):
+        assert _decode_command(_encode_command(command)) == command
+    assert plain.plan is None
+    for wrong in ("", 7, "x" * (TEXT_LIMIT + 1)):
+        with pytest.raises(CommandRefused, match="a 'start' command's plan is text"):
+            _command_from({"kind": "start", "by": {"kind": "box", "name": "jake"},
+                           "task": "planned.py", "values": {}, "trials": 5, "acknowledged": [],
+                           "plan": wrong})
+
+
+def test_a_frame_names_the_runs_plan_its_next_block_and_its_time_left():
+    """`Telemetry.of` reads the session's plan and time left (`Session.plan`, `Session.left`) and
+    the scheduler's next block, recomputing nothing."""
+    session = SimpleNamespace(**{**vars(_session_with(1.25, 3.0)), "plan": "train",
+                                 "left": lambda which: {"block": 3.0, "run": 30.0}[which]})
+    scheduler = Scheduler([Block("easy", [Condition("a", {}, target=1)]),
+                           Block("hard", [Condition("b", {}, target=1)])], seed=0)
+
+    frame = Telemetry.of(session, Tally(), scheduler, 0)
+
+    assert (frame.plan, frame.next_block, frame.block_left_s, frame.run_left_s) == (
+        "train", "hard", 3.0, 30.0)
+    assert (frame.trials_to_run, frame.passed_at, frame.fell_back) == (None, None, 0)
+    assert Telemetry.of(session, None, None, 0).block_left_s is None
+
+
+def test_a_frame_says_when_a_top_stage_passed_how_often_the_plan_fell_back_and_its_trials():
+    """The engine C2b plan's science review, I1 and I2: the trial after which a training
+    progression's top stage first met its rule, the times the plan fell back a stage, and the open
+    block's number of trials, read from the scheduler."""
+    session = SimpleNamespace(**{**vars(_session_with(1.25, 3.0)), "plan": "train",
+                                 "left": lambda which: None})
+    stages = [Block("easy", [Condition("a", {}, target=1)], criterion=(1.0, 1)),
+              Block("hard", [Condition("b", {}, target=1)], criterion=(1.0, 1), trials=5)]
+    scheduler = Scheduler(stages, seed=0, order=ByCriterion(fall_back=(0.5, 1)))
+    for outcome in (Outcome.CORRECT, Outcome.WRONG_TARGET, Outcome.CORRECT):
+        scheduler.record(scheduler.next_trial().name, outcome)
+        if scheduler.ends is not None:
+            scheduler.advance(scheduler.ends)
+    for _ in range(5):
+        scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
+    assert scheduler.ends is None
+
+    frame = Telemetry.of(session, Tally(), scheduler, 0)
+
+    assert (frame.trials_to_run, frame.passed_at, frame.fell_back) == (5, 7, 1)
+
+
+def test_between_runs_a_frame_carries_none_of_the_finished_runs_block_fields():
+    """The final review of engine build C2b, M1: the scheduler a finished run leaves stays, and
+    with it its open block's number of trials, its top stage's pass and its fall-backs; between
+    runs no block is open, so the frame says none of them, as it says no next block and no time
+    left -- the page, `/health` and `wlx console` read none of them then."""
+    session = SimpleNamespace(**{**vars(_session_with(1.25, 3.0)), "plan": "train",
+                                 "phase": "between_runs", "stop_kind": "completed",
+                                 "left": lambda which: 30.0})
+    stages = [Block("easy", [Condition("a", {}, target=1)], criterion=(1.0, 1)),
+              Block("hard", [Condition("b", {}, target=1)], criterion=(1.0, 1), trials=5)]
+    scheduler = Scheduler(stages, seed=0, order=ByCriterion(fall_back=(0.5, 1)))
+    for outcome in (Outcome.CORRECT, Outcome.WRONG_TARGET, Outcome.CORRECT):
+        scheduler.record(scheduler.next_trial().name, outcome)
+        if scheduler.ends is not None:
+            scheduler.advance(scheduler.ends)
+    for _ in range(5):
+        scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
+    assert scheduler.ends is None
+    assert (scheduler.block.trials, scheduler.passed_at, scheduler.fell_back) == (5, 7, 1)
+
+    frame = Telemetry.of(session, Tally(), scheduler, 0)
+
+    assert (frame.next_block, frame.block_left_s, frame.run_left_s) == (None, None, None)
+    assert (frame.trials_to_run, frame.passed_at, frame.fell_back) == (None, None, 0)

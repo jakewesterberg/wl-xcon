@@ -25,6 +25,7 @@ raises into that item's fail.
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from collections.abc import Collection
 from pathlib import Path
@@ -63,7 +64,8 @@ def _said(refused: SystemExit, path: Path) -> str:
     return f"{path.name} ended its own load without saying why (exit {code!r})"
 
 
-def task(path: Path, allocation, geometry, calibration, deployment=None) -> tuple[PreflightItem, Task | None, list]:
+def task(path: Path, allocation, geometry, calibration, deployment=None,
+         plan: str | None = None) -> tuple[PreflightItem, Task | None, list]:
     """The task's load-time checks in the session's setup: **fail** if it will not load -- a file
     with trials and no task object among them (engine build C1) --, if its checks do not finish,
     or if any finding blocks (`check.check_task`: each structure's and the task object's own).
@@ -76,7 +78,8 @@ def task(path: Path, allocation, geometry, calibration, deployment=None) -> tupl
     item's fail, whatever the session's kind; and `calibration` is the session's (the default in
     the place of a record that will not load, since XC-352's E1). **The session's deployment**
     makes a task that needs a fixed head a warning in any but a head-fixed session, never this
-    item's fail (engine spec §20.1; XC-277; the PI, 2026-10-11)."""
+    item's fail (engine spec §20.1; XC-277; the PI, 2026-10-11). **A plan the task does not
+    declare fails it too** (engine build C2b), so `gate` refuses a start naming one unchanged."""
     try:
         loaded = _load_task(path)
     except SystemExit as refused:
@@ -107,10 +110,15 @@ def task(path: Path, allocation, geometry, calibration, deployment=None) -> tupl
             loaded,
             [],
         )
-    if blocking:
+    unknown = [] if plan is None or plan in loaded.plans else [
+        f"the task declares no plan {plan!r}; its plans are "
+        + (", ".join(map(repr, loaded.plans)) or "none")
+    ]
+    if blocking or unknown:
         return (
             PreflightItem(
-                TASK_CHECKS, FAIL, "; ".join(f"{f.code}: {f.detail}" for f in blocking)
+                TASK_CHECKS, FAIL,
+                "; ".join([*(f"{f.code}: {f.detail}" for f in blocking), *unknown]),
             ),
             loaded,
             findings,
@@ -179,19 +187,36 @@ def starting(task: Task, given: dict) -> dict:
     return {**starts, **given}
 
 
-def beyond(task: Task | None, given: dict, allocation, geometry, calibration, deployment) -> list:
+def beyond(task: Task | None, given: dict, allocation, geometry, calibration, deployment,
+           plan: str | None = None) -> list:
     """**A run's starting values outside their declared ranges** (the PI, 2026-10-11, XC-352's D2):
     the load-time checks run again with each range widened to its value (`check.beyond_range`),
     the session's setup, calibration and deployment theirs. Its warnings join the run's warnings
     item and what blocks fails the starting values item (`values`). **Nothing raises out of
     here**: a check that does not finish refuses the values, saying only what is known -- that
     the checks could not run, and why -- since what raised can be a bound that cannot be compared
-    with any value, and no value need be outside its range (Task 10's review, M3)."""
+    with any value, and no value need be outside its range (Task 10's review, M3). **And each
+    condition of the run's plan**, its values over the starting ones (engine build C2b): a value
+    a condition sets is held to its range as a starting value is, each finding naming it."""
     if task is None:
         return []
     try:
-        return beyond_range(task, starting(task, given), allocation, geometry=geometry,
-                            calibration=calibration, deployment=deployment)
+        start = starting(task, given)
+        found = beyond_range(task, start, allocation, geometry=geometry,
+                             calibration=calibration, deployment=deployment)
+        if plan is None or plan not in task.plans:
+            return found
+        for block in task.plans[plan].blocks:
+            for condition in block.conditions:
+                for finding in beyond_range(task, {**start, **condition.values}, allocation,
+                                            geometry=geometry, calibration=calibration,
+                                            deployment=deployment):
+                    if finding in found:
+                        continue
+                    found.append(dataclasses.replace(finding, detail=(
+                        f"in plan {plan!r}, block {block.name!r}, condition "
+                        f"{condition.name!r}: {finding.detail}")))
+        return found
     except Exception as broken:  # noqa: BLE001 -- the checks run on code; their fault refuses
         return [Finding("outside-range", (
             f"the load-time checks could not be run again with each range widened to its "
@@ -199,7 +224,7 @@ def beyond(task: Task | None, given: dict, allocation, geometry, calibration, de
             f"would break is unknown"))]
 
 
-def values(task: Task | None, given: dict, refused=()) -> PreflightItem:
+def values(task: Task | None, given: dict, refused=(), plan: str | None = None) -> PreflightItem:
     """A run's starting values -- its task's own (`Param.start`), with what a console
     sent over them (P4d-2b spec §6.2; S8 §3.4) -- against the task's declarations, the union of
     its trial structures' (engine spec §3.5):
@@ -214,7 +239,9 @@ def values(task: Task | None, given: dict, refused=()) -> PreflightItem:
     categorical parameter is an appearance, which nothing in this build resolves before
     a trial needs it -- S4's display is not built -- so one left unset is not refused.
     Checked as `Session.set` checks a live value, non-finite numbers included. **Nothing
-    a task's declarations hold raises out of here.**"""
+    a task's declarations hold raises out of here.** **A run of a plan** (engine build C2b)
+    needs the numbers of the structures its conditions play only, and one that every
+    condition playing a structure that uses it sets is given."""
     if task is None:
         return PreflightItem(
             STARTING_VALUES, FAIL, "the task did not load, so its values cannot be checked"
@@ -224,10 +251,19 @@ def values(task: Task | None, given: dict, refused=()) -> PreflightItem:
         starts = {
             name: param.start for name, param in declared.items() if param.start is not None
         }
-        # Every structure's numbers, since engine build C1: a run's values cover each trial
-        # structure its task can play, failing closed (the engine C1 plan's call 15); build C2's
-        # plans narrow it to the structures a run plays.
-        used = frozenset().union(*(parameters_used(s) for s in task.structures.values()))
+        # The numbers of every structure the run can play: a plain run's, every structure's,
+        # failing closed (the engine C1 plan's call 15); a plan's, the structures its conditions
+        # play (engine build C2b), less what each condition playing it sets.
+        conditions = ([c for block in task.plans[plan].blocks for c in block.conditions]
+                      if plan is not None and plan in task.plans else None)
+        if conditions is None:
+            used = frozenset().union(*(parameters_used(s) for s in task.structures.values()))
+        else:
+            used = frozenset(
+                name for c in conditions
+                for name in parameters_used(task.structures[c.structure or task.default])
+                if name not in c.values
+            )
     except Exception as broken:  # noqa: BLE001 -- a task's declarations are code's output
         return PreflightItem(
             STARTING_VALUES,

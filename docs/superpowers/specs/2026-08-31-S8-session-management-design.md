@@ -33,6 +33,13 @@ from the planner and quarantines on absence, so an unplanned block degrades the 
 tier. Changing condition weights or geometry within a task creates no block and is free;
 **changing task type mid-session does**, and is therefore a planning operation, not a live edit.
 
+> **Amended 2026-10-22 (engine build C2b):** superseded. The PI retired the day's plan on 2026-10-01
+> (through wl-works), and a block is one stretch of trials under one block type inside one run
+> (session-levels spec §2). A task declares its plans in its task object and the operator chooses
+> one at run start (engine spec §13.1, as built by engine build C2b); wl-preproc measures blocks
+> from `BLOCK_START` and `BLOCK_END` and quarantines nothing. The length rules below gained a
+> number of trials and a time limit (§13.5). The text above is left as approved.
+
 Length rules: fixed N, or criterion-based [@asaad2008flexible]
 (*"80% correct over the last 20 completed trials"*). Criterion transitions consume the same running statistics the console plots
 use, computed once.

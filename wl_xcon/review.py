@@ -16,7 +16,14 @@ from dataclasses import fields, is_dataclass
 
 from wl_xcon.task import (
     COUNTED,
+    NO_LIMIT,
     OWED,
+    Balanced,
+    ByCriterion,
+    Constrained,
+    Cyclic,
+    Random,
+    WithReplacement,
     SPENT,
     UNPAID,
     arrays_of,
@@ -333,8 +340,9 @@ def render_task(task: Task, allocation_names: dict[int, str] | None = None) -> s
     task's content hash, each setting's role, meaning and where it comes from -- the shared list,
     the task's own, or the task's override of the shared list with why (the PI, 2026-10-11) -- the
     bounded settings it rewards through, how its reaction time is defined, what it offers to
-    choose, whether it needs a fixed head, and what each trial does to its condition's count
-    (engine build C2a). **Then each trial structure**, the default first,
+    choose, whether it needs a fixed head, what each trial does to its condition's count (engine
+    build C2a), and its plans in tables (engine spec §18.1: "the plan in tables"; engine build
+    C2b). **Then each trial structure**, the default first,
     as `render` draws one, a heading level down. Nothing is checked first, as `wlx review` checks
     nothing: an undeclared meaning is shown as one, and a content that cannot be hashed says so."""
     from wl_xcon.declarations import BOUNDED, OVERRIDE, content_hash, resolved, rewarded_through
@@ -402,10 +410,12 @@ def render_task(task: Task, allocation_names: dict[int, str] | None = None) -> s
     )
     lines += ["### Head", "", head, ""]
     lines += _counting(task)
+    lines += _plans(task)
     for name in (task.default, *(other for other in task.structures if other != task.default)):
         heading = f"## Structure `{name}`"
         if name == task.default:
-            heading += ", the default: its runs play it until plans exist (engine build C2)"
+            heading += (", the default: the plain run plays it, and a condition that names no "
+                        "structure")
         lines += [heading, "", _demoted(render(task.structures[name], allocation_names)), ""]
     return "\n".join(lines)
 
@@ -431,7 +441,8 @@ def _counting(task: Task) -> list[str]:
                    else "**it names no state its stimulus appears in**")
         withholding = ("withholding is an answer, so no response is a miss" if table.withholding
                        else "withholding is no answer")
-        limit = ("no repeat limit: a condition is repeated until done" if table.cap is None
+        limit = ("no repeat limit: a condition is repeated until done"
+                 if table.cap in (None, NO_LIMIT)
                  else f"a repeat limit of {table.cap} failed repeats in a row")
         lines += [f"Structure `{name}`: {appears}; {withholding}; {limit}.", "",
                   "| Outcome | After the stimulus appears | Before it |", "|---|---|---|"]
@@ -439,6 +450,114 @@ def _counting(task: Task) -> list[str]:
         for said, outcome in [*rows, ("hang (the five-minute cap)", None)]:
             lines.append(f"| {said} | {_CLASS_WORDS[table.of(outcome)]} "
                          f"| {_CLASS_WORDS[table.of(outcome, shown=False)]} |")
+        lines.append("")
+    return lines
+
+
+def _rule(rule: tuple, answers: str = "answers") -> str:
+    """A criterion or a fall-back rule in words: a proportion of 1.0 is a streak. A fall-back
+    judges each trial's first answer only (the PI, 2026-10-19, "First answer only")."""
+    proportion, window = rule
+    if proportion >= 1.0:
+        return f"{window} right in a row"
+    return f"{100 * proportion:g}% right over the last {window} {answers}"
+
+
+def _seconds(seconds: float) -> str:
+    """A time in whole minutes and seconds, or seconds under a minute (the engine C2b plan's
+    engineering review, Minor 4: "1 minutes", "3.33333 minutes")."""
+    if seconds < 60:
+        return f"{seconds:g} s"
+    minutes, rest = divmod(round(seconds), 60)
+    return f"{minutes} minute{'' if minutes == 1 else 's'}" + (f" {rest} s" if rest else "")
+
+
+def _order(order) -> str:
+    """How a plan's blocks follow one another, in words (engine spec §13.5)."""
+    if isinstance(order, Cyclic):
+        times = ("until a time limit, a stop or the out-of-cage limit" if order.cycles is None
+                 else f"{order.cycles} passes")
+        return f"In order, over and over: {times}."
+    if isinstance(order, Balanced):
+        count = ("round after round until a time limit, a stop or the out-of-cage limit"
+                 if order.blocks is None else f"{order.blocks} blocks")
+        return (f"In shuffled rounds within the run, each block type once a round, drawn from the "
+                f"run's seed, never one type twice in a row: {count}.")
+    if isinstance(order, Random):
+        count = ("until a time limit, a stop or the out-of-cage limit" if order.blocks is None
+                 else f"{order.blocks} blocks")
+        return f"Each block a type drawn at random from the run's seed: {count}."
+    if isinstance(order, ByCriterion):
+        back = ("no fall-back" if order.fall_back is None
+                else f"back one, started fresh, under {_rule(order.fall_back, 'first answers')}")
+        return ("A training progression, stage by stage from the first: up one when a stage's "
+                f"rule is met or its time runs out; {back}; the top stage keeps working until a "
+                "time limit, a stop or the session's end.")
+    return "Each block once, in order."
+
+
+def _block_order(order) -> str:
+    """How a block orders its conditions, in words."""
+    if isinstance(order, Constrained):
+        weights = f", weighted {order.weights}" if order.weights else ""
+        return f"drawn with replacement, runs of at most {order.max_run}{weights}"
+    if isinstance(order, WithReplacement):
+        return "drawn with replacement" + (f", weighted {order.weights}" if order.weights else "")
+    return "shuffled passes"
+
+
+def _set_label(value: object) -> str:
+    """A value a condition sets, as the plan's table shows it: **a position eccentricity and
+    direction first, its (x, y) beside them**, as every position in this report is shown
+    (`_point_label`; the PI, 2026-10-19, "Polar first, x-y allowed"), whether the setting takes a
+    `Polar` or a pair; anything else as written."""
+    from wl_xcon.task import Polar
+
+    if isinstance(value, Polar) or (isinstance(value, tuple) and len(value) == 2):
+        return _point_label(value)
+    return f"{value}"
+
+
+def _plans(task: Task) -> list[str]:
+    """**The plan in tables** (engine spec §18.1; engine build C2b): each plan's order and run time
+    limit, then a row for each block -- what ends it, how it orders its conditions, what it counts
+    by, whether it drums -- and a row for each condition: the structure it plays, its target and
+    the values it sets. A task with none says the plain run is its only run."""
+    lines = ["### Plans", ""]
+    if not task.plans:
+        return lines + ["None: the plain run only -- one block of the default structure, every "
+                        "trial paying.", ""]
+    for name, plan in task.plans.items():
+        limit = ("No run time limit." if plan.time_limit_s is None
+                 else f"The run ends at the first pause between trials after "
+                      f"{_seconds(plan.time_limit_s)} of trials.")
+        lines += [f"#### Plan `{name}`", "", f"{_order(plan.order)} {limit}", "",
+                  "| Block | Ends once | Conditions drawn | Counts by | Drums |",
+                  "|---|---|---|---|---|"]
+        for block in plan.blocks:
+            ends = ["every target used up"]
+            if block.criterion is not None:
+                ends.append(_rule(block.criterion))
+            if block.trials is not None:
+                ends.append(f"{block.trials} trials run")
+            if block.time_limit_s is not None:
+                ends.append(f"or its time runs out at {_seconds(block.time_limit_s)}")
+            counts = ("its own table" if block.counting is not None
+                      else "each condition's structure's table")
+            # Every name through `_cell`, so a bar in one is never a new column (the final review
+            # of engine build C2b, T11).
+            lines.append(f"| {_cell(f'{block.name}')} | {_cell('; '.join(ends))} | "
+                         f"{_cell(_block_order(block.order))} | {counts} | "
+                         f"{'yes' if block.drum else 'no'} |")
+        lines += ["", "| Block | Condition | Structure | Target | Values |",
+                  "|---|---|---|---|---|"]
+        for block in plan.blocks:
+            for condition in block.conditions:
+                values = ", ".join(f"{k} = {_set_label(v)}"
+                                   for k, v in condition.values.items()) or "none"
+                lines.append(f"| {_cell(f'{block.name}')} | {_cell(f'{condition.name}')} | "
+                             f"{_cell(f'{condition.structure or task.default}')} | "
+                             f"{condition.target} | {_cell(values)} |")
         lines.append("")
     return lines
 

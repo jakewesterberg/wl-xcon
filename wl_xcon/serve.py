@@ -579,8 +579,8 @@ _SHAPES = {
         "session_id", "animal", "deployment", "view", "session_kind", "departure",
         "delivered_today", "answer", "amend_to", "amend_reason", "accepted",
     }),
-    "check": frozenset({"task", "values"}),
-    "start": frozenset({"task", "values", "trials", "acknowledged"}),
+    "check": frozenset({"task", "values", "plan"}),
+    "start": frozenset({"task", "values", "trials", "acknowledged", "plan"}),
     "end": frozenset({"session_id", "returned", "confirm"}),
     "resume_session": frozenset({"session_id"}),
     # Engine build C2a: a run's count and its drumming (the PI, 2026-10-11).
@@ -588,6 +588,9 @@ _SHAPES = {
     "drum": frozenset({"scope"}),
     # The PI, 2026-10-18: the training aid *clear* and the percentage setting, switched.
     "training": frozenset({"setting", "on"}),
+    # Engine build C2b (the PI, 2026-10-19): a run moved on a block, or back one, by hand.
+    "next_block": frozenset(),
+    "back_block": frozenset(),
 }
 _SCHEDULES = {"at": "clock", "trials": "trials", "ml": "fluid"}
 #: The kinds `wlx taskd` takes (open, check, start, end and resume_session) that the page sends by the wire's own field names, built
@@ -714,6 +717,8 @@ def parse_command(data: object, actor: Member | None = None):
         "resume": _link.Resume,
         "cancel": _link.CancelScheduledStop,
         "reward": _link.ManualReward,
+        "next_block": _link.NextBlock,
+        "back_block": _link.BackBlock,
     }[kind](by=by)
 
 

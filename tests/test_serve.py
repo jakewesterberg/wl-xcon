@@ -45,6 +45,7 @@ from wl_xcon.link import (
     CONNECT_TIMEOUT_S,
     REPLY_TIMEOUT_S,
     SCHEMA,
+    BackBlock,
     CancelScheduledStop,
     CheckRun,
     ClearOwed,
@@ -53,6 +54,7 @@ from wl_xcon.link import (
     Idle,
     ManualReward,
     Mark,
+    NextBlock,
     NotDelivered,
     OpenSession,
     Pause,
@@ -2479,6 +2481,8 @@ def test_a_body_longer_than_the_limit_or_without_a_length_is_refused_unread():
         ({"kind": "drum", "by": "jake", "scope": "block"}, Drum(scope="block", by=Box("jake"))),
         ({"kind": "training", "by": "jake", "setting": "clear", "on": True},
          Training(setting="clear", on=True, by=Box("jake"))),
+        ({"kind": "next_block", "by": "jake"}, NextBlock(by=Box("jake"))),
+        ({"kind": "back_block", "by": "jake"}, BackBlock(by=Box("jake"))),
     ],
 )
 def test_each_command_the_page_sends_parses_to_what_the_rig_is_sent(body, expected):
@@ -2498,6 +2502,7 @@ def test_a_parse_refusal_is_a_bad_command():
         ({"kind": "drum", "by": "jake", "scope": "always"}, "block, run or off"),
         ({"kind": "training", "by": "jake", "setting": "always", "on": True},
          "a training setting is clear or first_answers"),
+        ({"kind": "next_block", "by": "jake", "block": "far"}, "takes no block"),
     ],
 )
 def test_a_clear_or_a_drum_the_page_sends_is_held_to_the_wires_rules(body, said):
@@ -2546,11 +2551,23 @@ PAGE = Box("jake")
             by=PAGE, task="fixation_detection.py", values={}, trials=3,
             acknowledged=("pump calibration", "eye tracker"),
         )),
+        # Engine build C2b: the plan, by its name in the task, or none for the plain run.
+        ({"kind": "check", "by": "jake", "task": "planned.py", "values": {}, "plan": "train"},
+         CheckRun(by=PAGE, task="planned.py", values={}, plan="train")),
+        ({**START_BODY, "plan": "train"}, StartRun(
+            by=PAGE, task="fixation_detection.py", values={}, trials=3,
+            acknowledged=("pump calibration", "eye tracker"), plan="train",
+        )),
+        ({**START_BODY, "plan": None}, StartRun(
+            by=PAGE, task="fixation_detection.py", values={}, trials=3,
+            acknowledged=("pump calibration", "eye tracker"),
+        )),
         ({**END_BODY, "session_id": "2027-01-14_01", "returned": "now"},
          EndSession(by=PAGE, session_id="2027-01-14_01", returned="now", confirm=False)),
         (END_BODY, EndSession(by=PAGE, session_id=None, returned=None, confirm=False)),
     ],
-    ids=["open", "open-amended", "check", "start", "end-with-return", "end-return-later"],
+    ids=["open", "open-amended", "check", "start", "check-plan", "start-plan", "start-plain",
+         "end-with-return", "end-return-later"],
 )
 def test_each_session_command_the_page_sends_is_the_one_the_wire_would_decode(body, expected):
     """The b3a-2 plan, decision 3: a page's body is built by the wire's own function, so
@@ -2576,6 +2593,7 @@ def test_each_session_command_the_page_sends_is_the_one_the_wire_would_decode(bo
         ({"kind": "check", "by": "jake", "task": "", "values": {}}, "task is text of 1 to 200"),
         ({"kind": "check", "by": "jake", "task": "t.py", "values": [1]}, "at most 64 named settings"),
         ({**START_BODY, "trials": "3"}, "trials are a whole number from 1"),
+        ({**START_BODY, "plan": ""}, "a 'start' command's plan is text of 1 to 200 characters"),
         ({**START_BODY, "trials": True}, "trials are a whole number from 1"),
         ({**START_BODY, "acknowledged": "pump calibration"}, "acknowledged items are at most 16 names"),
         ({**START_BODY, "values": {"fix_hold": True}}, "a setting is a finite number"),
@@ -4169,7 +4187,8 @@ def test_page_e2e_open_a_session_run_it_twice_and_end_it(tmp_path, monkeypatch, 
     ]
     assert "take the pre-flight first" in before["controls"]
     assert '<option value="fixation_detection.py">' in before["task-sel"]
-    assert 'data-task="fixation_detection.py">start run</button>' in checked["controls"]
+    assert ('data-task="fixation_detection.py" data-plan="">start run</button>'
+            in checked["controls"])
     assert "pre-flight · 3 to acknowledge" in checked["pf-pill"]
 
 

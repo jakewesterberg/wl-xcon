@@ -128,6 +128,35 @@ def test_every_trial_carries_its_whole_resolved_parameter_set(tmp_path):
     assert [row["params"]["fix_hold"] for row in rows] == [0.3, 0.9]
 
 
+def test_a_polar_value_is_written_as_its_eccentricity_and_direction_with_its_x_y_beside(tmp_path):
+    """The PI, 2026-10-20, "Both, polar first": a setting's value that is a polar position
+    (`task.Polar`) is recorded as its eccentricity and direction, with the per-axis (x, y) the
+    screen is drawn in beside them, converted exactly (`geometry.polar_deg`) -- a `Polar` is not
+    JSON, and a run of one faulted writing its start row. A pair is written as it always was, a
+    list; a `Polar` holding a setting where a number belongs is no value, and is refused by name."""
+    from wl_xcon.geometry import polar_deg
+    from wl_xcon.task import P, Polar
+
+    record = SessionRecord.open(tmp_path, session_id="2027-01-14_01", subject="A")
+    record.trial(
+        index=1, outcome="correct", params={"pos": Polar(8.0, 45.0), "pair": (5.0, 0.0)}, run=0,
+        position=Position.lone(1), fluid_ml=0.0, last_reward_at=None,
+    )
+    (row,) = [json.loads(line) for line in (
+        tmp_path / "2027-01-14_01" / "xcon" / "trials.jsonl").read_text().splitlines()]
+    x, y = polar_deg(8.0, 45.0)
+
+    assert row["params"] == {"pos": {"eccentricity": 8.0, "direction": 45.0, "x": x, "y": y},
+                             "pair": [5.0, 0.0]}
+    # The record's own refusal, never json's "Object of type Polar is not JSON serializable" (the
+    # final review of engine build C2b, T2).
+    with pytest.raises(TypeError, match="^the record writes no Polar value"):
+        record.trial(
+            index=2, outcome="correct", params={"pos": Polar(P("ecc"), 45.0)}, run=0,
+            position=Position.lone(2), fluid_ml=0.0, last_reward_at=None,
+        )
+
+
 def test_the_subject_is_on_every_trial_not_only_in_a_header(tmp_path):
     """Two animals routinely work in one day (S3 §2), and the session directory is
     keyed on the sync box's day-scoped id. Naming the subject per trial is what

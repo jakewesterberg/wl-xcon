@@ -16,6 +16,7 @@ import json
 import threading
 import time
 from datetime import date
+from http.server import ThreadingHTTPServer
 
 import pytest
 
@@ -35,7 +36,8 @@ from _tls import client_context, material  # noqa: E402
 from wl_xcon import signin, warnlist, web  # noqa: E402
 from wl_xcon.findings import SESSION_KINDS  # noqa: E402
 from wl_xcon.link import (  # noqa: E402
-    ClearOwed, Drum, ManualReward, OpenSession, Pause, Training, WarningRow,
+    BackBlock, CheckRun, ClearOwed, Drum, ManualReward, NextBlock, OpenSession, Pause, Preflight,
+    PreflightItem, StartRun, Training, WarningRow,
 )
 from wl_xcon.photometry import SRGB  # noqa: E402
 from wl_xcon.warnlist import HEAD_FREE  # noqa: E402
@@ -1203,9 +1205,7 @@ def test_an_open_with_no_deployment_chosen_is_refused_at_the_form(rig):
     page.select_option("#dn-deployment", "")
     assert page.input_value("#dn-deployment") == ""
     page.click("#dn-ok")
-    page.wait_for_function(
-        'document.getElementById("dn-msg").textContent.includes("a deployment must be chosen")'
-    )
+    page.locator("#dn-msg", has_text="a deployment must be chosen").wait_for(state="attached")
     time.sleep(0.3)
     assert _opens(rig) == []
 
@@ -1236,3 +1236,404 @@ def test_the_new_session_dialog_scrolls_to_its_button_in_a_short_window(rig):
     assert taller, "the dialog must be taller than the window for this to test scrolling"
     page.click("#dn-ok")  # Playwright scrolls the button into view first
     rig.wait_for(lambda: _opens(rig))
+
+
+# --- Plans (engine build C2b) ----------------------------------------------------------------
+
+
+def _between_runs(**over):
+    """A `wlx taskd` session between runs offering a task with plans, its first run ended."""
+    fields = dict(phase="between_runs", service=True, run_index=0, stop_kind="completed",
+                  stopped_because="every block is finished",
+                  offered_tasks=("fixation_detection.py", "planned.py"))
+    fields.update(over)
+    return frame(**fields)
+
+
+def _checks(rig) -> list:
+    return [seen for seen in rig.dispatch.seen if isinstance(seen, CheckRun)]
+
+
+def test_choosing_a_task_preselects_its_first_plan_and_start_sends_the_plan_its_preflight_is_for(
+        rig):
+    """The PI, 2026-10-19, "Preselect first, keep plain": choosing a task takes its pre-flight,
+    and once that brings the task's plans the page preselects the first, takes the pre-flight for
+    it and hides the plain run's trials box; *start run* then sends that plan, as the member's.
+    Test the path through the page's own script: the select, the frame, the swap, the post."""
+    rig.hub.offer(_between_runs())
+    page = rig.browser_page()
+    _sign_in(page)
+    page.select_option("#task-sel", "planned.py")
+    rig.wait_for(lambda: _checks(rig))
+    passing = (PreflightItem("task checks", "pass", "planned.py passes its load-time checks"),)
+    rig.hub.offer(_between_runs(preflight=Preflight("planned.py", passing, plan=None,
+                                                    plans=("train", "test"))))
+    rig.wait_for(lambda: len(_checks(rig)) == 2)
+    rig.hub.offer(_between_runs(preflight=Preflight("planned.py", passing, plan="train",
+                                                    plans=("train", "test"))))
+    page.wait_for_selector('[data-cmd="start"][data-plan="train"]:not([disabled])')
+    hidden = page.evaluate('document.getElementById("run-trials").closest("label").hidden')
+    page.click('[data-cmd="start"]')
+    rig.wait_for(lambda: any(isinstance(seen, StartRun) for seen in rig.dispatch.seen))
+
+    first, second = _checks(rig)
+    started = next(seen for seen in rig.dispatch.seen if isinstance(seen, StartRun))
+    assert (first.task, first.plan, second.task, second.plan) == (
+        "planned.py", None, "planned.py", "train")
+    assert hidden is True
+    assert (started.task, started.plan, started.by.name) == (
+        "planned.py", "train", "Jake Westerberg")
+
+
+def test_the_only_task_offered_has_its_first_plan_preselected_as_its_plans_arrive(rig):
+    """The engineering review, I3: on a rig offering one task, the task selector never changes, so
+    the page preselected nothing. Its plans arrive with the pre-flight the pill takes, and the
+    first is preselected then and its pre-flight taken -- once: the plan's own pre-flight leaves
+    it standing."""
+    rig.hub.offer(_between_runs(offered_tasks=("planned.py",)))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('[data-cmd="check"]')
+    rig.wait_for(lambda: _checks(rig))
+    passing = (PreflightItem("task checks", "pass", "planned.py passes its load-time checks"),)
+    rig.hub.offer(_between_runs(offered_tasks=("planned.py",), preflight=Preflight(
+        "planned.py", passing, plan=None, plans=("train", "test"))))
+    rig.wait_for(lambda: len(_checks(rig)) == 2)
+    rig.hub.offer(_between_runs(offered_tasks=("planned.py",), preflight=Preflight(
+        "planned.py", passing, plan="train", plans=("train", "test"))))
+    page.wait_for_selector('[data-cmd="start"][data-plan="train"]:not([disabled])')
+
+    assert page.evaluate('document.getElementById("plan-sel").value') == "train"
+    assert [(check.task, check.plan) for check in _checks(rig)] == [
+        ("planned.py", None), ("planned.py", "train")]
+
+
+def test_next_block_and_back_one_reach_the_rig_as_the_members(rig):
+    """The PI, 2026-10-19, "'Next' and 'back one'": "Both directions by hand, each recorded with
+    who"."""
+    rig.hub.offer(frame(plan="train", block="easy", next_block="hard"))
+    page = rig.browser_page()
+    _sign_in(page)
+
+    page.click('[data-cmd="next_block"]')
+    rig.wait_for(lambda: rig.dispatch.seen)
+    page.click('[data-cmd="back_block"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
+
+    moved, back = rig.dispatch.seen
+    assert (type(moved), moved.by.name) == (NextBlock, "Jake Westerberg")
+    assert (type(back), back.by.name) == (BackBlock, "Jake Westerberg")
+
+
+ONE_TASK = ("planned.py",)
+PASSING = (PreflightItem("task checks", "pass", "planned.py passes its load-time checks"),)
+
+
+def _plans_of(taken, plans=("train", "test"), **over):
+    """A between-runs frame offering the one task with plans, its pre-flight taken for `taken`."""
+    return _between_runs(offered_tasks=ONE_TASK, preflight=Preflight(
+        "planned.py", PASSING, plan=taken, plans=plans), **over)
+
+
+def _second_run_pill(rig, page, last, plans, *, task="tasks/planned.py"):
+    """A first run of `last` has ended: the frame between runs carries it, as taskd's does, the
+    pill is pressed and the plain pre-flight's `plans` arrive."""
+    rig.hub.offer(_between_runs(offered_tasks=ONE_TASK, run_index=1, plan=last, block="easy",
+                                task=task))
+    page.wait_for_selector('[data-cmd="check"]:not([disabled])')
+    before = len(_checks(rig))
+    page.click('[data-cmd="check"]')
+    rig.wait_for(lambda: len(_checks(rig)) == before + 1)
+    rig.hub.offer(_plans_of(None, plans, run_index=1, plan=last, task=task))
+    page.locator("#plan-sel option").nth(1).wait_for(state="attached")
+
+
+#: A banner text no other frame says, to see that a frame was swapped in.
+FRAME_MARKER = "frame-marker-7f3"
+
+
+def _marker_shown(page, timeout_ms: float = WAIT_S * 1000) -> None:
+    """Wait for `FRAME_MARKER` in the banners. A locator, not `wait_for_function`: that polls by
+    evaluating a string in the page, which the page's Content-Security-Policy refuses, and only
+    a condition already true at its first look got through (CI, Python 3.11 and 3.12)."""
+    page.locator("#banners", has_text=FRAME_MARKER).wait_for(state="attached", timeout=timeout_ms)
+
+
+def _after_a_frame_is_processed(rig, page, *, late_s: float = 0.0):
+    """Wait until the page has swapped in a frame offered after it loaded (offered `late_s`
+    seconds from now, to see the wait poll). `preselect` runs inside that synchronous swap and
+    sets `#plan-sel` before it posts anything, so what the page would have sent on a frame is
+    sent, or not, by the time this returns; no fixed wait."""
+    offer = lambda: rig.hub.offer(_plans_of(None, stopped_because=FRAME_MARKER))  # noqa: E731
+    late = threading.Timer(late_s, offer) if late_s else None
+    if late:
+        late.start()
+    else:
+        offer()
+    try:
+        _marker_shown(page)
+    finally:
+        if late:
+            late.cancel()
+
+
+def test_the_wait_for_a_frame_polls_when_the_frame_comes_late_and_fails_plainly_when_not(rig):
+    """CI: the marker wait must work when it has to poll, which the page's Content-Security-Policy
+    allows only for a locator; and a page that never gets the frame fails at the locator's
+    timeout, naming what it waited for, not with an EvalError."""
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+    rig.hub.offer(_plans_of(None))
+    page = rig.browser_page()
+    _after_a_frame_is_processed(rig, page, late_s=1.5)
+
+    with pytest.raises(PlaywrightTimeoutError) as raised:
+        page.locator("#banners", has_text="never-offered").wait_for(
+            state="attached", timeout=500)
+    assert "Timeout 500ms exceeded" in str(raised.value) and "never-offered" in str(raised.value)
+
+
+def _preselected(rig, page):
+    """The one-task rig's first run offered: the pill's plain pre-flight, its plans arriving, the
+    first preselected and its pre-flight taken."""
+    page.click('[data-cmd="check"]')
+    rig.wait_for(lambda: len(_checks(rig)) == 1)
+    rig.hub.offer(_plans_of(None))
+    rig.wait_for(lambda: len(_checks(rig)) == 2)
+    rig.hub.offer(_plans_of("train"))
+    page.wait_for_selector('[data-cmd="start"][data-plan="train"]:not([disabled])')
+
+
+def test_a_later_run_on_a_one_task_rig_preselects_the_first_plan_again(rig):
+    """The task's first review, I1a: taskd clears the pre-flight at run start, so the next run's
+    plans came back to a page that had "already" offered them, and nothing was preselected. A run
+    is a plan's while it runs -- the bar shows that plan, the Trials box hidden -- and the next
+    run's plain pre-flight, on the pill, preselects the plan last run (the PI, 2026-10-22, "The
+    plan last run"), here the task's second, so "last" is told from "first"; the session's first
+    run preselected the task's first (Q9)."""
+    rig.hub.offer(_between_runs(offered_tasks=ONE_TASK))
+    page = rig.browser_page()
+    _sign_in(page)
+    _preselected(rig, page)
+    page.select_option("#plan-sel", "test")
+    rig.wait_for(lambda: len(_checks(rig)) == 3)
+
+    rig.hub.offer(frame(plan="test", block="easy", next_block="hard", offered_tasks=ONE_TASK,
+                        task="tasks/planned.py", preflight=None))
+    page.wait_for_selector('[data-cmd="next_block"]', state="attached")
+    during = page.evaluate('[document.getElementById("plan-sel").value, '
+                           'document.getElementById("run-trials").closest("label").hidden]')
+    # As taskd sends it: between runs the frame still carries the last run's plan.
+    rig.hub.offer(_between_runs(offered_tasks=ONE_TASK, run_index=1, plan="test", block="easy",
+                                task="tasks/planned.py"))
+    page.wait_for_selector('[data-cmd="next_block"]', state="detached")
+    plain_between = page.evaluate('document.getElementById("plan-sel").value')
+    page.click('[data-cmd="check"]')
+    rig.wait_for(lambda: len(_checks(rig)) == 4)
+    rig.hub.offer(_plans_of(None, run_index=1, plan="test", task="tasks/planned.py"))
+    rig.wait_for(lambda: len(_checks(rig)) == 5)
+
+    assert during == ["test", True] and plain_between == ""
+    assert [(check.task, check.plan) for check in _checks(rig)] == [
+        ("planned.py", None), ("planned.py", "train"), ("planned.py", "test"),
+        ("planned.py", None), ("planned.py", "test")]
+    assert page.evaluate('document.getElementById("plan-sel").value') == "test"
+
+
+def test_a_plain_last_run_is_repeated_as_the_plain_run_but_the_first_run_gets_the_first_plan(rig):
+    """The PI, 2026-10-22, "The plan last run" -- "Repeats what the operator just ran": a session
+    whose last run of this task was the plain run keeps the plain run for the next, the first plan
+    being only for the session's first run (Q9; `_preselected` is that first run)."""
+    rig.hub.offer(_between_runs(offered_tasks=ONE_TASK))
+    page = rig.browser_page()
+    _sign_in(page)
+    _preselected(rig, page)
+    page.select_option("#plan-sel", "")
+    rig.wait_for(lambda: len(_checks(rig)) == 3)
+
+    rig.hub.offer(_between_runs(offered_tasks=ONE_TASK, run_index=1, plan=None,
+                                task="tasks/planned.py"))
+    page.wait_for_selector('[data-cmd="check"]:not([disabled])')
+    page.click('[data-cmd="check"]')
+    rig.wait_for(lambda: len(_checks(rig)) == 4)
+    again = dict(run_index=1, plan=None, task="tasks/planned.py")
+    rig.hub.offer(_plans_of(None, **again))
+    rig.hub.offer(_plans_of(None, stopped_because=FRAME_MARKER, **again))
+    _marker_shown(page)
+
+    assert [(check.task, check.plan) for check in _checks(rig)] == [
+        ("planned.py", None), ("planned.py", "train"), ("planned.py", None),
+        ("planned.py", None)]
+    assert page.evaluate('document.getElementById("plan-sel").value') == ""
+
+
+def test_a_last_plan_no_longer_among_the_tasks_plans_falls_back_to_its_first(rig):
+    """The PI, 2026-10-22: the plan last run is preselected "if it is still among the task's
+    plans"; the task was edited between the runs, so the first is."""
+    rig.hub.offer(_between_runs(offered_tasks=ONE_TASK))
+    page = rig.browser_page()
+    _sign_in(page)
+    _second_run_pill(rig, page, "test", ("alpha", "beta"))
+    rig.wait_for(lambda: len(_checks(rig)) == 2)
+
+    assert [(check.task, check.plan) for check in _checks(rig)] == [
+        ("planned.py", None), ("planned.py", "alpha")]
+    assert page.evaluate('document.getElementById("plan-sel").value') == "alpha"
+
+
+def test_another_task_chosen_after_a_run_gets_its_own_first_plan(rig):
+    """The PI, 2026-10-22: the plan last run is the same task's. The operator switches to another
+    task whose plans include a plan of the same name: its first is preselected, not that one."""
+    rig.hub.offer(_between_runs(offered_tasks=("planned.py", "other.py"), run_index=1,
+                                plan="test", block="easy", task="tasks/planned.py"))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.select_option("#task-sel", "other.py")
+    rig.wait_for(lambda: _checks(rig))
+    rig.hub.offer(_between_runs(
+        offered_tasks=("planned.py", "other.py"), run_index=1, plan="test", block="easy",
+        task="tasks/planned.py", preflight=Preflight(
+            "other.py", PASSING, plan=None, plans=("alpha", "test"))))
+    rig.wait_for(lambda: len(_checks(rig)) == 2)
+
+    assert [(check.task, check.plan) for check in _checks(rig)] == [
+        ("other.py", None), ("other.py", "alpha")]
+    assert page.evaluate('document.getElementById("plan-sel").value') == "alpha"
+
+
+def test_a_reload_after_an_explicit_plain_choice_keeps_the_plain_run(rig):
+    """The task's first review, I1b: the plain run, chosen by a person, stood only until the page
+    was reloaded, when it preselected the first plan again and took its pre-flight. Only a
+    pre-flight this page asked for arms the preselection."""
+    rig.hub.offer(_between_runs(offered_tasks=ONE_TASK))
+    page = rig.browser_page()
+    _sign_in(page)
+    _preselected(rig, page)
+    page.select_option("#plan-sel", "")
+    rig.wait_for(lambda: len(_checks(rig)) == 3)
+    rig.hub.offer(_plans_of(None))
+    page.wait_for_selector('[data-cmd="start"][data-plan=""]:not([disabled])')
+
+    page.reload()
+    _after_a_frame_is_processed(rig, page)
+
+    assert len(_checks(rig)) == 3
+    assert page.evaluate('document.getElementById("plan-sel").value') == ""
+
+
+def test_a_page_not_signed_in_sends_and_says_nothing_as_it_loads(rig):
+    """The task's first review, I1c: a page with no one signed in preselected a task's plan on
+    load and said "not sent: sign in". Opening a page asks for nothing."""
+    rig.hub.offer(_plans_of(None))
+    page = rig.browser_page()
+    _after_a_frame_is_processed(rig, page)
+
+    assert _checks(rig) == []
+    assert page.evaluate('document.getElementById("sent").textContent.trim()') == ""
+    # Nor is a plan preselected on a page that cannot send (the final review, T10).
+    assert page.evaluate('document.getElementById("plan-sel").value') == ""
+
+
+def test_a_double_click_on_next_block_or_back_one_is_one_move(rig):
+    """The task's first review, I2: pause, reward and clear are held against a double click; the
+    moves between blocks are too. A second, different move is the synchronization: it arrives
+    after the first double click's second click would have."""
+    rig.hub.offer(frame(plan="train", block="easy", next_block="hard"))
+    page = rig.browser_page()
+    _sign_in(page)
+
+    page.dblclick('[data-cmd="next_block"]')
+    rig.wait_for(lambda: rig.dispatch.seen)
+    page.dblclick('[data-cmd="back_block"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) >= 2)
+    page.wait_for_timeout(800)
+
+    assert [type(seen) for seen in rig.dispatch.seen] == [NextBlock, BackBlock]
+
+
+def test_a_plan_start_ignores_the_hidden_trials_box(rig):
+    """The task's first review, M4: the Trials box is hidden while a plan is chosen, so a bad value
+    left in it must not refuse a plan's start and point at a box the person cannot see."""
+    rig.hub.offer(_between_runs(offered_tasks=ONE_TASK))
+    page = rig.browser_page()
+    _sign_in(page)
+    _preselected(rig, page)
+
+    page.evaluate('document.getElementById("run-trials").value = "many"')
+    page.click('[data-cmd="start"]')
+    rig.wait_for(lambda: any(isinstance(seen, StartRun) for seen in rig.dispatch.seen))
+
+    started = next(seen for seen in rig.dispatch.seen if isinstance(seen, StartRun))
+    assert (started.task, started.plan) == ("planned.py", "train")
+
+
+class _BoxRig:
+    """The rig PC's own page: http on loopback, no wl.works sign-in, the operator named in the
+    page's own storage (b3a-2)."""
+
+    def __init__(self, browser) -> None:
+        self.dispatch = _Dispatch()
+        self.hub = Hub(steady=_Clock(), endpoint=ENDPOINT)
+        port = int(free_endpoints(1)[0].rsplit(":", 1)[1])
+        self.server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(
+            self.hub, token=TOKEN, stale_after_s=30.0, dispatch=self.dispatch))
+        self._thread = threading.Thread(target=self.server.serve_forever,
+                                        kwargs={"poll_interval": 0.05}, daemon=True)
+        self._thread.start()
+        self._context = browser.new_context()
+        self._context.add_init_script(
+            "window.localStorage.setItem('wlx-console-name', 'Box Op')")
+        self.page = self._context.new_page()
+        self.page.set_default_timeout(WAIT_S * 1000)
+        self.url = f"http://127.0.0.1:{port}/"
+
+    def wait_for(self, predicate, seconds: float = WAIT_S) -> None:
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            if predicate():
+                return
+            time.sleep(0.05)
+        pytest.fail(f"timed out after {seconds:g} s waiting for a condition")
+
+    def close(self) -> None:
+        for step in (self._context.close, self.server.shutdown, self.server.server_close,
+                     self.hub.close):
+            try:
+                step()
+            except Exception:
+                pass
+
+
+@pytest.fixture
+def box():
+    with browser() as launched:
+        made = _BoxRig(launched)
+        try:
+            yield made
+        finally:
+            made.close()
+
+
+def test_the_rig_pcs_own_page_preselects_the_first_plan_and_keeps_a_plain_choice(box):
+    """The task's first review, fix round 2: the rig PC's page has no wl.works sign-in, so
+    "signed in" was never true there and the preselection was never armed. It is armed where the
+    page can send; the operator's own plain choice then stands."""
+    box.hub.offer(_between_runs(offered_tasks=ONE_TASK))
+    box.page.goto(box.url)
+    box.page.wait_for_selector('[data-cmd="check"]:not([disabled])')
+    box.page.click('[data-cmd="check"]')
+    box.wait_for(lambda: len(_checks(box)) == 1)
+    box.hub.offer(_plans_of(None))
+    box.wait_for(lambda: len(_checks(box)) == 2)
+    box.hub.offer(_plans_of("train"))
+    box.page.wait_for_selector('[data-cmd="start"][data-plan="train"]:not([disabled])')
+    box.page.select_option("#plan-sel", "")
+    box.wait_for(lambda: len(_checks(box)) == 3)
+    box.hub.offer(_plans_of(None))
+    box.page.wait_for_selector('[data-cmd="start"][data-plan=""]:not([disabled])')
+    box.hub.offer(_plans_of(None, stopped_because=FRAME_MARKER))
+    _marker_shown(box.page)
+
+    assert [(check.task, check.plan) for check in _checks(box)] == [
+        ("planned.py", None), ("planned.py", "train"), ("planned.py", None)]
+    assert box.page.evaluate('document.getElementById("plan-sel").value') == ""

@@ -1215,11 +1215,12 @@ def expand_windows(
 
 # --- The task object (engine spec §3.5; engine build C1) --------------------------------
 #
-# A task file defines one `Task`: its trial structures by name, the default one its runs play until
-# plans exist (engine build C2), and what XC-288 §4 has a task declare about itself: what each of
-# its settings means, which of its objects count as choices, and how its reaction time is defined.
-# Its format is defined here, in wl-xcon (the PI, 2026-10-11; the engine C1 plan). Plans (C2),
-# procedures (D) and stages (C7) join it as fields with defaults.
+# A task file defines one `Task`: its trial structures by name, the default one -- which the plain
+# run plays, and a condition that names no structure -- its plans (engine build C2b), and what
+# XC-288 §4 has a task declare about itself: what each of its settings means, which of its objects
+# count as choices, and how its reaction time is defined. Its format is defined here, in wl-xcon
+# (the PI, 2026-10-11; the engine C1 plan). Procedures (D) and stages (C7) join it as fields with
+# defaults.
 
 #: What a setting's meaning may be (XC-288 §4.1; TRN-03): clear-cut with a direction, expected
 #: with a direction and a context note, or not a difficulty setting.
@@ -1468,6 +1469,12 @@ AFTER_STIMULUS = frozenset(
 #: page read.
 HANG_COUNTS_AS = Outcome.NO_FIXATION
 
+#: **A block's "no limit"** (XC-380; engine build C2b): a block's own counting table whose `cap` is
+#: this removes its task's repeat limit in that block, where `None` leaves the task's in force (the
+#: PI, 2026-10-18: "No: the task's limit applies unless the block sets its own"). Text, so a task's
+#: content hash writes it as it writes any declaration.
+NO_LIMIT = "no limit"
+
 
 @dataclass(frozen=True, slots=True)
 class Counting:
@@ -1495,7 +1502,10 @@ class Counting:
       2026-10-12: "The condition is moved past after 3 failed repeats in a row, and the count
       resets once it is done"): any trial not shown again ends the count (the PI, 2026-10-18).
       `None`, no limit, repeated until done (the PI, 2026-10-11), with the console's *clear* --
-      a training aid a trainer switches on (the PI, 2026-10-18) -- to move past one by hand.
+      a training aid a trainer switches on (the PI, 2026-10-18) -- to move past one by hand. In a
+      block's own table `None` is "not set", so the structure's limit holds there (the PI,
+      2026-10-18: "the task's limit applies unless the block sets its own"), and **`NO_LIMIT`
+      removes it** (XC-380); in a structure's table the two say the same.
 
     Every answer (`ANSWERS`) is counted and every outcome of `REPEATED` owed, unless `outcomes` says
     otherwise; `of` reads the table."""
@@ -1504,7 +1514,7 @@ class Counting:
     appears: "str | None" = None
     withholding: bool = False
     outcomes: "dict[str, str]" = field(default_factory=dict)
-    cap: "int | None" = None
+    cap: "int | str | None" = None
 
     def __post_init__(self) -> None:
         if self.after_stimulus not in (SPENT, OWED):
@@ -1531,12 +1541,12 @@ class Counting:
                 raise ValueError(
                     f"an outcome is {', '.join(COUNTING_CLASSES)}, and {name!r} is given {kind!r}"
                 )
-        if self.cap is not None and (
+        if self.cap is not None and self.cap != NO_LIMIT and (
             isinstance(self.cap, bool) or not isinstance(self.cap, int) or self.cap < 0
         ):
             raise ValueError(
-                f"a repeat cap is a whole number of repeats, 0 or more, or None for no limit; not "
-                f"{self.cap!r}"
+                f"a repeat cap is a whole number of repeats, 0 or more, None for no limit, or "
+                f"NO_LIMIT where a block removes its task's; not {self.cap!r}"
             )
 
     def of(self, outcome: "Outcome | None", shown: bool = True) -> str:
@@ -1558,12 +1568,223 @@ class Counting:
         return self.after_stimulus
 
 
+# --- Plans and blocks (engine spec §13.1, §13.3, §13.5, §13.8; engine build C2b) --------------
+#
+# **A task's plans live in its task object** (the PI, 2026-10-07: "In the task file": "beside its
+# trial(s), one reviewable file; the operator chooses at run start among the plans it declares").
+# A plan is its block types, how they follow one another, and a run time limit. A block type is a
+# named set of conditions; **a block is one stretch of consecutive trials under one block type
+# inside one run** (the PI, 2026-10-01: "it is important that blocks are temporal instances"):
+# types recur, and each occurrence is a new block. The vocabulary lives here, the task's, so the
+# content hash and its format pins read it as they read every declaration; `scheduler` plays it
+# and imports it from here.
+
+
+@dataclass(frozen=True, slots=True)
+class Order:
+    """How the next condition is chosen. **Declared per block** (PI, 2026-08-31)."""
+
+
+@dataclass(frozen=True, slots=True)
+class Shuffled(Order):
+    """Every still-owed condition once per pass, in random order.
+
+    Balance as the block progresses, and a bound on how long an animal waits for any
+    condition. Partly predictable near the end of a pass, when few remain.
+    """
+
+
+@dataclass(frozen=True, slots=True)
+class WithReplacement(Order):
+    """Each trial drawn independently, optionally weighted.
+
+    No sequential predictability, and it supports conditions wanted rarely -- catch
+    trials, probes. Balance only in expectation, so the counters matter more.
+    """
+
+    weights: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class Constrained(Order):
+    """Drawn with replacement, refusing runs longer than `max_run`.
+
+    What most search and attention designs actually use, because an animal exploits
+    runs: three of the same target position in a row and it stops searching and
+    starts predicting.
+    """
+
+    max_run: int = 2
+    weights: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class Condition:
+    """One condition of a block (engine spec §14.1): its `name`, the `values` it sets, the trials
+    it is owed (`target`; a minimum where its block has another end rule), and **the trial
+    structure it plays** (`structure`, one of the task's by name; `None`, the task's default) --
+    the PI, 2026-10-07: "a task declares several trial structures; each condition names its own;
+    interleaving them in a block is ordinary". Its trials count by that structure's table
+    (`Trial.counting`) unless its block counts by one of its own. **A value it sets gives way to
+    a live edit** of the same setting for the rest of the run (engine spec §14.7), and the trial
+    still counts toward it."""
+
+    name: str
+    values: dict
+    target: int
+    structure: "str | None" = None
+
+
+@dataclass(frozen=True, slots=True)
+class Block:
+    """One block type (engine spec §13.5): its `name`, its `conditions`, and how a block of it
+    ends -- every condition's target used up, and where it declares them a criterion, a number of
+    trials, or a time limit -- with how it orders its conditions, what it counts by and whether it
+    drums. A name is what each trial's row records as its `block`, the block's type (wl-preproc
+    reads it so), so no two block types of one plan share one."""
+
+    name: str
+    conditions: "list[Condition]"
+    #: `(proportion, window)` -- "80% correct over the last 20 answers", a percentage; a proportion
+    #: of 1.0 is a streak, "N correct in a row" (the engine C2a plan, revised 2026-10-18). Judged on
+    #: every answer, and on a broken hold or a failure to acquire fixation where this block's own
+    #: table scores it (`scheduler.Scheduler._scored`); a percentage judges only each trial's first
+    #: answer under `first_answers`, a streak never. The block ends once every condition is owed
+    #: nothing and, with a criterion, the criterion is met too: **its targets are a minimum**
+    #: (`scheduler.Scheduler.finished`).
+    criterion: "tuple[float, int] | None" = None
+    #: The table this block counts by, **replacing its conditions' structures'** (TSK-26: what
+    #: counts is declared per block): `scheduler.CORRECT_ONLY`, `PRESENTED`, `EVERY_TRIAL` or any
+    #: `Counting` -- a block training an animal to hold fixation may count a fixation break as an
+    #: error that pays its debt -- and its rule then judges that break a miss (the PI, 2026-10-18,
+    #: "Yes, where the block says so"; `scheduler.Scheduler._scored`) -- while a block measuring a
+    #: psychometric function must not. What is an answer stays the structure's: a block's own
+    #: `withholding` is not read, nor its `appears` (`scheduler.Scheduler._class`;
+    #: `taskd._appeared`). `None`, each condition's structure's own.
+    counting: "Counting | None" = None
+    order: Order = field(default_factory=Shuffled)
+    #: **Drumming** (the PI, 2026-10-11: "a training tool ... where a trial is repeated until
+    #: correct"): every trial of this block that is not right comes back at once, paying nothing,
+    #: until it is. A trainer switches it on or off for a block or a run from the console as well
+    #: (`scheduler.Scheduler.drum`).
+    drum: bool = False
+    #: **A number of trials** (engine spec §13.5; the PI, 2026-10-07, "a number of trials"): the
+    #: block ends once it has run this many trials -- a trial and its drummed repeats one (the PI,
+    #: 2026-10-18: "200 trials; drummed repeats inside them"), an ordinary repeat a trial of its own
+    #: -- **and every target is used up**: its targets are a minimum, as under a criterion, and past
+    #: them every condition is drawn by its order (`scheduler.Scheduler.past_targets`). `None`, no
+    #: such rule.
+    trials: "int | None" = None
+    #: **A time limit**, in seconds of trials run (engine spec §13.5; the PI, 2026-10-19): read
+    #: between trials, so a trial in flight finishes and pays if earned ("Finish trial, then end");
+    #: a drummed trial waiting comes back until it is right first ("Finish the drum first"); time
+    #: paused does not count ("Pauses don't count"). What the block still owes then is recorded as
+    #: not run, "time ran out" (`scheduler.TIME`). `None`, no limit. Not a welfare limit: the
+    #: out-of-cage limit ends the session whatever a block says.
+    time_limit_s: "float | None" = None
+
+
+@dataclass(frozen=True, slots=True)
+class BlockOrder:
+    """How a plan's blocks follow one another (engine spec §13.5; the PI, 2026-10-07: "a fixed
+    sequence; repeating (Bt1, Bt2, Bt1, Bt2...); randomized from a recorded seed, balanced;
+    progression by criterion (training stages, shaping)"). Declared per plan;
+    `scheduler.Scheduler` plays it, drawing a random order from the run's recorded seed."""
+
+
+@dataclass(frozen=True, slots=True)
+class Fixed(BlockOrder):
+    """Each block type once, in the order the plan lists them; the plan is done after the last."""
+
+
+@dataclass(frozen=True, slots=True)
+class Cyclic(BlockOrder):
+    """The plan's block types in order, over and over (Bt1, Bt2, Bt1, Bt2...): `cycles` passes, or
+    with `None` until a time limit, a stop or the out-of-cage limit ends the run."""
+
+    cycles: "int | None" = None
+
+
+@dataclass(frozen=True, slots=True)
+class Balanced(BlockOrder):
+    """**Shuffled rounds, within each run** (the PI, 2026-10-11: "A 'balanced' block order balances
+    within each run"; 2026-10-19, "Shuffled rounds"): each round shows every block type once, in an
+    order drawn from the run's seed, **and never the type just played first** ("Never
+    back-to-back": "Each new round starts with a different type than the last one played, so every
+    block boundary is a real switch"); `blocks` in all, or with `None` round after round until a
+    time limit, a stop or the out-of-cage limit. A count that is not whole rounds leaves the last
+    round partial, the seed choosing which types it shows (a warning at load); a run cut short
+    leaves its last round incomplete, as recorded."""
+
+    blocks: "int | None" = None
+
+
+@dataclass(frozen=True, slots=True)
+class Random(BlockOrder):
+    """**Each block a type drawn at random** from the run's seed (the PI, 2026-10-19, "Both, as two
+    choices": "random can repeat a type and leave another out by chance, recorded with its seed"):
+    `blocks` in all, or with `None` until a time limit, a stop or the out-of-cage limit."""
+
+    blocks: "int | None" = None
+
+
+@dataclass(frozen=True, slots=True)
+class ByCriterion(BlockOrder):
+    """**A training progression** (the PI, 2026-10-07: "advance on one criterion, fall back on
+    another, as declared"; 2026-10-19, "Same, but top keeps going" and "Move on anyway"): the
+    plan's block types are its stages, easiest first, and the run starts at the first. **A stage
+    whose own rule is met moves up one**; a stage whose time runs out moves up one whether it
+    passed or not. **`fall_back`, `(proportion, window)`**: back one stage, started fresh, when
+    fewer than `proportion` of the last `window` answers are right, judged once that many answers
+    are in and on answers only, as every rule -- **each trial's first answer only**, however the
+    stage's own rule counts drummed tries ("First answer only": "so one stubborn trial can't demote
+    a stage the animal is otherwise doing well in"), and a broken hold where the stage's own table
+    scores one, as toward moving up ("Yes, the same"). **At the top stage the animal keeps
+    working** once its rule is met, until a time limit, a stop or the session's end; the top
+    stage's own time limit, with nowhere to move on to, ends the run. `None`, no fall-back."""
+
+    fall_back: "tuple[float, int] | None" = None
+
+
+@dataclass(frozen=True, slots=True)
+class Plan:
+    """One plan (engine spec §13.1): its block types (`blocks`), how they follow one another
+    (`order`, `Fixed()` by default), and **a run time limit** (`time_limit_s`, in seconds of trials
+    run; the PI, 2026-10-19, "Yes, in the plan": "the run ends at the first pause between trials
+    after its time", pauses not counting, a drummed trial waiting answered right first, "Finish
+    the drum first") -- which is no welfare limit: the out-of-cage limit ends the session whatever
+    a plan says, and the console's scheduled stop stays as it is, whichever comes first ending the
+    run. **Its shape is refused as it is built**, as a `Task`'s is; what it declares is checked at
+    load (`check.check_task`)."""
+
+    blocks: "list[Block]"
+    order: BlockOrder = field(default_factory=Fixed)
+    time_limit_s: "float | None" = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.blocks, list) or not all(
+                isinstance(block, Block) for block in self.blocks):
+            raise ValueError("a plan's blocks are a list of Blocks")
+        if not isinstance(self.order, BlockOrder):
+            raise ValueError(
+                "a plan's order is a BlockOrder: Fixed(), Cyclic(), Balanced(), Random() or "
+                "ByCriterion()"
+            )
+        if self.time_limit_s is not None and (
+                isinstance(self.time_limit_s, bool)
+                or not isinstance(self.time_limit_s, (int, float))):
+            raise ValueError(
+                f"a plan's time limit is a number of seconds, or None; not {self.time_limit_s!r}"
+            )
+
+
 @dataclass(frozen=True, slots=True)
 class Task:
-    """One task (engine spec §3.5): its trial structures by name (§13.3), `default` the one its runs
-    play until plans exist (engine build C2), and what XC-288 §4 has it declare: what its settings
-    mean beyond the shared list (`meanings`; `declarations.COMMON`), what it offers to choose --
-    a `Choice`, or `NO_CHOICE` -- how its reaction time is defined, and whether it needs a fixed head. **Its shape is refused as
+    """One task (engine spec §3.5): its trial structures by name (§13.3), `default` the one the
+    plain run plays and a condition naming no structure plays, its plans by name (§13.1; engine
+    build C2b), and what XC-288 §4 has it declare: what its settings mean beyond the shared list
+    (`meanings`; `declarations.COMMON`), what it offers to choose -- a `Choice`, or `NO_CHOICE` --
+    how its reaction time is defined, and whether it needs a fixed head. **Its shape is refused as
     it is built**, as a `Param`'s start is; what it declares is checked at load
     (`check.check_task`), which refuses an unset reaction time or choice."""
 
@@ -1576,6 +1797,10 @@ class Task:
     #: a refusal (the PI, 2026-10-11), in any session not declared head-fixed (`RIG_FIXED`), where
     #: a free head would position every stimulus against a nominal head.
     needs_fixed_head: bool = False
+    #: **Its plans, by name** (engine spec §13.1; engine build C2b): what the operator chooses among
+    #: at run start, the first preselected on the page (the PI, 2026-10-19, "Preselect first, keep
+    #: plain"). Empty, the plain run only: one block of the default structure, every trial paying.
+    plans: "dict[str, Plan]" = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not isinstance(self.structures, dict) or not self.structures:
@@ -1604,10 +1829,17 @@ class Task:
                 )
         if not isinstance(self.needs_fixed_head, bool):
             raise ValueError("a task's needs_fixed_head is True or False")
+        if not isinstance(self.plans, dict):
+            raise ValueError("a task's plans are a dict of plan names to Plans")
+        for name, plan in self.plans.items():
+            if not isinstance(name, str) or not name:
+                raise ValueError(f"a plan is named by text, not {name!r}")
+            if not isinstance(plan, Plan):
+                raise ValueError(f"plan {name!r} is a Plan, not {type(plan).__name__}")
 
     @property
     def trial(self) -> Trial:
-        """The structure a run plays until plans exist (engine build C2): the default."""
+        """The default structure: what the plain run plays, and a condition naming none."""
         return self.structures[self.default]
 
     @property

@@ -117,6 +117,9 @@ XC-288 §4.1), what it offers to choose and how its reaction time is defined (XC
 whether it needs a fixed head (§20.1). `Session.set` validates against the union of its structures' settings;
 the loader, the checks (`check.check_task`), the pre-flight, the review report and the simulator
 take it. Plans (C2), procedures (D) and stages (C7) join it as fields of their own.
+*Engine build C2b, 2026-10-20* (plan `docs/superpowers/plans/2026-10-19-engine-c2b.md`): plans
+joined it (`Task.plans`), and the default structure is the plain run's and a condition's that names
+none.
 
 ## 4. What can be shown (N§1)
 
@@ -623,6 +626,9 @@ luminance waits on build F (XC-305).
    *Engine build C1, 2026-10-11*: a task object holds several structures, its settings one set and
    its structures written for one setup; a condition naming its own is build C2's, and until then a
    run plays one block of the default structure.
+   *Engine build C2b, 2026-10-20*: each condition names its structure (`Condition.structure`), the
+   default where it names none, and is counted by that structure's table unless its block has its
+   own; a trial's row names the structure it played.
 4. **Interludes** (a recalibration, a quick RF map, a rest): the run steps aside and returns to the same
    block. An interlude's trials keep the session's trial numbering but belong to no block, and record the
    task they ran.
@@ -647,6 +653,36 @@ luminance waits on build F (XC-305).
 9. **When the animal stops working**: an alert; a console checkbox with a trial count turns on
    auto-pause (a system-actor pause, §11.3).
 
+*Engine build C2b, 2026-10-22* (plan `docs/superpowers/plans/2026-10-19-engine-c2b.md`; the PI's
+answers of 2026-10-19): **items 1, 5 and 8 built** -- a task's plans in its task object, chosen at
+run start (the page preselecting the first plan for a session's first run and the plan last run for
+its later ones, a plain last run repeated as the plain run, the plain run kept as a choice:
+"Preselect first, keep plain", "The plan last run"; `wlx run --plan`); block orders fixed, cyclic,
+balanced in shuffled rounds within each run ("Shuffled rounds") and plain random ("Both, as two
+choices"), each random order drawn from the run's recorded seed, a balanced round never starting
+with the type just played ("Never back-to-back"), and by criterion: up on a stage's own rule,
+back one stage, started fresh, on the
+plan's fall-back rule, judged once its window of answers is in and on each trial's first answer
+only ("First answer only"; a broken hold where the stage scores one, "Yes, the same"), the top
+stage working on ("Same, but top keeps going"), and a stage whose time runs out moving on whether
+or not it passed ("Move on anyway"), the top stage's own time limit ending the run. A block ends on
+every target
+used up and, as declared, a criterion, a number of trials (a trial and its drummed repeats one) or
+a time limit. **Time limits** -- a block's and the run's, the run's written in the plan ("Yes, in
+the plan") -- are read between trials on the time trials ran, pauses not counting ("Pauses don't
+count"): the trial in flight finishes and pays ("Finish trial, then end"), a drummed trial waiting
+is answered right first ("Finish the drum first", for both), and what a block still owed is
+recorded as not run, "time ran out", the run's time apart from a block's own; neither is a welfare
+limit, and a run they end is `completed`, never the out-of-cage stop's `limit`, its end row saying
+why (`end_reason`). **The per-advance progress check**: a plan whose every block ended before it
+drew a trial since the last one, or a block that cannot draw and does not end, ends the run with a
+sentence ("End run with a sentence"), recorded as the run's end, not a crash. Item 5's citation of
+[@berger2018standardized] beside "fall-back", and §15's beside progressions that "may step back",
+rest on automated progression through levels from each animal's progress, which its abstract
+states; that it steps back is UNVERIFIED (TSK-57). A person moves a run on a block or back one
+("'Next' and 'back one'"), recorded with who. Interludes (item 4) are build C6's; the
+operator's edits (item 2), C3's.
+
 ## 14. Variation (N§11, N§R1, N§R2)
 
 1. **Named conditions plus drawn values.** [@asaad2008flexible] A parameter is set by a condition or
@@ -664,6 +700,12 @@ luminance waits on build F (XC-305).
    (N§R2, offered against: not counting it). The parameter-change code goes out, and **the trial table
    carries an "overridden" flag** that wl-preproc reads (an ask, §21), so grouping by condition number
    cannot silently include overridden trials. The console shows which conditions an edit overrides.
+   *Engine build C2b, 2026-10-20*: built but for the console's showing which conditions an edit
+   overrides (build C3's live-edit layer): a value edited live in a run wins over the condition's
+   for the rest of the run, setting it back not undoing that, and each trial's row lists the
+   values overridden (`overridden`); until C3, the edit's line on the changes feed names the
+   conditions it overrides. Condition numbers (item 5) wait for the registry, build C5 (the PI, 2026-10-19: "Wait for the
+   registry").
 
 ## 15. Adaptivity (N§12)
 
@@ -795,6 +837,9 @@ drummed repeats one, and its `presentations` the lines written.
    own, or an override with why), the bounded settings it rewards through, its reaction time, its
    choice and whether it needs a fixed head (`review.render_task`) -- then each structure. Its plan
    tables, census and timing diagram, and keeping each version's report, are builds C2 and C8's.
+   *Engine build C2b, 2026-10-22*: the plan in tables built -- each plan's order and time limit,
+   each block's end rules, draw, table and drumming, each condition's structure, target and
+   values.
 2. **Simulation is advised, not enforced.**
 3. **The simulated animal** follows declared functions [@wichmann2001psychometric; @carpenter1995neural]
    with named profiles: perfect, chance, an incorrect strategy, normal (85% correct), trying to break the

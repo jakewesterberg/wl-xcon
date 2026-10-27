@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import dataclasses
 
+import pytest
+
 from wl_xcon.declarations import COMMON, content_hash
 from wl_xcon.review import render, render_task
 from wl_xcon.task import (
@@ -26,6 +28,7 @@ from wl_xcon.task import (
     Exited,
     Meaning,
     NO_CHOICE,
+    NO_LIMIT,
     On,
     P,
     Param,
@@ -34,11 +37,21 @@ from wl_xcon.task import (
     Reward,
     SaccadeTo,
     SPENT,
+    Block,
+    Balanced,
+    ByCriterion,
+    Condition,
+    Constrained,
+    Cyclic,
+    Fixed,
+    Plan,
+    Random,
     STIMULUS,
     State,
     Task,
     Trial,
     Window,
+    WithReplacement,
 )
 
 TRIAL = Trial(
@@ -215,6 +228,126 @@ def test_the_report_shows_what_each_trial_does_to_its_conditions_count():
     assert "a repeat limit of 3 failed repeats in a row" in out
     assert "Structure `other`: **no counting table**" in out
     assert out.index("### What each trial does") < out.index("## Structure `holding`")
+
+
+def test_the_report_shows_each_plan_in_tables():
+    """Engine spec §18.1, "the plan in tables" (engine build C2b): each plan's order and run time
+    limit; each block's end rules, how it draws its conditions, what it counts by and whether it
+    drums; each condition's structure, target and values. A task with none says so."""
+    plans = {
+        "train": Plan(
+            [Block("easy", [Condition("near", {"contrast": 0.9}, target=10)],
+                   criterion=(0.8, 20), time_limit_s=300.0, drum=True),
+             Block("hard", [Condition("far", {"contrast": 0.2}, target=10, structure="other")],
+                   criterion=(1.0, 5), trials=40, counting=Counting(after_stimulus=SPENT),
+                   order=Constrained(max_run=2))],
+            order=ByCriterion(fall_back=(0.5, 20)), time_limit_s=1800.0),
+        "loop": Plan([Block("easy", [Condition("near", {}, target=4)])], order=Cyclic(cycles=3)),
+    }
+    out = render_task(_reviewed(plans=plans))
+
+    assert "### Plans" in out and "#### Plan `train`" in out and "#### Plan `loop`" in out
+    assert ("A training progression, stage by stage from the first: up one when a stage's rule is "
+            "met or its time runs out; back one, started fresh, under 50% right over the last 20 "
+            "first answers; the top stage keeps working until a time limit, a stop or the "
+            "session's end. "
+            "The run ends at the first pause between trials after 30 minutes of trials.") in out
+    assert ("| easy | every target used up; 80% right over the last 20 answers; or its time runs "
+            "out at 5 minutes | shuffled passes | each condition's structure's table | yes |"
+            in out)
+    assert ("| hard | every target used up; 5 right in a row; 40 trials run | drawn with "
+            "replacement, runs of at most 2 | its own table | no |") in out
+    assert "| train | " not in out
+    assert "| easy | near | holding | 10 | contrast = 0.9 |" in out
+    assert "| hard | far | other | 10 | contrast = 0.2 |" in out
+    assert "In order, over and over: 3 passes. No run time limit." in out
+    assert out.index("### Plans") < out.index("## Structure `holding`")
+    assert "None: the plain run only" in render_task(_reviewed())
+
+
+def test_a_conditions_position_is_shown_eccentricity_and_direction_first():
+    """The PI, 2026-10-19, "Polar first, x-y allowed": a value a condition sets that is a position
+    -- a whole-point setting's `Polar` or pair -- is shown in the plan's table as every position in
+    the report is, eccentricity and direction first and its (x, y) beside them; a number as
+    written."""
+    from wl_xcon.task import Polar
+
+    plans = {"places": Plan([Block("b", [
+        Condition("oblique", {"pos": Polar(8.0, 45.0), "contrast": 0.5}, target=2),
+        Condition("right", {"pos": (5.0, 0.0)}, target=2)])])}
+    out = render_task(_reviewed(plans=plans))
+
+    assert ("| b | oblique | holding | 2 | pos = 8° at 45° · (x, y) (5.675, 5.675), "
+            "contrast = 0.5 |") in out
+    assert "| b | right | holding | 2 | pos = 5° at 0° · (x, y) (5, 0) |" in out
+
+
+def test_the_plan_tables_say_a_time_in_whole_minutes_and_a_balanced_order_never_back_to_back():
+    """The engineering review, Minor 4 ("1 minutes", "3.33333 minutes"), and the PI's "Never
+    back-to-back" (2026-10-19), as the report says them."""
+    plans = {"mixed": Plan([Block("a", [Condition("near", {}, target=4)], time_limit_s=200.0),
+                            Block("b", [Condition("far", {}, target=4)])],
+                           order=Balanced(blocks=4), time_limit_s=60.0)}
+    out = render_task(_reviewed(plans=plans))
+
+    assert ("In shuffled rounds within the run, each block type once a round, drawn from the run's "
+            "seed, never one type twice in a row: 4 blocks. The run ends at the first pause "
+            "between trials after 1 minute of trials.") in out
+    assert "or its time runs out at 3 minutes 20 s" in out
+
+
+NEAR = Condition("near", {"contrast": 0.9}, target=4)
+
+
+@pytest.mark.parametrize(
+    ("plan", "said"),
+    [
+        (Plan([Block("b", [NEAR])], order=Random(blocks=3)),
+         "Each block a type drawn at random from the run's seed: 3 blocks. No run time limit."),
+        (Plan([Block("b", [NEAR])], order=Random()),
+         "Each block a type drawn at random from the run's seed: until a time limit, a stop or the "
+         "out-of-cage limit."),
+        (Plan([Block("b", [NEAR])], order=Fixed()), "Each block once, in order. No run time limit."),
+        (Plan([Block("b", [NEAR])], order=Cyclic()),
+         "In order, over and over: until a time limit, a stop or the out-of-cage limit."),
+        (Plan([Block("b", [NEAR])], order=Balanced()),
+         "never one type twice in a row: round after round until a time limit, a stop or the "
+         "out-of-cage limit."),
+        (Plan([Block("b", [NEAR], criterion=(0.8, 10))], order=ByCriterion()),
+         "up one when a stage's rule is met or its time runs out; no fall-back; the top stage"),
+        (Plan([Block("b", [NEAR], order=WithReplacement())]),
+         "| b | every target used up | drawn with replacement | each condition's structure's "
+         "table | no |"),
+        (Plan([Block("b", [NEAR], order=WithReplacement(weights={"near": 2.0}))]),
+         "| b | every target used up | drawn with replacement, weighted {'near': 2.0} |"),
+        (Plan([Block("b", [NEAR], order=Constrained(max_run=1, weights={"near": 2.0}))]),
+         "| drawn with replacement, runs of at most 1, weighted {'near': 2.0} |"),
+        (Plan([Block("b", [Condition("bare", {}, target=4)])]), "| b | bare | holding | 4 | none |"),
+        # A bar in a block's, a condition's or a structure's name is escaped, never a new column.
+        (Plan([Block("a|b", [Condition("c|d", {}, target=1, structure="x|y")])]),
+         "| a\\|b | c\\|d | x\\|y | 1 | none |"),
+        (Plan([Block("a|b", [NEAR])]),
+         "| a\\|b | every target used up | shuffled passes |"),
+    ],
+)
+def test_the_plan_tables_say_each_order_draw_and_value_as_declared(plan, said):
+    """The final review of engine build C2b, T11: the plan tables' branches the other tests leave
+    unread -- a random and a fixed order, a count of none for each order that takes one, no
+    fall-back, a draw with replacement, weights, a condition setting nothing -- and a name with a
+    bar in it, which `_cell` escapes as it escapes every other cell."""
+    structures = {"other": OTHER, "holding": HOLDING, "x|y": OTHER}
+
+    assert said in render_task(_reviewed(structures=structures, plans={"p": plan}))
+
+
+def test_a_tables_no_limit_is_shown_as_no_limit():
+    """XC-380 (engine build C2b): `NO_LIMIT` reads as no repeat limit, never as a number."""
+    table = Counting(after_stimulus=SPENT, appears="hold", cap=NO_LIMIT)
+    holding = dataclasses.replace(HOLDING, counting=table)
+    out = render_task(_reviewed(structures={"holding": holding}))
+
+    assert "no repeat limit: a condition is repeated until done" in out
+    assert "a repeat limit of no limit" not in out
 
 
 def test_each_structure_is_drawn_under_its_own_heading_the_default_first():

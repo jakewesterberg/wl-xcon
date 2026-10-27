@@ -16,6 +16,7 @@ from wl_xcon.task import (
     ANSWERS,
     COUNTED,
     HANG_COUNTS_AS,
+    NO_LIMIT,
     OWED,
     REPEATED,
     RIGHT,
@@ -130,6 +131,7 @@ def test_a_class_the_structure_declares_for_an_outcome_overrides_the_rules():
         ({"after_stimulus": OWED, "cap": -1}, "a repeat cap is a whole number"),
         ({"after_stimulus": OWED, "cap": True}, "a repeat cap is a whole number"),
         ({"after_stimulus": OWED, "cap": 2.5}, "a repeat cap is a whole number"),
+        ({"after_stimulus": OWED, "cap": "none"}, "a repeat cap is a whole number"),
     ],
 )
 def test_a_malformed_counting_table_is_refused_as_it_is_built(fields, said):
@@ -144,6 +146,7 @@ def test_a_counting_table_says_what_breaks_after_the_stimulus_do_or_cannot_be_bu
     with pytest.raises(TypeError, match="after_stimulus"):
         Counting()
     assert Counting(after_stimulus=SPENT, cap=0).cap == 0
+    assert Counting(after_stimulus=SPENT, cap=NO_LIMIT).cap == NO_LIMIT
 
 
 def test_a_counting_table_names_the_state_its_stimulus_appears_in():

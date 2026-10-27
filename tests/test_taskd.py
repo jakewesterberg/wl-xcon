@@ -35,7 +35,7 @@ from wl_xcon.actor import Box
 from wl_xcon.bounds import Bounds, Ceiling, Exceeded, Floor
 from wl_xcon.cli import _load_task
 from wl_xcon.codes import BLOCK_END
-from wl_xcon.declarations import content_hash
+from wl_xcon.declarations import canonical, content_hash
 from wl_xcon.dio import Simulated as Card
 from wl_xcon.encode import BLOCK_START, UNALLOCATED_TASK_CODE, words_for_block
 from wl_xcon.findings import NOT_RECORDING, SESSION_KINDS, Finding
@@ -43,11 +43,13 @@ from wl_xcon.link import (
     CONTROL_HISTORY,
     RECENT_OUTCOMES,
     REFUSAL_HISTORY,
+    BackBlock,
     CancelScheduledStop,
     ClearOwed,
     Drum,
     ManualReward,
     Mark,
+    NextBlock,
     Pause,
     Preflight,
     PreflightItem,
@@ -62,9 +64,11 @@ from wl_xcon.link import (
 from wl_xcon.photometry import SRGB
 from wl_xcon.record import REFUSAL_LOG_LIMIT, SessionRecord
 from wl_xcon.scheduler import EVERY_TRIAL, Block, Condition, Scheduler
-from wl_xcon.simulate import Tally
+from wl_xcon.simulate import Subject, Tally, prepare
 from wl_xcon.task import ANSWERS, OWED, RIGHT, After, Counting, On, Outcome, State, Trial
-from wl_xcon.taskd import PAUSE_HOUSEKEEPING_S, RunSpec, Session, SessionSpec, _drum_warned
+from wl_xcon.taskd import (
+    PAUSE_HOUSEKEEPING_S, RunSpec, Session, SessionSpec, _drum_warned, _minutes,
+)
 from wl_xcon.warnlist import Entry
 from wl_xcon.welfare import Deployment, Simulated as Pump
 import _sessions
@@ -1126,6 +1130,132 @@ def test_a_session_runs_its_blocks_in_order_and_stops_when_they_are_done(tmp_pat
     # Six each in the first block plus four in the second, all counted on completed
     # trials, so aborts add to the total without paying the debt.
     assert sum(census.outcomes.values()) >= 16
+
+
+def test_a_settings_polar_value_is_recorded_wherever_a_value_is_and_reads_back(tmp_path):
+    """The PI, 2026-10-20, "Both, polar first": a run whose setting holds a polar position
+    (`task.Polar`, since true visual angle merged) writes it wherever a value is written -- its
+    start row's layers and resolved values, each trial row's `params`, a live change's
+    `parameter_changes.jsonl` row -- as its eccentricity and direction with its (x, y) beside them,
+    where the run faulted writing its start row, a `Polar` not being JSON. A resume reads the
+    record back as it reads any other."""
+    from wl_xcon import resume
+    from wl_xcon.geometry import polar_deg
+    from wl_xcon.task import Polar
+
+    path = _sessions.polar_task(tmp_path)
+    link = _Drained({2: [SetParameter(name="target_pos", value=Polar(8.0, 45.0), by=Box("jake"))]})
+    session = _session(_spec(tmp_path, task=str(path), trials=4, values={
+        **_spec(tmp_path).values, "target_pos": Polar(8.0, 0.0)}), link=link)
+
+    session.run()
+
+    x, y = polar_deg(8.0, 45.0)
+    right = {"eccentricity": 8.0, "direction": 0.0, "x": 8.0, "y": 0.0}
+    oblique = {"eccentricity": 8.0, "direction": 45.0, "x": x, "y": y}
+    start, _ = _runs(session)
+    assert start["resolved"]["target_pos"] == start["layers"]["run"]["target_pos"] == right
+    placed = [row["params"]["target_pos"] for row in _trial_rows(session)]
+    assert placed[0] == right and placed[-1] == oblique
+    assert all(value in (right, oblique) for value in placed)
+    ((was, now),) = [(row["was"], row["now"]) for row in _parameter_changes(session)]
+    assert (was, now) == (right, oblique)
+    assert resume.read(session.directory, session.welfare.left_cage_wall_at).run_index == 0
+
+
+def test_each_condition_plays_the_structure_it_names_and_its_row_says_which(tmp_path):
+    """Engine spec §13.3 (the PI, 2026-10-07: "each condition names its own; interleaving them in a
+    block is ordinary"; engine build C2b): each trial is built and run from its condition's
+    structure, the task's default for one naming none, and its row names the structure played."""
+    path = _sessions.planned_task(tmp_path, structures=(
+        '{"detection": detection, "spent": _dataclasses.replace(detection, counting='
+        '_dataclasses.replace(detection.counting, after_stimulus=SPENT))}'))
+    task = _load_task(path)
+    block = Block(name="mixed", conditions=[Condition("plain", {}, target=3),
+                                            Condition("used", {}, target=3, structure="spent")])
+    spec = _spec(tmp_path, task=str(path), trials=400, blocks=[block])
+    subject = Subject(seed=1, hazards=spec.hazards, engagement=spec.engagement, lapse=spec.lapse)
+    played = []
+
+    def world(trial, values, index):
+        played.append(trial)
+        subject.new_trial()
+        prepare(subject, trial, spec.frame_period, values)
+        return subject
+
+    session = _session(spec)
+    session.world = world
+
+    session.run()
+
+    rows = _trial_rows(session)
+    assert {(row["condition"], row["structure"]) for row in rows} == {
+        ("plain", "detection"), ("used", "spent")}
+    assert [trial.counting for trial in played] == [
+        task.structures[row["structure"]].counting for row in rows]
+
+
+def test_a_live_edit_wins_over_a_conditions_value_and_its_rows_say_so(tmp_path):
+    """Engine spec §14.7 (§17.1's order: the task's start, the run's value, the condition's, a live
+    edit): "A live edit to a value a condition sets wins, and the trial still counts toward its
+    condition", the trial table carrying an "overridden" flag. A value the condition does not set
+    is overridden by nothing; before the edit the condition's value holds."""
+    link = _Drained({3: [SetParameter(name="target_x", value=12.0, by=Box("jake"))]})
+    spec = _spec(tmp_path, trials=400, blocks=[
+        Block(name="b", conditions=[Condition("near", {"target_x": 5.0}, target=6)])])
+    session = _session(spec, link=link)
+
+    session.run()
+
+    rows = _trial_rows(session)
+    assert [(row["params"]["target_x"], row["overridden"]) for row in rows[:3]] == [
+        (5.0, [])] * 3
+    assert {(row["params"]["target_x"], tuple(row["overridden"])) for row in rows[3:]} == {
+        (12.0, ("target_x",))}
+    assert {row["condition"] for row in rows} == {"near"}
+    assert session.stopped_because == "every block is finished"
+
+
+def test_setting_a_value_back_to_the_conditions_does_not_hand_control_back(tmp_path):
+    """The engine C2b plan's Appendix B, item 1, confirmed by the PI on 2026-10-19: "setting the
+    value back does not hand control back to the condition; it stays yours until the run ends"
+    (the final review, T4). A live edit, then the value set back to the condition's own: every row
+    after the edit still names the value overridden, the condition's value and the person's now
+    the same."""
+    link = _Drained({3: [SetParameter(name="target_x", value=12.0, by=Box("jake"))],
+                     6: [SetParameter(name="target_x", value=5.0, by=Box("jake"))]})
+    spec = _spec(tmp_path, trials=400, blocks=[
+        Block(name="b", conditions=[Condition("near", {"target_x": 5.0}, target=9)])])
+    session = _session(spec, link=link)
+
+    session.run()
+
+    rows = [(row["params"]["target_x"], row["overridden"]) for row in _trial_rows(session)]
+    assert rows[:3] == [(5.0, [])] * 3
+    edited = rows[3:].index((5.0, ["target_x"]))
+    assert edited >= 1 and rows[3:3 + edited] == [(12.0, ["target_x"])] * edited
+    assert rows[3 + edited:] == [(5.0, ["target_x"])] * (len(rows) - 3 - edited)
+    assert [row["now"] for row in _parameter_changes(session)] == [12.0, 5.0]
+
+
+def test_a_live_edits_feed_line_names_the_conditions_it_now_overrides(tmp_path):
+    """The engine C2b plan's science review, I5: until the console shows which conditions an edit
+    overrides (build C3), the edit's line on the changes feed names them -- every condition of the
+    run's blocks that sets the value -- and an edit of a value no condition sets names none."""
+    link = _Drained({1: [SetParameter(name="target_x", value=12.0, by=Box("jake")),
+                         SetParameter(name="target_y", value=2.0, by=Box("jake"))]})
+    spec = _spec(tmp_path, trials=400, blocks=[
+        Block(name="b", conditions=[Condition("near", {"target_x": 5.0}, target=2),
+                                    Condition("far", {"target_x": 9.0}, target=2)])])
+    session = _session(spec, link=link)
+
+    session.run()
+
+    assert [said for kind, _, _, said in session.controls if kind == "set"] == [
+        "target_x 10.00 → 12.00, from trial 1; for the rest of the run it overrides the value "
+        "conditions near, far set",
+        "target_y 0.00 → 2.00, from trial 1",
+    ]
 
 
 def test_each_trial_records_the_condition_it_actually_ran(tmp_path):
@@ -7128,3 +7258,486 @@ def test_a_card_that_faults_on_param_changed_leaves_no_row_naming_it(tmp_path):
         session.run()
 
     assert _changes_so_far(session) == []
+
+
+# --- A run plays the plan it names (engine build C2b) -----------------------------------------
+
+#: Two block types of `fixation_detection`'s one condition each, near then far.
+_TWO = ('[Block("near", [Condition("near", {"target_x": 5.0}, target=2)]), '
+        'Block("far", [Condition("far", {"target_x": 12.0}, target=2)])]')
+
+
+def _planned(tmp_path, plans: str, *, plan: str, link=None, **spec) -> Session:
+    path = _sessions.planned_task(tmp_path, plans)
+    return _session(_spec(tmp_path, task=str(path), plan=plan, trials=400, **spec), link=link)
+
+
+def test_a_run_plays_the_plan_it_names_and_its_rows_record_it(tmp_path):
+    """Engine spec §13.1 (the PI, 2026-10-07: "the operator chooses at run start among the plans it
+    declares"): the run plays the named plan's blocks in its order; its start row names the plan,
+    whose blocks its task's content hash holds, and records no trial count of its own; its end row
+    says how each block ended."""
+    session = _planned(tmp_path, f'{{"short": Plan({_TWO}), "other": Plan({_TWO}[::-1])}}',
+                       plan="short")
+
+    session.run()
+
+    start, end = _runs(session)
+    assert (start["plan"], start["trials"], start["blocks"]) == ("short", None, ["near", "far"])
+    assert session.blocks_run == ["near", "far"]
+    assert session.stopped_because == "every block is finished"
+    assert [(e["block"], e["ended"], e["by"]) for e in end["block_ends"]] == [
+        ("near", "rule", None), ("far", "rule", None)]
+    assert {row["block"] for row in _trial_rows(session)} == {"near", "far"}
+
+
+def test_a_condition_setting_a_polar_position_plays_it_and_its_rows_record_it_polar_first(
+        tmp_path):
+    """The PI, 2026-10-20, "Both, polar first", through a plan: a condition may set a setting that
+    holds a whole position to one of its `Polar` choices (since true visual angle merged); its
+    trials play it, and each row records it as its eccentricity and direction with its (x, y)
+    beside them."""
+    from wl_xcon.geometry import polar_deg
+
+    path = _sessions.polar_task(tmp_path)
+    path.write_text(path.read_text() + (
+        "\nfrom wl_xcon.task import Block, Condition, Plan\n"
+        "TASK = _polar_dataclasses.replace(TASK, plans={'places': Plan([Block('b', [\n"
+        "    Condition('right', {'target_pos': Polar(8.0, 0.0)}, target=2),\n"
+        "    Condition('oblique', {'target_pos': Polar(8.0, 45.0)}, target=2)])])})\n"))
+    session = _session(_spec(tmp_path, task=str(path), plan="places", trials=400))
+
+    session.run()
+
+    x, y = polar_deg(8.0, 45.0)
+    assert {row["condition"]: row["params"]["target_pos"] for row in _trial_rows(session)} == {
+        "right": {"eccentricity": 8.0, "direction": 0.0, "x": 8.0, "y": 0.0},
+        "oblique": {"eccentricity": 8.0, "direction": 45.0, "x": x, "y": y}}
+    assert session.stopped_because == "every block is finished"
+
+
+def test_a_plain_run_records_no_plan_and_its_trial_count(tmp_path):
+    session = _session(_spec(tmp_path, trials=3))
+
+    session.run()
+
+    start, end = _runs(session)
+    assert (start["plan"], start["plan_form"], start["trials"], start["blocks"]) == (
+        None, None, 3, None)
+    assert end["block_ends"] == [{"block": "session", "ended": "rule", "by": None,
+                                  "after_trial": 2, "block_in_session": 1, "position": 0,
+                                  "passed_at": None}]
+    assert end["end_reason"] == "plan_done"
+
+
+def test_a_cyclic_plan_runs_until_its_time_limit_and_ends_as_designed_not_as_the_welfare_stop(
+        tmp_path, monkeypatch):
+    """The PI, 2026-10-19, "Yes, in the plan": the run ends at the first pause between trials after
+    its time; neither it nor a block's limit is a welfare limit, so its stop is `completed`, never
+    `limit`, the out-of-cage welfare stop's kind. What the open block still owed is recorded as not
+    run, "time ran out"."""
+    _scripted_trials(monkeypatch, [Outcome.CORRECT] * 400, frames=240)
+    session = _planned(tmp_path, f'{{"loop": Plan({_TWO}, order=Cyclic(), time_limit_s=31.0)}}',
+                       plan="loop")
+
+    session.run()
+
+    (_, end) = _runs(session)
+    assert session.stop_kind == "completed"
+    assert session.stopped_because == "the plan's time limit is reached: 31 s of trials"
+    assert session.blocks_run[:4] == ["near", "far", "near", "far"]
+    assert end["block_ends"][-1]["ended"] == "run_time" and end["end_reason"] == "plan_time"
+    owed = [s for s in end["shortfalls"] if s["because"] in ("time", "run_time")]
+    assert all(s["block"] == session.blocks_run[-1] and s["because"] == "run_time" for s in owed)
+    # Read between trials: each trial is 1 s and its 0.5 s ITI, so the 21st is the first boundary
+    # at or past 31 s: the run overran by 0.5 s, less than the trial in flight.
+    assert session._elapsed - session._run_from == 31.5
+
+
+def test_a_blocks_time_limit_ends_it_between_trials_and_records_what_it_owed_as_not_run(tmp_path):
+    """The PI, 2026-10-19, "Finish trial, then end": the trial in flight finishes and pays if
+    earned; the block ends at the next pause between trials; trials it still owed are recorded as
+    not run, "time ran out"; a fixed plan then plays its next block."""
+    session = _planned(tmp_path, (
+        '{"timed": Plan([Block("long", [Condition("near", {"target_x": 5.0}, target=500)], '
+        'time_limit_s=10.0), Block("far", [Condition("far", {"target_x": 12.0}, target=2)])])}'),
+        plan="timed")
+
+    session.run()
+
+    (_, end) = _runs(session)
+    assert session.blocks_run == ["long", "far"]
+    assert [e["ended"] for e in end["block_ends"]] == ["time", "rule"]
+    (short,) = [s for s in end["shortfalls"] if s["because"] == "time"]
+    assert (short["block"], short["condition"]) == ("long", "near") and short["trials"] > 0
+    assert not short["possible_avoidance"]
+    # Framed in the stream (Task 7's review, Minor 2): each block opens and closes, the one ended
+    # by its time as well as the one ended by its rule.
+    assert _block_words(session.card.codes) == [
+        ("run", 1), ("start", 1), "end", ("start", 2), "end", "run end"]
+
+
+def test_a_block_the_runs_time_ends_is_framed_in_the_stream_like_any_other(tmp_path, monkeypatch):
+    """Task 7's review, Minor 2: a block ended by the run's time is closed by its `BLOCK_END`."""
+    _scripted_trials(monkeypatch, [Outcome.CORRECT] * 400, frames=240)
+    session = _planned(tmp_path, (
+        '{"one": Plan([Block("a", [Condition("near", {"target_x": 5.0}, target=500)])], '
+        'time_limit_s=7.0)}'), plan="one")
+
+    session.run()
+
+    assert _runs(session)[1]["block_ends"][-1]["ended"] == "run_time"
+    assert _block_words(session.card.codes) == [("run", 1), ("start", 1), "end", "run end"]
+
+
+def test_a_clear_that_finishes_a_block_does_not_stall_a_plan_that_can_still_draw(
+        tmp_path, monkeypatch):
+    """Task 7's review, Important 1: a one-block cyclic plan, its block cleared by a person after
+    the first trial, goes on to its time limit; it is not "stalled" (the clear moves past a trial
+    as an answer does)."""
+    _scripted_trials(monkeypatch, [Outcome.CORRECT] * 400)
+    link = _Drained({2: [Training(setting="clear", on=True, by=Box("jake")),
+                         ClearOwed(condition="near", by=Box("jake"))]})
+    session = _planned(tmp_path, (
+        '{"loop": Plan([Block("a", [Condition("near", {"target_x": 5.0}, target=2)])], '
+        'order=Cyclic(), time_limit_s=20.0)}'), plan="loop", link=link)
+
+    session.run()
+
+    assert _runs(session)[1]["end_reason"] == "plan_time"
+    assert len(_trial_rows(session)) > 3
+
+
+def test_time_paused_does_not_count_against_a_plans_time_limit(tmp_path):
+    """The PI, 2026-10-19, "Pauses don't count": the clock runs only while trials run, so a pause
+    longer than the limit leaves the run its minutes of work, and the welfare-listed paused loop
+    (`Session._hold`) reads no time limit."""
+    link = _Scripted(script={12: [Resume(by=Box("jake"))]}, step=5.0)
+    path = _sessions.planned_task(tmp_path, f'{{"loop": Plan({_TWO}, order=Cyclic(), '
+                                            f'time_limit_s=20.0)}}')
+    session, wall = _walled(tmp_path, link, task=str(path), plan="loop", trials=400)
+    link.wall = wall
+    link.queue(Pause(by=Box("jake")))
+
+    session.run()
+
+    assert len(link.waits) == 12, "paused for 60 s of wall, three times the limit"
+    assert session.stopped_because == "the plan's time limit is reached: 20 s of trials"
+    assert len(_trial_rows(session)) > 0
+
+
+def test_a_plan_that_can_draw_no_further_trial_ends_its_run_with_a_sentence(tmp_path):
+    """The PI, 2026-10-19, "End run with a sentence": "The run ends cleanly, saying why in plain
+    words; the session stays open so the operator can start another run at once. Recorded as the
+    run's end, not a crash." A cyclic plan whose every block owes nothing would advance forever;
+    the per-advance progress check ends it. Its passes are bounded (`_Scripted`, Ruling 10), so
+    without the check the run faults rather than spinning the suite."""
+    session = _planned(tmp_path, (
+        '{"empty": Plan([Block("a", [Condition("x", {}, target=0)]), '
+        'Block("b", [Condition("y", {}, target=0)])], order=Cyclic(), time_limit_s=60.0)}'),
+        plan="empty", link=_Scripted())
+
+    session.run()
+
+    (_, end) = _runs(session)
+    assert session.stop_kind == "completed"
+    assert session.stopped_because == (
+        "the plan can draw no further trial: since the run's last trial each of its blocks (a, b) "
+        "ended before it drew one, so the run ends here")
+    assert end["trials"] == 0 and session.blocks_run == ["a", "b"]
+    assert [e["ended"] for e in end["block_ends"]] == ["rule", "run"]
+    assert end["end_reason"] == "stalled"
+
+
+def test_a_block_that_cannot_draw_and_does_not_end_ends_its_run_with_a_sentence(tmp_path):
+    """The PI, 2026-10-19, "End run with a sentence": a block that can draw nothing and whose rule
+    is not met -- here a criterion over no conditions, given in code past the load-time check that
+    refuses it in a task (XC-381) -- ends the run saying why, where `next_trial` faulted it."""
+    session = _session(_spec(tmp_path, trials=400,
+                             blocks=[Block(name="empty", conditions=[], criterion=(0.8, 5))]))
+
+    session.run()
+
+    assert session.stop_kind == "completed"
+    assert session.stopped_because == (
+        "block empty has no condition left to draw and its end rule is not met, so the run ends "
+        "here")
+    assert [e["ended"] for e in _runs(session)[1]["block_ends"]] == ["run"]
+    assert _runs(session)[1]["end_reason"] == "cannot_draw"
+
+
+def test_a_training_progression_moves_up_falls_back_and_keeps_its_top_stage_in_a_run(
+        tmp_path, monkeypatch):
+    """The PI, 2026-10-19 ("Same, but top keeps going"), through a run: two right answers pass
+    stage one; three wrong at stage two fall back to stage one, started fresh; two right pass it
+    again; at the top the animal keeps working until the run's time limit."""
+    from wl_xcon import taskd
+
+    real, calls = taskd.run_trial, []
+    script = [Outcome.CORRECT] * 2 + [Outcome.WRONG_TARGET] * 3 + [Outcome.CORRECT] * 200
+
+    def scripted(*args, **kwargs):
+        calls.append(None)
+        return dataclasses.replace(real(*args, **kwargs), outcome=script[len(calls) - 1])
+
+    monkeypatch.setattr(taskd, "run_trial", scripted)
+    session = _planned(tmp_path, (
+        '{"train": Plan([Block("one", [Condition("near", {"target_x": 5.0}, target=1)], '
+        'criterion=(1.0, 2)), Block("two", [Condition("far", {"target_x": 12.0}, target=1)], '
+        'criterion=(1.0, 2))], order=ByCriterion(fall_back=(0.5, 3)), time_limit_s=40.0)}'),
+        plan="train")
+
+    session.run()
+
+    (_, end) = _runs(session)
+    assert session.blocks_run == ["one", "two", "one", "two"]
+    assert [e["ended"] for e in end["block_ends"]] == ["rule", "fall_back", "rule", "run_time"]
+    assert session.stopped_because == "the plan's time limit is reached: 40 s of trials"
+    # The science review, I1: the top stage's rule was met after trial 8, and it worked on.
+    assert end["block_ends"][-1]["passed_at"] == 8 and end["block_ends"][-1]["after_trial"] > 8
+    # I2: each move to another block is said on the changes feed, with its numbers.
+    assert [said for kind, _, _, said in session.controls if kind == "block"] == [
+        "one → two: its rule met: 2 right in a row, every target used up",
+        "two → one: fell back: 0 of its last 3 first answers right, under 50%",
+        "one → two: its rule met: 2 right in a row, every target used up",
+    ]
+
+
+def _scripted_trials(monkeypatch, outcomes, frames: int | None = None) -> None:
+    """Every trial `run_trial` runs ends with the next of `outcomes`, and lasts `frames` frames
+    when given -- so a run's trial clock reads exactly frames at the frame period and the ITI."""
+    from wl_xcon import taskd
+
+    real, calls = taskd.run_trial, []
+
+    def scripted(*args, **kwargs):
+        calls.append(None)
+        result = dataclasses.replace(real(*args, **kwargs), outcome=outcomes[len(calls) - 1])
+        return result if frames is None else dataclasses.replace(result, frames=frames)
+
+    monkeypatch.setattr(taskd, "run_trial", scripted)
+
+
+def test_a_runs_time_limit_finishes_a_drummed_trial_first(tmp_path, monkeypatch):
+    """The PI, 2026-10-19, "Finish the drum first", for a run's time limit: "Same as a block's
+    limit: 'Training ends on a success.'" A drummed trial still coming back when the run's time is
+    up comes back until it is right; the run ends at the boundary after it, its last line that
+    drummed trial, right."""
+    _scripted_trials(monkeypatch, [Outcome.WRONG_TARGET] * 30 + [Outcome.CORRECT] * 100)
+    session = _planned(tmp_path, (
+        '{"drill": Plan([Block("drill", [Condition("near", {"target_x": 5.0}, target=500)], '
+        'drum=True)], time_limit_s=5.0)}'), plan="drill")
+
+    session.run()
+
+    rows = _trial_rows(session)
+    assert len(rows) == 31, "thirty tries of one trial, the time up after the first ten"
+    assert (rows[-1]["outcome"], rows[-1]["drummed"]) == ("correct", True)
+    assert session.stopped_because == "the plan's time limit is reached: 5 s of trials"
+    assert session._elapsed - session._run_from >= 15.0
+
+
+def test_a_rule_met_as_the_runs_time_runs_out_closes_its_block_as_met(tmp_path, monkeypatch):
+    """The science review, I3: a stage passed on the run's last trial is recorded as passed
+    (`rule`), not as the run's time; a block the run's time ends unmet is the run's time's
+    (`run_time`), apart from a block's own (`time`). Each trial lasts 1 s and its 0.5 s ITI, so
+    the run's 7.4 s are up after the fifth -- the trial that meets the rule."""
+    _scripted_trials(monkeypatch, [Outcome.WRONG_TARGET] * 2 + [Outcome.CORRECT] * 100,
+                     frames=240)
+    session = _planned(tmp_path, (
+        '{"two": Plan([Block("a", [Condition("near", {"target_x": 5.0}, target=1)], '
+        'criterion=(1.0, 3)), Block("b", [Condition("far", {"target_x": 12.0}, target=1)])], '
+        'time_limit_s=7.4)}'), plan="two")
+
+    session.run()
+
+    (_, end) = _runs(session)
+    assert len(_trial_rows(session)) == 5
+    assert [(e["block"], e["ended"]) for e in end["block_ends"]] == [("a", "rule")]
+    assert end["end_reason"] == "plan_time"
+
+
+def test_each_block_end_names_its_block_in_the_stream_and_its_place_in_the_run(tmp_path):
+    """The engineering review, I4: `block_ends` joins the stream's blocks by `block_in_session`,
+    the number each block's `BLOCK_START` carried, null for a block that ran no trial and so was
+    never opened in the stream; `position` is its place in the run's sequence."""
+    session = _planned(tmp_path, (
+        '{"three": Plan([Block("a", [Condition("x", {"target_x": 5.0}, target=2)]), '
+        'Block("b", [Condition("y", {"target_x": 8.0}, target=0)]), '
+        'Block("c", [Condition("z", {"target_x": 12.0}, target=2)])])}'), plan="three")
+
+    session.run()
+
+    (_, end) = _runs(session)
+    assert [(e["block"], e["block_in_session"], e["position"]) for e in end["block_ends"]] == [
+        ("a", 1, 0), ("b", None, 1), ("c", 2, 2)]
+    opened = [word[1] for word in _block_words(session.card.codes)
+              if isinstance(word, tuple) and word[0] == "start"]
+    assert opened == [e["block_in_session"] for e in end["block_ends"]
+                      if e["block_in_session"] is not None]
+    assert {row["block"]: row["block_in_session"] for row in _trial_rows(session)} == {
+        "a": 1, "c": 2}
+
+
+def test_the_start_row_carries_the_plan_as_declared(tmp_path):
+    """The science review, I4: the start row names the plan and writes it as declared, in the form
+    the content hash reads it, so the record tells a balanced plan from a random one without the
+    task file; `blocks` is the plan's block types as declared."""
+    path = _sessions.planned_task(tmp_path, f'{{"mixed": Plan({_TWO}, order=Balanced(blocks=4))}}')
+    session = _session(_spec(tmp_path, task=str(path), plan="mixed", trials=400))
+
+    session.run()
+
+    (start, _) = _runs(session)
+    plan = _load_task(path).plans["mixed"]
+    assert start["plan_form"] == json.loads(json.dumps(canonical(plan)))
+    assert start["plan_form"]["fields"]["order"] == {"class": "Balanced",
+                                                     "fields": {"blocks": 4}}
+    assert start["blocks"] == ["near", "far"]
+
+
+def test_a_time_limit_is_said_in_whole_minutes_and_seconds():
+    """The engineering review, Minor 4: "1 minutes" and "3.33333 minutes" were said."""
+    assert [_minutes(s) for s in (45, 60, 200, 3600)] == [
+        "45 s", "1 minute", "3 minutes 20 s", "60 minutes"]
+
+
+def test_a_run_naming_a_plan_its_task_lacks_is_refused_before_it_starts(tmp_path):
+    """The backstop for a caller that took no pre-flight, as for a blocking finding."""
+    session = _planned(tmp_path, f'{{"short": Plan({_TWO})}}', plan="long")
+
+    with pytest.raises(SystemExit, match="the task declares no plan long; its plans are short"):
+        session.run()
+
+    assert not (session.directory / "runs.jsonl").exists()
+
+
+# --- A person moves the run on a block, or back one (engine build C2b) ---------------------
+
+#: Three block types of one condition each, every condition owed four trials.
+_THREE = ('{"three": Plan([Block("a", [Condition("x", {"target_x": 5.0}, target=4)]), '
+          'Block("b", [Condition("y", {"target_x": 8.0}, target=4)]), '
+          'Block("c", [Condition("z", {"target_x": 12.0}, target=4)])])}')
+
+
+def test_a_person_moves_a_run_on_a_block_and_back_one_and_each_is_recorded_with_who(tmp_path):
+    """The PI, 2026-10-19, "'Next' and 'back one'": "Both directions by hand, each recorded with
+    who". *Next* leaves `a` after its first trial; *back one*, after two trials of `b`, plays `a`
+    again, started fresh; the stream closes each block as it is left, and the controls and the end
+    row say who."""
+    link = _Drained({2: [NextBlock(by=Box("kim"))], 4: [BackBlock(by=Box("kim"))]})
+    session = _planned(tmp_path, _THREE, plan="three", link=link)
+
+    session.run()
+
+    (_, end) = _runs(session)
+    assert session.blocks_run == ["a", "b", "a", "b", "c"]
+    kim = {"kind": "box", "name": "kim"}
+    assert [(e["block"], e["ended"], e["by"]) for e in end["block_ends"]] == [
+        ("a", "next", kim), ("b", "back", kim), ("a", "rule", None), ("b", "rule", None),
+        ("c", "rule", None)]
+    moves = [(row["kind"], row["block"], row["to"], row["event_code"], row["by"])
+             for row in _controls_rows(session) if row["kind"] in ("next_block", "back_block")]
+    # The engineering review, C1: a move's row names no code -- every block that ends on its own
+    # strobes `BLOCK_END` with no row, so wl-preproc could not time the n-th row naming 3 by the
+    # n-th 3 -- and it is timed by its own instant; the stream still closes each block left. Each
+    # row says who moved it (the final review, T9).
+    assert moves == [("next_block", "a", "b", None, kim), ("back_block", "b", "a", None, kim)]
+    rows = _trial_rows(session)
+    assert [row["block"] for row in rows[:4]] == ["a", "b", "b", "a"]
+    assert sum(row["block"] == "a" for row in rows) == 5, "one before next, four once back"
+    assert _block_words(session.card.codes) == [
+        ("run", 1), ("start", 1), "end", ("start", 2), "end", ("start", 3), "end", ("start", 4),
+        "end", ("start", 5), "end", "run end"]
+
+
+def test_a_move_back_before_a_blocks_first_trial_does_not_end_its_run_as_stalled(tmp_path):
+    """The engineering review, I1 (its fuzz's seed 167): a fixed plan whose first block owes
+    nothing and whose second owes three; a person moves back one before the second's first trial,
+    the first ends on its rule again, and the second plays its three -- where the run ended with
+    "the plan can draw no further trial", false for the second."""
+    link = _Drained({2: [BackBlock(by=Box("kim"))]})
+    session = _planned(tmp_path, (
+        '{"two": Plan([Block("a", [Condition("x", {"target_x": 5.0}, target=0)]), '
+        'Block("b", [Condition("y", {"target_x": 12.0}, target=3)])])}'), plan="two", link=link)
+
+    session.run()
+
+    (_, end) = _runs(session)
+    assert session.blocks_run == ["a", "b", "a", "b"]
+    assert [e["ended"] for e in end["block_ends"]] == ["rule", "back", "rule", "rule"]
+    assert len(_trial_rows(session)) == 3 and end["end_reason"] == "plan_done"
+    # A block left before it ran a trial was never opened in the stream, so the move closes
+    # nothing: an unconditional `BLOCK_END` would be unpaired, against wl-preproc's framing (the
+    # final review, T9). Only `b`'s second time, which ran its three trials, is framed.
+    assert _block_words(session.card.codes) == [("run", 1), ("start", 1), "end", "run end"]
+
+
+def test_a_move_into_a_timed_block_starts_its_time_afresh(tmp_path, monkeypatch):
+    """The engine C2b plan's Task 9 (the final review, T9): a person's move starts the block moved
+    to on its own time, as an advance does. Each trial lasts 1.5 s on the trial clock; `a` runs
+    three before *next*, 4.5 s, and `b`'s 4 s limit, counted from the move, ends it after its own
+    three -- counted from the run's start it would be over before `b`'s first."""
+    _scripted_trials(monkeypatch, [Outcome.CORRECT] * 400, frames=240)
+    link = _Drained({4: [NextBlock(by=Box("kim"))]})
+    session = _planned(tmp_path, (
+        '{"two": Plan([Block("a", [Condition("x", {"target_x": 5.0}, target=500)]), '
+        'Block("b", [Condition("y", {"target_x": 12.0}, target=500)], time_limit_s=4.0)])}'),
+        plan="two", link=link)
+
+    session.run()
+
+    (_, end) = _runs(session)
+    assert [row["block"] for row in _trial_rows(session)] == ["a"] * 3 + ["b"] * 3
+    assert [(e["block"], e["ended"]) for e in end["block_ends"]] == [("a", "next"), ("b", "time")]
+
+
+def test_a_move_that_drops_a_drummed_trial_says_so_in_its_row(tmp_path, monkeypatch):
+    """The science review, M5: a person's move acts at once, dropping a drummed trial waiting to
+    come back (the engineering call; Appendix B), and its row says which."""
+    _scripted_trials(monkeypatch, [Outcome.WRONG_TARGET] + [Outcome.CORRECT] * 50)
+    link = _Drained({2: [NextBlock(by=Box("kim"))]})
+    session = _planned(tmp_path, (
+        '{"drill": Plan([Block("a", [Condition("x", {"target_x": 5.0}, target=4)], drum=True), '
+        'Block("b", [Condition("y", {"target_x": 12.0}, target=2)])])}'), plan="drill", link=link)
+
+    session.run()
+
+    (row,) = [row for row in _controls_rows(session) if row["kind"] == "next_block"]
+    assert (row["block"], row["to"], row["dropped"]) == ("a", "b", "x")
+    (said,) = [said for kind, _, _, said in session.controls if kind == "next_block"]
+    assert said == "next block: from block a to block b; the drummed trial of x waiting was dropped"
+
+
+def test_a_move_with_no_block_to_go_to_is_refused_with_its_sentence_and_changes_nothing(tmp_path):
+    """A plain run is one block; a plan's first block has none before it."""
+    plain = _session(_spec(tmp_path / "plain", trials=3), link=_Drained(
+        {1: [NextBlock(by=Box("kim"))]}))
+    planned = _planned(tmp_path / "planned", _THREE, plan="three", link=_Drained(
+        {1: [BackBlock(by=Box("kim"))]}))
+
+    plain.run()
+    planned.run()
+
+    assert [why for _, _, why in plain.refusals] == [
+        "a plain run is one block, so there is no block to move to; a run of one of the task's "
+        "plans moves between its blocks"]
+    assert [why for _, _, why in planned.refusals] == [
+        "block 'a' is the first of the run's blocks, so there is no block before it"]
+    assert planned.blocks_run == ["a", "b", "c"]
+
+
+def test_a_move_sent_while_paused_is_applied_at_once(tmp_path):
+    """As a clear or a drumming switch is: `_hold` drains it into `Session._command`, beside the
+    pause, outside its welfare-listed parts, so the run resumes in the block moved to."""
+    link = _Scripted(script={1: [NextBlock(by=Box("kim"))], 2: [Resume(by=Box("kim"))]})
+    path = _sessions.planned_task(tmp_path, _THREE)
+    session, _ = _walled(tmp_path, link, task=str(path), plan="three", trials=400)
+    link.queue(Pause(by=Box("kim")))
+
+    session.run()
+
+    kinds = [row["kind"] for row in _controls_rows(session)]
+    assert kinds[:3] == ["pause", "next_block", "resume"]
+    assert _trial_rows(session)[0]["block"] == "b"
+    assert session.blocks_run == ["a", "b", "c"]

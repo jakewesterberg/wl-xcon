@@ -135,3 +135,56 @@ def head_free_task(folder: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text.replace(old, ""))
     return path
+
+
+def polar_task(folder: Path, *, name: str = "polar") -> Path:
+    """The reference detection task with its target placed by one setting, `target_pos`, whose
+    choices are polar positions -- 8° out to the right and 8° out at 45° (`task.Polar`; the PI,
+    2026-10-19, "Polar first, x-y allowed") -- written into `folder` as `NAME.py`. Engine test
+    material, run only in the simulator: no reference task has such a setting."""
+    text = Path("tasks/fixation_detection.py").read_text()
+    for old, new in (
+        ('"target", at=(P("target_x"), P("target_y")), looks=P("target_appearance")',
+         '"target", at=P("target_pos"), looks=P("target_appearance")'),
+        ('            at=(P("target_x"), P("target_y")),\n            radius=P("target_window"),',
+         '            at=P("target_pos"),\n            radius=P("target_window"),'),
+        ('        Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0),',
+         '        Param("target_pos", unit="deg", choices=(Polar(8.0, 0.0), Polar(8.0, 45.0))),\n'
+         '        Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0),'),
+        ("from wl_xcon.task import (", "from wl_xcon.task import (\n    Polar,"),
+    ):
+        assert text.count(old) == 1, old
+        text = text.replace(old, new)
+    text += (
+        "\n\nimport dataclasses as _polar_dataclasses\n"
+        "from wl_xcon.task import NOT_DIFFICULTY, STIMULUS, Meaning\n"
+        "TASK = _polar_dataclasses.replace(TASK, meanings={\n"
+        "    **TASK.meanings,\n"
+        "    'target_pos': Meaning(NOT_DIFFICULTY, STIMULUS, note='the target position'),\n"
+        "})\n"
+    )
+    path = Path(folder) / f"{name}.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path
+
+
+def planned_task(folder: Path, plans: str = "{}", *, name: str = "planned",
+                 structures: str = "TASK.structures") -> Path:
+    """The reference detection task with plans (engine build C2b), written into `folder` as
+    `NAME.py`: `plans` is Python source for its plans dict, and `structures` for its structures
+    dict, each free to name `detection`, its one trial structure, and every word of the plan
+    vocabulary. Engine test material, run only in the simulator: no reference task declares a
+    plan, since real plans are set with the PI in wl-xtasks."""
+    text = Path("tasks/fixation_detection.py").read_text() + (
+        "\n\nimport dataclasses as _dataclasses\n"
+        "from wl_xcon.task import (\n"
+        "    NO_LIMIT, SPENT, Balanced, Block, ByCriterion, Condition, Constrained, Cyclic,\n"
+        "    Fixed, Plan, Random, WithReplacement,\n"
+        ")\n"
+        f"TASK = _dataclasses.replace(TASK, structures={structures}, plans={plans})\n"
+    )
+    path = Path(folder) / f"{name}.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path

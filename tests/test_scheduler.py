@@ -12,15 +12,22 @@ import random
 import pytest
 
 from wl_xcon.scheduler import (
+    BACK,
     CAP,
     CLEARED,
     CORRECT_ONLY,
     DRUM_WARNING,
     EVERY_TRIAL,
+    FALL_BACK,
+    NEXT,
     PRESENTED,
     RIG,
+    RULE,
+    RUN_TIME,
+    TIME,
     TRAINING,
     Block,
+    BlockEnd,
     Condition,
     ConditionReport,
     Constrained,
@@ -29,7 +36,10 @@ from wl_xcon.scheduler import (
     Shuffled,
     WithReplacement,
 )
-from wl_xcon.task import COUNTED, OWED, SPENT, UNPAID, Counting, Outcome
+from wl_xcon.task import (
+    COUNTED, NO_LIMIT, OWED, SPENT, UNPAID, Balanced, ByCriterion, Counting, Cyclic, Fixed, Outcome,
+    Random,
+)
 
 
 def _block(**kwargs) -> Block:
@@ -814,6 +824,86 @@ def test_the_tasks_repeat_limit_holds_in_a_block_counted_by_its_own_table_unless
     assert moved_past(Counting(after_stimulus=OWED, cap=2)) == [2]
 
 
+def _mixed(**block) -> Scheduler:
+    """A block of two conditions, `detect` naming the `detection` structure -- breaks after its
+    stimulus used up, no response a miss, no repeat -- and `search` naming none, so playing the
+    default's: breaks shown again, no response no answer, no limit (engine build C2b)."""
+    detection = Counting(after_stimulus=SPENT, withholding=True, cap=0)
+    search = Counting(after_stimulus=OWED)
+    mixed = Block(name="mixed", conditions=[
+        Condition("detect", {}, target=5, structure="detection"),
+        Condition("search", {}, target=5),
+    ], **block)
+    return Scheduler([mixed], seed=1, counting=search, countings={"detection": detection})
+
+
+def test_each_condition_counts_by_the_table_of_the_structure_it_plays():
+    """Engine build C2b (the PI, 2026-10-07: "a task declares several trial structures; each
+    condition names its own; interleaving them in a block is ordinary"): a condition naming a
+    structure counts by that structure's table -- what a break after its stimulus does, whether no
+    response is an answer, its repeat limit -- and one naming none by the default's."""
+    scheduler = _mixed()
+
+    assert scheduler.record("detect", Outcome.TARGET_BREAK) == SPENT
+    assert scheduler.record("search", Outcome.TARGET_BREAK) == OWED
+    assert scheduler.record("detect", Outcome.NO_RESPONSE) == COUNTED
+    assert scheduler.record("search", Outcome.NO_RESPONSE) == OWED
+    # `detect`'s structure moves a condition past at its first failure in a row; `search`'s has
+    # no limit, so its failures were placed as repeats.
+    assert scheduler.record("detect", Outcome.FIXATION_BREAK) == OWED
+    assert [(s.condition, s.because) for s in scheduler.shortfalls] == [("detect", CAP)]
+    assert scheduler.counts("search").repeats == 2
+    # And judged by it: `detect`'s miss is a wrong answer, `search`'s no response no answer.
+    assert (scheduler.counts("detect").wrong, scheduler.counts("search").wrong) == (1, 0)
+
+
+def test_a_blocks_own_table_replaces_each_structures_and_each_structure_says_what_is_an_answer():
+    """A block counting by its own table counts every condition by it, whatever structure each
+    plays; whether no response is an answer stays each structure's (the controller's ruling M8 on
+    the engine C2a plan's revision): a miss under `detect`, used up as no answer under `search`."""
+    scheduler = _mixed(counting=PRESENTED)
+
+    assert scheduler.record("detect", Outcome.TARGET_BREAK) == SPENT
+    assert scheduler.record("search", Outcome.TARGET_BREAK) == SPENT
+    assert scheduler.record("detect", Outcome.NO_RESPONSE) == COUNTED
+    assert scheduler.record("search", Outcome.NO_RESPONSE) == SPENT
+
+
+def test_a_block_offers_clear_when_any_structure_its_conditions_play_can_owe():
+    """`clearable` (the engine C2a plan's Minor 3) asks every structure the open block's conditions
+    play: a block of conditions all playing a structure that owes nothing offers no *clear*; one
+    more condition playing a structure that owes, and it does."""
+    def offered(*structures) -> bool:
+        block = Block(name="b", conditions=[
+            Condition(f"c{n}", {}, target=1, structure=name) for n, name in enumerate(structures)])
+        return Scheduler([block], seed=1, counting=Counting(after_stimulus=OWED),
+                         countings={"flat": EVERY_TRIAL}).clearable
+
+    assert offered("flat", "flat") is False
+    assert offered("flat", None) is True
+
+
+def test_a_blocks_no_limit_removes_its_tasks_repeat_limit():
+    """XC-380 (engine build C2b): a block's own table says "no limit" with `NO_LIMIT`, where `None`
+    keeps the task's -- so a hold-training block can repeat a trial until it is done though its
+    task moves a condition past at its second failure in a row. In a structure's own table the two
+    say the same."""
+    def moved_past(block_cap, structure_cap=1) -> list:
+        table = Counting(after_stimulus=OWED, cap=block_cap)
+        block = Block(name="b", conditions=[Condition("a", {}, target=3)], counting=table)
+        scheduler = Scheduler([block], seed=1,
+                              counting=Counting(after_stimulus=OWED, cap=structure_cap))
+        for _ in range(6):
+            if scheduler.finished:
+                break
+            scheduler.record(scheduler.next_trial().name, Outcome.FIXATION_BREAK)
+        return [short.after_trial for short in scheduler.shortfalls]
+
+    assert moved_past(None) == [1]
+    assert moved_past(NO_LIMIT) == []
+    assert moved_past(None, structure_cap=NO_LIMIT) == []
+
+
 def test_a_rig_failure_anywhere_in_the_row_names_it_for_the_rig_and_an_ended_trial_forgets_it():
     """Task 7's review, Important 2: a shortfall is flagged as possible avoidance only when every
     failed try in the row was the animal's, so a lost tracker on the row's first try names it for
@@ -1576,3 +1666,590 @@ def test_a_condition_already_paid_is_not_placed_again_when_a_trial_of_it_is_owed
     assert scheduler.record("a", Outcome.FIXATION_BREAK) == OWED
 
     assert scheduler.requeued == ["a", "a"]
+
+
+# --- Plans: how blocks follow one another, and how each ends (engine build C2b) ---------------
+
+
+def _one(name: str, target: int = 1, **block) -> Block:
+    return Block(name=name, conditions=[Condition(name.lower(), {}, target=target)], **block)
+
+
+def _run_out(scheduler: Scheduler, limit: int = 60) -> list[str]:
+    """The block names a scheduler visits, every trial correct, until its plan is done."""
+    seen = [scheduler.block.name]
+    for _ in range(limit):
+        if scheduler.done:
+            return seen
+        if scheduler.ends is not None:
+            seen.append(scheduler.advance(scheduler.ends).name)
+            continue
+        scheduler.record(scheduler.next_trial().name, Outcome.CORRECT)
+    raise AssertionError(f"not done after {limit} steps: {seen}")
+
+
+def test_a_cyclic_plan_repeats_its_blocks_in_order_its_cycles_times():
+    """The PI, 2026-10-07: "repeating (Bt1, Bt2, Bt1, Bt2...)". A cyclic plan of no count is never
+    done by its blocks; a time limit, a stop or the out-of-cage limit ends its run."""
+    blocks = [_one("A"), _one("B")]
+
+    assert _run_out(Scheduler(blocks, seed=1, order=Cyclic(cycles=2))) == ["A", "B", "A", "B"]
+    endless = Scheduler(blocks, seed=1, order=Cyclic())
+    for _ in range(9):
+        endless.record(endless.next_trial().name, Outcome.CORRECT)
+        assert not endless.done
+        endless.advance(endless.ends)
+    assert endless.block.name == "B"
+
+
+def test_a_balanced_plan_shows_every_block_type_once_a_round_in_an_order_drawn_from_the_seed():
+    """The PI, 2026-10-19, "Shuffled rounds": each round shows every block type once, in a seeded
+    random order; a count that is not whole rounds leaves the last round partial, the seed choosing
+    its types; the same seed replays the same order, and another seed can draw another."""
+    blocks = [_one("A"), _one("B"), _one("C")]
+
+    def order(seed: int, count: int = 7) -> list[str]:
+        return _run_out(Scheduler(blocks, seed=seed, order=Balanced(blocks=count)))
+
+    first = order(1)
+    assert len(first) == 7
+    assert sorted(first[0:3]) == sorted(first[3:6]) == ["A", "B", "C"]
+    assert first == order(1)
+    assert len({tuple(order(seed)) for seed in range(8)}) > 1
+
+
+def test_a_random_plan_draws_each_block_type_from_the_seed_and_may_repeat_one():
+    """The PI, 2026-10-19, "Both, as two choices": "random can repeat a type and leave another out
+    by chance, recorded with its seed": each block's type drawn on its own, replayed by the seed."""
+    blocks = [_one("A"), _one("B")]
+    orders = [tuple(_run_out(Scheduler(blocks, seed=seed, order=Random(blocks=6))))
+              for seed in range(12)]
+
+    assert all(len(order) == 6 for order in orders)
+    assert any(order[i] == order[i + 1] for order in orders for i in range(5))
+    assert orders[3] == tuple(_run_out(Scheduler(blocks, seed=3, order=Random(blocks=6))))
+
+
+def test_a_random_block_order_leaves_every_conditions_draw_as_the_seed_gives_it():
+    """A random block order draws from a generator of its own (`seed` again, apart), so the
+    conditions a block draws are the ones a fixed plan's same block draws from the same seed."""
+    block = Block(name="A", conditions=[Condition(c, {}, target=3) for c in "xyz"])
+
+    def draws(**order) -> list[str]:
+        scheduler = Scheduler([block], seed=5, **order)
+        names = []
+        for _ in range(9):
+            names.append(scheduler.next_trial().name)
+            scheduler.record(names[-1], Outcome.CORRECT)
+        return names
+
+    assert draws() == draws(order=Random(blocks=1))
+
+
+def _stages(fall_back=(0.5, 4)) -> Scheduler:
+    """A training progression of three stages, each "3 right in a row" over one condition."""
+    blocks = [_one(name, target=1, criterion=(1.0, 3)) for name in ("S1", "S2", "S3")]
+    return Scheduler(blocks, seed=1, order=ByCriterion(fall_back=fall_back))
+
+
+def _answer(scheduler: Scheduler, *outcomes: Outcome) -> None:
+    for outcome in outcomes:
+        scheduler.record(scheduler.next_trial().name, outcome)
+
+
+def test_a_training_progression_moves_up_on_a_stages_rule_and_back_one_on_its_fall_back():
+    """The PI, 2026-10-19, "Same, but top keeps going": move up when the stage's own rule is met;
+    move back one stage, started fresh, when the plan's second rule is met -- "under 50% over the
+    last 20" -- judged once that many answers are in, answers only."""
+    scheduler = _stages()
+    _answer(scheduler, Outcome.CORRECT, Outcome.CORRECT, Outcome.CORRECT)
+    assert scheduler.ends == RULE
+    assert scheduler.advance(scheduler.ends).name == "S2"
+
+    _answer(scheduler, Outcome.WRONG_TARGET, Outcome.FIXATION_BREAK, Outcome.WRONG_TARGET,
+            Outcome.CORRECT)
+    assert scheduler.ends is None, "three answers are not yet the window's four"
+    _answer(scheduler, Outcome.WRONG_TARGET)
+    assert scheduler.ends == FALL_BACK
+    assert scheduler.advance(scheduler.ends).name == "S1"
+    assert scheduler.counts("s1").trials == 0, "started fresh"
+    assert scheduler.fell_back == 1, "counted, for the console's plan row"
+    assert [(end.block, end.ended) for end in scheduler.ended] == [("S1", RULE), ("S2", FALL_BACK)]
+
+
+def test_the_first_stage_has_no_stage_to_fall_back_to():
+    scheduler = _stages()
+    _answer(scheduler, *[Outcome.WRONG_TARGET] * 6)
+
+    assert scheduler.ends is None
+
+
+def test_at_the_top_stage_the_animal_keeps_working_once_its_rule_is_met():
+    """The PI, 2026-10-19: "at the top stage the animal keeps working there until a time limit, a
+    stop or the end of the session": its rule met, it does not end, and its conditions keep coming;
+    its own time limit ends the run, with nowhere to move on to."""
+    scheduler = _stages(fall_back=None)
+    for _ in range(2):
+        _answer(scheduler, Outcome.CORRECT, Outcome.CORRECT, Outcome.CORRECT)
+        scheduler.advance(scheduler.ends)
+    _answer(scheduler, *[Outcome.CORRECT] * 5)
+
+    assert scheduler.block.name == "S3" and scheduler.finished
+    assert scheduler.ends is None and not scheduler.done and scheduler.past_targets
+    scheduler.expire()
+    assert scheduler.ends == TIME and scheduler.done
+
+
+def test_a_met_rule_counts_before_a_fall_back_at_the_top_stage_too():
+    """A met rule counts before a fall-back met at the same answer ("training ends on a success";
+    Appendix B) -- and at the top stage, which works on once its rule is met, it holds the
+    fall-back off for as long as the rule holds, falling back once it does not."""
+    blocks = [_one("S1", target=1), _one("S2", target=1, criterion=(1.0, 2))]
+    scheduler = Scheduler(blocks, seed=1, order=ByCriterion(fall_back=(0.6, 4)))
+    _answer(scheduler, Outcome.CORRECT)
+    scheduler.advance(scheduler.ends)
+    _answer(scheduler, Outcome.WRONG_TARGET, Outcome.WRONG_TARGET, Outcome.CORRECT,
+            Outcome.CORRECT)
+
+    assert scheduler.finished and list(scheduler._back) == [0, 0, 1, 1]
+    assert scheduler.ends is None, "two right in a row hold off two of four first answers"
+    _answer(scheduler, Outcome.WRONG_TARGET)
+    assert scheduler.ends == FALL_BACK
+
+
+def test_a_stage_whose_time_runs_out_moves_up_whether_or_not_it_passed():
+    """The PI, 2026-10-19, "Move on anyway": "Time-boxed stages: go to the next stage whether or not
+    the animal passed." What it still owed is recorded as not run, "time ran out"."""
+    scheduler = _stages()
+    _answer(scheduler, Outcome.FIXATION_BREAK)
+    scheduler.expire()
+
+    assert scheduler.ends == TIME
+    assert scheduler.advance(scheduler.ends).name == "S2"
+    assert scheduler.shortfalls == [Shortfall("S1", "s1", 1, TIME, 0)]
+    assert scheduler.ended == [BlockEnd("S1", TIME, None, 0)]
+
+
+def test_a_blocks_time_waits_for_a_drummed_trial_to_be_right():
+    """The PI, 2026-10-19, "Finish the drum first": time running out while a drummed trial is coming
+    back ends the block only once that trial is right."""
+    scheduler = Scheduler([_one("A", target=5, drum=True), _one("B")], seed=1)
+    _answer(scheduler, Outcome.WRONG_TARGET)
+    scheduler.expire()
+
+    assert scheduler.ends is None
+    _answer(scheduler, Outcome.WRONG_TARGET)
+    assert scheduler.ends is None
+    _answer(scheduler, Outcome.CORRECT)
+    assert scheduler.ends == TIME and not scheduler.done
+
+
+def test_a_block_with_a_number_of_trials_ends_once_it_has_run_them_drummed_repeats_inside():
+    """Engine spec §13.5's "a number of trials" (the PI, 2026-10-07), counted as the PI counts
+    trials (2026-10-18: "200 trials; drummed repeats inside them"): a trial and its drummed repeats
+    one, an ordinary repeat a trial of its own; the targets are a minimum, and past them every
+    condition is drawn by its order."""
+    block = Block(name="A", conditions=[Condition("x", {}, target=1), Condition("y", {}, target=1)],
+                  trials=4, drum=True)
+    scheduler = Scheduler([block], seed=1)
+    _answer(scheduler, Outcome.CORRECT, Outcome.WRONG_TARGET, Outcome.CORRECT)
+
+    assert scheduler.block_trials == 2 and scheduler.past_targets and not scheduler.finished
+    _answer(scheduler, Outcome.CORRECT)
+    assert scheduler.block_trials == 3 and not scheduler.finished
+    _answer(scheduler, Outcome.CORRECT)
+    assert scheduler.finished and scheduler.ends == RULE and scheduler.done
+
+
+def test_a_person_moves_a_run_on_a_block_or_back_one_and_it_is_recorded_with_who():
+    """The PI, 2026-10-19, "'Next' and 'back one'": both directions by hand, each recorded with
+    who; back one starts that block fresh; past the plan's last block, or before its first, nothing
+    moves and the sentence says why."""
+    scheduler = _stages()
+    assert scheduler.move(BACK, by="kim") == (
+        "block 'S1' is the first of the run's blocks, so there is no block before it")
+    _answer(scheduler, Outcome.CORRECT)
+
+    assert scheduler.move(NEXT, by="kim") is None and scheduler.block.name == "S2"
+    assert scheduler.move(NEXT, by="kim") is None and scheduler.block.name == "S3"
+    assert scheduler.move(NEXT, by="kim") == (
+        "block 'S3' is the last its plan gives, so there is no next block; stop ends the run")
+    assert scheduler.move(BACK, by="kim") is None and scheduler.block.name == "S2"
+    assert [(end.block, end.ended, end.by) for end in scheduler.ended] == [
+        ("S1", NEXT, "kim"), ("S2", NEXT, "kim"), ("S3", BACK, "kim")]
+
+
+def test_a_drumming_switch_as_a_cyclic_plans_last_block_ends_is_for_the_block_that_follows():
+    """`drum`'s carry reads the block the plan's order gives next (`following`), not the next in
+    the list: at a cyclic plan's last block that is its first again."""
+    scheduler = Scheduler([_one("A", drum=True), _one("B")], seed=1, order=Cyclic())
+    scheduler.advance(RULE)
+    _answer(scheduler, Outcome.CORRECT)
+
+    assert scheduler.drumming_switched == "block", "A, which follows, drums by its declaration"
+    assert scheduler.drum("off") == "A"
+
+
+def test_a_plan_that_has_opened_every_block_type_since_its_last_trial_has_stalled():
+    """The per-advance progress check (engine spec §13.5): a cyclic plan whose every block is over
+    before it draws a trial would advance forever; it has stalled once it has opened each type
+    since its last trial. A plan with one such type among others that draw has not."""
+    empty = [_one("A", target=0), _one("B", target=0)]
+    scheduler = Scheduler(empty, seed=1, order=Cyclic())
+    assert scheduler.ends == RULE and not scheduler.stalled
+    scheduler.advance(scheduler.ends)
+    assert scheduler.ends == RULE and scheduler.stalled
+
+    mixed = Scheduler([_one("A", target=0), _one("B")], seed=2, order=Random())
+    for _ in range(12):
+        if mixed.ends is None:
+            break
+        assert not mixed.stalled
+        mixed.advance(mixed.ends)
+    assert mixed.block.name == "B" and mixed.drawable
+
+
+def test_a_persons_move_starts_the_progress_check_afresh():
+    """The engine C2b plan's engineering review, I1 (its fuzz's seed 167): a fixed plan whose first
+    block owes nothing and whose second owes three; a person moves back one before the second's
+    first trial, and the first ends on its rule again. The plan has opened both types since its
+    last trial, but a move is not the plan spinning: it has not stalled, and the second block
+    draws."""
+    scheduler = Scheduler([_one("A", target=0), _one("B", target=3)], seed=1)
+    assert scheduler.ends == RULE and not scheduler.stalled
+    scheduler.advance(scheduler.ends)
+    assert scheduler.move(BACK, by="kim") is None and scheduler.block.name == "A"
+
+    assert scheduler.ends == RULE and not scheduler.stalled
+    assert scheduler.advance(scheduler.ends).name == "B" and scheduler.drawable
+
+
+def test_a_condition_of_weight_0_is_never_drawn_and_leaves_nothing_to_draw_once_the_rest_are_paid():
+    """The engine C2b plan's engineering review, I2: a weighted draw never gives a condition of
+    weight 0, and once every other condition is paid there is nothing to draw -- `drawable` says
+    so, for the loop to end the run with its sentence (the PI, 2026-10-19, "End run with a
+    sentence") -- where `random.choices` raised. The draws before are the ones the seed gives
+    with the condition left out."""
+    def block(weights) -> Block:
+        return Block(name="A", conditions=[Condition(c, {}, target=t) for c, t in
+                                           (("a", 2), ("b", 3), ("c", 3))][:len(weights)],
+                     order=WithReplacement(weights=weights))
+
+    zero = Scheduler([block({"a": 0.0, "b": 1.0, "c": 2.0})], seed=4)
+    drawn = []
+    while zero.drawable:
+        drawn.append(zero.next_trial().name)
+        zero.record(drawn[-1], Outcome.CORRECT)
+
+    assert sorted(drawn) == ["b"] * 3 + ["c"] * 3
+    assert zero.owed("a") == 2 and zero.ends is None and not zero.drawable
+
+
+def _second_stage(drum: bool = True, **stage) -> Scheduler:
+    """A training progression at its second stage, drumming unless told not to, under a fall-back
+    rule of under half of the last four answers right; the first stage passed on one right
+    answer."""
+    blocks = [_one("S1", target=1),
+              Block(name="S2", conditions=[Condition("s2", {}, target=50)], drum=drum, **stage)]
+    scheduler = Scheduler(blocks, seed=1, order=ByCriterion(fall_back=(0.5, 4)))
+    _answer(scheduler, Outcome.CORRECT)
+    scheduler.advance(scheduler.ends)
+    return scheduler
+
+
+@pytest.mark.parametrize("criterion", [(1.0, 3), (0.8, 5), None])
+@pytest.mark.parametrize("first_answers", [False, True])
+def test_moving_back_judges_each_trials_first_answer_only_whatever_the_stage_counts(
+        criterion, first_answers):
+    """The PI, 2026-10-19, "First answer only": "Only each trial's first answer counts toward moving
+    back, so one stubborn trial can't demote a stage the animal is otherwise doing well in" --
+    under a streak, a percentage or no rule, with the training setting "first answers only" on or
+    off (the science review, C1: the window sat in the stage rule's branch). Right first time
+    twice, then one trial right only at its fourth try, then one at its second: four first answers,
+    half right, not under half; one more wrong first answer and the stage falls back, once its
+    drummed trial is right."""
+    scheduler = _second_stage(criterion=criterion)
+    scheduler.first_answers = first_answers
+    _answer(scheduler, Outcome.CORRECT, Outcome.CORRECT)
+    _answer(scheduler, Outcome.WRONG_TARGET, Outcome.WRONG_TARGET, Outcome.WRONG_TARGET,
+            Outcome.CORRECT)
+    assert scheduler.ends is None, "three first answers, two right: not judged yet"
+    _answer(scheduler, Outcome.WRONG_TARGET, Outcome.CORRECT)
+    assert scheduler.ends is None, "four first answers, half right: not under half"
+
+    _answer(scheduler, Outcome.WRONG_TARGET)
+    assert scheduler.ends is None, "its drummed trial comes back first"
+    _answer(scheduler, Outcome.CORRECT)
+    assert scheduler.ends == FALL_BACK
+    assert scheduler.because(FALL_BACK) == (
+        "fell back: 1 of its last 4 first answers right, under 50%")
+
+
+def test_a_broken_hold_a_stage_scores_counts_toward_moving_back_as_toward_moving_up():
+    """The PI, 2026-10-19, "Yes, the same": "A hold-training stage judges holds both ways: broken
+    holds count toward moving up and toward moving back." A break the stage's own table does not
+    score counts toward neither."""
+    scored = _second_stage(drum=False, counting=Counting(
+        after_stimulus=OWED, outcomes={"fixation_break": COUNTED}))
+    plain = _second_stage(drum=False)
+    for scheduler in (scored, plain):
+        _answer(scheduler, Outcome.CORRECT, *[Outcome.FIXATION_BREAK] * 3)
+
+    assert list(scored._back) == [1, 0, 0, 0] and scored.ends == FALL_BACK
+    assert list(plain._back) == [1] and plain.ends is None
+
+
+def test_a_balanced_plans_rounds_never_put_one_block_type_back_to_back():
+    """The PI, 2026-10-19, "Never back-to-back": "Each new round starts with a different type than
+    the last one played, so every block boundary is a real switch; still balanced in counts." Over
+    many seeds and two to five types, no two blocks in a row share a type, and each whole round
+    still shows every type once."""
+    for n in range(2, 6):
+        blocks = [_one(f"T{i}") for i in range(n)]
+        for seed in range(40):
+            order = _run_out(Scheduler(blocks, seed=seed, order=Balanced(blocks=4 * n + 1)),
+                             limit=400)
+            assert all(a != b for a, b in zip(order, order[1:])), (n, seed, order)
+            rounds = [sorted(order[i:i + n]) for i in range(0, 4 * n, n)]
+            assert rounds == [sorted(b.name for b in blocks)] * 4, (n, seed)
+
+
+def test_each_block_end_records_its_place_its_number_in_the_stream_and_when_a_top_stage_passed():
+    """The engineering review, I4: each `BlockEnd` names its place in the run's sequence and the
+    number the loop gave it as its first trial opened it in the stream, `None` for a block that
+    ran no trial. The science review, I1: a top stage's end says after which trial its rule was
+    first met, its animal working on past it."""
+    scheduler = _stages(fall_back=None)
+    scheduler.in_session = 7
+    _answer(scheduler, Outcome.CORRECT, Outcome.CORRECT, Outcome.CORRECT)
+    scheduler.advance(scheduler.ends)
+    assert scheduler.move(NEXT, by="kim") is None
+    scheduler.in_session = 9
+    _answer(scheduler, Outcome.CORRECT, Outcome.WRONG_TARGET, *[Outcome.CORRECT] * 3)
+    assert scheduler.passed_at is None, "not yet asked at a boundary"
+    assert scheduler.ends is None and scheduler.passed_at == 7
+    _answer(scheduler, Outcome.CORRECT, Outcome.WRONG_TARGET)
+    scheduler.expire()
+    assert scheduler.ends == TIME and scheduler.passed_at == 7
+    scheduler.close(scheduler.ends)
+
+    assert scheduler.ended == [BlockEnd("S1", RULE, None, 2, 0, 7, None),
+                               BlockEnd("S2", NEXT, "kim", 2, 1, None, None),
+                               BlockEnd("S3", TIME, None, 9, 2, 9, 7)]
+
+
+def test_the_runs_time_closes_its_open_block_as_the_runs_recording_what_it_owed_so():
+    """The science review, I3: the run's own time limit ending the run with a block open is
+    recorded apart from the block's own time -- `RUN_TIME` -- and what the block still owed is
+    recorded as not run for it, forgiving nothing."""
+    scheduler = Scheduler([_one("A", target=3)], seed=1)
+    _answer(scheduler, Outcome.CORRECT)
+    scheduler.close(RUN_TIME)
+
+    assert scheduler.shortfalls == [Shortfall("A", "a", 2, RUN_TIME, 0)]
+    assert scheduler.ended == [BlockEnd("A", RUN_TIME, None, 0)]
+    assert scheduler.owed("a") == 2
+
+
+def test_each_block_end_is_said_with_its_numbers():
+    """The science review, I2: one line on the changes feed per block end, with its reason and
+    numbers -- "S2 -> S1: 8 of last 20 right"."""
+    streak = _stages()
+    _answer(streak, Outcome.CORRECT, Outcome.CORRECT, Outcome.CORRECT)
+    percentage = Scheduler([_one("A", target=1, criterion=(0.8, 5), trials=6)], seed=1)
+    _answer(percentage, Outcome.CORRECT, Outcome.WRONG_TARGET, *[Outcome.CORRECT] * 4)
+    timed = Scheduler([_one("A", target=4)], seed=1)
+    timed.expire()
+
+    assert streak.because(RULE) == "its rule met: 3 right in a row, every target used up"
+    assert percentage.because(RULE) == (
+        "its rule met: 4 of its last 5 answers right, 6 trials run, every target used up")
+    assert timed.because(TIME) == "its time ran out, its rule not met"
+    assert timed.because(RUN_TIME) == "the run's time ran out"
+
+
+def _fuzzed(seed: int) -> Scheduler:
+    """A random plan: one to four block types of one to three conditions, targets 0 to 3, each
+    perhaps a criterion, a number of trials, drumming and a condition order; and a random block
+    order of each kind, the counted ones counted."""
+    rng = random.Random(seed)
+    blocks = []
+    for b in range(rng.randint(1, 4)):
+        order = rng.choice([Shuffled(), WithReplacement(weights={"c0": 2.0}),
+                            Constrained(max_run=rng.randint(1, 2))])
+        blocks.append(Block(
+            name=f"B{b}",
+            conditions=[Condition(f"c{c}", {}, target=rng.randint(0, 3))
+                        for c in range(rng.randint(1, 3))],
+            criterion=rng.choice([None, (rng.choice([0.5, 0.8, 1.0]), rng.randint(1, 4))]),
+            trials=rng.choice([None, rng.randint(1, 6)]),
+            drum=rng.random() < 0.3,
+            order=order,
+        ))
+    order = rng.choice([Cyclic(cycles=rng.randint(1, 3)), Balanced(blocks=rng.randint(1, 6)),
+                        Random(blocks=rng.randint(1, 6)),
+                        ByCriterion(fall_back=rng.choice([None, (0.5, rng.randint(1, 4))]))])
+    return Scheduler(blocks, seed=seed, counting=Counting(after_stimulus=OWED, cap=2),
+                     order=order)
+
+
+@pytest.mark.parametrize("seed", range(0, 400, 40))
+def test_no_random_plan_draws_from_nowhere_ends_a_block_on_a_drum_or_moves_a_stage_by_two(seed):
+    """Engine build C2b's plans fuzzed, forty plans a case: whatever a plan's orders and end rules,
+    a block that does not end can always draw (its targets, a repeat, a drum, or past its targets
+    every condition); no block ends while a drum waits ("Finish the drum first"); a training
+    progression moves one stage at a time; and every plan is done, stalls, or -- a progression's
+    top stage working on -- runs until it is stopped."""
+    for case in range(seed, seed + 40):
+        scheduler = _fuzzed(case)
+        rng = random.Random(case)
+        for _ in range(800):
+            if scheduler.done:
+                break
+            ending = scheduler.ends
+            if ending is not None:
+                assert scheduler._drum is None, case
+                if scheduler.stalled:
+                    assert all(
+                        b.criterion is None and b.trials is None
+                        and all(c.target == 0 for c in b.conditions) for b in scheduler.blocks
+                    ), f"a false stall, case {case}"
+                    break
+                was = scheduler._position
+                scheduler.advance(ending)
+                if isinstance(scheduler.order, ByCriterion):
+                    assert abs(scheduler._position - was) == 1, case
+                continue
+            assert scheduler.drawable, case
+            if isinstance(scheduler.order, Balanced) and len(scheduler.blocks) > 1:
+                sequence = scheduler._sequence
+                assert all(a != b for a, b in zip(sequence, sequence[1:])), case
+            name = scheduler.next_trial().name
+            assert name in {c.name for c in scheduler.block.conditions}, case
+            scheduler.record(name, rng.choice([Outcome.CORRECT, Outcome.CORRECT,
+                                               Outcome.WRONG_TARGET, Outcome.FIXATION_BREAK]))
+            if rng.random() < 0.02:
+                scheduler.expire()
+        else:
+            assert isinstance(scheduler.order, ByCriterion), case
+
+
+def test_a_timed_stages_fall_back_met_as_its_time_runs_out_moves_back():
+    """A fall-back is judged before a stage's time: S2 with four wrong first answers, its time
+    run out, falls back to S1 rather than moving on."""
+    scheduler = _stages()
+    _answer(scheduler, Outcome.CORRECT, Outcome.CORRECT, Outcome.CORRECT)
+    scheduler.advance(scheduler.ends)
+    _answer(scheduler, *[Outcome.WRONG_TARGET] * 4)
+    scheduler.expire()
+
+    assert scheduler.ends == FALL_BACK
+    assert scheduler.advance(scheduler.ends).name == "S1"
+
+
+def test_a_stage_moved_on_by_its_time_starts_its_own_clock():
+    scheduler = _stages()
+    _answer(scheduler, Outcome.FIXATION_BREAK)
+    scheduler.expire()
+    assert scheduler.expired
+    scheduler.advance(scheduler.ends)
+
+    assert scheduler.ends is None and not scheduler.expired
+
+
+def test_a_plan_whose_block_drew_since_it_opened_every_type_has_not_stalled():
+    scheduler = Scheduler([_one("A", target=0), _one("B")], seed=1, order=Cyclic())
+    scheduler.advance(scheduler.ends)
+    _answer(scheduler, Outcome.CORRECT)
+    assert scheduler.ends == RULE and not scheduler.stalled
+    scheduler.advance(scheduler.ends)
+
+    assert scheduler.ends == RULE and not scheduler.stalled
+
+
+def test_a_balanced_order_leaves_every_conditions_draw_as_the_seed_gives_it():
+    blocks = [Block(name=n, conditions=[Condition(c, {}, target=3) for c in "xyz"]) for n in "AB"]
+
+    def draws(**order) -> list[str]:
+        scheduler = Scheduler(blocks, seed=5, **order)
+        names = []
+        for _ in range(9):
+            names.append(scheduler.next_trial().name)
+            scheduler.record(names[-1], Outcome.CORRECT)
+        return names
+
+    assert draws() == draws(order=Balanced(blocks=1))
+
+
+def test_a_stage_below_the_top_records_no_pass_after_a_fall_back_from_it():
+    blocks = [_one("S1"), _one("S2", criterion=(1.0, 2))]
+    scheduler = Scheduler(blocks, seed=1, order=ByCriterion(fall_back=(0.6, 4)))
+    _answer(scheduler, Outcome.CORRECT)
+    scheduler.advance(scheduler.ends)
+    _answer(scheduler, Outcome.WRONG_TARGET, Outcome.WRONG_TARGET, Outcome.CORRECT,
+            Outcome.CORRECT)
+    assert scheduler.ends is None and scheduler.passed_at is not None
+    _answer(scheduler, Outcome.WRONG_TARGET)
+    scheduler.advance(scheduler.ends)
+
+    assert scheduler.passed_at is None
+
+
+def test_next_block_names_the_block_the_plan_goes_on_to_and_none_at_its_end():
+    scheduler = _stages()
+    assert scheduler.next_block.name == "S2"
+    _answer(scheduler, Outcome.CORRECT, Outcome.CORRECT, Outcome.CORRECT)
+    scheduler.advance(scheduler.ends)
+    scheduler.advance(RULE)
+    assert scheduler.block.name == "S3" and scheduler.next_block is None
+    cyclic = Scheduler([_one("A"), _one("B")], seed=1, order=Cyclic(cycles=1))
+    assert cyclic.next_block.name == "B"
+    cyclic.advance(RULE)
+    assert cyclic.next_block is None
+
+
+def test_expired_is_false_until_expire_and_false_again_after_the_block_moves_on():
+    scheduler = Scheduler([_one("A"), _one("B")], seed=1)
+    assert scheduler.expired is False
+    scheduler.expire()
+    assert scheduler.expired is True
+    scheduler.advance(TIME)
+    assert scheduler.expired is False
+
+
+def test_drum_waiting_names_the_condition_whose_drummed_trial_waits_until_it_is_right():
+    scheduler = Scheduler([_one("A", target=3, drum=True)], seed=1)
+    assert scheduler.drum_waiting is None
+    _answer(scheduler, Outcome.WRONG_TARGET)
+    assert scheduler.drum_waiting == "a"
+    _answer(scheduler, Outcome.CORRECT)
+    assert scheduler.drum_waiting is None
+
+
+def test_a_block_end_is_recorded_once_whoever_closes_it_again():
+    scheduler = Scheduler([_one("A", target=3)], seed=1)
+    scheduler.close(TIME)
+    scheduler.close(RUN_TIME)
+
+    assert scheduler.ended == [BlockEnd("A", TIME, None, None)]
+    assert [s.because for s in scheduler.shortfalls] == [TIME]
+
+
+def test_a_persons_clear_starts_the_progress_check_afresh():
+    """A Cyclic plan, A owing nothing and B owing two: B cleared to nothing before its first trial
+    ends on its rule, but that is a person's doing, not the plan spinning, so it has not stalled."""
+    scheduler = Scheduler([_one("A", target=0), _one("B", target=2)], seed=1, order=Cyclic())
+    scheduler.clearing = True
+    scheduler.advance(scheduler.ends)
+    assert scheduler.clear("b", by="kim", rest=True) is None
+
+    assert scheduler.ends == RULE and not scheduler.stalled
+    # And the move on from it: A owes nothing and ends at once, but the plan can still draw (B).
+    scheduler.advance(scheduler.ends)
+    assert scheduler.ends == RULE and not scheduler.stalled
+
+
+@pytest.mark.parametrize("order", [Fixed(), Cyclic(), Balanced(), Random(), ByCriterion()])
+def test_a_plan_with_no_blocks_is_refused_plainly_whatever_its_order(order):
+    with pytest.raises(IndexError, match="no block to start"):
+        Scheduler([], seed=1, order=order)

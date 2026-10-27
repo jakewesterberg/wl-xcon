@@ -31,21 +31,29 @@ from wl_xcon.task import (
     EXPECTED,
     HARDER,
     NEITHER,
+    NO_LIMIT,
     NOT_DIFFICULTY,
     OWED,
     SPENT,
     STIMULUS,
     UNCHANGED,
     After,
+    Balanced,
+    Block,
+    ByCriterion,
+    Condition,
     Counting,
+    Cyclic,
     Meaning,
     On,
     Outcome,
     Param,
+    Plan,
     Reward,
     State,
     Task,
     Trial,
+    WithReplacement,
 )
 
 HOLD = Param("fix_hold", unit="s", low=0.05, high=2.0, start=0.3)
@@ -139,6 +147,28 @@ TASK = Task(
 )
 '''
 
+#: `TASK_FILE` with a plan (engine build C2b): blocks drawn with replacement by weight, conditions
+#: naming their structure, a time limit and a balanced order -- each a declaration the hash writes.
+PLANNED_FILE = TASK_FILE.replace(
+    "    Reward, State, Task, Trial,\n)",
+    "    Reward, State, Task, Trial, Balanced, Block, Condition, Plan, WithReplacement,\n)",
+) + '''
+PLANNED = Task(
+    TASK.structures, default=TASK.default, reaction_time=TASK.reaction_time, choice=TASK.choice,
+    meanings=TASK.meanings,
+    plans={"mixed": Plan(
+        blocks=[
+            Block("catch", [Condition("signal", {"contrast": 0.5}, target=8, structure="wait"),
+                            Condition("blank", {"contrast": 0.02}, target=2)],
+                  order=WithReplacement(weights={"signal": 0.8, "blank": 0.2}), trials=10),
+            Block("easy", [Condition("easy", {"contrast": 0.9}, target=5)], time_limit_s=300.0),
+        ],
+        order=Balanced(blocks=4), time_limit_s=1800.0,
+    )},
+)
+del TASK
+'''
+
 #: Loads a task file by path and prints its hash: what another process makes of it.
 HASH_IT = (
     "import importlib.util, sys\n"
@@ -174,14 +204,29 @@ DEFAULTS = {
         "phase": 0.0,
     },
     "Background": {},
+    "Balanced": {"blocks": None},
     "Bar": {"length": 4.0, "width": 0.5, "orientation": 0.0, "contrast": None, "color": None},
     "Blank": {},
+    "Block": {
+        "name": REQUIRED,
+        "conditions": REQUIRED,
+        "criterion": None,
+        "counting": None,
+        "order": {"class": "Shuffled", "fields": {}},
+        "drum": False,
+        "trials": None,
+        "time_limit_s": None,
+    },
+    "BlockOrder": {},
     "Bounded": {"name": REQUIRED},
+    "ByCriterion": {"fall_back": None},
     "ChairStill": {},
     "Checkerboard": {"check_size": 1.0, "contrast": None, "aperture": 10.0, "color": None},
     "Choice": {"objects": REQUIRED, "by": REQUIRED},
     "Color": {},
+    "Condition": {"name": REQUIRED, "values": REQUIRED, "target": REQUIRED, "structure": None},
     "ConeContrast": {"L": 0.0, "M": 0.0, "S": 0.0},
+    "Constrained": {"max_run": 2, "weights": {}},
     "Contrast": {"value": REQUIRED},
     "Corrugation": {"sf": 0.5, "amplitude": 0.1, "orientation": 0.0, "phase": 0.0},
     "Counting": {
@@ -190,6 +235,7 @@ DEFAULTS = {
     },
     "Cross": {"size": 0.5, "thickness": 0.1, "contrast": None, "color": None},
     "Custom": {"name": REQUIRED},
+    "Cyclic": {"cycles": None},
     "DKL": {"lum": 0.0, "l_m": 0.0, "s_lm": 0.0},
     "Disc": {"size": 1.0, "contrast": None, "color": None},
     "Dots": {
@@ -204,6 +250,7 @@ DEFAULTS = {
     "Entered": {"window": REQUIRED},
     "Exited": {"window": REQUIRED},
     "FeatureAbove": {"source": REQUIRED, "threshold": REQUIRED},
+    "Fixed": {},
     "Form": {},
     "Gabor": {
         "sf": 2.0,
@@ -248,6 +295,7 @@ DEFAULTS = {
     },
     "On": {"guard": REQUIRED, "to": REQUIRED, "do": []},
     "Onscreen": {"patch": "task"},
+    "Order": {},
     "P": {"name": REQUIRED},
     "Param": {
         "name": REQUIRED,
@@ -259,6 +307,7 @@ DEFAULTS = {
         "start": None,
     },
     "Picture": {"asset": "", "size": 10.0},
+    "Plan": {"blocks": REQUIRED, "order": {"class": "Fixed", "fields": {}}, "time_limit_s": None},
     "Plaid": {
         "sf": 2.0,
         "orientation": 0.0,
@@ -281,6 +330,7 @@ DEFAULTS = {
         "color": None,
     },
     "RMS": {"value": REQUIRED},
+    "Random": {"blocks": None},
     "ReactionTime": {"state": REQUIRED, "to": REQUIRED, "note": REQUIRED},
     "Released": {"device": REQUIRED},
     "Remembered": {},
@@ -290,6 +340,7 @@ DEFAULTS = {
     "SaccadeTo": {"window": REQUIRED},
     "Score": {"window": REQUIRED, "scored_as": REQUIRED},
     "Show": {"stimulus": REQUIRED},
+    "Shuffled": {},
     "Slant": {"gradient": 0.05, "orientation": 0.0},
     "Square": {"size": 1.0, "contrast": None, "color": None},
     "State": {"name": REQUIRED, "enter": [], "go": [], "unbounded": False},
@@ -312,6 +363,7 @@ DEFAULTS = {
         "choice": None,
         "meanings": {},
         "needs_fixed_head": False,
+        "plans": {},
     },
     "Tolerances": {"blink": 0.0, "tracker_lost": 0.05},
     "Touched": {"window": REQUIRED},
@@ -340,6 +392,7 @@ DEFAULTS = {
         "at_right": {"class": "Unchanged", "fields": {}},
     },
     "Weber": {"value": REQUIRED},
+    "WithReplacement": {"weights": {}},
     "Window": {"name": REQUIRED, "at": REQUIRED, "radius": REQUIRED, "on": None, "eye": "both"},
     "xyY": {"x": REQUIRED, "y": REQUIRED, "Y": REQUIRED},
 }
@@ -464,6 +517,25 @@ def test_the_hash_is_the_same_in_another_process(tmp_path):
     assert elsewhere("1") == elsewhere("999") == content_hash(_loaded(path))
 
 
+def test_a_plan_hashes_the_same_in_another_process(tmp_path):
+    """Engine build C2b: a plan's blocks, weights and orders are declarations the hash writes field
+    by field, none of them a set or an address, so a task with plans hashes alike in every
+    process."""
+    path = tmp_path / "planned_task.py"
+    path.write_text(PLANNED_FILE)
+
+    def elsewhere(seed: str) -> str:
+        done = subprocess.run(
+            [sys.executable, "-c", HASH_IT.replace("module.TASK", "module.PLANNED"), str(path)],
+            cwd=ROOT, env={**os.environ, "PYTHONHASHSEED": seed}, capture_output=True, text=True,
+            timeout=120,
+        )
+        assert done.returncode == 0, done.stderr
+        return done.stdout.strip()
+
+    assert elsewhere("1") == elsewhere("999") == content_hash(_module(path).PLANNED)
+
+
 def test_a_comment_or_a_default_written_out_leaves_the_hash_and_a_start_value_moves_it(tmp_path):
     """Review Focus 4 (XC-288 §4.4: "a hash of its content, never its file path"). One file name
     each: two files of one name, size and second can share a bytecode cache entry."""
@@ -564,3 +636,32 @@ def test_a_structures_counting_table_is_part_of_the_tasks_content():
 
     assert len({of(trial), of(spent), of(owed)}) == 3
     assert of(trial) == content_hash(plain)
+
+
+def test_a_tasks_plans_are_part_of_its_content():
+    """Engine build C2b: which blocks a run can play, how they follow, what each condition sets and
+    plays, and when a block or a run is over change what a run of the task is, so each moves the
+    hash; a task with no plans hashes as before the field existed."""
+    plain = _task(HOLD)
+    near = Condition("near", {"fix_hold": 0.3}, target=10)
+    block = Block("hold", [near])
+
+    def of(**plans):
+        return content_hash(Task(plain.structures, default=plain.default, plans=plans))
+
+    variants = {
+        of(),
+        of(one=Plan([block])),
+        of(two=Plan([block])),
+        of(one=Plan([block], order=Cyclic())),
+        of(one=Plan([block], order=Cyclic(cycles=3))),
+        of(one=Plan([block], order=ByCriterion(fall_back=(0.5, 20)))),
+        of(one=Plan([block], time_limit_s=600.0)),
+        of(one=Plan([dataclasses.replace(block, time_limit_s=60.0)])),
+        of(one=Plan([dataclasses.replace(block, trials=40)])),
+        of(one=Plan([Block("hold", [dataclasses.replace(near, structure="wait")])])),
+        of(one=Plan([dataclasses.replace(
+            block, counting=Counting(after_stimulus=OWED, cap=NO_LIMIT))])),
+    }
+    assert len(variants) == 11
+    assert of() == content_hash(plain)

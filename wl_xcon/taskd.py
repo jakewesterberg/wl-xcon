@@ -50,7 +50,7 @@ from wl_xcon.bounds import Bounds, Exceeded, _finite
 from wl_xcon.check import beyond_range, check_task
 from wl_xcon.cli import _clock, _load_allocation, _load_task, _printable, _shown
 from wl_xcon.codes import BLOCK_END, RUN_END_MARKER, TRIAL_END, TRIAL_START, Allocation
-from wl_xcon.declarations import content_hash
+from wl_xcon.declarations import canonical, content_hash
 from wl_xcon.dio import Absent as NoCard
 from wl_xcon.encode import (
     TRIAL_NUMBER,
@@ -65,9 +65,14 @@ from wl_xcon.levels import Levels
 from wl_xcon.photometry import Calibration, cone_record
 from wl_xcon.record import XCON_DIRNAME, SessionRecord, _local, welfare_note
 from wl_xcon.scheduler import (
+    BACK,
     DRUM_SCOPES,
     DRUM_WARNING,
     EVERY_TRIAL,
+    NEXT,
+    RULE,
+    RUN,
+    RUN_TIME,
     TRAINING,
     Block,
     Condition,
@@ -76,7 +81,7 @@ from wl_xcon.scheduler import (
 from wl_xcon.simulate import Census, Subject, Tally, prepare
 from wl_xcon.run import LONGEST_TRIAL_S, run_trial
 from wl_xcon.task import (
-    COUNTED, OWED, SPENT, UNPAID, Entered, Exited, Param, SaccadeTo, Task, Trial,
+    COUNTED, OWED, SPENT, UNPAID, Entered, Exited, Param, Plan, SaccadeTo, Task, Trial,
 )
 from wl_xcon.warnlist import PAUSE_UNMARKED, Entry, of_findings, sentence
 from wl_xcon.welfare import (
@@ -154,6 +159,20 @@ def _next_occurrence(hhmm: str, wall: float) -> float:
     raise ValueError(f"no occurrence of {hhmm} after {wall} within a day")
 
 
+def _overriding(blocks, name: str) -> str:
+    """What a live edit of `name` now overrides, for its line on the changes feed (engine spec
+    §14.7; the engine C2b plan's science review, I5): the conditions of the run's blocks that set
+    it, whose value the edit replaces for the rest of the run -- setting it back does not undo
+    that -- since the console's own showing of them is build C3's. Empty when none sets it."""
+    named = list(dict.fromkeys(
+        condition.name for block in blocks for condition in block.conditions
+        if name in condition.values))
+    if not named:
+        return ""
+    return (f"; for the rest of the run it overrides the value condition"
+            f"{'s' if len(named) > 1 else ''} {', '.join(named)} set")
+
+
 def _hung(index: int, condition: str, counted: str, owed: int, drummed: bool = False,
           forgiven: bool = False, past: bool = False) -> str:
     """What the console's changes feed says of a trial that reached the longest trial (engine spec
@@ -198,6 +217,24 @@ def _drum_warned(condition: str, index: int, owed: int, clearing: bool = False) 
            else "stop drumming ends it")
     return (f"{condition} has failed {DRUM_WARNING} tries in a row under drumming, the last trial "
             f"{index}; drumming goes on: {way}")
+
+
+def _minutes(seconds: float) -> str:
+    """A time limit in the words a sentence gives it: whole minutes and seconds, or seconds under
+    a minute -- "1 minute", "3 minutes 20 s", "45 s" (the engine C2b plan's engineering review,
+    Minor 4)."""
+    if seconds < 60:
+        return f"{seconds:g} s"
+    minutes, rest = divmod(round(seconds), 60)
+    return f"{minutes} minute{'' if minutes == 1 else 's'}" + (f" {rest} s" if rest else "")
+
+
+#: **Why a run ended `completed`**, on its end row beside `stop_kind` (`end_reason`; engine build
+#: C2b, the plan's science review, I3), for a reader that must not parse the sentence: its plan's
+#: last block ended (`plan_done`), the plan's time limit (`plan_time`), the progress check -- every
+#: block type opened since its last trial ended before it drew one (`stalled`) -- or a block that
+#: can draw nothing and does not end (`cannot_draw`). `None` for a run that ended any other way.
+END_REASONS = ("plan_done", "plan_time", "stalled", "cannot_draw")
 
 
 def _appeared(trial: Trial, result) -> bool:
@@ -281,9 +318,12 @@ class SessionSpec:
     #: none -- since XC-352's E1 (2026-10-11) `wlx taskd` and `wlx run` put the default in the
     #: place of a record that will not load -- and `run` then refuses every run.
     calibration: Calibration | None
-    #: The session's plan. `None` means one block of `trials` trials, which is the
-    #: same code path with one block in it.
+    #: Blocks given in code -- a test's -- played in order. `None`, with no `plan`, means one
+    #: block of `trials` trials, which is the same code path with one block in it.
     blocks: list[Block] | None = None
+    #: **The plan the run plays, by its name in the task** (`task.Task.plans`; engine spec §13.1;
+    #: engine build C2b), `wlx run --plan`'s; `None` for the plain run of `trials` trials.
+    plan: str | None = None
     #: How close to the out-of-cage ceiling the session starts warning, in seconds
     #: (PI, 2026-09-20). Defaulted rather than required, unlike the fields above,
     #: because it bounds nothing: the session ends at the same instant whatever it
@@ -332,13 +372,16 @@ class SessionSpec:
 class RunSpec:
     """One run of a session: a task and what it starts with (P4d-2b spec §6.1). A
     session holds several; each is its own task, trial count, seed, starting values and
-    plan, while the session's welfare, clocks and record go on across them."""
+    plan, while the session's welfare, clocks and record go on across them. **`plan` names
+    one of the task's plans** (engine spec §13.1; engine build C2b), chosen at the run's
+    start; with none, the plain run of `trials` trials, or `blocks` given in code (a test's)."""
 
     task: str
     trials: int
     seed: int
     values: dict
     blocks: list[Block] | None = None
+    plan: str | None = None
 
     @classmethod
     def of(cls, spec: SessionSpec) -> RunSpec:
@@ -357,6 +400,7 @@ class RunSpec:
             seed=spec.seed,
             values=spec.values,
             blocks=spec.blocks,
+            plan=spec.plan,
         )
 
 
@@ -448,6 +492,13 @@ class Session:
     #: The task files `wlx taskd` offers this session's runs, for a console's form.
     offered_tasks: tuple = field(init=False, default=())
     _elapsed: float = field(init=False, default=0.0, repr=False)
+    #: **The trial clock as the run and its open block began** (engine build C2b): their time limits
+    #: are read against `_elapsed`, the time trials ran -- frames at the frame period and each
+    #: ITI -- which a pause does not move (the PI, 2026-10-19, "Pauses don't count").
+    _run_from: float = field(init=False, default=0.0, repr=False)
+    _block_from: float = field(init=False, default=0.0, repr=False)
+    #: The plan the run in progress plays, or the last one's (`_plan`).
+    _played: Plan | None = field(init=False, default=None, repr=False)
     #: Accepted changes not yet applied: `(name, was, now, by, bounded)`, `by` an
     #: `Actor` -- see `staged`.
     _staged: list = field(init=False, default_factory=list, repr=False)
@@ -1661,6 +1712,42 @@ class Session:
             index, setting=command.setting, was=was, now=command.on,
         )
 
+    def _move(self, command, index: int, step: str) -> None:
+        """**A person moves the run on to its next block, or back one** (`link.NextBlock`,
+        `link.BackBlock`; engine build C2b; the PI, 2026-10-19, "'Next' and 'back one'": "Both
+        directions by hand, each recorded with who"), between trials or while paused: the scheduler
+        moves (`Scheduler.move`), the open block closes in the stream (`BLOCK_END`, where it ran a
+        trial) as an advance's does, its time starts afresh, and `controls.jsonl` records who moved
+        it from which block to which, and a drummed trial waiting that the move dropped (the plan's
+        science review, M5), the run's end row how the block ended. **The row names no event
+        code** (the engineering review, C1): wl-preproc times the n-th row naming a code by the
+        n-th time that code was strobed, and every block that ends on its own strobes `BLOCK_END`
+        with no row, so a move's row is timed by its own instant. **Refused with the sentence**,
+        nothing changed, where there is no such block: a plain run is one block, and the first or
+        last block of a plan has none before or after it."""
+        scheduler = self._scheduler
+        if self._run is not None and self._run.plan is None and not self._run.blocks:
+            self._refuse(command.KIND, command.by, (
+                "a plain run is one block, so there is no block to move to; a run of one of the "
+                "task's plans moves between its blocks"))
+            return
+        was, dropped = scheduler.block.name, scheduler.drum_waiting
+        said = scheduler.move(step, command.by)
+        if said is not None:
+            self._refuse(command.KIND, command.by, said)
+            return
+        if self._levels.end_block():
+            self.card.emit(BLOCK_END)
+        self.blocks_run.append(scheduler.block.name)
+        self._block_from = self._elapsed
+        what = "next block" if step == NEXT else "back one"
+        self._control(
+            command.KIND, command.by,
+            f"{what}: from block {was} to block {scheduler.block.name}"
+            + ("" if dropped is None else f"; the drummed trial of {dropped} waiting was dropped"),
+            index, block=was, to=scheduler.block.name, dropped=dropped,
+        )
+
     def _ends(self, index: int) -> bool:
         """Whether the session must end at this boundary, with its reason and kind
         set. **One place for it**, asked between trials and on every pass of the
@@ -1986,6 +2073,12 @@ class Session:
         if isinstance(command, _link.Training):
             self._train(command, index)
             return
+        if isinstance(command, _link.NextBlock):
+            self._move(command, index, NEXT)
+            return
+        if isinstance(command, _link.BackBlock):
+            self._move(command, index, BACK)
+            return
         if not isinstance(command, _link.SetParameter):
             # A command this session has no branch for -- a newer console's -- is
             # refused under its kind, as `drain` refuses an unknown kind on the
@@ -2097,6 +2190,9 @@ class Session:
                 self.spec.bounds.set(name, now, by=by)
             else:
                 self.spec.values[name] = now
+                # A live edit, which wins over a value a condition sets for the rest of the run
+                # (engine spec §14.7).
+                self._edited |= {name}
             # Strobed before its row is written, as every other writer does: a card that
             # faults here leaves no row naming a code that never went out (XC-321 ask 1).
             self.card.emit(code)
@@ -2108,26 +2204,35 @@ class Session:
                 "set",
                 by,
                 self.wall_now(),
-                f"{name} {_shown(was)} → {_shown(now)}, from trial {index}",
+                f"{name} {_shown(was)} → {_shown(now)}, from trial {index}"
+                + ("" if bounded else _overriding(self._scheduler.blocks, name)),
             )
         self._staged.clear()
 
     # --- running ----------------------------------------------------------
 
     _task: Task | None = field(init=False, default=None, repr=False)
+    #: The settings edited live in the run in progress (`_apply_staged`), which win over a value a
+    #: condition sets for the rest of the run (engine spec §14.7; engine build C2b).
+    _edited: frozenset = field(init=False, default=frozenset(), repr=False)
     #: `_task`'s settings by name, built once as it is taken (`_take`).
     _declared: dict[str, Param] = field(init=False, default_factory=dict, repr=False)
 
-    def _plan(self, run: RunSpec) -> list[Block]:
-        """The run's blocks, or the one block a flat run is.
+    def _plan(self, run: RunSpec, task: Task) -> Plan:
+        """The plan the run plays: the task's plan the run names, blocks given in code (a test's),
+        or the plain run's one block.
 
         **Block plans and conditions come from the task programs (wl-xtasks) or are
         chosen at the rig** (XC-207; the PI, 2026-10-01, through wl-works, which sends the
-        rig no day's plan). Until either exists nothing but a test gives a run blocks, so
-        a run is one block of `run.trials` trials under one condition."""
+        rig no day's plan): a task declares its plans in its task object (engine spec §13.1;
+        engine build C2b), and the operator chooses one as the run starts. **With none chosen
+        a run is the plain run**: one block of `run.trials` trials under one condition, of the
+        task's default structure, every trial paying."""
+        if run.plan is not None:
+            return task.plans[run.plan]
         if run.blocks:
-            return run.blocks
-        return [
+            return Plan(blocks=list(run.blocks))
+        return Plan(blocks=[
             Block(
                 name="session",
                 conditions=[Condition("session", {}, target=run.trials)],
@@ -2138,7 +2243,7 @@ class Session:
                 # reached the longest trial is one of the N (the engine C2a plan).
                 counting=EVERY_TRIAL,
             )
-        ]
+        ])
 
     def _agent(self, run: RunSpec):
         """The default world: one behaviour agent, told about each trial.
@@ -2290,6 +2395,25 @@ class Session:
         """One frame of this session as it stands, for a caller between its runs."""
         self._publish()
 
+    @property
+    def plan(self) -> str | None:
+        """The plan the run in progress, or the last one, plays, by its name in its task; `None`
+        for the plain run, or before any run (engine build C2b)."""
+        return None if self._run is None else self._run.plan
+
+    def left(self, which: str) -> float | None:
+        """The seconds of trials left before the open block's time limit (`"block"`) or the run's
+        (`"run"`), on the time trials ran, a pause not counting (the PI, 2026-10-19); `None` with
+        no limit, or before any run (engine build C2b): what the console shows."""
+        scheduler, plan = self._scheduler, self._played
+        if scheduler is None or plan is None:
+            return None
+        if which == "block":
+            limit, since = scheduler.block.time_limit_s, self._block_from
+        else:
+            limit, since = plan.time_limit_s, self._run_from
+        return None if limit is None else max(0.0, limit - (self._elapsed - since))
+
     def _after_service_run(self) -> None:
         """A service session's run is over (the b3a-1 plan, decisions 1 and 2): back
         between runs, where nothing applies a staged change, so any left is dropped and
@@ -2380,6 +2504,13 @@ class Session:
                 "task refused, session not started:\n"
                 + "\n".join(f"  {_printable(f.code)}: {_printable(f.detail)}" for f in blocking)
             )
+        if run.plan is not None and run.plan not in task.plans:
+            # The backstop for a caller that took no pre-flight (engine build C2b), as above.
+            raise SystemExit(
+                f"task refused, session not started: the task declares no plan "
+                f"{_printable(run.plan)}; its plans are "
+                + (", ".join(_printable(name) for name in task.plans) or "none")
+            )
         self.welfare.preflight(self.wall_now())
         # **What the start accepted, written as the run starts** (engine spec §19.3; the
         # engine B plan, call 23): after both refusals above, so a refused run leaves no row of
@@ -2394,8 +2525,6 @@ class Session:
         # config go on. A change staged before `run()` is not dropped here: it applies
         # at this run's first boundary, as a live write always has.
         self._take(task)
-        # The structure this run plays: the default, until build C2's plans name others.
-        trial = task.trial
         self._run = run
         # **The task's own starting values, under the run's** (P4d-2b spec §6.2:
         # "Starting values are the task's own"; S8 §3.4's task layer; the b3a-2 plan,
@@ -2423,10 +2552,18 @@ class Session:
         self._recent.clear()
         self.preflight = None
         self.question = None
+        # The settings edited live in this run, which win over a condition's (engine spec §14.7).
+        self._edited = frozenset()
 
-        # Counted by the structure's table (engine spec §16.1; engine build C2a), which a block's
-        # own replaces.
-        scheduler = Scheduler(blocks=self._plan(run), seed=run.seed, counting=trial.counting)
+        # Counted by each condition's structure's table (engine spec §16.1; engine build C2a; each
+        # condition naming its structure since C2b), which a block's own replaces.
+        plan = self._played = self._plan(run, task)
+        scheduler = Scheduler(
+            blocks=plan.blocks, seed=run.seed, counting=task.trial.counting,
+            countings={name: structure.counting for name, structure in task.structures.items()},
+            order=plan.order,
+        )
+        self._run_from = self._block_from = self._elapsed
         make_world = self.world if self.world is not None else self._agent(run)
         tally = Tally()
         self.blocks_run = [scheduler.block.name]
@@ -2445,9 +2582,16 @@ class Session:
             # The task by its content, never its path (XC-288 §4.4; `task` above keeps the path
             # it was given); the allocation is still named by its path (XC-178).
             versions={"task": content_hash(task), "allocation": self.spec.allocation},
-            trials=run.trials,
+            # **The plan it plays, by its name in the task** (engine build C2b), whose content hash
+            # is above; a planned run's lengths are its plan's, so it records no trial count.
+            plan=run.plan,
+            # **And as declared** (the plan's science review, I4), in the form the content hash
+            # reads it, so the record tells a balanced plan from a random one by itself.
+            plan_form=None if run.plan is None else canonical(plan),
+            trials=None if run.plan is not None else run.trials,
             seed=run.seed,
-            blocks=None if not run.blocks else [block.name for block in run.blocks],
+            blocks=(None if run.plan is None and not run.blocks
+                    else [block.name for block in plan.blocks]),
             layers={"task": starts, "run": given},
             resolved=dict(self.spec.values),
             # The welfare-bounded values it starts with -- a reward size set in an
@@ -2475,6 +2619,8 @@ class Session:
         #: `RUN_END` marker (4, XC-205) goes out on every ending by design and is not
         #: what this records. The end row's `strobed`.
         ended_strobed = False
+        #: Why the run ended `completed` (`END_REASONS`), for its end row; `None` otherwise.
+        end_reason = None
         # **The per-frame mark check** (P4d-2b spec §5.1), handed to `run_trial` as
         # its one per-frame hook. Bound once, here, so each frame is two calls and a
         # test on a small integer; `_stamp` runs only when a signal arrived.
@@ -2491,8 +2637,6 @@ class Session:
             # or on the run escape's words would otherwise raise `UnboundLocalError` from
             # the handler, chained to the real exception, with no frame naming the stop.
             index = 0
-            #: Block transitions taken. Bounded by the plan -- see the check below.
-            advanced = 0
 
             def publish() -> None:
                 """Telemetry for the current boundary, to whoever is attached.
@@ -2525,6 +2669,15 @@ class Session:
             # them cuts it short, as it does a block's or a trial's (XC-199).
             for word in run_words:
                 self.card.emit(word)
+
+            def said_end(reason: str, to: str) -> None:
+                """**One line on the changes feed as the plan moves to another block** (the plan's
+                science review, I2: "S2 -> S1: 8 of last 20 right"): from which block to which, and
+                why, with its numbers -- asked before the block is left, whose counts say it. A
+                block the run ends with is said by the run's stop reason; a person's move by its
+                own line (`_move`)."""
+                self._feed("block", None, self.wall_now(),
+                           f"{scheduler.block.name} → {to}: {scheduler.because(reason)}")
 
             while True:
                 self._apply_staged(index)
@@ -2562,54 +2715,99 @@ class Session:
                     if self.stopped_because:
                         break
                     continue
-                if scheduler.finished:
-                    if scheduler.done:
-                        self.stopped_because = "every block is finished"
-                        self.stop_kind = "completed"
+                # **A block's time limit** (the PI, 2026-10-19), read on the time trials ran, pauses
+                # not counting ("Pauses don't count"), and never in `_ends`, the welfare limits' (a
+                # plan's time limit is none of them): the block ends at this boundary, a trial in
+                # flight having finished ("Finish trial, then end"), or once a drummed trial
+                # waiting is right ("Finish the drum first"; `Scheduler.ends`).
+                held = scheduler.block.time_limit_s
+                if (held is not None and not scheduler.expired
+                        and self._elapsed - self._block_from >= held):
+                    scheduler.expire()
+                ending = scheduler.ends
+                # **The run's time limit** ("Yes, in the plan": "the run ends at the first pause
+                # between trials after its time"), read the same way, **a drummed trial waiting
+                # answered right first** as for a block's ("Finish the drum first": "Same as a
+                # block's limit"). The open block closes as met if its rule is met at this
+                # boundary, else as the run's time's (`RUN_TIME`; the plan's science review, I3),
+                # what it still owed recorded as not run.
+                limit = plan.time_limit_s
+                if (limit is not None and self._elapsed - self._run_from >= limit
+                        and scheduler.drum_waiting is None):
+                    scheduler.close(RULE if ending == RULE else RUN_TIME)
+                    self.stopped_because = (
+                        f"the plan's time limit is reached: {_minutes(limit)} of trials"
+                    )
+                    self.stop_kind, end_reason = "completed", "plan_time"
+                    publish()
+                    break
+                if ending is not None:
+                    if scheduler.following is None:
+                        scheduler.close(ending)
+                        self.stopped_because = (
+                            "every block is finished" if ending == RULE
+                            else f"block {scheduler.block.name}'s time limit is reached "
+                            f"({_minutes(scheduler.block.time_limit_s)} of trials) and its plan "
+                            f"has no block after it"
+                        )
+                        self.stop_kind, end_reason = "completed", "plan_done"
                         publish()
                         break
-                    # **A plan can be advanced through only as many times as it has
-                    # blocks.** This `continue` runs no trial, draws no condition
-                    # and moves no clock, so a scheduler that reported `finished`
-                    # and then did not leave the block would spin here: no telemetry
-                    # would change, `must_stop` would not fire until the wall itself
-                    # reached the ceiling -- hours on a rig, and never under a test
-                    # whose wall follows the frames, since `self._elapsed` does not
-                    # move -- and a rig would look like it was running with an
-                    # animal in the chair and nothing happening.
-                    #
-                    # `Scheduler.advance` raises on the last block, so no path
-                    # reaches this today. It is counted here anyway, and **counted
-                    # rather than compared**: a plan may legitimately list the same
-                    # `Block` object twice -- "multiple blocks of the same tasks"
-                    # is how the PI described a session (2026-09-19) -- so a guard
-                    # asking whether the block *changed* would abort one of those
-                    # with an animal in the chair. A count cannot: a session
-                    # advances exactly `len(blocks) - 1` times, and the next one is
-                    # impossible whatever the blocks are.
-                    #
-                    # It is also what makes a mutation of `advance` fail a test
-                    # instead of hanging the suite until a 300-second timeout, which
-                    # is the harness noticing rather than a test noticing.
-                    advanced += 1
-                    if advanced >= len(scheduler.blocks):
-                        raise RuntimeError(
-                            f"this session has advanced {advanced} times through a "
-                            f"plan of {len(scheduler.blocks)} blocks, so the "
-                            f"scheduler is not leaving {scheduler.block.name!r}; it "
-                            f"can draw no further trial and must not spin"
+                    # **The per-advance progress check** (engine spec §13.5; the PI, 2026-10-19,
+                    # "End run with a sentence"): an advance runs no trial, draws no condition and
+                    # moves no clock, so a plan whose every block ended before it drew a trial
+                    # would spin here, a rig that looks busy with an animal in the chair and
+                    # nothing happening. **Asked, never counted**: a cyclic or falling-back plan
+                    # advances more often than it has blocks, by design.
+                    if scheduler.stalled:
+                        scheduler.close(RUN)
+                        names = ", ".join(block.name for block in plan.blocks)
+                        self.stopped_because = (
+                            f"the plan can draw no further trial: since the run's last trial each "
+                            f"of its blocks ({names}) ended before it drew one, so the run ends "
+                            f"here"
                         )
+                        self.stop_kind, end_reason = "completed", "stalled"
+                        publish()
+                        break
                     # The block its type finished closes in the stream after its last
                     # `TRIAL_END`; the next trial opens the next (session-levels spec §4).
                     if levels.end_block():
                         self.card.emit(BLOCK_END)
-                    scheduler.advance()
+                    said_end(ending, scheduler.following.name)
+                    scheduler.advance(ending)
                     self.blocks_run.append(scheduler.block.name)
+                    self._block_from = self._elapsed
                     continue
+                if not scheduler.drawable:
+                    # A block that does not end and cannot draw -- the load-time checks refuse
+                    # the known ones (XC-381) -- ends the run saying why, never faults it (the PI,
+                    # 2026-10-19, "End run with a sentence").
+                    scheduler.close(RUN)
+                    self.stopped_because = (
+                        f"block {scheduler.block.name} has no condition left to draw and its end "
+                        f"rule is not met, so the run ends here"
+                    )
+                    self.stop_kind, end_reason = "completed", "cannot_draw"
+                    publish()
+                    break
 
                 condition = scheduler.next_trial()
                 drawn = scheduler.drawn
-                values = {**self.spec.values, **condition.values}
+                # **The structure its condition names**, or the task's default (engine spec §13.3;
+                # the PI, 2026-10-07: "each condition names its own; interleaving them in a block
+                # is ordinary"); `check_task` refuses a condition naming one the task lacks.
+                structure = condition.structure or task.default
+                trial = task.structures[structure]
+                # **A live edit to a value a condition sets wins** (engine spec §14.7; §17.1's
+                # order: the task's start, the run's value, the condition's, a live edit), and the
+                # trial still counts toward its condition; its row names each value overridden.
+                overridden = sorted(name for name in condition.values if name in self._edited)
+                values = {
+                    **self.spec.values,
+                    **{name: value for name, value in condition.values.items()
+                       if name not in self._edited},
+                }
                 world = make_world(trial, values, index)
                 # **The trial opens in the stream at the boundary, never in a frame**
                 # (XC-155; S1 §4's between-trial surface): `TRIAL_START`, then its number
@@ -2625,6 +2823,10 @@ class Session:
                 # `TRIAL_START` is out, a card that fails between the emits, a Ctrl-C, a
                 # SIGTERM or a crash can still cut the escape short (XC-199).
                 position, opened = levels.start_trial()
+                if opened:
+                    # The block's number in the stream, for its end-row entry (the engine C2b plan's
+                    # engineering review, I4): only a block that runs a trial takes one.
+                    scheduler.in_session = position.block_in_session
                 # **Every word this boundary strobes is computed first** (XC-155): a
                 # value that cannot be framed raises here, ahead of the stream, never
                 # leaving a block or a trial opened without its number.
@@ -2701,6 +2903,8 @@ class Session:
                     params=values,
                     block=scheduler.block.name,
                     condition=condition.name,
+                    structure=structure,
+                    overridden=tuple(overridden),
                     counting=counted,
                     shown=shown,
                     repeat_of=drawn.repeat_of,
@@ -2797,6 +3001,9 @@ class Session:
                     self._settle_stamps(self._index)
             finally:
                 try:
+                    # The open block, ended with the run (a stop, a limit, a fault), if nothing
+                    # above recorded how it ended.
+                    scheduler.close(RUN)
                     record.run_row(
                         "end",
                         self.run_index,
@@ -2808,6 +3015,27 @@ class Session:
                         trials=scheduler.trials,
                         presentations=self._index,
                         blocks_run=list(self.blocks_run),
+                        # **How each block ended** (engine build C2b): its own rule, its time, the
+                        # plan's fall-back, a person's next or back one (with who), or the run's
+                        # end. On the end row, never rows of their own (wl-preproc reads only start
+                        # and end rows), since `BLOCK_END` carries no reason.
+                        block_ends=[
+                            {
+                                "block": end.block,
+                                "ended": end.ended,
+                                "by": to_map_or_none(end.by),
+                                "after_trial": end.after_trial,
+                                # Which block of the stream it is, `None` for one that ran no
+                                # trial, and its place in the run's sequence (the engineering
+                                # review, I4); when a top stage passed (the science review, I1).
+                                "block_in_session": end.block_in_session,
+                                "position": end.position,
+                                "passed_at": end.passed_at,
+                            }
+                            for end in scheduler.ended
+                        ],
+                        # Why a completed run ended, for a reader (`END_REASONS`).
+                        end_reason=end_reason,
                         strobed=ended_strobed,
                         # **Each condition's debt forgiven** (engine spec §16.6): by its repeat
                         # limit, flagged as possible avoidance when the animal's own failures
