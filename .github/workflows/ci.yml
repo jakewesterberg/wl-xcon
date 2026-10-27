@@ -65,12 +65,16 @@ jobs:
         # DisplayAdapter and that is worth failing over.
         python: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      # Every job's actions run on Node.js 24 (XC-403, 2026-10-27): each one's `action.yml` at
+      # these majors says `using: node24`, read that day; v4 and v5 said node20, which GitHub
+      # deprecated. Neither major's breaking changes touch this file (pull_request_target,
+      # workflow_run, the pip-install input, Python older than 3.11).
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
       - name: Check out wl-preproc inside the workspace
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: jakewesterberg/wl-preproc
           path: wl-preproc
@@ -128,16 +132,16 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The gate diffs against the previous commit or the PR base, so the
           # shallow default clone is not enough.
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - name: Check out wl-preproc inside the workspace
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: jakewesterberg/wl-preproc
           path: wl-preproc
@@ -207,12 +211,12 @@ jobs:
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
                 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - name: Check out wl-preproc inside the workspace
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: jakewesterberg/wl-preproc
           path: wl-preproc
