@@ -1225,11 +1225,11 @@ entry has its three lines, that every link names a file that exists, and that ev
 - **Where:** [`wl_xcon/link.py`](../../wl_xcon/link.py) (`NextBlock`, `BackBlock`); [`wl_xcon/taskd.py`](../../wl_xcon/taskd.py) (`Session._move`); [`wl_xcon/scheduler.py`](../../wl_xcon/scheduler.py) (`Scheduler.move`).
 - **Basis:** PI decision; no published source.
 
-### TSK-63 — The page preselects a task's first plan, the plain run kept as one more labeled choice
+### TSK-63 — The page preselects a task's first plan for its first run and the plan last run after, the plain run kept as one more labeled choice
 - **Decided:** 2026-10-19, the PI: "Preselect first, keep plain" -- "The task's first plan is preselected; the plain run stays as one more labeled choice. One click to start; a wrong plan shows in the pre-flight and the run's start record." That the first plan is preselected once, as a task's plans first arrive with the plain run's pre-flight -- whether a person chose the task or it is the only one the rig offers -- and that the plain run is labeled "plain run: the trials below, each counted once, none shown again", are engineering ([the engine C2b plan](../superpowers/plans/2026-10-19-engine-c2b.md#appendix-b-for-the-pi-to-confirm)).
 - **Where:** [`wl_xcon/web.py`](../../wl_xcon/web.py) (`_plans`, `PLAIN_RUN`, the page's `preselect`); [the engine C2b plan](../superpowers/plans/2026-10-19-engine-c2b.md).
-- **Revised:** 2026-10-22, the PI: a session's second and later runs preselect the plan last run ("The plan last run" -- "Repeats what the operator just ran; a one-line change"); the first run, the task's first plan (Q9). The plan last run is the same task's and still among its plans, else the task's first; a plain last run is repeated as the plain run; the page learns it from the frame's `plan` between runs (`Session.plan`), marked `data-last` on the picker's option (`_plans`).
-- **Basis:** PI decision; engineering default for the page's script. No published source.
+- **Revised:** 2026-10-22, the PI: a session's second and later runs preselect the plan last run ("The plan last run" -- "Repeats what the operator just ran; a one-line change"); the first run keeps the task's first plan (Q9). Engineering, 2026-10-27, from his reason: a plain last run is repeated as the plain run; the plan last run counts only if it was the same task's and is still among its plans, else the task's first; the page learns it from the frame between runs (`Session.task`, `Session.plan`, `Session.run_index`), marked `data-last` on the picker's option (`_plans`).
+- **Basis:** PI decision; engineering default for the page's script and for a plain last run. No published source.
 
 ## Recording and events
 

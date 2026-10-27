@@ -657,10 +657,11 @@ luminance waits on build F (XC-305).
 answers of 2026-10-19): **items 1, 5 and 8 built** -- a task's plans in its task object, chosen at
 run start (the page preselecting the first plan for a session's first run and the plan last run for
 its later ones, a plain last run repeated as the plain run, the plain run kept as a choice:
-"Preselect first, keep plain", "The plan last run"; `wlx run --plan`); block orders fixed, cyclic, balanced in shuffled rounds within each
-run ("Shuffled rounds") and plain random ("Both, as two choices"), each random order drawn from the
-run's recorded seed, a balanced round never starting with the type just played ("Never
-back-to-back"), and by criterion: up on a stage's own rule, back one stage, started fresh, on the
+"Preselect first, keep plain", "The plan last run"; `wlx run --plan`); block orders fixed, cyclic,
+balanced in shuffled rounds within each run ("Shuffled rounds") and plain random ("Both, as two
+choices"), each random order drawn from the run's recorded seed, a balanced round never starting
+with the type just played ("Never back-to-back"), and by criterion: up on a stage's own rule,
+back one stage, started fresh, on the
 plan's fall-back rule, judged once its window of answers is in and on each trial's first answer
 only ("First answer only"; a broken hold where the stage scores one, "Yes, the same"), the top
 stage working on ("Same, but top keeps going"), and a stage whose time runs out moving on whether

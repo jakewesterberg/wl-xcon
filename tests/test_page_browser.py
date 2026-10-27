@@ -1337,7 +1337,7 @@ def _plans_of(taken, plans=("train", "test"), **over):
 
 def _second_run_pill(rig, page, last, plans, *, task="tasks/planned.py"):
     """A first run of `last` has ended: the frame between runs carries it, as taskd's does, the
-    pill is pressed and the plain pre-flight's `plans` arrive. Returns the checks sent."""
+    pill is pressed and the plain pre-flight's `plans` arrive."""
     rig.hub.offer(_between_runs(offered_tasks=ONE_TASK, run_index=1, plan=last, block="easy",
                                 task=task))
     page.wait_for_selector('[data-cmd="check"]:not([disabled])')
@@ -1365,11 +1365,16 @@ def _after_a_frame_is_processed(rig, page, *, late_s: float = 0.0):
     sets `#plan-sel` before it posts anything, so what the page would have sent on a frame is
     sent, or not, by the time this returns; no fixed wait."""
     offer = lambda: rig.hub.offer(_plans_of(None, stopped_because=FRAME_MARKER))  # noqa: E731
-    if late_s:
-        threading.Timer(late_s, offer).start()
+    late = threading.Timer(late_s, offer) if late_s else None
+    if late:
+        late.start()
     else:
         offer()
-    _marker_shown(page)
+    try:
+        _marker_shown(page)
+    finally:
+        if late:
+            late.cancel()
 
 
 def test_the_wait_for_a_frame_polls_when_the_frame_comes_late_and_fails_plainly_when_not(rig):
