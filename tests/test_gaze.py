@@ -1142,8 +1142,8 @@ def test_an_update_that_changes_the_target_moves_what_holds_the_target(on, outco
 
 
 def test_a_saccade_to_the_target_is_scored_where_an_update_made_it_the_target():
-    """`SaccadeTo` asks the world for the target's window by its alias's own name, so the
-    window `search.target` itself must follow the update, not only the loop's membership."""
+    """`SaccadeTo` asks the world about the target by its alias's own name, so the world's own
+    reading of `search.target` must follow the update, not only the loop's membership."""
     ring = replace(_RING, radius=8.0)
     shown = Stimulus("search", at=(0.0, 0.0), looks=ring)
     update = Update("search", looks=replace(ring, target=3))
@@ -1226,3 +1226,146 @@ def test_an_update_that_draws_no_array_leaves_the_windows_where_the_objects_were
 
     assert result.visited == ("shown", "moved", "blanked")
     assert result.outcome is Outcome.CORRECT
+
+
+# ---------------------------------------------------------------------------
+# A saccade to an array's distractor is one to any distractor, wherever it is
+# ---------------------------------------------------------------------------
+#
+# `SaccadeTo` reaches the world directly (`World.happened`), so `Tracked` itself must judge an
+# alias by the objects it names, each with its own eye. Until 2026-10-27 it judged
+# `<of>.distractor` by a stand-in window at the target, so on a rig `WRONG_TARGET` was
+# unreachable in the reference search task, a saccade to a distractor and then a corrective one to
+# the target was rewarded, and a task listing the distractor edge first punished a saccade to the
+# target. The simulated animal has no geometry, so no census could see it. The reference search
+# task is run here whole, its settings below; its objects are drawn in grays, since where they are
+# does not depend on their color.
+
+_SEARCH_FRAME = 0.002
+_SEARCH = {
+    "fix_acquisition": 1.0, "fix_hold": 0.1, "response_deadline": 0.8, "target_hold": 0.1,
+    "fix_window": 2.0, "object_window": 1.0, "array_eccentricity": 8.0, "set_size": 4,
+    "target_index": 1, "array_rotation": 0.0, "fix_luminance": 40.0,
+    "target_appearance": Disc(size=1.0, color=Gray(30.0)),
+    "distractor_appearance": Disc(size=1.0, color=Gray(20.0)),
+}
+
+
+def _saccades(*to, dwell: int = 200, steps: int = 10, stay: int = 100, seed: int = 5,
+              right: "tuple[float, float]" = (0.0, 0.0)) -> Replay:
+    """Payloads that fixate the origin for `dwell` frames, then saccade to each point of `to` in
+    turn, `steps` frames each, staying `stay` frames at each but the last, where they stay; the
+    right eye `right` degrees from the left throughout."""
+    rng = random.Random(seed)
+    path, at = [(0.0, 0.0)] * dwell, (0.0, 0.0)
+    for k, point in enumerate(to):
+        path += [(at[0] + (point[0] - at[0]) * j / steps, at[1] + (point[1] - at[1]) * j / steps)
+                 for j in range(1, steps + 1)]
+        path += [point] * (stay if k < len(to) - 1 else 600)
+        at = point
+    payloads = []
+    for n, (x, y) in enumerate(path):
+        x, y = x + rng.gauss(0, 0.02), y + rng.gauss(0, 0.02)
+        payload = json.loads(_payload(x, y, frame=n))
+        payload["Right"] = json.loads(_payload(x + right[0], y + right[1], frame=n))["Right"]
+        payloads.append((0.0, json.dumps(payload)))
+    return Replay(payloads=payloads)
+
+
+def _searched(*to, distractor_first: bool = False):
+    """`tasks/visual_search`'s trial through the loop, gaze saccading to each of `to` in turn."""
+    from tasks.visual_search import search
+
+    if distractor_first:
+        states = [replace(s, go=[s.go[1], s.go[0], *s.go[2:]]) if s.name == "array_on" else s
+                  for s in search.states]
+        search = replace(search, states=states)
+    world = Tracked(Tracker(), _fitted_mapping(), search, _SEARCH_FRAME, _SEARCH,
+                    source=_saccades(*to))
+    effects = Recorded()
+    return run_trial(search, world, _SEARCH_FRAME, values=_SEARCH, effects=effects), effects
+
+
+def _search_drawn() -> dict:
+    from tasks.visual_search import ARRAY, search
+
+    return _drawn(ARRAY, _SEARCH, search)
+
+
+@pytest.mark.parametrize("distractor", ["search.0", "search.2", "search.3"])
+def test_a_saccade_to_any_distractor_is_wrong_target(distractor):
+    """Each of the three distractors, not only one, and with its marks."""
+    result, effects = _searched(_search_drawn()[distractor])
+
+    assert result.outcome is Outcome.WRONG_TARGET
+    assert ("mark", 4104) in effects.log and ("reward", "reward_correct") not in effects.log
+
+
+@pytest.mark.parametrize("distractor_first", [False, True],
+                         ids=["the target edge first", "the distractor edge first"])
+def test_a_saccade_to_the_target_is_correct_whichever_edge_is_listed_first(distractor_first):
+    """With the distractor edge listed first, the stand-in at the target took the saccade, and a
+    task punished the right answer as `WRONG_TARGET`."""
+    result, effects = _searched(_search_drawn()["search.1"], distractor_first=distractor_first)
+
+    assert result.outcome is Outcome.CORRECT
+    assert ("reward", "reward_correct") in effects.log
+
+
+def test_a_distractor_saccade_corrected_to_the_target_is_scored_by_the_first():
+    """The first saccade is the response the task's edges score: a saccade to a distractor and a
+    corrective one to the target is `WRONG_TARGET`, unrewarded. It was rewarded as `CORRECT`."""
+    drawn = _search_drawn()
+
+    result, effects = _searched(drawn["search.0"], drawn["search.1"])
+
+    assert result.outcome is Outcome.WRONG_TARGET
+    assert ("reward", "reward_correct") not in effects.log
+
+
+def test_a_saccade_to_a_distractor_of_a_moved_array_is_wrong_target():
+    """After an `Update` moved the array, a saccade to one of its distractors where it is now drawn
+    is `WRONG_TARGET`, and one to where that distractor was is no response at all."""
+    ring = replace(_RING, radius=8.0)
+    shown = Stimulus("search", at=(0.0, 0.0), looks=ring)
+    update = Update("search", at=(3.0, -2.0))
+    trial = Trial(
+        start="shown",
+        windows=[ObjectWindows(of="search", radius=1.5)],
+        states=[
+            State("shown", enter=[Show(shown)], go=[On(After(0.02), "moved")]),
+            State("moved", enter=[update],
+                  go=[On(SaccadeTo("search.target"), Outcome.CORRECT),
+                      On(SaccadeTo("search.distractor"), Outcome.WRONG_TARGET),
+                      On(After(0.6), Outcome.NO_RESPONSE)]),
+        ],
+    )
+
+    def to(where):
+        world = Tracked(Tracker(), _fitted_mapping(), trial, 0.002, {}, source=_saccades(where))
+        return run_trial(trial, world, 0.002, values={}, effects=Recorded()).outcome
+
+    assert to(_drawn(_moved(shown, update), {}, trial)["search.2"]) is Outcome.WRONG_TARGET
+    assert to(_drawn(shown, {}, trial)["search.2"]) is Outcome.NO_RESPONSE
+
+
+def test_a_saccade_to_a_distractor_is_judged_for_the_eye_its_family_scores():
+    """Each distractor's window is judged for its own eye: a family scoring the left eye takes a
+    saccade landing the left eye on a distractor while the right eye looks 6° away, where the two
+    eyes' mean would be 3° off it."""
+    ring = replace(_RING, radius=8.0)
+    shown = Stimulus("search", at=(0.0, 0.0), looks=ring)
+    trial = Trial(
+        start="shown",
+        windows=[ObjectWindows(of="search", radius=1.5, eye="left")],
+        states=[State("shown", enter=[Show(shown)],
+                      go=[On(SaccadeTo("search.target"), Outcome.CORRECT),
+                          On(SaccadeTo("search.distractor"), Outcome.WRONG_TARGET),
+                          On(After(0.8), Outcome.NO_RESPONSE)])],
+    )
+    to = _drawn(shown, {}, trial)["search.2"]
+    world = Tracked(Tracker(), _fitted_mapping(), trial, 0.002, {},
+                    source=_saccades(to, right=(6.0, 0.0)))
+
+    assert run_trial(trial, world, 0.002, values={}, effects=Recorded()).outcome is \
+        Outcome.WRONG_TARGET

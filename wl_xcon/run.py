@@ -421,9 +421,10 @@ def run_trial(
     }
     # An array's windows do not exist until `n` is bound, so aliases -- `<of>.target`
     # and `<of>.distractor` -- are resolved here against this trial's values. A
-    # saccade guard reaches the world directly and worked by accident; membership is
-    # derived by the loop, so an unresolved alias is simply never satisfied and the
-    # animal fixates the target while the task waits forever.
+    # saccade guard reaches the world directly, which judges an alias by the objects it
+    # names itself (`gaze.Tracked.happened`); membership is derived by the loop, so an
+    # unresolved alias is simply never satisfied and the animal fixates the target while
+    # the task waits forever.
     declared, aliases = expand_windows(trial, values or {})
     # Which eye each window scores. A window that declares one and is asked about
     # the conjugate estimate is a criterion nobody applied.

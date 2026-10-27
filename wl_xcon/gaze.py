@@ -95,8 +95,14 @@ class Tracked:
         self._pending: Saccade | None = None
         self._in_flight = False
         self._values = values or {}
-        declared, _aliases = expand_windows(trial, self._values)
+        declared, aliases = expand_windows(trial, self._values)
         self._windows: dict = {window.name: window for window in declared}
+        #: **An array's aliases, by the objects they name**: `<of>.target` and `<of>.distractor`
+        #: to their objects' windows. `SaccadeTo` reaches the world directly rather than through
+        #: the loop's membership, so this is where a saccade to "any distractor" is judged at every
+        #: distractor, each with its own eye, and never at the alias's own window, a stand-in at the
+        #: target that names the array and its eye. Switched with the windows in `display`.
+        self._members: dict = dict(aliases)
         #: **An array's object windows follow it** (XC-402): each array with object windows, every
         #: placement it can be drawn in this trial, built now, between trials (`task.placements`);
         #: and the stimulus last seen drawing it. `display` switches `_windows` to the placement on
@@ -109,6 +115,8 @@ class Tracked:
             for placement in options:
                 for name in placement.windows:
                     self._windows.setdefault(name, None)
+                for alias in placement.members:
+                    self._members.setdefault(alias, ())
         #: Which mapping version scored this trial. S5 §6: every trial cites the
         #: version in force, and it is read off the map rather than passed in, so a
         #: trial cannot cite a version it was not actually scored under.
@@ -183,12 +191,19 @@ class Tracked:
         if isinstance(guard, SaccadeTo):
             if self._pending is None or self._in_flight:
                 return False
-            declared = self._windows.get(guard.window)
-            if not self.in_window(guard.window, frame,
-                                  declared.eye if declared is not None else "both"):
+            if not self._landed(self._members.get(guard.window, (guard.window,)), frame):
                 return False
             self._pending = None
             return True
+        return False
+
+    def _landed(self, names: "tuple[str, ...]", frame: int) -> bool:
+        """Whether gaze is inside any of the windows `names`, each judged for its own eye: one
+        window, or the objects an array's alias names (`_members`)."""
+        for name in names:
+            declared = self._windows.get(name)
+            if declared is not None and self.in_window(name, frame, declared.eye):
+                return True
         return False
 
     def signal(self, frame: int) -> str:
@@ -223,6 +238,7 @@ class Tracked:
             for placement in options:
                 if placement.draws(stimulus):
                     self._windows.update(placement.windows)
+                    self._members.update(placement.members)
                     break
         if self.source is not None:
             self.tracker.accept(self.source.poll(self.when(frame)))

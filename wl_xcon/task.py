@@ -914,7 +914,10 @@ class ObjectWindows:
         windows.append(
             Window(
                 f"{self.of}.distractor",
-                at=at[target],  # nominal; membership is the union of the others
+                # A stand-in no gaze is scored against: it names the array and the eye, and the
+                # alias is judged by the objects it names, every one but the target (the loop's
+                # membership; `gaze.Tracked`'s for a saccade).
+                at=at[target],
                 radius=self.radius,
                 on=self.of,
                 eye=self.eye,

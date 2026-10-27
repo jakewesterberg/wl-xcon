@@ -184,7 +184,8 @@ def test_an_array_that_would_not_fit_on_the_display_is_refused():
 def test_a_hold_on_an_alias_resolves_to_the_object_it_names():
     """`search.target` is where object 1 is, and the loop must know that.
 
-    A saccade guard reaches the world directly, so aliases worked there by accident.
+    A saccade guard reaches the world directly, which judges an alias by its objects itself
+    (`gaze.Tracked.happened`; `tests/test_gaze.py`).
     Membership guards -- entering, leaving, holding -- are derived by the loop from
     concrete windows, and an unresolved alias would simply never be satisfied: the
     animal fixates the target and the task waits forever.
