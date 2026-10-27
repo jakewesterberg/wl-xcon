@@ -237,3 +237,33 @@ def test_the_simulator_takes_a_task_object_and_plays_its_default_structure():
     assert (played.outcomes, played.states_visited) == (alone.outcomes, alone.states_visited)
     assert "only" not in played.states_visited
     assert played.uncovered(task) == played.uncovered(DETECTION)
+
+
+def test_a_simulated_animal_will_not_look_at_an_object_an_update_added_once_the_array_is_gone():
+    """XC-402: an object window only an `Update` draws -- object 3, once a two-object array is
+    updated to four -- scores the array as every other object's does, so with the array hidden
+    the animal has nothing there to hold. Uncoupled, it was held as if something were there."""
+    from wl_xcon.task import Array, Hide, ObjectWindows, Show, Stimulus, Update
+
+    def task(hidden: bool) -> Trial:
+        return Trial(
+            start="shown",
+            windows=[ObjectWindows(of="search", radius=1.0)],
+            states=[
+                State("shown", enter=[Show(Stimulus("search", at=(0.0, 0.0),
+                                                    looks=Array(n=2, radius=6.0)))],
+                      go=[On(After(0.01), "grown")]),
+                State("grown", enter=[Update("search", looks=Array(n=4, radius=6.0))],
+                      go=[On(After(0.01), "last")]),
+                State("last", enter=[Hide("search")] if hidden else [],
+                      go=[On(Hold("search.3", 0.02), Outcome.CORRECT),
+                          On(After(0.5), Outcome.NO_RESPONSE)]),
+            ],
+        )
+
+    def census(hidden: bool):
+        return simulate(task(hidden), Subject(seed=11, engagement=1.0, hazards={Entered: 5.0}),
+                        trials=200, frame_period=1 / 240)
+
+    assert census(hidden=False).outcomes[Outcome.CORRECT] > 150
+    assert census(hidden=True).outcomes[Outcome.CORRECT] == 0

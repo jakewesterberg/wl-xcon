@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import math
 from enum import Enum
+from typing import NamedTuple
 
 from wl_xcon.geometry import on_circle_deg, polar_deg
 from wl_xcon.photometry import Color, Contrast
@@ -1195,8 +1196,12 @@ def expand_windows(
     One definition, used by the runner and the checker both, for the reason
     `actions_of` gives: a checker that inspected a different set of windows from the
     one the loop scores would be validating a task nobody runs.
+
+    **An array's object windows here are where its last `Show` puts it**, which is where they
+    are until it is first drawn: from then they follow it, wherever a `Show` or an `Update` draws
+    it (`placements`; XC-402).
     """
-    # Each array with the position its `Show` gives it, so its objects' windows are where it is.
+    # Each array with the position its last `Show` gives it, so its objects' windows are there.
     shown = {action.stimulus.name: action.stimulus for _, action in actions_of(trial)
              if isinstance(action, Show) and isinstance(action.stimulus.looks, Array)}
     windows: list[Window] = []
@@ -1211,6 +1216,82 @@ def expand_windows(
         else:
             windows.append(declared)
     return windows, aliases
+
+
+class Placement(NamedTuple):
+    """One way a trial can draw an array that has object windows -- a position and an appearance
+    its `Show`s and `Update`s give it -- with the object windows and aliases built there, by
+    `ObjectWindows.expand` and `ObjectWindows.members` (`placements`). A record the run builds,
+    as `run.Shown` is, and never part of a task: not a dataclass of this vocabulary."""
+
+    #: As declared: the very objects a `Show` or an `Update` wrote, which the loop carries onto
+    #: the display (`run._apply`), so a stimulus on the display is matched by identity.
+    at: object
+    looks: object
+    #: Every object window name the family has in any of the trial's placements, to its window
+    #: here, or `None` where this placement has no such object: a smaller set size. Every name, so
+    #: switching to it overwrites the last placement's windows whole and adds no key.
+    windows: "dict[str, Window | None]"
+    #: `<of>.target` and `<of>.distractor` to the objects each names here.
+    members: "dict[str, tuple[str, ...]]"
+
+    def draws(self, stimulus: Stimulus) -> bool:
+        """Whether `stimulus`, as on the display, is drawn this way. **On the trial loop's path**,
+        on the frame a stimulus changes: identity first, and equality only for a stimulus made
+        some other way."""
+        return ((stimulus.at is self.at or stimulus.at == self.at)
+                and (stimulus.looks is self.looks or stimulus.looks == self.looks))
+
+
+def placements(trial: Trial, values: dict) -> "dict[str, tuple[Placement, ...]]":
+    """**Every placement each array with object windows can be drawn in, its windows built there**
+    (XC-402): each position a `Show` or an `Update` of the array gives it, with each appearance one
+    gives it, so an `Update` that moves the array -- its position, in any form; its ring's radius;
+    its rotation; its set size; which object is its target -- moves its windows with it.
+
+    **Built between trials**, for the trial's values: which `Update`s will have run is a question
+    about paths through the task, so every pairing is built, as `check._as_updated` reasons, and a
+    trial's frames only switch from one to another (`Placement.draws`; `gaze.Tracked.display`,
+    `run.run_trial`). Each object's window is built by `ObjectWindows.expand`, the route that
+    places it where `screen` draws it (`Array.positions` about `position_of`): one geometry, never
+    a second copy. An appearance that is not an array, or a setting whose value is not one, draws
+    no objects, so it has no placement: the windows stay where the objects were last drawn, as
+    they do while the array is hidden. A family whose array no `Show` gives has none."""
+    shows: dict[str, list[Stimulus]] = {}
+    updates: dict[str, list[Update]] = {}
+    for _, action in actions_of(trial):
+        if isinstance(action, Show):
+            shows.setdefault(action.stimulus.name, []).append(action.stimulus)
+        elif isinstance(action, Update):
+            updates.setdefault(action.stimulus, []).append(action)
+
+    def unique(found: list) -> list:
+        kept: list = []
+        for value in found:  # by equality: values need not be hashable
+            if not any(value is seen or value == seen for seen in kept):
+                kept.append(value)
+        return kept
+
+    found: dict[str, tuple[Placement, ...]] = {}
+    for declared in trial.windows:
+        if not isinstance(declared, ObjectWindows) or declared.of not in shows:
+            continue
+        shown, changed = shows[declared.of], updates.get(declared.of, [])
+        built = []
+        for at in unique([s.at for s in shown] + [u.at for u in changed if "at" in u.changes()]):
+            for looks in unique([s.looks for s in shown]
+                                + [u.looks for u in changed if "looks" in u.changes()]):
+                array = _value(looks, values)
+                if not isinstance(array, Array):
+                    continue
+                windows = {w.name: w for w in declared.expand(array, values, at)}
+                built.append((at, looks, windows, declared.members(array, values)))
+        names = {name: None for _, _, windows, _ in built for name in windows}
+        found[declared.of] = tuple(
+            Placement(at, looks, {**names, **windows}, members)
+            for at, looks, windows, members in built
+        )
+    return found
 
 
 # --- The task object (engine spec §3.5; engine build C1) --------------------------------

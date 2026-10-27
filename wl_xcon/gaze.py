@@ -46,6 +46,7 @@ from wl_xcon.task import (
     Stimulus,
     Trial,
     expand_windows,
+    placements,
     position_of,
 )
 
@@ -95,7 +96,19 @@ class Tracked:
         self._in_flight = False
         self._values = values or {}
         declared, _aliases = expand_windows(trial, self._values)
-        self._windows = {window.name: window for window in declared}
+        self._windows: dict = {window.name: window for window in declared}
+        #: **An array's object windows follow it** (XC-402): each array with object windows, every
+        #: placement it can be drawn in this trial, built now, between trials (`task.placements`);
+        #: and the stimulus last seen drawing it. `display` switches `_windows` to the placement on
+        #: the display, so an `Update` that moves an array moves its windows on the frame its
+        #: objects are first drawn there. Every name any placement has is a key from the start,
+        #: `None` while the placement drawn has no such object, so a switch adds none.
+        self._arrays = tuple(placements(trial, self._values).items())
+        self._drawn: dict = {of: None for of, _ in self._arrays}
+        for _, options in self._arrays:
+            for placement in options:
+                for name in placement.windows:
+                    self._windows.setdefault(name, None)
         #: Which mapping version scored this trial. S5 §6: every trial cites the
         #: version in force, and it is read off the map rather than passed in, so a
         #: trial cannot cite a version it was not actually scored under.
@@ -170,8 +183,9 @@ class Tracked:
         if isinstance(guard, SaccadeTo):
             if self._pending is None or self._in_flight:
                 return False
-            if not self.in_window(guard.window, frame, self._windows[guard.window].eye
-                                  if guard.window in self._windows else "both"):
+            declared = self._windows.get(guard.window)
+            if not self.in_window(guard.window, frame,
+                                  declared.eye if declared is not None else "both"):
                 return False
             self._pending = None
             return True
@@ -198,6 +212,18 @@ class Tracked:
         the poll in `in_window`, and the trial died of staleness at frame 7 because
         `signal` ran first and saw a sample nothing had refreshed.
         """
+        # The windows of what this frame draws (XC-402): an array a `Show` or an `Update` changed
+        # since the last frame switches to the placement it is now drawn in, built between trials.
+        # One identity test per array on every other frame, and a switch overwrites existing keys.
+        for of, options in self._arrays:
+            stimulus = visible.get(of)
+            if stimulus is None or stimulus is self._drawn[of]:
+                continue
+            self._drawn[of] = stimulus
+            for placement in options:
+                if placement.draws(stimulus):
+                    self._windows.update(placement.windows)
+                    break
         if self.source is not None:
             self.tracker.accept(self.source.poll(self.when(frame)))
         # Feed the detector from the same sample the window tests will read, so a

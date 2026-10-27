@@ -36,6 +36,7 @@ from wl_xcon.task import (
     Trial,
     Update,
     expand_windows,
+    placements,
 )
 
 
@@ -432,6 +433,27 @@ def run_trial(
         for name in tracked
     }
     tracked = {concrete for names in asked.values() for concrete in names}
+    # **And an array's aliases follow it** (XC-402): an `Update` can change its set size or its
+    # target, and with them which objects `<of>.target` and `<of>.distractor` name. Every placement
+    # the array can be drawn in is built now (`task.placements`), each with what it makes of the
+    # aliases a guard here asks; the frame loop switches `asked` to the one on the display, as
+    # `gaze.Tracked` switches the windows. Every object any of them can name is asked of the world
+    # every frame -- one with no window where the array is drawn is outside it -- and every window
+    # any of them builds has its eye.
+    arrays = []
+    for of, options in placements(trial, values or {}).items():
+        switches = []
+        for placement in options:
+            members = {alias: concretes for alias, concretes in placement.members.items()
+                       if alias in asked}
+            switches.append((placement, members))
+            tracked.update(concrete for concretes in members.values() for concrete in concretes)
+            for name, window in placement.windows.items():
+                if window is not None:
+                    eyes.setdefault(name, window.eye)
+        if any(members for _, members in switches):
+            arrays.append((of, tuple(switches)))
+    drawn: dict[str, object] = {of: None for of, _ in arrays}
     was_inside: dict[str, bool] = dict.fromkeys(asked, False)
     holding_since: dict[str, int] = {}
 
@@ -467,6 +489,18 @@ def run_trial(
         if each_frame is not None:
             each_frame(frame)
         world.display(visible, frame)
+        # The aliases of what this frame draws (XC-402), on the frame the world's windows switch:
+        # one identity test per array that has aliases asked, and a switch overwrites keys `asked`
+        # already has.
+        for of, switches in arrays:
+            stimulus = visible.get(of)
+            if stimulus is None or stimulus is drawn[of]:
+                continue
+            drawn[of] = stimulus
+            for placement, members in switches:
+                if placement.draws(stimulus):
+                    asked.update(members)
+                    break
         elapsed = (frame - entered_at) * frame_period
         bound = values or {}
 

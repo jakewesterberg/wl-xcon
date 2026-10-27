@@ -310,6 +310,17 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    mean pixels per degree, and the load checks that measure how far apart two windows, or an
    array's object windows, can come measure it the same way. Per axis, a 2° window at (20°, 0°)
    had been 1.879° tall (STE-27).
+   *Note, 2026-10-27:* **an array's object windows follow it**: an `Update` that moves an array --
+   its position, as a pair, as eccentricity and direction or as a setting; its ring's radius; its
+   rotation; its set size; which object is its target -- moves each object's window, and what
+   `<of>.target` and `<of>.distractor` name, on the frame the display first carries the change, and
+   so does a `Show` of it after a `Hide`. Every placement a `Show` or an `Update` gives the array is
+   built between trials, each object's window by the route that draws the object
+   (`task.placements`), and the frames only switch between them. Until then the windows stayed
+   where the array's `Show` had put it for the whole trial, and the animal was scored where the
+   objects had been (XC-402). Gaze is judged against the windows as drawn on each frame, with no
+   grace across a move, and an appearance that is not an array leaves them where the objects were
+   last drawn (EYE-29, engineering defaults).
 8. **Off the field**: only when declared; check 8 grows to test extents (XC-143, XC-144).
 9. **Head-free chaired sessions**: nominal head position, recorded and listed; a task may require a
    fixed head.
