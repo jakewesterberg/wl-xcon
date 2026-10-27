@@ -39,6 +39,7 @@ import math
 import time
 from dataclasses import dataclass
 from importlib import resources
+from pathlib import PurePath
 
 from wl_xcon import health as _health
 from wl_xcon.actor import Actor, Member
@@ -667,7 +668,10 @@ def _plans(frame: Telemetry | Idle | None) -> str:
     that task's own plans arrive with its pre-flight. No pre-flight shown, the plain run alone --
     but while a plan runs, that run's plan, so the bar never reads the plain run's label over a
     plan's run. Only while it runs: between runs the frame still carries the last run's plan
-    (`Session.plan`, "the run in progress, or the last one"), not what the next run plays."""
+    (`Session.plan`, "the run in progress, or the last one"), not what the next run plays.
+    That last plan is what a session's second and later runs preselect (the PI, 2026-10-22, "The
+    plan last run"): the option for it, when the frame's last run was of this pre-flight's task,
+    is marked `data-last`, and the first run's frame, with no last plan, marks none."""
     preflight = None if frame is None or isinstance(frame, Idle) else frame.preflight
     if preflight is None:
         if (frame is not None and not isinstance(frame, Idle) and frame.plan is not None
@@ -675,10 +679,14 @@ def _plans(frame: Telemetry | Idle | None) -> str:
             return f'<option value="{_e(frame.plan)}" selected>plan {_e(frame.plan)}</option>'
         return f'<option value="">{_e(PLAIN_RUN)}</option>'
     task = _e(preflight.task)
+    # The frame's task is the run's file path, the pre-flight's the name the page offered it by.
+    last = (frame.plan if frame.task is not None and PurePath(frame.task).name == preflight.task
+            else None)
 
     def option(value: str, label: str) -> str:
         chosen = " selected" if (preflight.plan or "") == value else ""
-        return f'<option value="{_e(value)}" data-for="{task}"{chosen}>{_e(label)}</option>'
+        again = " data-last" if last is not None and last == value else ""
+        return f'<option value="{_e(value)}" data-for="{task}"{again}{chosen}>{_e(label)}</option>'
 
     return "".join(option(name, f"plan {name}") for name in preflight.plans) + option("", PLAIN_RUN)
 
@@ -2813,8 +2821,10 @@ _SCRIPT = """
   // field is a static element no frame replaces; each form sends one command through
   // `post`, the one `fetch`, which adds who sent it.
   function chosenTask() { return el("task-sel").value; }
-  // Engine build C2b (the PI, 2026-10-19, "Preselect first, keep plain"): the plan a run plays,
-  // the empty choice the plain run; a task's first plan preselected when the plans come back to
+  // Engine build C2b (the PI, 2026-10-19, "Preselect first, keep plain"; 2026-10-22, "The plan
+  // last run"): the plan a run plays, the empty choice the plain run; a session's first run
+  // preselects the task's first plan, its later runs the plan last run (`data-last`, the same
+  // task's, still among its plans), else the first, when the plans come back to
   // this page's own plain pre-flight request -- the task chosen, the only one offered (the
   // engineering review, I3), or the next run's -- a choice made since standing; the trials box
   // hidden while a plan is chosen. `awaiting`, the task whose plain pre-flight this page asked
@@ -2827,11 +2837,12 @@ _SCRIPT = """
     var select = el("plan-sel");
     var first = select.options[0];
     var task = first ? first.getAttribute("data-for") : null;
+    var chosen = select.querySelector("option[data-last]") || first;
     // Nothing here reads the pre-flight pill, which a frame swaps after this select.
     if (task && task === awaiting && task === chosenTask() && !select.value) {
       awaiting = null;
-      if (first.value) {
-        select.value = first.value;
+      if (chosen.value) {
+        select.value = chosen.value;
         takePreflight(false);
       }
     }

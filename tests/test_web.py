@@ -3019,8 +3019,9 @@ def test_a_tasks_first_plan_is_preselected_once_its_plans_arrive_and_a_plan_hide
     preselect = _function("preselect")
 
     assert "if (task && task === awaiting && task === chosenTask() && !select.value) {" in preselect
-    assert "awaiting = null;" in preselect and "if (first.value) {" in preselect
-    assert "select.value = first.value;" in preselect and "takePreflight(false);" in preselect
+    assert "awaiting = null;" in preselect and "if (chosen.value) {" in preselect
+    assert 'var chosen = select.querySelector("option[data-last]") || first;' in preselect
+    assert "select.value = chosen.value;" in preselect and "takePreflight(false);" in preselect
     # The pre-flight pill is swapped after this select in the same frame: nothing here reads it.
     assert "betweenRuns" not in preselect
     assert ("awaiting = chosenPlan() === null && (signinPage ? signedIn() : canWrite) ? task : "
@@ -3138,6 +3139,24 @@ def test_the_picker_shows_the_plan_that_runs_not_the_plain_runs_label():
                  dict(stop_kind="completed")):
         assert fragments(frame(plan="train", block="easy", **over), view())["plan-sel"] == (
             f'<option value="">{PLAIN_RUN}</option>')
+
+
+def test_the_option_for_the_plan_last_run_is_marked_when_it_is_the_same_tasks_and_still_offered():
+    """The PI, 2026-10-22, "The plan last run": the page preselects the plan the frame's last run
+    played, when that run was of the pre-flight's task and the plan is still among its plans; the
+    frame's task is the run's file path, the pre-flight's the name it is offered by."""
+    def picker(**over) -> str:
+        return fragments(_between(preflight=Preflight(
+            "planned.py", PLANNED.items, plan=None, plans=("train", "test")), **over),
+            view())["plan-sel"]
+
+    last = picker(plan="test", task="tasks/planned.py")
+    assert '<option value="test" data-for="planned.py" data-last>plan test</option>' in last
+    assert last.count("data-last") == 1
+    assert "data-last" not in picker(plan="gone", task="tasks/planned.py")
+    assert "data-last" not in picker(plan="test", task="tasks/other.py")
+    assert "data-last" not in picker(plan="test", task=None)
+    assert "data-last" not in picker(plan=None, task="tasks/planned.py")
 
 
 def test_the_moves_between_blocks_are_held_against_a_double_click_and_a_plan_start_skips_trials():

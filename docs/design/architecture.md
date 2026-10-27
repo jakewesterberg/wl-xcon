@@ -421,8 +421,8 @@ state can cut it short, a timeout listed before the hold that ties it included (
 
 **Plans and blocks, since engine build C2b.** A task declares its plans (`Task.plans`; engine spec
 §13.1), and the operator chooses one at run start -- from the page, its pre-flight taken for
-it, the first preselected and the plain run one more choice, or `wlx run --plan` -- or none,
-the plain run.
+it, the task's first preselected for a session's first run and the plan last run for its later
+ones, the plain run one more choice, or `wlx run --plan` -- or none, the plain run.
 A plan is its block types (`task.Block`: a named set of conditions, each naming the trial
 structure it plays and counted by that structure's table unless its block has its own; ending once
 every target is used up and, as declared, a criterion is met, a number of trials is run, or its
