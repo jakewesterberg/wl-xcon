@@ -244,8 +244,9 @@ class Polar:
 def position_of(at: object, values: dict) -> tuple[float, float]:
     """A position as the per-axis degrees everything downstream reads -- the screen, the gaze
     windows, the checks: a `Polar` converted exactly (`geometry.polar_deg`), a pair coordinate by
-    coordinate, a whole-point setting as its value is. On the trial loop's path (a window's
-    center, every frame), so floats and `math` only."""
+    coordinate, a whole-point setting as its value is. Floats and `math` only: `screen.resolve`
+    reads each stimulus's position through it at a frame. A gaze window's center is read through it
+    once, between trials (`gaze._judged`), where until XC-413 it was read every frame."""
     if isinstance(at, P):
         at = _value(at, values)
     if isinstance(at, Polar):
