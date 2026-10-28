@@ -324,9 +324,10 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    (`windows-left-behind`); a position per eye or a disparity moves no window, which stays about
    the array's cyclopean position, and a task scoring one where the array can be drawn so is
    warned of that at load (`cyclopean-windows`); an `Update`'s array is held to the array checks
-   a `Show`'s is (`target-outside-array`, `crowded-array`); and a saccade to `<of>.distractor` is
-   judged at every distractor, each for its own eye, where it had been judged at a stand-in window
-   at the target (EYE-29, engineering defaults).
+   a `Show`'s is (`target-outside-array`, `crowded-array`, and `undeclared-window` for an object
+   only it has) and counted in the review report's windows table; and a saccade to
+   `<of>.distractor` is judged at every distractor, each for its own eye, where it had been judged
+   at a stand-in window at the target (EYE-29, engineering defaults).
 8. **Off the field**: only when declared; check 8 grows to test extents (XC-143, XC-144).
 9. **Head-free chaired sessions**: nominal head position, recorded and listed; a task may require a
    fixed head.

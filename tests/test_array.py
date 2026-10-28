@@ -615,3 +615,62 @@ def test_an_array_drawn_at_its_own_position_is_not_warned():
         _per_eye(_EACH_EYE, held="fix"),
     ):
         assert _cyclopean(trial) == []
+
+
+# --- An object only an `Update`'s array has is declared, and reviewed (XC-411) -------------------
+
+
+def _grown(held: str) -> Trial:
+    """A lit four-object array on a 5° ring, grown to eight objects by an `Update`, then 0.5 s for
+    a hold on `held`."""
+    from dataclasses import replace
+
+    from wl_xcon.photometry import Gray
+    from wl_xcon.task import Hold, Update
+
+    lit = Disc(size=0.5, color=Gray(40.0))
+    ring = Array(n=4, radius=5.0, target=1, looks=lit, among=lit)
+    return Trial(
+        start="shown",
+        windows=[ObjectWindows(of="search", radius=1.0)],
+        states=[
+            State("shown", enter=[Show(Stimulus("search", at=(0.0, 0.0), looks=ring))],
+                  go=[On(After(0.04), "grown")]),
+            State("grown", enter=[Update("search", looks=replace(ring, n=8))],
+                  go=[On(Hold(held, 0.05), Outcome.CORRECT),
+                      On(After(0.5), Outcome.NO_RESPONSE)]),
+        ],
+    )
+
+
+def test_an_object_only_an_update_s_array_has_is_declared():
+    """Object 5 exists once an `Update` grows the array to eight, and a run scores it there
+    (XC-402), so a hold on it loads clean: it was refused as undeclared, the checker reading only a
+    `Show`'s array. Object 8 is past every array the task gives, and stays undeclared."""
+    assert [f.code for f in check(_grown("search.5")) if f.blocking] == []
+    assert "undeclared-window" in {f.code for f in check(_grown("search.8"))}
+
+
+def test_an_object_of_an_array_a_setting_gives_is_declared_as_far_as_its_choices_reach():
+    """Read as the run reads it (`task.placements`), an array a setting gives has the objects of
+    each of its choices: object 5 of a choice of six is declared, and object 6 is not. Neither was
+    declared while the checker read only an array written into a `Show` (XC-411)."""
+    from wl_xcon.photometry import Gray
+    from wl_xcon.task import Hold
+
+    lit = Disc(size=0.5, color=Gray(40.0))
+
+    def held(name: str) -> Trial:
+        return Trial(
+            start="shown",
+            params=[Param("ring", unit="array", choices=(
+                Array(n=4, radius=5.0, looks=lit, among=lit),
+                Array(n=6, radius=5.0, looks=lit, among=lit)))],
+            windows=[ObjectWindows(of="search", radius=1.0)],
+            states=[State("shown", enter=[Show(Stimulus("search", at=(0.0, 0.0), looks=P("ring")))],
+                          go=[On(Hold(name, 0.05), Outcome.CORRECT),
+                              On(After(0.5), Outcome.NO_RESPONSE)])],
+        )
+
+    assert [f.code for f in check(held("search.5")) if f.blocking] == []
+    assert "undeclared-window" in {f.code for f in check(held("search.6"))}

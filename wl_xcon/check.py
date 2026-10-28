@@ -67,7 +67,6 @@ from wl_xcon.task import (
     Update,
     Window,
     actions_of,
-    arrays_of,
 )
 from wl_xcon.welfare import Deployment
 
@@ -2936,20 +2935,26 @@ def _declared_window_names(trial: Trial) -> set[str]:
     no highest. **Only the ones the task names are listed**: listing every index up to the
     highest set size made a value sent past its range cost as many names as it is large,
     in the widened check run between two trials (Task 10's review, fix round 2).
+
+    **Over every array a `Show` or an `Update` gives** (`_array_actions`), as written or among a
+    setting's choices: since XC-402 an array's object windows follow an `Update` that changes it,
+    so an object only an `Update`'s array has is scored, and was refused as undeclared while this
+    read only a `Show`'s array (XC-411).
     """
-    arrays = arrays_of(trial)
     params = {p.name: p for p in trial.params}
+    most: dict[str, float] = {}
+    for _, name, _, array in _array_actions(trial, params):
+        reach = _whole(_span(array.n, params, 0.0)[1])
+        most[name] = max(most.get(name, reach), reach)
     named = set(_window_refs(trial.states))
     names: set[str] = set()
     for window in trial.windows:
         if isinstance(window, ObjectWindows):
             names |= {f"{window.of}.target", f"{window.of}.distractor"}
-            array = arrays.get(window.of)
-            if array is not None:
-                most = _whole(_span(array.n, params, 0.0)[1])
+            if window.of in most:
                 names |= {name for name in named
                           if (index := _object_index(name, window.of)) is not None
-                          and index < most}
+                          and index < most[window.of]}
         else:
             names.add(window.name)
     return names

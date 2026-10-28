@@ -1183,15 +1183,6 @@ def FixPoint(
     return Stimulus(name=name, at=at, looks=Disc(size=size), **kwargs)
 
 
-def arrays_of(trial: Trial) -> "dict[str, Array]":
-    """Every array stimulus a trial can show, by stimulus name."""
-    return {
-        action.stimulus.name: action.stimulus.looks
-        for _, action in actions_of(trial)
-        if isinstance(action, Show) and isinstance(action.stimulus.looks, Array)
-    }
-
-
 def expand_windows(
     trial: Trial, values: dict
 ) -> "tuple[list[Window], dict[str, tuple[str, ...]]]":
