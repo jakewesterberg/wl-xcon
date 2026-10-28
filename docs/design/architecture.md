@@ -522,8 +522,8 @@ not reset.
   true eccentricity and direction beside them, an array's objects and target too; REC-26),
   which the trial loop keeps by reference (`run.Result.placed`) and the record resolves as
   the line is written, never in a frame. A position that cannot be resolved is written null with why (`unresolved`), never
-  raised, so a trial that ran always has its line, and the run's first such line puts one
-  warning on the changes feed. **Each trial's start is written too**, as a
+  raised, so a trial that ran always has its line, and each unresolved stimulus is said on
+  the changes feed once a run for each reason. **Each trial's start is written too**, as a
   row of `trial_starts.jsonl` — its ten numbers, its run and its task — at the boundary,
   after its words are computed and before its first strobe (XC-026 spec §8a item 1): a
   trial that dies mid-trial has strobed its number and has no line, and a resume takes

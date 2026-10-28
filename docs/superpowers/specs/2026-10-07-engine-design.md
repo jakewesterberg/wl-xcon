@@ -280,8 +280,8 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    beside them its true eccentricity `atan(√(tan²x + tan²y))` and direction `atan2(tan y, tan x)`,
    in (−180°, 180°] pending the PI, computed from what was drawn as the line is written, between
    trials; an array's objects and target, and a per-eye stimulus's two eyes, beside them; a position
-   that cannot be resolved written null with why, never raised, and said once a run on the changes
-   feed; wl-preproc told the fields first (REC-26).
+   that cannot be resolved written null with why, never raised, and each such stimulus said once a
+   run for each reason on the changes feed; wl-preproc told the fields first (REC-26).
 2. **Sizes**: one size number is the full width; each block's definition states it.
 3. **Away from the center**: true visual angle (default) or the screen center's
    scale, declared per task. *Note, 2026-10-19 (the PI, "Retire it"):* "Every stimulus is drawn in

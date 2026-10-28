@@ -1251,8 +1251,8 @@ def test_a_run_whose_lines_hold_an_unresolved_stimulus_says_so_once_on_the_chang
     """The re-review of XC-399, its minor 5, under the PI's warnings over refusals: a stimulus the
     record cannot place is silent at the rig unless said, so the first trial whose line holds one
     puts one warning on the changes feed, naming the stimulus, the setting and how many of its
-    entries were unresolved -- once a run, never a trial, so a run of such trials is not a flood;
-    a run whose lines resolve says nothing."""
+    entries were unresolved -- each once a run, never a trial, so a run of such trials is not a
+    flood; a run whose lines resolve says nothing."""
     path = _sessions.cue_task(tmp_path)
     session = _service_session(tmp_path)
 
@@ -1264,10 +1264,51 @@ def test_a_run_whose_lines_hold_an_unresolved_stimulus_says_so_once_on_the_chang
             if kind == "warning" and by is None and "could not resolve" in said]
     assert said == [
         "trial 0's line could not resolve 1 stimulus entry: cue (setting 'cue_pos' has no value); "
-        "it is recorded so, null where unresolved, as is every later one like it this run, "
-        "said once a run",
+        "it is recorded so, null where unresolved, and each stimulus is said once a run for each "
+        "reason",
     ] * 2
     assert len(_trial_rows(session)) >= 7
+
+
+def test_each_new_unresolved_stimulus_is_said_once_a_run_and_a_repeat_is_not(tmp_path):
+    """The scoped check of XC-399's second fix round: a later line can hold a different unresolved
+    stimulus -- another condition leaving another setting without a value -- so the feed says each
+    (stimulus, reason) once a run, naming what is new, and a repeat of one already said gives
+    nothing. A plan's first block leaves the cue's setting unset and its second the probe's."""
+    path = _sessions.cue_task(tmp_path)
+    text = path.read_text()
+    for old, new in (
+        ("            enter=[Show(FIX), Show(CUE), Mark(4096)],",
+         "            enter=[Show(FIX), Show(CUE), Show(PROBE), Mark(4096)],"),
+        ("\ndetection = Trial(\n",
+         '\nPROBE = Stimulus("probe", at=P("probe_pos"), looks=Disc(size=0.5, '
+         'color=Gray(P("fix_luminance"))))\n\ndetection = Trial(\n'),
+        ('        Param("cue_pos", unit="deg", choices=(Polar(8.0, 0.0), Polar(8.0, 180.0))),\n',
+         '        Param("cue_pos", unit="deg", choices=(Polar(8.0, 0.0), Polar(8.0, 180.0))),\n'
+         '        Param("probe_pos", unit="deg", choices=(Polar(8.0, 90.0), Polar(8.0, -90.0))),\n'),
+    ):
+        assert text.count(old) == 1, old
+        text = text.replace(old, new)
+    path.write_text(text + (
+        "\nfrom wl_xcon.task import Block, Condition, Plan\n"
+        "TASK = _cue_dataclasses.replace(TASK, meanings={\n"
+        "    **TASK.meanings, 'probe_pos': Meaning(NOT_DIFFICULTY, STIMULUS, note='a probe')},\n"
+        "    plans={'two': Plan([\n"
+        "        Block('cue unset', [Condition('probe set', {'probe_pos': Polar(8.0, 90.0)}, target=3)]),\n"
+        "        Block('probe unset', [Condition('cue set', {'cue_pos': Polar(8.0, 0.0)}, target=3)])])})\n"))
+    session = _session(_spec(tmp_path, task=str(path), plan="two", trials=400))
+
+    session.run()
+
+    rows = _trial_rows(session)
+    unresolved = [{e["name"] for e in row["stimuli"] if e["unresolved"]} for row in rows]
+    assert {frozenset(names) for names in unresolved} == {frozenset({"cue"}), frozenset({"probe"})}
+    first_probe = next(row["index"] for row, names in zip(rows, unresolved) if "probe" in names)
+    said = [said for kind, by, _, said in session.controls
+            if kind == "warning" and by is None and "could not resolve" in said]
+    assert [(text.split("'s line")[0], "cue (" in text, "probe (" in text) for text in said] == [
+        ("trial 0", True, False), (f"trial {first_probe}", False, True)]
+    assert "probe (setting 'probe_pos' has no value)" in said[1]
 
 
 def test_each_condition_plays_the_structure_it_names_and_its_row_says_which(tmp_path):
