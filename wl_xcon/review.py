@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import fields, is_dataclass
+from decimal import Context, Decimal
 
 from wl_xcon.task import (
     COUNTED,
@@ -100,32 +101,45 @@ def _point_label(at: object) -> str:
     a thousandth and what is written to six significant figures (`_value_label`); a value a
     setting holds by its name, and a pair holding one per axis alone, as no number converts.
     **A number that is not finite** -- an infinity or a NaN, which has no direction and which
-    converting raised on -- says it is not a position, the rest as written (XC-401's fix round,
-    M1). Anything else is shown as written: a position's shape is not checked at load (XC-272),
-    and an artifact that raises shows nothing at all."""
+    converting raised on, or an integer past a float's range, written in the same `g` form
+    (`1e+400`) -- says it is not a position, the rest as written (XC-401's fix rounds, M1 and N2).
+    Anything else is shown as written: a position's shape is not checked at load (XC-272), and an
+    artifact that raises shows nothing at all."""
     from wl_xcon.geometry import polar_deg, polar_of_deg
     from wl_xcon.task import Polar
 
     def number(value) -> bool:
         return isinstance(value, (int, float)) and not isinstance(value, bool)
 
+    def finite(value) -> bool:
+        try:
+            return math.isfinite(value)
+        except OverflowError:  # an integer past a float's range
+            return False
+
+    def written(value) -> str:
+        if number(value) and isinstance(value, int) and not finite(value):
+            # Its own digits past 4,300 are refused by `str`; six significant figures, as `g`.
+            return format(Decimal(value).normalize(Context(prec=6)), "g")
+        return _value_label(value)
+
     def deg(value: float) -> str:
         return f"{round(value, 3) + 0.0:g}"
 
     if isinstance(at, Polar):
         e, d = at.eccentricity, at.direction
-        polar = " at ".join(f"{_value_label(v)}°" if number(v) else _value_label(v) for v in (e, d))
+        polar = " at ".join(f"{written(v)}°" if number(v) else _value_label(v) for v in (e, d))
         if not (number(e) and number(d)):
             return polar
-        if not (math.isfinite(e) and math.isfinite(d)):
+        if not (finite(e) and finite(d)):
             return f"not a position: {polar}"
         x, y = polar_deg(e, d)
         return f"{polar} · (x, y) ({deg(x)}, {deg(y)})"
     if isinstance(at, tuple) and len(at) == 2:
-        pair = f"(x, y) ({_value_label(at[0])}, {_value_label(at[1])})"
+        pair = f"(x, y) ({written(at[0])}, {written(at[1])})"
         if not (number(at[0]) and number(at[1])):
             return pair
-        if not (math.isfinite(at[0]) and math.isfinite(at[1])):
+        if not (finite(at[0]) and finite(at[1])):
             return f"not a position: {pair}"
         e, d = polar_of_deg(float(at[0]), float(at[1]))
         return (f"{deg(e)}°" + (f" at {deg(d)}°" if round(e, 3) else "") + f" · {pair}")
@@ -514,34 +528,33 @@ def _block_order(order) -> str:
     return "shuffled passes"
 
 
-def _pair(value: object) -> bool:
-    return isinstance(value, tuple) and len(value) == 2
-
-
 def declares_position(choices) -> bool:
-    """**Whether a setting is declared as a whole position**: it offers choices, and every one is
-    a `Polar` or an (x, y) pair -- how check 8 reads a position given as one setting
-    (`check._points`, the points it offers as choices). No unit says it: a coordinate and a size
-    are `deg` alike (XC-401's fix round, M2)."""
-    from wl_xcon.task import Polar
+    """**Whether a setting is declared as a whole position**: it offers choices, and every one is a
+    point as check 8 reads one among a whole-position setting's choices (`check._points`), both
+    through `task.is_point` -- a `Polar` of two numbers, or an (x, y) pair of two numbers, a tuple
+    or a list (XC-401's fix rounds, M2 and N1). No unit says it: a coordinate and a size are `deg`
+    alike."""
+    from wl_xcon.task import is_point
 
     return (isinstance(choices, (tuple, list)) and bool(choices)
-            and all(isinstance(c, Polar) or _pair(c) for c in choices))
+            and all(is_point(c) for c in choices))
 
 
 def position_words(value: object, choices=()) -> str | None:
     """**A setting's value that is a whole position**, as every position in this report is shown,
     eccentricity and direction first with its (x, y) beside them (`_point_label`; the PI,
     2026-10-19, "Polar first, x-y allowed"): a `Polar`, a position by its type wherever it is, as
-    the record writes one (REC-25), and an (x, y) pair only for a setting whose `choices` declare
-    it a position (`declares_position`; XC-401's fix round, M2), since `(0.3, 0.6)` may be two
-    numbers of anything; `None` for any other value. The plan's tables show a condition's value
-    through it, and the console a setting's (`link.ParamRow.of`, the rig making the words, so no
-    console converts; XC-401)."""
+    the record writes one (REC-25), and an (x, y) pair, a tuple or a list, only for a setting whose
+    `choices` declare it a position (`declares_position`; XC-401's fix rounds, M2 and N1), since
+    `(0.3, 0.6)` may be two numbers of anything; `None` for any other value. The plan's tables show
+    a condition's value through it, and the console a setting's (`link.ParamRow.of`, the rig
+    making the words, so no console converts; XC-401)."""
     from wl_xcon.task import Polar
 
-    if isinstance(value, Polar) or (_pair(value) and declares_position(choices)):
+    if isinstance(value, Polar):
         return _point_label(value)
+    if isinstance(value, (tuple, list)) and len(value) == 2 and declares_position(choices):
+        return _point_label(tuple(value))
     return None
 
 

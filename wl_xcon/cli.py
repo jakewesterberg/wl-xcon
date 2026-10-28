@@ -703,7 +703,7 @@ def _interrupted(session) -> None:
     )
 
 
-def _value(value: float | str | None) -> str:
+def _value(value: object) -> str:
     """A staged parameter value, to the same 2 decimal places every fluid figure on
     this screen uses.
 
@@ -718,11 +718,15 @@ def _value(value: float | str | None) -> str:
 
     **Text is printed as it is** (XC-401): a categorical choice's word, or the rig's words for a
     whole position, eccentricity and direction first (`link.Staged`, schema 18), where
-    formatting it as a number raised.
+    formatting it as a number raised; and **any other value that is no number**, a pair a
+    setting not declared a position holds arriving as a list among them, as written (XC-401's
+    second fix round).
     """
-    if isinstance(value, str):
-        return _printable(value)
-    return "unset" if value is None else f"{value:.2f}"
+    if value is None:
+        return "unset"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return f"{value:.2f}"
+    return _printable(str(value))
 
 
 def _shown(value: object, choices=()) -> str:

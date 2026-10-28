@@ -3035,3 +3035,44 @@ def test_a_position_that_is_not_finite_is_said_plainly_and_never_faults_the_fram
     assert (cue.value, cue.position) == (None, "not a position: nan° at 45°")
     assert frame.staged[0].now == "not a position: -inf° at 45°"
     assert decode(encode(frame)) == frame
+
+
+def test_a_setting_is_a_position_where_check_8_reads_its_choices_as_points():
+    """XC-401's second fix round (N1): the console reads a setting's choices as check 8 does
+    (`check._points`), both through one function, `task.is_point`: a `Polar` of two numbers, or an
+    (x, y) pair of two numbers, a tuple or a list. A setting whose choices are `[x, y]` lists is a
+    position, its list value shown eccentricity and direction first; one whose choices are pairs
+    of words is not, and keeps its plain form."""
+    from wl_xcon.task import P, is_point
+
+    assert all(is_point(v)
+               for v in (Polar(8.0, 45.0), Polar(8, 0), (1.0, 2.0), [1.0, 2.0], (1, -2)))
+    assert not any(is_point(v) for v in (Polar(P("e"), 45.0), ("a", "b"), (1.0,), (1.0, 2.0, 3.0),
+                                         (True, 1.0), [1.0, "b"], "ab", 5.0, None))
+    session = SimpleNamespace(**{**vars(_session_with(1.25, 3.0)), "parameters": (
+        ("listed", "deg", None, None, [10.0, 10.0], False, ([8.0, 0.0], [10.0, 10.0])),
+        ("named", "", None, None, ("a", "b"), False, (("a", "b"), ("c", "d"))),
+    )})
+
+    frame = Telemetry.of(session, Tally(), _scheduler(), 0)
+
+    listed, named = frame.params
+    assert (listed.value, listed.position) == (None, "14.002° at 45° · (x, y) (10, 10)")
+    assert (named.value, named.position) == (("a", "b"), None)
+
+
+def test_an_integer_past_a_floats_range_is_said_plainly_as_no_position():
+    """XC-401's second fix round (N2): `math.isfinite(10**400)` raised `OverflowError` out of
+    `Telemetry.of`, an integer past a float's range being no float at all. It is said plainly as
+    not a position, as an infinity is, written in the `g` form every number in the report is."""
+    session = SimpleNamespace(**{**vars(_session_with(1.25, 3.0)), "parameters": (
+        ("target_pos", "deg", None, None, (10**400, 0.0), False, ((10**400, 0.0), (5.0, 0.0))),
+        ("cue", "deg", None, None, Polar(-(10**5000), 45.0), False, ()),
+    )})
+
+    frame = Telemetry.of(session, Tally(), _scheduler(), 0)
+
+    target, cue = frame.params
+    assert target.position == "not a position: (x, y) (1e+400, 0)"
+    assert cue.position == "not a position: -1e+5000° at 45°"
+    assert decode(encode(frame)) == frame

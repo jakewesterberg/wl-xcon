@@ -1417,7 +1417,11 @@ def _params(frame: Telemetry | None, view: View) -> str:
     **A setting holding a whole position** shows the rig's words for it, eccentricity and
     direction first with its (x, y) beside them, its unit in them (`ParamRow.position`; the PI,
     2026-10-19, "Polar first, x-y allowed"; XC-401), and no input or arrows: nothing a console
-    sends sets a position, `link._setting` taking a number or a word."""
+    sends sets a position, `link._setting` taking a number or a word. **Any other value that is
+    neither a number nor a word** -- a pair a setting not declared a position holds, arriving as a
+    list, or a `bool` -- is shown as written, with no input either (XC-401's second fix round):
+    formatted as a number it raised, and `serve` builds the page and its event stream from these
+    cards unguarded, so the page went blank and took the controls with it."""
     if frame is None:
         return _NONE
     if not frame.params:
@@ -1440,11 +1444,14 @@ def _params(frame: Telemetry | None, view: View) -> str:
             else f'<span class="rfs">last refused: {_e(refusal.why)}</span>'
         )
         cls = "param staged" if change is not None else "param"
+        settable = row.value is None or isinstance(row.value, str) or (
+            isinstance(row.value, (int, float)) and not isinstance(row.value, bool))
         shown = (
             f'<span class="pv">{_e(row.position)}</span>'
             if row.position is not None
             else f'<span class="pv">{_e(_num(row.value))} '
-            f'<span class="unit">{_e(row.unit)}</span></span>{_field(row, view)}'
+            f'<span class="unit">{_e(row.unit)}</span></span>'
+            + (_field(row, view) if settable else "")
         )
         cards.append(
             f'<div class="{cls}"><div class="pn"><span>{_e(row.name)}</span>{flag}</div>'

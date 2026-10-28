@@ -2284,6 +2284,18 @@ def test_console_shows_a_setting_holding_a_position_eccentricity_and_direction_f
                                "8° at 45° · (x, y) (5.675, 5.675) by jake") for line in rendered)
 
 
+def test_console_shows_a_staged_value_that_is_no_number_or_word_as_written():
+    """XC-401's second fix round: a staged value that is neither a number nor a word -- a pair a
+    setting not declared a position holds, arriving as a list -- is printed as written, where
+    formatting it as a number raised and `wlx console` showed nothing."""
+    rendered = render(_telemetry(staged=(
+        Staged(name="span", was=[0.3, 0.6], now=[0.4, 0.6], by=Box("jake"), bounded=False),),
+    )).splitlines()
+
+    assert any(line.startswith("  staged: span [0.3, 0.6] -> [0.4, 0.6] by jake")
+               for line in rendered)
+
+
 def test_console_lists_the_recent_outcomes_oldest_first():
     assert "  recent (oldest first): correct hang no_fixation" in render(
         _telemetry(recent_outcomes=("correct", "hang", "no_fixation"))

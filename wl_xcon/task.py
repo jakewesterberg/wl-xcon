@@ -240,6 +240,21 @@ class Polar:
     direction: "float | P"
 
 
+def is_point(value: object) -> bool:
+    """**A position written out in numbers**: a `Polar` whose eccentricity and direction are
+    numbers, or an (x, y) pair of two numbers, a tuple or a list. What check 8 reads among the
+    choices of a setting that is a whole position (`check._points`), and what makes a setting one
+    on the console (`review.declares_position`; XC-401's second fix round, N1): one function, so
+    the two cannot read a setting differently. A `bool` is no number, here as elsewhere."""
+
+    def number(item: object) -> bool:
+        return isinstance(item, (int, float)) and not isinstance(item, bool)
+
+    if isinstance(value, Polar):
+        return number(value.eccentricity) and number(value.direction)
+    return isinstance(value, (tuple, list)) and len(value) == 2 and all(number(v) for v in value)
+
+
 def position_of(at: object, values: dict) -> tuple[float, float]:
     """A position as the per-axis degrees everything downstream reads -- the screen, the gaze
     windows, the checks: a `Polar` converted exactly (`geometry.polar_deg`), a pair coordinate by

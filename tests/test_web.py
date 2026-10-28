@@ -1278,6 +1278,27 @@ def test_a_setting_holding_a_position_shows_it_polar_first_and_offers_no_input()
     assert 'data-param="fix_hold"' in params
 
 
+def test_a_value_that_is_no_number_or_word_is_shown_as_written_with_no_input():
+    """XC-401's second fix round: a setting holding a value that is neither a number nor a word --
+    a pair a setting not declared a position holds, arriving as a list, or a `bool` -- made its
+    card raise formatting it as a number, and `serve` builds the page and its event stream from
+    the cards unguarded, so the page went blank. It is shown as written, escaped, with no input or
+    arrows: nothing a console sends sets it."""
+    params = fragments(frame(params=(
+        ParamRow("span", "deg", 0.0, 1.0, [0.3, 0.6], False),
+        ParamRow("odd", "", None, None, ["<b>", 1], False),
+        ParamRow("flag", "", None, None, True, False),
+        ParamRow("fix_hold", "s", 0.1, 1.0, 0.3, False),
+    )), view())["params"]
+    span, odd, flag, hold = params.split('<div class="param">')[1:]
+
+    assert '<span class="pv">[0.3, 0.6] <span class="unit">deg</span></span>' in span
+    assert "[&#x27;&lt;b&gt;&#x27;, 1]" in odd and "<b>" not in odd
+    assert '<span class="pv">True ' in flag
+    assert not any("<input" in card or 'data-dir="1"' in card for card in (span, odd, flag))
+    assert 'data-param="fix_hold"' in hold
+
+
 def test_a_refusal_shows_on_its_parameters_card_with_its_sentence():
     params = fragments(
         frame(
