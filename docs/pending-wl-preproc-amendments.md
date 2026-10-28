@@ -497,3 +497,57 @@ shape come to you before they are written.
 agreement, the main sequence and stored detections read the same coordinates; and versioned contract fixtures, v1 the
 per-axis behavior (which our `tests/test_saccade.py` reads instead of importing your live code, before anything
 changes), v2 the true-angle one beside it, never replacing it. *(2026-10-19: v1 is vendored here at `tests/fixtures/wl-preproc/saccade-v1.json` from `10ea913` and pinned by SHA-256; `tests/test_saccade.py` no longer imports your detector.)*
+
+---
+
+# OPEN — a setting's value that is an appearance (new, 2026-10-28)
+
+Opened 2026-10-28, **before any such value is written**: found by the review of wl-xcon's XC-399 branch, and older than it.
+Read against wl-preproc's `wl_preproc/events/rigtrials.py` (a line's `params` must be an object; its values are not read one
+by one), `wl_preproc/nwb/conditions.py` (`trial_columns`, `block_conditions`, `_summarise`) and
+`wl_preproc/nwb/intervals.py` (`_setting_columns`), in the export `ecd1616` through the worktree's `wl-preproc` link, and
+in wl-preproc's checkout at `58ec42a` (branch `feat/syncbox-records`, 2026-10-27), where `rigtrials.py` and
+`conditions.py` are the same byte for byte.
+
+## What changed on our side
+
+**A task's setting may offer appearances as its choices**, which is how "circles among squares" becomes a value applied
+between trials rather than a new task: the reference task `fixation_detection`'s `target_appearance` offers a disc and a
+square, and `visual_search`'s `target_appearance` and `distractor_appearance` offer discs and squares in its red and
+green. A setting may equally hold a piece of one -- a color, a contrast, or a `Look`'s shape, fill, edge or outline --
+when an appearance names it by `P`. **Until now a run with one chosen faulted writing its start row** (the value is not
+JSON), before its first strobe, so no record holds one. **Such a value is now recorded, wherever a setting's value is
+written** -- each `trials.jsonl` line's `params`, a `runs.jsonl` start row's `layers` and `resolved`, a
+`parameter_changes.jsonl` row's `was` and `now` -- **as an object: the declaration's class by name and every one of its
+fields**, `{"class": ..., "fields": {...}}`, nested declarations written the same way. It is the form wl-xcon's task
+hash reads a declaration in (`declarations.canonical`, the form of a start row's `plan_form`) with one difference:
+**every field is written, those at their defaults included**, where the hash leaves a default out, so a reader never
+needs the defaults of the wl-xcon that wrote the line. **A setting the appearance refers to stays a reference by its
+name**, `{"class": "P", "fields": {"name": ...}}`; its value is the same line's `params` entry of that name. The
+reference task's disc, as a trial line's `params` holds it (keys sorted, as every line is written):
+
+```json
+"target_appearance": {"class": "Disc", "fields": {"color": {"class": "Gray", "fields": {"cd_m2": {"class": "P", "fields": {"name": "target_luminance"}}}}, "contrast": null, "size": 1.0}},
+"target_luminance": 40.0
+```
+
+Its square is the same with `"class": "Square"`. A class is named as wl-xcon's vocabulary names it (`Disc`, `Gray`,
+`DKL`, `Weber`, `Look`, `Flat`), an enum as `{"enum": ..., "value": ...}`, and a tuple as a list. **A choice's index is
+deliberately not written**, alone or beside it: a number there would become a number column and be summarized by its
+least and greatest, which says nothing about a disc or a square. A number, a word, an (x, y) pair and a polar position
+are written as before (the polar position as in the C2b section above). This applies wherever a setting's value is
+recorded, today and in any row added later.
+
+## The ask
+
+**Say whether this is the form you want to publish.** Nothing on your side has to change for it to be read: `rigtrials`
+takes any `params` object, and `conditions.py` writes a setting that is not a number as JSON text with sorted keys --
+in the trials table's `setting_target_appearance` where it varies across a session's trials, among a condition's
+constant `settings` or its varying values' distinct list otherwise -- so the disc above is published as the text of its
+object. If you would rather publish an appearance otherwise (its class alone in a column of its own, say), it is yours to
+decide; the record keeps every field either way.
+
+## What is deliberately not asked for
+
+No new escape, code or marker: parameter values travel in the session folder, never the stream (your own rule,
+`contracts/events.py`: "parameter VALUES do not"). No change to the six required trial fields.
