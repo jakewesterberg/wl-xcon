@@ -93,6 +93,7 @@ def check(
         + _uncoupled_windows(trial)
         + _display_faults(trial)
         + _windows_left_behind(trial)
+        + _cyclopean_windows(trial)
         + _color_faults(trial, calibration)
         + _light_faults(trial)
         + _block_faults(trial)
@@ -1429,18 +1430,7 @@ def _windows_left_behind(trial: Trial) -> list[Finding]:
             blanked = blanked | {name} if no_array(looks) else blanked - {name}
         return blanked
 
-    entry: dict[str, frozenset[str]] = {state.name: frozenset() for state in trial.states}
-    for _ in range(len(entry) + 1):
-        arriving: dict[str, frozenset[str]] = {name: frozenset() for name in entry}
-        for state in trial.states:
-            leaving = after(entry[state.name], state.enter)
-            for edge in state.go:
-                if not isinstance(edge.to, Outcome) and edge.to in arriving:
-                    arriving[edge.to] = arriving[edge.to] | after(leaving, edge.do)
-        if arriving == entry:
-            break
-        entry = arriving
-
+    entry = _may_reach(trial, after)
     findings: list[Finding] = []
     for state in trial.states:
         blanked = after(entry[state.name], state.enter)
@@ -1451,8 +1441,7 @@ def _windows_left_behind(trial: Trial) -> list[Finding]:
             ):
                 continue
             for of in sorted(blanked):
-                if window not in (f"{of}.target", f"{of}.distractor") and \
-                        _object_index(window, of) is None:
+                if not _object_window_of(window, of):
                     continue
                 finding = Finding(
                     "windows-left-behind",
@@ -1461,6 +1450,106 @@ def _windows_left_behind(trial: Trial) -> list[Finding]:
                     f"windows stay where its objects were last drawn, and gaze there is scored "
                     f"as on them: right for a memory-guided design that blanks the array on "
                     f"purpose, wrong if it was not meant (a Hide of the array is refused instead)",
+                    blocking=False,
+                    accepted_in=SESSION_KINDS,
+                )
+                if finding not in findings:
+                    findings.append(finding)
+    return findings
+
+
+def _may_reach(trial: Trial, after) -> dict[str, frozenset]:
+    """**What may hold on entering each state, along any path into it**: `after(facts, actions)`
+    applied to each state's entry actions and to each edge's, from nothing at the start, joined
+    over every edge into a state, to a fixpoint (`_windows_left_behind`, `_cyclopean_windows`). A
+    may analysis, unlike `_visible_on_entry`'s must: one path is enough. Each `after` adds and
+    removes facts by the actions alone, so the fixpoint is reached within a pass per state."""
+    entry: dict[str, frozenset] = {state.name: frozenset() for state in trial.states}
+    for _ in range(len(entry) + 1):
+        arriving: dict[str, frozenset] = {name: frozenset() for name in entry}
+        for state in trial.states:
+            leaving = after(entry[state.name], state.enter)
+            for edge in state.go:
+                if not isinstance(edge.to, Outcome) and edge.to in arriving:
+                    arriving[edge.to] = arriving[edge.to] | after(leaving, edge.do)
+        if arriving == entry:
+            break
+        entry = arriving
+    return entry
+
+
+def _object_window_of(window: str, of: str) -> bool:
+    """Whether `window` names an object window of array `of`: one of its objects, as
+    `ObjectWindows.expand` names them, or its `<of>.target` or `<of>.distractor`."""
+    return window in (f"{of}.target", f"{of}.distractor") or _object_index(window, of) is not None
+
+
+def _cyclopean_windows(trial: Trial) -> list[Finding]:
+    """**An array's object window scored where the array can be drawn with a position per eye or
+    a disparity, warned** (XC-412). Its object windows stay on a ring about its cyclopean
+    position, `at`, whatever it is drawn with (EYE-29's choice 5). With a position per eye the
+    screen draws nothing there: each eye's objects are on a ring about that eye's own position
+    (`screen._eyes`). With a disparity each eye's image is half of it to one side, so the two
+    eyes' mean is on an object when the animal fixates it in depth, and one eye alone is half
+    the disparity off it. A stimulus is read as `_per_eye_content` and `_stereo_content` read it:
+    a position per eye given, a disparity not provably zero (`_disparity_is_zero`); an `Update`
+    giving either adds it and one clearing it, or a `Show`, takes it away. A may analysis, as
+    `_windows_left_behind`'s (`_may_reach`). A warning in every kind (the PI, 2026-10-11:
+    warnings over refusals)."""
+    families = {w.of for w in trial.windows if isinstance(w, ObjectWindows)}
+    if not families:
+        return []
+
+    def after(drawn: frozenset, actions: list) -> frozenset:
+        for action in actions:
+            if isinstance(action, Show) and action.stimulus.name in families:
+                shown = action.stimulus
+                drawn = drawn - {(shown.name, "per-eye"), (shown.name, "disparity")}
+                if shown.at_left is not None or shown.at_right is not None:
+                    drawn = drawn | {(shown.name, "per-eye")}
+                if not _disparity_is_zero(shown.disparity, trial):
+                    drawn = drawn | {(shown.name, "disparity")}
+            elif isinstance(action, Update) and action.stimulus in families:
+                changes = action.changes()
+                eyes = [changes[eye] for eye in ("at_left", "at_right") if eye in changes]
+                if eyes:
+                    fact = (action.stimulus, "per-eye")
+                    drawn = (drawn | {fact} if any(at is not None for at in eyes)
+                             else drawn - {fact})
+                if "disparity" in changes:
+                    fact = (action.stimulus, "disparity")
+                    drawn = (drawn - {fact} if _disparity_is_zero(changes["disparity"], trial)
+                             else drawn | {fact})
+        return drawn
+
+    why = {
+        "per-eye": ("a position per eye", "where with a position per eye the screen draws "
+                    "nothing: each eye's objects are on a ring about that eye's own position, and "
+                    "gaze on them is inside a window only as far as that position is near `at`"),
+        "disparity": ("a disparity", "midway between each object's two images, one for each "
+                      "eye, half the disparity either side: the two eyes' mean is on an object "
+                      "when the animal fixates it in depth, but one eye alone, as a window scoring "
+                      "one eye judges it, is half the disparity off it"),
+    }
+    entry = _may_reach(trial, after)
+    findings: list[Finding] = []
+    for state in trial.states:
+        drawn = after(entry[state.name], state.enter)
+        for edge in state.go:
+            window = getattr(edge.guard, "window", None)
+            if window is None or not isinstance(
+                edge.guard, (Entered, Exited, Hold, SaccadeTo, Touched)
+            ):
+                continue
+            for of, how in sorted(drawn):
+                if not _object_window_of(window, of):
+                    continue
+                drawn_with, where = why[how]
+                finding = Finding(
+                    "cyclopean-windows",
+                    f"state {state.name!r} scores {window!r}, an object window of array {of!r}, "
+                    f"which can be drawn with {drawn_with}; its object windows stay on a ring "
+                    f"about its cyclopean position, `at` (EYE-29), {where}",
                     blocking=False,
                     accepted_in=SESSION_KINDS,
                 )

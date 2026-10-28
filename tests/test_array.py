@@ -504,3 +504,114 @@ def test_an_object_window_asked_after_a_show_draws_no_array_is_warned():
     warned = [f for f in check(again(Blank())) if f.code == "windows-left-behind"]
     assert len(warned) == 1 and not warned[0].blocking
     assert "windows-left-behind" not in {f.code for f in check(again(Array(n=4, radius=3.0)))}
+
+
+# --- An array drawn per eye is scored at its cyclopean position (XC-412) -------------------------
+#
+# An array's object windows stay on a ring about its cyclopean position, `at`, whatever per-eye
+# positions or disparity it is drawn with (EYE-29, choice 5). With per-eye positions the screen
+# draws nothing there; with a disparity each eye's image is half of it to one side. A task scoring
+# an object window then is warned at load, in every kind.
+
+
+def _per_eye(shown: dict, update=None, held: str = "search.1", params=()) -> Trial:
+    """A four-object array on a 3° ring on the stereoscope, shown with `shown` -- a position per
+    eye, a disparity, or neither -- then after 0.04 s `update`, if any, and 0.5 s for a hold on
+    `held`."""
+    from wl_xcon.task import Hold
+
+    ring = Array(n=4, radius=3.0, target=1)
+    return Trial(
+        start="shown",
+        view="stereoscope",
+        windows=[ObjectWindows(of="search", radius=1.0)],
+        params=list(params),
+        states=[
+            State("shown", enter=[Show(Stimulus("search", at=(0.0, 0.0), looks=ring, **shown))],
+                  go=[On(After(0.04), "held")]),
+            State("held", enter=[update] if update is not None else [],
+                  go=[On(Hold(held, 0.05), Outcome.CORRECT),
+                      On(After(0.5), Outcome.NO_RESPONSE)]),
+        ],
+    )
+
+
+def _cyclopean(trial: Trial) -> list:
+    return [f for f in check(trial) if f.code == "cyclopean-windows"]
+
+
+#: Each eye's own position, 1° either side of straight ahead.
+_EACH_EYE = {"at_left": (-1.0, 0.0), "at_right": (1.0, 0.0)}
+
+
+def test_an_object_window_of_an_array_drawn_per_eye_is_warned_where_it_is():
+    """Scored where the screen draws nothing, a warning in every kind that says where the windows
+    are and why the animal may not be looking there; for an object, and for an alias."""
+    from wl_xcon.findings import SESSION_KINDS
+
+    found = _cyclopean(_per_eye(_EACH_EYE))
+
+    assert len(found) == 1
+    warned = found[0]
+    assert not warned.blocking and warned.accepted_in == SESSION_KINDS
+    assert warned.detail.startswith("state 'held' scores 'search.1', an object window of array "
+                                    "'search', which can be drawn with a position per eye;")
+    assert "cyclopean position" in warned.detail and "draws nothing" in warned.detail
+    assert len(_cyclopean(_per_eye(_EACH_EYE, held="search.distractor"))) == 1
+
+
+@pytest.mark.parametrize("disparity, params", [
+    (0.5, ()),
+    (P("d"), (Param("d", unit="deg", choices=(0.0, 0.4)),)),
+], ids=["written", "among a setting's choices"])
+def test_an_object_window_of_an_array_drawn_with_a_disparity_is_warned(disparity, params):
+    """Each eye's image half the disparity to one side of where the windows are."""
+    found = _cyclopean(_per_eye({"disparity": disparity}, params=params))
+
+    assert len(found) == 1
+    assert "which can be drawn with a disparity;" in found[0].detail
+    assert "half the disparity" in found[0].detail
+
+
+@pytest.mark.parametrize("update", [
+    "per-eye positions", "a disparity",
+])
+def test_an_update_that_draws_the_array_per_eye_is_warned_after_it_and_not_before(update):
+    """A may analysis along the task's paths, as `windows-left-behind`'s: an object window scored
+    after an `Update` gives the array per-eye positions or a disparity is warned; one scored only
+    before it is not."""
+    from wl_xcon.task import Hold, Update
+
+    given = (Update("search", **_EACH_EYE) if update == "per-eye positions"
+             else Update("search", disparity=0.3))
+    before = Trial(
+        start="held",
+        view="stereoscope",
+        windows=[ObjectWindows(of="search", radius=1.0)],
+        states=[
+            State("held", enter=[Show(Stimulus("search", at=(0.0, 0.0),
+                                                looks=Array(n=4, radius=3.0, target=1)))],
+                  go=[On(Hold("search.1", 0.05), "given"), On(After(0.5), Outcome.NO_RESPONSE)]),
+            State("given", enter=[given], go=[On(After(0.1), Outcome.CORRECT)]),
+        ],
+    )
+
+    assert len(_cyclopean(_per_eye({}, update=given))) == 1
+    assert _cyclopean(before) == []
+
+
+def test_an_array_drawn_at_its_own_position_is_not_warned():
+    """Controls: no per-eye position and no disparity, or a disparity provably zero, or per-eye
+    positions cleared by an update that gives `at` again, or an array drawn per eye whose object
+    windows nothing scores."""
+    from wl_xcon.task import Update
+
+    cleared = Update("search", at=(0.0, 0.0), at_left=None, at_right=None)
+    for trial in (
+        _per_eye({}),
+        _per_eye({"disparity": 0.0}),
+        _per_eye({"disparity": P("d")}, params=[Param("d", unit="deg", choices=(0.0,))]),
+        _per_eye(_EACH_EYE, update=cleared),
+        _per_eye(_EACH_EYE, held="fix"),
+    ):
+        assert _cyclopean(trial) == []
