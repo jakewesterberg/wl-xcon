@@ -157,6 +157,143 @@ def test_a_polar_value_is_written_as_its_eccentricity_and_direction_with_its_x_y
         )
 
 
+def _declared_values() -> dict:
+    """Every value a setting can hold that is a declaration (REC-27), by a name for each: each
+    appearance `task.py` defines, at its defaults, and the general `Look`; the reference tasks' own
+    choices; appearances whose fields hold other declarations, settings among them; and the pieces
+    of one an appearance can name by `P` -- a color, a contrast, a look's shape, fill, edge and
+    outline."""
+    import dataclasses
+
+    from wl_xcon import look, task
+    from wl_xcon.cli import _load_task
+    from wl_xcon.photometry import DKL, Gray, Michelson, Weber
+    from wl_xcon.task import Array, Corrugation, Disc, Gabor, P, RDS, Square
+
+    values = {
+        f"default {name}": cls()
+        for name, cls in vars(task).items()
+        if isinstance(cls, type) and issubclass(cls, task.Appearance) and cls is not task.Appearance
+        and cls.__module__ == "wl_xcon.task" and dataclasses.is_dataclass(cls)
+    }
+    values["default Look"] = look.Look()
+    for path in ("tasks/fixation_detection.py", "tasks/visual_search.py"):
+        for param in _load_task(Path(path)).params:
+            for at, choice in enumerate(param.choices):
+                if isinstance(choice, task.Appearance):
+                    values[f"{path} {param.name} {at}"] = choice
+    values.update({
+        "disc on a setting": Disc(size=P("size"), color=Gray(P("target_luminance"))),
+        "gabor": Gabor(sf=4.0, contrast=Michelson(0.5)),
+        "rds": RDS(correlation=-1.0, form=Corrugation(sf=P("sf"), amplitude=0.2), seed=7),
+        "array": Array(n=P("n"), looks=Square(color=DKL(l_m=0.08)), among=Disc(contrast=Weber(-0.4))),
+        "look": look.Look(
+            shape=look.Vertices(points=((0.0, 0.0), (1.0, 0.0), (0.0, 1.0))),
+            fill=look.SineGrating(sf=3.0, contrast=Michelson(0.3), mean=Gray(20.0)),
+            edge=look.RaisedCosine(width=0.2),
+            outline=look.Outline(width=0.1, color=Gray(5.0)),
+            orientation=P("tilt"),
+        ),
+        "gray": Gray(40.0),
+        "dkl": DKL(lum=0.1),
+        "weber": Weber(0.2),
+        "shape": look.Ring(inner=1.0),
+        "fill": look.Flat(color=Gray(10.0)),
+        "edge": look.GaussianEdge(sigma=0.5),
+        "outline": look.Outline(color=Gray(5.0)),
+    })
+    return values
+
+
+def _names_every_field(value: object, written: object) -> bool:
+    """Whether `written` names `value`'s class and every one of its fields, at every level."""
+    import dataclasses
+
+    if dataclasses.is_dataclass(value):
+        names = [spec.name for spec in dataclasses.fields(value)]
+        return (
+            isinstance(written, dict) and set(written) == {"class", "fields"}
+            and written["class"] == type(value).__name__
+            and sorted(written["fields"]) == sorted(names)
+            and all(_names_every_field(getattr(value, name), written["fields"][name])
+                    for name in names)
+        )
+    if isinstance(value, tuple):
+        return isinstance(written, list) and len(written) == len(value) and all(
+            _names_every_field(item, entry) for item, entry in zip(value, written))
+    return True
+
+
+def _rebuilt(written: object, classes: dict) -> object:
+    """A declaration rebuilt from the record's form, each class found by its name in `classes`."""
+    if isinstance(written, dict) and set(written) == {"class", "fields"}:
+        return classes[written["class"]](
+            **{name: _rebuilt(field, classes) for name, field in written["fields"].items()})
+    if isinstance(written, list):
+        return tuple(_rebuilt(item, classes) for item in written)
+    return written
+
+
+def test_a_declared_value_is_written_as_its_class_and_every_field_and_reads_back(tmp_path):
+    """REC-27 (found 2026-10-28 by the XC-399 review): a setting's value that is an appearance --
+    the reference task's disc or square -- or a piece of one is not JSON, and the record faulted
+    on it. It is written as the task hash's form of a declaration, its class by name and its
+    fields, but **every field**, those at their defaults included -- which the hash leaves out --
+    so a reader never needs the defaults of the code that wrote it; a setting it refers to stays
+    a reference by name. Each value here is read back off the line and rebuilt from it alone,
+    equal to the value written. A polar position beside one is written as REC-25 has it, and a
+    value that is no declaration a setting can hold is still refused by name."""
+    import dataclasses
+
+    from wl_xcon import look, photometry, task
+    from wl_xcon.geometry import polar_deg
+    from wl_xcon.task import P, Polar
+
+    def classes(*modules) -> dict:
+        found = {}
+        for module in modules:
+            for name, cls in vars(module).items():
+                if isinstance(cls, type) and dataclasses.is_dataclass(cls) and (
+                        cls.__module__ == module.__name__):
+                    found[name] = cls
+        return found
+
+    # `look`'s `Cross` shape and the appearance `Cross` share a name, as they do in the task hash;
+    # a value is rebuilt from the vocabulary it is written in.
+    plain = classes(task, photometry)
+    looks = {**classes(look, photometry), "P": P}
+    values = _declared_values()
+    record = SessionRecord.open(tmp_path, session_id="2027-01-14_01", subject="A")
+    record.trial(
+        index=1, outcome="correct",
+        params={**values, "pos": Polar(8.0, 45.0), "pair": (5.0, 0.0), "luminance": 40.0}, run=0,
+        position=Position.lone(1), fluid_ml=0.0, last_reward_at=None,
+    )
+    (row,) = [json.loads(line) for line in (
+        tmp_path / "2027-01-14_01" / "xcon" / "trials.jsonl").read_text().splitlines()]
+    written = row["params"]
+
+    assert written["tasks/fixation_detection.py target_appearance 0"] == {"class": "Disc", "fields": {
+        "size": 1.0, "contrast": None, "color": {"class": "Gray", "fields": {
+            "cd_m2": {"class": "P", "fields": {"name": "target_luminance"}}}}}}
+    assert written["default Disc"] == {"class": "Disc", "fields": {
+        "size": 1.0, "contrast": None, "color": None}}
+    for name, value in values.items():
+        assert _names_every_field(value, written[name]), name
+        vocabulary = looks if isinstance(value, (look.Look, look.Shape, look.Fill, look.Edge,
+                                                 look.Outline)) else plain
+        assert _rebuilt(written[name], vocabulary) == value, name
+    x, y = polar_deg(8.0, 45.0)
+    assert written["pos"] == {"eccentricity": 8.0, "direction": 45.0, "x": x, "y": y}
+    assert (written["pair"], written["luminance"]) == ([5.0, 0.0], 40.0)
+    for refused, name in ((P("size"), "P"), (Box("jake"), "Box"), (Polar(P("ecc"), 45.0), "Polar")):
+        with pytest.raises(TypeError, match=f"^the record writes no {name} value"):
+            record.trial(
+                index=2, outcome="correct", params={"value": refused}, run=0,
+                position=Position.lone(2), fluid_ml=0.0, last_reward_at=None,
+            )
+
+
 def test_the_subject_is_on_every_trial_not_only_in_a_header(tmp_path):
     """Two animals routinely work in one day (S3 §2), and the session directory is
     keyed on the sync box's day-scoped id. Naming the subject per trial is what

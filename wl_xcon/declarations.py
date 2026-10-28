@@ -151,34 +151,41 @@ def _at_default(spec: dataclasses.Field, value: object) -> bool:
     return False
 
 
-def canonical(value: object) -> object:
+def canonical(value: object, *, every_field: bool = False) -> object:
     """`value` as plain data for the content hash (the engine C1 plan's call 11): each declaration
     by its class's name and the fields it sets away from their defaults -- so a field a later build
     adds, at its default, leaves every task's hash as it was, and a default that changes raises
     `FORMAT` -- an `Enum` by its class and value, and sequences and text-keyed dicts element by
     element. **A `Reward` is read for the entry it names before the dataclass rule**, which would
     read no field of it (call 19). Anything else raises `TypeError`: a value written by its
-    address would make every process's hash its own."""
+    address would make every process's hash its own.
+
+    **`every_field` writes the fields at their defaults too, at every depth**: the form the session
+    record writes a setting's value in when it is a declaration -- an appearance, or a piece of
+    one (`record._written`; REC-27). The record differs from the hash there alone, and for the
+    opposite reason: a hash must not move when a later build adds a field at its default, while a
+    record read years later must not need the defaults of the build that wrote it."""
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
     if isinstance(value, Enum):
-        return {"enum": type(value).__name__, "value": canonical(value.value)}
+        return {"enum": type(value).__name__,
+                "value": canonical(value.value, every_field=every_field)}
     if isinstance(value, (list, tuple)):
-        return [canonical(item) for item in value]
+        return [canonical(item, every_field=every_field) for item in value]
     if isinstance(value, dict):
         for key in value:
             if not isinstance(key, str):
                 raise TypeError(f"a declaration's keys are text, and {key!r} is not")
-        return {key: canonical(item) for key, item in value.items()}
+        return {key: canonical(item, every_field=every_field) for key, item in value.items()}
     if isinstance(value, Reward):
-        return {"class": "Reward", "fields": {"ref": canonical(value.ref)}}
+        return {"class": "Reward", "fields": {"ref": canonical(value.ref, every_field=every_field)}}
     if isinstance(value, Unchanged):
         return {"class": "Unchanged", "fields": {}}
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return {"class": type(value).__name__, "fields": {
-            spec.name: canonical(getattr(value, spec.name))
+            spec.name: canonical(getattr(value, spec.name), every_field=every_field)
             for spec in dataclasses.fields(value)
-            if not _at_default(spec, getattr(value, spec.name))
+            if every_field or not _at_default(spec, getattr(value, spec.name))
         }}
     raise TypeError(
         f"{type(value).__name__!r} is not a declaration the task's content hash can read"

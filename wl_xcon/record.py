@@ -200,10 +200,28 @@ def _written(value: object) -> object:
     "y": 5.675...}`, (x, y) converted exactly (`geometry.polar_deg`), so a reader that wants either
     has it without converting. The keys are `Polar`'s own field names, which a reader rebuilds it
     from, and the (x, y) every per-axis position is written in. A position written as a pair is a
-    two-item list, as it always was. **Anything else raises `TypeError`**, as `json` does: a
-    `Polar` holding a setting is no value, and a record never writes a stand-in for one."""
+    two-item list, as it always was.
+
+    **A setting's value that is an appearance** -- the reference task's `target_appearance`, a
+    `Disc` or a `Square` -- **or a piece of one an appearance names by `P`** (a color, a contrast,
+    a `Look`'s shape, fill, edge or outline) **is written as the task hash writes a
+    declaration, but with every field** (REC-27; found 2026-10-28 by the XC-399 review, when a run
+    with its target's appearance chosen faulted writing its start row): `{"class": "Disc",
+    "fields": {"size": 1.0, "contrast": null, "color": {"class": "Gray", "fields": {"cd_m2":
+    {"class": "P", "fields": {"name": "target_luminance"}}}}}}` (`declarations.canonical`,
+    `every_field`). Every field, those at their defaults included, which the hash leaves out, so a
+    reader never needs the defaults of the build that wrote the line; a setting the appearance
+    refers to stays a reference by name, its value beside it in the same `params`. Never a choice's
+    index, which a reader would take for a number.
+
+    **Anything else raises `TypeError`**, as `json` does: a `Polar` holding a setting, or a bare
+    setting reference, is no value, and a record never writes a stand-in for one; nor does it write
+    any other object, which reached here by mistake."""
+    from wl_xcon.declarations import canonical
     from wl_xcon.geometry import polar_deg
-    from wl_xcon.task import Polar
+    from wl_xcon.look import Edge, Fill, Outline, Shape
+    from wl_xcon.photometry import Color, Contrast
+    from wl_xcon.task import Appearance, Polar
 
     def number(field: object) -> bool:
         return isinstance(field, (int, float)) and not isinstance(field, bool)
@@ -211,6 +229,8 @@ def _written(value: object) -> object:
     if isinstance(value, Polar) and number(value.eccentricity) and number(value.direction):
         x, y = polar_deg(float(value.eccentricity), float(value.direction))
         return {"eccentricity": value.eccentricity, "direction": value.direction, "x": x, "y": y}
+    if isinstance(value, (Appearance, Color, Contrast, Shape, Fill, Edge, Outline)):
+        return canonical(value, every_field=True)
     raise TypeError(f"the record writes no {type(value).__name__} value ({value!r})")
 
 

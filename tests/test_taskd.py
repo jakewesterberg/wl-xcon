@@ -1163,6 +1163,75 @@ def test_a_settings_polar_value_is_recorded_wherever_a_value_is_and_reads_back(t
     assert resume.read(session.directory, session.welfare.left_cage_wall_at).run_index == 0
 
 
+def _target_appearances() -> tuple:
+    """`tasks/fixation_detection.py`'s own choices for `target_appearance`, read from the task: its
+    disc, then its square."""
+    (param,) = [param for param in _load_task(Path("tasks/fixation_detection.py")).params
+                if param.name == "target_appearance"]
+    return param.choices
+
+
+#: The reference task's disc as the record writes it (REC-27): its class and every field, the
+#: contrast at its default included, and its luminance a reference to the setting by name, whose
+#: value is the same line's `target_luminance`. Written out here, not computed by the code under
+#: test, so a change to the form fails this file.
+DISC_WRITTEN = {"class": "Disc", "fields": {
+    "size": 1.0,
+    "contrast": None,
+    "color": {"class": "Gray", "fields": {
+        "cd_m2": {"class": "P", "fields": {"name": "target_luminance"}}}},
+}}
+SQUARE_WRITTEN = {**DISC_WRITTEN, "class": "Square"}
+
+
+def test_a_run_with_its_targets_appearance_chosen_runs_and_records_it_whole(tmp_path):
+    """REC-27 (found 2026-10-28 by the XC-399 review): `fixation_detection` with its target's
+    appearance set to its own disc choice faulted writing its run's start row, before the first
+    strobe -- an appearance is not JSON -- so no trial ran. It runs to its end, and its start row's
+    layers and resolved values and every trial line's `params` carry the disc as its class and
+    every field, its luminance the setting it names, whose value is beside it."""
+    disc, _ = _target_appearances()
+    session = _session(_spec(tmp_path, trials=4, values={**VALUES, "target_appearance": disc}))
+
+    session.run()
+
+    assert session.stop_kind == "completed"
+    start = _runs(session)[0]
+    assert start["event"] == "start"
+    assert start["resolved"]["target_appearance"] == DISC_WRITTEN
+    assert start["layers"]["run"]["target_appearance"] == DISC_WRITTEN
+    rows = _trial_rows(session)
+    assert len(rows) == 4
+    assert [row["params"]["target_appearance"] for row in rows] == [DISC_WRITTEN] * 4
+    assert [row["params"]["target_luminance"] for row in rows] == [40.0] * 4
+
+
+def test_a_live_switch_of_the_targets_appearance_is_recorded_and_the_run_goes_on(tmp_path):
+    """REC-27: the switch `fixation_detection` advertises -- its target's appearance changed between
+    trials -- ended the run at the next boundary, as its `parameter_changes.jsonl` row was written.
+    Chosen live, from none to the disc and then to the square, each change's row names both
+    values whole, the trial lines follow them, the run goes on to its end, and a resume reads the
+    record back, since it reads no task setting's value."""
+    from wl_xcon import resume
+
+    disc, square = _target_appearances()
+    link = _Drained({2: [SetParameter(name="target_appearance", value=disc, by=Box("jake"))],
+                     4: [SetParameter(name="target_appearance", value=square, by=Box("jake"))]})
+    session = _session(_spec(tmp_path, trials=6), link=link)
+
+    session.run()
+
+    assert session.stop_kind == "completed"
+    assert [(row["name"], row["was"], row["now"]) for row in _parameter_changes(session)] == [
+        ("target_appearance", None, DISC_WRITTEN),
+        ("target_appearance", DISC_WRITTEN, SQUARE_WRITTEN),
+    ]
+    placed = [row["params"]["target_appearance"] for row in _trial_rows(session)]
+    assert len(placed) == 6
+    assert placed[0] is None and placed[-1] == SQUARE_WRITTEN and DISC_WRITTEN in placed
+    assert resume.read(session.directory, session.welfare.left_cage_wall_at).run_index == 0
+
+
 def test_each_condition_plays_the_structure_it_names_and_its_row_says_which(tmp_path):
     """Engine spec §13.3 (the PI, 2026-10-07: "each condition names its own; interleaving them in a
     block is ordinary"; engine build C2b): each trial is built and run from its condition's
