@@ -497,3 +497,43 @@ shape come to you before they are written.
 agreement, the main sequence and stored detections read the same coordinates; and versioned contract fixtures, v1 the
 per-axis behavior (which our `tests/test_saccade.py` reads instead of importing your live code, before anything
 changes), v2 the true-angle one beside it, never replacing it. *(2026-10-19: v1 is vendored here at `tests/fixtures/wl-preproc/saccade-v1.json` from `10ea913` and pinned by SHA-256; `tests/test_saccade.py` no longer imports your detector.)*
+
+---
+
+# OPEN — XC-399: where each shown stimulus was, in true eccentricity and direction, on its trial's line (new, 2026-10-28)
+
+Opened 2026-10-28 on the PI's decision of 2026-10-19 (**"Record both, tell wl-preproc"**), backlog XC-399, **before any of these fields is written**. Written, not yet sent: the controller sends it to wl-preproc's session before the build that writes the field merges (it is stacked on engine build C2b). Read against wl-preproc's `wl_preproc/events/rigtrials.py` (`_FIELDS`, the six fields a line must carry; every other field is ignored) and `nwb/intervals.py` (`_setting_columns`, one column per setting in `params`) through this worktree's `wl-preproc` link, which is **a local export from 2026-10-02, not your main**; C2b's ask above read your main at `b74d4f3` (2026-10-19) and found `_FIELDS` the same.
+
+## What changes on our side
+
+Positions are per screen axis, `(x, y)` = `(atan(X/D), atan(Y/D))`, so `√(x² + y²)` overstates how far out a stimulus is off the axes: 28.28° for 27.24° at (20°, 20°), 42.43° for 39.23° at (30°, 30°). **Until now no trial line said where its stimuli were**: a position was in `params` only where a setting held it (`target_x` and `target_y`, or since C2b a whole position, REC-25), and a literal one -- the fixation point's (0°, 0°), every object of an array -- was in the task file alone.
+
+**Each `trials.jsonl` line gains `stimuli`**: a list with one entry each time the trial put a stimulus on the screen (a `Show`) or changed one already there (an `Update`), in the order they took effect, each saying where the stimulus was from that frame on:
+
+```json
+"stimuli": [
+  {"name": "fix", "frame": 1, "eccentricity": 0.0, "direction": 0.0, "x": 0.0, "y": 0.0},
+  {"name": "target", "frame": 85, "eccentricity": 27.23631347517073, "direction": 45.0, "x": 20.0, "y": 20.0},
+  {"name": "search", "frame": 85, "eccentricity": 0.0, "direction": 0.0, "x": 0.0, "y": 0.0,
+   "objects": [{"eccentricity": 8.0, "direction": 0.0, "x": 8.0, "y": 0.0}, ...]}
+]
+```
+
+- **`name`** (text): the stimulus's name in its task, the one `Hide`, `Update` and its window use.
+- **`frame`** (integer): the trial's frame it was first there, counted from 1 at the trial's first frame, as the trial loop counts (the frame a `Show` makes it visible, the frame an `Update` first differs). Not a time: frames are matched to the recording by flip-patch edges from `TRIAL_START` (engine spec §8.4), which the screen log will carry (build F).
+- **`x`, `y`** (degrees): the per-axis position the screen draws it at, the cyclopean direction `(atan(X/D), atan(Y/D))`; a position the task wrote as `Polar(e, θ)` converted exactly, `x = atan(tan e·cos θ)` and `y = atan(tan e·sin θ)`, as REC-25 writes a setting's polar value.
+- **`eccentricity`** (degrees of visual angle): its true angle from straight ahead, **`atan(√(tan²x + tan²y))`**.
+- **`direction`** (degrees): its polar angle, counter-clockwise from rightward (engine spec §5.1: 0° right, +y up), **`atan2(tan y, tan x)`**, in (−180°, 180°], so a stimulus written `Polar(8, 270)` reads −90 here. At eccentricity 0 it is whatever `atan2` gives (0 at (0°, 0°)) and means nothing.
+- **How they are computed**: by `geometry.polar_of_deg`, as `atan2(√(u_x² + u_y²), u_z)` and `atan2(u_y, u_x)` of the direction `u = (sin x cos y, cos x sin y, cos x cos y)`, which is `(tan x, tan y, 1)` scaled by `cos x cos y`: the two formulas above, for every position a screen shows (|x|, |y| < 90°), equal to rounding (about 10⁻¹⁴°). **Always from `x` and `y`**, never copied from the task: a stimulus written `Polar(10, 135)` reads `eccentricity` 10.0 and `direction` 135.0 only to rounding. Where a setting holds the position, its value as written is in `params` (REC-25).
+- **`objects`** (an array only): a list, entry `i` its object `i` -- the object the screen calls `<name>.<i>` and its window `<of>.<i>` -- each `{eccentricity, direction, x, y}` as above; the array's own fields are its center. The objects sit on a true circle of its radius about its center (STE-28), so each is `radius` from the center in true visual angle, not in `(x, y)`.
+- **`left`, `right`** (a stimulus drawn by per-eye positions only, on the stereoscope): each eye's own position as drawn (engine spec §5.4: that eye's own direction, after the vergence offset), each `{eccentricity, direction, x, y}` in that eye's own frame, with `objects` for an array; its `eccentricity`, `direction`, `x` and `y` are then null, since nothing is drawn at a cyclopean position. No reference task has one.
+
+**Every `Show` and every `Update` makes an entry**, an `Update` that moved nothing included (it repeats where the stimulus was), so the list lines up with the display's changes one for one; a `Hide` makes none, and a stimulus hidden and shown again has an entry for each showing. **A `Blank`** (a catch trial's stimulus: a `Show` of nothing) is recorded where it was placed, though nothing was drawn. **The position is cyclopean**: a disparity, which shifts each eye's image by ∓d/2 about it (engine spec §5.4), is not applied, and is in `params` or the task file. A trial that showed nothing has an empty list; a trial that faulted writes no line, as today. The six required fields are unchanged.
+
+## The ask
+
+**Read `stimuli` into the published dataset**, so an analysis takes each stimulus's eccentricity and polar angle from its trial's line instead of computing `√(x² + y²)`. Yours to decide: how a list per trial is published (the trials table holds one value per trial per column; a JSON column, a column per stimulus name's first entry, or a table of its own keyed by trial); and whether your eye events' endpoints, which your saccade spec gives the same two formulas (the section above, "Widened the same day"), should take the same names, `eccentricity` and `direction`, so a saccade's landing and the target it went to are read by one name. Both readers tolerate the field today (a trial line's extra fields are ignored), so nothing breaks before this is done.
+
+## What is deliberately not asked for
+
+No new escape, code or marker: positions travel in the session folder, never the stream (your `contracts/events.py`: "parameter VALUES do not, since they always travel with the session directory"). No change to the six required fields or to `params`. Not the screen log (engine spec §8.5, build F), which will carry every change's frame and full resolved description: this is only where each stimulus was.
