@@ -288,7 +288,7 @@ class Result:
     changed: tuple[Changed, ...] = ()
     #: Photodiode confirmations, in order: the display as the world reported it.
     confirmed: tuple[Confirmed, ...] = ()
-    #: Every `Show` and every `Update` that took effect by the trial's last frame, in the order
+    #: Every `Show` and every `Update` on the screen for a frame or more of the trial, in the order
     #: they did, each with the stimulus as it was drawn from its frame, which action made it and
     #: when its presentation went off (XC-399, `_drawn`): where each stimulus was, which `shown`
     #: and `changed` name but do not say.
@@ -375,12 +375,18 @@ def _drawn(placed: "list[Placed]", shown: "list[Shown]", last: int) -> "tuple[Pl
     took effect by its last frame, with the first frame its presentation was off. **A `Show` or
     `Update` on an edge to an outcome** takes effect on the frame after the last, so it was never
     on the screen and is left out (the review's I2); **a `Hide` there** leaves its presentation on
-    through the last frame, so its `off` is `None`, as a presentation still up at the end."""
+    through the last frame, so its `off` is `None`, as a presentation still up at the end. **A
+    placement its presentation's `Hide` took effect with** -- a `Show` and a `Hide`, or an `Update`
+    and a `Hide`, on one transition -- was on the screen for no frame, and is left out too (the
+    re-review's minor 2). A `Show` and an `Update` on one frame stay two placements: the first was
+    so for no frame, which the `Update` at its frame says."""
     kept = []
     for place in placed:
         if place.frame > last:
             continue
         off = shown[place.presentation].off
+        if off is not None and off <= place.frame:
+            continue
         kept.append(place._replace(off=off if off is not None and off <= last else None))
     return tuple(kept)
 

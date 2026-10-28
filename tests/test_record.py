@@ -294,6 +294,30 @@ def test_a_stimulus_whose_position_has_no_value_is_recorded_unresolved_never_rai
     assert both["unresolved"] == "setting 'ecc' has no value"
 
 
+def test_a_position_its_objects_or_its_target_that_cannot_be_read_is_recorded_with_why(tmp_path):
+    """XC-399, the re-review's minor 1: a setting that holds something that is no position where a
+    position goes -- a plain number, say -- or something that is no number where an array's count
+    or target goes, is read as the screen would read it and fails; the record writes the fields it
+    could not give as null and says why, never raises, so the trial keeps its line."""
+    from wl_xcon.task import Array, Disc, P, Stimulus
+
+    where, ring, picked = _line(tmp_path, (
+        _shown(Stimulus("where", at=P("cue_pos"), looks=Disc()), 1),
+        _shown(Stimulus("ring", at=(2.0, 0.0), looks=Array(n=P("set_size"), radius=3.0)), 1, 1),
+        _shown(Stimulus("picked", at=(-2.0, 0.0),
+                        looks=Array(n=2, radius=1.0, target=P("target_index"))), 1, 2)),
+        {"cue_pos": 3.0, "set_size": "four", "target_index": "first"})
+
+    assert [where[k] for k in ("eccentricity", "direction", "x", "y")] == [None] * 4
+    assert where["unresolved"].startswith(f"its position {P('cue_pos')!r} could not be read (")
+    _is_at(ring, 2.0, 0.0)
+    assert ring["objects"] is None
+    assert ring["unresolved"].startswith("its objects could not be placed (")
+    _is_at(picked, -2.0, 0.0)
+    assert len(picked["objects"]) == 2 and picked["target"] is None
+    assert picked["unresolved"].startswith("its target could not be read (")
+
+
 def test_a_stimulus_whose_appearance_is_a_setting_has_its_arrays_objects_only_when_one_is_set():
     """XC-399: an appearance setting holding an array places its objects as the screen would;
     one a run left unset -- the reference detection task leaves `target_appearance` to the run,

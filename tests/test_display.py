@@ -157,6 +157,37 @@ def test_what_a_trial_puts_up_on_its_way_out_was_never_drawn_and_is_not_placed()
     assert result.placed == (Placed(FIX, 1, "show", (), 0, None),)
 
 
+def test_a_stimulus_up_for_no_frame_is_not_placed_and_one_changed_as_it_appears_is_two_entries():
+    """The re-review of XC-399, its minor 2: a `Show` and a `Hide` on one transition -- or an
+    `Update` and a `Hide` -- take effect on one frame, so what they describe was on the screen for
+    no frame and has no entry; the presentation's `Show` keeps its own, `off` the frame it went.
+    A `Show` and an `Update` on one frame stay two entries at that frame, the `Show`'s describing
+    for no frame what the `Update` then changed, as the ask says such pairs can occur."""
+    flash = Stimulus("flash", at=(3.0, 0.0), looks=Disc(size=0.3))
+    trial = Trial(
+        start="on",
+        windows=[],
+        states=[
+            State("on", enter=[Show(FIX)], go=[On(After(0.02), "next", do=[
+                Show(flash), Hide("flash"), Update("fix", at=(1.0, 1.0)), Hide("fix")])]),
+            State("next", go=[On(After(0.02), Outcome.CORRECT)]),
+        ],
+    )
+    result = run_trial(trial, Quiet(), frame_period=0.01)
+
+    assert result.placed == (Placed(FIX, 1, "show", (), 0, 3),)
+
+    dimmed = Trial(start="on", windows=[], states=[State(
+        "on", enter=[Show(FIX), Update("fix", opacity=0.5)],
+        go=[On(After(0.02), Outcome.CORRECT)])])
+    result = run_trial(dimmed, Quiet(), frame_period=0.01)
+
+    assert result.placed == (
+        Placed(FIX, 1, "show", (), 0, None),
+        Placed(dataclasses.replace(FIX, opacity=0.5), 1, "update", ("opacity",), 0, None),
+    )
+
+
 def test_the_world_is_told_what_is_on_the_display():
     """A world that cannot see the display cannot draw it, and a simulated subject
     that cannot see it is responding to a screen nobody rendered."""

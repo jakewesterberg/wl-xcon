@@ -386,7 +386,7 @@ class SessionRecord:
         aids: tuple = (),
         structure: str | None = None,
         overridden: tuple = (),
-    ) -> None:
+    ) -> list[dict]:
         """One trial's record, flushed before returning.
 
         **The whole resolved parameter set, per trial** -- not a pointer to "the
@@ -434,8 +434,10 @@ class SessionRecord:
         kind, frame and `off`, its (x, y) and its true eccentricity and direction beside them, a
         position that cannot be resolved written null with why, never raised. Required, as
         `position` is: a line written without it would say the trial showed nothing, and nothing
-        would say so.
+        would say so. **Returns the line's `stimuli`**, so the session can say on the changes feed
+        that one could not be resolved (`taskd`, once a run).
         """
+        stimuli = _stimuli(placed, params)
         if self._trials is None:
             self._trials = (self.directory / "trials.jsonl").open("a", encoding="utf-8")
         self._trials.write(
@@ -461,7 +463,7 @@ class SessionRecord:
                     "aids": list(aids),
                     "structure": structure,
                     "overridden": list(overridden),
-                    "stimuli": _stimuli(placed, params),
+                    "stimuli": stimuli,
                 },
                 sort_keys=True,
                 default=_written,
@@ -469,6 +471,7 @@ class SessionRecord:
             + "\n"
         )
         self._trials.flush()
+        return stimuli
 
     def trial_start(self, position: Position, *, run: int, task: str) -> None:
         """One row of `TRIAL_STARTS`: the trial's position, its run (from 0) and its

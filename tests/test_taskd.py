@@ -1247,6 +1247,29 @@ def test_a_stimulus_whose_position_setting_has_no_value_never_costs_a_trial_its_
         assert (cue["unresolved"], cue["drawn"]) == ("setting 'cue_pos' has no value", True)
 
 
+def test_a_run_whose_lines_hold_an_unresolved_stimulus_says_so_once_on_the_changes_feed(tmp_path):
+    """The re-review of XC-399, its minor 5, under the PI's warnings over refusals: a stimulus the
+    record cannot place is silent at the rig unless said, so the first trial whose line holds one
+    puts one warning on the changes feed, naming the stimulus, the setting and how many of its
+    entries were unresolved -- once a run, never a trial, so a run of such trials is not a flood;
+    a run whose lines resolve says nothing."""
+    path = _sessions.cue_task(tmp_path)
+    session = _service_session(tmp_path)
+
+    session.run(RunSpec(task=str(path), trials=3, seed=2, values=dict(VALUES)))
+    session.run(RunSpec(task=str(path), trials=2, seed=3, values=dict(VALUES)))
+    session.run(_run_spec(trials=2))
+
+    said = [said for kind, by, _, said in session.controls
+            if kind == "warning" and by is None and "could not resolve" in said]
+    assert said == [
+        "trial 0's line could not resolve 1 stimulus entry: cue (setting 'cue_pos' has no value); "
+        "it is recorded so, null where unresolved, as is every later one like it this run, "
+        "said once a run",
+    ] * 2
+    assert len(_trial_rows(session)) >= 7
+
+
 def test_each_condition_plays_the_structure_it_names_and_its_row_says_which(tmp_path):
     """Engine spec §13.3 (the PI, 2026-10-07: "each condition names its own; interleaving them in a
     block is ordinary"; engine build C2b): each trial is built and run from its condition's
