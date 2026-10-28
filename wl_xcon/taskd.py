@@ -2905,6 +2905,9 @@ class Session:
                     condition=condition.name,
                     structure=structure,
                     overridden=tuple(overridden),
+                    # Where each stimulus it showed was (XC-399), turned into positions as the
+                    # line is written, between trials.
+                    placed=result.placed,
                     counting=counted,
                     shown=shown,
                     repeat_of=drawn.repeat_of,

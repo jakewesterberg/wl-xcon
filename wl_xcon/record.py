@@ -214,6 +214,55 @@ def _written(value: object) -> object:
     raise TypeError(f"the record writes no {type(value).__name__} value ({value!r})")
 
 
+def _stimuli(placed: tuple, values: dict) -> list[dict]:
+    """**Where each stimulus a trial showed was** (XC-399; the PI, 2026-10-19, "Record both, tell
+    wl-preproc"), as its line writes it: one entry for each `Show` and each `Update`, in the order
+    they took effect (`run.Result.placed`), each `{name, frame, eccentricity, direction, x, y}` --
+    the frame it was first there; the per-axis position the screen draws it at, a `Polar` and a
+    whole-position setting converted as the screen converts them (`task.position_of`); and beside
+    it the position's **true eccentricity and direction**, `atan(√(tan²x + tan²y))` and `atan2(tan
+    y, tan x)` (`geometry.polar_of_deg`), never `√(x² + y²)`, which overstates it off the axes. The
+    shape is REC-25's, a setting's polar value's. **An array** adds `objects`, each object's,
+    in index order, on its true circle about its center (`task.Array.positions`, as the screen
+    places them). **A stimulus drawn by per-eye positions** (engine spec §5.4) is drawn at no
+    cyclopean position, so those four are null and `left` and `right` give each eye's own, in that
+    eye's frame. Computed as the trial's line is written, between trials, never in a frame."""
+    from wl_xcon.geometry import polar_of_deg
+    from wl_xcon.task import Array, P, position_of
+
+    def where(x: float, y: float) -> dict:
+        eccentricity, direction = polar_of_deg(x, y)
+        return {"eccentricity": eccentricity, "direction": direction, "x": x, "y": y}
+
+    entries = []
+    for stimulus, frame in placed:
+        # Only an array has objects. An appearance setting a run left unset (the reference
+        # detection task's `target_appearance`, "left to the run") is no array: nothing draws a
+        # trial's screen until the display process (engine build E), so a run without one runs,
+        # and must not fault here. Its position is required.
+        looks = (values.get(stimulus.looks.name) if isinstance(stimulus.looks, P)
+                 else stimulus.looks)
+
+        def at(position) -> dict | None:
+            if position is None:
+                # One eye's position alone, which the load check refuses (`per-eye-misused`).
+                return None
+            x, y = position_of(position, values)
+            entry = where(x, y)
+            if isinstance(looks, Array):
+                entry["objects"] = [where(*p) for p in looks.positions(values, (x, y))]
+            return entry
+
+        entry = {"name": stimulus.name, "frame": frame}
+        if stimulus.at_left is not None or stimulus.at_right is not None:
+            entry.update(eccentricity=None, direction=None, x=None, y=None,
+                         left=at(stimulus.at_left), right=at(stimulus.at_right))
+        else:
+            entry.update(at(stimulus.at))
+        entries.append(entry)
+    return entries
+
+
 def _local(posix_seconds: float) -> str:
     """A POSIX instant as this host's local clock time, with its zone named.
 
@@ -262,6 +311,7 @@ class SessionRecord:
         position: Position,
         fluid_ml: float,
         last_reward_at: float | None,
+        placed: tuple,
         counting: str | None = None,
         shown: bool | None = None,
         repeat_of: int | None = None,
@@ -314,6 +364,11 @@ class SessionRecord:
         default; engine build C2b), and **the values its condition set that a live edit
         overrode** (`overridden`, a list of names; engine spec §14.7: "the trial table carries an
         'overridden' flag"), so a grouping by condition can leave them out.
+
+        **And where each stimulus it showed was** (`stimuli`, from `placed`, the trial's
+        `run.Result.placed`; XC-399, `_stimuli`): its (x, y) and its true eccentricity and
+        direction beside them, for each `Show` and `Update`. Required, as `position` is: a line
+        written without it would say the trial showed nothing, and nothing would say so.
         """
         if self._trials is None:
             self._trials = (self.directory / "trials.jsonl").open("a", encoding="utf-8")
@@ -340,6 +395,7 @@ class SessionRecord:
                     "aids": list(aids),
                     "structure": structure,
                     "overridden": list(overridden),
+                    "stimuli": _stimuli(placed, params),
                 },
                 sort_keys=True,
                 default=_written,

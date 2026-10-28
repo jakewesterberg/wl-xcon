@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+import _angles
 from wl_xcon.actor import Box
 from wl_xcon.levels import Position
 from wl_xcon.record import (
@@ -93,7 +94,7 @@ def test_a_trial_is_on_disk_before_the_session_ends(tmp_path):
     record.trial(
         index=1, outcome="correct", params={"fix_hold": 0.3}, run=0, position=Position.lone(1),
         fluid_ml=0.0,
-        last_reward_at=None,
+        last_reward_at=None, placed=(),
     )
 
     written = (
@@ -110,12 +111,12 @@ def test_every_trial_carries_its_whole_resolved_parameter_set(tmp_path):
     record.trial(
         index=1, outcome="correct", params={"fix_hold": 0.3}, run=0, position=Position.lone(1),
         fluid_ml=0.0,
-        last_reward_at=None,
+        last_reward_at=None, placed=(),
     )
     record.trial(
         index=2, outcome="correct", params={"fix_hold": 0.9}, run=0, position=Position.lone(2),
         fluid_ml=0.0,
-        last_reward_at=None,
+        last_reward_at=None, placed=(),
     )
 
     rows = [
@@ -140,7 +141,7 @@ def test_a_polar_value_is_written_as_its_eccentricity_and_direction_with_its_x_y
     record = SessionRecord.open(tmp_path, session_id="2027-01-14_01", subject="A")
     record.trial(
         index=1, outcome="correct", params={"pos": Polar(8.0, 45.0), "pair": (5.0, 0.0)}, run=0,
-        position=Position.lone(1), fluid_ml=0.0, last_reward_at=None,
+        position=Position.lone(1), fluid_ml=0.0, last_reward_at=None, placed=(),
     )
     (row,) = [json.loads(line) for line in (
         tmp_path / "2027-01-14_01" / "xcon" / "trials.jsonl").read_text().splitlines()]
@@ -153,8 +154,87 @@ def test_a_polar_value_is_written_as_its_eccentricity_and_direction_with_its_x_y
     with pytest.raises(TypeError, match="^the record writes no Polar value"):
         record.trial(
             index=2, outcome="correct", params={"pos": Polar(P("ecc"), 45.0)}, run=0,
-            position=Position.lone(2), fluid_ml=0.0, last_reward_at=None,
+            position=Position.lone(2), fluid_ml=0.0, last_reward_at=None, placed=(),
         )
+
+
+def _is_at(entry: dict, x: float, y: float) -> None:
+    """`entry` says it was at `(x, y)`, with that position's true eccentricity and direction by
+    the PI's formulas (`_angles.true`), each to a billionth of a degree."""
+    eccentricity, direction = _angles.true(x, y)
+    assert (entry["x"], entry["y"]) == (pytest.approx(x, abs=1e-9), pytest.approx(y, abs=1e-9))
+    assert entry["eccentricity"] == pytest.approx(eccentricity, abs=1e-9)
+    assert entry["direction"] == pytest.approx(direction, abs=1e-9)
+
+
+def test_a_trial_line_says_where_each_stimulus_was_and_each_eyes_own_where_it_has_them(tmp_path):
+    """XC-399 (the PI, 2026-10-19, "Record both, tell wl-preproc"): each stimulus the trial put up
+    or changed is on its line with the frame it was first there, its (x, y) and its true
+    eccentricity and direction, computed from what was drawn: a position a setting holds as its
+    value binds (here a `Polar`, converted exactly), a `Blank` is where it was placed, and an
+    array's objects are listed on their true circle (STE-28). **A stimulus drawn by per-eye
+    positions** (engine spec §5.4) is drawn at no cyclopean position, so it has none: each eye's
+    own is beside it, in that eye's frame, each with its array's objects about it."""
+    from wl_xcon.run import Placed
+    from wl_xcon.task import Array, Blank, P, Polar, Stimulus
+
+    pair = Stimulus("pair", at=(0.0, 0.0), at_left=(2.5, 1.0), at_right=Polar(3.0, 30.0),
+                    looks=Array(n=3, radius=1.0, phase=0.0))
+    record = SessionRecord.open(tmp_path, session_id="2027-01-14_01", subject="A")
+    record.trial(
+        index=1, outcome="correct", params={"target_pos": Polar(15.0, -150.0)}, run=0,
+        position=Position.lone(1), fluid_ml=0.0, last_reward_at=None,
+        placed=(Placed(Stimulus("catch", at=P("target_pos"), looks=Blank()), 2), Placed(pair, 5)),
+    )
+    target, both = json.loads((record.directory / "trials.jsonl").read_text())["stimuli"]
+
+    assert (target["name"], target["frame"], both["name"], both["frame"]) == ("catch", 2, "pair", 5)
+    _is_at(target, *_angles.from_polar(15.0, -150.0))
+    assert (target["eccentricity"], target["direction"]) == (
+        pytest.approx(15.0, abs=1e-9), pytest.approx(-150.0, abs=1e-9))
+    assert "objects" not in target and "left" not in target
+    assert [both[k] for k in ("eccentricity", "direction", "x", "y")] == [None] * 4
+    for eye, (x, y) in (("left", (2.5, 1.0)), ("right", _angles.from_polar(3.0, 30.0))):
+        _is_at(both[eye], x, y)
+        assert len(both[eye]["objects"]) == 3
+        for drawn, (ox, oy) in zip(both[eye]["objects"], _angles.ring(x, y, 1.0, 0.0, 3)):
+            _is_at(drawn, ox, oy)
+
+
+def test_a_stimulus_whose_appearance_is_a_setting_has_its_arrays_objects_only_when_one_is_set():
+    """XC-399: an appearance setting holding an array places its objects as the screen would;
+    one a run left unset -- the reference detection task leaves `target_appearance` to the run,
+    and nothing draws a trial's screen before the display process (engine build E) -- is no
+    array, and the stimulus is recorded where it was, never a fault after a trial that ran."""
+    from wl_xcon.record import _stimuli
+    from wl_xcon.run import Placed
+    from wl_xcon.task import Array, P, Stimulus
+
+    target = Placed(Stimulus("target", at=(5.0, 0.0), looks=P("target_appearance")), 3)
+
+    (unset,) = _stimuli((target,), {})
+    assert "objects" not in unset
+    _is_at(unset, 5.0, 0.0)
+    (ring,) = _stimuli((target,), {"target_appearance": Array(n=2, radius=2.0, phase=90.0)})
+    for drawn, (x, y) in zip(ring["objects"], _angles.ring(5.0, 0.0, 2.0, 90.0, 2), strict=True):
+        _is_at(drawn, x, y)
+
+
+def test_a_trial_row_is_never_written_without_what_it_showed(tmp_path):
+    """XC-399: a line written without its stimuli would say the trial showed nothing, and nothing
+    would say that was wrong -- the way `Mark` and `Reward` were once dropped while sessions read
+    clean. Required, as `position` is, and never defaulted; a trial that showed nothing says so
+    with an empty list."""
+    record = SessionRecord.open(tmp_path, session_id="2027-01-14_01", subject="A")
+
+    with pytest.raises(TypeError, match="placed"):
+        record.trial(index=0, outcome="correct", params={}, run=0, position=Position.lone(0),
+                     fluid_ml=0.0, last_reward_at=None)
+    assert not (record.directory / "trials.jsonl").exists()
+
+    record.trial(index=0, outcome="correct", params={}, run=0, position=Position.lone(0),
+                 fluid_ml=0.0, last_reward_at=None, placed=())
+    assert json.loads((record.directory / "trials.jsonl").read_text())["stimuli"] == []
 
 
 def test_the_subject_is_on_every_trial_not_only_in_a_header(tmp_path):
@@ -162,7 +242,7 @@ def test_the_subject_is_on_every_trial_not_only_in_a_header(tmp_path):
     keyed on the sync box's day-scoped id. Naming the subject per trial is what
     makes a day partition correctly whatever wl-sync decides about `_02`."""
     record = SessionRecord.open(tmp_path, session_id="2027-01-14_01", subject="A")
-    record.trial(index=1, outcome="correct", params={}, run=0, position=Position.lone(1), fluid_ml=0.0, last_reward_at=None)
+    record.trial(index=1, outcome="correct", params={}, run=0, position=Position.lone(1), fluid_ml=0.0, last_reward_at=None, placed=())
 
     row = json.loads(
         (tmp_path / "2027-01-14_01" / "xcon" / "trials.jsonl").read_text()
@@ -195,7 +275,7 @@ def test_the_trial_file_is_reopened_for_each_run_and_every_row_names_its_run(tmp
     **And every row carries its trial number beside its run and its index** (XC-155),
     written as given: `taskd` counts it across the session, and wl-preproc joins on it."""
     record = SessionRecord.open(tmp_path, session_id="2027-01-14_01", subject="A")
-    record.trial(index=0, outcome="correct", params={}, run=0, position=Position.lone(0), fluid_ml=0.0, last_reward_at=None)
+    record.trial(index=0, outcome="correct", params={}, run=0, position=Position.lone(0), fluid_ml=0.0, last_reward_at=None, placed=())
     record.close()
     record.trial(
         index=0,
@@ -204,7 +284,7 @@ def test_the_trial_file_is_reopened_for_each_run_and_every_row_names_its_run(tmp
         run=1,
         position=Position(2, 2, 1, 1, 2, 2, 1, 2, 2, 1),
         fluid_ml=0.0,
-        last_reward_at=None,
+        last_reward_at=None, placed=(),
     )
     record.close()
     record.close()  # a second close does nothing
@@ -227,7 +307,7 @@ def test_a_trial_row_is_never_written_without_its_position(tmp_path):
     record = SessionRecord.open(tmp_path, session_id="2027-01-14_01", subject="A")
 
     with pytest.raises(TypeError, match="position"):
-        record.trial(index=0, outcome="correct", params={}, run=0, fluid_ml=0.0, last_reward_at=None)
+        record.trial(index=0, outcome="correct", params={}, run=0, fluid_ml=0.0, last_reward_at=None, placed=())
 
     assert not (record.directory / "trials.jsonl").exists()
 
@@ -239,7 +319,7 @@ def test_a_trial_row_carries_its_ten_position_numbers(tmp_path):
     `index` and `run` stay beside them, 0-based, as they were."""
     record = SessionRecord.open(tmp_path, session_id="2027-01-14_01", subject="A")
     position = Position(512, 400, 58, 18, 27, 21, 3, 4, 2, 2)
-    record.trial(index=57, outcome="correct", params={}, run=3, position=position, fluid_ml=0.0, last_reward_at=None)
+    record.trial(index=57, outcome="correct", params={}, run=3, position=position, fluid_ml=0.0, last_reward_at=None, placed=())
 
     row = json.loads((record.directory / "trials.jsonl").read_text().splitlines()[-1])
     assert {k: row[k] for k in position.as_record()} == position.as_record()
@@ -330,7 +410,7 @@ def test_a_crash_leaves_every_trial_written_so_far(tmp_path):
         record.trial(
             index=index, outcome="correct", params={}, run=0, position=Position.lone(index),
             fluid_ml=0.0,
-            last_reward_at=None,
+            last_reward_at=None, placed=(),
         )
     del record  # no close(), no __exit__ -- the process died
 
@@ -394,6 +474,25 @@ def test_a_simulated_session_writes_a_real_session_directory(tmp_path):
     assert [json.loads(row)["trial_number"] for row in rows] == list(range(1, 51))
 
 
+def test_a_simulated_session_writes_where_its_stimuli_were_as_a_rig_does(tmp_path):
+    """XC-399, through the simulator's own writer: the same record through the same code, so each
+    line says where each stimulus its trial showed was."""
+    from wl_xcon.simulate import Subject, run_session
+    from wl_xcon.task import After, Disc, On, Outcome, Polar, Show, State, Stimulus, Trial
+
+    shown = Stimulus("probe", at=Polar(6.0, 120.0), looks=Disc(size=0.5))
+    trial = Trial(start="up", windows=[], states=[
+        State("up", enter=[Show(shown)], go=[On(After(0.05), Outcome.CORRECT)])])
+
+    run_session(trial, Subject(seed=5), trials=3, frame_period=0.01,
+                record=SessionRecord.open(tmp_path, session_id="2027-01-14_01", subject="A"))
+
+    for line in (tmp_path / "2027-01-14_01" / "xcon" / "trials.jsonl").read_text().splitlines():
+        (entry,) = json.loads(line)["stimuli"]
+        assert (entry["name"], entry["frame"]) == ("probe", 1)
+        _is_at(entry, *_angles.from_polar(6.0, 120.0))
+
+
 def test_closing_releases_the_file_and_the_context_manager_does_it_for_you(tmp_path):
     """`close()` is nearly redundant, because every write is flushed -- that is the
     crash-safety property. Nearly is not the same as actually: the handle still has
@@ -403,7 +502,7 @@ def test_closing_releases_the_file_and_the_context_manager_does_it_for_you(tmp_p
     `__exit__` surviving -- three methods nothing exercised.
     """
     with SessionRecord.open(tmp_path, session_id="2027-01-14_01", subject="A") as r:
-        r.trial(index=1, outcome="correct", params={}, run=0, position=Position.lone(1), fluid_ml=0.0, last_reward_at=None)
+        r.trial(index=1, outcome="correct", params={}, run=0, position=Position.lone(1), fluid_ml=0.0, last_reward_at=None, placed=())
         handle = r._trials
         assert not handle.closed
 
@@ -547,7 +646,7 @@ def test_a_trial_line_carries_its_fluid_and_its_last_reward(tmp_path):
     record = SessionRecord.open(tmp_path, session_id="2027-01-14_01", subject="A")
     record.trial(
         index=1, outcome="correct", params={}, run=0, position=Position.lone(1),
-        fluid_ml=0.3, last_reward_at=1_700_000_001.5,
+        fluid_ml=0.3, last_reward_at=1_700_000_001.5, placed=(),
     )
 
     row = json.loads((tmp_path / "2027-01-14_01" / "xcon" / "trials.jsonl").read_text())

@@ -7,6 +7,8 @@ holds it in `hold_fix`, which is only correct if a `Show` persists. Found by rev
 2026-08-31.
 """
 
+import dataclasses
+
 import pytest
 
 from wl_xcon.run import Quiet, Scripted, run_trial
@@ -18,6 +20,7 @@ from wl_xcon.task import (
     Hold,
     On,
     Outcome,
+    Polar,
     Show,
     State,
     Stimulus,
@@ -103,6 +106,31 @@ def test_update_changes_a_stimulus_without_taking_it_down():
     # Decided while processing frame 2, different from frame 3 -- the same
     # one-frame rule the whole display follows.
     assert result.changed == (("fix", 3),)
+
+
+def test_each_show_and_update_says_what_was_drawn_from_which_frame():
+    """XC-399: a trial's row says where each stimulus it showed was, so the loop keeps each
+    stimulus as a `Show` put it up and as an `Update` left it, with the first frame it was so --
+    every `Show` and every `Update`, in the order they took effect, a stimulus shown again after a
+    `Hide` once more. Nothing is resolved in a frame: the record turns them into positions after
+    the trial."""
+    moved = Update("fix", at=Polar(8.0, 45.0))
+    trial = Trial(
+        start="on",
+        windows=[],
+        states=[
+            State("on", enter=[Show(FIX)], go=[On(After(0.02), "moved")]),
+            State("moved", enter=[moved], go=[On(After(0.02), "off")]),
+            State("off", enter=[Hide("fix")], go=[On(After(0.02), "again")]),
+            State("again", enter=[Show(FIX)], go=[On(After(0.02), Outcome.CORRECT)]),
+        ],
+    )
+    result = run_trial(trial, Quiet(), frame_period=0.01)
+
+    assert result.placed == (
+        (FIX, 1), (dataclasses.replace(FIX, at=Polar(8.0, 45.0)), 3), (FIX, 7))
+    assert [(p.stimulus.name, p.frame) for p in result.placed] == [
+        ("fix", 1), ("fix", 3), ("fix", 7)]
 
 
 def test_the_world_is_told_what_is_on_the_display():

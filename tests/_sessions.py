@@ -188,3 +188,34 @@ def planned_task(folder: Path, plans: str = "{}", *, name: str = "planned",
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
     return path
+
+
+def stimuli_task(folder: Path, *, name: str = "stimuli") -> Path:
+    """The reference detection task showing three more stimuli beside its fixation point in
+    `await_fix` -- `corner` at (20°, 20°), `oblique` at `Polar(10, 135)` and `ring`, an array of
+    four 3° about (-8°, -6°) at phase 30° -- and moving `corner` to `Polar(12, -60)` as its target
+    appears, written into `folder` as `NAME.py` (XC-399: where each shown stimulus was, on its
+    trial's row). Engine test material, run only in the simulator; (20°, 20°) is past direct view's
+    18.4° up at 50 cm, so the tests that run it view the panel from nearer."""
+    text = Path("tasks/fixation_detection.py").read_text()
+    shade = "color=Gray(P(\"fix_luminance\"))"
+    for old, new in (
+        ("from wl_xcon.task import (", "from wl_xcon.task import (\n    Array,\n    Polar,\n    Update,"),
+        ("\ndetection = Trial(\n", (
+            f'\nCORNER = Stimulus("corner", at=(20.0, 20.0), looks=Disc(size=0.3, {shade}))\n'
+            f'OBLIQUE = Stimulus("oblique", at=Polar(10.0, 135.0), looks=Disc(size=0.3, {shade}))\n'
+            f'RING = Stimulus("ring", at=(-8.0, -6.0), looks=Array(\n'
+            f'    n=4, radius=3.0, phase=30.0, looks=Disc(size=0.5, {shade}),\n'
+            f'    among=Disc(size=0.5, {shade})))\n'
+            "\ndetection = Trial(\n")),
+        ("            enter=[Show(FIX), Mark(4096)],",
+         "            enter=[Show(FIX), Show(CORNER), Show(OBLIQUE), Show(RING), Mark(4096)],"),
+        ("            enter=[Show(TARGET), Mark(4097)],",
+         '            enter=[Show(TARGET), Update("corner", at=Polar(12.0, -60.0)), Mark(4097)],'),
+    ):
+        assert text.count(old) == 1, old
+        text = text.replace(old, new)
+    path = Path(folder) / f"{name}.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path
