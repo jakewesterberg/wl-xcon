@@ -552,7 +552,7 @@ in the trials table's `setting_target_appearance` where it varies across a sessi
 constant `settings` or its varying values' distinct list otherwise -- so the disc above is published as the text of its
 object; `rigrecords.py` keeps a change row's `was` and `now` as the same JSON text, and `rig_record.py` publishes it in
 the `parameter_changes` table, so a change of appearance there names its luminance by reference, its value in the trials
-table. If you would rather publish an appearance otherwise (its class alone in a column of its own, say), it is yours to
+table when the luminance varies, or in the conditions table's constant `settings` when it does not. If you would rather publish an appearance otherwise (its class alone in a column of its own, say), it is yours to
 decide; the record keeps every field either way.
 
 ## What is deliberately not asked for

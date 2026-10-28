@@ -2233,8 +2233,10 @@ class Session:
         resume counts it short. `check` refuses every such value the review of REC-27 found (a
         condition's value is one of its setting's choices, and a bare setting, or a `Polar` holding
         one, among an appearance's or a position's choices is refused), so this is the backstop for
-        one a later build admits. Not welfare-critical: it reads, and faults a run before anything
-        of it happens. Run once, as a run starts, never in a trial."""
+        one a later build admits. **Values drawn per trial (engine build C3) must join this list
+        when they exist**: a drawn value is recorded on its trial's line like a condition's. Not
+        welfare-critical: it reads, and faults a run before anything of it happens. Run once, as a
+        run starts, never in a trial."""
         offered = [(f"the run's value of {name!r}", value) for name, value in values.items()]
         offered += [(f"the change to {name!r} staged before the run", value)
                     for name, was, now, _, _ in self._staged for value in (was, now)]
