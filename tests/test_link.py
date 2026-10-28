@@ -168,10 +168,11 @@ def _session_with(
         staged=(),
         refusals=(),
         # Stand-ins for `Session.parameters` and `Session.recent_outcomes` (P4d-2b
-        # b1): the shapes `Telemetry.of` reads, as `staged` and `refusals` are.
+        # b1): the shapes `Telemetry.of` reads, as `staged` and `refusals` are. Each setting's
+        # choices last since schema 18 (XC-401's fix round, M2).
         parameters=(
-            ("fix_hold", "s", 0.1, 1.0, 0.3, False),
-            ("reward_correct", "mL", 0.0, 0.4, 0.15, True),
+            ("fix_hold", "s", 0.1, 1.0, 0.3, False, ()),
+            ("reward_correct", "mL", 0.0, 0.4, 0.15, True, ()),
         ),
         recent_outcomes=("correct", "hang"),
         # Read as a plain attribute by `Telemetry.of`, exactly like `link.refused`
@@ -2915,24 +2916,33 @@ def test_a_settings_position_reaches_the_console_eccentricity_and_direction_firs
     whose value is a whole position -- a `task.Polar`, or an (x, y) pair -- reaches the console as
     the rig's words for it, the review report's (`review.position_words`). Its eccentricity is the
     true visual angle `atan(√(tan²x + tan²y))` and its direction `atan2(tan y, tan x)`: (20°, 20°)
-    is 27.236° out at 45°, never the 28.284° that `√(x² + y²)` gives off the axes. Its `value` is
-    then `None`, so no console offers to set it as a number or a word -- a `Polar` was no value
-    the wire could carry at all -- and every other value is carried as it was."""
+    is 27.236° out at 45°, never the 28.284° that `√(x² + y²)` gives off the axes, and (12.5°,
+    -7.25°) is computed here from the same two formulas, off the diagonal. Its `value` is then
+    `None`, so no console offers to set it as a number or a word -- a `Polar` was no value the
+    wire could carry at all -- and every other value is carried as it was. Each row is
+    `Session.parameters`' shape, its last item the setting's choices, which declare a pair a
+    position (the fix round's M2)."""
     import math
 
+    places = ((20.0, 20.0), (12.5, -7.25))
     session = SimpleNamespace(**{**vars(_session_with(1.25, 3.0)), "parameters": (
-        ("target_pos", "deg", None, None, (20.0, 20.0), False),
-        ("cue_pos", "deg", None, None, Polar(8.0, 45.0), False),
-        ("fix_hold", "s", 0.1, 1.0, 0.3, False),
-        ("target_appearance", "", None, None, "circle", False),
+        ("target_pos", "deg", None, None, (20.0, 20.0), False, places),
+        ("probe_pos", "deg", None, None, (12.5, -7.25), False, places),
+        ("cue_pos", "deg", None, None, Polar(8.0, 45.0), False, (Polar(8.0, 45.0),)),
+        ("fix_hold", "s", 0.1, 1.0, 0.3, False, ()),
+        ("target_appearance", "", None, None, "circle", False, ("circle", "square")),
     )})
 
     frame = Telemetry.of(session, Tally(), _scheduler(), 0)
 
-    target, cue, hold, looks = frame.params
+    target, probe, cue, hold, looks = frame.params
     tan = math.tan(math.radians(20.0))
     assert round(math.degrees(math.atan(math.hypot(tan, tan))), 3) == 27.236
     assert (target.value, target.position) == (None, "27.236° at 45° · (x, y) (20, 20)")
+    across, up = (math.tan(math.radians(v)) for v in (12.5, -7.25))
+    out = round(math.degrees(math.atan(math.hypot(across, up))), 3)
+    toward = round(math.degrees(math.atan2(up, across)), 3)
+    assert probe.position == f"{out:g}° at {toward:g}° · (x, y) (12.5, -7.25)"
     assert (cue.value, cue.position) == (None, "8° at 45° · (x, y) (5.675, 5.675)")
     assert (hold.value, hold.position, looks.value, looks.position) == (0.3, None, "circle", None)
     assert decode(encode(frame)) == frame
@@ -2946,6 +2956,10 @@ def test_a_staged_position_reaches_the_console_as_its_words():
     session = SimpleNamespace(**{**vars(_session_with(1.25, 3.0)), "staged": (
         ("target_pos", Polar(8.0, 0.0), Polar(8.0, 45.0), Box("jake"), False),
         ("fix_hold", 0.3, 0.4, Box("jake"), False),
+    ), "parameters": (
+        ("target_pos", "deg", None, None, Polar(8.0, 0.0), False,
+         (Polar(8.0, 0.0), Polar(8.0, 45.0))),
+        ("fix_hold", "s", 0.1, 1.0, 0.3, False, ()),
     )})
 
     frame = Telemetry.of(session, Tally(), _scheduler(), 0)
@@ -2969,3 +2983,55 @@ def test_schema_18_carries_a_settings_position_and_refuses_17_by_name():
     assert decode(encode(sent)).params[1].position is None
     with pytest.raises(SchemaMismatch, match="carried schema 17 and this console reads schema 18"):
         decode(encode(replace(sent, schema=17)))
+
+
+def test_a_pair_is_a_position_only_where_its_setting_is_declared_one():
+    """The fix round's M2: a pair is shown as a position only for a setting declared as one -- one
+    whose choices are each a `Polar` or an (x, y) pair, as check 8 reads a whole position as one
+    setting (`check._points`); no unit says it, a coordinate and a size being `deg` alike. A
+    setting holding `(0.3, 0.6)` that is not a position keeps its plain form, on its card and on a
+    staged change, where it read 0.671° at 63.435°. A `Polar` is a position by its type, wherever
+    it is, as the record writes one (REC-25)."""
+    session = SimpleNamespace(**{**vars(_session_with(1.25, 3.0)), "parameters": (
+        ("span", "deg", 0.0, 1.0, (0.3, 0.6), False, ()),
+        ("labels", "", None, None, (0.3, 0.6), False, ("near", (0.3, 0.6))),
+        ("target_pos", "deg", None, None, (0.3, 0.6), False, ((0.3, 0.6), (5.0, 0.0))),
+        ("cue", "deg", None, None, Polar(8.0, 0.0), False, ()),
+    ), "staged": (
+        ("span", (0.3, 0.6), (0.4, 0.6), Box("jake"), False),
+        ("target_pos", (5.0, 0.0), (0.3, 0.6), Box("jake"), False),
+    )})
+
+    frame = Telemetry.of(session, Tally(), _scheduler(), 0)
+
+    span, labels, target, cue = frame.params
+    assert (span.value, span.position, labels.value, labels.position) == (
+        (0.3, 0.6), None, (0.3, 0.6), None)
+    assert target.value is None and target.position.endswith(" · (x, y) (0.3, 0.6)")
+    assert cue.position == "8° at 0° · (x, y) (8, 0)"
+    plain, moved = frame.staged
+    assert (plain.was, plain.now) == ((0.3, 0.6), (0.4, 0.6))
+    assert (moved.was, moved.now) == ("5° at 0° · (x, y) (5, 0)", target.position)
+
+
+def test_a_position_that_is_not_finite_is_said_plainly_and_never_faults_the_frame():
+    """The fix round's M1: a position holding an infinite or a NaN number has no direction, and
+    converting it raised `ValueError` (a math domain error) out of `Telemetry.of`, at every trial's
+    boundary, which faults the run. It is said plainly, as written and as not a position, and the
+    frame crosses the wire."""
+    import math
+
+    session = SimpleNamespace(**{**vars(_session_with(1.25, 3.0)), "parameters": (
+        ("target_pos", "deg", None, None, (math.inf, 0.0), False, ((math.inf, 0.0), (5.0, 0.0))),
+        ("cue", "deg", None, None, Polar(math.nan, 45.0), False, ()),
+    ), "staged": (
+        ("cue", Polar(8.0, 45.0), Polar(-math.inf, 45.0), Box("jake"), False),
+    )})
+
+    frame = Telemetry.of(session, Tally(), _scheduler(), 0)
+
+    target, cue = frame.params
+    assert (target.value, target.position) == (None, "not a position: (x, y) (inf, 0)")
+    assert (cue.value, cue.position) == (None, "not a position: nan° at 45°")
+    assert frame.staged[0].now == "not a position: -inf° at 45°"
+    assert decode(encode(frame)) == frame

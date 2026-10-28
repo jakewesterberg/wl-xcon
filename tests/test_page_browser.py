@@ -1332,7 +1332,8 @@ def test_the_page_shows_a_settings_position_eccentricity_and_direction_first(rig
     (x, y) beside them, and no input to set it. Through the wire, in a real browser."""
     from wl_xcon.link import ParamRow, decode, encode
 
-    row = ParamRow.of("target_pos", "deg", None, None, (20.0, 20.0), False)
+    row = ParamRow.of("target_pos", "deg", None, None, (20.0, 20.0), False,
+                      ((20.0, 20.0), (0.0, 10.0)))
     held = ParamRow("fix_hold", "s", 0.1, 1.0, 0.3, False)
     rig.hub.offer(decode(encode(frame(params=(row, held)))))
     page = rig.browser_page()

@@ -271,9 +271,10 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    the axes (7.975° for 8° at 45°), is a load-time warning in every session kind
    (`computed-position`). The review report shows every position as eccentricity and direction
    first with (x, y) beside it; the console shows a setting's value that is a whole position the
-   same way, in the report's words, which the rig makes and sends (telemetry schema 18, XC-401,
-   2026-10-28; STE-30) -- no stimulus or window position is on the console otherwise -- and the
-   record, each stimulus's true eccentricity and direction beside its (x, y) (XC-399) (STE-29).
+   same way, in the report's words, which the rig makes and sends (telemetry schema 18,
+   2026-10-28; STE-30), and each stimulus's and window's position after the record has it
+   (XC-401, read from XC-399's per-trial fields); and the record, each stimulus's true
+   eccentricity and direction beside its (x, y) (XC-399) (STE-29).
 2. **Sizes**: one size number is the full width; each block's definition states it.
 3. **Away from the center**: true visual angle (default) or the screen center's
    scale, declared per task. *Note, 2026-10-19 (the PI, "Retire it"):* "Every stimulus is drawn in

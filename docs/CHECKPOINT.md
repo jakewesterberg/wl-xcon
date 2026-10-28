@@ -453,7 +453,9 @@ that it is forward calculated for that specific location rather than using ppd a
 - **Positions written as eccentricity and direction first** (**"Polar first, x-y allowed"**): `task.Polar`, converted
   exactly; the review report shows "8° at 45° · (x, y) (5.675, 5.675)"; a load warning, `computed-position`, where a
   task file computes e·cos θ itself (read with `ast`; it misses positions built in functions or other modules); STE-29.
-  The console's half is XC-401 and the record's XC-399, both after C2b.
+  The console's half is XC-401 and the record's XC-399, both after C2b. *2026-10-28:* XC-401's first half is built
+  (`cfd370f`, STE-30: a setting's value that is a whole position is shown eccentricity and direction first); each
+  stimulus's and window's position on the console stays open, read from XC-399's per-trial fields once they exist.
 - **The screen center's scale retired** (**"Retire it"**): `periphery="center_scale"` is refused at load; STE-06 revised.
 - **Disparity stays azimuth-longitude, named** (**"Keep longitude, say so"**): the review report states it once, and
   `config.json` carries `setup.disparity_convention` (wl-preproc told first; nothing of its reads `setup`); STE-07 note.

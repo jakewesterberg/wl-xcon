@@ -3950,11 +3950,16 @@ def test_console_strips_control_characters_from_wire_text():
                 ),
             ),
             refusals=(Refused("reward_correct", Box("jake"), "exceeds ceiling\x1b[31m"),),
+            # A position's words, and a staged one's (schema 18, XC-401; the fix round's M4).
+            params=(ParamRow("pos", "deg", None, None, None, False,
+                             "8° at 45°\x1b[2J\nSTOPPED: forged"),),
+            staged=(Staged(name="pos", was="8° at 0°\x1b[31m", now="8° at 45°\x9b2J",
+                           by=Box("jake"), bounded=False),),
         )
     )
     lines = rendered.splitlines()
 
-    assert "\x1b" not in rendered
+    assert "\x1b" not in rendered and "\x9b" not in rendered
     assert "\x07" not in rendered
     assert not any(line.startswith("STOPPED:") for line in lines)
 
@@ -3966,6 +3971,7 @@ def test_console_strips_control_characters_from_wire_text():
     # new ones -- the replacement character shows sanitizing actually ran here.
     refused_line = next(line for line in lines if line.startswith("  refused:"))
     assert "\ufffd" in refused_line
+    assert "  param: pos 8° at 45°\ufffd[2J\ufffdSTOPPED: forged (no declared range)" in lines
 
 
 def test_the_terminal_console_says_no_session_is_open_and_what_is_stranded():

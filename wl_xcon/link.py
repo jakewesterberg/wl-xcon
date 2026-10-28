@@ -180,12 +180,14 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: and 17 refuses 16, by name.
 #:
 #: 18 (XC-401; the PI, 2026-10-19, "Polar first, x-y allowed"): `ParamRow.position`, a setting's
-#: value that is a whole position -- a `task.Polar` or an (x, y) pair -- in the rig's words,
-#: eccentricity and direction first with its (x, y) beside them (`review.position_words`), its
-#: `value` then `None`; and a `Staged` row's `was` and `now` carry such a value as those words, as
-#: a word value already travels there. Until 18 a frame holding a `Polar` could not be encoded at
-#: all; no value a console can send is a position (`_setting`), so nothing else is shown
-#: differently. A reader of 17 refuses 18 and 18 refuses 17, by name.
+#: value that is a whole position -- a `task.Polar`, or an (x, y) pair held by a setting whose
+#: choices declare it a position (`review.declares_position`) -- in the rig's words, eccentricity
+#: and direction first with its (x, y) beside them (`review.position_words`), one that is not
+#: finite said to be no position, its `value` then `None`; and a `Staged` row's `was` and `now`
+#: carry such a value as those words, as a word value already travels there. Until 18 a frame
+#: holding a `Polar` could not be encoded at all. Every other value, a pair another setting holds
+#: included, is carried as before, and no value a console can send is a position (`_setting`). A
+#: reader of 17 refuses 18 and 18 refuses 17, by name.
 SCHEMA = 18
 
 #: How many refusals a session keeps, per source, and therefore how many one
@@ -300,9 +302,10 @@ class ParamRow:
     task declares a parameter nobody set -- a console prints *unset*, never `0` --
     and may be a string for a categorical one.
 
-    **A whole position** (schema 18, XC-401): a setting whose value is a `task.Polar` or an
-    (x, y) pair -- which only code puts there, a console sending numbers and words alone
-    (`_setting`) -- carries it in `position`, the rig's words for it, and `value` is `None`.
+    **A whole position** (schema 18, XC-401): a setting whose value is a `task.Polar`, or an
+    (x, y) pair where its choices declare it a position -- which only code puts there, a console
+    sending numbers and words alone (`_setting`) -- carries it in `position`, the rig's words for
+    it, and `value` is `None`.
     """
 
     name: str
@@ -314,20 +317,24 @@ class ParamRow:
     #: The value, when it is a whole position, **eccentricity and direction first with its (x, y)
     #: beside them** (the PI, 2026-10-19, "Polar first, x-y allowed"): `27.236° at 45° · (x, y)
     #: (20, 20)`, the review report's words (`review.position_words`), made by the rig so that no
-    #: console converts a position or formats one its own way. `None` for every other value.
+    #: console converts a position or formats one its own way; what is converted to a thousandth,
+    #: what the value holds to six significant figures. `None` for every other value.
     position: str | None = None
 
     @classmethod
     def of(cls, name: str, unit: str, low: float | None, high: float | None, value: object,
-           bounded: bool) -> "ParamRow":
-        """One row from `Session.parameters`' shape: a value that is a whole position as its
-        words in `position` -- a pair's eccentricity the true visual angle `atan(√(tan²x +
-        tan²y))` and its direction `atan2(tan y, tan x)` (`geometry.polar_of_deg`), a `Polar`'s
-        (x, y) by `geometry.polar_deg`, what is converted to a thousandth and what the value holds
-        as it holds it; any other value as it is."""
+           bounded: bool, choices=()) -> "ParamRow":
+        """One row from `Session.parameters`' shape, `choices` the setting's own: a value that
+        is a whole position (`review.position_words`: a `Polar`, or a pair where `choices`
+        declare one) as its words in `position` -- a pair's eccentricity the true visual angle
+        `atan(√(tan²x + tan²y))` and its direction `atan2(tan y, tan x)`
+        (`geometry.polar_of_deg`), a `Polar`'s (x, y) by `geometry.polar_deg`; what is converted
+        shown to a thousandth, and what the value holds to six significant figures (`:g`), so
+        `Polar(8.123456789, 45)` reads `8.12346°`; a position holding an infinity or a NaN is
+        said to be no position, as written. Any other value as it is."""
         from wl_xcon.review import position_words
 
-        words = position_words(value)
+        words = position_words(value, choices)
         if words is None:
             return cls(name, unit, low, high, value, bounded)
         return cls(name, unit, low, high, None, bounded, words)
@@ -909,6 +916,10 @@ class Telemetry:
         # Read, never decided: `Welfare` guarantees a rig session has this ceiling
         # and a cage-side one does not, so its absence is the cage-side case.
         limit = session.welfare.bounds.ceilings.get(OUT_OF_CAGE)
+        parameters = session.parameters
+        # Each setting's choices, which say whether a pair it holds is a position (XC-401's fix
+        # round, M2): `Session.parameters`' last item.
+        choices = {row[0]: row[6] for row in parameters}
         return cls(
             schema=SCHEMA,
             session_id=session.spec.session_id,
@@ -964,9 +975,11 @@ class Telemetry:
             # private attribute read across the module boundary is exactly the kind
             # of coupling that breaks silently the day the private shape changes.
             # A value that is a whole position as the rig's words for it (schema 18, XC-401):
-            # a `Polar` is no value the wire carries, and no console converts one.
+            # a `Polar` is no value the wire carries, and no console converts one. A pair is
+            # one only where its setting's choices say so (`parameters`' last item).
             staged=tuple(
-                Staged(name=n, was=_carried(w), now=_carried(v), by=b, bounded=bd)
+                Staged(name=n, was=_carried(w, choices.get(n, ())),
+                       now=_carried(v, choices.get(n, ())), by=b, bounded=bd)
                 for n, w, v, b, bd in session.staged
             ),
             # `session.refusals`, already public -- unlike `_staged`, nothing private
@@ -984,7 +997,7 @@ class Telemetry:
             task=session.task,
             allocation=session.spec.allocation,
             bounds_config=session.spec.bounds_config,
-            params=tuple(ParamRow.of(*row) for row in session.parameters),
+            params=tuple(ParamRow.of(*row) for row in parameters),
             floor_ml=session.welfare.bounds.minima[DAILY_FLUID].value,
             out_of_cage_limit_s=None if limit is None else limit.value,
             # The reading above, the one this whole frame describes (ledger Ruling 1).
@@ -1075,13 +1088,14 @@ class Telemetry:
         )
 
 
-def _carried(value: object) -> object:
-    """A staged value as a frame carries it: a whole position as the rig's words for it,
-    eccentricity and direction first with its (x, y) beside them (`review.position_words`; schema
-    18, XC-401), anything else as it is."""
+def _carried(value: object, choices=()) -> object:
+    """A staged value as a frame carries it: a whole position -- a `Polar`, or a pair where its
+    setting's `choices` declare one -- as the rig's words for it, eccentricity and direction first
+    with its (x, y) beside them (`review.position_words`; schema 18, XC-401), anything else as
+    it is."""
     from wl_xcon.review import position_words
 
-    words = position_words(value)
+    words = position_words(value, choices)
     return value if words is None else words
 
 

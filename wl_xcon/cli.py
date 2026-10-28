@@ -725,16 +725,17 @@ def _value(value: float | str | None) -> str:
     return "unset" if value is None else f"{value:.2f}"
 
 
-def _shown(value: object) -> str:
+def _shown(value: object, choices=()) -> str:
     """A parameter's value on the terminal: `unset` for `None`, two decimals for a
     number, like every other figure on this screen, and the text of a categorical
-    choice. Formatting, not derivation -- see `_value`. **A whole position** (a `task.Polar` or
-    an (x, y) pair), eccentricity and direction first with its (x, y) beside them, in the review
-    report's words (`review.position_words`; the PI, 2026-10-19, "Polar first, x-y allowed";
-    XC-401): `taskd` says an applied change of one this way on the changes feed."""
+    choice. Formatting, not derivation -- see `_value`. **A whole position** (a `task.Polar`, or
+    an (x, y) pair of a setting whose `choices` declare it one), eccentricity and direction
+    first with its (x, y) beside them, in the review report's words (`review.position_words`;
+    the PI, 2026-10-19, "Polar first, x-y allowed"; XC-401): `taskd` says an applied change of
+    one this way on the changes feed."""
     if value is None:
         return "unset"
-    words = position_words(value)
+    words = position_words(value, choices)
     if words is not None:
         return words
     if isinstance(value, (int, float)) and not isinstance(value, bool):

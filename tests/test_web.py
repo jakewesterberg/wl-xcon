@@ -918,7 +918,9 @@ def test_every_telemetry_string_is_escaped():
         recent_outcomes=(EVIL, "correct"),
         staged=(Staged(EVIL, 0.1, 0.2, Box(EVIL), False),),
         refusals=(Refused(EVIL, Box(EVIL), EVIL),),
-        params=(ParamRow(EVIL, EVIL, None, None, EVIL, False),),
+        # A position's words too (schema 18, XC-401; the fix round's M4).
+        params=(ParamRow(EVIL, EVIL, None, None, EVIL, False),
+                ParamRow("pos", "deg", None, None, None, False, EVIL)),
         performance=replace(frame().performance, task_name=EVIL, block_type=EVIL),
         session_kind=EVIL,
         calibration=EVIL,
