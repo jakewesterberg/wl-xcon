@@ -15,7 +15,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 **Finding one.** Grep the ID, a package (`P9`, `b3`), a repository (`wl-sync`) or a file. The sections: brainstorms the PI asked to have later; features no plan covers yet; defects and review findings deliberately not fixed; debt (cleanup, stale wording, test hygiene); anything that needs the rig or other hardware, measurements included; and asks of, or waits on, other repositories.
 
-**Next free ID: XC-420.**
+**Next free ID: XC-422.**
 
 ## Brainstorms queued for the PI
 
@@ -201,6 +201,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 - **XC-408** `preflight.beyond`'s first pass checks every starting value against the whole task, so for a plan it may warn or refuse on a structure the plan never plays (safe side, rare); narrowing it to the plan's structures is a design change. — 2026-10-22, [final review of engine build C2b](superpowers/plans/2026-10-19-engine-c2b.md) — waits on: nothing
 - **XC-417** The live-edit refusal sentence prints a `Polar` choice as Python does (`'target_pos' may only be one of (Polar(eccentricity=8.0, direction=45.0), ...)`), in `Session.set` and `preflight.values` alike, where every other position on the console reads eccentricity and direction first; `Session.set` is welfare-listed, so the change needs the PI's welfare review. — 2026-10-28, [STE-30](references/decisions.md#ste-30--the-console-shows-a-settings-value-that-is-a-whole-position-in-the-review-reports-words-eccentricity-and-direction-first-with-x-y-beside-them-made-by-the-rig-and-sent-as-words) (the XC-401 review and its fix round) — waits on: the PI's welfare review
 - **XC-418** An unset setting whose choices are `Polar`s, a position a plan's conditions set, shows a number spinner on its page card, since `ParamRow` carries no choices and the run's values hold nothing for it. — 2026-10-28, [STE-30](references/decisions.md#ste-30--the-console-shows-a-settings-value-that-is-a-whole-position-in-the-review-reports-words-eccentricity-and-direction-first-with-x-y-beside-them-made-by-the-rig-and-sent-as-words) (the XC-401 review and its fix round) — waits on: engine build C3 (the console's conditions and values)
+- **XC-421** Check 8 raises instead of refusing when a setting's choices are all points and one holds an infinity or an integer past a float's range (`Polar(float('inf'), 0)`, `(10**400, 0)`): `check._points` reaches a math error before its bound. A choices list that also holds a non-point is refused as unbounded since `9998882`. Only code can write such a choice. — 2026-10-28, [`wl_xcon/check.py`'s `_points`](../wl_xcon/check.py) (the XC-401 round-2 re-review) — waits on: nothing
 
 ## Debt
 
