@@ -211,8 +211,9 @@ def _written(value: object) -> object:
     {"class": "P", "fields": {"name": "target_luminance"}}}}}}` (`declarations.canonical`,
     `every_field`). Every field, those at their defaults included, which the hash leaves out, so a
     reader never needs the defaults of the build that wrote the line; a setting the appearance
-    refers to stays a reference by name, its value beside it in the same `params`. Never a choice's
-    index, which a reader would take for a number.
+    refers to stays a reference by name, its value where that setting's is written (a trial line's
+    own `params`, a start row's `resolved`; for a change row, the lines of the trials it applies
+    to). Never a choice's index, which a reader would take for a number.
 
     **Anything else raises `TypeError`**, as `json` does: a `Polar` holding a setting, or a bare
     setting reference, is no value, and a record never writes a stand-in for one; nor does it write
@@ -232,6 +233,19 @@ def _written(value: object) -> object:
     if isinstance(value, (Appearance, Color, Contrast, Shape, Fill, Edge, Outline)):
         return canonical(value, every_field=True)
     raise TypeError(f"the record writes no {type(value).__name__} value ({value!r})")
+
+
+def unwritable(value: object) -> str | None:
+    """Why the record cannot write `value`, or `None` when it can: `value` written as every writer
+    of a setting's value writes it (`json.dumps`, `_written` its `default`), and thrown away.
+    `taskd.Session.run` asks it of every value a run can record before the run starts (REC-27), so
+    a value refused here faults the run before it is numbered, never at a row written after a
+    trial rewarded."""
+    try:
+        json.dumps(value, sort_keys=True, default=_written)
+    except (TypeError, ValueError) as why:  # `ValueError`: a value that holds itself
+        return str(why)
+    return None
 
 
 def _local(posix_seconds: float) -> str:

@@ -15,7 +15,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 **Finding one.** Grep the ID, a package (`P9`, `b3`), a repository (`wl-sync`) or a file. The sections: brainstorms the PI asked to have later; features no plan covers yet; defects and review findings deliberately not fixed; debt (cleanup, stale wording, test hygiene); anything that needs the rig or other hardware, measurements included; and asks of, or waits on, other repositories.
 
-**Next free ID: XC-409.**
+**Next free ID: XC-421.**
 
 ## Brainstorms queued for the PI
 
@@ -199,6 +199,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 - **XC-382** A task's `Mark` can strobe a framework code's number (`check.py`'s `_unallocated_codes` accepts any code the allocation holds, `PAUSE` among them), adding codes no controls or change row explains and breaking wl-preproc's join by `event_code`; warn at load (the PI's warnings over refusals), never refuse. — 2026-10-18, [XC-321 ask 1, the `xc321-event-code` branch](superpowers/specs/2026-10-10-xc288-training-records-design.md#34-one-change-log) — waits on: nothing
 - **XC-387** `wlx console` shows none of telemetry schema 16's and 17's additions (the training-aid banner, trials beside presentations, each condition's counts; a run's plan, its next block and the time left). — 2026-10-18, [engine C2a plan, "Not in C2a"](superpowers/plans/2026-10-11-engine-c2a.md#not-in-c2a) (Task 9's review, minor 10) — waits on: a decision that the terminal console is kept
 - **XC-408** `preflight.beyond`'s first pass checks every starting value against the whole task, so for a plan it may warn or refuse on a structure the plan never plays (safe side, rare); narrowing it to the plan's structures is a design change. — 2026-10-22, [final review of engine build C2b](superpowers/plans/2026-10-19-engine-c2b.md) — waits on: nothing
+- **XC-420** Telemetry cannot carry a setting's value that is an appearance or a color (or any piece of one): `link.encode` packs `ParamRow.value` (`link.py`, typed `float | str | None`) with msgpack, which raises on such an object, and `ZmqLink.publish` does not catch it, so a run with a console faults at its next boundary (it fails closed); only code in the session's process can put one among the run's values today, since the wire takes numbers and words and `Param.start` refuses an appearance, and a console choosing an appearance needs it. — 2026-10-28, [REC-27](references/decisions.md#rec-27--a-settings-value-that-is-an-appearance-or-a-piece-of-one-is-recorded-as-the-task-hash-writes-a-declaration-its-class-and-every-field-defaults-included-a-setting-it-refers-to-kept-by-name-never-a-choices-index) (the appearance-record review's I2) — waits on: build E
 
 ## Debt
 

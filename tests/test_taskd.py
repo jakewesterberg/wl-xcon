@@ -1232,6 +1232,58 @@ def test_a_live_switch_of_the_targets_appearance_is_recorded_and_the_run_goes_on
     assert resume.read(session.directory, session.welfare.left_cage_wall_at).run_index == 0
 
 
+@pytest.mark.parametrize("source, said", [
+    ("condition", "the value condition 'square' of block 'b' sets for 'target_appearance'"),
+    ("choice", "choice 2 of setting 'target_appearance'"),
+    ("run", "the run's value of 'target_appearance'"),
+    ("staged", "the change to 'target_appearance' staged before the run"),
+])
+def test_a_value_the_record_cannot_write_faults_the_run_before_it_begins(
+        tmp_path, monkeypatch, source, said):
+    """REC-27; the appearance-record review's M2: a value the record refuses reached it only in the
+    first row that held it -- a condition's, in its trial's line, after the trial ran and rewarded,
+    so that trial's fluid was on no line and a resume would count it short; a choice set live, in
+    its change row, ending the run; the run's own, in its start row, once the run was numbered.
+    **Every value the run can record is tried in the record's own writer as the run starts**: its
+    own values, a change staged before it, those its plan's conditions set and each setting's
+    choices. One the record refuses faults the run before it is numbered, strobed or written, with
+    a sentence naming where the value came from, and no fluid. Here the record refuses the
+    reference task's square, as it refused every appearance before REC-27; `check` lets nothing in
+    today that the record refuses, so this is the backstop for a value a later build lets in."""
+    import wl_xcon.record as record
+
+    _, square = _target_appearances()
+    written = record._written
+
+    def refusing(value):
+        if value == square:
+            raise TypeError("the record writes no Square value")
+        return written(value)
+
+    monkeypatch.setattr(record, "_written", refusing)
+    values = {**VALUES, "target_appearance": square} if source == "run" else dict(VALUES)
+    if source == "condition":
+        path = _sessions.planned_task(tmp_path, (
+            '{"shapes": Plan([Block("b", [Condition("square", {"target_appearance": '
+            'Square(size=1.0, color=Gray(P("target_luminance")))}, target=3)])])}'))
+        spec = _spec(tmp_path, task=str(path), plan="shapes", trials=400, values=values)
+    else:
+        spec = _spec(tmp_path, trials=4, values=values)
+    session = _session(spec)
+    if source == "staged":
+        session.set("target_appearance", square, by=Box("jake"))
+    before = list(session.card.codes)  # the head fixed, as `_session` marks it
+
+    with pytest.raises(TypeError, match=re.escape(said)):
+        session.run()
+
+    assert session.run_index is None
+    assert session.welfare.commanded == 0.0
+    assert session.card.codes == before
+    assert not (session.directory / "runs.jsonl").exists()
+    assert not (session.directory / "trials.jsonl").exists()
+
+
 def test_each_condition_plays_the_structure_it_names_and_its_row_says_which(tmp_path):
     """Engine spec §13.3 (the PI, 2026-10-07: "each condition names its own; interleaving them in a
     block is ordinary"; engine build C2b): each trial is built and run from its condition's

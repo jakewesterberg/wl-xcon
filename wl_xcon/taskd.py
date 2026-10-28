@@ -64,6 +64,7 @@ from wl_xcon.geometry import DISPARITY_CONVENTION, Geometry
 from wl_xcon.levels import Levels
 from wl_xcon.photometry import Calibration, cone_record
 from wl_xcon.record import XCON_DIRNAME, SessionRecord, _local, welfare_note
+from wl_xcon.record import unwritable as record_unwritable
 from wl_xcon.scheduler import (
     BACK,
     DRUM_SCOPES,
@@ -2218,6 +2219,41 @@ class Session:
     #: `_task`'s settings by name, built once as it is taken (`_take`).
     _declared: dict[str, Param] = field(init=False, default_factory=dict, repr=False)
 
+    def _unwritable(self, task: Task, run: RunSpec, values: dict) -> str | None:
+        """**What the record would refuse of a run, said before the run starts** (REC-27; the
+        appearance-record review's M2): every value the run can record, written as the record's
+        writers write it (`record.unwritable`) -- its own values (`values`, the task's starting
+        values under the run's), a change staged before it, which its first boundary records,
+        each value a condition of its plan sets, and each choice each setting offers, which a
+        console may set live. The sentence for the first the record refuses, or `None`.
+
+        A value the record refuses otherwise faults the run at the first row that holds it: the
+        start row, once the run is numbered; a change row, ending the run; or a condition's trial
+        line, **after the trial ran and rewarded**, so that trial's fluid is on no line and a
+        resume counts it short. `check` refuses every such value the review of REC-27 found (a
+        condition's value is one of its setting's choices, and a bare setting, or a `Polar` holding
+        one, among an appearance's or a position's choices is refused), so this is the backstop for
+        one a later build admits. Not welfare-critical: it reads, and faults a run before anything
+        of it happens. Run once, as a run starts, never in a trial."""
+        offered = [(f"the run's value of {name!r}", value) for name, value in values.items()]
+        offered += [(f"the change to {name!r} staged before the run", value)
+                    for name, was, now, _, _ in self._staged for value in (was, now)]
+        offered += [
+            (f"the value condition {condition.name!r} of block {block.name!r} sets for {name!r}",
+             value)
+            for block in self._plan(run, task).blocks
+            for condition in block.conditions
+            for name, value in condition.values.items()
+        ]
+        offered += [(f"choice {at} of setting {param.name!r}", choice)
+                    for param in task.params for at, choice in enumerate(param.choices, 1)]
+        for said, value in offered:
+            why = record_unwritable(value)
+            if why is not None:
+                return (f"the record cannot write {said}, {value!r} ({why}), and a row holding it "
+                        f"would fault the run, so it does not start")
+        return None
+
     def _plan(self, run: RunSpec, task: Task) -> Plan:
         """The plan the run plays: the task's plan the run names, blocks given in code (a test's),
         or the plain run's one block.
@@ -2512,6 +2548,18 @@ class Session:
                 + (", ".join(_printable(name) for name in task.plans) or "none")
             )
         self.welfare.preflight(self.wall_now())
+        # **The task's own starting values, under the run's** (P4d-2b spec §6.2:
+        # "Starting values are the task's own"; S8 §3.4's task layer; the b3a-2 plan,
+        # decision 1): each declared `Param.start` that the run was not given, merged below.
+        starts = {param.name: param.start for param in task.params if param.start is not None}
+        given = dict(run.values)
+        # **Every value the run can record, tried in the record's writer before it starts**
+        # (REC-27; the appearance-record review's M2): one the record refuses faults the run
+        # here, before it is numbered, strobed or written -- `Service._run`'s "the run did not
+        # start" -- never at a row written after a trial rewarded, whose fluid no line would hold.
+        refused = self._unwritable(task, run, {**starts, **given})
+        if refused is not None:
+            raise TypeError(refused)
         # **What the start accepted, written as the run starts** (engine spec §19.3; the
         # engine B plan, call 23): after both refusals above, so a refused run leaves no row of
         # a warning accepted for it, and before the run's numbers are taken, so a fault here is
@@ -2526,12 +2574,8 @@ class Session:
         # at this run's first boundary, as a live write always has.
         self._take(task)
         self._run = run
-        # **The task's own starting values, under the run's** (P4d-2b spec §6.2:
-        # "Starting values are the task's own"; S8 §3.4's task layer; the b3a-2 plan,
-        # decision 1): each declared `Param.start` that the run was not given. `wlx run`'s
-        # one run fills its spec's own dict, as its values always were (`RunSpec.of`).
-        starts = {param.name: param.start for param in task.params if param.start is not None}
-        given = dict(run.values)
+        # The starting values under the run's (`starts`, `given`, above). `wlx run`'s one run
+        # fills its spec's own dict, as its values always were (`RunSpec.of`).
         if implied:
             for name, start in starts.items():
                 self.spec.values.setdefault(name, start)

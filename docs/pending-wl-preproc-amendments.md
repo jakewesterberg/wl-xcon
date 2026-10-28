@@ -503,11 +503,12 @@ changes), v2 the true-angle one beside it, never replacing it. *(2026-10-19: v1 
 # OPEN — a setting's value that is an appearance (new, 2026-10-28)
 
 Opened 2026-10-28, **before any such value is written**: found by the review of wl-xcon's XC-399 branch, and older than it.
-Read against wl-preproc's `wl_preproc/events/rigtrials.py` (a line's `params` must be an object; its values are not read one
-by one), `wl_preproc/nwb/conditions.py` (`trial_columns`, `block_conditions`, `_summarise`) and
-`wl_preproc/nwb/intervals.py` (`_setting_columns`), in the export `ecd1616` through the worktree's `wl-preproc` link, and
-in wl-preproc's checkout at `58ec42a` (branch `feat/syncbox-records`, 2026-10-27), where `rigtrials.py` and
-`conditions.py` are the same byte for byte.
+Read against wl-preproc's `origin/main` at `bbdfa0e` (2026-10-20), with `git show`: `wl_preproc/events/rigtrials.py` (a
+line's `params` must be an object; its values are not read one by one), `wl_preproc/nwb/conditions.py` (`trial_columns`,
+`block_conditions`, `_summarise`), `wl_preproc/nwb/intervals.py` (`_setting_columns`), `wl_preproc/events/rigrecords.py`
+(`read_rig_records`: a `parameter_changes.jsonl` row's `was` and `now` kept as JSON text with sorted keys, `_json`, into
+`core.ParameterChange`'s `mediumtext` columns) and `wl_preproc/nwb/rig_record.py` (`_add_changes`: the NWB file's
+`processing/rig_record/parameter_changes` table, `was` and `now` as that JSON text).
 
 ## What changed on our side
 
@@ -523,8 +524,13 @@ fields**, `{"class": ..., "fields": {...}}`, nested declarations written the sam
 hash reads a declaration in (`declarations.canonical`, the form of a start row's `plan_form`) with one difference:
 **every field is written, those at their defaults included**, where the hash leaves a default out, so a reader never
 needs the defaults of the wl-xcon that wrote the line. **A setting the appearance refers to stays a reference by its
-name**, `{"class": "P", "fields": {"name": ...}}`; its value is the same line's `params` entry of that name. The
-reference task's disc, as a trial line's `params` holds it (keys sorted, as every line is written):
+name**, `{"class": "P", "fields": {"name": ...}}`. Its value is found where that setting's value is: in a trial line,
+the same line's `params` entry of that name; in a start row, the same row's `resolved` entry (`layers` holds only the
+values each layer gave, so the name may be in another layer than the appearance); and for a `parameter_changes.jsonl`
+row, which holds only the setting it changed, the `params` of each trial line the change applies to, from the first
+trial after the row's code in the recording on, since every change made between two trials applies at once to the
+trial after them. The reference task's disc, as a trial line's `params` holds it (keys sorted, as every line is
+written):
 
 ```json
 "target_appearance": {"class": "Disc", "fields": {"color": {"class": "Gray", "fields": {"cd_m2": {"class": "P", "fields": {"name": "target_luminance"}}}}, "contrast": null, "size": 1.0}},
@@ -544,7 +550,9 @@ recorded, today and in any row added later.
 takes any `params` object, and `conditions.py` writes a setting that is not a number as JSON text with sorted keys --
 in the trials table's `setting_target_appearance` where it varies across a session's trials, among a condition's
 constant `settings` or its varying values' distinct list otherwise -- so the disc above is published as the text of its
-object. If you would rather publish an appearance otherwise (its class alone in a column of its own, say), it is yours to
+object; `rigrecords.py` keeps a change row's `was` and `now` as the same JSON text, and `rig_record.py` publishes it in
+the `parameter_changes` table, so a change of appearance there names its luminance by reference, its value in the trials
+table. If you would rather publish an appearance otherwise (its class alone in a column of its own, say), it is yours to
 decide; the record keeps every field either way.
 
 ## What is deliberately not asked for
