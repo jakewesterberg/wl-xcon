@@ -506,16 +506,25 @@ def _block_order(order) -> str:
     return "shuffled passes"
 
 
-def _set_label(value: object) -> str:
-    """A value a condition sets, as the plan's table shows it: **a position eccentricity and
-    direction first, its (x, y) beside them**, as every position in this report is shown
-    (`_point_label`; the PI, 2026-10-19, "Polar first, x-y allowed"), whether the setting takes a
-    `Polar` or a pair; anything else as written."""
+def position_words(value: object) -> str | None:
+    """**A setting's value that is a whole position**, a `Polar` or an (x, y) pair, as every
+    position in this report is shown, eccentricity and direction first with its (x, y) beside
+    them (`_point_label`; the PI, 2026-10-19, "Polar first, x-y allowed"); `None` for any other
+    value. The plan's tables show a condition's value through it, and the console a setting's
+    (`link.ParamRow.of`, the rig making the words, so no console converts; XC-401)."""
     from wl_xcon.task import Polar
 
     if isinstance(value, Polar) or (isinstance(value, tuple) and len(value) == 2):
         return _point_label(value)
-    return f"{value}"
+    return None
+
+
+def _set_label(value: object) -> str:
+    """A value a condition sets, as the plan's table shows it: **a position eccentricity and
+    direction first, its (x, y) beside them** (`position_words`), whether the setting takes a
+    `Polar` or a pair; anything else as written."""
+    words = position_words(value)
+    return f"{value}" if words is None else words
 
 
 def _plans(task: Task) -> list[str]:

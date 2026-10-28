@@ -2267,6 +2267,23 @@ def test_console_lists_every_parameter_with_its_range_or_its_ceiling():
     assert "  param: fix_window 2.00 deg (range open to 5 deg)" in rendered
 
 
+def test_console_shows_a_setting_holding_a_position_eccentricity_and_direction_first():
+    """XC-401: `wlx console`'s parameter line shows a setting whose value is a whole position in
+    the rig's words, eccentricity and direction first with its (x, y) beside them, its unit in
+    them; and a staged change carrying the words of a position, or a word, prints it, where
+    `_value` formatted every staged value as a number."""
+    rendered = render(_telemetry(
+        params=(ParamRow("target_pos", "deg", None, None, None, False,
+                         "27.236° at 45° · (x, y) (20, 20)"),),
+        staged=(Staged(name="target_pos", was="8° at 0° · (x, y) (8, 0)",
+                       now="8° at 45° · (x, y) (5.675, 5.675)", by=Box("jake"), bounded=False),),
+    )).splitlines()
+
+    assert "  param: target_pos 27.236° at 45° · (x, y) (20, 20) (no declared range)" in rendered
+    assert any(line.startswith("  staged: target_pos 8° at 0° · (x, y) (8, 0) -> "
+                               "8° at 45° · (x, y) (5.675, 5.675) by jake") for line in rendered)
+
+
 def test_console_lists_the_recent_outcomes_oldest_first():
     assert "  recent (oldest first): correct hang no_fixation" in render(
         _telemetry(recent_outcomes=("correct", "hang", "no_fixation"))

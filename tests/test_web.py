@@ -1256,6 +1256,26 @@ def test_each_parameter_card_has_arrows_and_an_input_with_its_step_and_range():
     assert params.count('data-dir="1"') == 4 and params.count('data-dir="-1"') == 4
 
 
+def test_a_setting_holding_a_position_shows_it_polar_first_and_offers_no_input():
+    """XC-401 (the PI, 2026-10-19, "Polar first, x-y allowed"): a setting whose value is a whole
+    position shows the rig's words for it, eccentricity and direction first with its (x, y)
+    beside them (`ParamRow.position`), escaped, and no input or arrows: nothing a console sends
+    sets a position (`link._setting` takes a number or a word). The unit is in the words."""
+    params = fragments(
+        frame(params=(
+            ParamRow("target_pos", "deg", None, None, None, False,
+                     "27.236° at 45° · (x, y) (20, 20)"),
+            ParamRow("fix_hold", "s", 0.1, 1.0, 0.3, False),
+        )),
+        view(),
+    )["params"]
+    target = params.partition('<div class="param">')[2].partition('<div class="param">')[0]
+
+    assert '<span class="pv">27.236° at 45° · (x, y) (20, 20)</span>' in target
+    assert "<input" not in target and 'data-dir="1"' not in target and "unset" not in target
+    assert 'data-param="fix_hold"' in params
+
+
 def test_a_refusal_shows_on_its_parameters_card_with_its_sentence():
     params = fragments(
         frame(

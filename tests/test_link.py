@@ -84,7 +84,7 @@ from wl_xcon.link import (
 )
 from wl_xcon.photometry import SRGB
 from wl_xcon.scheduler import EVERY_TRIAL, Block, Condition, Scheduler
-from wl_xcon.task import OWED, ByCriterion, Counting, Outcome
+from wl_xcon.task import OWED, ByCriterion, Counting, Outcome, Polar
 from wl_xcon.simulate import Tally
 from wl_xcon.welfare import Deployment, Simulated as Pump, Welfare
 
@@ -2124,7 +2124,7 @@ def test_schema_8_reads_the_pause_the_schedule_and_the_feed_from_the_session():
 
     telemetry = Telemetry.of(session, Tally(), _scheduler(), index=40)
 
-    assert telemetry.schema == SCHEMA == 17
+    assert telemetry.schema == SCHEMA == 18
     assert telemetry.paused_at == 1_700_000_100.0
     assert telemetry.scheduled_stop == ScheduledStop(
         kind="trials", target=48.0, by=Box("jake"), said="after trial 48"
@@ -2187,15 +2187,15 @@ def test_a_frame_carries_the_setup_the_session_runs_in():
     assert decode(encode(stereo)).view == "stereoscope"
     assert decode(encode(stereo)).half_ipd_cm == 1.6
     assert decode(encode(_telemetry())).half_ipd_cm is None
-    assert SCHEMA == 17
+    assert SCHEMA == 18
 
 
-def test_a_schema_7_frame_is_refused_by_a_schema_17_reader():
-    """§3's schema rule: a reader built for 17 refuses 7 by name, before touching a
+def test_a_schema_7_frame_is_refused_by_a_schema_18_reader():
+    """§3's schema rule: a reader built for 18 refuses 7 by name, before touching a
     field (`SchemaMismatch`), and says which it reads."""
     old = encode(replace(_telemetry(), schema=7))
 
-    with pytest.raises(SchemaMismatch, match="carried schema 7 and this console reads schema 17"):
+    with pytest.raises(SchemaMismatch, match="carried schema 7 and this console reads schema 18"):
         decode(old)
 
 
@@ -2289,7 +2289,7 @@ def test_schema_10_survives_the_wire_with_its_absences_intact():
         assert decode(encode(original)) == original
     assert type(decode(encode(populated)).preflight.items[0]) is PreflightItem
     assert type(decode(encode(populated)).question) is Question
-    assert SCHEMA == 17
+    assert SCHEMA == 18
 
 
 def test_a_session_before_its_first_run_has_no_block_task_or_counts():
@@ -2345,7 +2345,7 @@ def test_an_idle_frame_carries_the_last_closed_sessions_summary_across_the_wire(
     assert type(restored.closed) is Telemetry and restored.closed.phase == "closed"
     assert (restored.closed.fluid_today_ml, restored.closed.shortfall_ml) == (None, None)
     assert decode(encode(replace(idle, closed=None))).closed is None
-    assert SCHEMA == 17
+    assert SCHEMA == 18
 
 
 def test_idle_of_carries_what_it_is_given_as_the_closed_summary():
@@ -2367,7 +2367,7 @@ def test_an_idle_frame_of_another_schema_is_refused_by_name():
         )
     )
 
-    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 17"):
+    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 18"):
         decode(old)
 
 
@@ -2511,7 +2511,7 @@ def test_the_strips_levels_and_the_return_survive_the_wire():
     assert decode(encode(original)) == original
     # 12 added `performance` (the strip's session, task, run and block counts) and
     # `returned_at` (the recorded return).
-    assert SCHEMA == 17
+    assert SCHEMA == 18
 
 
 def test_a_frame_between_runs_carries_the_session_alone():
@@ -2581,7 +2581,7 @@ def test_the_instant_a_session_was_resumed_survives_the_wire_and_none_stays_none
     assert decode(encode(resumed)).resumed_at == 1_700_000_050.0
     assert decode(encode(_telemetry())).resumed_at is None
     # 13 added `Stranded.resumable` and `why`, and `Telemetry.resumed_at`.
-    assert SCHEMA == 17
+    assert SCHEMA == 18
 
 
 def test_the_frame_reads_the_resume_from_the_session():
@@ -2598,7 +2598,7 @@ def test_the_frame_reads_the_resume_from_the_session():
 def test_a_schema_13_frame_is_refused_by_name():
     """b2b (schema 14): a frame whose `by`s are strings is refused by its schema, by
     name, before any `by` is read."""
-    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 17"):
+    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 18"):
         decode(encode(replace(_telemetry(), schema=13)))
 
 
@@ -2635,7 +2635,7 @@ def test_schema_15_carries_the_kind_the_calibration_and_the_warnings_both_ways()
         warnings=(WarningRow("default calibration", "the standard's", SESSION_KINDS, None, None),),
     )
 
-    assert (sent.schema, decode(encode(sent))) == (17, sent)
+    assert (sent.schema, decode(encode(sent))) == (18, sent)
     assert type(decode(encode(sent)).warnings[0]) is WarningRow
     assert decode(encode(unloaded)).calibration is None
     assert decode(encode(idle)) == idle
@@ -2674,7 +2674,7 @@ def test_schema_16_carries_each_shortfall_drumming_the_training_aids_and_each_co
         only = replace(sent, rule="streak", **flags)
         assert decode(encode(only)) == only
     assert decode(encode(replace(sent, rule=None))).rule is None
-    with pytest.raises(SchemaMismatch, match="carried schema 15 and this console reads schema 17"):
+    with pytest.raises(SchemaMismatch, match="carried schema 15 and this console reads schema 18"):
         decode(encode(replace(sent, schema=15)))
 
 
@@ -2762,7 +2762,7 @@ def test_a_schema_14_frame_of_either_shape_is_refused_by_name():
 
     for old in (replace(_telemetry(), schema=14), idle):
         with pytest.raises(
-                SchemaMismatch, match="carried schema 14 and this console reads schema 17"):
+                SchemaMismatch, match="carried schema 14 and this console reads schema 18"):
             decode(encode(old))
 
 
@@ -2818,7 +2818,7 @@ def test_schema_17_carries_the_plan_the_next_block_the_time_left_and_the_plans_o
     assert decode(encode(replace(sent, plan=None, next_block=None, block_left_s=None,
                                  run_left_s=None, preflight=replace(preflight, plan=None,
                                                                     plans=())))).plan is None
-    with pytest.raises(SchemaMismatch, match="carried schema 16 and this console reads schema 17"):
+    with pytest.raises(SchemaMismatch, match="carried schema 16 and this console reads schema 18"):
         decode(encode(replace(sent, schema=16)))
 
 
@@ -2902,3 +2902,70 @@ def test_between_runs_a_frame_carries_none_of_the_finished_runs_block_fields():
 
     assert (frame.next_block, frame.block_left_s, frame.run_left_s) == (None, None, None)
     assert (frame.trials_to_run, frame.passed_at, frame.fell_back) == (None, None, 0)
+
+
+# ---------------------------------------------------------------------------
+# Schema 18 (XC-401): a setting's value that is a whole position, eccentricity and direction first
+# ---------------------------------------------------------------------------
+
+
+def test_a_settings_position_reaches_the_console_eccentricity_and_direction_first():
+    """XC-401 (the PI, 2026-10-19, "Polar first, x-y allowed": "The review report, the console
+    and the record show eccentricity and direction first, with (x, y) beside them"): a setting
+    whose value is a whole position -- a `task.Polar`, or an (x, y) pair -- reaches the console as
+    the rig's words for it, the review report's (`review.position_words`). Its eccentricity is the
+    true visual angle `atan(√(tan²x + tan²y))` and its direction `atan2(tan y, tan x)`: (20°, 20°)
+    is 27.236° out at 45°, never the 28.284° that `√(x² + y²)` gives off the axes. Its `value` is
+    then `None`, so no console offers to set it as a number or a word -- a `Polar` was no value
+    the wire could carry at all -- and every other value is carried as it was."""
+    import math
+
+    session = SimpleNamespace(**{**vars(_session_with(1.25, 3.0)), "parameters": (
+        ("target_pos", "deg", None, None, (20.0, 20.0), False),
+        ("cue_pos", "deg", None, None, Polar(8.0, 45.0), False),
+        ("fix_hold", "s", 0.1, 1.0, 0.3, False),
+        ("target_appearance", "", None, None, "circle", False),
+    )})
+
+    frame = Telemetry.of(session, Tally(), _scheduler(), 0)
+
+    target, cue, hold, looks = frame.params
+    tan = math.tan(math.radians(20.0))
+    assert round(math.degrees(math.atan(math.hypot(tan, tan))), 3) == 27.236
+    assert (target.value, target.position) == (None, "27.236° at 45° · (x, y) (20, 20)")
+    assert (cue.value, cue.position) == (None, "8° at 45° · (x, y) (5.675, 5.675)")
+    assert (hold.value, hold.position, looks.value, looks.position) == (0.3, None, "circle", None)
+    assert decode(encode(frame)) == frame
+
+
+def test_a_staged_position_reaches_the_console_as_its_words():
+    """XC-401: a staged change of a setting that holds a whole position -- which only code makes,
+    a console sending numbers and words alone (`link._setting`) -- carries each value as the rig's
+    words for it, eccentricity and direction first, as a word value already travels there; a
+    `Polar` was no value the wire could carry."""
+    session = SimpleNamespace(**{**vars(_session_with(1.25, 3.0)), "staged": (
+        ("target_pos", Polar(8.0, 0.0), Polar(8.0, 45.0), Box("jake"), False),
+        ("fix_hold", 0.3, 0.4, Box("jake"), False),
+    )})
+
+    frame = Telemetry.of(session, Tally(), _scheduler(), 0)
+
+    moved, held = frame.staged
+    assert (moved.was, moved.now) == (
+        "8° at 0° · (x, y) (8, 0)", "8° at 45° · (x, y) (5.675, 5.675)")
+    assert (held.was, held.now) == (0.3, 0.4)
+    assert decode(encode(frame)) == frame
+
+
+def test_schema_18_carries_a_settings_position_and_refuses_17_by_name():
+    """XC-401: `ParamRow.position`, the rig's words for a setting's value that is a whole
+    position, crosses the wire both ways; a reader of 18 refuses 17 by name."""
+    sent = _telemetry(params=(
+        ParamRow("target_pos", "deg", None, None, None, False, "8° at 45° · (x, y) (5.675, 5.675)"),
+        ParamRow("fix_hold", "s", 0.1, 1.0, 0.3, False),
+    ))
+
+    assert (sent.schema, decode(encode(sent))) == (18, sent)
+    assert decode(encode(sent)).params[1].position is None
+    with pytest.raises(SchemaMismatch, match="carried schema 17 and this console reads schema 18"):
+        decode(encode(replace(sent, schema=17)))

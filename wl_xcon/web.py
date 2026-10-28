@@ -1412,7 +1412,12 @@ def _params(frame: Telemetry | None, view: View) -> str:
     marker, and -- P4d-2b b2a -- the input and arrows that set it and the last
     refusal of it with its sentence (spec §5.2: "A refusal shows on the card and in
     the feed"). *Last* is the word because a refusal carries no time: it stays on
-    the card beside whatever the value has since become, and says it is the last."""
+    the card beside whatever the value has since become, and says it is the last.
+
+    **A setting holding a whole position** shows the rig's words for it, eccentricity and
+    direction first with its (x, y) beside them, its unit in them (`ParamRow.position`; the PI,
+    2026-10-19, "Polar first, x-y allowed"; XC-401), and no input or arrows: nothing a console
+    sends sets a position, `link._setting` taking a number or a word."""
     if frame is None:
         return _NONE
     if not frame.params:
@@ -1435,11 +1440,15 @@ def _params(frame: Telemetry | None, view: View) -> str:
             else f'<span class="rfs">last refused: {_e(refusal.why)}</span>'
         )
         cls = "param staged" if change is not None else "param"
+        shown = (
+            f'<span class="pv">{_e(row.position)}</span>'
+            if row.position is not None
+            else f'<span class="pv">{_e(_num(row.value))} '
+            f'<span class="unit">{_e(row.unit)}</span></span>{_field(row, view)}'
+        )
         cards.append(
             f'<div class="{cls}"><div class="pn"><span>{_e(row.name)}</span>{flag}</div>'
-            f'<span class="pv">{_e(_num(row.value))} '
-            f'<span class="unit">{_e(row.unit)}</span></span>'
-            f"{_field(row, view)}"
+            f"{shown}"
             f'<span class="range">{_range(row)}</span>{mark}{said}</div>'
         )
     return "".join(cards)

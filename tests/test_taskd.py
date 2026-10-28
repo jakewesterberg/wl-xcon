@@ -1163,6 +1163,45 @@ def test_a_settings_polar_value_is_recorded_wherever_a_value_is_and_reads_back(t
     assert resume.read(session.directory, session.welfare.left_cage_wall_at).run_index == 0
 
 
+def test_a_settings_polar_value_reaches_the_console_polar_first_through_the_wire(tmp_path):
+    """XC-401 (the PI, 2026-10-19, "Polar first, x-y allowed": the console shows eccentricity and
+    direction first, with (x, y) beside them): the run above, whose setting holds a polar position
+    and is changed live, publishes frames that cross the wire -- where a frame holding a `Polar`
+    could not be encoded at all -- and the page's parameter card, its staged change, the changes
+    feed's line and `wlx console` each show the position eccentricity and direction first, in the
+    rig's words. Test the path: the session's own frames, through `encode` and `decode`,
+    rendered."""
+    from _frames import view
+
+    from wl_xcon.cli import render
+    from wl_xcon.link import decode, encode
+    from wl_xcon.task import Polar
+    from wl_xcon.web import fragments
+
+    path = _sessions.polar_task(tmp_path)
+    link = _Drained({2: [SetParameter(name="target_pos", value=Polar(8.0, 45.0), by=Box("jake"))]})
+    session = _session(_spec(tmp_path, task=str(path), trials=4, values={
+        **_spec(tmp_path).values, "target_pos": Polar(8.0, 0.0)}), link=link)
+
+    session.run()
+
+    frames = [decode(encode(frame)) for frame in link.published]
+    right, oblique = "8° at 0° · (x, y) (8, 0)", "8° at 45° · (x, y) (5.675, 5.675)"
+    shown = [row for frame in frames for row in frame.params if row.name == "target_pos"]
+    assert shown[0].position == right and shown[-1].position == oblique
+    assert {row.value for row in shown} == {None}
+    staged = [(row.was, row.now) for frame in frames for row in frame.staged]
+    assert staged and set(staged) == {(right, oblique)}
+    (line,) = [control.said for control in frames[-1].controls if control.kind == "set"]
+    assert line.startswith(f"target_pos {right} → {oblique}, from trial ")
+    with_staged = next(frame for frame in frames if frame.staged)
+    card = fragments(with_staged, view())["params"]
+    assert f'<span class="pv">{right}</span>' in card and f"staged → {oblique}" in card
+    assert f"target_pos {right} → {oblique}" in fragments(with_staged, view())["rt-changes"]
+    assert f"  param: target_pos {oblique} " in render(frames[-1])
+    assert f"  staged: target_pos {right} -> {oblique} " in render(with_staged)
+
+
 def test_each_condition_plays_the_structure_it_names_and_its_row_says_which(tmp_path):
     """Engine spec §13.3 (the PI, 2026-10-07: "each condition names its own; interleaving them in a
     block is ordinary"; engine build C2b): each trial is built and run from its condition's
