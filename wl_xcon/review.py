@@ -36,6 +36,7 @@ from wl_xcon.task import (
     Trial,
     Update,
     actions_of,
+    array_actions,
 )
 
 
@@ -251,12 +252,10 @@ def render(trial: Trial, allocation_names: dict[int, str] | None = None) -> str:
         lines += ["## Windows", "", "| Name | Centre | Radius | Scores | Eye |",
                   "|---|---|---|---|---|"]
         # Every array a `Show` or an `Update` gives each stimulus, as the checker reads them
-        # (`check._array_actions`): an `Update` that grows an array makes windows its `Show` does
+        # (`task.array_actions`): an `Update` that grows an array makes windows its `Show` does
         # not (XC-402), and the row read only the `Show`'s count (XC-411).
-        from wl_xcon.check import _array_actions
-
         counts: dict[str, list[str]] = {}
-        for _, name, _, array in _array_actions(trial, {p.name: p for p in trial.params}):
+        for _, name, _, array in array_actions(trial):
             label = _value_label(array.n)
             if label not in counts.setdefault(name, []):
                 counts[name].append(label)

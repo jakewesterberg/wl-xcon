@@ -283,7 +283,7 @@ confirming engine build C1's plan's Appendix B: "i prefer object to item").*
 an `Update` that changes it, and it was the instance this time: an `Update`'s array escaped the
 target and crowding checks, which read only a `Show`'s, so an `Update` with its target outside its
 objects loaded and then raised at a trial's start. Both now read every array a `Show` or an
-`Update` gives (`check._array_actions`), and so, since XC-411, do the check that every window a
+`Update` gives (`task.array_actions`), and so, since XC-411, do the check that every window a
 task names is declared and the review report's windows table: an object only an `Update`'s array
 has was refused as undeclared, and the table counted only a `Show`'s objects.
 

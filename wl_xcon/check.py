@@ -67,6 +67,7 @@ from wl_xcon.task import (
     Update,
     Window,
     actions_of,
+    array_actions,
 )
 from wl_xcon.welfare import Deployment
 
@@ -2936,14 +2937,14 @@ def _declared_window_names(trial: Trial) -> set[str]:
     highest set size made a value sent past its range cost as many names as it is large,
     in the widened check run between two trials (Task 10's review, fix round 2).
 
-    **Over every array a `Show` or an `Update` gives** (`_array_actions`), as written or among a
+    **Over every array a `Show` or an `Update` gives** (`task.array_actions`), as written or among a
     setting's choices: since XC-402 an array's object windows follow an `Update` that changes it,
     so an object only an `Update`'s array has is scored, and was refused as undeclared while this
     read only a `Show`'s array (XC-411).
     """
     params = {p.name: p for p in trial.params}
     most: dict[str, float] = {}
-    for _, name, _, array in _array_actions(trial, params):
+    for _, name, _, array in array_actions(trial):
         reach = _whole(_span(array.n, params, 0.0)[1])
         most[name] = max(most.get(name, reach), reach)
     named = set(_window_refs(trial.states))
@@ -3002,14 +3003,14 @@ def _array_faults(trial: Trial) -> list[Finding]:
     2026-10-14, the final review's I4). A set size with no highest is refused too, by
     `_unbounded_set_sizes`.
 
-    **Every array a `Show` or an `Update` gives** (`_array_actions`), as written or among a
+    **Every array a `Show` or an `Update` gives** (`task.array_actions`), as written or among a
     setting's choices: since XC-402 an array's windows follow an `Update` that changes it, and
     a run builds each one's windows before its first frame, where a target outside the objects
     raises (the XC-402 review, I1).
     """
     params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
-    for state, name, updated, looks in _array_actions(trial, params):
+    for state, name, updated, looks in array_actions(trial):
         lowest_n = _whole(_span(looks.n, params, 0.0)[0])
         lowest_t, highest_t = (_whole(v) for v in _span(looks.target, params))
         if lowest_t < 0 or highest_t >= lowest_n:
@@ -3044,7 +3045,7 @@ def _unbounded_set_sizes(trial: Trial) -> list[Finding]:
     has none, failing closed (`_span`). A set size with no lowest is `_array_faults`' to name."""
     params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
-    for name, array in _shown_arrays(trial, params):
+    for name, array in _shown_arrays(trial):
         if not isinstance(array.n, P) or array.n.name not in params:
             continue  # a literal is its own highest; an undeclared setting is refused at load
         if math.isfinite(_span(array.n, params, 0.0)[1]):
@@ -3425,7 +3426,7 @@ def _crowded_arrays(trial: Trial) -> list[Finding]:
     for declared in trial.windows:
         if not isinstance(declared, ObjectWindows):
             continue
-        for name, array in _shown_arrays(trial, params):
+        for name, array in _shown_arrays(trial):
             if name == declared.of:
                 findings += _crowded(declared, array, params)
     unique: list[Finding] = []
@@ -3486,7 +3487,7 @@ def _overlapping_objects(trial: Trial, raised: dict[str, float]) -> list[Finding
     apart, and is never refused here."""
     params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
-    for name, array in _shown_arrays(trial, params):
+    for name, array in _shown_arrays(trial):
         if not (isinstance(array.n, P) and array.n.name in raised):
             continue
         n = _whole(raised[array.n.name])
@@ -3532,35 +3533,13 @@ def _most_apart(ring: float, size: float) -> int:
     return most
 
 
-def _shown_arrays(trial: Trial, params: dict[str, Param]) -> list[tuple[str, Array]]:
+def _shown_arrays(trial: Trial) -> list[tuple[str, Array]]:
     """Every array a trial can show, with the stimulus that shows it: a `Show`'s looks or an
     `Update`'s, as written or among a parameter's choices."""
     found: list[tuple[str, Array]] = []
-    for _, name, _, array in _array_actions(trial, params):
+    for _, name, _, array in array_actions(trial):
         if (name, array) not in found:
             found.append((name, array))
-    return found
-
-
-def _array_actions(trial: Trial, params: dict[str, Param]) -> list[tuple[str, str, bool, Array]]:
-    """`_shown_arrays` by the action that gives each: the state, the stimulus's name, whether an
-    `Update` gives it, and the array, as written or among a parameter's choices."""
-    found: list[tuple[str, str, bool, Array]] = []
-
-    def walk(state: str, name: str, updated: bool, looks: object, inside: frozenset[str]) -> None:
-        if isinstance(looks, P):
-            param = params.get(looks.name)
-            if param is not None and looks.name not in inside:
-                for choice in param.choices:
-                    walk(state, name, updated, choice, inside | {looks.name})
-        elif isinstance(looks, Array) and (state, name, updated, looks) not in found:
-            found.append((state, name, updated, looks))
-
-    for state, action in actions_of(trial):
-        if isinstance(action, Show):
-            walk(state, action.stimulus.name, False, action.stimulus.looks, frozenset())
-        elif isinstance(action, Update) and "looks" in action.changes():
-            walk(state, action.stimulus, True, action.looks, frozenset())
     return found
 
 

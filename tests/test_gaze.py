@@ -1460,7 +1460,12 @@ def _built_on(call, *args) -> "list[tuple[str, str]]":
     `call` itself included (`_BUILDING`). **The functions are found by running it**
     (`sys.setprofile`), so the measure follows whatever the path calls, which a list of functions
     written into a test does not; **each is read whole** (`dis`), so a branch this call did not take
-    is read too. The collector is off meanwhile, so no finalizer runs inside."""
+    is read too. The collector is off meanwhile, so no finalizer runs inside.
+
+    **It cannot see a call that allocates.** It reads instructions, and a call is one instruction
+    whatever it does: `str(frame)`, `list(x)` or `dict(x)` in `in_window` would pass it (the
+    gaze-followups review's K3), as would anything a function written in C allocates inside. Such
+    calls are kept off the path by reading it, not by this."""
     import dis
     import gc
     import sys
@@ -1573,3 +1578,91 @@ def test_each_eye_s_gaze_is_converted_once_a_frame_and_builds_only_the_map_s_tup
     tracker.accept(parse(_payload(3.0, 0.0), at=world.when(1)))
 
     assert set(_built_on(world.gaze_cyclopean, 1)) <= _ONCE_A_FRAME
+
+
+def test_a_second_sample_within_a_frame_is_judged_not_the_frame_s_first():
+    """Each eye's gaze is converted once a frame, and again when the tracker accepts a sample
+    since: after a second sample in the frame, a window is judged by it, and the detector's mean
+    is taken from it, whichever is asked first. Keyed by the frame alone, either would read the
+    frame's first sample."""
+    from wl_xcon.task import position_of
+
+    on_w = position_of(Polar(_JUDGED["ecc"], _JUDGED["dir"]), {})
+
+    def second_sample():
+        world, tracker, _, _, _ = _judged_world()
+        tracker.accept(parse(_payload(*on_w), at=world.when(1)))
+        world.display({}, 1)
+        assert world.in_window("w", 1)
+        tracker.accept(parse(_payload(-20.0, 10.0), at=world.when(1)))
+        return world
+
+    window_first = second_sample()
+    assert not window_first.in_window("w", 1)
+    assert window_first.gaze_cyclopean(1) == pytest.approx((-20.0, 10.0), abs=1e-6)
+
+    mean_first = second_sample()
+    assert mean_first.gaze_cyclopean(1) == pytest.approx((-20.0, 10.0), abs=1e-6)
+    assert not mean_first.in_window("w", 1)
+
+
+#: A task whose one window is centered by a whole-point setting with a choice that is no position
+#: (the gaze-followups review's first, I1): it loads with no finding (XC-415), and the window is
+#: judged only by `SaccadeTo`, so a trial with no saccade never asks about it.
+_NEVER_ASKED_TASK = """
+from wl_xcon.photometry import Gray
+from wl_xcon.task import (
+    CRITERION, NO_CHOICE, NOT_DIFFICULTY, OWED, After, Counting, Disc, Meaning, On, Outcome, P,
+    Param, Polar, ReactionTime, SaccadeTo, Show, State, Stimulus, Task, Trial, Window,
+)
+
+trial = Trial(
+    start="only",
+    params=[Param("where", unit="deg", choices=(Polar(8.0, 0.0), 0.0))],
+    windows=[Window("w", at=P("where"), radius=1.0, on="t")],
+    states=[State("only",
+                  enter=[Show(Stimulus("t", at=(0.0, 0.0), looks=Disc(size=0.5, color=Gray(40.0))))],
+                  go=[On(SaccadeTo("w"), Outcome.CORRECT), On(After(0.05), Outcome.NO_RESPONSE)])],
+    counting=Counting(after_stimulus=OWED, appears="only"),
+)
+TASK = Task(
+    {"only": trial},
+    default="only",
+    reaction_time=ReactionTime("only", (Outcome.CORRECT,), "the one state's length"),
+    choice=NO_CHOICE,
+    meanings={"where": Meaning(NOT_DIFFICULTY, CRITERION, note="where the window is")},
+)
+"""
+
+
+def test_a_window_no_trial_asks_about_raises_only_when_asked(tmp_path):
+    """**A window that cannot be placed with a trial's values raises where it is asked about, never
+    when the world is built** (the gaze-followups review, I1): a session whose trials never ask
+    about it runs to its end, as it did before XC-413 resolved each window between trials, and
+    the window still raises when asked. Raised at the build, it stopped the session on its first
+    trial."""
+    path = tmp_path / "never_asked.py"
+    path.write_text(_NEVER_ASKED_TASK)
+    built = []
+
+    def world(trial, values, index):
+        built.append(Tracked(Tracker(), _fitted_mapping(), trial, 0.008, values,
+                             source=Replay(payloads=[(0.0, _payload(0.0, 0.0, frame=n))
+                                                     for n in range(100)])))
+        return built[-1]
+
+    spec = SessionSpec(
+        task=str(path), allocation="tasks/allocation.py", root=tmp_path,
+        session_id="2027-01-14_01", subject="REFERENCE", trials=2, frame_period=0.008, seed=11,
+        values={"where": 0.0}, bounds=_calibration_bounds(), already_delivered_today=0.0,
+        deployment=Deployment.RIG_FIXED, geometry=DIRECT, session_kind="training",
+        calibration=SRGB,
+    )
+    session = _marked(Session(spec, card=Card(), pump=Pump(), world=world))
+
+    session.run()
+
+    assert session.stopped_because == "every block is finished"
+    assert len(built) == 2
+    with pytest.raises(TypeError):
+        built[-1].in_window("w", 1)

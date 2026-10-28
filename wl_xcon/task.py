@@ -1183,6 +1183,33 @@ def FixPoint(
     return Stimulus(name=name, at=at, looks=Disc(size=size), **kwargs)
 
 
+def array_actions(trial: Trial) -> "list[tuple[str, str, bool, Array]]":
+    """**Every array a `Show` or an `Update` gives**, by the action that gives it: the state, the
+    stimulus's name, whether an `Update` gives it, and the array, as written or among a setting's
+    choices (a setting in its own choices is read once). Since XC-402 an array's object windows
+    follow an `Update` that changes it, so the load checks and the review report read every one of
+    these, never a `Show`'s alone (`check._array_faults`, `check._declared_window_names`,
+    `check._shown_arrays`; `review.render`'s windows table; XC-411)."""
+    params = {param.name: param for param in trial.params}
+    found: list[tuple[str, str, bool, Array]] = []
+
+    def walk(state: str, name: str, updated: bool, looks: object, inside: frozenset[str]) -> None:
+        if isinstance(looks, P):
+            param = params.get(looks.name)
+            if param is not None and looks.name not in inside:
+                for choice in param.choices:
+                    walk(state, name, updated, choice, inside | {looks.name})
+        elif isinstance(looks, Array) and (state, name, updated, looks) not in found:
+            found.append((state, name, updated, looks))
+
+    for state, action in actions_of(trial):
+        if isinstance(action, Show):
+            walk(state, action.stimulus.name, False, action.stimulus.looks, frozenset())
+        elif isinstance(action, Update) and "looks" in action.changes():
+            walk(state, action.stimulus, True, action.looks, frozenset())
+    return found
+
+
 def expand_windows(
     trial: Trial, values: dict
 ) -> "tuple[list[Window], dict[str, tuple[str, ...]]]":
