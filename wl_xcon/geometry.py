@@ -726,12 +726,17 @@ def _angle(u, v) -> float:
 
 def polar_of_deg(x: float, y: float) -> tuple[float, float]:
     """A per-axis position's eccentricity and direction, in degrees: `polar_deg`'s inverse, the
-    direction in (-180°, 180°]."""
+    direction in (-180°, 180°] **exactly** (the review of XC-399, M1): `atan2` gives -180° where
+    the upward share is -0.0 or rounds to -π, as `polar_deg(8, -180)` does, so leftward would be
+    written two ways; it is 180°, and a direction of -0.0 is 0."""
     ax, ay = math.radians(x), math.radians(y)
     ux = math.sin(ax) * math.cos(ay)
     uy = math.cos(ax) * math.sin(ay)
     uz = math.cos(ax) * math.cos(ay)
-    return (math.degrees(math.atan2(math.hypot(ux, uy), uz)), math.degrees(math.atan2(uy, ux)))
+    direction = math.degrees(math.atan2(uy, ux))
+    if direction <= -180.0:
+        direction += 360.0
+    return (math.degrees(math.atan2(math.hypot(ux, uy), uz)), direction + 0.0)
 
 
 def _to_sector(x: float, y: float, eccentricities, directions) -> float:

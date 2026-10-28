@@ -241,10 +241,22 @@ class Placed(NamedTuple):
     """A stimulus as a `Show` put it on the display or an `Update` left it, and the first frame
     it was so (XC-399): what the record turns into where it was, after the trial
     (`record.SessionRecord.trial`), never in a frame. The stimulus as given, its parameters
-    unbound: a reference, kept, never copied."""
+    unbound: a reference, kept, never copied. **With what reads it as a timeline** (the review of
+    XC-399, I3): which action made it, the fields an `Update` set, its presentation, and when that
+    presentation went off."""
 
     stimulus: Stimulus
     frame: int
+    #: `"show"` or `"update"`.
+    kind: str
+    #: The fields an `Update` set, as `Update.changes()` names them, in its order; `()` for a
+    #: `Show`.
+    changed: tuple[str, ...]
+    #: Its presentation: its index in `Result.shown`, the `Show` it belongs to.
+    presentation: int
+    #: The first frame its presentation was off the display, after a `Hide`, or `None` when it was
+    #: on through the trial's last frame -- set as the trial returns (`_drawn`).
+    off: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -276,9 +288,10 @@ class Result:
     changed: tuple[Changed, ...] = ()
     #: Photodiode confirmations, in order: the display as the world reported it.
     confirmed: tuple[Confirmed, ...] = ()
-    #: Every `Show` and every `Update`, in the order they took effect, each with the stimulus as
-    #: it was drawn from its frame (XC-399): where each stimulus was, which `shown` and `changed`
-    #: name but do not say.
+    #: Every `Show` and every `Update` that took effect by the trial's last frame, in the order
+    #: they did, each with the stimulus as it was drawn from its frame, which action made it and
+    #: when its presentation went off (XC-399, `_drawn`): where each stimulus was, which `shown`
+    #: and `changed` name but do not say.
     placed: tuple[Placed, ...] = ()
 
 
@@ -334,7 +347,7 @@ def _apply(
             visible[name] = action.stimulus
             open_at[name] = len(shown)
             shown.append(Shown(name, frame, None))
-            placed.append(Placed(action.stimulus, frame))
+            placed.append(Placed(action.stimulus, frame, "show", (), open_at[name]))
         elif isinstance(action, Hide):
             if action.stimulus not in visible:
                 raise ValueError(
@@ -350,11 +363,26 @@ def _apply(
                     f"stimulus {action.stimulus!r} is not on the display, so it "
                     f"cannot be updated"
                 )
-            visible[action.stimulus] = replace(
-                visible[action.stimulus], **action.changes()
-            )
+            changes = action.changes()
+            visible[action.stimulus] = replace(visible[action.stimulus], **changes)
             changed.append(Changed(action.stimulus, frame))
-            placed.append(Placed(visible[action.stimulus], frame))
+            placed.append(Placed(visible[action.stimulus], frame, "update", tuple(changes),
+                                 open_at[action.stimulus]))
+
+
+def _drawn(placed: "list[Placed]", shown: "list[Shown]", last: int) -> "tuple[Placed, ...]":
+    """What the trial drew, as it returns -- once, never in a frame (XC-399): each placement that
+    took effect by its last frame, with the first frame its presentation was off. **A `Show` or
+    `Update` on an edge to an outcome** takes effect on the frame after the last, so it was never
+    on the screen and is left out (the review's I2); **a `Hide` there** leaves its presentation on
+    through the last frame, so its `off` is `None`, as a presentation still up at the end."""
+    kept = []
+    for place in placed:
+        if place.frame > last:
+            continue
+        off = shown[place.presentation].off
+        kept.append(place._replace(off=off if off is not None and off <= last else None))
+    return tuple(kept)
 
 
 def _emit(actions: "list[Action]", effects: "Effects") -> None:
@@ -515,7 +543,7 @@ def run_trial(
                     tuple(shown),
                     tuple(changed),
                     tuple(confirmed),
-                    tuple(placed),
+                    _drawn(placed, shown, frame),
                 )
             # Frozen: hold clocks do not advance and no edges are derived.
             holding_since = {
@@ -595,7 +623,7 @@ def run_trial(
                     tuple(shown),
                     tuple(changed),
                     tuple(confirmed),
-                    tuple(placed),
+                    _drawn(placed, shown, frame),
                 )
             current, entered_at = by_name[edge.to], frame
             _apply(edge.do, visible, shown, open_at, changed, placed, frame + 1)
@@ -623,5 +651,5 @@ def run_trial(
         tuple(shown),
         tuple(changed),
         tuple(confirmed),
-        tuple(placed),
+        _drawn(placed, shown, max_frames),
     )

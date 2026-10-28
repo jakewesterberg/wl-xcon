@@ -167,33 +167,51 @@ def _is_at(entry: dict, x: float, y: float) -> None:
     assert entry["direction"] == pytest.approx(direction, abs=1e-9)
 
 
+def _shown(stimulus, frame: int, presentation: int = 0, off=None):
+    """A `Show` of `stimulus` that took effect on `frame`, as the trial loop keeps it."""
+    from wl_xcon.run import Placed
+
+    return Placed(stimulus, frame, "show", (), presentation, off)
+
+
+def _line(tmp_path, placed, params=None) -> list[dict]:
+    """The `stimuli` of the one line a record writes for `placed`."""
+    record = SessionRecord.open(tmp_path, session_id="2027-01-14_01", subject="A")
+    record.trial(index=1, outcome="correct", params=params or {}, run=0,
+                 position=Position.lone(1), fluid_ml=0.0, last_reward_at=None, placed=placed)
+    return json.loads((record.directory / "trials.jsonl").read_text())["stimuli"]
+
+
 def test_a_trial_line_says_where_each_stimulus_was_and_each_eyes_own_where_it_has_them(tmp_path):
     """XC-399 (the PI, 2026-10-19, "Record both, tell wl-preproc"): each stimulus the trial put up
     or changed is on its line with the frame it was first there, its (x, y) and its true
     eccentricity and direction, computed from what was drawn: a position a setting holds as its
-    value binds (here a `Polar`, converted exactly), a `Blank` is where it was placed, and an
-    array's objects are listed on their true circle (STE-28). **A stimulus drawn by per-eye
-    positions** (engine spec §5.4) is drawn at no cyclopean position, so it has none: each eye's
-    own is beside it, in that eye's frame, each with its array's objects about it."""
-    from wl_xcon.run import Placed
+    value binds (here a `Polar`, converted exactly), and an array's objects are listed on their
+    true circle (STE-28), with the object its array declares the target. **A `Blank`** is where it
+    was placed, and its entry says it was not drawn (the review's I2). **A stimulus drawn by
+    per-eye positions** (engine spec §5.4) is drawn at no cyclopean position, so it has none: each
+    eye's own is beside it, in that eye's frame, each with its array's objects about it."""
     from wl_xcon.task import Array, Blank, P, Polar, Stimulus
 
     pair = Stimulus("pair", at=(0.0, 0.0), at_left=(2.5, 1.0), at_right=Polar(3.0, 30.0),
-                    looks=Array(n=3, radius=1.0, phase=0.0))
-    record = SessionRecord.open(tmp_path, session_id="2027-01-14_01", subject="A")
-    record.trial(
-        index=1, outcome="correct", params={"target_pos": Polar(15.0, -150.0)}, run=0,
-        position=Position.lone(1), fluid_ml=0.0, last_reward_at=None,
-        placed=(Placed(Stimulus("catch", at=P("target_pos"), looks=Blank()), 2), Placed(pair, 5)),
-    )
-    target, both = json.loads((record.directory / "trials.jsonl").read_text())["stimuli"]
+                    looks=Array(n=3, radius=1.0, phase=0.0, target=P("target_index")))
+    target, both = _line(tmp_path, (
+        _shown(Stimulus("catch", at=P("target_pos"), looks=Blank()), 2, 0, 9), _shown(pair, 5, 1)),
+        {"target_pos": Polar(15.0, -150.0), "target_index": 2})
 
-    assert (target["name"], target["frame"], both["name"], both["frame"]) == ("catch", 2, "pair", 5)
+    assert {k: target[k] for k in ("name", "kind", "frame", "off", "changed", "drawn",
+                                    "unresolved")} == {
+        "name": "catch", "kind": "show", "frame": 2, "off": 9, "changed": None, "drawn": False,
+        "unresolved": None}
     _is_at(target, *_angles.from_polar(15.0, -150.0))
     assert (target["eccentricity"], target["direction"]) == (
         pytest.approx(15.0, abs=1e-9), pytest.approx(-150.0, abs=1e-9))
-    assert "objects" not in target and "left" not in target
+    assert not {"objects", "target", "left", "right"} & set(target)
+    assert {k: both[k] for k in ("name", "kind", "frame", "off", "drawn", "unresolved", "target")} == {
+        "name": "pair", "kind": "show", "frame": 5, "off": None, "drawn": True, "unresolved": None,
+        "target": 2}
     assert [both[k] for k in ("eccentricity", "direction", "x", "y")] == [None] * 4
+    assert "objects" not in both
     for eye, (x, y) in (("left", (2.5, 1.0)), ("right", _angles.from_polar(3.0, 30.0))):
         _is_at(both[eye], x, y)
         assert len(both[eye]["objects"]) == 3
@@ -201,21 +219,97 @@ def test_a_trial_line_says_where_each_stimulus_was_and_each_eyes_own_where_it_ha
             _is_at(drawn, ox, oy)
 
 
+def test_a_stimulus_with_a_disparity_is_recorded_at_its_cyclopean_position(tmp_path):
+    """XC-399 (the review's M2): a disparity shifts each eye's image by -d/2 and +d/2 about the
+    stimulus's position (engine spec §5.4); the record writes that position, the eyes' midpoint,
+    never one eye's, so its eccentricity is the stimulus's, the disparity being in `params`."""
+    from wl_xcon.task import Disc, P, Stimulus
+
+    (near, far) = _line(tmp_path, (
+        _shown(Stimulus("near", at=(4.0, 2.0), disparity=-0.5, looks=Disc()), 1),
+        _shown(Stimulus("far", at=(-6.0, 1.0), disparity=P("depth"), looks=Disc()), 1, 1)),
+        {"depth": 0.8})
+
+    _is_at(near, 4.0, 2.0)
+    _is_at(far, -6.0, 1.0)
+
+
+def test_a_trial_line_reads_as_a_timeline_so_a_gap_and_an_overlap_differ(tmp_path):
+    """XC-399 (the review's I3): each entry says whether a `Show` or an `Update` made it, the fields
+    an `Update` set, and the first frame its presentation was off the display (null when it was on
+    through the trial's last frame). A gap trial -- the fixation point off before the target is
+    on -- and an overlap trial -- the fixation point still on -- read differently, as they were."""
+    from wl_xcon.run import Quiet, run_trial
+    from wl_xcon.task import (
+        After, Disc, Hide, On, Outcome, Polar, Show, State, Stimulus, Trial, Update,
+    )
+
+    fix = Stimulus("fix", at=(0.0, 0.0), looks=Disc(size=0.3))
+    target = Stimulus("target", at=Polar(8.0, 45.0), looks=Disc(size=1.0))
+    dim = Update("target", opacity=0.5)
+    states = {
+        "gap": [
+            State("fix", enter=[Show(fix)], go=[On(After(0.05), "gap")]),
+            State("gap", enter=[Hide("fix")], go=[On(After(0.05), "target")]),
+            State("target", enter=[Show(target)], go=[On(After(0.05), "dim")]),
+            State("dim", enter=[dim], go=[On(After(0.05), Outcome.CORRECT)])],
+        "overlap": [
+            State("fix", enter=[Show(fix)], go=[On(After(0.05), "target")]),
+            State("target", enter=[Show(target)], go=[On(After(0.05), "dim")]),
+            State("dim", enter=[dim], go=[On(After(0.05), Outcome.CORRECT)])],
+    }
+    read = {}
+    for name, its_states in states.items():
+        result = run_trial(Trial(start="fix", windows=[], states=its_states), Quiet(),
+                           frame_period=0.01)
+        read[name] = [(e["name"], e["kind"], e["frame"], e["off"], e["changed"])
+                      for e in _line(tmp_path / name, result.placed)]
+
+    assert read == {
+        "gap": [("fix", "show", 1, 6, None), ("target", "show", 11, None, None),
+                ("target", "update", 16, None, ["opacity"])],
+        "overlap": [("fix", "show", 1, None, None), ("target", "show", 6, None, None),
+                    ("target", "update", 11, None, ["opacity"])],
+    }
+
+
+def test_a_stimulus_whose_position_has_no_value_is_recorded_unresolved_never_raised(tmp_path):
+    """XC-399 (the review's I1): the record never loses a trial's line. A stimulus whose position
+    names a setting the run left without a value -- or whose array's objects do -- is written with
+    null position fields and why, never raised after a trial that ran and paid."""
+    from wl_xcon.task import Array, Disc, P, Polar, Stimulus
+
+    cue, ring, both = _line(tmp_path, (
+        _shown(Stimulus("cue", at=P("cue_pos"), looks=Disc()), 1),
+        _shown(Stimulus("ring", at=(2.0, 0.0), looks=Array(n=P("set_size"), radius=3.0)), 1, 1),
+        _shown(Stimulus("both", at=(0.0, 0.0), at_left=Polar(P("ecc"), 0.0), at_right=(1.0, 0.0),
+                        looks=Disc()), 1, 2)))
+
+    assert [cue[k] for k in ("eccentricity", "direction", "x", "y")] == [None] * 4
+    assert cue["unresolved"] == "setting 'cue_pos' has no value"
+    _is_at(ring, 2.0, 0.0)
+    assert (ring["objects"], ring["unresolved"]) == (None, "setting 'set_size' has no value")
+    assert [both["left"][k] for k in ("eccentricity", "direction", "x", "y")] == [None] * 4
+    _is_at(both["right"], 1.0, 0.0)
+    assert both["unresolved"] == "setting 'ecc' has no value"
+
+
 def test_a_stimulus_whose_appearance_is_a_setting_has_its_arrays_objects_only_when_one_is_set():
     """XC-399: an appearance setting holding an array places its objects as the screen would;
     one a run left unset -- the reference detection task leaves `target_appearance` to the run,
     and nothing draws a trial's screen before the display process (engine build E) -- is no
-    array, and the stimulus is recorded where it was, never a fault after a trial that ran."""
+    array, and the stimulus is recorded where it was, never a fault after a trial that ran, with
+    whether it was drawn unknown (null)."""
     from wl_xcon.record import _stimuli
-    from wl_xcon.run import Placed
     from wl_xcon.task import Array, P, Stimulus
 
-    target = Placed(Stimulus("target", at=(5.0, 0.0), looks=P("target_appearance")), 3)
+    target = _shown(Stimulus("target", at=(5.0, 0.0), looks=P("target_appearance")), 3)
 
     (unset,) = _stimuli((target,), {})
-    assert "objects" not in unset
+    assert "objects" not in unset and unset["drawn"] is None
     _is_at(unset, 5.0, 0.0)
     (ring,) = _stimuli((target,), {"target_appearance": Array(n=2, radius=2.0, phase=90.0)})
+    assert (ring["drawn"], ring["target"]) == (True, 0)
     for drawn, (x, y) in zip(ring["objects"], _angles.ring(5.0, 0.0, 2.0, 90.0, 2), strict=True):
         _is_at(drawn, x, y)
 

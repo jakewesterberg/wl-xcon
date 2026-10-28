@@ -686,6 +686,25 @@ def test_a_polar_position_is_its_direction_as_per_axis_degrees():
         == pytest.approx(7.975, abs=1e-3)
 
 
+def test_a_positions_direction_is_in_its_documented_range_one_value_for_one_direction():
+    """`polar_of_deg`'s direction is in (-180°, 180°], as its docstring, the record (REC-26) and
+    the ask to wl-preproc say (the review of XC-399, M1): leftward is 180°, never -180°, however
+    the position was reached -- `Polar(8, -180)` and `Polar(8, 180)` are one position, and a
+    per-axis `y` of -0.0 is 0 -- and no direction is written as -0.0. A sweep `range(-180, 180,
+    45)` is how a task meets it."""
+    from wl_xcon.geometry import polar_of_deg
+
+    for x, y in ((-8.0, -0.0), (-8.0, 0.0), polar_deg(8.0, -180.0), polar_deg(8.0, 180.0)):
+        assert polar_of_deg(x, y)[1] == 180.0
+    for x, y in ((8.0, -0.0), (0.0, 0.0), (-0.0, -0.0), (0.0, -0.0)):
+        direction = polar_of_deg(x, y)[1]
+        assert direction in (0.0, 180.0) and math.copysign(1.0, direction) == 1.0
+    for theta in range(-180, 180, 45):
+        direction = polar_of_deg(*polar_deg(8.0, float(theta)))[1]
+        assert -180.0 < direction <= 180.0
+        assert direction == pytest.approx(theta if theta > -180 else 180.0, abs=1e-9)
+
+
 def test_a_polar_position_past_90_degrees_is_past_the_side_never_wrapped_onto_the_field():
     """No screen shows a position 90° or more out, but a setting can reach one: past 90° `atan(tan
     e cos θ)` would wrap it onto the far side of the field, where check 8 would pass it. Here it

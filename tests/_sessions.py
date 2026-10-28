@@ -219,3 +219,34 @@ def stimuli_task(folder: Path, *, name: str = "stimuli") -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
     return path
+
+
+def cue_task(folder: Path, *, name: str = "cue") -> Path:
+    """The reference detection task showing a cue beside its fixation point in `await_fix`, placed
+    by a setting, `cue_pos`, whose choices are two polar positions and which declares no start, so
+    a run that gives none leaves it without a value; no window is on the cue (the review of XC-399,
+    I1, its probe). Engine test material, run only in the simulator."""
+    text = Path("tasks/fixation_detection.py").read_text()
+    for old, new in (
+        ("from wl_xcon.task import (", "from wl_xcon.task import (\n    Polar,"),
+        ("\ndetection = Trial(\n",
+         '\nCUE = Stimulus("cue", at=P("cue_pos"), looks=Disc(size=0.5, color=Gray(P("fix_luminance"))))\n'
+         "\ndetection = Trial(\n"),
+        ("            enter=[Show(FIX), Mark(4096)],",
+         "            enter=[Show(FIX), Show(CUE), Mark(4096)],"),
+        ('        Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0),',
+         '        Param("cue_pos", unit="deg", choices=(Polar(8.0, 0.0), Polar(8.0, 180.0))),\n'
+         '        Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0),'),
+    ):
+        assert text.count(old) == 1, old
+        text = text.replace(old, new)
+    text += (
+        "\n\nimport dataclasses as _cue_dataclasses\n"
+        "from wl_xcon.task import NOT_DIFFICULTY, STIMULUS, Meaning\n"
+        "TASK = _cue_dataclasses.replace(TASK, meanings={\n"
+        "    **TASK.meanings, 'cue_pos': Meaning(NOT_DIFFICULTY, STIMULUS, note='a cue')})\n"
+    )
+    path = Path(folder) / f"{name}.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path

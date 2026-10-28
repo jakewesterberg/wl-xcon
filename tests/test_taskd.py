@@ -1221,6 +1221,30 @@ def test_each_trials_row_says_where_every_stimulus_it_showed_was_in_true_eccentr
         _is_at(moved, *_angles.from_polar(12.0, -60.0))
         assert (moved["eccentricity"], moved["direction"]) == (
             pytest.approx(12.0, abs=1e-9), pytest.approx(-60.0, abs=1e-9))
+        assert [(e["kind"], e["changed"]) for e in (target, moved)] == [
+            ("show", None), ("update", ["at"])]
+
+
+def test_a_stimulus_whose_position_setting_has_no_value_never_costs_a_trial_its_line(tmp_path):
+    """The review of XC-399, I1, its probe: a cue placed by a setting the run left without a value,
+    with no window on it, ran on every trial before its position was recorded. The record never
+    loses a line: every trial that started has its line, every mL the trials commanded is on one,
+    and the cue's entry has no position and says why. The pre-flight is not changed here."""
+    path = _sessions.cue_task(tmp_path)
+    session = _session(_spec(tmp_path, task=str(path), trials=8))
+
+    session.run()
+
+    rows = _trial_rows(session)
+    starts = (session.directory / "trial_starts.jsonl").read_text().splitlines()
+    assert session.stop_kind == "completed"
+    assert len(rows) == len(starts) >= 8
+    assert sum(row["fluid_ml"] for row in rows) == pytest.approx(session.welfare.commanded)
+    assert session.welfare.commanded > 0
+    for row in rows:
+        (cue,) = [e for e in row["stimuli"] if e["name"] == "cue"]
+        assert [cue[k] for k in ("eccentricity", "direction", "x", "y")] == [None] * 4
+        assert (cue["unresolved"], cue["drawn"]) == ("setting 'cue_pos' has no value", True)
 
 
 def test_each_condition_plays_the_structure_it_names_and_its_row_says_which(tmp_path):
