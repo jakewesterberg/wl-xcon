@@ -4311,3 +4311,33 @@ def test_a_missing_file_exits_one_with_no_traceback(tmp_path):
 
     assert done.returncode == 1, done.stderr
     assert "Traceback" not in done.stderr and "missing.py" in done.stderr
+
+
+# --- `wlx run --subject` is held to the rule `wlx taskd` holds an animal to (XC-161) ------------
+
+
+@pytest.mark.parametrize("subject", ["has space", "../outside", "a/b", ".hidden", "x" * 65, ""])
+def test_wlx_run_refuses_a_subject_wlx_taskd_would_refuse_before_writing(tmp_path, subject):
+    from wl_xcon import service
+
+    assert not service._folder_name(subject), "the same rule, by calling it"
+    argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm())
+    argv[argv.index("--subject") + 1] = subject
+
+    with pytest.raises(SystemExit) as refused:
+        main(argv)
+
+    said = str(refused.value)
+    assert isinstance(refused.value.code, str)
+    assert "one folder name" in said and repr(subject) in said
+    assert not (tmp_path / "2027-01-14_01").exists()
+
+
+def test_wlx_run_takes_the_rule_from_wlx_taskd_not_a_copy(tmp_path, monkeypatch):
+    """Whatever `service._folder_name` says, `wlx run` follows: a stand-in that refuses the
+    reference subject refuses it here, so no second rule can drift from the first."""
+    from wl_xcon import service
+
+    monkeypatch.setattr(service, "_folder_name", lambda name: False)
+    with pytest.raises(SystemExit, match="one folder name"):
+        main(_run_args(tmp_path, "--out-of-cage-at", _hhmm()))

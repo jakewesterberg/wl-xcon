@@ -1679,6 +1679,22 @@ def main(argv: list[str] | None = None) -> int:
             Simulated as SimulatedPump,
         )
 
+        # **The animal is one folder name, as `wlx taskd` holds it to** (XC-161): a session left
+        # stranded under a name `service._folder_name` refuses blocks every `wlx taskd` open
+        # until its record is edited by hand. The rule is that function, called, never a copy
+        # (XC-196 may tighten it); refused before anything is written, the rig loaded or the
+        # departure asked about. Imported here as `serve` and `taskd` are: `service` imports this
+        # module.
+        from wl_xcon import service as _service
+
+        if not _service._folder_name(args.subject):
+            raise SystemExit(
+                f"refused: an animal is one folder name -- letters, digits, '_', '.' and '-', "
+                f"starting with a letter or digit -- and {_printable(repr(args.subject))} is not "
+                f"one, so --subject {_printable(repr(args.subject))} is refused as `wlx taskd` "
+                f"would refuse it; nothing recorded"
+            )
+
         # `--deployment` arrives as a hyphenated word because that is how a flag
         # reads; the enum's own value is the underscored one that goes on the wire.
         deployment = Deployment(args.deployment.replace("-", "_"))
