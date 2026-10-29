@@ -69,7 +69,7 @@ def test_a_task_file_that_does_not_load_fails_rather_than_raising(tmp_path, text
 
 def _checks_that_raise(monkeypatch) -> None:
     """`check_task` raising `TypeError` on a shape it does not expect, as it did on a window placed
-    by a whole-point setting until XC-156 was fixed (its `_closest_approach` unpacked the place as a
+    by a whole-point setting until XC-156 was fixed (its `_approach` unpacked the place as a
     pair): no task of the repo's makes the checks raise now, so the fault is put there."""
     def unpack(*_args, **_kwargs):
         raise TypeError("cannot unpack non-iterable P object")

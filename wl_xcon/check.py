@@ -17,6 +17,7 @@ import itertools
 import math
 from decimal import Decimal
 from pathlib import Path
+from typing import NamedTuple
 
 from wl_xcon.actor import TEXT_LIMIT
 from wl_xcon.codes import PROVISIONAL, Allocation
@@ -3623,8 +3624,29 @@ def _eye_faults(trial: Trial) -> list[Finding]:
 # with the ranges widened to it (`beyond_range`).
 
 
-def _closest_approach(a: Window, b: Window, params: dict[str, Param]) -> tuple[float, float]:
-    """Least possible centre separation, and greatest possible summed radius (`_span`).
+#: One place a window's center can be (`_places`): its two values as intervals, whether they are an
+#: eccentricity and a direction, and for a window placed by a whole-point setting the words naming it.
+_Place = tuple[list[tuple[float, float]], list[tuple[float, float]], bool, str]
+
+
+class _Approach(NamedTuple):
+    """What `_approach` finds of two windows: the least `gap` between their centers, the greatest
+    `reach` their radii sum to (`None` where a radius is no number: nothing to compare), the
+    `overlapping` combinations of choices as words, nearest first, and how many `combinations` of
+    whole-point choices were compared (0 where neither window is placed by a whole-point setting)."""
+
+    gap: float
+    reach: float | None
+    overlapping: list[str]
+    combinations: int
+
+
+def _approach(
+    a: Window, b: Window, params: dict[str, Param],
+    places: "dict[str, list[_Place]] | None" = None,
+) -> _Approach:
+    """Least possible centre separation, greatest possible summed radius (`_span`), and **which
+    choices bring the windows together**.
 
     **Each centre is the regions it can be in** (`_centres`): a coordinate given by choices is
     each choice, a point, and one given by a range is that interval, so a window at x -10° or
@@ -3645,40 +3667,53 @@ def _closest_approach(a: Window, b: Window, params: dict[str, Param]) -> tuple[f
     one setting (`at=P("pos")`) is read over every choice it offers (XC-156; `_places`), each a
     point, as a window whose coordinates are settings is read over theirs: a pairing of the two
     windows' choices is compared whole, never a coordinate of one choice with a coordinate of
-    another, which no choice offered. Choices that are no position are left out (`bad-placement`
-    refuses them, `_position_kind_faults`), and a window with none left is never compared."""
-    reach = _span(a.radius, params, 0.0)[1] + _span(b.radius, params, 0.0)[1]
-    return _approach(a, b, params)[0], reach
+    another, which no choice offered, and every pairing is compared, not choice i of one with choice i
+    of the other. **Every pairing that comes within the radii is named** (`overlapping`, as words in
+    the review report's: eccentricity and direction first), the window placed by a literal left out
+    of it. Choices that are no position, and a window with none left, a literal that is no position
+    and a radius that is no number, are left out (`bad-placement` refuses each, `_position_kind_faults`):
+    this check never raises on them. `places` holds each window's places already made, by name, so
+    that a check making many comparisons builds them once."""
+    def built(window: Window) -> "list[_Place]":
+        if places is None:
+            return _places(window, params)
+        if window.name not in places:
+            places[window.name] = _places(window, params)
+        return places[window.name]
+
+    radii = [_radius(window.radius, params) for window in (a, b)]
+    reach = None if None in radii else sum(radii)
+    first, second = built(a), built(b)
+    named = any(place[3] for place in first + second)
+    best, found = math.inf, []
+    for one in first:
+        for two in second:
+            gap = least_separation_deg(one[0], one[1], two[0], two[1],
+                                       polar_a=one[2], polar_b=two[2])
+            best = min(best, gap)
+            if reach is not None and named and gap < reach:
+                found.append((gap, " with ".join(said for said in (one[3], two[3]) if said)))
+    found.sort(key=lambda item: item[0])
+    return _Approach(best, reach, [said for _, said in found],
+                     len(first) * len(second) if named else 0)
 
 
-def _approach(
-    a: Window, b: Window, params: dict[str, Param]
-) -> tuple[float, list[str]]:
-    """The least possible separation of two windows' centers (`_closest_approach`), and **which
-    choices bring them that close**: for each window placed by a whole-point setting, a phrase
-    naming it, its setting and the choice it is at, in the review report's words for a position
-    (`_said`: eccentricity and direction first). The least is `inf` where a window has no place
-    to compare (`_places`)."""
-    best, named = math.inf, []
-    for first in _places(a, params):
-        for second in _places(b, params):
-            gap = least_separation_deg(
-                _intervals(first[0], params), _intervals(first[1], params),
-                _intervals(second[0], params), _intervals(second[1], params),
-                polar_a=first[2], polar_b=second[2])
-            if gap < best:
-                best, named = gap, [said for said in (first[3], second[3]) if said]
-    return best, named
+def _radius(radius: object, params: dict[str, Param]) -> float | None:
+    """The greatest a window's radius can be (`_span`; without end where a setting has no highest),
+    or `None` for a literal that is no finite number, which `_position_kind_faults` refuses."""
+    if not isinstance(radius, P) and not _finite(radius):
+        return None
+    return _span(radius, params, 0.0)[1]
 
 
-def _places(window: Window, params: dict[str, Param]) -> list[tuple[object, object, bool, str]]:
-    """Each place a window's center can be: `(first, second, polar, said)`, the two values of
-    `_centers`, and for a window placed by a whole-point setting (`at=P("pos")`, XC-156) one place
-    for each of its choices that is a position, with `said` naming the window, the choice and the
-    setting (else `""`). A choice that is no position (`task.is_point`, finite) is left out, as is
-    any choice of a setting with none (a free value) or not declared: refused elsewhere
-    (`_position_kind_faults`), and this check never raises on them. A literal of no shape the check
-    reads gives none."""
+def _places(window: Window, params: dict[str, Param]) -> "list[_Place]":
+    """Each place a window's center can be (`_Place`), built once: the two values of `_centers` as
+    intervals (`_intervals`), and for a window placed by a whole-point setting (`at=P("pos")`,
+    XC-156) one place for each of its choices that is a position, with the words naming the window,
+    the choice and the setting (else `""`). A choice that is no position (`task.is_point`, finite)
+    is left out, as is any choice of a setting with none (a free value) or not declared; and a
+    literal of no shape the check reads, or with a part that is no finite number, gives none. All
+    are refused elsewhere (`_position_kind_faults`), and this check never raises on them."""
     at = window.at
     if isinstance(at, P):
         declared = params.get(at.name)
@@ -3686,11 +3721,13 @@ def _places(window: Window, params: dict[str, Param]) -> list[tuple[object, obje
         for choice in (declared.choices or ()) if declared is not None else ():
             if is_point(choice) and all(_real(n) for n in _parts_of(choice)):
                 first, second, polar = _centers(choice)
-                places.append((float(first), float(second), polar,
-                               f"{window.name!r} at {_said(choice)} (setting {at.name!r})"))
+                places.append((_intervals(float(first), params), _intervals(float(second), params),
+                               polar, f"{window.name!r} at {_said(choice)} (setting {at.name!r})"))
         return places
     if isinstance(at, Polar) or (isinstance(at, (tuple, list)) and len(at) == 2):
-        return [(*_centers(at), "")]
+        first, second, polar = _centers(at)
+        if all(isinstance(part, P) or _finite(part) for part in (first, second)):
+            return [(_intervals(first, params), _intervals(second, params), polar, "")]
     return []
 
 
@@ -3708,13 +3745,29 @@ def _intervals(
 ) -> list[tuple[float, float]]:
     """The values a number can be, as intervals: a literal, or each choice of a setting, a point;
     a range one interval (`_span`, with its `least`). Choices that are not all finite numbers are
-    read as `_span` reads them, failing closed. Read by `_closest_approach` for a window's
+    read as `_span` reads them, failing closed. Read by `_places` for a window's
     coordinate (the final review's I2) and by `_overlapping_objects` for a ring (the final
     re-review's m1): a coordinate or a ring of -10° or 10° is never 0."""
     param = params.get(value.name) if isinstance(value, P) else None
     if param is not None and param.choices and all(_finite(c) for c in param.choices):
         return [(float(c), float(c)) for c in param.choices]
     return [_span(value, params, least)]
+
+
+#: The most combinations of whole-point choices a finding names; the rest are counted.
+_NAMED = 3
+
+
+def _which(found: _Approach) -> str:
+    """The combinations of a whole-point setting's choices that overlap, for the finding's sentence:
+    `" (4 of 64 combinations overlap: A; B; C, and 1 more)"`, nearest first; nothing where neither
+    window is placed by a whole-point setting."""
+    if not found.combinations:
+        return ""
+    named = found.overlapping
+    more = f", and {len(named) - _NAMED} more" if len(named) > _NAMED else ""
+    return (f" ({len(named)} of {found.combinations} combinations overlap: "
+            + "; ".join(named[:_NAMED]) + more + ")")
 
 
 def _overlapping_windows(trial: Trial) -> list[Finding]:
@@ -3735,6 +3788,7 @@ def _overlapping_windows(trial: Trial) -> list[Finding]:
     by_name = {w.name: w for w in trial.windows if not isinstance(w, ObjectWindows)}
     findings: list[Finding] = []
     seen: set[tuple[str, str]] = set()
+    places: dict[str, list[_Place]] = {}
     for state in trial.states:
         scored = [
             name
@@ -3748,10 +3802,9 @@ def _overlapping_windows(trial: Trial) -> list[Finding]:
                 if first == second or pair in seen:
                     continue
                 seen.add(pair)
-                gap, named = _approach(by_name[first], by_name[second], params)
-                reach = (_span(by_name[first].radius, params, 0.0)[1]
-                         + _span(by_name[second].radius, params, 0.0)[1])
-                if gap < reach:
+                found = _approach(by_name[first], by_name[second], params, places)
+                gap, reach = found.gap, found.reach
+                if reach is not None and gap < reach:
                     radii = (f"their radii sum to {reach:.2f}°" if math.isfinite(reach)
                              else "a radius has no declared highest, so they can be any size")
                     findings.append(
@@ -3759,7 +3812,7 @@ def _overlapping_windows(trial: Trial) -> list[Finding]:
                             "overlapping-windows",
                             f"state {state.name!r} scores {first!r} and {second!r}, "
                             f"which can come within {gap:.2f}° while {radii}"
-                            + (f" (with {' and '.join(named)})" if named else "") + "; "
+                            + _which(found) + "; "
                             f"a gaze position inside both "
                             f"satisfies both guards, and which one scores is decided "
                             f"by the order the transitions happen to be written in, so "
@@ -4337,6 +4390,10 @@ def _position_kind_faults(trial: Trial) -> list[Finding]:
     for window in trial.windows:
         if isinstance(window, Window):
             place(f"window {window.name!r}", "position", window.at)
+            if not isinstance(window.radius, P) and not _finite(window.radius):
+                findings.append(Finding("bad-placement", (
+                    f"window {window.name!r}: its radius is {_said(window.radius)}, which is not "
+                    f"a finite number of degrees")))
     for state, action in actions_of(trial):
         if isinstance(action, Show):
             stimulus = action.stimulus

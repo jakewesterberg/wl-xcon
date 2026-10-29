@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 import textwrap
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -381,7 +382,7 @@ def _overlaps(trial: Trial) -> list:
 
 
 def test_two_windows_each_placed_by_a_whole_point_setting_are_checked_over_every_pair_of_choices():
-    """XC-156: `_closest_approach` unpacked a window's place as a pair and raised `TypeError` for
+    """XC-156: `_approach` unpacked a window's place as a pair and raised `TypeError` for
     `Window.at = P(...)`, a legal form. Read as a window with coordinate settings is, over every
     value its choices allow: 8° at 0° and 8° at 5° are 0.70° apart, under the 2° the radii sum to,
     and the sentence names those choices in the review report's words (eccentricity and direction
@@ -389,13 +390,14 @@ def test_two_windows_each_placed_by_a_whole_point_setting_are_checked_over_every
     trial = _two_windows(
         P("pa"), P("pb"),
         Param("pa", unit="deg", choices=(_polar(8.0, 0.0), _polar(8.0, 90.0))),
-        Param("pb", unit="deg", choices=(_polar(8.0, 5.0), _polar(20.0, 180.0))))
+        Param("pb", unit="deg", choices=(_polar(20.0, 180.0), _polar(8.0, 5.0))))
 
     (found,) = _overlaps(trial)
 
     assert "which can come within 0.70° while their radii sum to 2.00°" in found.detail
     assert "'a' at 8° at 0° · (x, y) (8, 0)" in found.detail
-    assert "'b' at 8° at 5° · (x, y)" in found.detail
+    assert ("(1 of 4 combinations overlap: 'a' at 8° at 0° · (x, y) (8, 0) (setting 'pa') with "
+            "'b' at 8° at 5° · (x, y)") in found.detail
     assert "(setting 'pa')" in found.detail and "(setting 'pb')" in found.detail
     assert "Polar(" not in found.detail
     assert not found.blocking and found.accepted_in == SESSION_KINDS
@@ -422,11 +424,13 @@ def test_a_window_placed_by_a_whole_point_setting_and_one_placed_by_a_literal_ar
 
 def test_choices_that_overlap_only_in_some_combinations_are_found_and_the_combination_named():
     """XC-156: of the four pairings of two settings' two choices, only (0°, 10°) with (0°, 10.5°)
-    come within the radii; the finding is the same as a pair that does overlap, naming that one."""
+    come within the radii: `pa`'s second choice with `pb`'s first, off the diagonal, so a check
+    that pairs choice i with choice i (a plan's conditions do set two settings together) passes
+    it. The finding is the same as a pair that does overlap, naming that one."""
     trial = _two_windows(
         P("pa"), P("pb"),
         Param("pa", unit="deg", choices=((10.0, 0.0), (0.0, 10.0))),
-        Param("pb", unit="deg", choices=((-10.0, 0.0), (0.0, 10.5))))
+        Param("pb", unit="deg", choices=((0.0, 10.5), (-10.0, 0.0))))
 
     (found,) = _overlaps(trial)
 
@@ -480,3 +484,68 @@ def test_a_window_whose_position_is_of_no_shape_the_check_reads_does_not_raise_e
         trial = _two_windows(at, (0.0, 0.0))
         assert _overlaps(trial) == []
         assert "bad-placement" in {f.code for f in check(trial)}
+
+
+def test_every_choice_that_overlaps_is_named_up_to_three_then_counted():
+    """XC-156 fix round 1 (I1): a target at any of eight places 1.5° out overlaps a window at the
+    center; the finding names the nearest three combinations, then counts the rest, and the closest
+    separation stays in the sentence."""
+    trial = _two_windows(P("pt"), (0.0, 0.0), Param(
+        "pt", unit="deg", choices=tuple(_polar(1.5, 45.0 * k) for k in range(8))))
+
+    (found,) = _overlaps(trial)
+
+    assert "which can come within 1.50° while their radii sum to 2.00° (8 of 8 combinations " \
+           "overlap: " in found.detail
+    assert found.detail.count("(setting 'pt')") == 3
+    assert "; " in found.detail and ", and 5 more)" in found.detail
+
+
+def test_two_overlapping_choices_are_both_named_and_the_one_that_does_not_is_not():
+    """XC-156 fix round 1 (I1): the repo's own fixture shape, a target at (10°, 0°) or (-10°, 0°)
+    against a window at the center with a radius of 9.5°, and a third choice far off."""
+    trial = Trial(
+        start="w",
+        params=[Param("pa", unit="deg", choices=((10.0, 0.0), (-10.0, 0.0), (0.0, 30.0)))],
+        windows=[Window("a", at=P("pa"), radius=1.0, on="s"),
+                 Window("b", at=(0.0, 0.0), radius=9.5, on="s")],
+        states=[State("w", enter=[Show(Stimulus("s", at=(0.0, 0.0), looks=Disc()))],
+                      go=[On(Hold("a", 0.1), Outcome.CORRECT),
+                          On(Hold("b", 0.1), Outcome.WRONG_TARGET),
+                          On(After(1.0), Outcome.NO_RESPONSE)])],
+    )
+
+    (found,) = _overlaps(trial)
+
+    assert "(2 of 3 combinations overlap: " in found.detail
+    assert "(x, y) (10, 0)" in found.detail and "(x, y) (-10, 0)" in found.detail
+    assert "(0, 30)" not in found.detail
+
+
+@pytest.mark.parametrize("at", [
+    ("a", 1), (None, 1), ([1.0], 2.0), (10**400, 0), (float("nan"), 0.0), (P("x"), "b"),
+    _polar("x", 0.0), _polar(10**400, 0.0), _polar(P("x"), None),
+])
+def test_a_literal_position_holding_a_non_number_is_refused_and_the_overlap_check_does_not_raise(at):
+    """XC-156 fix round 1 (m1): `check()` raised on these literals (ValueError, TypeError,
+    OverflowError) before `bad-placement` could refuse them; it refuses them now."""
+    trial = _two_windows(at, (0.0, 0.0), Param("x", unit="deg", low=-1.0, high=1.0))
+
+    found = check(trial)
+
+    assert "bad-placement" in {f.code for f in found}
+    assert [f for f in found if f.code == "overlapping-windows"] == []
+
+
+@pytest.mark.parametrize("radius", ["big", None, 10**400, float("nan"), float("inf")])
+def test_a_literal_radius_that_is_no_number_is_refused_and_the_overlap_check_does_not_raise(radius):
+    """XC-156 fix round 1 (m1): a window radius written as text, None or a value no float holds
+    raised out of `check()`; it is refused (`bad-placement`) and the pair is not compared."""
+    trial = _two_windows((0.0, 0.0), (0.0, 1.0))
+    trial = replace(trial, windows=[replace(trial.windows[0], radius=radius), trial.windows[1]])
+
+    found = check(trial)
+
+    (refusal,) = [f for f in found if f.code == "bad-placement"]
+    assert "window 'a': its radius is " in refusal.detail and "not a finite number" in refusal.detail
+    assert [f for f in found if f.code == "overlapping-windows"] == []

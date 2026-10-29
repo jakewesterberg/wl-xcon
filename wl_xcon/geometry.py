@@ -445,7 +445,7 @@ def least_separation_deg(xs_a, ys_a, xs_b, ys_b, *, polar_a: bool = False,
     region is every `(x, y)` with `x` in one of its intervals `xs` and `y` in one of its `ys`,
     each `(low, high)` in degrees, a point being `(v, v)`; or, `polar_a` or `polar_b` set, every
     `polar_deg(e, θ)` with `e` in one of its first intervals and θ in one of its second. What
-    `check._closest_approach` asks of two windows whose centers are settings.
+    `check._approach` asks of two windows whose centers are settings.
 
     **Two rectangles** in degrees are two rectangles on the tangent plane, so each is a convex
     patch of directions bounded by four arcs of great circles: they are 0° apart where they
