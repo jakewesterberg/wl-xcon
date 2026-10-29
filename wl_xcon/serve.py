@@ -62,6 +62,7 @@ housekeeping, not a measurement of this system.
 
 from __future__ import annotations
 
+import functools
 import hmac
 import ipaddress
 import json
@@ -364,6 +365,8 @@ _ERRORS = {
     405: {"error": "method not allowed"},
     414: {"error": "request line too long"},
     431: {"error": "request header fields too large"},
+    #: A handler that raised (`_backstop`): what failed is logged, never sent (XC-042).
+    500: {"error": "internal server error"},
     505: {"error": "http version not supported"},
 }
 _FALLBACK = {"error": "request rejected"}
@@ -988,6 +991,13 @@ def make_handler(
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
 
+        #: Whether this request has begun its answer, which a 500 after that cannot replace.
+        _answered = False
+
+        def send_response(self, code, message=None) -> None:
+            self._answered = True
+            super().send_response(code, message)
+
         def _path(self) -> str:
             """The request's path without its query string (b2b spec §3): the page's
             return from wl.works carries an authorization code in it."""
@@ -1435,6 +1445,37 @@ def make_handler(
                     }
                 )
             )
+
+    def _backstop(handler):
+        """`handler` with a last resort (XC-042): one that raises answers `500` with a fixed
+        JSON body (`_ERRORS`) and the connection is closed, never the exception's text or a
+        traceback to the client, and never a dead thread with no answer. What failed is logged
+        where the server logs (`log_error`). A handler that had begun its answer (an event
+        stream) cannot be given a second one: its connection is closed."""
+
+        @functools.wraps(handler)
+        def guarded(self) -> None:
+            self._answered = False
+            try:
+                handler(self)
+            except Exception as exc:  # noqa: BLE001 -- answered and logged, never hidden
+                self.log_error(
+                    "%s %s raised %s: %s", self.command, self._path(), type(exc).__name__,
+                    traceback.format_exc().replace("\n", " | "),
+                )
+                self.close_connection = True
+                if not self._answered:
+                    try:
+                        self._send_json(500, _ERRORS[500])
+                    except OSError:
+                        pass  # the client is gone; the log line above is all there is
+
+        return guarded
+
+    # **Every** `do_*`, by name, so a verb added later goes through the backstop with no
+    # further change: GET, POST and the refused verbs alike.
+    for _name in [name for name in vars(ConsoleHandler) if name.startswith("do_")]:
+        setattr(ConsoleHandler, _name, _backstop(getattr(ConsoleHandler, _name)))
 
     return ConsoleHandler
 

@@ -5589,3 +5589,68 @@ def test_a_write_the_box_refuses_names_the_https_page_only_when_there_is_one():
             server.server_close()
             thread.join(timeout=5)
     assert answers == [CONTROLS_AT_THE_BOX, CONTROLS_ELSEWHERE]
+
+
+# --- a handler that raises answers JSON 500 and says nothing of why (XC-042) ---------------------
+
+_SECRET = "secret-path /etc/rig.key and a traceback"
+
+
+def _assert_a_bare_500(raw_status, body):
+    assert raw_status == 500
+    assert json.loads(body) == {"error": "internal server error"}
+    assert _SECRET.encode() not in body and b"Traceback" not in body
+
+
+def test_a_dispatch_that_raises_answers_a_json_500_without_its_text(capfd):
+    def dispatch(request):
+        raise RuntimeError(_SECRET)
+
+    with _served(_hub(), dispatch=dispatch) as port:
+        raw = _post_raw(port, {"kind": "pause", "by": "jake"})
+
+    _assert_a_bare_500(*raw)
+    # Said where the server logs, not to the client.
+    assert "RuntimeError" in capfd.readouterr().err
+
+
+def _post_raw(port: int, body):
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=POST_ANSWER_S)
+    try:
+        connection.request("POST", "/commands", json.dumps(body).encode(), {
+            "Host": f"127.0.0.1:{port}", "Origin": f"http://127.0.0.1:{port}",
+            "Content-Type": "application/json"})
+        response = connection.getresponse()
+        return response.status, response.read()
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize("method", ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "TRACE"])
+def test_every_handler_goes_through_the_same_500_backstop(monkeypatch, method):
+    """Each verb's handler, the refused ones among them, answers a JSON 500 when it raises: the
+    `Host` check they all begin with is made to raise."""
+    def explode(header):
+        raise RuntimeError(_SECRET)
+
+    monkeypatch.setattr(serve, "host_name", explode)
+    with _served(_hub()) as port:
+        status, _, body = _request(port, method, "/health")
+
+    _assert_a_bare_500(status, body)
+
+
+def test_the_server_keeps_answering_after_a_handler_raised(monkeypatch):
+    real = serve.host_name
+    calls = []
+
+    def once(header):
+        calls.append(header)
+        if len(calls) == 1:
+            raise RuntimeError(_SECRET)
+        return real(header)
+
+    monkeypatch.setattr(serve, "host_name", once)
+    with _served(_hub()) as port:
+        assert _request(port, "GET", "/nope")[0] == 500
+        assert _request(port, "GET", "/nope")[0] == 404
