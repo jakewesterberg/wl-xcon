@@ -120,6 +120,7 @@ def check(
         + _crowded_arrays(trial)
         + _view_faults(trial, geometry)
         + _placement_faults(trial)
+        + _position_kind_faults(trial)
         + _trial_display_faults(trial)
         + _holds_cut_short(trial)
     )
@@ -1281,6 +1282,12 @@ class _Unbounded(Exception):
     """A value check 8 cannot bound. Its one argument names the parameter."""
 
 
+class _Unmeasurable(_Unbounded):
+    """A choice of a whole-position setting that is a point but none a float can hold: an
+    infinity, a NaN, or an integer past a float's range (XC-421). The arguments are the
+    parameter's name and the choice; `_offscreen_stimuli` names both."""
+
+
 def _domain(value: object, params: dict[str, Param]) -> list:
     """Every value that matters for a property check 8 measures.
 
@@ -1338,6 +1345,21 @@ def _reach(value: object, params: dict[str, Param]) -> list[float]:
     return [] if literal is None else [literal]
 
 
+def _real(number: object) -> bool:
+    """Whether a number is one a float holds and a calculation can use: finite, and not an
+    integer past a float's range (`math.isfinite(10**400)` raises `OverflowError`)."""
+    try:
+        return math.isfinite(float(number))
+    except OverflowError:
+        return False
+
+
+def _parts_of(point: object) -> tuple:
+    """The two numbers of a point `task.is_point` accepts."""
+    return ((point.eccentricity, point.direction) if isinstance(point, Polar)
+            else (point[0], point[1]))
+
+
 def _points(at: object, params: dict[str, Param]) -> list[tuple[float, float]]:
     """Every centre a position can take.
 
@@ -1352,6 +1374,9 @@ def _points(at: object, params: dict[str, Param]) -> list[tuple[float, float]]:
         offered = _domain(at, params)
         if not all(is_point(point) for point in offered):
             raise _Unbounded(at.name)
+        for point in offered:
+            if not all(_real(part) for part in _parts_of(point)):
+                raise _Unmeasurable(at.name, point)
         return [polar_deg(float(point.eccentricity), float(point.direction))
                 if isinstance(point, Polar) else (float(point[0]), float(point[1]))
                 for point in offered]
@@ -1558,6 +1583,19 @@ def _offscreen_stimuli(trial: Trial, geometry: Geometry | None) -> list[Finding]
                 for point in _reachable(stimulus, params, vergence)
                 if not geometry.can_show(*point)
             ]
+        except _Unmeasurable as unmeasurable:
+            setting, choice = unmeasurable.args
+            said = repr(choice)
+            said = said if len(said) <= 60 else said[:57] + "..."
+            findings.append(
+                Finding(
+                    "stimulus-off-screen",
+                    f"state {name!r} {what} whose extent cannot be bounded: {setting!r} can be "
+                    f"{said}, a position with an infinity, a NaN or a number past a float's "
+                    f"range in it, so it cannot be proved inside {field}",
+                )
+            )
+            continue
         except _Unbounded as unbounded:
             findings.append(
                 Finding(
@@ -4120,6 +4158,73 @@ def _placement_faults(trial: Trial) -> list[Finding]:
                 refuse("per-eye-misused", (
                     f"{name!r} gives per-eye positions in a task written for "
                     f"{trial.view!r}; only the stereoscope shows each eye its own image"))
+    return findings
+
+
+def _position_kind_faults(trial: Trial) -> list[Finding]:
+    """**A position setting that can hold a value no place takes** (XC-415): refused at load, as
+    the session would stop mid-run where the value met it. One rule for every place a position is
+    written: a window's center (`gaze._placed`), a stimulus's `at`, `at_left` and `at_right`
+    (`screen.resolve`), each `Update`'s, which is an array's position too (`Update("search",
+    at=P("where"))`; the array's objects are placed about it, XC-402). All three read it through
+    `task.position_of`: a whole-position setting's every choice is a point (`task.is_point`), a
+    coordinate's, an eccentricity's and a direction's a number. Code `bad-placement`, as a stimulus's
+    opacity that is no number is. **A choice of `None` is left out**: whether a run whose stimulus is
+    placed by a setting with no value is refused at its start is a question put to the PI
+    (XC-415, narrowed). A setting with no choices (a free value) has none to read, and is left
+    to check 8's bound."""
+    from wl_xcon.task import Show, Update
+
+    params = {p.name: p for p in trial.params}
+    findings: list[Finding] = []
+
+    def number(value: object) -> bool:
+        return _is_number(value)
+
+    def offending(setting: object, fits) -> "tuple[str, object] | None":
+        """The setting's name and its first choice that is a value and does not fit."""
+        if not isinstance(setting, P):
+            return None
+        param = params.get(setting.name)
+        bad = [c for c in (param.choices if param is not None else ())
+               if c is not None and not fits(c)]
+        return (setting.name, bad[0]) if bad else None
+
+    def read(at: object) -> "tuple[str, object] | None":
+        if isinstance(at, P):
+            return offending(at, is_point)
+        parts = ((at.eccentricity, at.direction) if isinstance(at, Polar)
+                 else tuple(at) if isinstance(at, (tuple, list)) else ())
+        return next((found for part in parts if (found := offending(part, number))), None)
+
+    def check_place(where: str, at: object) -> None:
+        found = read(at)
+        if found is not None:
+            setting, choice = found
+            said = repr(choice)
+            said = said if len(said) <= 60 else said[:57] + "..."
+            findings.append(Finding("bad-placement", (
+                f"{where} is placed by parameter {setting!r}, which can be {said}, not a "
+                f"position: a position is a Polar of two numbers or an (x, y) pair of two, and "
+                f"each coordinate, eccentricity and direction a number")))
+
+    for window in trial.windows:
+        if isinstance(window, Window):
+            check_place(f"window {window.name!r}'s position", window.at)
+    for _, action in actions_of(trial):
+        if isinstance(action, Show):
+            stimulus = action.stimulus
+            places = (("position", stimulus.at), ("left-eye position", stimulus.at_left),
+                      ("right-eye position", stimulus.at_right))
+            for what, at in places:
+                if at is not None:
+                    check_place(f"stimulus {stimulus.name!r}'s {what}", at)
+        elif isinstance(action, Update):
+            for field, what in (("at", "position"), ("at_left", "left-eye position"),
+                                ("at_right", "right-eye position")):
+                at = action.changes().get(field)
+                if at is not None:
+                    check_place(f"an update of {action.stimulus!r}'s {what}", at)
     return findings
 
 

@@ -18,6 +18,7 @@ from wl_xcon.task import (
     Custom,
     Exited,
     Hold,
+    Polar,
     ObjectWindows,
     On,
     Outcome,
@@ -998,3 +999,110 @@ def test_an_arrays_ring_reaching_a_housing_is_refused_even_though_its_centre_is_
 
     assert finding.code == "stimulus-off-screen"
     assert "direct field, less the light sensors' housings" in finding.detail
+
+
+# --- XC-421 and XC-415: a position setting is refused at load when a choice is no position -------
+
+def _unmeasurable(choice):
+    return _off(_showing(P("pos"), [Param("pos", unit="deg", choices=(choice,))]))
+
+
+@pytest.mark.parametrize("choice", [
+    Polar(float("inf"), 0.0), Polar(5.0, float("inf")), (float("inf"), 0.0),
+    Polar(10**400, 0.0), (10**400, 0.0), Polar(5.0, 10**400),
+    Polar(float("nan"), 0.0), (0.0, float("nan")),
+])
+def test_a_whole_position_choice_no_float_can_measure_is_refused_not_raised(choice):
+    """XC-421: choices that are all points, one an infinity, a NaN or an integer past a float's
+    range, raised a math error out of `check` (a NaN passed). It is refused as a choice that
+    is not a point is, in a sentence naming the setting and the choice."""
+    (finding,) = _unmeasurable(choice)
+    assert "'pos'" in finding.detail and "cannot be bounded" in finding.detail
+    assert "past a float's range" in finding.detail
+    assert repr(choice)[:50] in finding.detail
+
+
+def _place_faults(trial) -> list:
+    return [f for f in check(trial) if f.code == "bad-placement" and "position" in f.detail]
+
+
+def _windowed(at, params) -> Trial:
+    trial = _showing((0.0, 0.0))
+    return replace(trial, params=list(params), windows=[Window("w", at=at, radius=1.0, on="s")])
+
+
+_WRONG_KINDS = [
+    # (what a setting holds, the setting's choices, how the place reads it)
+    ("whole", (Polar(8.0, 0.0), 0.0)),
+    ("coordinate", (0.0, Polar(8.0, 0.0))),
+    ("eccentricity", (8.0, "far")),
+    ("direction", (0.0, (1.0, 2.0))),
+]
+
+
+def _setting(kind, choices):
+    param = Param("p", unit="deg", choices=choices)
+    at = {"whole": P("p"), "coordinate": (P("p"), 0.0),
+          "eccentricity": Polar(P("p"), 0.0), "direction": Polar(8.0, P("p"))}[kind]
+    return at, [param]
+
+
+@pytest.mark.parametrize("kind,choices", _WRONG_KINDS)
+def test_a_window_whose_position_can_be_no_position_is_refused(kind, choices):
+    """XC-415: such a window loaded clean and raised when first judged (`gaze._placed`)."""
+    at, params = _setting(kind, choices)
+    (finding,) = _place_faults(_windowed(at, params))
+    assert "window 'w'" in finding.detail and "'p'" in finding.detail
+
+
+@pytest.mark.parametrize("kind,choices", _WRONG_KINDS)
+def test_a_stimulus_shown_where_no_position_is_refused(kind, choices):
+    """XC-415: raised in `screen.resolve` when the frame was drawn."""
+    at, params = _setting(kind, choices)
+    (finding,) = _place_faults(_showing(at, params))
+    assert "stimulus 's'" in finding.detail and "'p'" in finding.detail
+
+
+@pytest.mark.parametrize("kind,choices", _WRONG_KINDS)
+def test_an_update_to_where_no_position_is_refused(kind, choices):
+    at, params = _setting(kind, choices)
+    (finding,) = _place_faults(_updating(Update("s", at=at), params=params))
+    assert "update of 's'" in finding.detail and "'p'" in finding.detail
+
+
+def test_an_arrays_position_setting_with_a_choice_no_position_is_refused():
+    """XC-415: `Update("search", at=P("where"))` with a choice `0.0`, in a state no trial
+    reaches, stopped the session when the world was built (XC-402)."""
+    trial = _searching([Param("where", unit="deg", choices=((5.0, 0.0), 0.0))], 4, 0)
+    trial = replace(trial, states=[*trial.states, State(
+        "later", enter=[Update("search", at=P("where"))], go=[On(After(1.0), Outcome.CORRECT)])])
+    (finding,) = _place_faults(trial)
+    assert "update of 'search'" in finding.detail and "'where'" in finding.detail
+
+
+def test_a_per_eye_position_with_a_choice_no_position_is_refused():
+    trial = _showing((0.0, 0.0), [Param("p", unit="deg", choices=((1.0, 0.0), 0.0))],
+                     at_left=P("p"), at_right=(1.0, 0.0))
+    (finding,) = _place_faults(replace(trial, view="stereoscope"))
+    assert "left-eye" in finding.detail
+
+
+def test_positions_that_are_all_positions_are_not_refused_and_a_choice_of_none_is_left_alone():
+    """The rule refuses a kind of value no place takes. A setting that can hold no value (None)
+    is a question put to the PI (XC-415, narrowed), and a free setting has no choices to read."""
+    ok = [Param("p", unit="deg", choices=(Polar(8.0, 0.0), (1.0, 2.0), [3.0, 4.0]))]
+    assert _place_faults(_windowed(P("p"), ok)) == []
+    assert _place_faults(_showing((P("p"), 0.0), [Param("p", unit="deg", choices=(1.0, 2))])) == []
+    none = [Param("p", unit="deg", choices=(8.0, None))]
+    assert _place_faults(_windowed(Polar(P("p"), 0.0), none)) == []
+    assert _place_faults(_showing(P("p"), [Param("p", unit="deg", choices=(None,))])) == []
+    assert _place_faults(_showing(P("p"), [Param("p", unit="deg", low=0.0, high=1.0)])) == []
+
+
+@pytest.mark.parametrize("eye", ["left", "right"])
+def test_an_updates_per_eye_position_with_a_choice_no_position_is_refused(eye):
+    params = [Param("p", unit="deg", choices=((1.0, 0.0), 0.0))]
+    sides = {"at_left": (1.0, 0.0), "at_right": (1.0, 0.0), f"at_{eye}": P("p")}
+    (finding,) = _place_faults(replace(_updating(Update("s", **sides), params=params),
+                                       view="stereoscope"))
+    assert "update of 's'" in finding.detail and f"{eye}-eye" in finding.detail

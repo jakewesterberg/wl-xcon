@@ -1606,8 +1606,9 @@ def test_a_second_sample_within_a_frame_is_judged_not_the_frame_s_first():
     assert not mean_first.in_window("w", 1)
 
 
-#: A task whose one window is centered by a whole-point setting with a choice that is no position
-#: (the gaze-followups review's first, I1): it loads with no finding (XC-415), and the window is
+#: A task whose one window is centered by a whole-point setting with a choice that holds no value
+#: (the gaze-followups review's first, I1): it loads with no finding (XC-415, narrowed to this case;
+#: a choice that is a value and no position is refused at load), and the window is
 #: judged only by `SaccadeTo`, so a trial with no saccade never asks about it.
 _NEVER_ASKED_TASK = """
 from wl_xcon.photometry import Gray
@@ -1618,7 +1619,7 @@ from wl_xcon.task import (
 
 trial = Trial(
     start="only",
-    params=[Param("where", unit="deg", choices=(Polar(8.0, 0.0), 0.0))],
+    params=[Param("where", unit="deg", choices=(Polar(8.0, 0.0), None))],
     windows=[Window("w", at=P("where"), radius=1.0, on="t")],
     states=[State("only",
                   enter=[Show(Stimulus("t", at=(0.0, 0.0), looks=Disc(size=0.5, color=Gray(40.0))))],

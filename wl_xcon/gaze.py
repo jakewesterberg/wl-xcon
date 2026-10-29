@@ -71,7 +71,9 @@ def _judged(window: "Window | None", values: dict) -> "tuple[float, float, float
     and radius (`_placed`), or `None` for no window. **A window these values cannot place stays as
     it is**, and is resolved where it is asked about, raising there as it always has, never when
     the world is built: a setting with no value bound (a world built for its gaze alone, as tests
-    build one), or one bound to a value that is no position, which loads with no finding (XC-415).
+    build one), or one bound to a value that is no position, which loads with no finding only when
+    its setting can hold no value (XC-415, narrowed; any other choice that is no position is
+    refused at load).
     Raised here, it stopped a session on a trial that never asks about the window (the
     gaze-followups review, I1). So any exception is deferred, whatever it is."""
     if window is None:
