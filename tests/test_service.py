@@ -1297,8 +1297,8 @@ def test_a_stranded_record_whose_animal_is_no_folder_name_runs_nothing_outside_s
     tmp_path, where
 ):
     """Fix round 1 of Task 7 (Critical): a stranded record's subject becomes a path, and
-    the bounded config at that path is code. `wlx run --subject` takes any text, so a
-    record may name `../outside` or an absolute path; nothing outside `--subjects` may
+    the bounded config at that path is code. `wlx run --subject` took any text before XC-161,
+    and a record may still be hand-edited to name `../outside` or an absolute path; nothing outside `--subjects` may
     run for it. Refused before any path is built, and the animal stays stranded."""
     folders = _folders(tmp_path)
     outside = tmp_path / "outside"
@@ -3515,7 +3515,7 @@ def test_a_resumable_record_whose_animal_is_no_folder_name_runs_nothing_outside_
 ):
     """`_close_stranded`'s rule (fix round 1 of Task 7, Critical), for a resume: the
     record's animal becomes a path, and the bounded config there is code. `wlx run
-    --subject` takes any text, so a record may name `../outside` or an absolute path;
+    --subject` took any text before XC-161, and a record may still be hand-edited to name `../outside` or an absolute path;
     nothing outside `--subjects` runs for it, and nothing is written."""
     folders = _folders(tmp_path)
     _crashed(folders, "2027-01-14_01")
@@ -4877,3 +4877,18 @@ def test_a_plan_whose_conditions_all_set_a_number_runs_without_it_sent_a_plain_r
 
     assert plain.run_index is None and "'target_x' is used by the task" in _refused(plain)[-1]
     assert (planned.phase, planned.stop_kind) == ("between_runs", "completed")
+
+
+def test_wlx_taskd_says_a_missing_rig_or_allocation_in_a_sentence(tmp_path):
+    """XC-145 (fix round 1, I1): as `wlx check` and `wlx run` do, never a FileNotFoundError."""
+    folders = _folders(tmp_path)
+    missing = str(tmp_path / "missing.py")
+    argv = _taskd_args(folders, "--allocation", ALLOCATION)
+    for flag, args in (
+        ("--rig", argv[:argv.index("--rig") + 1] + [missing] + argv[argv.index("--rig") + 2:]),
+        ("--allocation", argv[:argv.index("--allocation") + 1] + [missing]),
+    ):
+        with pytest.raises(SystemExit) as refused:
+            main(args)
+        assert isinstance(refused.value.code, str)
+        assert flag in refused.value.code and missing in refused.value.code

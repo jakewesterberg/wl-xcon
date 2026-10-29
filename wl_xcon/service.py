@@ -695,7 +695,8 @@ class Service:
 
         **The animal is held to `_folder_name` before any path is built** (XC-026): an
         open has already checked it (`_session_for`), and a resume's comes from a record
-        -- `config.json`'s subject, which `wlx run --subject` takes as any text -- so a
+        -- `config.json`'s subject, which `wlx run --subject` took as any text before XC-161 and a
+        hand-edited record can still make anything -- so a
         `../outside` or an absolute path never makes a `bounds.py` outside `--subjects`
         the code that runs, as `_close_stranded` refuses one."""
         if not _folder_name(animal):

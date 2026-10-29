@@ -4406,3 +4406,24 @@ def test_wlx_check_reads_the_subject_settings_when_a_stereoscope_setup_is_checke
 def test_wlx_check_does_not_refuse_a_missing_subject_settings_file_it_does_not_read(tmp_path):
     assert main(["check", GOOD, "--rig", RIG_FILE, "--allocation", ALLOCATION,
                  "--view", "direct", "--subject-settings", str(tmp_path / "missing.py")]) == 0
+
+
+def test_a_directory_or_an_unreadable_file_is_said_for_what_it_is(tmp_path):
+    """XC-145 (fix round 1, M1): not 'no such file', and not a PermissionError traceback."""
+    folder = tmp_path / "folder.py"
+    folder.mkdir()
+    with pytest.raises(SystemExit) as refused:
+        main(_check_args(("--rig", str(folder))))
+    assert "is a directory" in refused.value.code and "--rig" in refused.value.code
+
+    locked = tmp_path / "locked.py"
+    locked.write_text("X = 1\n", encoding="utf-8")
+    locked.chmod(0)
+    try:
+        if os.access(locked, os.R_OK):
+            pytest.skip("this account reads a mode-000 file (root)")
+        with pytest.raises(SystemExit) as refused:
+            main(_check_args(("task", str(locked))))
+    finally:
+        locked.chmod(0o600)
+    assert "cannot be read" in refused.value.code and "task" in refused.value.code

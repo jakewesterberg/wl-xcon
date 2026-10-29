@@ -45,8 +45,18 @@ def _require_file(path: Path | None, name: str) -> None:
     `main` before it loads what the flag names. **`--bounds` is not among them**: its loader is
     the bounded-config loader, welfare-critical, and how it fails is for the PI's welfare review
     (XC-145's remaining line)."""
-    if path is not None and not path.is_file():
-        raise SystemExit(f"refused: {name} {_printable(str(path))}: no such file")
+    if path is None:
+        return
+    shown = _printable(str(path))
+    if path.is_dir():
+        raise SystemExit(f"refused: {name} {shown} is a directory, not a file")
+    if not path.exists():
+        raise SystemExit(f"refused: {name} {shown}: no such file")
+    try:
+        with open(path, "rb"):
+            pass
+    except OSError as why:
+        raise SystemExit(f"refused: {name} {shown} cannot be read: {why.strerror}") from why
 
 
 def _load_task(path: Path) -> Task:
@@ -1364,8 +1374,9 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         metavar="PATH",
         help="this animal's settings: a Python file defining SETTINGS, for --subject "
-        "(PI, 2026-09-29). Required with --view stereoscope, for the animal's "
-        "half-IPD; refused with --view direct, which reads nothing from it",
+        "(PI, 2026-09-29). Through the stereoscope it gives the animal's half-IPD; omitted, "
+        "the nominal half-IPD is used and a warning says so. Direct view reads nothing from it "
+        "and warns that it is ignored (XC-352's C6, C7, C8 and H4)",
     )
     runner.add_argument(
         "--out-of-cage-at",
@@ -1676,6 +1687,11 @@ def main(argv: list[str] | None = None) -> int:
         # Imported here, as `serve` is: no other subcommand loads the service.
         from wl_xcon import service as _service
 
+        # A missing rig or allocation is a sentence here, as in `check` and `run` (XC-145).
+        # `--subjects` and `--tasks` are held to being folders in `service.run`; `--bounds` is
+        # not a flag of this command (its animals' own are loaded by `Service._open`).
+        _require_file(args.rig, "--rig")
+        _require_file(args.allocation, "--allocation")
         return _service.run(args)
 
     if args.command == "run":
