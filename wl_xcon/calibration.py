@@ -16,9 +16,10 @@ random constellations. What we never write is a *reader*: reading the file back 
 their side of the contract and a second reader would be a second definition.
 
 **Fitting allocates; applying does not.** `fit_eye` runs at a block boundary and uses
-numpy freely. `EyeMap.degrees` runs on every gaze sample inside the trial loop, so it
-is six multiplies and five adds on plain floats, with no array, no allocation and no
-branch on model beyond a stored length (CLAUDE.md, hot-path discipline).
+numpy freely. A map is applied to every gaze sample inside the trial loop
+(`Mapping.degrees_of`, once a frame for each eye), so each axis is its polynomial on plain
+floats (`_polynomial`), with no array, nothing built but the `(x, y)` pair returned, and no
+branch on model beyond a stored length (CLAUDE.md, hot-path discipline; XC-414).
 
 **Three refusals, and the order matters.** Point count is checked *before*
 conditioning, because conditioning is structurally blind to under-determination:
@@ -38,7 +39,7 @@ import dataclasses
 import math
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NoReturn
 
 import numpy as np
 
@@ -162,22 +163,22 @@ class EyeMap:
             )
 
     def degrees(self, raw: tuple[float, float]) -> tuple[float, float]:
-        """Raw Purkinje vector to degrees. **Trial-loop hot path**: no allocation
-        beyond the returned tuple, no numpy, no per-sample branch on the model."""
+        """Raw Purkinje vector to degrees: each axis's polynomial (`_polynomial`), no allocation
+        beyond the returned tuple, no numpy, no per-sample branch on the model. The trial loop
+        reaches the map through `Mapping.degrees_of`, which adds the offset."""
         dx, dy = raw
-        cx, cy = self.x, self.y
-        if len(cx) == 6:
-            terms = (1.0, dx, dy, dx * dx, dy * dy, dx * dy)
-            return (
-                cx[0] + cx[1] * dx + cx[2] * dy
-                + cx[3] * terms[3] + cx[4] * terms[4] + cx[5] * terms[5],
-                cy[0] + cy[1] * dx + cy[2] * dy
-                + cy[3] * terms[3] + cy[4] * terms[4] + cy[5] * terms[5],
-            )
-        return (
-            cx[0] + cx[1] * dx + cx[2] * dy,
-            cy[0] + cy[1] * dx + cy[2] * dy,
-        )
+        return (_polynomial(self.x, dx, dy), _polynomial(self.y, dx, dy))
+
+
+def _polynomial(c: "tuple[float, ...]", dx: float, dy: float) -> float:
+    """One axis of a map at the raw vector `(dx, dy)`: its coefficients `c` against `basis_row`'s
+    terms, in that column order, on plain floats -- `[1, dx, dy]`, or `[1, dx, dy, dx², dy², dx·dy]`
+    when there are six. **On the trial loop's path**, so it builds nothing, the terms included
+    (XC-414: the six were a tuple)."""
+    if len(c) == 6:
+        return (c[0] + c[1] * dx + c[2] * dy
+                + c[3] * (dx * dx) + c[4] * (dy * dy) + c[5] * (dx * dy))
+    return c[0] + c[1] * dx + c[2] * dy
 
 
 def fit_eye(
@@ -466,16 +467,35 @@ class Mapping:
             return self.left, self.offsets[0]
         if which == "right":
             return self.right, self.offsets[1]
-        raise ValueError(f"{which!r} is not an eye; expected 'left' or 'right'")
+        _not_an_eye(which)
 
     def degrees(self, which: str, raw: tuple[float, float]) -> tuple[float, float] | None:
         """Raw Purkinje vector to degrees for one eye, or `None` if that eye has no
-        map. **Trial-loop path**: one polynomial and two adds."""
-        eye_map, (ox, oy) = self._for(which)
+        map -- before the vector is read, as it always was: `degrees_of`, with the vector as a
+        pair."""
+        eye_map, (_, _) = self._for(which)
         if eye_map is None:
             return None
-        x, y = eye_map.degrees(raw)
-        return (x + ox, y + oy)
+        dx, dy = raw
+        return self.degrees_of(which, dx, dy)
+
+    def degrees_of(self, which: str, dx: float, dy: float) -> tuple[float, float] | None:
+        """The raw Purkinje vector `(dx, dy)` to degrees for one eye, or `None` if that eye has no
+        map: its map's polynomial on each axis (`_polynomial`), then its offset. **On the trial
+        loop's path**, once a frame for each eye (`gaze.Tracked.gaze`), so the vector arrives as
+        its two numbers and the one thing built is the `(x, y)` returned (XC-414): until then the
+        vector, the map with its offset, and the map's own pair were three tuples more."""
+        if which == "left":
+            eye_map = self.left
+            ox, oy = self.offsets[0]
+        elif which == "right":
+            eye_map = self.right
+            ox, oy = self.offsets[1]
+        else:
+            _not_an_eye(which)
+        if eye_map is None:
+            return None
+        return (_polynomial(eye_map.x, dx, dy) + ox, _polynomial(eye_map.y, dx, dy) + oy)
 
     def as_calibration(self) -> GazeCalibration:
         """The file, with offsets folded into the constant terms.
@@ -508,6 +528,11 @@ class Mapping:
             left=folded[0],
             right=folded[1],
         )
+
+
+def _not_an_eye(which: str) -> NoReturn:
+    """`Mapping`'s refusal of a name that is no eye, its message built as it is raised."""
+    raise ValueError(f"{which!r} is not an eye; expected 'left' or 'right'")
 
 
 @dataclass(frozen=True, slots=True)

@@ -14,7 +14,7 @@ time is the loop's own property rather than something the world reports.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Callable, Mapping, NamedTuple, Protocol
+from typing import Callable, Mapping, NamedTuple, NoReturn, Protocol
 
 from wl_xcon.task import (
     Action,
@@ -302,15 +302,23 @@ def _resolve(value: float | P, values: dict[str, float]) -> float:
     **Missing is an error, never a default.** A timeout that silently became 0.0
     would abort every trial immediately -- and that reads as an animal who will not
     work, not as a bug, which is the most expensive way for this to fail.
+
+    **On the trial loop's path** (every `After` and `Hold` a frame evaluates), so the refusal's
+    message is built by `_unbound`, as it raises (XC-414).
     """
     if isinstance(value, P):
         if value.name not in values:
-            raise KeyError(
-                f"no value bound for parameter {value.name!r}; a trial runs against "
-                f"a resolved parameter set, not a partially resolved one"
-            )
+            _unbound(value.name)
         return values[value.name]
     return value
+
+
+def _unbound(name: str) -> NoReturn:
+    """`_resolve`'s refusal, its message built as it is raised, never on a frame that resolves."""
+    raise KeyError(
+        f"no value bound for parameter {name!r}; a trial runs against "
+        f"a resolved parameter set, not a partially resolved one"
+    )
 
 
 def _apply(
@@ -336,39 +344,44 @@ def _apply(
 
     Non-display actions are not this function's business: `Score` is the loop's and
     `Mark` and `Reward` are `_emit`'s, on a different clock -- see there.
+
+    **On the frame an edge is taken** (`_Loop._take`), so it builds the records it keeps and the
+    stimulus an `Update` leaves, and nothing else (XC-414): the actions are walked by index, and a
+    refusal's message is built by `_refused`, as it raises.
     """
-    for action in actions:
+    index = 0
+    while index < len(actions):
+        action = actions[index]
+        index += 1
         if isinstance(action, Show):
             name = action.stimulus.name
             if name in visible:
-                raise ValueError(
-                    f"stimulus {name!r} is already on the display; two live "
-                    f"stimuli under one name would make Hide and Update ambiguous"
-                )
+                _refused(name, "is already on the display; two live stimuli under one name would "
+                               "make Hide and Update ambiguous")
             visible[name] = action.stimulus
             open_at[name] = len(shown)
             shown.append(Shown(name, frame, None))
             placed.append(Placed(action.stimulus, frame, "show", (), open_at[name]))
         elif isinstance(action, Hide):
             if action.stimulus not in visible:
-                raise ValueError(
-                    f"stimulus {action.stimulus!r} is not on the display, so it "
-                    f"cannot be hidden"
-                )
+                _refused(action.stimulus, "is not on the display, so it cannot be hidden")
             del visible[action.stimulus]
-            index = open_at.pop(action.stimulus)
-            shown[index] = shown[index]._replace(off=frame)
+            at = open_at.pop(action.stimulus)
+            was = shown[at]
+            shown[at] = Shown(was.name, was.on, frame)
         elif isinstance(action, Update):
             if action.stimulus not in visible:
-                raise ValueError(
-                    f"stimulus {action.stimulus!r} is not on the display, so it "
-                    f"cannot be updated"
-                )
+                _refused(action.stimulus, "is not on the display, so it cannot be updated")
             changes = action.changes()
             visible[action.stimulus] = replace(visible[action.stimulus], **changes)
             changed.append(Changed(action.stimulus, frame))
             placed.append(Placed(visible[action.stimulus], frame, "update", tuple(changes),
                                  open_at[action.stimulus]))
+
+
+def _refused(name: str, why: str) -> NoReturn:
+    """`_apply`'s refusal of an action, its message built as it is raised."""
+    raise ValueError(f"stimulus {name!r} {why}")
 
 
 def _drawn(placed: "list[Placed]", shown: "list[Shown]", last: int) -> "tuple[Placed, ...]":
@@ -406,8 +419,13 @@ def _emit(actions: "list[Action]", effects: "Effects") -> None:
     N with the point visible at N+1 is what actually happens, and a system reporting
     them as simultaneous would be hiding its own display latency inside its own
     event stream.
+
+    On the frame an edge is taken, so the actions are walked by index (XC-414).
     """
-    for action in actions:
+    index = 0
+    while index < len(actions):
+        action = actions[index]
+        index += 1
         if isinstance(action, Mark):
             effects.mark(action.code)
         elif isinstance(action, Reward):
@@ -457,109 +475,181 @@ def run_trial(
     operator's mark in the frame it arrives. **Hot path**: whatever is passed must
     not block, log or allocate when there is nothing to do; this loop does not check.
     """
-    effects = Unwired() if effects is None else effects
     if max_frames is None:
         max_frames = longest_trial_frames(frame_period)
-    by_name = {state.name: state for state in trial.states}
-    current = by_name[trial.start]
-    entered_at = 0
-    visited = [current.name]
-    scored: list[Scored] = []
-    #: Window membership on the previous frame, so entering and leaving are edges
-    #: rather than states, and the frame a hold began, so leaving restarts it.
-    tracked = {
-        guard.window
-        for state in trial.states
-        for edge in state.go
-        if isinstance(edge.guard, (Entered, Exited, Hold))
-        for guard in (edge.guard,)
-    }
-    # An array's windows do not exist until `n` is bound, so aliases -- `<of>.target`
-    # and `<of>.distractor` -- are resolved here against this trial's values. A
-    # saccade guard reaches the world directly, which judges an alias by the objects it
-    # names itself (`gaze.Tracked.happened`); membership is derived by the loop, so an
-    # unresolved alias is simply never satisfied and the animal fixates the target while
-    # the task waits forever.
-    declared, aliases = expand_windows(trial, values or {})
-    # Which eye each window scores. A window that declares one and is asked about
-    # the conjugate estimate is a criterion nobody applied.
-    eyes = {window.name: window.eye for window in declared}
-    asked = {
-        name: aliases.get(name, (name,))
-        for name in tracked
-    }
-    tracked = {concrete for names in asked.values() for concrete in names}
-    # **And an array's aliases follow it** (XC-402): an `Update` can change its set size or its
-    # target, and with them which objects `<of>.target` and `<of>.distractor` name. Every placement
-    # the array can be drawn in is built now (`task.placements`), each with what it makes of the
-    # aliases a guard here asks; the frame loop switches `asked` to the one on the display, as
-    # `gaze.Tracked` switches the windows. Every object any of them can name is asked of the world
-    # every frame -- one with no window where the array is drawn is outside it -- and every window
-    # any of them builds has its eye.
-    arrays = []
-    for of, options in placements(trial, values or {}).items():
-        switches = []
-        for placement in options:
-            members = {alias: concretes for alias, concretes in placement.members.items()
-                       if alias in asked}
-            switches.append((placement, members))
-            tracked.update(concrete for concretes in members.values() for concrete in concretes)
-            for name, window in placement.windows.items():
-                if window is not None:
-                    eyes.setdefault(name, window.eye)
-        if any(members for _, members in switches):
-            arrays.append((of, tuple(switches)))
-    drawn: dict[str, object] = {of: None for of, _ in arrays}
-    was_inside: dict[str, bool] = dict.fromkeys(asked, False)
-    holding_since: dict[str, int] = {}
-
-    # The display. The start state's entry actions run before the loop, so what
-    # they put up is visible on frame 1 -- the same one-frame rule every other
-    # entry action follows, counted from a notional frame 0.
-    #: When each `since` guard fired, per state entry. Reset on every transition,
-    #: because a clock started in one state saying something about a later one is
-    #: the same defect as a hold clocked from the wrong zero.
-    started_at: dict[Guard, int] = {}
-    confirmed: list[Confirmed] = []
-    visible: dict[str, Stimulus] = {}
-    shown: list[Shown] = []
-    open_at: dict[str, int] = {}
-    changed: list[Changed] = []
-    placed: list[Placed] = []
-    _apply(current.enter, visible, shown, open_at, changed, placed, 1)
-    _emit(current.enter, effects)
-
-    # Two independent graces, in frames. `None` is enforcement switched off.
-    def _grace(value) -> "int | None":
-        if value is None:
-            return None
-        return _resolve(value, values or {}) / frame_period
-
-    graces = {
-        "blink": (_grace(trial.tolerances.blink), Outcome.BLINK_BREAK),
-        "lost": (_grace(trial.tolerances.tracker_lost), Outcome.TRACKER_LOST),
-    }
-    interrupted_for = 0
-    interruption = "ok"
-
+    loop = _Loop(trial, world, frame_period, values, effects, each_frame)
     for frame in range(1, max_frames + 1):
-        if each_frame is not None:
-            each_frame(frame)
+        if loop.frame(frame):
+            return loop.result(loop.ended_as, frame)
+    return loop.result(None, max_frames)
+
+
+class _Loop:
+    """**One trial's loop**: what `run_trial` builds before the trial's first frame, and `frame`,
+    one frame of it -- a function of its own so that a frame is what can be measured
+    (`tests/test_gaze.py`, XC-414).
+
+    **A frame builds nothing** (CLAUDE.md: "Inside trial loops: no allocation"). Every container a
+    frame writes is built here, between trials, holding every key it ever will -- the membership of
+    each window the world is asked about, whether each window a guard names is inside, the frame
+    each hold began (`None` for none running), the frame each `since` clock started (`None` until
+    it does) -- and a frame overwrites values. The windows' insides are two dicts the frames take in
+    turn, this frame's becoming the next one's previous, as a fresh dict a frame used to be. Every
+    walk is by index, so not even an iterator is made. **An edge taken is `_take`'s**, which builds
+    the trial's record of it (`_apply`): never called on a frame that takes none. The trial's
+    `Result` is built as it returns (`result`), after its last frame.
+    """
+
+    def __init__(
+        self,
+        trial: Trial,
+        world: World,
+        frame_period: float,
+        values: "dict[str, float] | None",
+        effects: "Effects | None",
+        each_frame: "Callable[[int], None] | None",
+    ) -> None:
+        self.world = world
+        self.frame_period = frame_period
+        self.effects = Unwired() if effects is None else effects
+        self.each_frame = each_frame
+        #: The values a frame resolves against: the trial's own, read as a frame reads them
+        #: (`values or ...`), or this, one empty dict for the trial rather than a new one a frame.
+        self.values = values
+        self.no_values: dict[str, float] = {}
+        bound = values or self.no_values
+        self.by_name = {state.name: state for state in trial.states}
+        self.current = self.by_name[trial.start]
+        self.entered_at = 0
+        self.visited = [self.current.name]
+        self.scored: list[Scored] = []
+        #: Window membership on the previous frame, so entering and leaving are edges
+        #: rather than states, and the frame a hold began, so leaving restarts it.
+        tracked = {
+            guard.window
+            for state in trial.states
+            for edge in state.go
+            if isinstance(edge.guard, (Entered, Exited, Hold))
+            for guard in (edge.guard,)
+        }
+        # An array's windows do not exist until `n` is bound, so aliases -- `<of>.target`
+        # and `<of>.distractor` -- are resolved here against this trial's values. A
+        # saccade guard reaches the world directly, which judges an alias by the objects it
+        # names itself (`gaze.Tracked.happened`); membership is derived by the loop, so an
+        # unresolved alias is simply never satisfied and the animal fixates the target while
+        # the task waits forever.
+        declared, aliases = expand_windows(trial, bound)
+        # Which eye each window scores. A window that declares one and is asked about
+        # the conjugate estimate is a criterion nobody applied.
+        eyes = {window.name: window.eye for window in declared}
+        asked = {
+            name: aliases.get(name, (name,))
+            for name in tracked
+        }
+        tracked = {concrete for names in asked.values() for concrete in names}
+        # **And an array's aliases follow it** (XC-402): an `Update` can change its set size or its
+        # target, and with them which objects `<of>.target` and `<of>.distractor` name. Every
+        # placement the array can be drawn in is built now (`task.placements`), each with what it
+        # makes of the aliases a guard here asks; the frame loop switches `asked` to the one on the
+        # display, as `gaze.Tracked` switches the windows. Every object any of them can name is
+        # asked of the world every frame -- one with no window where the array is drawn is outside
+        # it -- and every window any of them builds has its eye.
+        arrays = []
+        for of, options in placements(trial, bound).items():
+            switches = []
+            for placement in options:
+                members = {alias: concretes for alias, concretes in placement.members.items()
+                           if alias in asked}
+                switches.append((placement, members))
+                tracked.update(concrete for concretes in members.values() for concrete in concretes)
+                for name, window in placement.windows.items():
+                    if window is not None:
+                        eyes.setdefault(name, window.eye)
+            if any(members for _, members in switches):
+                arrays.append((of, tuple(switches)))
+        self.arrays = tuple(arrays)
+        self.drawn: dict[str, object] = {of: None for of, _ in arrays}
+        self.asked = asked
+        #: Each name a guard asks about, in `asked`'s order; each window the world is asked about,
+        #: in the order the frames have always asked (the set's), with the eye it scores.
+        self.names = tuple(asked)
+        self.concretes = tuple(tracked)
+        self.concrete_eyes = tuple(eyes.get(name, "both") for name in self.concretes)
+        self.membership: dict[str, bool] = dict.fromkeys(self.concretes, False)
+        self.was_inside: dict[str, bool] = dict.fromkeys(asked, False)
+        self.inside_now: dict[str, bool] = dict.fromkeys(asked, False)
+        self.holding_since: "dict[str, int | None]" = dict.fromkeys(asked)
+
+        #: When each `since` guard fired, per state entry. Reset on every transition,
+        #: because a clock started in one state saying something about a later one is
+        #: the same defect as a hold clocked from the wrong zero. Every `since` the trial's
+        #: edges have is a key from the start, `None` until its clock starts.
+        self.clocks = tuple(dict.fromkeys(
+            since
+            for state in trial.states
+            for edge in state.go
+            if (since := getattr(edge.guard, "since", None)) is not None
+        ))
+        self.started_at: "dict[Guard, int | None]" = dict.fromkeys(self.clocks)
+        self.confirmed: list[Confirmed] = []
+        self.visible: dict[str, Stimulus] = {}
+        self.shown: list[Shown] = []
+        self.open_at: dict[str, int] = {}
+        self.changed: list[Changed] = []
+        self.placed: list[Placed] = []
+        # The display. The start state's entry actions run before the loop, so what
+        # they put up is visible on frame 1 -- the same one-frame rule every other
+        # entry action follows, counted from a notional frame 0.
+        _apply(self.current.enter, self.visible, self.shown, self.open_at, self.changed,
+               self.placed, 1)
+        _emit(self.current.enter, self.effects)
+
+        # Two independent graces, in frames. `None` is enforcement switched off.
+        def _grace(value) -> "int | None":
+            if value is None:
+                return None
+            return _resolve(value, bound) / frame_period
+
+        self.graces = {
+            "blink": (_grace(trial.tolerances.blink), Outcome.BLINK_BREAK),
+            "lost": (_grace(trial.tolerances.tracker_lost), Outcome.TRACKER_LOST),
+        }
+        self.interrupted_for = 0
+        self.interruption = "ok"
+        #: How the trial ended, once `frame` says it has.
+        self.ended_as: Outcome | None = None
+
+    def frame(self, frame: int) -> bool:
+        """Run frame `frame`; `True` when the trial ended on it, how in `ended_as`."""
+        if self.each_frame is not None:
+            self.each_frame(frame)
+        world = self.world
+        visible = self.visible
         world.display(visible, frame)
         # The aliases of what this frame draws (XC-402), on the frame the world's windows switch:
         # one identity test per array that has aliases asked, and a switch overwrites keys `asked`
         # already has.
-        for of, switches in arrays:
+        arrays = self.arrays
+        index = 0
+        while index < len(arrays):
+            of, switches = arrays[index]
+            index += 1
             stimulus = visible.get(of)
-            if stimulus is None or stimulus is drawn[of]:
+            if stimulus is None or stimulus is self.drawn[of]:
                 continue
-            drawn[of] = stimulus
-            for placement, members in switches:
+            self.drawn[of] = stimulus
+            option = 0
+            while option < len(switches):
+                placement, members = switches[option]
+                option += 1
                 if placement.draws(stimulus):
-                    asked.update(members)
+                    self.asked.update(members)
                     break
-        elapsed = (frame - entered_at) * frame_period
-        bound = values or {}
+        frame_period = self.frame_period
+        elapsed = (frame - self.entered_at) * frame_period
+        bound = self.values or self.no_values
+        holding = self.holding_since
+        names = self.names
 
         # The gaze signal, before anything reads membership. An interruption within
         # its grace **freezes** the trial's view of gaze rather than lapsing it: the
@@ -569,57 +659,77 @@ def run_trial(
         # camera.
         state_of_signal = world.signal(frame)
         if state_of_signal == "ok":
-            interrupted_for = 0
-            interruption = "ok"
+            self.interrupted_for = 0
+            self.interruption = "ok"
         else:
-            interrupted_for = interrupted_for + 1 if interruption == state_of_signal else 1
-            interruption = state_of_signal
-            allowed, ends_as = graces.get(state_of_signal, (None, None))
-            if allowed is not None and interrupted_for > allowed:
-                return Result(
-                    ends_as,
-                    frame,
-                    tuple(visited),
-                    tuple(scored),
-                    tuple(shown),
-                    tuple(changed),
-                    tuple(confirmed),
-                    _drawn(placed, shown, frame),
-                )
+            self.interrupted_for = (
+                self.interrupted_for + 1 if self.interruption == state_of_signal else 1
+            )
+            self.interruption = state_of_signal
+            allowed, ends_as = self.graces.get(state_of_signal, (None, None))
+            if allowed is not None and self.interrupted_for > allowed:
+                self.ended_as = ends_as
+                return True
             # Frozen: hold clocks do not advance and no edges are derived.
-            holding_since = {
-                name: since + 1 for name, since in holding_since.items()
-            }
-            continue
+            index = 0
+            while index < len(names):
+                since = holding[names[index]]
+                if since is not None:
+                    holding[names[index]] = since + 1
+                index += 1
+            return False
 
         # Membership first, once per frame: entering and leaving are edges against
         # the previous frame, and a hold that lapses restarts rather than pausing.
-        membership = {
-            name: world.in_window(name, frame, eyes.get(name, "both"))
-            for name in tracked
-        }
-        inside_now = {
-            name: any(membership[concrete] for concrete in concretes)
-            for name, concretes in asked.items()
-        }
-        for name, inside in inside_now.items():
-            if inside:
-                holding_since.setdefault(name, frame)
-            else:
-                holding_since.pop(name, None)
+        membership = self.membership
+        concretes = self.concretes
+        concrete_eyes = self.concrete_eyes
+        index = 0
+        while index < len(concretes):
+            membership[concretes[index]] = world.in_window(concretes[index], frame,
+                                                           concrete_eyes[index])
+            index += 1
+        inside_now = self.inside_now
+        asked = self.asked
+        index = 0
+        while index < len(names):
+            name = names[index]
+            index += 1
+            members = asked[name]
+            inside = False
+            member = 0
+            while member < len(members):
+                if membership[members[member]]:
+                    inside = True
+                    break
+                member += 1
+            inside_now[name] = inside
+            if not inside:
+                holding[name] = None
+            elif holding[name] is None:
+                holding[name] = frame
 
         # Arm any `since` clocks this frame, before the guards that read them, so a
         # zero-length interval fires on the frame the photodiode reports rather than
         # one frame later.
-        for edge in current.go:
-            since = getattr(edge.guard, "since", None)
-            if since is not None and since not in started_at:
+        current = self.current
+        go = current.go
+        started_at = self.started_at
+        index = 0
+        while index < len(go):
+            since = getattr(go[index].guard, "since", None)
+            index += 1
+            if since is not None and started_at.get(since) is None:
                 if world.happened(since, current.name, frame):
                     started_at[since] = frame
                     if isinstance(since, Onscreen):
-                        confirmed.append(Confirmed(since.patch, frame))
+                        self.confirmed.append(Confirmed(since.patch, frame))
 
-        for edge in current.go:
+        was_inside = self.was_inside
+        index = 0
+        while index < len(go):
+            edge = go[index]
+            index += 1
             guard = edge.guard
             if isinstance(guard, After):
                 if guard.since is None:
@@ -640,7 +750,7 @@ def run_trial(
                 # from the frame *after* entry would make every hold one frame
                 # longer than declared, which at 240 Hz is invisible and at 60 Hz
                 # is 17 ms of unasked-for fixation.
-                since = holding_since.get(guard.window)
+                since = holding.get(guard.window)
                 fired = since is not None and (
                     (frame - since + 1) * frame_period >= _resolve(guard.seconds, bound)
                 )
@@ -648,49 +758,70 @@ def run_trial(
                 fired = world.happened(guard, current.name, frame)
             if not fired:
                 continue
-            scored.extend(
-                Scored(action.window, action.scored_as, frame)
-                for action in edge.do
-                if isinstance(action, Score)
-            )
-            if isinstance(edge.to, Outcome):
-                _apply(edge.do, visible, shown, open_at, changed, placed, frame + 1)
-                _emit(edge.do, effects)
-                return Result(
-                    edge.to,
-                    frame,
-                    tuple(visited),
-                    tuple(scored),
-                    tuple(shown),
-                    tuple(changed),
-                    tuple(confirmed),
-                    _drawn(placed, shown, frame),
-                )
-            current, entered_at = by_name[edge.to], frame
-            _apply(edge.do, visible, shown, open_at, changed, placed, frame + 1)
-            _emit(edge.do, effects)
-            _apply(current.enter, visible, shown, open_at, changed, placed, frame + 1)
-            _emit(current.enter, effects)
-            # **Entering a state clears every hold.** A hold declared in a state
-            # means held continuously *since that state began*. Carrying the window's
-            # own entry frame across a transition let a later state's hold be
-            # satisfied by presence that began before it -- a memory-guided structure
-            # with a declared 0.3 s delay ran that delay for **one frame** and scored
-            # CORRECT, with the task written correctly and every load-time check
-            # passing. Found by review 2026-08-31; every working-memory delay in the
-            # v1 inventory is written this way.
-            holding_since.clear()
-            started_at.clear()
-            visited.append(current.name)
+            if self._take(edge, frame):
+                return True
             break
-        was_inside = inside_now
-    return Result(
-        None,
-        max_frames,
-        tuple(visited),
-        tuple(scored),
-        tuple(shown),
-        tuple(changed),
-        tuple(confirmed),
-        _drawn(placed, shown, max_frames),
-    )
+        # This frame's insides are the next frame's previous ones, and the previous frame's
+        # dict is the one the next frame writes.
+        self.was_inside, self.inside_now = inside_now, was_inside
+        return False
+
+    def _take(self, edge, frame: int) -> bool:
+        """The edge `edge`, taken on `frame`: its scored responses, its actions, and the state it
+        enters or the outcome it ends the trial with (`True`). **The trial's record of it is built
+        here** (`Scored`, and `_apply`'s), on a frame that takes an edge only."""
+        do = edge.do
+        index = 0
+        while index < len(do):
+            action = do[index]
+            index += 1
+            if isinstance(action, Score):
+                self.scored.append(Scored(action.window, action.scored_as, frame))
+        if isinstance(edge.to, Outcome):
+            _apply(do, self.visible, self.shown, self.open_at, self.changed, self.placed,
+                   frame + 1)
+            _emit(do, self.effects)
+            self.ended_as = edge.to
+            return True
+        self.current = current = self.by_name[edge.to]
+        self.entered_at = frame
+        _apply(do, self.visible, self.shown, self.open_at, self.changed, self.placed, frame + 1)
+        _emit(do, self.effects)
+        _apply(current.enter, self.visible, self.shown, self.open_at, self.changed, self.placed,
+               frame + 1)
+        _emit(current.enter, self.effects)
+        # **Entering a state clears every hold.** A hold declared in a state
+        # means held continuously *since that state began*. Carrying the window's
+        # own entry frame across a transition let a later state's hold be
+        # satisfied by presence that began before it -- a memory-guided structure
+        # with a declared 0.3 s delay ran that delay for **one frame** and scored
+        # CORRECT, with the task written correctly and every load-time check
+        # passing. Found by review 2026-08-31; every working-memory delay in the
+        # v1 inventory is written this way.
+        holding = self.holding_since
+        names = self.names
+        index = 0
+        while index < len(names):
+            holding[names[index]] = None
+            index += 1
+        started_at = self.started_at
+        clocks = self.clocks
+        index = 0
+        while index < len(clocks):
+            started_at[clocks[index]] = None
+            index += 1
+        self.visited.append(current.name)
+        return False
+
+    def result(self, outcome: "Outcome | None", last: int) -> Result:
+        """The trial's `Result`, ended `outcome` on frame `last` -- built once, as it returns."""
+        return Result(
+            outcome,
+            last,
+            tuple(self.visited),
+            tuple(self.scored),
+            tuple(self.shown),
+            tuple(self.changed),
+            tuple(self.confirmed),
+            _drawn(self.placed, self.shown, last),
+        )

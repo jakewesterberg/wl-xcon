@@ -182,7 +182,13 @@ def _outside(v: tuple[float, float], eta_x: float, eta_y: float) -> bool:
     thresholds. Not a speed threshold -- the axes are scaled independently, because
     horizontal and vertical noise differ and a circular test would be set by whichever
     axis was worse."""
-    return (v[0] / eta_x) ** 2 + (v[1] / eta_y) ** 2 > 1.0
+    return _outside_xy(v[0], v[1], eta_x, eta_y)
+
+
+def _outside_xy(vx: float, vy: float, eta_x: float, eta_y: float) -> bool:
+    """`_outside`, the velocity given as its two numbers: the online detector's form, which holds
+    no velocity as a pair (XC-414)."""
+    return (vx / eta_x) ** 2 + (vy / eta_y) ** 2 > 1.0
 
 
 def _amplitude(gaze_deg: list[tuple[float, float] | None], start: int, stop: int) -> float:
@@ -258,9 +264,17 @@ class Detector:
     **Bounded work per sample.** Velocity is five plain multiplications on a
     five-element ring. The threshold is *not* recomputed per sample -- that would be a
     median over a growing list inside a trial loop, which is the unbounded per-frame
-    work CLAUDE.md forbids -- but every `refresh_every` samples, over a bounded
-    history. What that costs is unmeasured and stays unmeasured here: it is a number
-    for a tools/ script and `docs/measurements/`, not for a docstring.
+    work CLAUDE.md forbids -- but every `refresh_every` usable velocities (and every one
+    while both thresholds are still zero), over the last `history` of them. What that
+    costs is unmeasured and stays unmeasured here: it is a number for a tools/ script and
+    `docs/measurements/`, not for a docstring.
+
+    **And nothing built per sample** (XC-414): a sample is `gaze.Tracked.display`'s every
+    frame, so every buffer is built with the detector, its size fixed by its parameters --
+    the last samples (`_ring`), the last `history` velocities, and the list their medians
+    are sorted in -- and a sample overwrites values in them. Until 2026-10-29 every sample
+    appended to three growing lists, sliced two, walked them with generators, and every
+    refresh copied the velocities into a list and sorted copies of it.
     """
 
     params: Params = field(default_factory=Params)
@@ -269,35 +283,60 @@ class Detector:
     history: int = 1000
     refresh_every: int = 50
 
-    _gaze: list[tuple[float, float] | None] = field(default_factory=list, repr=False)
-    _at: list[float] = field(default_factory=list, repr=False)
-    _velocities: list[tuple[float, float]] = field(default_factory=list, repr=False)
-    _eta: tuple[float, float] = field(default=(0.0, 0.0), repr=False)
+    #: **The last samples, a ring**: sample `k` of the trial (counting from 0) in slot
+    #: `k % len(_t)`, its gaze in `_x` and `_y` when `_present`. Long enough for the
+    #: five-sample window and for the run a confirmation measures the amplitude of
+    #: (`_ring`): never a sample older than either needs, so nothing is trimmed.
+    _x: list = field(init=False, repr=False)
+    _y: list = field(init=False, repr=False)
+    _t: list = field(init=False, repr=False)
+    _present: list = field(init=False, repr=False)
+    #: How many samples this trial has accepted. A sample's index is absolute, which is
+    #: what makes `Saccade.start` mean the same thing as it does in `detect`.
+    _seen: int = field(default=0, init=False, repr=False)
+    #: **The last `history` usable velocities, a ring**: `_v_count` of them, the next
+    #: written at `_v_next`, the oldest `_v_count` slots before it.
+    _vx: list = field(init=False, repr=False)
+    _vy: list = field(init=False, repr=False)
+    _v_count: int = field(default=0, init=False, repr=False)
+    _v_next: int = field(default=0, init=False, repr=False)
+    #: Where a median is taken (`_median`): the velocities, oldest first, then +inf.
+    _sorting: list = field(init=False, repr=False)
+    _eta_x: float = field(default=0.0, init=False, repr=False)
+    _eta_y: float = field(default=0.0, init=False, repr=False)
     _since_refresh: int = field(default=0, repr=False)
-    #: Absolute sample index of the open run, not an index into the buffer. The
-    #: buffer is trimmed, so a stored buffer index goes stale the moment it is; that
-    #: was a real bug here before the buffer was bounded, and absolute indices are
-    #: what make `Saccade.start` mean the same thing as it does in `detect`.
+    #: Absolute sample index of the open run.
     _run_start: int | None = field(default=None, repr=False)
     _run_had_gap: bool = field(default=False, repr=False)
-    #: How many samples have been dropped off the front. Local index + this = absolute.
-    _offset: int = field(default=0, repr=False)
     #: Set for the sample on which a saccade was confirmed, and cleared by the next
     #: `accept`. The trial loop asks once per frame, so an edge has to survive exactly
     #: one question, not until someone happens to ask.
     onset: Saccade | None = field(default=None, repr=False)
 
+    def __post_init__(self) -> None:
+        """Every buffer, built once, as the detector is (XC-414)."""
+        ring = _ring(self.params)
+        self._x = [0.0] * ring
+        self._y = [0.0] * ring
+        self._t = [0.0] * ring
+        self._present = [False] * ring
+        kept = max(self.history, 0)
+        self._vx = [0.0] * kept
+        self._vy = [0.0] * kept
+        self._sorting = [0.0] * kept
+
     def reset(self) -> None:
         """A new trial. The threshold is per trial, so carrying one across trials
-        would make the first trial's noise decide the second trial's sensitivity."""
-        self._gaze.clear()
-        self._at.clear()
-        self._velocities.clear()
-        self._eta = (0.0, 0.0)
+        would make the first trial's noise decide the second trial's sensitivity.
+        The buffers are kept, and written over from their first slot."""
+        self._seen = 0
+        self._v_count = 0
+        self._v_next = 0
+        self._eta_x = 0.0
+        self._eta_y = 0.0
         self._since_refresh = 0
         self._run_start = None
         self._run_had_gap = False
-        self._offset = 0
         self.onset = None
 
     @property
@@ -308,8 +347,12 @@ class Detector:
 
     @property
     def ready(self) -> bool:
-        """Whether the threshold rests on enough samples to mean anything."""
-        return len(self._velocities) >= self.params.warmup_samples and min(self._eta) > 0
+        """Whether the threshold rests on enough samples to mean anything: enough
+        velocities, and the smaller threshold above zero (`min`'s choice of the two)."""
+        eta_x = self._eta_x
+        eta_y = self._eta_y
+        return (self._v_count >= self.params.warmup_samples
+                and (eta_y if eta_y < eta_x else eta_x) > 0)
 
     def accept(self, at: float, gaze_deg: tuple[float, float] | None) -> Saccade | None:
         """One sample. Returns a saccade on the sample that confirms it, else `None`.
@@ -320,58 +363,65 @@ class Detector:
         module docstring.
         """
         self.onset = None
-        self._gaze.append(gaze_deg)
-        self._at.append(at)
+        xs = self._x
+        ys = self._y
+        ts = self._t
+        present = self._present
+        ring = len(ts)
+        slot = self._seen % ring
+        if gaze_deg is None:
+            present[slot] = False
+        else:
+            present[slot] = True
+            xs[slot] = gaze_deg[0]
+            ys[slot] = gaze_deg[1]
+        ts[slot] = at
+        self._seen += 1
 
-        centre = len(self._gaze) - 1 - HALF_WINDOW
+        centre = self._seen - 1 - HALF_WINDOW
         if centre < HALF_WINDOW:
             return None
 
-        window = self._gaze[centre - HALF_WINDOW : centre + HALF_WINDOW + 1]
-        times = self._at[centre - HALF_WINDOW : centre + HALF_WINDOW + 1]
-        current = None
-        if all(point is not None for point in window) and all(
-            times[i + 1] - times[i] <= self.params.max_gap_s for i in range(len(times) - 1)
-        ):
-            span = times[-1] - times[0]
+        # The five-sample window, `centre - 2` to `centre + 2`, by slot.
+        w0 = (centre - 2) % ring
+        w1 = (centre - 1) % ring
+        w2 = centre % ring
+        w3 = (centre + 1) % ring
+        w4 = slot
+        gap = self.params.max_gap_s
+        moved = False
+        vx = vy = 0.0
+        if (present[w0] and present[w1] and present[w2] and present[w3] and present[w4]
+                and ts[w1] - ts[w0] <= gap and ts[w2] - ts[w1] <= gap
+                and ts[w3] - ts[w2] <= gap and ts[w4] - ts[w3] <= gap):
+            span = ts[w4] - ts[w0]
             if span > 0:
                 fs = 2 * HALF_WINDOW / span
-                current = (
-                    (window[4][0] + window[3][0] - window[1][0] - window[0][0]) * fs / _WEIGHT_SUM,
-                    (window[4][1] + window[3][1] - window[1][1] - window[0][1]) * fs / _WEIGHT_SUM,
-                )
+                vx = (xs[w4] + xs[w3] - xs[w1] - xs[w0]) * fs / _WEIGHT_SUM
+                vy = (ys[w4] + ys[w3] - ys[w1] - ys[w0]) * fs / _WEIGHT_SUM
+                moved = True
 
-        if current is not None:
-            self._velocities.append(current)
-            if len(self._velocities) > self.history:
-                del self._velocities[0]
+        if moved:
+            kept = len(self._vx)
+            if kept:
+                self._vx[self._v_next] = vx
+                self._vy[self._v_next] = vy
+                self._v_next = self._v_next + 1 if self._v_next + 1 < kept else 0
+                if self._v_count < kept:
+                    self._v_count += 1
             self._since_refresh += 1
-            if self._since_refresh >= self.refresh_every or self._eta == (0.0, 0.0):
-                self._eta = thresholds(list(self._velocities), self.params)
+            if self._since_refresh >= self.refresh_every or (
+                    self._eta_x == 0.0 and self._eta_y == 0.0):
+                self._refresh()
                 self._since_refresh = 0
-
-        # Trim, but never past an open run: its start is still needed to measure the
-        # amplitude, and never past what the next five-sample window needs.
-        keep_from = len(self._gaze) - (2 * HALF_WINDOW + 1 + self.history)
-        if self._run_start is not None:
-            keep_from = min(keep_from, self._run_start - self._offset)
-        if keep_from > 0:
-            del self._gaze[:keep_from]
-            del self._at[:keep_from]
-            self._offset += keep_from
-            centre -= keep_from
 
         if not self.ready:
             self._run_start = None
             self._run_had_gap = False
             return None
 
-        absolute = centre + self._offset
-        continuous = (
-            len(self._at) < 2
-            or (self._at[centre] - self._at[centre - 1]) <= self.params.max_gap_s
-        )
-        if current is None:
+        continuous = ts[w2] - ts[w1] <= gap
+        if not moved:
             # Same rule as `detect`: unknown velocity flags an open run rather than
             # ending it; a break in time ends it. Two answers here would make the
             # online and offline detectors disagree about gaps specifically, which is
@@ -383,16 +433,14 @@ class Detector:
                     self._run_had_gap = False
             return None
 
-        if _outside(current, *self._eta):
+        if _outside_xy(vx, vy, self._eta_x, self._eta_y):
             if self._run_start is None:
-                self._run_start = absolute
-            elif absolute - self._run_start + 1 == self.params.min_duration_samples:
+                self._run_start = centre
+            elif centre - self._run_start + 1 == self.params.min_duration_samples:
                 found = Saccade(
                     start=self._run_start,
-                    stop=absolute + 1,
-                    amplitude_deg=_amplitude(
-                        self._gaze, self._run_start - self._offset, centre + 1
-                    ),
+                    stop=centre + 1,
+                    amplitude_deg=self._amplitude(self._run_start, centre + 1),
                     flagged=self._run_had_gap,
                 )
                 self.onset = found
@@ -401,3 +449,103 @@ class Detector:
             self._run_start = None
             self._run_had_gap = False
         return None
+
+    def _amplitude(self, start: int, stop: int) -> float:
+        """`_amplitude` over samples `start` to `stop - 1`, by absolute index, in the ring:
+        first present sample to last, start point to end point."""
+        ring = len(self._t)
+        present = self._present
+        first = start
+        while first < stop and not present[first % ring]:
+            first += 1
+        if first == stop:
+            return 0.0
+        last = stop - 1
+        while not present[last % ring]:
+            last -= 1
+        return math.hypot(self._x[last % ring] - self._x[first % ring],
+                          self._y[last % ring] - self._y[first % ring])
+
+    def _refresh(self) -> None:
+        """The thresholds, re-estimated from the last `history` velocities: `thresholds` over
+        them, oldest first, **bit for bit** (XC-414), with nothing built. Each median sorts the
+        values in `_sorting`, the velocities oldest first and, while fewer than `history` exist,
+        +inf after them (`_median`); a stable sort over values `<` orders totally leaves the first
+        `count` exactly as `sorted` orders the velocities alone. **A NaN orders nothing**, so
+        while the buffer is filling and one is among them the thresholds are `thresholds` over the
+        velocities as a list, which builds it: a tracker handing over NaN, never one that works.
+        Once it is full, the sort is over the velocities alone, in the order `sorted` met them."""
+        count = self._v_count
+        kept = len(self._vx)
+        oldest = self._v_next - count
+        if oldest < 0:
+            oldest += kept
+        if count < kept and _any_nan(self._vx, self._vy, oldest, count):
+            self._eta_x, self._eta_y = _thresholds_as_listed(self._vx, self._vy, oldest, count,
+                                                              self.params)
+            return
+        self._eta_x = self.params.lambda_ * self._scale(self._vx, oldest, count)
+        self._eta_y = self.params.lambda_ * self._scale(self._vy, oldest, count)
+
+    def _scale(self, ring: list, oldest: int, count: int) -> float:
+        """`median_scale` over `count` values of a velocity ring from slot `oldest`."""
+        if count == 0:
+            return 0.0
+        variance = (self._median(ring, oldest, count, True)
+                    - self._median(ring, oldest, count, False) ** 2)
+        return math.sqrt(variance) if variance > 0 else 0.0
+
+    def _median(self, ring: list, oldest: int, count: int, squared: bool) -> float:
+        """`median` over `count` values of a velocity ring from slot `oldest`, each squared when
+        `squared`, sorted in `_sorting` after +inf fills the rest of it."""
+        sorting = self._sorting
+        kept = len(ring)
+        index = 0
+        slot = oldest
+        while index < count:
+            value = ring[slot]
+            sorting[index] = value * value if squared else value
+            index += 1
+            slot += 1
+            if slot == kept:
+                slot = 0
+        while index < kept:
+            sorting[index] = math.inf
+            index += 1
+        sorting.sort()
+        middle = count // 2
+        if count % 2:
+            return sorting[middle]
+        return (sorting[middle - 1] + sorting[middle]) / 2.0
+
+
+def _ring(params: Params) -> int:
+    """How many samples `Detector` keeps: the five-sample window, and every sample of a run as it
+    is confirmed, `min_duration_samples` of them up to the window's centre and the two after it."""
+    return max(2 * HALF_WINDOW + 1, params.min_duration_samples + HALF_WINDOW)
+
+
+def _any_nan(xs: list, ys: list, oldest: int, count: int) -> bool:
+    """Whether any of `count` velocities in a ring from slot `oldest` has a NaN component."""
+    kept = len(xs)
+    index = 0
+    slot = oldest
+    while index < count:
+        if xs[slot] != xs[slot] or ys[slot] != ys[slot]:
+            return True
+        index += 1
+        slot += 1
+        if slot == kept:
+            slot = 0
+    return False
+
+
+def _thresholds_as_listed(xs: list, ys: list, oldest: int, count: int,
+                          params: Params) -> tuple[float, float]:
+    """`thresholds` over `count` velocities of a ring from slot `oldest`, as the list of pairs
+    the online detector kept until XC-414, oldest first: what `Detector._refresh` gives when a
+    NaN is among them before the ring is full, so the order the values were met in decides the
+    median as it always did."""
+    kept = len(xs)
+    return thresholds([(xs[(oldest + i) % kept], ys[(oldest + i) % kept]) for i in range(count)],
+                      params)

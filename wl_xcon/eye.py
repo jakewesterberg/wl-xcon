@@ -58,7 +58,16 @@ class EyeReading:
 
     def dpi(self) -> tuple[float, float]:
         """The dual-Purkinje difference: the translation-cancelled gaze signal."""
-        return (self.p1[0] - self.p4[0], self.p1[1] - self.p4[1])
+        return (self.dpi_x(), self.dpi_y())
+
+    def dpi_x(self) -> float:
+        """`dpi`'s horizontal component, P1 minus P4, without the pair: what the trial loop's map
+        conversion reads every frame (`gaze.Tracked.gaze`, XC-414)."""
+        return self.p1[0] - self.p4[0]
+
+    def dpi_y(self) -> float:
+        """`dpi`'s vertical component, P1 minus P4, without the pair."""
+        return self.p1[1] - self.p4[1]
 
 
 @dataclass(frozen=True, slots=True)
