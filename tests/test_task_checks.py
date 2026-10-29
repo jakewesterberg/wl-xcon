@@ -1253,3 +1253,10 @@ def test_a_per_eye_part_names_its_eye():
         trial = replace(_showing((0.0, 0.0), params, **sides), view="stereoscope")
         (found,) = _place_faults(trial)
         assert f"its {eye}-eye eccentricity is parameter" in found.detail
+
+
+def test_an_after_time_past_a_float_is_not_raised_on_at_load():
+    """`_finite` read an integer past a float's range with `math.isfinite`, which raises."""
+    trial = Trial(start="a", params=[Param("t", unit="s", choices=(1.0, 10**400))],
+                  states=[State("a", go=[On(After(P("t")), Outcome.CORRECT)])])
+    assert isinstance(check(trial), list) and isinstance(check(trial, geometry=GEOMETRY), list)

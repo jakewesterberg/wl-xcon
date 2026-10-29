@@ -944,8 +944,9 @@ def _plan_faults(task: Task) -> list[Finding]:
                         refuse(name, f"{of} sets {setting!r} to {value!r}, and it is one of "
                                      f"{param.choices}")
                     elif not param.choices and not _finite(value):
-                        refuse(name, f"{of} sets {setting!r} to {value!r}, and it takes a number "
-                                     f"({param.unit})")
+                        said = _said(value) if _is_number(value) else repr(value)
+                        refuse(name, f"{of} sets {setting!r} to {said}, and it takes a finite "
+                                     f"number ({param.unit})")
             targets = [c.target for c in conditions if isinstance(c.target, int)]
             if (block.criterion is not None or block.trials is not None) and (
                     0 in targets and any(targets)):

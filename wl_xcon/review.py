@@ -104,7 +104,8 @@ def _point_label(at: object) -> str:
     converting raised on, or an integer past a float's range, written in the same `g` form
     (`1e+400`) -- says it is not a position, the rest as written (XC-401's fix rounds, M1 and N2).
     Anything else is shown as written: a position's shape is refused at load
-    (`check._position_kind_faults`), but a caller may hand it one, and an artifact that raises shows nothing at all."""
+    (`check._position_kind_faults`), but a caller may hand it one, and an artifact that raises
+    shows nothing at all."""
     from wl_xcon.geometry import polar_deg, polar_of_deg
     from wl_xcon.task import Polar
 
