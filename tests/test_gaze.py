@@ -17,7 +17,7 @@ from dataclasses import replace
 
 import pytest
 
-from _builds import built_on
+from _builds import built_on, builds_of
 from _rig import DIRECT
 from wl_xcon.calibration import (
     Collector,
@@ -1575,9 +1575,12 @@ def test_a_second_sample_within_a_frame_is_judged_not_the_frame_s_first():
 #: record -- every presentation, change and scored response a trial can make, sized from what the
 #: task declares -- is a design of its own (the engine spec's §2 item 6), not this.
 _A_TRANSITION = {
-    # Each record as `collections.namedtuple` builds one (`run.Shown`, `Placed`, `Changed`,
-    # `Scored`): its fields, packed into the tuple it is.
-    ("<lambda>", "tuple"),
+    # Each record `collections.namedtuple` builds (`run.Shown`, `Placed`, `Changed`): its fields,
+    # packed into the tuple it is, by the `__new__` it generates, named here by its record
+    # (`_RECORDS`) where it is a `<lambda>` like any other.
+    ("Shown.__new__", "tuple"),
+    ("Placed.__new__", "tuple"),
+    ("Changed.__new__", "tuple"),
     # An `Update`'s stimulus as the display carries it after, made from the one there with the
     # fields the `Update` sets (`dataclasses.replace`): the call's arguments, packed.
     ("_apply", "tuple"),
@@ -1588,6 +1591,16 @@ _A_TRANSITION = {
     ("Recorded.mark", "tuple"),
     ("Recorded.reward", "tuple"),
 }
+
+
+def _records() -> dict:
+    """Each record's generated `__new__` by its record's name (`built_on`'s `named`): compiled from
+    a string as a `<lambda>`, it is told from any other lambda only by being this code object
+    (XC-414's review, M2)."""
+    from wl_xcon.run import Changed, Confirmed, Placed, Shown
+
+    return {record.__new__.__code__: f"{record.__name__}.__new__"
+            for record in (Shown, Placed, Changed, Confirmed)}
 
 
 class _Arrived:
@@ -1607,14 +1620,18 @@ class _Arrived:
         return sample
 
 
-def test_a_frame_of_a_running_trial_builds_only_each_eye_s_gaze_and_their_mean():
-    """**Every frame of the reference search task**, through `gaze.Tracked`, the rig's gaze world,
-    with the animal fixating, the array shown, a saccade to the target confirmed by the detector,
-    landing there and held: a frame that takes no edge builds only the tuples a function's
-    interface returns each frame (`_ONCE_A_FRAME`), and one that takes an edge, besides them, only
-    its record (`_A_TRANSITION`). Each frame is `run._Loop.frame`, the one `run_trial` runs."""
+def test_a_frame_of_a_running_trial_builds_only_each_eye_s_gaze_and_their_mean(monkeypatch):
+    """**Every frame `run_trial` runs of the reference search task**, through `gaze.Tracked`, the
+    rig's gaze world, with the animal fixating, the array shown, a saccade to the target confirmed by
+    the detector, landing there and held: a frame that takes no edge builds only the tuples a
+    function's interface returns each frame (`_ONCE_A_FRAME`), and one that takes an edge, besides
+    them, only its record (`_A_TRANSITION`). **The path, not the piece** (XC-414's review, M1): each
+    frame is measured as `run_trial` calls it, `_Loop.frame` wrapped on the class, which must be
+    called once for each frame the trial ran, and `run_trial`'s own code, which runs every frame
+    of it, builds nothing. Not seen by this, a call: the confirming frame's `Saccade`, the
+    detector's result."""
     from tasks.visual_search import search
-    from wl_xcon.run import _Loop
+    from wl_xcon import run
 
     to = _search_drawn()["search.1"]
     samples = [parse(text, at=(n + 1) * _SEARCH_FRAME)
@@ -1622,23 +1639,29 @@ def test_a_frame_of_a_running_trial_builds_only_each_eye_s_gaze_and_their_mean()
     world = Tracked(Tracker(), _fitted_mapping(), search, _SEARCH_FRAME, _SEARCH,
                     source=_Arrived(samples))
     effects = Recorded()
-    loop = _Loop(search, world, _SEARCH_FRAME, _SEARCH, effects, None)
-    ended = []
+    frame_of = run._Loop.frame
+    records = _records()
+    measured, steady, took = [], set(), set()
 
-    def step(frame: int) -> None:
-        ended.append(loop.frame(frame))
+    def measured_frame(loop, frame: int) -> bool:
+        ended, states = [], len(loop.visited)
 
-    steady, took = set(), set()
-    for frame in range(1, 2000):
-        states = len(loop.visited)
-        built = set(built_on(step, frame))
-        (took if ended[-1] or len(loop.visited) != states else steady).update(built)
-        if ended[-1]:
-            break
+        def step() -> None:
+            ended.append(frame_of(loop, frame))
 
-    assert loop.visited == ["await_fix", "hold_fix", "array_on", "verify"]
-    assert ("reward", "reward_correct") in effects.log
+        built = set(built_on(step, named=records))
+        measured.append(frame)
+        (took if ended[0] or len(loop.visited) != states else steady).update(built)
+        return ended[0]
+
+    monkeypatch.setattr(run._Loop, "frame", measured_frame)
+    result = run_trial(search, world, _SEARCH_FRAME, values=_SEARCH, effects=effects)
+
+    assert result.outcome is Outcome.CORRECT
+    assert result.visited == ("await_fix", "hold_fix", "array_on", "verify")
+    assert measured == list(range(1, result.frames + 1))
     assert world.detector.ready and not world.detector.in_flight
+    assert builds_of(run_trial) == []
     assert sorted(steady - _ONCE_A_FRAME) == []
     assert sorted(took - _ONCE_A_FRAME - _A_TRANSITION) == []
 

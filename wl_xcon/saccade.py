@@ -261,18 +261,22 @@ class Detector:
     handful of samples is a scale estimated from noise, and a detector that fires on
     it is worse than one that stays quiet.
 
-    **Bounded work per sample.** Velocity is five plain multiplications on a
-    five-element ring. The threshold is *not* recomputed per sample -- that would be a
+    **Bounded work per sample.** Velocity is five plain multiplications on five samples
+    of a ring of `_ring(params)`, `max(5, min_duration_samples + 2)` of them (8 with the
+    defaults). The threshold is *not* recomputed per sample -- that would be a
     median over a growing list inside a trial loop, which is the unbounded per-frame
     work CLAUDE.md forbids -- but every `refresh_every` usable velocities (and every one
     while both thresholds are still zero), over the last `history` of them. What that
     costs is unmeasured and stays unmeasured here: it is a number for a tools/ script and
     `docs/measurements/`, not for a docstring.
 
-    **And nothing built per sample** (XC-414): a sample is `gaze.Tracked.display`'s every
-    frame, so every buffer is built with the detector, its size fixed by its parameters --
-    the last samples (`_ring`), the last `history` velocities, and the list their medians
-    are sorted in -- and a sample overwrites values in them. Until 2026-10-29 every sample
+    **And nothing built per sample but what one returns** (XC-414): a sample is
+    `gaze.Tracked.display`'s every frame, so every buffer is built with the detector, its
+    size fixed by its parameters -- the last `_ring(params)` samples, the last `history`
+    velocities, and the list their medians are sorted in -- and a sample overwrites values
+    in them. What a sample still builds: the `Saccade` a confirming sample returns, one a
+    saccade, and the list `_refresh` re-estimates over when a NaN is among the velocities
+    before `history` of them exist (`_thresholds_as_listed`). Until 2026-10-29 every sample
     appended to three growing lists, sliced two, walked them with generators, and every
     refresh copied the velocities into a list and sorted copies of it.
     """

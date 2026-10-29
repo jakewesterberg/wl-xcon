@@ -478,9 +478,13 @@ def run_trial(
     if max_frames is None:
         max_frames = longest_trial_frames(frame_period)
     loop = _Loop(trial, world, frame_period, values, effects, each_frame)
-    for frame in range(1, max_frames + 1):
+    # Frames counted, not iterated: this runs every frame of the trial, so its own code builds
+    # nothing either (XC-414), and anything a frame builds is `_Loop.frame`'s, where it is measured.
+    frame = 1
+    while frame <= max_frames:
         if loop.frame(frame):
             return loop.result(loop.ended_as, frame)
+        frame += 1
     return loop.result(None, max_frames)
 
 
