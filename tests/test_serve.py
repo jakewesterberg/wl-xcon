@@ -5654,3 +5654,36 @@ def test_the_server_keeps_answering_after_a_handler_raised(monkeypatch):
     with _served(_hub()) as port:
         assert _request(port, "GET", "/nope")[0] == 500
         assert _request(port, "GET", "/nope")[0] == 404
+
+
+def test_a_handler_that_raised_after_it_began_its_answer_is_closed_not_answered_twice(
+    monkeypatch, capfd,
+):
+    """The stream has sent its 200 and headers when building a frame raises: one status line,
+    no 500 behind it, and the connection closed (the read to EOF returns)."""
+    def explode(*args, **kwargs):
+        raise RuntimeError(_SECRET)
+
+    monkeypatch.setattr(serve._web, "fragments", explode)
+    with _served(_hub()) as port:
+        raw = _raw(port, b"GET /events HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
+
+    assert raw.startswith(b"HTTP/1.0 200")
+    assert raw.count(b"HTTP/1.") == 1 and b"500" not in raw.split(b"\r\n\r\n")[0]
+    assert _SECRET.encode() not in raw
+    assert "RuntimeError" in capfd.readouterr().err
+
+
+@pytest.mark.parametrize("gone", [BrokenPipeError, ConnectionResetError])
+def test_a_client_that_left_is_not_logged_as_a_server_fault_nor_answered(monkeypatch, capfd, gone):
+    """XC-042's backstop leaves what the https listener's `finish_request` drops, and what the
+    standard library already handled, as they were: no 500 attempt and no 'raised' line."""
+    def leave(header):
+        raise gone("the client left")
+
+    monkeypatch.setattr(serve, "host_name", leave)
+    with _served(_hub()) as port:
+        with pytest.raises((http.client.RemoteDisconnected, ConnectionError)):
+            _request(port, "GET", "/health")
+
+    assert " raised " not in capfd.readouterr().err

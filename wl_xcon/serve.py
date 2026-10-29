@@ -1451,13 +1451,20 @@ def make_handler(
         JSON body (`_ERRORS`) and the connection is closed, never the exception's text or a
         traceback to the client, and never a dead thread with no answer. What failed is logged
         where the server logs (`log_error`). A handler that had begun its answer (an event
-        stream) cannot be given a second one: its connection is closed."""
+        stream) cannot be given a second one: its connection is closed. **Only the `do_*` verbs
+        are covered:** a verb the standard library does not know goes to `send_error` (501)
+        instead, which answers JSON already and holds no handler of ours."""
 
         @functools.wraps(handler)
         def guarded(self) -> None:
             self._answered = False
             try:
                 handler(self)
+            except (ConnectionError, ssl.SSLError):
+                # A client that left mid-request: no fault of the server's, nobody to answer.
+                # Left to what handled it before the backstop -- `_PageServer.finish_request`
+                # drops it silently, the standard library's `handle_error` reports it.
+                raise
             except Exception as exc:  # noqa: BLE001 -- answered and logged, never hidden
                 self.log_error(
                     "%s %s raised %s: %s", self.command, self._path(), type(exc).__name__,
