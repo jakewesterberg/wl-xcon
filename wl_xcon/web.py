@@ -2331,14 +2331,21 @@ _SCRIPT = """
       }).catch(function () { resolve(false); });
     });
   }
-  // What a rig's answer is, read from its response: **a server fault (5xx) is read as an answer
-  // lost**, whatever its body says, so it takes the handling every call gives a lost answer (a
-  // reward's "unknown" sentence, a sign-in kept and asked again) and never a refusal's (XC-042:
-  // `wlx serve` answers a handler that raised with a JSON 500 that has no `said`). The one place
-  // every call to this rig reads its answer through.
+  // What a rig's answer is, read from its response: **an answer the page cannot read as one is
+  // read as an answer lost**, so it takes the handling every call gives a lost answer (a reward's
+  // "unknown" sentence, a sign-in kept and asked again). That is a failed response (not 2xx)
+  // whose body is not JSON or carries no `said`: `wlx serve`'s 500 for a handler that raised
+  // has `{"error": ...}` (XC-042). **Any answer with a `said` is read as it was before, whatever
+  // its status**: 503 busy, and 504 not delivered or a reward's unknown, are the rig's own
+  // words, which a trainer needs as they are. The one place every call to this rig reads its
+  // answer through.
   function answerOf(response) {
-    if (response.status >= 500) { throw new Error("wlx serve faulted"); }
-    return response.json();
+    return response.json().then(function (answer) {
+      if (!response.ok && !(answer && typeof answer.said === "string")) {
+        throw new Error("wlx serve faulted");
+      }
+      return answer;
+    });
   }
   // /whoami with the held token. Answers true when it confirms the sign-in. A refusal
   // is read by its reason word (the plan's Ruling 8): `expired` renews (once: a token

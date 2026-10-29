@@ -34,7 +34,7 @@ from _frames import ENDPOINT, frame, idle  # noqa: E402
 from _issuer import Issuer  # noqa: E402
 from _ports import endpoints as free_endpoints  # noqa: E402
 from _tls import client_context, material  # noqa: E402
-from wl_xcon import signin, warnlist, web  # noqa: E402
+from wl_xcon import serve, signin, warnlist, web  # noqa: E402
 from wl_xcon.findings import SESSION_KINDS  # noqa: E402
 from wl_xcon.link import (  # noqa: E402
     BackBlock, CheckRun, ClearOwed, Drum, ManualReward, NextBlock, OpenSession, Pause, Preflight,
@@ -66,6 +66,8 @@ class _Dispatch:
         self.entered = threading.Event()
         #: A server fault after the command was handed over (XC-042): the backstop answers 500.
         self.raises = False
+        #: The (status, body) the rig answers every command with, when set.
+        self.answers: tuple[int, dict] | None = None
 
     def __call__(self, request):
         self.seen.append(request)
@@ -74,6 +76,8 @@ class _Dispatch:
             self.gate.wait(timeout=20.0)  # bounded: a failing test must not hang its teardown
         if self.raises:
             raise RuntimeError("a fault the server did not anticipate")
+        if self.answers is not None:
+            return self.answers
         return 200, {"status": "sent", "said": "sent: test"}
 
 
@@ -1757,3 +1761,43 @@ def test_a_whoami_the_server_faulted_on_keeps_the_sign_in_and_asks_again(rig, mo
     assert page.inner_text("#sent") == UNCONFIRMED
     assert _has_signin(page), "the sign-in is kept"
     assert "not signed in" not in page.inner_text("#sent")
+
+
+# --- the rig's own 5xx answers carry a `said` and are shown as they were (fix round 2, C2) --------
+
+_NO_ACK = (
+    "not delivered: the rig did not acknowledge it within 5 s. It may still be applied at the "
+    "rig's next trial boundary"
+)
+
+
+@pytest.mark.parametrize("answer", [
+    pytest.param(serve.BUSY, id="busy-503"),
+    pytest.param(serve.REWARD_UNKNOWN, id="reward-unknown-504"),
+    pytest.param(serve.not_delivered("the rig is not connected; no reward was given"),
+                 id="reward-not-delivered-504"),
+])
+def test_a_reward_answered_by_the_rig_with_a_5xx_shows_the_rigs_own_sentence(rig, answer):
+    """At bcd2013 the page showed the answer's `said`, whatever the status: the PI's 2026-09-28
+    line between 'not delivered' and 'unknown' on a reward is the rig's, not the page's."""
+    rig.dispatch.answers = answer
+    said, klass, _, handed = _after_a_reward_press(rig, lambda page: None)
+
+    assert handed
+    assert said == answer[1]["said"]
+    assert "crit" in klass
+
+
+def test_a_next_block_the_rig_may_still_apply_says_so(rig):
+    """The worst case of reading every 5xx as lost: 'it may still be applied at the next trial
+    boundary' became 'could not reach wlx serve', which invites a second press."""
+    answer = serve.not_delivered(_NO_ACK[len("not delivered: "):])
+    rig.dispatch.answers = answer
+    rig.hub.offer(frame(plan="train", block="easy", next_block="hard"))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.wait_for_selector('[data-cmd="next_block"]', state="attached")
+    page.click('[data-cmd="next_block"]')
+    page.wait_for_selector("#sent:has-text('may still be applied')")
+
+    assert page.inner_text("#sent") == answer[1]["said"]

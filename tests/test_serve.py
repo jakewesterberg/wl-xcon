@@ -18,6 +18,7 @@ import re
 import shutil
 import signal
 import socket
+import ssl
 import subprocess
 import sys
 import threading
@@ -5674,7 +5675,7 @@ def test_a_handler_that_raised_after_it_began_its_answer_is_closed_not_answered_
     assert "RuntimeError" in capfd.readouterr().err
 
 
-@pytest.mark.parametrize("gone", [BrokenPipeError, ConnectionResetError])
+@pytest.mark.parametrize("gone", [BrokenPipeError, ConnectionResetError, ssl.SSLEOFError])
 def test_a_client_that_left_is_not_logged_as_a_server_fault_nor_answered(monkeypatch, capfd, gone):
     """XC-042's backstop leaves what the https listener's `finish_request` drops, and what the
     standard library already handled, as they were: no 500 attempt and no 'raised' line."""
