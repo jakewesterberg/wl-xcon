@@ -15,6 +15,7 @@ import ast
 import dataclasses
 import itertools
 import math
+from decimal import Decimal
 from pathlib import Path
 
 from wl_xcon.actor import TEXT_LIMIT
@@ -1283,9 +1284,10 @@ class _Unbounded(Exception):
 
 
 class _Unmeasurable(_Unbounded):
-    """A choice of a whole-position setting that is a point but none a float can hold: an
-    infinity, a NaN, or an integer past a float's range (XC-421). The arguments are the
-    parameter's name and the choice; `_offscreen_stimuli` names both."""
+    """A position check 8 cannot measure, named: a choice of a whole-position setting that is no
+    point, or is a point with an infinity, a NaN or an integer past a float's range in it (XC-421);
+    or a literal position that is no position. The arguments are the setting's name (`None` for a
+    literal) and the value; `_offscreen_stimuli` names both."""
 
 
 def _domain(value: object, params: dict[str, Param]) -> list:
@@ -1345,6 +1347,26 @@ def _reach(value: object, params: dict[str, Param]) -> list[float]:
     return [] if literal is None else [literal]
 
 
+#: Why a position with an infinity, a NaN or an integer past a float's range in it is none.
+_NOT_FINITE = "A position holds no infinity, NaN or number past a float's range"
+
+
+def _said(value: object) -> str:
+    """A value as a sentence prints it, a `Polar` or a pair as every position in the review
+    report is (`review.position_words`: eccentricity and direction first), an integer past a
+    float's range as its magnitude, anything else as written and cut at 60 characters."""
+    from wl_xcon.review import position_words
+
+    if isinstance(value, int) and not isinstance(value, bool) and not _real(value):
+        return f"{Decimal(value):.6g}"
+    try:
+        words = position_words(value, (value,))
+    except Exception:
+        words = None
+    said = repr(value) if words is None else words
+    return said if len(said) <= 60 else said[:57] + "..."
+
+
 def _real(number: object) -> bool:
     """Whether a number is one a float holds and a calculation can use: finite, and not an
     integer past a float's range (`math.isfinite(10**400)` raises `OverflowError`)."""
@@ -1372,14 +1394,23 @@ def _points(at: object, params: dict[str, Param]) -> list[tuple[float, float]]:
         # Each choice a point as `task.is_point` reads one, the console's test too (XC-401's
         # second fix round, N1), so the two cannot read a setting differently.
         offered = _domain(at, params)
-        if not all(is_point(point) for point in offered):
-            raise _Unbounded(at.name)
         for point in offered:
+            if not is_point(point):
+                raise _Unmeasurable(at.name, point)
             if not all(_real(part) for part in _parts_of(point)):
                 raise _Unmeasurable(at.name, point)
         return [polar_deg(float(point.eccentricity), float(point.direction))
                 if isinstance(point, Polar) else (float(point[0]), float(point[1]))
                 for point in offered]
+    if not isinstance(at, Polar) and not (isinstance(at, (tuple, list)) and len(at) == 2):
+        raise _Unmeasurable(None, at)
+    # A part no float can hold (an infinity, a NaN, an integer past a float's range) is named
+    # before anything converts it: `float(10**400)` and `polar_deg(inf, 0)` raise.
+    for part in (at.eccentricity, at.direction) if isinstance(at, Polar) else at:
+        for number in (_domain(part, params) if isinstance(part, P) and part.name in params
+                       and params[part.name].choices else [part]):
+            if _is_number(number) and not _real(number):
+                raise _Unmeasurable(part.name if isinstance(part, P) else None, number)
     if isinstance(at, Polar):
         # Every direction a range allows, not its ends alone: 20° out over 0° to 120° is 20° up
         # at 90°. The corners of each piece's per-axis box (`polar_box_deg`), which a field, a
@@ -1398,6 +1429,8 @@ def _polar_sides(
     or each choice a point, a range one interval. One check 8 cannot bound is `_Unbounded`, as
     every other is, but for a direction (`bounded` false), which without bounds is every one."""
     if not isinstance(value, P):
+        if not (_is_number(value) and _real(value)):
+            raise _Unmeasurable(None, value)
         return [(float(value), float(value))]
     param = params.get(value.name)
     if param is not None and param.choices and all(_finite(c) for c in param.choices):
@@ -1585,14 +1618,13 @@ def _offscreen_stimuli(trial: Trial, geometry: Geometry | None) -> list[Finding]
             ]
         except _Unmeasurable as unmeasurable:
             setting, choice = unmeasurable.args
-            said = repr(choice)
-            said = said if len(said) <= 60 else said[:57] + "..."
             findings.append(
                 Finding(
                     "stimulus-off-screen",
-                    f"state {name!r} {what} whose extent cannot be bounded: {setting!r} can be "
-                    f"{said}, a position with an infinity, a NaN or a number past a float's "
-                    f"range in it, so it cannot be proved inside {field}",
+                    f"state {name!r} {what} whose extent cannot be bounded: "
+                    + (f"{setting!r} can be" if setting else "its position is")
+                    + f" {_said(choice)}, which no position can be, so it cannot be proved "
+                    f"inside {field}",
                 )
             )
             continue
@@ -1621,12 +1653,18 @@ def _offscreen_stimuli(trial: Trial, geometry: Geometry | None) -> list[Finding]
 
 
 def _described(at: object) -> str:
+    def part(v: object) -> str:
+        if isinstance(v, P):
+            return v.name
+        return f"{v:g}" if _is_number(v) and _real(v) else _said(v)
+
     if isinstance(at, P):
         return at.name
     if isinstance(at, Polar):
-        return "eccentricity " + ", direction ".join(
-            v.name if isinstance(v, P) else f"{v:g}" for v in (at.eccentricity, at.direction))
-    return ", ".join(f"{v.name}" if isinstance(v, P) else f"{v:g}" for v in at)
+        return "eccentricity " + ", direction ".join(part(v) for v in (at.eccentricity, at.direction))
+    if isinstance(at, (tuple, list)):
+        return ", ".join(part(v) for v in at)
+    return _said(at)
 
 
 def _unallocated_outcomes(trial: Trial, allocation: Allocation) -> list[Finding]:
@@ -4162,69 +4200,92 @@ def _placement_faults(trial: Trial) -> list[Finding]:
 
 
 def _position_kind_faults(trial: Trial) -> list[Finding]:
-    """**A position setting that can hold a value no place takes** (XC-415): refused at load, as
-    the session would stop mid-run where the value met it. One rule for every place a position is
-    written: a window's center (`gaze._placed`), a stimulus's `at`, `at_left` and `at_right`
+    """**A position that can be no position** (XC-415, XC-421): refused at load, as the session
+    would stop mid-run where the value met it. One rule for every place a position is written: a
+    window's center (`gaze._placed`), a stimulus's `at`, `at_left` and `at_right`
     (`screen.resolve`), each `Update`'s, which is an array's position too (`Update("search",
-    at=P("where"))`; the array's objects are placed about it, XC-402). All three read it through
-    `task.position_of`: a whole-position setting's every choice is a point (`task.is_point`), a
-    coordinate's, an eccentricity's and a direction's a number. Code `bad-placement`, as a stimulus's
-    opacity that is no number is. **A choice of `None` is left out**: whether a run whose stimulus is
-    placed by a setting with no value is refused at its start is a question put to the PI
-    (XC-415, narrowed). A setting with no choices (a free value) has none to read, and is left
-    to check 8's bound."""
-    from wl_xcon.task import Show, Update
-
+    at=P("where"))`; the array's objects are placed about it, XC-402). All read it through
+    `task.position_of`. A whole-position setting's every choice is a point (`task.is_point`), a
+    coordinate's, an eccentricity's and a direction's a number, and **none has an infinity, a NaN or
+    an integer past a float's range in it**; a literal that is no position is refused the same.
+    Code `bad-placement`, as a stimulus's opacity that is no number is. **A choice of `None` is
+    left out**: whether a run whose stimulus is placed by a setting with no value is refused at its
+    start is a question put to the PI (XC-415, narrowed). **A setting with no choices (a free
+    value) is not read**, at a window or anywhere: a value of the wrong kind set live raises where
+    the window is judged (XC-422)."""
     params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
 
-    def number(value: object) -> bool:
-        return _is_number(value)
+    def fault(subject: str, what: str, name: str, choice: object, why: str, fix: str) -> None:
+        findings.append(Finding("bad-placement", (
+            f"{subject}: its {what} is parameter {name!r}, which can be {_said(choice)}. "
+            f"{why}; {fix}")))
 
-    def offending(setting: object, fits) -> "tuple[str, object] | None":
-        """The setting's name and its first choice that is a value and does not fit."""
-        if not isinstance(setting, P):
-            return None
-        param = params.get(setting.name)
-        bad = [c for c in (param.choices if param is not None else ())
-               if c is not None and not fits(c)]
-        return (setting.name, bad[0]) if bad else None
-
-    def read(at: object) -> "tuple[str, object] | None":
+    def parts(at: object) -> "list[tuple[str, object, bool]]":
+        """What a position is made of: (name of the part, its value, whether it is the whole)."""
         if isinstance(at, P):
-            return offending(at, is_point)
-        parts = ((at.eccentricity, at.direction) if isinstance(at, Polar)
-                 else tuple(at) if isinstance(at, (tuple, list)) else ())
-        return next((found for part in parts if (found := offending(part, number))), None)
+            return [("position", at, True)]
+        if isinstance(at, Polar):
+            return [("eccentricity", at.eccentricity, False), ("direction", at.direction, False)]
+        if isinstance(at, (tuple, list)) and len(at) == 2:
+            return [("x coordinate", at[0], False), ("y coordinate", at[1], False)]
+        return [("position", at, True)]
 
-    def check_place(where: str, at: object) -> None:
-        found = read(at)
-        if found is not None:
-            setting, choice = found
-            said = repr(choice)
-            said = said if len(said) <= 60 else said[:57] + "..."
-            findings.append(Finding("bad-placement", (
-                f"{where} is placed by parameter {setting!r}, which can be {said}, not a "
-                f"position: a position is a Polar of two numbers or an (x, y) pair of two, and "
-                f"each coordinate, eccentricity and direction a number")))
+    def place(subject: str, what: str, at: object) -> None:
+        for part, value, whole in parts(at):
+            label = what if whole else part
+            if not isinstance(value, P):
+                if whole and not isinstance(at, P):
+                    findings.append(Finding("bad-placement", (
+                        f"{subject}: its {what} is {_said(value)}, which is not a position (a "
+                        f"Polar of two numbers, or an (x, y) pair of two)")))
+                elif not whole and not _is_number(value):
+                    findings.append(Finding("bad-placement", (
+                        f"{subject}: its {label} is {_said(value)}, which is not a number of degrees")))
+                continue
+            declared = params.get(value.name)
+            for choice in (declared.choices if declared is not None else ()):
+                if choice is None:
+                    continue
+                if whole:
+                    if not is_point(choice):
+                        fault(subject, label, value.name, choice, "That is not a position (a Polar "
+                              "of two numbers, or an (x, y) pair of two)", f"give {value.name!r} "
+                              f"positions")
+                    elif not all(_real(n) for n in _parts_of(choice)):
+                        fault(subject, label, value.name, choice, _NOT_FINITE,
+                              f"give {value.name!r} finite positions")
+                    else:
+                        continue
+                elif not _is_number(choice):
+                    fault(subject, label, value.name, choice,
+                          "That is a whole position, not a number of degrees" if is_point(choice)
+                          else "That is not a number of degrees", f"give {value.name!r} numbers"
+                          + (f", or place its {what} at P({value.name!r})"
+                             if is_point(choice) else ""))
+                elif not _real(choice):
+                    fault(subject, label, value.name, choice, "That is not a finite number",
+                          f"give {value.name!r} finite numbers")
+                else:
+                    continue
+                break
 
     for window in trial.windows:
         if isinstance(window, Window):
-            check_place(f"window {window.name!r}'s position", window.at)
-    for _, action in actions_of(trial):
+            place(f"window {window.name!r}", "position", window.at)
+    for state, action in actions_of(trial):
         if isinstance(action, Show):
             stimulus = action.stimulus
-            places = (("position", stimulus.at), ("left-eye position", stimulus.at_left),
-                      ("right-eye position", stimulus.at_right))
-            for what, at in places:
+            for what, at in (("position", stimulus.at), ("left-eye position", stimulus.at_left),
+                             ("right-eye position", stimulus.at_right)):
                 if at is not None:
-                    check_place(f"stimulus {stimulus.name!r}'s {what}", at)
+                    place(f"state {state!r} shows stimulus {stimulus.name!r}", what, at)
         elif isinstance(action, Update):
             for field, what in (("at", "position"), ("at_left", "left-eye position"),
                                 ("at_right", "right-eye position")):
                 at = action.changes().get(field)
                 if at is not None:
-                    check_place(f"an update of {action.stimulus!r}'s {what}", at)
+                    place(f"state {state!r} updates stimulus {action.stimulus!r}", what, at)
     return findings
 
 

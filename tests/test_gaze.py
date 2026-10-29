@@ -1655,7 +1655,7 @@ def test_a_window_no_trial_asks_about_raises_only_when_asked(tmp_path):
     spec = SessionSpec(
         task=str(path), allocation="tasks/allocation.py", root=tmp_path,
         session_id="2027-01-14_01", subject="REFERENCE", trials=2, frame_period=0.008, seed=11,
-        values={"where": 0.0}, bounds=_calibration_bounds(), already_delivered_today=0.0,
+        values={"where": None}, bounds=_calibration_bounds(), already_delivered_today=0.0,
         deployment=Deployment.RIG_FIXED, geometry=DIRECT, session_kind="training",
         calibration=SRGB,
     )

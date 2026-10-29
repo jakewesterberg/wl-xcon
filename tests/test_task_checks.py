@@ -1007,23 +1007,26 @@ def _unmeasurable(choice):
     return _off(_showing(P("pos"), [Param("pos", unit="deg", choices=(choice,))]))
 
 
-@pytest.mark.parametrize("choice", [
+_UNREAL = [
     Polar(float("inf"), 0.0), Polar(5.0, float("inf")), (float("inf"), 0.0),
     Polar(10**400, 0.0), (10**400, 0.0), Polar(5.0, 10**400),
     Polar(float("nan"), 0.0), (0.0, float("nan")),
-])
+]
+
+
+@pytest.mark.parametrize("choice", _UNREAL)
 def test_a_whole_position_choice_no_float_can_measure_is_refused_not_raised(choice):
     """XC-421: choices that are all points, one an infinity, a NaN or an integer past a float's
     range, raised a math error out of `check` (a NaN passed). It is refused as a choice that
     is not a point is, in a sentence naming the setting and the choice."""
     (finding,) = _unmeasurable(choice)
     assert "'pos'" in finding.detail and "cannot be bounded" in finding.detail
-    assert "past a float's range" in finding.detail
-    assert repr(choice)[:50] in finding.detail
+    assert "which no position can be" in finding.detail
+    assert "Polar(" not in finding.detail and "10000000000" not in finding.detail
 
 
 def _place_faults(trial) -> list:
-    return [f for f in check(trial) if f.code == "bad-placement" and "position" in f.detail]
+    return [f for f in check(trial) if f.code == "bad-placement"]
 
 
 def _windowed(at, params) -> Trial:
@@ -1032,12 +1035,14 @@ def _windowed(at, params) -> Trial:
 
 
 _WRONG_KINDS = [
-    # (what a setting holds, the setting's choices, how the place reads it)
-    ("whole", (Polar(8.0, 0.0), 0.0)),
-    ("coordinate", (0.0, Polar(8.0, 0.0))),
-    ("eccentricity", (8.0, "far")),
-    ("direction", (0.0, (1.0, 2.0))),
+    # (what a setting holds, the setting's choices, the words the sentence must hold)
+    ("whole", (Polar(8.0, 0.0), 0.0), "That is not a position"),
+    ("coordinate", (0.0, Polar(8.0, 0.0)), "That is a whole position, not a number of degrees"),
+    ("eccentricity", (8.0, "far"), "That is not a number of degrees"),
+    ("direction", (0.0, (1.0, 2.0)), "That is a whole position, not a number of degrees"),
 ]
+_PART = {"whole": "position", "coordinate": "x coordinate", "eccentricity": "eccentricity",
+         "direction": "direction"}
 
 
 def _setting(kind, choices):
@@ -1047,27 +1052,40 @@ def _setting(kind, choices):
     return at, [param]
 
 
-@pytest.mark.parametrize("kind,choices", _WRONG_KINDS)
-def test_a_window_whose_position_can_be_no_position_is_refused(kind, choices):
-    """XC-415: such a window loaded clean and raised when first judged (`gaze._placed`)."""
+@pytest.mark.parametrize("kind,choices,said", _WRONG_KINDS)
+def test_a_window_whose_position_can_be_no_position_is_refused(kind, choices, said):
+    """XC-415: such a window loaded clean and raised when first judged (`gaze._placed`). The
+    sentence names the part the setting fills and the kind it must be (I1)."""
     at, params = _setting(kind, choices)
     (finding,) = _place_faults(_windowed(at, params))
     assert "window 'w'" in finding.detail and "'p'" in finding.detail
+    assert f"its {_PART[kind]} is parameter" in finding.detail and said in finding.detail
+    assert "Polar(" not in finding.detail
 
 
-@pytest.mark.parametrize("kind,choices", _WRONG_KINDS)
-def test_a_stimulus_shown_where_no_position_is_refused(kind, choices):
+@pytest.mark.parametrize("kind,choices,said", _WRONG_KINDS)
+def test_a_stimulus_shown_where_no_position_is_refused(kind, choices, said):
     """XC-415: raised in `screen.resolve` when the frame was drawn."""
     at, params = _setting(kind, choices)
     (finding,) = _place_faults(_showing(at, params))
-    assert "stimulus 's'" in finding.detail and "'p'" in finding.detail
+    assert "state 'show' shows stimulus 's'" in finding.detail and "'p'" in finding.detail
+    assert f"its {_PART[kind]} is parameter" in finding.detail and said in finding.detail
 
 
-@pytest.mark.parametrize("kind,choices", _WRONG_KINDS)
-def test_an_update_to_where_no_position_is_refused(kind, choices):
+@pytest.mark.parametrize("kind,choices,said", _WRONG_KINDS)
+def test_an_update_to_where_no_position_is_refused(kind, choices, said):
     at, params = _setting(kind, choices)
     (finding,) = _place_faults(_updating(Update("s", at=at), params=params))
-    assert "update of 's'" in finding.detail and "'p'" in finding.detail
+    assert "state 'update0' updates stimulus 's'" in finding.detail and "'p'" in finding.detail
+    assert f"its {_PART[kind]} is parameter" in finding.detail and said in finding.detail
+
+
+def test_an_update_in_two_states_is_refused_once_for_each_naming_it():
+    """M4: two identical sentences that named no state."""
+    params = [Param("p", unit="deg", choices=((1.0, 0.0), 0.0))]
+    found = _place_faults(_updating(Update("s", at=P("p")), Update("s", at=P("p")), params=params))
+    assert sorted(f.detail.split(" updates")[0] for f in found) == [
+        "state 'update0'", "state 'update1'"]
 
 
 def test_an_arrays_position_setting_with_a_choice_no_position_is_refused():
@@ -1077,7 +1095,7 @@ def test_an_arrays_position_setting_with_a_choice_no_position_is_refused():
     trial = replace(trial, states=[*trial.states, State(
         "later", enter=[Update("search", at=P("where"))], go=[On(After(1.0), Outcome.CORRECT)])])
     (finding,) = _place_faults(trial)
-    assert "update of 'search'" in finding.detail and "'where'" in finding.detail
+    assert "state 'later' updates stimulus 'search'" in finding.detail and "'where'" in finding.detail
 
 
 def test_a_per_eye_position_with_a_choice_no_position_is_refused():
@@ -1085,6 +1103,15 @@ def test_a_per_eye_position_with_a_choice_no_position_is_refused():
                      at_left=P("p"), at_right=(1.0, 0.0))
     (finding,) = _place_faults(replace(trial, view="stereoscope"))
     assert "left-eye" in finding.detail
+
+
+@pytest.mark.parametrize("eye", ["left", "right"])
+def test_an_updates_per_eye_position_with_a_choice_no_position_is_refused(eye):
+    params = [Param("p", unit="deg", choices=((1.0, 0.0), 0.0))]
+    sides = {"at_left": (1.0, 0.0), "at_right": (1.0, 0.0), f"at_{eye}": P("p")}
+    (finding,) = _place_faults(replace(_updating(Update("s", **sides), params=params),
+                                       view="stereoscope"))
+    assert "updates stimulus 's'" in finding.detail and f"{eye}-eye" in finding.detail
 
 
 def test_positions_that_are_all_positions_are_not_refused_and_a_choice_of_none_is_left_alone():
@@ -1097,12 +1124,39 @@ def test_positions_that_are_all_positions_are_not_refused_and_a_choice_of_none_i
     assert _place_faults(_windowed(Polar(P("p"), 0.0), none)) == []
     assert _place_faults(_showing(P("p"), [Param("p", unit="deg", choices=(None,))])) == []
     assert _place_faults(_showing(P("p"), [Param("p", unit="deg", low=0.0, high=1.0)])) == []
+    assert _place_faults(_windowed(P("p"), [Param("p", unit="deg", low=0.0, high=1.0)])) == []
 
 
-@pytest.mark.parametrize("eye", ["left", "right"])
-def test_an_updates_per_eye_position_with_a_choice_no_position_is_refused(eye):
-    params = [Param("p", unit="deg", choices=((1.0, 0.0), 0.0))]
-    sides = {"at_left": (1.0, 0.0), "at_right": (1.0, 0.0), f"at_{eye}": P("p")}
-    (finding,) = _place_faults(replace(_updating(Update("s", **sides), params=params),
-                                       view="stereoscope"))
-    assert "update of 's'" in finding.detail and f"{eye}-eye" in finding.detail
+_UNREAL_PARTS = [float("inf"), float("nan"), 10**400]
+
+
+@pytest.mark.parametrize("bad", _UNREAL_PARTS)
+@pytest.mark.parametrize("kind", ["whole", "coordinate", "eccentricity", "direction"])
+@pytest.mark.parametrize("place", ["window", "show", "update"])
+def test_a_choice_that_is_not_finite_is_refused_at_every_place_and_kind_without_raising(
+        place, kind, bad):
+    """M2: an infinity, a NaN or an integer past a float's range was refused only for a
+    whole position at a stimulus under the rig's field; a window or a part of a position loaded
+    clean and failed when drawn or judged (or was drawn at NaN)."""
+    choice = {"whole": Polar(bad, 0.0), "coordinate": bad, "eccentricity": bad,
+              "direction": bad}[kind]
+    at, params = _setting(kind, ((1.0, 2.0) if kind == "whole" else 1.0, choice))
+    trial = {"window": lambda: _windowed(at, params), "show": lambda: _showing(at, params),
+             "update": lambda: _updating(Update("s", at=at), params=params)}[place]()
+    found = [f for geometry in (None, GEOMETRY, DIRECT) for f in check(trial, geometry=geometry)
+             if f.code == "bad-placement"]
+    assert found and all(f.detail == found[0].detail for f in found)
+    assert "'p'" in found[0].detail
+    assert "finite" in found[0].detail or "no infinity" in found[0].detail
+    assert "10000000000" not in found[0].detail
+
+
+@pytest.mark.parametrize("at", [0.0, "center", Polar("far", 0.0), Polar(5.0, "up"), (None, 0.0),
+                                (1.0, 2.0, 3.0)])
+def test_a_literal_position_of_the_wrong_kind_is_refused_not_raised(at):
+    """M3: raised out of check 8's sentence builder at a stimulus, loaded clean at a window."""
+    for trial in (_showing(at), _windowed(at, ()), _updating(Update("s", at=at))):
+        found = [f for geometry in (None, GEOMETRY) for f in check(trial, geometry=geometry)
+                 if f.code == "bad-placement"]
+        assert found, trial
+        assert "which is not a" in found[0].detail
