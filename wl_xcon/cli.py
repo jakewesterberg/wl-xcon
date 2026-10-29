@@ -221,6 +221,21 @@ def _setup_words(view: object, half_ipd_cm: object) -> str:
     return f"the stereoscope, half-IPD {half_ipd_cm:.2f} cm"
 
 
+def _checked_views(task: Task, view: str | None) -> list[str]:
+    """The setups `wlx check` holds a task to: the one named, or every one the task allows
+    (none, for a task whose `view` is unrecognized). Said once so that `main` can ask whether a
+    stereoscope setup is among them before it reads `--subject-settings` (XC-375)."""
+    return (
+        [view]
+        if view is not None
+        else {
+            "direct": ["direct"],
+            "stereoscope": ["stereoscope"],
+            "either": ["direct", "stereoscope"],
+        }.get(task.view, [])
+    )
+
+
 def _setups(
     task: Task, rig: Rig, view: str | None, settings: SubjectSettings | None
 ) -> list[Geometry]:
@@ -230,15 +245,7 @@ def _setups(
     rig is drawn for, so a task that passes, passes for the animals the drawing covers; one outside
     that range runs too, with a warning (XC-352's C7), which only its own settings can check.
     A task whose `view` is unrecognized gets none, and `check` refuses it by name."""
-    views = (
-        [view]
-        if view is not None
-        else {
-            "direct": ["direct"],
-            "stereoscope": ["stereoscope"],
-            "either": ["direct", "stereoscope"],
-        }.get(task.view, [])
-    )
+    views = _checked_views(task, view)
     halves = [settings.half_ipd_cm] if settings else list(rig.half_ipd_range_cm)
     geometries: list[Geometry] = []
     for name in views:
@@ -2218,21 +2225,27 @@ def main(argv: list[str] | None = None) -> int:
     rig = _load_rig(args.rig)
     # The default in the place of a record that will not load, said below (XC-352's E1).
     calibration, unloaded = _calibration_or_default(rig, args.rig)
-    _require_file(args.subject_settings, "--subject-settings")
+    # **Read only when a stereoscope setup is checked** (XC-375): direct view reads nothing from
+    # it, and `wlx run` does not read it there either.
+    reads_settings = "stereoscope" in _checked_views(task, args.view)
+    if reads_settings:
+        _require_file(args.subject_settings, "--subject-settings")
     settings = (
         _load_subject_settings(args.subject_settings)
-        if args.subject_settings is not None
+        if args.subject_settings is not None and reads_settings
         else None
     )
     geometries = _setups(task, rig, args.view, settings)
     # The settings' own warnings (XC-352's C7 and H4): ignored in direct view; a half-IPD
     # outside the drawn optics, through the stereoscope. A check names no animal, so whose
     # settings they are is the session's to warn of.
-    setup = [] if settings is None else (
-        warnlist.of_ignored_settings(args.subject_settings)
-        if geometries and {g.view for g in geometries} == {"direct"}
-        else warnlist.of_setup(rig, settings.subject, settings.half_ipd_cm, settings,
-                               args.subject_settings)
+    setup = (
+        warnlist.of_setup(rig, settings.subject, settings.half_ipd_cm, settings,
+                          args.subject_settings)
+        if settings is not None
+        else warnlist.of_ignored_settings(args.subject_settings)
+        if args.subject_settings is not None and geometries
+        else []
     )
     for geometry in geometries:
         print(f"checked against: {_setup_words(geometry.view, geometry.half_ipd_cm)}")
