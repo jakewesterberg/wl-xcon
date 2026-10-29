@@ -4237,3 +4237,77 @@ def test_wlx_run_refuses_a_plan_its_task_does_not_declare_before_anything_is_rec
         main(argv)
 
     assert not (tmp_path / "2027-01-14_01").exists()
+
+
+# --- a missing file named on the command line is a sentence (XC-145, in part) -------------------
+# `--bounds` is left out on purpose: its loader is the bounded-config loader, welfare-critical,
+# and how it fails needs the PI's welfare review (XC-145's remaining line).
+
+
+def _wlx(*argv: str):
+    """`wlx` as a person runs it: its exit status and its streams, which a traceback would fill."""
+    root = Path(__file__).resolve().parents[1]
+    return subprocess.run(
+        [sys.executable, "-m", "wl_xcon.cli", *argv],
+        cwd=root, capture_output=True, text=True, timeout=120,
+    )
+
+
+def _check_args(*swap: tuple[str, str]) -> list:
+    """`wlx check`'s arguments with each named option (or `task`) pointed at a path."""
+    argv = ["check", GOOD, "--rig", RIG_FILE, "--allocation", ALLOCATION,
+            "--view", "stereoscope", "--subject-settings", "tasks/reference_subject.py"]
+    for flag, path in swap:
+        if flag == "task":
+            argv[1] = path
+        else:
+            argv[argv.index(flag) + 1] = path
+    return argv
+
+
+@pytest.mark.parametrize("flag", ["task", "--rig", "--allocation", "--subject-settings"])
+def test_wlx_check_says_a_missing_file_in_a_sentence(tmp_path, flag):
+    missing = str(tmp_path / "missing.py")
+    with pytest.raises(SystemExit) as refused:
+        main(_check_args((flag, missing)))
+
+    said = str(refused.value)
+    assert isinstance(refused.value.code, str), "a refusal sentence, not a FileNotFoundError"
+    assert missing in said and ("task" if flag == "task" else flag) in said
+
+
+@pytest.mark.parametrize("flag", ["task", "--rig", "--allocation", "--subject-settings"])
+def test_wlx_run_says_a_missing_file_in_a_sentence_and_records_nothing(tmp_path, flag):
+    missing = str(tmp_path / "missing.py")
+    argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm(), "--subject-settings",
+                     "tasks/reference_subject.py")
+    argv[argv.index("direct")] = "stereoscope"
+    if flag == "task":
+        argv[1] = missing
+    else:
+        argv[argv.index(flag) + 1] = missing
+
+    with pytest.raises(SystemExit) as refused:
+        main(argv)
+
+    said = str(refused.value)
+    assert isinstance(refused.value.code, str), "a refusal sentence, not a FileNotFoundError"
+    assert missing in said and ("task" if flag == "task" else flag) in said
+    assert not (tmp_path / "2027-01-14_01").exists()
+
+
+def test_wlx_review_says_a_missing_task_or_allocation_in_a_sentence(tmp_path):
+    missing = str(tmp_path / "missing.py")
+    for argv, flag in ((["review", missing], "task"),
+                       (["review", GOOD, "--allocation", missing], "--allocation")):
+        with pytest.raises(SystemExit) as refused:
+            main(argv)
+        assert isinstance(refused.value.code, str) and missing in str(refused.value)
+        assert flag in str(refused.value)
+
+
+def test_a_missing_file_exits_one_with_no_traceback(tmp_path):
+    done = _wlx(*_check_args(("--rig", str(tmp_path / "missing.py"))))
+
+    assert done.returncode == 1, done.stderr
+    assert "Traceback" not in done.stderr and "missing.py" in done.stderr

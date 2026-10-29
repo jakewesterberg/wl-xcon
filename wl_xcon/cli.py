@@ -39,6 +39,16 @@ from wl_xcon.task import Task, Trial
 from wl_xcon.welfare import Deployment
 
 
+def _require_file(path: Path | None, name: str) -> None:
+    """Say a file named on the command line that is not there in a refusal sentence, never a
+    `FileNotFoundError` traceback (XC-145, in part): `name` is the flag, or `task`. Called by
+    `main` before it loads what the flag names. **`--bounds` is not among them**: its loader is
+    the bounded-config loader, welfare-critical, and how it fails is for the PI's welfare review
+    (XC-145's remaining line)."""
+    if path is not None and not path.is_file():
+        raise SystemExit(f"refused: {name} {_printable(str(path))}: no such file")
+
+
 def _load_task(path: Path) -> Task:
     """Import a task file and return the task object it defines (engine spec §3.5; engine build
     C1): exactly one `Task`, which holds its trial structures and says what its settings mean, what
@@ -262,6 +272,7 @@ def _session_geometry(args, rig: Rig) -> tuple[Geometry, list]:
                  else warnlist.of_ignored_settings(args.subject_settings))
         build = rig.direct
     else:
+        _require_file(args.subject_settings, "--subject-settings")
         settings = (None if args.subject_settings is None
                     else _load_subject_settings(args.subject_settings))
         half = NOMINAL_HALF_IPD_CM if settings is None else settings.half_ipd_cm
@@ -1674,6 +1685,7 @@ def main(argv: list[str] | None = None) -> int:
 
         # The rig file is run once (the engine B final review): its geometry and its color
         # calibration both come from this one load.
+        _require_file(args.rig, "--rig")
         rig = _load_rig(args.rig)
         geometry, setup = _session_geometry(args, rig)
         # **Refused before anything is recorded** (direct-view spec §3, plan decision
@@ -1687,6 +1699,8 @@ def main(argv: list[str] | None = None) -> int:
         # The task object, held to its declarations and, since engine build C1, to the session's
         # deployment: a task that needs a fixed head is a warning in any session not declared
         # head-fixed (`RIG_FIXED`; XC-277; the PI, 2026-10-11), accepted with the others below.
+        _require_file(args.task, "task")
+        _require_file(args.allocation, "--allocation")
         task = _load_task(args.task)
         findings = check_task(
             task,
@@ -2174,15 +2188,21 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "review":
+        _require_file(args.task, "task")
+        _require_file(args.allocation, "--allocation")
         allocation = _load_allocation(args.allocation)
         print(render_review(_load_task(args.task), allocation.task_events))
         return 0
 
+    _require_file(args.task, "task")
+    _require_file(args.allocation, "--allocation")
+    _require_file(args.rig, "--rig")
     task = _load_task(args.task)
     allocation = _load_allocation(args.allocation)
     rig = _load_rig(args.rig)
     # The default in the place of a record that will not load, said below (XC-352's E1).
     calibration, unloaded = _calibration_or_default(rig, args.rig)
+    _require_file(args.subject_settings, "--subject-settings")
     settings = (
         _load_subject_settings(args.subject_settings)
         if args.subject_settings is not None
