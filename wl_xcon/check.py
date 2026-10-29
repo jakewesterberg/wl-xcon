@@ -1276,7 +1276,7 @@ def _span(
 
 def _finite(value: object) -> bool:
     """Whether `value` is a finite number, and not a `bool`."""
-    return _is_number(value) and math.isfinite(value)
+    return _is_number(value) and _real(value)
 
 
 class _Unbounded(Exception):
@@ -1351,6 +1351,9 @@ def _reach(value: object, params: dict[str, Param]) -> list[float]:
 _NOT_FINITE = "A position holds no infinity, NaN or number past a float's range"
 
 
+_NOT_A_POSITION = "not a position: "
+
+
 def _said(value: object) -> str:
     """A value as a sentence prints it, a `Polar` or a pair as every position in the review
     report is (`review.position_words`: eccentricity and direction first), an integer past a
@@ -1363,6 +1366,8 @@ def _said(value: object) -> str:
         words = position_words(value, (value,))
     except Exception:
         words = None
+    if words is not None and words.startswith(_NOT_A_POSITION):
+        words = words[len(_NOT_A_POSITION):]  # the review's own prefix; inside a sentence it garbles
     said = repr(value) if words is None else words
     return said if len(said) <= 60 else said[:57] + "..."
 
@@ -1409,7 +1414,8 @@ def _points(at: object, params: dict[str, Param]) -> list[tuple[float, float]]:
     for part in (at.eccentricity, at.direction) if isinstance(at, Polar) else at:
         for number in (_domain(part, params) if isinstance(part, P) and part.name in params
                        and params[part.name].choices else [part]):
-            if _is_number(number) and not _real(number):
+            if (_is_number(number) and not _real(number)) or (
+                    not isinstance(part, P) and not _is_number(number)):
                 raise _Unmeasurable(part.name if isinstance(part, P) else None, number)
     if isinstance(at, Polar):
         # Every direction a range allows, not its ends alone: 20° out over 0° to 120° is 20° up
@@ -1622,7 +1628,7 @@ def _offscreen_stimuli(trial: Trial, geometry: Geometry | None) -> list[Finding]
                 Finding(
                     "stimulus-off-screen",
                     f"state {name!r} {what} whose extent cannot be bounded: "
-                    + (f"{setting!r} can be" if setting else "its position is")
+                    + (f"{setting!r} can be" if setting else "its position holds")
                     + f" {_said(choice)}, which no position can be, so it cannot be proved "
                     f"inside {field}",
                 )
@@ -4211,8 +4217,8 @@ def _position_kind_faults(trial: Trial) -> list[Finding]:
     Code `bad-placement`, as a stimulus's opacity that is no number is. **A choice of `None` is
     left out**: whether a run whose stimulus is placed by a setting with no value is refused at its
     start is a question put to the PI (XC-415, narrowed). **A setting with no choices (a free
-    value) is not read**, at a window or anywhere: a value of the wrong kind set live raises where
-    the window is judged (XC-422)."""
+    value) is refused where a whole position goes**, since no path outside code gives one a position
+    (XC-422); where a number goes it is unchanged."""
     params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
 
@@ -4233,7 +4239,8 @@ def _position_kind_faults(trial: Trial) -> list[Finding]:
 
     def place(subject: str, what: str, at: object) -> None:
         for part, value, whole in parts(at):
-            label = what if whole else part
+            eye = what[:-len("position")]  # "left-eye ", "right-eye " or ""
+            label = what if whole else eye + part
             if not isinstance(value, P):
                 if whole and not isinstance(at, P):
                     findings.append(Finding("bad-placement", (
@@ -4242,8 +4249,18 @@ def _position_kind_faults(trial: Trial) -> list[Finding]:
                 elif not whole and not _is_number(value):
                     findings.append(Finding("bad-placement", (
                         f"{subject}: its {label} is {_said(value)}, which is not a number of degrees")))
+                elif not whole and not _real(value):
+                    findings.append(Finding("bad-placement", (
+                        f"{subject}: its {label} is {_said(value)}, which is not a finite number "
+                        f"of degrees")))
                 continue
             declared = params.get(value.name)
+            if whole and declared is not None and not declared.choices:
+                findings.append(Finding("bad-placement", (
+                    f"{subject}: its {what} is parameter {value.name!r}, which has no choices and "
+                    f"can only hold a number; a position is a Polar or an (x, y) pair, so give "
+                    f"{value.name!r} choices that are positions")))
+                continue
             for choice in (declared.choices if declared is not None else ()):
                 if choice is None:
                     continue

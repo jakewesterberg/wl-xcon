@@ -263,7 +263,7 @@ def test_a_trial_that_shows_nothing_still_states_its_background():
 
 
 def test_a_position_that_is_not_a_pair_is_shown_as_written():
-    # Its shape is not checked at load (XC-272); the artifact must still render.
+    # Its shape is refused at load (`check._position_kind_faults`); the artifact must still render.
     odd = Trial(start="on", states=[
         State("on", enter=[Show(Stimulus("odd", at=(1.0,), looks=Disc(size=1.0)))],
               go=[On(After(1.0), Outcome.ABORT)])])

@@ -1116,15 +1116,13 @@ def test_an_updates_per_eye_position_with_a_choice_no_position_is_refused(eye):
 
 def test_positions_that_are_all_positions_are_not_refused_and_a_choice_of_none_is_left_alone():
     """The rule refuses a kind of value no place takes. A setting that can hold no value (None)
-    is a question put to the PI (XC-415, narrowed), and a free setting has no choices to read."""
+    is a question put to the PI (XC-415, narrowed)."""
     ok = [Param("p", unit="deg", choices=(Polar(8.0, 0.0), (1.0, 2.0), [3.0, 4.0]))]
     assert _place_faults(_windowed(P("p"), ok)) == []
     assert _place_faults(_showing((P("p"), 0.0), [Param("p", unit="deg", choices=(1.0, 2))])) == []
     none = [Param("p", unit="deg", choices=(8.0, None))]
     assert _place_faults(_windowed(Polar(P("p"), 0.0), none)) == []
     assert _place_faults(_showing(P("p"), [Param("p", unit="deg", choices=(None,))])) == []
-    assert _place_faults(_showing(P("p"), [Param("p", unit="deg", low=0.0, high=1.0)])) == []
-    assert _place_faults(_windowed(P("p"), [Param("p", unit="deg", low=0.0, high=1.0)])) == []
 
 
 _UNREAL_PARTS = [float("inf"), float("nan"), 10**400]
@@ -1160,3 +1158,98 @@ def test_a_literal_position_of_the_wrong_kind_is_refused_not_raised(at):
                  if f.code == "bad-placement"]
         assert found, trial
         assert "which is not a" in found[0].detail
+
+
+# --- Fix round 2 -------------------------------------------------------------------------------
+
+_FREE = [Param("p", unit="deg", low=0.0, high=1.0), Param("p", unit="deg")]
+
+
+@pytest.mark.parametrize("param", _FREE)
+@pytest.mark.parametrize("place", ["window", "show", "update", "left", "update_right"])
+def test_a_whole_position_placed_by_a_free_setting_is_refused_at_load(place, param):
+    """XC-422: a free setting (no choices) can only hold a number, so a place that takes a whole
+    position cannot run; no path outside code gives it a position."""
+    trial = {"window": lambda: _windowed(P("p"), [param]),
+             "show": lambda: _showing(P("p"), [param]),
+             "update": lambda: _updating(Update("s", at=P("p")), params=[param]),
+             "left": lambda: replace(_showing((0.0, 0.0), [param], at_left=P("p"),
+                                              at_right=(1.0, 0.0)), view="stereoscope"),
+             "update_right": lambda: replace(_updating(Update("s", at_right=P("p"),
+                                                              at_left=(1.0, 0.0)), params=[param]),
+                                             view="stereoscope")}[place]()
+    for geometry in (None, GEOMETRY):
+        found = [f for f in check(trial, geometry=geometry) if f.code == "bad-placement"]
+        assert len(found) == 1, geometry
+        assert "has no choices and can only hold a number" in found[0].detail
+        assert "'p'" in found[0].detail
+
+
+def test_a_free_setting_where_a_number_goes_is_not_refused():
+    free = [Param("p", unit="deg", low=0.0, high=1.0)]
+    for at in ((P("p"), 0.0), Polar(P("p"), 0.0), Polar(5.0, P("p"))):
+        assert _place_faults(_windowed(at, free)) == []
+        assert _place_faults(_showing(at, free)) == []
+
+
+@pytest.mark.parametrize("at", [(1.0,), (1.0, 2.0, 3.0), "ab"])
+def test_a_position_that_is_not_a_pair_is_refused_not_raised(at):
+    """XC-272: `(1.0,)` raised `IndexError` in check 8, a triple passed, a string raised."""
+    for trial in (_showing(at), _updating(Update("s", at=at)), _windowed(at, ())):
+        for geometry in (None, GEOMETRY):
+            assert [f for f in check(trial, geometry=geometry) if f.code == "bad-placement"], at
+
+
+@pytest.mark.parametrize("at", [(float("inf"), 0.0), Polar(10**400, 0.0), (float("nan"), 0.0),
+                                Polar(5.0, float("nan"))])
+def test_a_literal_position_that_is_not_finite_is_refused_at_a_window_and_a_stimulus(at):
+    for trial in (_windowed(at, ()), _showing(at)):
+        for geometry in (None, GEOMETRY):
+            found = [f for f in check(trial, geometry=geometry) if f.code == "bad-placement"]
+            assert len(found) == 1 and "not a finite number of degrees" in found[0].detail, (
+                trial, geometry)
+
+
+def test_a_non_finite_choice_is_named_plainly_not_as_a_position_that_is_not_one():
+    """R3: "which can be not a position: 1e+400° at 0°"."""
+    params = [Param("p", unit="deg", choices=((1.0, 0.0), Polar(10**400, 0.0)))]
+    found = [f.detail for f in check(_showing(P("p"), params), geometry=GEOMETRY)
+             if f.code in ("bad-placement", "stimulus-off-screen")]
+    assert len(found) == 2
+    assert all("1e+400" in d and "can be not a position" not in d for d in found), found
+
+
+def test_check_8_names_a_literal_wrong_kind_coordinate_as_a_value_not_a_setting():
+    """R5: "'None' has neither a two-sided range nor choices"."""
+    (found,) = _off(_showing((None, 0.0)))
+    assert "its position holds None, which no position can" in found.detail
+    assert "has neither" not in found.detail
+
+
+def test_check_8_prints_a_literal_position_as_the_review_report_does():
+    """R7: the sentence builder's tail, and a past-float integer as its magnitude."""
+    assert "shows a stimulus at (1.00000e+400)" in _off(_showing(10**400))[0].detail
+    assert "shows a stimulus at ('center')" in _off(_showing("center"))[0].detail
+
+
+def test_two_scored_windows_with_a_coordinate_choice_past_a_float_are_refused_not_raised():
+    """R6: `_intervals` raised `OverflowError` out of `check()`."""
+    params = [Param("x", unit="deg", choices=(0.0, 10**400))]
+    trial = _showing((0.0, 0.0))
+    trial = replace(trial, params=params, windows=[
+        Window("a", at=(P("x"), 0.0), radius=1.0, on="s"), Window("b", at=(5.0, 0.0), radius=1.0, on="s")],
+        states=[replace(trial.states[0], go=[On(Hold("a", 0.1), Outcome.CORRECT),
+                                             On(Hold("b", 0.1), Outcome.ABORT),
+                                             On(After(1.0), Outcome.NO_RESPONSE)])])
+    found = [f for f in check(trial) if f.code == "bad-placement"]
+    assert found and "'x'" in found[0].detail
+
+
+def test_a_per_eye_part_names_its_eye():
+    """R8."""
+    params = [Param("p", unit="deg", choices=(8.0, "far"))]
+    for eye in ("left", "right"):
+        sides = {"at_left": (1.0, 0.0), "at_right": (1.0, 0.0), f"at_{eye}": Polar(P("p"), 0.0)}
+        trial = replace(_showing((0.0, 0.0), params, **sides), view="stereoscope")
+        (found,) = _place_faults(trial)
+        assert f"its {eye}-eye eccentricity is parameter" in found.detail
