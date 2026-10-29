@@ -69,8 +69,8 @@ def test_a_task_file_that_does_not_load_fails_rather_than_raising(tmp_path, text
 
 def _checks_that_raise(monkeypatch) -> None:
     """`check_task` raising `TypeError` on a shape it does not expect, as it did on a window placed
-    by a whole-point setting until XC-156 was fixed (its `_approach` unpacked the place as a
-    pair): no task of the repo's makes the checks raise now, so the fault is put there."""
+    by a whole-point setting until XC-156 was fixed (its `_closest_approach`, since removed,
+    unpacked the place as a pair): no task of the repo's makes the checks raise now, so the fault is put there."""
     def unpack(*_args, **_kwargs):
         raise TypeError("cannot unpack non-iterable P object")
 
@@ -102,7 +102,7 @@ def test_a_task_with_a_window_placed_by_a_whole_point_setting_is_checked_and_war
 
     assert item.result == "pass" and trial is not None
     (found,) = [f for f in findings if f.code == "overlapping-windows"]
-    assert "(setting 'target_point')" in found.detail
+    assert "by setting 'target_point'" in found.detail
 
 
 def test_the_task_item_returns_its_findings_checked_against_the_calibration():

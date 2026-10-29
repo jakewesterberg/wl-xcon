@@ -382,7 +382,7 @@ def _overlaps(trial: Trial) -> list:
 
 
 def test_two_windows_each_placed_by_a_whole_point_setting_are_checked_over_every_pair_of_choices():
-    """XC-156: `_approach` unpacked a window's place as a pair and raised `TypeError` for
+    """XC-156: the overlap check (`_closest_approach`, since removed) unpacked a window's place as a pair and raised `TypeError` for
     `Window.at = P(...)`, a legal form. Read as a window with coordinate settings is, over every
     value its choices allow: 8° at 0° and 8° at 5° are 0.70° apart, under the 2° the radii sum to,
     and the sentence names those choices in the review report's words (eccentricity and direction
@@ -395,10 +395,8 @@ def test_two_windows_each_placed_by_a_whole_point_setting_are_checked_over_every
     (found,) = _overlaps(trial)
 
     assert "which can come within 0.70° while their radii sum to 2.00°" in found.detail
-    assert "'a' at 8° at 0° · (x, y) (8, 0)" in found.detail
-    assert ("(1 of 4 combinations overlap: 'a' at 8° at 0° · (x, y) (8, 0) (setting 'pa') with "
-            "'b' at 8° at 5° · (x, y)") in found.detail
-    assert "(setting 'pa')" in found.detail and "(setting 'pb')" in found.detail
+    assert ("(1 of 4 combinations overlaps, by settings 'pa' and 'pb': 'a' at 8° at 0° with "
+            "'b' at 8° at 5°)") in found.detail
     assert "Polar(" not in found.detail
     assert not found.blocking and found.accepted_in == SESSION_KINDS
 
@@ -413,13 +411,13 @@ def test_a_window_placed_by_a_whole_point_setting_and_one_placed_by_a_literal_ar
     (found,) = _overlaps(trial)
 
     assert "which can come within 0.50° while their radii sum to 2.00°" in found.detail
-    assert "'a' at 10° at 0° · (x, y) (10, 0) (setting 'pa')" in found.detail
-    assert "(-10, 0)" not in found.detail and "'b' at" not in found.detail
+    assert "(1 of 2 choices overlaps, by setting 'pa': 'a' at 10° at 0°)" in found.detail
+    assert "at 180°" not in found.detail and "'b' at" not in found.detail
 
     swapped = _two_windows((10.5, 0.0), P("pb"), Param("pb", unit="deg",
                                                        choices=((-10.0, 0.0), (10.0, 0.0))))
     (found,) = _overlaps(swapped)
-    assert "'b' at 10° at 0° · (x, y) (10, 0) (setting 'pb')" in found.detail
+    assert "(1 of 2 choices overlaps, by setting 'pb': 'b' at 10° at 0°)" in found.detail
 
 
 def test_choices_that_overlap_only_in_some_combinations_are_found_and_the_combination_named():
@@ -435,8 +433,8 @@ def test_choices_that_overlap_only_in_some_combinations_are_found_and_the_combin
     (found,) = _overlaps(trial)
 
     assert "which can come within 0.50° while their radii sum to 2.00°" in found.detail
-    assert "'a' at 10° at 90° · (x, y) (0, 10) (setting 'pa')" in found.detail
-    assert "'b' at 10.5° at 90° · (x, y) (0, 10.5) (setting 'pb')" in found.detail
+    assert ("by settings 'pa' and 'pb': 'a' at 10° at 90° with 'b' at 10.5° at 90°)"
+            in found.detail)
 
 
 def test_choices_that_never_overlap_are_not_crossed_into_positions_nobody_offered():
@@ -474,7 +472,7 @@ def test_a_setting_never_declared_or_a_mix_of_good_and_bad_choices_is_checked_wi
     mixed = _two_windows(P("pa"), (0.0, 10.5), Param("pa", unit="deg",
                                                     choices=("left", (0.0, 10.0), None)))
     (found,) = _overlaps(mixed)
-    assert "'a' at 10° at 90° · (x, y) (0, 10) (setting 'pa')" in found.detail
+    assert "(1 choice overlaps, by setting 'pa': 'a' at 10° at 90°)" in found.detail
 
 
 def test_a_window_whose_position_is_of_no_shape_the_check_reads_does_not_raise_either():
@@ -495,10 +493,9 @@ def test_every_choice_that_overlaps_is_named_up_to_three_then_counted():
 
     (found,) = _overlaps(trial)
 
-    assert "which can come within 1.50° while their radii sum to 2.00° (8 of 8 combinations " \
-           "overlap: " in found.detail
-    assert found.detail.count("(setting 'pt')") == 3
-    assert "; " in found.detail and ", and 5 more)" in found.detail
+    assert ("which can come within 1.50° while their radii sum to 2.00° (8 of 8 choices overlap, "
+            "by setting 'pt': ") in found.detail
+    assert found.detail.count("'a' at 1.5° at ") == 3 and ", and 5 more)" in found.detail
 
 
 def test_two_overlapping_choices_are_both_named_and_the_one_that_does_not_is_not():
@@ -517,9 +514,9 @@ def test_two_overlapping_choices_are_both_named_and_the_one_that_does_not_is_not
 
     (found,) = _overlaps(trial)
 
-    assert "(2 of 3 combinations overlap: " in found.detail
-    assert "(x, y) (10, 0)" in found.detail and "(x, y) (-10, 0)" in found.detail
-    assert "(0, 30)" not in found.detail
+    assert "(2 of 3 choices overlap, by setting 'pa': " in found.detail
+    assert "'a' at 10° at 0°" in found.detail and "'a' at 10° at 180°" in found.detail
+    assert "30° at 90°" not in found.detail
 
 
 @pytest.mark.parametrize("at", [
@@ -549,3 +546,59 @@ def test_a_literal_radius_that_is_no_number_is_refused_and_the_overlap_check_doe
     (refusal,) = [f for f in found if f.code == "bad-placement"]
     assert "window 'a': its radius is " in refusal.detail and "not a finite number" in refusal.detail
     assert [f for f in found if f.code == "overlapping-windows"] == []
+
+
+def test_the_three_named_are_the_nearest_and_the_farthest_is_counted_not_named():
+    """XC-156 fix round 2 (n1): five places at distinct distances, 0.5° to 2.5° out, from a window
+    3° in radius with the target 1° in radius: all five overlap; the three nearest are named, in
+    order, and the farthest two are counted."""
+    trial = _two_windows(P("pt"), (0.0, 0.0), Param(
+        "pt", unit="deg", choices=tuple(_polar(e, 0.0) for e in (2.5, 0.5, 2.0, 1.0, 1.5))))
+    trial = replace(trial, windows=[trial.windows[0], replace(trial.windows[1], radius=3.0)])
+
+    (found,) = _overlaps(trial)
+
+    assert ("(5 of 5 choices overlap, by setting 'pt': 'a' at 0.5° at 0°; 'a' at 1° at 0°; "
+            "'a' at 1.5° at 0°, and 2 more)") in found.detail
+    assert "2.5°" not in found.detail.split("while")[1].split("a gaze")[0]
+
+
+def test_two_windows_on_one_setting_take_its_choice_together_and_are_counted_so():
+    """XC-156 fix round 2 (n3): windows `a` and `b` both at `P("pt")`, as per-eye windows can be,
+    hold one choice between them at a time: two combinations, not four, where the choices are far
+    apart (a choice of one beside another choice of the other never happens), and both overlap."""
+    trial = _two_windows(P("pt"), P("pt"), Param("pt", unit="deg", choices=((0.0, 0.0), (20.0, 0.0))))
+
+    (found,) = _overlaps(trial)
+
+    assert "(2 of 2 combinations overlap, by setting 'pt': " in found.detail
+    assert "'a' at 0° with 'b' at 0°" in found.detail and "'a' at 20° at 0° with 'b' at 20° at 0°" in found.detail
+    assert "0.00°" in found.detail
+
+
+def test_a_count_of_one_agrees_with_its_verb_and_noun():
+    """XC-156 fix round 2 (n3): "1 choice overlaps" where one place is compared, "1 of 3 choices
+    overlaps" where one of several does; never "1 of 1 combinations overlap"."""
+    one = _two_windows(P("pa"), (10.5, 0.0), Param("pa", unit="deg", choices=((10.0, 0.0),)))
+    several = _two_windows(P("pa"), (10.5, 0.0), Param(
+        "pa", unit="deg", choices=((10.0, 0.0), (-10.0, 0.0), (0.0, 10.0))))
+
+    assert "(1 choice overlaps, by setting 'pa': " in _overlaps(one)[0].detail
+    assert "(1 of 3 choices overlaps, by setting 'pa': " in _overlaps(several)[0].detail
+
+
+def test_a_finding_with_both_windows_set_stays_short_and_names_two_then_counts():
+    """XC-156 fix round 2 (n3): eight choices each, every pairing on a ring 0.7° apart or less
+    overlapping: two combinations named, the rest counted, and the clause of choices is under 250
+    characters, eccentricity and direction first."""
+    trial = _two_windows(
+        P("pa"), P("pb"),
+        Param("pa", unit="deg", choices=tuple(_polar(8.0, 45.0 * k) for k in range(8))),
+        Param("pb", unit="deg", choices=tuple(_polar(8.0, 45.0 * k + 5.0) for k in range(8))))
+
+    (found,) = _overlaps(trial)
+
+    clause = found.detail.split("radii sum to 2.00° ", 1)[1].split("; a gaze", 1)[0]
+    assert clause.startswith("(8 of 64 combinations overlap, by settings 'pa' and 'pb': ")
+    assert clause.endswith(", and 6 more)") and clause.count(" with ") == 2
+    assert len(clause) < 250 and "(x, y)" not in clause

@@ -98,8 +98,9 @@ def task(path: Path, allocation, geometry, calibration, deployment=None,
         blocking = [f for f in findings if f.blocking]
     except Exception as broken:  # noqa: BLE001 -- the checks run on code; their fault is this item's
         # Fix round 1 of Task 8: `check` can raise on a task shape it does not expect (it did,
-        # XC-156, closed 2026-10-29; a check is code), and a pre-flight that raised took `wlx taskd` down with the animal
-        # out. A check that did not finish has not passed, so it fails.
+        # XC-156, closed 2026-10-29; a check is code), and a pre-flight that raised took
+        # `wlx taskd` down with the animal out. A check that did not finish has not passed, so
+        # it fails.
         return (
             PreflightItem(
                 TASK_CHECKS,

@@ -3632,13 +3632,17 @@ _Place = tuple[list[tuple[float, float]], list[tuple[float, float]], bool, str]
 class _Approach(NamedTuple):
     """What `_approach` finds of two windows: the least `gap` between their centers, the greatest
     `reach` their radii sum to (`None` where a radius is no number: nothing to compare), the
-    `overlapping` combinations of choices as words, nearest first, and how many `combinations` of
-    whole-point choices were compared (0 where neither window is placed by a whole-point setting)."""
+    `overlapping` combinations of choices as words, nearest first, how many `combinations` of
+    whole-point choices were compared (0 where neither window is placed by a whole-point setting),
+    the `settings` that place the windows, and whether the combinations are `paired` (both windows
+    placed by settings) or are one setting's choices against a literal."""
 
     gap: float
     reach: float | None
     overlapping: list[str]
     combinations: int
+    settings: tuple[str, ...] = ()
+    paired: bool = False
 
 
 def _approach(
@@ -3668,7 +3672,8 @@ def _approach(
     point, as a window whose coordinates are settings is read over theirs: a pairing of the two
     windows' choices is compared whole, never a coordinate of one choice with a coordinate of
     another, which no choice offered, and every pairing is compared, not choice i of one with choice i
-    of the other. **Every pairing that comes within the radii is named** (`overlapping`, as words in
+    of the other; **except two windows placed by one setting**, which hold one choice at a time and are
+    compared choice by choice. **Every pairing that comes within the radii is named** (`overlapping`, as words in
     the review report's: eccentricity and direction first), the window placed by a literal left out
     of it. Choices that are no position, and a window with none left, a literal that is no position
     and a radius that is no number, are left out (`bad-placement` refuses each, `_position_kind_faults`):
@@ -3685,17 +3690,22 @@ def _approach(
     reach = None if None in radii else sum(radii)
     first, second = built(a), built(b)
     named = any(place[3] for place in first + second)
-    best, found = math.inf, []
-    for one in first:
-        for two in second:
-            gap = least_separation_deg(one[0], one[1], two[0], two[1],
-                                       polar_a=one[2], polar_b=two[2])
-            best = min(best, gap)
-            if reach is not None and named and gap < reach:
-                found.append((gap, " with ".join(said for said in (one[3], two[3]) if said)))
+    # Two windows at one setting hold one choice between them at a time: choice by choice, never
+    # across choices, which no moment has (a window at each of two places never happens).
+    same = isinstance(a.at, P) and isinstance(b.at, P) and a.at.name == b.at.name
+    pairs = zip(first, second) if same else itertools.product(first, second)
+    best, found, count = math.inf, [], 0
+    for one, two in pairs:
+        count += 1
+        gap = least_separation_deg(one[0], one[1], two[0], two[1],
+                                   polar_a=one[2], polar_b=two[2])
+        best = min(best, gap)
+        if reach is not None and named and gap < reach:
+            found.append((gap, " with ".join(said for said in (one[3], two[3]) if said)))
     found.sort(key=lambda item: item[0])
-    return _Approach(best, reach, [said for _, said in found],
-                     len(first) * len(second) if named else 0)
+    settings = tuple(dict.fromkeys(w.at.name for w in (a, b) if isinstance(w.at, P)))
+    return _Approach(best, reach, [said for _, said in found], count if named else 0,
+                     settings, isinstance(a.at, P) and isinstance(b.at, P))
 
 
 def _radius(radius: object, params: dict[str, Param]) -> float | None:
@@ -3722,7 +3732,7 @@ def _places(window: Window, params: dict[str, Param]) -> "list[_Place]":
             if is_point(choice) and all(_real(n) for n in _parts_of(choice)):
                 first, second, polar = _centers(choice)
                 places.append((_intervals(float(first), params), _intervals(float(second), params),
-                               polar, f"{window.name!r} at {_said(choice)} (setting {at.name!r})"))
+                               polar, f"{window.name!r} at {_said(choice).split(' · ')[0]}"))
         return places
     if isinstance(at, Polar) or (isinstance(at, (tuple, list)) and len(at) == 2):
         first, second, polar = _centers(at)
@@ -3754,20 +3764,32 @@ def _intervals(
     return [_span(value, params, least)]
 
 
-#: The most combinations of whole-point choices a finding names; the rest are counted.
+#: The most choices of a whole-point setting a finding names, and the most combinations where both
+#: windows are placed by settings (each names two positions); the rest are counted.
 _NAMED = 3
+_NAMED_PAIRED = 2
 
 
 def _which(found: _Approach) -> str:
-    """The combinations of a whole-point setting's choices that overlap, for the finding's sentence:
-    `" (4 of 64 combinations overlap: A; B; C, and 1 more)"`, nearest first; nothing where neither
-    window is placed by a whole-point setting."""
+    """The choices of a whole-point setting that overlap, for the finding's sentence, nearest first:
+    ` (4 of 64 combinations overlap, by settings 'a' and 'b': X with Y; Z with W, and 2 more)`, each
+    position in the review report's words, eccentricity and direction first. A choice where one
+    window is placed by a setting and the other by a literal, a combination where both are; "1 choice
+    overlaps", "1 of 3 choices overlaps", "2 of 3 choices overlap". Two combinations are named, or
+    three choices, the rest counted. Nothing where neither window is placed by a setting."""
     if not found.combinations:
         return ""
-    named = found.overlapping
-    more = f", and {len(named) - _NAMED} more" if len(named) > _NAMED else ""
-    return (f" ({len(named)} of {found.combinations} combinations overlap: "
-            + "; ".join(named[:_NAMED]) + more + ")")
+    unit = "combination" if found.paired else "choice"
+    shown = _NAMED_PAIRED if found.paired else _NAMED
+    count = len(found.overlapping)
+    total = f"{count}" if found.combinations == 1 else f"{count} of {found.combinations}"
+    noun = f"{unit}s" if found.combinations > 1 else unit
+    verb = "overlaps" if count == 1 else "overlap"
+    by = ("setting " if len(found.settings) == 1 else "settings ") + " and ".join(
+        repr(name) for name in found.settings)
+    more = f", and {count - shown} more" if count > shown else ""
+    return (f" ({total} {noun} {verb}, by {by}: " + "; ".join(found.overlapping[:shown])
+            + more + ")")
 
 
 def _overlapping_windows(trial: Trial) -> list[Finding]:
