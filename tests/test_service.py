@@ -24,7 +24,7 @@ from _frames import view
 from _ports import endpoints as free_endpoints
 from _rig import PATH as RIG_FILE
 from _rig import RIG, naming
-from _sessions import OPEN_ACCEPTED, WALL, malformed_task, planned_task, typed, whole_point_task
+from _sessions import OPEN_ACCEPTED, WALL, malformed_task, planned_task, typed
 from _zmq_release import _every_zmq_context_released  # noqa: F401
 from wl_xcon import preflight, resume, stranded, warnlist
 from wl_xcon.actor import Box
@@ -1448,20 +1448,23 @@ def test_a_check_shows_the_runs_preflight_and_starts_nothing(tmp_path):
     assert _runs(service.root) == [] and service.session.card.codes == [4128], "nothing ran"
 
 
-def test_a_task_the_checks_raise_on_fails_its_preflight_and_the_service_goes_on(tmp_path):
-    """Fix round 1 of Task 8: `check()` raising on an offered task (XC-156) went out of
-    `step` uncaught, and `wlx taskd` ended with the animal out of its cage. It is the
-    task checks item's fail now: shown by a check, refused on a start, and the next
-    command served."""
+def test_a_task_the_checks_raise_on_fails_its_preflight_and_the_service_goes_on(tmp_path, monkeypatch):
+    """Fix round 1 of Task 8: `check()` raising on an offered task (it did, XC-156; a stand-in
+    raises `TypeError` now) went out of `step` uncaught, and `wlx taskd` ended with the animal
+    out of its cage. It is the task checks item's fail now: shown by a check, refused on a
+    start, and the next command served."""
+    def unpack(*_args, **_kwargs):
+        raise TypeError("cannot unpack non-iterable P object")
+
+    monkeypatch.setattr(preflight, "check_task", unpack)
     service = _service(tmp_path)
-    whole_point_task(service.tasks)
     _step(service, _open())
 
-    checked = _step(service, CheckRun(by=BY, task="whole_point.py", values={}))
-    started = _step(service, _start(task="whole_point.py"))
+    checked = _step(service, CheckRun(by=BY, task=TASK, values={}))
+    started = _step(service, _start(task=TASK))
     ended = _step(service, _end())
 
-    assert "whole_point.py" in checked.offered_tasks
+    assert TASK in checked.offered_tasks
     items = {i.name: i for i in checked.preflight.items}
     assert items["task checks"].result == "fail" and "TypeError" in items["task checks"].said
     assert started.run_index is None and _runs(service.root) == []

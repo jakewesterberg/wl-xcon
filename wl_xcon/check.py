@@ -3642,13 +3642,56 @@ def _closest_approach(a: Window, b: Window, params: dict[str, Param]) -> tuple[f
     without crossing forty choices an axis into 2.5 million pairs (the final re-review's m4;
     `geometry.least_separation_deg`). Per axis, the hypotenuse of the gaps misread it off the
     axes: windows at (25°, 0°) and (25°, 4.2°) are 3.81° apart, not 4.2°. A whole position as
-    one setting (`at=P("pos")`) is still unpacked as a pair, and raises `TypeError` out of
-    `check` (XC-156, filed; two tests use such a task as one the checks cannot finish on)."""
-    (a_1, a_2, a_polar), (b_1, b_2, b_polar) = (_centers(window.at) for window in (a, b))
+    one setting (`at=P("pos")`) is read over every choice it offers (XC-156; `_places`), each a
+    point, as a window whose coordinates are settings is read over theirs: a pairing of the two
+    windows' choices is compared whole, never a coordinate of one choice with a coordinate of
+    another, which no choice offered. Choices that are no position are left out (`bad-placement`
+    refuses them, `_position_kind_faults`), and a window with none left is never compared."""
     reach = _span(a.radius, params, 0.0)[1] + _span(b.radius, params, 0.0)[1]
-    return (least_separation_deg(_intervals(a_1, params), _intervals(a_2, params),
-                                 _intervals(b_1, params), _intervals(b_2, params),
-                                 polar_a=a_polar, polar_b=b_polar), reach)
+    return _approach(a, b, params)[0], reach
+
+
+def _approach(
+    a: Window, b: Window, params: dict[str, Param]
+) -> tuple[float, list[str]]:
+    """The least possible separation of two windows' centers (`_closest_approach`), and **which
+    choices bring them that close**: for each window placed by a whole-point setting, a phrase
+    naming it, its setting and the choice it is at, in the review report's words for a position
+    (`_said`: eccentricity and direction first). The least is `inf` where a window has no place
+    to compare (`_places`)."""
+    best, named = math.inf, []
+    for first in _places(a, params):
+        for second in _places(b, params):
+            gap = least_separation_deg(
+                _intervals(first[0], params), _intervals(first[1], params),
+                _intervals(second[0], params), _intervals(second[1], params),
+                polar_a=first[2], polar_b=second[2])
+            if gap < best:
+                best, named = gap, [said for said in (first[3], second[3]) if said]
+    return best, named
+
+
+def _places(window: Window, params: dict[str, Param]) -> list[tuple[object, object, bool, str]]:
+    """Each place a window's center can be: `(first, second, polar, said)`, the two values of
+    `_centers`, and for a window placed by a whole-point setting (`at=P("pos")`, XC-156) one place
+    for each of its choices that is a position, with `said` naming the window, the choice and the
+    setting (else `""`). A choice that is no position (`task.is_point`, finite) is left out, as is
+    any choice of a setting with none (a free value) or not declared: refused elsewhere
+    (`_position_kind_faults`), and this check never raises on them. A literal of no shape the check
+    reads gives none."""
+    at = window.at
+    if isinstance(at, P):
+        declared = params.get(at.name)
+        places = []
+        for choice in (declared.choices or ()) if declared is not None else ():
+            if is_point(choice) and all(_real(n) for n in _parts_of(choice)):
+                first, second, polar = _centers(choice)
+                places.append((float(first), float(second), polar,
+                               f"{window.name!r} at {_said(choice)} (setting {at.name!r})"))
+        return places
+    if isinstance(at, Polar) or (isinstance(at, (tuple, list)) and len(at) == 2):
+        return [(*_centers(at), "")]
+    return []
 
 
 def _centers(at: object) -> tuple[object, object, bool]:
@@ -3705,7 +3748,9 @@ def _overlapping_windows(trial: Trial) -> list[Finding]:
                 if first == second or pair in seen:
                     continue
                 seen.add(pair)
-                gap, reach = _closest_approach(by_name[first], by_name[second], params)
+                gap, named = _approach(by_name[first], by_name[second], params)
+                reach = (_span(by_name[first].radius, params, 0.0)[1]
+                         + _span(by_name[second].radius, params, 0.0)[1])
                 if gap < reach:
                     radii = (f"their radii sum to {reach:.2f}°" if math.isfinite(reach)
                              else "a radius has no declared highest, so they can be any size")
@@ -3713,7 +3758,8 @@ def _overlapping_windows(trial: Trial) -> list[Finding]:
                         Finding(
                             "overlapping-windows",
                             f"state {state.name!r} scores {first!r} and {second!r}, "
-                            f"which can come within {gap:.2f}° while {radii}; "
+                            f"which can come within {gap:.2f}° while {radii}"
+                            + (f" (with {' and '.join(named)})" if named else "") + "; "
                             f"a gaze position inside both "
                             f"satisfies both guards, and which one scores is decided "
                             f"by the order the transitions happen to be written in, so "

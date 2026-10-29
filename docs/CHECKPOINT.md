@@ -1259,10 +1259,11 @@ figures for P10's blink handling and for the "no sample" rule wl-preproc offers 
 - **CI's `--changed-only` diffs against the previous push, so read every push's run, not the last.** `exact` was swept
   only at `292603d`, `photometry` only at `f9a208d`, and `geometry`, `record` and `stranded` only at `f1a870b`; the
   last run alone would have left them unread.
-- **XC-156's crash is a fixture.** `tests/_sessions.whole_point_task` is the task `check()` cannot finish on, used by
-  `test_a_task_whose_checks_raise_on_it_fails_rather_than_raising` and
-  `test_a_task_the_checks_raise_on_fails_its_preflight_and_the_service_goes_on`; fixing XC-156 (three lines in
-  `_centres`) means re-basing those two on another fixture first.
+- **XC-156's crash was a fixture, and is closed (2026-10-29).** `tests/_sessions.whole_point_task` was the task
+  `check()` could not finish on; the overlap check now reads a window placed by a whole-point setting over each of
+  its choices (`check._places`), so that task loads and warns, and the two tests that needed a raising `check()`
+  (`test_a_task_whose_checks_raise_on_it_fails_rather_than_raising`,
+  `test_a_task_the_checks_raise_on_fails_its_preflight_and_the_service_goes_on`) monkeypatch `preflight.check_task`.
 - **A test's client timeout tighter than the product's own deadline is a flake on a slow runner** (XC-296): wait for
   the product's answer, the bound read from its constants. `http.client`'s timeout bounds each socket operation, not
   the round trip.

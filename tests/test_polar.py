@@ -360,3 +360,123 @@ def test_a_window_reaching_the_side_that_does_come_within_reach_is_still_found()
                 if f.code == "overlapping-windows"]
 
     assert "which can come within 1.09°" in found.detail
+
+def _two_windows(first_at, second_at, *params) -> Trial:
+    """Two windows 1° in radius, `a` and `b`, scored in one state, placed at `first_at` and
+    `second_at` (a position, or a setting among `params`)."""
+    return Trial(
+        start="w",
+        params=list(params),
+        windows=[Window("a", at=first_at, radius=1.0, on="s"),
+                 Window("b", at=second_at, radius=1.0, on="s")],
+        states=[State("w", enter=[Show(Stimulus("s", at=(0.0, 0.0), looks=Disc()))],
+                      go=[On(Hold("a", 0.1), Outcome.CORRECT),
+                          On(Hold("b", 0.1), Outcome.WRONG_TARGET),
+                          On(After(1.0), Outcome.NO_RESPONSE)])],
+    )
+
+
+def _overlaps(trial: Trial) -> list:
+    return [f for f in check(trial) if f.code == "overlapping-windows"]
+
+
+def test_two_windows_each_placed_by_a_whole_point_setting_are_checked_over_every_pair_of_choices():
+    """XC-156: `_closest_approach` unpacked a window's place as a pair and raised `TypeError` for
+    `Window.at = P(...)`, a legal form. Read as a window with coordinate settings is, over every
+    value its choices allow: 8° at 0° and 8° at 5° are 0.70° apart, under the 2° the radii sum to,
+    and the sentence names those choices in the review report's words (eccentricity and direction
+    first), not Python's repr."""
+    trial = _two_windows(
+        P("pa"), P("pb"),
+        Param("pa", unit="deg", choices=(_polar(8.0, 0.0), _polar(8.0, 90.0))),
+        Param("pb", unit="deg", choices=(_polar(8.0, 5.0), _polar(20.0, 180.0))))
+
+    (found,) = _overlaps(trial)
+
+    assert "which can come within 0.70° while their radii sum to 2.00°" in found.detail
+    assert "'a' at 8° at 0° · (x, y) (8, 0)" in found.detail
+    assert "'b' at 8° at 5° · (x, y)" in found.detail
+    assert "(setting 'pa')" in found.detail and "(setting 'pb')" in found.detail
+    assert "Polar(" not in found.detail
+    assert not found.blocking and found.accepted_in == SESSION_KINDS
+
+
+def test_a_window_placed_by_a_whole_point_setting_and_one_placed_by_a_literal_are_checked():
+    """XC-156: one window at a setting's choice (10°, 0°) or (-10°, 0°), the other literally at
+    (10.5°, 0°): they overlap at the first choice only, which is the one named; only the window
+    placed by a setting is described by its setting."""
+    trial = _two_windows(
+        P("pa"), (10.5, 0.0), Param("pa", unit="deg", choices=((10.0, 0.0), (-10.0, 0.0))))
+
+    (found,) = _overlaps(trial)
+
+    assert "which can come within 0.50° while their radii sum to 2.00°" in found.detail
+    assert "'a' at 10° at 0° · (x, y) (10, 0) (setting 'pa')" in found.detail
+    assert "(-10, 0)" not in found.detail and "'b' at" not in found.detail
+
+    swapped = _two_windows((10.5, 0.0), P("pb"), Param("pb", unit="deg",
+                                                       choices=((-10.0, 0.0), (10.0, 0.0))))
+    (found,) = _overlaps(swapped)
+    assert "'b' at 10° at 0° · (x, y) (10, 0) (setting 'pb')" in found.detail
+
+
+def test_choices_that_overlap_only_in_some_combinations_are_found_and_the_combination_named():
+    """XC-156: of the four pairings of two settings' two choices, only (0°, 10°) with (0°, 10.5°)
+    come within the radii; the finding is the same as a pair that does overlap, naming that one."""
+    trial = _two_windows(
+        P("pa"), P("pb"),
+        Param("pa", unit="deg", choices=((10.0, 0.0), (0.0, 10.0))),
+        Param("pb", unit="deg", choices=((-10.0, 0.0), (0.0, 10.5))))
+
+    (found,) = _overlaps(trial)
+
+    assert "which can come within 0.50° while their radii sum to 2.00°" in found.detail
+    assert "'a' at 10° at 90° · (x, y) (0, 10) (setting 'pa')" in found.detail
+    assert "'b' at 10.5° at 90° · (x, y) (0, 10.5) (setting 'pb')" in found.detail
+
+
+def test_choices_that_never_overlap_are_not_crossed_into_positions_nobody_offered():
+    """XC-156: a window at (10°, 5°) or (-10°, -5°) is never near (10°, -5°) (10° away). Read as
+    two coordinate settings crossed, x in {10, -10} and y in {5, -5}, it would have a position
+    nobody offered, (10°, -5°), exactly on the other window: a whole point is one choice or the
+    other."""
+    trial = _two_windows(
+        P("pa"), (10.0, -5.0), Param("pa", unit="deg", choices=((10.0, 5.0), (-10.0, -5.0))))
+
+    assert _overlaps(trial) == []
+
+
+@pytest.mark.parametrize("choices", [
+    (None,), ("left", "right"), (3.0, 4.0), ((1.0, 2.0, 3.0),), (float("inf"), float("nan")),
+    ((float("inf"), 0.0),), (10**400,), ((10**400, 0.0),), (True, False), ((), ()),
+    (_polar("x", 0.0),), (),
+])
+def test_choices_that_are_no_position_do_not_raise_out_of_the_overlap_check(choices):
+    """XC-156: a whole-point setting whose choices are no positions (the other refusal,
+    `bad-placement`, speaks) or that has none (a free value, refused at load by XC-422) is skipped
+    by the overlap check, which never raises."""
+    trial = _two_windows(P("pa"), (0.0, 0.0), Param("pa", unit="deg", choices=choices))
+
+    assert _overlaps(trial) == []
+    assert {f.code for f in check(trial)} >= {"bad-placement"} or choices == (None,)
+
+
+def test_a_setting_never_declared_or_a_mix_of_good_and_bad_choices_is_checked_without_raising():
+    """XC-156: an undeclared setting is skipped (its own finding says so); of a setting's choices
+    only those that are positions are compared."""
+    undeclared = _two_windows(P("nowhere"), (0.0, 0.0))
+    assert _overlaps(undeclared) == []
+
+    mixed = _two_windows(P("pa"), (0.0, 10.5), Param("pa", unit="deg",
+                                                    choices=("left", (0.0, 10.0), None)))
+    (found,) = _overlaps(mixed)
+    assert "'a' at 10° at 90° · (x, y) (0, 10) (setting 'pa')" in found.detail
+
+
+def test_a_window_whose_position_is_of_no_shape_the_check_reads_does_not_raise_either():
+    """XC-156: `_centers` unpacked any literal as a pair, and a three-tuple or a string raised;
+    `_position_kind_faults` refuses it, and the overlap check skips it."""
+    for at in ((1.0, 2.0, 3.0), "here", 5.0, None):
+        trial = _two_windows(at, (0.0, 0.0))
+        assert _overlaps(trial) == []
+        assert "bad-placement" in {f.code for f in check(trial)}
