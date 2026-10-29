@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from types import SimpleNamespace
 from datetime import date
 from http.server import ThreadingHTTPServer
 
@@ -63,12 +64,16 @@ class _Dispatch:
         self.seen: list = []
         self.gate: threading.Event | None = None
         self.entered = threading.Event()
+        #: A server fault after the command was handed over (XC-042): the backstop answers 500.
+        self.raises = False
 
     def __call__(self, request):
         self.seen.append(request)
         if isinstance(request, ManualReward) and self.gate is not None:
             self.entered.set()
             self.gate.wait(timeout=20.0)  # bounded: a failing test must not hang its teardown
+        if self.raises:
+            raise RuntimeError("a fault the server did not anticipate")
         return 200, {"status": "sent", "said": "sent: test"}
 
 
@@ -1679,3 +1684,76 @@ def test_the_rig_pcs_own_page_preselects_the_first_plan_and_keeps_a_plain_choice
     assert [(check.task, check.plan) for check in _checks(box)] == [
         ("planned.py", None), ("planned.py", "train"), ("planned.py", None)]
     assert box.page.evaluate('document.getElementById("plan-sel").value') == ""
+
+
+# --- a server fault reads to the page as a lost answer (XC-042's backstop answers 500) -----------
+
+_REWARD_LOST = (
+    "unknown: this page lost wlx serve's answer, so whether the reward was given is not known, "
+    "and it was not sent again; check the session's fluid total before pressing again"
+)
+
+
+def _after_a_reward_press(rig, make_it_fail) -> tuple[str, str, bool, bool]:
+    """Press *give reward* with `make_it_fail(page)` in place; what the page says, in what class,
+    whether the button is held, and whether the server was handed the command."""
+    rig.hub.offer(frame(paused_at=1_700_000_030.0))
+    page = rig.browser_page()
+    _sign_in(page)
+    rig.wait_for(lambda: not page.is_disabled(REWARD))
+    make_it_fail(page)
+    page.click(REWARD)
+    rig.wait_for(lambda: page.evaluate("document.getElementById('sent').textContent") != "sending…")
+    time.sleep(0.5)  # housekeeping: room for the line and the button to settle
+    return (page.inner_text("#sent"), page.get_attribute("#sent", "class"),
+            page.is_disabled(REWARD), bool(_rewards(rig)))
+
+
+def test_a_reward_the_server_faulted_on_says_what_a_lost_answer_says(rig):
+    """C1 of cli-refusals' review: at bcd2013 an answer the page lost to a server fault told the
+    trainer the reward is unknown; the JSON 500 left the line blank."""
+    rig.dispatch.raises = True
+    said, klass, held, handed = _after_a_reward_press(rig, lambda page: None)
+
+    assert handed, "the server was handed the reward before it faulted"
+    assert said == _REWARD_LOST
+    assert "crit" in klass
+
+
+def test_a_reward_the_server_faulted_on_leaves_the_button_as_a_lost_answer_does(tmp_path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    with browser() as launched:
+        lost = _Rig(tmp_path / "a", launched)
+        try:
+            lost_said = _after_a_reward_press(
+                lost, lambda page: page.route("**/commands", lambda route: route.abort()))
+        finally:
+            lost.close()
+        faulted = _Rig(tmp_path / "b", launched)
+        try:
+            faulted.dispatch.raises = True
+            faulted_said = _after_a_reward_press(faulted, lambda page: None)
+        finally:
+            faulted.close()
+
+    assert faulted_said[:3] == lost_said[:3]
+
+
+def test_a_whoami_the_server_faulted_on_keeps_the_sign_in_and_asks_again(rig, monkeypatch):
+    """I2: a rig that faulted is a rig that could not confirm, as one out of reach is."""
+    page = rig.browser_page()
+    _sign_in(page)
+
+    def fault(*args, **kwargs):
+        # An answer without a member: the handler raises reading it, after the request's body
+        # was read, so the 500 reaches the page whole (a raise before that resets the
+        # connection, which the page already read as a lost answer).
+        return SimpleNamespace(expires_at=0)
+
+    monkeypatch.setattr(rig.checker, "check", fault)
+    page.reload()
+    page.wait_for_selector("#sent:has-text('has not confirmed')")
+    assert page.inner_text("#sent") == UNCONFIRMED
+    assert _has_signin(page), "the sign-in is kept"
+    assert "not signed in" not in page.inner_text("#sent")

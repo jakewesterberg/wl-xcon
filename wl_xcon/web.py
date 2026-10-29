@@ -2331,6 +2331,15 @@ _SCRIPT = """
       }).catch(function () { resolve(false); });
     });
   }
+  // What a rig's answer is, read from its response: **a server fault (5xx) is read as an answer
+  // lost**, whatever its body says, so it takes the handling every call gives a lost answer (a
+  // reward's "unknown" sentence, a sign-in kept and asked again) and never a refusal's (XC-042:
+  // `wlx serve` answers a handler that raised with a JSON 500 that has no `said`). The one place
+  // every call to this rig reads its answer through.
+  function answerOf(response) {
+    if (response.status >= 500) { throw new Error("wlx serve faulted"); }
+    return response.json();
+  }
   // /whoami with the held token. Answers true when it confirms the sign-in. A refusal
   // is read by its reason word (the plan's Ruling 8): `expired` renews (once: a token
   // just renewed is not expired), `clock` and `no_keys` keep the sign-in, say why and,
@@ -2345,7 +2354,7 @@ _SCRIPT = """
       cache: "no-store",
       headers: { "Content-Type": "application/json", "Authorization": "Bearer " + signin.access },
       body: "{}"
-    }).then(function (response) { return response.json(); }).then(function (answer) {
+    }).then(answerOf).then(function (answer) {
       if (mine !== generation) { return false; }
       if (answer.status === "signed_in") {
         signin.name = answer.name;
@@ -2736,9 +2745,7 @@ _SCRIPT = """
       headers: headers,
       body: JSON.stringify(command),
       cache: "no-store"
-    }).then(function (response) {
-      return response.json();
-    }).then(function (answer) {
+    }).then(answerOf).then(function (answer) {
       tell(answer.said, answer.status === "sent" || answer.status === "signaled" ? "ok" : "crit");
       // A refusal for the token (the plan's Ruling 8): never re-sent; renew, or sign out.
       if (answer.reason === "expired") {
@@ -3187,7 +3194,7 @@ _SCRIPT = """
           cache: "no-store",
           headers: { "Content-Type": "application/json" },
           body: "{}"
-        }).then(function (response) { return response.json(); }).then(function (answer) {
+        }).then(answerOf).then(function (answer) {
           if (answer.reason === "no_token") { window.location.reload(); return; }
           setTimeout(recheck, RECHECK_MS);
         }, function () { setTimeout(recheck, RECHECK_MS); });
