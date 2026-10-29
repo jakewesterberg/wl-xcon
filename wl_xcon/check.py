@@ -3732,7 +3732,7 @@ def _places(window: Window, params: dict[str, Param]) -> "list[_Place]":
             if is_point(choice) and all(_real(n) for n in _parts_of(choice)):
                 first, second, polar = _centers(choice)
                 places.append((_intervals(float(first), params), _intervals(float(second), params),
-                               polar, f"{window.name!r} at {_said(choice).split(' · ')[0]}"))
+                               polar, f"{window.name!r} at {_said(choice)}"))
         return places
     if isinstance(at, Polar) or (isinstance(at, (tuple, list)) and len(at) == 2):
         first, second, polar = _centers(at)
@@ -3773,7 +3773,8 @@ _NAMED_PAIRED = 2
 def _which(found: _Approach) -> str:
     """The choices of a whole-point setting that overlap, for the finding's sentence, nearest first:
     ` (4 of 64 combinations overlap, by settings 'a' and 'b': X with Y; Z with W, and 2 more)`, each
-    position in the review report's words, eccentricity and direction first. A choice where one
+    position in the review report's words in full (`_said`: eccentricity and direction first, with
+    (x, y) beside them; STE-29). A choice where one
     window is placed by a setting and the other by a literal, a combination where both are; "1 choice
     overlaps", "1 of 3 choices overlaps", "2 of 3 choices overlap". Two combinations are named, or
     three choices, the rest counted. Nothing where neither window is placed by a setting."""
