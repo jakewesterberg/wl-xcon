@@ -18,6 +18,7 @@ import re
 import shutil
 import signal
 import socket
+import ssl
 import subprocess
 import sys
 import threading
@@ -5589,3 +5590,101 @@ def test_a_write_the_box_refuses_names_the_https_page_only_when_there_is_one():
             server.server_close()
             thread.join(timeout=5)
     assert answers == [CONTROLS_AT_THE_BOX, CONTROLS_ELSEWHERE]
+
+
+# --- a handler that raises answers JSON 500 and says nothing of why (XC-042) ---------------------
+
+_SECRET = "secret-path /etc/rig.key and a traceback"
+
+
+def _assert_a_bare_500(raw_status, body):
+    assert raw_status == 500
+    assert json.loads(body) == {"error": "internal server error"}
+    assert _SECRET.encode() not in body and b"Traceback" not in body
+
+
+def test_a_dispatch_that_raises_answers_a_json_500_without_its_text(capfd):
+    def dispatch(request):
+        raise RuntimeError(_SECRET)
+
+    with _served(_hub(), dispatch=dispatch) as port:
+        raw = _post_raw(port, {"kind": "pause", "by": "jake"})
+
+    _assert_a_bare_500(*raw)
+    # Said where the server logs, not to the client.
+    assert "RuntimeError" in capfd.readouterr().err
+
+
+def _post_raw(port: int, body):
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=POST_ANSWER_S)
+    try:
+        connection.request("POST", "/commands", json.dumps(body).encode(), {
+            "Host": f"127.0.0.1:{port}", "Origin": f"http://127.0.0.1:{port}",
+            "Content-Type": "application/json"})
+        response = connection.getresponse()
+        return response.status, response.read()
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize("method", ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "TRACE"])
+def test_every_handler_goes_through_the_same_500_backstop(monkeypatch, method):
+    """Each verb's handler, the refused ones among them, answers a JSON 500 when it raises: the
+    `Host` check they all begin with is made to raise."""
+    def explode(header):
+        raise RuntimeError(_SECRET)
+
+    monkeypatch.setattr(serve, "host_name", explode)
+    with _served(_hub()) as port:
+        status, _, body = _request(port, method, "/health")
+
+    _assert_a_bare_500(status, body)
+
+
+def test_the_server_keeps_answering_after_a_handler_raised(monkeypatch):
+    real = serve.host_name
+    calls = []
+
+    def once(header):
+        calls.append(header)
+        if len(calls) == 1:
+            raise RuntimeError(_SECRET)
+        return real(header)
+
+    monkeypatch.setattr(serve, "host_name", once)
+    with _served(_hub()) as port:
+        assert _request(port, "GET", "/nope")[0] == 500
+        assert _request(port, "GET", "/nope")[0] == 404
+
+
+def test_a_handler_that_raised_after_it_began_its_answer_is_closed_not_answered_twice(
+    monkeypatch, capfd,
+):
+    """The stream has sent its 200 and headers when building a frame raises: one status line,
+    no 500 behind it, and the connection closed (the read to EOF returns)."""
+    def explode(*args, **kwargs):
+        raise RuntimeError(_SECRET)
+
+    monkeypatch.setattr(serve._web, "fragments", explode)
+    with _served(_hub()) as port:
+        raw = _raw(port, b"GET /events HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
+
+    assert raw.startswith(b"HTTP/1.0 200")
+    assert raw.count(b"HTTP/1.") == 1 and b"500" not in raw.split(b"\r\n\r\n")[0]
+    assert _SECRET.encode() not in raw
+    assert "RuntimeError" in capfd.readouterr().err
+
+
+@pytest.mark.parametrize("gone", [BrokenPipeError, ConnectionResetError, ssl.SSLEOFError])
+def test_a_client_that_left_is_not_logged_as_a_server_fault_nor_answered(monkeypatch, capfd, gone):
+    """XC-042's backstop leaves what the https listener's `finish_request` drops, and what the
+    standard library already handled, as they were: no 500 attempt and no 'raised' line."""
+    def leave(header):
+        raise gone("the client left")
+
+    monkeypatch.setattr(serve, "host_name", leave)
+    with _served(_hub()) as port:
+        with pytest.raises((http.client.RemoteDisconnected, ConnectionError)):
+            _request(port, "GET", "/health")
+
+    assert " raised " not in capfd.readouterr().err

@@ -39,6 +39,26 @@ from wl_xcon.task import Task, Trial
 from wl_xcon.welfare import Deployment
 
 
+def _require_file(path: Path | None, name: str) -> None:
+    """Say a file named on the command line that is not there in a refusal sentence, never a
+    `FileNotFoundError` traceback (XC-145, in part): `name` is the flag, or `task`. Called by
+    `main` before it loads what the flag names. **`--bounds` is not among them**: its loader is
+    the bounded-config loader, welfare-critical, and how it fails is for the PI's welfare review
+    (XC-145's remaining line)."""
+    if path is None:
+        return
+    shown = _printable(str(path))
+    if path.is_dir():
+        raise SystemExit(f"refused: {name} {shown} is a directory, not a file")
+    if not path.exists():
+        raise SystemExit(f"refused: {name} {shown}: no such file")
+    try:
+        with open(path, "rb"):
+            pass
+    except OSError as why:
+        raise SystemExit(f"refused: {name} {shown} cannot be read: {why.strerror}") from why
+
+
 def _load_task(path: Path) -> Task:
     """Import a task file and return the task object it defines (engine spec §3.5; engine build
     C1): exactly one `Task`, which holds its trial structures and says what its settings mean, what
@@ -211,6 +231,21 @@ def _setup_words(view: object, half_ipd_cm: object) -> str:
     return f"the stereoscope, half-IPD {half_ipd_cm:.2f} cm"
 
 
+def _checked_views(task: Task, view: str | None) -> list[str]:
+    """The setups `wlx check` holds a task to: the one named, or every one the task allows
+    (none, for a task whose `view` is unrecognized). Said once so that `main` can ask whether a
+    stereoscope setup is among them before it reads `--subject-settings` (XC-375)."""
+    return (
+        [view]
+        if view is not None
+        else {
+            "direct": ["direct"],
+            "stereoscope": ["stereoscope"],
+            "either": ["direct", "stereoscope"],
+        }.get(task.view, [])
+    )
+
+
 def _setups(
     task: Task, rig: Rig, view: str | None, settings: SubjectSettings | None
 ) -> list[Geometry]:
@@ -220,15 +255,7 @@ def _setups(
     rig is drawn for, so a task that passes, passes for the animals the drawing covers; one outside
     that range runs too, with a warning (XC-352's C7), which only its own settings can check.
     A task whose `view` is unrecognized gets none, and `check` refuses it by name."""
-    views = (
-        [view]
-        if view is not None
-        else {
-            "direct": ["direct"],
-            "stereoscope": ["stereoscope"],
-            "either": ["direct", "stereoscope"],
-        }.get(task.view, [])
-    )
+    views = _checked_views(task, view)
     halves = [settings.half_ipd_cm] if settings else list(rig.half_ipd_range_cm)
     geometries: list[Geometry] = []
     for name in views:
@@ -262,6 +289,7 @@ def _session_geometry(args, rig: Rig) -> tuple[Geometry, list]:
                  else warnlist.of_ignored_settings(args.subject_settings))
         build = rig.direct
     else:
+        _require_file(args.subject_settings, "--subject-settings")
         settings = (None if args.subject_settings is None
                     else _load_subject_settings(args.subject_settings))
         half = NOMINAL_HALF_IPD_CM if settings is None else settings.half_ipd_cm
@@ -1346,8 +1374,9 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         metavar="PATH",
         help="this animal's settings: a Python file defining SETTINGS, for --subject "
-        "(PI, 2026-09-29). Required with --view stereoscope, for the animal's "
-        "half-IPD; refused with --view direct, which reads nothing from it",
+        "(PI, 2026-09-29). Through the stereoscope it gives the animal's half-IPD; omitted, "
+        "the nominal half-IPD is used and a warning says so. Direct view reads nothing from it "
+        "and warns that it is ignored (XC-352's C6, C7, C8 and H4)",
     )
     runner.add_argument(
         "--out-of-cage-at",
@@ -1658,6 +1687,11 @@ def main(argv: list[str] | None = None) -> int:
         # Imported here, as `serve` is: no other subcommand loads the service.
         from wl_xcon import service as _service
 
+        # A missing rig or allocation is a sentence here, as in `check` and `run` (XC-145).
+        # `--subjects` and `--tasks` are held to being folders in `service.run`; `--bounds` is
+        # not a flag of this command (its animals' own are loaded by `Service._open`).
+        _require_file(args.rig, "--rig")
+        _require_file(args.allocation, "--allocation")
         return _service.run(args)
 
     if args.command == "run":
@@ -1668,12 +1702,29 @@ def main(argv: list[str] | None = None) -> int:
             Simulated as SimulatedPump,
         )
 
+        # **The animal is one folder name, as `wlx taskd` holds it to** (XC-161): a session left
+        # stranded under a name `service._folder_name` refuses blocks every `wlx taskd` open
+        # until its record is edited by hand. The rule is that function, called, never a copy
+        # (XC-196 may tighten it); refused before anything is written, the rig loaded or the
+        # departure asked about. Imported here as `serve` and `taskd` are: `service` imports this
+        # module.
+        from wl_xcon import service as _service
+
+        if not _service._folder_name(args.subject):
+            raise SystemExit(
+                f"refused: an animal is one folder name -- letters, digits, '_', '.' and '-', "
+                f"starting with a letter or digit -- and {_printable(repr(args.subject))} is not "
+                f"one, so --subject {_printable(repr(args.subject))} is refused as `wlx taskd` "
+                f"would refuse it; nothing recorded"
+            )
+
         # `--deployment` arrives as a hyphenated word because that is how a flag
         # reads; the enum's own value is the underscored one that goes on the wire.
         deployment = Deployment(args.deployment.replace("-", "_"))
 
         # The rig file is run once (the engine B final review): its geometry and its color
         # calibration both come from this one load.
+        _require_file(args.rig, "--rig")
         rig = _load_rig(args.rig)
         geometry, setup = _session_geometry(args, rig)
         # **Refused before anything is recorded** (direct-view spec §3, plan decision
@@ -1687,6 +1738,8 @@ def main(argv: list[str] | None = None) -> int:
         # The task object, held to its declarations and, since engine build C1, to the session's
         # deployment: a task that needs a fixed head is a warning in any session not declared
         # head-fixed (`RIG_FIXED`; XC-277; the PI, 2026-10-11), accepted with the others below.
+        _require_file(args.task, "task")
+        _require_file(args.allocation, "--allocation")
         task = _load_task(args.task)
         findings = check_task(
             task,
@@ -2174,29 +2227,41 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "review":
+        _require_file(args.task, "task")
+        _require_file(args.allocation, "--allocation")
         allocation = _load_allocation(args.allocation)
         print(render_review(_load_task(args.task), allocation.task_events))
         return 0
 
+    _require_file(args.task, "task")
+    _require_file(args.allocation, "--allocation")
+    _require_file(args.rig, "--rig")
     task = _load_task(args.task)
     allocation = _load_allocation(args.allocation)
     rig = _load_rig(args.rig)
     # The default in the place of a record that will not load, said below (XC-352's E1).
     calibration, unloaded = _calibration_or_default(rig, args.rig)
+    # **Read only when a stereoscope setup is checked** (XC-375): direct view reads nothing from
+    # it, and `wlx run` does not read it there either.
+    reads_settings = "stereoscope" in _checked_views(task, args.view)
+    if reads_settings:
+        _require_file(args.subject_settings, "--subject-settings")
     settings = (
         _load_subject_settings(args.subject_settings)
-        if args.subject_settings is not None
+        if args.subject_settings is not None and reads_settings
         else None
     )
     geometries = _setups(task, rig, args.view, settings)
     # The settings' own warnings (XC-352's C7 and H4): ignored in direct view; a half-IPD
     # outside the drawn optics, through the stereoscope. A check names no animal, so whose
     # settings they are is the session's to warn of.
-    setup = [] if settings is None else (
-        warnlist.of_ignored_settings(args.subject_settings)
-        if geometries and {g.view for g in geometries} == {"direct"}
-        else warnlist.of_setup(rig, settings.subject, settings.half_ipd_cm, settings,
-                               args.subject_settings)
+    setup = (
+        warnlist.of_setup(rig, settings.subject, settings.half_ipd_cm, settings,
+                          args.subject_settings)
+        if settings is not None
+        else warnlist.of_ignored_settings(args.subject_settings)
+        if args.subject_settings is not None and geometries
+        else []
     )
     for geometry in geometries:
         print(f"checked against: {_setup_words(geometry.view, geometry.half_ipd_cm)}")

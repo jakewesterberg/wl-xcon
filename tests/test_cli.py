@@ -567,7 +567,9 @@ def test_a_rig_or_settings_file_that_defines_nothing_is_refused(tmp_path):
     with pytest.raises(SystemExit, match="must define RIG"):
         main(["check", GOOD, "--rig", str(empty)])
     with pytest.raises(SystemExit, match="must define SETTINGS"):
-        main(["check", GOOD, "--rig", RIG_FILE, "--subject-settings", str(empty)])
+        # Read only where a stereoscope setup is checked (XC-375); GOOD is a direct-view task.
+        main(["check", GOOD, "--rig", RIG_FILE, "--view", "stereoscope",
+              "--subject-settings", str(empty)])
 
 
 def test_subject_settings_load_whoever_they_name(tmp_path):
@@ -4237,3 +4239,191 @@ def test_wlx_run_refuses_a_plan_its_task_does_not_declare_before_anything_is_rec
         main(argv)
 
     assert not (tmp_path / "2027-01-14_01").exists()
+
+
+# --- a missing file named on the command line is a sentence (XC-145, in part) -------------------
+# `--bounds` is left out on purpose: its loader is the bounded-config loader, welfare-critical,
+# and how it fails needs the PI's welfare review (XC-145's remaining line).
+
+
+def _wlx(*argv: str):
+    """`wlx` as a person runs it: its exit status and its streams, which a traceback would fill."""
+    root = Path(__file__).resolve().parents[1]
+    return subprocess.run(
+        [sys.executable, "-m", "wl_xcon.cli", *argv],
+        cwd=root, capture_output=True, text=True, timeout=120,
+    )
+
+
+def _check_args(*swap: tuple[str, str]) -> list:
+    """`wlx check`'s arguments with each named option (or `task`) pointed at a path."""
+    argv = ["check", GOOD, "--rig", RIG_FILE, "--allocation", ALLOCATION,
+            "--view", "stereoscope", "--subject-settings", "tasks/reference_subject.py"]
+    for flag, path in swap:
+        if flag == "task":
+            argv[1] = path
+        else:
+            argv[argv.index(flag) + 1] = path
+    return argv
+
+
+@pytest.mark.parametrize("flag", ["task", "--rig", "--allocation", "--subject-settings"])
+def test_wlx_check_says_a_missing_file_in_a_sentence(tmp_path, flag):
+    missing = str(tmp_path / "missing.py")
+    with pytest.raises(SystemExit) as refused:
+        main(_check_args((flag, missing)))
+
+    said = str(refused.value)
+    assert isinstance(refused.value.code, str), "a refusal sentence, not a FileNotFoundError"
+    assert missing in said and ("task" if flag == "task" else flag) in said
+
+
+@pytest.mark.parametrize("flag", ["task", "--rig", "--allocation", "--subject-settings"])
+def test_wlx_run_says_a_missing_file_in_a_sentence_and_records_nothing(tmp_path, flag):
+    missing = str(tmp_path / "missing.py")
+    argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm(), "--subject-settings",
+                     "tasks/reference_subject.py")
+    argv[argv.index("direct")] = "stereoscope"
+    if flag == "task":
+        argv[1] = missing
+    else:
+        argv[argv.index(flag) + 1] = missing
+
+    with pytest.raises(SystemExit) as refused:
+        main(argv)
+
+    said = str(refused.value)
+    assert isinstance(refused.value.code, str), "a refusal sentence, not a FileNotFoundError"
+    assert missing in said and ("task" if flag == "task" else flag) in said
+    assert not (tmp_path / "2027-01-14_01").exists()
+
+
+def test_wlx_review_says_a_missing_task_or_allocation_in_a_sentence(tmp_path):
+    missing = str(tmp_path / "missing.py")
+    for argv, flag in ((["review", missing], "task"),
+                       (["review", GOOD, "--allocation", missing], "--allocation")):
+        with pytest.raises(SystemExit) as refused:
+            main(argv)
+        assert isinstance(refused.value.code, str) and missing in str(refused.value)
+        assert flag in str(refused.value)
+
+
+def test_a_missing_file_exits_one_with_no_traceback(tmp_path):
+    done = _wlx(*_check_args(("--rig", str(tmp_path / "missing.py"))))
+
+    assert done.returncode == 1, done.stderr
+    assert "Traceback" not in done.stderr and "missing.py" in done.stderr
+
+
+# --- `wlx run --subject` is held to the rule `wlx taskd` holds an animal to (XC-161) ------------
+
+
+@pytest.mark.parametrize("subject", ["has space", "../outside", "a/b", ".hidden", "x" * 65, ""])
+def test_wlx_run_refuses_a_subject_wlx_taskd_would_refuse_before_writing(tmp_path, subject):
+    from wl_xcon import service
+
+    assert not service._folder_name(subject), "the same rule, by calling it"
+    argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm())
+    argv[argv.index("--subject") + 1] = subject
+
+    with pytest.raises(SystemExit) as refused:
+        main(argv)
+
+    said = str(refused.value)
+    assert isinstance(refused.value.code, str)
+    assert "one folder name" in said and repr(subject) in said
+    assert not (tmp_path / "2027-01-14_01").exists()
+
+
+def test_wlx_run_takes_the_rule_from_wlx_taskd_not_a_copy(tmp_path, monkeypatch):
+    """Whatever `service._folder_name` says, `wlx run` follows: a stand-in that refuses the
+    reference subject refuses it here, so no second rule can drift from the first."""
+    from wl_xcon import service
+
+    monkeypatch.setattr(service, "_folder_name", lambda name: False)
+    with pytest.raises(SystemExit, match="one folder name"):
+        main(_run_args(tmp_path, "--out-of-cage-at", _hhmm()))
+
+
+# --- wlx check reads --subject-settings only for a stereoscope setup (XC-375) -------------------
+
+
+def _tripwire_settings(tmp_path) -> tuple[Path, Path]:
+    """A settings file that cannot load, and the marker it writes if anything runs it: a check
+    that reads it leaves the marker and is refused, one that does not leaves neither."""
+    marker = tmp_path / "read.marker"
+    path = tmp_path / "tripwire.py"
+    path.write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('read')\n"
+        "from wl_xcon.geometry import SubjectSettings\n"
+        "SETTINGS = SubjectSettings(subject='REFERENCE', half_ipd_cm=0.0)\n",
+        encoding="utf-8",
+    )
+    return path, marker
+
+
+def test_wlx_check_direct_view_does_not_read_the_subject_settings(tmp_path, capsys):
+    """`wlx run` never reads F in direct view and warns it ignores it (XC-352's H4); `wlx check`
+    did read it, and was refused when it did not load."""
+    settings, marker = _tripwire_settings(tmp_path)
+
+    assert main(["check", GOOD, "--rig", RIG_FILE, "--allocation", ALLOCATION,
+                 "--view", "direct", "--subject-settings", str(settings)]) == 0
+
+    out = capsys.readouterr().out
+    assert not marker.exists(), "the file was run"
+    assert "warning  settings not read" in out and "direct view reads nothing from it" in out
+
+
+def test_wlx_check_of_a_direct_task_does_not_read_the_subject_settings_either(tmp_path, capsys):
+    """With no `--view`, a task written for direct view is checked in direct view only, so the
+    stereoscope's settings are not read for it."""
+    settings, marker = _tripwire_settings(tmp_path)
+
+    assert main(["check", GOOD, "--rig", RIG_FILE, "--allocation", ALLOCATION,
+                 "--subject-settings", str(settings)]) == 0
+
+    assert not marker.exists()
+    assert "direct view reads nothing from it" in capsys.readouterr().out
+
+
+def test_wlx_check_reads_the_subject_settings_when_a_stereoscope_setup_is_checked(tmp_path):
+    for argv in (
+        ["--view", "stereoscope"],
+        [],  # an `either` task is checked through the stereoscope too
+    ):
+        settings, marker = _tripwire_settings(tmp_path)
+        task = _either_task(tmp_path, 10.0) if not argv else GOOD
+        with pytest.raises(SystemExit) as refused:
+            main(["check", task, "--rig", RIG_FILE, "--allocation", ALLOCATION, *argv,
+                  "--subject-settings", str(settings)])
+
+        assert "not a half-IPD" in str(refused.value)
+        assert marker.exists(), "the file was not run"
+        marker.unlink()
+
+
+def test_wlx_check_does_not_refuse_a_missing_subject_settings_file_it_does_not_read(tmp_path):
+    assert main(["check", GOOD, "--rig", RIG_FILE, "--allocation", ALLOCATION,
+                 "--view", "direct", "--subject-settings", str(tmp_path / "missing.py")]) == 0
+
+
+def test_a_directory_or_an_unreadable_file_is_said_for_what_it_is(tmp_path):
+    """XC-145 (fix round 1, M1): not 'no such file', and not a PermissionError traceback."""
+    folder = tmp_path / "folder.py"
+    folder.mkdir()
+    with pytest.raises(SystemExit) as refused:
+        main(_check_args(("--rig", str(folder))))
+    assert "is a directory" in refused.value.code and "--rig" in refused.value.code
+
+    locked = tmp_path / "locked.py"
+    locked.write_text("X = 1\n", encoding="utf-8")
+    locked.chmod(0)
+    try:
+        if os.access(locked, os.R_OK):
+            pytest.skip("this account reads a mode-000 file (root)")
+        with pytest.raises(SystemExit) as refused:
+            main(_check_args(("task", str(locked))))
+    finally:
+        locked.chmod(0o600)
+    assert "cannot be read" in refused.value.code and "task" in refused.value.code

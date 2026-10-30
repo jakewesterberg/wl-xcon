@@ -2331,6 +2331,22 @@ _SCRIPT = """
       }).catch(function () { resolve(false); });
     });
   }
+  // What a rig's answer is, read from its response: **an answer the page cannot read as one is
+  // read as an answer lost**, so it takes the handling every call gives a lost answer (a reward's
+  // "unknown" sentence, a sign-in kept and asked again). That is a failed response (not 2xx)
+  // whose body is not JSON or carries no `said`: `wlx serve`'s 500 for a handler that raised
+  // has `{"error": ...}` (XC-042). **Any answer with a `said` is read as it was before, whatever
+  // its status**: 503 busy, and 504 not delivered or a reward's unknown, are the rig's own
+  // words, which a trainer needs as they are. The one place every call to this rig reads its
+  // answer through.
+  function answerOf(response) {
+    return response.json().then(function (answer) {
+      if (!response.ok && !(answer && typeof answer.said === "string")) {
+        throw new Error("wlx serve faulted");
+      }
+      return answer;
+    });
+  }
   // /whoami with the held token. Answers true when it confirms the sign-in. A refusal
   // is read by its reason word (the plan's Ruling 8): `expired` renews (once: a token
   // just renewed is not expired), `clock` and `no_keys` keep the sign-in, say why and,
@@ -2345,7 +2361,7 @@ _SCRIPT = """
       cache: "no-store",
       headers: { "Content-Type": "application/json", "Authorization": "Bearer " + signin.access },
       body: "{}"
-    }).then(function (response) { return response.json(); }).then(function (answer) {
+    }).then(answerOf).then(function (answer) {
       if (mine !== generation) { return false; }
       if (answer.status === "signed_in") {
         signin.name = answer.name;
@@ -2736,9 +2752,7 @@ _SCRIPT = """
       headers: headers,
       body: JSON.stringify(command),
       cache: "no-store"
-    }).then(function (response) {
-      return response.json();
-    }).then(function (answer) {
+    }).then(answerOf).then(function (answer) {
       tell(answer.said, answer.status === "sent" || answer.status === "signaled" ? "ok" : "crit");
       // A refusal for the token (the plan's Ruling 8): never re-sent; renew, or sign out.
       if (answer.reason === "expired") {
@@ -3187,7 +3201,7 @@ _SCRIPT = """
           cache: "no-store",
           headers: { "Content-Type": "application/json" },
           body: "{}"
-        }).then(function (response) { return response.json(); }).then(function (answer) {
+        }).then(answerOf).then(function (answer) {
           if (answer.reason === "no_token") { window.location.reload(); return; }
           setTimeout(recheck, RECHECK_MS);
         }, function () { setTimeout(recheck, RECHECK_MS); });
