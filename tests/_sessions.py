@@ -228,8 +228,9 @@ def stimuli_task(folder: Path, *, name: str = "stimuli") -> Path:
 def cue_task(folder: Path, *, name: str = "cue") -> Path:
     """The reference detection task showing a cue beside its fixation point in `await_fix`, placed
     by a setting, `cue_pos`, whose choices are two polar positions and which declares no start, so
-    a run that gives none leaves it without a value; no window is on the cue (the review of XC-399,
-    I1, its probe). Engine test material, run only in the simulator."""
+    a run that gives none would leave it without a value, and is refused before it starts (XC-415;
+    the PI, 2026-10-30, "Refuse to start"); no window is on the cue (the review of XC-399, I1, its
+    probe). Engine test material, run only in the simulator."""
     text = Path("tasks/fixation_detection.py").read_text()
     for old, new in (
         ("from wl_xcon.task import (", "from wl_xcon.task import (\n    Polar,"),

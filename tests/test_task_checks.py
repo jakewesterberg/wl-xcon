@@ -34,6 +34,8 @@ from wl_xcon.task import (
     Update,
     Window,
     Trial,
+    placements,
+    position_of,
 )
 from wl_xcon.check import _declared_window_names, check
 from wl_xcon.findings import SESSION_KINDS
@@ -1114,15 +1116,90 @@ def test_an_updates_per_eye_position_with_a_choice_no_position_is_refused(eye):
     assert "updates stimulus 's'" in finding.detail and f"{eye}-eye" in finding.detail
 
 
-def test_positions_that_are_all_positions_are_not_refused_and_a_choice_of_none_is_left_alone():
-    """The rule refuses a kind of value no place takes. A setting that can hold no value (None)
-    is a question put to the PI (XC-415, narrowed)."""
+def test_positions_that_are_all_positions_are_not_refused():
+    """The rule refuses a kind of value no place takes, and nothing else."""
     ok = [Param("p", unit="deg", choices=(Polar(8.0, 0.0), (1.0, 2.0), [3.0, 4.0]))]
     assert _place_faults(_windowed(P("p"), ok)) == []
     assert _place_faults(_showing((P("p"), 0.0), [Param("p", unit="deg", choices=(1.0, 2))])) == []
-    none = [Param("p", unit="deg", choices=(8.0, None))]
-    assert _place_faults(_windowed(Polar(P("p"), 0.0), none)) == []
-    assert _place_faults(_showing(P("p"), [Param("p", unit="deg", choices=(None,))])) == []
+
+
+# --- XC-415: a place whose setting can hold no value is refused at load -------------------------
+# The PI, 2026-10-30, asked whether a run whose stimulus is placed by a setting nobody has given a
+# value should refuse to start: "Refuse to start (Recommended)" ("A stimulus that cannot be drawn
+# is a case where the run cannot proceed").
+
+#: What each place is, and what a place with no value cannot be.
+_NOUN = {"window": ("window", "judged"), "show": ("stimulus", "drawn"),
+         "update": ("stimulus", "drawn")}
+_SUBJECT = {"window": "window 'w'", "show": "state 'show' shows stimulus 's'",
+            "update": "state 'update0' updates stimulus 's'"}
+#: A choice each kind of place can take, beside `None`.
+_SOME = {"whole": Polar(8.0, 0.0), "coordinate": 1.0, "eccentricity": 8.0, "direction": 0.0}
+
+
+@pytest.mark.parametrize("kind", ["whole", "coordinate", "eccentricity", "direction"])
+@pytest.mark.parametrize("place", ["window", "show", "update"])
+def test_a_place_whose_setting_can_hold_no_value_is_refused_with_or_without_the_rigs_field(
+        place, kind):
+    """XC-415: a window, a stimulus or an update placed by a setting with `None` among its choices
+    loaded clean -- a direction at every place, a window of every kind, and every place without the
+    rig's field -- and raised where the place is read (`task.position_of`: `gaze._placed` as the
+    window is judged, `screen.resolve` as the stimulus is drawn, `task.placements` as an array's
+    world is built). It is refused at load, in one sentence naming the setting and the place, the
+    same with the rig's field as without; check 8 leaves the choice to that sentence, so none says
+    the place "cannot be bounded" (for a coordinate or an eccentricity it said the setting had no
+    choices check 8 could measure)."""
+    at, params = _setting(kind, (_SOME[kind], None))
+    trial = {"window": lambda: _windowed(at, params), "show": lambda: _showing(at, params),
+             "update": lambda: _updating(Update("s", at=at), params=params)}[place]()
+    with pytest.raises(TypeError):
+        position_of(at, {"p": None})  # how the place is read when it is judged or drawn
+    noun, verb = _NOUN[place]
+    for geometry in (None, GEOMETRY, DIRECT):
+        found = [f for f in check(trial, geometry=geometry) if "'p'" in f.detail]
+        assert [f.code for f in found] == ["bad-placement"], geometry
+        (finding,) = found
+        assert finding.detail.startswith(
+            f"{_SUBJECT[place]}: its {_PART[kind]} is parameter 'p', which can be None, ")
+        assert f"a {noun} placed by no value cannot be {verb}" in finding.detail
+        assert finding.detail.endswith("remove None from 'p''s choices")
+        assert "cannot be bounded" not in finding.detail
+
+
+def test_an_arrays_position_whose_direction_can_hold_no_value_is_refused():
+    """XC-415: `Update("search", at=Polar(5.0, P("where")))` with `None` among its choices loaded
+    clean, and raised when the world was built (`task.placements`, XC-402)."""
+    trial = _searching([Param("where", unit="deg", choices=(0.0, None))], 4, 0)
+    trial = replace(trial, states=[*trial.states, State(
+        "later", enter=[Update("search", at=Polar(5.0, P("where")))],
+        go=[On(After(1.0), Outcome.CORRECT)])])
+    with pytest.raises(TypeError):
+        placements(trial, {"where": None})
+    for geometry in (None, GEOMETRY, DIRECT):
+        (finding,) = [f for f in check(trial, geometry=geometry) if "'where'" in f.detail]
+        assert finding.code == "bad-placement"
+        assert finding.detail.startswith(
+            "state 'later' updates stimulus 'search': its direction is parameter 'where', which "
+            "can be None, ")
+
+
+def test_a_per_eye_position_whose_setting_can_hold_no_value_is_refused():
+    trial = _showing((0.0, 0.0), [Param("p", unit="deg", choices=(0.0, None))],
+                     at_left=Polar(8.0, P("p")), at_right=(1.0, 0.0))
+    (finding,) = _place_faults(replace(trial, view="stereoscope"))
+    assert "its left-eye direction is parameter 'p', which can be None" in finding.detail
+
+
+def test_a_setting_that_can_only_hold_no_value_is_refused_once_wherever_it_places():
+    """`choices=(None,)`: nothing for check 8 to measure, and one sentence for each place."""
+    params = [Param("p", unit="deg", choices=(None,))]
+    trial = replace(_showing(P("p"), params),
+                    windows=[Window("w", at=Polar(8.0, P("p")), radius=1.0, on="s")])
+    for geometry in (None, GEOMETRY):
+        found = [f for f in check(trial, geometry=geometry) if "'p'" in f.detail]
+        assert sorted(f.detail.split(":")[0] for f in found) == [
+            "state 'show' shows stimulus 's'", "window 'w'"], geometry
+        assert {f.code for f in found} == {"bad-placement"}
 
 
 _UNREAL_PARTS = [float("inf"), float("nan"), 10**400]

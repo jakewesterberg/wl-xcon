@@ -35,7 +35,7 @@ from wl_xcon import link as _link
 from wl_xcon import warnlist
 from wl_xcon.actor import Actor, Box, Member
 from wl_xcon.bounds import Exceeded
-from wl_xcon.check import beyond_range, check_task, parameters_used
+from wl_xcon.check import beyond_range, check_task, parameters_used, unplaced
 from wl_xcon.cli import _load_bounds, _load_subject_settings, _load_task, _setup_words
 from wl_xcon.findings import Finding
 from wl_xcon.link import Preflight, PreflightItem
@@ -236,13 +236,16 @@ def values(task: Task | None, given: dict, refused=(), plan: str | None = None) 
     never this item's fail, unless it breaks the run); and **for a number the task uses that
     nothing gives a value** (the
     b3a-2 plan, decision 2): a run started without one faults at its first trial
-    (`run._resolve`), after `RUN_START`, so it is refused here instead, naming each. A
-    categorical parameter is an appearance, which nothing in this build resolves before
-    a trial needs it -- S4's display is not built -- so one left unset is not refused.
+    (`run._resolve`), after `RUN_START`, so it is refused here instead, naming each. **And for
+    a categorical parameter that places a window, a stimulus or an update that nothing gives a
+    value** (`check.unplaced`; XC-415; the PI, 2026-10-30: "Refuse to start", "A stimulus that
+    cannot be drawn is a case where the run cannot proceed"), naming it and where it places: a
+    whole position is given by a plan's condition or not at all, since no starting value and
+    nothing over the wire is one. One that places nothing, an appearance, is not refused unset.
     Checked as `Session.set` checks a live value, non-finite numbers included. **Nothing
     a task's declarations hold raises out of here.** **A run of a plan** (engine build C2b)
     needs the numbers of the structures its conditions play only, and one that every
-    condition playing a structure that uses it sets is given."""
+    condition playing a structure that uses it sets is given; so is a place."""
     if task is None:
         return PreflightItem(
             STARTING_VALUES, FAIL, "the task did not load, so its values cannot be checked"
@@ -255,8 +258,8 @@ def values(task: Task | None, given: dict, refused=(), plan: str | None = None) 
         # The numbers of every structure the run can play: a plain run's, every structure's,
         # failing closed (the engine C1 plan's call 15); a plan's, the structures its conditions
         # play (engine build C2b), less what each condition playing it sets.
-        conditions = ([c for block in task.plans[plan].blocks for c in block.conditions]
-                      if plan is not None and plan in task.plans else None)
+        blocks = task.plans[plan].blocks if plan is not None and plan in task.plans else None
+        conditions = None if blocks is None else [c for block in blocks for c in block.conditions]
         if conditions is None:
             used = frozenset().union(*(parameters_used(s) for s in task.structures.values()))
         else:
@@ -265,6 +268,9 @@ def values(task: Task | None, given: dict, refused=(), plan: str | None = None) 
                 for name in parameters_used(task.structures[c.structure or task.default])
                 if name not in c.values
             )
+        merged = {**starts, **given}
+        # Each place nothing gives a value, by its setting's name (XC-415).
+        unset = dict(unplaced(task, merged, blocks))
     except Exception as broken:  # noqa: BLE001 -- a task's declarations are code's output
         return PreflightItem(
             STARTING_VALUES,
@@ -272,7 +278,6 @@ def values(task: Task | None, given: dict, refused=(), plan: str | None = None) 
             f"the task's parameter declarations could not be read: "
             f"{type(broken).__name__}: {broken}",
         )
-    merged = {**starts, **given}
     wrong, outside = [], []
     for name, value in merged.items():
         param = declared.get(name)
@@ -308,6 +313,11 @@ def values(task: Task | None, given: dict, refused=(), plan: str | None = None) 
                 f"{name!r} is used by the task and has no starting value: the task "
                 f"declares none, and none was sent"
             )
+        elif name in unset and name not in merged:
+            # A setting with choices left unset. One given a value none of them, `None` among
+            # them, failed above, as `Session.set` refuses it; one with `None` among its choices
+            # fails the task checks (`bad-placement`).
+            wrong.append(unset[name])
     wrong += [f"{f.code}: {f.detail}" for f in refused]
     if wrong:
         return PreflightItem(STARTING_VALUES, FAIL, "; ".join(wrong))

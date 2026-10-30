@@ -1396,11 +1396,15 @@ def _points(at: object, params: dict[str, Param]) -> list[tuple[float, float]]:
     parameter** (`at=P("pos")`) is the points it offers as choices, a `Polar` of numbers
     converted (`polar_deg`); indexing it as a pair was a `TypeError` that would have crashed
     `taskd`'s load (XC-036). A range, or choices that are not points, names no place to test.
+    **A choice of `None`, of the whole or of a part, is left out**: a setting that can hold no
+    value is refused in a sentence of its own (`_position_kind_faults`; XC-415), with the rig's
+    field or without, so check 8 measures the choices that are values and never says it "cannot
+    be bounded" for want of one.
     """
     if isinstance(at, P):
         # Each choice a point as `task.is_point` reads one, the console's test too (XC-401's
         # second fix round, N1), so the two cannot read a setting differently.
-        offered = _domain(at, params)
+        offered = [point for point in _domain(at, params) if point is not None]
         for point in offered:
             if not is_point(point):
                 raise _Unmeasurable(at.name, point)
@@ -1427,7 +1431,17 @@ def _points(at: object, params: dict[str, Param]) -> list[tuple[float, float]]:
                 for es in _polar_sides(at.eccentricity, params, bounded=True)
                 for ds in _polar_sides(at.direction, params, bounded=False)
                 for xs, ys in (polar_box_deg(es, ds),) for x in xs for y in ys]
-    return [(x, y) for x in _numbers(at[0], params) for y in _numbers(at[1], params)]
+    return [(x, y) for x in _coordinates(at[0], params) for y in _coordinates(at[1], params)]
+
+
+def _coordinates(value: object, params: dict[str, Param]) -> list[float]:
+    """`_numbers`, for a coordinate of a position: a choice of `None` is left out (`_points`)."""
+    if isinstance(value, P) and value.name in params and params[value.name].choices:
+        offered = [c for c in params[value.name].choices if c is not None]
+        if not all(_is_number(c) for c in offered):
+            raise _Unbounded(value.name)
+        return [float(c) for c in offered]
+    return _numbers(value, params)
 
 
 def _polar_sides(
@@ -1435,14 +1449,16 @@ def _polar_sides(
 ) -> list[tuple[float, float]]:
     """The values a polar position's eccentricity or direction can take, as intervals: a literal
     or each choice a point, a range one interval. One check 8 cannot bound is `_Unbounded`, as
-    every other is, but for a direction (`bounded` false), which without bounds is every one."""
+    every other is, but for a direction (`bounded` false), which without bounds is every one. A
+    choice of `None` is left out (`_points`)."""
     if not isinstance(value, P):
         if not (_is_number(value) and _real(value)):
             raise _Unmeasurable(None, value)
         return [(float(value), float(value))]
     param = params.get(value.name)
-    if param is not None and param.choices and all(_finite(c) for c in param.choices):
-        return [(float(c), float(c)) for c in param.choices]
+    offered = [c for c in param.choices if c is not None] if param is not None else []
+    if param is not None and param.choices and all(_finite(c) for c in offered):
+        return [(float(c), float(c)) for c in offered]
     if (param is not None and not param.choices and _finite(param.low)
             and _finite(param.high)):
         return [(float(param.low), float(param.high))]
@@ -4328,20 +4344,133 @@ def _placement_faults(trial: Trial) -> list[Finding]:
     return findings
 
 
+class _Written(NamedTuple):
+    """One place a position is written (`_written`): `subject`, the words a load-time finding
+    opens with; `what`, `"position"` or one eye's; `at`, as written; `whose`, the thing placed, as a
+    run-start sentence names it; and whether it is a window's, judged, or a stimulus's, drawn."""
+
+    subject: str
+    what: str
+    at: object
+    whose: str
+    window: bool
+
+
+def _written(trial: Trial) -> "list[_Written]":
+    """**Every place a position is written in `trial`**, in order: each window's center
+    (`gaze._placed` judges it), each stimulus's `at`, `at_left` and `at_right` as a `Show` gives
+    them (`screen.resolve` draws them), and each an `Update` gives, which is an array's position too
+    (`Update("search", at=P("where"))`; the array's objects are placed about it when its world is
+    built, `task.placements`, XC-402). All are read through `task.position_of`."""
+    found: list[_Written] = []
+    for window in trial.windows:
+        if isinstance(window, Window):
+            found.append(_Written(f"window {window.name!r}", "position", window.at,
+                                  f"window {window.name!r}", True))
+    for state, action in actions_of(trial):
+        if isinstance(action, Show):
+            stimulus = action.stimulus
+            for what, at in (("position", stimulus.at), ("left-eye position", stimulus.at_left),
+                             ("right-eye position", stimulus.at_right)):
+                if at is not None:
+                    found.append(_Written(
+                        f"state {state!r} shows stimulus {stimulus.name!r}", what, at,
+                        f"stimulus {stimulus.name!r} as state {state!r} shows it", False))
+        elif isinstance(action, Update):
+            for field, what in (("at", "position"), ("at_left", "left-eye position"),
+                                ("at_right", "right-eye position")):
+                at = action.changes().get(field)
+                if at is not None:
+                    found.append(_Written(
+                        f"state {state!r} updates stimulus {action.stimulus!r}", what, at,
+                        f"stimulus {action.stimulus!r} as state {state!r} updates it", False))
+    return found
+
+
+def _position_parts(at: object) -> "list[tuple[str, object, bool]]":
+    """What a position is made of: (name of the part, its value, whether it is the whole)."""
+    if isinstance(at, P):
+        return [("position", at, True)]
+    if isinstance(at, Polar):
+        return [("eccentricity", at.eccentricity, False), ("direction", at.direction, False)]
+    if isinstance(at, (tuple, list)) and len(at) == 2:
+        return [("x coordinate", at[0], False), ("y coordinate", at[1], False)]
+    return [("position", at, True)]
+
+
+def _unplaceable(window: bool) -> str:
+    """What a place with no value cannot be, and why the run cannot have one (XC-415; the PI,
+    2026-10-30: "A stimulus that cannot be drawn is a case where the run cannot proceed")."""
+    return ("a window placed by no value cannot be judged" if window
+            else "a stimulus placed by no value cannot be drawn")
+
+
+def placing(trial: Trial) -> "dict[str, tuple[str, bool]]":
+    """**Each setting that places something in `trial`**, by name: the first place it fills, in
+    words ("the direction of window 'w'"), and whether that place is a window's. A setting placing a
+    whole position or a part of one (an eccentricity, a direction, a coordinate) at any place
+    `_written` lists. What a run must give a value before it starts (`unplaced`)."""
+    found: dict[str, tuple[str, bool]] = {}
+    for place in _written(trial):
+        eye = place.what[:-len("position")]  # "left-eye ", "right-eye " or ""
+        for part, value, whole in _position_parts(place.at):
+            if isinstance(value, P) and value.name not in found:
+                found[value.name] = (f"the {place.what if whole else eye + part} of {place.whose}",
+                                     place.window)
+    return found
+
+
+def unplaced(task: Task, values: dict, blocks=None) -> "list[tuple[str, str]]":
+    """**A place a run would start with no value for** (XC-415; the PI, 2026-10-30, asked whether
+    a run whose stimulus is placed by a setting nobody gave a value should refuse to start: "Refuse
+    to start (Recommended)", "A stimulus that cannot be drawn is a case where the run cannot
+    proceed"): each setting that places a window, a stimulus or an update (`placing`) in a structure
+    the run can play, that `values` -- the task's starting values under the run's -- holds no value
+    for, or holds `None`, and that the condition playing the structure does not set. `blocks` are
+    the plan's the run plays; `None` for a plain run, which checks every structure the task has,
+    failing closed, as `preflight.values` checks its numbers. As (setting, sentence), one for each
+    setting, the first place it fills named. Read by `preflight.values` and by `Session.run`, its
+    backstop for a caller that took no pre-flight (`wlx run`, XC-159).
+
+    A setting with `None` among its choices is refused at load (`_position_kind_faults`), and a
+    condition sets only a choice of its setting or a finite number (`_plan_faults`), so a live edit
+    (`Session.set`, which takes only a choice or a number) and a condition cannot make a place have
+    no value once a run has started; this refuses one it would start with."""
+    plays = ([(name, {}, "") for name in task.structures] if blocks is None else [
+        (condition.structure or task.default, condition.values,
+         f" in condition {condition.name!r} of block {block.name!r}")
+        for block in blocks for condition in block.conditions])
+    found: dict[str, str] = {}
+    for structure, sets, where in plays:
+        for name, (place, window) in placing(task.structures[structure]).items():
+            if name in found or name in sets or values.get(name) is not None:
+                continue
+            said = (f"setting {name!r} places {place} and the run's value of it is None"
+                    if name in values else
+                    f"setting {name!r} places {place} and has no value{where}: neither the task"
+                    + (", the run nor the condition" if where else " nor the run")
+                    + " gives it one")
+            found[name] = f"{said}, and {_unplaceable(window)}, so the run does not start"
+    return list(found.items())
+
+
 def _position_kind_faults(trial: Trial) -> list[Finding]:
     """**A position that can be no position** (XC-415, XC-421): refused at load, as the session
-    would stop mid-run where the value met it. One rule for every place a position is written: a
-    window's center (`gaze._placed`), a stimulus's `at`, `at_left` and `at_right`
+    would stop mid-run where the value met it. One rule for every place a position is written
+    (`_written`): a window's center (`gaze._placed`), a stimulus's `at`, `at_left` and `at_right`
     (`screen.resolve`), each `Update`'s, which is an array's position too (`Update("search",
     at=P("where"))`; the array's objects are placed about it, XC-402). All read it through
     `task.position_of`. A whole-position setting's every choice is a point (`task.is_point`), a
     coordinate's, an eccentricity's and a direction's a number, and **none has an infinity, a NaN or
     an integer past a float's range in it**; a literal that is no position is refused the same.
     Code `bad-placement`, as a stimulus's opacity that is no number is. **A choice of `None` is
-    left out**: whether a run whose stimulus is placed by a setting with no value is refused at its
-    start is a question put to the PI (XC-415, narrowed). **A setting with no choices (a free
-    value) is refused where a whole position goes**, since no path outside code gives one a position
-    (XC-422); where a number goes it is unchanged."""
+    refused too** (XC-415; the PI, 2026-10-30: "Refuse to start (Recommended)", "A stimulus that
+    cannot be drawn is a case where the run cannot proceed"): a setting that can hold no value
+    places a window that cannot be judged or a stimulus that cannot be drawn, with the rig's field
+    or without it; check 8 leaves such a choice to this sentence (`_points`, `_polar_sides`). A run
+    that would start with a place's setting unset is refused as it starts (`unplaced`). **A setting
+    with no choices (a free value) is refused where a whole position goes**, since no path outside
+    code gives one a position (XC-422); where a number goes it is unchanged."""
     params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
 
@@ -4350,18 +4479,8 @@ def _position_kind_faults(trial: Trial) -> list[Finding]:
             f"{subject}: its {what} is parameter {name!r}, which can be {_said(choice)}. "
             f"{why}; {fix}")))
 
-    def parts(at: object) -> "list[tuple[str, object, bool]]":
-        """What a position is made of: (name of the part, its value, whether it is the whole)."""
-        if isinstance(at, P):
-            return [("position", at, True)]
-        if isinstance(at, Polar):
-            return [("eccentricity", at.eccentricity, False), ("direction", at.direction, False)]
-        if isinstance(at, (tuple, list)) and len(at) == 2:
-            return [("x coordinate", at[0], False), ("y coordinate", at[1], False)]
-        return [("position", at, True)]
-
-    def place(subject: str, what: str, at: object) -> None:
-        for part, value, whole in parts(at):
+    def place(subject: str, what: str, at: object, window: bool) -> None:
+        for part, value, whole in _position_parts(at):
             eye = what[:-len("position")]  # "left-eye ", "right-eye " or ""
             label = what if whole else eye + part
             if not isinstance(value, P):
@@ -4386,8 +4505,11 @@ def _position_kind_faults(trial: Trial) -> list[Finding]:
                 continue
             for choice in (declared.choices if declared is not None else ()):
                 if choice is None:
-                    continue
-                if whole:
+                    findings.append(Finding("bad-placement", (
+                        f"{subject}: its {label} is parameter {value.name!r}, which can be None, "
+                        f"and {_unplaceable(window)}, so the run cannot proceed; remove None from "
+                        f"{value.name!r}'s choices")))
+                elif whole:
                     if not is_point(choice):
                         fault(subject, label, value.name, choice, "That is not a position (a Polar "
                               "of two numbers, or an (x, y) pair of two)", f"give {value.name!r} "
@@ -4410,26 +4532,17 @@ def _position_kind_faults(trial: Trial) -> list[Finding]:
                     continue
                 break
 
-    for window in trial.windows:
-        if isinstance(window, Window):
-            place(f"window {window.name!r}", "position", window.at)
-            if not isinstance(window.radius, P) and not _finite(window.radius):
-                findings.append(Finding("bad-placement", (
-                    f"window {window.name!r}: its radius is {_said(window.radius)}, which is not "
-                    f"a finite number of degrees")))
-    for state, action in actions_of(trial):
-        if isinstance(action, Show):
-            stimulus = action.stimulus
-            for what, at in (("position", stimulus.at), ("left-eye position", stimulus.at_left),
-                             ("right-eye position", stimulus.at_right)):
-                if at is not None:
-                    place(f"state {state!r} shows stimulus {stimulus.name!r}", what, at)
-        elif isinstance(action, Update):
-            for field, what in (("at", "position"), ("at_left", "left-eye position"),
-                                ("at_right", "right-eye position")):
-                at = action.changes().get(field)
-                if at is not None:
-                    place(f"state {state!r} updates stimulus {action.stimulus!r}", what, at)
+    written = _written(trial)
+    windows = [window for window in trial.windows if isinstance(window, Window)]
+    # The windows' places come first, one each, and each window's radius is said after its place.
+    for window, its in zip(windows, written):
+        place(its.subject, its.what, its.at, its.window)
+        if not isinstance(window.radius, P) and not _finite(window.radius):
+            findings.append(Finding("bad-placement", (
+                f"window {window.name!r}: its radius is {_said(window.radius)}, which is not "
+                f"a finite number of degrees")))
+    for its in written[len(windows):]:
+        place(its.subject, its.what, its.at, its.window)
     return findings
 
 

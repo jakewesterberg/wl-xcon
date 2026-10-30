@@ -1225,13 +1225,18 @@ def test_each_trials_row_says_where_every_stimulus_it_showed_was_in_true_eccentr
             ("show", None), ("update", ["at"])]
 
 
-def test_a_stimulus_whose_position_setting_has_no_value_never_costs_a_trial_its_line(tmp_path):
+def test_a_stimulus_whose_position_cannot_be_read_never_costs_a_trial_its_line(tmp_path):
     """The review of XC-399, I1, its probe: a cue placed by a setting the run left without a value,
-    with no window on it, ran on every trial before its position was recorded. The record never
+    with no window on it, ran on every trial before its position was recorded. Since the PI's
+    answer of 2026-10-30 ("Refuse to start"; XC-415) a run that would start so is refused
+    (`test_a_run_whose_place_has_no_value_is_refused_before_it_starts`), so the record's guard is
+    held here with what `wlx run` can still bind to the cue's setting: a number, which is no
+    position (`wlx run --set cue_pos=5`; `wlx run` takes no pre-flight, XC-159). The record never
     loses a line: every trial that started has its line, every mL the trials commanded is on one,
-    and the cue's entry has no position and says why. The pre-flight is not changed here."""
+    and the cue's entry has no position and says why."""
     path = _sessions.cue_task(tmp_path)
-    session = _session(_spec(tmp_path, task=str(path), trials=8))
+    session = _session(_spec(tmp_path, task=str(path), trials=8,
+                             values={**VALUES, "cue_pos": 5.0}))
 
     session.run()
 
@@ -1244,7 +1249,8 @@ def test_a_stimulus_whose_position_setting_has_no_value_never_costs_a_trial_its_
     for row in rows:
         (cue,) = [e for e in row["stimuli"] if e["name"] == "cue"]
         assert [cue[k] for k in ("eccentricity", "direction", "x", "y")] == [None] * 4
-        assert (cue["unresolved"], cue["drawn"]) == ("setting 'cue_pos' has no value", True)
+        assert cue["unresolved"].startswith("its position P(name='cue_pos') could not be read")
+        assert cue["drawn"] is True
 
 
 def test_a_run_whose_lines_hold_an_unresolved_stimulus_says_so_once_on_the_changes_feed(tmp_path):
@@ -1252,18 +1258,22 @@ def test_a_run_whose_lines_hold_an_unresolved_stimulus_says_so_once_on_the_chang
     record cannot place is silent at the rig unless said, so the first trial whose line holds one
     puts one warning on the changes feed, naming the stimulus, the setting and how many of its
     entries were unresolved -- each once a run, never a trial, so a run of such trials is not a
-    flood; a run whose lines resolve says nothing."""
+    flood; a run whose lines resolve says nothing. The cue's setting holds a number, no position,
+    as `wlx run --set` can bind (XC-159): a run that would start with it unset is refused (XC-415)."""
     path = _sessions.cue_task(tmp_path)
     session = _service_session(tmp_path)
+    unread = {**VALUES, "cue_pos": 5.0}
 
-    session.run(RunSpec(task=str(path), trials=3, seed=2, values=dict(VALUES)))
-    session.run(RunSpec(task=str(path), trials=2, seed=3, values=dict(VALUES)))
+    session.run(RunSpec(task=str(path), trials=3, seed=2, values=dict(unread)))
+    session.run(RunSpec(task=str(path), trials=2, seed=3, values=dict(unread)))
     session.run(_run_spec(trials=2))
 
+    (cue,) = [e for e in _trial_rows(session)[0]["stimuli"] if e["name"] == "cue"]
+    assert cue["unresolved"].startswith("its position P(name='cue_pos') could not be read")
     said = [said for kind, by, _, said in session.controls
             if kind == "warning" and by is None and "could not resolve" in said]
     assert said == [
-        "trial 0's line could not resolve 1 stimulus entry: cue (setting 'cue_pos' has no value); "
+        f"trial 0's line could not resolve 1 stimulus entry: cue ({cue['unresolved']}); "
         "it is recorded so, null where unresolved, and each stimulus is said once a run for each "
         "reason",
     ] * 2
@@ -1274,7 +1284,9 @@ def test_each_new_unresolved_stimulus_is_said_once_a_run_and_a_repeat_is_not(tmp
     """The scoped check of XC-399's second fix round: a later line can hold a different unresolved
     stimulus -- another condition leaving another setting without a value -- so the feed says each
     (stimulus, reason) once a run, naming what is new, and a repeat of one already said gives
-    nothing. A plan's first block leaves the cue's setting unset and its second the probe's."""
+    nothing. The run gives both settings a number, no position (as `wlx run --set` can, XC-159; a
+    run that would start with either unset is refused, XC-415); a plan's first block sets the
+    probe's, leaving the cue unread, and its second the cue's, leaving the probe."""
     path = _sessions.cue_task(tmp_path)
     text = path.read_text()
     for old, new in (
@@ -1294,9 +1306,10 @@ def test_each_new_unresolved_stimulus_is_said_once_a_run_and_a_repeat_is_not(tmp
         "TASK = _cue_dataclasses.replace(TASK, meanings={\n"
         "    **TASK.meanings, 'probe_pos': Meaning(NOT_DIFFICULTY, STIMULUS, note='a probe')},\n"
         "    plans={'two': Plan([\n"
-        "        Block('cue unset', [Condition('probe set', {'probe_pos': Polar(8.0, 90.0)}, target=3)]),\n"
-        "        Block('probe unset', [Condition('cue set', {'cue_pos': Polar(8.0, 0.0)}, target=3)])])})\n"))
-    session = _session(_spec(tmp_path, task=str(path), plan="two", trials=400))
+        "        Block('cue unread', [Condition('probe set', {'probe_pos': Polar(8.0, 90.0)}, target=3)]),\n"
+        "        Block('probe unread', [Condition('cue set', {'cue_pos': Polar(8.0, 0.0)}, target=3)])])})\n"))
+    session = _session(_spec(tmp_path, task=str(path), plan="two", trials=400,
+                             values={**VALUES, "cue_pos": 5.0, "probe_pos": 5.0}))
 
     session.run()
 
@@ -1308,7 +1321,80 @@ def test_each_new_unresolved_stimulus_is_said_once_a_run_and_a_repeat_is_not(tmp
             if kind == "warning" and by is None and "could not resolve" in said]
     assert [(text.split("'s line")[0], "cue (" in text, "probe (" in text) for text in said] == [
         ("trial 0", True, False), (f"trial {first_probe}", False, True)]
-    assert "probe (setting 'probe_pos' has no value)" in said[1]
+    assert "probe (its position P(name='probe_pos') could not be read" in said[1]
+
+
+def _polar_planned(tmp_path, plans: str) -> Path:
+    """`_sessions.polar_task`, its target window and target placed by `target_pos`, with `plans`
+    (Python source for its plans dict)."""
+    path = _sessions.polar_task(tmp_path)
+    path.write_text(path.read_text() + (
+        "\nfrom wl_xcon.task import Block, Condition, Plan\n"
+        f"TASK = _polar_dataclasses.replace(TASK, plans={plans})\n"))
+    return path
+
+
+@pytest.mark.parametrize("case, said", [
+    ("cue", "setting 'cue_pos' places the position of stimulus 'cue' as state 'await_fix' shows "
+            "it and has no value: neither the task nor the run gives it one, and a stimulus "
+            "placed by no value cannot be drawn, so the run does not start"),
+    ("target", "setting 'target_pos' places the position of window 'target' and has no value: "
+               "neither the task nor the run gives it one, and a window placed by no value cannot "
+               "be judged, so the run does not start"),
+    ("none", "setting 'target_x' places the x coordinate of window 'target' and the run's value "
+             "of it is None, and a window placed by no value cannot be judged"),
+    ("plan", "setting 'target_pos' places the position of window 'target' and has no value in "
+             "condition 'far' of block 'b': neither the task, the run nor the condition gives it "
+             "one"),
+])
+def test_a_run_whose_place_has_no_value_is_refused_before_it_starts(tmp_path, case, said):
+    """XC-415 (the PI, 2026-10-30, asked whether a run whose stimulus is placed by a setting nobody
+    gave a value should refuse to start: "Refuse to start"; "A stimulus that cannot be drawn is a
+    case where the run cannot proceed"): a run that would start with a setting that places a window,
+    a stimulus or an update holding no value -- one neither the task's starting values nor the run's
+    give, as a whole position never is but by a plan's condition, or one given `None` -- is refused
+    before it is numbered, strobed or written. `Session.run`'s refusal is the backstop for `wlx
+    run`, which takes no pre-flight (XC-159), and for every caller; `wlx taskd`'s pre-flight refuses
+    it first (`preflight.values`). Until then the run started: its stimulus could not be drawn,
+    and its window raised when it was judged. A plan's run needs it given only where a condition
+    playing the structure sets none."""
+    if case == "cue":
+        spec = _spec(tmp_path, task=str(_sessions.cue_task(tmp_path)), trials=4)
+    elif case == "target":
+        spec = _spec(tmp_path, task=str(_sessions.polar_task(tmp_path)), trials=4)
+    elif case == "none":
+        spec = _spec(tmp_path, trials=4, values={**VALUES, "target_x": None})
+    else:
+        path = _polar_planned(tmp_path, (
+            '{"p": Plan([Block("b", [Condition("near", {"target_pos": Polar(8.0, 0.0)}, '
+            'target=2), Condition("far", {}, target=2)])])}'))
+        spec = _spec(tmp_path, task=str(path), plan="p", trials=400)
+    session = _session(spec)
+    before = list(session.card.codes)  # the head fixed, as `_session` marks it
+
+    with pytest.raises(SystemExit) as refused:
+        session.run()
+
+    assert refused.value.code.startswith(f"task refused, run not started: {said}")
+    assert session.run_index is None
+    assert session.welfare.commanded == 0.0
+    assert session.card.codes == before
+    assert not (session.directory / "runs.jsonl").exists()
+    assert not (session.directory / "trials.jsonl").exists()
+
+
+def test_a_place_every_condition_playing_it_sets_needs_no_value_from_the_run(tmp_path):
+    """XC-415: a whole position is given by a plan's conditions, so a plan whose every condition
+    sets it runs with none given, to its end."""
+    path = _polar_planned(tmp_path, (
+        '{"p": Plan([Block("b", [Condition("near", {"target_pos": Polar(8.0, 0.0)}, target=2), '
+        'Condition("far", {"target_pos": Polar(8.0, 45.0)}, target=2)])])}'))
+    session = _session(_spec(tmp_path, task=str(path), plan="p", trials=400))
+
+    session.run()
+
+    assert session.stop_kind == "completed" and session.run_index == 0
+    assert {row["params"]["target_pos"]["direction"] for row in _trial_rows(session)} == {0.0, 45.0}
 
 
 def test_a_settings_polar_value_reaches_the_console_polar_first_through_the_wire(tmp_path):

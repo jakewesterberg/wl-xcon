@@ -47,7 +47,7 @@ from pathlib import Path
 from wl_xcon import link as _link
 from wl_xcon.actor import Actor, to_map_or_none
 from wl_xcon.bounds import Bounds, Exceeded, _finite
-from wl_xcon.check import beyond_range, check_task
+from wl_xcon.check import beyond_range, check_task, unplaced
 from wl_xcon.cli import _clock, _load_allocation, _load_task, _printable, _shown
 from wl_xcon.codes import BLOCK_END, RUN_END_MARKER, TRIAL_END, TRIAL_START, Allocation
 from wl_xcon.declarations import canonical, content_hash
@@ -2579,6 +2579,17 @@ class Session:
         # decision 1): each declared `Param.start` that the run was not given, merged below.
         starts = {param.name: param.start for param in task.params if param.start is not None}
         given = dict(run.values)
+        # **A place with no value refuses the run before it starts** (XC-415; the PI, 2026-10-30,
+        # "Refuse to start": "A stimulus that cannot be drawn is a case where the run cannot
+        # proceed"): a setting placing a window, a stimulus or an update that the run's values and
+        # every condition playing it leave without one (`check.unplaced`). `wlx taskd`'s pre-flight
+        # refuses it first (`preflight.values`); this is the backstop for `wlx run`, which takes
+        # none (XC-159). A plain run is read over every structure, as the pre-flight reads it.
+        plain = run.plan is None and not run.blocks
+        unset = unplaced(task, {**starts, **given}, None if plain else self._plan(run, task).blocks)
+        if unset:
+            raise SystemExit("task refused, run not started: "
+                             + "; ".join(_printable(said) for _, said in unset))
         # **Every value the run can record, tried in the record's writer before it starts**
         # (REC-27; the appearance-record review's M2): one the record refuses faults the run
         # here, before it is numbered, strobed or written -- `Service._run`'s "the run did not

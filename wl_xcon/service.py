@@ -1245,8 +1245,9 @@ class Service:
         )
 
     def _run(self, run: RunSpec, rows: list, by: Actor, accepted=()) -> None:
-        """The run, to its end. **Its two backstop refusals** (`Session.run`'s blocking
-        finding and `welfare.preflight`), raised before it starts, are refusals here.
+        """The run, to its end. **Its backstop refusals** (`Session.run`'s, for a blocking
+        finding, a plan the task lacks or a place with no value, XC-415; and
+        `welfare.preflight`'s), raised before it starts, are refusals here.
         **Anything else is a fault, and contained** (the b3a-1 plan, decision 14): one
         raised once the run started -- `Exceeded` from a delivery `welfare` would not
         make among them -- `run()` has published and written into the run's end row;
