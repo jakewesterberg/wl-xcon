@@ -544,6 +544,24 @@ def test_a_whole_position_parameter_that_offers_no_points_is_refused():
         assert "cannot be bounded" in finding.detail, param
 
 
+def test_check_8_and_the_console_read_a_whole_position_settings_choices_alike():
+    """XC-401's second fix round (N1): check 8 and the console read a setting's choices through
+    one function, `task.is_point`. `[x, y]` lists are points to both, checked at each; a pair of
+    words is a point to neither, which check 8 refuses as unbounded and the console shows as
+    written (`review.declares_position`)."""
+    from wl_xcon.review import declares_position
+
+    listed = Param("pos", unit="deg", choices=([0.0, 0.0], [30.0, 0.0]))
+    worded = Param("pos", unit="deg", choices=(("a", "b"), ("c", "d")))
+
+    (finding,) = _off(_showing(P("pos"), [listed]))
+    (refused,) = _off(_showing(P("pos"), [worded]))
+
+    assert f"{30.0 + GEOMETRY.vergence_half_deg:.1f}" in finding.detail
+    assert "cannot be bounded" in refused.detail
+    assert declares_position(listed.choices) and not declares_position(worded.choices)
+
+
 def test_a_coordinate_declared_by_choices_is_checked_at_every_choice():
     """XC-038: a coordinate chosen among values was read as 0, the one place every
     field contains, so a choice of 30 degrees passed."""

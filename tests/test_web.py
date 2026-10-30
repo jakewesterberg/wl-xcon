@@ -918,7 +918,9 @@ def test_every_telemetry_string_is_escaped():
         recent_outcomes=(EVIL, "correct"),
         staged=(Staged(EVIL, 0.1, 0.2, Box(EVIL), False),),
         refusals=(Refused(EVIL, Box(EVIL), EVIL),),
-        params=(ParamRow(EVIL, EVIL, None, None, EVIL, False),),
+        # A position's words too (schema 18, XC-401; the fix round's M4).
+        params=(ParamRow(EVIL, EVIL, None, None, EVIL, False),
+                ParamRow("pos", "deg", None, None, None, False, EVIL)),
         performance=replace(frame().performance, task_name=EVIL, block_type=EVIL),
         session_kind=EVIL,
         calibration=EVIL,
@@ -1254,6 +1256,47 @@ def test_each_parameter_card_has_arrows_and_an_input_with_its_step_and_range():
         'aria-label="shape">'
     ) in params
     assert params.count('data-dir="1"') == 4 and params.count('data-dir="-1"') == 4
+
+
+def test_a_setting_holding_a_position_shows_it_polar_first_and_offers_no_input():
+    """XC-401 (the PI, 2026-10-19, "Polar first, x-y allowed"): a setting whose value is a whole
+    position shows the rig's words for it, eccentricity and direction first with its (x, y)
+    beside them (`ParamRow.position`), escaped, and no input or arrows: nothing a console sends
+    sets a position (`link._setting` takes a number or a word). The unit is in the words."""
+    params = fragments(
+        frame(params=(
+            ParamRow("target_pos", "deg", None, None, None, False,
+                     "27.236° at 45° · (x, y) (20, 20)"),
+            ParamRow("fix_hold", "s", 0.1, 1.0, 0.3, False),
+        )),
+        view(),
+    )["params"]
+    target = params.partition('<div class="param">')[2].partition('<div class="param">')[0]
+
+    assert '<span class="pv">27.236° at 45° · (x, y) (20, 20)</span>' in target
+    assert "<input" not in target and 'data-dir="1"' not in target and "unset" not in target
+    assert 'data-param="fix_hold"' in params
+
+
+def test_a_value_that_is_no_number_or_word_is_shown_as_written_with_no_input():
+    """XC-401's second fix round: a setting holding a value that is neither a number nor a word --
+    a pair a setting not declared a position holds, arriving as a list, or a `bool` -- made its
+    card raise formatting it as a number, and `serve` builds the page and its event stream from
+    the cards unguarded, so the page went blank. It is shown as written, escaped, with no input or
+    arrows: nothing a console sends sets it."""
+    params = fragments(frame(params=(
+        ParamRow("span", "deg", 0.0, 1.0, [0.3, 0.6], False),
+        ParamRow("odd", "", None, None, ["<b>", 1], False),
+        ParamRow("flag", "", None, None, True, False),
+        ParamRow("fix_hold", "s", 0.1, 1.0, 0.3, False),
+    )), view())["params"]
+    span, odd, flag, hold = params.split('<div class="param">')[1:]
+
+    assert '<span class="pv">[0.3, 0.6] <span class="unit">deg</span></span>' in span
+    assert "[&#x27;&lt;b&gt;&#x27;, 1]" in odd and "<b>" not in odd
+    assert '<span class="pv">True ' in flag
+    assert not any("<input" in card or 'data-dir="1"' in card for card in (span, odd, flag))
+    assert 'data-param="fix_hold"' in hold
 
 
 def test_a_refusal_shows_on_its_parameters_card_with_its_sentence():

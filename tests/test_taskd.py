@@ -1311,6 +1311,75 @@ def test_each_new_unresolved_stimulus_is_said_once_a_run_and_a_repeat_is_not(tmp
     assert "probe (setting 'probe_pos' has no value)" in said[1]
 
 
+def test_a_settings_polar_value_reaches_the_console_polar_first_through_the_wire(tmp_path):
+    """XC-401 (the PI, 2026-10-19, "Polar first, x-y allowed": the console shows eccentricity and
+    direction first, with (x, y) beside them): the run above, whose setting holds a polar position
+    and is changed live, publishes frames that cross the wire -- where a frame holding a `Polar`
+    could not be encoded at all -- and the page's parameter card, its staged change, the changes
+    feed's line and `wlx console` each show the position eccentricity and direction first, in the
+    rig's words. Test the path: the session's own frames, through `encode` and `decode`,
+    rendered."""
+    from _frames import view
+
+    from wl_xcon.cli import render
+    from wl_xcon.link import decode, encode
+    from wl_xcon.task import Polar
+    from wl_xcon.web import fragments
+
+    path = _sessions.polar_task(tmp_path)
+    link = _Drained({2: [SetParameter(name="target_pos", value=Polar(8.0, 45.0), by=Box("jake"))]})
+    session = _session(_spec(tmp_path, task=str(path), trials=4, values={
+        **_spec(tmp_path).values, "target_pos": Polar(8.0, 0.0)}), link=link)
+
+    session.run()
+
+    frames = [decode(encode(frame)) for frame in link.published]
+    right, oblique = "8° at 0° · (x, y) (8, 0)", "8° at 45° · (x, y) (5.675, 5.675)"
+    shown = [row for frame in frames for row in frame.params if row.name == "target_pos"]
+    assert shown[0].position == right and shown[-1].position == oblique
+    assert {row.value for row in shown} == {None}
+    staged = [(row.was, row.now) for frame in frames for row in frame.staged]
+    assert staged and set(staged) == {(right, oblique)}
+    (line,) = [control.said for control in frames[-1].controls if control.kind == "set"]
+    assert line.startswith(f"target_pos {right} → {oblique}, from trial ")
+    with_staged = next(frame for frame in frames if frame.staged)
+    card = fragments(with_staged, view())["params"]
+    assert f'<span class="pv">{right}</span>' in card and f"staged → {oblique}" in card
+    assert f"target_pos {right} → {oblique}" in fragments(with_staged, view())["rt-changes"]
+    assert f"  param: target_pos {oblique} " in render(frames[-1])
+    assert f"  staged: target_pos {right} -> {oblique} " in render(with_staged)
+
+
+def test_a_settings_pair_position_reaches_the_console_polar_first_where_its_choices_declare_one(
+        tmp_path):
+    """XC-401's fix round (M2): a pair is a position only for a setting whose choices declare one
+    (`review.declares_position`). The polar task with its target's choices written as (x, y)
+    pairs: the session's own parameters carry each setting's choices, so its card, its staged
+    change and the changes feed's line say the pair eccentricity and direction first -- (10°,
+    10°) 14.002° out at 45°, not the 14.142° that `√(x² + y²)` gives -- through the wire."""
+    from wl_xcon.link import decode, encode
+
+    path = _sessions.polar_task(tmp_path)
+    text = path.read_text()
+    old = "choices=(Polar(8.0, 0.0), Polar(8.0, 45.0))"
+    assert text.count(old) == 1
+    path.write_text(text.replace(old, "choices=((8.0, 0.0), (10.0, 10.0))"))
+    link = _Drained({2: [SetParameter(name="target_pos", value=(10.0, 10.0), by=Box("jake"))]})
+    session = _session(_spec(tmp_path, task=str(path), trials=4, values={
+        **_spec(tmp_path).values, "target_pos": (8.0, 0.0)}), link=link)
+
+    session.run()
+
+    frames = [decode(encode(frame)) for frame in link.published]
+    right, oblique = "8° at 0° · (x, y) (8, 0)", "14.002° at 45° · (x, y) (10, 10)"
+    shown = [row for frame in frames for row in frame.params if row.name == "target_pos"]
+    assert (shown[0].position, shown[-1].position) == (right, oblique)
+    staged = [(row.was, row.now) for frame in frames for row in frame.staged]
+    assert staged and set(staged) == {(right, oblique)}
+    (line,) = [control.said for control in frames[-1].controls if control.kind == "set"]
+    assert line.startswith(f"target_pos {right} → {oblique}, from trial ")
+
+
 def test_each_condition_plays_the_structure_it_names_and_its_row_says_which(tmp_path):
     """Engine spec §13.3 (the PI, 2026-10-07: "each condition names its own; interleaving them in a
     block is ordinary"; engine build C2b): each trial is built and run from its condition's
@@ -3305,8 +3374,13 @@ def test_the_parameters_a_console_shows_are_the_declarations_then_the_ceilings(
         fix_hold.high,
         0.3,
         False,
+        fix_hold.choices,
     )
-    assert by_name["reward_correct"] == ("reward_correct", "mL", 0.0, 0.40, 0.15, True)
+    assert by_name["reward_correct"] == ("reward_correct", "mL", 0.0, 0.40, 0.15, True, ())
+    # Each setting's choices, last (schema 18, XC-401's fix round, M2): a pair is shown as a
+    # position only for a setting whose choices declare one.
+    looks = next(p for p in declared if p.name == "target_appearance")
+    assert by_name["target_appearance"][-1] == looks.choices != ()
     assert "out_of_cage" not in by_name
 
 

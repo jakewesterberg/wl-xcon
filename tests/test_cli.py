@@ -2267,6 +2267,35 @@ def test_console_lists_every_parameter_with_its_range_or_its_ceiling():
     assert "  param: fix_window 2.00 deg (range open to 5 deg)" in rendered
 
 
+def test_console_shows_a_setting_holding_a_position_eccentricity_and_direction_first():
+    """XC-401: `wlx console`'s parameter line shows a setting whose value is a whole position in
+    the rig's words, eccentricity and direction first with its (x, y) beside them, its unit in
+    them; and a staged change carrying the words of a position, or a word, prints it, where
+    `_value` formatted every staged value as a number."""
+    rendered = render(_telemetry(
+        params=(ParamRow("target_pos", "deg", None, None, None, False,
+                         "27.236° at 45° · (x, y) (20, 20)"),),
+        staged=(Staged(name="target_pos", was="8° at 0° · (x, y) (8, 0)",
+                       now="8° at 45° · (x, y) (5.675, 5.675)", by=Box("jake"), bounded=False),),
+    )).splitlines()
+
+    assert "  param: target_pos 27.236° at 45° · (x, y) (20, 20) (no declared range)" in rendered
+    assert any(line.startswith("  staged: target_pos 8° at 0° · (x, y) (8, 0) -> "
+                               "8° at 45° · (x, y) (5.675, 5.675) by jake") for line in rendered)
+
+
+def test_console_shows_a_staged_value_that_is_no_number_or_word_as_written():
+    """XC-401's second fix round: a staged value that is neither a number nor a word -- a pair a
+    setting not declared a position holds, arriving as a list -- is printed as written, where
+    formatting it as a number raised and `wlx console` showed nothing."""
+    rendered = render(_telemetry(staged=(
+        Staged(name="span", was=[0.3, 0.6], now=[0.4, 0.6], by=Box("jake"), bounded=False),),
+    )).splitlines()
+
+    assert any(line.startswith("  staged: span [0.3, 0.6] -> [0.4, 0.6] by jake")
+               for line in rendered)
+
+
 def test_console_lists_the_recent_outcomes_oldest_first():
     assert "  recent (oldest first): correct hang no_fixation" in render(
         _telemetry(recent_outcomes=("correct", "hang", "no_fixation"))
@@ -3933,11 +3962,16 @@ def test_console_strips_control_characters_from_wire_text():
                 ),
             ),
             refusals=(Refused("reward_correct", Box("jake"), "exceeds ceiling\x1b[31m"),),
+            # A position's words, and a staged one's (schema 18, XC-401; the fix round's M4).
+            params=(ParamRow("pos", "deg", None, None, None, False,
+                             "8° at 45°\x1b[2J\nSTOPPED: forged"),),
+            staged=(Staged(name="pos", was="8° at 0°\x1b[31m", now="8° at 45°\x9b2J",
+                           by=Box("jake"), bounded=False),),
         )
     )
     lines = rendered.splitlines()
 
-    assert "\x1b" not in rendered
+    assert "\x1b" not in rendered and "\x9b" not in rendered
     assert "\x07" not in rendered
     assert not any(line.startswith("STOPPED:") for line in lines)
 
@@ -3949,6 +3983,7 @@ def test_console_strips_control_characters_from_wire_text():
     # new ones -- the replacement character shows sanitizing actually ran here.
     refused_line = next(line for line in lines if line.startswith("  refused:"))
     assert "\ufffd" in refused_line
+    assert "  param: pos 8° at 45°\ufffd[2J\ufffdSTOPPED: forged (no declared range)" in lines
 
 
 def test_the_terminal_console_says_no_session_is_open_and_what_is_stranded():

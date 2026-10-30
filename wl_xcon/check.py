@@ -81,6 +81,7 @@ from wl_xcon.task import (
     WithReplacement,
     actions_of,
     array_actions,
+    is_point,
 )
 from wl_xcon.welfare import Deployment
 
@@ -1346,18 +1347,14 @@ def _points(at: object, params: dict[str, Param]) -> list[tuple[float, float]]:
     `taskd`'s load (XC-036). A range, or choices that are not points, names no place to test.
     """
     if isinstance(at, P):
-        offered = [polar_deg(float(point.eccentricity), float(point.direction))
-                   if isinstance(point, Polar) and _is_number(point.eccentricity)
-                   and _is_number(point.direction) else point
-                   for point in _domain(at, params)]
-        if not all(
-            isinstance(point, (tuple, list))
-            and len(point) == 2
-            and all(_is_number(c) for c in point)
-            for point in offered
-        ):
+        # Each choice a point as `task.is_point` reads one, the console's test too (XC-401's
+        # second fix round, N1), so the two cannot read a setting differently.
+        offered = _domain(at, params)
+        if not all(is_point(point) for point in offered):
             raise _Unbounded(at.name)
-        return [(float(x), float(y)) for x, y in offered]
+        return [polar_deg(float(point.eccentricity), float(point.direction))
+                if isinstance(point, Polar) else (float(point[0]), float(point[1]))
+                for point in offered]
     if isinstance(at, Polar):
         # Every direction a range allows, not its ends alone: 20° out over 0° to 120° is 20° up
         # at 90°. The corners of each piece's per-axis box (`polar_box_deg`), which a field, a

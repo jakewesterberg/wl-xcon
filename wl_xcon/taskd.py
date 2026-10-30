@@ -1321,8 +1321,10 @@ class Session:
     @property
     def parameters(self) -> tuple:
         """Every settable value a console shows, as `(name, unit, low, high, value,
-        bounded)` -- the shape `link.Telemetry.of` builds its `ParamRow`s from (P4d-2b
-        spec §3: "the parameter row is generated from it").
+        bounded, choices)` -- the shape `link.Telemetry.of` builds its `ParamRow`s from (P4d-2b
+        spec §3: "the parameter row is generated from it"). `choices` is the setting's own,
+        empty for a ceiling: they say whether a pair it holds is a position (schema 18, XC-401's
+        fix round, M2; `review.declares_position`).
 
         The task's own `Param` declarations first, in declaration order, each with
         its value in `spec.values` (`None` when nobody set it); then every welfare
@@ -1335,11 +1337,11 @@ class Session:
         were a task setting.
         """
         declared = tuple(
-            (p.name, p.unit, p.low, p.high, self.spec.values.get(p.name), False)
+            (p.name, p.unit, p.low, p.high, self.spec.values.get(p.name), False, p.choices)
             for p in self._params().values()
         )
         ceilings = tuple(
-            (name, ceiling.unit, 0.0, ceiling.maximum, ceiling.value, True)
+            (name, ceiling.unit, 0.0, ceiling.maximum, ceiling.value, True, ())
             for name, ceiling in self.spec.bounds.ceilings.items()
             if name != OUT_OF_CAGE
         )
@@ -2215,11 +2217,14 @@ class Session:
                 self._record.parameter_change(
                     self._sequence, name, was, now, by, run=self.run_index, event_code=code
                 )
+            # A pair as a position only for a setting whose choices declare one (XC-401's fix
+            # round, M2): a ceiling's name is no setting the task declares.
+            choices = () if bounded or name not in self._declared else self._declared[name].choices
             self._feed(
                 "set",
                 by,
                 self.wall_now(),
-                f"{name} {_shown(was)} → {_shown(now)}, from trial {index}"
+                f"{name} {_shown(was, choices)} → {_shown(now, choices)}, from trial {index}"
                 + ("" if bounded else _overriding(self._scheduler.blocks, name)),
             )
         self._staged.clear()
@@ -2441,12 +2446,13 @@ class Session:
         frame saying "paused" would read as a run held and waiting. The feed names the
         run from 1, as a person reads it beside the page's header and pill
         (session-levels spec §6); `run_index` counts from 0, as the record's `run` does."""
-        for name, was, now, by, _bounded in self._staged:
+        for name, was, now, by, bounded in self._staged:
+            choices = () if bounded or name not in self._declared else self._declared[name].choices
             self._feed(
                 "set",
                 by,
                 self.wall_now(),
-                f"{name} {_shown(was)} → {_shown(now)} was not applied: run "
+                f"{name} {_shown(was, choices)} → {_shown(now, choices)} was not applied: run "
                 f"{self.run_index + 1} ended first",
             )
         self._staged.clear()

@@ -29,6 +29,7 @@ from wl_xcon.marks import clock_time as _wall_clock_time
 from wl_xcon.bounds import Bounds, Exceeded
 from wl_xcon.check import check_task
 from wl_xcon.findings import SESSION_KINDS
+from wl_xcon.review import position_words
 from wl_xcon.review import render_task as render_review
 from wl_xcon.codes import PROVISIONAL, Allocation
 from wl_xcon.geometry import NOMINAL_HALF_IPD_CM, VIEWS, Geometry, Rig, SubjectSettings
@@ -702,7 +703,7 @@ def _interrupted(session) -> None:
     )
 
 
-def _value(value: float | None) -> str:
+def _value(value: object) -> str:
     """A staged parameter value, to the same 2 decimal places every fluid figure on
     this screen uses.
 
@@ -714,16 +715,33 @@ def _value(value: float | None) -> str:
     `None` is `Staged.was` for a parameter the session had no prior value for. It
     prints `unset` rather than `0.00`, for the reason `fluid_today_ml` prints
     `UNKNOWN`: a value nobody has is not a value of zero.
+
+    **Text is printed as it is** (XC-401): a categorical choice's word, or the rig's words for a
+    whole position, eccentricity and direction first (`link.Staged`, schema 18), where
+    formatting it as a number raised; and **any other value that is no number**, a pair a
+    setting not declared a position holds arriving as a list among them, as written (XC-401's
+    second fix round).
     """
-    return "unset" if value is None else f"{value:.2f}"
-
-
-def _shown(value: object) -> str:
-    """A parameter's value on the terminal: `unset` for `None`, two decimals for a
-    number, like every other figure on this screen, and the text of a categorical
-    choice. Formatting, not derivation -- see `_value`."""
     if value is None:
         return "unset"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return f"{value:.2f}"
+    return _printable(str(value))
+
+
+def _shown(value: object, choices=()) -> str:
+    """A parameter's value on the terminal: `unset` for `None`, two decimals for a
+    number, like every other figure on this screen, and the text of a categorical
+    choice. Formatting, not derivation -- see `_value`. **A whole position** (a `task.Polar`, or
+    an (x, y) pair of a setting whose `choices` declare it one), eccentricity and direction
+    first with its (x, y) beside them, in the review report's words (`review.position_words`;
+    the PI, 2026-10-19, "Polar first, x-y allowed"; XC-401): `taskd` says an applied change of
+    one this way on the changes feed."""
+    if value is None:
+        return "unset"
+    words = position_words(value, choices)
+    if words is not None:
+        return words
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return f"{value:.2f}"
     return str(value)
@@ -1136,6 +1154,13 @@ def render(frame: _link.Telemetry | _link.Idle) -> str:
         name = _printable(row.name)
         unit = _printable(row.unit)
         value = _printable(row.value) if isinstance(row.value, str) else row.value
+        # A whole position in the rig's words, eccentricity and direction first, its unit in
+        # them (`ParamRow.position`, schema 18; XC-401): the line `wlx console` already has,
+        # though it shows none of schema 16's and 17's additions (XC-387).
+        shown = (
+            _printable(row.position) if row.position is not None
+            else _with_unit(_shown(value), unit)
+        )
         if row.bounded:
             limit = f"(welfare ceiling {_with_unit(_shown(row.high), unit)})"
         elif row.low is None and row.high is None:
@@ -1145,9 +1170,7 @@ def render(frame: _link.Telemetry | _link.Idle) -> str:
                 f"(range {_edge(row.low)} to "
                 f"{_with_unit(_edge(row.high), unit)})"
             )
-        lines.append(
-            f"  param: {name} {_with_unit(_shown(value), unit)} {limit}"
-        )
+        lines.append(f"  param: {name} {shown} {limit}")
     lines.append(
         f"  recent (oldest first): "
         f"{' '.join(_printable(outcome) for outcome in frame.recent_outcomes)}"

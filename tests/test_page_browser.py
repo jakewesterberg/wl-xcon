@@ -1325,6 +1325,48 @@ def test_next_block_and_back_one_reach_the_rig_as_the_members(rig):
     assert (type(back), back.by.name) == (BackBlock, "Jake Westerberg")
 
 
+def test_the_page_shows_a_settings_position_eccentricity_and_direction_first(rig):
+    """XC-401 (the PI, 2026-10-19, "Polar first, x-y allowed"): a setting holding the per-axis
+    position (20°, 20°) is shown on its card as the rig made it, eccentricity and direction first
+    -- 27.236° out at 45°, the true visual angle, never the 28.284° `√(x² + y²)` gives -- with its
+    (x, y) beside them, and no input to set it. Through the wire, in a real browser."""
+    from wl_xcon.link import ParamRow, decode, encode
+
+    row = ParamRow.of("target_pos", "deg", None, None, (20.0, 20.0), False,
+                      ((20.0, 20.0), (0.0, 10.0)))
+    held = ParamRow("fix_hold", "s", 0.1, 1.0, 0.3, False)
+    rig.hub.offer(decode(encode(frame(params=(row, held)))))
+    page = rig.browser_page()
+
+    page.locator("#params", has_text="27.236° at 45°").wait_for(state="attached")
+    card = page.locator("#params .param").first
+    text = card.text_content()
+
+    assert "target_pos" in text and "27.236° at 45° · (x, y) (20, 20)" in text
+    assert text.index("27.236°") < text.index("(x, y)") and "28.28" not in text
+    assert card.locator("input").count() == 0
+    assert page.locator('#params input[data-param="fix_hold"]').count() == 1
+
+
+def test_the_page_keeps_its_controls_while_a_setting_holds_no_number_or_word(rig):
+    """XC-401's second fix round: a setting holding a value that is neither a number nor a word --
+    here a pair held by a setting not declared a position -- made its card raise, and `serve`
+    builds the page and its event stream unguarded, so the page went blank and the operator lost
+    pause, mark, reward and stop for as long as the value stood. The card shows the value as
+    written, with no input, and every control stays. Through the wire, in a real browser."""
+    from wl_xcon.link import ParamRow, decode, encode
+
+    span = ParamRow.of("span", "deg", 0.0, 1.0, (0.3, 0.6), False, ())
+    rig.hub.offer(decode(encode(frame(params=(span,)))))
+    page = rig.browser_page()
+
+    page.locator("#params", has_text="[0.3, 0.6]").wait_for(state="attached")
+
+    assert page.locator("#params .param").first.locator("input").count() == 0
+    for command in ("pause", "mark", "reward", "stop"):
+        assert page.locator(f'#controls [data-cmd="{command}"]').count() == 1, command
+
+
 ONE_TASK = ("planned.py",)
 PASSING = (PreflightItem("task checks", "pass", "planned.py passes its load-time checks"),)
 

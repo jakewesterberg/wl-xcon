@@ -269,17 +269,25 @@ def test_a_conditions_position_is_shown_eccentricity_and_direction_first():
     """The PI, 2026-10-19, "Polar first, x-y allowed": a value a condition sets that is a position
     -- a whole-point setting's `Polar` or pair -- is shown in the plan's table as every position in
     the report is, eccentricity and direction first and its (x, y) beside them; a number as
-    written."""
+    written. A pair is a position only for a setting declared as one, its choices each a `Polar`
+    or a pair (XC-401's fix round, M2): a pair another setting holds is shown as written."""
+    from dataclasses import replace
+
     from wl_xcon.task import Polar
 
+    holding = replace(HOLDING, params=[
+        *HOLDING.params, Param("pos", unit="deg", choices=(Polar(8.0, 45.0), (5.0, 0.0))),
+        Param("span", unit="deg", low=0.0, high=1.0)])
     plans = {"places": Plan([Block("b", [
         Condition("oblique", {"pos": Polar(8.0, 45.0), "contrast": 0.5}, target=2),
-        Condition("right", {"pos": (5.0, 0.0)}, target=2)])])}
-    out = render_task(_reviewed(plans=plans))
+        Condition("right", {"pos": (5.0, 0.0)}, target=2),
+        Condition("plain", {"span": (0.3, 0.6)}, target=2)])])}
+    out = render_task(_reviewed(plans=plans, structures={"other": OTHER, "holding": holding}))
 
     assert ("| b | oblique | holding | 2 | pos = 8° at 45° · (x, y) (5.675, 5.675), "
             "contrast = 0.5 |") in out
     assert "| b | right | holding | 2 | pos = 5° at 0° · (x, y) (5, 0) |" in out
+    assert "| b | plain | holding | 2 | span = (0.3, 0.6) |" in out
 
 
 def test_the_plan_tables_say_a_time_in_whole_minutes_and_a_balanced_order_never_back_to_back():

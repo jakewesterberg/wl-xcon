@@ -270,8 +270,11 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    (x, y). A task file that computes a position as (e·cos θ, e·sin θ) itself, less than e out off
    the axes (7.975° for 8° at 45°), is a load-time warning in every session kind
    (`computed-position`). The review report shows every position as eccentricity and direction
-   first with (x, y) beside it; the console follows after engine build C2b (XC-401), and the
-   record, each stimulus's true eccentricity and direction beside its (x, y) (XC-399) (STE-29).
+   first with (x, y) beside it; the console shows a setting's value that is a whole position the
+   same way, in the report's words, which the rig makes and sends (telemetry schema 18,
+   2026-10-28; STE-30), and each stimulus's and window's position after the record has it
+   (XC-401, read from XC-399's per-trial fields); and the record, each stimulus's true
+   eccentricity and direction beside its (x, y) (XC-399) (STE-29).
    *Note, 2026-10-28 (XC-399, the PI's "Record both, tell wl-preproc"):* the record's half is built.
    Each trial's line says where each stimulus it showed was, and when (`stimuli`): for every `Show`
    and `Update` on the screen for a frame or more, in order, its name, whether a `Show` or an `Update`
