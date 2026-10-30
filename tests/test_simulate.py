@@ -9,6 +9,11 @@ without reading the source (ADR-0006).
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 from wl_xcon.simulate import Subject, simulate
 from wl_xcon.task import (
     After,
@@ -237,3 +242,47 @@ def test_the_simulator_takes_a_task_object_and_plays_its_default_structure():
     assert (played.outcomes, played.states_visited) == (alone.outcomes, alone.states_visited)
     assert "only" not in played.states_visited
     assert played.uncovered(task) == played.uncovered(DETECTION)
+
+
+_FIVE_WINDOWS = '''
+import json
+from wl_xcon.simulate import Subject, simulate
+from wl_xcon.task import After, Entered, Exited, On, Outcome, State, Trial, Window
+
+trial = Trial(
+    start="look",
+    windows=[Window(n, at=(x, 0.0), radius=2.0) for n, x in
+             (("left", -5.0), ("right", 5.0), ("up", 0.0), ("down", 9.0), ("far", -9.0))],
+    states=[
+        State("look", go=[
+            On(Entered("left"), Outcome.CORRECT),
+            On(Entered("right"), Outcome.WRONG_TARGET),
+            On(Entered("up"), Outcome.EARLY_RESPONSE),
+            On(Entered("down"), Outcome.LATE_RESPONSE),
+            On(Entered("far"), Outcome.EARLY_ERROR),
+            On(After(1.0), Outcome.NO_RESPONSE),
+        ]),
+    ],
+)
+census = simulate(trial, Subject(seed=11, hazards={Entered: 0.8, Exited: 0.1}),
+                  trials=60, frame_period=0.01)
+print(json.dumps({k.value: v for k, v in sorted(census.outcomes.items(), key=lambda kv: kv[0].value)}))
+'''
+
+
+def test_one_seed_gives_one_simulated_session_in_every_process():
+    """XC-409. `Subject._tick` drew from the seeded generator while walking a set of window
+    names, whose order follows the process's `PYTHONHASHSEED`: one seed gave different
+    outcomes in different processes (a fuzz seed ran 33 or 34 trials). Five windows are
+    asked about every frame, so the draws' order decides the outcome and six hash seeds
+    cannot all agree by luck."""
+    root = str(Path(__file__).resolve().parents[1])
+    seen = {}
+    for hash_seed in range(6):
+        env = {**os.environ, "PYTHONHASHSEED": str(hash_seed), "PYTHONPATH": root}
+        done = subprocess.run([sys.executable, "-c", _FIVE_WINDOWS], env=env, cwd=root,
+                              capture_output=True, text=True, timeout=60)
+        assert done.returncode == 0, done.stderr
+        seen[hash_seed] = done.stdout.strip()
+
+    assert len(set(seen.values())) == 1, f"one seed, different outcomes per PYTHONHASHSEED: {seen}"
