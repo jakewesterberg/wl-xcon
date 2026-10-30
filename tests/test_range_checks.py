@@ -152,7 +152,7 @@ def test_a_window_whose_center_is_a_range_is_found_at_its_true_nearest():
     swept = min(_true_angle((20.0, 0.0), (10.0 + 20.0 * k / 20000, 5.0)) for k in range(20001))
 
     warning = found(trial, "overlapping-windows")
-    gap, _ = checking._closest_approach(trial.windows[0], trial.windows[1],
+    gap, _, *_rest = checking._approach(trial.windows[0], trial.windows[1],
                                         {p.name: p for p in trial.params})
 
     assert "which can come within 4.70°" in warning.detail
@@ -640,7 +640,7 @@ def test_a_value_that_brings_a_window_onto_another_between_the_corners_of_its_ra
     """Task 10's review, I2: the least distance between two windows was taken over the corners of
     their position ranges, so a target widened to x 0-16° and y ±8° was never nearer the fixation
     window than its corners, 8°, though at (0, 0) it sits on it. Per axis, the distance between
-    the two ranges, 0 where they overlap (`_closest_approach`): refused, naming the value and the
+    the two ranges, 0 where they overlap (`_approach`): refused, naming the value and the
     windows; a value that keeps them apart is only outside its range."""
     found = beyond_range(_target_task(), {"target_x": 0.0})
 
@@ -679,7 +679,7 @@ def test_a_window_placed_by_choices_is_at_each_choice_never_between_them():
     within 0.00° of a fixation window at the centre (`overlapping-windows`), though it is always
     10° from it and their radii sum to at most 4°; and `fix_window` sent at 9°, where the two
     truly collide, was then the same pair only larger, a warning. **Each choice is a point**
-    (`_closest_approach`): nothing at load, and 9° refused, as it is with the target at -10° or
+    (`_approach`): nothing at load, and 9° refused, as it is with the target at -10° or
     -8°."""
     assert "overlapping-windows" not in {f.code for f in check_task(_chosen_target((-10.0, 10.0)))}
     for xs, gap in (((-10.0, 10.0), "10.00"), ((-10.0, -8.0), "8.00")):
@@ -1061,8 +1061,8 @@ def test_the_least_separation_over_crossed_choices_is_the_least_over_every_pair_
     brute = min(_true_angle((ax, ay), (bx, by))
                 for ax in xs for ay in ys for bx in xs2 for by in ys2)
 
-    assert checking._closest_approach(a, b, {p.name: p for p in declared}) == (
-        pytest.approx(brute, abs=1e-9), 2.5)
+    approach = checking._approach(a, b, {p.name: p for p in declared})
+    assert (approach.gap, approach.reach) == (pytest.approx(brute, abs=1e-9), 2.5)
     # Per axis the least was hypot(2, 1), between (3°, 6°) and (1°, 7°).
     assert brute < math.hypot(2.0, 1.0)
 
@@ -1074,7 +1074,7 @@ def test_the_least_separation_over_crossed_choices_is_the_least_over_every_pair_
              for xs, ys in ((forty[0], forty[1]), (forty[2], forty[3]))]
     dots = np.clip(every[0] @ every[1].T, -1.0, 1.0)
 
-    gap, _ = checking._closest_approach(a, b, {p.name: p for p in declared})
+    gap, _, *_rest = checking._approach(a, b, {p.name: p for p in declared})
 
     assert gap == pytest.approx(math.degrees(math.acos(dots.max())), abs=1e-9)
 

@@ -83,11 +83,11 @@ def typed(seconds_before: float) -> str:
 
 
 def whole_point_task(folder: Path) -> Path:
-    """A task `check()` itself raises on, written into `folder` as `whole_point.py`: the
-    reference task with its target window placed at a whole-point parameter (a legal
-    form) and a fixation break its target could overlap. `check`'s overlap test
-    unpacks the window's place as a pair and raises `TypeError` (XC-156, filed on main,
-    not fixed here): what a pre-flight must turn into a fail rather than pass on."""
+    """A task whose target window is placed by a whole-point setting, written into `folder` as
+    `whole_point.py`: the reference task with its target window at a whole-point parameter (a legal
+    form) and a fixation break its target could overlap. Until XC-156 was fixed `check()` raised
+    `TypeError` on it (the overlap test unpacked the window's place as a pair); now it loads, is
+    checked to the end, and warns that the two windows can overlap."""
     text = Path("tasks/fixation_detection.py").read_text()
     for old, new in (
         ('            "target",\n            at=(P("target_x"), P("target_y")),',
@@ -98,6 +98,10 @@ def whole_point_task(folder: Path) -> Path:
         ('                On(SaccadeTo("target"), "verify", do=[Mark(4098)]),',
          '                On(SaccadeTo("target"), "verify", do=[Mark(4098)]),\n'
          '                On(Exited("fix"), Outcome.FIXATION_BREAK),'),
+        ('    needs_fixed_head=True,\n)',
+         '    needs_fixed_head=True,\n'
+         '    meanings={"target_point": Meaning(NOT_DIFFICULTY, STIMULUS, note="where the target is")},\n)'),
+        ('from wl_xcon.task import (\n', 'from wl_xcon.task import (\n    Meaning, NOT_DIFFICULTY, STIMULUS,\n'),
     ):
         assert text.count(old) == 1, old
         text = text.replace(old, new)

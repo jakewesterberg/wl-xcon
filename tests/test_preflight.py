@@ -67,16 +67,42 @@ def test_a_task_file_that_does_not_load_fails_rather_than_raising(tmp_path, text
     assert item.result == "fail" and said in item.said and trial is None
 
 
-def test_a_task_whose_checks_raise_on_it_fails_rather_than_raising(tmp_path):
+def _checks_that_raise(monkeypatch) -> None:
+    """`check_task` raising `TypeError` on a shape it does not expect, as it did on a window placed
+    by a whole-point setting until XC-156 was fixed (its `_closest_approach`, since removed,
+    unpacked the place as a pair): no task of the repo's makes the checks raise now, so the fault is put there."""
+    def unpack(*_args, **_kwargs):
+        raise TypeError("cannot unpack non-iterable P object")
+
+    monkeypatch.setattr(preflight, "check_task", unpack)
+
+
+def test_a_task_whose_checks_raise_on_it_fails_rather_than_raising(monkeypatch):
     """Fix round 1 of Task 8: a task file is code, and `check()` is run on it -- and can
-    raise on a shape it does not expect (XC-156). Its fault is this item's, as a failed
-    load is, and never the caller's: the service reached this on every check and start,
-    and nothing above it contained the exception."""
-    item, trial, _ = preflight.task(_sessions.whole_point_task(tmp_path), ALLOCATION, DIRECT, SRGB)
+    raise on a shape it does not expect (it did, XC-156; the fault is put there now by a
+    stand-in). Its fault is this item's, as a failed load is, and never the caller's: the
+    service reached this on every check and start, and nothing above it contained the
+    exception."""
+    _checks_that_raise(monkeypatch)
+
+    item, trial, _ = preflight.task(TASK, ALLOCATION, DIRECT, SRGB)
 
     assert (item.name, item.result) == ("task checks", "fail")
-    assert item.said.startswith("whole_point.py's load-time checks did not finish: TypeError: ")
+    assert item.said.startswith(
+        f"{TASK.name}'s load-time checks did not finish: TypeError: cannot unpack non-iterable")
     assert trial is not None, "it loaded; its checks did not finish"
+
+
+def test_a_task_with_a_window_placed_by_a_whole_point_setting_is_checked_and_warned_of(tmp_path):
+    """XC-156: the task the checks used to raise on loads, is checked to the end, and is warned of
+    where its target's choices can overlap its fixation window's (a warning, never the item's
+    fail), saying which choice."""
+    item, trial, findings = preflight.task(
+        _sessions.whole_point_task(tmp_path), ALLOCATION, DIRECT, SRGB)
+
+    assert item.result == "pass" and trial is not None
+    (found,) = [f for f in findings if f.code == "overlapping-windows"]
+    assert "by setting 'target_point'" in found.detail
 
 
 def test_the_task_item_returns_its_findings_checked_against_the_calibration():
