@@ -1869,20 +1869,22 @@ def _path(to, steps: int, profile: str = "linear", dwell: int = 200, tail: int =
     return path + [to] * tail
 
 
-def _replay_path(path: list, seed: int = 5) -> Replay:
-    """`path` as payloads, with `_saccades`' fixational noise."""
+def _replay_path(path: list, seed: int = 5, lose: "set[int]" = frozenset()) -> Replay:
+    """`path` as payloads, with `_saccades`' fixational noise, and the datagrams `lose` lost."""
     rng = random.Random(seed)
-    return Replay(payloads=[(0.0, _payload(x + rng.gauss(0, 0.02), y + rng.gauss(0, 0.02),
-                                           frame=n)) for n, (x, y) in enumerate(path)])
+    return Replay(payloads=[(0.0, "" if n in lose else
+                             _payload(x + rng.gauss(0, 0.02), y + rng.gauss(0, 0.02), frame=n))
+                            for n, (x, y) in enumerate(path)])
 
 
-def _stopped(trial: Trial, source: Replay) -> "tuple[int, int]":
+def _stopped(trial: Trial, source: Replay, tracker: "Tracker | None" = None) -> "tuple[int, int]":
     """The frame the online detector confirms `source`'s saccade on, and the frame **the detector's
     own stop field** puts the eye at rest on: `saccade.detect`'s `Saccade.stop`, the first sample
     after the run, over the gaze the loop feeds it, sample k being frame k + 1's."""
     from wl_xcon.saccade import detect
 
-    world = Tracked(Tracker(), _fitted_mapping(), trial, _PROBE_FRAME, {}, source=source)
+    world = Tracked(tracker or Tracker(), _fitted_mapping(), trial, _PROBE_FRAME, {},
+                    source=source)
     gaze, at, confirmed = [], [], None
     for frame in range(1, len(source.payloads) + 1):
         world.display({}, frame)
@@ -1955,6 +1957,39 @@ def test_an_onset_clock_observes_the_onset_and_leaves_it_to_an_onset_edge():
     result = _replayed(trial, _saccades(to))
 
     assert (result.outcome, result.frames) == (Outcome.CORRECT, confirmed)
+
+
+def test_a_saccade_confirmed_on_the_sample_that_ends_its_run_is_judged_on_that_frame():
+    """**I2** (the review of XC-410, at the merge with saccade-gap-onset). A 3-sample saccade to
+    the target with the datagram 2 samples into it lost, the tracker's staleness half a frame so
+    that frame has no sample: the detector (version 2) confirms it on the sample that ends its run,
+    the run already closed. It landed on that frame, and is judged there, with its stop where
+    `saccade.detect` puts it. Until then the world took it as still in flight and judged it a frame
+    later, its stop a frame late too; no outcome shows the stop here, since any state a transition
+    could carry it into begins after it is confirmed."""
+    trial = _probe([State("s", enter=[Show(_PROBED)],
+                          go=[*_asks()[:2], On(After(2.0), Outcome.NO_RESPONSE)])])
+    path = _path(_drawn(_PROBED, {}, trial)["search.1"], 3)
+
+    def world() -> Tracked:
+        return Tracked(Tracker(staleness=_PROBE_FRAME / 2), _fitted_mapping(), trial,
+                       _PROBE_FRAME, {}, source=_replay_path(path, lose={202}))
+
+    seen, closed = world(), None
+    for frame in range(1, len(path) + 1):
+        seen.display({}, frame)
+        if seen.detector.onset is not None:
+            closed = frame, seen.detector.in_flight
+            break
+    assert closed is not None and closed[1] is False, \
+        "the detector must confirm it on the sample that ends its run"
+    played = world()
+
+    result = run_trial(trial, played, _PROBE_FRAME, values={}, effects=Recorded())
+
+    assert (result.outcome, result.frames) == (Outcome.CORRECT, closed[0])
+    assert played._stopped == _stopped(trial, _replay_path(path, lose={202}),
+                                       Tracker(staleness=_PROBE_FRAME / 2))[1]
 
 
 def test_a_world_refuses_a_detector_that_has_already_been_fed():

@@ -36,8 +36,8 @@ ended the state before -- a transition taken on `SaccadeOnset`, or on a timer co
 from it, `After(since=SaccadeOnset())` -- into the very next state and no further, for
 its landing alone, so an intrasaccadic displacement, at once or delayed, is scored
 where the eye lands ("Yes, that one saccade carries"; "Yes, carry it too"); and only if
-the detector puts the eye at rest (its stop field, `Saccade.stop`) on that state's first
-frame or after. One whose eye stopped before the transition landed in the state before
+the detector puts the eye at rest (its stop field, `Saccade.stop`, as `saccade.detect`
+reports it) on that state's first frame or after. One whose eye stopped before the transition landed in the state before
 (the controller's ruling on the review's I1). Until then the last saccade no guard had
 taken waited for the rest of the trial, so an object shown or moved onto where it had
 landed took it on the frame the object was drawn there.
@@ -159,7 +159,8 @@ class Tracked:
         #: of its onset, its first sample (`Saccade.start`); the frame it was confirmed on, the one
         #: frame `SaccadeOnset` sees it; whether it is still in flight; the frame it landed on, the
         #: one frame `SaccadeTo` judges it on (`None` while in flight); the frame the detector puts
-        #: the eye at rest on (its stop field, `Saccade.stop`); whether a `SaccadeOnset` has seen
+        #: the eye at rest on (its stop field, `Saccade.stop`, as `saccade.detect` reports it);
+        #: whether a `SaccadeOnset` has seen
         #: it, a clock's or an edge's; and whether a `SaccadeTo` has taken it, as one has before
         #: any saccade is confirmed. A saccade in flight cannot have landed in anything.
         self._onset = 0
@@ -458,11 +459,18 @@ class Tracked:
             # one is fed a frame, so its first, `start`, was fed `fed - start` frames ago.
             self._onset = frame - (fed - confirmed.start)
             self._confirmed_on = frame
-            self._in_flight = True
-            self._landed_on = None
             self._onset_seen = False
             self._taken = False
             self._carried = False
+            # **Confirmed on the sample that ends its run** (version 2 of the detector; the review
+            # of XC-410's I2): it has landed already, on this frame, and its stop is the
+            # `Saccade.stop` it is confirmed with, the run's end as `saccade.detect` reports it.
+            self._in_flight = self.detector.in_flight
+            if self._in_flight:
+                self._landed_on = None
+            else:
+                self._landed_on = frame
+                self._stopped = frame - (fed - confirmed.stop)
         elif self._in_flight and not self.detector.in_flight:
             # The run closed: the eye has landed, so `SaccadeTo` can now ask where, on this frame.
             # **Where the eye stopped** (the review's I1): a run closes on the sample whose

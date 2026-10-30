@@ -365,9 +365,10 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    -- an `Update` on that transition has moved them -- but no `SaccadeOnset`, its onset having ended
    the state before; the carry ends when that state is left, landed or not. **It counts there only
    if the detector puts its eye at rest on that state's first frame or after** (its stop field,
-   `Saccade.stop`; the controller's ruling on the review's I1, engineering): one whose eye stopped
-   before the transition landed in the earlier state, whichever edge took it, where until then it
-   carried while the detector's run was still open, two samples more. A transition on any other
+   `Saccade.stop`, as `saccade.detect` reports it; the controller's ruling on the review's I1,
+   engineering): one whose eye stopped before the transition landed in the earlier state,
+   whichever edge took it, where until then it carried while the detector's run was still open,
+   two samples more. A transition on any other
    guard carries nothing (the loop tells the world which guard took it). And a clock started by a
    saccade's onset takes nothing: its own state's `SaccadeTo` can still take the saccade if it lands
    before the timer ends, and its `SaccadeOnset` edge still fires on it, a `SaccadeOnset` being

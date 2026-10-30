@@ -366,8 +366,8 @@ class SaccadeTo(Guard):
     and the window is the one drawn on the frame the saccade lands, never later. **One
     exception, the carry**: the saccade whose onset ended the state before -- a transition on
     `SaccadeOnset`, or on `After(t, since=SaccadeOnset())` -- counts here too, if the detector
-    puts its eye at rest on this state's first frame or after, so an intrasaccadic jump is scored
-    where the eye lands."""
+    puts its eye at rest (its stop field, `Saccade.stop`, as `saccade.detect` reports it) on this
+    state's first frame or after, so an intrasaccadic jump is scored where the eye lands."""
 
     window: str
 
