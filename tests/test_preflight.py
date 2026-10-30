@@ -740,6 +740,37 @@ def test_a_place_with_no_value_fails_the_starting_values_and_an_appearance_does_
     assert preflight.values(_load_task(TASK), {}).result == "pass"
 
 
+def test_a_plain_runs_pre_flight_reads_the_places_of_the_default_structure_alone(tmp_path):
+    """The review of XC-415's fix, I1: a plain run plays the default structure only, so a place
+    with no value in another structure fails nothing; a plan's run reads the structures its
+    conditions play, so one whose condition playing it leaves the place unset fails, naming the
+    condition."""
+    task = _load_task(_sessions.cued_task(tmp_path))
+
+    assert preflight.values(task, {}).result == "pass"
+    assert preflight.values(task, {}, plan="cueing").result == "pass"
+    unset = preflight.values(task, {}, plan="unset")
+    assert unset.result == "fail"
+    assert "setting 'cue_pos' places the position of stimulus 'cue'" in unset.said
+    assert "has no value in condition 'left' of block 'b'" in unset.said
+
+
+@pytest.mark.parametrize("setting", ["set_size", "array_eccentricity"])
+def test_an_arrays_set_size_or_ring_with_no_value_fails_the_starting_values(tmp_path, setting):
+    """The review of XC-415's fix, M2: a setting with choices that gives an array's objects their
+    places, left without a value, passed; the run then faulted building the array."""
+    task = _load_task(_sessions.search_by_choices(tmp_path, setting))
+    given = {k: v for k, v in _sessions.SEARCH_VALUES.items() if k != setting}
+
+    item = preflight.values(task, given)
+
+    assert item.result == "fail"
+    assert item.said.startswith(f"setting {setting!r} gives the ")
+    assert "an array whose objects are placed by no value cannot be drawn" in item.said
+    chosen = {"set_size": 4, "array_eccentricity": 8.0}[setting]  # one of its choices
+    assert preflight.values(task, {**given, setting: chosen}).result == "pass"
+
+
 def test_a_plan_its_task_does_not_declare_fails_the_task_checks(tmp_path):
     """Engine build C2b: so `gate` refuses a start naming one, `Service._start` unchanged in
     that."""

@@ -1190,16 +1190,92 @@ def test_a_per_eye_position_whose_setting_can_hold_no_value_is_refused():
     assert "its left-eye direction is parameter 'p', which can be None" in finding.detail
 
 
-def test_a_setting_that_can_only_hold_no_value_is_refused_once_wherever_it_places():
-    """`choices=(None,)`: nothing for check 8 to measure, and one sentence for each place."""
+@pytest.mark.parametrize("at", [P("p"), (P("p"), 0.0), Polar(P("p"), 0.0), Polar(8.0, P("p"))])
+def test_a_setting_that_can_only_hold_no_value_is_refused_once_wherever_it_places(at):
+    """`choices=(None,)`: nothing for check 8 to measure, a whole position, a coordinate, an
+    eccentricity or a direction (`_points`, `_coordinates`, `_polar_sides`, since `_valued` leaves a
+    setting whose every choice is `None` as it is), and one sentence for each place."""
     params = [Param("p", unit="deg", choices=(None,))]
-    trial = replace(_showing(P("p"), params),
+    trial = replace(_showing(at, params),
                     windows=[Window("w", at=Polar(8.0, P("p")), radius=1.0, on="s")])
     for geometry in (None, GEOMETRY):
         found = [f for f in check(trial, geometry=geometry) if "'p'" in f.detail]
         assert sorted(f.detail.split(":")[0] for f in found) == [
             "state 'show' shows stimulus 's'", "window 'w'"], geometry
         assert {f.code for f in found} == {"bad-placement"}
+
+
+def test_a_window_whose_coordinate_can_hold_no_value_is_not_also_warned_of_overlap():
+    """The review of XC-415's fix, M1: two windows a state scores, `w` 5° from `v` but for its x
+    coordinate's choice of `None`, were warned "can come within 0.00°" beside the refusal, the
+    overlap check reading a coordinate with `None` among its choices as unbounded. It reads the
+    choices that are values, as check 8 does; with (5.0, 6.0) it says nothing."""
+    def scored(choices):
+        return Trial(start="s", params=[Param("p", unit="deg", choices=choices)],
+                     windows=[Window("w", at=(P("p"), 0.0), radius=1.0, on="t"),
+                              Window("v", at=(0.0, 0.0), radius=1.0, on="t")],
+                     states=[State("s", enter=[Show(Stimulus("t", at=(0.0, 0.0), looks=LIT))],
+                                   go=[On(Hold("w", 0.1), Outcome.CORRECT),
+                                       On(Hold("v", 0.1), Outcome.WRONG_TARGET),
+                                       On(After(1.0), Outcome.NO_RESPONSE)])])
+
+    assert check(scored((5.0, 6.0))) == []
+    for geometry in (None, DIRECT):
+        assert [f.code for f in check(scored((5.0, None)), geometry=geometry)] == ["bad-placement"]
+
+
+def _array_by(field, choices) -> Trial:
+    """`_searching`'s array of four on its 8° ring, its `field` the setting `q` with `choices`."""
+    trial = _searching([Param("q", unit="x", choices=choices)], 4, 0)
+    state = trial.states[0]
+    stimulus = state.enter[0].stimulus
+    looks = replace(stimulus.looks, **{field: P("q")})
+    return replace(trial, states=[replace(state, enter=[
+        replace(state.enter[0], stimulus=replace(stimulus, looks=looks))])])
+
+
+_ARRAY_FIELDS = [("n", (4, None), "set size"), ("radius", (8.0, None), "ring radius"),
+                 ("phase", (0.0, None), "phase"), ("target", (0, None), "target index")]
+
+
+@pytest.mark.parametrize("field,choices,what", _ARRAY_FIELDS)
+def test_an_arrays_field_whose_setting_can_hold_no_value_is_refused_once(field, choices, what):
+    """The review of XC-415's fix, M2, within the PI's answer ("A stimulus that cannot be drawn is a
+    case where the run cannot proceed"): an array's set size, ring radius, phase and target index
+    place its objects, and one whose setting can hold no value cannot be drawn. It was refused at
+    load only by sentences that misstated why -- a set size "as few as 0 objects" with "no declared
+    highest", a target index "with no declared highest", a ring "cannot be bounded" with the rig's
+    field and nothing without it, a phase as a bad block -- or not at all. It is refused in one
+    sentence naming the setting and the array, the other checks reading the choices that are
+    values."""
+    trial = _array_by(field, choices)
+    for geometry in (None, GEOMETRY, DIRECT):
+        found = [f for f in check(trial, geometry=geometry) if f.blocking or "'q'" in f.detail]
+        assert [f.code for f in found] == ["bad-placement"], geometry
+        assert found[0].detail.startswith(
+            f"state 'search' shows stimulus 'search': its {what} is parameter 'q', which can be "
+            f"None, and an array whose objects are placed by no value cannot be drawn")
+        assert found[0].detail.endswith("remove None from 'q''s choices")
+
+
+@pytest.mark.parametrize("family", [False, True])
+def test_a_windows_radius_whose_setting_can_hold_no_value_is_refused(family):
+    """M2: a window sized by a setting with `None` among its choices loaded clean, and could not be
+    judged; an array's object windows the same."""
+    if family:
+        trial = replace(_searching([Param("q", unit="deg", choices=(1.0, None))], 4, 0),
+                        windows=[ObjectWindows(of="search", radius=P("q"))])
+        subject = "the object windows of 'search': their radius"
+    else:
+        trial = replace(_windowed((0.0, 0.0), [Param("q", unit="deg", choices=(1.0, None))]),
+                        windows=[Window("w", at=(0.0, 0.0), radius=P("q"), on="s")])
+        subject = "window 'w': its radius"
+    for geometry in (None, DIRECT):
+        found = [f for f in check(trial, geometry=geometry) if f.blocking or "'q'" in f.detail]
+        assert [f.code for f in found] == ["bad-placement"], geometry
+        assert found[0].detail.startswith(
+            f"{subject} is parameter 'q', which can be None, and a window sized by no value "
+            f"cannot be judged")
 
 
 _UNREAL_PARTS = [float("inf"), float("nan"), 10**400]

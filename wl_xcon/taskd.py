@@ -2581,10 +2581,11 @@ class Session:
         given = dict(run.values)
         # **A place with no value refuses the run before it starts** (XC-415; the PI, 2026-10-30,
         # "Refuse to start": "A stimulus that cannot be drawn is a case where the run cannot
-        # proceed"): a setting placing a window, a stimulus or an update that the run's values and
-        # every condition playing it leave without one (`check.unplaced`). `wlx taskd`'s pre-flight
-        # refuses it first (`preflight.values`); this is the backstop for `wlx run`, which takes
-        # none (XC-159). A plain run is read over every structure, as the pre-flight reads it.
+        # proceed"): a setting placing a window, a stimulus, an update or an array's objects, or
+        # sizing a window, that the run's values and the condition playing it leave without one
+        # (`check.unplaced`), in the structures the run plays (a plain run's default alone).
+        # `wlx taskd`'s pre-flight refuses it first (`preflight.values`), and `wlx run` before its
+        # session opens; this is the backstop for any other caller.
         plain = run.plan is None and not run.blocks
         unset = unplaced(task, {**starts, **given}, None if plain else self._plan(run, task).blocks)
         if unset:

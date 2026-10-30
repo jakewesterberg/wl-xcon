@@ -288,10 +288,11 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    *Note, 2026-10-30 (XC-415, the PI's "Refuse to start": "A stimulus that cannot be drawn is a case
    where the run cannot proceed"):* a position placed by a setting that can hold no value (`None`
    among its choices) is refused at load wherever it is written, a window's, a stimulus's or an
-   `Update`'s, whole or a part, with the rig's field or without (`bad-placement`); a run that would
-   start with such a setting given no value -- by the task, the run or the plan's condition playing
-   it -- is refused before it starts, by `wlx taskd`'s pre-flight and by `Session.run` (TSK-51's
-   revision).
+   `Update`'s, whole or a part, with the rig's field or without (`bad-placement`), and so is an
+   array's set size, ring radius, phase or target index, or a window's radius, held by one; a run
+   that would start with such a setting given no value -- by the task, the run or the plan's
+   condition playing it -- in a structure it plays is refused before it starts, by `wlx taskd`'s
+   pre-flight, by `wlx run` before its session opens and by `Session.run` (TSK-51's revision).
 2. **Sizes**: one size number is the full width; each block's definition states it.
 3. **Away from the center**: true visual angle (default) or the screen center's
    scale, declared per task. *Note, 2026-10-19 (the PI, "Retire it"):* "Every stimulus is drawn in

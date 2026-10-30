@@ -95,36 +95,39 @@ def check(
     geometry: Geometry | None = None,
     calibration: Calibration | None = None,
 ) -> list[Finding]:
+    # Every check but the placement refusal reads a placing setting's choices less `None`, which
+    # that refusal says in its own sentence (`_valued`; XC-415).
+    valued = _valued(trial)
     return (
-        _unreachable_states(trial)
-        + _unbounded_waits(trial)
-        + _states_with_no_outcome_path(trial)
-        + _shadowed_transitions(trial)
-        + _unallocated_codes(trial, allocation)
-        + _undeclared_parameters(trial)
-        + _custom_components(trial, components or Registry())
-        + _offscreen_stimuli(trial, geometry)
-        + _unallocated_outcomes(trial, allocation)
-        + _undeclared_windows(trial)
-        + _uncoupled_windows(trial)
-        + _display_faults(trial)
-        + _windows_left_behind(trial)
-        + _cyclopean_windows(trial)
-        + _color_faults(trial, calibration)
-        + _light_faults(trial)
-        + _block_faults(trial)
-        + _array_faults(trial)
-        + _unbounded_set_sizes(trial)
-        + _stereogram_faults(trial)
-        + _eye_faults(trial)
-        + _overlapping_windows(trial)
-        + _unreachable_timeouts(trial)
-        + _crowded_arrays(trial)
-        + _view_faults(trial, geometry)
-        + _placement_faults(trial)
+        _unreachable_states(valued)
+        + _unbounded_waits(valued)
+        + _states_with_no_outcome_path(valued)
+        + _shadowed_transitions(valued)
+        + _unallocated_codes(valued, allocation)
+        + _undeclared_parameters(valued)
+        + _custom_components(valued, components or Registry())
+        + _offscreen_stimuli(valued, geometry)
+        + _unallocated_outcomes(valued, allocation)
+        + _undeclared_windows(valued)
+        + _uncoupled_windows(valued)
+        + _display_faults(valued)
+        + _windows_left_behind(valued)
+        + _cyclopean_windows(valued)
+        + _color_faults(valued, calibration)
+        + _light_faults(valued)
+        + _block_faults(valued)
+        + _array_faults(valued)
+        + _unbounded_set_sizes(valued)
+        + _stereogram_faults(valued)
+        + _eye_faults(valued)
+        + _overlapping_windows(valued)
+        + _unreachable_timeouts(valued)
+        + _crowded_arrays(valued)
+        + _view_faults(valued, geometry)
+        + _placement_faults(valued)
         + _position_kind_faults(trial)
-        + _trial_display_faults(trial)
-        + _holds_cut_short(trial)
+        + _trial_display_faults(valued)
+        + _holds_cut_short(valued)
     )
 
 
@@ -1399,7 +1402,8 @@ def _points(at: object, params: dict[str, Param]) -> list[tuple[float, float]]:
     **A choice of `None`, of the whole or of a part, is left out**: a setting that can hold no
     value is refused in a sentence of its own (`_position_kind_faults`; XC-415), with the rig's
     field or without, so check 8 measures the choices that are values and never says it "cannot
-    be bounded" for want of one.
+    be bounded" for want of one. `check` already hands it the choices less `None` (`_valued`);
+    this leaves it out where it is a setting's every choice, which `_valued` leaves as it is.
     """
     if isinstance(at, P):
         # Each choice a point as `task.is_point` reads one, the console's test too (XC-401's
@@ -4344,16 +4348,36 @@ def _placement_faults(trial: Trial) -> list[Finding]:
     return findings
 
 
+#: What a place with no value cannot be, and why the run cannot have one (XC-415; the PI,
+#: 2026-10-30: "A stimulus that cannot be drawn is a case where the run cannot proceed").
+_JUDGED = "a window placed by no value cannot be judged"
+_DRAWN = "a stimulus placed by no value cannot be drawn"
+_SIZED = "a window sized by no value cannot be judged"
+_ARRAYED = "an array whose objects are placed by no value cannot be drawn"
+
+
 class _Written(NamedTuple):
     """One place a position is written (`_written`): `subject`, the words a load-time finding
     opens with; `what`, `"position"` or one eye's; `at`, as written; `whose`, the thing placed, as a
-    run-start sentence names it; and whether it is a window's, judged, or a stimulus's, drawn."""
+    run-start sentence names it; and `cannot`, what it is with no value (`_JUDGED`, `_DRAWN`)."""
 
     subject: str
     what: str
     at: object
     whose: str
-    window: bool
+    cannot: str
+
+
+class _Sized(NamedTuple):
+    """One number that sizes a window or places an array's objects (`_sized`), as `_Written` says a
+    position, with `its` the pronoun its finding reads ("its", or "their" for object windows)."""
+
+    subject: str
+    its: str
+    what: str
+    value: object
+    whose: str
+    cannot: str
 
 
 def _written(trial: Trial) -> "list[_Written]":
@@ -4366,7 +4390,7 @@ def _written(trial: Trial) -> "list[_Written]":
     for window in trial.windows:
         if isinstance(window, Window):
             found.append(_Written(f"window {window.name!r}", "position", window.at,
-                                  f"window {window.name!r}", True))
+                                  f"window {window.name!r}", _JUDGED))
     for state, action in actions_of(trial):
         if isinstance(action, Show):
             stimulus = action.stimulus
@@ -4375,7 +4399,7 @@ def _written(trial: Trial) -> "list[_Written]":
                 if at is not None:
                     found.append(_Written(
                         f"state {state!r} shows stimulus {stimulus.name!r}", what, at,
-                        f"stimulus {stimulus.name!r} as state {state!r} shows it", False))
+                        f"stimulus {stimulus.name!r} as state {state!r} shows it", _DRAWN))
         elif isinstance(action, Update):
             for field, what in (("at", "position"), ("at_left", "left-eye position"),
                                 ("at_right", "right-eye position")):
@@ -4383,7 +4407,32 @@ def _written(trial: Trial) -> "list[_Written]":
                 if at is not None:
                     found.append(_Written(
                         f"state {state!r} updates stimulus {action.stimulus!r}", what, at,
-                        f"stimulus {action.stimulus!r} as state {state!r} updates it", False))
+                        f"stimulus {action.stimulus!r} as state {state!r} updates it", _DRAWN))
+    return found
+
+
+def _sized(trial: Trial) -> "list[_Sized]":
+    """**Every number that sizes a window or places an array's objects** (the review of XC-415's
+    fix, M2): each window's radius and each array's object windows' (`gaze._placed`,
+    `ObjectWindows.expand`), and each array's set size, ring radius, phase and target index
+    (`Array.positions`, `ObjectWindows.expand`), for every array a `Show` or an `Update` gives, as
+    written or among a setting's choices (`task.array_actions`), which a console may choose live."""
+    found: list[_Sized] = []
+    for window in trial.windows:
+        if isinstance(window, Window):
+            found.append(_Sized(f"window {window.name!r}", "its", "radius", window.radius,
+                                f"window {window.name!r}", _SIZED))
+        elif isinstance(window, ObjectWindows):
+            found.append(_Sized(f"the object windows of {window.of!r}", "their", "radius",
+                                window.radius, f"the object windows of {window.of!r}", _SIZED))
+    for state, name, updated, array in array_actions(trial):
+        how = "updates" if updated else "shows"
+        for field, what in (("n", "set size"), ("radius", "ring radius"), ("phase", "phase"),
+                            ("target", "target index")):
+            found.append(_Sized(f"state {state!r} {how} stimulus {name!r}", "its", what,
+                                getattr(array, field),
+                                f"the array of stimulus {name!r} as state {state!r} {how} it",
+                                _ARRAYED))
     return found
 
 
@@ -4398,59 +4447,83 @@ def _position_parts(at: object) -> "list[tuple[str, object, bool]]":
     return [("position", at, True)]
 
 
-def _unplaceable(window: bool) -> str:
-    """What a place with no value cannot be, and why the run cannot have one (XC-415; the PI,
-    2026-10-30: "A stimulus that cannot be drawn is a case where the run cannot proceed")."""
-    return ("a window placed by no value cannot be judged" if window
-            else "a stimulus placed by no value cannot be drawn")
-
-
-def placing(trial: Trial) -> "dict[str, tuple[str, bool]]":
-    """**Each setting that places something in `trial`**, by name: the first place it fills, in
-    words ("the direction of window 'w'"), and whether that place is a window's. A setting placing a
+def placing(trial: Trial) -> "dict[str, tuple[str, str]]":
+    """**Each setting that places something in `trial`**, by name: what it does at the first place
+    it fills, in words ("places the direction of window 'w'", "gives the set size of the array of
+    stimulus 's' as state 'on' shows it"), and what that place is with no value. A setting placing a
     whole position or a part of one (an eccentricity, a direction, a coordinate) at any place
-    `_written` lists. What a run must give a value before it starts (`unplaced`)."""
-    found: dict[str, tuple[str, bool]] = {}
+    `_written` lists, or giving a number `_sized` lists: a window's radius, an array's set size,
+    ring radius, phase or target index. What a run must give a value before it starts
+    (`unplaced`), and what every check but the refusal reads less `None` (`_valued`)."""
+    found: dict[str, tuple[str, str]] = {}
     for place in _written(trial):
         eye = place.what[:-len("position")]  # "left-eye ", "right-eye " or ""
         for part, value, whole in _position_parts(place.at):
             if isinstance(value, P) and value.name not in found:
-                found[value.name] = (f"the {place.what if whole else eye + part} of {place.whose}",
-                                     place.window)
+                found[value.name] = (
+                    f"places the {place.what if whole else eye + part} of {place.whose}",
+                    place.cannot)
+    for sized in _sized(trial):
+        if isinstance(sized.value, P) and sized.value.name not in found:
+            found[sized.value.name] = (f"gives the {sized.what} of {sized.whose}", sized.cannot)
     return found
+
+
+def _valued(trial: Trial) -> Trial:
+    """`trial` with every setting that places something (`placing`) offering its choices less
+    `None`, for every check but `_position_kind_faults`, which refuses a `None` among them in its
+    own sentence (XC-415): so no other check reads it as unbounded and says why wrongly -- check 8
+    that the place "cannot be bounded", the overlap check that two windows "can come within 0.00°"
+    (the review of XC-415's fix, M1), the array checks that a set size has "no declared highest" --
+    beside the refusal. A setting whose every choice is `None` is left as it is (it would read as a
+    free value), and a trial whose declarations cannot be read is checked as it is."""
+    try:
+        named = placing(trial)
+        params, changed = [], False
+        for param in trial.params:
+            kept = (tuple(c for c in param.choices if c is not None)
+                    if param.name in named else param.choices)
+            if kept and len(kept) < len(param.choices):
+                param, changed = dataclasses.replace(param, choices=kept), True
+            params.append(param)
+    except Exception:  # noqa: BLE001 -- the checks say what they say of a malformed trial
+        return trial
+    return dataclasses.replace(trial, params=params) if changed else trial
 
 
 def unplaced(task: Task, values: dict, blocks=None) -> "list[tuple[str, str]]":
     """**A place a run would start with no value for** (XC-415; the PI, 2026-10-30, asked whether
     a run whose stimulus is placed by a setting nobody gave a value should refuse to start: "Refuse
     to start (Recommended)", "A stimulus that cannot be drawn is a case where the run cannot
-    proceed"): each setting that places a window, a stimulus or an update (`placing`) in a structure
-    the run can play, that `values` -- the task's starting values under the run's -- holds no value
-    for, or holds `None`, and that the condition playing the structure does not set. `blocks` are
-    the plan's the run plays; `None` for a plain run, which checks every structure the task has,
-    failing closed, as `preflight.values` checks its numbers. As (setting, sentence), one for each
-    setting, the first place it fills named. Read by `preflight.values` and by `Session.run`, its
-    backstop for a caller that took no pre-flight (`wlx run`, XC-159).
+    proceed"): each setting that places a window, a stimulus, an update or an array's objects, or
+    sizes a window (`placing`), in a structure the run plays, that `values` -- the task's starting
+    values under the run's -- holds no value for, or holds `None`, and that the condition playing
+    the structure does not set. `blocks` are those of the plan the run plays; `None` for a plain
+    run, which plays the task's default structure alone (`Session._plan`; the review of XC-415's
+    fix, I1: a place only another structure has is never drawn, and a whole position cannot be
+    given but by a condition). As (setting, sentence), one for each setting, the first place it
+    fills named. Read by `preflight.values`, by `wlx run` before its session opens, and by
+    `Session.run`, the backstop for a caller that took no pre-flight.
 
     A setting with `None` among its choices is refused at load (`_position_kind_faults`), and a
     condition sets only a choice of its setting or a finite number (`_plan_faults`), so a live edit
     (`Session.set`, which takes only a choice or a number) and a condition cannot make a place have
     no value once a run has started; this refuses one it would start with."""
-    plays = ([(name, {}, "") for name in task.structures] if blocks is None else [
+    plays = ([(task.default, {}, "")] if blocks is None else [
         (condition.structure or task.default, condition.values,
          f" in condition {condition.name!r} of block {block.name!r}")
         for block in blocks for condition in block.conditions])
     found: dict[str, str] = {}
     for structure, sets, where in plays:
-        for name, (place, window) in placing(task.structures[structure]).items():
+        for name, (role, cannot) in placing(task.structures[structure]).items():
             if name in found or name in sets or values.get(name) is not None:
                 continue
-            said = (f"setting {name!r} places {place} and the run's value of it is None"
+            said = (f"setting {name!r} {role} and the run's value of it is None"
                     if name in values else
-                    f"setting {name!r} places {place} and has no value{where}: neither the task"
+                    f"setting {name!r} {role} and has no value{where}: neither the task"
                     + (", the run nor the condition" if where else " nor the run")
                     + " gives it one")
-            found[name] = f"{said}, and {_unplaceable(window)}, so the run does not start"
+            found[name] = f"{said}, and {cannot}, so the run does not start"
     return list(found.items())
 
 
@@ -4467,8 +4540,11 @@ def _position_kind_faults(trial: Trial) -> list[Finding]:
     refused too** (XC-415; the PI, 2026-10-30: "Refuse to start (Recommended)", "A stimulus that
     cannot be drawn is a case where the run cannot proceed"): a setting that can hold no value
     places a window that cannot be judged or a stimulus that cannot be drawn, with the rig's field
-    or without it; check 8 leaves such a choice to this sentence (`_points`, `_polar_sides`). A run
-    that would start with a place's setting unset is refused as it starts (`unplaced`). **A setting
+    or without it; every other check reads the choices less `None` (`_valued`), so none says it
+    otherwise. **So does one that sizes a window or places an array's objects** (`_sized`; the
+    review of XC-415's fix, M2): a window's radius, an array's set size, ring radius, phase and
+    target index. A run that would start with such a setting unset is refused as it starts
+    (`unplaced`). **A setting
     with no choices (a free value) is refused where a whole position goes**, since no path outside
     code gives one a position (XC-422); where a number goes it is unchanged."""
     params = {p.name: p for p in trial.params}
@@ -4479,7 +4555,7 @@ def _position_kind_faults(trial: Trial) -> list[Finding]:
             f"{subject}: its {what} is parameter {name!r}, which can be {_said(choice)}. "
             f"{why}; {fix}")))
 
-    def place(subject: str, what: str, at: object, window: bool) -> None:
+    def place(subject: str, what: str, at: object, cannot: str) -> None:
         for part, value, whole in _position_parts(at):
             eye = what[:-len("position")]  # "left-eye ", "right-eye " or ""
             label = what if whole else eye + part
@@ -4507,7 +4583,7 @@ def _position_kind_faults(trial: Trial) -> list[Finding]:
                 if choice is None:
                     findings.append(Finding("bad-placement", (
                         f"{subject}: its {label} is parameter {value.name!r}, which can be None, "
-                        f"and {_unplaceable(window)}, so the run cannot proceed; remove None from "
+                        f"and {cannot}, so the run cannot proceed; remove None from "
                         f"{value.name!r}'s choices")))
                 elif whole:
                     if not is_point(choice):
@@ -4536,13 +4612,24 @@ def _position_kind_faults(trial: Trial) -> list[Finding]:
     windows = [window for window in trial.windows if isinstance(window, Window)]
     # The windows' places come first, one each, and each window's radius is said after its place.
     for window, its in zip(windows, written):
-        place(its.subject, its.what, its.at, its.window)
+        place(its.subject, its.what, its.at, its.cannot)
         if not isinstance(window.radius, P) and not _finite(window.radius):
             findings.append(Finding("bad-placement", (
                 f"window {window.name!r}: its radius is {_said(window.radius)}, which is not "
                 f"a finite number of degrees")))
     for its in written[len(windows):]:
-        place(its.subject, its.what, its.at, its.window)
+        place(its.subject, its.what, its.at, its.cannot)
+    # A window's radius and an array's set size, ring radius, phase and target index: `None` among
+    # a setting's choices (the review of XC-415's fix, M2). Any other value that is no number is
+    # refused where each is read (check 8, `_block_faults`, the array checks).
+    for sized in _sized(trial):
+        value = sized.value
+        if isinstance(value, P) and value.name in params and any(
+                choice is None for choice in params[value.name].choices):
+            findings.append(Finding("bad-placement", (
+                f"{sized.subject}: {sized.its} {sized.what} is parameter {value.name!r}, which can "
+                f"be None, and {sized.cannot}, so the run cannot proceed; remove None from "
+                f"{value.name!r}'s choices")))
     return findings
 
 

@@ -4908,6 +4908,39 @@ def test_a_start_whose_place_has_no_value_is_refused_by_its_pre_flight_naming_it
     assert [row["plan"] for row in _runs(service.root) if row["event"] == "start"] == ["set"]
 
 
+def test_a_wlx_run_whose_place_has_no_value_records_nothing_and_leaves_taskd_free(tmp_path):
+    """The review of XC-415's fix, I2: `wlx run` of `adaptive_detection` with every setting but
+    `target_x` (the target window's and target's x coordinate) was refused by `Session.run`, after
+    its departure was marked: the session was stranded (`stranded.find`), with no return asked at
+    the terminal, and `wlx taskd` under the same root opened no session for any animal until it was
+    ended or resumed. It is refused before the session opens, beside the plan check, so nothing is
+    recorded and `wlx taskd` opens a session there."""
+    folders = _folders(tmp_path)
+    subjects, _, root = folders
+    sets = [part for pair in ("fix_acquisition=4.0", "fix_hold=0.3", "response_deadline=0.6",
+                              "target_hold=0.2", "fix_window=2.0", "target_window=3.0",
+                              "target_contrast=0.5", "target_eccentricity=10.0")
+            for part in ("--set", pair)]
+    argv = ["run", "tasks/adaptive_detection.py", "--rig", RIG_FILE, "--view", "direct",
+            "--kind", "training", "--accept-warnings", "--allocation", ALLOCATION,
+            "--bounds", str(subjects / "REFERENCE" / "bounds.py"), "--root", str(root),
+            "--session-id", "2027-01-14_01", "--subject", "REFERENCE", "--delivered-today", "0",
+            "--trials", "2", *sets, "--out-of-cage-at", time.strftime("%H:%M")]
+
+    with pytest.raises(SystemExit) as refused:
+        main(argv)
+
+    assert [(s.session_id, s.subject) for s in stranded.find(root)] == []
+    assert list(root.iterdir()) == []
+    assert refused.value.code == (
+        "task refused, session not started, nothing recorded: setting 'target_x' places the x "
+        "coordinate of window 'target' and has no value: neither the task nor the run gives it "
+        "one, and a window placed by no value cannot be judged, so the run does not start")
+    service = _made(folders)
+    _step(service, _open())
+    assert service.session is not None and service.session.spec.session_id == "2027-01-14_01"
+
+
 def test_wlx_taskd_says_a_missing_rig_or_allocation_in_a_sentence(tmp_path):
     """XC-145 (fix round 1, I1): as `wlx check` and `wlx run` do, never a FileNotFoundError."""
     folders = _folders(tmp_path)

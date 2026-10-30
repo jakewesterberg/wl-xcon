@@ -255,3 +255,62 @@ def cue_task(folder: Path, *, name: str = "cue") -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
     return path
+
+
+def cued_task(folder: Path, *, name: str = "cued") -> Path:
+    """The reference detection task with a second trial structure, `cued`, which adds a cue in
+    `await_fix` placed by `cue_pos`, a setting whose choices are two polar positions and which no
+    starting value can give (a whole position never is one); the default stays `detection`, so a
+    plain run never plays `cued`. Its plans: `cueing`, whose condition playing `cued` sets
+    `cue_pos`, and `unset`, whose does not. Written into `folder` as `NAME.py` (the review of
+    XC-415's fix, I1, its input). Engine test material, run only in the simulator."""
+    text = Path("tasks/fixation_detection.py").read_text() + '''
+import dataclasses as _d
+from wl_xcon.task import Polar, Show, Stimulus, Disc, Param, Block, Condition, Plan, Meaning, NOT_DIFFICULTY, STIMULUS
+from wl_xcon.photometry import Gray
+_CUE = Stimulus("cue", at=P("cue_pos"), looks=Disc(size=0.5, color=Gray(40.0)))
+_base = TASK.structures[TASK.default]
+_states = [_d.replace(s, enter=[*s.enter, Show(_CUE)]) if s.name == "await_fix" else s
+           for s in _base.states]
+_cued = _d.replace(_base, params=[*_base.params, Param("cue_pos", unit="deg",
+                   choices=(Polar(8.0, 0.0), Polar(8.0, 180.0)))], states=_states)
+TASK = _d.replace(TASK, structures={**TASK.structures, "cued": _cued},
+                  meanings={**TASK.meanings, "cue_pos": Meaning(NOT_DIFFICULTY, STIMULUS, note="a cue")},
+                  plans={"cueing": Plan([Block("b", [
+                             Condition("left", {"cue_pos": Polar(8.0, 180.0)}, target=2, structure="cued"),
+                             Condition("plain", {}, target=2)])]),
+                         "unset": Plan([Block("b", [
+                             Condition("left", {}, target=2, structure="cued"),
+                             Condition("plain", {}, target=2)])])})
+'''
+    path = Path(folder) / f"{name}.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path
+
+
+#: `visual_search`'s starting values for a run, `fix_luminance` among them (the review of XC-415's
+#: fix, M2, its input).
+SEARCH_VALUES = {"fix_acquisition": 4.0, "fix_hold": 0.3, "response_deadline": 0.6,
+                 "target_hold": 0.2, "fix_window": 2.0, "object_window": 0.5,
+                 "array_eccentricity": 8.0, "set_size": 6, "target_index": 0,
+                 "array_rotation": 0.0, "fix_luminance": 40.0}
+
+
+def search_by_choices(folder: Path, setting: str) -> Path:
+    """`visual_search` with its array's `set_size` declared by the choices (4, 8), or its ring's
+    radius, `array_eccentricity`, by (6.0, 8.0), in place of a range, written into `folder` as
+    `search.py` (the review of XC-415's fix, M2, its input). Engine test material, run only in the
+    simulator."""
+    old, new = {
+        "set_size": ('Param("set_size", unit="objects", low=2, high=12)',
+                     'Param("set_size", unit="objects", choices=(4, 8))'),
+        "array_eccentricity": ('Param("array_eccentricity", unit="deg", low=5.0, high=14.0)',
+                               'Param("array_eccentricity", unit="deg", choices=(6.0, 8.0))'),
+    }[setting]
+    text = Path("tasks/visual_search.py").read_text()
+    assert text.count(old) == 1, old
+    path = Path(folder) / "search.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text.replace(old, new))
+    return path

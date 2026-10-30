@@ -1397,6 +1397,61 @@ def test_a_place_every_condition_playing_it_sets_needs_no_value_from_the_run(tmp
     assert {row["params"]["target_pos"]["direction"] for row in _trial_rows(session)} == {0.0, 45.0}
 
 
+def test_a_plain_run_is_not_refused_for_a_place_only_a_structure_it_never_plays_has(tmp_path):
+    """The review of XC-415's fix, I1: a plain run plays its task's default structure alone
+    (`Session._plan`, engine build C2b), so a cue placed by a setting nobody gave a value in
+    another structure is never drawn, and the run starts. A whole position cannot be given by a
+    starting value or by `wlx run --set`, so refusing it left the plain run of such a task no way
+    to start. A plan whose condition playing that structure leaves the cue's setting unset is still
+    refused, naming the condition; one that sets it runs."""
+    path = _sessions.cued_task(tmp_path)
+
+    plain = _session(_spec(tmp_path / "plain", task=str(path), trials=4))
+    plain.run()
+    cueing = _session(_spec(tmp_path / "cueing", task=str(path), plan="cueing", trials=400))
+    cueing.run()
+    unset = _session(_spec(tmp_path / "unset", task=str(path), plan="unset", trials=400))
+    with pytest.raises(SystemExit) as refused:
+        unset.run()
+
+    assert (plain.stop_kind, plain.run_index, plain.blocks_run) == ("completed", 0, ["session"])
+    assert (cueing.stop_kind, cueing.run_index) == ("completed", 0)
+    assert refused.value.code == (
+        "task refused, run not started: setting 'cue_pos' places the position of stimulus 'cue' as "
+        "state 'await_fix' shows it and has no value in condition 'left' of block 'b': neither the "
+        "task, the run nor the condition gives it one, and a stimulus placed by no value cannot be "
+        "drawn, so the run does not start")
+    assert unset.run_index is None and not (unset.directory / "runs.jsonl").exists()
+
+
+@pytest.mark.parametrize("setting, place", [
+    ("set_size", "the set size of the array of stimulus 'search' as state 'array_on' shows it"),
+    ("array_eccentricity",
+     "the ring radius of the array of stimulus 'search' as state 'array_on' shows it"),
+])
+def test_a_run_whose_arrays_objects_have_no_value_is_refused_before_it_starts(
+        tmp_path, setting, place):
+    """The review of XC-415's fix, M2 (the PI, 2026-10-30: "A stimulus that cannot be drawn is a
+    case where the run cannot proceed"): `visual_search` with its set size, or its ring's radius,
+    declared by choices and given no value passed its pre-flight, and the run started and faulted
+    with `KeyError` as the array's world was built, after `RUN_START` and before any trial's line.
+    It is refused before it starts, naming the setting and the array."""
+    path = _sessions.search_by_choices(tmp_path, setting)
+    given = {k: v for k, v in _sessions.SEARCH_VALUES.items() if k != setting}
+    session = _session(_spec(tmp_path, task=str(path), trials=3, values=given))
+    before = list(session.card.codes)
+
+    with pytest.raises(SystemExit) as refused:
+        session.run()
+
+    assert refused.value.code == (
+        f"task refused, run not started: setting {setting!r} gives {place} and has no value: "
+        f"neither the task nor the run gives it one, and an array whose objects are placed by no "
+        f"value cannot be drawn, so the run does not start")
+    assert session.run_index is None and session.card.codes == before
+    assert not (session.directory / "runs.jsonl").exists()
+
+
 def test_a_settings_polar_value_reaches_the_console_polar_first_through_the_wire(tmp_path):
     """XC-401 (the PI, 2026-10-19, "Polar first, x-y allowed": the console shows eccentricity and
     direction first, with (x, y) beside them): the run above, whose setting holds a polar position

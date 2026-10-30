@@ -525,10 +525,12 @@ not reset.
   raised, so a trial that ran always has its line, and each unresolved stimulus is said on
   the changes feed once a run for each reason. **A run never starts with a place's setting
   unset** (XC-415; the PI, 2026-10-30, "Refuse to start"): a setting that can hold no value is
-  refused at load wherever it places a window, a stimulus or an update, and one nothing gives a
-  value is refused before the run starts, by the pre-flight and by `Session.run`
-  (`check.unplaced`); so a position is unresolved only where its value cannot be read (one
-  `wlx run --set` binds that is no position, XC-159). **Each trial's start is written too**, as a
+  refused at load wherever it places a window, a stimulus, an update or an array's objects (its
+  set size, ring radius, phase or target index), or sizes a window, and one nothing gives a value
+  in a structure the run plays is refused before the run starts -- by `wlx taskd`'s pre-flight,
+  by `wlx run` before its session opens, and by `Session.run` (`check.unplaced`); so a position,
+  an array's objects or its target is unresolved only where a value cannot be read (one `wlx run
+  --set` binds that is none of its kind, XC-159). **Each trial's start is written too**, as a
   row of `trial_starts.jsonl` — its ten numbers, its run and its task — at the boundary,
   after its words are computed and before its first strobe (XC-026 spec §8a item 1): a
   trial that dies mid-trial has strobed its number and has no line, and a resume takes

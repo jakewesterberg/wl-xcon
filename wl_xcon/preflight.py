@@ -237,15 +237,20 @@ def values(task: Task | None, given: dict, refused=(), plan: str | None = None) 
     nothing gives a value** (the
     b3a-2 plan, decision 2): a run started without one faults at its first trial
     (`run._resolve`), after `RUN_START`, so it is refused here instead, naming each. **And for
-    a categorical parameter that places a window, a stimulus or an update that nothing gives a
-    value** (`check.unplaced`; XC-415; the PI, 2026-10-30: "Refuse to start", "A stimulus that
-    cannot be drawn is a case where the run cannot proceed"), naming it and where it places: a
-    whole position is given by a plan's condition or not at all, since no starting value and
-    nothing over the wire is one. One that places nothing, an appearance, is not refused unset.
-    Checked as `Session.set` checks a live value, non-finite numbers included. **Nothing
-    a task's declarations hold raises out of here.** **A run of a plan** (engine build C2b)
-    needs the numbers of the structures its conditions play only, and one that every
-    condition playing a structure that uses it sets is given; so is a place."""
+    a categorical parameter that places a window, a stimulus, an update or an array's objects,
+    or sizes a window, that nothing gives a value** (`check.unplaced`; XC-415; the PI,
+    2026-10-30: "Refuse to start", "A stimulus that cannot be drawn is a case where the run cannot
+    proceed"), naming it and where: a whole position is given by a plan's condition or not at
+    all, since no starting value and nothing over the wire is one. A stimulus's appearance left
+    unset is not refused: nothing in this build draws a trial's screen before the display process
+    (engine build E), and the record writes `drawn` null for it (`record._stimuli`). Checked as
+    `Session.set` checks a live value, non-finite numbers included. **Nothing a task's
+    declarations hold raises out of here.** **A run of a plan** (engine build C2b) needs the
+    numbers of the structures its conditions play only, and one that every condition playing a
+    structure that uses it sets is given; so is a place. **A plain run's numbers are read over
+    every structure, failing closed (the engine C1 plan's call 15), and its places over the default
+    structure alone**, the one it plays (`Session._plan`; the review of XC-415's fix, I1), since a
+    whole position can be given by nothing but a condition."""
     if task is None:
         return PreflightItem(
             STARTING_VALUES, FAIL, "the task did not load, so its values cannot be checked"
