@@ -97,6 +97,7 @@ def test_documentation_alone_selects_nothing():
         "tests/conftest.py",
         "tests/_zmq_release.py",
         "tests/_frames.py",
+        "tests/_builds.py",
         "tools/mutate.py",
         "tools/suite_progress/wlx_suite_progress.py",
         "pyproject.toml",

@@ -111,6 +111,9 @@ GLOBAL = (
     "tests/_zmq_release.py",
     # The one frame test_health.py, test_web.py and test_serve.py build their cases on.
     "tests/_frames.py",
+    # What test_gaze.py and test_saccade.py read a frame's builds with (XC-413, XC-414): the hot-path
+    # tests see only what it counts.
+    "tests/_builds.py",
     "tools/mutate.py",
     # Loaded into every suite `mutate.py` runs; it decides what a stopped suite read.
     "tools/suite_progress/wlx_suite_progress.py",

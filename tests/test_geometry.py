@@ -687,11 +687,12 @@ def test_a_polar_position_is_its_direction_as_per_axis_degrees():
 
 
 def test_a_positions_direction_is_in_its_documented_range_one_value_for_one_direction():
-    """`polar_of_deg`'s direction is in (-180°, 180°], as its docstring, the record (REC-26) and
-    the ask to wl-preproc say (the review of XC-399, M1): leftward is 180°, never -180°, however
-    the position was reached -- `Polar(8, -180)` and `Polar(8, 180)` are one position, and a
-    per-axis `y` of -0.0 is 0 -- and no direction is written as -0.0. A sweep `range(-180, 180,
-    45)` is how a task meets it."""
+    """`polar_of_deg`'s direction is in (-180°, 180°], as its docstring says (the review of XC-399,
+    M1), the math's own form: what is shown or written is `shown_polar`'s, from 0° to 360° (the PI,
+    2026-10-30; `tests/test_direction.py`). Leftward is 180°, never -180°, however the position
+    was reached -- `Polar(8, -180)` and `Polar(8, 180)` are one position, and a per-axis `y` of
+    -0.0 is 0 -- and no direction is read as -0.0. A sweep `range(-180, 180, 45)` is how a task
+    meets it."""
     from wl_xcon.geometry import polar_of_deg
 
     for x, y in ((-8.0, -0.0), (-8.0, 0.0), polar_deg(8.0, -180.0), polar_deg(8.0, 180.0)):

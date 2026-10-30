@@ -2917,7 +2917,8 @@ def test_a_settings_position_reaches_the_console_eccentricity_and_direction_firs
     the rig's words for it, the review report's (`review.position_words`). Its eccentricity is the
     true visual angle `atan(√(tan²x + tan²y))` and its direction `atan2(tan y, tan x)`: (20°, 20°)
     is 27.236° out at 45°, never the 28.284° that `√(x² + y²)` gives off the axes, and (12.5°,
-    -7.25°) is computed here from the same two formulas, off the diagonal. Its `value` is then
+    -7.25°) is computed here from the same two formulas, off the diagonal, its direction from 0° to
+    360° (the PI, 2026-10-30, "0 to 360 everywhere"): 330.151°, never -29.849°. Its `value` is then
     `None`, so no console offers to set it as a number or a word -- a `Polar` was no value the
     wire could carry at all -- and every other value is carried as it was. Each row is
     `Session.parameters`' shape, its last item the setting's choices, which declare a pair a
@@ -2941,7 +2942,8 @@ def test_a_settings_position_reaches_the_console_eccentricity_and_direction_firs
     assert (target.value, target.position) == (None, "27.236° at 45° · (x, y) (20, 20)")
     across, up = (math.tan(math.radians(v)) for v in (12.5, -7.25))
     out = round(math.degrees(math.atan(math.hypot(across, up))), 3)
-    toward = round(math.degrees(math.atan2(up, across)), 3)
+    toward = round(math.degrees(math.atan2(up, across)) % 360.0, 3)
+    assert toward == 330.151
     assert probe.position == f"{out:g}° at {toward:g}° · (x, y) (12.5, -7.25)"
     assert (cue.value, cue.position) == (None, "8° at 45° · (x, y) (5.675, 5.675)")
     assert (hold.value, hold.position, looks.value, looks.position) == (0.3, None, "circle", None)

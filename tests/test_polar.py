@@ -401,6 +401,19 @@ def test_two_windows_each_placed_by_a_whole_point_setting_are_checked_over_every
     assert not found.blocking and found.accepted_in == SESSION_KINDS
 
 
+def test_the_overlap_finding_names_each_choice_by_its_direction_from_0_to_360():
+    """The PI, 2026-10-30, "0 to 360 everywhere": the choice the overlap finding names, written
+    `Polar(8, -90)` by the task, reads 270 there as everywhere else."""
+    trial = _two_windows(P("pa"), _polar(8.0, 272.0), Param("pa", unit="deg", choices=(
+        _polar(8.0, -90.0), _polar(8.0, 90.0))))
+
+    (found,) = _overlaps(trial)
+
+    assert "(1 of 2 choices overlaps, by setting 'pa': 'a' at 8° at 270° · (x, y) (0, -8))" \
+        in found.detail
+    assert "-90" not in found.detail
+
+
 def test_a_window_placed_by_a_whole_point_setting_and_one_placed_by_a_literal_are_checked():
     """XC-156: one window at a setting's choice (10°, 0°) or (-10°, 0°), the other literally at
     (10.5°, 0°): they overlap at the first choice only, which is the one named; only the window

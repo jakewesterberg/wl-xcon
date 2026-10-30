@@ -1166,11 +1166,17 @@ def test_a_settings_polar_value_is_recorded_wherever_a_value_is_and_reads_back(t
 
 def _is_at(entry: dict, x: float, y: float) -> None:
     """`entry` says it was at `(x, y)`, with that position's true eccentricity and direction by
-    the PI's formulas (`_angles.true`), each to a billionth of a degree."""
+    the PI's formulas (`_angles.true`), each to a billionth of a degree, the direction as the
+    record writes it (`_angles.shown`: from 0° to 360°, none at the center; the PI, 2026-10-30)."""
     eccentricity, direction = _angles.true(x, y)
     assert (entry["x"], entry["y"]) == (pytest.approx(x, abs=1e-9), pytest.approx(y, abs=1e-9))
     assert entry["eccentricity"] == pytest.approx(eccentricity, abs=1e-9)
-    assert entry["direction"] == pytest.approx(direction, abs=1e-9)
+    shown = _angles.shown(eccentricity, direction)
+    if shown is None:
+        assert entry["direction"] is None
+    else:  # read round the circle, so 359.99999999999994 and 0 are one direction
+        assert 0.0 <= entry["direction"] < 360.0
+        assert (entry["direction"] - shown + 180.0) % 360.0 - 180.0 == pytest.approx(0.0, abs=1e-9)
 
 
 def test_each_trials_row_says_where_every_stimulus_it_showed_was_in_true_eccentricity_and_direction(
@@ -1220,7 +1226,7 @@ def test_each_trials_row_says_where_every_stimulus_it_showed_was_in_true_eccentr
         _is_at(target, VALUES["target_x"], VALUES["target_y"])
         _is_at(moved, *_angles.from_polar(12.0, -60.0))
         assert (moved["eccentricity"], moved["direction"]) == (
-            pytest.approx(12.0, abs=1e-9), pytest.approx(-60.0, abs=1e-9))
+            pytest.approx(12.0, abs=1e-9), pytest.approx(300.0, abs=1e-9))
         assert [(e["kind"], e["changed"]) for e in (target, moved)] == [
             ("show", None), ("update", ["at"])]
 
@@ -1489,6 +1495,57 @@ def test_a_settings_polar_value_reaches_the_console_polar_first_through_the_wire
     assert f"target_pos {right} → {oblique}" in fragments(with_staged, view())["rt-changes"]
     assert f"  param: target_pos {oblique} " in render(frames[-1])
     assert f"  staged: target_pos {right} -> {oblique} " in render(with_staged)
+
+
+def test_every_direction_reaches_the_record_and_the_console_from_0_to_360_and_none_at_the_center(
+        tmp_path):
+    """The PI, 2026-10-30, "0 to 360 everywhere" ("As tasks write it, e.g. 270. One form in the
+    task, the console and the record") and "Empty at center" ("The record writes no direction at
+    eccentricity 0, and the console shows only '0°'"). Test the path: a run whose target the task
+    places at `Polar(8, -90)`, changed live to `Polar(8, 180)`, writes 270 and 180 wherever a value
+    is written and in each stimulus's entry, where it wrote -90 before, and no direction for the
+    fixation point at the center; and its own frames, through `encode` and `decode`, show 270 on
+    the page's card, its staged change, the changes feed and `wlx console`."""
+    from wl_xcon.cli import render
+    from wl_xcon.link import decode, encode
+    from wl_xcon.task import Polar
+    from wl_xcon.web import fragments
+    from _frames import view
+
+    path = _sessions.polar_task(tmp_path)
+    text = path.read_text()
+    old = "choices=(Polar(8.0, 0.0), Polar(8.0, 45.0))"
+    assert text.count(old) == 1
+    path.write_text(text.replace(old, "choices=(Polar(8.0, -90.0), Polar(8.0, 180.0))"))
+    link = _Drained({2: [SetParameter(name="target_pos", value=Polar(8.0, 180.0), by=Box("jake"))]})
+    session = _session(_spec(tmp_path, task=str(path), trials=6, values={
+        **_spec(tmp_path).values, "target_pos": Polar(8.0, -90.0)}), link=link)
+
+    session.run()
+
+    start, _ = _runs(session)
+    assert start["resolved"]["target_pos"]["direction"] == 270.0
+    ((was, now),) = [(row["was"], row["now"]) for row in _parameter_changes(session)]
+    assert (was["direction"], now["direction"]) == (270.0, 180.0)
+    rows = _trial_rows(session)
+    assert [row["params"]["target_pos"]["direction"] for row in (rows[0], rows[-1])] == [
+        270.0, 180.0]
+    for row in rows:
+        (fix,) = [e for e in row["stimuli"] if e["name"] == "fix"]
+        assert (fix["eccentricity"], fix["direction"]) == (0.0, None)
+        for target in (e for e in row["stimuli"] if e["name"] == "target"):
+            want = row["params"]["target_pos"]["direction"]
+            assert abs(target["direction"] - want) < 1e-9 and 0.0 <= target["direction"] < 360.0
+    assert any(e["name"] == "target" for row in rows for e in row["stimuli"])
+    frames = [decode(encode(frame)) for frame in link.published]
+    down, left = "8° at 270° · (x, y) (0, -8)", "8° at 180° · (x, y) (-8, 0)"
+    shown = [row.position for frame in frames for row in frame.params if row.name == "target_pos"]
+    assert (shown[0], shown[-1]) == (down, left)
+    with_staged = next(frame for frame in frames if frame.staged)
+    assert f"staged → {left}" in fragments(with_staged, view())["params"]
+    assert f"target_pos {down} → {left}" in fragments(with_staged, view())["rt-changes"]
+    assert f"  staged: target_pos {down} -> {left} " in render(with_staged)
+    assert f"  param: target_pos {left} " in render(frames[-1])
 
 
 def test_a_settings_pair_position_reaches_the_console_polar_first_where_its_choices_declare_one(
