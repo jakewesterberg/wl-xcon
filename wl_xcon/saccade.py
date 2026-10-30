@@ -350,6 +350,13 @@ class Detector:
         return self._run_start is not None
 
     @property
+    def seen(self) -> int:
+        """How many samples this trial has accepted, the count `Saccade.start` and `stop` index
+        into. A gaze world numbering the samples it feeds from the first needs a detector that has
+        seen none (`gaze.Tracked`)."""
+        return self._seen
+
+    @property
     def ready(self) -> bool:
         """Whether the threshold rests on enough samples to mean anything: enough
         velocities, and the smaller threshold above zero (`min`'s choice of the two)."""
