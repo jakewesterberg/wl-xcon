@@ -146,9 +146,9 @@ class Param:
     #: "Starting values are the task's own"; S8 §3.4's *task* layer, under what a console
     #: or `wlx run --set` gives): a number inside the parameter's own declared range.
     #: `__post_init__` refuses any other as the task is built: a starting appearance is
-    #: not carried until something records and publishes one, and a start outside
-    #: `[low, high]` would run under `wlx run`, which takes no pre-flight (XC-159; the
-    #: b3a-2 final review, m2). A bound that is not a real number is left to
+    #: not carried until telemetry publishes one (XC-420; the record writes one since REC-27),
+    #: and a start outside `[low, high]` would run under `wlx run`, which takes no
+    #: pre-flight (XC-159; the b3a-2 final review, m2). A bound that is not a real number is left to
     #: `preflight.values`, which holds the merged values to `[low, high]` again -- one outside
     #: it a warning since XC-352's D2 (2026-10-11), unless the checks widened to it refuse it
     #: (`preflight.beyond`) -- and fails closed on a bound it cannot compare. `None`, the
@@ -167,7 +167,7 @@ class Param:
             raise ValueError(
                 f"parameter {self.name!r}: a task's starting value is a number, and "
                 f"{start!r} is not a finite one; a starting appearance is not carried "
-                f"until something records and publishes one"
+                f"until telemetry publishes one (XC-420)"
             )
         if start is None:
             return

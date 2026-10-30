@@ -117,7 +117,8 @@ def test_a_parameter_declares_the_value_a_run_starts_with_or_none():
 @pytest.mark.parametrize("bad", [Disc(size=1.0), True, float("nan"), float("inf"), "0.3"])
 def test_a_parameter_refuses_a_start_that_is_not_a_finite_number(bad):
     """A starting value is recorded and published, and only a number is: a starting
-    appearance is not carried until something records and publishes one."""
+    appearance is not carried until telemetry publishes one (XC-420; the record writes one since
+    REC-27)."""
     with pytest.raises(ValueError, match="'fix_hold'.*starting value is a number"):
         Param("fix_hold", unit="s", low=0.05, high=2.0, start=bad)
 

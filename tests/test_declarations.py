@@ -468,6 +468,28 @@ def test_a_declaration_is_written_by_its_class_and_the_fields_it_sets():
     assert canonical((1, 2.5, "a", None, True)) == [1, 2.5, "a", None, True]
 
 
+def test_every_field_writes_the_defaults_the_hash_leaves_out_at_every_depth():
+    """REC-27: the session record writes a setting's value that is a declaration in the hash's form
+    with **every field**, those at their defaults included (`record._written`), so a reader of the
+    record never needs the defaults of the code that wrote it -- inside a list, a tuple and a dict
+    alike. The hash's own form is unchanged: a field at its default is left out."""
+    from wl_xcon.photometry import Gray
+    from wl_xcon.task import Disc, P
+
+    whole = {"class": "Disc", "fields": {"size": 1.0, "contrast": None, "color": None}}
+    assert canonical(Disc()) == {"class": "Disc", "fields": {}}
+    assert canonical(Disc(), every_field=True) == whole
+    assert canonical([Disc()], every_field=True) == [whole]
+    assert canonical((Disc(),), every_field=True) == [whole]
+    assert canonical({"a": Disc()}, every_field=True) == {"a": whole}
+    assert canonical(Disc(color=Gray(P("lum"))), every_field=True) == {"class": "Disc", "fields": {
+        "size": 1.0, "contrast": None, "color": {"class": "Gray", "fields": {
+            "cd_m2": {"class": "P", "fields": {"name": "lum"}}}}}}
+    assert canonical(Meaning(CLEAR_CUT, STIMULUS, raising=EASIER), every_field=True) == {
+        "class": "Meaning", "fields": {"kind": "clear-cut", "role": "stimulus", "raising": "easier",
+                                       "note": "", "relative_to": None, "overrides": ""}}
+
+
 def test_a_reward_is_written_with_the_entry_it_names():
     """Call 19: `Reward` reads as a dataclass with no fields, and every `Reward` equals every other;
     the entry it pays through is part of the task all the same. `canonical` reads its one slot,
