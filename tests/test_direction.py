@@ -363,6 +363,10 @@ def test_a_setting_used_as_a_direction_that_can_be_outside_0_to_360_is_warned_at
     said = _said_of(_placed_by(Polar(8.0, P("dir")), _dir(low=0.0, high=360.0, start=360.0)),
                     DIRECTION)
     assert "its start 360" in said and "write 0 for 360" in said
+    # Re-review 2's S3: a start and a range both outside are each told what to write.
+    said = _said_of(_placed_by(Polar(8.0, P("dir")), _dir(low=-180.0, high=180.0, start=-90.0)),
+                    DIRECTION)
+    assert "write 270 for -90" in said and "write 0 to 360" in said
     twice = dataclasses.replace(_placed_by(Polar(8.0, P("dir")), down, where="window"),
                                 states=_placed_by(Polar(8.0, P("dir")), down).states)
     assert len(_warned(twice, DIRECTION)) == 1
@@ -428,8 +432,9 @@ def test_each_warning_s_reason_is_where_its_position_is_used():
     assert STIMULUS_REASON not in said and "console" not in said
     said = _said_of(_placed_by(P("pos"), Param("pos", unit="deg", choices=(
         Polar(-8.0, 90.0),)), where="window"), ECCENTRICITY)
-    assert ("where the window is placed, while the console, `params` and the review report say it "
-            "as written") in said and STIMULUS_REASON not in said
+    # Re-review 2's S1: the review report shows a setting by its name, never its choices.
+    assert ("where the window is placed, while the console and `params` say it as written"
+            ) in said and STIMULUS_REASON not in said and "review report" not in said
     said = _said_of(_placed_by(Polar(P("ecc"), 45.0), Param("ecc", unit="deg", low=-2.0, high=10.0),
                                where="window"), ECCENTRICITY)
     assert "while the window is placed at a positive eccentricity" in said
@@ -496,6 +501,22 @@ def test_a_plan_condition_giving_a_direction_or_an_eccentricity_outside_is_warne
     assert eccentricity.startswith("plan 'p': block 'b''s condition 'down' sets 'ecc' to -4, below "
                                    "0, and 'ecc' places the eccentricity of")
     assert found[0].subjects == ("plan 'p': block 'b': condition 'down': setting 'dir'",)
+    # Re-review 2's S2: a direction past 360, and a whole position below 0, which the review
+    # report shows as a condition's value.
+    far = dataclasses.replace(task, plans={"p": Plan([Block("b", [
+        Condition("far", {"dir": 400.0}, target=1)])])})
+    (said,) = [f.detail for f in check_task(far) if f.code == DIRECTION]
+    assert "condition 'far' sets 'dir' to 400, outside 0 to 360" in said
+    assert said.endswith("write 40 for 400")
+    whole = Task({"t": _placed_by(P("pos"), Param("pos", unit="deg", choices=(
+        Polar(8.0, 0.0), Polar(-8.0, 90.0))))}, default="t", plans={"p": Plan([Block("b", [
+            Condition("neg", {"pos": Polar(-8.0, 90.0)}, target=1)])])})
+    (said,) = [f.detail for f in check_task(whole)
+               if f.code == ECCENTRICITY and f.subjects[0].startswith("plan")]
+    assert said.startswith("plan 'p': block 'b''s condition 'neg' sets 'pos', placing state 'on' "
+                           "shows stimulus 's', to -8° at 90° · (x, y) (0, -8)")
+    assert ("which a stimulus's entry records, while the console, `params` and the review report "
+            "say it as written") in said and said.endswith("Polar(8, 270)")
 
 
 def test_a_negative_eccentricity_is_warned_at_load_saying_what_to_write():

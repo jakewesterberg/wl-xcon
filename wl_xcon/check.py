@@ -4578,8 +4578,9 @@ def _direction_reach(param: Param) -> tuple[list[str], list[str], float | None]:
     one (a side it does not bound reaches without end), spelled from 0 to 360 where it has one
     spelling -- -90 to -10 is 270 to 350, a range of a whole turn or more is every direction, 0 to
     360 -- and told to offer choices only where it truly crosses 0 (re-review 1's R1, R5). A range
-    ending at 360 is not warned: 0 to 360 is how a range says every direction. Third, a number it
-    can be outside, for the reason to show, where it has one."""
+    ending at 360 is not warned: 0 to 360 is how a range says every direction. Each distinct piece
+    of advice is given, so a start and a range both outside are each told (re-review 2's S3).
+    Third, a number it can be outside, for the reason to show, where it has one."""
     def real(value: object) -> bool:
         return _is_number(value) and _real(value)
 
@@ -4594,7 +4595,7 @@ def _direction_reach(param: Param) -> tuple[list[str], list[str], float | None]:
         write.append(f"write {_spelled(param.start)} for {param.start:g}")
         examples.append(float(param.start))
     if param.choices:
-        return found, write[:1], (examples or [None])[0]
+        return found, list(dict.fromkeys(write)), (examples or [None])[0]
     low, high = param.low, param.high
     if not real(low) and not real(high):
         found.append("any number, its range declaring no bounds")
@@ -4615,7 +4616,9 @@ def _direction_reach(param: Param) -> tuple[list[str], list[str], float | None]:
             write.append(f"write {start:g} to {start + (high - low):g}")
         else:
             write.append("offer choices, as a range across 0 has no one spelling from 0 to 360")
-    return found, write[:1], (examples or [None])[0]
+    # Each piece of advice, distinct: a start and a range both outside are each told (re-review
+    # 2's S3), so following it leaves the start inside the range.
+    return found, list(dict.fromkeys(write)), (examples or [None])[0]
 
 
 def _eccentricity_reach(param: Param) -> tuple[list[str], list[str], float | None]:
@@ -4630,20 +4633,22 @@ def _eccentricity_reach(param: Param) -> tuple[list[str], list[str], float | Non
     if real(param.start) and param.start < 0:
         found.append(f"its start {param.start:g}")
         below.append(float(param.start))
-    write = ["give it eccentricities of 0 or more, at the opposite direction (its direction "
-             "+ 180°)"]
+    give = ("give it eccentricities of 0 or more, at the opposite direction (its direction "
+            "+ 180°)")
+    write = [give] if found else []
     if param.choices:
         return found, write, (below or [None])[0]
     low, high = param.low, param.high
     if not real(low):
         found.append("any number, its range declaring no bounds" if not real(high)
                      else f"its range up to {high:g}, with no lowest")
-        write = ["declare its lowest, 0 or more"]
+        write.append("declare its lowest, 0 or more")
     elif low < 0:
         found.append(f"its range from {low:g} to {high:g}" if real(high)
                      else f"its range from {low:g}, with no highest")
         below.append(float(low))
-    return found, write, (below or [None])[0]
+        write.append(give)
+    return found, list(dict.fromkeys(write)), (below or [None])[0]
 
 
 def _negative_said(said: str, at: Polar, there: str) -> str:
@@ -4700,9 +4705,11 @@ def _two_spellings(trial: Trial) -> list[Finding]:
                            and _is_number(c.eccentricity) and _real(c.eccentricity)
                            and c.eccentricity < 0), None)
             if choice is not None:
+                # The review report shows a setting by its name, never its choices (re-review
+                # 2's S1); a plan condition's value it does show (`_condition_spellings`).
                 findings.append(Finding("negative-eccentricity", _negative_said(
                     f"setting {name!r}, placing {where}, can be", choice, _where_reason(
-                        kinds, "the console, `params` and the review report")),
+                        kinds, "the console and `params`")),
                     blocking=False, accepted_in=SESSION_KINDS, subjects=subject))
         elif role == "direction":
             found, write, example = _direction_reach(param)
