@@ -244,8 +244,9 @@ class Polar:
 def position_of(at: object, values: dict) -> tuple[float, float]:
     """A position as the per-axis degrees everything downstream reads -- the screen, the gaze
     windows, the checks: a `Polar` converted exactly (`geometry.polar_deg`), a pair coordinate by
-    coordinate, a whole-point setting as its value is. On the trial loop's path (a window's
-    center, every frame), so floats and `math` only."""
+    coordinate, a whole-point setting as its value is. Floats and `math` only: `screen.resolve`
+    reads each stimulus's position through it at a frame. A gaze window's center is read through it
+    once, between trials (`gaze._judged`), where until XC-413 it was read every frame."""
     if isinstance(at, P):
         at = _value(at, values)
     if isinstance(at, Polar):
@@ -1182,13 +1183,31 @@ def FixPoint(
     return Stimulus(name=name, at=at, looks=Disc(size=size), **kwargs)
 
 
-def arrays_of(trial: Trial) -> "dict[str, Array]":
-    """Every array stimulus a trial can show, by stimulus name."""
-    return {
-        action.stimulus.name: action.stimulus.looks
-        for _, action in actions_of(trial)
-        if isinstance(action, Show) and isinstance(action.stimulus.looks, Array)
-    }
+def array_actions(trial: Trial) -> "list[tuple[str, str, bool, Array]]":
+    """**Every array a `Show` or an `Update` gives**, by the action that gives it: the state, the
+    stimulus's name, whether an `Update` gives it, and the array, as written or among a setting's
+    choices (a setting in its own choices is read once). Since XC-402 an array's object windows
+    follow an `Update` that changes it, so the load checks and the review report read every one of
+    these, never a `Show`'s alone (`check._array_faults`, `check._declared_window_names`,
+    `check._shown_arrays`; `review.render`'s windows table; XC-411)."""
+    params = {param.name: param for param in trial.params}
+    found: list[tuple[str, str, bool, Array]] = []
+
+    def walk(state: str, name: str, updated: bool, looks: object, inside: frozenset[str]) -> None:
+        if isinstance(looks, P):
+            param = params.get(looks.name)
+            if param is not None and looks.name not in inside:
+                for choice in param.choices:
+                    walk(state, name, updated, choice, inside | {looks.name})
+        elif isinstance(looks, Array) and (state, name, updated, looks) not in found:
+            found.append((state, name, updated, looks))
+
+    for state, action in actions_of(trial):
+        if isinstance(action, Show):
+            walk(state, action.stimulus.name, False, action.stimulus.looks, frozenset())
+        elif isinstance(action, Update) and "looks" in action.changes():
+            walk(state, action.stimulus, True, action.looks, frozenset())
+    return found
 
 
 def expand_windows(

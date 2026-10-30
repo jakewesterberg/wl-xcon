@@ -1410,8 +1410,8 @@ def test_a_saccade_to_a_distractor_is_judged_for_the_eye_its_family_scores():
 def test_judging_a_saccade_builds_nothing_in_its_frame():
     """`happened` runs on every frame an unclaimed saccade is pending (XC-410), so judging where
     it landed builds no tuple, list, dict or set: the bytecode of the two functions on that path
-    has no `BUILD_` instruction (the round-1 re-review). What `in_window` builds, it builds for
-    the loop's membership every frame too."""
+    has no `BUILD_` instruction (the round-1 re-review). `in_window`, which both reach, builds
+    nothing either (XC-413; `test_judging_a_window_builds_nothing_in_its_frame`)."""
     import dis
 
     built = sorted({(function.__name__, instruction.opname)
@@ -1420,3 +1420,249 @@ def test_judging_a_saccade_builds_nothing_in_its_frame():
                     if instruction.opname.startswith("BUILD_")})
 
     assert built == []
+
+
+# ---------------------------------------------------------------------------
+# Judging a window builds nothing in its frame (XC-413)
+# ---------------------------------------------------------------------------
+#
+# `in_window` runs on every frame for every window a guard asks about (`run.run_trial`'s
+# membership), so CLAUDE.md's hot-path discipline holds it: nothing allocated per frame. Until
+# 2026-10-28 every call built a list of the eyes' positions, a one-eye tuple, two generators for
+# their mean, the window's center again from however the task wrote it, and each eye's gaze again
+# from the tracker's sample, window after window.
+
+#: The instructions that build an object, by what they build, the first prefix an instruction's name
+#: has deciding: a container and what fills one, a string, a slice, a function or its cell, a
+#: generator, an iterator, a call's packed arguments, and anything else built. Named by what is
+#: built, not by instruction, so Python 3.11 to 3.13 read alike: one string is `FORMAT_VALUE` in
+#: 3.12 and `FORMAT_SIMPLE` in 3.13. **A float is not counted**: CPython boxes every float an
+#: arithmetic step makes, and no pure-Python path avoids it.
+_BUILDING = (
+    ("BUILD_TUPLE", "tuple"), ("LIST_TO_TUPLE", "tuple"),
+    ("BUILD_LIST", "list"), ("LIST_", "list"),
+    ("BUILD_MAP", "dict"), ("BUILD_CONST_KEY_MAP", "dict"), ("DICT_", "dict"), ("MAP_ADD", "dict"),
+    ("BUILD_SET", "set"), ("SET_ADD", "set"), ("SET_UPDATE", "set"),
+    ("BUILD_STRING", "string"), ("FORMAT_", "string"), ("CONVERT_VALUE", "string"),
+    ("BUILD_SLICE", "slice"), ("BINARY_SLICE", "slice"),
+    ("MAKE_", "function"), ("SET_FUNCTION_ATTRIBUTE", "function"),
+    ("RETURN_GENERATOR", "generator"), ("GET_ITER", "iterator"),
+    ("CALL_FUNCTION_EX", "arguments"), ("CALL_INTRINSIC", "object"), ("BUILD_", "object"),
+)
+
+
+def _what_builds(opname: str) -> "str | None":
+    return next((what for prefix, what in _BUILDING if opname.startswith(prefix)), None)
+
+
+def _built_on(call, *args) -> "list[tuple[str, str]]":
+    """What each Python function `call(*args)` runs can build, by the function's qualified name,
+    `call` itself included (`_BUILDING`). **The functions are found by running it**
+    (`sys.setprofile`), so the measure follows whatever the path calls, which a list of functions
+    written into a test does not; **each is read whole** (`dis`), so a branch this call did not take
+    is read too. The collector is off meanwhile, so no finalizer runs inside.
+
+    **It cannot see a call that allocates.** It reads instructions, and a call is one instruction
+    whatever it does: `str(frame)`, `list(x)` or `dict(x)` in `in_window` would pass it (the
+    gaze-followups review's K3), as would anything a function written in C allocates inside. Such
+    calls are kept off the path by reading it, not by this."""
+    import dis
+    import gc
+    import sys
+
+    codes = set()
+
+    def entered(frame, event, arg):
+        if event == "call":
+            codes.add(frame.f_code)
+
+    collecting = gc.isenabled()
+    gc.disable()
+    sys.setprofile(entered)
+    try:
+        call(*args)
+    finally:
+        sys.setprofile(None)
+        if collecting:
+            gc.enable()
+    return sorted({(code.co_qualname, what)
+                   for code in codes for instruction in dis.get_instructions(code)
+                   if (what := _what_builds(instruction.opname)) is not None})
+
+
+#: The settings `_judged_world`'s trial runs with.
+_JUDGED = {"ecc": 12.0, "dir": 200.0, "r": 2.0}
+
+
+def _judged_world():
+    """A world over a window centered by eccentricity and direction, each a setting, and an array
+    moved by an `Update`, its family scoring the left eye; with its tracker, its trial, and the
+    array as shown and as moved."""
+    from wl_xcon.task import Window
+
+    shown = Stimulus("search", at=(0.0, 0.0), looks=_RING)
+    move = Update("search", at=Polar(P("ecc"), P("dir")))
+    trial = Trial(
+        start="shown",
+        windows=[Window("w", at=Polar(P("ecc"), P("dir")), radius=P("r"), on="s"),
+                 ObjectWindows(of="search", radius=1.0, eye="left")],
+        states=[
+            State("shown", enter=[Show(Stimulus("s", at=Polar(P("ecc"), P("dir")))), Show(shown)],
+                  go=[On(After(0.04), "moved")]),
+            State("moved", enter=[move], go=[On(Hold("search.1", _HOLD), Outcome.CORRECT),
+                                             On(After(0.5), Outcome.NO_RESPONSE)]),
+        ],
+    )
+    tracker = Tracker()
+    world = Tracked(tracker, _fitted_mapping(), trial, _FRAME, _JUDGED)
+    return world, tracker, trial, shown, _moved(shown, move)
+
+
+def test_judging_a_window_builds_nothing_in_its_frame():
+    """Once the frame's display has run, as the trial loop runs it before asking: a window centered
+    by settings, an array's object windows before and after an `Update` moves them, an object only
+    a larger set would have, a window the task does not have, each for both eyes and for each eye
+    alone, with gaze fresh and with it stale."""
+    world, tracker, _, shown, moved = _judged_world()
+
+    built = set()
+    for frame, array, at in ((1, shown, (3.0, 0.0)), (2, moved, (-11.0, -4.0)), (100, moved, None)):
+        if at is not None:
+            tracker.accept(parse(_payload(*at), at=world.when(frame)))
+        world.display({"s": Stimulus("s", at=(0.0, 0.0)), "search": array}, frame)
+        for name in ("w", "search.1", "search.target", "search.distractor", "search.5", "nowhere"):
+            for eye in ("both", "left", "right"):
+                built.update(_built_on(world.in_window, name, frame, eye))
+
+    assert sorted(built) == []
+
+
+def test_a_window_center_resolved_before_the_trial_follows_an_update_that_moves_the_array():
+    """Resolved between trials, each placement's centers are swapped in on the frame the display
+    first carries the `Update`: gaze where object 1 is drawn after it, by eccentricity and direction
+    from settings, is inside its window, and gaze where object 1 was is no longer. Before it, the
+    windows are where the `Show` drew the array."""
+    world, tracker, trial, shown, moved = _judged_world()
+    old = _drawn(shown, _JUDGED, trial)["search.1"]
+    new = _drawn(moved, _JUDGED, trial)["search.1"]
+    assert _apart(old, new) > 2.0
+
+    def at(frame: int, gaze, array) -> bool:
+        tracker.accept(parse(_payload(*gaze), at=world.when(frame)))
+        world.display({"s": Stimulus("s", at=(0.0, 0.0)), "search": array}, frame)
+        return world.in_window("search.1", frame, "left")
+
+    assert at(1, old, shown) and not at(2, new, shown)
+    assert at(3, new, moved) and not at(4, old, moved)
+
+
+#: **What still builds in a frame, once a frame however many windows are asked**: each eye's gaze
+#: from the tracker's sample, its dual-Purkinje vector (`eye.EyeReading.dpi`) through its map
+#: (`calibration.Mapping.degrees`, `_for` and `EyeMap.degrees`, its polynomial's terms among them),
+#: and the two eyes' mean the saccade detector is fed (`gaze.Tracked.gaze_cyclopean`). `_for`'s
+#: string is its refusal's message, built only for a name that is no eye.
+_ONCE_A_FRAME = {
+    ("EyeReading.dpi", "tuple"),
+    ("Mapping._for", "tuple"),
+    ("Mapping._for", "string"),
+    ("Mapping.degrees", "tuple"),
+    ("EyeMap.degrees", "tuple"),
+    ("Tracked.gaze_cyclopean", "tuple"),
+}
+
+
+def test_each_eye_s_gaze_is_converted_once_a_frame_and_builds_only_the_map_s_tuples():
+    """Where the frame's gaze is first read, for the detector, as the display reads it: each eye's
+    sample through its map builds the tuples the map's interface returns, and nothing else does."""
+    world, tracker, _, _, _ = _judged_world()
+    tracker.accept(parse(_payload(3.0, 0.0), at=world.when(1)))
+
+    assert set(_built_on(world.gaze_cyclopean, 1)) <= _ONCE_A_FRAME
+
+
+def test_a_second_sample_within_a_frame_is_judged_not_the_frame_s_first():
+    """Each eye's gaze is converted once a frame, and again when the tracker accepts a sample
+    since: after a second sample in the frame, a window is judged by it, and the detector's mean
+    is taken from it, whichever is asked first. Keyed by the frame alone, either would read the
+    frame's first sample."""
+    from wl_xcon.task import position_of
+
+    on_w = position_of(Polar(_JUDGED["ecc"], _JUDGED["dir"]), {})
+
+    def second_sample():
+        world, tracker, _, _, _ = _judged_world()
+        tracker.accept(parse(_payload(*on_w), at=world.when(1)))
+        world.display({}, 1)
+        assert world.in_window("w", 1)
+        tracker.accept(parse(_payload(-20.0, 10.0), at=world.when(1)))
+        return world
+
+    window_first = second_sample()
+    assert not window_first.in_window("w", 1)
+    assert window_first.gaze_cyclopean(1) == pytest.approx((-20.0, 10.0), abs=1e-6)
+
+    mean_first = second_sample()
+    assert mean_first.gaze_cyclopean(1) == pytest.approx((-20.0, 10.0), abs=1e-6)
+    assert not mean_first.in_window("w", 1)
+
+
+#: A task whose one window is centered by a whole-point setting with a choice that is no position
+#: (the gaze-followups review's first, I1): it loads with no finding (XC-415), and the window is
+#: judged only by `SaccadeTo`, so a trial with no saccade never asks about it.
+_NEVER_ASKED_TASK = """
+from wl_xcon.photometry import Gray
+from wl_xcon.task import (
+    CRITERION, NO_CHOICE, NOT_DIFFICULTY, OWED, After, Counting, Disc, Meaning, On, Outcome, P,
+    Param, Polar, ReactionTime, SaccadeTo, Show, State, Stimulus, Task, Trial, Window,
+)
+
+trial = Trial(
+    start="only",
+    params=[Param("where", unit="deg", choices=(Polar(8.0, 0.0), 0.0))],
+    windows=[Window("w", at=P("where"), radius=1.0, on="t")],
+    states=[State("only",
+                  enter=[Show(Stimulus("t", at=(0.0, 0.0), looks=Disc(size=0.5, color=Gray(40.0))))],
+                  go=[On(SaccadeTo("w"), Outcome.CORRECT), On(After(0.05), Outcome.NO_RESPONSE)])],
+    counting=Counting(after_stimulus=OWED, appears="only"),
+)
+TASK = Task(
+    {"only": trial},
+    default="only",
+    reaction_time=ReactionTime("only", (Outcome.CORRECT,), "the one state's length"),
+    choice=NO_CHOICE,
+    meanings={"where": Meaning(NOT_DIFFICULTY, CRITERION, note="where the window is")},
+)
+"""
+
+
+def test_a_window_no_trial_asks_about_raises_only_when_asked(tmp_path):
+    """**A window that cannot be placed with a trial's values raises where it is asked about, never
+    when the world is built** (the gaze-followups review, I1): a session whose trials never ask
+    about it runs to its end, as it did before XC-413 resolved each window between trials, and
+    the window still raises when asked. Raised at the build, it stopped the session on its first
+    trial."""
+    path = tmp_path / "never_asked.py"
+    path.write_text(_NEVER_ASKED_TASK)
+    built = []
+
+    def world(trial, values, index):
+        built.append(Tracked(Tracker(), _fitted_mapping(), trial, 0.008, values,
+                             source=Replay(payloads=[(0.0, _payload(0.0, 0.0, frame=n))
+                                                     for n in range(100)])))
+        return built[-1]
+
+    spec = SessionSpec(
+        task=str(path), allocation="tasks/allocation.py", root=tmp_path,
+        session_id="2027-01-14_01", subject="REFERENCE", trials=2, frame_period=0.008, seed=11,
+        values={"where": 0.0}, bounds=_calibration_bounds(), already_delivered_today=0.0,
+        deployment=Deployment.RIG_FIXED, geometry=DIRECT, session_kind="training",
+        calibration=SRGB,
+    )
+    session = _marked(Session(spec, card=Card(), pump=Pump(), world=world))
+
+    session.run()
+
+    assert session.stopped_because == "every block is finished"
+    assert len(built) == 2
+    with pytest.raises(TypeError):
+        built[-1].in_window("w", 1)

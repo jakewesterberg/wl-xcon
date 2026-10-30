@@ -45,6 +45,7 @@ from wl_xcon.task import (
     SaccadeTo,
     Stimulus,
     Trial,
+    Window,
     expand_windows,
     placements,
     position_of,
@@ -56,6 +57,29 @@ def _resolve(value: float | P, values: dict[str, float]) -> float:
     kept here rather than imported to avoid a cycle, and small enough that the
     duplication is cheaper than the coupling."""
     return values[value.name] if isinstance(value, P) else value
+
+
+def _placed(window: Window, values: dict) -> "tuple[float, float, float]":
+    """A window's center and radius as the numbers gaze is compared with: its center in any form
+    a task writes it, a `Polar` converted exactly (`position_of`), and its radius."""
+    cx, cy = position_of(window.at, values)
+    return (cx, cy, _resolve(window.radius, values))
+
+
+def _judged(window: "Window | None", values: dict) -> "tuple[float, float, float] | Window | None":
+    """**A window as `Tracked.in_window` judges it, resolved between trials** (XC-413): its center
+    and radius (`_placed`), or `None` for no window. **A window these values cannot place stays as
+    it is**, and is resolved where it is asked about, raising there as it always has, never when
+    the world is built: a setting with no value bound (a world built for its gaze alone, as tests
+    build one), or one bound to a value that is no position, which loads with no finding (XC-415).
+    Raised here, it stopped a session on a trial that never asks about the window (the
+    gaze-followups review, I1). So any exception is deferred, whatever it is."""
+    if window is None:
+        return None
+    try:
+        return _placed(window, values)
+    except Exception:
+        return window
 
 
 class Tracked:
@@ -104,19 +128,40 @@ class Tracked:
         #: target that names the array and its eye. Switched with the windows in `display`.
         self._members: dict = dict(aliases)
         #: **An array's object windows follow it** (XC-402): each array with object windows, every
-        #: placement it can be drawn in this trial, built now, between trials (`task.placements`);
-        #: and the stimulus last seen drawing it. `display` switches `_windows` to the placement on
-        #: the display, so an `Update` that moves an array moves its windows on the frame its
-        #: objects are first drawn there. Every name any placement has is a key from the start,
-        #: `None` while the placement drawn has no such object, so a switch adds none.
-        self._arrays = tuple(placements(trial, self._values).items())
+        #: placement it can be drawn in this trial, built now, between trials (`task.placements`),
+        #: each with its windows judged (`_judged`); and the stimulus last seen drawing it.
+        #: `display` switches `_windows` and `_judged` to the placement on the display, so an
+        #: `Update` that moves an array moves its windows on the frame its objects are first drawn
+        #: there. Every name any placement has is a key from the start, `None` while the placement
+        #: drawn has no such object, so a switch adds none.
+        self._arrays = tuple(
+            (of, tuple((placement, {name: _judged(window, self._values)
+                                    for name, window in placement.windows.items()})
+                       for placement in options))
+            for of, options in placements(trial, self._values).items()
+        )
         self._drawn: dict = {of: None for of, _ in self._arrays}
         for _, options in self._arrays:
-            for placement in options:
+            for placement, _ in options:
                 for name in placement.windows:
                     self._windows.setdefault(name, None)
                 for alias in placement.members:
                     self._members.setdefault(alias, ())
+        #: **Each window's center and radius as numbers, resolved now, between trials** (XC-413):
+        #: `in_window` runs every frame for every window a guard asks about, and they change only
+        #: when an array's placement switches, which swaps in the placement's own (`display`).
+        self._judged: dict = {name: _judged(window, self._values)
+                              for name, window in self._windows.items()}
+        #: **Each eye's gaze, converted once a frame** however many windows ask (XC-413): the
+        #: frame and the sample it was converted for, and each eye's position or `None`. Gaze at a
+        #: frame is a function of the two, the map, the clock and the tracker's staleness being
+        #: fixed for a world's trial; `display` converts it, for the detector, before any window is
+        #: asked about, and a frame asked about without one, or a sample accepted since, converts
+        #: it again.
+        self._looked: int | None = None
+        self._sample = None
+        self._left: tuple[float, float] | None = None
+        self._right: tuple[float, float] | None = None
         #: Which mapping version scored this trial. S5 §6: every trial cites the
         #: version in force, and it is read off the map rather than passed in, so a
         #: trial cannot cite a version it was not actually scored under.
@@ -143,34 +188,61 @@ class Tracked:
     def gaze_cyclopean(self, frame: int) -> tuple[float, float] | None:
         """Both eyes averaged, which is what the detector runs on. A per-eye detector
         would need a per-eye threshold and would answer a question no guard asks:
-        `SaccadeOnset` is about the animal, not about one of its eyes."""
-        positions = [self.gaze(side, frame) for side in ("left", "right")]
-        usable = [p for p in positions if p is not None]
-        if not usable:
-            return None
-        return (
-            sum(p[0] for p in usable) / len(usable),
-            sum(p[1] for p in usable) / len(usable),
-        )
+        `SaccadeOnset` is about the animal, not about one of its eyes. One eye alone when the
+        other has no position, and `None` when neither has.
+
+        **On the trial loop's path** (`display`, every frame), so each eye is the frame's one
+        conversion (`_look`), and the mean is taken without a list or a generator (XC-413)."""
+        if frame != self._looked or self.tracker.latest is not self._sample:
+            self._look(frame)
+        left = self._left
+        right = self._right
+        if left is None:
+            return right
+        if right is None:
+            return left
+        return ((left[0] + right[0]) / 2, (left[1] + right[1]) / 2)
+
+    def _look(self, frame: int) -> None:
+        """Each eye's gaze at `frame`, kept for the rest of the frame (`_looked`)."""
+        self._left = self.gaze("left", frame)
+        self._right = self.gaze("right", frame)
+        self._looked = frame
+        self._sample = self.tracker.latest
 
     def in_window(self, window: str, frame: int, eye: str = "both") -> bool:
-        declared = self._windows.get(window)
-        if declared is None:
+        """**On the trial loop's path**, every frame for every window a guard asks about, so it
+        builds nothing (XC-413): the window's center and radius were resolved between trials
+        (`_judged`), each eye's gaze is the frame's one conversion (`_look`), and the two eyes'
+        mean is taken without a list or a generator."""
+        judged = self._judged.get(window)
+        if judged is None:
             return False
-        # Its center in any form a task writes it, a `Polar` converted exactly (`position_of`).
-        cx, cy = position_of(declared.at, self._values)
-        radius = _resolve(declared.radius, self._values)
-
-        which = ("left", "right") if eye == "both" else (eye,)
-        positions = [self.gaze(side, frame) for side in which]
-        if any(position is None for position in positions):
-            return False
-        # A conjugate criterion is the mean of the two eyes, not either one: an
-        # `eye="both"` window asks where the animal is looking, and under dichoptic
-        # presentation one eye alone answers a different question. A window that
-        # wants one eye says so, which is what `Window.eye` exists for.
-        x = sum(p[0] for p in positions) / len(positions)
-        y = sum(p[1] for p in positions) / len(positions)
+        if isinstance(judged, Window):
+            # These values could not place it when this world was built: resolved here, raising.
+            judged = _placed(judged, self._values)
+        cx, cy, radius = judged
+        if frame != self._looked or self.tracker.latest is not self._sample:
+            self._look(frame)
+        if eye == "both":
+            # A conjugate criterion is the mean of the two eyes, not either one: an
+            # `eye="both"` window asks where the animal is looking, and under dichoptic
+            # presentation one eye alone answers a different question. A window that
+            # wants one eye says so, which is what `Window.eye` exists for.
+            left = self._left
+            right = self._right
+            if left is None or right is None:
+                return False
+            x = (left[0] + right[0]) / 2
+            y = (left[1] + right[1]) / 2
+        else:
+            # Any other name is no eye, and `gaze` refuses it as it always has.
+            position = (self._left if eye == "left" else self._right if eye == "right"
+                        else self.gaze(eye, frame))
+            if position is None:
+                return False
+            x = position[0]
+            y = position[1]
         # **True visual angle, at the window's own location** (the PI, 2026-10-19): the angle
         # at the eye between where it points and the window's center. Per axis,
         # `hypot(x - cx, y - cy)` made a 2° window at (20°, 0°) 1.879° tall. Gaze and window
@@ -244,9 +316,10 @@ class Tracked:
             if stimulus is None or stimulus is self._drawn[of]:
                 continue
             self._drawn[of] = stimulus
-            for placement in options:
+            for placement, judged in options:
                 if placement.draws(stimulus):
                     self._windows.update(placement.windows)
+                    self._judged.update(judged)
                     self._members.update(placement.members)
                     break
         if self.source is not None:

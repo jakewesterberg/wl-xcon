@@ -113,6 +113,46 @@ def test_an_array_task_renders():
     assert "set_size objects" in artifact
 
 
+def test_the_windows_table_counts_the_objects_an_update_gives_an_array():
+    """An `Update` that grows the array to eight objects makes windows its `Show` does not (XC-402),
+    so the family's row counts both: it said 4, the table reading only a `Show`'s array
+    (XC-411)."""
+    from wl_xcon.task import Array, ObjectWindows
+
+    ring = Array(n=4, radius=5.0, target=1)
+    trial = Trial(
+        start="shown",
+        windows=[ObjectWindows(of="search", radius=1.0)],
+        states=[
+            State("shown", enter=[Show(Stimulus("search", at=(0.0, 0.0), looks=ring))],
+                  go=[On(After(0.04), "grown")]),
+            State("grown", enter=[Update("search", looks=Array(n=8, radius=5.0, target=1))],
+                  go=[On(Hold("search.5", 0.05), Outcome.CORRECT),
+                      On(After(0.5), Outcome.NO_RESPONSE)]),
+        ],
+    )
+
+    assert _window_row(render(trial), "search.*") == (
+        "| `search.*` | 4 or 8 objects on a ring | 1 | `search` | both |")
+
+
+def test_the_windows_table_counts_the_objects_of_each_array_a_setting_gives():
+    """An array a setting gives is counted over the setting's choices; its row said `?`."""
+    from wl_xcon.task import Array, ObjectWindows, P, Param
+
+    trial = Trial(
+        start="shown",
+        params=[Param("ring", unit="array", choices=(Array(n=4), Array(n=6)))],
+        windows=[ObjectWindows(of="search", radius=1.0)],
+        states=[State("shown", enter=[Show(Stimulus("search", at=(0.0, 0.0), looks=P("ring")))],
+                      go=[On(Hold("search.5", 0.05), Outcome.CORRECT),
+                          On(After(0.5), Outcome.NO_RESPONSE)])],
+    )
+
+    assert _window_row(render(trial), "search.*") == (
+        "| `search.*` | 4 or 6 objects on a ring | 1 | `search` | both |")
+
+
 def _window_row(artifact: str, name: str) -> str:
     """The window table's row for `name`, as a reviewer reads it."""
     for line in artifact.splitlines():

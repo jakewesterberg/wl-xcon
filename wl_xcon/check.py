@@ -80,7 +80,7 @@ from wl_xcon.task import (
     Window,
     WithReplacement,
     actions_of,
-    arrays_of,
+    array_actions,
 )
 from wl_xcon.welfare import Deployment
 
@@ -106,6 +106,7 @@ def check(
         + _uncoupled_windows(trial)
         + _display_faults(trial)
         + _windows_left_behind(trial)
+        + _cyclopean_windows(trial)
         + _color_faults(trial, calibration)
         + _light_faults(trial)
         + _block_faults(trial)
@@ -1773,18 +1774,7 @@ def _windows_left_behind(trial: Trial) -> list[Finding]:
             blanked = blanked | {name} if no_array(looks) else blanked - {name}
         return blanked
 
-    entry: dict[str, frozenset[str]] = {state.name: frozenset() for state in trial.states}
-    for _ in range(len(entry) + 1):
-        arriving: dict[str, frozenset[str]] = {name: frozenset() for name in entry}
-        for state in trial.states:
-            leaving = after(entry[state.name], state.enter)
-            for edge in state.go:
-                if not isinstance(edge.to, Outcome) and edge.to in arriving:
-                    arriving[edge.to] = arriving[edge.to] | after(leaving, edge.do)
-        if arriving == entry:
-            break
-        entry = arriving
-
+    entry = _may_reach(trial, after)
     findings: list[Finding] = []
     for state in trial.states:
         blanked = after(entry[state.name], state.enter)
@@ -1795,8 +1785,7 @@ def _windows_left_behind(trial: Trial) -> list[Finding]:
             ):
                 continue
             for of in sorted(blanked):
-                if window not in (f"{of}.target", f"{of}.distractor") and \
-                        _object_index(window, of) is None:
+                if not _object_window_of(window, of):
                     continue
                 finding = Finding(
                     "windows-left-behind",
@@ -1805,6 +1794,106 @@ def _windows_left_behind(trial: Trial) -> list[Finding]:
                     f"windows stay where its objects were last drawn, and gaze there is scored "
                     f"as on them: right for a memory-guided design that blanks the array on "
                     f"purpose, wrong if it was not meant (a Hide of the array is refused instead)",
+                    blocking=False,
+                    accepted_in=SESSION_KINDS,
+                )
+                if finding not in findings:
+                    findings.append(finding)
+    return findings
+
+
+def _may_reach(trial: Trial, after) -> dict[str, frozenset]:
+    """**What may hold on entering each state, along any path into it**: `after(facts, actions)`
+    applied to each state's entry actions and to each edge's, from nothing at the start, joined
+    over every edge into a state, to a fixpoint (`_windows_left_behind`, `_cyclopean_windows`). A
+    may analysis, unlike `_visible_on_entry`'s must: one path is enough. Each `after` adds and
+    removes facts by the actions alone, so the fixpoint is reached within a pass per state."""
+    entry: dict[str, frozenset] = {state.name: frozenset() for state in trial.states}
+    for _ in range(len(entry) + 1):
+        arriving: dict[str, frozenset] = {name: frozenset() for name in entry}
+        for state in trial.states:
+            leaving = after(entry[state.name], state.enter)
+            for edge in state.go:
+                if not isinstance(edge.to, Outcome) and edge.to in arriving:
+                    arriving[edge.to] = arriving[edge.to] | after(leaving, edge.do)
+        if arriving == entry:
+            break
+        entry = arriving
+    return entry
+
+
+def _object_window_of(window: str, of: str) -> bool:
+    """Whether `window` names an object window of array `of`: one of its objects, as
+    `ObjectWindows.expand` names them, or its `<of>.target` or `<of>.distractor`."""
+    return window in (f"{of}.target", f"{of}.distractor") or _object_index(window, of) is not None
+
+
+def _cyclopean_windows(trial: Trial) -> list[Finding]:
+    """**An array's object window scored where the array can be drawn with a position per eye or
+    a disparity, warned** (XC-412). Its object windows stay on a ring about its cyclopean
+    position, `at`, whatever it is drawn with (EYE-29's choice 5). With a position per eye the
+    screen draws nothing there: each eye's objects are on a ring about that eye's own position
+    (`screen._eyes`). With a disparity each eye's image is half of it to one side, so the two
+    eyes' mean is on an object when the animal fixates it in depth, and one eye alone is half
+    the disparity off it. A stimulus is read as `_per_eye_content` and `_stereo_content` read it:
+    a position per eye given, a disparity not provably zero (`_disparity_is_zero`); an `Update`
+    giving either adds it and one clearing it, or a `Show`, takes it away. A may analysis, as
+    `_windows_left_behind`'s (`_may_reach`). A warning in every kind (the PI, 2026-10-11:
+    warnings over refusals)."""
+    families = {w.of for w in trial.windows if isinstance(w, ObjectWindows)}
+    if not families:
+        return []
+
+    def after(drawn: frozenset, actions: list) -> frozenset:
+        for action in actions:
+            if isinstance(action, Show) and action.stimulus.name in families:
+                shown = action.stimulus
+                drawn = drawn - {(shown.name, "per-eye"), (shown.name, "disparity")}
+                if shown.at_left is not None or shown.at_right is not None:
+                    drawn = drawn | {(shown.name, "per-eye")}
+                if not _disparity_is_zero(shown.disparity, trial):
+                    drawn = drawn | {(shown.name, "disparity")}
+            elif isinstance(action, Update) and action.stimulus in families:
+                changes = action.changes()
+                eyes = [changes[eye] for eye in ("at_left", "at_right") if eye in changes]
+                if eyes:
+                    fact = (action.stimulus, "per-eye")
+                    drawn = (drawn | {fact} if any(at is not None for at in eyes)
+                             else drawn - {fact})
+                if "disparity" in changes:
+                    fact = (action.stimulus, "disparity")
+                    drawn = (drawn - {fact} if _disparity_is_zero(changes["disparity"], trial)
+                             else drawn | {fact})
+        return drawn
+
+    why = {
+        "per-eye": ("a position per eye", "where with a position per eye the screen draws "
+                    "nothing: each eye's objects are on a ring about that eye's own position, and "
+                    "gaze on them is inside a window only as far as that position is near `at`"),
+        "disparity": ("a disparity", "midway between each object's two images, one for each "
+                      "eye, half the disparity either side: the two eyes' mean is on an object "
+                      "when the animal fixates it in depth, but one eye alone, as a window scoring "
+                      "one eye judges it, is half the disparity off it"),
+    }
+    entry = _may_reach(trial, after)
+    findings: list[Finding] = []
+    for state in trial.states:
+        drawn = after(entry[state.name], state.enter)
+        for edge in state.go:
+            window = getattr(edge.guard, "window", None)
+            if window is None or not isinstance(
+                edge.guard, (Entered, Exited, Hold, SaccadeTo, Touched)
+            ):
+                continue
+            for of, how in sorted(drawn):
+                if not _object_window_of(window, of):
+                    continue
+                drawn_with, where = why[how]
+                finding = Finding(
+                    "cyclopean-windows",
+                    f"state {state.name!r} scores {window!r}, an object window of array {of!r}, "
+                    f"which can be drawn with {drawn_with}; its object windows stay on a ring "
+                    f"about its cyclopean position, `at` (EYE-29), {where}",
                     blocking=False,
                     accepted_in=SESSION_KINDS,
                 )
@@ -3191,20 +3280,26 @@ def _declared_window_names(trial: Trial) -> set[str]:
     no highest. **Only the ones the task names are listed**: listing every index up to the
     highest set size made a value sent past its range cost as many names as it is large,
     in the widened check run between two trials (Task 10's review, fix round 2).
+
+    **Over every array a `Show` or an `Update` gives** (`task.array_actions`), as written or among a
+    setting's choices: since XC-402 an array's object windows follow an `Update` that changes it,
+    so an object only an `Update`'s array has is scored, and was refused as undeclared while this
+    read only a `Show`'s array (XC-411).
     """
-    arrays = arrays_of(trial)
     params = {p.name: p for p in trial.params}
+    most: dict[str, float] = {}
+    for _, name, _, array in array_actions(trial):
+        reach = _whole(_span(array.n, params, 0.0)[1])
+        most[name] = max(most.get(name, reach), reach)
     named = set(_window_refs(trial.states))
     names: set[str] = set()
     for window in trial.windows:
         if isinstance(window, ObjectWindows):
             names |= {f"{window.of}.target", f"{window.of}.distractor"}
-            array = arrays.get(window.of)
-            if array is not None:
-                most = _whole(_span(array.n, params, 0.0)[1])
+            if window.of in most:
                 names |= {name for name in named
                           if (index := _object_index(name, window.of)) is not None
-                          and index < most}
+                          and index < most[window.of]}
         else:
             names.add(window.name)
     return names
@@ -3252,14 +3347,14 @@ def _array_faults(trial: Trial) -> list[Finding]:
     2026-10-14, the final review's I4). A set size with no highest is refused too, by
     `_unbounded_set_sizes`.
 
-    **Every array a `Show` or an `Update` gives** (`_array_actions`), as written or among a
+    **Every array a `Show` or an `Update` gives** (`task.array_actions`), as written or among a
     setting's choices: since XC-402 an array's windows follow an `Update` that changes it, and
     a run builds each one's windows before its first frame, where a target outside the objects
     raises (the XC-402 review, I1).
     """
     params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
-    for state, name, updated, looks in _array_actions(trial, params):
+    for state, name, updated, looks in array_actions(trial):
         lowest_n = _whole(_span(looks.n, params, 0.0)[0])
         lowest_t, highest_t = (_whole(v) for v in _span(looks.target, params))
         if lowest_t < 0 or highest_t >= lowest_n:
@@ -3294,7 +3389,7 @@ def _unbounded_set_sizes(trial: Trial) -> list[Finding]:
     has none, failing closed (`_span`). A set size with no lowest is `_array_faults`' to name."""
     params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
-    for name, array in _shown_arrays(trial, params):
+    for name, array in _shown_arrays(trial):
         if not isinstance(array.n, P) or array.n.name not in params:
             continue  # a literal is its own highest; an undeclared setting is refused at load
         if math.isfinite(_span(array.n, params, 0.0)[1]):
@@ -3675,7 +3770,7 @@ def _crowded_arrays(trial: Trial) -> list[Finding]:
     for declared in trial.windows:
         if not isinstance(declared, ObjectWindows):
             continue
-        for name, array in _shown_arrays(trial, params):
+        for name, array in _shown_arrays(trial):
             if name == declared.of:
                 findings += _crowded(declared, array, params)
     unique: list[Finding] = []
@@ -3736,7 +3831,7 @@ def _overlapping_objects(trial: Trial, raised: dict[str, float]) -> list[Finding
     apart, and is never refused here."""
     params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
-    for name, array in _shown_arrays(trial, params):
+    for name, array in _shown_arrays(trial):
         if not (isinstance(array.n, P) and array.n.name in raised):
             continue
         n = _whole(raised[array.n.name])
@@ -3782,35 +3877,13 @@ def _most_apart(ring: float, size: float) -> int:
     return most
 
 
-def _shown_arrays(trial: Trial, params: dict[str, Param]) -> list[tuple[str, Array]]:
+def _shown_arrays(trial: Trial) -> list[tuple[str, Array]]:
     """Every array a trial can show, with the stimulus that shows it: a `Show`'s looks or an
     `Update`'s, as written or among a parameter's choices."""
     found: list[tuple[str, Array]] = []
-    for _, name, _, array in _array_actions(trial, params):
+    for _, name, _, array in array_actions(trial):
         if (name, array) not in found:
             found.append((name, array))
-    return found
-
-
-def _array_actions(trial: Trial, params: dict[str, Param]) -> list[tuple[str, str, bool, Array]]:
-    """`_shown_arrays` by the action that gives each: the state, the stimulus's name, whether an
-    `Update` gives it, and the array, as written or among a parameter's choices."""
-    found: list[tuple[str, str, bool, Array]] = []
-
-    def walk(state: str, name: str, updated: bool, looks: object, inside: frozenset[str]) -> None:
-        if isinstance(looks, P):
-            param = params.get(looks.name)
-            if param is not None and looks.name not in inside:
-                for choice in param.choices:
-                    walk(state, name, updated, choice, inside | {looks.name})
-        elif isinstance(looks, Array) and (state, name, updated, looks) not in found:
-            found.append((state, name, updated, looks))
-
-    for state, action in actions_of(trial):
-        if isinstance(action, Show):
-            walk(state, action.stimulus.name, False, action.stimulus.looks, frozenset())
-        elif isinstance(action, Update) and "looks" in action.changes():
-            walk(state, action.stimulus, True, action.looks, frozenset())
     return found
 
 

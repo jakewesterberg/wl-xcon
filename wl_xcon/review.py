@@ -26,7 +26,6 @@ from wl_xcon.task import (
     WithReplacement,
     SPENT,
     UNPAID,
-    arrays_of,
     After,
     Background,
     Custom,
@@ -44,6 +43,7 @@ from wl_xcon.task import (
     Trial,
     Update,
     actions_of,
+    array_actions,
 )
 
 
@@ -258,13 +258,19 @@ def render(trial: Trial, allocation_names: dict[int, str] | None = None) -> str:
     if trial.windows:
         lines += ["## Windows", "", "| Name | Centre | Radius | Scores | Eye |",
                   "|---|---|---|---|---|"]
-        arrays = arrays_of(trial)
+        # Every array a `Show` or an `Update` gives each stimulus, as the checker reads them
+        # (`task.array_actions`): an `Update` that grows an array makes windows its `Show` does
+        # not (XC-402), and the row read only the `Show`'s count (XC-411).
+        counts: dict[str, list[str]] = {}
+        for _, name, _, array in array_actions(trial):
+            label = _value_label(array.n)
+            if label not in counts.setdefault(name, []):
+                counts[name].append(label)
         for window in trial.windows:
             if isinstance(window, ObjectWindows):
                 # A family, described as one: how many members it has is a
                 # parameter, so listing them would be listing one configuration.
-                array = arrays.get(window.of)
-                count = _value_label(array.n) if array is not None else "?"
+                count = " or ".join(counts.get(window.of, [])) or "?"
                 lines.append(
                     f"| `{window.of}.*` | {count} objects on a ring "
                     f"| {_value_label(window.radius)} | `{window.of}` "

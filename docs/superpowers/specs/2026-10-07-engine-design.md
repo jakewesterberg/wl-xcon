@@ -324,10 +324,13 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    objects had been (XC-402). Gaze is judged against the windows as drawn on each frame, with no
    grace across a move, and an `Update` or a `Show` that draws the array as no array leaves them
    where the objects were last drawn, which a task scoring them then is warned of at load
-   (`windows-left-behind`); an `Update`'s array is held to the array checks a `Show`'s is
-   (`target-outside-array`, `crowded-array`); and a saccade to `<of>.distractor` is judged at
-   every distractor, each for its own eye, where it had been judged at a stand-in window at the
-   target (EYE-29, engineering defaults).
+   (`windows-left-behind`); a position per eye or a disparity moves no window, which stays about
+   the array's cyclopean position, and a task scoring one where the array can be drawn so is
+   warned of that at load (`cyclopean-windows`); an `Update`'s array is held to the array checks
+   a `Show`'s is (`target-outside-array`, `crowded-array`, and `undeclared-window` for an object
+   only it has) and counted in the review report's windows table; and a saccade to
+   `<of>.distractor` is judged at every distractor, each for its own eye, where it had been judged
+   at a stand-in window at the target (EYE-29, engineering defaults).
 8. **Off the field**: only when declared; check 8 grows to test extents (XC-143, XC-144).
 9. **Head-free chaired sessions**: nominal head position, recorded and listed; a task may require a
    fixed head.
@@ -891,8 +894,10 @@ drummed repeats one, and its `presentations` the lines written.
    2026-10-12, `longer-than-declared`, and, in engine build C2a, `hold-cut-short` (a timeout that
    can end a state before its hold completes, one listed before the hold that ties it included), and,
    on 2026-10-27, `windows-left-behind` (an array's object window scored after a `Show` or an
-   `Update` that can draw it as no array; EYE-29), and `color-on-default` and `contrast-on-default` are
-   accepted in recording. No warning the rig lists refuses any kind.
+   `Update` that can draw it as no array; EYE-29), and, on 2026-10-28, `cyclopean-windows` (an
+   array's object window scored where the array can be drawn with a position per eye or a
+   disparity, its windows staying about its cyclopean position; EYE-29), and `color-on-default`
+   and `contrast-on-default` are accepted in recording. No warning the rig lists refuses any kind.
 3. **Accepted once per session**, at open, recorded. **A warning appearing during a run that its kinds do
    not accept pauses the run at the next trial**, for the operator to accept (recorded) or stop (N§R6).
    Today's unknowns keep the 2026-09-19 rule: proceed on a recorded acknowledgment.

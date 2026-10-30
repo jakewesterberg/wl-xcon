@@ -426,7 +426,9 @@ def separation_deg(x1: float, y1: float, x2: float, y2: float) -> float:
     """
     ax, ay = math.radians(x1), math.radians(y1)
     bx, by = math.radians(x2), math.radians(y2)
-    cos_ax, cos_ay, cos_bx, cos_by = math.cos(ax), math.cos(ay), math.cos(bx), math.cos(by)
+    # Two at a time: a pair's assignment is a swap, four at once built a tuple every call (XC-413).
+    cos_ax, cos_ay = math.cos(ax), math.cos(ay)
+    cos_bx, cos_by = math.cos(bx), math.cos(by)
     ux = math.sin(ax) * cos_ay
     uy = cos_ax * math.sin(ay)
     uz = cos_ax * cos_ay
