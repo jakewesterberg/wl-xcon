@@ -397,5 +397,6 @@ def simulate(
                 # A census commands nothing through `welfare`: no fluid, no reward.
                 fluid_ml=0.0,
                 last_reward_at=None,
+                placed=result.placed,
             )
     return tally.census()

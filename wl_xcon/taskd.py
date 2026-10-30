@@ -219,6 +219,21 @@ def _drum_warned(condition: str, index: int, owed: int, clearing: bool = False) 
             f"{index}; drumming goes on: {way}")
 
 
+def _unresolved(index: int, entries: list[dict]) -> str:
+    """The changes feed's warning at a trial whose line holds a stimulus entry the record could
+    not resolve, for a reason not yet said this run (XC-399, the re-review's minor 5 and the scoped
+    check's; the PI's warnings over refusals, 2026-10-11): which trial, how many new entries, and
+    each stimulus with why -- the setting with no value, or the fault reading it. **Each (stimulus,
+    reason) is said once a run** (`Session._unresolved_said`): a later line holding another is
+    said, a repeat of one said is not, for every trial like it is recorded the same way and a
+    flood would bury the feed."""
+    count = len(entries)
+    which = "; ".join(f"{entry['name']} ({entry['unresolved']})" for entry in entries)
+    return (f"trial {index}'s line could not resolve {count} stimulus "
+            f"{'entry' if count == 1 else 'entries'}: {which}; it is recorded so, null where "
+            f"unresolved, and each stimulus is said once a run for each reason")
+
+
 def _minutes(seconds: float) -> str:
     """A time limit in the words a sentence gives it: whole minutes and seconds, or seconds under
     a minute -- "1 minute", "3 minutes 20 s", "45 s" (the engine C2b plan's engineering review,
@@ -2215,6 +2230,9 @@ class Session:
     #: The settings edited live in the run in progress (`_apply_staged`), which win over a value a
     #: condition sets for the rest of the run (engine spec §14.7; engine build C2b).
     _edited: frozenset = field(init=False, default=frozenset(), repr=False)
+    #: The (stimulus name, reason) pairs the run in progress has said on the changes feed a trial's
+    #: line could not resolve (`_unresolved`; XC-399): each once a run.
+    _unresolved_said: frozenset = field(init=False, default=frozenset(), repr=False)
     #: `_task`'s settings by name, built once as it is taken (`_take`).
     _declared: dict[str, Param] = field(init=False, default_factory=dict, repr=False)
 
@@ -2554,6 +2572,7 @@ class Session:
         self.question = None
         # The settings edited live in this run, which win over a condition's (engine spec §14.7).
         self._edited = frozenset()
+        self._unresolved_said = frozenset()
 
         # Counted by each condition's structure's table (engine spec §16.1; engine build C2a; each
         # condition naming its structure since C2b), which a block's own replaces.
@@ -2897,7 +2916,7 @@ class Session:
                 # the two cannot disagree (P4d-2b spec §4.1).
                 recorded = result.outcome.value if result.outcome else "hang"
                 self._recent.append(recorded)
-                record.trial(
+                stimuli = record.trial(
                     index=index,
                     outcome=recorded,
                     params=values,
@@ -2905,6 +2924,9 @@ class Session:
                     condition=condition.name,
                     structure=structure,
                     overridden=tuple(overridden),
+                    # Where each stimulus it showed was (XC-399), turned into positions as the
+                    # line is written, between trials.
+                    placed=result.placed,
                     counting=counted,
                     shown=shown,
                     repeat_of=drawn.repeat_of,
@@ -2928,6 +2950,15 @@ class Session:
                         else None
                     ),
                 )
+                new = [entry for entry in stimuli if entry["unresolved"]
+                       and (entry["name"], entry["unresolved"]) not in self._unresolved_said]
+                if new:
+                    # **A warning on the changes feed, each (stimulus, reason) once a run**
+                    # (XC-399, the re-review's minor 5 and the scoped check's): the line is
+                    # written, what it could not resolve null with why, and the trainer hears what
+                    # is new as the run goes on, where the record alone is silent.
+                    self._unresolved_said |= {(e["name"], e["unresolved"]) for e in new}
+                    self._feed("warning", None, self.wall_now(), _unresolved(index, new))
                 if self.observe is not None:
                     self.observe(condition, values, result)
                 index += 1

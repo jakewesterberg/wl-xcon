@@ -214,6 +214,119 @@ def _written(value: object) -> object:
     raise TypeError(f"the record writes no {type(value).__name__} value ({value!r})")
 
 
+#: What reading a position can raise: each is written as unresolved, never raised, for a line
+#: written after a trial that ran and paid must be written (the review of XC-399, I1).
+_UNREADABLE = (KeyError, TypeError, ValueError, IndexError, ArithmeticError)
+
+
+def _stimuli(placed: tuple, values: dict) -> list[dict]:
+    """**Where each stimulus a trial showed was** (XC-399; the PI, 2026-10-19, "Record both, tell
+    wl-preproc"), as its line writes it: one entry for each `Show` and each `Update` the trial drew,
+    in the order they took effect (`run.Result.placed`).
+
+    **Every entry** is `{name, kind, frame, off, changed, drawn, unresolved, eccentricity,
+    direction, x, y}`: `kind` `"show"` or `"update"`; `frame` the first frame it was so; `off` the
+    first frame its presentation was off the display after a `Hide`, null when it was on through
+    the trial's last frame; `changed` the fields an `Update` set, null for a `Show`; `drawn` false
+    for a `Blank`, null when its appearance is a setting with no value, true otherwise; the
+    per-axis position, a `Polar` and a whole-position setting converted as the screen converts them
+    (`task.position_of`), and beside it the position's **true eccentricity and direction**,
+    `atan(√(tan²x + tan²y))` and `atan2(tan y, tan x)` (`geometry.polar_of_deg`), never `√(x² +
+    y²)`, which overstates it off the axes -- REC-25's keys. **An array** adds `objects`, each
+    object's, in index order, on its true circle about its center (`task.Array.positions`, as the
+    screen places them), and `target`, the index of the object it declares the target. **A
+    stimulus drawn by per-eye positions** (engine spec §5.4) is drawn at no cyclopean position, so
+    those four are null and `left` and `right` give each eye's own, in that eye's frame.
+
+    **Never raises on a position** (the review's I1): one naming a setting with no value, or one
+    that cannot be read, is written null with why in `unresolved` (null when everything resolved),
+    so a trial that ran and paid always has its line. Computed as the line is written, between
+    trials, never in a frame."""
+    from wl_xcon.geometry import polar_of_deg
+    from wl_xcon.task import Array, Blank, P, Polar, position_of
+
+    def value(field):
+        """A field as it stands: a setting's value, `None` where it has none."""
+        return values.get(field.name) if isinstance(field, P) else field
+
+    def unset(*fields) -> list[str]:
+        """The settings `fields` name, a position's own included, that have no value."""
+        names = []
+        for field in fields:
+            if isinstance(field, P) and value(field) is None:
+                names.append(field.name)
+                continue
+            field = value(field)
+            parts = ((field.eccentricity, field.direction) if isinstance(field, Polar)
+                     else field if isinstance(field, (tuple, list)) else ())
+            names += [part.name for part in parts if isinstance(part, P) and value(part) is None]
+        return names
+
+    def why(names: list[str]) -> str:
+        named = ", ".join(repr(name) for name in dict.fromkeys(names))
+        return (f"setting {named} has no value" if len(set(names)) == 1
+                else f"settings {named} have no value")
+
+    def where(x: float, y: float) -> dict:
+        eccentricity, direction = polar_of_deg(x, y)
+        return {"eccentricity": eccentricity, "direction": direction, "x": x, "y": y}
+
+    nowhere = {"eccentricity": None, "direction": None, "x": None, "y": None}
+    entries = []
+    for stimulus, frame, kind, changed, _, off in placed:
+        # Only an array has objects. An appearance setting a run left unset (the reference
+        # detection task's `target_appearance`, "left to the run") is no array: nothing draws a
+        # trial's screen until the display process (engine build E), so a run without one runs.
+        looks = value(stimulus.looks)
+        array = isinstance(looks, Array)
+        reasons: list[str] = []
+
+        def at(position) -> dict:
+            missing = unset(position)
+            if missing:
+                reasons.append(why(missing))
+                return {**nowhere, "objects": None} if array else dict(nowhere)
+            try:
+                x, y = position_of(position, values)
+            except _UNREADABLE as fault:
+                reasons.append(f"its position {position!r} could not be read ({fault})")
+                return {**nowhere, "objects": None} if array else dict(nowhere)
+            entry = where(x, y)
+            if array:
+                entry["objects"] = None
+                missing = unset(looks.n, looks.radius, looks.phase)
+                if missing:
+                    reasons.append(why(missing))
+                else:
+                    try:
+                        entry["objects"] = [where(*p) for p in looks.positions(values, (x, y))]
+                    except _UNREADABLE as fault:
+                        reasons.append(f"its objects could not be placed ({fault})")
+            return entry
+
+        entry = {"name": stimulus.name, "kind": kind, "frame": frame, "off": off,
+                 "changed": list(changed) if kind == "update" else None,
+                 "drawn": None if looks is None else not isinstance(looks, Blank)}
+        if stimulus.at_left is not None or stimulus.at_right is not None:
+            # One eye's position alone, which the load check refuses (`per-eye-misused`), is null.
+            entry.update(nowhere, left=None if stimulus.at_left is None else at(stimulus.at_left),
+                         right=None if stimulus.at_right is None else at(stimulus.at_right))
+        else:
+            entry.update(at(stimulus.at))
+        if array:
+            entry["target"] = None
+            if unset(looks.target):
+                reasons.append(why(unset(looks.target)))
+            else:
+                try:
+                    entry["target"] = int(value(looks.target))
+                except _UNREADABLE as fault:
+                    reasons.append(f"its target could not be read ({fault})")
+        entry["unresolved"] = "; ".join(dict.fromkeys(reasons)) or None
+        entries.append(entry)
+    return entries
+
+
 def _local(posix_seconds: float) -> str:
     """A POSIX instant as this host's local clock time, with its zone named.
 
@@ -262,6 +375,7 @@ class SessionRecord:
         position: Position,
         fluid_ml: float,
         last_reward_at: float | None,
+        placed: tuple,
         counting: str | None = None,
         shown: bool | None = None,
         repeat_of: int | None = None,
@@ -272,7 +386,7 @@ class SessionRecord:
         aids: tuple = (),
         structure: str | None = None,
         overridden: tuple = (),
-    ) -> None:
+    ) -> list[dict]:
         """One trial's record, flushed before returning.
 
         **The whole resolved parameter set, per trial** -- not a pointer to "the
@@ -314,7 +428,16 @@ class SessionRecord:
         default; engine build C2b), and **the values its condition set that a live edit
         overrode** (`overridden`, a list of names; engine spec §14.7: "the trial table carries an
         'overridden' flag"), so a grouping by condition can leave them out.
+
+        **And where each stimulus it showed was, and when** (`stimuli`, from `placed`, the
+        trial's `run.Result.placed`; XC-399, `_stimuli`): for each `Show` and `Update` it drew, its
+        kind, frame and `off`, its (x, y) and its true eccentricity and direction beside them, a
+        position that cannot be resolved written null with why, never raised. Required, as
+        `position` is: a line written without it would say the trial showed nothing, and nothing
+        would say so. **Returns the line's `stimuli`**, so the session can say on the changes feed
+        that one could not be resolved (`taskd`, once a run).
         """
+        stimuli = _stimuli(placed, params)
         if self._trials is None:
             self._trials = (self.directory / "trials.jsonl").open("a", encoding="utf-8")
         self._trials.write(
@@ -340,6 +463,7 @@ class SessionRecord:
                     "aids": list(aids),
                     "structure": structure,
                     "overridden": list(overridden),
+                    "stimuli": stimuli,
                 },
                 sort_keys=True,
                 default=_written,
@@ -347,6 +471,7 @@ class SessionRecord:
             + "\n"
         )
         self._trials.flush()
+        return stimuli
 
     def trial_start(self, position: Position, *, run: int, task: str) -> None:
         """One row of `TRIAL_STARTS`: the trial's position, its run (from 0) and its

@@ -7,9 +7,11 @@ holds it in `hold_fix`, which is only correct if a `Show` persists. Found by rev
 2026-08-31.
 """
 
+import dataclasses
+
 import pytest
 
-from wl_xcon.run import Quiet, Scripted, run_trial
+from wl_xcon.run import Placed, Quiet, Scripted, run_trial
 from wl_xcon.task import (
     After,
     Disc,
@@ -18,6 +20,7 @@ from wl_xcon.task import (
     Hold,
     On,
     Outcome,
+    Polar,
     Show,
     State,
     Stimulus,
@@ -103,6 +106,86 @@ def test_update_changes_a_stimulus_without_taking_it_down():
     # Decided while processing frame 2, different from frame 3 -- the same
     # one-frame rule the whole display follows.
     assert result.changed == (("fix", 3),)
+
+
+def test_each_show_and_update_says_what_was_drawn_from_which_frame():
+    """XC-399: a trial's row says where each stimulus it showed was, so the loop keeps each
+    stimulus as a `Show` put it up and as an `Update` left it, with the first frame it was so --
+    every `Show` and every `Update`, in the order they took effect, a stimulus shown again after a
+    `Hide` once more -- and, so the row reads as a timeline (the review's I3), which it was, the
+    fields an `Update` set, its presentation in `shown`, and the first frame that presentation was
+    off the display (null when it was on through the trial's last frame). Nothing is resolved in a
+    frame: the record turns them into positions after the trial."""
+    moved = Update("fix", at=Polar(8.0, 45.0), opacity=0.5)
+    trial = Trial(
+        start="on",
+        windows=[],
+        states=[
+            State("on", enter=[Show(FIX)], go=[On(After(0.02), "moved")]),
+            State("moved", enter=[moved], go=[On(After(0.02), "off")]),
+            State("off", enter=[Hide("fix")], go=[On(After(0.02), "again")]),
+            State("again", enter=[Show(FIX)], go=[On(After(0.02), Outcome.CORRECT)]),
+        ],
+    )
+    result = run_trial(trial, Quiet(), frame_period=0.01)
+
+    # Shown on 1, moved on 3, hidden on 5, shown again on 7; the trial's last frame is 8.
+    assert result.frames == 8
+    assert result.placed == (
+        Placed(FIX, 1, "show", (), 0, 5),
+        Placed(dataclasses.replace(FIX, at=Polar(8.0, 45.0), opacity=0.5), 3, "update",
+               ("at", "opacity"), 0, 5),
+        Placed(FIX, 7, "show", (), 1, None),
+    )
+
+
+def test_what_a_trial_puts_up_on_its_way_out_was_never_drawn_and_is_not_placed():
+    """The review's I2: a `Show` or `Update` on an edge to an outcome takes effect on the frame
+    after the trial's last, so it was never on the screen, and the row must not say where it was.
+    A `Hide` on that edge leaves the stimulus on through the last frame: its presentation never
+    went off within the trial."""
+    late = Stimulus("late", at=(3.0, 0.0), looks=Disc(size=0.3))
+    trial = Trial(
+        start="on",
+        windows=[],
+        states=[State("on", enter=[Show(FIX)], go=[On(After(0.02), Outcome.CORRECT, do=[
+            Show(late), Update("fix", at=(1.0, 1.0)), Hide("fix")])])],
+    )
+    result = run_trial(trial, Quiet(), frame_period=0.01)
+
+    assert result.frames == 2
+    assert result.placed == (Placed(FIX, 1, "show", (), 0, None),)
+
+
+def test_a_stimulus_up_for_no_frame_is_not_placed_and_one_changed_as_it_appears_is_two_entries():
+    """The re-review of XC-399, its minor 2: a `Show` and a `Hide` on one transition -- or an
+    `Update` and a `Hide` -- take effect on one frame, so what they describe was on the screen for
+    no frame and has no entry; the presentation's `Show` keeps its own, `off` the frame it went.
+    A `Show` and an `Update` on one frame stay two entries at that frame, the `Show`'s describing
+    for no frame what the `Update` then changed, as the ask says such pairs can occur."""
+    flash = Stimulus("flash", at=(3.0, 0.0), looks=Disc(size=0.3))
+    trial = Trial(
+        start="on",
+        windows=[],
+        states=[
+            State("on", enter=[Show(FIX)], go=[On(After(0.02), "next", do=[
+                Show(flash), Hide("flash"), Update("fix", at=(1.0, 1.0)), Hide("fix")])]),
+            State("next", go=[On(After(0.02), Outcome.CORRECT)]),
+        ],
+    )
+    result = run_trial(trial, Quiet(), frame_period=0.01)
+
+    assert result.placed == (Placed(FIX, 1, "show", (), 0, 3),)
+
+    dimmed = Trial(start="on", windows=[], states=[State(
+        "on", enter=[Show(FIX), Update("fix", opacity=0.5)],
+        go=[On(After(0.02), Outcome.CORRECT)])])
+    result = run_trial(dimmed, Quiet(), frame_period=0.01)
+
+    assert result.placed == (
+        Placed(FIX, 1, "show", (), 0, None),
+        Placed(dataclasses.replace(FIX, opacity=0.5), 1, "update", ("opacity",), 0, None),
+    )
 
 
 def test_the_world_is_told_what_is_on_the_display():

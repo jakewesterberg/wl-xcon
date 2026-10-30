@@ -272,6 +272,16 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    (`computed-position`). The review report shows every position as eccentricity and direction
    first with (x, y) beside it; the console follows after engine build C2b (XC-401), and the
    record, each stimulus's true eccentricity and direction beside its (x, y) (XC-399) (STE-29).
+   *Note, 2026-10-28 (XC-399, the PI's "Record both, tell wl-preproc"):* the record's half is built.
+   Each trial's line says where each stimulus it showed was, and when (`stimuli`): for every `Show`
+   and `Update` on the screen for a frame or more, in order, its name, whether a `Show` or an `Update`
+   made it and the fields an `Update` set, the frame it was first so and the frame its presentation
+   went off (null when on to the end), whether it was drawn (false for a `Blank`), its (x, y), and
+   beside them its true eccentricity `atan(√(tan²x + tan²y))` and direction `atan2(tan y, tan x)`,
+   in (−180°, 180°] pending the PI, computed from what was drawn as the line is written, between
+   trials; an array's objects and target, and a per-eye stimulus's two eyes, beside them; a position
+   that cannot be resolved written null with why, never raised, and each such stimulus said once a
+   run for each reason on the changes feed; wl-preproc told the fields first (REC-26).
 2. **Sizes**: one size number is the full width; each block's definition states it.
 3. **Away from the center**: true visual angle (default) or the screen center's
    scale, declared per task. *Note, 2026-10-19 (the PI, "Retire it"):* "Every stimulus is drawn in

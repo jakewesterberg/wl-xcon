@@ -497,3 +497,58 @@ shape come to you before they are written.
 agreement, the main sequence and stored detections read the same coordinates; and versioned contract fixtures, v1 the
 per-axis behavior (which our `tests/test_saccade.py` reads instead of importing your live code, before anything
 changes), v2 the true-angle one beside it, never replacing it. *(2026-10-19: v1 is vendored here at `tests/fixtures/wl-preproc/saccade-v1.json` from `10ea913` and pinned by SHA-256; `tests/test_saccade.py` no longer imports your detector.)*
+
+---
+
+# OPEN — XC-399: where each shown stimulus was, in true eccentricity and direction, on its trial's line (new, 2026-10-28)
+
+Opened 2026-10-28 on the PI's decision of 2026-10-19 (**"Record both, tell wl-preproc"**), backlog XC-399 (built; your reading of it is XC-416), **before any of these fields is written**. Written, not yet sent: the controller sends it to wl-preproc's session before the build that writes the field merges (it is stacked on engine build C2b). Revised the same day after its review (a timeline, entries never drawn, positions that cannot be resolved, the vergence offset), before anything was sent. Read against wl-preproc's `wl_preproc/events/rigtrials.py` (`_FIELDS`, the six fields a line must carry; every other field is ignored) and `nwb/conditions.py` (`trial_columns`, one trials-table column per setting in `params` **that varies across the trials**, which `nwb/intervals.py::_setting_columns` names) through this worktree's `wl-preproc` link, which is **a local export from 2026-10-02, not your main**; C2b's ask above read your main at `b74d4f3` (2026-10-19) and found `_FIELDS` the same.
+
+## What changes on our side
+
+Positions are per screen axis, `(x, y)` = `(atan(X/D), atan(Y/D))`, so `√(x² + y²)` overstates how far out a stimulus is off the axes: 28.28° for 27.24° at (20°, 20°), 42.43° for 39.23° at (30°, 30°). **Until now no trial line said where its stimuli were**: a position was in `params` only where a setting held it (`target_x` and `target_y`, or since C2b a whole position, REC-25), and a literal one -- the fixation point's (0°, 0°), every object of an array -- was in the task file alone.
+
+**Each `trials.jsonl` line gains `stimuli`**: a list with one entry each time the trial put a stimulus on the screen (a `Show`) or changed one already there (an `Update`), in the order they took effect, **only those on the screen for at least one frame of the trial**: a `Show` or `Update` on the transition that ends the trial would take effect on the frame after its last, and one that its presentation's `Hide` took effect with (a `Show` and a `Hide`, or an `Update` and a `Hide`, on one transition) was on it for no frame, so neither has an entry:
+
+```json
+"stimuli": [
+  {"name": "fix", "kind": "show", "frame": 1, "off": 61, "changed": null, "drawn": true, "unresolved": null,
+   "eccentricity": 0.0, "direction": 0.0, "x": 0.0, "y": 0.0},
+  {"name": "target", "kind": "show", "frame": 85, "off": null, "changed": null, "drawn": true, "unresolved": null,
+   "eccentricity": 27.23631347517073, "direction": 45.0, "x": 20.0, "y": 20.0},
+  {"name": "target", "kind": "update", "frame": 97, "off": null, "changed": ["opacity"], "drawn": true,
+   "unresolved": null, "eccentricity": 27.23631347517073, "direction": 45.0, "x": 20.0, "y": 20.0},
+  {"name": "search", "kind": "show", "frame": 85, "off": null, "changed": null, "drawn": true, "unresolved": null,
+   "eccentricity": 0.0, "direction": 0.0, "x": 0.0, "y": 0.0, "target": 0,
+   "objects": [{"eccentricity": 8.0, "direction": 0.0, "x": 8.0, "y": 0.0}, ...]}
+]
+```
+
+**Every entry carries these eleven fields** (an array's and a per-eye stimulus's add the fields below them):
+- **`name`** (text): the stimulus's name in its task, the one `Hide`, `Update` and its window use.
+- **`kind`** (text): `"show"`, a `Show` put it up, or `"update"`, an `Update` changed it while it was up.
+- **`frame`** (integer): the trial's frame from which it was so, counted from 1 at the trial's first frame, as the trial loop counts (the frame a `Show` makes it visible, the frame an `Update` first differs). **A `Show` and an `Update` can take effect on one frame** (the `Update` in the same transition as the `Show`, or in the state it enters): both have entries at that frame, in that order, and the `Show`'s describes the screen for no frame -- what was shown is the `Update`'s. Not a time: frames are matched to the recording by flip-patch edges from `TRIAL_START` (engine spec §8.4), which the screen log will carry (build F).
+- **`off`** (integer or null): the first frame of the trial on which its presentation -- the stimulus from the `Show` that put it up to the `Hide` that took it down, an `Update` belonging to the presentation it changed -- was no longer on the screen, after a `Hide`; **null when it was on through the trial's last frame** (a `Hide` on the transition that ends the trial included). Half-open, as a duration is a subtraction: an entry describes the screen from its `frame` up to, not including, the next entry of the same presentation (an `Update`) or its `off`, whichever is first, or the trial's end. So a gap trial (the fixation point's `off` before the target's `frame`) and an overlap trial (its `off` null, or after) read differently.
+- **`changed`** (list of text, or null): for an `Update`, the fields it set, in this order among `at`, `looks`, `disparity`, `eye`, `layer`, `opacity`, `at_left` and `at_right` (an `Update` that moved nothing repeats the position, and this says what it did change); null for a `Show`.
+- **`drawn`** (true, false or null): **whether its appearance is something to draw, not whether it reached the screen** -- **false for a `Blank`** (a catch trial's stimulus: a `Show` of nothing, recorded where it was placed); **null when its appearance is a setting with no value** (the reference detection task leaves `target_appearance` to the run); true otherwise. Nothing draws a trial's screen before the display process (build E), and a stimulus whose position could not be resolved has null `x` and `y` beside `drawn: true`.
+- **`unresolved`** (text or null): null when everything in the entry resolved; otherwise why not -- **`"setting 'cue_pos' has no value"`** where a position, an array's objects or its target name a setting the run left without one, or that a position could not be read -- and the fields it could not give are null. **A line is never lost to a position**: a trial that ran and paid has its line.
+- **`x`, `y`** (degrees): the cyclopean per-axis position, `(atan(X/D), atan(Y/D))`; a position the task wrote as `Polar(e, θ)` converted exactly, `x = atan(tan e·cos θ)` and `y = atan(tan e·sin θ)`, as REC-25 writes a setting's polar value. **In direct view it is exactly where the screen draws the stimulus** (both eyes see one screen, the vergence offset is 0 and a disparity is refused there). **Through the stereoscope** no image is drawn at it: the left eye's image is drawn at `x − d/2 + v` and the right's at `x + d/2 − v`, `d` its disparity (in `params` or the task file) and `v = atan(E/D)` the vergence offset, `E` and `D` being `config.json`'s `setup.half_ipd_cm` and `setup.viewing_distance_cm` (engine spec §5.4).
+- **`eccentricity`** (degrees of visual angle): its true angle from straight ahead, **`atan(√(tan²x + tan²y))`**.
+- **`direction`** (degrees): its polar angle, counter-clockwise from rightward (engine spec §5.1: 0° right, +y up), **`atan2(tan y, tan x)`**, in **(−180°, 180°] exactly**: leftward is 180, never −180, and no direction is −0. At eccentricity 0 it is 0 (or 180 for a position written (−0°, 0°)) and means nothing. **The range is pending the PI**: a task may write `Polar(8, 270)`, which `params` keeps as 270 (REC-25) and `stimuli` writes as −90; whether the record writes [0°, 360°) instead is his to say, and this ask will say which before it is sent.
+- **How they are computed**: by `geometry.polar_of_deg`, as `atan2(√(u_x² + u_y²), u_z)` and `atan2(u_y, u_x)` of the direction `u = (sin x cos y, cos x sin y, cos x cos y)`, which is `(tan x, tan y, 1)` scaled by `cos x cos y`: the two formulas above, for every position a screen shows (|x|, |y| < 90°), equal to rounding (about 10⁻¹⁴°). **Always from `x` and `y`**, never copied from the task: a stimulus written `Polar(10, 135)` reads `eccentricity` 10.0 and `direction` 135.0 only to rounding. Where a setting holds the position, its value as written is in `params` (REC-25).
+
+**An array's entry adds two**:
+- **`objects`**: a list, entry `i` its object `i` -- the object the screen calls `<name>.<i>` and its window `<of>.<i>` -- each `{eccentricity, direction, x, y}` as above (one an appearance setting holds included, when the run sets it); the array's own fields are its center. The objects sit on a true circle of its radius about its center (STE-28), so each is `radius` from the center in true visual angle, not in `(x, y)`. Null when they cannot be placed (`unresolved` says why).
+- **`target`** (integer or null): the index in `objects` of the object the array declares its target (`Array.target`, 0 unless set; every array has one); null when the setting holding it has no value.
+
+**A stimulus drawn by per-eye positions** (on the stereoscope only; no reference task has one) has null `eccentricity`, `direction`, `x` and `y`, since nothing is drawn at a cyclopean position, and adds **`left`** and **`right`**: each eye's own position as drawn (engine spec §5.4: that eye's own direction, **after the vergence offset**), each `{eccentricity, direction, x, y}` in that eye's own frame. **A per-eye array** keeps `target` at the top level of its entry, one index for both eyes, and has its `objects` inside `left` and `right`, each eye's ring about that eye's position, none at the top level. **They include the vergence offset** (+`v` on the left eye, −`v` on the right, `v` as above), so they are not comparable with a cyclopean entry until it is taken off. An eye given no position (which the load check refuses) is null.
+
+**The position is cyclopean**: a disparity is not applied to `x` and `y`. A trial that showed nothing has an empty list; a trial that faulted writes no line, as today. The six required fields are unchanged.
+
+## The ask
+
+**Read `stimuli` into the published dataset**, so an analysis takes each stimulus's eccentricity and polar angle from its trial's line instead of computing `√(x² + y²)`, and can tell when each was on the screen. Yours to decide: how a list per trial is published (the trials table holds one value per trial per column; a JSON column, a column per stimulus name's first entry, or a table of its own keyed by trial and frame); and whether your eye events' endpoints, which your saccade spec gives the same two formulas (the section above, "Widened the same day"), should take the same names, `eccentricity` and `direction`, so a saccade's landing and the target it went to are read by one name. Both readers tolerate the field today (a trial line's extra fields are ignored), so nothing breaks before this is done.
+
+## What is deliberately not asked for
+
+No new escape, code or marker: positions travel in the session folder, never the stream (your `contracts/events.py`: "parameter VALUES do not, since they always travel with the session directory"). No change to the six required fields or to `params`. Not the screen log (engine spec §8.5, build F), which will carry every change's frame and full resolved description: this is only where each stimulus was, and when.

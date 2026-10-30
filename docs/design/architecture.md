@@ -515,7 +515,15 @@ not reset.
   stream's `TRIAL_NUMBER` (its `main`, `b0f8b52`, 2026-10-01).
   Every line carries ten position numbers (`levels.Position`; session-levels spec §3),
   and since XC-026 (2026-10-01) the fluid commanded during the trial (`fluid_ml`) and its
-  last reward's instant (`last_reward_at`). **Each trial's start is written too**, as a
+  last reward's instant (`last_reward_at`), and since XC-399 (2026-10-28) where each
+  stimulus it showed was, and when (`stimuli`: for every `Show` and `Update` on the
+  screen for a frame or more, its kind, its frame, when its presentation went off, the
+  fields an `Update` set, whether its appearance is something to draw, its (x, y) and its
+  true eccentricity and direction beside them, an array's objects and target too; REC-26),
+  which the trial loop keeps by reference (`run.Result.placed`) and the record resolves as
+  the line is written, never in a frame. A position that cannot be resolved is written null with why (`unresolved`), never
+  raised, so a trial that ran always has its line, and each unresolved stimulus is said on
+  the changes feed once a run for each reason. **Each trial's start is written too**, as a
   row of `trial_starts.jsonl` — its ten numbers, its run and its task — at the boundary,
   after its words are computed and before its first strobe (XC-026 spec §8a item 1): a
   trial that dies mid-trial has strobed its number and has no line, and a resume takes

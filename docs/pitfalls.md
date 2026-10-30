@@ -359,7 +359,9 @@ the angles the engine measures between positions -- gaze to a window's center, w
 window, an array's neighbors, how far calibration targets reach -- are the angles between their
 directions, where they are (`geometry.separation_deg`, and `least_separation_deg` built on it),
 an array is a true circle about its own direction (STE-28, `ring_spacing_deg`), and the screen
-center's scale is retired (STE-06). **Still per axis**, each for a reason STE-27 names: saccade
+center's scale is retired (STE-06); since XC-399 each trial's line gives every shown stimulus's
+true eccentricity and direction beside its (x, y), so an analysis need not take `√(x² + y²)`
+(REC-26). **Still per axis**, each for a reason STE-27 names: saccade
 detection and size (with wl-preproc, XC-398), the calibration's RMS residual, disparity (azimuth
 longitude, STE-07), the two eyes' mean, check 8's field test, and the stereoscope's gaze frame
 (XC-005). `Geometry.pixels_per_degree` stays a reported mean, and a test that asks the parser

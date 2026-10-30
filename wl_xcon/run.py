@@ -238,6 +238,28 @@ class Changed(NamedTuple):
     frame: int
 
 
+class Placed(NamedTuple):
+    """A stimulus as a `Show` put it on the display or an `Update` left it, and the first frame
+    it was so (XC-399): what the record turns into where it was, after the trial
+    (`record.SessionRecord.trial`), never in a frame. The stimulus as given, its parameters
+    unbound: a reference, kept, never copied. **With what reads it as a timeline** (the review of
+    XC-399, I3): which action made it, the fields an `Update` set, its presentation, and when that
+    presentation went off."""
+
+    stimulus: Stimulus
+    frame: int
+    #: `"show"` or `"update"`.
+    kind: str
+    #: The fields an `Update` set, as `Update.changes()` names them, in its order; `()` for a
+    #: `Show`.
+    changed: tuple[str, ...]
+    #: Its presentation: its index in `Result.shown`, the `Show` it belongs to.
+    presentation: int
+    #: The first frame its presentation was off the display, after a `Hide`, or `None` when it was
+    #: on through the trial's last frame -- set as the trial returns (`_drawn`).
+    off: int | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class Scored:
     """One scored response inside a trial: what, where, and when."""
@@ -267,6 +289,11 @@ class Result:
     changed: tuple[Changed, ...] = ()
     #: Photodiode confirmations, in order: the display as the world reported it.
     confirmed: tuple[Confirmed, ...] = ()
+    #: Every `Show` and every `Update` on the screen for a frame or more of the trial, in the order
+    #: they did, each with the stimulus as it was drawn from its frame, which action made it and
+    #: when its presentation went off (XC-399, `_drawn`): where each stimulus was, which `shown`
+    #: and `changed` name but do not say.
+    placed: tuple[Placed, ...] = ()
 
 
 def _resolve(value: float | P, values: dict[str, float]) -> float:
@@ -292,6 +319,7 @@ def _apply(
     shown: "list[Shown]",
     open_at: "dict[str, int]",
     changed: "list[Changed]",
+    placed: "list[Placed]",
     frame: int,
 ) -> None:
     """Execute the display actions among `actions`, effective from `frame`.
@@ -301,6 +329,10 @@ def _apply(
     though it were already visible would build the one-frame lie into every realized
     duration this system reports, and reporting durations honestly is most of why it
     exists.
+
+    **Each `Show` and `Update` keeps the stimulus it drew** (`placed`, XC-399), a reference
+    beside the name `shown` and `changed` keep, at the same transitions: nothing is resolved
+    here, and the record says where it was after the trial.
 
     Non-display actions are not this function's business: `Score` is the loop's and
     `Mark` and `Reward` are `_emit`'s, on a different clock -- see there.
@@ -316,6 +348,7 @@ def _apply(
             visible[name] = action.stimulus
             open_at[name] = len(shown)
             shown.append(Shown(name, frame, None))
+            placed.append(Placed(action.stimulus, frame, "show", (), open_at[name]))
         elif isinstance(action, Hide):
             if action.stimulus not in visible:
                 raise ValueError(
@@ -331,10 +364,32 @@ def _apply(
                     f"stimulus {action.stimulus!r} is not on the display, so it "
                     f"cannot be updated"
                 )
-            visible[action.stimulus] = replace(
-                visible[action.stimulus], **action.changes()
-            )
+            changes = action.changes()
+            visible[action.stimulus] = replace(visible[action.stimulus], **changes)
             changed.append(Changed(action.stimulus, frame))
+            placed.append(Placed(visible[action.stimulus], frame, "update", tuple(changes),
+                                 open_at[action.stimulus]))
+
+
+def _drawn(placed: "list[Placed]", shown: "list[Shown]", last: int) -> "tuple[Placed, ...]":
+    """What the trial drew, as it returns -- once, never in a frame (XC-399): each placement that
+    took effect by its last frame, with the first frame its presentation was off. **A `Show` or
+    `Update` on an edge to an outcome** takes effect on the frame after the last, so it was never
+    on the screen and is left out (the review's I2); **a `Hide` there** leaves its presentation on
+    through the last frame, so its `off` is `None`, as a presentation still up at the end. **A
+    placement its presentation's `Hide` took effect with** -- a `Show` and a `Hide`, or an `Update`
+    and a `Hide`, on one transition -- was on the screen for no frame, and is left out too (the
+    re-review's minor 2). A `Show` and an `Update` on one frame stay two placements: the first was
+    so for no frame, which the `Update` at its frame says."""
+    kept = []
+    for place in placed:
+        if place.frame > last:
+            continue
+        off = shown[place.presentation].off
+        if off is not None and off <= place.frame:
+            continue
+        kept.append(place._replace(off=off if off is not None and off <= last else None))
+    return tuple(kept)
 
 
 def _emit(actions: "list[Action]", effects: "Effects") -> None:
@@ -470,7 +525,8 @@ def run_trial(
     shown: list[Shown] = []
     open_at: dict[str, int] = {}
     changed: list[Changed] = []
-    _apply(current.enter, visible, shown, open_at, changed, 1)
+    placed: list[Placed] = []
+    _apply(current.enter, visible, shown, open_at, changed, placed, 1)
     _emit(current.enter, effects)
 
     # Two independent graces, in frames. `None` is enforcement switched off.
@@ -528,6 +584,7 @@ def run_trial(
                     tuple(shown),
                     tuple(changed),
                     tuple(confirmed),
+                    _drawn(placed, shown, frame),
                 )
             # Frozen: hold clocks do not advance and no edges are derived.
             holding_since = {
@@ -597,7 +654,7 @@ def run_trial(
                 if isinstance(action, Score)
             )
             if isinstance(edge.to, Outcome):
-                _apply(edge.do, visible, shown, open_at, changed, frame + 1)
+                _apply(edge.do, visible, shown, open_at, changed, placed, frame + 1)
                 _emit(edge.do, effects)
                 return Result(
                     edge.to,
@@ -607,11 +664,12 @@ def run_trial(
                     tuple(shown),
                     tuple(changed),
                     tuple(confirmed),
+                    _drawn(placed, shown, frame),
                 )
             current, entered_at = by_name[edge.to], frame
-            _apply(edge.do, visible, shown, open_at, changed, frame + 1)
+            _apply(edge.do, visible, shown, open_at, changed, placed, frame + 1)
             _emit(edge.do, effects)
-            _apply(current.enter, visible, shown, open_at, changed, frame + 1)
+            _apply(current.enter, visible, shown, open_at, changed, placed, frame + 1)
             _emit(current.enter, effects)
             # **Entering a state clears every hold.** A hold declared in a state
             # means held continuously *since that state began*. Carrying the window's
@@ -634,4 +692,5 @@ def run_trial(
         tuple(shown),
         tuple(changed),
         tuple(confirmed),
+        _drawn(placed, shown, max_frames),
     )

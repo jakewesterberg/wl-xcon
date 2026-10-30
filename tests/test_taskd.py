@@ -71,6 +71,7 @@ from wl_xcon.taskd import (
 )
 from wl_xcon.warnlist import Entry
 from wl_xcon.welfare import Deployment, Simulated as Pump
+import _angles
 import _sessions
 from _rig import DIRECT, STEREOSCOPE
 
@@ -1161,6 +1162,153 @@ def test_a_settings_polar_value_is_recorded_wherever_a_value_is_and_reads_back(t
     ((was, now),) = [(row["was"], row["now"]) for row in _parameter_changes(session)]
     assert (was, now) == (right, oblique)
     assert resume.read(session.directory, session.welfare.left_cage_wall_at).run_index == 0
+
+
+def _is_at(entry: dict, x: float, y: float) -> None:
+    """`entry` says it was at `(x, y)`, with that position's true eccentricity and direction by
+    the PI's formulas (`_angles.true`), each to a billionth of a degree."""
+    eccentricity, direction = _angles.true(x, y)
+    assert (entry["x"], entry["y"]) == (pytest.approx(x, abs=1e-9), pytest.approx(y, abs=1e-9))
+    assert entry["eccentricity"] == pytest.approx(eccentricity, abs=1e-9)
+    assert entry["direction"] == pytest.approx(direction, abs=1e-9)
+
+
+def test_each_trials_row_says_where_every_stimulus_it_showed_was_in_true_eccentricity_and_direction(
+        tmp_path):
+    """XC-399 (the PI, 2026-10-19, "Record both, tell wl-preproc"): each trial's row says where
+    each stimulus it showed was -- its (x, y) and, beside them, its true eccentricity and direction,
+    `atan(√(tan²x + tan²y))` and `atan2(tan y, tan x)`, never `√(x² + y²)` -- one entry for each
+    `Show` and each `Update`, in order, with the frame it was first there. Off the axes the two
+    differ: (20°, 20°) is 27.24° out, not 28.28°. A `Polar` is converted exactly, and an array's
+    objects sit on their true circle about its center (STE-28). Run through the session, so a
+    trial loop that drops what it drew, or a row that leaves it out, fails here."""
+    path = _sessions.stimuli_task(tmp_path)
+    near = dataclasses.replace(DIRECT, viewing_distance_cm=30.0)
+    session = _session(_spec(tmp_path, task=str(path), trials=20, geometry=near))
+
+    session.run()
+
+    rows = _trial_rows(session)
+    assert rows and any(row["shown"] for row in rows) and not all(row["shown"] for row in rows)
+    for row in rows:
+        entries = row["stimuli"]
+        opening = entries[:4]
+        assert [(e["name"], e["frame"]) for e in opening] == [
+            ("fix", 1), ("corner", 1), ("oblique", 1), ("ring", 1)]
+        fix, corner, oblique, ring = opening
+        _is_at(fix, 0.0, 0.0)
+        _is_at(corner, 20.0, 20.0)
+        assert corner["eccentricity"] == pytest.approx(27.236313, abs=1e-6), "not 28.28"
+        _is_at(oblique, *_angles.from_polar(10.0, 135.0))
+        assert (oblique["eccentricity"], oblique["direction"]) == (
+            pytest.approx(10.0, abs=1e-9), pytest.approx(135.0, abs=1e-9))
+        _is_at(ring, -8.0, -6.0)
+        expected = _angles.ring(-8.0, -6.0, 3.0, 30.0, 4)
+        assert len(ring["objects"]) == 4
+        for drawn, (x, y) in zip(ring["objects"], expected):
+            _is_at(drawn, x, y)
+            assert _angles.apart((drawn["x"], drawn["y"]), (-8.0, -6.0)) == pytest.approx(
+                3.0, abs=1e-9)
+        assert all("objects" not in e for e in (fix, corner, oblique))
+        # The target appears, and `corner` moves, only on a trial that reached `stim_on`.
+        if not row["shown"]:
+            assert len(entries) == 4
+            continue
+        target, moved = entries[4:]
+        assert (target["name"], moved["name"]) == ("target", "corner")
+        assert target["frame"] == moved["frame"] > 1
+        _is_at(target, VALUES["target_x"], VALUES["target_y"])
+        _is_at(moved, *_angles.from_polar(12.0, -60.0))
+        assert (moved["eccentricity"], moved["direction"]) == (
+            pytest.approx(12.0, abs=1e-9), pytest.approx(-60.0, abs=1e-9))
+        assert [(e["kind"], e["changed"]) for e in (target, moved)] == [
+            ("show", None), ("update", ["at"])]
+
+
+def test_a_stimulus_whose_position_setting_has_no_value_never_costs_a_trial_its_line(tmp_path):
+    """The review of XC-399, I1, its probe: a cue placed by a setting the run left without a value,
+    with no window on it, ran on every trial before its position was recorded. The record never
+    loses a line: every trial that started has its line, every mL the trials commanded is on one,
+    and the cue's entry has no position and says why. The pre-flight is not changed here."""
+    path = _sessions.cue_task(tmp_path)
+    session = _session(_spec(tmp_path, task=str(path), trials=8))
+
+    session.run()
+
+    rows = _trial_rows(session)
+    starts = (session.directory / "trial_starts.jsonl").read_text().splitlines()
+    assert session.stop_kind == "completed"
+    assert len(rows) == len(starts) >= 8
+    assert sum(row["fluid_ml"] for row in rows) == pytest.approx(session.welfare.commanded)
+    assert session.welfare.commanded > 0
+    for row in rows:
+        (cue,) = [e for e in row["stimuli"] if e["name"] == "cue"]
+        assert [cue[k] for k in ("eccentricity", "direction", "x", "y")] == [None] * 4
+        assert (cue["unresolved"], cue["drawn"]) == ("setting 'cue_pos' has no value", True)
+
+
+def test_a_run_whose_lines_hold_an_unresolved_stimulus_says_so_once_on_the_changes_feed(tmp_path):
+    """The re-review of XC-399, its minor 5, under the PI's warnings over refusals: a stimulus the
+    record cannot place is silent at the rig unless said, so the first trial whose line holds one
+    puts one warning on the changes feed, naming the stimulus, the setting and how many of its
+    entries were unresolved -- each once a run, never a trial, so a run of such trials is not a
+    flood; a run whose lines resolve says nothing."""
+    path = _sessions.cue_task(tmp_path)
+    session = _service_session(tmp_path)
+
+    session.run(RunSpec(task=str(path), trials=3, seed=2, values=dict(VALUES)))
+    session.run(RunSpec(task=str(path), trials=2, seed=3, values=dict(VALUES)))
+    session.run(_run_spec(trials=2))
+
+    said = [said for kind, by, _, said in session.controls
+            if kind == "warning" and by is None and "could not resolve" in said]
+    assert said == [
+        "trial 0's line could not resolve 1 stimulus entry: cue (setting 'cue_pos' has no value); "
+        "it is recorded so, null where unresolved, and each stimulus is said once a run for each "
+        "reason",
+    ] * 2
+    assert len(_trial_rows(session)) >= 7
+
+
+def test_each_new_unresolved_stimulus_is_said_once_a_run_and_a_repeat_is_not(tmp_path):
+    """The scoped check of XC-399's second fix round: a later line can hold a different unresolved
+    stimulus -- another condition leaving another setting without a value -- so the feed says each
+    (stimulus, reason) once a run, naming what is new, and a repeat of one already said gives
+    nothing. A plan's first block leaves the cue's setting unset and its second the probe's."""
+    path = _sessions.cue_task(tmp_path)
+    text = path.read_text()
+    for old, new in (
+        ("            enter=[Show(FIX), Show(CUE), Mark(4096)],",
+         "            enter=[Show(FIX), Show(CUE), Show(PROBE), Mark(4096)],"),
+        ("\ndetection = Trial(\n",
+         '\nPROBE = Stimulus("probe", at=P("probe_pos"), looks=Disc(size=0.5, '
+         'color=Gray(P("fix_luminance"))))\n\ndetection = Trial(\n'),
+        ('        Param("cue_pos", unit="deg", choices=(Polar(8.0, 0.0), Polar(8.0, 180.0))),\n',
+         '        Param("cue_pos", unit="deg", choices=(Polar(8.0, 0.0), Polar(8.0, 180.0))),\n'
+         '        Param("probe_pos", unit="deg", choices=(Polar(8.0, 90.0), Polar(8.0, -90.0))),\n'),
+    ):
+        assert text.count(old) == 1, old
+        text = text.replace(old, new)
+    path.write_text(text + (
+        "\nfrom wl_xcon.task import Block, Condition, Plan\n"
+        "TASK = _cue_dataclasses.replace(TASK, meanings={\n"
+        "    **TASK.meanings, 'probe_pos': Meaning(NOT_DIFFICULTY, STIMULUS, note='a probe')},\n"
+        "    plans={'two': Plan([\n"
+        "        Block('cue unset', [Condition('probe set', {'probe_pos': Polar(8.0, 90.0)}, target=3)]),\n"
+        "        Block('probe unset', [Condition('cue set', {'cue_pos': Polar(8.0, 0.0)}, target=3)])])})\n"))
+    session = _session(_spec(tmp_path, task=str(path), plan="two", trials=400))
+
+    session.run()
+
+    rows = _trial_rows(session)
+    unresolved = [{e["name"] for e in row["stimuli"] if e["unresolved"]} for row in rows]
+    assert {frozenset(names) for names in unresolved} == {frozenset({"cue"}), frozenset({"probe"})}
+    first_probe = next(row["index"] for row, names in zip(rows, unresolved) if "probe" in names)
+    said = [said for kind, by, _, said in session.controls
+            if kind == "warning" and by is None and "could not resolve" in said]
+    assert [(text.split("'s line")[0], "cue (" in text, "probe (" in text) for text in said] == [
+        ("trial 0", True, False), (f"trial {first_probe}", False, True)]
+    assert "probe (setting 'probe_pos' has no value)" in said[1]
 
 
 def test_each_condition_plays_the_structure_it_names_and_its_row_says_which(tmp_path):
