@@ -1431,7 +1431,7 @@ def test_judging_a_saccade_builds_nothing_in_its_frame():
     import dis
 
     built = sorted({(function.__name__, instruction.opname)
-                    for function in (Tracked.happened, Tracked._counts, Tracked._landed,
+                    for function in (Tracked.happened, Tracked._began_in, Tracked._landed,
                                      Tracked.began)
                     for instruction in dis.get_instructions(function)
                     if instruction.opname.startswith("BUILD_")})
@@ -1479,19 +1479,26 @@ def _replayed(trial: Trial, source: Replay):
     return run_trial(trial, world, _PROBE_FRAME, values={}, effects=Recorded())
 
 
-def _timeline(trial: Trial, to) -> "tuple[int, int, int]":
-    """The frames of `_saccades(to)`'s saccade, the loop feeding the detector payload k on frame
+def _timelines(trial: Trial, source: Replay) -> "list[tuple[int, int, int]]":
+    """The frames of each of `source`'s saccades, the loop feeding the detector payload k on frame
     k + 1: its onset (its first sample, `Saccade.start`, is frame `start + 1`'s), the frame the
     detector confirms it on, and the frame its run closes on, where `Tracked` lands it."""
-    world = Tracked(Tracker(), _fitted_mapping(), trial, _PROBE_FRAME, {}, source=_saccades(to))
-    onset = confirmed = None
-    for frame in range(1, 400):
+    world = Tracked(Tracker(), _fitted_mapping(), trial, _PROBE_FRAME, {}, source=source)
+    found, onset, confirmed = [], None, None
+    for frame in range(1, len(source.payloads) + 1):
         world.display({}, frame)
         if world.detector.onset is not None:
             onset, confirmed = world.detector.onset.start + 1, frame
         elif confirmed is not None and not world.detector.in_flight:
-            return onset, confirmed, frame
-    raise AssertionError("the detector confirmed no saccade, or it never landed")
+            found.append((onset, confirmed, frame))
+            confirmed = None
+    return found
+
+
+def _timeline(trial: Trial, to) -> "tuple[int, int, int]":
+    """The frames of `_saccades(to)`'s saccade (`_timelines`)."""
+    (only,) = _timelines(trial, _saccades(to))
+    return only
 
 
 def _onset_frame(trial: Trial, to) -> int:
@@ -1668,10 +1675,17 @@ def test_the_saccade_whose_onset_moved_the_target_is_scored_where_it_lands(lands
     assert result.outcome is outcome
 
 
-def test_the_carried_saccade_does_not_satisfy_an_onset_guard_in_the_next_state():
+#: The two ways a saccade's onset ends a state, so that it carries: at once, and by a timer from it
+#: (the PI's two answers of 2026-10-30), here with no delay.
+_ENDED_BY = pytest.mark.parametrize("by", [SaccadeOnset(), After(0.0, since=SaccadeOnset())],
+                                    ids=["its onset", "a timer from its onset"])
+
+
+@_ENDED_BY
+def test_the_carried_saccade_does_not_satisfy_an_onset_guard_in_the_next_state(by):
     """Its onset is spent: it ended the state before. Asked first in `jumped`, `SaccadeOnset` is
     never satisfied by it, and the saccade is still scored where it lands."""
-    trial = _contingent([On(SaccadeOnset(), Outcome.ABORT), *_asks()])
+    trial = _contingent([On(SaccadeOnset(), Outcome.ABORT), *_asks()], by=by)
 
     result = _replayed(trial, _saccades(_drawn(_moved(_PROBED, _JUMP), {}, trial)["search.1"]))
 
@@ -1679,12 +1693,13 @@ def test_the_carried_saccade_does_not_satisfy_an_onset_guard_in_the_next_state()
     assert result.outcome is Outcome.CORRECT
 
 
-def test_a_carried_saccade_does_not_survive_a_further_transition():
+@_ENDED_BY
+def test_a_carried_saccade_does_not_survive_a_further_transition(by):
     """The carry is into the very next state only: `jumped` is left after two frames, before the
     eye lands, and `asks`, which asks for a saccade to the target, does not count it."""
     trial = _probe([
         State("onset", enter=[Show(_PROBED)],
-              go=[On(SaccadeOnset(), "jumped", do=[_JUMP]), On(After(1.0), Outcome.NO_FIXATION)]),
+              go=[On(by, "jumped", do=[_JUMP]), On(After(1.0), Outcome.NO_FIXATION)]),
         State("jumped", go=[On(After(2 * _PROBE_FRAME), "asks")]),
         State("asks", go=_asks()),
     ])
@@ -1718,16 +1733,116 @@ def test_a_saccade_begun_two_states_back_still_does_not_count():
     assert result.outcome is Outcome.NO_RESPONSE
 
 
-def test_a_saccade_whose_onset_did_not_end_its_state_does_not_carry():
-    """Begun in `onset`, its onset taken there by a clock (`After(0, since=SaccadeOnset())`), which
-    ends the state on the same frame: the transition is the clock's, not the onset's, so this is
-    not "the saccade whose start ended the previous state", and `jumped` does not count it."""
-    trial = _contingent(_asks(), by=After(0.0, since=SaccadeOnset()))
+# A timer counted from a saccade's start ends a state: that saccade carries too (the PI,
+# 2026-10-30; XC-410's fix round 2). Asked: some intrasaccadic designs wait a few milliseconds into
+# the saccade before changing the display, a timer started at the saccade's start ending the state;
+# should that saccade carry into the next state too? "Yes, carry it too (Recommended)": "A state
+# ended by a timer counted from a saccade's start passes that same saccade to the next state, as a
+# state ended at the start does. Delayed intrasaccadic jumps can then score where it lands." And the
+# controller's ruling, engineering: a clock started by a saccade's onset does not use that saccade
+# up within its own state, so a state can time a saccade and still score it.
 
-    result = _replayed(trial, _saccades(_drawn(_moved(_PROBED, _JUMP), {}, trial)["search.1"]))
+
+@pytest.mark.parametrize("delay, lands_on, outcome", [
+    (0.01, "search.1", Outcome.CORRECT),
+    (0.01, "search.3", Outcome.WRONG_TARGET),
+    (0.0, "search.1", Outcome.CORRECT),
+], ids=["10 ms, the target", "10 ms, a distractor", "at once, the target"])
+def test_the_saccade_whose_onset_started_a_jump_s_timer_is_scored_where_it_lands(
+        delay, lands_on, outcome):
+    """**The delayed intrasaccadic jump**: a timer from the saccade's onset
+    (`After(delay, since=SaccadeOnset())`) ends `onset`, the array jumps while the eye is still in
+    flight, and `jumped` asks for a saccade to the target: the saccade that started the timer
+    carries, and is scored where it lands, against the windows drawn then. Until the PI's answer it
+    could never count, at no delay either."""
+    trial = _contingent(_asks(), by=After(delay, since=SaccadeOnset()))
+    to = _drawn(_moved(_PROBED, _JUMP), {}, trial)[lands_on]
+    _, confirmed, landed = _timeline(trial, to)
+    assert landed > confirmed + round(delay / _PROBE_FRAME) + 1, "it must land in `jumped`"
+
+    result = _replayed(trial, _saccades(to))
+
+    assert result.visited == ("onset", "jumped")
+    assert result.outcome is outcome
+
+
+def test_a_saccade_that_lands_before_the_timer_ends_does_not_carry():
+    """The timer from its onset runs 0.05 s, and the eye lands well inside it, in `onset`, which
+    asks for no saccade: it landed in the earlier state, and `jumped` has nothing to score."""
+    trial = _contingent(_asks(), by=After(0.05, since=SaccadeOnset()))
+    to = _drawn(_moved(_PROBED, _JUMP), {}, trial)["search.1"]
+    _, confirmed, landed = _timeline(trial, to)
+    assert landed < confirmed + 25, "it must land before the timer ends"
+
+    result = _replayed(trial, _saccades(to))
 
     assert result.visited == ("onset", "jumped")
     assert result.outcome is Outcome.NO_RESPONSE
+
+
+def test_a_later_saccade_in_flight_when_the_timer_ends_does_not_carry():
+    """Only the saccade that started the timer carries. The first saccade lands on empty space in
+    `onset` and starts the timer; a second, to the target, is in flight when it ends: the second's
+    onset ended nothing, so `jumped` does not count it."""
+    probe = _probe([State("shown", enter=[Show(_PROBED)], go=[On(After(2.0), Outcome.ABORT)])])
+    target = _drawn(_PROBED, {}, probe)["search.1"]
+    source = lambda: _saccades((-3.0, 3.0), target, stay=30)  # noqa: E731
+    (_, first, _), (_, second, landed) = _timelines(probe, source())
+    trial = _probe([
+        State("onset", enter=[Show(_PROBED)],
+              go=[On(After((second + 1 - first) * _PROBE_FRAME, since=SaccadeOnset()), "jumped"),
+                  On(After(1.0), Outcome.NO_FIXATION)]),
+        State("jumped", go=_asks()),
+    ])
+    assert landed > second + 2, "the second must land in `jumped`"
+
+    result = _replayed(trial, source())
+
+    assert result.visited == ("onset", "jumped")
+    assert result.outcome is Outcome.NO_RESPONSE
+
+
+def test_a_saccade_a_clock_timed_does_not_carry_when_another_timer_ends_its_state():
+    """Its onset started a clock in `onset`, but a plain timer from the state's entry ends the state
+    while the eye is in flight: no timer counted from its start ended the state, so it does not
+    carry, and `jumped` does not count it."""
+    probe = _probe([State("shown", enter=[Show(_PROBED)], go=[On(After(2.0), Outcome.ABORT)])])
+    to = _drawn(_moved(_PROBED, _JUMP), {}, probe)["search.1"]
+    _, confirmed, landed = _timeline(probe, to)
+    trial = _probe([
+        State("onset", enter=[Show(_PROBED)],
+              go=[On(After(1.0, since=SaccadeOnset()), Outcome.LATE_RESPONSE),
+                  On(After((confirmed + 1) * _PROBE_FRAME), "jumped", do=[_JUMP])]),
+        State("jumped", go=_asks()),
+    ])
+    assert landed > confirmed + 2, "it must land in `jumped`"
+
+    result = _replayed(trial, _saccades(to))
+
+    assert result.visited == ("onset", "jumped")
+    assert result.outcome is Outcome.NO_RESPONSE
+
+
+@pytest.mark.parametrize("on, outcome", [("search.1", Outcome.CORRECT),
+                                         ("search.3", Outcome.WRONG_TARGET)])
+def test_a_state_can_time_a_saccade_and_still_score_it(on, outcome):
+    """**The controller's ruling** (engineering, 2026-10-30): a clock started by a saccade's onset
+    does not use that saccade up within its own state. A state with `After(0.1,
+    since=SaccadeOnset())` and saccades to the target and a distractor scores the saccade where it
+    lands, before the timer ends; the timer's clock had taken it, and the trial ran out as a late
+    response."""
+    trial = _probe([State("shown", enter=[Show(_PROBED)], go=[
+        *_asks()[:2],
+        On(After(0.1, since=SaccadeOnset()), Outcome.LATE_RESPONSE),
+        On(After(1.0), Outcome.NO_RESPONSE),
+    ])])
+    to = _drawn(_PROBED, {}, trial)[on]
+    _, confirmed, landed = _timeline(trial, to)
+    assert landed < confirmed + 50, "it must land before the timer ends"
+
+    result = _replayed(trial, _saccades(to))
+
+    assert result.outcome is outcome
 
 
 # ---------------------------------------------------------------------------

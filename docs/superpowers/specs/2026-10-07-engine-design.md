@@ -356,13 +356,20 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    the frame it was drawn there, and a saccade landing beside a window is not taken when gaze drifts
    in. **One saccade carries** (the PI, the same day: "Yes, that one saccade carries": "Only the
    saccade whose start ended the previous state carries over. Intrasaccadic-displacement designs can
-   then score where it lands. Every other earlier saccade still never counts."): when a transition is
-   taken on a `SaccadeOnset`, the saccade whose onset satisfied it carries into the very next state,
-   where a `SaccadeTo` may take it on the frame it lands, against the windows drawn then -- an
-   `Update` on that transition has moved them -- but no `SaccadeOnset`, its onset being spent; the
-   carry ends when that state is left, landed or not, and a transition on any other guard carries
-   nothing (the loop tells the world which guard took it). An object moving onto the eye still
-   counts as arriving for `Entered` and `Exited` (EYE-19 and EYE-29, revised).
+   then score where it lands. Every other earlier saccade still never counts."; and "Yes, carry it
+   too": "A state ended by a timer counted from a saccade's start passes that same saccade to the
+   next state, as a state ended at the start does. Delayed intrasaccadic jumps can then score where
+   it lands."): when a transition is taken on a `SaccadeOnset`, or on a timer counted from one
+   (`After(t, since=SaccadeOnset())`) while the saccade that started it is still in flight, that
+   saccade carries into the very next state, where a `SaccadeTo` may take it on the frame it lands,
+   against the windows drawn then -- an `Update` on that transition has moved them -- but no
+   `SaccadeOnset`, its onset being spent; the carry ends when that state is left, landed or not. A
+   saccade that landed before its timer ended landed in the earlier state, and carries nothing; so
+   does a transition on any other guard (the loop tells the world which guard took it). And a clock
+   started by a saccade's onset does not use that saccade up in its own state, whose `SaccadeTo` can
+   still take it if it lands before the timer ends (the controller's ruling, engineering). An object
+   moving onto the eye still counts as arriving for `Entered` and `Exited` (EYE-19 and EYE-29,
+   revised).
 8. **Off the field**: only when declared; check 8 grows to test extents (XC-143, XC-144).
 9. **Head-free chaired sessions**: nominal head position, recorded and listed; a task may require a
    fixed head.

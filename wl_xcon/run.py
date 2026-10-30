@@ -76,8 +76,9 @@ class World(Protocol):
         **A saccade counts for a state only if it began in that state** (XC-410; the PI,
         2026-10-30: "one that began before the state is anticipatory, as an early response would
         be"), **except the one whose onset ended the state before** -- a transition taken on a
-        `SaccadeOnset` -- which carries into this state, and no further, for its landing ("Yes,
-        that one saccade carries"). So a world that remembers a saccade across frames
+        `SaccadeOnset`, or on a timer counted from one, `After(since=SaccadeOnset())` -- which
+        carries into this state, and no further, for its landing ("Yes, that one saccade carries";
+        "Yes, carry it too"). So a world that remembers a saccade across frames
         (`gaze.Tracked`) is told here when each state begins and by which guard, and refuses to
         judge a saccade for a state it was not told of. A world that draws each event as a guard
         asks for it has nothing to forget, and does nothing.
@@ -815,9 +816,9 @@ class _Loop:
         self.current = current = self.by_name[edge.to]
         self.entered_at = frame
         # **A saccade counts for a state only if it began in it** (XC-410; the PI, 2026-10-30), as
-        # a hold counts only gaze since its state began (below), or if its onset took this edge,
-        # for this state alone: the world is told the state's first frame, the next, re-entered or
-        # not, and the guard that took it.
+        # a hold counts only gaze since its state began (below), or if its onset ended the state
+        # before, at once or by a timer from it, for this state alone: the world is told the
+        # state's first frame, the next, re-entered or not, and the guard that took the edge.
         self.world.began(current.name, frame + 1, edge.guard)
         _apply(do, self.visible, self.shown, self.open_at, self.changed, self.placed, frame + 1)
         _emit(do, self.effects)
