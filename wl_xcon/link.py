@@ -327,9 +327,10 @@ class ParamRow:
         """One row from `Session.parameters`' shape, `choices` the setting's own: a value that
         is a whole position (`review.position_words`: a `Polar`, or a pair where `choices`
         declare one) as its words in `position` -- a pair's eccentricity the true visual angle
-        `atan(√(tan²x + tan²y))` and its direction `atan2(tan y, tan x)`
-        (`geometry.polar_of_deg`), a `Polar`'s (x, y) by `geometry.polar_deg`; what is converted
-        shown to a thousandth, and what the value holds to six significant figures (`:g`), so
+        `atan(√(tan²x + tan²y))` and its direction `atan2(tan y, tan x)` from 0° to 360°, none at
+        eccentricity 0 (`geometry.shown_polar`; the PI, 2026-10-30), a `Polar`'s (x, y) by
+        `geometry.polar_deg`; what is converted shown to a thousandth, and what the value holds
+        to six significant figures (`:g`), so
         `Polar(8.123456789, 45)` reads `8.12346°`; a position holding an infinity or a NaN is
         said to be no position, as written. Any other value as it is."""
         from wl_xcon.review import position_words

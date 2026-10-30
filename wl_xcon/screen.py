@@ -17,6 +17,7 @@ import math
 from dataclasses import dataclass, fields, replace
 
 from wl_xcon import look
+from wl_xcon.geometry import shown_direction
 from wl_xcon.photometry import CONE_COLORS, D65, Gray, Michelson, Weber, cone_xyz, to_xyz, xyY
 from wl_xcon.task import (
     Annulus, Array, Bar, Blank, Cross, Disc, Gabor, Grating, P, Polygon, Square, _value,
@@ -261,9 +262,13 @@ def _drift(fill, values, orientation) -> float:
     direction = _num(fill.direction, values)
     turn = math.radians(direction - (orientation + 90.0))
     if abs(math.sin(turn)) > 1e-9:
-        raise ValueError(f"a grating's drift direction {direction:g} degrees is not across the "
-                         f"bars: with orientation {orientation:g} it is "
-                         f"{orientation + 90.0:g} or {orientation + 270.0:g}")
+        # Every direction named from 0° to 360° as printed (`geometry.shown_direction`; the PI,
+        # 2026-10-30), so what prints as 360 is 0.
+        printed = [float(f"{shown_direction(d):g}")
+                   for d in (direction, orientation + 90.0, orientation + 270.0)]
+        shown = [f"{shown_direction(d):g}" for d in printed]
+        raise ValueError(f"a grating's drift direction {shown[0]} degrees is not across the "
+                         f"bars: with orientation {orientation:g} it is {shown[1]} or {shown[2]}")
     return tf if math.cos(turn) > 0.0 else -tf
 
 

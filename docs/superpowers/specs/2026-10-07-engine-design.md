@@ -281,10 +281,27 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    made it and the fields an `Update` set, the frame it was first so and the frame its presentation
    went off (null when on to the end), whether it was drawn (false for a `Blank`), its (x, y), and
    beside them its true eccentricity `atan(√(tan²x + tan²y))` and direction `atan2(tan y, tan x)`,
-   in (−180°, 180°] pending the PI, computed from what was drawn as the line is written, between
-   trials; an array's objects and target, and a per-eye stimulus's two eyes, beside them; a position
-   that cannot be resolved written null with why, never raised, and each such stimulus said once a
-   run for each reason on the changes feed; wl-preproc told the fields first (REC-26).
+   in (−180°, 180°] pending the PI (from 0° to 360° since 2026-10-30, below), computed from what was
+   drawn as the line is written, between trials; an array's objects and target, and a per-eye
+   stimulus's two eyes, beside them; a position that cannot be resolved written null with why, never
+   raised, and each such stimulus said once a run for each reason on the changes feed; wl-preproc
+   told the fields first (REC-26).
+   *Note, 2026-10-30 (the PI, "0 to 360 everywhere" and "Empty at center"):* every direction the rig
+   shows or writes for a position -- the record's, the review report's, the console's and the
+   checker's sentences' -- is from 0° to 360° (the angle mod 360, then 0 where that gives 360.0, as
+   wl-preproc normalizes it), a task's own `Polar(8, -90)` reading and recorded 270, and none at
+   eccentricity 0: the record writes null there and the console shows only "0°"
+   (`geometry.shown_direction`, `shown_polar`). A setting whose value is a number is shown and
+   recorded as the number it holds, even where a task uses it as a direction, while a stimulus's
+   entry carries that direction from 0° to 360°; such a setting -- a position's direction or a
+   grating's drift -- that can be outside [0, 360), by a choice, its start, its range or a side it
+   leaves open, or by a plan condition's value, is a warning at load in every kind
+   (`direction-outside-0-360`), and so is a negative eccentricity, the position at the opposite
+   direction (`negative-eccentricity`), each saying what to write, a range spelled from 0 to 360
+   where it can be, and why, from where the value is used (the PI, the same day, "Warn at load"
+   twice; STE-29's revision). The math keeps its own form, `polar_of_deg`'s (−180°, 180°]
+   and every interval as written, so no window, overlap or interval result moves; a task may write
+   any direction (REC-26's and STE-29's revisions).
 2. **Sizes**: one size number is the full width; each block's definition states it.
 3. **Away from the center**: true visual angle (default) or the screen center's
    scale, declared per task. *Note, 2026-10-19 (the PI, "Retire it"):* "Every stimulus is drawn in
@@ -909,8 +926,13 @@ drummed repeats one, and its `presentations` the lines written.
    on 2026-10-27, `windows-left-behind` (an array's object window scored after a `Show` or an
    `Update` that can draw it as no array; EYE-29), and, on 2026-10-28, `cyclopean-windows` (an
    array's object window scored where the array can be drawn with a position per eye or a
-   disparity, its windows staying about its cyclopean position; EYE-29), and `color-on-default`
-   and `contrast-on-default` are accepted in recording. No warning the rig lists refuses any kind.
+   disparity, its windows staying about its cyclopean position; EYE-29), and, on 2026-10-30,
+   `direction-outside-0-360` (a setting used as a direction, a position's or a grating's drift, that
+   can be outside 0 to 360, shown and recorded as its number while a stimulus's entry, a window's
+   placing or a drift's sentences say it from 0° to 360°) and
+   `negative-eccentricity` (a position at an eccentricity below 0, the position at the opposite
+   direction; both STE-29), and `color-on-default` and `contrast-on-default` are accepted in
+   recording. No warning the rig lists refuses any kind.
 3. **Accepted once per session**, at open, recorded. **A warning appearing during a run that its kinds do
    not accept pauses the run at the next trial**, for the operator to accept (recorded) or stop (N§R6).
    Today's unknowns keep the 2026-09-19 rule: proceed on a recorded acknowledgment.

@@ -730,7 +730,8 @@ def polar_of_deg(x: float, y: float) -> tuple[float, float]:
     """A per-axis position's eccentricity and direction, in degrees: `polar_deg`'s inverse, the
     direction in (-180°, 180°] **exactly** (the review of XC-399, M1): `atan2` gives -180° where
     the upward share is -0.0 or rounds to -π, as `polar_deg(8, -180)` does, so leftward would be
-    written two ways; it is 180°, and a direction of -0.0 is 0."""
+    read two ways; it is 180°, and a direction of -0.0 is 0. **The math's form**: what is shown or
+    written is `shown_polar`'s, from 0° to 360° and none at the center (the PI, 2026-10-30)."""
     ax, ay = math.radians(x), math.radians(y)
     ux = math.sin(ax) * math.cos(ay)
     uy = math.cos(ax) * math.sin(ay)
@@ -739,6 +740,40 @@ def polar_of_deg(x: float, y: float) -> tuple[float, float]:
     if direction <= -180.0:
         direction += 360.0
     return (math.degrees(math.atan2(math.hypot(ux, uy), uz)), direction + 0.0)
+
+
+def shown_direction(degrees: float) -> float:
+    """**A direction as a person or a file sees it: from 0° to 360°** (the PI, 2026-10-30, asked
+    "Today a task that writes 270 degrees sees 270 on the console but -90 in the record": "0 to 360
+    everywhere", "As tasks write it, e.g. 270. One form in the task, the console and the record").
+    **The shown form, not the math's**: every edge that shows or writes a direction calls this, or
+    `shown_polar` built on it -- the record (`record._stimuli`, `record._written`), the review
+    report and through it the console, the page and `wlx console` (`review._point_label`), and the
+    checker's sentences (`check._described`, a grating's drift in `check._direction_faults` and
+    `screen._drift`) -- while the math keeps its own convention: `polar_of_deg` reads (-180°,
+    180°], and every direction interval, window and arc is read as written, a whole turn either
+    way (`_holds`), so no result moves with what is shown.
+
+    **Normalized as wl-preproc normalizes** (its spec, amendment 1, 2026-10-30), so the two repos
+    agree to the sample: `degrees` mod 360, then 0 where that gives 360.0 -- a tiny negative angle,
+    -1e-15 say, is 360.0 mod 360 in float64. An integer stays an integer. **A caller that prints
+    the direction rounded** normalizes what it prints again (`shown_direction(float(format(
+    shown_direction(d), "g")))`), so one just under 360° that the rounding carries up reads 0°,
+    never 360°. **The center is `shown_polar`'s**, or the caller's where it holds a `Polar`."""
+    turned = degrees % 360
+    return 0.0 if turned == 360.0 else turned
+
+
+def shown_polar(x: float, y: float) -> tuple[float, float | None]:
+    """**A per-axis position's eccentricity and its shown direction** (`polar_of_deg`, then
+    `shown_direction`), **with no direction at eccentricity 0** (the PI, 2026-10-30, "Empty at
+    center": "The record writes no direction at eccentricity 0, and the console shows only '0°'.
+    Matches wl-preproc."): the position is then the origin, which has none, decided as the math
+    does, with no tolerance -- `None` where `polar_of_deg`'s eccentricity is exactly 0. A caller
+    that shows the eccentricity rounded (the review report, to a thousandth) shows no direction
+    where the rounded one is 0, as it already rounded."""
+    eccentricity, direction = polar_of_deg(x, y)
+    return eccentricity, None if eccentricity == 0.0 else shown_direction(direction)
 
 
 def _to_sector(x: float, y: float, eccentricities, directions) -> float:

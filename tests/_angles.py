@@ -18,6 +18,16 @@ def true(x: float, y: float) -> tuple[float, float]:
             math.degrees(math.atan2(ty, tx)))
 
 
+def shown(eccentricity: float, direction: float) -> float | None:
+    """A direction as the record writes it (the PI, 2026-10-30, "0 to 360 everywhere" and "Empty at
+    center"): none at eccentricity 0, otherwise the angle mod 360, then 0 where that gives 360.0,
+    as wl-preproc normalizes it (its spec, amendment 1, 2026-10-30)."""
+    if eccentricity == 0.0:
+        return None
+    turned = direction % 360.0
+    return 0.0 if turned == 360.0 else turned
+
+
 def from_polar(eccentricity: float, direction: float) -> tuple[float, float]:
     """The per-axis position `eccentricity` degrees out, `direction` degrees counter-clockwise from
     rightward (engine spec §5.1): `atan(tan e·cos θ)` across and `atan(tan e·sin θ)` up."""
