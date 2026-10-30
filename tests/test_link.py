@@ -2064,6 +2064,78 @@ def test_a_rig_that_never_acknowledges_is_not_delivered_and_the_socket_is_reset(
     assert Resume(by=Box("jake")) in got
 
 
+def test_a_link_closed_right_after_replying_still_lets_a_late_console_read_the_reply(
+    zmq_cleanup, monkeypatch
+):
+    """XC-429: `wlx run` closes its link right after the boundary that drained a stop,
+    and a console's REQ socket, which sets `IMMEDIATE`, loses a reply it has not yet read
+    when that connection goes. So `ZmqLink.close` holds its sockets open for
+    `REPLY_GRACE_S` after its last reply.
+
+    **The console reads only once the close has begun**, as a console thread kept from
+    running does. Inside the grace the reply is there to read. With no grace, the
+    console reads once its own monitor says the connection has gone, and finds nothing.
+
+    **The link's clock stands still**, so the grace left is all of `REPLY_GRACE_S`
+    however slowly this test runs, and the grace's sleep is replaced by a wait for the
+    console's read, so nothing here depends on how long anything takes."""
+    import zmq
+    from zmq.utils.monitor import recv_monitor_message
+
+    import wl_xcon.link as link_module
+
+    holding, read = threading.Event(), threading.Event()
+
+    class _StillClock:
+        """`link`'s `time`, standing still, with the grace's sleep held until the
+        console has read."""
+
+        def __getattr__(self, name):
+            return getattr(time, name)
+
+        @staticmethod
+        def monotonic() -> float:
+            return 1000.0
+
+        @staticmethod
+        def sleep(seconds: float) -> None:
+            holding.set()
+            read.wait(10)
+
+    monkeypatch.setattr(link_module, "time", _StillClock())
+    link = zmq_cleanup(ZmqLink(pub_endpoint="tcp://127.0.0.1:0", rep_endpoint="tcp://127.0.0.1:0"))
+    commands = zmq_cleanup(ZmqCommands(link.rep_endpoint, reply_timeout_s=2.0))
+    req = commands._req  # the console's own socket, `IMMEDIATE` and all
+    gone = req.get_monitor_socket(zmq.EVENT_DISCONNECTED)
+    assert req.poll(5000, zmq.POLLOUT), "the console never connected to the link"
+    req.send(_encode_command(Stop(by=Box("jake"))))
+    deadline = time.monotonic() + 5.0
+    while not link.drain():  # which replies as it reads
+        assert time.monotonic() < deadline, "the stop never reached the link"
+        time.sleep(0.005)
+
+    closing = threading.Thread(target=link.close)
+    closing.start()
+    while closing.is_alive() and not holding.wait(0.01):
+        pass
+    try:
+        if not holding.is_set():
+            # Closed with no grace: read as a late console would, the connection gone.
+            assert gone.poll(5000), "the link closed and the console never saw it go"
+            recv_monitor_message(gone)
+        try:
+            reply = req.recv()
+        except zmq.Again:
+            reply = None
+    finally:
+        read.set()
+        closing.join(10)
+        req.disable_monitor()
+        gone.close(linger=0)
+
+    assert reply == b"received", "the console lost the rig's reply when the link closed"
+
+
 def test_an_unclosed_command_sender_is_released_by_the_collector(zmq_cleanup):
     link = zmq_cleanup(ZmqLink(pub_endpoint="tcp://127.0.0.1:0", rep_endpoint="tcp://127.0.0.1:0"))
     with _collector_paused():
