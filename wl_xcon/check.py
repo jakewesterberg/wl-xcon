@@ -171,6 +171,7 @@ def check_task(
         + _head_faults(task, deployment)
         + _counting_faults(task)
         + _plan_faults(task)
+        + _condition_spellings(task)
         + ([] if source is None else _computed_positions(Path(source)))
     )
 
@@ -943,10 +944,16 @@ def _plan_faults(task: Task) -> list[Finding]:
                         refuse(name, f"{of} sets {setting!r}, which is no setting the task "
                                      f"declares; a condition sets the task's own settings")
                     elif param.choices and value not in param.choices:
-                        # Each in the review report's words, a position eccentricity and direction
-                        # first (`_said`; STE-29; review 1's I2), never as Python writes a `Polar`.
-                        refuse(name, f"{of} sets {setting!r} to {_said(value)}, and it is one of "
-                                     f"{', '.join(_said(c) for c in param.choices)}")
+                        # A position in the review report's words, eccentricity and direction
+                        # first (STE-29; review 1's I2), never as Python writes a `Polar`; any
+                        # other value in full, as before (re-review 1's R3).
+                        offered = ([_position_said(c, param.choices) for c in param.choices]
+                                   if any(_position_said(c, param.choices) != repr(c)
+                                          for c in param.choices) else None)
+                        refuse(name, f"{of} sets {setting!r} to "
+                                     f"{_position_said(value, param.choices)}, and it is one of "
+                                     + (f"{param.choices}" if offered is None
+                                        else ", ".join(offered)))
                     elif not param.choices and not _finite(value):
                         said = _said(value) if _is_number(value) else repr(value)
                         refuse(name, f"{of} sets {setting!r} to {said}, and it takes a finite "
@@ -1375,6 +1382,21 @@ def _said(value: object) -> str:
         words = words[len(_NOT_A_POSITION):]  # the review's own prefix; inside a sentence it garbles
     said = repr(value) if words is None else words
     return said if len(said) <= 60 else said[:57] + "..."
+
+
+def _position_said(value: object, choices) -> str:
+    """`value` in the review report's words where it is a position (`review.position_words`, a pair
+    one where `choices` declare it), its "not a position" prefix left out as `_said` leaves it; any
+    other value as Python writes it, in full."""
+    from wl_xcon.review import position_words
+
+    try:
+        words = position_words(value, choices)
+    except Exception:
+        words = None
+    if words is None:
+        return repr(value)
+    return words[len(_NOT_A_POSITION):] if words.startswith(_NOT_A_POSITION) else words
 
 
 def _real(number: object) -> bool:
@@ -4449,137 +4471,324 @@ def _position_kind_faults(trial: Trial) -> list[Finding]:
     return findings
 
 
-def _two_spellings(trial: Trial) -> list[Finding]:
-    """**A position the record and the console would write two ways**, each a warning in every
-    kind, never a refusal, saying what to write (the PI, 2026-10-30, both asked in the UI):
+#: Where a position or a drift is used, which is what a spelling warning's reason names
+#: (`_spelling_uses`): a `Show` or an `Update` places a stimulus, whose entry in the record says
+#: where it was; a window is judged where it is placed, and nothing records it; a grating drifts.
+_STIMULUS, _WINDOW, _DRIFT = "stimulus", "window", "drift"
 
-    - **`direction-outside-0-360`** ("Warn at load": "A setting used as a direction that offers a
-      value outside 0-360 gets a load warning, never a refusal, so the task author writes 270. The
-      docs say a setting's number is shown as written."): a setting placing a `Polar`'s direction
-      -- a window's, a stimulus's, an update's -- is shown on the console and recorded in `params`
-      as the number it holds, while each stimulus's entry records the direction from 0° to 360°
-      (`geometry.shown_direction`), so a choice or a start outside [0, 360) (-90, or 360), or a
-      range reaching below 0 or past 360, writes one direction two ways. A range's end at 360 is
-      not: 0 to 360 is how a range says every direction.
-    - **`negative-eccentricity`** ("Warn at load": "Says to write it as a positive eccentricity at
-      the opposite direction. Never refused."): `Polar(-8, 90)` is the position 8° out at 270°,
-      which a stimulus's entry records, while the report, the console and `params` say -8° at 90°.
-      A literal `Polar`, a whole position's choice that is one, and a setting placing a `Polar`'s
-      eccentricity whose choices, start or range go below 0; -0 is the center, and is not.
 
-    Every place a position is written, as `_position_kind_faults` reads them; a setting is warned
-    once, naming the first place it is used. What is no number is `bad-placement`'s."""
+def _spelling_uses(trial: Trial) -> tuple[dict, list]:
+    """**Where `trial` uses each setting as a direction, an eccentricity or a whole position**, and
+    each literal `Polar` below 0, for `_two_spellings` and `_condition_spellings`: `(uses,
+    literals)`, `uses` mapping `(role, name)` -- role `"direction"`, `"eccentricity"` or `"whole"`
+    -- to `[(where, kind)]` in the order met, kind `_STIMULUS`, `_WINDOW` or `_DRIFT`, and
+    `literals` `[(said, polar, kind)]`, `said` the sentence's start. Every place a position is
+    written, as `_position_kind_faults` reads them (a window's, a `Show`'s and an `Update`'s, each
+    eye's included), and each grating's drift direction (`_appearances`, `_parts`)."""
+    from wl_xcon import look
+
     params = {p.name: p for p in trial.params}
-    findings: list[Finding] = []
-    named: dict[tuple[str, str], list[str]] = {}
+    uses: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    literals: list[tuple[str, Polar, str]] = []
 
-    def real(value: object) -> bool:
-        return _is_number(value) and _real(value)
+    def use(role: str, name: str, where: str, kind: str) -> None:
+        uses.setdefault((role, name), []).append((where, kind))
 
-    def written(value: float) -> str:  # a direction from 0 to 360, as printed
-        return f"{shown_direction(float(f'{shown_direction(value):g}')):g}"
-
-    def outside(param: Param, single, low_ok, high_ok) -> list[str]:
-        """What `param` can be that is outside: each choice and its start by `single`, its range by
-        its ends."""
-        found = [f"{c:g}" for c in param.choices if real(c) and not single(c)]
-        if real(param.start) and not single(param.start):
-            found.append(f"its start {param.start:g}")
-        low, high = param.low, param.high
-        if (real(low) and not low_ok(low)) or (real(high) and not high_ok(high)):
-            ends = [f"{end:g}" if real(end) else "without end" for end in (low, high)]
-            found.append(f"its range from {ends[0]} to {ends[1]}")
-        return found
-
-    def setting(code: str, name: str, where: str) -> None:
-        places = named.setdefault((code, name), [])
-        places.append(where)
-        param = params.get(name)
-        if len(places) > 1 or param is None:
-            return
-        if code == "direction-outside-0-360":
-            found = outside(param, lambda v: 0 <= v < 360, lambda v: v >= 0, lambda v: v <= 360)
-            if not found:
-                return
-            first = next((float(c) for c in (*param.choices, param.start, param.low)
-                          if real(c) and not 0 <= c < 360), None)
-            first = float(param.high) if first is None else first
-            across = any(f.startswith("its range") for f in found)
-            findings.append(Finding(code, (
-                f"setting {name!r} places the direction of {where} and can be "
-                f"{', '.join(found)}, outside 0 to 360: the console shows a setting's number and "
-                f"`params` records it as the setting holds it, while a stimulus's entry records "
-                f"its direction from 0° to 360°, so one direction is written two ways; give "
-                f"{name!r} directions from 0 to 360 (write {written(first)} for {first:g})"
-                + ("; a range across 0 has no one spelling from 0 to 360, so offer choices"
-                   if across else "")), blocking=False, accepted_in=SESSION_KINDS,
-                subjects=(f"setting {name!r}",)))
-        else:
-            found = outside(param, lambda v: v >= 0, lambda v: v >= 0, lambda v: True)
-            if not found:
-                return
-            findings.append(Finding(code, (
-                f"setting {name!r} places the eccentricity of {where} and can be "
-                f"{', '.join(found)}, below 0: a negative eccentricity is the position at the "
-                f"opposite direction, which a stimulus's entry records with a positive "
-                f"eccentricity, while the console and `params` show the setting's number; give "
-                f"{name!r} eccentricities of 0 or more, at the opposite direction (its direction "
-                f"+ 180°)"), blocking=False, accepted_in=SESSION_KINDS,
-                subjects=(f"setting {name!r}",)))
-
-    def negative(said: str, at: Polar, subject: str) -> None:
-        """A literal `Polar` below 0, `said` the sentence's start up to it."""
-        e, d = at.eccentricity, at.direction
-        there = (f"{-e:g}° out at {written(d + 180.0)}°" if real(d)
-                 else f"{-e:g}° out at the opposite direction")
-        fix = (f"Polar({-e:g}, {written(d + 180.0)})" if real(d)
-               else f"{-e:g}° with {d.name!r}'s directions turned by 180°" if isinstance(d, P)
-               else f"{-e:g}° with its direction turned by 180°")
-        findings.append(Finding("negative-eccentricity", (
-            f"{said} {_said(at)}, at an eccentricity below 0: that is the position {there}, which "
-            f"a stimulus's entry records, while the review report, the console and `params` say "
-            f"it as written; write it as a positive eccentricity at the opposite direction, "
-            f"{fix}"), blocking=False, accepted_in=SESSION_KINDS, subjects=(subject,)))
-
-    def place(where: str, what: str, at: object) -> None:
+    def place(where: str, what: str, at: object, kind: str) -> None:
         if isinstance(at, P):
-            param = params.get(at.name)
-            if param is None or (("negative-eccentricity", at.name) in named):
-                return
-            for choice in param.choices:
-                if isinstance(choice, Polar) and real(choice.eccentricity) and (
-                        choice.eccentricity < 0):
-                    named[("negative-eccentricity", at.name)] = [where]
-                    negative(f"setting {at.name!r}, placing {where}, can be", choice,
-                             f"setting {at.name!r}")
-                    return
-            return
-        if not isinstance(at, Polar):
-            return
-        e, d = at.eccentricity, at.direction
-        if isinstance(d, P):
-            setting("direction-outside-0-360", d.name, where)
-        if isinstance(e, P):
-            setting("negative-eccentricity", e.name, where)
-        elif real(e) and e < 0:
-            negative(f"{where}: its {what} is", at, where)
+            use("whole", at.name, where, kind)
+        elif isinstance(at, Polar):
+            e, d = at.eccentricity, at.direction
+            if isinstance(d, P):
+                use("direction", d.name, where, kind)
+            if isinstance(e, P):
+                use("eccentricity", e.name, where, kind)
+            elif _is_number(e) and _real(e) and e < 0:
+                literals.append((f"{where}: its {what} is", at, kind))
 
     for window in trial.windows:
         if isinstance(window, Window):
-            place(f"window {window.name!r}", "position", window.at)
+            place(f"window {window.name!r}", "position", window.at, _WINDOW)
     for state, action in actions_of(trial):
         if isinstance(action, Show):
             stimulus = action.stimulus
             for what, at in (("position", stimulus.at), ("left-eye position", stimulus.at_left),
                              ("right-eye position", stimulus.at_right)):
                 if at is not None:
-                    place(f"state {state!r} shows stimulus {stimulus.name!r}", what, at)
+                    place(f"state {state!r} shows stimulus {stimulus.name!r}", what, at,
+                          _STIMULUS)
         elif isinstance(action, Update):
             for field, what in (("at", "position"), ("at_left", "left-eye position"),
                                 ("at_right", "right-eye position")):
                 at = action.changes().get(field)
                 if at is not None:
-                    place(f"state {state!r} updates stimulus {action.stimulus!r}", what, at)
+                    place(f"state {state!r} updates stimulus {action.stimulus!r}", what, at,
+                          _STIMULUS)
+    for looks in _appearances(trial):
+        for part in _parts(looks, params):
+            if isinstance(part, look.SineGrating) and isinstance(part.direction, P):
+                use("direction", part.direction.name, "a grating's drift", _DRIFT)
+    return uses, literals
+
+
+def _spelled(direction: float) -> str:
+    """A direction from 0 to 360 as a sentence prints it (`:g`), what prints as 360 being 0."""
+    return f"{shown_direction(float(f'{shown_direction(direction):g}')):g}"
+
+
+def _held_reason(role: str, kinds: set[str], number: float | None) -> str:
+    """**Why a setting's value is written two ways, from where it is used** (re-review 1's R2):
+    the console and `params` show the number it holds (`number`, an example where one is
+    known), while a stimulus's entry records the direction from 0° to 360°, or the position at
+    the opposite direction; a window is placed there and nothing records it; a drift's sentences
+    say it from 0° to 360°."""
+    known = number is not None
+    held = ("the console shows the setting's number and `params` records it as it holds it"
+            + (f" ({number:g})" if known else ""))
+    toward = f" ({_spelled(number)})" if known else ""
+    if role == "direction":
+        if _STIMULUS in kinds:
+            return (f"{held}, while a stimulus's entry records the direction from 0° to 360°"
+                    f"{toward}, so one direction is written two ways")
+        if _WINDOW in kinds:
+            placed = (f"at the direction {_spelled(number)}°" if known
+                      else "at its direction from 0° to 360°")
+            return (f"{held}, while the window is placed {placed}, every direction being shown "
+                    f"from 0° to 360°, and nothing records a window's direction")
+        return (f"{held}, while the drift sentences, the checker's and the drawer's, say a drift "
+                f"direction from 0° to 360°{toward}")
+    if _STIMULUS in kinds:
+        return (f"{held}, while a stimulus's entry records the position at a positive "
+                f"eccentricity, at the opposite direction")
+    return (f"{held}, while the window is placed at a positive eccentricity at the opposite "
+            f"direction, and nothing records a window's position")
+
+
+def _where_reason(kinds: set[str], said_by: str) -> str:
+    """Where a literal `Polar` below 0 is, and who says it as written (re-review 1's R2)."""
+    if _STIMULUS in kinds:
+        return f"which a stimulus's entry records, while {said_by} say it as written"
+    return (f"where the window is placed, while {said_by} say it as written, and nothing records "
+            f"a window's position")
+
+
+def _direction_reach(param: Param) -> tuple[list[str], list[str], float | None]:
+    """What a direction setting can be outside 0 to 360, and what to write: each choice and its
+    start outside [0, 360) ("write 270 for -90"); without choices, its range, read as `_span` reads
+    one (a side it does not bound reaches without end), spelled from 0 to 360 where it has one
+    spelling -- -90 to -10 is 270 to 350, a range of a whole turn or more is every direction, 0 to
+    360 -- and told to offer choices only where it truly crosses 0 (re-review 1's R1, R5). A range
+    ending at 360 is not warned: 0 to 360 is how a range says every direction. Third, a number it
+    can be outside, for the reason to show, where it has one."""
+    def real(value: object) -> bool:
+        return _is_number(value) and _real(value)
+
+    found, write, examples = [], [], []
+    for value in param.choices:
+        if real(value) and not 0 <= value < 360:
+            found.append(f"{value:g}")
+            write.append(f"write {_spelled(value)} for {value:g}")
+            examples.append(float(value))
+    if real(param.start) and not 0 <= param.start < 360:
+        found.append(f"its start {param.start:g}")
+        write.append(f"write {_spelled(param.start)} for {param.start:g}")
+        examples.append(float(param.start))
+    if param.choices:
+        return found, write[:1], (examples or [None])[0]
+    low, high = param.low, param.high
+    if not real(low) and not real(high):
+        found.append("any number, its range declaring no bounds")
+        write.append("declare its range within 0 to 360")
+    elif not real(high):
+        found.append(f"its range from {low:g}, with no highest")
+        write.append("declare its range within 0 to 360")
+    elif not real(low):
+        found.append(f"its range up to {high:g}, with no lowest")
+        write.append("declare its range within 0 to 360")
+    elif low < 0 or high > 360:
+        found.append(f"its range from {low:g} to {high:g}")
+        examples.append(float(low if low < 0 else high))
+        start = low % 360.0
+        if high - low >= 360:
+            write.append("write 0 to 360, which is every direction")
+        elif start + (high - low) <= 360:
+            write.append(f"write {start:g} to {start + (high - low):g}")
+        else:
+            write.append("offer choices, as a range across 0 has no one spelling from 0 to 360")
+    return found, write[:1], (examples or [None])[0]
+
+
+def _eccentricity_reach(param: Param) -> tuple[list[str], list[str], float | None]:
+    """What an eccentricity setting can be below 0, and what to write: each choice and its start
+    below 0; without choices, its range, a side it does not bound reaching without end (re-review
+    1's R5); third, a number below 0 it can be, where it has one."""
+    def real(value: object) -> bool:
+        return _is_number(value) and _real(value)
+
+    below = [float(value) for value in param.choices if real(value) and value < 0]
+    found = [f"{value:g}" for value in below]
+    if real(param.start) and param.start < 0:
+        found.append(f"its start {param.start:g}")
+        below.append(float(param.start))
+    write = ["give it eccentricities of 0 or more, at the opposite direction (its direction "
+             "+ 180°)"]
+    if param.choices:
+        return found, write, (below or [None])[0]
+    low, high = param.low, param.high
+    if not real(low):
+        found.append("any number, its range declaring no bounds" if not real(high)
+                     else f"its range up to {high:g}, with no lowest")
+        write = ["declare its lowest, 0 or more"]
+    elif low < 0:
+        found.append(f"its range from {low:g} to {high:g}" if real(high)
+                     else f"its range from {low:g}, with no highest")
+        below.append(float(low))
+    return found, write, (below or [None])[0]
+
+
+def _negative_said(said: str, at: Polar, there: str) -> str:
+    """A literal `Polar` below 0, `said` the sentence's start up to it and `there` who records it
+    where: what it is, and what to write."""
+    e, d = at.eccentricity, at.direction
+    real = _is_number(d) and _real(d)
+    out = (f"{-e:g}° out at {_spelled(d + 180.0)}°" if real
+           else f"{-e:g}° out at the opposite direction")
+    fix = (f"Polar({-e:g}, {_spelled(d + 180.0)})" if real
+           else f"{-e:g}° with {d.name!r}'s directions turned by 180°" if isinstance(d, P)
+           else f"{-e:g}° with its direction turned by 180°")
+    return (f"{said} {_said(at)}, at an eccentricity below 0: that is the position {out}, "
+            f"{there}; write it as a positive eccentricity at the opposite direction, {fix}")
+
+
+def _two_spellings(trial: Trial) -> list[Finding]:
+    """**A value the record, the console or the report would write two ways**, each a warning in
+    every kind, never a refusal, saying what to write and why, from where it is used (the PI,
+    2026-10-30, both asked in the UI; `_spelling_uses`, `_held_reason`):
+
+    - **`direction-outside-0-360`** ("Warn at load": "A setting used as a direction that offers a
+      value outside 0-360 gets a load warning, never a refusal, so the task author writes 270. The
+      docs say a setting's number is shown as written."): a setting placing a `Polar`'s direction
+      -- a window's, a stimulus's, an update's, each eye's -- or a grating's drift direction is
+      shown on the console and recorded in `params` as the number it holds, while a stimulus's
+      entry, a window's placing and the drift sentences say the direction from 0° to 360°
+      (`geometry.shown_direction`). A choice or a start outside [0, 360), or a range reaching below
+      0 or past 360, or open on a side (`_direction_reach`).
+    - **`negative-eccentricity`** ("Warn at load": "Says to write it as a positive eccentricity at
+      the opposite direction. Never refused."): `Polar(-8, 90)` is the position 8° out at 270°. A
+      literal `Polar` (in the review report and the checker's sentences as written), a whole
+      position's choice that is one (on the console and in `params` as written), and a setting
+      placing a `Polar`'s eccentricity whose choices, start or range go below 0, or with no lowest
+      (`_eccentricity_reach`); -0 is the center, and is not.
+
+    A setting is warned once, naming the first place it is used; a plan condition's value is
+    `_condition_spellings`'. What is no number is `bad-placement`'s."""
+    params = {p.name: p for p in trial.params}
+    uses, literals = _spelling_uses(trial)
+    findings: list[Finding] = []
+    for said, at, kind in literals:
+        findings.append(Finding("negative-eccentricity", _negative_said(
+            said, at, _where_reason({kind}, "the review report and the checker's sentences")),
+            blocking=False, accepted_in=SESSION_KINDS, subjects=(said.split(": its ")[0],)))
+    for (role, name), places in uses.items():
+        param = params.get(name)
+        if param is None:
+            continue
+        where, kinds = places[0][0], {kind for _, kind in places}
+        subject = (f"setting {name!r}",)
+        if role == "whole":
+            choice = next((c for c in param.choices if isinstance(c, Polar)
+                           and _is_number(c.eccentricity) and _real(c.eccentricity)
+                           and c.eccentricity < 0), None)
+            if choice is not None:
+                findings.append(Finding("negative-eccentricity", _negative_said(
+                    f"setting {name!r}, placing {where}, can be", choice, _where_reason(
+                        kinds, "the console, `params` and the review report")),
+                    blocking=False, accepted_in=SESSION_KINDS, subjects=subject))
+        elif role == "direction":
+            found, write, example = _direction_reach(param)
+            if found:
+                findings.append(Finding("direction-outside-0-360", (
+                    f"setting {name!r} places the direction of {where} and can be "
+                    f"{', '.join(found)}, outside 0 to 360: " + _held_reason(role, kinds, example)
+                    + f"; give {name!r} directions from 0 to 360 ({'; '.join(write)})"),
+                    blocking=False, accepted_in=SESSION_KINDS, subjects=subject))
+        else:
+            found, write, example = _eccentricity_reach(param)
+            if found:
+                findings.append(Finding("negative-eccentricity", (
+                    f"setting {name!r} places the eccentricity of {where} and can be "
+                    f"{', '.join(found)}, below 0: " + _held_reason(role, kinds, example)
+                    + f"; {'; '.join(write)}"),
+                    blocking=False, accepted_in=SESSION_KINDS, subjects=subject))
+    return findings
+
+
+def _condition_spellings(task: Task) -> list[Finding]:
+    """**A plan condition's value written two ways** (the controller, 2026-10-30, on the C3 plan's
+    outline, under the PI's "Warn at load" of that day: a condition gives a setting a value the
+    task holds as surely as a choice does): a condition giving a setting used as a direction a
+    number outside [0, 360), or one used as an eccentricity a number below 0, or a whole position
+    a `Polar` below 0, is warned once per setting and condition, in every kind, its reason from
+    where the setting is used in any of the task's structures (`_spelling_uses`). Plans that are
+    no plans are `_plan_faults`', and read here only as far as they are."""
+    several = len(task.structures) > 1
+    uses: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for structure_name, structure in task.structures.items():
+        if not isinstance(structure, Trial):
+            continue
+        found, _ = _spelling_uses(structure)
+        for key, places in found.items():
+            uses.setdefault(key, []).extend(
+                (f"in structure {structure_name!r}: {where}" if several else where, kind)
+                for where, kind in places)
+    findings: list[Finding] = []
+
+    def real(value: object) -> bool:
+        return _is_number(value) and _real(value)
+
+    for plan_name, plan in task.plans.items():
+        for block in plan.blocks if isinstance(plan.blocks, (list, tuple)) else ():
+            conditions = getattr(block, "conditions", ())
+            for condition in conditions if isinstance(conditions, (list, tuple)) else ():
+                values = getattr(condition, "values", None)
+                if not isinstance(values, dict):
+                    continue
+                of = (f"plan {plan_name!r}: block {getattr(block, 'name', '?')!r}'s condition "
+                      f"{getattr(condition, 'name', '?')!r} sets")
+                subject = (f"plan {plan_name!r}: block {getattr(block, 'name', '?')!r}: condition "
+                           f"{getattr(condition, 'name', '?')!r}: setting")
+                for setting, value in values.items():
+                    if not isinstance(setting, str):
+                        continue
+                    for role in ("direction", "eccentricity", "whole"):
+                        places = uses.get((role, setting))
+                        if not places:
+                            continue
+                        where, kinds = places[0][0], {kind for _, kind in places}
+                        if role == "direction" and real(value) and not 0 <= value < 360:
+                            detail = (f"{of} {setting!r} to {value:g}, outside 0 to 360, and "
+                                      f"{setting!r} places the direction of {where}: "
+                                      + _held_reason(role, kinds, float(value))
+                                      + f"; write {_spelled(value)} for {value:g}")
+                            code = "direction-outside-0-360"
+                        elif role == "eccentricity" and real(value) and value < 0:
+                            detail = (f"{of} {setting!r} to {value:g}, below 0, and {setting!r} "
+                                      f"places the eccentricity of {where}: "
+                                      + _held_reason(role, kinds, float(value))
+                                      + f"; give it {-value:g} at the opposite direction (its "
+                                        f"direction + 180°)")
+                            code = "negative-eccentricity"
+                        elif (role == "whole" and isinstance(value, Polar)
+                              and real(value.eccentricity) and value.eccentricity < 0):
+                            detail = _negative_said(
+                                f"{of} {setting!r}, placing {where}, to", value, _where_reason(
+                                    kinds, "the console, `params` and the review report"))
+                            code = "negative-eccentricity"
+                        else:
+                            continue
+                        findings.append(Finding(code, detail, blocking=False,
+                                                accepted_in=SESSION_KINDS,
+                                                subjects=(f"{subject} {setting!r}",)))
     return findings
 
 

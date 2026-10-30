@@ -23,8 +23,9 @@ warnings, its load-time findings that are warnings (`luminance-step`, `color-on-
 window scored after a `Show` or an `Update` that can draw it as no array), `cyclopean-windows`
 (2026-10-28, an array's object window scored where the array can be drawn with a position per eye
 or a disparity, its windows staying about its cyclopean position), `direction-outside-0-360` and
-`negative-eccentricity` (2026-10-30, the PI's "Warn at load" twice: a setting placing a direction
-that can be outside 0 to 360, and a position at an eccentricity below 0, each written two ways)
+`negative-eccentricity` (2026-10-30, the PI's "Warn at load" twice: a setting used as a direction,
+a position's or a grating's drift, that can be outside 0 to 360, and a position at an eccentricity
+below 0, each written two ways, a plan condition's value included)
 and, for a value outside its declared range at a run's start or live, `outside-range` and, for a
 wait longer than any the task declares, `longer-than-declared`, by his answer of 2026-10-12);
 and today's pre-flight unknowns, the pump calibration and the eye tracker (S9a §10). **What

@@ -71,6 +71,20 @@ def test_a_condition_s_position_and_its_setting_s_choices_are_named_in_the_rig_s
     assert "Polar(" not in said and "-90" not in said
 
 
+def test_a_condition_s_value_that_is_no_position_is_named_in_full_as_before():
+    """Re-review 1's R3: only a position is named in the rig's words; any other value and its
+    setting's choices are printed in full, as before, so two appearances that differ late in their
+    declaration never read the same."""
+    (choices,) = [p.choices for p in BASE.params if p.name == "target_appearance"]
+    plan = Plan([Block("b", [Condition("c", {"target_appearance": "disc"}, target=1)])])
+
+    (said,) = [f.detail for f in check_task(dataclasses.replace(BASE, plans={"p": plan}))
+               if f.code == "bad-plan"]
+
+    assert f"sets 'target_appearance' to 'disc', and it is one of {choices}" in said
+    assert "..." not in said
+
+
 def test_a_plan_the_rig_can_run_adds_no_finding():
     """A balanced plan of whole rounds and a run time limit; a training progression with a fall-back
     rule and a run time limit; conditions naming the task's structure and setting its settings
