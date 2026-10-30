@@ -232,9 +232,11 @@ def _written(value: object) -> object:
 
     if isinstance(value, Polar) and number(value.eccentricity) and number(value.direction):
         x, y = polar_deg(float(value.eccentricity), float(value.direction))
-        # As the task wrote it, from 0° to 360°, and none at the center (the PI, 2026-10-30).
+        # As the task wrote it, from 0° to 360°, and none at the center (the PI, 2026-10-30); a
+        # zero 0, never -0 (review 1's M2).
         direction = None if value.eccentricity == 0 else shown_direction(value.direction)
-        return {"eccentricity": value.eccentricity, "direction": direction, "x": x, "y": y}
+        return {"eccentricity": value.eccentricity + 0, "direction": direction, "x": x + 0.0,
+                "y": y + 0.0}
     if isinstance(value, (Appearance, Color, Contrast, Shape, Fill, Edge, Outline)):
         return canonical(value, every_field=True)
     raise TypeError(f"the record writes no {type(value).__name__} value ({value!r})")
@@ -297,7 +299,7 @@ def _stimuli(placed: tuple, values: dict) -> list[dict]:
 
     def where(x: float, y: float) -> dict:
         eccentricity, direction = shown_polar(x, y)
-        return {"eccentricity": eccentricity, "direction": direction, "x": x, "y": y}
+        return {"eccentricity": eccentricity, "direction": direction, "x": x + 0.0, "y": y + 0.0}
 
     nowhere = {"eccentricity": None, "direction": None, "x": None, "y": None}
     entries = []

@@ -103,9 +103,9 @@ def _point_label(at: object) -> str:
     **Every direction from 0° to 360°, and none at the center** (the PI, 2026-10-30, "0 to 360
     everywhere" and "Empty at center", through `geometry.shown_direction` and `shown_polar`):
     `Polar(8, -90)` reads `8° at 270°`, a direction a hair under 360° that its precision rounds up
-    reads `0°`, and a position at eccentricity 0 -- a `Polar` written at 0, whatever its
+    reads `0°`, and a position at eccentricity 0 -- a `Polar` written at 0 or -0, whatever its
     direction, or a pair whose eccentricity shown to a thousandth is 0, as this report already
-    rounded it -- reads `0°` alone, its (x, y) beside it.
+    rounded it -- reads `0°` alone, never `-0°`, its (x, y) beside it.
     **A number that is not finite** -- an infinity or a NaN, which has no direction and which
     converting raised on, or an integer past a float's range, written in the same `g` form
     (`1e+400`) -- says it is not a position, the rest as written (XC-401's fix rounds, M1 and N2).
@@ -141,9 +141,10 @@ def _point_label(at: object) -> str:
         shown = d
         if number(d) and finite(d):
             shown = shown_direction(float(f"{shown_direction(d):g}"))
-        center = number(e) and e == 0 and (isinstance(d, P) or number(d) and finite(d))
-        polar = " at ".join(f"{written(v)}°" if number(v) else _value_label(v)
-                            for v in ((e,) if center else (e, shown)))
+        if number(e) and e == 0 and (isinstance(d, P) or number(d) and finite(d)):
+            # The origin: "0°", never "-0°", and (0, 0) whatever the direction (review 1's M2).
+            return "0° · (x, y) (0, 0)"
+        polar = " at ".join(f"{written(v)}°" if number(v) else _value_label(v) for v in (e, shown))
         if not (number(e) and number(d)):
             return polar
         if not (finite(e) and finite(d)):

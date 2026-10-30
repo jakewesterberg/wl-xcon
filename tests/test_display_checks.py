@@ -765,6 +765,9 @@ def test_a_drift_refused_names_every_direction_from_0_to_360():
             "bars. Write direction=225 or 45, or leave `direction` out to drift toward 225") in said
     (said,) = _blocks(_one(_drifting(direction=-45.0, orientation=0.0), background=GRAY_BG))
     assert "cannot drift toward 315 degrees" in said and "-45" not in said
+    # Review 1's M1: one that prints as 360 at six significant figures reads 0.
+    (said,) = _blocks(_one(_drifting(direction=0.0, orientation=89.9999999), background=GRAY_BG))
+    assert "Write direction=180 or 0," in said and "360" not in said
 
 
 def test_a_drift_across_the_bars_is_accepted():

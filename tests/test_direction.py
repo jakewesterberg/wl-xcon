@@ -11,6 +11,7 @@ directions the record writes are read against `_angles`, the PI's formulas.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 import random
@@ -20,6 +21,7 @@ import pytest
 import _angles
 from _rig import DIRECT
 from wl_xcon.check import check
+from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.levels import Position
 from wl_xcon.photometry import Gray
 from wl_xcon.record import SessionRecord
@@ -129,6 +131,18 @@ def test_a_setting_s_polar_value_is_recorded_from_0_to_360_and_with_none_at_the_
     assert params["center"] == {"eccentricity": 0.0, "direction": None, "x": 0.0, "y": 0.0}
 
 
+def test_the_record_writes_a_zero_eccentricity_and_its_x_y_as_0_never_minus_0(tmp_path):
+    """Review 1's M2: the PI's "the console shows only '0°'" reads a center written `Polar(-0.0,
+    45)` as 0 too, never -0, in a setting's value and in a stimulus's entry, each number with
+    its sign."""
+    line = _line(tmp_path, (_shown(Stimulus("fix", at=Polar(-0.0, 45.0), looks=Disc())),),
+                 {"center": Polar(-0.0, 45.0)})
+    for written in (line["params"]["center"], line["stimuli"][0]):
+        numbers = [written[k] for k in ("eccentricity", "x", "y")]
+        assert numbers == [0.0] * 3 and written["direction"] is None
+        assert [math.copysign(1.0, n) for n in numbers] == [1.0] * 3, written
+
+
 # --- The review report, the console, the page and `wlx console` -------------------------------
 
 
@@ -142,20 +156,25 @@ def test_the_report_and_the_console_show_every_direction_from_0_to_360_and_none_
     from wl_xcon.link import ParamRow
     from wl_xcon.review import position_words
 
-    pairs = ((0.0, -8.0), (-8.0, 0.0), (8.0, -0.0004), (8.0, -1e-6), (0.0, 0.0))
+    pairs = ((0.0, -8.0), (-8.0, 0.0), (8.0, -0.0004), (8.0, -1e-6), (0.0, 0.0), (0.0003, 0.0))
     assert [position_words(pair, pairs) for pair in pairs] == [
         "8° at 270° · (x, y) (0, -8)",
         "8° at 180° · (x, y) (-8, 0)",
         "8° at 359.997° · (x, y) (8, -0.0004)",
         "8° at 0° · (x, y) (8, -1e-06)",
         "0° · (x, y) (0, 0)",
+        "0° · (x, y) (0.0003, 0)",
     ]
     assert position_words(Polar(8.0, -90.0)) == "8° at 270° · (x, y) (0, -8)"
     assert position_words(Polar(8, -90)) == "8° at 270° · (x, y) (0, -8)"
     assert position_words(Polar(8.0, -180.0)) == "8° at 180° · (x, y) (-8, 0)"
     assert position_words(Polar(8.0, -1e-9)) == "8° at 0° · (x, y) (8, 0)"
     assert position_words(Polar(0.0, 45.0)) == "0° · (x, y) (0, 0)"
-    assert position_words(Polar(0.0, P("dir"))) == "0°"
+    # Review 1's M2: the center is "0°", never "-0°", and keeps the (x, y) it knows, (0, 0)
+    # whatever direction a setting would give it.
+    assert position_words(Polar(-0.0, 45.0)) == "0° · (x, y) (0, 0)"
+    assert position_words(Polar(0.0, P("dir"))) == "0° · (x, y) (0, 0)"
+    assert position_words(Polar(-0.0, P("dir"))) == "0° · (x, y) (0, 0)"
     assert position_words(Polar(P("ecc"), -90.0)) == "ecc at 270°"
     assert position_words(Polar(math.inf, -90.0)) == "not a position: inf° at 270°"
     row = ParamRow.of("pos", "deg", None, None, Polar(8.0, -90.0), False)
@@ -208,10 +227,13 @@ def test_a_stimulus_placed_off_the_screen_is_named_by_its_direction_from_0_to_36
 
     assert "shows a stimulus at (eccentricity 80, direction 270)" in said(
         _shows(Polar(80.0, -90.0)))
+    # Review 1's M1: a direction just under 360 that prints as 360 reads 0.
+    assert "shows a stimulus at (eccentricity 80, direction 0)" in said(_shows(Polar(80.0, -1e-9)))
     assert "shows a stimulus at (eccentricity ecc, direction 270)" in said(_shows(
         Polar(P("ecc"), -90.0), Param("ecc", unit="deg", low=2.0, high=80.0)))
     ring = Array(n=4, radius=50.0, looks=Disc(), among=Disc())
     assert "shows a stimulus at (eccentricity 0) " in said(_shows(Polar(0.0, 45.0), looks=ring))
+    assert "shows a stimulus at (eccentricity 0) " in said(_shows(Polar(-0.0, 45.0), looks=ring))
     assert "shows a stimulus at (eccentricity 0) " in said(_shows(
         Polar(0.0, P("dir")), Param("dir", unit="deg", choices=(0.0, 90.0)), looks=ring))
 
@@ -277,3 +299,95 @@ def test_the_shown_form_changes_no_window_overlap_or_interval_result():
                                         On(After(1.0), Outcome.NO_RESPONSE)])])
         gaps.append([f.detail for f in check(trial) if f.code == "overlapping-windows"])
     assert gaps[0] and gaps[0] == gaps[1]
+
+
+# --- Load warnings: one position written two ways (the PI, 2026-10-30) -------------------------
+
+
+def _placed_by(at, *params, where="stimulus") -> Trial:
+    """A trial placing a stimulus, a window or an update (`where`) at `at`, with `params`."""
+    from wl_xcon.task import Update
+
+    lit = Disc(size=0.5, color=Gray(40.0))
+    shown = Stimulus("s", at=(0.0, 0.0) if where != "stimulus" else at, looks=lit)
+    enter = [Show(shown)] + ([Update("s", at=at)] if where == "update" else [])
+    windows = [Window("w", at=at if where == "window" else (0.0, 0.0), radius=1.0, on="s")]
+    return Trial(start="on", params=list(params), windows=windows,
+                 states=[State("on", enter=enter, go=[On(Hold("w", 0.1), Outcome.CORRECT),
+                                                      On(After(1.0), Outcome.NO_RESPONSE)])])
+
+
+def _warned(trial: Trial, code: str) -> list:
+    found = [f for f in check(trial) if f.code == code]
+    assert all(not f.blocking and f.accepted_in == SESSION_KINDS for f in found), found
+    return found
+
+
+def test_a_setting_used_as_a_direction_that_can_be_outside_0_to_360_is_warned_at_load():
+    """Review 1's I1, the PI, 2026-10-30, "Warn at load": "A setting used as a direction that offers
+    a value outside 0-360 gets a load warning, never a refusal, so the task author writes 270. The
+    docs say a setting's number is shown as written." A setting placing a `Polar`'s direction -- a
+    stimulus's, a window's, an update's -- is shown on the console and recorded in `params` as the
+    number it holds, while the stimulus's entry records its direction from 0 to 360: a choice or a
+    start outside [0, 360), or a range reaching below 0 or past 360, is warned once, in every kind,
+    saying what to write. 0 to 360 as a range, choices inside it, a coordinate's setting, a
+    `Polar`'s own literal direction and a whole position's choices (each shown from 0 to 360) are
+    not."""
+    code = "direction-outside-0-360"
+    down = Param("dir", unit="deg", choices=(-90.0, 90.0))
+    (found,) = _warned(_placed_by(Polar(8.0, P("dir")), down), code)
+    assert found.subjects == ("setting 'dir'",)
+    assert ("setting 'dir' places the direction of state 'on' shows stimulus 's' and can be -90, "
+            "outside 0 to 360") in found.detail
+    assert "write 270 for -90" in found.detail
+    across = Param("dir", unit="deg", low=-30.0, high=30.0)
+    (found,) = _warned(_placed_by(Polar(8.0, P("dir")), across, where="window"), code)
+    assert "window 'w'" in found.detail and "its range from -30 to 30" in found.detail
+    assert "offer choices" in found.detail
+    (found,) = _warned(_placed_by(Polar(8.0, P("dir")), Param(
+        "dir", unit="deg", choices=(0.0, 360.0)), where="update"), code)
+    assert "updates stimulus 's'" in found.detail and "write 0 for 360" in found.detail
+    (found,) = _warned(_placed_by(Polar(8.0, P("dir")), Param(
+        "dir", unit="deg", low=0.0, high=360.0, start=360.0)), code)
+    assert "its start 360" in found.detail
+    twice = dataclasses.replace(_placed_by(Polar(8.0, P("dir")), down, where="window"),
+                                states=_placed_by(Polar(8.0, P("dir")), down).states)
+    assert len(_warned(twice, code)) == 1
+    for quiet in (
+            _placed_by(Polar(8.0, P("dir")), Param("dir", unit="deg", low=0.0, high=360.0)),
+            _placed_by(Polar(8.0, P("dir")), Param("dir", unit="deg", choices=(0.0, 90.0, 270.0))),
+            _placed_by((P("dir"), 0.0), Param("dir", unit="deg", choices=(-5.0, 5.0))),
+            _placed_by(Polar(8.0, -90.0)),
+            _placed_by(P("pos"), Param("pos", unit="deg", choices=(Polar(8.0, -90.0),))),
+    ):
+        assert _warned(quiet, code) == []
+
+
+def test_a_negative_eccentricity_is_warned_at_load_saying_what_to_write():
+    """Review 1's M3, the PI, 2026-10-30, "Warn at load": "Says to write it as a positive
+    eccentricity at the opposite direction. Never refused." `Polar(-8, 90)` is the position 8° out
+    at 270°, which a stimulus's entry records, while the report, the console and `params` say -8°
+    at 90°. A literal `Polar`, a whole position's choice and a setting placing an eccentricity whose
+    choices, start or range go below 0 are each warned, in every kind; -0 and 0 or more are not."""
+    code = "negative-eccentricity"
+    (found,) = _warned(_placed_by(Polar(-8.0, 90.0)), code)
+    assert "is -8° at 90° · (x, y) (0, -8)" in found.detail and "Polar(8, 270)" in found.detail
+    (found,) = _warned(_placed_by(Polar(-8, -135), where="window"), code)
+    assert "window 'w'" in found.detail and "Polar(8, 45)" in found.detail
+    (found,) = _warned(_placed_by(P("pos"), Param("pos", unit="deg", choices=(
+        Polar(8.0, 0.0), Polar(-8.0, 90.0)))), code)
+    assert found.subjects == ("setting 'pos'",) and "Polar(8, 270)" in found.detail
+    (found,) = _warned(_placed_by(Polar(P("ecc"), 45.0), Param(
+        "ecc", unit="deg", low=-2.0, high=10.0), where="update"), code)
+    assert ("setting 'ecc' places the eccentricity of state 'on' updates stimulus 's' and can be "
+            "its range from -2 to 10") in found.detail
+    assert "opposite direction" in found.detail
+    (found,) = _warned(_placed_by(Polar(P("ecc"), 45.0), Param(
+        "ecc", unit="deg", choices=(-8.0, 8.0))), code)
+    assert "can be -8" in found.detail
+    (found,) = _warned(_placed_by(Polar(-8.0, P("d")), Param("d", unit="deg", choices=(90.0,))),
+                       code)
+    assert found.detail.endswith("8° with 'd''s directions turned by 180°")
+    for quiet in (_placed_by(Polar(-0.0, 45.0)), _placed_by(Polar(8.0, 90.0)),
+                  _placed_by(Polar(P("ecc"), 45.0), Param("ecc", unit="deg", low=0.0, high=10.0))):
+        assert _warned(quiet, code) == []

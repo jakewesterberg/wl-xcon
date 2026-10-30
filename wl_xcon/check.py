@@ -123,6 +123,7 @@ def check(
         + _view_faults(trial, geometry)
         + _placement_faults(trial)
         + _position_kind_faults(trial)
+        + _two_spellings(trial)
         + _trial_display_faults(trial)
         + _holds_cut_short(trial)
     )
@@ -942,8 +943,10 @@ def _plan_faults(task: Task) -> list[Finding]:
                         refuse(name, f"{of} sets {setting!r}, which is no setting the task "
                                      f"declares; a condition sets the task's own settings")
                     elif param.choices and value not in param.choices:
-                        refuse(name, f"{of} sets {setting!r} to {value!r}, and it is one of "
-                                     f"{param.choices}")
+                        # Each in the review report's words, a position eccentricity and direction
+                        # first (`_said`; STE-29; review 1's I2), never as Python writes a `Polar`.
+                        refuse(name, f"{of} sets {setting!r} to {_said(value)}, and it is one of "
+                                     f"{', '.join(_said(c) for c in param.choices)}")
                     elif not param.choices and not _finite(value):
                         said = _said(value) if _is_number(value) else repr(value)
                         refuse(name, f"{of} sets {setting!r} to {said}, and it takes a finite "
@@ -1674,7 +1677,7 @@ def _described(at: object) -> str:
     if isinstance(at, Polar):
         e, d = at.eccentricity, at.direction
         if _is_number(e) and e == 0 and (isinstance(d, P) or _is_number(d) and _real(d)):
-            return f"eccentricity {part(e)}"
+            return "eccentricity 0"  # never -0 (review 1's M2)
         if _is_number(d) and _real(d):  # as printed, so what prints as 360 is 0
             d = shown_direction(float(f"{shown_direction(d):g}"))
         return "eccentricity " + ", direction ".join(part(v) for v in (e, d))
@@ -4430,6 +4433,140 @@ def _position_kind_faults(trial: Trial) -> list[Finding]:
                 findings.append(Finding("bad-placement", (
                     f"window {window.name!r}: its radius is {_said(window.radius)}, which is not "
                     f"a finite number of degrees")))
+    for state, action in actions_of(trial):
+        if isinstance(action, Show):
+            stimulus = action.stimulus
+            for what, at in (("position", stimulus.at), ("left-eye position", stimulus.at_left),
+                             ("right-eye position", stimulus.at_right)):
+                if at is not None:
+                    place(f"state {state!r} shows stimulus {stimulus.name!r}", what, at)
+        elif isinstance(action, Update):
+            for field, what in (("at", "position"), ("at_left", "left-eye position"),
+                                ("at_right", "right-eye position")):
+                at = action.changes().get(field)
+                if at is not None:
+                    place(f"state {state!r} updates stimulus {action.stimulus!r}", what, at)
+    return findings
+
+
+def _two_spellings(trial: Trial) -> list[Finding]:
+    """**A position the record and the console would write two ways**, each a warning in every
+    kind, never a refusal, saying what to write (the PI, 2026-10-30, both asked in the UI):
+
+    - **`direction-outside-0-360`** ("Warn at load": "A setting used as a direction that offers a
+      value outside 0-360 gets a load warning, never a refusal, so the task author writes 270. The
+      docs say a setting's number is shown as written."): a setting placing a `Polar`'s direction
+      -- a window's, a stimulus's, an update's -- is shown on the console and recorded in `params`
+      as the number it holds, while each stimulus's entry records the direction from 0° to 360°
+      (`geometry.shown_direction`), so a choice or a start outside [0, 360) (-90, or 360), or a
+      range reaching below 0 or past 360, writes one direction two ways. A range's end at 360 is
+      not: 0 to 360 is how a range says every direction.
+    - **`negative-eccentricity`** ("Warn at load": "Says to write it as a positive eccentricity at
+      the opposite direction. Never refused."): `Polar(-8, 90)` is the position 8° out at 270°,
+      which a stimulus's entry records, while the report, the console and `params` say -8° at 90°.
+      A literal `Polar`, a whole position's choice that is one, and a setting placing a `Polar`'s
+      eccentricity whose choices, start or range go below 0; -0 is the center, and is not.
+
+    Every place a position is written, as `_position_kind_faults` reads them; a setting is warned
+    once, naming the first place it is used. What is no number is `bad-placement`'s."""
+    params = {p.name: p for p in trial.params}
+    findings: list[Finding] = []
+    named: dict[tuple[str, str], list[str]] = {}
+
+    def real(value: object) -> bool:
+        return _is_number(value) and _real(value)
+
+    def written(value: float) -> str:  # a direction from 0 to 360, as printed
+        return f"{shown_direction(float(f'{shown_direction(value):g}')):g}"
+
+    def outside(param: Param, single, low_ok, high_ok) -> list[str]:
+        """What `param` can be that is outside: each choice and its start by `single`, its range by
+        its ends."""
+        found = [f"{c:g}" for c in param.choices if real(c) and not single(c)]
+        if real(param.start) and not single(param.start):
+            found.append(f"its start {param.start:g}")
+        low, high = param.low, param.high
+        if (real(low) and not low_ok(low)) or (real(high) and not high_ok(high)):
+            ends = [f"{end:g}" if real(end) else "without end" for end in (low, high)]
+            found.append(f"its range from {ends[0]} to {ends[1]}")
+        return found
+
+    def setting(code: str, name: str, where: str) -> None:
+        places = named.setdefault((code, name), [])
+        places.append(where)
+        param = params.get(name)
+        if len(places) > 1 or param is None:
+            return
+        if code == "direction-outside-0-360":
+            found = outside(param, lambda v: 0 <= v < 360, lambda v: v >= 0, lambda v: v <= 360)
+            if not found:
+                return
+            first = next((float(c) for c in (*param.choices, param.start, param.low)
+                          if real(c) and not 0 <= c < 360), None)
+            first = float(param.high) if first is None else first
+            across = any(f.startswith("its range") for f in found)
+            findings.append(Finding(code, (
+                f"setting {name!r} places the direction of {where} and can be "
+                f"{', '.join(found)}, outside 0 to 360: the console shows a setting's number and "
+                f"`params` records it as the setting holds it, while a stimulus's entry records "
+                f"its direction from 0° to 360°, so one direction is written two ways; give "
+                f"{name!r} directions from 0 to 360 (write {written(first)} for {first:g})"
+                + ("; a range across 0 has no one spelling from 0 to 360, so offer choices"
+                   if across else "")), blocking=False, accepted_in=SESSION_KINDS,
+                subjects=(f"setting {name!r}",)))
+        else:
+            found = outside(param, lambda v: v >= 0, lambda v: v >= 0, lambda v: True)
+            if not found:
+                return
+            findings.append(Finding(code, (
+                f"setting {name!r} places the eccentricity of {where} and can be "
+                f"{', '.join(found)}, below 0: a negative eccentricity is the position at the "
+                f"opposite direction, which a stimulus's entry records with a positive "
+                f"eccentricity, while the console and `params` show the setting's number; give "
+                f"{name!r} eccentricities of 0 or more, at the opposite direction (its direction "
+                f"+ 180°)"), blocking=False, accepted_in=SESSION_KINDS,
+                subjects=(f"setting {name!r}",)))
+
+    def negative(said: str, at: Polar, subject: str) -> None:
+        """A literal `Polar` below 0, `said` the sentence's start up to it."""
+        e, d = at.eccentricity, at.direction
+        there = (f"{-e:g}° out at {written(d + 180.0)}°" if real(d)
+                 else f"{-e:g}° out at the opposite direction")
+        fix = (f"Polar({-e:g}, {written(d + 180.0)})" if real(d)
+               else f"{-e:g}° with {d.name!r}'s directions turned by 180°" if isinstance(d, P)
+               else f"{-e:g}° with its direction turned by 180°")
+        findings.append(Finding("negative-eccentricity", (
+            f"{said} {_said(at)}, at an eccentricity below 0: that is the position {there}, which "
+            f"a stimulus's entry records, while the review report, the console and `params` say "
+            f"it as written; write it as a positive eccentricity at the opposite direction, "
+            f"{fix}"), blocking=False, accepted_in=SESSION_KINDS, subjects=(subject,)))
+
+    def place(where: str, what: str, at: object) -> None:
+        if isinstance(at, P):
+            param = params.get(at.name)
+            if param is None or (("negative-eccentricity", at.name) in named):
+                return
+            for choice in param.choices:
+                if isinstance(choice, Polar) and real(choice.eccentricity) and (
+                        choice.eccentricity < 0):
+                    named[("negative-eccentricity", at.name)] = [where]
+                    negative(f"setting {at.name!r}, placing {where}, can be", choice,
+                             f"setting {at.name!r}")
+                    return
+            return
+        if not isinstance(at, Polar):
+            return
+        e, d = at.eccentricity, at.direction
+        if isinstance(d, P):
+            setting("direction-outside-0-360", d.name, where)
+        if isinstance(e, P):
+            setting("negative-eccentricity", e.name, where)
+        elif real(e) and e < 0:
+            negative(f"{where}: its {what} is", at, where)
+
+    for window in trial.windows:
+        if isinstance(window, Window):
+            place(f"window {window.name!r}", "position", window.at)
     for state, action in actions_of(trial):
         if isinstance(action, Show):
             stimulus = action.stimulus

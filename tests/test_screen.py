@@ -204,6 +204,10 @@ def test_the_drawer_s_refusal_of_a_drift_names_every_direction_from_0_to_360():
         _drift(-45.0, 135.0)
     assert str(refused.value) == ("a grating's drift direction 315 degrees is not across the bars: "
                                   "with orientation 135 it is 225 or 45")
+    # Review 1's M1: one that prints as 360 at six significant figures reads 0.
+    with pytest.raises(ValueError) as refused:
+        _drift(0.0, 89.9999999)
+    assert str(refused.value).endswith("it is 180 or 0")
 
 
 def _seen(image, vp, x_deg):

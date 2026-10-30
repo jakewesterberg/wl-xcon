@@ -48,6 +48,29 @@ def _findings(**plans) -> list:
     return [f for f in check_task(task) if f.code in PLAN_CODES]
 
 
+def test_a_condition_s_position_and_its_setting_s_choices_are_named_in_the_rig_s_words(tmp_path):
+    """Review 1's I2 (the PI, 2026-10-30, "0 to 360 everywhere"; STE-29): a condition setting a
+    whole position to no choice of its setting names the value and the choices as the review report
+    does, eccentricity and direction first, each direction from 0° to 360° and none at the center,
+    never as Python writes a `Polar`."""
+    import _sessions
+    from wl_xcon.task import Polar
+
+    path = _sessions.polar_task(tmp_path)
+    text = path.read_text()
+    old = "choices=(Polar(8.0, 0.0), Polar(8.0, 45.0))"
+    assert text.count(old) == 1
+    path.write_text(text.replace(old, "choices=(Polar(8.0, -90.0), Polar(0.0, 45.0))"))
+    task = dataclasses.replace(_load_task(path), plans={"p": Plan([Block("b", [
+        Condition("c", {"target_pos": Polar(8.0, -45.0)}, target=1)])])})
+
+    (said,) = [f.detail for f in check_task(task) if f.code == "bad-plan"]
+
+    assert ("sets 'target_pos' to 8° at 315° · (x, y) (5.675, -5.675), and it is one of "
+            "8° at 270° · (x, y) (0, -8), 0° · (x, y) (0, 0)") in said
+    assert "Polar(" not in said and "-90" not in said
+
+
 def test_a_plan_the_rig_can_run_adds_no_finding():
     """A balanced plan of whole rounds and a run time limit; a training progression with a fall-back
     rule and a run time limit; conditions naming the task's structure and setting its settings
