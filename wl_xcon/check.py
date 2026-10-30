@@ -1618,8 +1618,9 @@ def _offscreen_stimuli(trial: Trial, geometry: Geometry | None) -> list[Finding]
     Skipped when no geometry is supplied: a task is not wrong for being checked
     without a rig, it is unchecked, and the caller knows which it wanted. **`taskd` and
     `wlx check` supply one** (`wlx run --rig --view` and `wlx check --rig`, which take
-    the field from the rig file); `check()` without a geometry is only for callers that
-    have no rig (`wlx review`, the tests).
+    the field from the rig file); `check()` without a geometry is only for the tests, and for
+    `wlx check` on a task whose `view` it does not recognize, which `unknown-view` refuses
+    (`wlx review` checks nothing).
     """
     if geometry is None:
         return []
@@ -3714,9 +3715,11 @@ def _approach(
     compared choice by choice. **Every pairing that comes within the radii is named** (`overlapping`, as words in
     the review report's: eccentricity and direction first), the window placed by a literal left out
     of it. Choices that are no position, and a window with none left, a literal that is no position
-    and a radius that is no number, are left out (`bad-placement` refuses each, `_position_kind_faults`):
-    this check never raises on them. `places` holds each window's places already made, by name, so
-    that a check making many comparisons builds them once."""
+    and a literal radius that is no number, are left out (`bad-placement` refuses each,
+    `_position_kind_faults`); a radius setting with a choice that is no finite number reads as
+    having no highest (`_radius`, `_span`), which nothing refuses yet (XC-426): this check never
+    raises on them. `places` holds each window's places already made, by name, so that a check
+    making many comparisons builds them once."""
     def built(window: Window) -> "list[_Place]":
         if places is None:
             return _places(window, params)
@@ -3812,10 +3815,10 @@ def _which(found: _Approach) -> str:
     """The choices of a whole-point setting that overlap, for the finding's sentence, nearest first:
     ` (4 of 64 combinations overlap, by settings 'a' and 'b': X with Y; Z with W, and 2 more)`, each
     position in the review report's words in full (`_said`: eccentricity and direction first, with
-    (x, y) beside them; STE-29). A choice where one
-    window is placed by a setting and the other by a literal, a combination where both are; "1 choice
-    overlaps", "1 of 3 choices overlaps", "2 of 3 choices overlap". Two combinations are named, or
-    three choices, the rest counted. Nothing where neither window is placed by a setting."""
+    (x, y) beside them; STE-29). A choice where one window is placed by a setting and the other by a
+    literal, a combination where both are; "1 choice overlaps", "1 of 3 choices overlaps",
+    "2 of 3 choices overlap". Two combinations are named, or three choices, the rest counted.
+    Nothing where neither window is placed by a setting."""
     if not found.combinations:
         return ""
     unit = "combination" if found.paired else "choice"
@@ -4838,8 +4841,8 @@ def _view_faults(trial: Trial, geometry: Geometry | None) -> list[Finding]:
     (`_offscreen_stimuli`), so a caller that passes the session's geometry has nothing else
     to do. `taskd` and
     `wlx check` are those callers (`wlx run --rig --view` and `wlx check --rig`, which
-    take the field from the rig file); without a geometry (`wlx review`, the tests)
-    only the stereo-content finding is reachable. An unrecognized `view` is refused
+    take the field from the rig file); without a geometry (the tests; `wlx review` checks
+    nothing) only the stereo-content finding is reachable. An unrecognized `view` is refused
     outright, as an unrecognized eye is: it would be checked as neither.
     """
     if trial.view not in TRIAL_VIEWS:
