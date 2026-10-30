@@ -212,6 +212,9 @@ class _Membership:
     def happened(self, guard, state: str, frame: int) -> bool:
         return False
 
+    def began(self, state: str, frame: int) -> None:
+        pass
+
     def signal(self, frame: int) -> str:
         """Always available: these tests are not about signal loss."""
         return "ok"
@@ -476,3 +479,38 @@ def test_each_frame_runs_on_a_frame_the_gaze_signal_was_lost_too():
     )
 
     assert frames == list(range(1, 21))
+
+
+# --- XC-410: a saccade counts for a state only if it began in it -------------------------------
+
+
+class _Told(Quiet):
+    """`Quiet`, with every state the loop says began logged, with its first frame."""
+
+    def __init__(self, log: list) -> None:
+        object.__setattr__(self, "log", log)
+
+    def began(self, state: str, frame: int) -> None:
+        self.log.append((state, frame))
+
+
+def test_the_world_is_told_the_first_frame_of_every_state_the_trial_enters():
+    """A saccade counts for a state only if it began in that state (the PI, 2026-10-30), so a
+    world that remembers saccades (`gaze.Tracked`) has to know each state's first frame: the frame
+    its guards are first asked on and its entry actions first drawn. The start state's is frame 1;
+    every other's is the frame after the transition that enters it, **a state entered again
+    included**, whose earlier saccades are no more its own than another state's."""
+    trial = Trial(
+        start="a",
+        states=[
+            State("a", go=[On(After(0.03), "b")]),
+            State("b", go=[On(After(0.02), "b2")]),
+            State("b2", go=[On(After(0.02), "b2")]),
+        ],
+    )
+    log: list = []
+
+    result = run_trial(trial, world=_Told(log), frame_period=0.01, max_frames=12)
+
+    assert result.outcome is None and result.frames == 12
+    assert log == [("a", 1), ("b", 4), ("b2", 6), ("b2", 8), ("b2", 10), ("b2", 12)]

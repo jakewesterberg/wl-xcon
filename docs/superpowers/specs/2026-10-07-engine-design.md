@@ -344,6 +344,18 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    only it has) and counted in the review report's windows table; and a saccade to
    `<of>.distractor` is judged at every distractor, each for its own eye, where it had been judged
    at a stand-in window at the target (EYE-29, engineering defaults).
+   *Note, 2026-10-30 (the PI, XC-410):* **a saccade counts for a state only if it began in that
+   state, and it is judged where it landed** ("Only during the state"; "No; it must start in the
+   state": "one that began before the state is anticipatory, as an early response would be"; "No;
+   judged where it landed": "A saccade to X lands in X's window at the moment it lands."). A
+   `SaccadeTo` or `SaccadeOnset` takes a saccade only if its onset, the detector's first sample of
+   it, is on the state's first frame or after -- the frame the state's guards are first asked on and
+   its entry actions first drawn, which the loop tells the world (`run.World.began`) -- and a
+   `SaccadeTo` judges it on the frame it lands, against the windows drawn then, and never after. So
+   an object shown or moved onto where an earlier saccade landed does not take it, where it had on
+   the frame it was drawn there, and a saccade landing beside a window is not taken when gaze drifts
+   in. An object moving onto the eye still counts as arriving for `Entered` and `Exited` (EYE-19
+   and EYE-29, revised).
 8. **Off the field**: only when declared; check 8 grows to test extents (XC-143, XC-144).
 9. **Head-free chaired sessions**: nominal head position, recorded and listed; a task may require a
    fixed head.

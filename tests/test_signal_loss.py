@@ -45,6 +45,9 @@ class Interrupted:
     def happened(self, guard, state: str, frame: int) -> bool:
         return False
 
+    def began(self, state: str, frame: int) -> None:
+        pass
+
     def display(self, visible, frame: int) -> None:
         pass
 
