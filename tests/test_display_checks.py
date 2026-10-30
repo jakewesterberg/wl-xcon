@@ -756,6 +756,17 @@ def test_a_drift_not_across_the_bars_is_refused_at_load(grating, params):
     assert _blocks(_one(grating, params=params, background=GRAY_BG))
 
 
+def test_a_drift_refused_names_every_direction_from_0_to_360():
+    """The PI, 2026-10-30, "0 to 360 everywhere": the refusal of a drift not across the bars names
+    the drift as the task wrote it and the two that are across, each from 0° to 360°: at
+    orientation 135 they are 225 and 45, never 405, and a drift written -45 reads 315."""
+    (said,) = _blocks(_one(_drifting(direction=0.0, orientation=135.0), background=GRAY_BG))
+    assert ("a grating with orientation 135 cannot drift toward 0 degrees: that is not across its "
+            "bars. Write direction=225 or 45, or leave `direction` out to drift toward 225") in said
+    (said,) = _blocks(_one(_drifting(direction=-45.0, orientation=0.0), background=GRAY_BG))
+    assert "cannot drift toward 315 degrees" in said and "-45" not in said
+
+
 def test_a_drift_across_the_bars_is_accepted():
     both = [Param("d", unit="deg", choices=(90.0, 270.0))]
     assert _refused(_one(_drifting(direction=P("d")), params=both, background=GRAY_BG)) == set()

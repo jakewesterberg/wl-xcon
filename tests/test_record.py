@@ -160,11 +160,17 @@ def test_a_polar_value_is_written_as_its_eccentricity_and_direction_with_its_x_y
 
 def _is_at(entry: dict, x: float, y: float) -> None:
     """`entry` says it was at `(x, y)`, with that position's true eccentricity and direction by
-    the PI's formulas (`_angles.true`), each to a billionth of a degree."""
+    the PI's formulas (`_angles.true`), each to a billionth of a degree, the direction as the
+    record writes it (`_angles.shown`: from 0° to 360°, none at the center; the PI, 2026-10-30)."""
     eccentricity, direction = _angles.true(x, y)
     assert (entry["x"], entry["y"]) == (pytest.approx(x, abs=1e-9), pytest.approx(y, abs=1e-9))
     assert entry["eccentricity"] == pytest.approx(eccentricity, abs=1e-9)
-    assert entry["direction"] == pytest.approx(direction, abs=1e-9)
+    shown = _angles.shown(eccentricity, direction)
+    if shown is None:
+        assert entry["direction"] is None
+    else:  # read round the circle, so 359.99999999999994 and 0 are one direction
+        assert 0.0 <= entry["direction"] < 360.0
+        assert (entry["direction"] - shown + 180.0) % 360.0 - 180.0 == pytest.approx(0.0, abs=1e-9)
 
 
 def _shown(stimulus, frame: int, presentation: int = 0, off=None):
@@ -205,7 +211,7 @@ def test_a_trial_line_says_where_each_stimulus_was_and_each_eyes_own_where_it_ha
         "unresolved": None}
     _is_at(target, *_angles.from_polar(15.0, -150.0))
     assert (target["eccentricity"], target["direction"]) == (
-        pytest.approx(15.0, abs=1e-9), pytest.approx(-150.0, abs=1e-9))
+        pytest.approx(15.0, abs=1e-9), pytest.approx(210.0, abs=1e-9))
     assert not {"objects", "target", "left", "right"} & set(target)
     assert {k: both[k] for k in ("name", "kind", "frame", "off", "drawn", "unresolved", "target")} == {
         "name": "pair", "kind": "show", "frame": 5, "off": None, "drawn": True, "unresolved": None,

@@ -197,6 +197,15 @@ def test_a_direction_not_across_the_bars_or_a_negative_speed_is_refused():
         _drift(None, 0.0, tf=-1.0)
 
 
+def test_the_drawer_s_refusal_of_a_drift_names_every_direction_from_0_to_360():
+    """The PI, 2026-10-30, "0 to 360 everywhere": at orientation 135 the drifts across the bars
+    are 225 and 45, never 405, and a drift written -45 is named 315."""
+    with pytest.raises(ValueError) as refused:
+        _drift(-45.0, 135.0)
+    assert str(refused.value) == ("a grating's drift direction 315 degrees is not across the bars: "
+                                  "with orientation 135 it is 225 or 45")
+
+
 def _seen(image, vp, x_deg):
     """The luminance of the pixel at (x°, 0°) in a direct-view image."""
     col = vp.width_px / 2 + (vp.distance_cm * math.tan(math.radians(x_deg)) + vp.ahead_cm[0]) / vp.pitch_cm[0]

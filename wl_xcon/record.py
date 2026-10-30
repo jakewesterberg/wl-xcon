@@ -198,8 +198,11 @@ def _written(value: object) -> object:
     is drawn in beside them** (the PI, 2026-10-20, "Both, polar first": "Recorded as eccentricity
     and direction with (x, y) beside"): `{"eccentricity": 8.0, "direction": 45.0, "x": 5.675...,
     "y": 5.675...}`, (x, y) converted exactly (`geometry.polar_deg`), so a reader that wants either
-    has it without converting. The keys are `Polar`'s own field names, which a reader rebuilds it
-    from, and the (x, y) every per-axis position is written in. A position written as a pair is a
+    has it without converting. **The direction as the task wrote it, but from 0° to 360°, and null
+    at eccentricity 0** (`geometry.shown_direction`; the PI, 2026-10-30, "0 to 360 everywhere" and
+    "Empty at center"): `Polar(8, -90)` is written 270, `Polar(0, 45)` with a null direction. The
+    keys are `Polar`'s own field names, which a reader rebuilds it from, and the (x, y) every
+    per-axis position is written in. A position written as a pair is a
     two-item list, as it always was.
 
     **A setting's value that is an appearance** -- the reference task's `target_appearance`, a
@@ -219,7 +222,7 @@ def _written(value: object) -> object:
     setting reference, is no value, and a record never writes a stand-in for one; nor does it write
     any other object, which reached here by mistake."""
     from wl_xcon.declarations import canonical
-    from wl_xcon.geometry import polar_deg
+    from wl_xcon.geometry import polar_deg, shown_direction
     from wl_xcon.look import Edge, Fill, Outline, Shape
     from wl_xcon.photometry import Color, Contrast
     from wl_xcon.task import Appearance, Polar
@@ -229,7 +232,9 @@ def _written(value: object) -> object:
 
     if isinstance(value, Polar) and number(value.eccentricity) and number(value.direction):
         x, y = polar_deg(float(value.eccentricity), float(value.direction))
-        return {"eccentricity": value.eccentricity, "direction": value.direction, "x": x, "y": y}
+        # As the task wrote it, from 0° to 360°, and none at the center (the PI, 2026-10-30).
+        direction = None if value.eccentricity == 0 else shown_direction(value.direction)
+        return {"eccentricity": value.eccentricity, "direction": direction, "x": x, "y": y}
     if isinstance(value, (Appearance, Color, Contrast, Shape, Fill, Edge, Outline)):
         return canonical(value, every_field=True)
     raise TypeError(f"the record writes no {type(value).__name__} value ({value!r})")
@@ -253,7 +258,9 @@ def _stimuli(placed: tuple, values: dict) -> list[dict]:
     per-axis position, a `Polar` and a whole-position setting converted as the screen converts them
     (`task.position_of`), and beside it the position's **true eccentricity and direction**,
     `atan(√(tan²x + tan²y))` and `atan2(tan y, tan x)` (`geometry.polar_of_deg`), never `√(x² +
-    y²)`, which overstates it off the axes -- REC-25's keys. **An array** adds `objects`, each
+    y²)`, which overstates it off the axes -- REC-25's keys -- **the direction from 0° to 360°, and
+    null at eccentricity 0** (`geometry.shown_polar`; the PI, 2026-10-30, "0 to 360 everywhere" and
+    "Empty at center"), so straight down is 270, never -90. **An array** adds `objects`, each
     object's, in index order, on its true circle about its center (`task.Array.positions`, as the
     screen places them), and `target`, the index of the object it declares the target. **A
     stimulus drawn by per-eye positions** (engine spec §5.4) is drawn at no cyclopean position, so
@@ -263,7 +270,7 @@ def _stimuli(placed: tuple, values: dict) -> list[dict]:
     that cannot be read, is written null with why in `unresolved` (null when everything resolved),
     so a trial that ran and paid always has its line. Computed as the line is written, between
     trials, never in a frame."""
-    from wl_xcon.geometry import polar_of_deg
+    from wl_xcon.geometry import shown_polar
     from wl_xcon.task import Array, Blank, P, Polar, position_of
 
     def value(field):
@@ -289,7 +296,7 @@ def _stimuli(placed: tuple, values: dict) -> list[dict]:
                 else f"settings {named} have no value")
 
     def where(x: float, y: float) -> dict:
-        eccentricity, direction = polar_of_deg(x, y)
+        eccentricity, direction = shown_polar(x, y)
         return {"eccentricity": eccentricity, "direction": direction, "x": x, "y": y}
 
     nowhere = {"eccentricity": None, "direction": None, "x": None, "y": None}

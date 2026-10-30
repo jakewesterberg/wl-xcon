@@ -100,13 +100,19 @@ def _point_label(at: object) -> str:
     written and a pair converted exactly (`geometry.polar_deg`'s inverse), what is converted to
     a thousandth and what is written to six significant figures (`_value_label`); a value a
     setting holds by its name, and a pair holding one per axis alone, as no number converts.
+    **Every direction from 0° to 360°, and none at the center** (the PI, 2026-10-30, "0 to 360
+    everywhere" and "Empty at center", through `geometry.shown_direction` and `shown_polar`):
+    `Polar(8, -90)` reads `8° at 270°`, a direction a hair under 360° that its precision rounds up
+    reads `0°`, and a position at eccentricity 0 -- a `Polar` written at 0, whatever its
+    direction, or a pair whose eccentricity shown to a thousandth is 0, as this report already
+    rounded it -- reads `0°` alone, its (x, y) beside it.
     **A number that is not finite** -- an infinity or a NaN, which has no direction and which
     converting raised on, or an integer past a float's range, written in the same `g` form
     (`1e+400`) -- says it is not a position, the rest as written (XC-401's fix rounds, M1 and N2).
     Anything else is shown as written: a position's shape is refused at load
     (`check._position_kind_faults`), but a caller may hand it one, and an artifact that raises
     shows nothing at all."""
-    from wl_xcon.geometry import polar_deg, polar_of_deg
+    from wl_xcon.geometry import polar_deg, shown_direction, shown_polar
     from wl_xcon.task import Polar
 
     def number(value) -> bool:
@@ -129,7 +135,15 @@ def _point_label(at: object) -> str:
 
     if isinstance(at, Polar):
         e, d = at.eccentricity, at.direction
-        polar = " at ".join(f"{written(v)}°" if number(v) else _value_label(v) for v in (e, d))
+        # As written, to six significant figures, from 0° to 360°, what prints as 360 being 0
+        # (`shown_direction`); and none at the center, where a setting's name would be a direction
+        # word too (the PI, 2026-10-30).
+        shown = d
+        if number(d) and finite(d):
+            shown = shown_direction(float(f"{shown_direction(d):g}"))
+        center = number(e) and e == 0 and (isinstance(d, P) or number(d) and finite(d))
+        polar = " at ".join(f"{written(v)}°" if number(v) else _value_label(v)
+                            for v in ((e,) if center else (e, shown)))
         if not (number(e) and number(d)):
             return polar
         if not (finite(e) and finite(d)):
@@ -142,8 +156,12 @@ def _point_label(at: object) -> str:
             return pair
         if not (finite(at[0]) and finite(at[1])):
             return f"not a position: {pair}"
-        e, d = polar_of_deg(float(at[0]), float(at[1]))
-        return (f"{deg(e)}°" + (f" at {deg(d)}°" if round(e, 3) else "") + f" · {pair}")
+        e, d = shown_polar(float(at[0]), float(at[1]))
+        # Converted, so shown to a thousandth, what rounds to 360 being 0; no direction where the
+        # eccentricity shown is 0, as this report rounds it.
+        toward = (f" at {deg(shown_direction(round(d, 3)))}°" if d is not None and round(e, 3)
+                  else "")
+        return f"{deg(e)}°{toward} · {pair}"
     return _value_label(at)
 
 

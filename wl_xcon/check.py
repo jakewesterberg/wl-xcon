@@ -25,7 +25,7 @@ from wl_xcon.components import Registry
 from wl_xcon.findings import SESSION_KINDS, Finding
 from wl_xcon.geometry import (
     VIEWS, Geometry, circle_extent_deg, least_separation_deg, polar_box_deg, polar_deg,
-    ring_spacing_deg,
+    ring_spacing_deg, shown_direction,
 )
 from wl_xcon.photometry import (
     CONE_COLORS,
@@ -1661,6 +1661,9 @@ def _offscreen_stimuli(trial: Trial, geometry: Geometry | None) -> list[Finding]
 
 
 def _described(at: object) -> str:
+    """Where a `Show` places its stimulus, as check 8's sentence names it: a setting by its name,
+    a `Polar` as its eccentricity and direction, **the direction from 0° to 360° and none at the
+    center** (`shown_direction`; the PI, 2026-10-30), a pair as its two coordinates."""
     def part(v: object) -> str:
         if isinstance(v, P):
             return v.name
@@ -1669,7 +1672,12 @@ def _described(at: object) -> str:
     if isinstance(at, P):
         return at.name
     if isinstance(at, Polar):
-        return "eccentricity " + ", direction ".join(part(v) for v in (at.eccentricity, at.direction))
+        e, d = at.eccentricity, at.direction
+        if _is_number(e) and e == 0 and (isinstance(d, P) or _is_number(d) and _real(d)):
+            return f"eccentricity {part(e)}"
+        if _is_number(d) and _real(d):  # as printed, so what prints as 360 is 0
+            d = shown_direction(float(f"{shown_direction(d):g}"))
+        return "eccentricity " + ", direction ".join(part(v) for v in (e, d))
     if isinstance(at, (tuple, list)):
         return ", ".join(part(v) for v in at)
     return _said(at)
@@ -3333,12 +3341,17 @@ def _direction_faults(looks, grating, params: dict[str, Param], bad) -> None:
     orientations = choices(orientation, "the grating's orientation", (
         "a range cannot be checked against a fixed direction, so offer choices, or leave "
         "`direction` out to drift toward orientation + 90"))
+    def shown(direction: float) -> str:
+        """From 0° to 360° as printed (`shown_direction`; the PI, 2026-10-30)."""
+        printed = float(f"{shown_direction(direction):g}")
+        return f"{shown_direction(printed):g}"
+
     for o in orientations or []:
         for d in directions or []:
             if abs(math.sin(math.radians(d - (o + 90.0)))) > 1e-9:
-                bad(f"a grating with orientation {o:g} cannot drift toward {d:g} degrees: that is "
-                    f"not across its bars. Write direction={o + 90:g} or {o + 270:g}, or leave "
-                    f"`direction` out to drift toward {o + 90:g}")
+                bad(f"a grating with orientation {o:g} cannot drift toward {shown(d)} degrees: "
+                    f"that is not across its bars. Write direction={shown(o + 90)} or "
+                    f"{shown(o + 270)}, or leave `direction` out to drift toward {shown(o + 90)}")
                 return
 
 

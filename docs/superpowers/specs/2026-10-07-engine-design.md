@@ -281,10 +281,18 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    made it and the fields an `Update` set, the frame it was first so and the frame its presentation
    went off (null when on to the end), whether it was drawn (false for a `Blank`), its (x, y), and
    beside them its true eccentricity `atan(√(tan²x + tan²y))` and direction `atan2(tan y, tan x)`,
-   in (−180°, 180°] pending the PI, computed from what was drawn as the line is written, between
-   trials; an array's objects and target, and a per-eye stimulus's two eyes, beside them; a position
-   that cannot be resolved written null with why, never raised, and each such stimulus said once a
-   run for each reason on the changes feed; wl-preproc told the fields first (REC-26).
+   in (−180°, 180°] pending the PI (from 0° to 360° since 2026-10-30, below), computed from what was
+   drawn as the line is written, between trials; an array's objects and target, and a per-eye
+   stimulus's two eyes, beside them; a position that cannot be resolved written null with why, never
+   raised, and each such stimulus said once a run for each reason on the changes feed; wl-preproc
+   told the fields first (REC-26).
+   *Note, 2026-10-30 (the PI, "0 to 360 everywhere" and "Empty at center"):* every direction shown
+   or written -- the record's, the review report's, the console's and the checker's sentences' -- is
+   from 0° to 360° (the angle mod 360, then 0 where that gives 360.0, as wl-preproc normalizes it), a
+   task's own `Polar(8, -90)` reading and recorded 270, and none at eccentricity 0: the record writes
+   null there and the console shows only "0°" (`geometry.shown_direction`, `shown_polar`). The math
+   keeps its own form, `polar_of_deg`'s (−180°, 180°] and every interval as written, so no window,
+   overlap or interval result moves; a task may write any direction (REC-26's revision).
 2. **Sizes**: one size number is the full width; each block's definition states it.
 3. **Away from the center**: true visual angle (default) or the screen center's
    scale, declared per task. *Note, 2026-10-19 (the PI, "Retire it"):* "Every stimulus is drawn in
