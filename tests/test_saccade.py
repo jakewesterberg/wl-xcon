@@ -19,17 +19,24 @@ from pathlib import Path
 
 import pytest
 
+from wl_xcon.calibration import EyeMap, Mapping, Model
+from wl_xcon.eye import Replay, Tracker
+from wl_xcon.gaze import Tracked
+from wl_xcon.run import Recorded, run_trial
 from wl_xcon.saccade import (
     DEFAULT_LAMBDA,
     DEFAULT_MIN_DURATION_SAMPLES,
+    HALF_WINDOW,
     VERSION,
     Detector,
     Params,
+    _amplitude,
     detect,
     median_scale,
     thresholds,
     velocity,
 )
+from wl_xcon.task import REMEMBERED, After, On, Outcome, SaccadeTo, State, Trial, Window
 
 FS = 500.0
 DT = 1.0 / FS
@@ -205,10 +212,9 @@ def test_the_online_detector_reports_on_the_sample_that_confirms():
 
 def test_the_online_amplitude_is_measured_as_the_batch_form_measures_it():
     """Start point to end point over the samples a confirmation has, `start` to `stop - 1`: the
-    online detector measures them in its own buffer (XC-414), and the batch form's `_amplitude`
-    over the same samples of the trace gives the same number, bit for bit."""
-    from wl_xcon.saccade import _amplitude
-
+    online detector measures them from the run's first sample, kept as the run starts, to the last
+    in its own buffer (XC-414; version 2), and the batch form's `_amplitude` over the same samples
+    of the trace gives the same number, bit for bit."""
     gaze, at = _trace([(200, 10, 8.0, 0.0), (450, 12, -7.0, 3.0)], n=700)
     found = _online(gaze, at)
 
@@ -281,10 +287,14 @@ def test_the_buffer_stays_bounded_over_a_long_trial():
 def _demanding(n: int = 1000):
     """A trace that makes the online detector do everything it does: hold perfectly still for its
     first 120 samples (so its thresholds are zero and re-estimated every sample), warm up, refresh,
-    lose two samples, cross an 0.2 s hole in time, and confirm saccades on both sides of it."""
-    gaze, at = _trace([(200, 10, 8.0, 0.0), (450, 12, -7.0, 3.0), (800, 15, 5.0, 5.0)], n=n)
+    lose two samples far from any saccade, cross an 0.2 s hole in time, confirm saccades on both
+    sides of it, and confirm two that each lost a sample near their start (version 2): one on a
+    later sample outside the threshold, and one, a short saccade, on the sample that ends it."""
+    gaze, at = _trace([(200, 10, 8.0, 0.0), (450, 12, -7.0, 3.0), (800, 15, 5.0, 5.0),
+                       (900, 4, 4.0, 0.0)], n=n)
     gaze[:120] = [(0.0, 0.0)] * 120
     gaze[300] = gaze[700] = None
+    gaze[203] = gaze[905] = None
     at = [t + (0.2 if i >= 600 else 0.0) for i, t in enumerate(at)]
     return gaze, at
 
@@ -294,7 +304,9 @@ def test_a_sample_builds_nothing_whatever_it_does():
     builds nothing (XC-414), on every sample of `_demanding`'s trace, with a history short enough
     that its buffers wrap and its thresholds refreshed every seventh velocity: no list, slice,
     generator or tuple, where until 2026-10-29 every sample appended to three growing lists, sliced
-    two, walked them with generators, and every refresh copied its velocities into a list."""
+    two, walked them with generators, and every refresh copied its velocities into a list. Both
+    ways a saccade that lost a sample is confirmed (version 2) are among them: still in flight,
+    and as its run ends."""
     from _builds import built_on
 
     gaze, at = _demanding()
@@ -303,9 +315,10 @@ def test_a_sample_builds_nothing_whatever_it_does():
     for t, g in zip(at, gaze):
         built.update(built_on(detector.accept, t, g))
         if detector.onset is not None:
-            confirmed.append(detector.onset)
+            confirmed.append((detector.onset, detector.in_flight))
 
-    assert [s.start for s in confirmed if s.start > 600] and len(confirmed) >= 3
+    assert [s.start for s, _ in confirmed if s.start > 600] and len(confirmed) >= 3
+    assert {flying for s, flying in confirmed if s.flagged} == {True, False}
     assert sorted(built) == []
 
 
@@ -337,6 +350,107 @@ def test_indices_stay_absolute_once_the_buffer_has_been_trimmed():
     found = _online_with(detector, gaze, at)
     assert found, "a saccade after many trims is still a saccade"
     assert abs(found[0].start - 900) <= 6, f"start drifted to {found[0].start}"
+
+
+# ---------------------------------------------------------------------------
+# A sample lost near a saccade's start: counted, marked (version 2)
+# ---------------------------------------------------------------------------
+#
+# One missing gaze sample leaves unknown the five velocities whose windows hold it. Until version 2
+# the online detector confirmed a run only on the sample at which it was exactly
+# `min_duration_samples` long, so a run whose confirming velocity was one of those five was never
+# reported at all, while `detect` reported it flagged (found by the XC-414 work, 2026-10-29). The
+# PI, asked 2026-10-30, "Count it, marked (Recommended)": "Its landing is measured, so live and
+# offline agree. Some trials now scored 'no response' would become correct or wrong-target."
+
+
+def _lost(gaze, *samples):
+    """The trace with each of `samples` missing, as a sample the tracker never delivered is."""
+    gaze = list(gaze)
+    for k in samples:
+        gaze[k] = None
+    return gaze
+
+
+def _confirmations(gaze, at, params=Params()):
+    """Each saccade the online detector reports, with the sample that confirmed it and whether its
+    run was still open then."""
+    detector = Detector(params=params)
+    found = []
+    for k, (t, g) in enumerate(zip(at, gaze)):
+        saccade = detector.accept(t, g)
+        if saccade is not None:
+            found.append((k, saccade, detector.in_flight))
+    return found
+
+
+#: A 12-sample saccade at sample 200, whose run starts at 198 and is confirmed on the velocity at
+#: 203, the sixth, which sample 205 completes.
+_TWELVE = [(200, 12, 8.0, 0.0)]
+
+
+@pytest.mark.parametrize("into", range(3, 8))
+def test_a_saccade_that_lost_a_sample_where_it_is_confirmed_is_reported_marked(into):
+    """A sample `into` samples after its run's start, 3 to 7: each leaves the sixth velocity unknown
+    and one before it known, so the run was never reported. Now it is confirmed on its first later
+    velocity outside the threshold, one to five samples after a whole trace confirms it, at the
+    batch form's start and flagged as the batch form flags it, its size start point to end point
+    as the batch form measures it."""
+    gaze, at = _trace(_TWELVE)
+    [(whole_at, whole, _)] = _confirmations(gaze, at)
+    lost = _lost(gaze, whole.start + into)
+
+    found = _confirmations(lost, at)
+    batch = detect(lost, at)
+
+    assert [s.start for _, s, _ in found] == [s.start for s in batch] == [whole.start]
+    assert [s.flagged for _, s, _ in found] == [s.flagged for s in batch] == [True]
+    [(confirmed_at, saccade, flying)] = found
+    assert 1 <= confirmed_at - whole_at <= 5 and flying
+    assert saccade.amplitude_deg == _amplitude(lost, saccade.start, saccade.stop)
+
+
+def test_a_short_saccade_that_lost_a_sample_is_confirmed_on_the_sample_that_ends_it():
+    """A 4-sample saccade whose run is 7 samples long, a sample lost 7 into it: five velocities
+    outside the threshold, five unknown, then one inside it. The run is 10 samples as the batch form
+    counts it, so it is a saccade, confirmed on the velocity that ends it -- the eye has landed, and
+    where is measured -- with exactly the batch form's interval, flag and size."""
+    gaze, at = _trace([(200, 4, 4.0, 0.0)])
+    [(_, whole, _)] = _confirmations(gaze, at)
+    lost = _lost(gaze, whole.start + 7)
+
+    found = _confirmations(lost, at)
+    batch = detect(lost, at)
+
+    assert [(s.start, s.stop, s.flagged) for _, s, _ in found] \
+        == [(s.start, s.stop, s.flagged) for s in batch] == [(whole.start, whole.start + 10, True)]
+    [(confirmed_at, saccade, flying)] = found
+    assert confirmed_at == saccade.stop + HALF_WINDOW and not flying
+    assert saccade.amplitude_deg == batch[0].amplitude_deg
+
+
+@pytest.mark.parametrize("before", range(-2, 4))
+def test_a_saccade_whose_first_velocity_follows_a_lost_sample_is_marked(before):
+    """A sample lost from three samples before the run's start to two into it: the run starts
+    late or not at all, but its first velocity's window, or one of the two before it, held the
+    lost sample, so the batch form flags it (`_saccade`'s window). It was reported online unflagged:
+    an artifact the gap may have made, reported as though nothing were missing."""
+    gaze, at = _trace(_TWELVE)
+    [(_, whole, _)] = _confirmations(gaze, at)
+    lost = _lost(gaze, whole.start - 1 + before)
+
+    found = _confirmations(lost, at)
+    batch = detect(lost, at)
+
+    assert [(s.start, s.flagged) for _, s, _ in found] == [(s.start, s.flagged) for s in batch]
+    assert [s.flagged for _, s, _ in found] == [True]
+
+
+def test_the_detector_that_counts_a_saccade_with_a_lost_sample_is_version_2():
+    """`VERSION` is bumped whenever a session would detect something else, and version 2 reports
+    what version 1 never did. **Not wl-preproc's fixture set "v2"** (true angle, XC-398): that is
+    their file's version, and this constant is ours."""
+    assert VERSION == 2
 
 
 # ---------------------------------------------------------------------------
@@ -452,6 +566,53 @@ def test_our_amplitude_is_their_amplitude(name):
     mine = detect(gaze, at)
     for found, run in zip(mine, trace["runs"]):
         assert abs(found.amplitude_deg - run["amplitude_deg"]) <= 4 * math.ulp(run["amplitude_deg"])
+
+
+@pytest.mark.parametrize("name", list(_TRACES))
+def test_online_each_of_their_runs_is_confirmed_on_its_sixth_velocity_and_nothing_else(name):
+    """**What version 2 leaves alone, sample for sample.** On each v1 trace, nothing missing near a
+    run, the online detector reports exactly their runs, each at their start, unflagged, on the
+    sample that completes its sixth velocity, `start + min_duration_samples + HALF_WINDOW - 1`, as
+    version 1 did: confirming a run once it is long enough rather than exactly so moves nothing
+    where no velocity in it is unknown."""
+    gaze, at = _ours_on(_TRACES[name])
+    runs = _TRACES[name]["runs"]
+
+    assert [(k, s.start, s.stop, s.flagged) for k, s, _ in _confirmations(gaze, at)] == [
+        (r["start"] + DEFAULT_MIN_DURATION_SAMPLES + HALF_WINDOW - 1, r["start"],
+         r["start"] + DEFAULT_MIN_DURATION_SAMPLES, False) for r in runs]
+
+
+_LOST_IN_A_RUN = [(name, index, into) for name, trace in _TRACES.items()
+                  for index in range(len(trace["runs"])) for into in range(3, 8)]
+
+
+@pytest.mark.parametrize("name,index,into", _LOST_IN_A_RUN,
+                         ids=[f"{n}-run{i}-lost+{k}" for n, i, k in _LOST_IN_A_RUN])
+def test_online_a_run_that_lost_a_sample_near_its_start_is_found_where_theirs_is_marked(
+        name, index, into):
+    """**Live and offline agree** (the PI, 2026-10-30). Their run, on the trace the eye PC
+    recorded, against ours on the same trace with one sample the rig's stream lost, 3 to 7 samples
+    into the run: each hides the velocity a whole trace confirms it on, and version 1 reported
+    nothing there. Now every one of their runs is found at their start, the one that lost a sample
+    flagged and the rest not. On the off-centre traces, whose runs are 10 samples, a loss 7 in,
+    and on the microsaccade's, 9 samples, a loss 6 or 7 in, leave only the velocity that ends the
+    run to confirm it.
+
+    The offline side is their run on the whole trace because the eye PC's file keeps the frame the
+    rig's stream lost (S5 §3, the XC-288 spec §3.3). A frame missing from that file too is masked
+    there, and their detector ends a run at a masked sample where ours carries it across, so offline
+    would then start the run after the gap or, 7 samples in, drop it: their rule against ours,
+    older than this change."""
+    trace = _TRACES[name]
+    gaze, at = _ours_on(trace)
+    start = trace["runs"][index]["start"]
+    lost = _lost(gaze, start + into)
+
+    found = _confirmations(lost, at)
+
+    assert [s.start for _, s, _ in found] == [r["start"] for r in trace["runs"]]
+    assert [s.flagged for _, s, _ in found] == [i == index for i in range(len(trace["runs"]))]
 
 
 def test_in_flight_tracks_the_open_run_not_the_confirmation():
@@ -576,3 +737,78 @@ def test_their_thresholds_follow_their_stated_rule(name, trace, eta):
     for axis in (0, 1):
         rebuilt = DEFAULT_LAMBDA * median_scale([float(v[axis]) for v in usable])
         assert rebuilt == pytest.approx(eta[axis], rel=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# In a trial: a guard waiting for a saccade takes one that lost a sample
+# ---------------------------------------------------------------------------
+#
+# Through the trial loop, a replayed tracker, the map and `gaze.Tracked`, which feeds the detector
+# one sample a frame. **The tracker's staleness ceiling is half a frame here**, so a datagram that
+# never arrived is a frame with no gaze, which the detector is given as a lost sample; under the
+# default 50 ms ceiling the tracker keeps the last sample over one lost datagram, and the detector
+# is given that sample again instead. One frame without gaze is inside the trial's 50 ms
+# tracker-loss grace, which only freezes the frame.
+
+_FRAME = 0.002
+
+#: An eye whose map is the identity: P1 at the gaze in degrees and P4 at the origin, so a payload
+#: states where the animal looks.
+_IDENTITY = EyeMap(model=Model.AFFINE, x=(0.0, 1.0, 0.0), y=(0.0, 0.0, 1.0), conditioning=1.0,
+                   rms_residual_deg=0.0, n_points=3)
+
+_RESPOND = Trial(
+    start="respond",
+    windows=[Window("target", at=(8.0, 0.0), radius=2.0, on=REMEMBERED),
+             Window("other", at=(-8.0, 0.0), radius=2.0, on=REMEMBERED)],
+    states=[State("respond", go=[On(SaccadeTo("target"), Outcome.CORRECT),
+                                 On(SaccadeTo("other"), Outcome.WRONG_TARGET),
+                                 On(After(1.0), Outcome.NO_RESPONSE)])],
+)
+
+
+def _datagram(x: float, y: float, frame: int) -> str:
+    """What OpenIrisDPI sends for both eyes looking at `(x, y)` under `_IDENTITY`."""
+    eye = {"FrameNumber": frame,
+           "Pupil": {"Center": {"X": x, "Y": y}, "Size": {"Width": 30.0, "Height": 28.0}},
+           "CRs": [{"X": x, "Y": y}, {"X": 0.0, "Y": 0.0}, {"X": 0.0, "Y": 0.0}, {"X": 0.0, "Y": 0.0}]}
+    return json.dumps({"Left": eye, "Right": eye})
+
+
+def _responded(to_x: float, lose=()):
+    """`_RESPOND` through the loop, the eye fixating the origin for 200 frames and then making
+    `_TWELVE`'s saccade to `(to_x, 0)`, each sample in `lose` a datagram that never arrived: the
+    result, and every saccade the detector confirmed."""
+    gaze, _ = _trace([(200, 12, to_x, 0.0)], n=800)
+    payloads = [(0.0, "" if k in lose else _datagram(x, y, k)) for k, (x, y) in enumerate(gaze)]
+    detector, confirmed = Detector(), []
+    accept = detector.accept
+
+    def keeping(at, gaze_deg):
+        saccade = accept(at, gaze_deg)
+        if saccade is not None:
+            confirmed.append(saccade)
+        return saccade
+
+    detector.accept = keeping
+    world = Tracked(Tracker(staleness=_FRAME / 2),
+                    Mapping(version=1, targets=(), left=_IDENTITY, right=_IDENTITY), _RESPOND,
+                    _FRAME, {}, source=Replay(payloads=payloads), detector=detector)
+    return run_trial(_RESPOND, world, _FRAME, values={}, effects=Recorded()), confirmed
+
+
+@pytest.mark.parametrize("to_x,outcome", [(8.0, Outcome.CORRECT), (-8.0, Outcome.WRONG_TARGET)],
+                         ids=["to the target", "to the other window"])
+def test_a_trial_waiting_for_a_saccade_takes_one_that_lost_a_sample_near_its_start(to_x, outcome):
+    """The PI, 2026-10-30: "It counts for a task's saccade guard like any saccade." A saccade whose
+    fifth sample never arrived ended its trial `NO_RESPONSE` under version 1, the detector never
+    reporting it; now the trial ends as the whole saccade ends it, by where it landed, and the
+    saccade the guard took is the one the detector confirmed, flagged. The trial record holds no
+    saccade yet (build T, XC-400), so that flag is the mark it carries."""
+    whole, kept = _responded(to_x)
+    assert whole.outcome is outcome and [s.flagged for s in kept] == [False]
+
+    result, confirmed = _responded(to_x, lose={kept[0].start + 5})
+
+    assert result.outcome is outcome
+    assert [(s.start, s.flagged) for s in confirmed] == [(kept[0].start, True)]
