@@ -60,17 +60,22 @@ _WEIGHT_SUM = 6.0
 #: trial record beside the mapping version, because S5 §5 makes a detector change a
 #: discontinuity of the same class as a parameter change (P16) -- two sessions run
 #: under different versions are not comparable and must not silently look it. *Nothing
-#: writes it yet (2026-10-30): a trial's saccades reach a record in build T (the XC-288
-#: spec §3.3).*
+#: writes it yet (2026-10-30), nor a saccade's flag: backlog XC-427, waiting on build T.*
 #:
-#: **2 since 2026-10-30** (the PI, "Count it, marked"): `Detector` reports, flagged, a
-#: saccade that a sample lost near its start hid -- confirmed on the first velocity
-#: that shows its run long enough, rather than only on the one that makes it exactly
-#: so -- and flags a run whose first velocity's window touched a gap, as `detect` does.
-#: 1 never reported the first and left the second unflagged; on a trace with no sample
-#: missing near a saccade the two detect the same thing, sample for sample. **Not
-#: wl-preproc's fixture set "v2"** (true angle, XC-398): that numbers their published
-#: fixture files, and this numbers our detector.
+#: **2 since 2026-10-30** (the PI, "Count it, marked"): `Detector` confirms a run on the
+#: first velocity that shows it long enough, counted as `detect` counts it, rather than
+#: only on the one that makes it exactly so, and reports it flagged; and it flags a run
+#: with a gap in the windows of the two velocities before it, as `detect` does. So the
+#: online form now counts and marks a run by `detect`'s rule: a saccade that a sample lost
+#: near its start hid, which 1 never reported, is reported, flagged, at the start `detect`
+#: gives it, and wl-preproc on the eye PC's whole trace. 1 and 2 detect the same thing,
+#: sample for sample, wherever no sample is missing, and no two are more than `max_gap_s`
+#: apart, within four samples of a velocity outside the threshold. **Beyond what the PI
+#: was asked** (a question for him, 2026-10-30): a lost sample beside a single noise
+#: velocity outside the threshold makes a run of six, now reported, marked, and taken by
+#: a saccade guard, where 1 and wl-preproc report nothing. **Not wl-preproc's fixture set
+#: "v2"** (true angle, XC-398): that numbers their published fixture files, and this
+#: numbers our detector.
 VERSION = 2
 
 
@@ -286,13 +291,20 @@ class Detector:
     eye has landed, and where is measured. Version 1 confirmed a run only on the velocity
     that made it exactly that long, so a sample lost near its start, which leaves the five
     velocities around it unknown, could hide that one, and the saccade was never reported
-    while `detect` reported it. Such a run is reported **flagged**, as is one whose first
-    velocity's window, or either of the two before it, held a gap (`_saccade`'s window
-    begins two samples before the run). **What a confirmation cannot know, it does not
-    claim**: a gap after it, in the run or in the two samples beyond it, flags the batch
-    form's saccade and not this one; and a run a break in time ends before it is confirmed
-    is not reported here, where `detect` reports it once long enough -- the PI counted a
-    saccade whose landing is measured, and after a break in time nothing is.
+    while `detect` reported it. Such a run is reported **flagged**, as is one with a gap
+    in the windows of the two velocities before it (`_saccade`'s window begins two samples
+    before the run). **Counting unknown velocities has a cost the PI was not asked about**
+    (a question for him, 2026-10-30): one noise velocity outside the threshold, then the
+    five a lost sample leaves unknown, then one inside it, is a run of six, reported
+    flagged as it ends, where version 1 and wl-preproc report nothing. **What a
+    confirmation cannot know, it does not claim**: a gap after it, in the run or in the two
+    samples beyond it, flags the batch form's saccade and not this one; and a run a break
+    in time ends before it is confirmed is not reported here, where `detect` reports it
+    once long enough -- the PI counted a saccade whose landing is measured, and after a
+    break in time nothing is. *On the rig's default path none of this is reached yet
+    (2026-10-30): `gaze.Tracked` gives a lost datagram as the held sample again, never as
+    a gap, until the tracker's staleness runs out (backlog XC-428, waiting on build T and
+    V3(a)).*
 
     **Bounded work per sample.** Velocity is five plain multiplications on a ring of the
     last five samples (`_WINDOW`). The threshold is *not* recomputed per sample -- that

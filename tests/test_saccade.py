@@ -446,6 +446,97 @@ def test_a_saccade_whose_first_velocity_follows_a_lost_sample_is_marked(before):
     assert [s.flagged for _, s, _ in found] == [True]
 
 
+@pytest.mark.parametrize("shortest,reported", [(10, True), (11, False)],
+                         ids=["exactly long enough", "one sample short"])
+def test_a_run_exactly_long_enough_as_it_ends_is_confirmed_on_the_sample_that_ends_it(
+        shortest, reported):
+    """The boundary of confirming a run as it ends, as `detect` counts it: the 4-sample saccade
+    with a sample lost 7 into its run ends 10 samples long (five velocities outside the threshold,
+    five unknown), so with `min_duration_samples` 10 it is a saccade, confirmed on the velocity that
+    ends it, and with 11 it is not, online as in the batch form. **Whether a run that unknown
+    velocities make long enough should count at all is a question for the PI** (2026-10-30: a lost
+    sample beside one noise velocity outside the threshold makes such a run of six); this pins
+    today's rule, which is `detect`'s."""
+    gaze, at = _trace([(200, 4, 4.0, 0.0)])
+    [(_, whole, _)] = _confirmations(gaze, at)
+    lost = _lost(gaze, whole.start + 7)
+    params = Params(min_duration_samples=shortest)
+
+    found = [(s.start, s.stop, s.flagged) for _, s, _ in _confirmations(lost, at, params)]
+
+    assert found == [(s.start, s.stop, s.flagged) for s in detect(lost, at, params)]
+    assert found == ([(whole.start, whole.start + 10, True)] if reported else [])
+
+
+def _flagged_as_the_batch_form_would(velocities, start, centre):
+    """`_saccade`'s flag over what a confirmation on the velocity at `centre` can know: whether
+    the batch form leaves a velocity unknown from two samples before the run to the one before."""
+    return any(velocities[k] is None for k in range(max(0, start - HALF_WINDOW), centre))
+
+
+def test_each_flag_is_the_batch_form_s_window_where_a_lost_sample_neighbours_a_saccade():
+    """**The flag's window, both edges, swept** (seeded): 100 saccades of random size, length and
+    direction, each with one sample lost from eight before its onset to four into it. Every
+    confirmation is flagged exactly when the batch form leaves a velocity unknown from two samples
+    before its run to the velocity that confirms it. The sweep holds runs whose nearest unknown
+    velocity before them is two samples back, which the window takes, and three, which it does
+    not, so a window one narrower or one wider fails here."""
+    rng = random.Random(20261030)
+    nearest = set()
+    for _ in range(100):
+        onset = rng.randint(150, 300)
+        gaze, at = _trace([(onset, rng.randint(6, 16), rng.uniform(1.0, 9.0), rng.uniform(-3.0, 3.0))],
+                          n=480, seed=rng.randint(0, 10**6))
+        lost = _lost(gaze, onset + rng.randint(-8, 4))
+        velocities = velocity(lost, at, Params())
+        for k, saccade, _ in _confirmations(lost, at):
+            centre = k - HALF_WINDOW
+            assert saccade.flagged == _flagged_as_the_batch_form_would(
+                velocities, saccade.start, centre), (onset, saccade)
+            back = [d for d in (1, 2, 3) if velocities[saccade.start - d] is None]
+            if back:
+                nearest.add(back[0])
+
+    assert {2, 3} <= nearest
+
+
+def test_reset_forgets_where_the_last_trial_lost_a_sample():
+    """`reset` starts the last unknown velocity over. Carried from a trial that lost a sample near
+    its end, its index, past every sample of the next trial, would flag every run in it, so the
+    next trial's clean saccade would be reported as touching a gap it never had."""
+    gaze, at = _trace(_TWELVE)
+    [(_, whole, _)] = _confirmations(gaze, at)
+    detector = Detector()
+    _online_with(detector, _lost(gaze, len(gaze) - 3), at)
+
+    detector.reset()
+
+    assert [(s.start, s.flagged) for s in _online_with(detector, gaze, at)] == [(whole.start, False)]
+
+
+@pytest.mark.parametrize("moving_from,start,flagged", [(0, 3, True), (4, 4, False)],
+                         ids=["from the first sample", "from the fifth"])
+def test_a_run_at_a_trial_s_first_velocities_is_flagged_as_the_batch_form_flags_it(
+        moving_from, start, flagged):
+    """`velocity` gives the first two samples no velocity, for want of a window, and the batch
+    form's flag counts them unknown, as the detector's starting last unknown velocity does. With a
+    two-velocity warmup the detector is ready on its second velocity, the trace's fourth: an eye
+    moving from the first sample is outside the threshold there, so its run starts at 3, sample 1's
+    unknown velocity two back, and is flagged; with the eye moving later the first run starts at 4,
+    three back, unflagged."""
+    rng = random.Random(11)
+    gaze = [(0.5 * max(0, i - moving_from) + rng.gauss(0, 0.02), rng.gauss(0, 0.02))
+            for i in range(40)]
+    at = [i * DT for i in range(40)]
+    params = Params(warmup_samples=2)
+
+    k, saccade, _ = _confirmations(gaze, at, params)[0]
+
+    assert (saccade.start, saccade.flagged) == (start, flagged)
+    assert saccade.flagged == _flagged_as_the_batch_form_would(
+        velocity(gaze, at, params), saccade.start, k - HALF_WINDOW)
+
+
 def test_the_detector_that_counts_a_saccade_with_a_lost_sample_is_version_2():
     """`VERSION` is bumped whenever a session would detect something else, and version 2 reports
     what version 1 never did. **Not wl-preproc's fixture set "v2"** (true angle, XC-398): that is
@@ -601,9 +692,10 @@ def test_online_a_run_that_lost_a_sample_near_its_start_is_found_where_theirs_is
 
     The offline side is their run on the whole trace because the eye PC's file keeps the frame the
     rig's stream lost (S5 §3, the XC-288 spec §3.3). A frame missing from that file too is masked
-    there, and their detector ends a run at a masked sample where ours carries it across, so offline
-    would then start the run after the gap or, 7 samples in, drop it: their rule against ours,
-    older than this change."""
+    there with its neighbours, and their detector ends a run at a masked sample where ours carries
+    it across: with their default validity mask, `_TWELVE`'s saccade with a sample lost 3 to 12
+    into its run is not found offline at all (measured 2026-10-30). Their rule against ours, older
+    than this change."""
     trace = _TRACES[name]
     gaze, at = _ours_on(trace)
     start = trace["runs"][index]["start"]
