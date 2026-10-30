@@ -13,6 +13,7 @@ import json
 import math
 import os
 import random
+from dataclasses import replace
 
 import pytest
 
@@ -41,6 +42,10 @@ from wl_xcon.taskd import Session, SessionSpec
 from wl_xcon.welfare import Deployment, Simulated as Pump
 from wl_xcon.task import Outcome, SaccadeOnset, SaccadeTo
 from tasks.calibration import calibration
+from wl_xcon import screen
+from wl_xcon.photometry import Gray
+from wl_xcon.task import (After, Array, Blank, Disc, Entered, Exited, Hide, Hold, ObjectWindows,
+                          On, P, Polar, Show, State, Stimulus, Trial, Update)
 
 GEOMETRY = Geometry.stereoscope(
     panel_width_cm=58.997, panel_height_cm=33.293, screen_distance_cm=50.0, half_ipd_cm=1.6
@@ -924,3 +929,494 @@ def test_a_window_whose_center_is_a_polar_position_holds_gaze_by_true_visual_ang
         outside = Tracked(_tracker_at(*_away(center, 2.01, toward, turn)), mapping, trial, 0.008,
                           values)
         assert inside.in_window("w", frame=0) and not outside.in_window("w", frame=0)
+
+
+# ---------------------------------------------------------------------------
+# An array's object windows follow an `Update` that moves it (XC-402)
+# ---------------------------------------------------------------------------
+#
+# Each object's window is where the object is drawn (STE-28), so an `Update` that moves an array
+# -- its position, as a pair, as eccentricity and direction or as a setting; its ring's radius;
+# its rotation; its set size; which object is its target -- moves the windows with it, from the
+# frame the display first carries the change. Until 2026-10-27 they stayed where the array's
+# `Show` had put it for the whole trial, and the animal was scored where the objects had been.
+# Gaze is placed where `screen` draws each object, never where the windows are built: the windows
+# are what is under test.
+
+#: Four 0.5° discs on a 3° ring, object 1 the target. With 1° windows, neighbors' windows are
+#: 4.24° apart and never touch.
+_DISC = Disc(size=0.5, color=Gray(40.0))
+_RING = Array(n=4, radius=3.0, target=1, looks=_DISC, among=_DISC)
+_FRAME = 0.008
+_HOLD = 0.05
+
+
+def _drawn(stimulus: Stimulus, values: dict, trial: Trial) -> dict:
+    """Where `screen` draws each of an array stimulus's objects, by name, in direct view."""
+    shown = screen.resolve({stimulus.name: stimulus}, values, trial, DIRECT, frame_period=_FRAME)
+    return {item.name: item.at_left for item in shown.items}
+
+
+def _moved(shown: Stimulus, update: Update) -> Stimulus:
+    """The stimulus as the display carries it after `update`, made as `run._apply` makes it."""
+    return replace(shown, **update.changes())
+
+
+def _apart(p, q) -> float:
+    """The angle at the eye between two positions, from their directions."""
+    a, b = _direction(*p), _direction(*q)
+    return math.degrees(math.acos(max(-1.0, min(1.0, sum(x * y for x, y in zip(a, b))))))
+
+
+def _then_moved(shown: Stimulus, update: Update, held: str = "search.1", before=None,
+                scored_as: Outcome = Outcome.CORRECT, windows=None, waits: float = 0.5) -> Trial:
+    """`shown`, moved by `update` once `before` fires (0.04 s by default) within `waits`, or else
+    `NO_FIXATION`; then 0.5 s for a `_HOLD` on `held`, scored `scored_as`, or else
+    `NO_RESPONSE`."""
+    return Trial(
+        start="shown",
+        windows=windows or [ObjectWindows(of="search", radius=1.0)],
+        states=[
+            State("shown", enter=[Show(shown)],
+                  go=[On(before or After(0.04), "moved"), On(After(waits), Outcome.NO_FIXATION)]),
+            State("moved", enter=[update],
+                  go=[On(Hold(held, _HOLD), scored_as), On(After(0.5), Outcome.NO_RESPONSE)]),
+        ],
+    )
+
+
+def _run(trial: Trial, values: dict, gaze: list, eyes: "list | None" = None):
+    """The trial through the loop, gaze held at `gaze[k]` on frame k + 1 (and the right eye at
+    `eyes[k]` when given), through the parser, the tracker, a fitted map and `Tracked`."""
+    payloads = []
+    for n, at in enumerate(gaze):
+        payload = json.loads(_payload(*at, frame=n))
+        if eyes is not None:
+            payload["Right"] = json.loads(_payload(*eyes[n], frame=n))["Right"]
+        payloads.append((0.0, json.dumps(payload)))
+    world = Tracked(Tracker(), _fitted_mapping(), trial, _FRAME, values,
+                    source=Replay(payloads=payloads))
+    return run_trial(trial, world, _FRAME, values=values, effects=Recorded())
+
+
+#: Each way an `Update` moves an array without changing its objects: the array shown, the update,
+#: and the settings the trial runs with.
+_MOVES = {
+    "to another x-y position": (
+        Stimulus("search", at=(0.0, 0.0), looks=_RING), Update("search", at=(10.0, 5.0)), {}),
+    "to another eccentricity and direction, by its settings": (
+        Stimulus("search", at=Polar(5.0, 30.0), looks=_RING),
+        Update("search", at=Polar(P("ecc"), P("dir"))), {"ecc": 12.0, "dir": 200.0}),
+    "to a position one setting holds whole": (
+        Stimulus("search", at=(0.0, 0.0), looks=_RING), Update("search", at=P("where")),
+        {"where": Polar(8.0, 135.0)}),
+    "its ring grown": (
+        Stimulus("search", at=(4.0, -2.0), looks=_RING),
+        Update("search", looks=replace(_RING, radius=7.0)), {}),
+    "rotated": (
+        Stimulus("search", at=(4.0, -2.0), looks=_RING),
+        Update("search", looks=replace(_RING, phase=90.0)), {}),
+    "to an array a setting holds": (
+        Stimulus("search", at=(4.0, -2.0), looks=_RING), Update("search", looks=P("ring")),
+        {"ring": replace(_RING, radius=6.0, phase=45.0)}),
+}
+
+
+def _object_1(move: str):
+    """A move's trial, its settings, and where object 1 is drawn before and after it."""
+    shown, update, values = _MOVES[move]
+    trial = _then_moved(shown, update)
+    old = _drawn(shown, values, trial)["search.1"]
+    new = _drawn(_moved(shown, update), values, trial)["search.1"]
+    assert _apart(old, new) > 2.0, "the move must take the window off where it was"
+    return trial, values, old, new
+
+
+@pytest.mark.parametrize("move", list(_MOVES))
+def test_an_array_s_object_windows_follow_an_update_that_moves_it(move):
+    """After the update, gaze where object 1 is now drawn holds its window. Until 2026-10-27 it
+    held nothing there (XC-402)."""
+    trial, values, _, new = _object_1(move)
+
+    assert _run(trial, values, [new] * 200).outcome is Outcome.CORRECT
+
+
+@pytest.mark.parametrize("move", list(_MOVES))
+def test_after_the_update_an_object_s_old_place_holds_nothing(move):
+    """After the update, gaze where object 1 was drawn holds no window: until 2026-10-27 the
+    animal was scored there, looking at where the object had been (XC-402)."""
+    trial, values, old, _ = _object_1(move)
+
+    assert _run(trial, values, [old] * 200).outcome is Outcome.NO_RESPONSE
+
+
+def test_before_the_update_the_windows_are_where_the_array_was_shown():
+    """The in-between: gaze held where object 1 is shown completes the first hold, and the update
+    follows; held then where the update draws it, the second completes too. Gaze stays where the
+    object was shown for as long as the first hold is waited for (0.07 s), too short a time after
+    the update for a second hold there."""
+    shown, update, values = _MOVES["to another x-y position"]
+    trial = _then_moved(shown, update, before=Hold("search.1", _HOLD), waits=0.07)
+    old = _drawn(shown, values, trial)["search.1"]
+    new = _drawn(_moved(shown, update), values, trial)["search.1"]
+
+    result = _run(trial, values, [old] * math.ceil(0.07 / _FRAME) + [new] * 200)
+
+    assert result.visited == ("shown", "moved")
+    assert result.outcome is Outcome.CORRECT
+
+
+def test_the_windows_move_on_the_frame_the_display_first_carries_the_update():
+    """Not a frame before, while the objects are still drawn where they were, and not a frame
+    after: with gaze already where object 1 is going, `Entered` on it fires on the frame the loop
+    records the update as first shown (`Result.changed`)."""
+    shown, update, values = _MOVES["to another x-y position"]
+    trial = Trial(
+        start="shown",
+        windows=[ObjectWindows(of="search", radius=1.0)],
+        states=[
+            State("shown", enter=[Show(shown)], go=[On(After(0.04), "moved")]),
+            State("moved", enter=[update], go=[On(Entered("search.1"), Outcome.CORRECT),
+                                               On(After(0.5), Outcome.NO_RESPONSE)]),
+        ],
+    )
+    new = _drawn(_moved(shown, update), values, trial)["search.1"]
+
+    result = _run(trial, values, [new] * 200)
+
+    assert result.outcome is Outcome.CORRECT
+    assert result.frames == result.changed[0].frame
+
+
+def test_gaze_left_where_an_object_was_has_exited_it_on_the_frame_it_moves():
+    """The other edge of the same frame: gaze that stays where object 1 was shown is inside its
+    window until the update and has left it, an `Exited`, on the frame the update is first shown,
+    though the eye never moved (EYE-29)."""
+    shown, update, values = _MOVES["to another x-y position"]
+    trial = Trial(
+        start="shown",
+        windows=[ObjectWindows(of="search", radius=1.0)],
+        states=[
+            State("shown", enter=[Show(shown)], go=[On(After(0.04), "moved")]),
+            State("moved", enter=[update], go=[On(Exited("search.1"), Outcome.FIXATION_BREAK),
+                                               On(After(0.5), Outcome.NO_RESPONSE)]),
+        ],
+    )
+    old = _drawn(shown, values, trial)["search.1"]
+
+    result = _run(trial, values, [old] * 200)
+
+    assert result.outcome is Outcome.FIXATION_BREAK
+    assert result.frames == result.changed[0].frame
+
+
+@pytest.mark.parametrize("before, after, at, outcome", [
+    (4, 8, "after", Outcome.WRONG_TARGET),
+    (8, 4, "before", Outcome.NO_RESPONSE),
+], ids=["an object only the larger set has", "an object the smaller set no longer has"])
+def test_an_update_of_set_size_moves_the_objects_and_who_the_distractors_are(
+        before, after, at, outcome):
+    """Object 5 exists in an eight-object array and not in a four-object one: gaze where an
+    update to eight draws it holds `search.distractor`, and gaze where an update to four took it
+    from holds nothing."""
+    shown = Stimulus("search", at=(0.0, 0.0), looks=replace(_RING, n=before))
+    update = Update("search", looks=replace(_RING, n=after))
+    trial = _then_moved(shown, update, held="search.distractor",
+                        scored_as=Outcome.WRONG_TARGET)
+    drawn = _drawn(shown if at == "before" else _moved(shown, update), {}, trial)["search.5"]
+
+    assert _run(trial, {}, [drawn] * 200).outcome is outcome
+
+
+def test_an_object_a_smaller_set_no_longer_has_holds_nothing_where_it_was():
+    """Object 5 of eight, named directly rather than through an alias: after an update to four
+    objects it has no window, and gaze where it was drawn holds nothing (the review's R1). Kept
+    from the eight-object placement, it would still hold gaze there."""
+    shown = Stimulus("search", at=(0.0, 0.0), looks=replace(_RING, n=8))
+    update = Update("search", looks=_RING)
+    trial = _then_moved(shown, update, held="search.5")
+
+    assert _run(trial, {}, [_drawn(shown, {}, trial)["search.5"]] * 200).outcome is \
+        Outcome.NO_RESPONSE
+
+
+def test_two_updates_in_turn_place_the_windows_where_both_put_the_objects():
+    """Moved by one update and its ring grown by a later one: the windows are where both put
+    the objects, an update's position paired with another update's appearance (the review's R4),
+    not where the move alone did."""
+    shown = Stimulus("search", at=(0.0, 0.0), looks=_RING)
+    move, grow = Update("search", at=(10.0, 5.0)), Update("search", looks=replace(_RING, radius=7.0))
+    trial = Trial(
+        start="shown",
+        windows=[ObjectWindows(of="search", radius=1.0)],
+        states=[
+            State("shown", enter=[Show(shown)], go=[On(After(0.024), "moved")]),
+            State("moved", enter=[move], go=[On(After(0.024), "grown")]),
+            State("grown", enter=[grow], go=[On(Hold("search.1", _HOLD), Outcome.CORRECT),
+                                             On(After(0.5), Outcome.NO_RESPONSE)]),
+        ],
+    )
+    both = _drawn(_moved(_moved(shown, move), grow), {}, trial)["search.1"]
+
+    result = _run(trial, {}, [both] * 200)
+
+    assert result.visited == ("shown", "moved", "grown")
+    assert result.outcome is Outcome.CORRECT
+
+
+@pytest.mark.parametrize("on, outcome", [
+    ("search.3", Outcome.CORRECT), ("search.1", Outcome.NO_RESPONSE),
+], ids=["the new target", "the old target"])
+def test_an_update_that_changes_the_target_moves_what_holds_the_target(on, outcome):
+    """The objects stay where they are and object 3 becomes the target: a hold on
+    `search.target` is then a hold on object 3, and no longer on object 1."""
+    shown = Stimulus("search", at=(0.0, 0.0), looks=_RING)
+    update = Update("search", looks=replace(_RING, target=3))
+    trial = _then_moved(shown, update, held="search.target")
+
+    assert _run(trial, {}, [_drawn(shown, {}, trial)[on]] * 200).outcome is outcome
+
+
+def test_a_saccade_to_the_target_is_scored_where_an_update_made_it_the_target():
+    """`SaccadeTo` asks the world about the target by its alias's own name, so the world's own
+    reading of `search.target` must follow the update, not only the loop's membership."""
+    ring = replace(_RING, radius=8.0)
+    shown = Stimulus("search", at=(0.0, 0.0), looks=ring)
+    update = Update("search", looks=replace(ring, target=3))
+    trial = Trial(
+        start="shown",
+        windows=[ObjectWindows(of="search", radius=2.0)],
+        states=[
+            State("shown", enter=[Show(shown)], go=[On(After(0.02), "moved")]),
+            State("moved", enter=[update], go=[On(SaccadeTo("search.target"), Outcome.CORRECT),
+                                               On(After(0.6), Outcome.NO_RESPONSE)]),
+        ],
+    )
+    to = _drawn(_moved(shown, update), {}, trial)["search.3"]
+    world = Tracked(Tracker(), _fitted_mapping(), trial, 0.002, {},
+                    source=_saccade_source(dwell=120, steps=10, to=to))
+
+    result = run_trial(trial, world, 0.002, values={}, effects=Recorded())
+
+    assert result.outcome is Outcome.CORRECT
+
+
+def test_an_object_window_an_update_adds_scores_the_eye_its_family_declares():
+    """A family scoring the left eye scores it in an object only the update draws: the left eye
+    on object 5 holds it while the right looks 6° away, where their mean would not."""
+    shown = Stimulus("search", at=(0.0, 0.0), looks=_RING)
+    update = Update("search", looks=replace(_RING, n=8))
+    trial = _then_moved(shown, update, held="search.5",
+                        windows=[ObjectWindows(of="search", radius=1.0, eye="left")])
+    left = _drawn(_moved(shown, update), {}, trial)["search.5"]
+    right = (left[0] + 6.0, left[1])
+
+    assert _run(trial, {}, [left] * 200, eyes=[right] * 200).outcome is Outcome.CORRECT
+
+
+def test_an_array_shown_twice_is_scored_where_each_show_draws_it():
+    """Hidden and shown again elsewhere: each presentation's windows are where it is drawn. Built
+    once from the `Show`, they were where the last `Show` in the task put it, for every one. Gaze
+    stays where object 1 is first shown for as long as the first presentation waits for it."""
+    first = Stimulus("search", at=(0.0, 0.0), looks=_RING)
+    second = replace(first, at=(10.0, 5.0))
+    trial = Trial(
+        start="first",
+        windows=[ObjectWindows(of="search", radius=1.0)],
+        states=[
+            State("first", enter=[Show(first)], go=[On(Hold("search.1", _HOLD), "gone"),
+                                                    On(After(0.1), Outcome.NO_FIXATION)]),
+            State("gone", enter=[Hide("search")], go=[On(After(0.016), "second")]),
+            State("second", enter=[Show(second)], go=[On(Hold("search.1", _HOLD), Outcome.CORRECT),
+                                                      On(After(0.5), Outcome.NO_RESPONSE)]),
+        ],
+    )
+    at_first = _drawn(first, {}, trial)["search.1"]
+    at_second = _drawn(second, {}, trial)["search.1"]
+
+    result = _run(trial, {}, [at_first] * math.ceil(0.1 / _FRAME) + [at_second] * 200)
+
+    assert result.visited == ("first", "gone", "second")
+    assert result.outcome is Outcome.CORRECT
+
+
+def test_an_update_that_draws_no_array_leaves_the_windows_where_the_objects_were_drawn():
+    """An appearance that is not an array -- here `Blank` -- draws no objects, so their windows
+    have nowhere new to go: they stay where the objects were last drawn, as they do when the
+    array is hidden, and not where the array was first shown."""
+    shown, moving, values = _MOVES["to another x-y position"]
+    trial = Trial(
+        start="shown",
+        windows=[ObjectWindows(of="search", radius=1.0)],
+        states=[
+            State("shown", enter=[Show(shown)], go=[On(After(0.024), "moved")]),
+            State("moved", enter=[moving], go=[On(After(0.024), "blanked")]),
+            State("blanked", enter=[Update("search", looks=Blank())],
+                  go=[On(Hold("search.1", _HOLD), Outcome.CORRECT),
+                      On(After(0.5), Outcome.NO_RESPONSE)]),
+        ],
+    )
+    new = _drawn(_moved(shown, moving), values, trial)["search.1"]
+
+    result = _run(trial, values, [new] * 200)
+
+    assert result.visited == ("shown", "moved", "blanked")
+    assert result.outcome is Outcome.CORRECT
+
+
+# ---------------------------------------------------------------------------
+# A saccade to an array's distractor is one to any distractor, wherever it is
+# ---------------------------------------------------------------------------
+#
+# `SaccadeTo` reaches the world directly (`World.happened`), so `Tracked` itself must judge an
+# alias by the objects it names, each with its own eye. Until 2026-10-27 it judged
+# `<of>.distractor` by a stand-in window at the target, so on a rig `WRONG_TARGET` was
+# unreachable in the reference search task, a saccade to a distractor and then a corrective one to
+# the target was rewarded, and a task listing the distractor edge first punished a saccade to the
+# target. The simulated animal has no geometry, so no census could see it. The reference search
+# task is run here whole, its settings below; its objects are drawn in grays, since where they are
+# does not depend on their color.
+
+_SEARCH_FRAME = 0.002
+_SEARCH = {
+    "fix_acquisition": 1.0, "fix_hold": 0.1, "response_deadline": 0.8, "target_hold": 0.1,
+    "fix_window": 2.0, "object_window": 1.0, "array_eccentricity": 8.0, "set_size": 4,
+    "target_index": 1, "array_rotation": 0.0, "fix_luminance": 40.0,
+    "target_appearance": Disc(size=1.0, color=Gray(30.0)),
+    "distractor_appearance": Disc(size=1.0, color=Gray(20.0)),
+}
+
+
+def _saccades(*to, dwell: int = 200, steps: int = 10, stay: int = 100, seed: int = 5,
+              right: "tuple[float, float]" = (0.0, 0.0)) -> Replay:
+    """Payloads that fixate the origin for `dwell` frames, then saccade to each point of `to` in
+    turn, `steps` frames each, staying `stay` frames at each but the last, where they stay; the
+    right eye `right` degrees from the left throughout."""
+    rng = random.Random(seed)
+    path, at = [(0.0, 0.0)] * dwell, (0.0, 0.0)
+    for k, point in enumerate(to):
+        path += [(at[0] + (point[0] - at[0]) * j / steps, at[1] + (point[1] - at[1]) * j / steps)
+                 for j in range(1, steps + 1)]
+        path += [point] * (stay if k < len(to) - 1 else 600)
+        at = point
+    payloads = []
+    for n, (x, y) in enumerate(path):
+        x, y = x + rng.gauss(0, 0.02), y + rng.gauss(0, 0.02)
+        payload = json.loads(_payload(x, y, frame=n))
+        payload["Right"] = json.loads(_payload(x + right[0], y + right[1], frame=n))["Right"]
+        payloads.append((0.0, json.dumps(payload)))
+    return Replay(payloads=payloads)
+
+
+def _searched(*to, distractor_first: bool = False):
+    """`tasks/visual_search`'s trial through the loop, gaze saccading to each of `to` in turn."""
+    from tasks.visual_search import search
+
+    if distractor_first:
+        states = [replace(s, go=[s.go[1], s.go[0], *s.go[2:]]) if s.name == "array_on" else s
+                  for s in search.states]
+        search = replace(search, states=states)
+    world = Tracked(Tracker(), _fitted_mapping(), search, _SEARCH_FRAME, _SEARCH,
+                    source=_saccades(*to))
+    effects = Recorded()
+    return run_trial(search, world, _SEARCH_FRAME, values=_SEARCH, effects=effects), effects
+
+
+def _search_drawn() -> dict:
+    from tasks.visual_search import ARRAY, search
+
+    return _drawn(ARRAY, _SEARCH, search)
+
+
+@pytest.mark.parametrize("distractor", ["search.0", "search.2", "search.3"])
+def test_a_saccade_to_any_distractor_is_wrong_target(distractor):
+    """Each of the three distractors, not only one, and with its marks."""
+    result, effects = _searched(_search_drawn()[distractor])
+
+    assert result.outcome is Outcome.WRONG_TARGET
+    assert ("mark", 4104) in effects.log and ("reward", "reward_correct") not in effects.log
+
+
+@pytest.mark.parametrize("distractor_first", [False, True],
+                         ids=["the target edge first", "the distractor edge first"])
+def test_a_saccade_to_the_target_is_correct_whichever_edge_is_listed_first(distractor_first):
+    """With the distractor edge listed first, the stand-in at the target took the saccade, and a
+    task punished the right answer as `WRONG_TARGET`."""
+    result, effects = _searched(_search_drawn()["search.1"], distractor_first=distractor_first)
+
+    assert result.outcome is Outcome.CORRECT
+    assert ("reward", "reward_correct") in effects.log
+
+
+def test_a_distractor_saccade_corrected_to_the_target_is_scored_by_the_first():
+    """The first saccade is the response the task's edges score: a saccade to a distractor and a
+    corrective one to the target is `WRONG_TARGET`, unrewarded. It was rewarded as `CORRECT`."""
+    drawn = _search_drawn()
+
+    result, effects = _searched(drawn["search.0"], drawn["search.1"])
+
+    assert result.outcome is Outcome.WRONG_TARGET
+    assert ("reward", "reward_correct") not in effects.log
+
+
+def test_a_saccade_to_a_distractor_of_a_moved_array_is_wrong_target():
+    """After an `Update` moved the array, a saccade to one of its distractors where it is now drawn
+    is `WRONG_TARGET`, and one to where that distractor was is no response at all."""
+    ring = replace(_RING, radius=8.0)
+    shown = Stimulus("search", at=(0.0, 0.0), looks=ring)
+    update = Update("search", at=(3.0, -2.0))
+    trial = Trial(
+        start="shown",
+        windows=[ObjectWindows(of="search", radius=1.5)],
+        states=[
+            State("shown", enter=[Show(shown)], go=[On(After(0.02), "moved")]),
+            State("moved", enter=[update],
+                  go=[On(SaccadeTo("search.target"), Outcome.CORRECT),
+                      On(SaccadeTo("search.distractor"), Outcome.WRONG_TARGET),
+                      On(After(0.6), Outcome.NO_RESPONSE)]),
+        ],
+    )
+
+    def to(where):
+        world = Tracked(Tracker(), _fitted_mapping(), trial, 0.002, {}, source=_saccades(where))
+        return run_trial(trial, world, 0.002, values={}, effects=Recorded()).outcome
+
+    assert to(_drawn(_moved(shown, update), {}, trial)["search.2"]) is Outcome.WRONG_TARGET
+    assert to(_drawn(shown, {}, trial)["search.2"]) is Outcome.NO_RESPONSE
+
+
+def test_a_saccade_to_a_distractor_is_judged_for_the_eye_its_family_scores():
+    """Each distractor's window is judged for its own eye: a family scoring the left eye takes a
+    saccade landing the left eye on a distractor while the right eye looks 6° away, where the two
+    eyes' mean would be 3° off it."""
+    ring = replace(_RING, radius=8.0)
+    shown = Stimulus("search", at=(0.0, 0.0), looks=ring)
+    trial = Trial(
+        start="shown",
+        windows=[ObjectWindows(of="search", radius=1.5, eye="left")],
+        states=[State("shown", enter=[Show(shown)],
+                      go=[On(SaccadeTo("search.target"), Outcome.CORRECT),
+                          On(SaccadeTo("search.distractor"), Outcome.WRONG_TARGET),
+                          On(After(0.8), Outcome.NO_RESPONSE)])],
+    )
+    to = _drawn(shown, {}, trial)["search.2"]
+    world = Tracked(Tracker(), _fitted_mapping(), trial, 0.002, {},
+                    source=_saccades(to, right=(6.0, 0.0)))
+
+    assert run_trial(trial, world, 0.002, values={}, effects=Recorded()).outcome is \
+        Outcome.WRONG_TARGET
+
+
+def test_judging_a_saccade_builds_nothing_in_its_frame():
+    """`happened` runs on every frame an unclaimed saccade is pending (XC-410), so judging where
+    it landed builds no tuple, list, dict or set: the bytecode of the two functions on that path
+    has no `BUILD_` instruction (the round-1 re-review). What `in_window` builds, it builds for
+    the loop's membership every frame too."""
+    import dis
+
+    built = sorted({(function.__name__, instruction.opname)
+                    for function in (Tracked.happened, Tracked._landed)
+                    for instruction in dis.get_instructions(function)
+                    if instruction.opname.startswith("BUILD_")})
+
+    assert built == []

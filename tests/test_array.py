@@ -184,7 +184,8 @@ def test_an_array_that_would_not_fit_on_the_display_is_refused():
 def test_a_hold_on_an_alias_resolves_to_the_object_it_names():
     """`search.target` is where object 1 is, and the loop must know that.
 
-    A saccade guard reaches the world directly, so aliases worked there by accident.
+    A saccade guard reaches the world directly, which judges an alias by its objects itself
+    (`gaze.Tracked.happened`; `tests/test_gaze.py`).
     Membership guards -- entering, leaving, holding -- are derived by the loop from
     concrete windows, and an unresolved alias would simply never be satisfied: the
     animal fixates the target and the task waits forever.
@@ -403,3 +404,103 @@ def test_the_aliases_name_the_target_and_every_other_object():
     assert members == {"search.target": ("search.2",),
                        "search.distractor": ("search.0", "search.1", "search.3", "search.4",
                                              "search.5")}
+
+
+# --- An `Update`'s array is checked as a `Show`'s is (XC-402's review, I1 and I2) ----------------
+#
+# Since XC-402 an array's object windows follow an `Update` that changes it, so the array an
+# `Update` gives is scored exactly as a `Show`'s is, and is held to the same load checks.
+
+
+def _updated(update, windows_radius: float = 1.0, params=(), held: str = "search.1") -> Trial:
+    """A four-object array on a 3° ring, then `update`, then 0.5 s for a hold on `held`."""
+    from wl_xcon.task import Hold
+
+    ring = Array(n=4, radius=3.0, target=1)
+    return Trial(
+        start="shown",
+        windows=[ObjectWindows(of="search", radius=windows_radius)],
+        params=list(params),
+        states=[
+            State("shown", enter=[Show(Stimulus("search", at=(0.0, 0.0), looks=ring))],
+                  go=[On(After(0.04), "changed")]),
+            State("changed", enter=[update],
+                  go=[On(Hold(held, 0.05), Outcome.CORRECT),
+                      On(After(0.5), Outcome.NO_RESPONSE)]),
+        ],
+    )
+
+
+def test_an_update_whose_target_is_not_one_of_its_objects_is_refused_at_load():
+    """As a `Show`'s is: built at a trial's start, its target window would raise there."""
+    from wl_xcon.task import Update
+
+    literal = _updated(Update("search", looks=Array(n=4, radius=3.0, target=7)))
+    ranged = _updated(Update("search", looks=Array(n=4, radius=3.0, target=P("t"))),
+                      params=[Param("t", unit="index", low=0, high=6)])
+
+    for trial in (literal, ranged):
+        refused = [f for f in check(trial) if f.code == "target-outside-array"]
+        assert len(refused) == 1 and refused[0].blocking
+        assert refused[0].detail.startswith("state 'changed' updates 'search' to an array of as few")
+
+
+def test_an_update_that_crowds_its_array_is_warned_at_load():
+    """Four objects on a 0.6° ring, 0.85° apart, with 1° windows: a saccade to one would be scored
+    against another, after the update as before it."""
+    from wl_xcon.task import Update
+
+    warned = [f for f in check(_updated(Update("search", looks=Array(n=4, radius=0.6))))
+              if f.code == "crowded-array"]
+
+    assert len(warned) == 1 and not warned[0].blocking and warned[0].accepted_in
+    assert "0.6° ring" in warned[0].detail
+
+
+def test_an_object_window_asked_after_an_update_draws_no_array_is_warned():
+    """`Update(looks=Blank())` leaves the windows where the objects were last drawn, and gaze there
+    is scored as on them: right for a memory-guided design, wrong if not meant. A `Hide` is refused
+    instead (`nothing-to-look-at`). Asked before the update, or after one that draws an array, it is
+    not warned."""
+    from wl_xcon.findings import SESSION_KINDS
+    from wl_xcon.task import Blank, Update
+
+    def codes(trial):
+        return {f.code for f in check(trial)}
+
+    blanked = [f for f in check(_updated(Update("search", looks=Blank())))
+               if f.code == "windows-left-behind"]
+    assert len(blanked) == 1
+    assert not blanked[0].blocking and blanked[0].accepted_in == SESSION_KINDS
+    assert "'search.1'" in blanked[0].detail and "last drawn" in blanked[0].detail
+    assert "windows-left-behind" in codes(_updated(Update("search", looks=Blank()),
+                                                   held="search.distractor"))
+    assert "windows-left-behind" not in codes(_updated(Update("search", looks=Array(n=4))))
+    assert "windows-left-behind" not in codes(_updated(Update("search", looks=Blank()),
+                                                       held="fix"))
+
+
+def test_an_object_window_asked_after_a_show_draws_no_array_is_warned():
+    """The same for a `Show`: shown, hidden, and shown again as `Blank()`, the array draws no
+    objects, so its windows stay where the objects were last drawn (the round-1 re-review). Shown
+    again as an array, it is not warned."""
+    from wl_xcon.task import Blank, Hide, Hold
+
+    def again(looks) -> Trial:
+        ring = Array(n=4, radius=3.0, target=1)
+        return Trial(
+            start="shown",
+            windows=[ObjectWindows(of="search", radius=1.0)],
+            states=[
+                State("shown", enter=[Show(Stimulus("search", at=(0.0, 0.0), looks=ring))],
+                      go=[On(After(0.04), "hidden")]),
+                State("hidden", enter=[Hide("search")], go=[On(After(0.04), "again")]),
+                State("again", enter=[Show(Stimulus("search", at=(0.0, 0.0), looks=looks))],
+                      go=[On(Hold("search.1", 0.05), Outcome.CORRECT),
+                          On(After(0.5), Outcome.NO_RESPONSE)]),
+            ],
+        )
+
+    warned = [f for f in check(again(Blank())) if f.code == "windows-left-behind"]
+    assert len(warned) == 1 and not warned[0].blocking
+    assert "windows-left-behind" not in {f.code for f in check(again(Array(n=4, radius=3.0)))}

@@ -15,7 +15,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 **Finding one.** Grep the ID, a package (`P9`, `b3`), a repository (`wl-sync`) or a file. The sections: brainstorms the PI asked to have later; features no plan covers yet; defects and review findings deliberately not fixed; debt (cleanup, stale wording, test hygiene); anything that needs the rig or other hardware, measurements included; and asks of, or waits on, other repositories.
 
-**Next free ID: XC-410.**
+**Next free ID: XC-414.**
 
 ## Brainstorms queued for the PI
 
@@ -108,7 +108,10 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 ## Deferred defects
 
-- **XC-402** An array's object windows are built once per trial from its `Show`'s position (`task.expand_windows`), so an `Update` that moves the array mid-trial moves its objects but not their windows, and the animal is scored where the objects were. — 2026-10-19, [engine spec §5](superpowers/specs/2026-10-07-engine-design.md#5-where-n2-nr5) (item 7, gaze windows; found on the `true-angle-windows` branch) — waits on: nothing
+- **XC-410** A `SaccadeTo` is satisfied by a saccade no guard claimed, made before its state began or before an array moved: `gaze.Tracked._pending` (gaze.py:~250) never expires, so an object shown or moved onto where an old saccade landed takes it on the frame it is drawn there (the XC-402 review's probe: `CORRECT` on the frame of the move; on `main` the same through a `Show`). — 2026-10-27, [`wl_xcon/gaze.py`'s `Tracked.happened`](../wl_xcon/gaze.py) (found by the XC-402 review, fix round 1) — waits on: the PI (what counts as a saccade to an object: only one made in its state?)
+- **XC-411** `check._declared_window_names` and the review report's windows table (`review.py`:~254) read only a `Show`'s array: `Hold("search.5")` is refused as undeclared when only an `Update`'s array has object 5, and the table omits the windows an `Update` makes. — 2026-10-27, [`wl_xcon/check.py`'s `_declared_window_names`](../wl_xcon/check.py) (found by the XC-402 review, fix round 1) — waits on: nothing
+- **XC-412** With per-eye positions (`at_left`, `at_right`) or a disparity, an array's object windows sit at its cyclopean `at`, where with per-eye positions the screen draws nothing; a load warning should say so. — 2026-10-27, [`wl_xcon/task.py`'s `placements`](../wl_xcon/task.py) (found by the XC-402 review, fix round 1) — waits on: nothing
+- **XC-413** `gaze.Tracked.in_window` allocates on every call, and it is called every frame for every window a guard asks about: a list of the eyes' positions, the `(eye,)` tuple, two generators for the mean, and what `position_of` and `_resolve` return for a center and radius fixed until the array's placement switches. CLAUDE.md's hot-path discipline wants nothing allocated per frame; resolve each window's center and radius between trials (and at a placement switch) and take the two eyes' mean without a list. Not live: no production path builds a gaze world yet. — 2026-10-27, [`wl_xcon/gaze.py`'s `Tracked.in_window`](../wl_xcon/gaze.py) (found by the XC-402 fix round 2) — waits on: nothing (before the rig's gaze world is wired)
 - **XC-145** A missing `--rig` or `--subject-settings` path (like `--bounds`, `--allocation` or the task path) is a `FileNotFoundError` traceback rather than a refusal sentence. — 2026-09-29, [cli.py's `_load_named`](../wl_xcon/cli.py) — waits on: nothing
 - **XC-039** A change staged on a session's last pass is never applied and never recorded, a record gap on the reward path. — 2026-09-19, [next-session §6 item 2](next-session.md#6-p4d-2a-is-on-main-p4d-2b-b1-is-built-b2-is-next) — waits on: nothing
 - **XC-040** `tools/mutate.py` counts any non-zero pytest exit as `caught`, so a collection error (exit 2, no test ran) reads as coverage instead of failing the gate as inconclusive. — 2026-09-20, [CHECKPOINT, "The sweep is green"](CHECKPOINT.md#the-sweep-is-green-and-four-of-its-entries-are-green-for-a-reason-that-is-not-a-test) — waits on: nothing

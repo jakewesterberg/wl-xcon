@@ -32,6 +32,7 @@ from wl_xcon.task import (
     Remembered,
     Task,
     Trial,
+    placements,
 )
 
 if TYPE_CHECKING:
@@ -322,6 +323,13 @@ def prepare(subject: Subject, trial: Trial, frame_period: float, values: dict) -
     subject._frame_period = frame_period
     declared, _ = expand_windows(trial, values or {})
     subject._scores = {window.name: window.on for window in declared}
+    # And every object window an `Update` of an array can draw (XC-402): it scores the array as
+    # the rest do, so the animal cannot hold it while the array is gone.
+    for options in placements(trial, values or {}).values():
+        for placement in options:
+            for name, window in placement.windows.items():
+                if window is not None:
+                    subject._scores.setdefault(name, window.on)
 
 
 def run_session(

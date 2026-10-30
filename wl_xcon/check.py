@@ -105,6 +105,7 @@ def check(
         + _undeclared_windows(trial)
         + _uncoupled_windows(trial)
         + _display_faults(trial)
+        + _windows_left_behind(trial)
         + _color_faults(trial, calibration)
         + _light_faults(trial)
         + _block_faults(trial)
@@ -1733,6 +1734,85 @@ def _visible_on_entry(trial: Trial) -> dict[str, frozenset[str]]:
     return entry
 
 
+def _windows_left_behind(trial: Trial) -> list[Finding]:
+    """**An array's object window asked about after an `Update` or a `Show` that can draw the
+    array as no array, warned** (the XC-402 review, I2, and its round-1 re-review; the
+    controller's ruling of 2026-10-27, pending the PI). No objects are drawn then, so their
+    windows stay where the objects were last drawn (`task.placements`), and gaze there is scored
+    as on them: right for a memory-guided design that blanks the array on purpose, wrong if it was
+    not meant. A `Hide` of the array is refused
+    instead (`nothing-to-look-at`). A **may** analysis, unlike `_visible_on_entry`'s must: one
+    path into a state on which the array is drawn as no array is enough to say so. An appearance a
+    setting holds counts as no array when any of its choices is not one, or it has none. A warning
+    in every kind (the PI, 2026-10-11: warnings over refusals)."""
+    families = {w.of for w in trial.windows if isinstance(w, ObjectWindows)}
+    if not families:
+        return []
+    params = {p.name: p for p in trial.params}
+
+    def no_array(looks: object, inside: frozenset[str] = frozenset()) -> bool:
+        if isinstance(looks, P):
+            param = params.get(looks.name)
+            if param is None or not param.choices:
+                return True
+            return any(no_array(choice, inside | {looks.name}) for choice in param.choices
+                       if not (isinstance(choice, P) and choice.name in inside))
+        return not isinstance(looks, Array)
+
+    def after(blanked: frozenset[str], actions: list) -> frozenset[str]:
+        # A `Show` as an `Update`: one that draws the array as no array leaves its windows behind
+        # too, shown again after a `Hide` (the round-1 re-review).
+        for action in actions:
+            if isinstance(action, Show) and action.stimulus.name in families:
+                name, looks = action.stimulus.name, action.stimulus.looks
+            elif (isinstance(action, Update) and action.stimulus in families
+                  and "looks" in action.changes()):
+                name, looks = action.stimulus, action.looks
+            else:
+                continue
+            blanked = blanked | {name} if no_array(looks) else blanked - {name}
+        return blanked
+
+    entry: dict[str, frozenset[str]] = {state.name: frozenset() for state in trial.states}
+    for _ in range(len(entry) + 1):
+        arriving: dict[str, frozenset[str]] = {name: frozenset() for name in entry}
+        for state in trial.states:
+            leaving = after(entry[state.name], state.enter)
+            for edge in state.go:
+                if not isinstance(edge.to, Outcome) and edge.to in arriving:
+                    arriving[edge.to] = arriving[edge.to] | after(leaving, edge.do)
+        if arriving == entry:
+            break
+        entry = arriving
+
+    findings: list[Finding] = []
+    for state in trial.states:
+        blanked = after(entry[state.name], state.enter)
+        for edge in state.go:
+            window = getattr(edge.guard, "window", None)
+            if window is None or not isinstance(
+                edge.guard, (Entered, Exited, Hold, SaccadeTo, Touched)
+            ):
+                continue
+            for of in sorted(blanked):
+                if window not in (f"{of}.target", f"{of}.distractor") and \
+                        _object_index(window, of) is None:
+                    continue
+                finding = Finding(
+                    "windows-left-behind",
+                    f"state {state.name!r} scores {window!r}, an object window of array {of!r}, "
+                    f"after a Show or an Update that can draw {of!r} as no array; its object "
+                    f"windows stay where its objects were last drawn, and gaze there is scored "
+                    f"as on them: right for a memory-guided design that blanks the array on "
+                    f"purpose, wrong if it was not meant (a Hide of the array is refused instead)",
+                    blocking=False,
+                    accepted_in=SESSION_KINDS,
+                )
+                if finding not in findings:
+                    findings.append(finding)
+    return findings
+
+
 def _display_faults(trial: Trial) -> list[Finding]:
     """Guards and actions checked against what is actually on the screen."""
     scores = _coupling(trial)
@@ -3171,13 +3251,15 @@ def _array_faults(trial: Trial) -> list[Finding]:
     sentence then names the setting and the fix (`_open_sides`; the PI kept this refusal on
     2026-10-14, the final review's I4). A set size with no highest is refused too, by
     `_unbounded_set_sizes`.
+
+    **Every array a `Show` or an `Update` gives** (`_array_actions`), as written or among a
+    setting's choices: since XC-402 an array's windows follow an `Update` that changes it, and
+    a run builds each one's windows before its first frame, where a target outside the objects
+    raises (the XC-402 review, I1).
     """
     params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
-    for state, action in actions_of(trial):
-        looks = getattr(getattr(action, "stimulus", None), "looks", None)
-        if not isinstance(looks, Array):
-            continue
+    for state, name, updated, looks in _array_actions(trial, params):
         lowest_n = _whole(_span(looks.n, params, 0.0)[0])
         lowest_t, highest_t = (_whole(v) for v in _span(looks.target, params))
         if lowest_t < 0 or highest_t >= lowest_n:
@@ -3188,7 +3270,9 @@ def _array_faults(trial: Trial) -> list[Finding]:
             findings.append(
                 Finding(
                     "target-outside-array",
-                    f"state {state!r} shows an array of as few as {lowest_n} objects "
+                    f"state {state!r} "
+                    + (f"updates {name!r} to an array" if updated else "shows an array")
+                    + f" of as few as {lowest_n} objects "
                     f"with a target index {index}; the target must be "
                     f"one of the objects for every setting the console allows, not "
                     f"only the one it has today"
@@ -3582,39 +3666,49 @@ def _crowded_arrays(trial: Trial) -> list[Finding]:
     with no highest can be any size, and crowds; a ring with no lowest can be 0 (Task 10's
     review, I2). **A warning, not a refusal** (XC-352's A9; the PI, 2026-10-11), saying which
     settings crowd it. A set size sent past its range that draws the objects on one another,
-    windows or none, is refused (`_overlapping_objects`).
+    windows or none, is refused (`_overlapping_objects`). **Every array a `Show` or an `Update`
+    gives the family's stimulus** (`_shown_arrays`): since XC-402 the windows follow an `Update`
+    that changes the array (the XC-402 review, I1).
     """
-    arrays = arrays_of(trial)
     params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
     for declared in trial.windows:
         if not isinstance(declared, ObjectWindows):
             continue
-        array = arrays.get(declared.of)
-        if array is None:
-            continue
-        most = _whole(_span(array.n, params, 0.0)[1])
-        tightest = _span(array.radius, params, 0.0)[0]
-        widest = _span(declared.radius, params, 0.0)[1]
-        if most < 2:
-            continue
-        spacing = ring_spacing_deg(tightest, most)
-        if spacing < 2.0 * widest:
-            objects = "any number of" if math.isinf(most) else f"{int(most)}"
-            windows = "of any" if math.isinf(widest) else f"of {widest:g}°"
-            findings.append(
-                Finding(
-                    "crowded-array",
-                    f"array {declared.of!r} can put {objects} objects on a "
-                    f"{tightest:g}° ring, {spacing:.2f}° apart, with windows "
-                    f"{windows} radius; adjacent objects would overlap and a "
-                    f"saccade to one would be scored against another",
-                    blocking=False,
-                    accepted_in=SESSION_KINDS,
-                    subjects=(f"array {declared.of!r}",),
-                )
-            )
-    return findings
+        for name, array in _shown_arrays(trial, params):
+            if name == declared.of:
+                findings += _crowded(declared, array, params)
+    unique: list[Finding] = []
+    for finding in findings:  # two arrays crowding alike are one warning
+        if finding not in unique:
+            unique.append(finding)
+    return unique
+
+
+def _crowded(declared: ObjectWindows, array: Array, params: dict[str, Param]) -> list[Finding]:
+    """`crowded-array` for one array of a family, or nothing (`_crowded_arrays`)."""
+    most = _whole(_span(array.n, params, 0.0)[1])
+    tightest = _span(array.radius, params, 0.0)[0]
+    widest = _span(declared.radius, params, 0.0)[1]
+    if most < 2:
+        return []
+    spacing = ring_spacing_deg(tightest, most)
+    if spacing >= 2.0 * widest:
+        return []
+    objects = "any number of" if math.isinf(most) else f"{int(most)}"
+    windows = "of any" if math.isinf(widest) else f"of {widest:g}°"
+    return [
+        Finding(
+            "crowded-array",
+            f"array {declared.of!r} can put {objects} objects on a "
+            f"{tightest:g}° ring, {spacing:.2f}° apart, with windows "
+            f"{windows} radius; adjacent objects would overlap and a "
+            f"saccade to one would be scored against another",
+            blocking=False,
+            accepted_in=SESSION_KINDS,
+            subjects=(f"array {declared.of!r}",),
+        )
+    ]
 
 
 def _overlapping_objects(trial: Trial, raised: dict[str, float]) -> list[Finding]:
@@ -3692,21 +3786,31 @@ def _shown_arrays(trial: Trial, params: dict[str, Param]) -> list[tuple[str, Arr
     """Every array a trial can show, with the stimulus that shows it: a `Show`'s looks or an
     `Update`'s, as written or among a parameter's choices."""
     found: list[tuple[str, Array]] = []
+    for _, name, _, array in _array_actions(trial, params):
+        if (name, array) not in found:
+            found.append((name, array))
+    return found
 
-    def walk(name: str, looks: object, inside: frozenset[str]) -> None:
+
+def _array_actions(trial: Trial, params: dict[str, Param]) -> list[tuple[str, str, bool, Array]]:
+    """`_shown_arrays` by the action that gives each: the state, the stimulus's name, whether an
+    `Update` gives it, and the array, as written or among a parameter's choices."""
+    found: list[tuple[str, str, bool, Array]] = []
+
+    def walk(state: str, name: str, updated: bool, looks: object, inside: frozenset[str]) -> None:
         if isinstance(looks, P):
             param = params.get(looks.name)
             if param is not None and looks.name not in inside:
                 for choice in param.choices:
-                    walk(name, choice, inside | {looks.name})
-        elif isinstance(looks, Array) and (name, looks) not in found:
-            found.append((name, looks))
+                    walk(state, name, updated, choice, inside | {looks.name})
+        elif isinstance(looks, Array) and (state, name, updated, looks) not in found:
+            found.append((state, name, updated, looks))
 
-    for _, action in actions_of(trial):
+    for state, action in actions_of(trial):
         if isinstance(action, Show):
-            walk(action.stimulus.name, action.stimulus.looks, frozenset())
+            walk(state, action.stimulus.name, False, action.stimulus.looks, frozenset())
         elif isinstance(action, Update) and "looks" in action.changes():
-            walk(action.stimulus, action.looks, frozenset())
+            walk(state, action.stimulus, True, action.looks, frozenset())
     return found
 
 
