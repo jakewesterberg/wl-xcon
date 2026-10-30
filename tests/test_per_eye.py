@@ -41,7 +41,7 @@ class PerEye:
     def happened(self, guard, state: str, frame: int) -> bool:
         return False
 
-    def began(self, state: str, frame: int) -> None:
+    def began(self, state: str, frame: int, by) -> None:
         pass
 
     def signal(self, frame: int) -> str:

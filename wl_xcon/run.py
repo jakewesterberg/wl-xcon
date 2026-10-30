@@ -67,17 +67,20 @@ class World(Protocol):
 
     def happened(self, guard: Guard, state: str, frame: int) -> bool: ...
 
-    def began(self, state: str, frame: int) -> None:
+    def began(self, state: str, frame: int, by: "Guard | None") -> None:
         """State `state` began, and `frame` is its first: the frame its guards are first asked on
         and its entry actions first drawn, as a hold first counts gaze in it. The start state's is
         frame 1; every other's is the frame after the transition that enters it, **a state entered
-        again included**.
+        again included**. `by` is the guard of the edge that entered it, `None` for the start state.
 
         **A saccade counts for a state only if it began in that state** (XC-410; the PI,
         2026-10-30: "one that began before the state is anticipatory, as an early response would
-        be"), so a world that remembers a saccade across frames (`gaze.Tracked`) is told here when
-        each state begins, and refuses to judge a saccade for a state it was not told of. A world
-        that draws each event as a guard asks for it has nothing to forget, and does nothing.
+        be"), **except the one whose onset ended the state before** -- a transition taken on a
+        `SaccadeOnset` -- which carries into this state, and no further, for its landing ("Yes,
+        that one saccade carries"). So a world that remembers a saccade across frames
+        (`gaze.Tracked`) is told here when each state begins and by which guard, and refuses to
+        judge a saccade for a state it was not told of. A world that draws each event as a guard
+        asks for it has nothing to forget, and does nothing.
         """
 
     def signal(self, frame: int) -> str:
@@ -184,7 +187,7 @@ class Quiet:
     def happened(self, guard: Guard, state: str, frame: int) -> bool:
         return False
 
-    def began(self, state: str, frame: int) -> None:
+    def began(self, state: str, frame: int, by: "Guard | None") -> None:
         return None
 
     def signal(self, frame: int) -> str:
@@ -214,7 +217,7 @@ class Scripted:
     def happened(self, guard: Guard, state: str, frame: int) -> bool:
         return self.at_frame.get(guard) == frame
 
-    def began(self, state: str, frame: int) -> None:
+    def began(self, state: str, frame: int, by: "Guard | None") -> None:
         """A script fires each guard on the frame it names, in whatever state the trial is in."""
         return None
 
@@ -625,7 +628,7 @@ class _Loop:
         # they put up is visible on frame 1 -- the same one-frame rule every other
         # entry action follows, counted from a notional frame 0. And frame 1 is the
         # start state's first, which the world is told (`World.began`, XC-410).
-        world.began(self.current.name, 1)
+        world.began(self.current.name, 1, None)
         _apply(self.current.enter, self.visible, self.shown, self.open_at, self.changed,
                self.placed, 1)
         _emit(self.current.enter, self.effects)
@@ -812,9 +815,10 @@ class _Loop:
         self.current = current = self.by_name[edge.to]
         self.entered_at = frame
         # **A saccade counts for a state only if it began in it** (XC-410; the PI, 2026-10-30), as
-        # a hold counts only gaze since its state began (below): the world is told the state's first
-        # frame, the next, re-entered or not.
-        self.world.began(current.name, frame + 1)
+        # a hold counts only gaze since its state began (below), or if its onset took this edge,
+        # for this state alone: the world is told the state's first frame, the next, re-entered or
+        # not, and the guard that took it.
+        self.world.began(current.name, frame + 1, edge.guard)
         _apply(do, self.visible, self.shown, self.open_at, self.changed, self.placed, frame + 1)
         _emit(do, self.effects)
         _apply(current.enter, self.visible, self.shown, self.open_at, self.changed, self.placed,

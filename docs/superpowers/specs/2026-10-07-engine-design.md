@@ -354,8 +354,15 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    `SaccadeTo` judges it on the frame it lands, against the windows drawn then, and never after. So
    an object shown or moved onto where an earlier saccade landed does not take it, where it had on
    the frame it was drawn there, and a saccade landing beside a window is not taken when gaze drifts
-   in. An object moving onto the eye still counts as arriving for `Entered` and `Exited` (EYE-19
-   and EYE-29, revised).
+   in. **One saccade carries** (the PI, the same day: "Yes, that one saccade carries": "Only the
+   saccade whose start ended the previous state carries over. Intrasaccadic-displacement designs can
+   then score where it lands. Every other earlier saccade still never counts."): when a transition is
+   taken on a `SaccadeOnset`, the saccade whose onset satisfied it carries into the very next state,
+   where a `SaccadeTo` may take it on the frame it lands, against the windows drawn then -- an
+   `Update` on that transition has moved them -- but no `SaccadeOnset`, its onset being spent; the
+   carry ends when that state is left, landed or not, and a transition on any other guard carries
+   nothing (the loop tells the world which guard took it). An object moving onto the eye still
+   counts as arriving for `Entered` and `Exited` (EYE-19 and EYE-29, revised).
 8. **Off the field**: only when declared; check 8 grows to test extents (XC-143, XC-144).
 9. **Head-free chaired sessions**: nominal head position, recorded and listed; a task may require a
    fixed head.

@@ -148,7 +148,7 @@ class Subject:
         """
         self._visible = set(visible)
 
-    def began(self, state: str, frame: int) -> None:
+    def began(self, state: str, frame: int, by: "Guard | None") -> None:
         """Nothing to forget (XC-410): the simulated animal makes a saccade when a state's guard
         asks for one (`happened`), so every saccade it makes is made in the state that asks."""
         return None
