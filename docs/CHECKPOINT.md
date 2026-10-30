@@ -269,7 +269,8 @@ figure was one low. In order:
   are both **wl-preproc's**, read from their source; ours is the procedure. Thirteen
   targets (measured, not chosen), three refusals in a deliberate order — count, then
   conditioning, then extent — and a YAML file round-tripped through their real reader
-  in CI. `EyeMap.degrees` is the trial-loop path and allocates nothing.
+  in CI. The trial loop applies the map through `Mapping.degrees_of`, which builds only
+  the `(x, y)` it returns (XC-414).
 - `findings.py` — the `Finding` dataclass, lifted out of `check.py` so `calibration`
   can report refusals in the same words without a circular import.
 - `saccade.py` — online Engbert-Kliegl, and the batch form it is checked against.

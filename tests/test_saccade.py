@@ -203,6 +203,21 @@ def test_the_online_detector_reports_on_the_sample_that_confirms():
     assert confirmed_at - saccade.start >= DEFAULT_MIN_DURATION_SAMPLES
 
 
+def test_the_online_amplitude_is_measured_as_the_batch_form_measures_it():
+    """Start point to end point over the samples a confirmation has, `start` to `stop - 1`: the
+    online detector measures them in its own buffer (XC-414), and the batch form's `_amplitude`
+    over the same samples of the trace gives the same number, bit for bit."""
+    from wl_xcon.saccade import _amplitude
+
+    gaze, at = _trace([(200, 10, 8.0, 0.0), (450, 12, -7.0, 3.0)], n=700)
+    found = _online(gaze, at)
+
+    assert len(found) == 2
+    for saccade in found:
+        assert saccade.amplitude_deg > 1.0
+        assert saccade.amplitude_deg == _amplitude(gaze, saccade.start, saccade.stop)
+
+
 def test_nothing_fires_before_the_threshold_has_enough_samples():
     """A scale estimated from a handful of samples is a scale estimated from noise.
     The same refusal `Tracker.state` makes before its first sample."""
@@ -243,19 +258,80 @@ def test_the_onset_edge_survives_exactly_one_question():
     assert detector.onset is None
 
 
+#: Every buffer `Detector` keeps (XC-414).
+_BUFFERS = ("_x", "_y", "_t", "_present", "_vx", "_vy", "_sorting")
+
+
 def test_the_buffer_stays_bounded_over_a_long_trial():
     """Hot-path discipline: no unbounded work or memory per frame. A trial loop that
     grew a list for its whole duration would allocate through the trial it must not
-    allocate in."""
+    allocate in. **Each buffer is built with the detector** (XC-414), its size fixed by its
+    parameters, and a long trial, saccades and all, neither rebuilds nor resizes one."""
     detector = Detector(history=100)
-    gaze, at = _trace([], n=3000)
+    built = {name: (getattr(detector, name), len(getattr(detector, name))) for name in _BUFFERS}
+    gaze, at = _trace([(500, 10, 8.0, 0.0), (1500, 12, -7.0, 3.0)], n=3000)
     _online_with(detector, gaze, at)
-    assert len(detector._gaze) <= 2 * 2 + 1 + 100 + 1
+
+    assert {name: (getattr(detector, name), len(getattr(detector, name))) for name in _BUFFERS} \
+        == built
+    assert all(getattr(detector, name) is buffer for name, (buffer, _) in built.items())
+    assert max(size for _, size in built.values()) == 100
+
+
+def _demanding(n: int = 1000):
+    """A trace that makes the online detector do everything it does: hold perfectly still for its
+    first 120 samples (so its thresholds are zero and re-estimated every sample), warm up, refresh,
+    lose two samples, cross an 0.2 s hole in time, and confirm saccades on both sides of it."""
+    gaze, at = _trace([(200, 10, 8.0, 0.0), (450, 12, -7.0, 3.0), (800, 15, 5.0, 5.0)], n=n)
+    gaze[:120] = [(0.0, 0.0)] * 120
+    gaze[300] = gaze[700] = None
+    at = [t + (0.2 if i >= 600 else 0.0) for i, t in enumerate(at)]
+    return gaze, at
+
+
+def test_a_sample_builds_nothing_whatever_it_does():
+    """**On the trial loop's path**, a sample a frame (`gaze.Tracked.display`), so accepting one
+    builds nothing (XC-414), on every sample of `_demanding`'s trace, with a history short enough
+    that its buffers wrap and its thresholds refreshed every seventh velocity: no list, slice,
+    generator or tuple, where until 2026-10-29 every sample appended to three growing lists, sliced
+    two, walked them with generators, and every refresh copied its velocities into a list."""
+    from _builds import built_on
+
+    gaze, at = _demanding()
+    detector = Detector(history=60, refresh_every=7)
+    built, confirmed = set(), []
+    for t, g in zip(at, gaze):
+        built.update(built_on(detector.accept, t, g))
+        if detector.onset is not None:
+            confirmed.append(detector.onset)
+
+    assert [s.start for s in confirmed if s.start > 600] and len(confirmed) >= 3
+    assert sorted(built) == []
+
+
+@pytest.mark.parametrize("history,nan", [(60, False), (1000, False), (1000, True)],
+                         ids=["wrapped", "filling", "filling, a NaN among them"])
+def test_the_online_thresholds_are_the_batch_form_s_over_the_last_history_velocities(history,
+                                                                                       nan):
+    """Re-estimated in buffers built with the detector (XC-414), the thresholds are still
+    `thresholds` over the last `history` usable velocities, oldest first, bit for bit: once the
+    velocity buffer has wrapped, while it is still filling, and with a NaN among the velocities
+    then, where the order `sorted` met them in decides each median."""
+    gaze, at = _trace([(200, 10, 8.0, 0.0), (450, 12, -7.0, 3.0)], n=700)
+    if nan:
+        gaze[650] = (math.nan, gaze[650][1])
+    detector = Detector(history=history, refresh_every=1)
+    for t, g in zip(at, gaze):
+        detector.accept(t, g)
+    last = [v for v in velocity(gaze, at, Params()) if v is not None][-history:]
+
+    assert repr((detector._eta_x, detector._eta_y)) == repr(thresholds(last, Params()))
 
 
 def test_indices_stay_absolute_once_the_buffer_has_been_trimmed():
-    """The buffer is trimmed, so a stored buffer index goes stale the moment it is.
-    A saccade late in a long trial must still report where it actually began."""
+    """The buffers are rings, written over from their first slot once full (XC-414; until then
+    trimmed), so a stored buffer index goes stale the moment it is. A saccade late in a long
+    trial must still report where it actually began."""
     detector = Detector(history=60)
     gaze, at = _trace([(900, 12, 9.0, 0.0)], n=1100)
     found = _online_with(detector, gaze, at)

@@ -138,14 +138,16 @@ def test_a_parameter_reference_is_resolved_from_the_trials_bound_values():
 def test_running_without_a_value_for_a_declared_parameter_is_refused():
     """Not defaulted to zero. A missing timeout that silently becomes 0.0 turns
     every trial into an immediate abort, which looks like an animal that will not
-    work rather than like a bug."""
+    work rather than like a bug. **Refused by name, in its own words** (`run._unbound`, which
+    builds the message as it raises, never on a frame that resolves; XC-414), not as the bare
+    lookup's `KeyError`."""
     trial = Trial(
         start="wait",
         params=[Param("timeout", unit="s", low=0.01, high=1.0)],
         states=[State("wait", go=[On(After(P("timeout")), Outcome.NO_RESPONSE)])],
     )
 
-    with pytest.raises(KeyError, match="timeout"):
+    with pytest.raises(KeyError, match="no value bound for parameter 'timeout'"):
         run_trial(trial, Quiet(), frame_period=0.01, values={})
 
 

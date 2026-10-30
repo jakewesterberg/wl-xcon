@@ -179,13 +179,18 @@ class Tracked:
         too old, or this eye has no map -- and they are deliberately not told apart
         here. The loop asks `signal` when it needs to know which, because a window
         test only ever needed the answer "not usable".
+
+        **On the trial loop's path**, once a frame for each eye (`_look`), so the eye's
+        dual-Purkinje vector reaches its map as its two numbers (`EyeReading.dpi_x`, `dpi_y`;
+        `Mapping.degrees_of`) and the one thing built is the position returned (XC-414).
         """
         if self.tracker.state(self.when(frame)) != "ok":
             return None
         sample = self.tracker.latest
         if sample is None:
             return None
-        return self.mapping.degrees(which, getattr(sample, which).dpi())
+        reading = getattr(sample, which)
+        return self.mapping.degrees_of(which, reading.dpi_x(), reading.dpi_y())
 
     def gaze_cyclopean(self, frame: int) -> tuple[float, float] | None:
         """Both eyes averaged, which is what the detector runs on. A per-eye detector
@@ -282,8 +287,12 @@ class Tracked:
 
     def _landed(self, names: "tuple[str, ...]", frame: int) -> bool:
         """Whether gaze is inside any of the windows `names`, the objects an array's alias names
-        (`_members`), each judged for its own eye."""
-        for name in names:
+        (`_members`), each judged for its own eye. Walked by index, so not even an iterator is
+        made on the frames it runs (XC-414)."""
+        index = 0
+        while index < len(names):
+            name = names[index]
+            index += 1
             declared = self._windows.get(name)
             if declared is not None and self.in_window(name, frame, declared.eye):
                 return True
@@ -313,12 +322,20 @@ class Tracked:
         # The windows of what this frame draws (XC-402): an array a `Show` or an `Update` changed
         # since the last frame switches to the placement it is now drawn in, built between trials.
         # One identity test per array on every other frame, and a switch overwrites existing keys.
-        for of, options in self._arrays:
+        # Walked by index, so a frame makes no iterator (XC-414).
+        arrays = self._arrays
+        index = 0
+        while index < len(arrays):
+            of, options = arrays[index]
+            index += 1
             stimulus = visible.get(of)
             if stimulus is None or stimulus is self._drawn[of]:
                 continue
             self._drawn[of] = stimulus
-            for placement, judged in options:
+            option = 0
+            while option < len(options):
+                placement, judged = options[option]
+                option += 1
                 if placement.draws(stimulus):
                     self._windows.update(placement.windows)
                     self._judged.update(judged)
