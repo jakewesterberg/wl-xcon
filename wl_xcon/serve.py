@@ -448,10 +448,11 @@ def _console_at(host: str, port: int, name: str) -> str:
     by `name`, its host name (`run` passes `socket.gethostname()`, which asks the
     system and not the network, and which `box_names` answers to), and `localhost` for
     this box itself, and says the page listens on all interfaces. A name that is empty,
-    names loopback (`names_loopback`, or a `localhost.` name such as RHEL's
-    `localhost.localdomain`, which it does not know) or is not ASCII -- a browser sends
-    that one punycoded, which the `Host` check does not know -- is no URL for another
-    machine: `localhost` alone."""
+    names loopback or is not ASCII -- a browser sends that one punycoded, which the
+    `Host` check does not know -- is no URL for another machine: `localhost` alone.
+    Loopback is `names_loopback`'s, or a name it does not know: one beginning
+    `localhost.`, such as RHEL's `localhost.localdomain`, or one in `.localhost`, which
+    RFC 6761 §6.3 reserves for loopback (UNVERIFIED: recalled, not re-read, 2026-10-31)."""
     try:
         wildcard = ipaddress.ip_address(host).is_unspecified
     except ValueError:
@@ -460,7 +461,11 @@ def _console_at(host: str, port: int, name: str) -> str:
         return f"http://{host}:{port}/"
     local = f"http://localhost:{port}/"
     lowered = name.lower()
-    loopback = names_loopback(lowered) or lowered.startswith("localhost.")
+    loopback = (
+        names_loopback(lowered)
+        or lowered.startswith("localhost.")
+        or lowered.endswith(".localhost")
+    )
     if name and name.isascii() and not loopback:
         return f"http://{name}:{port}/ (listening on all interfaces; {local} on this box)"
     return (

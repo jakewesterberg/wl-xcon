@@ -1770,15 +1770,24 @@ def test_a_specific_bind_names_its_own_address_and_nothing_else(tmp_path, monkey
 
 @pytest.mark.parametrize(
     "name",
-    ["", "localhost", "LocalHost", "127.0.0.1", "127.0.1.1", "localhost.localdomain", "rïg-pc"],
+    [
+        "",
+        "localhost",
+        "LocalHost",
+        "127.0.0.1",
+        "127.0.1.1",
+        "localhost.localdomain",
+        "rig.localhost",
+        "rïg-pc",
+    ],
 )
 def test_a_wildcard_bind_with_no_usable_host_name_names_localhost(name):
-    """XC-045: a host name that is empty, names loopback (`names_loopback`: `localhost`
-    or a loopback address, such as Debian's `127.0.1.1`; or RHEL's
-    `localhost.localdomain`, which `names_loopback` does not know), or is not ASCII (a
-    browser sends such a name punycoded, which the page's `Host` check does not know)
-    is no URL for another machine, so the line names `localhost` alone and says where
-    else to look -- still never `0.0.0.0`."""
+    """XC-045: a host name that is empty, names loopback, or is not ASCII is no URL
+    for another machine, so the line names `localhost` alone and says where else to
+    look -- still never `0.0.0.0`. Loopback is `names_loopback`'s (`localhost`, or a
+    loopback address such as Debian's `127.0.1.1`), or what it does not know: RHEL's
+    `localhost.localdomain`, and a name in `.localhost`. A non-ASCII name a browser
+    sends punycoded, which the page's `Host` check does not know."""
     said = serve._console_at("0.0.0.0", 8080, name)
 
     assert said == (

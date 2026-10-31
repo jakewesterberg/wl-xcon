@@ -3161,16 +3161,22 @@ def _wait_ms(seconds: object, name: str, least_ms: int = 0) -> int:
     A number that is not a `bool`, from `least_ms` to `WAIT_MS_MAX` once in
     milliseconds, compared before `int()`: a NaN, an infinity, and a float that
     overflows on the way to milliseconds (`sys.float_info.max`) are refused like any
-    other value out of range. **Zero is a wait only where `least_ms` is 0**: a
-    console's receive wait, where an `RCVTIMEO` of 0 is ZeroMQ's do-not-wait (`wlx
-    serve`'s tests build their recorders so). A reply or a connect wait takes 1 ms at
-    least (`least_ms=1`): a reply wait of 0 reported every command *not delivered*
-    while the rig applied it, and a connect wait of 0 says no rig is listening on a
-    sender's first try when one is. **A positive wait under 1 ms waits 1 ms**, never
-    truncated to 0. **A negative is refused because ZeroMQ would not refuse it**: an
-    `RCVTIMEO` of -1 is wait forever, `-0.001` s truncates to it, and pyzmq's `poll`
-    reads every negative as forever. Checked at the top of each constructor, before a
-    context is made."""
+    other value out of range.
+
+    **Under 1 ms, the two kinds differ.** A reply or a connect wait (`least_ms=1`) under
+    1 ms is refused, 0 included: a reply wait of 0 reported every command *not
+    delivered* while the rig applied it, and a connect wait of 0 says no rig is
+    listening on a sender's first try when one is. The 1 ms floor refuses only the
+    value that can never wait: a reply wait shorter than the rig's answer still reads
+    *not delivered*, which is why `REPLY_TIMEOUT_S` outlasts a trial. A console's
+    receive wait (`least_ms=0`) of exactly 0 is ZeroMQ's do-not-wait, an `RCVTIMEO` of
+    0 (`wlx serve`'s tests build their recorders so), and one over 0 and under 1 ms
+    waits 1 ms, never truncated to that 0.
+
+    **A negative is refused because ZeroMQ would not refuse it**: an `RCVTIMEO` of -1
+    is wait forever, `-0.001` s truncates to it, and pyzmq's `poll` reads every
+    negative as forever. Checked at the top of each constructor, before a context is
+    made."""
     ms = None
     if not isinstance(seconds, bool) and isinstance(seconds, (int, float)):
         ms = seconds * 1000
