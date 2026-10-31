@@ -361,6 +361,37 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    only it has) and counted in the review report's windows table; and a saccade to
    `<of>.distractor` is judged at every distractor, each for its own eye, where it had been judged
    at a stand-in window at the target (EYE-29, engineering defaults).
+   *Note, 2026-10-30 (the PI, XC-410):* **a saccade counts for a state only if it began in that
+   state, and it is judged where it landed** ("Only during the state"; "No; it must start in the
+   state": "one that began before the state is anticipatory, as an early response would be"; "No;
+   judged where it landed": "A saccade to X lands in X's window at the moment it lands."). A
+   `SaccadeTo` or `SaccadeOnset` takes a saccade only if its onset, the detector's first sample of
+   it, is on the state's first frame or after -- the frame the state's guards are first asked on and
+   its entry actions first drawn, which the loop tells the world (`run.World.began`) -- and a
+   `SaccadeTo` judges it on the frame it lands, against the windows drawn then, and never after. So
+   an object shown or moved onto where an earlier saccade landed does not take it, where it had on
+   the frame it was drawn there, and a saccade landing beside a window is not taken when gaze drifts
+   in. **One saccade carries** (the PI, the same day: "Yes, that one saccade carries": "Only the
+   saccade whose start ended the previous state carries over. Intrasaccadic-displacement designs can
+   then score where it lands. Every other earlier saccade still never counts."; and "Yes, carry it
+   too": "A state ended by a timer counted from a saccade's start passes that same saccade to the
+   next state, as a state ended at the start does. Delayed intrasaccadic jumps can then score where
+   it lands."): when a transition is taken on a `SaccadeOnset`, or on a timer counted from one
+   (`After(t, since=SaccadeOnset())`), the saccade whose onset satisfied it carries into the very
+   next state, where a `SaccadeTo` may take it on the frame it lands, against the windows drawn then
+   -- an `Update` on that transition has moved them -- but no `SaccadeOnset`, its onset having ended
+   the state before; the carry ends when that state is left, landed or not. **It counts there only
+   if the detector puts its eye at rest on that state's first frame or after** (its stop field,
+   `Saccade.stop`, as `saccade.detect` reports it; the controller's ruling on the review's I1,
+   engineering): one whose eye stopped before the transition landed in the earlier state,
+   whichever edge took it, where until then it carried while the detector's run was still open,
+   two samples more. A transition on any other
+   guard carries nothing (the loop tells the world which guard took it). And a clock started by a
+   saccade's onset takes nothing: its own state's `SaccadeTo` can still take the saccade if it lands
+   before the timer ends, and its `SaccadeOnset` edge still fires on it, a `SaccadeOnset` being
+   satisfied on the frame the saccade is confirmed by every one of the state's asking then (the
+   controller's rulings, engineering; the review's M1). An object moving onto the eye still counts
+   as arriving for `Entered` and `Exited` (EYE-19 and EYE-29, revised).
 8. **Off the field**: only when declared; check 8 grows to test extents (XC-143, XC-144).
 9. **Head-free chaired sessions**: nominal head position, recorded and listed; a task may require a
    fixed head.

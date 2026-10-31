@@ -18,10 +18,29 @@ then, because at confirmation the eye is still in flight and has not landed anyw
 it fires once the saccade has ended and gaze is inside the named window. Conflating the
 two would make `SaccadeTo` fire on a saccade heading somewhere else entirely.
 
-**A saccade is consumed by whichever guard takes it.** Without that, one saccade
-satisfies `SaccadeTo` on every subsequent frame gaze stays in the window, which is
-indistinguishable from the animal saccading there repeatedly and turns one response
-into a stream of them.
+**A saccade's landing is taken by the `SaccadeTo` that fires on it, and its onset is
+only observed.** Without the first, one saccade satisfies `SaccadeTo` on every
+subsequent frame gaze stays in the window, which is indistinguishable from the animal
+saccading there repeatedly and turns one response into a stream of them. `SaccadeOnset`
+fires on the one frame the saccade is confirmed, for every guard of the state that asks
+then, a clock's (`After(since=SaccadeOnset())`) and an edge's alike, so a clock started
+by an onset neither uses up the landing nor keeps the onset from an edge (the
+controller's rulings, 2026-10-30).
+
+**A saccade counts for a state only if it began in that state, and `SaccadeTo` judges
+it where it landed** (XC-410; the PI, 2026-10-30). By its onset: one begun before the
+state is anticipatory, as an early response would be, however long it is in flight
+after. And on the frame it lands, against the windows drawn then: "A saccade to X lands
+in X's window at the moment it lands." **One saccade carries**: the one whose onset
+ended the state before -- a transition taken on `SaccadeOnset`, or on a timer counted
+from it, `After(since=SaccadeOnset())` -- into the very next state and no further, for
+its landing alone, so an intrasaccadic displacement, at once or delayed, is scored
+where the eye lands ("Yes, that one saccade carries"; "Yes, carry it too"); and only if
+the detector puts the eye at rest (its stop field, `Saccade.stop`, as `saccade.detect`
+reports it) on that state's first frame or after. One whose eye stopped before the transition landed in the state before
+(the controller's ruling on the review's I1). Until then the last saccade no guard had
+taken waited for the rest of the trial, so an object shown or moved onto where it had
+landed took it on the frame the object was drawn there.
 
 **The detector is per trial** (S5 §5), so a world is reset per trial; a threshold
 carried across would let a quiet trial set a noisy one's sensitivity.
@@ -31,13 +50,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping as MappingType
+from typing import Mapping as MappingType, NoReturn
 
 from wl_xcon.calibration import Collector, Mapping, MappingLog
 from wl_xcon.eye import Replay, Tracker
 from wl_xcon.geometry import separation_deg
-from wl_xcon.saccade import Detector, Saccade
+from wl_xcon.saccade import HALF_WINDOW, Detector
 from wl_xcon.task import (
+    After,
     Guard,
     Outcome,
     P,
@@ -84,6 +104,16 @@ def _judged(window: "Window | None", values: dict) -> "tuple[float, float, float
         return window
 
 
+def _untold(state: str, told: "str | None") -> NoReturn:
+    """`Tracked._began_in`'s refusal, its message built as it is raised, never on a frame that
+    asks."""
+    raise RuntimeError(
+        f"state {state!r} was asked about a saccade, and this world was told only that "
+        f"{told!r} began: a saccade counts for a state only if it began in it (XC-410), so the "
+        f"loop tells the world each state's first frame (`run.World.began`)"
+    )
+
+
 class Tracked:
     """A `World` whose gaze comes from a real (or replayed) tracker.
 
@@ -114,12 +144,44 @@ class Tracked:
         #: arrives, and it is polled in `display` for the reason given there.
         self.source = source
         #: Per trial, per S5 §5. Supplied rather than created when a caller wants to
-        #: log its parameters and version alongside the mapping version.
+        #: log its parameters and version alongside the mapping version, and **fresh**:
+        #: it numbers the samples this world feeds it, one a frame, from its first (`_fed`),
+        #: so one already fed is refused (the review's M4): every onset would be placed later
+        #: than it was, and a saccade begun before its state would count.
+        if detector is not None and detector.seen:
+            raise ValueError(
+                f"this detector has already been fed {detector.seen} samples; a gaze world numbers "
+                f"the samples it feeds from the detector's first, so it needs a fresh one, or one "
+                f"reset (`Detector.reset`)"
+            )
         self.detector = detector if detector is not None else Detector()
-        #: The most recent confirmed saccade not yet claimed by a guard, and whether
-        #: it has landed. A saccade in flight cannot have landed in anything.
-        self._pending: Saccade | None = None
+        #: **The last saccade the detector confirmed, as a guard may take it** (XC-410): the frame
+        #: of its onset, its first sample (`Saccade.start`); the frame it was confirmed on, the one
+        #: frame `SaccadeOnset` sees it; whether it is still in flight; the frame it landed on, the
+        #: one frame `SaccadeTo` judges it on (`None` while in flight); the frame the detector puts
+        #: the eye at rest on (its stop field, `Saccade.stop`, as `saccade.detect` reports it);
+        #: whether a `SaccadeOnset` has seen
+        #: it, a clock's or an edge's; and whether a `SaccadeTo` has taken it, as one has before
+        #: any saccade is confirmed. A saccade in flight cannot have landed in anything.
+        self._onset = 0
+        self._confirmed_on: int | None = None
         self._in_flight = False
+        self._landed_on: int | None = None
+        self._stopped = 0
+        self._onset_seen = False
+        self._taken = True
+        #: **The one saccade that carries** (the PI, 2026-10-30): whether the last saccade is the
+        #: one whose onset ended the state before, at once or by a timer from it, and may still be
+        #: taken by this state's `SaccadeTo` if its eye stopped in this state (`began`).
+        self._carried = False
+        #: How many samples this world has fed the detector, one each `display`: the next one's
+        #: index in the detector's numbering, which `Saccade.start` counts in.
+        self._fed = 0
+        #: **The state the loop is in and its first frame** (`began`): a saccade counts for the
+        #: state only if its onset is on that frame or after. `None` until the loop says, and a
+        #: saccade guard asked from a state this world was not told of is refused (`_untold`).
+        self._state: str | None = None
+        self._began = 0
         self._values = values or {}
         declared, aliases = expand_windows(trial, self._values)
         self._windows: dict = {window.name: window for window in declared}
@@ -261,17 +323,51 @@ class Tracked:
         # is the stereoscope calibration task's to settle (XC-005).
         return separation_deg(x, y, cx, cy) <= radius
 
+    def began(self, state: str, frame: int, by: "Guard | None") -> None:
+        """State `state` began, `frame` its first, entered by `by` (`run.World.began`): from now on
+        a saccade counts for a guard only if its onset is on `frame` or after (XC-410), **or it is
+        the saccade whose onset ended the state before**, which carries for its landing alone, and
+        into this state alone (the PI, 2026-10-30: "Only the saccade whose start ended the previous
+        state carries over"). Ended at its onset, `by` a `SaccadeOnset`; or by a timer counted from
+        it, `by` an `After` whose `since` is a `SaccadeOnset` ("Yes, carry it too"). Either way the
+        last saccade is that one only if a `SaccadeOnset` saw its onset: a state's `SaccadeOnset`
+        clock is started once, so a saccade confirmed after the one that started it was never
+        seen. **It counts only if its eye stopped in this state** (`happened`): one the detector
+        puts at rest before `frame` landed in the state before, whatever ended it (the review's
+        I1). Any later state ends the carry, whether or not it has landed."""
+        self._state = state
+        self._began = frame
+        self._carried = (
+            (isinstance(by, SaccadeOnset)
+             or (isinstance(by, After) and isinstance(by.since, SaccadeOnset)))
+            and self._onset_seen
+        )
+
     def happened(self, guard: Guard, state: str, frame: int) -> bool:
+        """`SaccadeOnset` on the frame the last saccade is confirmed, and `SaccadeTo` on the frame
+        it lands, if it landed in the window: in either case only a saccade begun in `state`.
+        **`SaccadeOnset` observes the onset and takes nothing** (the controller's ruling on the
+        review's M1): every one of the state's asking on that frame sees it, a clock's and an
+        edge's alike, and it is seen once, on that frame. **`SaccadeTo` takes the landing**, so
+        one saccade is one response; **and the carried saccade's** (`began`), whose onset ended
+        the state before, if the detector puts its eye at rest on the state's first frame or after
+        (the review's I1). The carried saccade is never a `SaccadeOnset`'s: it was confirmed in
+        the state before.
+
+        **On the trial loop's path**, every frame a state asks for a saccade, so nothing is built
+        here: an alias's objects are `_members`' own tuple, and a window is judged as it is."""
         if isinstance(guard, SaccadeOnset):
-            found = self._pending is not None and self._in_flight
-            if found:
-                self._pending = None
-            return found
-        if isinstance(guard, SaccadeTo):
-            if self._pending is None or self._in_flight:
+            if not self._began_in(state) or self._confirmed_on != frame:
                 return False
-            # On every frame an unclaimed saccade is pending (XC-410), so nothing is built here: an
-            # alias's objects are `_members`' own tuple, and a window is judged as it is.
+            self._onset_seen = True
+            return True
+        if isinstance(guard, SaccadeTo):
+            # Judged on the frame it landed, against the windows drawn then, and never after: a
+            # saccade that landed on empty space is not one to an object drawn there later, or to a
+            # window gaze drifts into (the PI, 2026-10-30).
+            if (not (self._began_in(state) or (self._carried and self._stopped >= self._began))
+                    or self._taken or self._landed_on != frame):
+                return False
             members = self._members.get(guard.window)
             if members is None:
                 declared = self._windows.get(guard.window)
@@ -281,9 +377,18 @@ class Tracked:
                 landed = self._landed(members, frame)
             if not landed:
                 return False
-            self._pending = None
+            self._taken = True
+            self._carried = False
             return True
         return False
+
+    def _began_in(self, state: str) -> bool:
+        """Whether the last saccade began in `state`: on its first frame or after (XC-410). **A
+        state this world was not told began is refused** (`_untold`): without its first frame,
+        every saccade of the trial would count."""
+        if state != self._state:
+            _untold(state, self._state)
+        return self._onset >= self._began
 
     def _landed(self, names: "tuple[str, ...]", frame: int) -> bool:
         """Whether gaze is inside any of the windows `names`, the objects an array's alias names
@@ -346,13 +451,35 @@ class Tracked:
         # Feed the detector from the same sample the window tests will read, so a
         # saccade and the gaze that guards see cannot come from different frames.
         now = self.when(frame)
+        fed = self._fed
+        self._fed = fed + 1
         confirmed = self.detector.accept(now, self.gaze_cyclopean(frame))
         if confirmed is not None:
-            self._pending = confirmed
-            self._in_flight = True
+            # Its onset as a frame (XC-410): this frame's sample is the detector's `fed`th, and
+            # one is fed a frame, so its first, `start`, was fed `fed - start` frames ago.
+            self._onset = frame - (fed - confirmed.start)
+            self._confirmed_on = frame
+            self._onset_seen = False
+            self._taken = False
+            self._carried = False
+            # **Confirmed on the sample that ends its run** (version 2 of the detector; the review
+            # of XC-410's I2): it has landed already, on this frame, and its stop is the
+            # `Saccade.stop` it is confirmed with, the run's end as `saccade.detect` reports it.
+            self._in_flight = self.detector.in_flight
+            if self._in_flight:
+                self._landed_on = None
+            else:
+                self._landed_on = frame
+                self._stopped = frame - (fed - confirmed.stop)
         elif self._in_flight and not self.detector.in_flight:
-            # The run closed: the eye has landed, so `SaccadeTo` can now ask where.
+            # The run closed: the eye has landed, so `SaccadeTo` can now ask where, on this frame.
+            # **Where the eye stopped** (the review's I1): a run closes on the sample whose
+            # velocity, centred `HALF_WINDOW` samples back, is the first below the threshold, and
+            # that sample is the run's end, `saccade.detect`'s `Saccade.stop`, fed that many
+            # frames ago (pinned against `detect` by `tests/test_gaze.py`).
             self._in_flight = False
+            self._landed_on = frame
+            self._stopped = frame - HALF_WINDOW
 
 
 @dataclass

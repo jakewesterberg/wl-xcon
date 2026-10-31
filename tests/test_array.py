@@ -229,6 +229,9 @@ def test_a_hold_on_an_alias_resolves_to_the_object_it_names():
         def happened(self, guard, state: str, frame: int) -> bool:
             return False
 
+        def began(self, state: str, frame: int, by) -> None:
+            pass
+
         def display(self, visible, frame: int) -> None:
             pass
 

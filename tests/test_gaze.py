@@ -333,7 +333,9 @@ def _saccade_source(dwell: int, steps: int, to: tuple[float, float], tail: int =
 
 
 def _drive(world, frames: int, frame_period: float = 0.002):
-    """Pump the world's own per-frame hook, which is where gaze is polled."""
+    """Pump the world's own per-frame hook, which is where gaze is polled, through one state, "s",
+    begun on the first frame as the loop tells the world (`run.World.began`, XC-410)."""
+    world.began("s", 0, None)
     for frame in range(frames):
         world.display({}, frame)
         yield frame
@@ -1421,18 +1423,589 @@ def test_a_saccade_to_a_distractor_is_judged_for_the_eye_its_family_scores():
 
 
 def test_judging_a_saccade_builds_nothing_in_its_frame():
-    """`happened` runs on every frame an unclaimed saccade is pending (XC-410), so judging where
-    it landed builds no tuple, list, dict or set: the bytecode of the two functions on that path
-    has no `BUILD_` instruction (the round-1 re-review). `in_window`, which both reach, builds
-    nothing either (XC-413; `test_judging_a_window_builds_nothing_in_its_frame`)."""
+    """`happened` runs on every frame a state asks for a saccade, so judging whether the last one
+    began in the state (XC-410) and where it landed builds no tuple, list, dict or set: the
+    bytecode of the functions on that path, and of `began`, which a transition calls, has no
+    `BUILD_` instruction (the round-1 re-review). `in_window`, which both reach, builds nothing
+    either (XC-413; `test_judging_a_window_builds_nothing_in_its_frame`)."""
     import dis
 
     built = sorted({(function.__name__, instruction.opname)
-                    for function in (Tracked.happened, Tracked._landed)
+                    for function in (Tracked.happened, Tracked._began_in, Tracked._landed,
+                                     Tracked.began)
                     for instruction in dis.get_instructions(function)
                     if instruction.opname.startswith("BUILD_")})
 
     assert built == []
+
+
+# ---------------------------------------------------------------------------
+# A saccade counts for a state only if it began in it, judged where it landed (XC-410)
+# ---------------------------------------------------------------------------
+#
+# The PI, 2026-10-30, asked in the UI: "Only during the state" -- only a saccade made while the
+# state is active counts; "No; it must start in the state" -- one that starts in the previous state
+# and lands after this one begins does not count, judged by its onset ("one that began before the
+# state is anticipatory, as an early response would be"); and "No; judged where it landed" -- "A
+# saccade to X lands in X's window at the moment it lands." Until then `gaze.Tracked` kept the last
+# saccade no guard had taken for the rest of the trial, so an object shown or moved onto where it
+# had landed took it on the frame the object was drawn there (the XC-402 review's probe), and a
+# saccade landing beside a window was taken when gaze drifted into it.
+
+#: The array the probes show: four objects 8° out, the target at 90° (`search.1`), each object's
+#: window 1.5° in radius.
+_PROBED = Stimulus("search", at=(0.0, 0.0), looks=replace(_RING, radius=8.0))
+_PROBE_FRAME = 0.002
+
+
+def _probe(states: list) -> Trial:
+    """A trial of `states`, starting in the first, scoring `_PROBED`'s object windows."""
+    return Trial(start=states[0].name, windows=[ObjectWindows(of="search", radius=1.5)],
+                 states=states)
+
+
+def _asks(guard=None) -> list:
+    """A state's edges asking for a saccade: `guard` alone when given, `CORRECT`; else one to the
+    target, `CORRECT`, and one to a distractor, `WRONG_TARGET`; and 0.3 s without, `NO_RESPONSE`."""
+    asked = ([On(guard, Outcome.CORRECT)] if guard is not None else
+             [On(SaccadeTo("search.target"), Outcome.CORRECT),
+              On(SaccadeTo("search.distractor"), Outcome.WRONG_TARGET)])
+    return [*asked, On(After(0.3), Outcome.NO_RESPONSE)]
+
+
+def _replayed(trial: Trial, source: Replay):
+    """`trial` through the loop and `Tracked`, gaze from `source`."""
+    world = Tracked(Tracker(), _fitted_mapping(), trial, _PROBE_FRAME, {}, source=source)
+    return run_trial(trial, world, _PROBE_FRAME, values={}, effects=Recorded())
+
+
+def _timelines(trial: Trial, source: Replay) -> "list[tuple[int, int, int]]":
+    """The frames of each of `source`'s saccades, the loop feeding the detector payload k on frame
+    k + 1: its onset (its first sample, `Saccade.start`, is frame `start + 1`'s), the frame the
+    detector confirms it on, and the frame its run closes on, where `Tracked` lands it."""
+    world = Tracked(Tracker(), _fitted_mapping(), trial, _PROBE_FRAME, {}, source=source)
+    found, onset, confirmed = [], None, None
+    for frame in range(1, len(source.payloads) + 1):
+        world.display({}, frame)
+        if world.detector.onset is not None:
+            onset, confirmed = world.detector.onset.start + 1, frame
+        elif confirmed is not None and not world.detector.in_flight:
+            found.append((onset, confirmed, frame))
+            confirmed = None
+    return found
+
+
+def _timeline(trial: Trial, to) -> "tuple[int, int, int]":
+    """The frames of `_saccades(to)`'s saccade (`_timelines`)."""
+    (only,) = _timelines(trial, _saccades(to))
+    return only
+
+
+def _onset_frame(trial: Trial, to) -> int:
+    """The frame the detector puts the onset of `_saccades(to)`'s saccade on (`_timeline`)."""
+    return _timeline(trial, to)[0]
+
+
+def _straddled(guard, last: int) -> Trial:
+    """The array up from the first frame in `before`, which ends on frame `last`; `after` begins on
+    the frame after it and asks for `guard`."""
+    return _probe([
+        State("before", enter=[Show(_PROBED)], go=[On(After(last * _PROBE_FRAME), "after")]),
+        State("after", go=_asks(guard)),
+    ])
+
+
+def test_a_saccade_landed_before_an_update_moves_the_target_onto_it_is_not_taken():
+    """**The XC-402 review's probe.** The eye saccades to empty space while the array is up; the
+    next state moves the array so its target is drawn where the eye landed, and asks for a saccade
+    to the target. The saccade was made in the state before: the trial was `CORRECT` on the frame
+    of the move, and is now a trial with no response."""
+    update = Update("search", at=(3.0, -2.0))
+    trial = _probe([State("shown", enter=[Show(_PROBED)], go=[On(After(0.6), "moved")]),
+                    State("moved", enter=[update], go=_asks())])
+    to = _drawn(_moved(_PROBED, update), {}, trial)["search.1"]
+    assert min(_apart(to, at) for at in _drawn(_PROBED, {}, trial).values()) > 3.0, \
+        "the eye must land on empty space, before the move"
+
+    result = _replayed(trial, _saccades(to))
+
+    assert result.visited == ("shown", "moved")
+    assert result.outcome is Outcome.NO_RESPONSE
+
+
+def test_a_saccade_landed_before_a_show_draws_the_target_there_is_not_taken():
+    """The probe through a `Show`, as it was on `main`: the eye saccades to where the target will
+    be before anything is drawn there, and the next state shows the array and asks for a saccade to
+    its target. `CORRECT` on the frame of the `Show`; now a trial with no response."""
+    trial = _probe([State("blank", go=[On(After(0.6), "shown")]),
+                    State("shown", enter=[Show(_PROBED)], go=_asks())])
+
+    result = _replayed(trial, _saccades(_drawn(_PROBED, {}, trial)["search.1"]))
+
+    assert result.visited == ("blank", "shown")
+    assert result.outcome is Outcome.NO_RESPONSE
+
+
+_SACCADE_GUARDS = pytest.mark.parametrize(
+    "guard", [SaccadeTo("search.target"), SaccadeOnset()], ids=["SaccadeTo", "SaccadeOnset"])
+
+
+@_SACCADE_GUARDS
+def test_a_saccade_begun_the_frame_before_its_state_does_not_count(guard):
+    """**Straddling**: its onset on the last frame of the state before, and its landing on the
+    target well inside the state that asks. Begun before the state, it is anticipatory, and
+    neither its onset nor its landing is the state's."""
+    to = _drawn(_PROBED, {}, _straddled(guard, 1))["search.1"]
+    onset = _onset_frame(_straddled(guard, 1), to)
+
+    result = _replayed(_straddled(guard, last=onset), _saccades(to))
+
+    assert result.visited == ("before", "after")
+    assert result.outcome is Outcome.NO_RESPONSE
+
+
+@_SACCADE_GUARDS
+def test_a_saccade_begun_on_its_state_s_first_frame_counts(guard):
+    """Its onset on the state's first frame: the frame its guards are first asked on and its entry
+    actions first drawn, as a hold first counts gaze in it."""
+    to = _drawn(_PROBED, {}, _straddled(guard, 1))["search.1"]
+    onset = _onset_frame(_straddled(guard, 1), to)
+
+    result = _replayed(_straddled(guard, last=onset - 1), _saccades(to))
+
+    assert result.visited == ("before", "after")
+    assert result.outcome is Outcome.CORRECT
+
+
+@pytest.mark.parametrize("on, outcome", [("search.1", Outcome.CORRECT),
+                                         ("search.3", Outcome.WRONG_TARGET)])
+def test_a_saccade_begun_inside_its_state_counts_where_it_lands(on, outcome):
+    """Begun 0.1 s into the state that asks, it is scored at the object it lands on."""
+    to = _drawn(_PROBED, {}, _straddled(None, 1))[on]
+    onset = _onset_frame(_straddled(None, 1), to)
+
+    result = _replayed(_straddled(None, last=onset - 50), _saccades(to))
+
+    assert result.outcome is outcome
+
+
+def test_a_saccade_that_lands_beside_the_target_is_not_taken_when_gaze_drifts_onto_it():
+    """**Judged where it landed**: a saccade landing 2.5° from the target's center, outside its
+    1.5° window, then gaze drifting onto the target at about 3°/s, too slowly to be a saccade.
+    "A saccade to X lands in X's window at the moment it lands": this one did not, so the trial
+    has no response. It was `CORRECT` once gaze reached the window, the saccade having waited."""
+    trial = _probe([State("shown", enter=[Show(_PROBED)],
+                          go=[On(SaccadeTo("search.target"), Outcome.CORRECT),
+                              On(After(2.0), Outcome.NO_RESPONSE)])])
+    target = _drawn(_PROBED, {}, trial)["search.1"]
+    beside = (target[0], target[1] - 2.5)
+    path = [(0.0, 0.0)] * 200
+    path += [(beside[0] * k / 10, beside[1] * k / 10) for k in range(1, 11)] + [beside] * 30
+    path += [(beside[0], beside[1] + 2.5 * k / 400) for k in range(1, 401)] + [target] * 500
+    rng = random.Random(5)
+    source = Replay(payloads=[(0.0, _payload(x + rng.gauss(0, 0.02), y + rng.gauss(0, 0.02),
+                                             frame=n)) for n, (x, y) in enumerate(path)])
+    world = Tracked(Tracker(), _fitted_mapping(), trial, _PROBE_FRAME, {}, source=source)
+
+    result = run_trial(trial, world, _PROBE_FRAME, values={}, effects=Recorded())
+
+    assert world.in_window("search.1", result.frames), "gaze must have drifted onto the target"
+    assert result.outcome is Outcome.NO_RESPONSE
+
+
+def test_a_world_not_told_its_state_began_refuses_to_judge_a_saccade():
+    """**A world that cannot say when its state began refuses**, rather than counting every saccade
+    of the trial (CLAUDE.md: a safety component's absence fails): the loop tells it each state's
+    first frame (`run.World.began`), and a saccade guard asked from any other state is refused."""
+    world = Tracked(Tracker(), _fitted_mapping(), calibration, 0.002,
+                    source=_saccade_source(dwell=120, steps=10, to=(8.0, 0.0)))
+    world.display({}, 1)
+
+    with pytest.raises(RuntimeError, match="'s' was asked about a saccade"):
+        world.happened(SaccadeOnset(), "s", 1)
+    world.began("s", 2, None)
+    world.display({}, 2)
+    assert not world.happened(SaccadeTo("cal"), "s", 2)
+    with pytest.raises(RuntimeError, match="'t' was asked about a saccade"):
+        world.happened(SaccadeTo("cal"), "t", 2)
+
+
+# The saccade whose onset ends a state carries into the next (the PI, 2026-10-30; XC-410's fix
+# round 1). Asked: a design changes the display mid-saccade -- the eye starts moving, the target
+# jumps while it is in flight, and the next state waits for "a saccade to the target" -- should the
+# saccade that triggered the move count in the state that follows? "Yes, that one saccade carries
+# (Recommended)": "Only the saccade whose start ended the previous state carries over.
+# Intrasaccadic-displacement designs can then score where it lands. Every other earlier saccade
+# still never counts."
+
+#: The jump: the array moved while the eye is in flight, its target from 8° up to about (3°, 6°).
+_JUMP = Update("search", at=(3.0, -2.0))
+
+
+def _contingent(after: list, by=None) -> Trial:
+    """The array up from the first frame in `onset`, which goes to `jumped` moving it (`_JUMP`)
+    when `by` is satisfied (a saccade's onset, `SaccadeOnset()`, unless given); `jumped`'s edges
+    are `after`."""
+    return _probe([
+        State("onset", enter=[Show(_PROBED)],
+              go=[On(by or SaccadeOnset(), "jumped", do=[_JUMP]),
+                  On(After(1.0), Outcome.NO_FIXATION)]),
+        State("jumped", go=after),
+    ])
+
+
+@pytest.mark.parametrize("lands_on, outcome", [
+    ("the target, moved", Outcome.CORRECT),
+    ("a distractor, moved", Outcome.WRONG_TARGET),
+    ("where the target was", Outcome.NO_RESPONSE),
+])
+def test_the_saccade_whose_onset_moved_the_target_is_scored_where_it_lands(lands_on, outcome):
+    """**The intrasaccadic displacement**: the saccade's onset ends `onset`, the array jumps while
+    the eye is in flight, and `jumped` asks for a saccade to the target. That saccade began in the
+    state before, and is the one saccade that carries: it is scored where it lands, against the
+    windows drawn then, as the guards say. Until the PI's answer it could never count."""
+    trial = _contingent(_asks())
+    moved = _drawn(_moved(_PROBED, _JUMP), {}, trial)
+    to = {"the target, moved": moved["search.1"], "a distractor, moved": moved["search.3"],
+          "where the target was": _drawn(_PROBED, {}, trial)["search.1"]}[lands_on]
+
+    result = _replayed(trial, _saccades(to))
+
+    assert result.visited == ("onset", "jumped")
+    assert result.outcome is outcome
+
+
+#: The two ways a saccade's onset ends a state, so that it carries: at once, and by a timer from it
+#: (the PI's two answers of 2026-10-30), here with no delay.
+_ENDED_BY = pytest.mark.parametrize("by", [SaccadeOnset(), After(0.0, since=SaccadeOnset())],
+                                    ids=["its onset", "a timer from its onset"])
+
+
+@_ENDED_BY
+def test_the_carried_saccade_does_not_satisfy_an_onset_guard_in_the_next_state(by):
+    """Its onset is spent: it ended the state before. Asked first in `jumped`, `SaccadeOnset` is
+    never satisfied by it, and the saccade is still scored where it lands."""
+    trial = _contingent([On(SaccadeOnset(), Outcome.ABORT), *_asks()], by=by)
+
+    result = _replayed(trial, _saccades(_drawn(_moved(_PROBED, _JUMP), {}, trial)["search.1"]))
+
+    assert result.visited == ("onset", "jumped")
+    assert result.outcome is Outcome.CORRECT
+
+
+@_ENDED_BY
+def test_a_carried_saccade_does_not_survive_a_further_transition(by):
+    """The carry is into the very next state only: `jumped` is left after two frames, before the
+    eye lands, and `asks`, which asks for a saccade to the target, does not count it."""
+    trial = _probe([
+        State("onset", enter=[Show(_PROBED)],
+              go=[On(by, "jumped", do=[_JUMP]), On(After(1.0), Outcome.NO_FIXATION)]),
+        State("jumped", go=[On(After(2 * _PROBE_FRAME), "asks")]),
+        State("asks", go=_asks()),
+    ])
+    to = _drawn(_moved(_PROBED, _JUMP), {}, trial)["search.1"]
+    _, confirmed, landed = _timeline(trial, to)
+    assert landed > confirmed + 3, "the eye must land in `asks`, which begins 3 frames after"
+
+    result = _replayed(trial, _saccades(to))
+
+    assert result.visited == ("onset", "jumped", "asks")
+    assert result.outcome is Outcome.NO_RESPONSE
+
+
+def test_a_saccade_begun_two_states_back_still_does_not_count():
+    """Begun in `shown`, which ends on the frame it is confirmed, in flight through `between`, and
+    landing on the target in `asks`: no saccade's onset ended a state, so none carries, and in
+    `asks` it is anticipatory."""
+    probe = _probe([State("shown", enter=[Show(_PROBED)], go=[On(After(1.0), Outcome.ABORT)])])
+    to = _drawn(_PROBED, {}, probe)["search.1"]
+    _, confirmed, landed = _timeline(probe, to)
+    trial = _probe([
+        State("shown", enter=[Show(_PROBED)], go=[On(After(confirmed * _PROBE_FRAME), "between")]),
+        State("between", go=[On(After(2 * _PROBE_FRAME), "asks")]),
+        State("asks", go=_asks()),
+    ])
+    assert landed > confirmed + 3, "the eye must land in `asks`, which begins 3 frames after"
+
+    result = _replayed(trial, _saccades(to))
+
+    assert result.visited == ("shown", "between", "asks")
+    assert result.outcome is Outcome.NO_RESPONSE
+
+
+# A timer counted from a saccade's start ends a state: that saccade carries too (the PI,
+# 2026-10-30; XC-410's fix round 2). Asked: some intrasaccadic designs wait a few milliseconds into
+# the saccade before changing the display, a timer started at the saccade's start ending the state;
+# should that saccade carry into the next state too? "Yes, carry it too (Recommended)": "A state
+# ended by a timer counted from a saccade's start passes that same saccade to the next state, as a
+# state ended at the start does. Delayed intrasaccadic jumps can then score where it lands." And the
+# controller's ruling, engineering: a clock started by a saccade's onset does not use that saccade
+# up within its own state, so a state can time a saccade and still score it.
+
+
+@pytest.mark.parametrize("delay, lands_on, outcome", [
+    (0.01, "search.1", Outcome.CORRECT),
+    (0.01, "search.3", Outcome.WRONG_TARGET),
+    (0.0, "search.1", Outcome.CORRECT),
+], ids=["10 ms, the target", "10 ms, a distractor", "at once, the target"])
+def test_the_saccade_whose_onset_started_a_jump_s_timer_is_scored_where_it_lands(
+        delay, lands_on, outcome):
+    """**The delayed intrasaccadic jump**: a timer from the saccade's onset
+    (`After(delay, since=SaccadeOnset())`) ends `onset`, the array jumps while the eye is still in
+    flight, and `jumped` asks for a saccade to the target: the saccade that started the timer
+    carries, and is scored where it lands, against the windows drawn then. Until the PI's answer it
+    could never count, at no delay either."""
+    trial = _contingent(_asks(), by=After(delay, since=SaccadeOnset()))
+    to = _drawn(_moved(_PROBED, _JUMP), {}, trial)[lands_on]
+    _, confirmed, landed = _timeline(trial, to)
+    first = confirmed + round(delay / _PROBE_FRAME) + 1
+    assert landed > first, "it must land in `jumped`"
+    assert _stopped(trial, _saccades(to))[1] >= first, \
+        "its eye must stop in `jumped`, by the detector's stop field (the review's I1)"
+
+    result = _replayed(trial, _saccades(to))
+
+    assert result.visited == ("onset", "jumped")
+    assert result.outcome is outcome
+
+
+def test_a_saccade_that_lands_before_the_timer_ends_does_not_carry():
+    """The timer from its onset runs 0.05 s, and the eye lands well inside it, in `onset`, which
+    asks for no saccade: it landed in the earlier state, and `jumped` has nothing to score."""
+    trial = _contingent(_asks(), by=After(0.05, since=SaccadeOnset()))
+    to = _drawn(_moved(_PROBED, _JUMP), {}, trial)["search.1"]
+    _, confirmed, landed = _timeline(trial, to)
+    assert landed < confirmed + 25, "it must land before the timer ends"
+
+    result = _replayed(trial, _saccades(to))
+
+    assert result.visited == ("onset", "jumped")
+    assert result.outcome is Outcome.NO_RESPONSE
+
+
+def test_a_later_saccade_in_flight_when_the_timer_ends_does_not_carry():
+    """Only the saccade that started the timer carries. The first saccade lands on empty space in
+    `onset` and starts the timer; a second, to the target, is in flight when it ends: the second's
+    onset ended nothing, so `jumped` does not count it."""
+    probe = _probe([State("shown", enter=[Show(_PROBED)], go=[On(After(2.0), Outcome.ABORT)])])
+    target = _drawn(_PROBED, {}, probe)["search.1"]
+    source = lambda: _saccades((-3.0, 3.0), target, stay=30)  # noqa: E731
+    (_, first, _), (_, second, landed) = _timelines(probe, source())
+    trial = _probe([
+        State("onset", enter=[Show(_PROBED)],
+              go=[On(After((second + 1 - first) * _PROBE_FRAME, since=SaccadeOnset()), "jumped"),
+                  On(After(1.0), Outcome.NO_FIXATION)]),
+        State("jumped", go=_asks()),
+    ])
+    assert landed > second + 2, "the second must land in `jumped`"
+
+    result = _replayed(trial, source())
+
+    assert result.visited == ("onset", "jumped")
+    assert result.outcome is Outcome.NO_RESPONSE
+
+
+def test_a_saccade_a_clock_timed_does_not_carry_when_another_timer_ends_its_state():
+    """Its onset started a clock in `onset`, but a plain timer from the state's entry ends the state
+    while the eye is in flight: no timer counted from its start ended the state, so it does not
+    carry, and `jumped` does not count it."""
+    probe = _probe([State("shown", enter=[Show(_PROBED)], go=[On(After(2.0), Outcome.ABORT)])])
+    to = _drawn(_moved(_PROBED, _JUMP), {}, probe)["search.1"]
+    _, confirmed, landed = _timeline(probe, to)
+    trial = _probe([
+        State("onset", enter=[Show(_PROBED)],
+              go=[On(After(1.0, since=SaccadeOnset()), Outcome.LATE_RESPONSE),
+                  On(After((confirmed + 1) * _PROBE_FRAME), "jumped", do=[_JUMP])]),
+        State("jumped", go=_asks()),
+    ])
+    assert landed > confirmed + 2, "it must land in `jumped`"
+
+    result = _replayed(trial, _saccades(to))
+
+    assert result.visited == ("onset", "jumped")
+    assert result.outcome is Outcome.NO_RESPONSE
+
+
+@pytest.mark.parametrize("on, outcome", [("search.1", Outcome.CORRECT),
+                                         ("search.3", Outcome.WRONG_TARGET)])
+def test_a_state_can_time_a_saccade_and_still_score_it(on, outcome):
+    """**The controller's ruling** (engineering, 2026-10-30): a clock started by a saccade's onset
+    does not use that saccade up within its own state. A state with `After(0.1,
+    since=SaccadeOnset())` and saccades to the target and a distractor scores the saccade where it
+    lands, before the timer ends; the timer's clock had taken it, and the trial ran out as a late
+    response."""
+    trial = _probe([State("shown", enter=[Show(_PROBED)], go=[
+        *_asks()[:2],
+        On(After(0.1, since=SaccadeOnset()), Outcome.LATE_RESPONSE),
+        On(After(1.0), Outcome.NO_RESPONSE),
+    ])])
+    to = _drawn(_PROBED, {}, trial)[on]
+    _, confirmed, landed = _timeline(trial, to)
+    assert landed < confirmed + 50, "it must land before the timer ends"
+
+    result = _replayed(trial, _saccades(to))
+
+    assert result.outcome is outcome
+
+
+# The review of 2026-10-30 (XC-410's fix round 3) and the controller's rulings on it. I1: a carried
+# saccade counts in the next state only if the detector's estimate of where the eye stopped -- its
+# stop field, `Saccade.stop`, the first sample after the run -- is on or after that state's first
+# frame; a saccade whose eye stopped before the transition landed in the state before, whichever
+# edge took it. Until then it carried while the detector's run was still open, which closes
+# `HALF_WINDOW` samples after the stop. M1: a clock started by a saccade's onset observes the onset
+# without taking it. M4: a world refuses a detector that has already been fed.
+
+
+def _path(to, steps: int, profile: str = "linear", dwell: int = 200, tail: int = 600) -> list:
+    """Gaze fixating the origin for `dwell` samples, moving to `to` in `steps` samples, linearly or
+    with a minimum-jerk profile (a bell-shaped velocity), then staying there."""
+    path = [(0.0, 0.0)] * dwell
+    for j in range(1, steps + 1):
+        s = j / steps
+        if profile == "minimum jerk":
+            s = 10 * s ** 3 - 15 * s ** 4 + 6 * s ** 5
+        path.append((to[0] * s, to[1] * s))
+    return path + [to] * tail
+
+
+def _replay_path(path: list, seed: int = 5, lose: "set[int]" = frozenset()) -> Replay:
+    """`path` as payloads, with `_saccades`' fixational noise, and the datagrams `lose` lost."""
+    rng = random.Random(seed)
+    return Replay(payloads=[(0.0, "" if n in lose else
+                             _payload(x + rng.gauss(0, 0.02), y + rng.gauss(0, 0.02), frame=n))
+                            for n, (x, y) in enumerate(path)])
+
+
+def _stopped(trial: Trial, source: Replay, tracker: "Tracker | None" = None) -> "tuple[int, int]":
+    """The frame the online detector confirms `source`'s saccade on, and the frame **the detector's
+    own stop field** puts the eye at rest on: `saccade.detect`'s `Saccade.stop`, the first sample
+    after the run, over the gaze the loop feeds it, sample k being frame k + 1's."""
+    from wl_xcon.saccade import detect
+
+    world = Tracked(tracker or Tracker(), _fitted_mapping(), trial, _PROBE_FRAME, {},
+                    source=source)
+    gaze, at, confirmed = [], [], None
+    for frame in range(1, len(source.payloads) + 1):
+        world.display({}, frame)
+        gaze.append(world.gaze_cyclopean(frame))
+        at.append(world.when(frame))
+        if world.detector.onset is not None:
+            confirmed = frame
+    (saccade,) = detect(gaze, at)
+    return confirmed, saccade.stop + 1
+
+
+@pytest.mark.parametrize("late", [0, 1, 2, 3, 4])
+@pytest.mark.parametrize("profile, steps", [("linear", 10), ("minimum jerk", 12)])
+def test_a_timer_jump_carries_a_saccade_only_if_its_eye_stopped_in_the_next_state(
+        profile, steps, late):
+    """**I1.** The eye saccades to empty space, where the timer's jump will draw the target, and
+    `jumped` begins `late` frames after the frame the detector's stop field puts the eye at rest
+    on. On that frame (0) the saccade carries and is scored at the target. On any later one the
+    eye had stopped before the transition: it landed in `onset`, on empty space, and nothing
+    carries. Until the review it carried while the detector's run was open, `HALF_WINDOW` frames
+    more, and the trial was `CORRECT`."""
+    probe = _contingent(_asks())
+    to = _drawn(_moved(_PROBED, _JUMP), {}, probe)["search.1"]
+    path = _path(to, steps, profile)
+    confirmed, stopped = _stopped(probe, _replay_path(path))
+    timer = (stopped + late - 1 - confirmed) * _PROBE_FRAME
+    assert timer >= 0, "the timer must end the state after the saccade is confirmed"
+    trial = _contingent(_asks(), by=After(timer, since=SaccadeOnset()))
+
+    result = _replayed(trial, _replay_path(path))
+
+    assert result.visited == ("onset", "jumped")
+    assert result.outcome is (Outcome.CORRECT if late == 0 else Outcome.NO_RESPONSE)
+
+
+@pytest.mark.parametrize("steps, outcome", [(3, Outcome.NO_RESPONSE), (4, Outcome.NO_RESPONSE),
+                                            (5, Outcome.CORRECT), (6, Outcome.CORRECT)])
+def test_a_short_saccade_on_the_onset_edge_carries_only_if_its_eye_stopped_in_the_next_state(
+        steps, outcome):
+    """**I1, on the onset's own edge.** A saccade of `steps` samples to empty space, where the
+    edge's jump draws the target: the edge is taken on the frame the detector confirms it, and the
+    detector's stop field puts the eye at rest before `jumped`'s first frame for 3 and 4 samples
+    (it landed in `onset`, on empty space: nothing carries), and on or after it for 5 and 6 (it
+    carries, and is scored at the target). Until the review all four were `CORRECT`."""
+    trial = _contingent(_asks())
+    to = _drawn(_moved(_PROBED, _JUMP), {}, trial)["search.1"]
+    path = _path(to, steps)
+    confirmed, stopped = _stopped(trial, _replay_path(path))
+    assert (stopped >= confirmed + 1) == (outcome is Outcome.CORRECT), \
+        "the stop must fall on the side of `jumped`'s first frame the case names"
+
+    result = _replayed(trial, _replay_path(path))
+
+    assert result.visited == ("onset", "jumped")
+    assert result.outcome is outcome
+
+
+def test_an_onset_clock_observes_the_onset_and_leaves_it_to_an_onset_edge():
+    """**M1** (the controller's ruling, engineering): a clock started by a saccade's onset observes
+    the onset without taking it, so the state's `SaccadeOnset` edge fires on the same saccade, on
+    the frame it is confirmed. The clock had taken it, and the edge waited for the next saccade."""
+    trial = _probe([State("shown", enter=[Show(_PROBED)], go=[
+        On(After(1.0, since=SaccadeOnset()), Outcome.LATE_RESPONSE),
+        On(SaccadeOnset(), Outcome.CORRECT),
+        On(After(1.5), Outcome.NO_RESPONSE),
+    ])])
+    to = _drawn(_PROBED, {}, trial)["search.1"]
+    _, confirmed, _ = _timeline(trial, to)
+
+    result = _replayed(trial, _saccades(to))
+
+    assert (result.outcome, result.frames) == (Outcome.CORRECT, confirmed)
+
+
+def test_a_saccade_confirmed_on_the_sample_that_ends_its_run_is_judged_on_that_frame():
+    """**I2** (the review of XC-410, at the merge with saccade-gap-onset). A 3-sample saccade to
+    the target with the datagram 2 samples into it lost, the tracker's staleness half a frame so
+    that frame has no sample: the detector (version 2) confirms it on the sample that ends its run,
+    the run already closed. It landed on that frame, and is judged there, with its stop where
+    `saccade.detect` puts it. Until then the world took it as still in flight and judged it a frame
+    later, its stop a frame late too; no outcome shows the stop here, since any state a transition
+    could carry it into begins after it is confirmed."""
+    trial = _probe([State("s", enter=[Show(_PROBED)],
+                          go=[*_asks()[:2], On(After(2.0), Outcome.NO_RESPONSE)])])
+    path = _path(_drawn(_PROBED, {}, trial)["search.1"], 3)
+
+    def world() -> Tracked:
+        return Tracked(Tracker(staleness=_PROBE_FRAME / 2), _fitted_mapping(), trial,
+                       _PROBE_FRAME, {}, source=_replay_path(path, lose={202}))
+
+    seen, closed = world(), None
+    for frame in range(1, len(path) + 1):
+        seen.display({}, frame)
+        if seen.detector.onset is not None:
+            closed = frame, seen.detector.in_flight
+            break
+    assert closed is not None and closed[1] is False, \
+        "the detector must confirm it on the sample that ends its run"
+    played = world()
+
+    result = run_trial(trial, played, _PROBE_FRAME, values={}, effects=Recorded())
+
+    assert (result.outcome, result.frames) == (Outcome.CORRECT, closed[0])
+    assert played._stopped == _stopped(trial, _replay_path(path, lose={202}),
+                                       Tracker(staleness=_PROBE_FRAME / 2))[1]
+
+
+def test_a_world_refuses_a_detector_that_has_already_been_fed():
+    """**M4.** `Tracked` numbers the samples it feeds the detector from the detector's first, so a
+    detector fed before would put every onset later than it was, and a saccade begun before its
+    state would count. Refused, plainly; the same detector, reset, is taken."""
+    from wl_xcon.saccade import Detector
+
+    fed = Detector()
+    for k in range(300):
+        fed.accept(k * 0.002, (0.0, 0.0))
+
+    with pytest.raises(ValueError, match="already been fed 300 samples"):
+        Tracked(Tracker(), _fitted_mapping(), calibration, 0.002, detector=fed)
+    fed.reset()
+    assert Tracked(Tracker(), _fitted_mapping(), calibration, 0.002, detector=fed).detector is fed
 
 
 # ---------------------------------------------------------------------------
