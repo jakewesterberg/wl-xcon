@@ -392,6 +392,9 @@ PANDOC_KEY = re.compile(r"[A-Za-z0-9_](?:[A-Za-z0-9_]|[:.#$%&+?<>~/-](?=[A-Za-z0
 #: short name included) is read, so a decorator (`@dataclass`) or a handle is not taken
 #: for a citation.
 LIBRARY_SHAPED = re.compile(r"[a-z0-9]+[0-9]{4}[a-z]+(?![A-Za-z0-9_])")
+#: Pandoc's braced key, `@{...}`: any characters but braces, in brackets or out (the same
+#: page, "Citation syntax"). Read wherever an `@` starts a citation, whatever its shape.
+BRACED_KEY = re.compile(r"\{([^{}\n]+)\}")
 
 
 def prose(text: str) -> str:
@@ -436,12 +439,15 @@ def citations(text: str) -> list[tuple[int, str]]:
             before = text[start - 1] if start else " "
             if depth:
                 starts_word = before.isspace() or before in "[;"
-                key = PANDOC_KEY.match(text, at + 1) if starts_word else None
+                bare = starts_word and PANDOC_KEY.match(text, at + 1) or None
             else:
                 inside_word = before.isalnum() or before in "_.@"
-                key = None if inside_word else LIBRARY_SHAPED.match(text, at + 1)
-            if key:
-                found.append((text.count("\n", 0, at) + 1, key[0]))
+                bare = None if inside_word else LIBRARY_SHAPED.match(text, at + 1)
+            braced = None if (before.isalnum() or before in "_.@") else BRACED_KEY.match(text, at + 1)
+            if braced and (not depth or starts_word):
+                found.append((text.count("\n", 0, at) + 1, braced[1]))
+            elif bare:
+                found.append((text.count("\n", 0, at) + 1, bare[0]))
     return found
 
 
@@ -466,6 +472,8 @@ def test_citations_are_read_from_prose_only():
             "nor @dataclass; [@nu2002thirteen] is, and `[@xi2003fourteen]` in code is not.",
             "Any Pandoc key is read in brackets, after an inner one too: [see [sic] @Doe99].",
             "A short name's digit does not hide a bare key: @nc3rs2012refining says so.",
+            "Pandoc's braced key is read outside brackets, @{Smith:2020/a} says, and in them:",
+            "[see @{Jones 2021}; -@{brace.key}, p. 3], but not an empty one, @{}, nor [@{] unclosed.",
         ]
     )
     assert citations(text) == [
@@ -479,6 +487,9 @@ def test_citations_are_read_from_prose_only():
         (16, "nu2002thirteen"),
         (17, "Doe99"),
         (18, "nc3rs2012refining"),
+        (19, "Smith:2020/a"),
+        (20, "Jones 2021"),
+        (20, "brace.key"),
     ]
 
 
