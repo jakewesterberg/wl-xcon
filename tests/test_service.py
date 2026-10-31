@@ -24,7 +24,7 @@ from _frames import view
 from _ports import endpoints as free_endpoints
 from _rig import PATH as RIG_FILE
 from _rig import RIG, naming
-from _sessions import OPEN_ACCEPTED, WALL, malformed_task, planned_task, typed
+from _sessions import OPEN_ACCEPTED, WALL, cue_task, malformed_task, planned_task, typed
 from _zmq_release import _every_zmq_context_released  # noqa: F401
 from wl_xcon import preflight, resume, stranded, warnlist
 from wl_xcon.actor import Box
@@ -4880,6 +4880,65 @@ def test_a_plan_whose_conditions_all_set_a_number_runs_without_it_sent_a_plain_r
 
     assert plain.run_index is None and "'target_x' is used by the task" in _refused(plain)[-1]
     assert (planned.phase, planned.stop_kind) == ("between_runs", "completed")
+
+
+def test_a_start_whose_place_has_no_value_is_refused_by_its_pre_flight_naming_it(tmp_path):
+    """XC-415 (the PI, 2026-10-30: "Refuse to start"; "A stimulus that cannot be drawn is a case
+    where the run cannot proceed"), the path, not the piece: a page's start of a task whose cue is
+    placed by a setting nobody gave a value fails its pre-flight's starting values, naming the
+    setting and the place, and `preflight.gate` refuses it, `Service._start` unchanged; before, the
+    run started and the cue could not be drawn. The same task under a plan whose every condition
+    sets the cue's place starts and runs to its end."""
+    service = _service(tmp_path)
+    path = cue_task(service.tasks)
+    path.write_text(path.read_text() + (
+        "\nfrom wl_xcon.task import Block, Condition, Plan\n"
+        "TASK = _cue_dataclasses.replace(TASK, plans={'set': Plan([Block('b', [\n"
+        "    Condition('right', {'cue_pos': Polar(8.0, 0.0)}, target=2)])])})\n"))
+    _step(service, _open())
+
+    refused = _step(service, _start(task="cue.py"))
+    planned = _step(service, _start(task="cue.py", plan="set"))
+
+    assert refused.run_index is None
+    assert ("pre-flight failed, so the run does not start: starting values: setting 'cue_pos' "
+            "places the position of stimulus 'cue' as state 'await_fix' shows it and has no "
+            "value") in _refused(refused)[-1]
+    assert (planned.phase, planned.stop_kind, planned.run_index) == ("between_runs", "completed", 0)
+    assert [row["plan"] for row in _runs(service.root) if row["event"] == "start"] == ["set"]
+
+
+def test_a_wlx_run_whose_place_has_no_value_records_nothing_and_leaves_taskd_free(tmp_path):
+    """The review of XC-415's fix, I2: `wlx run` of `adaptive_detection` with every setting but
+    `target_x` (the target window's and target's x coordinate) was refused by `Session.run`, after
+    its departure was marked: the session was stranded (`stranded.find`), with no return asked at
+    the terminal, and `wlx taskd` under the same root opened no session for any animal until it was
+    ended or resumed. It is refused before the session opens, beside the plan check, so nothing is
+    recorded and `wlx taskd` opens a session there."""
+    folders = _folders(tmp_path)
+    subjects, _, root = folders
+    sets = [part for pair in ("fix_acquisition=4.0", "fix_hold=0.3", "response_deadline=0.6",
+                              "target_hold=0.2", "fix_window=2.0", "target_window=3.0",
+                              "target_contrast=0.5", "target_eccentricity=10.0")
+            for part in ("--set", pair)]
+    argv = ["run", "tasks/adaptive_detection.py", "--rig", RIG_FILE, "--view", "direct",
+            "--kind", "training", "--accept-warnings", "--allocation", ALLOCATION,
+            "--bounds", str(subjects / "REFERENCE" / "bounds.py"), "--root", str(root),
+            "--session-id", "2027-01-14_01", "--subject", "REFERENCE", "--delivered-today", "0",
+            "--trials", "2", *sets, "--out-of-cage-at", time.strftime("%H:%M")]
+
+    with pytest.raises(SystemExit) as refused:
+        main(argv)
+
+    assert [(s.session_id, s.subject) for s in stranded.find(root)] == []
+    assert list(root.iterdir()) == []
+    assert refused.value.code == (
+        "task refused, session not started, nothing recorded: setting 'target_x' places the x "
+        "coordinate of window 'target' and has no value: neither the task nor the run gives it "
+        "one, and a window placed by no value cannot be judged, so the run does not start")
+    service = _made(folders)
+    _step(service, _open())
+    assert service.session is not None and service.session.spec.session_id == "2027-01-14_01"
 
 
 def test_wlx_taskd_says_a_missing_rig_or_allocation_in_a_sentence(tmp_path):

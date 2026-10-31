@@ -2239,10 +2239,10 @@ def test_a_frame_of_a_running_trial_builds_only_each_eye_s_gaze_and_their_mean(m
     assert sorted(took - _ONCE_A_FRAME - _A_TRANSITION) == []
 
 
-#: A task whose one window is centered by a whole-point setting with a choice that holds no value
-#: (the gaze-followups review's first, I1): it loads with no finding (XC-415, narrowed to this case;
-#: a choice that is a value and no position is refused at load), and the window is
-#: judged only by `SaccadeTo`, so a trial with no saccade never asks about it.
+#: A task whose one window is centered by a whole-point setting (the gaze-followups review's first,
+#: I1), judged only by `SaccadeTo`, so a trial with no saccade never asks about it. Its setting's
+#: choices are positions: one that can hold no value is refused at load, and a run that would start
+#: with it unset is refused before it starts (XC-415; the PI, 2026-10-30, "Refuse to start").
 _NEVER_ASKED_TASK = """
 from wl_xcon.photometry import Gray
 from wl_xcon.task import (
@@ -2252,7 +2252,7 @@ from wl_xcon.task import (
 
 trial = Trial(
     start="only",
-    params=[Param("where", unit="deg", choices=(Polar(8.0, 0.0), None))],
+    params=[Param("where", unit="deg", choices=(Polar(8.0, 0.0), Polar(-8.0, 0.0)))],
     windows=[Window("w", at=P("where"), radius=1.0, on="t")],
     states=[State("only",
                   enter=[Show(Stimulus("t", at=(0.0, 0.0), looks=Disc(size=0.5, color=Gray(40.0))))],
@@ -2274,7 +2274,9 @@ def test_a_window_no_trial_asks_about_raises_only_when_asked(tmp_path):
     when the world is built** (the gaze-followups review, I1): a session whose trials never ask
     about it runs to its end, as it did before XC-413 resolved each window between trials, and
     the window still raises when asked. Raised at the build, it stopped the session on its first
-    trial."""
+    trial. Its setting holds a number, which is no position: `wlx run --set where=5` binds one,
+    since `wlx run` takes no pre-flight (XC-159); a setting with no value is refused before the
+    run starts (below)."""
     path = tmp_path / "never_asked.py"
     path.write_text(_NEVER_ASKED_TASK)
     built = []
@@ -2288,7 +2290,7 @@ def test_a_window_no_trial_asks_about_raises_only_when_asked(tmp_path):
     spec = SessionSpec(
         task=str(path), allocation="tasks/allocation.py", root=tmp_path,
         session_id="2027-01-14_01", subject="REFERENCE", trials=2, frame_period=0.008, seed=11,
-        values={"where": None}, bounds=_calibration_bounds(), already_delivered_today=0.0,
+        values={"where": 5.0}, bounds=_calibration_bounds(), already_delivered_today=0.0,
         deployment=Deployment.RIG_FIXED, geometry=DIRECT, session_kind="training",
         calibration=SRGB,
     )
@@ -2300,3 +2302,43 @@ def test_a_window_no_trial_asks_about_raises_only_when_asked(tmp_path):
     assert len(built) == 2
     with pytest.raises(TypeError):
         built[-1].in_window("w", 1)
+
+
+def test_a_window_whose_setting_has_no_value_refuses_the_run_before_it_is_judged(tmp_path):
+    """XC-415 (the PI, 2026-10-30, "Refuse to start": "A stimulus that cannot be drawn is a case
+    where the run cannot proceed"): the window above, asked about on every frame (`Entered`), with
+    its setting given no value. The run started, and raised when the window was first judged
+    (`gaze._placed`), after `RUN_START` was strobed and the run's start row written. It is refused
+    before it starts, naming the setting and the window, through the gaze world a rig runs."""
+    path = tmp_path / "asked.py"
+    text = _NEVER_ASKED_TASK.replace("On(SaccadeTo(\"w\"), Outcome.CORRECT)",
+                                     "On(Entered(\"w\"), Outcome.CORRECT)")
+    assert text != _NEVER_ASKED_TASK
+    path.write_text(text.replace("    CRITERION,", "    CRITERION, Entered,"))
+    built = []
+
+    def world(trial, values, index):
+        built.append(Tracked(Tracker(), _fitted_mapping(), trial, 0.008, values,
+                             source=Replay(payloads=[(0.0, _payload(0.0, 0.0, frame=n))
+                                                     for n in range(100)])))
+        return built[-1]
+
+    spec = SessionSpec(
+        task=str(path), allocation="tasks/allocation.py", root=tmp_path,
+        session_id="2027-01-14_01", subject="REFERENCE", trials=2, frame_period=0.008, seed=11,
+        values={}, bounds=_calibration_bounds(), already_delivered_today=0.0,
+        deployment=Deployment.RIG_FIXED, geometry=DIRECT, session_kind="training",
+        calibration=SRGB,
+    )
+    session = _marked(Session(spec, card=Card(), pump=Pump(), world=world))
+    before = list(session.card.codes)
+
+    with pytest.raises(SystemExit) as refused:
+        session.run()
+
+    assert refused.value.code == (
+        "task refused, run not started: setting 'where' places the position of window 'w' and has "
+        "no value: neither the task nor the run gives it one, and a window placed by no value "
+        "cannot be judged, so the run does not start")
+    assert built == [] and session.run_index is None and session.card.codes == before
+    assert not (session.directory / "runs.jsonl").exists()

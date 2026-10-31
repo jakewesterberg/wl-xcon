@@ -27,7 +27,7 @@ from wl_xcon.marks import TIME_FORMATS as _TIME_FORMATS
 from wl_xcon.marks import clock_or_now as _clock_or_now
 from wl_xcon.marks import clock_time as _wall_clock_time
 from wl_xcon.bounds import Bounds, Exceeded
-from wl_xcon.check import check_task
+from wl_xcon.check import check_task, unplaced
 from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.review import position_words
 from wl_xcon.review import render_task as render_review
@@ -1765,6 +1765,43 @@ def main(argv: list[str] | None = None) -> int:
                 + (", ".join(_printable(name) for name in task.plans) or "none")
             )
 
+        values: dict[str, object] = {}
+        for assignment in args.set:
+            name, sep, raw = assignment.partition("=")
+            # The same unchecked split `wlx console --set` had, one subcommand over
+            # -- refused here too rather than only where a reviewer happened to look.
+            # An empty name here is quieter and no better: it lands in `spec.values`,
+            # gets written into the session's own parameter snapshot, and matches no
+            # `Param` any task declares, so it is a row in the record that means
+            # nothing.
+            if not sep or not name:
+                raise SystemExit(
+                    f"--set expects NAME=VALUE with a parameter name before the "
+                    f"'=', got {assignment!r}"
+                )
+            try:
+                values[name] = float(raw)
+            except ValueError:
+                values[name] = raw
+
+        # **A place with no value, refused before the session opens** (XC-415; the PI,
+        # 2026-10-30, "Refuse to start"; the review of its fix, I2): a setting placing a window, a
+        # stimulus, an update or an array's objects, or sizing a window, that neither the task's
+        # starting values, `--set` nor the plan's condition playing it gives a value
+        # (`check.unplaced`). Refused by `Session.run` instead, it came after the departure was
+        # marked, and the session was left stranded, `wlx taskd` opening none under this root
+        # until it was ended. `Session.run` refuses it too, as the backstop for its other callers.
+        unset = unplaced(
+            task,
+            {**{p.name: p.start for p in task.params if p.start is not None}, **values},
+            None if args.plan is None else task.plans[args.plan].blocks,
+        )
+        if unset:
+            raise SystemExit(
+                "task refused, session not started, nothing recorded: "
+                + "; ".join(_printable(said) for _, said in unset)
+            )
+
         # **The warnings this session runs with** (engine spec §19.2-19.3): the calibration's,
         # the deployment's and the task's. `wlx run` takes no pre-flight (XC-159), so none of
         # today's unknowns is among them. A task warning its kind does not accept was refused
@@ -1793,9 +1830,9 @@ def main(argv: list[str] | None = None) -> int:
                 "under --as's name, if given"
             )
 
-        # Once the check passes, one line, before the `--set` parsing, the link and
-        # the `Session`; not beside `out of cage:`, which sits inside the welfare
-        # path. Without `--link` this is the only place the setup is said here.
+        # Once the check passes, one line, before the link and the `Session`; not beside
+        # `out of cage:`, which sits inside the welfare path. Without `--link` this is the
+        # only place the setup is said here.
         print(f"  setup: {_setup_words(geometry.view, geometry.half_ipd_cm)}")
         # The calibration, as `wlx check` says it, and each warning the flag accepts, whole
         # (the final review's row 16; XC-353: a warning is shown whole before it is accepted),
@@ -1803,25 +1840,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  calibration: {_printable(_calibration_words(calibration))}")
         for entry in warnings:
             print(f"  warning accepted: {_printable(entry.code)}: {_printable(entry.detail)}")
-
-        values: dict[str, object] = {}
-        for assignment in args.set:
-            name, sep, raw = assignment.partition("=")
-            # The same unchecked split `wlx console --set` had, one subcommand over
-            # -- refused here too rather than only where a reviewer happened to look.
-            # An empty name here is quieter and no better: it lands in `spec.values`,
-            # gets written into the session's own parameter snapshot, and matches no
-            # `Param` any task declares, so it is a row in the record that means
-            # nothing.
-            if not sep or not name:
-                raise SystemExit(
-                    f"--set expects NAME=VALUE with a parameter name before the "
-                    f"'=', got {assignment!r}"
-                )
-            try:
-                values[name] = float(raw)
-            except ValueError:
-                values[name] = raw
 
         # **A session id is used once** (XC-201). `SessionRecord.open` makes the
         # folder with `exist_ok`, so running into an existing one appended to its
