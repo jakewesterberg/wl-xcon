@@ -1,0 +1,198 @@
+{
+ "label": "no-grace-3",
+ "host": {
+  "label": "no-grace-3",
+  "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "cpus": 14,
+  "docker": "29.4.0",
+  "docker_cpus": "14",
+  "image": "xcon-flake:latest",
+  "containers": 6,
+  "cpus_each": 2.0,
+  "repeats": 50,
+  "burners": 14,
+  "grace": 0.0,
+  "immediate": "on",
+  "started": "2026-10-31T01:00:33"
+ },
+ "config": {
+  "grace": 0.0,
+  "immediate": true,
+  "python": "3.12.14",
+  "pyzmq": "27.2.0",
+  "libzmq": "4.3.5",
+  "platform": "Linux-7.0.14-orbstack-00380-ga7e0a2dc9535-aarch64-with-glibc2.41"
+ },
+ "load": [
+  11.8076171875,
+  103.75537109375
+ ],
+ "runs": 600,
+ "failed": 10,
+ "lost": [
+  {
+   "test": "tests/test_serve.py::test_e2e_a_write_from_elsewhere_is_refused_and_the_session_never_sees_it[10]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.012,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     5.8
+    ],
+    [
+     "close",
+     6.5
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_a_write_from_elsewhere_is_refused_and_the_session_never_sees_it[14]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.026,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     2.4
+    ],
+    [
+     "close",
+     3.7
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_pause_holds_the_trial_count_keeps_the_clock_and_resume_continues[9]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.022,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     1.6
+    ],
+    [
+     "close",
+     2.5
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_pause_holds_the_trial_count_keeps_the_clock_and_resume_continues[18]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.016,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     4.4
+    ],
+    [
+     "close",
+     5.5
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_pause_holds_the_trial_count_keeps_the_clock_and_resume_continues[47]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.021,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     5.9
+    ],
+    [
+     "close",
+     6.8
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_a_write_from_elsewhere_is_refused_and_the_session_never_sees_it[2]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.002,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     9.1
+    ],
+    [
+     "close",
+     10.5
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_pause_holds_the_trial_count_keeps_the_clock_and_resume_continues[5]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.005,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     1.6
+    ],
+    [
+     "close",
+     2.6
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_pause_holds_the_trial_count_keeps_the_clock_and_resume_continues[13]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.019,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     7.1
+    ],
+    [
+     "close",
+     8.1
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_a_write_from_elsewhere_is_refused_and_the_session_never_sees_it[5]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.081,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     65.4
+    ],
+    [
+     "close",
+     66.7
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_a_write_from_elsewhere_is_refused_and_the_session_never_sees_it[47]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.023,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     6.6
+    ],
+    [
+     "close",
+     7.6
+    ]
+   ]
+  }
+ ],
+ "close_s": {
+  "median": 0.0005867949221283197,
+  "max": 0.05372698185965419
+ }
+}

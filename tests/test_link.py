@@ -2064,6 +2064,145 @@ def test_a_rig_that_never_acknowledges_is_not_delivered_and_the_socket_is_reset(
     assert Resume(by=Box("jake")) in got
 
 
+class _StillClock:
+    """`link`'s `time` for the grace's tests (XC-429): it stands still at `now` unless a
+    test moves it, and its `sleep` records what it was asked for and then calls `hold`,
+    which waits for nothing unless a test says otherwise. Every other name is the real
+    `time`'s."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+        self.slept: list[float] = []
+        self.hold = lambda: None
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.slept.append(seconds)
+        self.hold()
+
+
+def _still_link(monkeypatch, zmq_cleanup):
+    """A live link whose clock is a `_StillClock`, and the console's own command sender
+    connected to it, `IMMEDIATE` and all, with a 10 s reply wait. The sender is returned
+    as well as its socket: freed, its finalizer would close the socket."""
+    import zmq
+
+    import wl_xcon.link as link_module
+
+    clock = _StillClock()
+    monkeypatch.setattr(link_module, "time", clock)
+    link = zmq_cleanup(ZmqLink(pub_endpoint="tcp://127.0.0.1:0", rep_endpoint="tcp://127.0.0.1:0"))
+    commands = zmq_cleanup(ZmqCommands(link.rep_endpoint, reply_timeout_s=10.0))
+    assert commands._req.poll(5000, zmq.POLLOUT), "the console never connected to the link"
+    return link, clock, commands, commands._req
+
+
+def _replied(link, req) -> None:
+    """The console sends a stop and the link drains it, replying as it reads."""
+    req.send(_encode_command(Stop(by=Box("jake"))))
+    deadline = time.monotonic() + 10.0
+    while not link.drain():
+        assert time.monotonic() < deadline, "the stop never reached the link"
+        time.sleep(0.005)
+
+
+def test_a_link_closed_right_after_replying_still_lets_a_late_console_read_the_reply(
+    zmq_cleanup, monkeypatch
+):
+    """XC-429: `wlx run` closes its link right after the boundary that drained a stop,
+    and a console's REQ socket, which sets `IMMEDIATE`, loses a reply it has not yet read
+    when that connection goes. So `ZmqLink.close` holds its sockets open for
+    `REPLY_GRACE_S` after its last reply.
+
+    **The console reads only once the close has begun**, as a console thread kept from
+    running does. Inside the grace the reply is there to read. With no grace, the
+    console reads once its own monitor says the connection has gone, and finds nothing.
+
+    **The link's clock stands still**, so the grace left is all of `REPLY_GRACE_S`
+    however slowly this test runs, and the grace's sleep waits for the console's read
+    instead of for time to pass. Every wait here is a bound of 5 or 10 s on something
+    that takes milliseconds, so nothing depends on how fast the machine is."""
+    import zmq
+    from zmq.utils.monitor import recv_monitor_message
+
+    import wl_xcon.link as link_module
+
+    link, clock, _sender, req = _still_link(monkeypatch, zmq_cleanup)
+    holding, read = threading.Event(), threading.Event()
+
+    def hold() -> None:
+        holding.set()
+        read.wait(10)
+
+    clock.hold = hold
+    gone = req.get_monitor_socket(zmq.EVENT_DISCONNECTED)
+    _replied(link, req)
+
+    closing = threading.Thread(target=link.close)
+    closing.start()
+    while closing.is_alive() and not holding.wait(0.01):
+        pass
+    try:
+        if not holding.is_set():
+            # Closed with no grace: read as a late console would, the connection gone.
+            assert gone.poll(5000), "the link closed and the console never saw it go"
+            recv_monitor_message(gone)
+        try:
+            reply = req.recv()
+        except zmq.Again:
+            reply = None
+    finally:
+        read.set()
+        closing.join(10)
+        req.disable_monitor()
+        gone.close(linger=0)
+
+    assert reply == b"received", "the console lost the rig's reply when the link closed"
+    assert clock.slept == [pytest.approx(link_module.REPLY_GRACE_S)], (
+        "the grace is all of REPLY_GRACE_S when the close comes at once"
+    )
+
+
+@pytest.mark.parametrize(
+    ("case", "expected"),
+    [
+        ("nothing was replied", []),
+        ("the grace has passed", []),
+        ("the clock stepped back an hour", ["grace"]),
+        ("closed a second time", ["grace"]),
+    ],
+)
+def test_close_waits_only_after_a_recent_reply_and_never_past_the_grace(
+    zmq_cleanup, monkeypatch, case, expected
+):
+    """XC-429's grace, and only it: no wait when nothing was replied or the grace has
+    already passed by the time of the close; never more than `REPLY_GRACE_S`, even on a
+    clock that stepped back (`left` would be an hour); and once only, since a second
+    `close` has nothing more to hold for (review M1 and M3, 2026-10-31)."""
+    import wl_xcon.link as link_module
+
+    link, clock, _sender, req = _still_link(monkeypatch, zmq_cleanup)
+    if case != "nothing was replied":
+        _replied(link, req)
+    if case == "the grace has passed":
+        clock.now += link_module.REPLY_GRACE_S
+    elif case == "the clock stepped back an hour":
+        clock.now -= 3600.0
+
+    link.close()
+    if case == "closed a second time":
+        link.close()
+
+    assert clock.slept == [
+        pytest.approx(link_module.REPLY_GRACE_S) for _ in expected
+    ], case
+
+
 def test_an_unclosed_command_sender_is_released_by_the_collector(zmq_cleanup):
     link = zmq_cleanup(ZmqLink(pub_endpoint="tcp://127.0.0.1:0", rep_endpoint="tcp://127.0.0.1:0"))
     with _collector_paused():

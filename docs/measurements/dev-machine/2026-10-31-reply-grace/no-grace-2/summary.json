@@ -1,0 +1,214 @@
+{
+ "label": "no-grace-2",
+ "host": {
+  "label": "no-grace-2",
+  "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "cpus": 14,
+  "docker": "29.4.0",
+  "docker_cpus": "14",
+  "image": "xcon-flake:latest",
+  "containers": 6,
+  "cpus_each": 2.0,
+  "repeats": 50,
+  "burners": 0,
+  "grace": 0.0,
+  "immediate": "on",
+  "started": "2026-10-31T00:55:21"
+ },
+ "config": {
+  "grace": 0.0,
+  "immediate": true,
+  "python": "3.12.14",
+  "pyzmq": "27.2.0",
+  "libzmq": "4.3.5",
+  "platform": "Linux-7.0.14-orbstack-00380-ga7e0a2dc9535-aarch64-with-glibc2.41"
+ },
+ "load": [
+  4.7099609375,
+  44.77783203125
+ ],
+ "runs": 600,
+ "failed": 11,
+ "lost": [
+  {
+   "test": "tests/test_serve.py::test_e2e_a_write_from_elsewhere_is_refused_and_the_session_never_sees_it[4]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.019,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     7.4
+    ],
+    [
+     "close",
+     8.6
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_a_write_from_elsewhere_is_refused_and_the_session_never_sees_it[14]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.002,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     2.9
+    ],
+    [
+     "close",
+     3.7
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_a_write_from_elsewhere_is_refused_and_the_session_never_sees_it[28]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.024,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     4.1
+    ],
+    [
+     "close",
+     4.9
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_a_write_from_elsewhere_is_refused_and_the_session_never_sees_it[37]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.002,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     6.3
+    ],
+    [
+     "close",
+     7.1
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_a_write_from_elsewhere_is_refused_and_the_session_never_sees_it[5]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.015,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     4.9
+    ],
+    [
+     "close",
+     6.1
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_a_write_from_elsewhere_is_refused_and_the_session_never_sees_it[22]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.024,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     2.0
+    ],
+    [
+     "close",
+     2.7
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_a_write_from_elsewhere_is_refused_and_the_session_never_sees_it[2]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.005,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     5.8
+    ],
+    [
+     "close",
+     6.5
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_a_write_from_elsewhere_is_refused_and_the_session_never_sees_it[12]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.054,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     37.8
+    ],
+    [
+     "close",
+     38.6
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_a_write_from_elsewhere_is_refused_and_the_session_never_sees_it[40]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.019,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     6.5
+    ],
+    [
+     "close",
+     7.2
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_pause_holds_the_trial_count_keeps_the_clock_and_resume_continues[21]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.017,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     1.7
+    ],
+    [
+     "close",
+     2.6
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_pause_holds_the_trial_count_keeps_the_clock_and_resume_continues[40]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.015,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     11.7
+    ],
+    [
+     "close",
+     13.1
+    ]
+   ]
+  }
+ ],
+ "close_s": {
+  "median": 0.000579125015065074,
+  "max": 0.011868112022057176
+ }
+}

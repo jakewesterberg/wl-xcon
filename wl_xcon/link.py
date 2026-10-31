@@ -2725,6 +2725,26 @@ def _release(ctx, sockets) -> None:
     ctx.destroy(linger=0)
 
 
+#: How long `ZmqLink.close` keeps its sockets open after the last reply it sent, so a
+#: console can still read that reply (XC-429). `wlx run` closes its link right after
+#: the boundary that drained a stop, and the console's REQ socket, which sets
+#: `IMMEDIATE` (`ZmqCommands`), loses a reply it has not yet read when the connection
+#: goes: the page was told *not delivered* for a stop that had stopped the session.
+#: That effect is measured; why `IMMEDIATE` does it has not been read in libzmq's
+#: source.
+#:
+#: **Chosen from a measurement of the test environment, not of a rig**:
+#: `docs/measurements/dev-machine/2026-10-31-reply-grace.md`, by
+#: `tools/measure_reply_grace.py`. The two `wlx serve` end-to-end tests that failed so
+#: on CI, each run 50 times over in each of six two-CPU Linux containers at once, on
+#: one development host at one-minute load averages from 4.7 to 104: without a grace,
+#: 32 of 1,800 runs lost the stop's reply, each after the session had drained the stop
+#: and begun to close its link; with this grace, 0 of 1,800.
+#: **It narrows the race and does not close it**: a console kept from reading for
+#: longer than this still loses the reply. Closing that is the console's side, XC-429.
+REPLY_GRACE_S = 0.1
+
+
 class ZmqLink:
     """The `taskd` side of the console link, live on a real socket (S9a §7:
     `taskd ── ZMQ REQ/REP (commands) / ZMQ PUB (telemetry) ──> console`, ADR-0003's
@@ -2821,6 +2841,10 @@ class ZmqLink:
         #: however this object is freed. **The append is required**: a socket left
         #: out of it brings back the collector deadlock. See `_release`.
         self._sockets: list = []
+        #: When `drain` last replied to a command, on `time.monotonic()`, or `None`
+        #: before it has: what `close` holds its grace from (`REPLY_GRACE_S`). Set
+        #: before the binds, since a constructor that fails partway calls `close`.
+        self._replied_at: float | None = None
         # Registered before the first socket, so a constructor that raises partway
         # is covered too. It runs `_release` at most once, if this link is freed
         # without `close()` having run. `close()` runs `_release` itself and then
@@ -2985,6 +3009,8 @@ class ZmqLink:
         while self._rep.poll(timeout=0, flags=zmq.POLLIN):
             raw = self._rep.recv()
             self._rep.send(b"received")
+            # Only when a command came: what `close`'s grace counts from (XC-429).
+            self._replied_at = time.monotonic()
             try:
                 commands.append(_decode_command(raw))
             except CommandRefused as refused:
@@ -3060,7 +3086,18 @@ class ZmqLink:
         return 0
 
     def close(self) -> None:
-        """Release both sockets and this link's own `Context`, promptly.
+        """Release both sockets and this link's own `Context`: promptly, unless
+        `drain` replied to a command less than `REPLY_GRACE_S` ago.
+
+        **Then it first holds them open for the rest of that grace** (XC-429), so a
+        console can still read the reply: `wlx run` closes its link right after the
+        boundary that drained a stop, and a console's REQ socket loses a reply it has
+        not yet read when the connection goes (`REPLY_GRACE_S` has the measurement).
+        At most `REPLY_GRACE_S`, whatever the clock does, and once: a second `close`
+        does not wait again. Only on this path: the finalizer never waits, since it may
+        run inside the cyclic collector, and a constructor that fails has replied to
+        nothing. An interruption during the wait still releases, in the `finally`, and
+        leaves the finalizer armed, as below.
 
         Runs `_release`: each socket is closed with `linger=0`, then
         `Context.destroy(linger=0)` terminates the context. Then it detaches this
@@ -3134,7 +3171,17 @@ class ZmqLink:
         `b85d0d7` replaced it with `tests/_zmq_release.py`, and `_release` removed
         the deadlock itself.
         """
-        _release(self._ctx, self._sockets)
+        try:
+            if self._replied_at is not None:
+                left = self._replied_at + REPLY_GRACE_S - time.monotonic()
+                # Cleared first, so a second `close` after an interrupted one waits
+                # for nothing.
+                self._replied_at = None
+                if left > 0:
+                    # Clamped: on a clock stepped back, `left` could be anything.
+                    time.sleep(min(left, REPLY_GRACE_S))
+        finally:
+            _release(self._ctx, self._sockets)
         self._finalizer.detach()
 
     def __enter__(self) -> "ZmqLink":
@@ -3283,7 +3330,8 @@ class ZmqConsole:
         return decode(raw)
 
     def close(self) -> None:
-        """See `ZmqLink.close` -- same reasoning, same shape."""
+        """See `ZmqLink.close`: the same release, with no grace, since this end sends no
+        replies."""
         _release(self._ctx, self._sockets)
         self._finalizer.detach()
 
@@ -3359,7 +3407,8 @@ class ZmqMarks:
             ) from exc
 
     def close(self) -> None:
-        """See `ZmqLink.close` -- same reasoning, same shape."""
+        """See `ZmqLink.close`: the same release, with no grace, since this end sends no
+        replies."""
         _release(self._ctx, self._sockets)
         self._finalizer.detach()
 
@@ -3405,6 +3454,12 @@ class ZmqCommands:
     acknowledged**: it may still be drained and applied at the rig's next boundary,
     which is why that sentence says so rather than calling it lost, and why it is
     raised as `Unacknowledged`, which a caller can tell from a command never sent.
+
+    **`IMMEDIATE` has a cost** (XC-429): a reply this socket has not yet read when the
+    rig's connection goes is lost, so a command the rig drained at a session's last
+    boundary can be answered `Unacknowledged` though it was applied. `ZmqLink.close`'s
+    grace (`REPLY_GRACE_S`) narrows that; closing it here, without losing the connect
+    check above, is XC-429.
 
     **Nothing here sends a command twice**, and nothing may (PI, 2026-09-28): a manual
     reward is a command, and a re-send after a timeout would double a reward the rig
@@ -3478,7 +3533,8 @@ class ZmqCommands:
         self._req = self._open()
 
     def close(self) -> None:
-        """See `ZmqLink.close` -- same reasoning, same shape."""
+        """See `ZmqLink.close`: the same release, with no grace, since this end sends no
+        replies."""
         _release(self._ctx, self._sockets)
         self._finalizer.detach()
 

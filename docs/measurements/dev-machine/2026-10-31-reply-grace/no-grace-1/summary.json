@@ -1,0 +1,214 @@
+{
+ "label": "no-grace-1",
+ "host": {
+  "label": "no-grace-1",
+  "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "cpus": 14,
+  "docker": "29.4.0",
+  "docker_cpus": "14",
+  "image": "xcon-flake:latest",
+  "containers": 6,
+  "cpus_each": 2.0,
+  "repeats": 50,
+  "burners": 0,
+  "grace": 0.0,
+  "immediate": "on",
+  "started": "2026-10-31T00:50:09"
+ },
+ "config": {
+  "grace": 0.0,
+  "immediate": true,
+  "python": "3.12.14",
+  "pyzmq": "27.2.0",
+  "libzmq": "4.3.5",
+  "platform": "Linux-7.0.14-orbstack-00380-ga7e0a2dc9535-aarch64-with-glibc2.41"
+ },
+ "load": [
+  6.55908203125,
+  44.0712890625
+ ],
+ "runs": 600,
+ "failed": 11,
+ "lost": [
+  {
+   "test": "tests/test_serve.py::test_e2e_a_write_from_elsewhere_is_refused_and_the_session_never_sees_it[40]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.022,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     13.1
+    ],
+    [
+     "close",
+     13.6
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_pause_holds_the_trial_count_keeps_the_clock_and_resume_continues[1]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.01,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     1.6
+    ],
+    [
+     "close",
+     2.9
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_pause_holds_the_trial_count_keeps_the_clock_and_resume_continues[28]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.017,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     3.8
+    ],
+    [
+     "close",
+     4.3
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_a_write_from_elsewhere_is_refused_and_the_session_never_sees_it[2]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.017,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     2.7
+    ],
+    [
+     "close",
+     3.2
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_a_write_from_elsewhere_is_refused_and_the_session_never_sees_it[44]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.002,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     5.9
+    ],
+    [
+     "close",
+     6.5
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_pause_holds_the_trial_count_keeps_the_clock_and_resume_continues[16]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.025,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     6.1
+    ],
+    [
+     "close",
+     7.2
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_pause_holds_the_trial_count_keeps_the_clock_and_resume_continues[24]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.024,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     1.4
+    ],
+    [
+     "close",
+     1.9
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_pause_holds_the_trial_count_keeps_the_clock_and_resume_continues[10]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.013,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     1.9
+    ],
+    [
+     "close",
+     3.0
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_pause_holds_the_trial_count_keeps_the_clock_and_resume_continues[40]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.017,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     8.1
+    ],
+    [
+     "close",
+     9.3
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_pause_holds_the_trial_count_keeps_the_clock_and_resume_continues[1]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.017,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     6.7
+    ],
+    [
+     "close",
+     7.2
+    ]
+   ]
+  },
+  {
+   "test": "tests/test_serve.py::test_e2e_pause_holds_the_trial_count_keeps_the_clock_and_resume_continues[14]",
+   "kind": "Stop",
+   "bound": "reply",
+   "waited_s": 15.018,
+   "timeline_ms": [
+    [
+     "drained Stop",
+     9.5
+    ],
+    [
+     "close",
+     10.7
+    ]
+   ]
+  }
+ ],
+ "close_s": {
+  "median": 0.000557753024622798,
+  "max": 0.01152160787023604
+ }
+}
