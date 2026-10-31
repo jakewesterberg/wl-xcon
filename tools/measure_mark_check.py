@@ -214,7 +214,7 @@ def report(found: dict) -> str:
 
 **Date:** {time.strftime('%Y-%m-%d')}. **Script:** `tools/measure_mark_check.py`
 (P4d-2b b2a, spec §5.4), run as
-`python tools/measure_mark_check.py --frames {found['frames']} --trials {found['trials']}`.
+`python tools/measure_mark_check.py --frames {found['frames']} --trials {found['trials']} --calls {found['calls']}`.
 **Machine:** {platform.platform()}, {platform.machine()}, {platform.processor() or 'processor not reported'}.
 **Python:** {platform.python_version()}. **pyzmq:** {zmq.__version__} (libzmq {zmq.zmq_version()}).
 
@@ -224,8 +224,8 @@ def report(found: dict) -> str:
 (a world where nothing happens), {found['trials']} times with no `each_frame` and
 {found['trials']} times with the session's check -- `link.ZmqLink.mark_signal` on a live
 loopback link whose mark socket is bound and idle -- interleaved trial by trial. The
-collector is off inside each timed trial. The check alone is {found['calls']} calls in
-twenty batches.
+collector is off inside each timed trial.
+The check alone is {found['calls']} calls in {BATCHES} equal batches.
 
 | | median | p90 | p99 | max |
 |---|---|---|---|---|

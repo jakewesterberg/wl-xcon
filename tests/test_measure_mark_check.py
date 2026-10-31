@@ -66,7 +66,8 @@ def test_a_small_measurement_reports_both_loops_the_check_and_its_allocation():
     assert "**This is not V1, and not a frame-timing measurement.**" in text
     assert "Median added per frame by the check:" in text
     assert "V12 (`docs/validation.md`)" in text
-    assert "--frames 50 --trials 5" in text
+    assert "--frames 50 --trials 5 --calls 2000`" in text, "the run-as line names every option"
+    assert f"The check alone is 2000 calls in {tool.BATCHES} equal batches." in text
 
 
 def test_the_command_line_writes_the_report_where_it_is_told(tmp_path, capsys):
@@ -85,8 +86,20 @@ def test_the_command_line_writes_the_report_where_it_is_told(tmp_path, capsys):
     assert capsys.readouterr().out == f"wrote {out}\n"
 
 
+@pytest.fixture
+def _nothing_measured(monkeypatch):
+    """A link that fails the test if one is opened: the first thing a measurement
+    does, so a refusal is shown to come before anything is measured (the review's
+    N4)."""
+
+    def _opened(*args, **kwargs):
+        raise AssertionError("a link was opened, so the measurement began, before the count was checked")
+
+    monkeypatch.setattr(tool._link, "ZmqLink", _opened)
+
+
 @pytest.mark.parametrize("calls", [2010, 19, 1, 0, -20])
-def test_a_call_count_twenty_equal_batches_cannot_hold_is_refused(calls):
+def test_a_call_count_twenty_equal_batches_cannot_hold_is_refused(_nothing_measured, calls):
     """XC-138: the check alone is timed in twenty batches of `calls // 20`, so 2010
     timed 2000 calls under a report saying 2010, and fewer than 20 divided by zero.
     A count is now refused unless it is a positive multiple of twenty, before anything
@@ -95,7 +108,7 @@ def test_a_call_count_twenty_equal_batches_cannot_hold_is_refused(calls):
         tool.measure(frames=5, trials=1, calls=calls)
 
 
-def test_the_command_line_refuses_such_a_count_with_a_sentence(capsys):
+def test_the_command_line_refuses_such_a_count_with_a_sentence(_nothing_measured, capsys):
     with pytest.raises(SystemExit) as refused:
         tool.main(["--frames", "5", "--trials", "1", "--calls", "2010"])
 
