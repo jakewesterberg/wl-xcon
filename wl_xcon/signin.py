@@ -227,7 +227,8 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 def fetch_json(url: str, *, context: ssl.SSLContext | None = None) -> dict:
     """GET one JSON object over https, with the system's certificate checks (or
     `context`'s, in a test), no redirects, `FETCH_TIMEOUT_S` and at most `FETCH_LIMIT`
-    bytes. Raises `ValueError`, `OSError` or `http.client.HTTPException`."""
+    bytes. Raises `ValueError` (a body it cannot decode included), `OSError` or
+    `http.client.HTTPException`."""
     if urlsplit(url).scheme != "https":
         raise ValueError(f"{url!r} is not an https address")
     opener = urllib.request.build_opener(
@@ -239,7 +240,10 @@ def fetch_json(url: str, *, context: ssl.SSLContext | None = None) -> dict:
         body = response.read(FETCH_LIMIT + 1)
     if len(body) > FETCH_LIMIT:
         raise ValueError(f"{url!r} answered more than {FETCH_LIMIT} bytes")
-    data = json.loads(body)
+    try:
+        data = json.loads(body)
+    except Exception as err:  # JSONDecodeError, UnicodeDecodeError, and RecursionError on deep nesting
+        raise ValueError(f"{url!r} answered a body it could not decode ({type(err).__name__})") from err
     if not isinstance(data, dict):
         raise ValueError(f"{url!r} did not answer a JSON object")
     return data
@@ -453,14 +457,32 @@ class Checker:
         `KEY_REFRESH_S`, until `stop` is set. `say` gets the first load's sentence, and the
         sentence of a later load that brings the keys. A refresh never drops the keys, so
         the rig never goes back to none."""
-        say(self.load())
+        failed = False
+
+        def attempt(step):
+            # An error nobody named must not end the thread: wl.works' keys would never be
+            # fetched again until `wlx serve` restarts (XC-233). Said once, then retried.
+            nonlocal failed
+            try:
+                result = step()
+            except Exception as err:  # never BaseException: a stop still ends the thread
+                if not failed:
+                    say(f"sign-in keys: {type(err).__name__}: {err}; trying again")
+                failed = True
+                return None
+            failed = False
+            return result
+
+        said = attempt(self.load)
+        if said is not None:
+            say(said)
         held = self.ready
         while not stop.wait(KEY_REFRESH_S if held else RETRY_EVERY_S):
             if held:
-                self.refresh()
+                attempt(self.refresh)
                 continue
-            said = self.load()
-            if self.ready:
+            said = attempt(self.load)
+            if said is not None and self.ready:
                 say(said)
                 held = True
 

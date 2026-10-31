@@ -329,6 +329,8 @@ def test_fetch_json_refuses_a_certificate_from_an_authority_it_does_not_trust(tm
         (200, b"[1, 2]", "did not answer a JSON object"),
         # A short id: pytest would otherwise print the whole body as the test's name (XC-331).
         pytest.param(200, b" " * (signin.FETCH_LIMIT + 1), "more than", id="over-the-limit"),
+        # Under the limit, deep enough that json.loads raises RecursionError (XC-233).
+        pytest.param(200, b"[" * 30000 + b"]" * 30000, "not decode", id="nested-too-deep"),
     ],
 )
 def test_fetch_json_refuses_what_is_not_one_small_json_object(tmp_path, status, body, says):
@@ -682,6 +684,42 @@ def test_the_keys_thread_loads_at_once_retries_then_refreshes_and_says_only_the_
         _eventually(lambda: checker.key_ids() == {"rotated"})  # a refresh, on its own
         stop.wait(0.3)  # housekeeping: several more refreshes
         assert len(said) == 2
+    finally:
+        stop.set()
+        thread.join(5)
+    assert not thread.is_alive()
+
+
+def test_the_keys_thread_outlives_an_error_nobody_named_and_fetches_again(tmp_path, monkeypatch):
+    """XC-233: an exception outside the handlers' lists, in the first load and then in a
+    refresh, is said once and the thread goes on with its schedule; it does not die."""
+    monkeypatch.setattr(signin, "RETRY_EVERY_S", 0.05)
+    monkeypatch.setattr(signin, "KEY_REFRESH_S", 0.05)
+    issuer = Issuer()
+    state = {"calls": 0, "raise_from": None, "raised": 0}
+
+    def fetch(url, **kwargs):
+        state["calls"] += 1
+        if state["calls"] == 1 or (state["raise_from"] is not None and state["calls"] >= state["raise_from"] and state["raised"] < 3):
+            if state["calls"] != 1:
+                state["raised"] += 1
+            raise RuntimeError("nobody named this")
+        return issuer.fetch(url, **kwargs)
+
+    checker = signin.Checker(page=signin.parse_rig_page(f"rig-3={PAGE}"), issuer=ISSUER, cache=tmp_path / "wl-works.json", fetch=fetch)
+    said: list[str] = []
+    stop = threading.Event()
+    thread = threading.Thread(target=checker.keep_keys, args=(stop, said.append), daemon=True)
+    thread.start()
+    try:
+        _eventually(lambda: checker.ready)  # the first load raised; a later one brought the keys
+        assert "RuntimeError" in said[0]
+        assert thread.is_alive()
+        state["raise_from"] = state["calls"] + 1  # now the refreshes raise, three times
+        _eventually(lambda: state["raised"] == 3)
+        calls = state["calls"]
+        _eventually(lambda: state["calls"] > calls)  # and it fetches again afterwards
+        assert thread.is_alive() and checker.ready
     finally:
         stop.set()
         thread.join(5)
