@@ -2257,6 +2257,88 @@ def test_a_command_the_rig_took_and_never_acknowledged_is_told_from_one_never_se
     assert not isinstance(not_sent.value, Unacknowledged)
 
 
+def test_a_timed_out_command_is_on_the_wire_once_and_never_resent(zmq_cleanup):
+    """XC-136. No accidental doubles (PI, 2026-09-28), at the link rather than through
+    `wlx serve`: the rig here is a ROUTER socket that reads every frame and answers
+    none, so it counts what `deliver` puts on the wire. One timed-out command is one
+    frame, however long the socket then lives -- the reset opens a fresh socket and
+    sends nothing on it -- and the next command is the only other frame, after it.
+    Counts and outcomes only: the windows below bound how long the test looks, and no
+    assertion reads how long anything took."""
+    import zmq
+
+    from wl_xcon.link import _decode_command
+
+    ctx = zmq.Context()
+    rig = ctx.socket(zmq.ROUTER)
+    try:
+        rig.setsockopt(zmq.LINGER, 0)
+        port = rig.bind_to_random_port("tcp://127.0.0.1")
+        commands = zmq_cleanup(ZmqCommands(
+            f"tcp://127.0.0.1:{port}", reply_timeout_s=0.2, connect_timeout_s=10.0))
+
+        def seen_within(seconds: float) -> list:
+            frames: list = []
+            deadline = time.monotonic() + seconds
+            while time.monotonic() < deadline:
+                if rig.poll(50, zmq.POLLIN):
+                    frames.append(rig.recv_multipart())
+            return frames
+
+        with pytest.raises(Unacknowledged):
+            commands.deliver(ManualReward(by=Box("jake")))
+        after_timeout = seen_within(1.0)
+        # Read before anything else is sent, so a resend is what fails here.
+        assert [_decode_command(frames[-1]) for frames in after_timeout] == [
+            ManualReward(by=Box("jake"))
+        ]
+
+        with pytest.raises(Unacknowledged):
+            commands.deliver(Pause(by=Box("jake")))
+        after_second = seen_within(1.0)
+    finally:
+        rig.close(linger=0)
+        ctx.term()
+
+    assert [_decode_command(frames[-1]) for frames in after_second] == [
+        Pause(by=Box("jake"))
+    ]
+
+
+def test_a_command_right_after_a_connect_timeout_is_told_the_same_and_the_socket_is_kept(
+    zmq_cleanup,
+):
+    """XC-136. A connect timeout is the no-reset path: nothing was sent, so the REQ
+    socket owes no reply and is not replaced (`_reset` is only for an unacknowledged
+    send). A `deliver` right after it must say *no rig is connected* again -- not
+    raise a socket-state error from a send the first call never made, and not claim
+    an acknowledgment was missed -- and once a rig is listening on that endpoint the
+    very same socket delivers."""
+    (endpoint,) = free_endpoints(1)
+    commands = zmq_cleanup(ZmqCommands(endpoint, reply_timeout_s=30.0, connect_timeout_s=0.1))
+    socket = commands._req
+
+    for _ in range(2):
+        with pytest.raises(NotDelivered, match="no rig is connected") as raised:
+            commands.deliver(Stop(by=Box("jake")))
+        assert not isinstance(raised.value, Unacknowledged)
+        assert commands._req is socket and not socket.closed
+        assert commands._sockets == [socket], "a connect timeout must not touch the sockets"
+
+    # A rig comes up where the sender was pointed. The wait for the connection is
+    # lengthened for this call only: ZeroMQ reconnects on its own schedule, and the
+    # question here is whether the kept socket can deliver, not how fast it connects.
+    commands._connect_ms = 20_000
+    link = zmq_cleanup(ZmqLink(pub_endpoint="tcp://127.0.0.1:0", rep_endpoint=endpoint))
+    thread, got = _draining(link)
+
+    commands.deliver(Resume(by=Box("jake")))
+    thread.join(timeout=30)
+
+    assert got == [Resume(by=Box("jake"))]
+    assert commands._req is socket
+
+
 # ---------------------------------------------------------------------------
 # P4d-2b b3a-1: schema 10, the idle frame, and the service's commands
 # ---------------------------------------------------------------------------
