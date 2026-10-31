@@ -2064,6 +2064,68 @@ def test_a_rig_that_never_acknowledges_is_not_delivered_and_the_socket_is_reset(
     assert Resume(by=Box("jake")) in got
 
 
+#: Every wait a `Zmq*` constructor in `link.py` takes, as `(build, keyword)` (XC-046).
+#: `ZmqLink` takes none; `ZmqConsole`'s `settle_s` is a sleep, not a wait ZeroMQ is
+#: given, and `time.sleep` refuses a NaN or a negative itself.
+_WAITS = [
+    (lambda endpoint, **wait: ZmqConsole(endpoint, None, settle_s=0, **wait), "receive_timeout_s"),
+    (lambda endpoint, **wait: ZmqMarks(endpoint, **wait), "connect_timeout_s"),
+    (lambda endpoint, **wait: ZmqCommands(endpoint, **wait), "reply_timeout_s"),
+    (lambda endpoint, **wait: ZmqCommands(endpoint, **wait), "connect_timeout_s"),
+]
+_WAIT_IDS = ["ZmqConsole.receive", "ZmqMarks.connect", "ZmqCommands.reply", "ZmqCommands.connect"]
+
+
+@pytest.mark.parametrize(
+    "seconds",
+    [
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+        -1.0,
+        # One millisecond negative is `RCVTIMEO` -1, which ZeroMQ reads as wait forever;
+        # pyzmq's `poll` reads every negative so.
+        -0.001,
+        # One millisecond past the largest `RCVTIMEO` holds (a C `int`).
+        2_147_483.648,
+        1e300,
+        True,
+        "5",
+        None,
+    ],
+)
+@pytest.mark.parametrize(("build", "keyword"), _WAITS, ids=_WAIT_IDS)
+def test_a_wait_zeromq_cannot_take_is_refused_before_anything_opens(build, keyword, seconds):
+    """XC-046: each wait reached `int(seconds * 1000)` and the socket unchecked. NaN and
+    infinity raised from inside `int()`; one past what `RCVTIMEO` holds raised pyzmq's
+    `OverflowError`; `"5"` became a thousand fives; and a negative was taken in silence,
+    `-0.001` as ZeroMQ's wait forever. Now each is a plain `ValueError` naming the
+    parameter, raised before a context is made."""
+    (endpoint,) = free_endpoints(1)
+
+    with pytest.raises(ValueError, match=f"^{keyword} must be a number of seconds"):
+        build(endpoint, **{keyword: seconds})
+
+
+@pytest.mark.parametrize("seconds", [0, 0.0, 5, 0.05, 2_147_483.647])
+@pytest.mark.parametrize(("build", "keyword"), _WAITS, ids=_WAIT_IDS)
+def test_a_wait_zeromq_can_take_is_taken_to_the_millisecond(zmq_cleanup, build, keyword, seconds):
+    """Zero is a wait, ZeroMQ's do-not-wait (`wlx serve`'s tests build their consoles
+    so), and the largest is exactly what `RCVTIMEO` holds; a socket's own option is
+    read back where a socket carries the wait."""
+    import zmq
+
+    (endpoint,) = free_endpoints(1)
+    built = zmq_cleanup(build(endpoint, **{keyword: seconds}))
+
+    if isinstance(built, ZmqConsole):
+        assert built._sub.getsockopt(zmq.RCVTIMEO) == int(seconds * 1000)
+    elif keyword == "reply_timeout_s":
+        assert built._req.getsockopt(zmq.RCVTIMEO) == int(seconds * 1000)
+    else:
+        assert built._connect_ms == int(seconds * 1000)
+
+
 def test_an_unclosed_command_sender_is_released_by_the_collector(zmq_cleanup):
     link = zmq_cleanup(ZmqLink(pub_endpoint="tcp://127.0.0.1:0", rep_endpoint="tcp://127.0.0.1:0"))
     with _collector_paused():
