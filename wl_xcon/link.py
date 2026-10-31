@@ -3154,29 +3154,35 @@ class ZmqLink:
 WAIT_MS_MAX = 2**31 - 1
 
 
-def _wait_ms(seconds: object, name: str) -> int:
+def _wait_ms(seconds: object, name: str, least_ms: int = 0) -> int:
     """`seconds`, a wait one of this file's `Zmq*` constructors takes, as the whole
     milliseconds ZeroMQ is given, or a `ValueError` naming `name` (XC-046).
 
-    A number that is not a `bool`, finite, not negative, and within `WAIT_MS_MAX`.
-    **Zero is a wait**: ZeroMQ's do-not-wait, an `RCVTIMEO` of 0 or a poll of 0
-    returning at once (`wlx serve`'s tests build their consoles so). **A negative is
-    refused because ZeroMQ would not refuse it**: an `RCVTIMEO` of -1 is wait
-    forever, and `-0.001` s truncates to it, and pyzmq's `poll` reads every negative
-    as forever. Checked at the top of each constructor, before a context is made."""
-    if (
-        isinstance(seconds, bool)
-        or not isinstance(seconds, (int, float))
-        or (isinstance(seconds, float) and not math.isfinite(seconds))
-        or seconds < 0
-        or int(seconds * 1000) > WAIT_MS_MAX
-    ):
+    A number that is not a `bool`, from `least_ms` to `WAIT_MS_MAX` once in
+    milliseconds, compared before `int()`: a NaN, an infinity, and a float that
+    overflows on the way to milliseconds (`sys.float_info.max`) are refused like any
+    other value out of range. **Zero is a wait only where `least_ms` is 0**: a
+    console's receive wait, where an `RCVTIMEO` of 0 is ZeroMQ's do-not-wait (`wlx
+    serve`'s tests build their recorders so). A reply or a connect wait takes 1 ms at
+    least (`least_ms=1`): a reply wait of 0 reported every command *not delivered*
+    while the rig applied it, and a connect wait of 0 says no rig is listening on a
+    sender's first try when one is. **A positive wait under 1 ms waits 1 ms**, never
+    truncated to 0. **A negative is refused because ZeroMQ would not refuse it**: an
+    `RCVTIMEO` of -1 is wait forever, `-0.001` s truncates to it, and pyzmq's `poll`
+    reads every negative as forever. Checked at the top of each constructor, before a
+    context is made."""
+    ms = None
+    if not isinstance(seconds, bool) and isinstance(seconds, (int, float)):
+        ms = seconds * 1000
+    if ms is None or not least_ms <= ms < WAIT_MS_MAX + 1:
+        lowest = "0 (do not wait)" if least_ms == 0 else f"{least_ms / 1000:g}"
         raise ValueError(
-            f"{name} must be a number of seconds from 0 (do not wait) to "
-            f"{WAIT_MS_MAX / 1000}, the longest ZeroMQ's millisecond waits hold; "
-            f"got {seconds!r}"
+            f"{name} must be a number of seconds from {lowest} to {WAIT_MS_MAX / 1000}, "
+            f"the longest ZeroMQ's millisecond waits hold; got {seconds!r}"
         )
-    return int(seconds * 1000)
+    if 0 < ms < 1:
+        return 1
+    return int(ms)
 
 
 class ZmqConsole:
@@ -3365,10 +3371,10 @@ class ZmqMarks:
 
     def __init__(self, mark_endpoint: str, connect_timeout_s: float = CONNECT_TIMEOUT_S):
         """Connect to `mark_endpoint`. `connect_timeout_s` is refused, before anything
-        opens, unless ZeroMQ can take it (`_wait_ms`, XC-046)."""
+        opens, unless it is 1 ms or more and ZeroMQ can take it (`_wait_ms`, XC-046)."""
         import zmq
 
-        connect_ms = _wait_ms(connect_timeout_s, "connect_timeout_s")
+        connect_ms = _wait_ms(connect_timeout_s, "connect_timeout_s", least_ms=1)
         self._ctx = zmq.Context()
         self._sockets: list = []
         self._finalizer = weakref.finalize(self, _release, self._ctx, self._sockets)
@@ -3464,11 +3470,11 @@ class ZmqCommands:
         connect_timeout_s: float = CONNECT_TIMEOUT_S,
     ):
         """Connect to `req_endpoint`. Each timeout is refused, before anything opens,
-        unless ZeroMQ can take it (`_wait_ms`, XC-046)."""
+        unless it is 1 ms or more and ZeroMQ can take it (`_wait_ms`, XC-046)."""
         import zmq
 
-        reply_ms = _wait_ms(reply_timeout_s, "reply_timeout_s")
-        connect_ms = _wait_ms(connect_timeout_s, "connect_timeout_s")
+        reply_ms = _wait_ms(reply_timeout_s, "reply_timeout_s", least_ms=1)
+        connect_ms = _wait_ms(connect_timeout_s, "connect_timeout_s", least_ms=1)
         self._ctx = zmq.Context()
         self._sockets: list = []
         self._finalizer = weakref.finalize(self, _release, self._ctx, self._sockets)
