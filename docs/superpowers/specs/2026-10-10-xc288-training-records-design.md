@@ -505,6 +505,18 @@ console (not one of engine spec §19's warnings), and the file is built again la
 - **Every format change bumps the version**, and every past session rebuilds into it, with tables a
   session never had (gaze before build T) present and empty.
 
+> **Noted 2026-10-31 (wl.works' design of 2026-10-11, read at its `main` `b3c1b933`):** wl.works designed the
+> workstation's read as **a member's agent**, not a client of the workstation's own: a member connects the rebuild
+> program on that machine as their agent, signing in through a browser there; it reads only while that member's
+> agents and their animal switch are both on; and the workstation is not named in wl.works, with no new credential
+> class. One structured, read-only tool gives an animal's record as data over a date range (rig names over time,
+> weights, water entries, water states, observations, statuses, and sessions with cage times and notes), people as
+> account ids with a `people` list naming them. It is wl.works' stage 16b-4, designed, not built (its lab-host
+> spec, `docs/superpowers/specs/2026-10-11-what-wl-works-gives-a-lab-host-and-a-workstation-design.md` in
+> wl-works, §4.1 and §4.2, lines 268-302, and §12, which declines a named-workstation client class; its handover,
+> "The second brainstorm's answers", XC-320 (d), lines 646-653; backlog XC-320). Read "its own wl.works client"
+> above in that light. The text above is left as approved.
+
 ## 6. Where the records go
 
 - **The corpus is the session folders** on lab storage, the agent's file in each; the same folders

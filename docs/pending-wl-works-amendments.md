@@ -41,6 +41,13 @@ into that repository."* If wl-works rejects or reshapes that protocol, both amen
 below move with it, and that is the correct dependency — a second protocol invented here
 would be worse than either outcome.
 
+> **Accepted 2026-10-11 by wl.works** (noted 2026-10-31): the protocol is no longer only proposed. wl.works took it
+> in two parts: a common part every lab machine speaks (the token, `/health`, the job envelope, listings by
+> `?since=`, the codes, the three timings) and an appendix per kind of machine, each its writer's; its copy is its
+> `docs/ops/lab-host-protocol.md`, and the rig's and the kiosk's appendices are asked of wl-xcon (backlog XC-434).
+> (Its lab-host spec, `docs/superpowers/specs/2026-10-11-what-wl-works-gives-a-lab-host-and-a-workstation-design.md`,
+> ruling 1 and §1.1; its handover, "The second brainstorm's answers", lines 626-629; read 2026-10-31 at its `main` `b3c1b933`.)
+
 ---
 
 # OPEN — wl-works gains a second lab host, and it speaks the protocol it already has
@@ -427,6 +434,14 @@ for time needs a route to it that does not exist today, on UDP 123 only.
 
 > **Updated 2026-10-11 — the hostname is not as settled as this section says.** wl-works' own sources give **three** names, and its handover asks which a lab host will be given; **wl-xcon asserts none of them.** `ntp.wl.works` is the PI's name (2026-09-20, as this section says). wl-works' `docs/ops/waiting-on.md` (lines 3552 and 3564) says `ptp.wl.works` serves NTP, and its row-60 spec (`2026-09-20-row-60-lab-time-service-design.md` §8) rules `time.wl.works`, over both `ptp.` and `ntp.`. Wherever this file or the backlog writes `ntp.wl.works` below, read it as "the PI's name, awaiting wl-works' answer". The route (a lab host initiating UDP 123, one port, one direction) is asked unchanged. XC-017, a preflight clock-skew check, waits on it.
 
+> **Answered 2026-10-11 by wl.works** (noted 2026-10-31): **`time.wl.works`**, its owner's ruling of 2026-09-20 (its
+> row 60 §8), `time.` over `ptp.` and `ntp.`; the two `ptp.` lines were stale and were struck that day. The route
+> is not designed: how a lab host's UDP 123 to that name reaches the time appliance is row 60's plan's, and row 60
+> is filed under its "Waiting on final hardware", since no appliance, switch, fiber or antenna exists. It calls
+> this section's framing (one port, one direction, bookkeeping time, the rig's clock the floor) consistent with
+> row 60. (Its handover, "XC-103 — the NTP hostname", lines 540-549; read 2026-10-31 at its `main` `b3c1b933`.) This repository's
+> ADR-0009 and architecture.md still write `ntp.wl.works`, the PI's name of 2026-09-20. Backlog XC-103.
+
 **This is not the AST guardrail changing.** `wl-preproc`'s "never initiates a connection"
 check (`tests/test_cli_guardrails.py`, read from source 2026-09-20) is a static walk over
 *application source*, asserting nothing in that package opens an outbound socket. A
@@ -581,7 +596,7 @@ holds no ELN notes; it holds the rig name and not the id) and is rebuilt when it
    *(2026-10-11: `prepare-session` withdrawn, item 2; the envelope stands, read by the rig's page.)*
 5. Whether wl-works can run an NTP server at `ntp.wl.works` reachable from the lab
    network on UDP 123, and open the one-port routing exception that requires (new,
-   2026-09-20 — see above). **The hostname is the PI's; the route is not settled. As of 2026-10-11 wl-works names two other hostnames (see the update in the NTP section), and its answer is awaited on which a lab host is given.**
+   2026-09-20 — see above). **The hostname is the PI's; the route is not settled. As of 2026-10-11 wl-works names two other hostnames (see the update in the NTP section), and its answer is awaited on which a lab host is given.** *(Answered 2026-10-11: `time.wl.works`; the route is row 60's, waiting on its final hardware. The NTP section's note.)*
 6. **Answered 2026-09-29: yes, with conditions (above).** Whether signed-in members may send controls to a rig from its page, and, if so, the four
    changes that needs: a client per rig, the rig's callback URL allowed, tokens whose
    audience is the rig, and the rig's page exchanging a code for a token (new, 2026-09-29 —
@@ -699,14 +714,22 @@ are wl-works' section, in its order; each is wl-works' to accept, amend or refus
 | XC-105 | Does the ELN record both ends of an out-of-cage interval as clock times, and when might the rig read them? The rig's own 8-hour limit stays the rig's. wl-works did not check this | nothing; the stand-in works |
 | XC-098 | Does wl-works want to write `session_manifest.yaml`? The question is open with wl-preproc too (the XC-098 line in [the wl-preproc file](pending-wl-preproc-amendments.md#open--delivered-2026-10-11-engine-spec-21-and-the-older-backlog-asks)) | nothing |
 
-> **Answered 2026-10-11, for the rows `prepare-session` touches** (noted 2026-10-31; wl.works' handover, "wl.works'
+> **Answered 2026-10-11** (noted 2026-10-31; wl.works' handover, "wl.works'
 > answers to the open asks of 2026-10-11", lines 512-667, read at its `main` `b3c1b933`). **XC-099, XC-100**: code
 > against a fake; the lab-host client is its Plan 10's stage 10a-1, in the fifth build of its order (lines
 > 519-532); later that day `prepare-session` was withdrawn and the rig read designed in its place, the envelope's
 > names standing (lines 630-637; the note at the head of the metadata-bundle section). **XC-105**: the ELN records
 > both ends as clock times, each with who marked it (lines 597-601), and the rig's page reads the departure at the
-> open and the return after (lines 641-645). **XC-320**: item 7 of "What wl-works must decide". The table above is
-> kept as asked; the other rows' answers are in the same section of wl.works' handover.
+> open and the return after (lines 641-645). **XC-320**: item 7 of "What wl-works must decide". **XC-103**:
+> `time.wl.works`, the route not designed (lines 540-549; the NTP section's note). **XC-104**: yes, a kiosk
+> answering `down` tells the animal's people once per episode (lines 654-657). The table above is kept as asked;
+> XC-098's answer is in the same section of wl.works' handover.
+>
+> **Its asks of wl-xcon that day**, filed in the backlog on 2026-10-31: write the rig's and the kiosk's
+> appendices of the lab-host protocol (XC-434; lines 626-629); publish `subject` and `out_since` readings when
+> the console has had to ask (XC-435; lines 641-645); the kiosk answers `down` for a stop and a refusal as well
+> as a fault (XC-436; lines 654-657); and the rig read's other field names agreed at 10c-1's plan (XC-437; its
+> lab-host spec §2.2, line 197).
 
 **Closed, per wl-works (not re-asked):** XC-102, XC-147 to XC-149, XC-225 and XC-240 (rig sign-in built and deployed,
 `4eb2c568` and `637007a7`; only XC-151 and XC-152, wl-xcon's, stand between it and a live check); the host list,
