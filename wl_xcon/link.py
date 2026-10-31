@@ -2734,7 +2734,7 @@ def _release(ctx, sockets) -> None:
 #: source.
 #:
 #: **Chosen from a measurement of the test environment, not of a rig**:
-#: `docs/measurements/dev-machine/2026-10-30-reply-grace.md`, by
+#: `docs/measurements/dev-machine/2026-10-31-reply-grace.md`, by
 #: `tools/measure_reply_grace.py`. The two `wlx serve` end-to-end tests that failed so
 #: on CI, each run 50 times over in each of six two-CPU Linux containers at once, on
 #: one development host at one-minute load averages from 4.7 to 104: without a grace,

@@ -1,0 +1,15 @@
+{
+ "label": "grace-1",
+ "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+ "cpus": 14,
+ "docker": "29.4.0",
+ "docker_cpus": "14",
+ "image": "xcon-flake:latest",
+ "containers": 6,
+ "cpus_each": 2.0,
+ "repeats": 50,
+ "burners": 0,
+ "grace": null,
+ "immediate": "on",
+ "started": "2026-10-31T00:53:13"
+}

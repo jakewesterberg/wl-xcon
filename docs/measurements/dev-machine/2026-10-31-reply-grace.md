@@ -7,10 +7,12 @@
 
 **Date:** 2026-10-31 (the defect was found and first measured on 2026-10-30, XC-429).
 **Script:** `tools/measure_reply_grace.py`, run as
-`python tools/measure_reply_grace.py batch --label LABEL --image xcon-flake:latest --containers 6 --repeats 50 --out .superpowers/reply-grace`,
+`python tools/measure_reply_grace.py batch --label LABEL --image xcon-flake:latest --containers 6 --repeats 50 --out OUT`,
 with `--grace 0` for the batches without a grace, `--burners 14` for the third pair and
 `--grace 0 --immediate off` for the last, one batch at a time in the order of the table, then
-`python tools/measure_reply_grace.py summarize .superpowers/reply-grace`.
+`python tools/measure_reply_grace.py summarize OUT`. Each batch's `host.json`, `load.json`
+and `summary.json`, as `batch` wrote them, are in `2026-10-31-reply-grace/`, one folder per
+batch.
 **Code:** this branch's tree as committed with this document: `REPLY_GRACE_S = 0.1`, the
 clamped wait of XC-429's review (M3), and `tests/test_serve.py` as it stood at `957ec98`.
 **Host:** macOS-27.0.1-arm64, 14 CPUs, Docker 29.4.0 (OrbStack, 14 CPUs to its VM), with
@@ -92,11 +94,12 @@ link 0.5 to 1.4 ms after that drain returned. Times are from when the console se
 ## What it shows, and what it does not
 
 - **The reply is lost on the console's side, not the rig's.** With the console's REQ socket
-  reconnected without `IMMEDIATE`, nothing was lost. On 2026-10-30, closing the rig's REP
-  socket with a 1 s linger did not help (12 of 600, from this script's scratch predecessor),
-  and that close never waited, so nothing was left queued at the rig. Why `IMMEDIATE` drops a
-  reply not yet read when the connection goes is not read in libzmq's source here; it is
-  measured, not explained.
+  reconnected without `IMMEDIATE` and no grace, 0 of 600 runs lost it (`immediate-off-1`),
+  against 32 of 1,800 with `IMMEDIATE` on and no grace. Why `IMMEDIATE` drops a reply not yet
+  read when the connection goes is not read in libzmq's source here; it is measured, not
+  explained. One more observation points the same way but is **unreproduced scratch**, which
+  this script cannot re-run: on 2026-10-30, closing the rig's REP socket with a 1 s linger
+  still lost 12 of 600, and that close never waited, so nothing was left queued at the rig.
 - **The grace removed the loss at every load it was run at here**, and its cost is the close:
   about 100 ms, only when a command was answered less than `REPLY_GRACE_S` before it.
 - **It narrows the race and does not close it.** A console kept from reading for longer than
@@ -104,12 +107,13 @@ link 0.5 to 1.4 ms after that drain returned. Times are from when the console se
 - **It is not a rig.** The loss depends on how soon the console's thread reads after the rig
   closes, which depends on the console's machine and load. Nothing here measures a rig's.
 
-## Raw logs
+## Raw outputs
 
-One JSON-lines log per container, each batch's host record, load samples and `summary.json`,
-5.3 MB in all: not committed. They were kept in the git-ignored `.superpowers/reply-grace/` of
-the `xc429-e2e-room` worktree on the development machine, which is deleted after merge, and
-the script regenerates them. The tables above are `summarize`'s output, rearranged.
+`2026-10-31-reply-grace/` holds, for each batch, what `batch` wrote beside its logs: the host
+and its settings (`host.json`), the load samples (`load.json`), and the counts and every lost
+reply's timeline (`summary.json`). The tables above are `summarize`'s output from the same
+logs, rearranged. The per-container JSON-lines logs themselves, 5.3 MB in all, are not
+committed; a run of the script writes its own.
 
 **Before this script existed** (2026-10-30), the same measurement made by scratch probes, not
 committed, agreed: 56 of 3,120 runs lost the stop's reply without a grace, 0 of 1,800 with it,
