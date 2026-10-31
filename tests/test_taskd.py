@@ -5226,6 +5226,41 @@ def test_a_mark_in_a_trial_that_faults_is_still_recorded(tmp_path, monkeypatch):
     assert (stamp["mark"], stamp["trial_index"], stamp["frame"]) == (8, 0, 1)
 
 
+def test_a_mark_in_a_later_trial_that_faults_is_recorded_with_that_trial_index(
+    tmp_path, monkeypatch
+):
+    """XC-130. The test above faults in trial 0, where the index the close-time write
+    uses and a hard-coded 0 agree. Here a trial runs clean first and the fault, with a
+    mark stamped in its frame 1, is in trial 1: the stamp is written as the session
+    closes, numbered 1 and saying trial 1, with trial 1 on its row."""
+    from wl_xcon import taskd
+
+    real = taskd.run_trial
+    link = Simulated()
+    calls = []
+
+    def faults_second(trial, world, frame_period, values=None, effects=None, each_frame=None):
+        calls.append(1)
+        if len(calls) == 1:
+            return real(trial, world, frame_period, values=values, effects=effects,
+                        each_frame=each_frame)
+        link.marks.append(8)  # mark 8 arrives in frame 1 of the second trial
+        each_frame(1)
+        raise RuntimeError("the display went away")
+
+    monkeypatch.setattr(taskd, "run_trial", faults_second)
+    session = _session(_spec(tmp_path, trials=3), link=link)
+
+    with pytest.raises(RuntimeError, match="the display went away"):
+        session.run()
+
+    assert len(calls) == 2
+    (stamp,) = [row for row in _controls_rows(session) if row["kind"] == "mark"]
+    assert (stamp["mark"], stamp["trial_index"], stamp["frame"]) == (8, 1, 1)
+    assert stamp["number"] == 1
+    assert "trial 1, frame 1" in session.controls[-1][3]
+
+
 def test_a_stamp_that_cannot_be_written_as_the_session_closes_still_closes_the_record(
     tmp_path, monkeypatch
 ):
