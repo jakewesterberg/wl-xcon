@@ -2733,13 +2733,13 @@ def _release(ctx, sockets) -> None:
 #: That effect is measured; why `IMMEDIATE` does it has not been read in libzmq's
 #: source.
 #:
-#: **Chosen from a measurement of the test environment, not of a rig** (2026-10-30,
-#: scratch probes never committed): the two `wlx serve` end-to-end tests that failed
-#: so on CI, each run 30 or 50 times over in each of six two-CPU Linux containers at
-#: once, on one host whose one-minute load average read 8 to 142 across the runs.
-#: Without a grace, 56 of 3,120 runs lost the stop's reply at the reply timeout, and
-#: in each of the 50 probed for it the session had drained the stop and closed its
-#: link first; with this grace, 0 of 1,800.
+#: **Chosen from a measurement of the test environment, not of a rig**:
+#: `docs/measurements/dev-machine/2026-10-30-reply-grace.md`, by
+#: `tools/measure_reply_grace.py`. The two `wlx serve` end-to-end tests that failed so
+#: on CI, each run 50 times over in each of six two-CPU Linux containers at once, on
+#: one development host at one-minute load averages from 4.7 to 104: without a grace,
+#: 32 of 1,800 runs lost the stop's reply, each after the session had drained the stop
+#: and begun to close its link; with this grace, 0 of 1,800.
 #: **It narrows the race and does not close it**: a console kept from reading for
 #: longer than this still loses the reply. Closing that is the console's side, XC-429.
 REPLY_GRACE_S = 0.1
@@ -3093,10 +3093,11 @@ class ZmqLink:
         console can still read the reply: `wlx run` closes its link right after the
         boundary that drained a stop, and a console's REQ socket loses a reply it has
         not yet read when the connection goes (`REPLY_GRACE_S` has the measurement).
-        At most `REPLY_GRACE_S`, only on this path: the finalizer never waits, since it
-        may run inside the cyclic collector, and a constructor that fails has replied
-        to nothing. An interruption during the wait still releases, in the `finally`,
-        and leaves the finalizer armed, as below.
+        At most `REPLY_GRACE_S`, whatever the clock does, and once: a second `close`
+        does not wait again. Only on this path: the finalizer never waits, since it may
+        run inside the cyclic collector, and a constructor that fails has replied to
+        nothing. An interruption during the wait still releases, in the `finally`, and
+        leaves the finalizer armed, as below.
 
         Runs `_release`: each socket is closed with `linger=0`, then
         `Context.destroy(linger=0)` terminates the context. Then it detaches this
@@ -3173,8 +3174,12 @@ class ZmqLink:
         try:
             if self._replied_at is not None:
                 left = self._replied_at + REPLY_GRACE_S - time.monotonic()
+                # Cleared first, so a second `close` after an interrupted one waits
+                # for nothing.
+                self._replied_at = None
                 if left > 0:
-                    time.sleep(left)
+                    # Clamped: on a clock stepped back, `left` could be anything.
+                    time.sleep(min(left, REPLY_GRACE_S))
         finally:
             _release(self._ctx, self._sockets)
         self._finalizer.detach()
@@ -3325,7 +3330,8 @@ class ZmqConsole:
         return decode(raw)
 
     def close(self) -> None:
-        """See `ZmqLink.close` -- same reasoning, same shape."""
+        """See `ZmqLink.close`: the same release, with no grace, since this end sends no
+        replies."""
         _release(self._ctx, self._sockets)
         self._finalizer.detach()
 
@@ -3401,7 +3407,8 @@ class ZmqMarks:
             ) from exc
 
     def close(self) -> None:
-        """See `ZmqLink.close` -- same reasoning, same shape."""
+        """See `ZmqLink.close`: the same release, with no grace, since this end sends no
+        replies."""
         _release(self._ctx, self._sockets)
         self._finalizer.detach()
 
@@ -3526,7 +3533,8 @@ class ZmqCommands:
         self._req = self._open()
 
     def close(self) -> None:
-        """See `ZmqLink.close` -- same reasoning, same shape."""
+        """See `ZmqLink.close`: the same release, with no grace, since this end sends no
+        replies."""
         _release(self._ctx, self._sockets)
         self._finalizer.detach()
 
