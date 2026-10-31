@@ -93,6 +93,15 @@ transport, bearer token, `GET /health`, `POST /jobs`, same status codes and timi
 > reservoir drop is filed as the water entry. These are wl-works' four recommendations, to each of
 > which the PI answered **"Agree"**; kiosks follow the same rule.
 
+> **The ELN → rig row superseded 2026-10-11 by wl.works** (noted 2026-10-31). wl.works withdrew the
+> `prepare-session` action and sends a rig no action and no data; the row's plan fields and probes were
+> withdrawn on 2026-10-01. What the rig wants at a session's open is read by its own page, signed in through
+> wl.works, from wl.works' rig read (its stage 10c-1, designed, not built): the animal's permanent id and rig
+> name, its newest weight with its date, its water state, the day's water, its open rig visit and the people
+> list (wl.works' lab-host spec,
+> `docs/superpowers/specs/2026-10-11-what-wl-works-gives-a-lab-host-and-a-workstation-design.md` in wl-works, §2).
+> Backlog XC-100.
+
 The split follows their own rules: new observables become *readings* rather than endpoints, and
 result upload is declined because *"wl.works pulls; this host never pushes."*
 
@@ -110,7 +119,7 @@ All four amendment documents in this repo converge here:
 |---|---|
 | `wl-sync` | Session id readable by a rig host; a subject change mints `_02` |
 | `wl-preproc` | `PARAM_CHANGE` escape; ownership split recorded; codec declared as an artifact; **online-calibration reader**; per-trial gaze staleness in `EyeQuality` |
-| `wl-works` | Host list as configuration; `prepare-session`; a **planned calibration block per session** |
+| `wl-works` | Host list as configuration; `prepare-session` *(withdrawn by wl.works 2026-10-11, §4's note)*; a **planned calibration block per session** |
 
 Two of these block real things rather than tidying: without the calibration reader
 `CalibrationSource.ONLINE` is unavailable for every session under ADR-0005, and without the

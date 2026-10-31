@@ -637,6 +637,14 @@ verdict shape, published JSON Schemas — rather than inventing a second protoco
 | rig -> wl-works, live | session, subject, task, state, trial counts, fluid against the day's **floor** (PI, 2026-09-06 — not a ceiling), time out of the cage against its ceiling, preflight result | **readings on `GET /health`**, polled at the protocol's 60 s cadence |
 | rig -> ELN, finished | trials run, performance by condition, ~~fluid delivered~~ fluid commanded *(corrected 2026-10-18, the PI: "Say 'fluid commanded'", S8 §5.1; asked of wl-works, XC-390)*, task and config versions, parameter-change log, abort census | **a file in the session directory**, ingested by `wl-preproc`, reaching the ELN by the path that already exists |
 
+> **The ELN -> rig row superseded 2026-10-11 by wl.works** (noted 2026-10-31). wl.works withdrew the
+> `prepare-session` action and sends a rig no action and no data; the row's plan fields and probes were withdrawn
+> on 2026-10-01. What the rig wants at a session's open is read by its own page, signed in through wl.works, from
+> wl.works' rig read (its stage 10c-1, designed, not built): the animal's permanent id and rig name, its newest
+> weight with its date, its water state, the day's water, its open rig visit and the people list (wl.works'
+> lab-host spec, `docs/superpowers/specs/2026-10-11-what-wl-works-gives-a-lab-host-and-a-workstation-design.md` in
+> wl-works, §2). Backlog XC-100; `docs/design/architecture.md` carries the current shape.
+
 The split is not arbitrary. `lab-host-protocol.md` declines a job-status endpoint and states
 that when progress becomes observable "it will be as a **reading**, because readings are the
 surface this host already publishes and wl.works already polls — not as a new endpoint"; it

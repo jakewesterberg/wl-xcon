@@ -308,8 +308,10 @@ class SessionSpec:
     #: config is a session with no limits, and `Welfare` refuses one missing either
     #: of the two entries a session cannot be bounded without.
     bounds: Bounds
-    #: What another deployment already delivered today (S8 §5.2b), from wl-works's
-    #: `prepare-session`. **`None` leaves the day's shortfall unknown** rather than
+    #: What another deployment already delivered today (S8 §5.2b): what a person enters
+    #: at the open, until the rig's signed-in page reads it from wl.works' rig read (its
+    #: stage 10c-1, which replaced `prepare-session` on 2026-10-11; XC-100).
+    #: **`None` leaves the day's shortfall unknown** rather than
     #: assuming zero -- and it does *not* stop the session paying the animal, because
     #: the daily figure is a floor rather than a ceiling (PI, 2026-09-06).
     already_delivered_today: float | None

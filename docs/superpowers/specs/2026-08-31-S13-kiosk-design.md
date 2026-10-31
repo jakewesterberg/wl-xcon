@@ -120,6 +120,14 @@ reports `floor − already_delivered_today − earned_here` as what is still to 
 before that). Sequential use is the only real case, since an animal cannot be in the chair and
 at the kiosk at once, so a start-time figure suffices.
 
+> **`prepare-session` withdrawn 2026-10-11 by wl.works** (noted 2026-10-31): wl.works sends a rig no action and
+> no data. Its design of that day gives a rig's own page, signed in through wl.works, a read of the
+> day's water at the session's open (its stage 10c-1, designed, not built); it names no such read for a kiosk,
+> whose part of that design is its sessions as a listing and a `down` alert (wl.works' lab-host spec,
+> `docs/superpowers/specs/2026-10-11-what-wl-works-gives-a-lab-host-and-a-workstation-design.md` in wl-works, §2
+> and §5, and its copy of the lab-host protocol, `docs/ops/lab-host-protocol.md`, Appendix C; read 2026-10-31). How
+> the kiosk learns the day's prior figure is not designed there. Backlog XC-100.
+
 > ~~**S8 §5.2's fail-closed rule applies here with more force, not less.** If the daily fluid
 > total cannot be reconstructed after a restart, reward is refused until a human confirms — and
 > cage-side, nobody is watching to notice that it should have been.~~

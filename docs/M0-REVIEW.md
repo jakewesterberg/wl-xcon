@@ -73,7 +73,7 @@ Six things that changed the design, all found by reading neighbouring repositori
 
 | # | Question | Note |
 |---|---|---|
-| ~~12~~ | ~~Kiosk fluid against the daily budget~~ **Answered: yes, one daily figure.** wl-works holds the ledger and pushes the day's total in `prepare-session`. ~~an unknown prior total fails closed~~ — **corrected 2026-09-06: the daily figure is a *floor*, not a budget**, so an unknown prior total leaves the shortfall unreportable and does **not** stop reward | ✔ |
+| ~~12~~ | ~~Kiosk fluid against the daily budget~~ **Answered: yes, one daily figure.** wl-works holds the ledger and pushes the day's total in `prepare-session`. *(Superseded 2026-10-11, noted 2026-10-31: wl.works withdrew `prepare-session`; a rig's own page, signed in through wl.works, reads the day's water at the open from wl.works' rig read, its stage 10c-1, designed and not built, and that design names no such read for the kiosk; backlog XC-100.)* ~~an unknown prior total fails closed~~ — **corrected 2026-09-06: the daily figure is a *floor*, not a budget**, so an unknown prior total leaves the shortfall unreportable and does **not** stop reward | ✔ |
 | ~~13~~ | ~~Kiosk supervision~~ **Answered: both readings and an active alert.** The alert must originate at wl.works, because the host that faults cannot initiate a connection | ✔ |
 | 14 | **Kiosk recording model** | Recommendation: a lighter record of its own, not the session directory — minting a synthetic session id would create the second identity authority S3 spent its length deleting |
 | ~~15~~ | ~~Push the repository~~ **Done 2026-08-31** — created private, `main` pushed and tracking | ✔ |
@@ -119,7 +119,8 @@ One consolidated handover per repo (spec map §Handovers). **Two of these block 
 - **`wl-sync` — the session id.** Without it taskd cannot name its own output directory.
 
 The rest are cheap: the `PARAM_CHANGE` escape, the ownership split, the codec as a declared
-artifact, a `prepare-session` action, and a planned calibration block per session.
+artifact, a `prepare-session` action (withdrawn by wl.works 2026-10-11, backlog XC-100), and a planned
+calibration block per session.
 
 ---
 

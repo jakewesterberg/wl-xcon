@@ -139,6 +139,12 @@ explicitly, so our directory is simply ignored by it.
 | Planned blocks and their task types | wl-works' session planner | Same push |
 | Probe serials, insertion numbers, `trajectory_id` | wl-works | Same push |
 
+> **The push withdrawn 2026-10-11 by wl.works** (noted 2026-10-31): wl.works withdrew `prepare-session` and sends
+> a rig no action and no data. In its design the rig's own page, signed in through wl.works, reads the animal's
+> facts at a session's open from wl.works' rig read (its stage 10c-1, designed, not built; backlog XC-100), for the
+> animal the person picks, named by its rig name as the console names the subject. The planned-blocks row is
+> XC-208's; probes come from SpikeGLX on the rig since 2026-10-01.
+
 **The sync box does not currently expose its session id.** We could derive `YYYY-MM-DD` from
 the date, but `_NN` is the sync box's to mint and guessing it would create a second
 authority — exactly the failure this spec exists to avoid. Amendment in §9.

@@ -650,7 +650,7 @@ Three things S9a §6–§10 depends on that nobody has built:
 |---|---|---|
 | `wl-sync` | Session id readable by a rig host; a subject change mints `_02` | naming our own output directory |
 | `wl-preproc` | `PARAM_CHANGE` escape; ownership split; codec as an artifact | P16's guarantee |
-| `wl-works` | `prepare-session`, **including the day's already-delivered fluid total** | the day's shortfall is computed from it; without it a session pays the animal but can report no supplement |
+| `wl-works` | `prepare-session`, **including the day's already-delivered fluid total** *(withdrawn by wl.works 2026-10-11, noted 2026-10-31: the rig's signed-in page is to read the day's water from wl.works instead, backlog XC-100)* | the day's shortfall is computed from it; without it a session pays the animal but can report no supplement |
 | `wl-works` | **An NTP server at `ntp.wl.works`, reachable from the lab network on UDP 123** (ADR-0009, 2026-09-20; the hostname is the PI's, named the same day, and **the route is the part still open** — ask drafted in `docs/pending-wl-works-amendments.md`) | lab hosts agreeing what "today" and a clock time are, for wall-clock welfare marks and the fluid figure that spans rig and kiosk; **not session-blocking** — an outage just stops correction |
 | PI | **A photometer measurement of the panel** | every chromatic task (P19); `tasks/visual_search.py` is what waits |
 | PI | **A pump calibration: millilitres per second of open time** — protocol **V10**, `docs/validation.md` | real reward delivery (new 2026-09-06) |

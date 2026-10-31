@@ -2,6 +2,17 @@
 
 Delivered 2026-10-11 as a dated section of wl-works' `HANDOVER-wl-expcontroller.md` (`2bf5aca0`); answers are read there.
 
+**Updated 2026-10-31: `prepare-session` is withdrawn.** Later on 2026-10-11, answering the asks delivered that
+day, wl.works withdrew `prepare-session` as a published action, superseding its yes of 2026-08-31. A rig's own
+page, signed in through wl.works, reads at a session's open what `prepare-session` was to carry, and the people
+list with it, from a new read-only resource of wl.works', the rig read (its stage 10c-1, designed, not built);
+wl.works sends a rig no action and no data. Read 2026-10-31 at wl.works `main` `b3c1b933`, read only: its
+`HANDOVER-wl-expcontroller.md` (answer 2's correction, lines 68-70; "The second brainstorm's answers", lines
+619-640) and its spec `docs/superpowers/specs/2026-10-11-what-wl-works-gives-a-lab-host-and-a-workstation-design.md`
+(ruling 2, lines 79-82; §1.3, lines 156-160; §2, lines 164-243). Each section below that asked for
+`prepare-session` carries a dated note saying so; what it asked is kept as written. Backlog XC-100, XC-105 and
+XC-320 say what each now waits on.
+
 **Updated 2026-10-11.** Six asks were delivered that day (XC-320; XC-099 and XC-100's build order; XC-103;
 XC-104's alert half; XC-105; XC-098), listed in "Delivered 2026-10-11" below, and wl-works' own list of what is
 closed is there too. Most of what was open here has since been **answered by wl.works** (the host list,
@@ -105,6 +116,13 @@ for "this host cannot do that" exactly as documented.
 
 > **Note, 2026-10-11:** wl.works' answers of 2026-08-31 name `prepare-session`, the host list as configuration and the fluid envelope; **`export-session` is not among them**, and wl-works' 2026-10-11 handover does not ask about it. Treat it as proposed here and unanswered, and as not needed by any build.
 
+> **Superseded 2026-10-11 for `prepare-session`** (noted 2026-10-31): wl.works withdrew it as a published action,
+> and what it was to carry is read by the rig's own page instead (the note at the head of the next section).
+> wl.works' lab-host spec §1.3 (lines 156-160) says that with it gone "the rig publishes no jobs", that
+> `prepare-session` "is not a lab-host action", and that the welfare exclusion below becomes plain: "wl.works sends
+> a rig no action and no data. It only polls the rig's status." `export-session` is still as the note above says:
+> proposed here and not answered.
+
 > **No welfare-affecting action is ever published here.** `lab-host-protocol.md`'s most
 > prominent line is that publishing an action makes it available to every member of the
 > lab and that there is no permission model on the app side. On a preprocessing server the
@@ -117,6 +135,24 @@ for "this host cannot do that" exactly as documented.
 ---
 
 # OPEN — the metadata bundle wl-works already assembles should reach the rig too
+
+> **Superseded 2026-10-11 by wl.works' design** (noted 2026-10-31). wl.works withdrew `prepare-session`, so this
+> section's ask, from "The finding" to "What is deliberately not asked for", is kept as history: wl.works sends a
+> rig no action and no data. **What replaced it** (wl.works' ruling 2 of 2026-10-11, "The rig's page fetches it",
+> superseding the 2026-08-31 ruling that wl.works sends it to the rig): the rig's own page, already signed in
+> through wl.works, asks wl.works for a second token and reads a new read-only resource, the rig read, refused
+> to an agent's token and answering across origins only to a configured rig page, never with cookies. At a session's open it answers, for the animal the
+> person picks, named by its rig name: the animal's permanent id and rig name; its newest weight, with the date it
+> was measured and who weighed it; its water state (`free`, `bottle` or `control`, with any minimum and its
+> window); the day's water as the envelope (`value_ml`, `as_of`, `sources_included`, `complete`, in the field
+> `water_received_today_ml` since 2026-10-19), `value_ml` every water entry of the animal's lab day, rig, kiosk and
+> home cage; its open rig visit; and the people list. Nobody signed in, or wl.works or the network down: nothing
+> arrives, and the console asks the person. "The other field names are the plan's, agreed with wl-xcon." It is
+> wl.works' stage 10c-1, designed, not built, in its build "what lab machines read" right after its 20b-1 (its
+> lab-host spec, `docs/superpowers/specs/2026-10-11-what-wl-works-gives-a-lab-host-and-a-workstation-design.md`,
+> ruling 2 and §2.1 to §2.4, lines 79-82 and 164-228, and §13; its handover, "The second brainstorm's answers",
+> lines 619-640). The sections from "One addition to the session planner" on are separate asks, each with its own
+> dated notes. Backlog XC-100.
 
 ## The finding
 
@@ -153,7 +189,8 @@ optional — a rig that receives neither behaves exactly as it does today.
 > bundle are withdrawn. wl.works sends the rig nothing of a plan, and wl-xcon reads probes and
 > sites from SpikeGLX on the rig. **What stands:** `prepare-session` itself, now carrying no plan
 > fields, and the day's delivered fluid as an envelope (`fluid_delivered_today_ml`). Backlog
-> XC-100.
+> XC-100. *(2026-10-11: `prepare-session` withdrawn too; the envelope stands, read by the rig's page.
+> The note at this section's head.)*
 >
 > **Renamed 2026-10-19 by wl.works** (its handover's "2026-10-19: wl.works's answer on a session's water —
 > four asks", asks 3 and 4): the field is `water_received_today_ml`, the day's water the animal received;
@@ -167,13 +204,18 @@ Because the bundle is authored there and the rig has no route to fetch it (§11.
 Everything the rig needs from the ELN must arrive with a request, which is the same
 sentence that shaped wl-preproc's half of this problem.
 
+*(Superseded 2026-10-11, noted 2026-10-31: in wl.works' design nothing arrives with a request; the rig's own page,
+through the member signed in there, reads it from wl.works. See the note at this section's head.)*
+
 ## What is deliberately not asked for
 
 Declined rather than skipped, so a later revision overturns a decision instead of
 discovering an option:
 
 - **No session-start action.** `prepare-session` stages metadata and returns; it does not
-  begin a session. See the welfare note above.
+  begin a session. See the welfare note above. *(2026-10-11: `prepare-session` is withdrawn; the rig read that
+  replaced it starts nothing either: it is read only, and "The page writes nothing to wl.works", wl.works'
+  lab-host spec §2.1.)*
 - **No TLS, no rate limiting, no permission model, no `Retry-After`.** Identical to
   wl-preproc's declines and for identical reasons; a rig should not be the host that
   invents a second answer.
@@ -444,6 +486,19 @@ day's metadata and the fluid delivered so far. Added:
 | **Water entries** are not asked of `prepare-session`; they come by the read path in item 4. The **reward fluid** (type, dilution) is recorded by the rig itself at the open, so it is not asked of wl-works either | Named here so that nobody adds it |
 | The lab's **people list with each person's account id** | Lets a change be attributed when nobody can sign in (spec §3.6): the person picks a name from the list and the row is recorded "not signed in", with why. Until it arrives the list is a file on lab storage kept by hand |
 
+> **Superseded 2026-10-11 by wl.works' design** (noted 2026-10-31): `prepare-session` is withdrawn, and ask 1 is
+> designed as part of the rig read, which the rig's own page, signed in through wl.works, calls at a session's
+> open (wl.works' stage 10c-1, designed, not built; the note at the head of the metadata-bundle section above):
+> the animal's permanent id and rig name; its newest weight with the date it was measured and who weighed it; its
+> water state; and **the people list**: every active person (not a device, not banned, not deactivated) holding
+> *Control rigs*, by an admin's role or a grant, each with account id and name, "replaced whole at every read, so
+> the rig keeps the latest for the times nobody can sign in". Nobody signed in: nothing arrives, and the console
+> uses the last people list it kept. A removed member's name stays in a rig's copy until its page next reads,
+> wl.works' fifth `sever` exception. (wl.works' lab-host spec §2.2, §2.4 and §2.5, lines 182-198, 220-228 and
+> 237-239; its handover, "The second brainstorm's answers", XC-320 (a), lines 638-640.) Until it is built and our
+> page calls it, the list is the hand-kept file. Asks 2 to 5 were answered the same day in that handover's "The
+> first brainstorm's answers" and "The second brainstorm's answers"; backlog XC-320 says how.
+
 **2. The ELN's session keyed to the rig's session** (16b's `animal_session`; subject and session folder name).
 Without a key, a note written after the session cannot be found from it.
 
@@ -481,7 +536,8 @@ An agent that sees only sessions cannot tell a day of rest from a day of illness
 - **The rig gets no new network route** ([§5.4](superpowers/specs/2026-10-10-xc288-training-records-design.md#54-rebuilding-and-versions)). The read in item 4 is not made
   by a rig and not by a wl-preproc host (which never initiates a connection). **It runs on one named lab
   workstation** with its own wl.works client and a member's sign-in. Everything the rig itself needs arrives with
-  `prepare-session`, as above.
+  `prepare-session`, as above. *(2026-10-11: `prepare-session` is withdrawn; the rig's own page reads it from the
+  rig read instead, the note under "The ask".)*
 - **Changes need a wl.works sign-in** (Q7, Q8, [§3.6](superpowers/specs/2026-10-10-xc288-training-records-design.md#36-who)), which is the existing sign-in work
   (XC-151, XC-152) and not part of this ask.
 
@@ -489,14 +545,17 @@ An agent that sees only sessions cannot tell a day of rest from a day of illness
 
 - **No push to the rig, and no new route.** The rig still has no route in or out beyond what the sections above
   already settle; what it receives arrives with `prepare-session`, which wl-works sends as it does for the
-  other fields.
+  other fields. *(2026-10-11: wl.works sends a rig nothing; the rig's own page reads it, the note under "The
+  ask".)*
 - **Nothing welfare-affecting is published.** The standing exclusion above is unchanged: reward, stimulation,
   session start and parameter changes are not actions, and nothing here adds one. The weight, water and
   observation facts are read, not acted on, and the rig's welfare limits do not depend on them or on wl.works
   answering.
 - **No names in the agent's file**, and so no request for wl-works to send them to the rig beyond the display
   name in the people list the picker needs.
-- **No schema fixed here.** The rig's field names follow whatever `prepare-session` settles on.
+- **No schema fixed here.** The rig's field names follow whatever `prepare-session` settles on. *(2026-10-11:
+  they follow the rig read's; wl.works' lab-host spec §2.2: "The other field names are the plan's, agreed with
+  wl-xcon.")*
 
 **Nothing waits on an answer for a session to run.** Until each part is met the file says what it lacks (it
 holds no ELN notes; it holds the rig name and not the id) and is rebuilt when it arrives.
@@ -508,6 +567,9 @@ holds no ELN notes; it holds the rig name and not the id) and is rebuilt when it
 1. Whether the client's host list becomes configuration. **Answered yes, 2026-08-31.**
 2. **Answered 2026-08-31: yes to `prepare-session`, unrestricted; `export-session` was not answered (see the note in the first section).** Whether `prepare-session` and `export-session` are acceptable as published actions given
    the flat permission model, with the welfare exclusion above as a standing constraint.
+   **Superseded 2026-10-11 for `prepare-session`**: wl.works withdrew it as a published action (its handover's
+   answer 2, corrected that day, lines 68-70), and the rig's own page reads what it was to carry (the note at the
+   head of the metadata-bundle section). `export-session` is still unanswered.
 3. Whether a control box may register as an OAuth2 client of wl.works for operator
    attribution (above), and whether that is one client per box or one for the fleet.
 4. Whether `planned_task` and `session_intent` are worth adding to a bundle that is already
@@ -516,6 +578,7 @@ holds no ELN notes; it holds the rig name and not the id) and is rebuilt when it
    `6a57b1cc`, its montage-plan spec §1): both are plan fields, and nothing of a plan is sent.
    What stands of wl.works' answers of 2026-08-31: `prepare-session` (with no plan fields),
    the fluid figure as an envelope, the host list as configuration (item 1) and alerts.
+   *(2026-10-11: `prepare-session` withdrawn, item 2; the envelope stands, read by the rig's page.)*
 5. Whether wl-works can run an NTP server at `ntp.wl.works` reachable from the lab
    network on UDP 123, and open the one-port routing exception that requires (new,
    2026-09-20 — see above). **The hostname is the PI's; the route is not settled. As of 2026-10-11 wl-works names two other hostnames (see the update in the NTP section), and its answer is awaited on which a lab host is given.**
@@ -528,7 +591,10 @@ holds no ELN notes; it holds the rig name and not the id) and is rebuilt when it
    the day's weight with its date, the water regime and the people list with account ids;
    whether the ELN's session can be keyed to the rig's and each note carry its own author and time; whether a
    read path for one lab workstation's own client is acceptable; and whether a record of days with no session
-   and why is something wl-works can hold.
+   and why is something wl-works can hold. **Answered 2026-10-11** (wl.works' handover, "The first brainstorm's
+   answers" and "The second brainstorm's answers"): the first four designed, not built, the first as the rig read
+   rather than `prepare-session` (the note under XC-288's ask); the last with no new record, an optional
+   observation of a new kind, *Training*. Backlog XC-320.
 
 Nothing here is blocked on an answer: the controller's v1 works with no ELN integration at
 all, writing everything to the session directory as it would anyway. This buys the ELN
@@ -633,8 +699,18 @@ are wl-works' section, in its order; each is wl-works' to accept, amend or refus
 | XC-105 | Does the ELN record both ends of an out-of-cage interval as clock times, and when might the rig read them? The rig's own 8-hour limit stays the rig's. wl-works did not check this | nothing; the stand-in works |
 | XC-098 | Does wl-works want to write `session_manifest.yaml`? The question is open with wl-preproc too (the XC-098 line in [the wl-preproc file](pending-wl-preproc-amendments.md#open--delivered-2026-10-11-engine-spec-21-and-the-older-backlog-asks)) | nothing |
 
+> **Answered 2026-10-11, for the rows `prepare-session` touches** (noted 2026-10-31; wl.works' handover, "wl.works'
+> answers to the open asks of 2026-10-11", lines 512-667, read at its `main` `b3c1b933`). **XC-099, XC-100**: code
+> against a fake; the lab-host client is its Plan 10's stage 10a-1, in the fifth build of its order (lines
+> 519-532); later that day `prepare-session` was withdrawn and the rig read designed in its place, the envelope's
+> names standing (lines 630-637; the note at the head of the metadata-bundle section). **XC-105**: the ELN records
+> both ends as clock times, each with who marked it (lines 597-601), and the rig's page reads the departure at the
+> open and the return after (lines 641-645). **XC-320**: item 7 of "What wl-works must decide". The table above is
+> kept as asked; the other rows' answers are in the same section of wl.works' handover.
+
 **Closed, per wl-works (not re-asked):** XC-102, XC-147 to XC-149, XC-225 and XC-240 (rig sign-in built and deployed,
 `4eb2c568` and `637007a7`; only XC-151 and XC-152, wl-xcon's, stand between it and a live check); the host list,
 `prepare-session` as a published action and the fluid envelope (yes, 2026-08-31; building is the XC-099/XC-100 row);
 the plan fields and the calibration block (withdrawn 2026-10-01, XC-101); XC-104's reading half (yes, 2026-08-31).
-XC-151 and XC-152 are stated as wl-xcon's own work and were not asked of wl.works.
+XC-151 and XC-152 are stated as wl-xcon's own work and were not asked of wl.works. *(Later on 2026-10-11 wl.works
+withdrew `prepare-session` as a published action; the note above.)*
