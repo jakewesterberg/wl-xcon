@@ -766,8 +766,8 @@ the amount still to supplement, and its own finished total reaches wl-works by t
 > wl.works or the network down: nothing arrives (wl.works' lab-host spec,
 > `docs/superpowers/specs/2026-10-11-what-wl-works-gives-a-lab-host-and-a-workstation-design.md` in wl-works, §2.2
 > to §2.4). That design names this read for a rig's signed-in page only; how a cage-side kiosk would learn the
-> figure is not designed there. Until the read is built and the page calls it, the figure is what a person enters
-> at the open, or unknown. Backlog XC-100.
+> figure is not designed there (backlog XC-438). Until the read is built and the page calls it, the figure is what a
+> person enters at the open, or unknown. Backlog XC-100.
 
 - **A start-time figure is sufficient**, because an animal cannot be in the chair and at the cage
   kiosk simultaneously — the deployments are sequential, so the one that starts second gets a

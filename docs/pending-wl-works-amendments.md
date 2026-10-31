@@ -127,8 +127,10 @@ for "this host cannot do that" exactly as documented.
 > and what it was to carry is read by the rig's own page instead (the note at the head of the next section).
 > wl.works' lab-host spec §1.3 (lines 156-160) says that with it gone "the rig publishes no jobs", that
 > `prepare-session` "is not a lab-host action", and that the welfare exclusion below becomes plain: "wl.works sends
-> a rig no action and no data. It only polls the rig's status." `export-session` is still as the note above says:
-> proposed here and not answered.
+> a rig no action and no data. It only polls the rig's status." `export-session` was not answered by name, but it
+> was answered in effect: wl.works' protocol copy says "`actions` is empty. A rig publishes no jobs." (its
+> `docs/ops/lab-host-protocol.md`, Appendix B, line 120), which leaves the action no place in its design. Whether to
+> withdraw it here is put to the PI.
 
 > **No welfare-affecting action is ever published here.** `lab-host-protocol.md`'s most
 > prominent line is that publishing an action makes it available to every member of the
@@ -584,7 +586,8 @@ holds no ELN notes; it holds the rig name and not the id) and is rebuilt when it
    the flat permission model, with the welfare exclusion above as a standing constraint.
    **Superseded 2026-10-11 for `prepare-session`**: wl.works withdrew it as a published action (its handover's
    answer 2, corrected that day, lines 68-70), and the rig's own page reads what it was to carry (the note at the
-   head of the metadata-bundle section). `export-session` is still unanswered.
+   head of the metadata-bundle section). `export-session` was answered in effect, not by name (the note in the
+   first section).
 3. Whether a control box may register as an OAuth2 client of wl.works for operator
    attribution (above), and whether that is one client per box or one for the fleet.
 4. Whether `planned_task` and `session_intent` are worth adding to a bundle that is already
@@ -727,9 +730,17 @@ are wl-works' section, in its order; each is wl-works' to accept, amend or refus
 >
 > **Its asks of wl-xcon that day**, filed in the backlog on 2026-10-31: write the rig's and the kiosk's
 > appendices of the lab-host protocol (XC-434; lines 626-629); publish `subject` and `out_since` readings when
-> the console has had to ask (XC-435; lines 641-645); the kiosk answers `down` for a stop and a refusal as well
-> as a fault (XC-436; lines 654-657); and the rig read's other field names agreed at 10c-1's plan (XC-437; its
+> the console has had to ask (XC-435; lines 641-645); the kiosk answers `down` for every stop a person must act
+> on, not only a fault (XC-436, read there against S13 §4.1; lines 654-657); and the rig read's other field names agreed at 10c-1's plan (XC-437; its
 > lab-host spec §2.2, line 197).
+>
+> **Its one written condition, recorded as wl.works' statement only** (UNVERIFIED against KU Leuven's own text, and
+> not adopted here as a rule of this repository; the PI is asked): "whatever AI reads the training corpus must itself
+> be inside KU Leuven's rule — on lab hardware, KU Leuven's bonsAI, or Copilot signed in with a KU Leuven account",
+> because KU Leuven puts "too many specific details" of animal-testing research in its strictly confidential tier;
+> its owner ruled acceptable on that condition that the figures the rig logs from its read reach the corpus with no
+> switch turned on (its handover lines 663-667; its lab-host spec §2.5, lines 232-236, §4.3, lines 304-309, and
+> §10, lines 455-457).
 
 **Closed, per wl-works (not re-asked):** XC-102, XC-147 to XC-149, XC-225 and XC-240 (rig sign-in built and deployed,
 `4eb2c568` and `637007a7`; only XC-151 and XC-152, wl-xcon's, stand between it and a live check); the host list,

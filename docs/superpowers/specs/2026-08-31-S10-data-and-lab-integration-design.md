@@ -119,7 +119,7 @@ All four amendment documents in this repo converge here:
 |---|---|
 | `wl-sync` | Session id readable by a rig host; a subject change mints `_02` |
 | `wl-preproc` | `PARAM_CHANGE` escape; ownership split recorded; codec declared as an artifact; **online-calibration reader**; per-trial gaze staleness in `EyeQuality` |
-| `wl-works` | Host list as configuration; `prepare-session` *(withdrawn by wl.works 2026-10-11, §4's note)*; a **planned calibration block per session** |
+| `wl-works` | Host list as configuration; `prepare-session` *(withdrawn by wl.works 2026-10-11, §4's note)*; a **planned calibration block per session** (withdrawn 2026-10-01, XC-101) |
 
 Two of these block real things rather than tidying: without the calibration reader
 `CalibrationSource.ONLINE` is unavailable for every session under ADR-0005, and without the

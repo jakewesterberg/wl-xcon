@@ -284,8 +284,8 @@ dropped for an animal and an animal withdrawn from training are each an event, w
   (`cage_side`, `rig_chaired`, `rig_fixed`).
 - **Who was in the room**: one optional tap at the open, present, watching remotely or absent.
 
-> **Noted 2026-10-31 (wl.works' design of 2026-10-11):** wl.works sends a rig nothing. The first two items arrive
-> by wl.works' rig read, which the rig's own page, signed in through wl.works, calls at the session's open in place
+> **Noted 2026-10-31 (wl.works' design of 2026-10-11):** wl.works sends a rig nothing. The first two items, and the
+> day's water so far, arrive by wl.works' rig read, which the rig's own page, signed in through wl.works, calls at the session's open in place
 > of the withdrawn `prepare-session` (its stage 10c-1, designed, not built; backlog XC-100): `animal.id` and the rig
 > name; the newest weight, not necessarily that day's, with the date it was measured and who weighed it; the water
 > state; and the day's water so far. Read "when wl.works sends" above as "when the page reads". The text above is
@@ -515,7 +515,11 @@ console (not one of engine spec §19's warnings), and the file is built again la
 > spec, `docs/superpowers/specs/2026-10-11-what-wl-works-gives-a-lab-host-and-a-workstation-design.md` in
 > wl-works, §4.1 and §4.2, lines 268-302, and §12, which declines a named-workstation client class; its handover,
 > "The second brainstorm's answers", XC-320 (d), lines 646-653; backlog XC-320). Read "its own wl.works client"
-> above in that light. The text above is left as approved.
+> above in that light. wl.works also wrote one condition, recorded here as its statement only (UNVERIFIED against
+> KU Leuven's own text, and not adopted as this spec's rule; the PI is asked): "whatever AI reads the training
+> corpus must itself be inside KU Leuven's rule — on lab hardware, KU Leuven's bonsAI, or Copilot signed in with a KU
+> Leuven account" (its handover lines 663-667; its lab-host spec §2.5, lines 232-236, and §4.3, lines 304-309). The
+> text above is left as approved.
 
 ## 6. Where the records go
 

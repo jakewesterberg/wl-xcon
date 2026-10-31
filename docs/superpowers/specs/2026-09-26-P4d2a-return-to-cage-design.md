@@ -269,6 +269,13 @@ simulator with default flags. Task 6's tests passed only by running `rig-chaired
      headless run does.
    - The post-loop phase stays: it publishes the out-of-cage clock and the warning while
      the terminal waits.
+
+   *Noted 2026-10-31 (wl.works' design of 2026-10-11):* the ELN's return will not reach the box
+   through the lab-host protocol, which now carries nothing to a rig ("wl.works sends a rig no action
+   and no data"). The rig's own page, signed in through wl.works, reads it from wl.works' rig read,
+   asking again with the visit's id (wl.works' lab-host spec,
+   `docs/superpowers/specs/2026-10-11-what-wl-works-gives-a-lab-host-and-a-workstation-design.md`,
+   §1.3 and §2.4; its stage 10c-1, designed, not built). Backlog XC-105.
 3. **The in-session clock** is the session's own interval, the session opened to the
    session ended, on the wall. It is published as `in_session_seconds` (added to telemetry
    schema 6, which has not left this branch). It is recorded as `session opened` and

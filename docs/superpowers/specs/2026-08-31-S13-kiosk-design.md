@@ -126,7 +126,7 @@ at the kiosk at once, so a start-time figure suffices.
 > whose part of that design is its sessions as a listing and a `down` alert (wl.works' lab-host spec,
 > `docs/superpowers/specs/2026-10-11-what-wl-works-gives-a-lab-host-and-a-workstation-design.md` in wl-works, §2
 > and §5, and its copy of the lab-host protocol, `docs/ops/lab-host-protocol.md`, Appendix C; read 2026-10-31). How
-> the kiosk learns the day's prior figure is not designed there. Backlog XC-100.
+> the kiosk learns the day's prior figure is not designed there. Backlog XC-438 (XC-100 is the rig's read).
 
 > ~~**S8 §5.2's fail-closed rule applies here with more force, not less.** If the daily fluid
 > total cannot be reconstructed after a restart, reward is refused until a human confirms — and
