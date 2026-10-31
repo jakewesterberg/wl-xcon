@@ -68,9 +68,10 @@ third_party:
     constraint: ">=2026.2"
     where: rig/task
     why: >-
-      The display engine, accepted in ADR-0002 on 2026-08-31 and used strictly as a
-      library behind our own DisplayAdapter. Declared only for rig/task: the kiosk
-      has its own display path and a workstation needs it only to run the suite.
+      The display engine, proposed in ADR-0002 (deferred to V1 by the PI on
+      2026-08-31) and used strictly as a library behind our own DisplayAdapter.
+      Declared only for rig/task: the kiosk has its own display path and a
+      workstation needs it only to run the suite.
       Brings GPL-3 gravity on distribution, which is ADR-0004's open question, and
       a Python ceiling of 3.12 which reaches the whole project (see `python`).
   - name: pyzmq
@@ -78,28 +79,21 @@ third_party:
       The console runs as a separate process from taskd under all conditions, and
       the neural feature clients publish across machines (ADR-0003). Needed on a
       workstation too, since the simulated console talks to a fake taskd in tests.
-  - name: pyside6
-    where: rig/task
-    why: >-
-      The console is a desktop application (S9a), separate from taskd under all
-      conditions and able to run on another machine over ZMQ. Qt because the live
-      plots need pyqtgraph, which is Qt.
-  - name: pyqtgraph
-    where: rig/task
-    why: >-
-      Live plots at trial rates. Matplotlib is too slow to redraw per trial and a
-      browser would put a server on a machine whose job is frame-accurate timing.
   - name: msgpack
     why: >-
       The wire format for schema-versioned feature messages (ADR-0003). Small and
       boring, which is the point: the messages are latest-wins and carry no
       structure that would repay a richer format.
 
-# Declared on 2026-08-31, when ADR-0002 and ADR-0003 were accepted. Until then this
-# file deliberately named none of them -- asserting a toolchain nothing had accepted
-# is the fault wl-exptasks' manifest avoids by declining to name MATLAB, and `wlo
-# stack` reads third_party alone, so a premature entry puts wrong software on a real
-# machine.
+# Declared on 2026-08-31, when ADR-0003 was accepted and ADR-0002 was accepted (then
+# reopened and deferred to V1 by the PI the same day). Until then this file
+# deliberately named none of them -- asserting a toolchain nothing had accepted is
+# the fault wl-exptasks' manifest avoids by declining to name MATLAB, and `wlo stack`
+# reads third_party alone, so a premature entry puts wrong software on a real
+# machine. PsychoPy stays declared because the deferral keeps it installed until V1
+# decides (ADR-0002, "Ruling 2026-08-31"). PySide6 and PyQtGraph, declared that day
+# for S9a's desktop console, were removed on 2026-10-31 (XC-052): ADR-0008 made the
+# console a web application on 2026-09-19 and does not add the Qt stack.
 
 requires:
   - name: wl-sync
