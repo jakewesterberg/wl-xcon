@@ -4600,6 +4600,54 @@ def test_a_stop_is_recorded_with_who_and_when(tmp_path):
     assert session.controls[0][3] == "stopped by sam (box, unverified)"
 
 
+def test_a_stop_with_a_blank_by_still_stops_and_is_recorded_with_its_blank(tmp_path):
+    """XC-125. `Box("")` is what a terminal gives a confirmation made without `--as`
+    (`actor.Box`), and `str()` of it is empty. A stop from it must still end the
+    session at the boundary, say so on the feed and write the control row with the
+    blank name as it came: the record is not a place to invent a sender."""
+    link = Simulated()
+    link.queue(Stop(by=Box("")))
+    session = _session(_spec(tmp_path, trials=5), link=link)
+
+    census = session.run()
+
+    assert session.stop_kind == "operator"
+    assert sum(census.outcomes.values()) < 5
+    assert session.stopped_because == "stopped by "
+    (row,) = _controls_rows(session)
+    assert (row["kind"], row["by"], row["trial_index"]) == (
+        "stop", {"kind": "box", "name": ""}, 0
+    )
+    assert session.controls[0][1] == Box("")
+    assert session.controls[0][3] == "stopped by "
+
+
+def test_a_malformed_ceiling_write_of_no_plain_type_is_recorded_as_its_repr(
+    tmp_path, monkeypatch
+):
+    """XC-125. `asked` is written as asked when it is an int, float or str, and as
+    `repr` otherwise, so the refusal row is written whatever the value was. The wire
+    never builds such a command (`link._setting`), so the command is built here; `set`
+    is made to raise the `TypeError` a check it does not yet make would."""
+
+    def raises(self, name, value, by):
+        raise TypeError("must be real number, not list")
+
+    monkeypatch.setattr(Session, "set", raises)
+    link = Simulated()
+    link.queue(SetParameter(name="reward_correct", value=[0.4, "x"], by=Box("jake")))
+    session = _session(_spec(tmp_path, trials=3), link=link)
+
+    session.run()
+
+    assert session.stop_kind == "completed"
+    (row,) = _refusal_rows(session)
+    assert row["name"] == "reward_correct"
+    assert row["asked"] == "[0.4, 'x']"
+    assert "must be real number, not list" in row["why"]
+    assert row["by"] == {"kind": "box", "name": "jake"}
+
+
 def test_nothing_is_rewarded_while_paused(tmp_path):
     """Human review item 1 (spec §5.5, amended 2026-09-28): while paused, the task
     rewards nothing. No trial runs, so no `Reward` action reaches the pump, and with
