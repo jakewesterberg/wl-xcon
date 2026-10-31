@@ -556,5 +556,5 @@ so its runs are not covered; today it builds only the simulator's pump.
 |---|---|
 | 1 | Whether dichoptic trials need a two-panel replica (§2.1) |
 | 2 | Whether the replica renders through the same `DisplayAdapter` as the subject screen, or a second lighter path — the same code is truer, a second one cannot cost the subject a frame |
-| 3 | Task selection: from a directory, from `wl-exptasks`, or pushed by wl.works with the session |
+| 3 | ~~Task selection: from a directory, from `wl-exptasks`, or pushed by wl.works with the session~~ **Answered 2026-09-26 (PI):** *"a button next to the task, that must be pressed before anything can run in a new session that pulls the task library from github"*, the library being wl-exptasks (wl-xtasks since 2026-09-28) and the pulled commit recorded with every run. Not pushed by wl.works: the PI retired the plan-first ruling on 2026-10-01 (*"Nothing; retire the ruling"*), and wl.works sends the rig no day's plan. P4d-2b spec §4.0. Remaining: building the pull, XC-150 |
 | 4 | Whether plots dock inside the console or float, given a second monitor is likely |

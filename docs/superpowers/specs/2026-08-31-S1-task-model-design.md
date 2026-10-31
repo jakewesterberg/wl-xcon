@@ -318,8 +318,8 @@ does what was asked.
 
 | # | Item | Blocks |
 |---|---|---|
-| 1 | Transition priority: declared order, or explicit priority field | the checker's rule 10 |
-| 2 | Whether `Outcome` is `wl-exptasks`' enum directly or a task-local alias | S2 allocation |
+| 1 | ~~Transition priority: declared order, or explicit priority field~~ **Answered: transitions fire in declared order, with an explicit priority field available for the ambiguous case** (an engineering call, M0-REVIEW §4, "Task model"). Check 10 is written to declared order (`check._shadowed_transitions`); `task.py` has no priority field (read 2026-10-31) | — |
+| 2 | ~~Whether `Outcome` is `wl-exptasks`' enum directly or a task-local alias~~ **Answered: `Outcome` is `wl-exptasks`' enum directly, not a task-local alias** (an engineering call, M0-REVIEW §4, "Task model"). The one enum today is `wl_xcon.task.Outcome`, and `codes.PROVISIONAL`, a placeholder "until `wl-exptasks` publishes one", maps it onto `wl-preproc`'s frozen `Marker` values (`codes.py`, read 2026-10-31) | — |
 | 3 | How persistent (cross-trial) state is declared and versioned. **Raised from open to blocking a described trial outcome, 2026-09-20**: the PI's reason for allowing a zero-volume reward is that *"some trials will have a reward period, but they may not receive a juice reward. they may get an on-screen token reward that eventually becomes a real reward"* — so a token economy is a designed outcome, not a future nicety. §2.3 lists `Token(+1 / -1)` and `SetPersistent(...)`; **`task.py` implements neither, and no cross-trial state exists anywhere in the package** (read from source, 2026-09-20). Missing: a persistent count, a conversion rule to fluid through `welfare.deliver`, and what the recording sees when a token rather than fluid is paid. **Not designed anywhere yet, deliberately** — S8 §5.3 and §8 item 9 carry the statement of it | token tasks, S8 §5.3 |
-| 4 | Whether the review artifact is rendered by the console or a CLI | S9 |
+| 4 | ~~Whether the review artifact is rendered by the console or a CLI~~ **Answered: the review artifact has one renderer, callable from the console and from a CLI** (an engineering call, M0-REVIEW §4, "Task model"). The renderer is `review.render_task` and the CLI is `wlx review` | — |
 | 5 | Frame-accurate `Update` semantics for gaze-anchored stimuli | S4 |
