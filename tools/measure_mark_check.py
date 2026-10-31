@@ -58,6 +58,23 @@ from wl_xcon.task import After, On, Outcome, State, Trial  # noqa: E402
 #: more, since frames are not paced.
 PERIOD = 0.001
 
+#: The check alone is timed in this many equal batches, and its spread is theirs.
+BATCHES = 20
+
+
+def _per_batch(calls: int) -> int:
+    """How many calls each of the `BATCHES` batches times, or a `ValueError` unless
+    `calls` is a positive multiple of `BATCHES` (XC-138). Integer division timed
+    `calls // 20` per batch, so 2010 calls timed 2000 under a report saying 2010, and
+    fewer than 20 divided by zero. Refused rather than spread unevenly: every batch
+    is then the same size, and every call the report counts is timed."""
+    if isinstance(calls, bool) or not isinstance(calls, int) or calls < BATCHES or calls % BATCHES:
+        raise ValueError(
+            f"--calls must be a positive multiple of {BATCHES}, the batches the check "
+            f"alone is timed in, so that every call the report counts is timed; got {calls!r}"
+        )
+    return calls // BATCHES
+
 
 def _trial(frames: int) -> Trial:
     """A trial that ends on its own on frame `frames`: `After` fires on the first
@@ -114,7 +131,10 @@ def _spread(values: list[float]) -> dict:
 
 
 def measure(frames: int = 1000, trials: int = 300, calls: int = 200_000) -> dict:
-    """Run the three measurements and return what they found, as numbers."""
+    """Run the three measurements and return what they found, as numbers. `calls`
+    is refused before anything is measured unless it is a positive multiple of
+    `BATCHES` (`_per_batch`)."""
+    per_batch = _per_batch(calls)
     link = _link.ZmqLink(
         "tcp://127.0.0.1:0", "tcp://127.0.0.1:0", mark_endpoint="tcp://127.0.0.1:0"
     )
@@ -124,11 +144,11 @@ def measure(frames: int = 1000, trials: int = 300, calls: int = 200_000) -> dict
             check()
 
         per_call = []
-        for _ in range(20):
+        for _ in range(BATCHES):
             started = time.perf_counter_ns()
-            for _ in range(calls // 20):
+            for _ in range(per_batch):
                 check()
-            per_call.append((time.perf_counter_ns() - started) / (calls // 20))
+            per_call.append((time.perf_counter_ns() - started) / per_batch)
 
         tracemalloc.start()
         try:
@@ -194,7 +214,7 @@ def report(found: dict) -> str:
 
 **Date:** {time.strftime('%Y-%m-%d')}. **Script:** `tools/measure_mark_check.py`
 (P4d-2b b2a, spec §5.4), run as
-`python tools/measure_mark_check.py --frames {found['frames']} --trials {found['trials']}`.
+`python tools/measure_mark_check.py --frames {found['frames']} --trials {found['trials']} --calls {found['calls']}`.
 **Machine:** {platform.platform()}, {platform.machine()}, {platform.processor() or 'processor not reported'}.
 **Python:** {platform.python_version()}. **pyzmq:** {zmq.__version__} (libzmq {zmq.zmq_version()}).
 
@@ -204,8 +224,8 @@ def report(found: dict) -> str:
 (a world where nothing happens), {found['trials']} times with no `each_frame` and
 {found['trials']} times with the session's check -- `link.ZmqLink.mark_signal` on a live
 loopback link whose mark socket is bound and idle -- interleaved trial by trial. The
-collector is off inside each timed trial. The check alone is {found['calls']} calls in
-twenty batches.
+collector is off inside each timed trial.
+The check alone is {found['calls']} calls in {BATCHES} equal batches.
 
 | | median | p90 | p99 | max |
 |---|---|---|---|---|
@@ -233,9 +253,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--frames", type=int, default=1000)
     parser.add_argument("--trials", type=int, default=300)
-    parser.add_argument("--calls", type=int, default=200_000)
+    parser.add_argument(
+        "--calls", type=int, default=200_000, help=f"a multiple of {BATCHES}"
+    )
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args(argv)
+    try:
+        _per_batch(args.calls)
+    except ValueError as refused:
+        parser.error(str(refused))
     text = report(measure(args.frames, args.trials, args.calls))
     if args.out is None:
         print(text)

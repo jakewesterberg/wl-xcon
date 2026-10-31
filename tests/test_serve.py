@@ -1693,6 +1693,109 @@ def test_wlx_serve_serves_until_interrupted_then_closes(
         _request(seen["port"], "GET", "/")
 
 
+def _startup_line(
+    tmp_path, monkeypatch, capsys, http: str, hosts: tuple = (), reported: str | None = None
+) -> tuple:
+    """Serve on `http`, fetch `/` once for each `Host` in `hosts` (each with the bound
+    port), then Ctrl-C; return `(port, statuses, the startup line)`. Every request goes
+    to 127.0.0.1, so a `Host` naming this box is tested with no name looked up.
+
+    `reported` is the address the bound server reports, in place of the one it bound:
+    a wildcard bind's line is tested on a loopback bind, never one the LAN can reach
+    (the review's N3)."""
+    seen: dict = {}
+    if reported is not None:
+        monkeypatch.setattr(
+            Server, "address", property(lambda self: (reported, self._http.server_address[1]))
+        )
+
+    def interrupted(server: Server) -> None:
+        port = server.address[1]
+        seen["port"] = port
+        seen["statuses"] = [
+            _request(port, "GET", "/", {"Host": f"{host}:{port}"})[0] for host in hosts
+        ]
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(serve, "_wait", interrupted)
+    assert _main_uninterrupted(_serve_args(tmp_path, http=http)) == 130
+    [line] = [said for said in capsys.readouterr().out.splitlines() if "the console is at" in said]
+    return seen["port"], seen["statuses"], line
+
+
+def test_a_wildcard_bind_names_the_boxs_host_name_and_localhost_never_0_0_0_0():
+    """XC-045: `--http 0.0.0.0:PORT` printed `the console is at http://0.0.0.0:PORT/`,
+    an address no browser can open. A wildcard bind now names this box by its host
+    name and `localhost` for this box itself, and says it listens on all interfaces."""
+    said = serve._console_at("0.0.0.0", 8080, "rig-pc")
+
+    assert said == "http://rig-pc:8080/ (listening on all interfaces; http://localhost:8080/ on this box)"
+
+
+def test_the_host_name_a_wildcard_bind_prints_is_one_the_page_answers_to(
+    tmp_path, monkeypatch, capsys
+):
+    """XC-045, the path: `run` names this box by `socket.gethostname()`, read with no
+    network request, and the page's `Host` check (`box_names`) answers to that name and
+    to `localhost`, which the fetches prove; the rest of the line is unchanged. Bound on
+    loopback, with the server reporting the wildcard (`_startup_line`'s `reported`)."""
+    name = socket.gethostname()
+    lowered = name.lower()
+    if not name or not name.isascii() or serve.names_loopback(lowered) or lowered.startswith(
+        "localhost."
+    ):
+        pytest.skip(f"this machine's host name {name!r} is not one the line names")
+
+    port, statuses, line = _startup_line(
+        tmp_path, monkeypatch, capsys, "127.0.0.1:0", hosts=(name, "localhost"), reported="0.0.0.0"
+    )
+
+    assert "0.0.0.0" not in line
+    assert (
+        f"wlx serve: the console is at http://{name}:{port}/ (listening on all interfaces; "
+        f"http://localhost:{port}/ on this box), reading "
+    ) in line
+    assert "; GET /health needs the bearer token" in line
+    assert statuses == [200, 200], "a URL the line names was refused by the page's Host check"
+
+
+def test_a_specific_bind_names_its_own_address_and_nothing_else(tmp_path, monkeypatch, capsys):
+    """XC-045's other half: a bind on one address is its own URL, as before, with no
+    word about interfaces it does not listen on."""
+    port, _, line = _startup_line(tmp_path, monkeypatch, capsys, "127.0.0.1:0")
+
+    assert f"wlx serve: the console is at http://127.0.0.1:{port}/, reading " in line
+    assert "all interfaces" not in line and "localhost" not in line
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "",
+        "localhost",
+        "LocalHost",
+        "127.0.0.1",
+        "127.0.1.1",
+        "localhost.localdomain",
+        "rig.localhost",
+        "rïg-pc",
+    ],
+)
+def test_a_wildcard_bind_with_no_usable_host_name_names_localhost(name):
+    """XC-045: a host name that is empty, names loopback, or is not ASCII is no URL
+    for another machine, so the line names `localhost` alone and says where else to
+    look -- still never `0.0.0.0`. Loopback is `names_loopback`'s (`localhost`, or a
+    loopback address such as Debian's `127.0.1.1`), or what it does not know: RHEL's
+    `localhost.localdomain`, and a name in `.localhost`. A non-ASCII name a browser
+    sends punycoded, which the page's `Host` check does not know."""
+    said = serve._console_at("0.0.0.0", 8080, name)
+
+    assert said == (
+        "http://localhost:8080/ on this box (listening on all interfaces; from another "
+        "machine, use this box's name or address)"
+    )
+
+
 class _OneFrameThenNothingConsole:
     """A fake `ZmqConsole`: one good frame on its first `receive()`, then a
     `TimeoutError` -- deterministic, no real socket, no timing dependency. Stands

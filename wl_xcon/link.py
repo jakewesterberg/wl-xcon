@@ -3193,6 +3193,51 @@ class ZmqLink:
         self.close()
 
 
+#: The longest wait, in milliseconds, a socket's `RCVTIMEO` or a poll in this file is
+#: given, about 24.8 days. `RCVTIMEO` is a C `int` (pyzmq 27.1.0 with libzmq 4.3.5
+#: takes 2**31 - 1 and raises `OverflowError` one past it, checked 2026-10-31), and
+#: `zmq_poll`'s timeout a C `long` (libzmq 4.3.5's `zmq.h`), which is 32 bits on
+#: 64-bit Windows, so one bound serves both.
+WAIT_MS_MAX = 2**31 - 1
+
+
+def _wait_ms(seconds: object, name: str, least_ms: int = 0) -> int:
+    """`seconds`, a wait one of this file's `Zmq*` constructors takes, as the whole
+    milliseconds ZeroMQ is given, or a `ValueError` naming `name` (XC-046).
+
+    A number that is not a `bool`, from `least_ms` to `WAIT_MS_MAX` once in
+    milliseconds, compared before `int()`: a NaN, an infinity, and a float that
+    overflows on the way to milliseconds (`sys.float_info.max`) are refused like any
+    other value out of range.
+
+    **Under 1 ms, the two kinds differ.** A reply or a connect wait (`least_ms=1`) under
+    1 ms is refused, 0 included: a reply wait of 0 reported every command *not
+    delivered* while the rig applied it, and a connect wait of 0 says no rig is
+    listening on a sender's first try when one is. The 1 ms floor refuses only the
+    value that can never wait: a reply wait shorter than the rig's answer still reads
+    *not delivered*, which is why `REPLY_TIMEOUT_S` outlasts a trial. A console's
+    receive wait (`least_ms=0`) of exactly 0 is ZeroMQ's do-not-wait, an `RCVTIMEO` of
+    0 (`wlx serve`'s tests build their recorders so), and one over 0 and under 1 ms
+    waits 1 ms, never truncated to that 0.
+
+    **A negative is refused because ZeroMQ would not refuse it**: an `RCVTIMEO` of -1
+    is wait forever, `-0.001` s truncates to it, and pyzmq's `poll` reads every
+    negative as forever. Checked at the top of each constructor, before a context is
+    made."""
+    ms = None
+    if not isinstance(seconds, bool) and isinstance(seconds, (int, float)):
+        ms = seconds * 1000
+    if ms is None or not least_ms <= ms < WAIT_MS_MAX + 1:
+        lowest = "0 (do not wait)" if least_ms == 0 else f"{least_ms / 1000:g}"
+        raise ValueError(
+            f"{name} must be a number of seconds from {lowest} to {WAIT_MS_MAX / 1000}, "
+            f"the longest ZeroMQ's millisecond waits hold; got {seconds!r}"
+        )
+    if 0 < ms < 1:
+        return 1
+    return int(ms)
+
+
 class ZmqConsole:
     """The console side of the same link (S9a §7). Connects to a running
     `ZmqLink`'s two endpoints: SUB for telemetry, REQ for commands.
@@ -3233,9 +3278,13 @@ class ZmqConsole:
         **`req_endpoint` may be `None`** (P4d-2b b2a): a console that only reads --
         `wlx serve`'s telemetry thread, whose commands go through `ZmqCommands` on a
         thread of their own, so that each socket has one owning thread (spec §2) --
-        opens no REQ socket, and `send` refuses."""
+        opens no REQ socket, and `send` refuses.
+
+        `receive_timeout_s` is refused, before anything opens, unless ZeroMQ can take
+        it (`_wait_ms`, XC-046)."""
         import zmq
 
+        receive_ms = _wait_ms(receive_timeout_s, "receive_timeout_s")
         self._ctx = zmq.Context()
         # Registered before the first socket, as in `ZmqLink.__init__`, and for a
         # reason that matters more here: nothing below is in a `try`, so a `connect`
@@ -3252,7 +3301,7 @@ class ZmqConsole:
         # had. `wlx serve`'s telemetry thread passes a short one so it can look between
         # receives at whether to stop, and `Server.close` returns promptly (P4d-2b b1).
         # A responsiveness choice either way, not a measurement.
-        self._sub.setsockopt(zmq.RCVTIMEO, int(receive_timeout_s * 1000))
+        self._sub.setsockopt(zmq.RCVTIMEO, receive_ms)
         self._sub.connect(pub_endpoint)
 
         self._req = None
@@ -3375,8 +3424,11 @@ class ZmqMarks:
     """
 
     def __init__(self, mark_endpoint: str, connect_timeout_s: float = CONNECT_TIMEOUT_S):
+        """Connect to `mark_endpoint`. `connect_timeout_s` is refused, before anything
+        opens, unless it is 1 ms or more and ZeroMQ can take it (`_wait_ms`, XC-046)."""
         import zmq
 
+        connect_ms = _wait_ms(connect_timeout_s, "connect_timeout_s", least_ms=1)
         self._ctx = zmq.Context()
         self._sockets: list = []
         self._finalizer = weakref.finalize(self, _release, self._ctx, self._sockets)
@@ -3387,7 +3439,7 @@ class ZmqMarks:
         self._push.connect(mark_endpoint)
         #: Where this sends, named in the sentence a failed signal raises.
         self.endpoint = mark_endpoint
-        self._connect_ms = int(connect_timeout_s * 1000)
+        self._connect_ms = connect_ms
 
     def signal(self, mark: int) -> None:
         """Send `mark`, eight bytes big-endian. Raises `NotDelivered` when no rig is
@@ -3478,15 +3530,20 @@ class ZmqCommands:
         reply_timeout_s: float = REPLY_TIMEOUT_S,
         connect_timeout_s: float = CONNECT_TIMEOUT_S,
     ):
+        """Connect to `req_endpoint`. Each timeout is refused, before anything opens,
+        unless it is 1 ms or more and ZeroMQ can take it (`_wait_ms`, XC-046)."""
         import zmq
 
+        reply_ms = _wait_ms(reply_timeout_s, "reply_timeout_s", least_ms=1)
+        connect_ms = _wait_ms(connect_timeout_s, "connect_timeout_s", least_ms=1)
         self._ctx = zmq.Context()
         self._sockets: list = []
         self._finalizer = weakref.finalize(self, _release, self._ctx, self._sockets)
         #: Where this sends, named in every sentence `deliver` raises.
         self.endpoint = req_endpoint
         self._reply_s = reply_timeout_s
-        self._connect_ms = int(connect_timeout_s * 1000)
+        self._reply_ms = reply_ms
+        self._connect_ms = connect_ms
         self._req = self._open()
 
     def _open(self):
@@ -3497,7 +3554,7 @@ class ZmqCommands:
         self._sockets.append(req)
         req.setsockopt(zmq.LINGER, 0)
         req.setsockopt(zmq.IMMEDIATE, 1)
-        req.setsockopt(zmq.RCVTIMEO, int(self._reply_s * 1000))
+        req.setsockopt(zmq.RCVTIMEO, self._reply_ms)
         req.connect(self.endpoint)
         return req
 
