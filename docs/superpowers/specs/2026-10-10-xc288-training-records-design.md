@@ -248,6 +248,16 @@ recommended minimal treatment for the sickest patients, who were the ones treate
 > nobody" above as ids plus names where who acted matters (decisions.md TRN-08). The text above is
 > left as approved.
 
+> **Noted 2026-10-31 (wl.works' design of 2026-10-11, read at its `main` `b3c1b933`):** wl.works withdrew
+> `prepare-session`, so the people list does not come with it. It comes from wl.works' rig read, which the rig's
+> own page, signed in through wl.works, calls at a session's open (its stage 10c-1, designed, not built): every
+> active person holding *Control rigs*, each with account id and name, replaced whole at every read, the rig
+> keeping the latest for the times nobody can sign in; with nobody signed in nothing arrives, and the console uses
+> the last list it kept (wl.works' lab-host spec,
+> `docs/superpowers/specs/2026-10-11-what-wl-works-gives-a-lab-host-and-a-workstation-design.md` in wl-works, §2.2
+> and §2.4; backlog XC-320). Read "until XC-320's `prepare-session` carries the list" above as "until the rig read
+> is built and our page calls it". The text above is left as approved.
+
 ### 3.7 Stages
 
 **When a stage's pass rule is met** (§4.2), the rig records it as an event, with the counts that met it:
@@ -273,6 +283,13 @@ dropped for an animal and an animal withdrawn from training are each an event, w
 - **The restraint mode** (kiosk, head-free chair, head-fixed): `config.json`'s `deployment` already says it
   (`cage_side`, `rig_chaired`, `rig_fixed`).
 - **Who was in the room**: one optional tap at the open, present, watching remotely or absent.
+
+> **Noted 2026-10-31 (wl.works' design of 2026-10-11):** wl.works sends a rig nothing. The first two items, and the
+> day's water so far, arrive by wl.works' rig read, which the rig's own page, signed in through wl.works, calls at the session's open in place
+> of the withdrawn `prepare-session` (its stage 10c-1, designed, not built; backlog XC-100): `animal.id` and the rig
+> name; the newest weight, not necessarily that day's, with the date it was measured and who weighed it; the water
+> state; and the day's water so far. Read "when wl.works sends" above as "when the page reads". The text above is
+> left as approved.
 
 ### 3.9 Experimenter notes and welfare observations
 
@@ -488,6 +505,22 @@ console (not one of engine spec §19's warnings), and the file is built again la
 - **Every format change bumps the version**, and every past session rebuilds into it, with tables a
   session never had (gaze before build T) present and empty.
 
+> **Noted 2026-10-31 (wl.works' design of 2026-10-11, read at its `main` `b3c1b933`):** wl.works designed the
+> workstation's read as **a member's agent**, not a client of the workstation's own: a member connects the rebuild
+> program on that machine as their agent, signing in through a browser there; it reads only while that member's
+> agents and their animal switch are both on; and the workstation is not named in wl.works, with no new credential
+> class. One structured, read-only tool gives an animal's record as data over a date range (rig names over time,
+> weights, water entries, water states, observations, statuses, and sessions with cage times and notes), people as
+> account ids with a `people` list naming them. It is wl.works' stage 16b-4, designed, not built (its lab-host
+> spec, `docs/superpowers/specs/2026-10-11-what-wl-works-gives-a-lab-host-and-a-workstation-design.md` in
+> wl-works, §4.1 and §4.2, lines 268-302, and §12, which declines a named-workstation client class; its handover,
+> "The second brainstorm's answers", XC-320 (d), lines 646-653; backlog XC-320). Read "its own wl.works client"
+> above in that light. wl.works also wrote one condition, recorded here as its statement only (UNVERIFIED against
+> KU Leuven's own text, and not adopted as this spec's rule; the PI is asked): "whatever AI reads the training
+> corpus must itself be inside KU Leuven's rule — on lab hardware, KU Leuven's bonsAI, or Copilot signed in with a KU
+> Leuven account" (its handover lines 663-667; its lab-host spec §2.5, lines 232-236, and §4.3, lines 304-309). The
+> text above is left as approved.
+
 ## 6. Where the records go
 
 - **The corpus is the session folders** on lab storage, the agent's file in each; the same folders
@@ -524,6 +557,13 @@ console (not one of engine spec §19's warnings), and the file is built again la
 - **wl-preproc**: read the change log, reasons, timed events and `controls.jsonl` into the published
   dataset; accept the agent's file in the session folder without reading it.
 - **wl-touchtrain** (the kiosk): the same logs and file (S13 §5).
+
+> **Noted 2026-10-31:** wl.works answered its asks on 2026-10-11 (its handover, "The first brainstorm's answers"
+> and "The second brainstorm's answers", read at its `main` `b3c1b933`). It withdrew `prepare-session`; the
+> permanent id, the newest weight with its date, the water state and the people list (account ids with names)
+> come instead from its rig read, which the rig's own page, signed in through wl.works, calls at a session's open
+> (its stage 10c-1, designed, not built). Backlog XC-320 says how each of the other asks was answered. The list
+> above is left as sent.
 
 ## 8. Testing
 

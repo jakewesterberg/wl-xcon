@@ -758,6 +758,17 @@ but no pull out. Each deployment then reports `floor − already_delivered_today
 the amount still to supplement, and its own finished total reaches wl-works by the normal path.
 (Written as `ceiling − already_delivered_today` before the 2026-09-06 correction.)
 
+> **Superseded 2026-10-11 by wl.works** (noted 2026-10-31). wl.works withdrew `prepare-session` and sends a rig
+> no action and no data, so the figure is read, not pushed: the rig's own page, signed in through wl.works, reads
+> it at the session's open from wl.works' rig read (its stage 10c-1, designed, not built), as the envelope
+> `value_ml`, `as_of`, `sources_included`, `complete` (in the field `water_received_today_ml` since 2026-10-19),
+> `value_ml` counting every water entry of the animal's lab day, rig, kiosk and home cage. Nobody signed in, or
+> wl.works or the network down: nothing arrives (wl.works' lab-host spec,
+> `docs/superpowers/specs/2026-10-11-what-wl-works-gives-a-lab-host-and-a-workstation-design.md` in wl-works, §2.2
+> to §2.4). That design names this read for a rig's signed-in page only; how a cage-side kiosk would learn the
+> figure is not designed there (backlog XC-438). Until the read is built and the page calls it, the figure is what a
+> person enters at the open, or unknown. Backlog XC-100.
+
 - **A start-time figure is sufficient**, because an animal cannot be in the chair and at the cage
   kiosk simultaneously — the deployments are sequential, so the one that starts second gets a
   current number.
@@ -765,7 +776,8 @@ the amount still to supplement, and its own finished total reaches wl-works by t
   item 3.** A deployment that cannot learn the day's prior total cannot report what to
   supplement; it still pays the animal. Cage-side, where the ELN link is the only source, that
   is the difference between an unreportable day and an unrewarded one.
-- Added to the wl-works handover as a field on `prepare-session`.
+- Added to the wl-works handover as a field on `prepare-session`. *(Withdrawn by wl.works 2026-10-11 with
+  `prepare-session`; the rig read carries it, the note above.)*
 
 ### 5.3 Tokens
 

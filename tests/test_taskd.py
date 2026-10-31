@@ -878,9 +878,10 @@ def test_a_session_reports_what_the_day_still_owes(tmp_path):
 def test_a_session_with_an_unknown_daily_total_still_pays_and_says_it_cannot_count(
     tmp_path,
 ):
-    """The ELN was unreachable at `prepare-session`, so nobody knows what the animal
-    has already had. Under a floor that must not stop the reward: an unknown day is a
-    reporting failure, and the one thing it must not do is stop paying for work."""
+    """Nothing came from the ELN at the open (wl.works unreachable, or nobody signed
+    in to read it), so nobody knows what the animal has already had. Under a floor
+    that must not stop the reward: an unknown day is a reporting failure, and the
+    one thing it must not do is stop paying for work."""
     spec = _spec(tmp_path, trials=50)
     spec.already_delivered_today = None
     session = _session(spec)

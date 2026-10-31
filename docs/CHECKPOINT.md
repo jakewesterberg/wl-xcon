@@ -5730,7 +5730,7 @@ by another worker including its remote.
 | `wl-sync` | **yes** | The session id is unreadable by a rig host, so `taskd` cannot name its own output directory. And two animals a day means a subject change must mint `_02` |
 | ~~`wl-preproc`~~ | ~~**yes**~~ | ~~`read_online_map` reads a `.bhv2` that will not exist~~ **Closed 2026-09-05: they built the second reader** (`eye/expcontroller.py::read_expcontroller_map`, at `c3f6c5e`). Its source fixes the schema, and `tests/test_calibration.py` round-trips against it |
 | `wl-preproc` | no | `PARAM_CHANGE` escape; ownership split recorded; codec declared as an artifact; per-trial gaze staleness |
-| `wl-works` | no | `prepare-session`, a planned calibration block per session, alerting on bad readings, and an NTP server for lab hosts to synchronize to (ADR-0009) |
+| `wl-works` | no | `prepare-session` (withdrawn by wl.works 2026-10-11: the rig's signed-in page is to read the day's facts instead, XC-100), a planned calibration block per session (withdrawn 2026-10-01, XC-101), alerting on bad readings, and an NTP server for lab hosts to synchronize to (ADR-0009) |
 
 Neither blocking item stops P1–P4. Both are built around: codes are allocated in
 **4096–32767** (undisputed) and the session id sits behind a provider interface.

@@ -249,7 +249,9 @@ Today, the who and why of a change would not reach the published dataset.
   time. The key that never changes is `animal.id`.
 - **The rig cannot push to wl.works** (architecture.md, "Data outputs and lab integration"); it is to
   receive the day's delivered fluid with `prepare-session` (XC-100, waiting on wl-works; today the
-  figure is typed at the session's open), and nothing of a plan since 2026-10-01.
+  figure is typed at the session's open), and nothing of a plan since 2026-10-01. *(Noted 2026-10-31:
+  wl.works withdrew `prepare-session` on 2026-10-11; the rig's own page, signed in through wl.works, is to
+  read the day's water from wl.works at the open instead, its stage 10c-1, designed and not built.)*
 - **The kiosk's record is undesigned.** S13 §5 leaves it open with three candidates and recommends "a
   lighter record of its own" outside the pipeline for a first version. If home-cage training is where
   much of the training happens, a backlog that omits it is missing the part XC-288 is about.

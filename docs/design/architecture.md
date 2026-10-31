@@ -673,13 +673,18 @@ is the routing claim itself, narrowed rather than reversed. NTP serves bookkeepi
 only — which day it is, when a mark was made — never the timing record, which remains
 the sync box's hardware ticks and the strobed event words (S3) [@mills2010network;
 @karsh2026sync]. Application integration
-is otherwise still pull-based and reuses `wl-preproc`'s existing lab-host protocol, in three
-directions: wl-works pushes a `prepare-session` action carrying the ELN metadata bundle;
-live session state is exposed as **readings on `GET /health`**; and the finished session
+is otherwise still pull-based and reuses `wl-preproc`'s existing lab-host protocol: live
+session state is exposed as **readings on `GET /health`**, and the finished session
 summary is **a file in the session directory** that `wl-preproc` ingests, because the
-protocol declines result upload. No welfare-affecting action — reward, stimulation, session
-start, parameter change — is ever published through it, since wl-works' permission model is
-flat by design. Drafted at `docs/pending-wl-works-amendments.md`.
+protocol declines result upload. What the rig wants from the ELN at a session's open (the
+animal's permanent id, its newest weight and water state, the day's water so far, its open
+rig visit and the lab's people list) **is read by the rig's own page, signed in through
+wl.works**, from a read-only resource of wl.works' (its stage 10c-1, designed 2026-10-11 and
+not built; backlog XC-100): wl.works withdrew the `prepare-session` action it was to push
+on 2026-10-11, and sends a rig no action and no data. No welfare-affecting action —
+reward, stimulation, session start, parameter change — is ever published through the
+protocol, since wl-works' permission model is flat by design. Drafted at
+`docs/pending-wl-works-amendments.md`.
 
 Behavioral visualization lives here; **neural visualization stays in `wl-expviz`**.
 
