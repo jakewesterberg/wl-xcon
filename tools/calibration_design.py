@@ -113,7 +113,6 @@ SHOWN_REACH = 0.75
 FIXATION_NOISE_DEG = 0.35
 
 
-
 @dataclass(frozen=True)
 class Setup:
     """What one record measures: the extent the constellation is scaled to (the
