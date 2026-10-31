@@ -11,6 +11,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 from wl_xcon.run import Quiet, run_trial
 
 _SPEC = importlib.util.spec_from_file_location(
@@ -81,3 +83,23 @@ def test_the_command_line_writes_the_report_where_it_is_told(tmp_path, capsys):
     assert "Median added per frame by the check:" in text
     assert "--frames 20 --trials 3" in text
     assert capsys.readouterr().out == f"wrote {out}\n"
+
+
+@pytest.mark.parametrize("calls", [2010, 19, 1, 0, -20])
+def test_a_call_count_twenty_equal_batches_cannot_hold_is_refused(calls):
+    """XC-138: the check alone is timed in twenty batches of `calls // 20`, so 2010
+    timed 2000 calls under a report saying 2010, and fewer than 20 divided by zero.
+    A count is now refused unless it is a positive multiple of twenty, before anything
+    is measured: every batch the same size, and every call the report counts timed."""
+    with pytest.raises(ValueError, match="must be a positive multiple of 20"):
+        tool.measure(frames=5, trials=1, calls=calls)
+
+
+def test_the_command_line_refuses_such_a_count_with_a_sentence(capsys):
+    with pytest.raises(SystemExit) as refused:
+        tool.main(["--frames", "5", "--trials", "1", "--calls", "2010"])
+
+    assert refused.value.code == 2
+    captured = capsys.readouterr()
+    assert "--calls must be a positive multiple of 20" in captured.err
+    assert captured.out == "", "a refused count measured nothing and wrote nothing"
