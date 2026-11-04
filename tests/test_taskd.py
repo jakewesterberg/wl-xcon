@@ -4074,6 +4074,25 @@ def test_a_malformed_ceiling_write_is_recorded_as_asked(tmp_path):
     assert row["by"] == {"kind": "box", "name": "jake"}
 
 
+def test_a_ceiling_write_of_no_plain_type_is_recorded_as_its_repr(tmp_path):
+    """XC-125. `set`'s ceiling guard (M8) refuses a value that is not a number, and
+    `asked` is then written as its repr, so the refusal row is written whatever the
+    value was. The wire never builds one (`link._setting`), so it is queued in
+    process."""
+    link = Simulated()
+    link.queue(SetParameter(name="reward_correct", value=[0.4, "x"], by=Box("jake")))
+    session = _session(_spec(tmp_path, trials=3), link=link)
+
+    session.run()
+
+    assert session.stop_kind == "completed"
+    (row,) = _refusal_rows(session)
+    assert row["name"] == "reward_correct"
+    assert row["asked"] == "[0.4, 'x']"
+    assert "takes a number" in row["why"]
+    assert row["by"] == {"kind": "box", "name": "jake"}
+
+
 def test_a_command_the_session_does_not_act_on_is_refused_not_a_fault(tmp_path):
     """A command type `_command` has no branch for -- a newer console's, say -- is
     refused under its kind and the session runs on, the rule `drain` already applies
@@ -4601,10 +4620,10 @@ def test_a_stop_is_recorded_with_who_and_when(tmp_path):
 
 
 def test_a_stop_with_a_blank_by_still_stops_and_is_recorded_with_its_blank(tmp_path):
-    """XC-125. `Box("")` is what a terminal gives a confirmation made without `--as`
-    (`actor.Box`), and `str()` of it is empty. A stop from it must still end the
-    session at the boundary, say so on the feed and write the control row with the
-    blank name as it came: the record is not a place to invent a sender."""
+    """XC-125. No path sends one today: the wire and the page refuse an empty box
+    name, and `wlx console` requires `--as`. So it is queued in process. If one ever
+    arrives it must still stop, at the boundary, and its row keeps the blank name
+    rather than inventing one."""
     link = Simulated()
     link.queue(Stop(by=Box("")))
     session = _session(_spec(tmp_path, trials=5), link=link)
@@ -4612,40 +4631,15 @@ def test_a_stop_with_a_blank_by_still_stops_and_is_recorded_with_its_blank(tmp_p
     census = session.run()
 
     assert session.stop_kind == "operator"
-    assert sum(census.outcomes.values()) < 5
+    assert sum(census.outcomes.values()) == 0  # drained before trial 0
+    # today's wording; a blank Box prints as nothing
     assert session.stopped_because == "stopped by "
     (row,) = _controls_rows(session)
     assert (row["kind"], row["by"], row["trial_index"]) == (
         "stop", {"kind": "box", "name": ""}, 0
     )
     assert session.controls[0][1] == Box("")
-    assert session.controls[0][3] == "stopped by "
-
-
-def test_a_malformed_ceiling_write_of_no_plain_type_is_recorded_as_its_repr(
-    tmp_path, monkeypatch
-):
-    """XC-125. `asked` is written as asked when it is an int, float or str, and as
-    `repr` otherwise, so the refusal row is written whatever the value was. The wire
-    never builds such a command (`link._setting`), so the command is built here; `set`
-    is made to raise the `TypeError` a check it does not yet make would."""
-
-    def raises(self, name, value, by):
-        raise TypeError("must be real number, not list")
-
-    monkeypatch.setattr(Session, "set", raises)
-    link = Simulated()
-    link.queue(SetParameter(name="reward_correct", value=[0.4, "x"], by=Box("jake")))
-    session = _session(_spec(tmp_path, trials=3), link=link)
-
-    session.run()
-
-    assert session.stop_kind == "completed"
-    (row,) = _refusal_rows(session)
-    assert row["name"] == "reward_correct"
-    assert row["asked"] == "[0.4, 'x']"
-    assert "must be real number, not list" in row["why"]
-    assert row["by"] == {"kind": "box", "name": "jake"}
+    assert session.controls[0][3] == "stopped by "  # today's wording, as above
 
 
 def test_nothing_is_rewarded_while_paused(tmp_path):

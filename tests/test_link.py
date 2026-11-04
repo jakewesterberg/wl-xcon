@@ -2267,8 +2267,6 @@ def test_a_timed_out_command_is_on_the_wire_once_and_never_resent(zmq_cleanup):
     assertion reads how long anything took."""
     import zmq
 
-    from wl_xcon.link import _decode_command
-
     ctx = zmq.Context()
     rig = ctx.socket(zmq.ROUTER)
     try:
@@ -2306,7 +2304,7 @@ def test_a_timed_out_command_is_on_the_wire_once_and_never_resent(zmq_cleanup):
 
 
 def test_a_command_right_after_a_connect_timeout_is_told_the_same_and_the_socket_is_kept(
-    zmq_cleanup,
+    zmq_cleanup, monkeypatch
 ):
     """XC-136. A connect timeout is the no-reset path: nothing was sent, so the REQ
     socket owes no reply and is not replaced (`_reset` is only for an unacknowledged
@@ -2328,9 +2326,9 @@ def test_a_command_right_after_a_connect_timeout_is_told_the_same_and_the_socket
     # A rig comes up where the sender was pointed. The wait for the connection is
     # lengthened for this call only: ZeroMQ reconnects on its own schedule, and the
     # question here is whether the kept socket can deliver, not how fast it connects.
-    commands._connect_ms = 20_000
+    monkeypatch.setattr(commands, "_connect_ms", 20_000)
     link = zmq_cleanup(ZmqLink(pub_endpoint="tcp://127.0.0.1:0", rep_endpoint=endpoint))
-    thread, got = _draining(link)
+    thread, got = _draining(link, seconds=30.0)
 
     commands.deliver(Resume(by=Box("jake")))
     thread.join(timeout=30)
