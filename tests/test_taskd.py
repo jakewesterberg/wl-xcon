@@ -5128,6 +5128,30 @@ def test_a_note_joins_its_stamp_with_the_three_instants_and_their_gaps(tmp_path)
     )
 
 
+def test_a_note_for_a_mark_stamped_in_a_later_trial_is_joined_to_that_trial(tmp_path):
+    """XC-130's other half: the stamp a note joins keeps the trial it was stamped in,
+    not 0 -- the only other note test stamps in trial 0."""
+    link = _MarkAfter(mark=77, calls=11)  # trial 2, frame 10, once armed after trial 1
+    session = _session(_spec(tmp_path, trials=5), link=link)
+    ran = [0]
+
+    def observe(condition, values, result) -> None:
+        ran[0] += 1
+        if ran[0] == 2:
+            link.armed = True
+        if ran[0] == 3:  # drained at the boundary before trial 3
+            link.queue(
+                Mark(mark=77, note="bubble", by=Box("jake"), pressed_at=None, received_at=None)
+            )
+
+    session.observe = observe
+    session.run()
+
+    stamp, note = _controls_rows(session)
+    assert (stamp["trial_index"], stamp["frame"]) == (2, 10)
+    assert (note["kind"], note["stamped_in_trial"], note["frame"]) == ("note", 2, 10)
+
+
 def test_a_note_left_bare_and_a_note_whose_instants_are_unknown_still_record(tmp_path):
     """Esc leaves the mark bare; a `wlx serve` restarted between the signal and the
     note knows no instants. Both are recorded as they are, never filled in."""
