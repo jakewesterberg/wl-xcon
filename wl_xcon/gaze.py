@@ -258,6 +258,11 @@ class Tracked:
         self._sample = None
         self._left: tuple[float, float] | None = None
         self._right: tuple[float, float] | None = None
+        #: **The last sample `display` judged usable and the eyes' positions it converted to**
+        #: (`_usable`), so the frame's one conversion is that one when the tracker still holds it.
+        self._usable_sample = None
+        self._usable_left: tuple[float, float] | None = None
+        self._usable_right: tuple[float, float] | None = None
         #: Which mapping version scored this trial. S5 §6: every trial cites the
         #: version in force, and it is read off the map rather than passed in, so a
         #: trial cannot cite a version it was not actually scored under.
@@ -278,11 +283,13 @@ class Tracked:
         dual-Purkinje vector reaches its map as its two numbers (`EyeReading.dpi_x`, `dpi_y`;
         `Mapping.degrees_of`) and the one thing built is the position returned (XC-414).
 
-        **No position either where the map's answer is not finite** (the controller's ruling of
-        2026-11-06): a datagram whose gaze values are not finite never reaches here, being no
-        sample (`eye.parse`), but finite ones can still overflow, their difference or the map's
-        polynomial; that eye then has no position on the frame, as an eye with no map has none,
-        so no window's angle and no saccade's direction is taken of an infinity, which raised.
+        **No position either where the map's answer is not finite**, for a tracker driven directly
+        (the controller's ruling of 2026-11-06): a sample that reaches the world through `display`
+        never gives one, being a lost sample there when its map's answer is not finite
+        (`_usable`), its last good one held; a tracker given one some other way gives that eye no
+        position on the frame rather than an infinity, which raised in a window's angle and the
+        saccade detector's directions. A backstop, not the rule: an eye that has a map has a
+        position on every frame the tracker is "ok", and one without has none on any.
         """
         if self.tracker.state(self.when(frame)) != "ok":
             return None
@@ -312,14 +319,47 @@ class Tracked:
             return right
         if right is None:
             return left
-        return ((left[0] + right[0]) / 2, (left[1] + right[1]) / 2)
+        # Halved, then summed (the review of d932cb3, its I2): bit for bit `(a + b) / 2` wherever
+        # that is finite, and finite whenever both eyes are, where their sum could overflow.
+        return (left[0] * 0.5 + right[0] * 0.5, left[1] * 0.5 + right[1] * 0.5)
 
     def _look(self, frame: int) -> None:
-        """Each eye's gaze at `frame`, kept for the rest of the frame (`_looked`)."""
-        self._left = self.gaze("left", frame)
-        self._right = self.gaze("right", frame)
+        """Each eye's gaze at `frame`, kept for the rest of the frame (`_looked`): the positions
+        `display` converted the sample to when it judged it usable, while the tracker holds it and
+        it is fresh, so a frame converts each eye once; else as `gaze` gives them."""
+        sample = self.tracker.latest
+        if sample is not None and sample is self._usable_sample:
+            if self.tracker.state(self.when(frame)) == "ok":
+                self._left = self._usable_left
+                self._right = self._usable_right
+            else:
+                self._left = None
+                self._right = None
+        else:
+            self._left = self.gaze("left", frame)
+            self._right = self.gaze("right", frame)
         self._looked = frame
-        self._sample = self.tracker.latest
+        self._sample = sample
+
+    def _usable(self, sample) -> bool:
+        """**Whether a sample is usable**: each eye's map's answer finite (the controller's ruling
+        of 2026-11-06, on the review of d932cb3, its I3: a reading whose P1 - P4, map or eyes' mean
+        is not finite is a lost sample for the whole datagram). `eye.parse` judges P1 - P4; the map
+        is this world's, so it is judged here, before the tracker accepts the sample, and the eyes'
+        mean, halved then summed, is finite whenever both eyes are. Until then an eye whose map
+        overflowed had no position for that frame while the signal said "ok": a hold broke, and
+        two such frames made a saccade. The positions are kept for the frame's conversion
+        (`_look`)."""
+        left = self.mapping.degrees_of("left", sample.left.dpi_x(), sample.left.dpi_y())
+        if left is not None and not (math.isfinite(left[0]) and math.isfinite(left[1])):
+            return False
+        right = self.mapping.degrees_of("right", sample.right.dpi_x(), sample.right.dpi_y())
+        if right is not None and not (math.isfinite(right[0]) and math.isfinite(right[1])):
+            return False
+        self._usable_sample = sample
+        self._usable_left = left
+        self._usable_right = right
+        return True
 
     def in_window(self, window: str, frame: int, eye: str = "both") -> bool:
         """**On the trial loop's path**, every frame for every window a guard asks about, so it
@@ -344,8 +384,9 @@ class Tracked:
             right = self._right
             if left is None or right is None:
                 return False
-            x = (left[0] + right[0]) / 2
-            y = (left[1] + right[1]) / 2
+            # Halved, then summed, as `gaze_cyclopean` takes it (the review of d932cb3, its I2).
+            x = left[0] * 0.5 + right[0] * 0.5
+            y = left[1] * 0.5 + right[1] * 0.5
         else:
             # Any other name is no eye, and `gaze` refuses it as it always has.
             position = (self._left if eye == "left" else self._right if eye == "right"
@@ -525,7 +566,12 @@ class Tracked:
                     self._members.update(placement.members)
                     break
         if self.source is not None:
-            self.tracker.accept(self.source.poll(self.when(frame)))
+            # **An unusable reading is a lost sample** (`_usable`): dropped before the tracker
+            # accepts it, its last good sample held under staleness, as for a missing datagram.
+            sample = self.source.poll(self.when(frame))
+            if sample is not None and not self._usable(sample):
+                sample = None
+            self.tracker.accept(sample)
         # Feed the detector from the same sample the window tests will read, so a
         # saccade and the gaze that guards see cannot come from different frames.
         now = self.when(frame)

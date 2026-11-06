@@ -37,7 +37,16 @@ as a malformed one is. Judged here, where the datagram's numbers first become fl
 anything does arithmetic on them, so the tracker counts it dropped and holds its last sample
 through it as through any lost datagram, its staleness running from the last sample it kept,
 and nothing downstream (the map, a window's angle, the saccade detector's directions, where an
-infinity raised mid-session) ever sees it. The pupil, which no gaze reads, is not judged.
+infinity raised mid-session) ever sees it; **nor one whose P1 - P4 is not finite**, though both
+images are numbers (the review of d932cb3, its I3). The pupil, which no gaze reads, is not
+judged: *not yet*, until a blink rule reads it -- the pupil-area collapse `gaze.Tracked.signal`
+waits on, which the V3 bench measures.
+
+**`parse` never raises** (the controller's ruling of 2026-11-06, on the same review's I1: nothing
+from the tracker may raise mid-trial): any failure to read a datagram -- a frame number that is no
+integer, an integer too large for a float, one of more digits than Python reads, nesting too deep
+to read -- makes it no sample, counted dropped, as a malformed eye is. `Tracked.display` and
+`UdpSource.poll` call it every frame, and each of those raised there, ending the session.
 """
 
 from __future__ import annotations
@@ -107,9 +116,10 @@ def _eye(struct: object) -> EyeReading | None:
             return None
         p1 = (float(crs[_P1]["X"]), float(crs[_P1]["Y"]))
         p4 = (float(crs[_P4]["X"]), float(crs[_P4]["Y"]))
-        if not (math.isfinite(p1[0]) and math.isfinite(p1[1])
-                and math.isfinite(p4[0]) and math.isfinite(p4[1])):
-            # A gaze value that is not finite: a lost sample (the module docstring).
+        if not (math.isfinite(p1[0] - p4[0]) and math.isfinite(p1[1] - p4[1])):
+            # The gaze signal not finite, a lost sample (the module docstring): so whenever either
+            # image's coordinate is not, since an infinity or a NaN in a difference leaves one
+            # there, and when two finite images are too far apart for their difference.
             return None
         return EyeReading(
             frame=int(struct["FrameNumber"]),
@@ -118,7 +128,7 @@ def _eye(struct: object) -> EyeReading | None:
             p1=p1,
             p4=p4,
         )
-    except (KeyError, TypeError, ValueError, IndexError):
+    except (KeyError, TypeError, ValueError, IndexError, OverflowError):
         return None
 
 
@@ -128,17 +138,20 @@ def parse(payload: str | bytes, at: float) -> Sample | None:
     **Never raises.** UDP truncates and loses packets by design, and a parse error
     reaching the frame loop would end a session for something the protocol does
     routinely. A bad datagram is a dropped frame, which the staleness policy already
-    knows how to survive.
+    knows how to survive. **Whatever fails in reading it** (the module docstring): every
+    exception, not the ones foreseen, since each one not foreseen raised mid-trial.
     """
-    if isinstance(payload, bytes):
-        try:
-            payload = payload.decode("utf-8")
-        except UnicodeDecodeError:
-            return None
     try:
-        struct = json.loads(payload)
-    except (json.JSONDecodeError, TypeError):
+        return _parsed(payload, at)
+    except Exception:  # noqa: BLE001 -- any failure to read a datagram makes it no sample
         return None
+
+
+def _parsed(payload: str | bytes, at: float) -> Sample | None:
+    """`parse`'s reading, which may raise on a datagram it cannot read."""
+    if isinstance(payload, bytes):
+        payload = payload.decode("utf-8")
+    struct = json.loads(payload)
     if not isinstance(struct, dict):
         return None
     left, right = _eye(struct.get("Left")), _eye(struct.get("Right"))
@@ -162,7 +175,11 @@ class Tracker:
     #: survived and a real dropout is not.
     staleness: float = 0.05
     latest: Sample | None = None
+    #: **How many polls gave a usable sample**, which became `latest`.
     received: int = 0
+    #: **How many polls gave none**: no datagram, one `parse` could not read, or one that arrived
+    #: but whose gaze is not finite, or not finite through its map (`gaze.Tracked.display`): a
+    #: lost sample, `latest` held through it under `staleness`.
     dropped: int = 0
 
     def accept(self, sample: Sample | None) -> None:

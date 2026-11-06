@@ -496,6 +496,30 @@ def test_the_collector_fits_both_eyes_from_held_fixations():
     assert left.n_points == 13
 
 
+@pytest.mark.parametrize("raw", [1e200, 1e308])
+def test_a_held_reading_too_large_for_the_map_s_basis_is_a_blocking_finding(raw):
+    """**Calibration's fit never raises on one huge reading** (the review of 498460d and d932cb3,
+    its M3): one held sample, among one target's two, whose left first Purkinje image reads
+    `raw` across, finite, so parse keeps it. The second-order basis squares the vector past a
+    float's range, and the fit raised `LinAlgError` with LAPACK's complaints on stderr. That eye
+    now has no map and a blocking finding that says why, and the other eye is fitted as ever."""
+    collector = Collector()
+    for k, (x, y) in enumerate(_targets()):
+        held = [parse(_payload(x, y), at=0.0), parse(_payload(x, y), at=0.0)]
+        if k == 4:
+            datagram = json.loads(_payload(x, y))
+            datagram["Left"]["CRs"][0]["X"] = raw
+            held[1] = parse(json.dumps(datagram), at=0.0)
+            assert held[1] is not None, "a finite reading is a sample"
+        assert collector.accept((x, y), held)
+
+    left, right, findings = collector.fit()
+
+    assert left is None and right is not None
+    assert [(f.code, f.blocking) for f in findings if f.code.startswith("unusable-reading")] \
+        == [("unusable-reading:left", True)]
+
+
 def test_the_collector_tags_each_finding_by_eye_and_keeps_every_other_field(monkeypatch):
     """The engine B final review: the tag rebuilt each finding from its code, detail and
     blocking, so a warning came out accepted in no session kind."""

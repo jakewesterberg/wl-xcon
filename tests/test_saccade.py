@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from wl_xcon.calibration import EyeMap, Mapping, Model
-from wl_xcon.eye import Replay, Tracker
+from wl_xcon.eye import Replay, Tracker, parse
 from wl_xcon.gaze import Tracked
 from wl_xcon.run import Recorded, run_trial
 from wl_xcon.saccade import (
@@ -37,8 +37,8 @@ from wl_xcon.saccade import (
     thresholds,
     velocity,
 )
-from wl_xcon.task import (REMEMBERED, After, On, Outcome, SaccadeOnset, SaccadeTo, State, Trial,
-                          Window)
+from wl_xcon.task import (REMEMBERED, After, Exited, Hold, On, Outcome, SaccadeOnset, SaccadeTo,
+                          State, Trial, Window)
 
 FS = 500.0
 DT = 1.0 / FS
@@ -1286,25 +1286,92 @@ def test_a_trial_waiting_for_a_saccade_takes_one_that_lost_a_sample_near_its_sta
     assert [(s.start, s.flagged) for s in confirmed] == [(kept[0].start, True)]
 
 
-def test_a_reading_whose_degrees_overflow_is_no_position_for_that_eye():
-    """**A finite datagram whose conversion is not finite** does not raise either: the left eye's
-    Purkinje images read 1e308 and -1e308 across five samples into the saccade, finite, so `parse`
-    keeps the datagram, but their difference overflows to infinity. That eye has no position on
-    that frame (`gaze.Tracked.gaze`, as for an eye with no map), the right eye stands for gaze, and
-    the trial runs on and ends as it does whole, the datagram received. Until then the infinity
-    reached the true-angle arithmetic and raised."""
-    whole, kept = _responded(8.0)
-    bad = kept[0].start + 5
-    gaze, _ = _trace([(200, 12, 8.0, 0.0)], n=800)
-    datagram = json.loads(_datagram(gaze[bad][0], gaze[bad][1], bad))
+#: **A map ten times `_IDENTITY`'s scale, each eye `offset` degrees across**: a reading of 1e308
+#: is a finite gaze signal that this map takes past a float's range.
+def _tenfold(offset: float = 0.0) -> EyeMap:
+    return EyeMap(model=Model.AFFINE, x=(offset, 10.0, 0.0), y=(0.0, 0.0, 10.0), conditioning=1.0,
+                  rms_residual_deg=0.0, n_points=3)
+
+
+def _scored(trial: Trial, sent: dict, left: EyeMap, right: EyeMap, gaze=None):
+    """`trial` through the loop, fixation (`_fixating`) as datagrams through `left` and `right`,
+    each datagram `k` in `sent` replaced by `sent[k]`, the tracker's staleness half a frame: the
+    result and the tracker."""
+    gaze = gaze or _fixating()[0]
+    payloads = [(0.0, sent[k] if k in sent else _datagram(x / 10, y / 10, k))
+                for k, (x, y) in enumerate(gaze)]
+    tracker = Tracker(staleness=_FRAME / 2)
+    world = Tracked(tracker, Mapping(version=1, targets=(), left=left, right=right), trial, _FRAME,
+                    {}, source=Replay(payloads=payloads))
+    return run_trial(trial, world, _FRAME, values={}, effects=Recorded()), tracker
+
+
+def _overflowing(k: int) -> str:
+    """Datagram `k` with the left eye's first Purkinje image at 1e308 across, its fourth at the
+    origin: a finite gaze signal that `_tenfold`'s map takes past a float's range."""
+    datagram = json.loads(_datagram(0.0, 0.0, k))
     datagram["Left"]["CRs"][0]["X"] = 1e308
-    datagram["Left"]["CRs"][3]["X"] = -1e308
+    return json.dumps(datagram)
 
-    result, confirmed, tracker = _responded_with(8.0, {bad: json.dumps(datagram)})
 
-    assert (result.outcome, result.frames) == (whole.outcome, whole.frames)
-    assert [(s.start, s.flagged) for s in confirmed] == [(s.start, s.flagged) for s in kept]
-    assert tracker.dropped == 0
+#: **A fixation trial**: gaze held 0.6 s in a 2° window is correct, and leaving it a break.
+_FIXATE = Trial(start="fix", windows=[Window("fix", at=(0.0, 0.0), radius=2.0, on=REMEMBERED)],
+                states=[State("fix", go=[On(Exited("fix"), Outcome.FIXATION_BREAK),
+                                         On(Hold("fix", 0.6), Outcome.CORRECT)])])
+
+
+def test_a_reading_the_map_takes_past_a_float_s_range_is_a_lost_sample_in_a_hold():
+    """**An unusable reading behaves exactly as a lost sample** (the controller's ruling of
+    2026-11-06, on the review's I3): a datagram the left eye's map takes past a float's range, in
+    the middle of a 0.6 s hold, is judged where it enters the gaze world, before the tracker
+    accepts it, and dropped, so the tracker holds its last sample through it, as through a missing
+    datagram: the hold completes as it does with that datagram missing. Until then that eye alone
+    had no position for the frame while the signal said "ok", gaze left the window, and the trial
+    was a `FIXATION_BREAK` at frame 151."""
+    missing, lost = _scored(_FIXATE, {150: ""}, _tenfold(), _tenfold())
+    assert missing.outcome is Outcome.CORRECT
+
+    result, tracker = _scored(_FIXATE, {150: _overflowing(150)}, _tenfold(), _tenfold())
+
+    assert (result.outcome, result.frames) == (missing.outcome, missing.frames)
+    assert (tracker.received, tracker.dropped) == (lost.received, lost.dropped)
+
+
+def test_two_readings_past_a_float_s_range_make_no_saccade_on_a_catch_trial():
+    """**Nor a saccade** (the review's I3 (b)): the eyes' maps 1° apart, and two consecutive
+    datagrams the left eye's map takes past a float's range on a catch trial. The detector's mean
+    had stepped to the right eye alone and back, six velocities past the threshold, an unflagged
+    saccade (298, 304), and the trial ended `EARLY_RESPONSE` at frame 306. Lost samples now, held
+    through: a correct reject, as with those datagrams missing."""
+    sent = {150: _overflowing(150), 151: _overflowing(151)}
+    missing, _ = _scored(_CATCH, {150: "", 151: ""}, _tenfold(), _tenfold(1.0))
+    assert missing.outcome is Outcome.CORRECT_REJECT
+
+    result, _ = _scored(_CATCH, sent, _tenfold(), _tenfold(1.0))
+
+    assert (result.outcome, result.frames) == (missing.outcome, missing.frames)
+
+
+def test_two_eyes_at_a_float_s_largest_average_without_raising():
+    """**The two eyes' mean cannot overflow** (the review's I2): each eye a finite 1e308°, under
+    `_IDENTITY`, whose sum is past a float's range, so `(a + b) / 2` was an infinity that raised in
+    a window's angle mid-trial. Taken as `a * 0.5 + b * 0.5`, bit for bit `(a + b) / 2` wherever
+    that is finite, it is the 1e308 both eyes read: a reading of numbers, far outside the window,
+    so the hold breaks there, and nothing raises."""
+    datagram = json.loads(_datagram(0.0, 0.0, 150))
+    for eye in ("Left", "Right"):
+        datagram[eye]["CRs"][0]["X"] = 1e308
+
+    payloads = [(0.0, json.dumps(datagram) if k == 150 else _datagram(x, y, k))
+                for k, (x, y) in enumerate(_fixating()[0])]
+    world = Tracked(Tracker(staleness=_FRAME / 2),
+                    Mapping(version=1, targets=(), left=_IDENTITY, right=_IDENTITY), _FIXATE,
+                    _FRAME, {}, source=Replay(payloads=payloads))
+    result = run_trial(_FIXATE, world, _FRAME, values={}, effects=Recorded())
+
+    assert (result.outcome, result.frames) == (Outcome.FIXATION_BREAK, 151)
+    world.tracker.accept(parse(json.dumps(datagram), at=world.when(result.frames + 1)))
+    assert world.gaze_cyclopean(result.frames + 1) == (1e308, 0.0)
 
 
 #: **A catch trial**: any saccade in its second is an early response, and none a correct reject.
