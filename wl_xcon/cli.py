@@ -1799,12 +1799,23 @@ def main(argv: list[str] | None = None) -> int:
 
         # **A value its setting cannot hold, refused before the session opens** (the re-review of
         # the C3 plan's Task 19, out-of-scope 2): a word for a number died with a `TypeError` in the
-        # first trial, after the departure was marked, and a `nan` or an infinity ran with a
-        # timeout that never elapses. Judged as `Session.set` judges a live value of a numeric
-        # setting -- a number, not a `bool`, and `bounds._finite` -- so the two paths say alike.
+        # first trial, after the departure was marked, a `nan` or an infinity ran with a timeout
+        # that never elapses, and a word or number outside a setting's choices was recorded as
+        # given. Judged as `Session.set` judges a live value -- a choice of the setting's, else a
+        # number, not a `bool`, and `bounds._finite` -- so the two paths say alike.
         for name, value in values.items():
             declared = next((p for p in task.params if p.name == name), None)
-            if declared is None or declared.choices:
+            if declared is None:
+                continue
+            if declared.choices:
+                # A setting of choices takes one of them, as `Session.set` holds a live value: a
+                # word or a number outside them was recorded as given, and faulted a renderer
+                # after the departure (`NotYetDrawable`).
+                if value not in declared.choices:
+                    raise SystemExit(
+                        f"task refused, session not started, nothing recorded: --set "
+                        f"{_printable(repr(name))} may only be one of "
+                        f"{_printable(str(declared.choices))}; {_printable(repr(value))} is not")
                 continue
             try:
                 if isinstance(value, bool) or not isinstance(value, (int, float)):

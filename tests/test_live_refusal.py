@@ -438,10 +438,10 @@ def _wlx_run(tmp_path: Path, task: str, *sets: str, plan: str | None = None) -> 
 def test_wlx_run_of_a_plan_judges_the_conditions_its_factors_make_before_it_starts(
         tmp_path, capsys):
     """The re-review of Task 19: the check beside `unplaced` in `wlx run` reads the blocks of the
-    plan named, each factorial expanded, as the pre-flight does. A response deadline of 0.15 s
+    plan named (`check.impossible` expands each factorial itself). A response deadline of 0.15 s
     against a 0.2 s target hold is refused naming the conditions the factors make, before any
-    departure: unexpanded, the factorial's block has no condition and the run would be refused
-    only by the backstop, after the departure, stranded."""
+    departure, with no "out of cage", nothing under the root and no stranded session. The plan
+    branch is pinned: judged as the plain run, the refusal would name block 'session' instead."""
     task = _sessions.varied_task(tmp_path / "tasks", name="planned", plans=(
         '{"p": Plan([Block("grid", [], factorial=Factorial({"target_x": (-10.0, 10.0)}, '
         'target=1))])}'))
@@ -584,3 +584,56 @@ def test_a_live_value_outside_its_range_widens_a_direction_draw_as_the_runs_star
     else:
         assert [row["code"] for row in live] == ["outside-range"]
         assert f"target_dir' is {shown}" in live[0]["detail"]
+
+
+def _choosing_task(folder: Path) -> Path:
+    """The reference detection task with one more setting of number choices, `mode`, which nothing
+    reads, written into `folder` as `choosing.py`. Engine test material, run only in the
+    simulator."""
+    text = Path("tasks/fixation_detection.py").read_text()
+    old = '        Param("target_hold", unit="s", low=0.05, high=1.0, start=0.2'
+    assert text.count(old) == 1
+    path = Path(folder) / "choosing.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text.replace(
+        old, '        Param("mode", unit="mode", choices=(1.0, 2.0), start=1.0),\n' + old) + (
+        "\n\nimport dataclasses as _dataclasses\n"
+        "from wl_xcon.task import NEITHER, NOT_DIFFICULTY, Meaning\n"
+        "TASK = _dataclasses.replace(TASK, meanings={**TASK.meanings, 'mode': Meaning(\n"
+        "    NOT_DIFFICULTY, NEITHER, note='read by nothing')})\n"))
+    return path
+
+
+@pytest.mark.parametrize("assignment", ("target_appearance=square", "target_appearance=1.0",
+                                        "mode=fast", "mode=3.0"))
+def test_wlx_run_refuses_a_value_outside_a_settings_choices_before_the_departure(
+        tmp_path, capsys, assignment):
+    """The re-review of Task 19, out-of-scope 3: a `--set` word or number for a setting of choices
+    passed every refusal in `wlx run`, was recorded though it is none of its choices, and on a
+    renderer path faulted after the departure (`NotYetDrawable`), stranding the session. It is
+    refused as `Session.set` refuses a live value (it may only be one of its choices), before the
+    session opens: no "out of cage", nothing under the root, no stranded session. A choice of the
+    setting still runs (the next test)."""
+    task = _choosing_task(tmp_path / "tasks")
+
+    with pytest.raises(SystemExit) as refused:
+        main(_wlx_run(tmp_path, str(task), assignment))
+
+    name, _, value = assignment.partition("=")
+    said = str(refused.value)
+    assert said.startswith(f"task refused, session not started, nothing recorded: --set "
+                           f"{name!r} may only be one of (")
+    assert said.endswith(f"; {(float(value) if value[0].isdigit() else value)!r} is not")
+    assert "out of cage" not in capsys.readouterr().out
+    assert not (tmp_path / "root").exists()
+    assert stranded.find(tmp_path / "root") == []
+
+
+def test_wlx_run_runs_with_a_value_that_is_one_of_a_settings_choices(tmp_path, capsys):
+    """A choice of the setting (`mode=2.0`) is not refused: the run starts and the departure is
+    marked, as for any run."""
+    task = _choosing_task(tmp_path / "tasks")
+
+    main(_wlx_run(tmp_path, str(task), "mode=2.0"))
+
+    assert "out of cage" in capsys.readouterr().out

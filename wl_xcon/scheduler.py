@@ -610,6 +610,19 @@ class Scheduler:
         index = None if position is None else self._type_at(position)
         return None if index is None else self.blocks[index]
 
+    def following_if_expired(self, expired: bool) -> Block | None:
+        """`following`, asked as if the open block's time had run out (`expire`) where `expired` is
+        true, **without setting it**: the end is still decided where the loop decides it. What
+        `taskd.Session._playing` asks at a boundary, so a value applied as a block ends by its
+        time is judged by the block that follows, with no side effect on the boundary (a drum
+        switch, `owed`)."""
+        held = self._expired
+        self._expired = held or expired
+        try:
+            return self.following
+        finally:
+            self._expired = held
+
     @property
     def next_block(self) -> Block | None:
         """The block the plan goes on to when the open one ends on its own rule or its time -- the

@@ -727,3 +727,46 @@ def test_a_value_applied_as_a_block_ends_by_its_time_limit_is_judged_by_the_next
     assert row["trial_number"] == first
     assert (row["was"], row["now"]) == (2.0, 2.5)
     assert (row["meaning"]["went"], row["meaning"]["step"]) == ("easier", 2.5 - 2.0)
+
+
+#: `TIMED` with `given` sequence-balanced (four trials a condition, two cycles), whose end row's
+#: `owed` reads whether the block's time has run out.
+TIMED_SB = TIMED.replace('Condition("wide", {"fix_window": 3.0}, target=3), ',
+                         'Condition("wide", {"fix_window": 3.0}, target=4), ').replace(
+    'Condition("plain", {}, target=3)], time_limit_s=4.0)',
+    'Condition("plain", {}, target=4)], order=SequenceBalanced(cycles=2), time_limit_s=4.0)')
+SET_WINDOW = {"kind": "set", "by": "jake", "name": "fix_window", "value": 2.5}
+
+
+def _boundary(tmp_path, script: dict, plans: str) -> dict:
+    """What a time-limited block's end leaves that a value applied there must not move: each trial
+    line's drumming and aids, the drum switches' blocks in controls.jsonl, and the run end row's
+    per-condition counts (`owed` among them)."""
+    session = _session(tmp_path, script, plans=plans, plan="given")
+    session.run()
+    return {
+        "lines": [(line["trial_number"], line["block"], line.get("drumming"), line.get("aids"))
+                  for line in _rows(session.directory, "trials.jsonl")],
+        "controls": [(row["kind"], row.get("block"))
+                     for row in _rows(session.directory, "controls.jsonl")],
+        "owed": [(row["block"], row["condition"], row["owed"])
+                 for row in _rows(session.directory, "runs.jsonl")[-1]["conditions"]],
+    }
+
+
+@pytest.mark.parametrize("act", ({"kind": "drum", "by": "jake", "scope": "block"},
+                                 {"kind": "next_block", "by": "jake"}), ids=("drum", "next_block"))
+@pytest.mark.parametrize("plans", (TIMED, TIMED_SB), ids=("counted", "sequence_balanced"))
+def test_a_value_applied_at_a_time_limit_boundary_moves_nothing_but_its_own_record(
+        tmp_path, plans, act):
+    """The re-review of Task 19: deciding a block's time-limit end where a value applies must have
+    no side effect on the boundary. A value drained before the trial that ends `given`, and a drum
+    switch or a move to the next block at the boundary after it, leave the trial lines' drumming,
+    the switch's block and the run end row's `owed` as they are without the value (only the change
+    row, the feed line and the moment differ). Setting the scheduler's expiry early put the switch
+    in block `bare` and read a sequence-balanced block's `owed` as 0."""
+    assert plans != GIVEN
+    with_value = _boundary(tmp_path / "a", {4: [SET_WINDOW], 5: [act]}, plans)
+    without = _boundary(tmp_path / "b", {5: [act]}, plans)
+
+    assert with_value == without

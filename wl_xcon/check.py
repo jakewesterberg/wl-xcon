@@ -712,7 +712,9 @@ def _plan_faults(task: Task) -> list[Finding]:
     what cannot run or would leave the record unreadable: a plan of no blocks; two block types of
     one plan, or two conditions of one block, with one name (each is what a trial's row names it
     by; XC-388); a condition playing a structure the task lacks, or setting a value the task
-    cannot take; a block that can never end -- a criterion or a number of trials over no
+    cannot take, **or giving a bounded setting, a reward size** (the subject's bounded config and
+    the console set it, never a condition; as a draw and a factor of it are refused); a block that
+    can never end -- a criterion or a number of trials over no
     conditions (XC-381); a criterion, a fall-back rule, a number of trials, a count or a time
     limit that is no rule at all; weights that are no weights; and, each of which would fault the
     run or the check (the final review of engine build C2b, I1-I3), a block's order that is not

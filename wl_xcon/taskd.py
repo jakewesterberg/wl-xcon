@@ -2627,21 +2627,32 @@ class Session:
         this boundary by its rule (`Scheduler.following`), else the open one. A value applied as a
         block ends is judged, worded and recorded by the block its row's `trial_number` plays
         (the brief of Task 19; its review, Minor 1). **An end by the block's time limit is decided
-        here too** (`_elapsed - _block_from >= time_limit_s`, which no pause moves; the loop asks
-        the same a few lines on, so expiring it now changes nothing). **The known case left out**:
+        here too** (`_elapsed - _block_from >= time_limit_s`, which no pause moves), **asked and
+        not set** (`Scheduler.following_if_expired`): the loop decides the end a few lines on, and
+        setting it here moved a drum switch drained at the boundary into the next block and read a
+        sequence-balanced block's `owed` as 0. **The known case left out**:
         a person's `next_block` drained in the same drain as a value at the boundary moves the
         plan after the row is applied, so that row is judged by the block that was open."""
         scheduler = self._scheduler
         held = scheduler.block.time_limit_s
-        if (held is not None and not scheduler.expired
-                and self._elapsed - self._block_from >= held):
-            scheduler.expire()
-        return scheduler.following or scheduler.block
+        timed = (held is not None and not scheduler.expired
+                 and self._elapsed - self._block_from >= held)
+        return scheduler.following_if_expired(timed) or scheduler.block
 
     def _given_by(self, name: str, block) -> str | None:
         """What gives `name` in `block` while no person holds it: `"conditions"` where every
         condition draws it from its own range (`_own_range`'s rule) or any gives it a value,
-        `"draw"` where a draw of it is in force (`variation.in_force`), else None."""
+        `"draw"` where a draw of it is in force (`variation.in_force`), else None.
+
+        **The rule for a change row's `was`** (XC-288 §3.4; the controller's rulings of 2026-10-30
+        on the engine C3 plan's path test): a record must not claim a value no trial held. Where
+        this gives a name, a value a person or a revert gives it writes `was` null, and the
+        meaning's `went` and `step` null -- no single value was held before it: the run's own value
+        `set` reads lies under the draw or the conditions, and what the animal saw is each trial
+        line's `params` and `drawn`. Where it gives None (a setting a person holds, one nothing
+        gives, a reward size) the row keeps `was` and the way it went. Judged in the block the
+        row's trial plays (`_playing`); for a `set` row by the state before the pass, when its
+        `was` was read."""
         if name in self._edited:
             return None
         conditions = block.conditions
@@ -3309,8 +3320,9 @@ class Session:
                 # ahead of it has made by now: `set`'s `was` is the value before this
                 # inter-trial interval (its docstring), not before this row.
                 was = self.spec.values.get(name)
-            # No single value is "before" on a setting the open block draws or its conditions give:
-            # its row says none, and no way it went (`_given_by`); the feed says what gave it.
+            # No single value is "before" on a setting the block this row's trial plays draws or
+            # its conditions give: its row says none, and no way it went (`_given_by`); the feed
+            # says what gave it.
             given = (before[name] if moment is None
                      else None if bounded else self._given_by(name, playing))
             written = None if given else was
