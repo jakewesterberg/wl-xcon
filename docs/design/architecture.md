@@ -427,7 +427,13 @@ from a hash of the run's seed, the trial's number in the run and the setting, ne
 scheduler's generators, so adding a draw moves no condition or repeat; a prepared list in shuffled
 passes; the non-aging wait's tail drawn again; a factorial's conditions and their names; and a
 sequence-balanced block's de Bruijn sequence, each cycle played as the linear one, its first
-trials a lead-in.
+trials a lead-in. **A designed block** (`task.SequenceBalanced`,
+`task.Priming`) plays a plan the scheduler draws as it opens, from a generator of its own: a break
+in it is never placed as a repeat, a sequence-balanced block's lost place recorded as a `designed`
+shortfall, unless the block brings the trial back at once, under the repeat limit. **A trial a
+live change eased** (`Scheduler.record`'s `eased`) is left out of a block's criterion and, in a
+training progression, of a stage's number of trials and targets, and still judged toward the
+fall-back.
 
 **Plans and blocks, since engine build C2b.** A task declares its plans (`Task.plans`; engine spec
 §13.1), and the operator chooses one at run start -- from the page, its pre-flight taken for

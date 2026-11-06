@@ -147,7 +147,11 @@ random Euler circuit through them [@brooks2012counterbalancing]. **Depth (Q5a: "
 Pairs: each condition follows each, itself included, once per cycle, n² trials (4 conditions: 16); triples, n³ (64).
 *Engineering:* `SequenceBalanced(depth=2, cycles=1)` (`task.Balanced` is a block order's name); the block ends when
 its cycles are played out, owing nothing more (call 14). A trial count or time limit can cut a cycle short; the
-record says so.
+record says so. *Amended 2026-10-31 (the PI, on the engine C3 plan's Appendix B, item 1: "Add one closing trial
+(Recommended)"):* each cycle is played as the linear de Bruijn sequence, n^depth + depth − 1 trials (4 conditions:
+17 at pairs, 66 at triples), so every pair (or triple) is shown once per cycle; its first depth − 1 trials are a
+lead-in that only precedes what follows, each such trial's line marking it (`planned`'s `lead_in`) so an analysis
+can drop it.
 
 **On a break (Q5b: "'Again at once' as an option"):** no repeat by default (TSK-31). The sequence goes on; the lost
 transition is recorded as a shortfall `because` `"designed"` (engineering). A block may choose **"again at once"**:
