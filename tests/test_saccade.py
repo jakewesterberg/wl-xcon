@@ -363,9 +363,10 @@ def test_a_gaze_sample_that_is_no_number_makes_every_velocity_reading_it_no_numb
 
 
 @pytest.mark.parametrize("history,lost", [(60, None), (1000, None), (1000, "a NaN"), (60, 650),
-                                          (1000, 697)],
+                                          (1000, 697), (1000, "still upward")],
                          ids=["wrapped", "filling", "filling, a NaN among them",
-                              "wrapped, a sample lost", "a sample lost at the end"])
+                              "wrapped, a sample lost", "a sample lost at the end",
+                              "a sample lost, the eye still upward"])
 def test_the_online_thresholds_are_the_batch_form_s_over_the_last_history_velocities(history,
                                                                                        lost):
     """Re-estimated in buffers built with the detector (XC-414), the thresholds are still
@@ -378,8 +379,13 @@ def test_the_online_thresholds_are_the_batch_form_s_over_the_last_history_veloci
     unknown one follows within two samples, and the two after an unknown one are not taken, so a
     sample lost at 650 leaves out 646 and 647 and 653 and 654, beside the five it makes unknown,
     with the buffer wrapped or not; and lost at 697, its last velocities, the thresholds a refresh
-    took over 693 and 694 are taken again without them."""
+    took over 693 and 694 are taken again without them. **A withdrawal keeps the thresholds only
+    for a detector that is ready** (version 9, `_kept`): with the eye still upward, exactly, the
+    upward threshold is zero and the detector never ready, so a sample lost at 650 re-takes them
+    as version 8 did, where keeping them would leave the rightward one where it stood."""
     gaze, at = _trace([(200, 10, 8.0, 0.0), (450, 12, -7.0, 3.0)], n=700)
+    if lost == "still upward":
+        gaze, lost = [(x, 0.0) for x, _ in gaze], 650
     seen = list(gaze)
     if lost == "a NaN":
         gaze[650] = (math.nan, gaze[650][1])
@@ -412,21 +418,71 @@ def test_a_detector_once_ready_stays_ready_while_its_thresholds_are_not_zero():
     assert [(s.start, s.flagged) for _, s, _ in found] == [(whole.start, True)]
 
 
-def test_reset_leaves_a_detector_as_a_new_one_is():
+@pytest.mark.parametrize("warmup, onset, lost", [(2, 4, 6), (2, 4, 7), (3, 4, 7)],
+                         ids=["warmup 2, both velocities withdrawn", "warmup 2, one left",
+                              "warmup 3, one left"])
+def test_a_withdrawal_that_would_leave_fewer_than_two_velocities_keeps_the_thresholds(
+        warmup, onset, lost):
+    """**Ready stays ready for every warmup** (version 9; the review of version 8, its N1): with a
+    warmup of 2 or 3 a withdrawal just after it is met can leave none or one velocity taken, whose
+    scale is zero, so version 8 re-took the thresholds at zero, the detector stopped being ready and
+    dropped the run open then, and found the saccade later, unflagged, or never (the review's check
+    3(d): an 8° minimum-jerk saccade over 20 samples from sample 4, sample 6 or 7 lost). Now a
+    withdrawal that would leave a threshold at zero keeps the ones it found until a refresh, when
+    one is due, can replace them: the detector, once ready, stays ready, and the run open as the
+    sample is lost is carried across the stretch of unknown velocities it makes and is the first
+    saccade reported, at the start it opened with, flagged. (What a warmup of two velocities then
+    detects with a scale taken over them is that warmup's own matter.)"""
+    gaze, at = _minimum_jerk(onset=onset, duration=20, n=200, seed=onset * 100 + lost)
+    trace = _lost(gaze, lost)
+    detector = Detector(params=Params(warmup_samples=warmup))
+    ready, flying, found = [], [], []
+    for t, g in zip(at, trace):
+        saccade = detector.accept(t, g)
+        ready.append(detector.ready)
+        flying.append(detector.in_flight)
+        if saccade is not None:
+            found.append((saccade.start, saccade.flagged))
+    opened = flying.index(True)
+    assert opened < lost, "a run must be open as the sample is lost"
+
+    assert all(ready[ready.index(True):]), "once ready, the detector stays ready"
+    assert all(flying[opened:lost + 2 * HALF_WINDOW + 1]), \
+        "the run stays open across the withdrawal and the unknown velocities"
+    assert found[0] == (opened - HALF_WINDOW, True)
+
+
+@pytest.mark.parametrize("before", ["a loss withheld, then velocities taken",
+                                    "a loss withheld, to the trial's end",
+                                    "a withdrawal that kept the thresholds"])
+def test_reset_leaves_a_detector_as_a_new_one_is(before):
     """`reset` starts every count and mark over, so a trial is detected as by a new detector: every
     field but the buffers, which are kept and written over (XC-414), and the open run's first sample
-    (`_run_x`, `_run_y`), written as a run starts and read only in it. The trial before ends with a
-    loss of 61 samples, withheld, a lost sample before it, and velocities taken after it, so each of
-    version 8's marks -- the last measured sample's time, the withheld loss's reach, the velocities
-    not taken after an unknown one, the newest taken ones, a warmup met -- is set to forget."""
+    (`_run_x`, `_run_y`), written as a run starts and read only in it. Each trial before sets marks
+    to forget: one ends with a loss of 61 samples, withheld, a lost sample before it, and velocities
+    taken after it -- the last measured sample's time, the last carried unknown velocity, the
+    velocities not taken after an unknown one, the newest taken ones, a warmup met; one ends inside
+    a loss longer than `max_gap_s`, a stretch of unknown velocities under way, withheld (version 9);
+    and one, warmup 2, ends with thresholds a withdrawal kept (version 9)."""
     gaze, at = _trace(_TWELVE)
-    detector = Detector()
-    _online_with(detector, _lost(gaze, 300, *range(500, 561)), at)
-    new = Detector()
+    params = Params()
+    if before == "a loss withheld, then velocities taken":
+        trace = _lost(gaze, 300, *range(500, 561))
+        marks = ("_present_at", "_last_unknown", "_skip_to", "_provisional", "_warm")
+    elif before == "a loss withheld, to the trial's end":
+        trace = _lost(gaze, *range(540, len(gaze)))
+        marks = ("_present_at", "_stretch", "_withheld", "_warm")
+    else:
+        gaze, at = _minimum_jerk(onset=4, duration=20, n=200, seed=406)
+        trace, params = _lost(gaze, 6)[:12], Params(warmup_samples=2)
+        marks = ("_kept", "_eta_x", "_eta_y", "_warm")
+    detector = Detector(params=params)
+    _online_with(detector, trace, at)
+    new = Detector(params=params)
     kept = set(_BUFFERS) | {"_run_x", "_run_y"}
     fields = [f.name for f in dataclasses.fields(Detector) if f.name not in kept]
-    assert [name for name in ("_present_at", "_withheld_to", "_skip_to", "_provisional", "_warm")
-            if getattr(detector, name) == getattr(new, name)] == [], "each must be set to forget"
+    assert [name for name in marks if getattr(detector, name) == getattr(new, name)] == [], \
+        "each must be set to forget"
 
     detector.reset()
 
@@ -902,7 +958,7 @@ def test_the_batch_flag_reads_the_run_and_the_two_samples_before_it():
     assert _online_closing(trace, at)[0] == [(201, False)]
 
 
-@pytest.mark.parametrize("edge, lose", [("start", ()), ("start", (8,)), ("end", ()), ("end", (590,))],
+@pytest.mark.parametrize("edge, lose", [("start", ()), ("start", (6,)), ("end", ()), ("end", (590,))],
                          ids=["from the trace's start", "from its start, a sample lost",
                               "to the trace's end", "to its end, a sample lost"])
 def test_a_trace_s_edges_are_no_loss_of_data_for_the_flag(edge, lose):
@@ -914,9 +970,12 @@ def test_a_trace_s_edges_are_no_loss_of_data_for_the_flag(edge, lose):
     start's two flagged a run from sample 0, both forms, and the end's a run reaching it in the
     batch form. Online is ready only after its warmup's velocities, so at the start it runs with a
     warmup of two, as `test_a_run_at_a_trial_s_first_velocities_is_unflagged` does, and its run
-    starts later. The sample lost there is 8: until version 8 it was 6, whose unknown velocities
-    from 4 now withdraw from the scale both of the two the detector was ready on (`thresholds`'
-    complete windows), so it is not ready again until after the loss."""
+    starts later. The sample lost there is 6, whose unknown velocities from 4 withdraw from the
+    scale both of the two the detector was ready on (`thresholds`' complete windows): version 8,
+    re-taking the thresholds over none, stopped being ready and dropped the run, so this test lost
+    sample 8 in its place; version 9 keeps them (the review of version 8, its N1). A sample lost
+    nearer the start than 3 is withheld, no loss of data a run is carried across
+    (`test_a_loss_within_two_samples_of_a_trace_s_edge_is_withheld`)."""
     gaze, at = _minimum_jerk(onset=0) if edge == "start" else _minimum_jerk(onset=580)
     trace = _lost(gaze, *lose)
 
@@ -993,6 +1052,87 @@ def test_a_run_just_after_a_long_loss_is_unflagged(case):
     assert (*run, False) in found
     if case != "after a loss from the trace's start":
         assert (run[0], False) in _online_closing(trace, at)[0]
+
+
+# ---------------------------------------------------------------------------
+# Each stretch of unknown velocities judged whole (version 9)
+# ---------------------------------------------------------------------------
+#
+# wl-preproc's input rule for its detector (`contract_fixtures.detector_input`, by
+# `validity._uncarried`, on its branch `replay2/eye-lost` at `bb6180e`, the rule of its contract
+# fixtures v3): a lost sample makes unknown every velocity whose window holds it, and each maximal
+# stretch of unknown velocities is carried only when the samples either side of it are in the trace
+# and every measured sample from the one before it to the one after it is within `max_gap_s` of the
+# measured sample before; otherwise the whole stretch is withheld. Version 8 judged each loss alone.
+
+
+@pytest.mark.parametrize("between, flagged", [(4, False), (5, True)],
+                         ids=["four measured samples between: one stretch, withheld whole",
+                              "five: two stretches, the short loss's carried"])
+def test_a_short_loss_within_four_samples_of_a_long_one_is_withheld_with_it(between, flagged):
+    """**Version 9.** A loss makes unknown the velocities two samples either side of it, so two
+    losses with four measured samples or fewer between them leave no velocity known between them:
+    one stretch, judged whole. Fixation, 30 samples lost from 262 (62 ms from the last measured
+    sample to the next, past `max_gap_s`: withheld), then `between` measured samples, two more
+    lost, and a saccade at 300 whose run starts at 301, its flag window reading the second loss's
+    last unknown velocities. With four between, the short loss is part of the long loss's stretch,
+    withheld with it, and flags nothing, as wl-preproc labels it (INVALID); version 8 judged each
+    loss alone and flagged the run, batch and online. With five a velocity is known between them,
+    the short loss is a stretch of its own, carried, and flags the run in both versions."""
+    gaze, at = _minimum_jerk(onset=300)
+    short = 292 + between
+    trace = _lost(gaze, *range(262, 292), short, short + 1)
+    velocities = velocity(trace, at, Params())
+    assert all(v is None for v in velocities[260:short + 4]) is (between <= 4), \
+        "one stretch exactly when no velocity between the two losses is known"
+    assert velocities[299] is None and velocities[301] is not None
+
+    assert _runs(trace, at) == [(301, 330, flagged)]
+    assert _online_closing(trace, at)[0] == [(301, flagged)]
+
+
+def test_two_short_losses_within_four_samples_are_one_stretch_carried_by_each_loss_s_length():
+    """**Version 9, judged as wl-preproc's code judges it**: a stretch is carried when each measured
+    sample, from the one before it to the one after it, is within `max_gap_s` of the measured
+    sample before it -- so by each loss's own length, not by the stretch's span. A 30° movement
+    over 200 samples from 200 loses 20 samples from 230 and 20 from 251, one measured sample
+    between them: one stretch of unknown velocities, 228 to 272, 84 ms from the last measured
+    sample before it to the first after it, each loss 42 ms. Carried, so one run across it,
+    flagged, batch and online closing with the same stop, as wl-preproc's code gives it (its
+    labels LOST throughout, `n_lost` 45). Version 8, judging each loss alone, carried it too; a
+    rule reading the stretch's span would end the run at 228."""
+    gaze, at = _minimum_jerk(onset=200, duration=200, amplitude=30.0)
+    trace = _lost(gaze, *range(230, 250), *range(251, 271))
+    velocities = velocity(trace, at, Params())
+    assert [k for k in range(200, 300) if velocities[k] is None] == list(range(228, 273))
+    assert at[271] - at[229] > Params().max_gap_s >= at[250] - at[229]
+
+    [run] = detect(trace, at)
+
+    assert (run.start, run.stop, run.flagged) == (214, 385, True)
+    confirmed, closed = _online_closing(trace, at)
+    assert len(confirmed) == 1 and [stop for _, stop in closed] == [run.stop]
+
+
+@pytest.mark.parametrize("onset, lose, run", [
+    (0, 1, (4, 29, False)), (0, 2, (5, 29, False)), (0, 3, (6, 29, True)),
+    (580, 597, (581, 595, False)), (580, 598, (581, 596, False)), (580, 599, (581, 597, False)),
+], ids=["sample 1 lost", "sample 2 lost", "sample 3 lost: carried",
+        "the third-last lost", "the second-last lost", "the last lost"])
+def test_a_loss_within_two_samples_of_a_trace_s_edge_is_withheld(onset, lose, run):
+    """**Version 9**: a stretch of unknown velocities is carried only between two samples of the
+    trace, so one that reaches its first or last velocity is withheld. A sample lost within two of
+    the trace's first makes its first velocity unknown (its window clipped to the trace): a saccade
+    from sample 0 with sample 1 or 2 lost is no longer flagged, as wl-preproc labels the stretch
+    INVALID; with sample 3 lost the stretch begins at velocity 1, sample 0 before it, carried, and
+    the run is flagged in both versions. At the end a run reaching a loss in the last three samples
+    stops at its last measured velocity, unflagged, as in version 8 and wl-preproc. **The batch form
+    only**: online a run cannot start within two velocities of a stretch from the trial's start, the
+    detector not being ready (the two velocities after an unknown one are never taken, and its scale
+    needs two), and a trial has no end the detector sees."""
+    gaze, at = _minimum_jerk(onset=onset)
+
+    assert _runs(_lost(gaze, lose), at) == [run]
 
 
 def _complete(velocities) -> list:
@@ -1103,17 +1243,19 @@ def test_every_run_is_confirmed_while_it_is_open(seed):
     assert confirmed > 100
 
 
-def test_the_detector_that_ends_a_run_on_the_landing_after_a_short_loss_is_version_8():
+def test_the_detector_that_judges_each_stretch_of_unknown_velocities_whole_is_version_9():
     """`VERSION` is bumped whenever a session would detect something else: version 2 reports what
     version 1 never did, version 3 no longer reports a run whose minimum duration only unknown
     velocities met, version 4 detects and sizes in true visual angle (XC-398), version 5 ends a
     run at a lost stretch longer than `max_gap_s`, version 6 makes a gaze sample that is no number
     NaN in every velocity reading it, version 7 takes five of wl-preproc's lost-data rules (R3,
-    R11, R16, R18, R19), and version 8 ends a run that reaches a short loss on the first measured
+    R11, R16, R18, R19), version 8 ends a run that reaches a short loss on the first measured
     sample after it, flags no run for a withheld loss before it, and takes the thresholds over
-    complete windows of known velocities. **Not wl-preproc's fixture set "v2"**, which version 4 is
+    complete windows of known velocities, and version 9 judges each stretch of unknown velocities
+    whole, withholding one within two samples of a trace's edge, and keeps the thresholds a
+    withdrawal would leave at zero. **Not wl-preproc's fixture set "v2"**, which version 4 is
     pinned to: that is their file's version, and this constant is ours."""
-    assert VERSION == 8
+    assert VERSION == 9
 
 
 # ---------------------------------------------------------------------------
