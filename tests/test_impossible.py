@@ -487,6 +487,14 @@ def test_a_hold_its_timeout_leaves_less_than_a_saccades_latency_after_is_warned(
     assert "`target_hold`, which its 'w' hold takes too" in same.detail
     assert warned(_respond(hold=P("target_hold"), wait=P("target_hold"), first=True)) == []
     assert warned(_respond(starts=(0.5, 0.6), to=Outcome.CORRECT)) == []
+    # A drawn hold is judged at its longest, a drawn timeout at its soonest (fix round 1: the
+    # warning's own bounds, once unpinned, now read the one generator `_cut_off` reads).
+    (long_draw,) = warned(_respond(starts=(None, 0.6),
+                                   draws={"target_hold": Uniform(0.1, 0.5, repeat=FRESH)}))
+    assert "up to 0.5 s" in long_draw.detail
+    (soon_draw,) = warned(_respond(starts=(0.5, None),
+                                   draws={"response_deadline": Uniform(0.55, 2.0, repeat=FRESH)}))
+    assert "as soon as 0.55 s" in soon_draw.detail
     near_plan = _respond(plans={"p": Plan([Block("b", [Condition("tight", {
         "target_hold": 0.55}, target=1), Condition("loose", {}, target=1)])])})
     found = [f for f in warned(near_plan) if f.detail.startswith("plan 'p'")]
@@ -527,3 +535,48 @@ def test_a_48_cell_factorial_judges_its_looks_once_and_says_one_finding(monkeypa
     assert len(found.subjects) == 48
     assert found.subjects[0] == "grid: array_eccentricity=5.0, array_rotation=0.0"
     assert looked == [1] and paired == [1]
+
+
+def test_a_hold_leading_to_a_wrong_answer_that_the_timeout_cuts_off_is_not_refused():
+    """Fix round 1, the review's Important 1: the right answer's hold is payable, so a second hold
+    whose own exit is a wrong answer (an outcome no right answer is) and that the state's timeout
+    always beats refuses nothing and warns nothing; a hold leading to a right answer is judged."""
+    def two(wrong: object) -> Task:
+        shown = Stimulus("s", at=Polar(8.0, 0.0), looks=Disc(size=0.5, color=Gray(40.0)))
+        trial = Trial(
+            start="respond",
+            params=[Param("response_deadline", unit="s", low=0.1, high=3.0, start=0.6)],
+            windows=[Window("w", at=Polar(8.0, 0.0), radius=1.0, on="s"),
+                     Window("x", at=Polar(-8.0, 0.0), radius=1.0, on="s")],
+            states=[State("respond", enter=[Show(shown)], go=[
+                On(Hold("w", 0.2), Outcome.CORRECT), On(Hold("x", 0.8), wrong),
+                On(After(P("response_deadline")), Outcome.NO_RESPONSE)])],
+            counting=Counting(after_stimulus=OWED, appears="respond"),
+        )
+        return Task({"t": trial}, default="t")
+
+    task = two(Outcome.WRONG_TARGET)
+    assert _refused(task) == []
+    assert "little-time-to-answer" not in {f.code for f in check_task(task)}
+    assert len(_refused(two(Outcome.CORRECT))) == 1
+
+
+def test_a_self_pair_already_judged_alike_says_no_swap_and_a_cut_off_hold_is_refused_when_cued():
+    """Fix round 1, the review's Minor 1 and 2: one condition drawing its target from red or green
+    among green at two objects has green among green (item 2) but no trial of green among red, so
+    it gets the item-2 sentence alone; and no time to answer is refused whatever names the target."""
+    drawn = Plan([Block("b", [Condition("both", {"set_size": 2, "distractor_appearance": GREEN},
+                                        target=1)],
+                        draws={"target_appearance": Listed((RED, GREEN), repeat=FRESH)})])
+    (alone,) = _refused(_searched(p=drawn))
+    assert "can look the same" in alone.detail and "swap" not in alone.detail
+
+    cued = _ring(_lit("lum"), _lit("lum"), found_by="cue")
+    state = cued.structures["t"].states[0]
+    held = dataclasses.replace(state, go=[
+        On(Hold("w", 0.7), Outcome.CORRECT), On(After(0.6), Outcome.NO_RESPONSE),
+        *state.go[:1]])
+    trial = dataclasses.replace(cued.structures["t"], states=[held], windows=[
+        *cued.structures["t"].windows, Window("w", at=Polar(8.0, 0.0), radius=1.0, on="ring")])
+    refused = _refused(dataclasses.replace(cued, structures={"t": trial}))
+    assert len(refused) == 1 and "'w' hold" in refused[0].detail

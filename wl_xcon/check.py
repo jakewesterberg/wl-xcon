@@ -2102,6 +2102,43 @@ def _seconds_said(value: object, spans: list[tuple[float, float]], word: str, at
     return f"`{value.name}`, {at:g} s" if one else f"`{value.name}`, {word} {at:g} s"
 
 
+def _hold_bounds(structure: Trial, sources: dict[str, tuple]):
+    """**Every hold a plain timeout on its state can end the trial before**, for `_cut_off` and
+    `_little_time` alike (one reading of which pairs those are; fix round 1 of the C3 plan's
+    Task 9). Yields `(state, hold, bound, first, takes, waits, longest_of, soonest_of)`: the
+    state, the exit holding, the exit timing out, whether the timeout is listed first, the two
+    times as written, and the numbers each can be (`_spans`), the hold's longest and the
+    timeout's soonest read off them. A pair is a `Hold` whose own exit does not end the trial in
+    a wrong answer (its trial's right answer is payable, so a cut-off wrong-answer hold costs a
+    scoring, which `hold-cut-short` warns, not a run), and a plain `After` (timed from the
+    state's start) to an `Outcome` no right answer is (`task.RIGHT`). One setting read by both
+    gives `longest_of` and `soonest_of` as `None` (if it is in `sources`); a pair with no number
+    to read, a setting nothing gives or a word, is not yielded."""
+    for state in structure.states:
+        exits = list(enumerate(state.go))
+        for at, hold in exits:
+            if not isinstance(hold.guard, Hold):
+                continue
+            if isinstance(hold.to, Outcome) and hold.to not in RIGHT:
+                continue
+            for place, bound in exits:
+                guard = bound.guard
+                if not (isinstance(guard, After) and guard.since is None
+                        and isinstance(bound.to, Outcome) and bound.to not in RIGHT):
+                    continue
+                first = place < at
+                takes, waits = hold.guard.seconds, guard.seconds
+                if isinstance(takes, P) and takes == waits:
+                    if takes.name in sources:
+                        yield state, hold, bound, first, takes, waits, None, None
+                    continue
+                longest_of, soonest_of = _spans(_form(takes, sources)), _spans(
+                    _form(waits, sources))
+                if not longest_of or not soonest_of:
+                    continue
+                yield state, hold, bound, first, takes, waits, longest_of, soonest_of
+
+
 def _cut_off(structure: Trial, sources: dict[str, tuple]) -> list[str]:
     """**XC-343's first combination, no time to answer** (engine build C3's spec §9, item 1): a
     `Hold` always beaten by a plain `After` on its state that ends the trial in an outcome no
@@ -2114,46 +2151,32 @@ def _cut_off(structure: Trial, sources: dict[str, tuple]) -> list[str]:
     after must fall short of it (`t < h`). One setting read by both is one number on every trial.
     Each sentence names the state, the values and the fix."""
     found: list[str] = []
-    for state in structure.states:
-        exits = list(enumerate(state.go))
-        for at, hold in exits:
-            if not isinstance(hold.guard, Hold):
-                continue
-            for place, bound in exits:
-                guard = bound.guard
-                if not (isinstance(guard, After) and guard.since is None
-                        and isinstance(bound.to, Outcome) and bound.to not in RIGHT):
-                    continue
-                first = place < at
-                takes, waits = hold.guard.seconds, guard.seconds
-                if isinstance(takes, P) and takes == waits:
-                    if first and takes.name in sources:
-                        found.append(
-                            f"state {state.name!r} ends the trial {_target_name(bound.to)} after "
-                            f"`{takes.name}`, which its {hold.guard.window!r} hold takes too, and "
-                            f"the timeout is listed first, so it wins the frame both end on: the "
-                            f"hold starts only when the gaze arrives, so it never finishes and no "
-                            f"answer can be paid (XC-343); list the hold first, or bound the state "
-                            f"by a setting of its own, longer than the hold")
-                    continue
-                longest_of, soonest_of = _spans(_form(takes, sources)), _spans(
-                    _form(waits, sources))
-                if not longest_of or not soonest_of:
-                    continue
-                longest = max(high for _, high in longest_of)
-                soonest = min(low for low, _ in soonest_of)
-                if not (soonest <= longest if first else soonest < longest):
-                    continue
-                tie = (", and the timeout, listed first, wins the frame both end on"
-                       if soonest == longest else "")
+    for state, hold, bound, first, takes, waits, longest_of, soonest_of in _hold_bounds(
+            structure, sources):
+        if longest_of is None:  # one setting read by both
+            if first:
                 found.append(
                     f"state {state.name!r} ends the trial {_target_name(bound.to)} after "
-                    f"{_seconds_said(waits, soonest_of, 'as soon as', soonest)}, while its "
-                    f"{hold.guard.window!r} hold takes "
-                    f"{_seconds_said(takes, longest_of, 'up to', longest)}{tie}: the hold starts "
-                    f"only when the gaze arrives, so it never finishes and no answer can be paid "
-                    f"(XC-343); give the timeout more than {longest:g} s, or hold in a state of "
-                    f"its own bounded longer, as the reference tasks hold their target")
+                    f"`{takes.name}`, which its {hold.guard.window!r} hold takes too, and "
+                    f"the timeout is listed first, so it wins the frame both end on: the "
+                    f"hold starts only when the gaze arrives, so it never finishes and no "
+                    f"answer can be paid (XC-343); list the hold first, or bound the state "
+                    f"by a setting of its own, longer than the hold")
+            continue
+        longest = max(high for _, high in longest_of)
+        soonest = min(low for low, _ in soonest_of)
+        if not (soonest <= longest if first else soonest < longest):
+            continue
+        tie = (", and the timeout, listed first, wins the frame both end on"
+               if soonest == longest else "")
+        found.append(
+            f"state {state.name!r} ends the trial {_target_name(bound.to)} after "
+            f"{_seconds_said(waits, soonest_of, 'as soon as', soonest)}, while its "
+            f"{hold.guard.window!r} hold takes "
+            f"{_seconds_said(takes, longest_of, 'up to', longest)}{tie}: the hold starts "
+            f"only when the gaze arrives, so it never finishes and no answer can be paid "
+            f"(XC-343); give the timeout more than {longest:g} s, or hold in a state of "
+            f"its own bounded longer, as the reference tasks hold their target")
     return found
 
 
@@ -2176,49 +2199,35 @@ def _little_time(structure: Trial, sources: dict[str, tuple]) -> list[str]:
     hold listed first gains nothing on it; a combination `_cut_off` refuses is not said again.
     Each sentence names the state, the margin and the fix."""
     found: list[str] = []
-    for state in structure.states:
-        exits = list(enumerate(state.go))
-        for at, hold in exits:
-            if not isinstance(hold.guard, Hold):
-                continue
-            for place, bound in exits:
-                guard = bound.guard
-                if not (isinstance(guard, After) and guard.since is None
-                        and isinstance(bound.to, Outcome) and bound.to not in RIGHT):
-                    continue
-                first = place < at
-                takes, waits = hold.guard.seconds, guard.seconds
-                if isinstance(takes, P) and takes == waits:
-                    if not first and takes.name in sources:
-                        found.append(
-                            f"state {state.name!r} ends the trial {_target_name(bound.to)} after "
-                            f"`{takes.name}`, which its {hold.guard.window!r} hold takes too: the "
-                            f"hold starts only when the gaze arrives, a saccade's latency, about "
-                            f"{SACCADE_LATENCY_S:g} s, after the state begins, so only an "
-                            f"anticipation answers in time; bound the state by a setting of its "
-                            f"own, at least {SACCADE_LATENCY_S:g} s longer than the hold")
-                    continue
-                longest_of, soonest_of = _spans(_form(takes, sources)), _spans(
-                    _form(waits, sources))
-                if not longest_of or not soonest_of:
-                    continue
-                longest = max(high for _, high in longest_of)
-                soonest = min(low for low, _ in soonest_of)
-                if soonest <= longest if first else soonest < longest:
-                    continue
-                # A margin of the latency exactly, to the nanosecond, is one: 0.6 - 0.4 is no
-                # less than 0.2 to an author.
-                if round(soonest - longest, 9) >= SACCADE_LATENCY_S:
-                    continue
+    for state, hold, bound, first, takes, waits, longest_of, soonest_of in _hold_bounds(
+            structure, sources):
+        if longest_of is None:  # one setting read by both
+            if not first:
                 found.append(
                     f"state {state.name!r} ends the trial {_target_name(bound.to)} after "
-                    f"{_seconds_said(waits, soonest_of, 'as soon as', soonest)}, "
-                    f"{soonest - longest:g} s past the most its {hold.guard.window!r} hold takes "
-                    f"({_seconds_said(takes, longest_of, 'up to', longest)}): the hold starts only "
-                    f"when the gaze arrives, a saccade's latency, about {SACCADE_LATENCY_S:g} s, "
-                    f"after the state begins, so only an anticipation answers in time, unless "
-                    f"the gaze is in the window as the state begins; give the timeout at least "
-                    f"{longest + SACCADE_LATENCY_S:g} s")
+                    f"`{takes.name}`, which its {hold.guard.window!r} hold takes too: the "
+                    f"hold starts only when the gaze arrives, a saccade's latency, about "
+                    f"{SACCADE_LATENCY_S:g} s, after the state begins, so only an "
+                    f"anticipation answers in time; bound the state by a setting of its "
+                    f"own, at least {SACCADE_LATENCY_S:g} s longer than the hold")
+            continue
+        longest = max(high for _, high in longest_of)
+        soonest = min(low for low, _ in soonest_of)
+        if soonest <= longest if first else soonest < longest:
+            continue
+        # A margin of the latency exactly, to the nanosecond, is one: 0.6 - 0.4 is no
+        # less than 0.2 to an author.
+        if round(soonest - longest, 9) >= SACCADE_LATENCY_S:
+            continue
+        found.append(
+            f"state {state.name!r} ends the trial {_target_name(bound.to)} after "
+            f"{_seconds_said(waits, soonest_of, 'as soon as', soonest)}, "
+            f"{soonest - longest:g} s past the most its {hold.guard.window!r} hold takes "
+            f"({_seconds_said(takes, longest_of, 'up to', longest)}): the hold starts only "
+            f"when the gaze arrives, a saccade's latency, about {SACCADE_LATENCY_S:g} s, "
+            f"after the state begins, so only an anticipation answers in time, unless "
+            f"the gaze is in the window as the state begins; give the timeout at least "
+            f"{longest + SACCADE_LATENCY_S:g} s")
     return found
 
 
@@ -2285,13 +2294,14 @@ def _swapped(pairs: list[tuple]) -> list[tuple[tuple, tuple]]:
     then one display can call for either answer (the spec's own reason). A chain whose displays
     differ (red among green beside a green square among red) has its answer on each display, so
     it loads (the controller's ruling, 2026-10-30, under the PI's warnings over refusals, TSK-51).
-    A pair with itself is two trials of its conditions, judged where one of its looks can be other
-    values; one that cannot is one trial's own look, `_same_looks`' to judge."""
+    A pair with itself is two trials of its conditions, judged where both of its looks can be other
+    values (a swap needs the target and the distractors each to take two); one that cannot is one
+    trial's own look, `_same_looks`' to judge (fix round 1, the review's Minor 1)."""
     crossed: list[tuple[tuple, tuple]] = []
     for at, one in enumerate(pairs):
         for other in pairs[at:]:
             if other is one:
-                if _one_way(one[0]) and _one_way(one[1]):
+                if _one_way(one[0]) or _one_way(one[1]):
                     continue
                 meets = _alike(one[0], one[1], one=False)
             else:
