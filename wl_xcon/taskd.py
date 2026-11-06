@@ -190,6 +190,12 @@ def _draw_said(key: tuple) -> str:
     return f"condition {key[1]!r}'s own range for {key[2]!r}"
 
 
+def _back_to(change: int) -> str:
+    """The moment a revert goes back to, as a sentence names it (`Session._revert`): a change by
+    its id, or the run's start, 0."""
+    return "the run's start" if change == 0 else f"change {change}"
+
+
 def _kept_missing(number: int, repeat_of: int) -> str:
     """The changes feed's warning when a trial repeats one whose draws were not kept (the
     scheduler's `waiting` and `Session._kept`'s pruning disagree): its `same` settings are drawn
@@ -494,7 +500,10 @@ class Pending:
       `"draw"` or `"run"`.
     - `key`, a range's: its draw's key (`variation.in_force`'s, `("task", name)` or `("block",
       block, name)`); `draw`, the distribution it puts in force there, or `None` to restore the
-      one declared."""
+      one declared.
+    - `act`, a revert's (`Session._revert`): the act it belongs to, so that it and the revert's
+      other changes take one change id and are written as `revert` rows naming the moment
+      (`Session._apply_staged`); `None` for a hand-back or a range offered on its own."""
 
     kind: str
     name: str
@@ -505,6 +514,31 @@ class Pending:
     to: str | None = None
     key: tuple | None = None
     draw: Distribution | None = None
+    act: int | None = None
+
+
+@dataclass(frozen=True)
+class Moment:
+    """**A moment of the run a revert can go back to** (engine build C3's spec §8; the PI,
+    2026-10-07, TSK-43, "Yes, with revert": "any earlier state restored in one action"): what the
+    run's live layer held just after an act applied (`Session._apply_staged`), or as the run
+    started. Kept in `Session._moments`, the run's start first.
+
+    - `change` is the act's change id, or 0 for the run's start. A revert to any change id of the
+      run goes back to the latest moment at or before it (`Session._revert`), so a clear's or a
+      switch's, which keep none, goes back to what was in force then.
+    - `at` is when it was kept, on the session's anchored clock; `said`, the act in the changes
+      feed's words, or "the run's start".
+    - `held` is each task setting a person held then, by name, with its value; `ranges`, each draw
+      changed live then, by its key (`variation.in_force`'s), with the distribution in force.
+      **Never a bounded setting**: a reward size is no task setting a person holds
+      (`Session._edited`) and no draw, so no moment holds one, and no revert reaches one."""
+
+    change: int
+    at: float
+    said: str
+    held: dict
+    ranges: dict
 
 
 @dataclass
@@ -609,6 +643,27 @@ class Session:
     #: applied with `_staged` at the next boundary in the order offered (`_offered`), and dropped,
     #: each said, as a service session's run ends (`_after_service_run`).
     _pending: list = field(init=False, default_factory=list, repr=False)
+    #: **Which revert each value staged belongs to** (engine build C3's spec §8; `_revert`): the
+    #: place in `_staged` of each value a revert staged through `set`, to its act; a value staged
+    #: on its own is an act of its own and is not here. A revert's hand-backs and ranges carry
+    #: theirs (`Pending.act`). Cleared with `_staged`, as they apply (`_apply_staged`) or as a
+    #: service session's run ends (`_after_service_run`).
+    _acts: dict[int, int] = field(init=False, default_factory=dict, repr=False)
+    #: Each revert offered and not yet applied, by its act, to the change id it goes back to (its
+    #: rows' `moment`; 0 for the run's start). Cleared with `_acts`.
+    _act_moments: dict[int, int] = field(init=False, default_factory=dict, repr=False)
+    #: The last act `_revert` numbered, counted for the session: an act is only ever told apart
+    #: from another offered with it.
+    _act: int = field(init=False, default=0, repr=False)
+    #: **The moments a revert can go back to in the run in progress** (`Moment`; engine build C3's
+    #: spec §8): the run's start, then one kept after each act that moved a task setting or a
+    #: range (`_apply_staged`), in the order applied. As each run starts, its start alone. **Never
+    #: capped**, so a revert reaches any change of the run; the console's list of them is the
+    #: capped one, keeping the run's start (telemetry schema 19, the engine C3 plan's Task 17).
+    _moments: list = field(init=False, default_factory=list, repr=False)
+    #: The session's last change id as the run in progress started (`_change`): the run's own
+    #: change ids are those above it, the only ones a revert goes back to (`_revert`).
+    _change_at_start: int = field(init=False, default=0, repr=False)
     _sequence: int = field(init=False, default=0, repr=False)
     #: **The last change id the session gave** (XC-288 §3.4; engine build C3's spec §8): one for
     #: each act in the change log -- a person's value, a clear, a switch -- from 1, never 0. Kept
@@ -1440,8 +1495,8 @@ class Session:
         says how to proceed -- clear the waiting trial, switch drumming off or pause, then make the
         change (the C3 plan's science review, M-3).
 
-        Called once per change (`_impossible`, `_hand_back`, `_range`; the engine C3 plan's Task 14
-        for a revert): `check.impossible` judges each distinct combination once.
+        Called once per change (`_impossible`, `_hand_back`, `_range`, and `_revert` for the whole
+        of a revert at once): `check.impossible` judges each distinct combination once.
         Returns the reason a change is refused -- the conditions it would make impossible, as
         `"block: condition"`, then for each the values and the fix -- or `None`. **It never raises**
         (the C3 plan's call 26, "the live refusal fails closed"): a check that raises, or no run's
@@ -1535,13 +1590,22 @@ class Session:
         live range pending (`_pending`), each pending act after the values staged before it was
         offered (`Pending.after`) and ahead of those staged after it. What `_apply_staged` applies
         and `_after_service_run` drops, and what a change offered now is judged over (`_ahead`)."""
+        return [offer for offer, _ in self._offered_acts()]
+
+    def _offered_acts(self) -> list[tuple[object, int | None]]:
+        """**`_offered`'s changes, each with the act it belongs to** (engine build C3's spec §8):
+        a revert's (`_revert`) -- for a value it staged, from `_acts` by the value's place in
+        `_staged`; for a hand-back or a range it offered, its `Pending.act` -- or `None` for a
+        change offered on its own, an act of its own. A revert offers all its changes at once,
+        its hand-backs and ranges ahead of its values, so they stand together here. What
+        `_apply_staged` gives change ids by, and `_after_service_run` says a dropped revert by."""
         offered: list = []
         waiting = list(self._pending)
         for at, row in enumerate(self._staged):
-            offered += [act for act in waiting if act.after <= at]
-            waiting = [act for act in waiting if act.after > at]
-            offered.append(row)
-        return offered + waiting
+            offered += [(pending, pending.act) for pending in waiting if pending.after <= at]
+            waiting = [pending for pending in waiting if pending.after > at]
+            offered.append((row, self._acts.get(at)))
+        return offered + [(pending, pending.act) for pending in waiting]
 
     def _ahead(self) -> tuple[dict, set, dict]:
         """**What the run will hold once every change offered applies** (`_offered`, in its
@@ -2301,6 +2365,111 @@ class Session:
                                          for condition in block.conditions)
                 else "run")
 
+    def _revert(self, command, index: int) -> None:
+        """**A person takes the run back to an earlier moment** (`link.Revert`; engine build C3's
+        spec §8; the PI, 2026-10-07, TSK-43, "Yes, with revert": "any earlier state restored in
+        one action, itself recorded"), offered between trials or while paused and applied at the
+        next boundary as one act (`_apply_staged`): one change id for all its rows, of kind
+        `revert`, each naming the moment. `command.change` names it: 0, the run's start, or a
+        change id of the run in progress, which goes back to the latest moment kept at or before
+        it (`_moments`), so a clear's or a switch's goes back to what was in force then (the C3
+        plan's call 24). It goes back from what the run will hold once all offered ahead of it
+        applies (`_ahead`), so that it reaches the moment exactly:
+        - each setting a person held then, at another value now or not held now, is set to its
+          value then **through `set`, unchanged** (the C3 spec's welfare item 3), and held again;
+        - each setting held now and not then is handed back to what gives it in the open block
+          (`_to`), as the *hand back* button does;
+        - each draw changed live then or since goes back to its range then, or to the one the
+          task declares, as a live range is put in force.
+
+        **Never a bounded setting**: a reward size is no task setting a person holds and no draw,
+        so no moment holds one, and a revert neither sets nor hands back one (engine spec §17.6).
+        Counts and training aids are not reverted. `index`, the trial about to run, is every
+        branch's.
+
+        **Refused whole, with the sentence, none of it applying**: a `change` that is no whole
+        number from 0 (the wire's rule again, as `_clear` meets its own); one made before the run
+        started; one not made yet; a moment the run already holds, leaving nothing to revert; a
+        revert that would leave trials no animal can get right (`_possible`, judging all of it at
+        once, before any value is set, so a revert refused for it writes no warning); and one any
+        of whose values `set` refuses. What it staged and offered is cut back to what was there
+        before it (`_staged`, `_pending`; `_acts` is written only once all of it is accepted), and
+        no change row is written. A warning `set` accepted (`_beyond_range`) for one of its values
+        ahead of the refused one stays accepted, by that function's rule. **Its hand-backs and
+        ranges are offered ahead of its values**, which are set in the order of their names, so
+        `set` judges each value over the settings handed back and the ranges put back, not over
+        what the revert is about to undo.
+
+        **It never raises** (the C3 plan's call 20; its review, I-1): it runs beside the pause,
+        outside `_command`'s listed `try`, so a check that raises refuses the revert, saying it
+        could not be checked, and the session runs on. Its hand-backs and ranges do not pass
+        through `set`, as the buttons' do not (the C3 plan's Appendix A, item 5, put to the PI
+        with the plan): a hand-back puts back the run's own value, and a range puts back one in
+        force before, accepted when it was offered, or the declared one. Run between trials, never
+        in a frame. Not welfare-critical: the branch handing to it is `_command`'s."""
+        change = command.change
+        if isinstance(change, bool) or not isinstance(change, int) or change < 0:
+            self._refuse(command.KIND, command.by, (
+                f"a 'revert' command's change is a whole number from 0, and {change!r} is not "
+                f"one, so it is refused"))
+            return
+        where = _back_to(change)
+        staged, pending = len(self._staged), len(self._pending)
+        try:
+            if 0 < change <= self._change_at_start:
+                raise Exceeded(
+                    f"change {change} was made before run {self.run_index + 1} started, and a "
+                    f"revert goes back within the run in progress, to one of its changes or to "
+                    f"its start (0)")
+            if change > self._change:
+                raise Exceeded(f"no change {change} has been made yet")
+            then = next(moment for moment in reversed(self._moments) if moment.change <= change)
+            values, held, ranges = self._ahead()
+            restored = {name: value for name, value in then.held.items()
+                        if name not in held or values.get(name) != value}
+            handed = sorted(held - then.held.keys())
+            drawn = {key: then.ranges.get(key) for key in sorted({*ranges, *then.ranges})
+                     if ranges.get(key) != then.ranges.get(key)}
+            if not (restored or handed or drawn):
+                raise Exceeded(
+                    "the run holds now what it held then, so there is nothing to revert")
+            why = self._possible(restored, handed=frozenset(handed), ranges=drawn)
+            if why is not None:
+                raise Exceeded(why)
+            self._act += 1
+            act = self._act
+            for name in handed:
+                to = self._to(name)
+                self._pending.append(Pending(
+                    "hand_back", name, was=values.get(name),
+                    now=self._run_values.get(name) if to == "run" else None, by=command.by,
+                    after=staged, to=to, act=act,
+                ))
+            for key, draw in drawn.items():
+                declared, before = self._declared.get(key[-1]), ranges.get(key)
+                self._pending.append(Pending(
+                    "range", key[-1], by=command.by, after=staged, key=key, draw=draw, act=act,
+                    was=variation.recorded(
+                        self._declared_draw(key) if before is None else before, declared),
+                    now=variation.recorded(
+                        self._declared_draw(key) if draw is None else draw, declared),
+                ))
+            for name in sorted(restored):
+                self.set(name, restored[name], by=command.by)
+            self._acts.update(dict.fromkeys(range(staged, len(self._staged)), act))
+            self._act_moments[act] = change
+        except Exceeded as refused:
+            del self._staged[staged:]
+            del self._pending[pending:]
+            self._refuse(command.KIND, command.by,
+                         f"the revert to {where} is refused, and none of it applies: {refused}")
+        except Exception as broken:  # noqa: BLE001 -- see the docstring
+            del self._staged[staged:]
+            del self._pending[pending:]
+            self._refuse(command.KIND, command.by, (
+                f"the revert to {where} could not be checked ({type(broken).__name__}: "
+                f"{broken}), so it is refused, none of it applies, and the session runs on"))
+
     def _declared_draw(self, key: tuple) -> Distribution:
         """The draw `key` names as the task declares it (`variation.in_force`'s keys): the task's,
         or a block's own, of the run's plan. What a range changed live is judged against
@@ -2673,6 +2842,9 @@ class Session:
         if isinstance(command, _link.SetRange):
             self._range(command, index)
             return
+        if isinstance(command, _link.Revert):
+            self._revert(command, index)
+            return
         if not isinstance(command, _link.SetParameter):
             # A command this session has no branch for -- a newer console's -- is
             # refused under its kind, as `drain` refuses an unknown kind on the
@@ -2786,6 +2958,14 @@ class Session:
         the order offered (`_offered`), each an act of its own with a change id, a strobe and a
         row, of kind `hand_back` or `range` (`_apply_pending`). **Neither passes through `set` or
         `bounds`**: a hand-back carries no new value, and a range is no value.
+
+        **A revert is one act** (`_revert`; engine build C3's spec §8; the engine C3 plan's call
+        19, the applier's third step): every change it offered -- values staged through `set`,
+        hand-backs and ranges (`_offered_acts`) -- takes one change id, each still with its own
+        strobe, `sequence`, row and line on the feed, of kind `revert`, naming the moment it goes
+        back to (`moment`). A revert's row says what the setting held just before it applied.
+        **After each act that moves a task setting or a range a moment is kept** (`_keep_moment`),
+        which a revert can go back to; a reward size's act moves neither, and keeps none.
         """
         if not self._staged and not self._pending:
             return
@@ -2795,13 +2975,28 @@ class Session:
         code = self.allocation.code_for("PARAM_CHANGED")
         # The next trial to start (`Levels.start_trial`), numbered as its line will be.
         trial_number = self._levels.trials + 1
-        for act in self._offered():
+        offered = self._offered_acts()
+        for place, (offer, act) in enumerate(offered):
             self._sequence += 1
-            self._change += 1
-            if isinstance(act, Pending):
-                self._apply_pending(act, code, trial_number, index)
+            # One change id for each act: a change offered on its own, or all of one revert's,
+            # which stand together (`_offered_acts`); a moment kept as each act closes.
+            if act is None or place == 0 or offered[place - 1][1] != act:
+                self._change += 1
+            closes = act is None or place + 1 == len(offered) or offered[place + 1][1] != act
+            moment = None if act is None else self._act_moments[act]
+            if isinstance(offer, Pending):
+                self._apply_pending(offer, code, trial_number, index)
+                if closes:
+                    self._keep_moment(self._pending_said(offer) if moment is None
+                                      else f"reverted to {_back_to(moment)}")
                 continue
-            name, was, now, by, bounded = act
+            name, was, now, by, bounded = offer
+            kind = "set" if moment is None else "revert"
+            if moment is not None:
+                # A revert's row says what the setting held just before it, which all offered
+                # ahead of it has made by now: `set`'s `was` is the value before this
+                # inter-trial interval (its docstring), not before this row.
+                was = self.spec.values.get(name)
             if bounded:
                 self.spec.bounds.set(name, now, by=by)
             else:
@@ -2815,23 +3010,32 @@ class Session:
             at = self.wall_now()
             if self._record is not None:
                 self._record.change(
-                    change=self._change, kind="set", name=name, was=was, now=now, by=by, at=at,
+                    change=self._change, kind=kind, name=name, was=was, now=now, by=by, at=at,
                     trial_number=trial_number, run=self.run_index,
                     meaning=None if bounded else self._meaning(name, was, now),
                     event_code=code, sequence=self._sequence,
+                    **({} if moment is None else {"moment": moment}),
                 )
             # A pair as a position only for a setting whose choices declare one (XC-401's fix
             # round, M2): a ceiling's name is no setting the task declares.
             choices = () if bounded or name not in self._declared else self._declared[name].choices
+            said = f"{name} {_shown(was, choices)} → {_shown(now, choices)}"
+            back = "" if moment is None else f", reverting to {_back_to(moment)}"
             self._feed(
-                "set",
+                kind,
                 by,
                 at,
-                f"{name} {_shown(was, choices)} → {_shown(now, choices)}, from trial {index}"
+                f"{said}{back}, from trial {index}"
                 + ("" if bounded else _overriding(self._scheduler.blocks, name)),
             )
+            # A reward size's act moves no task setting and no range: it keeps no moment, and no
+            # revert reaches it.
+            if closes and not bounded:
+                self._keep_moment(said if moment is None else f"reverted to {_back_to(moment)}")
         self._staged.clear()
         self._pending.clear()
+        self._acts.clear()
+        self._act_moments.clear()
 
     def _apply_pending(self, act: Pending, code: int, trial_number: int, index: int) -> None:
         """**One hand-back or live range applied** (`_apply_staged`, whose change id, `sequence`,
@@ -2847,8 +3051,11 @@ class Session:
         against the range the task writes (`_range_went`; the PI, 2026-10-31, on the engine C3
         plan's Appendix B, item 18), its `step` null: a range is no single value. **A hand-back's
         `to` and `now` are read as it applies** (`_to`), in the block its next trial plays, not as
-        offered."""
+        offered. **A revert's** (`Pending.act`) is written as a `revert` row naming the moment it
+        goes back to, and one it hands back reads `now` null with no `to`, as the change log's
+        `revert` row is told to wl-preproc."""
         name = act.name
+        moment = None if act.act is None else self._act_moments[act.act]
         if act.kind == "hand_back":
             # What takes it back, and the run's value, read now, in the block the next trial
             # plays: one offered as a block ends applies in the next (the C3 plan's engineering
@@ -2868,7 +3075,14 @@ class Session:
             else:
                 self._ranges[act.key] = (act.draw, self._change)
             detail = {"from": act.key[0], "block": act.key[1] if act.key[0] == "block" else None}
-        meaning = self._meaning(name, act.was, act.now)
+        kind, now = act.kind, act.now
+        if moment is not None:
+            # One of a revert's rows (the C3 spec §8): naming the moment it goes back to, a
+            # range's `from` and `block` kept, a setting handed back with `now` null, no `to`.
+            kind = "revert"
+            detail = {"moment": moment, **({} if act.kind == "hand_back" else detail)}
+            now = None if act.kind == "hand_back" else now
+        meaning = self._meaning(name, act.was, now)
         if act.kind == "range" and meaning is not None:
             # Which way the new range went, judged as a whole against the range the task writes
             # (the PI, 2026-10-31, on the engine C3 plan's Appendix B, item 18).
@@ -2879,11 +3093,12 @@ class Session:
         at = self.wall_now()
         if self._record is not None:
             self._record.change(
-                change=self._change, kind=act.kind, name=name, was=act.was, now=act.now,
+                change=self._change, kind=kind, name=name, was=act.was, now=now,
                 by=act.by, at=at, trial_number=trial_number, run=self.run_index, meaning=meaning,
                 event_code=code, sequence=self._sequence, **detail,
             )
-        self._feed(act.kind, act.by, at, f"{self._pending_said(act)}, from trial {index}")
+        back = "" if moment is None else f", reverting to {_back_to(moment)}"
+        self._feed(kind, act.by, at, f"{self._pending_said(act)}{back}, from trial {index}")
 
     def _pending_said(self, act: Pending) -> str:
         """A hand-back or a live range as the changes feed says it, applied (`_apply_pending`) or
@@ -2903,6 +3118,18 @@ class Session:
         unit = "" if declared is None else declared.unit
         drawn = "as declared" if act.draw is None else variation.words(act.draw, unit)
         return f"{_draw_said(act.key)} → {drawn}"
+
+    def _keep_moment(self, said: str) -> None:
+        """**A moment a revert can go back to, kept as an act applies** (`Moment`; engine build C3's
+        spec §8; `_apply_staged`): the act's change id, now, `said`, and what the live layer holds
+        once it applied -- each setting a person holds, with its value (`_edited`), and each draw
+        changed live (`_ranges`, its change id left out) -- each in sorted order, so a revert's
+        rows come out in one order in every process. Between trials, never in a frame."""
+        self._moments.append(Moment(
+            self._change, self.wall_now(), said,
+            {name: self.spec.values.get(name) for name in sorted(self._edited)},
+            {key: self._ranges[key][0] for key in sorted(self._ranges)},
+        ))
 
     def _meaning(self, name: str, was: object, now: object) -> dict | None:
         """**What a change of `name` from `was` to `now` means**, as its change row writes it
@@ -3312,21 +3539,31 @@ class Session:
 
     def _after_service_run(self) -> None:
         """A service session's run is over (the b3a-1 plan, decisions 1 and 2): back
-        between runs, where nothing applies a staged change, a hand-back or a live range
-        (`_pending`; engine build C3), so any left is dropped and said on the feed, in the
-        order offered -- a row kept would read "applies at the next trial" of a run
+        between runs, where nothing applies a staged change, a hand-back, a live range or a revert
+        (`_pending`, `_acts`; engine build C3), so any left is dropped and said on the feed in the
+        order offered, a revert once -- a row kept would read "applies at the next trial" of a run
         that may never come. **And nothing is paused**: a run stopped while paused
         published its last frame paused, as the truth of how it ended, and a between-runs
         frame saying "paused" would read as a run held and waiting. The feed names the
         run from 1, as a person reads it beside the page's header and pill
         (session-levels spec §6); `run_index` counts from 0, as the record's `run` does."""
-        for act in self._offered():
-            if isinstance(act, Pending):
-                self._feed(act.kind, act.by, self.wall_now(),
-                           f"{self._pending_said(act)} was not applied: run "
+        reverts: set = set()
+        for offer, act in self._offered_acts():
+            if act is not None:
+                # A revert is said once, as the one act it is.
+                if act not in reverts:
+                    reverts.add(act)
+                    self._feed("revert", offer.by if isinstance(offer, Pending) else offer[3],
+                               self.wall_now(),
+                               f"the revert to {_back_to(self._act_moments[act])} was not "
+                               f"applied: run {self.run_index + 1} ended first")
+                continue
+            if isinstance(offer, Pending):
+                self._feed(offer.kind, offer.by, self.wall_now(),
+                           f"{self._pending_said(offer)} was not applied: run "
                            f"{self.run_index + 1} ended first")
                 continue
-            name, was, now, by, bounded = act
+            name, was, now, by, bounded = offer
             choices = () if bounded or name not in self._declared else self._declared[name].choices
             self._feed(
                 "set",
@@ -3337,6 +3574,8 @@ class Session:
             )
         self._staged.clear()
         self._pending.clear()
+        self._acts.clear()
+        self._act_moments.clear()
         self.paused_at = None
         self.phase = "between_runs"
 
@@ -3503,6 +3742,10 @@ class Session:
         # build C3).
         self._kept = {}
         self._listed = {}
+        # The moments a revert can go back to, the run's start first, and the change ids that are
+        # this run's own: those given from here (engine build C3's spec §8).
+        self._moments = [Moment(0, self.wall_now(), "the run's start", {}, {})]
+        self._change_at_start = self._change
         # The settings the task places a direction by: a value drawn for one is written from 0
         # to 360 (the PI, 2026-10-30, "0 to 360 in both repos"; engine build C3's call 11).
         turned = variation.directions(task)

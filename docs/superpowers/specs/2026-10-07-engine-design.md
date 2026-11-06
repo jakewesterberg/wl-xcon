@@ -921,6 +921,8 @@ drummed repeats one, and its `presentations` the lines written.
 
 *Engine build C3, 2026-10-30* (the C3 spec §8, call 8): **item 1's "not merged into the run's values" is met in the record, not in the run.** The live layer stays merged in the run's values, because `Session.set` (welfare-listed) stays byte-identical; the names a person set, the settings handed back and the drawn ranges changed are kept apart and recorded beside the values (each trial's `live`, `overridden` and `drawn`, and the change log), so a reader can always tell a person's value from the run's. Change ids are assigned where changes apply (`_apply_staged`, off the welfare list).
 
+*Engine build C3, 2026-10-30* (the C3 spec §8 and §14 item 3; TSK-70): **item 5's revert is built for the run in progress, and item 6 holds of it.** A person may take the run back to any earlier moment of it -- a change the change log names, or its start -- in one act recorded as one change: each task setting a person held then held again at its value then, through `Session.set` unchanged; each held since handed back; each drawn range put back as it was. The revert is refused whole if any value is. It never carries a bounded setting: a reward size is no task setting a person holds and is never drawn, so no moment of a run holds one (the PI, "Approve all four", 2026-10-30, welfare item 3). An edit history across sessions, presets and carried values stay build C5's.
+
 ## 18. Recording and review (N§15)
 
 1. **A task's review report**: the state diagrams and codes; example frames per state (exact drawer,
