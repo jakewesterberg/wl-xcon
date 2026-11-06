@@ -466,3 +466,48 @@ def test_possible_judges_a_hand_back_a_range_and_a_whole_revert(tmp_path):
                              ranges={drawn: wide}) == ranged
     assert session._possible({"response_deadline": 0.85},
                              handed=frozenset({"target_hold"})) is None
+
+
+@pytest.mark.parametrize("high, shown", [(360.0, None), (180.0, "315")])
+def test_a_live_value_outside_its_range_widens_a_direction_draw_as_the_runs_start_does(
+    tmp_path, high, shown
+):
+    """The review of Task 12 (Important 1; the controller's ruling that the live check widens a
+    draw by the one rule a run's start does): a direction drawn `Uniform(-45, 45)` is the angles
+    315 to 45, judged on the circle it is shown on. Declared [0, 360], it is inside its range, so a
+    person's `fix_hold` of 2.5, outside its own, writes that setting's warning alone and no
+    `target_dir` row; declared [0, 180], it reaches past at 315, which the start warns and the
+    live check says too, once, and no `direction-outside-0-360` row (the load suppresses that
+    warning for a drawn direction). A setting that is no direction keeps its live warning."""
+    from test_draws_in_runs import _directed, _right, _rows as _run_rows
+    from test_draws_in_runs import _session as _run_session, _spec as _run_spec
+    from wl_xcon import preflight
+    from wl_xcon.cli import _load_allocation
+    from wl_xcon.photometry import SRGB as _SRGB
+
+    path = _directed(tmp_path, '{"target_dir": Uniform(-45.0, 45.0, repeat=FRESH)}',
+                     plans='{"p": Plan([Block("drawn", [Condition("c", {}, target=6)])])}')
+    text = path.read_text()
+    old = 'Param("target_dir", unit="deg", low=-180.0, high=180.0, start=0.0)'
+    assert text.count(old) == 1
+    path.write_text(text.replace(old, f'Param("target_dir", unit="deg", low=0.0, high={high},'
+                                      f' start=0.0)'))
+    task = _load_task(path)
+    start = [f for f in preflight.beyond(task, {}, _load_allocation(Path("tasks/allocation.py")),
+                                         DIRECT, _SRGB, None, plan="p")
+             if "target_dir" in f.detail]
+    link = _Drained({2: [SetParameter(name="fix_hold", value=2.5, by=JAKE)]})
+    session = _run_session(_run_spec(tmp_path, path, plan="p", trials=3), link,
+                           world=lambda trial, values, index: _right(values))
+
+    session.run()
+
+    rows = _run_rows(session, "warnings.jsonl")
+    live = [row for row in rows if "target_dir" in row["detail"]]
+    assert [row["code"] for row in live] == [f.code for f in start]
+    assert [row["code"] for row in rows if "fix_hold" in row["detail"]] == ["outside-range"]
+    if shown is None:
+        assert start == [] and live == []
+    else:
+        assert [row["code"] for row in live] == ["outside-range"]
+        assert f"target_dir' is {shown}" in live[0]["detail"]

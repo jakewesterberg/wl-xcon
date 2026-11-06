@@ -1392,6 +1392,7 @@ class Session:
         sets: dict[frozenset, tuple[dict, list[str]]] = {own: (values, [])}
         if self._played is None:
             return list(sets.values())
+        turned = variation.directions(self._task)
         for block in self._played.blocks:
             draws = variation.in_force(self._task, block)
             for condition in block.conditions:
@@ -1404,7 +1405,8 @@ class Session:
                     changed = ranges.get(key)
                     drawn = drawn if changed is None else changed
                     met += [({**given, n: end}, f"{where}, {_draw_said(key)} at {end:g}")
-                            for end in variation.extremes(drawn, declared.get(n))]
+                            for end in variation.extremes(drawn, declared.get(n),
+                                                          direction=n in turned)]
                 for these, place in met:
                     which = outside(these)
                     if which != own:
