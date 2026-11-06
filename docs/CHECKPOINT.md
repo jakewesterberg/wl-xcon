@@ -9,6 +9,15 @@ distrust the reasoning. Numbers go stale, arguments do not.
 > written with**, `wl-expcontroller` and `wl_expcontroller/…` paths included, as the PI
 > ruled for dated documents; read `wl_expcontroller/taskd.py` there as `wl_xcon/taskd.py`.
 >
+> **Running the suite locally with `WLX_REQUIRE_PREPROC=1`** (2026-11-07). wl-preproc's readers have imported
+> `wl_sync` at module level since 2026-08 (`contracts.paths`, `contracts.manifest`, `events.extract`), and engine
+> build C3's tests are the first of ours to import a reader that reaches `contracts.paths` (`events.rigrecords`), so
+> the interpreter that runs the suite needs wl-sync installed the way CI installs it: at the commit
+> `wl-preproc/pyproject.toml` pins (`grep 'wl-sync @' wl-preproc/pyproject.toml`, then `pip install` that
+> requirement), not `pip install -e ./wl-preproc`. Without it `tests/test_c3_path.py` fails at collection, and
+> `tests/test_change_log.py`'s reader tests fail, with `No module named 'wl_sync'`. CI does the same in the step after
+> each wl-preproc checkout.
+>
 > **This file describes `main`.** Its newest entry, "What moved on 2026-10-30: seven side branches and four fixes
 > merged after C2b, every direction 0 to 360", is where to **start**: eleven branches merged on the PI's answers of that
 > day, every direction shown and written from 0° to 360° (`direction-360`), and the four fixes' review follow-ups; three
