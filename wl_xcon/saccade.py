@@ -35,6 +35,13 @@ reported** (S5 §5). Dropping it would hide a real saccade; reporting it unmarke
 launder an artifact into the record. Until version 2 the online form did both, near a
 run's start: a sample lost there could hide its confirmation, and a gap just before its
 first velocity went unmarked (`Detector`; the PI, 2026-10-30, "Count it, marked").
+
+**A velocity a gap leaves unknown carries a run but never makes one** (version 3; the PI,
+2026-11-04, "Require measured samples"). An unknown velocity does not end a run while time
+is continuous, so a run that lost a sample is still one run, flagged; but its minimum
+duration is met only by measured velocities outside the threshold, online and in `detect`
+alike. Version 2 counted the unknown ones too, so one noise velocity beside a lost sample
+made a saccade of six.
 """
 
 from __future__ import annotations
@@ -71,12 +78,26 @@ _WEIGHT_SUM = 6.0
 #: gives it, and wl-preproc on the eye PC's whole trace. 1 and 2 detect the same thing,
 #: sample for sample, wherever no sample is missing, and no two are more than `max_gap_s`
 #: apart, within four samples of a velocity outside the threshold. **Beyond what the PI
-#: was asked** (a question for him, 2026-10-30): a lost sample beside a single noise
-#: velocity outside the threshold makes a run of six, now reported, marked, and taken by
-#: a saccade guard, where 1 and wl-preproc report nothing. **Not wl-preproc's fixture set
-#: "v2"** (true angle, XC-398): that numbers their published fixture files, and this
-#: numbers our detector.
-VERSION = 2
+#: was asked then** (put to him on 2026-11-04; 3 is his answer): a lost sample beside a
+#: single noise velocity outside the threshold made a run of six, reported, marked, and
+#: taken by a saccade guard, where 1 and wl-preproc report nothing.
+#:
+#: **3 since 2026-11-04** (the PI, "Require measured samples": "A saccade counts only if
+#: its minimum duration is met by measured, not filled-in, moving samples; the offline
+#: detection applies the same rule"): a run is a saccade only once `min_duration_samples`
+#: of its velocities are measured and outside the threshold, in `Detector` and in
+#: `detect`; the unknown velocities a gap leaves still carry the run, and flag it, but
+#: count for nothing toward its length. So `Detector` confirms a run on the velocity that
+#: gives it that many, always while the run is open, never on the sample that ends it as 2
+#: could. 2 and 3 detect the same thing, sample for sample, wherever no velocity in a run
+#: is unknown. What 3 no longer reports: the noise velocity beside a lost sample, and a
+#: real saccade whose run a lost sample leaves fewer than `min_duration_samples` measured
+#: velocities -- one of ten velocities or fewer, losing a sample in its middle -- which 2
+#: reported flagged, and 1 did not (every such case of a sweep run on 2026-11-06, one to
+#: three samples lost). **Not wl-preproc's fixture set "v2"**
+#: (true angle, XC-398): that numbers their published fixture files, and this numbers our
+#: detector.
+VERSION = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,6 +255,11 @@ def detect(
 
     found: list[Saccade] = []
     run_start: int | None = None
+    #: The open run's measured velocities, every one outside the threshold: **its length, as
+    #: the minimum duration counts it** (version 3; the PI, 2026-11-04, "Require measured
+    #: samples"). The unknown velocities in it carry it and count for nothing.
+    measured = 0
+    shortest = params.min_duration_samples
     for n, v in enumerate(velocities):
         continuous = n == 0 or (at[n] - at[n - 1]) <= params.max_gap_s
         if v is None:
@@ -242,21 +268,25 @@ def detect(
             # to split the run into two pieces, each below the minimum duration, and
             # delete the event entirely -- so a single missing sample made the task
             # miss a response the animal really made. Unknown means unknown: the run
-            # carries on and is flagged. A break in *time*, though, is different, and
-            # ends the run: we no longer know what the eye did in between.
+            # carries on and is flagged, **and is no longer for it** (version 3): one
+            # noise velocity beside a lost sample is not a saccade of six. A break in
+            # *time*, though, is different, and ends the run: we no longer know what the
+            # eye did in between.
             if not continuous:
-                if run_start is not None and n - run_start >= params.min_duration_samples:
+                if run_start is not None and measured >= shortest:
                     found.append(_saccade(gaze_deg, velocities, run_start, n))
                 run_start = None
             continue
         if _outside(v, eta_x, eta_y):
             if run_start is None:
                 run_start = n
+                measured = 0
+            measured += 1
         elif run_start is not None:
-            if n - run_start >= params.min_duration_samples:
+            if measured >= shortest:
                 found.append(_saccade(gaze_deg, velocities, run_start, n))
             run_start = None
-    if run_start is not None and len(velocities) - run_start >= params.min_duration_samples:
+    if run_start is not None and measured >= shortest:
         found.append(_saccade(gaze_deg, velocities, run_start, len(velocities)))
     return found
 
@@ -281,30 +311,30 @@ class Detector:
     handful of samples is a scale estimated from noise, and a detector that fires on
     it is worse than one that stays quiet.
 
-    **Confirmed once its run is long enough, counted as `detect` counts it** (version 2;
-    the PI, 2026-10-30, "Count it, marked"). A velocity the five-sample window cannot give
-    -- a sample missing, or two more than `max_gap_s` apart -- does not end an open run
-    while time is continuous, and counts toward its length, as in `detect`. So a run is
-    reported on the first sample with a velocity that shows it at least
-    `min_duration_samples` long: one outside the threshold, the run still open and `stop`
-    the sample after it, or the one inside it that ends the run, `stop` that sample -- the
-    eye has landed, and where is measured. Version 1 confirmed a run only on the velocity
-    that made it exactly that long, so a sample lost near its start, which leaves the five
-    velocities around it unknown, could hide that one, and the saccade was never reported
-    while `detect` reported it. Such a run is reported **flagged**, as is one with a gap
-    in the windows of the two velocities before it (`_saccade`'s window begins two samples
-    before the run). **Counting unknown velocities has a cost the PI was not asked about**
-    (a question for him, 2026-10-30): one noise velocity outside the threshold, then the
-    five a lost sample leaves unknown, then one inside it, is a run of six, reported
-    flagged as it ends, where version 1 and wl-preproc report nothing. **What a
-    confirmation cannot know, it does not claim**: a gap after it, in the run or in the two
-    samples beyond it, flags the batch form's saccade and not this one; and a run a break
-    in time ends before it is confirmed is not reported here, where `detect` reports it
-    once long enough -- the PI counted a saccade whose landing is measured, and after a
-    break in time nothing is. *On the rig's default path none of this is reached yet
-    (2026-10-30): `gaze.Tracked` gives a lost datagram as the held sample again, never as
-    a gap, until the tracker's staleness runs out (backlog XC-428, waiting on build T and
-    V3(a)).*
+    **Confirmed once its run has `min_duration_samples` measured velocities, counted as
+    `detect` counts them** (version 3; the PI, 2026-11-04, "Require measured samples": "A
+    saccade counts only if its minimum duration is met by measured, not filled-in, moving
+    samples; the offline detection applies the same rule"). A velocity the five-sample
+    window cannot give -- a sample missing, or two more than `max_gap_s` apart -- does not
+    end an open run while time is continuous, as in `detect`, and counts for nothing
+    toward its length. So a run is reported on the velocity outside the threshold that
+    gives it `min_duration_samples` of them, the run still open and `stop` the sample after
+    it; the velocity inside the threshold that ends a run never confirms it, since every
+    measured velocity was counted as it came. A sample lost in a run delays its
+    confirmation by the velocities it leaves unknown there, up to five. Such a run is
+    reported **flagged**, as is one with a gap in the windows of the two velocities before
+    it (`_saccade`'s window begins two samples before the run), the mark version 2 gave it
+    (the PI, 2026-10-30, "Count it, marked"). Version 1 confirmed a run only on the velocity
+    that made it exactly that long, unknown ones counted, so a sample lost near its start
+    could hide that one, and the saccade was never reported while `detect` reported it;
+    version 2 counted the unknown ones toward the length as `detect` then did, and confirmed
+    on the first velocity that showed the run long enough, so one noise velocity outside
+    the threshold, then the five a lost sample leaves unknown, then one inside it, was a
+    saccade of six. **What a confirmation cannot know, it does not claim**: a gap after it,
+    in the run or in the two samples beyond it, flags the batch form's saccade and not this
+    one. *On the rig's default path none of this is reached yet (2026-10-30): `gaze.Tracked`
+    gives a lost datagram as the held sample again, never as a gap, until the tracker's
+    staleness runs out (backlog XC-428, waiting on build T and V3(a)).*
 
     **Bounded work per sample.** Velocity is five plain multiplications on a ring of the
     last five samples (`_WINDOW`). The threshold is *not* recomputed per sample -- that
@@ -359,6 +389,9 @@ class Detector:
     _run_had_gap: bool = field(default=False, repr=False)
     #: Whether the open run has been reported, so it is reported once (version 2).
     _run_confirmed: bool = field(default=False, init=False, repr=False)
+    #: **How many of the open run's velocities are measured** (version 3): its length, as
+    #: the minimum duration counts it, every one outside the threshold.
+    _run_measured: int = field(default=0, init=False, repr=False)
     #: **The open run's first sample, kept as it starts** (version 2): a run with unknown
     #: velocities in it can outgrow any ring before it is confirmed, and its size is measured
     #: from here (`_amplitude`).
@@ -398,6 +431,7 @@ class Detector:
         self._run_start = None
         self._run_had_gap = False
         self._run_confirmed = False
+        self._run_measured = 0
         self._last_unknown = HALF_WINDOW - 1
         self.onset = None
 
@@ -426,8 +460,8 @@ class Detector:
     def accept(self, at: float, gaze_deg: tuple[float, float] | None) -> Saccade | None:
         """One sample. Returns a saccade on the sample that confirms it, else `None`.
 
-        Confirmation, not onset: the run is reported on the first sample with a velocity
-        that shows at least `min_duration_samples` of it (the class docstring), and
+        Confirmation, not onset: the run is reported on the sample whose velocity gives it
+        `min_duration_samples` measured velocities (the class docstring), and
         `Saccade.start` is where it actually began. The lag between the two is the
         detector's, and it is arithmetic rather than measurement -- see the module
         docstring.
@@ -497,11 +531,12 @@ class Detector:
         continuous = ts[w2] - ts[w1] <= gap
         if not moved:
             # Same rule as `detect`: unknown velocity flags an open run rather than
-            # ending it, and counts toward its length; a break in time ends it. Two
-            # answers here would make the online and offline detectors disagree about
-            # gaps specifically, which is the one thing S5 §5 wants their disagreement to
-            # be measurable against. One remains, and the class docstring says why: a
-            # run a break in time ends unconfirmed is not reported here.
+            # ending it, and counts for nothing toward its length (version 3); a break in
+            # time ends it. Two answers here would make the online and offline detectors
+            # disagree about gaps specifically, which is the one thing S5 §5 wants their
+            # disagreement to be measurable against. A run a break in time ends
+            # unconfirmed has fewer measured velocities than the minimum, so `detect`
+            # does not report it either.
             if self._run_start is not None:
                 self._run_had_gap = True
                 if not continuous:
@@ -509,28 +544,25 @@ class Detector:
                     self._run_had_gap = False
             return None
 
-        # **Confirmed on the first velocity that shows the run long enough** (version 2):
-        # outside the threshold, the run counted to here, or inside it, ending the run
-        # here, as `detect` ends one. Not only on the velocity that makes it exactly
-        # `min_duration_samples` long, which a sample lost near its start can hide.
-        start = self._run_start
-        if _outside_xy(vx, vy, self._eta_x, self._eta_y):
-            if start is None:
-                start = self._run_start = centre
-                self._run_x = xs[w2]
-                self._run_y = ys[w2]
-                self._run_confirmed = False
-                self._run_had_gap = centre - self._last_unknown <= HALF_WINDOW
-            if self._run_confirmed or centre - start + 1 < self.params.min_duration_samples:
-                return None
-            stop = centre + 1
-        elif start is None:
-            return None
-        else:
+        # **Confirmed on the velocity that gives the run `min_duration_samples` measured
+        # ones** (version 3), outside the threshold, the run still open. A velocity inside
+        # it ends the run, as `detect` ends one, and never confirms it: every measured
+        # velocity of the run was counted, and the run reported if long enough, as it came.
+        if not _outside_xy(vx, vy, self._eta_x, self._eta_y):
             self._run_start = None
-            if self._run_confirmed or centre - start < self.params.min_duration_samples:
-                return None
-            stop = centre
+            return None
+        start = self._run_start
+        if start is None:
+            start = self._run_start = centre
+            self._run_x = xs[w2]
+            self._run_y = ys[w2]
+            self._run_confirmed = False
+            self._run_measured = 0
+            self._run_had_gap = centre - self._last_unknown <= HALF_WINDOW
+        self._run_measured += 1
+        if self._run_confirmed or self._run_measured < self.params.min_duration_samples:
+            return None
+        stop = centre + 1
         self._run_confirmed = True
         found = Saccade(
             start=start,
@@ -546,7 +578,7 @@ class Detector:
         run's first sample, kept as it started (`_run_x`, `_run_y`), to sample `stop - 1` in the
         ring. **Both are the first and last present samples `_amplitude` would find**: a run
         starts, and is confirmed, only on a sample with a velocity, whose window holds it and the
-        two each side of it, and `stop - 1` is the confirming sample or the one before it."""
+        two each side of it, and `stop - 1` is the confirming velocity's own sample."""
         last = (stop - 1) % len(self._t)
         return math.hypot(self._x[last] - self._run_x, self._y[last] - self._run_y)
 
@@ -604,9 +636,9 @@ class Detector:
 
 
 #: How many samples `Detector` keeps: the five-sample window. **Not the run as well**, as it was
-#: until version 2: a run whose velocities include unknown ones is confirmed when it is long enough
-#: as `detect` counts it, which no ring sized by `min_duration_samples` holds, so its first sample
-#: is kept apart as it starts (`Detector._run_x`).
+#: until version 2: a run whose velocities include unknown ones is confirmed once it has enough
+#: measured ones (version 3), which no ring sized by `min_duration_samples` holds, so its first
+#: sample is kept apart as it starts (`Detector._run_x`).
 _WINDOW = 2 * HALF_WINDOW + 1
 
 

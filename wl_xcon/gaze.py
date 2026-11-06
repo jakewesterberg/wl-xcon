@@ -493,6 +493,8 @@ class Tracked:
             # **Confirmed on the sample that ends its run** (version 2 of the detector; the review
             # of XC-410's I2): it has landed already, on this frame, and its stop is the
             # `Saccade.stop` it is confirmed with, the run's end as `saccade.detect` reports it.
+            # Version 3 (2026-11-04) confirms a run only while it is open, so since then no
+            # detector of ours confirms one so, and a saccade is landed when its run closes.
             self._in_flight = self.detector.in_flight
             if self._in_flight:
                 self._landed_on = None

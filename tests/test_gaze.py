@@ -1960,37 +1960,27 @@ def test_an_onset_clock_observes_the_onset_and_leaves_it_to_an_onset_edge():
     assert (result.outcome, result.frames) == (Outcome.CORRECT, confirmed)
 
 
-def test_a_saccade_confirmed_on_the_sample_that_ends_its_run_is_judged_on_that_frame():
-    """**I2** (the review of XC-410, at the merge with saccade-gap-onset). A 3-sample saccade to
-    the target with the datagram 2 samples into it lost, the tracker's staleness half a frame so
-    that frame has no sample: the detector (version 2) confirms it on the sample that ends its run,
-    the run already closed. It landed on that frame, and is judged there, with its stop where
-    `saccade.detect` puts it. Until then the world took it as still in flight and judged it a frame
-    later, its stop a frame late too; no outcome shows the stop here, since any state a transition
-    could carry it into begins after it is confirmed."""
+def test_a_short_saccade_a_lost_datagram_leaves_too_few_measured_velocities_is_no_response():
+    """**I2's saccade, since version 3** (the PI, 2026-11-04, "Require measured samples"). A
+    3-sample saccade to the target with the datagram 2 samples into it lost, the tracker's
+    staleness half a frame so that frame has no sample: five of its velocities are unknown and
+    fewer than six of the rest are measured, so the detector does not report it, and the trial
+    has no response, where whole it is `CORRECT`. Version 2 confirmed it on the sample that ended
+    its run (the review of XC-410's I2, at the merge with saccade-gap-onset), and the trial was
+    `CORRECT`; version 3 confirms no run there (`test_saccade.py`), so the landing `Tracked` takes
+    from a confirmation made as its run ends is reached by none of our detectors."""
     trial = _probe([State("s", enter=[Show(_PROBED)],
-                          go=[*_asks()[:2], On(After(2.0), Outcome.NO_RESPONSE)])])
+                          go=[*_asks()[:2], On(After(1.0), Outcome.NO_RESPONSE)])])
     path = _path(_drawn(_PROBED, {}, trial)["search.1"], 3)
 
-    def world() -> Tracked:
-        return Tracked(Tracker(staleness=_PROBE_FRAME / 2), _fitted_mapping(), trial,
-                       _PROBE_FRAME, {}, source=_replay_path(path, lose={202}))
+    def played(lose: "set[int]"):
+        world = Tracked(Tracker(staleness=_PROBE_FRAME / 2), _fitted_mapping(), trial,
+                        _PROBE_FRAME, {}, source=_replay_path(path, lose=lose))
+        return run_trial(trial, world, _PROBE_FRAME, values={}, effects=Recorded())
 
-    seen, closed = world(), None
-    for frame in range(1, len(path) + 1):
-        seen.display({}, frame)
-        if seen.detector.onset is not None:
-            closed = frame, seen.detector.in_flight
-            break
-    assert closed is not None and closed[1] is False, \
-        "the detector must confirm it on the sample that ends its run"
-    played = world()
+    assert played(set()).outcome is Outcome.CORRECT, "whole, it is a saccade to the target"
 
-    result = run_trial(trial, played, _PROBE_FRAME, values={}, effects=Recorded())
-
-    assert (result.outcome, result.frames) == (Outcome.CORRECT, closed[0])
-    assert played._stopped == _stopped(trial, _replay_path(path, lose={202}),
-                                       Tracker(staleness=_PROBE_FRAME / 2))[1]
+    assert played({202}).outcome is Outcome.NO_RESPONSE
 
 
 def test_a_world_refuses_a_detector_that_has_already_been_fed():
