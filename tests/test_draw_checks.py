@@ -242,7 +242,6 @@ def test_a_draw_that_says_neither_same_nor_fresh_is_refused(drawn):
                     f"give it repeat=SAME") in found[0].detail
 
 
-
 def test_never_both_is_judged_block_by_block_and_a_block_says_by_conditions():
     """The PI, 2026-10-30, Q1b: "never both" reads block by block -- a setting is drawn by the
     block, its own draw or the task's it does not replace, or given by its conditions, each a value
@@ -365,8 +364,8 @@ def test_a_draw_its_setting_cannot_hold_is_refused():
 def test_a_direction_drawn_from_one_value_is_refused_and_a_plain_setting_may_be():
     """The controller's ruling on the review of Task 4, I-2: in a direction draw equal ends mean the
     whole turn (the record writes both ends from 0 to 360), so a draw whose ends are one value in
-    the task's terms -- a uniform's, a cut normal's -- is no draw: write the value instead. A setting
-    that is no direction may draw from one value."""
+    the task's terms -- a uniform's, a cut normal's -- is no draw: write the value instead. A
+    setting that is no direction may draw from one value."""
     wide = Param("dir", unit="deg", low=-180.0, high=180.0)
     for drawn in (Uniform(45.0, 45.0, repeat=FRESH),
                   TruncatedNormal(45.0, 10.0, low=45.0, high=45.0, repeat=FRESH)):
@@ -403,7 +402,7 @@ def test_a_direction_drawn_in_its_own_terms_is_accepted_and_one_over_360_refused
     assert _codes(_aimed(wide, draws={"ecc": Uniform(0.0, 400.0, repeat=FRESH)})) == []
 
 
-def test_a_direction_drawn_everywhere_does_not_trip_the_two_spellings_warning_and_one_given_somewhere_does():
+def test_a_direction_drawn_everywhere_is_not_warned_two_spellings_and_one_given_somewhere_is():
     """The C3 plan's call 39, on the PI's "Warn at load" (2026-10-30): a direction setting placing a
     `Polar` is warned `direction-outside-0-360` for a range reaching outside 0 to 360, which its
     declaration alone shows. A task drawing it in every block every run can play -- the plain
@@ -581,7 +580,7 @@ def test_a_designed_blocks_faults_are_refused():
         (dataclasses.replace(primed, criterion=(0.8, 10)),
          "block 'prime' plays a designed order, Priming, and ends on a criterion"),
         (dataclasses.replace(primed, order=Priming("target_x")),
-         "block 'prime''s priming gives neither a chance and runs; give exactly one"),
+         "block 'prime''s priming gives neither a chance nor runs; give exactly one"),
         (dataclasses.replace(primed, order=Priming("target_x", chance=0.5, runs=(3, 7))),
          "block 'prime''s priming gives both a chance and runs"),
         (dataclasses.replace(primed, order=Priming("target_x", chance=1.5)),
@@ -625,7 +624,7 @@ def test_a_designed_blocks_faults_are_refused():
 def test_a_sequence_balanced_stage_below_a_progressions_top_is_warned_it_moves_up_when_played_out():
     """The PI, 2026-10-31, on the engine C3 plan's Appendix B, item 10, "Only warn at load": a
     training progression's stage below its top that plays a sequence-balanced order ends when its
-    sequence is played out, eased trials or not, since its places are not played again, so the
+    sequence is played out, eased trials or not, since a sequence is not extended, so the
     animal moves up then however many of its trials a live change eased (the C3 plan's calls 15
     and 18, built as they stand). The load says so, `sequence-stage-moves-up`, accepted in every
     kind; a sequence in a plan of another order, and a priming stage, are not warned. At the top a
@@ -643,8 +642,10 @@ def test_a_sequence_balanced_stage_below_a_progressions_top_is_warned_it_moves_u
     assert found[0].detail == (
         "plan 'p': block 'seq' is a training progression's stage below its top, and it is "
         "sequence-balanced: it moves up when its sequence is played out, eased trials or not, "
-        "since its places are not played again, so trials a live change made easier can move the "
-        "animal up; each such trial's line names what eased it (eased)")
+        "since a sequence plays each of its places once and is not extended, so trials a live "
+        "change made easier can move the animal up; each such trial's line names what eased it "
+        "(eased); a stage the animal must pass on its own is better with an ordinary order and a "
+        "criterion")
     assert _found(_with(p=Plan([sequence, easy])), codes) == []
     assert _found(_with(p=Plan([primed, easy], order=ByCriterion(), time_limit_s=600.0)),
                   codes) == []
@@ -698,7 +699,8 @@ def test_priming_runs_may_be_drawn_from_any_distribution_of_lengths_from_1():
     for runs, said in (
         (Uniform(0.5, 4.0), "block 'prime''s runs cannot be drawn: it can give 0.5, and a run is "
                             "at least 1 trial long"),
-        (TruncatedNormal(4.0, 1.0), "runs cannot be drawn: it has no lowest or highest to be cut to"),
+        (TruncatedNormal(4.0, 1.0),
+         "runs cannot be drawn: it has no lowest or highest to be cut to; give it low= and high="),
         (Weighted(("short", "long"), (1, 1)), "its lengths are ('short', 'long'), and a run's "
                                               "length is a number of trials"),
         (Uniform(4.0, 2.0), "its lowest, 4.0, is above its highest, 2.0"),
@@ -740,6 +742,69 @@ def test_a_same_draw_a_drum_can_hold_and_a_same_wait_brought_back_at_once_are_wa
                         p=Plan([again]))) == []
     assert warned(_with(draws={"fix_window": Uniform(1.0, 2.0, repeat=SAME)},
                         p=Plan([again]))) == []
+
+
+def test_a_drum_block_with_a_setting_keyed_by_no_text_is_refused_not_a_traceback():
+    """The review of Task 5, Important 1 (Call 2: a finding at load with a sentence, never a task
+    file that will not import): a drumming block whose condition draws `same` under a key that is
+    no text and under a setting's name once made `check_task` sort the two together and raise.
+    The key is refused as no setting, and the setting is still warned."""
+    ranged = Condition("c", {5: Uniform(1.0, 2.0, repeat=SAME),
+                             "fix_window": Uniform(1.0, 2.0, repeat=SAME)}, target=1)
+    found = _found(_with(p=Plan([Block("drum", [ranged], drum=True)])),
+                   ("bad-draw", "same-in-drum"))
+    assert [f.code for f in found] == ["bad-draw", "same-in-drum"], found
+    assert "draws 5, which is no setting the task declares" in found[0].detail
+    assert "draws 'fix_window' same" in found[1].detail
+
+
+def test_a_drum_warns_a_setting_once_a_block_and_reads_a_factorials_conditions():
+    """The review of Task 5, Minor 1 and Minor 8: two conditions drawing one setting `same` from
+    ranges of different kinds are one warning, not two, and a factorial's level that is its own
+    `same` range is read like a hand-listed condition's."""
+    drum = Block("drum", [Condition("a", {"fix_window": Uniform(1.0, 2.0, repeat=SAME)}, 1),
+                          Condition("b", {"fix_window": NonAging(0.2, 0.3, 0.6, repeat=SAME)}, 1)],
+                 drum=True)
+    assert [f.code for f in _found(_with(p=Plan([drum])), ("same-in-drum",))] == ["same-in-drum"]
+    made = Block("drum", [], factorial=Factorial(
+        {"fix_window": (Uniform(1.0, 2.0, repeat=SAME), 1.5)}), drum=True)
+    found = _found(_with(p=Plan([made])), ("bad-draw", "bad-plan", "same-in-drum"))
+    assert [f.code for f in found] == ["same-in-drum"], found
+
+
+def test_a_same_wait_brought_back_at_once_is_warned_in_these_words():
+    """The review of Task 5, Minor 8: `same-wait-at-once`'s sentence."""
+    again = Block("seq", [NEAR, FAR], order=SequenceBalanced(again_at_once=True))
+    found = _found(_with(draws={"fix_hold": NonAging(0.2, 0.3, 0.6, repeat=SAME)},
+                         p=Plan([again])), ("same-wait-at-once",))
+    assert [f.detail for f in found] == [
+        "plan 'p': block 'seq' brings a broken trial straight back and draws the wait "
+        "'fix_hold' same, so the repeat's wait is known to last past the moment its trial "
+        "broke, a cue in the very time the wait keeps unforeseeable; draw it fresh (the C3 "
+        "plan's science review, I-5)"]
+
+
+def test_an_array_found_by_a_misspelt_word_is_said_once_for_a_stimulus_shown_twice():
+    """The review of Task 5, Minor 8: each stimulus and word is said once, however many states
+    `Show` the array."""
+    task = _aimed(Param("dir", unit="deg", low=0.0, high=360.0, start=90.0),
+                  looks=Array(n=4, radius=2.0, found_by="cued"))
+    trial = task.structures["t"]
+    state = trial.states[0]
+    again = dataclasses.replace(state, name="again")
+    task = dataclasses.replace(task, structures={"t": dataclasses.replace(
+        trial, states=[*trial.states, again])})
+    assert len([f for f in check_task(task) if f.code == "bad-array"]) == 1
+
+
+def test_a_block_of_a_refused_factorial_alone_gets_the_factorials_refusal_only():
+    """The review of Task 5, Minor 10: a block with no hand-listed conditions whose factorial is
+    refused makes none, and was also told it "has no conditions" (XC-381), sending the author the
+    wrong way; the factorial's own refusal is the one sentence."""
+    found = _found(_with(p=Plan([Block("b", [], factorial=Factorial({"nothing": (1.0,)}),
+                                       trials=5)])))
+    assert [f.code for f in found] == ["bad-plan"], found
+    assert "varies 'nothing'" in found[0].detail
 
 
 def test_a_designed_block_meets_no_empty_block_or_late_condition_warning():
@@ -787,7 +852,8 @@ def test_a_sequence_a_count_or_time_can_cut_is_warned():
             f"plan 'p': block 'seq''s sequence (5 trials, 1 cycle(s) of 5, each opening on a "
             f"lead-in of 1) can be cut short -- {said} -- and a sequence cut short is not "
             f"balanced: the transitions it did not play are missing, recorded on its block's "
-            f"planned sequence and owed by no shortfall")
+            f"planned sequence, and nothing makes up the trials it did not play; to play it "
+            f"whole, write trials=5 or none, and no time limit")
 
 
 def test_a_condition_name_over_200_characters_is_warned_naming_both_limits():
@@ -808,13 +874,13 @@ def test_a_condition_name_over_200_characters_is_warned_naming_both_limits():
     assert found[0].detail == (
         f"plan 'p': block 'b''s condition {'n' * 40 + '…'!r} is named in 201 characters, over "
         f"200: a person clears what a condition owes by naming it in at most 200, so cannot clear "
-        f"this one from the console, and wl-preproc's main-sequence table, whose condition names "
-        f"hold at most 255, would leave its trials out of their group past 255; give it, or its "
-        f"factors and levels, shorter names")
+        f"this one from the console, and wl-preproc's main-sequence table groups trials by "
+        f"condition names of up to 255 characters, so this one's trials still group, though a "
+        f"name past 255 would not; give it, or its factors and levels, shorter names")
     found = warned(named("n" * 256))
     assert [f.code for f in found] == ["long-condition-name"], found
-    assert ("whose condition names hold at most 255, leaves its trials out of their condition's "
-            "group; give it") in found[0].detail
+    assert ("groups trials by condition names of up to 255 characters, so this one's trials are "
+            "left out of their condition's group; give it") in found[0].detail
     long = "x" * 195
     task = _redeclared(BASE, Param(long, unit="deg", low=0.0, high=1000.0))
     found = warned(_with(task, p=Plan([Block(

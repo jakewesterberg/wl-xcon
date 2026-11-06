@@ -937,9 +937,10 @@ def _plan_faults(task: Task) -> list[Finding]:
                 warn("sequence-stage-moves-up", plan_name, (
                     f"{where} is a training progression's stage below its top, and it is "
                     f"sequence-balanced: it moves up when its sequence is played out, eased "
-                    f"trials or not, since its places are not played again, so trials a live "
-                    f"change made easier can move the animal up; each such trial's line names "
-                    f"what eased it (eased)"))
+                    f"trials or not, since a sequence plays each of its places once and is not "
+                    f"extended, so trials a live change made easier can move the animal up; each "
+                    f"such trial's line names what eased it (eased); a stage the animal must pass "
+                    f"on its own is better with an ordinary order and a criterion"))
             if not (_whole_from(depth, 2) and _whole_from(cycles, 1) and count_ >= 2):
                 return
             # Each cycle the linear sequence, its first `depth - 1` trials a lead-in (the PI,
@@ -969,8 +970,9 @@ def _plan_faults(task: Task) -> list[Finding]:
                 warn("cut-sequence", plan_name, (
                     f"{where}'s sequence ({plays}) can be cut short -- {'; '.join(cut)} -- and "
                     f"a sequence cut short is not balanced: the transitions it did not play are "
-                    f"missing, recorded on its block's planned sequence and owed by no "
-                    f"shortfall"))
+                    f"missing, recorded on its block's planned sequence, and nothing makes up the "
+                    f"trials it did not play; to play it whole, write trials={planned} or none, "
+                    f"and no time limit"))
             return
         feature = order.feature
         if not isinstance(feature, str) or feature not in declared:
@@ -994,10 +996,12 @@ def _plan_faults(task: Task) -> list[Finding]:
                                   f"between 2 or more; give its conditions two values or more")
         chance, runs = order.chance, order.runs
         if (chance is None) == (runs is None):
-            refuse(plan_name, f"{where}'s priming gives {'neither' if chance is None else 'both'} "
-                              f"a chance and runs; give exactly one: chance=, the chance the next "
-                              f"trial repeats the last one's feature, or runs=(low, high), how "
-                              f"many trials of one feature come before a switch")
+            said = ("neither a chance nor runs" if chance is None
+                    else "both a chance and runs")
+            refuse(plan_name, f"{where}'s priming gives {said}; give exactly one: chance=, the "
+                              f"chance the next trial repeats the last one's feature, or "
+                              f"runs=(low, high), how many trials of one feature come before a "
+                              f"switch")
         elif chance is not None and not (_finite(chance) and 0 <= chance <= 1):
             refuse(plan_name, f"{where}'s chance of a repeat is {chance!r}, and a chance is a "
                               f"number from 0 to 1")
@@ -1148,7 +1152,8 @@ def _plan_faults(task: Task) -> list[Finding]:
                 refuse(name, f"{where} has two conditions named {twice!r}: they would share one "
                              f"count, and each trial's row names its condition by its name "
                              f"(XC-388); name each once")
-            if not conditions and (block.criterion is not None or block.trials is not None):
+            if not conditions and not unmade and (
+                    block.criterion is not None or block.trials is not None):
                 rule_ = "a criterion" if block.criterion is not None else "a number of trials"
                 refuse(name, f"{where} has no conditions and ends on {rule_}, which a block that "
                              f"draws no trial can never meet (XC-381); give it conditions")
@@ -1222,11 +1227,12 @@ def _plan_faults(task: Task) -> list[Finding]:
                         f"{longest} characters, over {CONDITION_NAME_LIMIT}: a person clears what "
                         f"a condition owes by naming it in at most {CONDITION_NAME_LIMIT}, so "
                         f"cannot clear this one from the console, and wl-preproc's main-sequence "
-                        f"table, whose condition names hold at most {_GROUP_NAME_LIMIT}, "
-                        + ("leaves its trials out of their condition's group"
+                        f"table groups trials by condition names of up to {_GROUP_NAME_LIMIT} "
+                        f"characters, so "
+                        + ("this one's trials are left out of their condition's group"
                            if longest > _GROUP_NAME_LIMIT
-                           else f"would leave its trials out of their group past "
-                                f"{_GROUP_NAME_LIMIT}")
+                           else f"this one's trials still group, though a name past "
+                                f"{_GROUP_NAME_LIMIT} would not")
                         + "; give it, or its factors and levels, shorter names"))
                 if (isinstance(condition.target, bool) or not isinstance(condition.target, int)
                         or condition.target < 0):
@@ -1634,11 +1640,14 @@ def _repeat_warnings(task: Task) -> list[Finding]:
             for condition in conditions if isinstance(conditions, list) else ():
                 if isinstance(condition, Condition) and isinstance(condition.values, dict):
                     drawn += own_ranges(condition).items()
-            same = sorted({(name, isinstance(distribution, NonAging))
-                           for name, (distribution, _) in drawn
-                           if getattr(distribution, "repeat", None) == SAME})
+            # A name that is no text is refused by `_draw_faults`, and cannot be sorted with text.
+            same = {name: any(isinstance(distribution, NonAging)
+                              for other, (distribution, _) in drawn if other == name
+                              and getattr(distribution, "repeat", None) == SAME)
+                    for name, (distribution, _) in drawn
+                    if isinstance(name, str) and getattr(distribution, "repeat", None) == SAME}
             where = f"plan {plan_name!r}: block {block.name!r}"
-            for name, wait in same:
+            for name, wait in sorted(same.items()):
                 meaning = meanings.get(name)
                 if block.drum is True and meaning is not None and meaning[0].kind == CLEAR_CUT:
                     found.append(Finding("same-in-drum", (
@@ -1663,7 +1672,9 @@ def _unrunnable(runs: Distribution) -> str | None:
     1, each length its draw rounded down, or anything but numbers."""
     why = undrawable(runs, None)
     if why is not None:
-        return why
+        # Runs belong to no setting, so there is no declared range to fall back on.
+        return why.replace(": neither it nor its setting declares one; give it low= and high=, "
+                           "or declare the setting's range", "; give it low= and high=")
     bounds = bounds_of(runs)
     if bounds is None:
         weights = runs.weights if isinstance(runs, Weighted) else (1,) * len(runs.values)
