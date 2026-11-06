@@ -238,11 +238,12 @@ def test_a_revert_restores_each_value_held_or_handed_back_and_each_range_as_then
         + [(12.0, 2.0, 40.0, ["target_x", "target_y"], ["target_x"], {"fix_hold": 8})] * 2)
     assert [line["params"]["fix_hold"] for line in lines[6:]] == [
         variation.draw(then, SEED, 6, key), variation.draw(then, SEED, 7, key)]
+    # A value over a setting its conditions give writes no `was` (`Session._block_gives`).
     assert [(row["change"], row["sequence"], row["name"], row["was"], row["now"], row["moment"])
             for row in _reverted(session)] == [
         (8, 8, "fix_luminance", 50.0, None, 3),
         (8, 9, "fix_hold", variation.recorded(since), variation.recorded(then), 3),
-        (8, 10, "target_x", 10.0, 12.0, 3),
+        (8, 10, "target_x", None, 12.0, 3),
         (8, 11, "target_y", 3.0, 2.0, 3)]
     assert (session._ranges, session._edited) == (
         {key: (then, 8)}, frozenset({"target_x", "target_y"}))
@@ -290,6 +291,7 @@ def test_a_revert_to_the_runs_start_hands_everything_back_and_restores_the_decla
         for index in (4, 5)]
     widened, raised = Uniform(0.5, 0.7, repeat=FRESH), Uniform(35.0, 50.0, repeat=FRESH)
     reverted = _reverted(session)
+    # A value over a setting its conditions give writes no `was` (`Session._block_gives`).
     assert [(row["change"], row["name"], row["was"], row["now"], row.get("from"),
              row.get("block"), row["moment"]) for row in reverted] == [
         (5, "target_x", 12.0, None, None, None, 0),
@@ -300,7 +302,7 @@ def test_a_revert_to_the_runs_start_hands_everything_back_and_restores_the_decla
         (6, "fix_hold", variation.recorded(own), variation.recorded(widened), "block", "own", 4),
         (6, "fix_luminance", variation.recorded(declared), variation.recorded(raised), "task",
          None, 4),
-        (6, "target_x", 10.0, 12.0, None, None, 4),
+        (6, "target_x", None, 12.0, None, None, 4),
         (6, "target_y", 0.0, 2.0, None, None, 4)]
     assert _without_instants(reverted[3]) == {
         "change": 5, "kind": "revert", "name": "fix_luminance",
@@ -343,6 +345,7 @@ def test_a_revert_is_one_change_its_rows_naming_the_moment(tmp_path):
 
     assert session.refusals == []
     rows = _changes(session)
+    # A value over a setting its conditions give writes no `was` (`Session._block_gives`).
     assert [(row["change"], row["sequence"], row["kind"], row["name"], row["was"], row["now"],
              row["by"], row.get("moment")) for row in rows] == [
         (1, 1, "set", "fix_hold", 0.3, 0.5, BY, None),
@@ -351,7 +354,7 @@ def test_a_revert_is_one_change_its_rows_naming_the_moment(tmp_path):
         (4, 4, "set", "fix_hold", 0.7, 0.9, ANA_BY, None),
         (5, 5, "revert", "target_y", 2.0, None, BY, 1),
         (5, 6, "revert", "fix_hold", 0.9, 0.5, BY, 1),
-        (6, 7, "set", "target_x", 10.0, 12.0, BY, None)]
+        (6, 7, "set", "target_x", None, 12.0, BY, None)]
     assert rows[5]["meaning"] == {**FIX_HOLD, "went": "easier", "step": -0.4}
     assert session.card.codes.count(PARAM_CHANGED) == 7
     assert [(line["params"]["fix_hold"], line["params"]["target_y"], line["live"])
@@ -390,8 +393,9 @@ def test_a_moment_is_kept_after_each_act_the_first_the_runs_start(tmp_path):
         moment(3, at[3], "target_x 12.00 handed back to its conditions", {}, {key: narrowed}),
         moment(4, at[4], "reverted to change 2", {"target_x": 12.0}, {key: narrowed}),
     ]
+    # A value over a setting its conditions give writes no `was` (`Session._block_gives`).
     assert [(row["kind"], row["name"], row["was"], row["now"]) for row in _reverted(session)] == [
-        ("revert", "target_x", 10.0, 12.0)]
+        ("revert", "target_x", None, 12.0)]
 
 
 def test_every_moment_of_the_run_is_kept_past_the_consoles_cap_its_start_first(tmp_path):

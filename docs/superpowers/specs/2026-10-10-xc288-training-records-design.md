@@ -187,7 +187,9 @@ restores), and `clear`, `drum` and `training`, the clears and switches build C2a
 which stay in `controls.jsonl` too until wl-preproc reads and times the log's rows (XC-442). Each row's keys:
 `change` (from 1, one per act, a revert's rows sharing one), `kind`, `name` (never empty: `"owed"` for a
 clear, `"drumming"` for a drum switch, the training setting for a training switch), `was` and `now` (as
-given: a person's value as typed, a direction's included), `by`, `at` and `at_local`, `trial_number` (the
+given: a person's value as typed, a direction's included; `was` null, with `meaning`'s `went` and `step`,
+where a person's or a revert's value lands on a setting drawn or given by its conditions at that moment,
+no person holding it, which no trial held at one value), `by`, `at` and `at_local`, `trial_number` (the
 first trial it applies to, as that trial's line numbers it), `run`, `meaning` (the setting's resolved
 meaning, `relative_to` as written, with `went` and `step`, a range row's `went` its new range judged as a
 whole against the range the task writes, the PI's answer of 2026-10-31; null on a row naming no task

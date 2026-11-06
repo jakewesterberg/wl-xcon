@@ -264,9 +264,10 @@ def test_a_hand_back_of_a_drawn_setting_draws_it_again_and_of_a_run_setting_rest
         variation.draw(drawn, SEED, 0, key), variation.draw(drawn, SEED, 1, key), 0.5, 0.5,
         variation.draw(drawn, SEED, 4, key), variation.draw(drawn, SEED, 5, key)]
     rows = _changes(session)
+    # A value set over a setting drawn at that moment writes no `was` (`Session._block_gives`).
     assert [(row["change"], row["kind"], row["name"], row["was"], row["now"], row.get("to"))
             for row in rows] == [
-        (1, "set", "fix_hold", 0.3, 0.5, None), (2, "set", "target_y", 1.5, 3.0, None),
+        (1, "set", "fix_hold", None, 0.5, None), (2, "set", "target_y", 1.5, 3.0, None),
         (3, "hand_back", "fix_hold", 0.5, None, "draw"),
         (4, "hand_back", "target_y", 3.0, 1.5, "run")]
     assert (rows[2]["meaning"]["step"], rows[3]["meaning"]["step"]) == (None, -1.5)
@@ -323,8 +324,9 @@ def test_typing_the_old_value_back_does_not_hand_it_back(tmp_path):
             for line in _lines(session)] == (
         [(5.0, [], [])] * 2 + [(12.0, ["target_x"], ["target_x"])] * 2
         + [(5.0, ["target_x"], ["target_x"])] * 2 + [(5.0, [], [])] * 2)
+    # A value over a setting its conditions give writes no `was` (`Session._block_gives`).
     assert [(row["kind"], row["was"], row["now"]) for row in _changes(session)] == [
-        ("set", 10.0, 12.0), ("set", 12.0, 5.0), ("hand_back", 5.0, None)]
+        ("set", None, 12.0), ("set", 12.0, 5.0), ("hand_back", 5.0, None)]
 
 
 #: The task draws the fixation hold, and block `own` replaces its draw; the task draws the target

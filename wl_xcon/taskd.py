@@ -2612,6 +2612,22 @@ class Session:
         return any(name in variation.own_ranges(condition)
                    for condition in self._scheduler.block.conditions)
 
+    def _block_gives(self, name: str) -> bool:
+        """**Whether the open block gives `name` at this moment**, no person holding it: by its own
+        draw or the task's (`variation.in_force`), or by its conditions, a value or a range of their
+        own (one condition giving it is enough). A value a person or a revert gives it then writes
+        its change row with `was` null, and its meaning's `went` and `step` null (`_apply_staged`):
+        no single value was held before it -- the value `set` read is the run's own, under the draw
+        or the conditions, which no trial they give it held -- and what the animal saw is each trial
+        line's (`params`, `drawn`). The controller's rulings of 2026-10-30 on the engine C3 plan's
+        path test (Task 19): a record must not claim a value no trial held; engine build C2b wrote
+        the run's value here for a setting its conditions give, and C3, which formalizes the change
+        log, corrects it."""
+        block = self._scheduler.block
+        return name not in self._edited and (
+            name in variation.in_force(self._task, block)
+            or any(name in condition.values for condition in block.conditions))
+
     def _revert(self, command, index: int) -> None:
         """**A person takes the run back to an earlier moment** (`link.Revert`; engine build C3's
         spec §8; the PI, 2026-10-07, TSK-43, "Yes, with revert": "any earlier state restored in
@@ -3209,7 +3225,9 @@ class Session:
         which stays as it was; one `PARAM_CHANGED` strobe with its `sequence`; then its row,
         kind `set` (`record.SessionRecord.change`), at the instant it applied, naming the next
         trial to start as the first it applies to, with the setting's meaning (`_meaning`; none
-        for a ceiling's), the value written as given; then its line on the feed, at that instant.
+        for a ceiling's), the value written as given, and `was` written null, with the meaning's
+        `went` and `step`, where the open block's draw or conditions give the setting at that
+        moment (`_block_gives`); then its line on the feed, at that instant, saying what `set` read.
         A bounded row still goes through `bounds.set`, in the same pass as its strobe and row.
 
         **A hand-back and a live range offered are applied here too** (`_pending`; engine build
@@ -3256,6 +3274,9 @@ class Session:
                 # ahead of it has made by now: `set`'s `was` is the value before this
                 # inter-trial interval (its docstring), not before this row.
                 was = self.spec.values.get(name)
+            # No single value is "before" on a setting the open block draws or its conditions give:
+            # its row says none, and no way it went (`_block_gives`); the feed says what `set` read.
+            written = None if self._block_gives(name) else was
             if bounded:
                 self.spec.bounds.set(name, now, by=by)
             else:
@@ -3269,9 +3290,9 @@ class Session:
             at = self.wall_now()
             if self._record is not None:
                 self._record.change(
-                    change=self._change, kind=kind, name=name, was=was, now=now, by=by, at=at,
-                    trial_number=trial_number, run=self.run_index,
-                    meaning=None if bounded else self._meaning(name, was, now),
+                    change=self._change, kind=kind, name=name, was=written, now=now, by=by,
+                    at=at, trial_number=trial_number, run=self.run_index,
+                    meaning=None if bounded else self._meaning(name, written, now),
                     event_code=code, sequence=self._sequence,
                     **({} if moment is None else {"moment": moment}),
                 )
