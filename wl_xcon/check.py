@@ -54,6 +54,7 @@ from wl_xcon.task import (
     FOUND_BY,
     RDS,
     REPEATS,
+    RIGHT,
     SAME,
     SPENT,
     After,
@@ -104,7 +105,7 @@ from wl_xcon.task import (
     is_point,
 )
 from wl_xcon.variation import (
-    bounds_of, directions, expanded, generated, in_force, level_name, own_ranges,
+    bounds_of, directions, expanded, generated, in_force, level_name, own_ranges, values_of,
 )
 from wl_xcon.welfare import Deployment
 
@@ -178,7 +179,10 @@ def check_task(
 
     **What it draws** (engine build C3) is checked with its plans (`_draw_faults`), and a
     direction setting the rig alone writes, drawn in every block, is not warned
-    `direction-outside-0-360` for the range it is declared in (`_drawn_directions`)."""
+    `direction-outside-0-360` for the range it is declared in (`_drawn_directions`). **A trial no
+    animal can get right** (engine build C3's spec §9; the PI, 2026-10-30, Q10) is refused at the
+    task's starting values, in each condition of the plain run and of every plan, every draw's
+    full range included (`_impossible_faults`, `impossible`)."""
     several = len(task.structures) > 1
     # A structure's check reads a direction setting's declaration alone and knows nothing of
     # draws (the C3 plan's call 39).
@@ -205,6 +209,7 @@ def check_task(
         + _counting_faults(task)
         + _plan_faults(task)
         + _draw_faults(task)
+        + _impossible_faults(task)
         + _found_by_faults(task)
         + _condition_spellings(task)
         + ([] if source is None else _computed_positions(Path(source)))
@@ -1744,6 +1749,658 @@ def _found_by_faults(task: Task) -> list[Finding]:
                 f"{', '.join(map(repr, FOUND_BY))}: 'look', its target the odd one out by its "
                 f"look, or 'cue', something else the trial shows naming it")))
     return found
+
+
+# --- Settings no animal can get right (engine build C3's spec §9; XC-343) -------------------
+
+#: **A trial no animal can get right, refused** (engine build C3's spec §9; the PI, 2026-10-30,
+#: Q10, "Refuse in file and live": "refused in the task file and when set live; the check judges
+#: each concrete combination (per condition, per live change)"). Under his rule of warnings over
+#: refusals (TSK-51) it breaks a run: no answer can be paid, and with drumming on such a trial
+#: comes back forever, holding the time limits open (XC-343).
+IMPOSSIBLE = "impossible-trial"
+
+
+#: **What the two look checks find in an array a cue names the target of, warned** (the PI,
+#: 2026-10-31, on the engine C3 plan's Appendix B, item 17, "Refuse only odd-one-out tasks
+#: (Recommended)"; `task.Array.found_by`): a cue, a remembered sample or a place names its target,
+#: so a target that looks like its distractors, or looks that swap, still leave an answer if the cue
+#: is shown. Accepted in every kind, at load and at a run's start (`impossible`'s `cued`); a live
+#: change, which the look checks do not refuse in such an array, is never warned for it.
+CUED = "cued-target"
+
+
+#: An array's fields the second and third combinations read: its set size, its two looks and what
+#: names its target. Its ring, its target's place and its rotation decide neither, so conditions
+#: differing in them alone are judged once (`_impossible_in`; the outline review's M-11).
+_LOOKED = ("n", "looks", "among", "found_by")
+
+
+class _Of(NamedTuple):
+    """A setting a value reads, as one trial of a condition can hold it (`_form`): its name, the
+    form of each value it can hold there (`held`), and the values themselves (`raw`), for the
+    sentence; `held` is `None` where nothing gives it, and it is not judged."""
+
+    name: str
+    held: "tuple | None"
+    raw: tuple = ()
+
+
+class _Spread(NamedTuple):
+    """A number a continuous draw gives -- a uniform, a normal, a wait: any from `low` to `high`,
+    and any one of them with no chance, so it is never judged equal to another value (`_alike`)."""
+
+    low: float
+    high: float
+
+
+class _Made(NamedTuple):
+    """A declaration -- an appearance, a color, an array -- as `_form` reads it: its class, and
+    each field's form by name, in the order the class declares them."""
+
+    kind: type
+    parts: tuple
+
+
+class _Seq(NamedTuple):
+    """A tuple or a list as `_form` reads it: each item's form."""
+
+    items: tuple
+
+
+def impossible(
+    task: Task,
+    blocks: list[Block],
+    values: dict,
+    *,
+    held: frozenset = frozenset(),
+    ranges: dict | None = None,
+    cued: bool = False,
+) -> list[Finding]:
+    """**The trials no animal can get right among `blocks`**, refused, `IMPOSSIBLE` (engine build
+    C3's spec §9; the PI, 2026-10-30, Q10: "the check judges each concrete combination (per
+    condition, per live change)"). One function for the load (`_impossible_faults`), a run's
+    start and a live change (the C3 plan's call 25), so each judges alike:
+
+    - **`values`** are the run's merged values -- the task's starts, the run's, a person's --
+      which a condition's value or a draw replaces on its trials, and **`held`** names the
+      settings a person holds, whose `values` beat both (the C3 plan's call 10).
+    - **`ranges`** changes the draws in force, keyed as the C3 plan's call 7 keys a draw
+      (`("task", name)`, `("block", block, name)`, `("condition", condition, name)`): a
+      `Distribution` there replaces the declared draw, `None` restores it.
+    - **Each condition of each block**, its factorial expanded (`variation.expanded`), is judged
+      on what its trials can hold (`_sources`): **a draw that can give an impossible trial is
+      refused**, since some trials would take that value (the spec's §9).
+    - **The three** (XC-343): no time to answer, judged by bounds (`_cut_off`); a target that looks
+      like its distractors (`_same_looks`); and two objects whose looks swap, target and
+      distractors one trial and the other way round another, in a block (`_swapped`), both judged
+      by the values each setting can hold, never a cross product of every setting's (the outline
+      review's M-10).
+    - **The two look checks refuse only an array found by its look** (`Array.found_by`, the
+      default: the odd one out; the PI, 2026-10-31, on the engine C3 plan's Appendix B, item 17,
+      "Refuse only odd-one-out tasks (Recommended)"), and a swap where any array in it is. Where a
+      cue names the target (`"cue"`), what they find is a warning, `CUED`, returned only with
+      **`cued`**: the load and a run's start ask for it; a live change and the run's backstop ask
+      for refusals alone, so a cued array refuses none of them. No time to answer is refused
+      whatever names the target.
+    - **Once per distinct combination** (the outline review's M-11): conditions whose arrays
+      resolve alike are judged once, a block's pairs of looks once per distinct pair, and one
+      sentence said of several conditions is one finding naming each (`subjects`, each
+      `"block: condition"`).
+
+    A setting nothing gives is not judged (a run's pre-flight refuses it), nor a draw that cannot
+    be drawn (`_draw_faults` refuses it), nor a block or condition that is not the shape its
+    class declares (`_plan_faults` refuses it); nothing in a task's declarations raises here."""
+    declared = {param.name: param for param in task.params}
+    changed = ranges if isinstance(ranges, dict) else {}
+    findings: list[Finding] = []
+    for block in blocks:
+        if isinstance(block, Block):
+            findings += _impossible_in(task, expanded(block), values, held, changed, declared,
+                                       cued)
+    return findings
+
+
+def _impossible_in(task: Task, block: Block, values: dict, held: frozenset, ranges: dict,
+                   declared: dict[str, Param], cued: bool = False) -> list[Finding]:
+    """`impossible` for one block, its factorial expanded: a look check's finding in an array a
+    cue names the target of (`_cued`) a `CUED` warning, said only with `cued`."""
+    conditions = [
+        condition for condition in block.conditions
+        if isinstance(condition, Condition) and isinstance(condition.values, dict)
+        and isinstance(condition.structure, (str, type(None)))
+    ] if isinstance(block.conditions, list) else []
+    said: dict[str, list[str]] = {}  # each sentence, and the conditions it is said of
+    warned: dict[str, list[str]] = {}  # likewise, a cued array's, warned (the PI, 2026-10-31)
+    looked: dict[str, tuple] = {}  # `_same_looks` once per distinct set of arrays
+    pairs: dict[str, tuple] = {}  # each distinct pair of looks at two objects, and its conditions
+    for condition in conditions:
+        structure = task.structures.get(condition.structure or task.default)
+        if not isinstance(structure, Trial):
+            continue
+        sources = _sources(task, block, condition, values, held, ranges, declared)
+        arrays = _arrays(structure, sources)
+        key = repr([(name, [part for part in form.parts if part[0] in _LOOKED])
+                    for name, _, form in arrays])
+        if key not in looked:
+            looked[key] = _same_looks(arrays, sources)
+        for sentence in _cut_off(structure, sources) + looked[key][0]:
+            said.setdefault(sentence, []).append(condition.name)
+        for sentence in looked[key][1]:
+            warned.setdefault(sentence, []).append(condition.name)
+        for name, array, form in arrays:
+            parts = dict(form.parts)
+            if _counts(parts["n"], 2, 2) is not True:
+                continue
+            key = repr((parts["looks"], parts["among"], _cued(array)))
+            if key not in pairs:
+                pairs[key] = (parts["looks"], parts["among"], [],
+                              _settings_said((array.looks, array.among), sources), _cued(array))
+            if condition.name not in pairs[key][2]:
+                pairs[key][2].append(condition.name)
+    findings = [
+        Finding(IMPOSSIBLE, f"block {block.name!r}, {_conditions_said(names)}: {sentence}",
+                subjects=tuple(f"{block.name}: {name}" for name in names))
+        for sentence, names in said.items()
+    ]
+    if cued:
+        findings += [
+            Finding(CUED, f"block {block.name!r}, {_conditions_said(names)}: {sentence}",
+                    blocking=False, accepted_in=SESSION_KINDS,
+                    subjects=tuple(f"{block.name}: {name}" for name in names))
+            for sentence, names in warned.items()
+        ]
+    crossed = _swapped(list(pairs.values()))
+    # A swap is refused where any array in it is found by its look; warned where a cue names
+    # every one's target (the PI, 2026-10-31, "Refuse only odd-one-out tasks").
+    named = [(one, other) for one, other in crossed if one[4] and other[4]]
+    crossed = [(one, other) for one, other in crossed if not (one[4] and other[4])]
+    for code, swaps in ((IMPOSSIBLE, crossed), (CUED, named if cued else [])):
+        if not swaps:
+            continue
+        names = list(dict.fromkeys(name for one, other in swaps
+                                   for name in (*one[2], *other[2])))
+        shown = [_pair_said(one, other) for one, other in swaps[:3]]
+        if len(swaps) > 3:
+            shown.append(f"and {len(swaps) - 3} more")
+        swapped = (f"block {block.name!r}: an array can show two objects, and two looks are the "
+                   f"target and the distractors on one trial and the other way round on another "
+                   f"({'; '.join(shown)})")
+        subjects = tuple(f"{block.name}: {name}" for name in names)
+        if code == IMPOSSIBLE:
+            findings.append(Finding(IMPOSSIBLE, (
+                f"{swapped}: two objects have no odd one out, so one display can call for either "
+                f"answer (XC-343); show three objects or more, or give each look one role in the "
+                f"block"), subjects=subjects))
+        else:
+            findings.append(Finding(CUED, (
+                f"{swapped}, and a cue names the target (found_by 'cue'): the target must be "
+                f"named by a cue; check that one is shown"),
+                blocking=False, accepted_in=SESSION_KINDS, subjects=subjects))
+    return findings
+
+
+def _cued(array: object) -> bool:
+    """Whether a cue names `array`'s target (`Array.found_by` `"cue"`; the PI, 2026-10-31), so the
+    two look checks warn for it; anything else, its look the default, is held to them."""
+    return getattr(array, "found_by", "look") == "cue"
+
+
+def _sources(task: Task, block: Block, condition: Condition, values: dict, held: frozenset,
+             ranges: dict, declared: dict[str, Param]) -> dict[str, tuple]:
+    """**What each setting can hold on a trial of `condition` in `block`**, in the order the C3
+    plan's call 10 builds a trial's values: the run's value (`values`), under the condition's value
+    or a draw -- its own range, else the block's or the task's draw in force (`variation.in_force`,
+    `own_ranges`), each as `ranges` changes it -- and a value a person holds (`held`) over both.
+    Each is a tuple: one value, or what its draw can give (`_drawable`). A setting nothing gives,
+    or a draw that cannot be drawn, is absent, and so not judged."""
+    found: dict[str, tuple | None] = {name: (value,) for name, value in values.items()}
+    for name, (drawn, key) in in_force(task, block).items():
+        found[name] = _drawable(ranges.get(key) or drawn, declared.get(name))
+    for name, (own, key) in own_ranges(condition).items():
+        found[name] = _drawable(ranges.get(key) or own, declared.get(name))
+    for name, value in condition.values.items():
+        if not isinstance(value, Distribution):
+            found[name] = (value,)
+    for name in held:
+        if name in values:
+            found[name] = (values[name],)
+    return {name: options for name, options in found.items() if options is not None}
+
+
+def _drawable(distribution: Distribution, declared: Param | None) -> tuple | None:
+    """**What a draw can give a trial** (`_sources`): a weighted set's values of weight above 0 (a
+    weight of 0 is never drawn), a list's items (`variation.values_of`), and a uniform's, a
+    normal's or a wait's span as one `_Spread` (`variation.bounds_of`), or its one number where
+    its lowest is its highest. `None` for a draw that cannot be drawn (`undrawable`): the load
+    refuses it (`_draw_faults`), and a live range is never applied (the C3 plan's Task 13)."""
+    if undrawable(distribution, declared) is not None:
+        return None
+    if isinstance(distribution, Weighted):
+        return tuple(value for value, weight in zip(distribution.values, distribution.weights)
+                     if weight > 0)
+    if isinstance(distribution, Listed):
+        return values_of(distribution)
+    low, high = bounds_of(distribution, declared)
+    return (low,) if low == high else (_Spread(low, high),)
+
+
+def _form(value: object, sources: dict[str, tuple], inside: frozenset[str] = frozenset()):
+    """**`value` as a trial of one condition can resolve it**: each setting it reads, at any depth
+    -- an array's looks, an appearance's color -- an `_Of` holding the form of each value
+    `sources` gives it (not judged where nothing gives it, or where it is met again inside its own
+    values); a declaration a `_Made` of its fields; a tuple or a list a `_Seq`; anything else
+    itself. One setting's values at a time, never a cross product of every setting's (the
+    outline review's M-10)."""
+    if isinstance(value, P):
+        options = sources.get(value.name)
+        if options is None or value.name in inside:
+            return _Of(value.name, None)
+        within = inside | {value.name}
+        return _Of(value.name, tuple(_form(option, sources, within) for option in options),
+                   options)
+    if isinstance(value, _Spread):
+        return value
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return _Made(type(value), tuple((field.name, _form(getattr(value, field.name), sources,
+                                                           inside))
+                                        for field in dataclasses.fields(value)))
+    if isinstance(value, (tuple, list)):
+        return _Seq(tuple(_form(item, sources, inside) for item in value))
+    return value
+
+
+def _some(answers) -> bool | None:
+    """`True` if any answer is; else `None` if any is unknown; else `False`."""
+    unknown = False
+    for answer in answers:
+        if answer is True:
+            return True
+        unknown = unknown or answer is None
+    return None if unknown else False
+
+
+def _every(answers) -> bool | None:
+    """`False` if any answer is; else `None` if any is unknown; else `True`."""
+    unknown = False
+    for answer in answers:
+        if answer is False:
+            return False
+        unknown = unknown or answer is None
+    return None if unknown else True
+
+
+def _alike(left: object, right: object, one: bool) -> bool | None:
+    """**Whether two forms can be one value**: `True` where a trial can give them equal -- or, not
+    `one`, where two trials can, one each -- `False` where none can, `None` where a setting
+    nothing gives decides it. On one trial a setting read on both sides holds one value, so it
+    is equal to itself; a continuous draw gives any one number with no chance, so it equals
+    nothing else (`_Spread`); a declaration is equal to one of its own class whose every field
+    can be equal to its own. Equality only, never similarity (the spec's §9)."""
+    if one and isinstance(left, _Of) and isinstance(right, _Of) and left.name == right.name:
+        return None if left.held is None else True
+    if isinstance(left, _Of) or isinstance(right, _Of):
+        reads, other = (left, right) if isinstance(left, _Of) else (right, left)
+        if reads.held is None:
+            return None
+        return _some(_alike(option, other, one) for option in reads.held)
+    if isinstance(left, _Spread) or isinstance(right, _Spread):
+        return False
+    if isinstance(left, _Made) or isinstance(right, _Made):
+        if not (isinstance(left, _Made) and isinstance(right, _Made)) or (
+                left.kind is not right.kind):
+            return False
+        return _every(_alike(mine, yours, one)
+                      for (_, mine), (_, yours) in zip(left.parts, right.parts))
+    if isinstance(left, _Seq) or isinstance(right, _Seq):
+        if not (isinstance(left, _Seq) and isinstance(right, _Seq)) or (
+                len(left.items) != len(right.items)):
+            return False
+        return _every(_alike(mine, yours, one) for mine, yours in zip(left.items, right.items))
+    try:
+        return bool(left == right)
+    except Exception:  # noqa: BLE001 -- a value's own equality is the task's code
+        return None
+
+
+def _spans(form: object) -> list[tuple[float, float]] | None:
+    """**The numbers a form can be**, each a `(least, most)` span: a finite number itself, a
+    continuous draw its span, a setting each of its values'; anything else no number this reads.
+    `None` where a setting nothing gives decides it."""
+    if isinstance(form, _Of):
+        if form.held is None:
+            return None
+        found: list[tuple[float, float]] = []
+        for option in form.held:
+            more = _spans(option)
+            if more is None:
+                return None
+            found += more
+        return found
+    if isinstance(form, _Spread):
+        return [(form.low, form.high)]
+    if _finite(form):
+        return [(float(form), float(form))]
+    return []
+
+
+def _counts(form: object, least: int, most: float) -> bool | None:
+    """Whether a set size, read as a trial reads it, `int()` (`task.Array.positions`), can be from
+    `least` to `most`; `None` where a setting nothing gives decides it."""
+    spans = _spans(form)
+    if spans is None:
+        return None
+    return any(high >= least and low < most + 1 for low, high in spans)
+
+
+def _seconds_said(value: object, spans: list[tuple[float, float]], word: str, at: float) -> str:
+    """A time a sentence names: a number as written, or a setting by name with the value `at`
+    that decides it, `word` ("up to", "as soon as") before it where it can be other values."""
+    if not isinstance(value, P):
+        return f"{at:g} s"
+    one = all(span == spans[0] for span in spans) and spans[0][0] == spans[0][1]
+    return f"`{value.name}`, {at:g} s" if one else f"`{value.name}`, {word} {at:g} s"
+
+
+def _cut_off(structure: Trial, sources: dict[str, tuple]) -> list[str]:
+    """**XC-343's first combination, no time to answer** (engine build C3's spec §9, item 1): a
+    `Hold` always beaten by a plain `After` on its state that ends the trial in an outcome no
+    right answer is (`task.RIGHT`; the outline review's M-10: a no-go design's timeout to a
+    correct rejection is its right answer). The hold starts only when the gaze arrives, so it
+    never finishes. **Judged by bounds** (M-10): the soonest the timeout can end the state against
+    the longest the hold can take, over what `sources` gives each. Ties go by the order the state
+    lists its exits, as `hold-cut-short` reads them (`_holds_cut_short`): a timeout listed first
+    fires on the frame both end, so it beats a hold as long as itself (`t <= h`), and one listed
+    after must fall short of it (`t < h`). One setting read by both is one number on every trial.
+    Each sentence names the state, the values and the fix."""
+    found: list[str] = []
+    for state in structure.states:
+        exits = list(enumerate(state.go))
+        for at, hold in exits:
+            if not isinstance(hold.guard, Hold):
+                continue
+            for place, bound in exits:
+                guard = bound.guard
+                if not (isinstance(guard, After) and guard.since is None
+                        and isinstance(bound.to, Outcome) and bound.to not in RIGHT):
+                    continue
+                first = place < at
+                takes, waits = hold.guard.seconds, guard.seconds
+                if isinstance(takes, P) and takes == waits:
+                    if first and takes.name in sources:
+                        found.append(
+                            f"state {state.name!r} ends the trial {_target_name(bound.to)} after "
+                            f"`{takes.name}`, which its {hold.guard.window!r} hold takes too, and "
+                            f"the timeout is listed first, so it wins the frame both end on: the "
+                            f"hold starts only when the gaze arrives, so it never finishes and no "
+                            f"answer can be paid (XC-343); list the hold first, or bound the state "
+                            f"by a setting of its own, longer than the hold")
+                    continue
+                longest_of, soonest_of = _spans(_form(takes, sources)), _spans(
+                    _form(waits, sources))
+                if not longest_of or not soonest_of:
+                    continue
+                longest = max(high for _, high in longest_of)
+                soonest = min(low for low, _ in soonest_of)
+                if not (soonest <= longest if first else soonest < longest):
+                    continue
+                tie = (", and the timeout, listed first, wins the frame both end on"
+                       if soonest == longest else "")
+                found.append(
+                    f"state {state.name!r} ends the trial {_target_name(bound.to)} after "
+                    f"{_seconds_said(waits, soonest_of, 'as soon as', soonest)}, while its "
+                    f"{hold.guard.window!r} hold takes "
+                    f"{_seconds_said(takes, longest_of, 'up to', longest)}{tie}: the hold starts "
+                    f"only when the gaze arrives, so it never finishes and no answer can be paid "
+                    f"(XC-343); give the timeout more than {longest:g} s, or hold in a state of "
+                    f"its own bounded longer, as the reference tasks hold their target")
+    return found
+
+
+#: **A macaque's saccadic reaction time with no gap, about 200 ms** (fischer1983saccadic, its
+#: abstract, as decisions.md reads it): the least time a hold that starts only when the gaze
+#: arrives needs between a state's start and its timeout, beyond the hold itself (the C3 plan's
+#: science review, I-6). One number for every animal, an engineering default on the published
+#: figure, until a per-animal latency is kept.
+SACCADE_LATENCY_S = 0.2
+
+
+def _little_time(structure: Trial, sources: dict[str, tuple]) -> list[str]:
+    """**The near miss of `_cut_off`** (the C3 plan's science review, I-6): a `Hold` and a plain
+    `After` on its state to no right answer, where the timeout's soonest end leaves less than a
+    saccade's latency (`SACCADE_LATENCY_S`) after the hold's longest. The hold starts only when the
+    gaze arrives, a latency after the state begins, so only an anticipation answers in time --
+    unless the gaze is in the window as the state begins, as in a state that holds a target
+    already looked at, which this cannot tell. A warning, not a refusal (TSK-51): a trial can
+    still be won. Judged by bounds, as `_cut_off`; one setting read by both is one number, so a
+    hold listed first gains nothing on it; a combination `_cut_off` refuses is not said again.
+    Each sentence names the state, the margin and the fix."""
+    found: list[str] = []
+    for state in structure.states:
+        exits = list(enumerate(state.go))
+        for at, hold in exits:
+            if not isinstance(hold.guard, Hold):
+                continue
+            for place, bound in exits:
+                guard = bound.guard
+                if not (isinstance(guard, After) and guard.since is None
+                        and isinstance(bound.to, Outcome) and bound.to not in RIGHT):
+                    continue
+                first = place < at
+                takes, waits = hold.guard.seconds, guard.seconds
+                if isinstance(takes, P) and takes == waits:
+                    if not first and takes.name in sources:
+                        found.append(
+                            f"state {state.name!r} ends the trial {_target_name(bound.to)} after "
+                            f"`{takes.name}`, which its {hold.guard.window!r} hold takes too: the "
+                            f"hold starts only when the gaze arrives, a saccade's latency, about "
+                            f"{SACCADE_LATENCY_S:g} s, after the state begins, so only an "
+                            f"anticipation answers in time; bound the state by a setting of its "
+                            f"own, at least {SACCADE_LATENCY_S:g} s longer than the hold")
+                    continue
+                longest_of, soonest_of = _spans(_form(takes, sources)), _spans(
+                    _form(waits, sources))
+                if not longest_of or not soonest_of:
+                    continue
+                longest = max(high for _, high in longest_of)
+                soonest = min(low for low, _ in soonest_of)
+                if soonest <= longest if first else soonest < longest:
+                    continue
+                # A margin of the latency exactly, to the nanosecond, is one: 0.6 - 0.4 is no
+                # less than 0.2 to an author.
+                if round(soonest - longest, 9) >= SACCADE_LATENCY_S:
+                    continue
+                found.append(
+                    f"state {state.name!r} ends the trial {_target_name(bound.to)} after "
+                    f"{_seconds_said(waits, soonest_of, 'as soon as', soonest)}, "
+                    f"{soonest - longest:g} s past the most its {hold.guard.window!r} hold takes "
+                    f"({_seconds_said(takes, longest_of, 'up to', longest)}): the hold starts only "
+                    f"when the gaze arrives, a saccade's latency, about {SACCADE_LATENCY_S:g} s, "
+                    f"after the state begins, so only an anticipation answers in time, unless "
+                    f"the gaze is in the window as the state begins; give the timeout at least "
+                    f"{longest + SACCADE_LATENCY_S:g} s")
+    return found
+
+
+def _arrays(structure: Trial, sources: dict[str, tuple]) -> list[tuple[str, Array, _Made]]:
+    """**Every array a trial of one condition can show**: what a `Show` or an `Update` gives its
+    stimulus, as written or a value `sources` gives the setting it reads, each with its
+    stimulus's name and its `_form`, once."""
+    found: list[tuple[str, Array, _Made]] = []
+    seen: set[str] = set()
+
+    def walk(name: str, value: object, form: object) -> None:
+        if isinstance(form, _Made) and form.kind is Array:
+            key = repr((name, form))
+            if key not in seen:
+                seen.add(key)
+                found.append((name, value, form))
+        elif isinstance(form, _Of):
+            for raw, option in zip(form.raw, form.held or ()):
+                walk(name, raw, option)
+
+    for _, action in actions_of(structure):
+        if isinstance(action, Show):
+            walk(action.stimulus.name, action.stimulus.looks,
+                 _form(action.stimulus.looks, sources))
+        elif isinstance(action, Update) and "looks" in action.changes():
+            walk(action.stimulus, action.looks, _form(action.looks, sources))
+    return found
+
+
+def _same_looks(arrays: list[tuple[str, Array, _Made]],
+                sources: dict[str, tuple]) -> tuple[list[str], list[str]]:
+    """**XC-343's second combination, a target that looks like its distractors** (engine build
+    C3's spec §9, item 2): an array that can show distractors, two objects or more, whose target
+    and distractor appearances one trial can resolve to the same value (`_alike`). Each sentence
+    names the array, the settings its looks read with what they can hold, and the fix: the
+    refusals, for arrays found by their look, then the warnings, for arrays a cue names the
+    target of, saying a cue must name it (`_cued`; the PI, 2026-10-31, "Refuse only odd-one-out
+    tasks")."""
+    found: list[str] = []
+    warned: list[str] = []
+    for name, array, form in arrays:
+        parts = dict(form.parts)
+        if _counts(parts["n"], 2, math.inf) is not True:
+            continue
+        if _alike(parts["looks"], parts["among"], one=True) is not True:
+            continue
+        given = _settings_said((array.looks, array.among), sources)
+        alike = (f"array {name!r}'s target, {_looks_said(array.looks)}, and its distractors, "
+                 f"{_looks_said(array.among)}, can look the same{f' ({given})' if given else ''}")
+        if _cued(array):
+            warned.append(f"{alike}, and a cue names the target (found_by 'cue'): the target must "
+                          f"be named by a cue; check that one is shown")
+        else:
+            found.append(f"{alike}: no object stands out, so no answer can be chosen (XC-343); "
+                         f"give the target a look its distractors never have")
+    return found, warned
+
+
+def _swapped(pairs: list[tuple]) -> list[tuple[tuple, tuple]]:
+    """**XC-343's third combination, two objects whose looks swap** (engine build C3's spec §9,
+    item 3): among a block's arrays that can show two objects, each distinct pair of looks
+    (`(looks, among, conditions, said)`), the pairs in which one trial's target and distractor
+    appearances can be another trial's distractor and target (`_alike`, two trials), **both ways**:
+    then one display can call for either answer (the spec's own reason). A chain whose displays
+    differ (red among green beside a green square among red) has its answer on each display, so
+    it loads (the controller's ruling, 2026-10-30, under the PI's warnings over refusals, TSK-51).
+    A pair with itself is two trials of its conditions, judged where one of its looks can be other
+    values; one that cannot is one trial's own look, `_same_looks`' to judge."""
+    crossed: list[tuple[tuple, tuple]] = []
+    for at, one in enumerate(pairs):
+        for other in pairs[at:]:
+            if other is one:
+                if _one_way(one[0]) and _one_way(one[1]):
+                    continue
+                meets = _alike(one[0], one[1], one=False)
+            else:
+                meets = _every((_alike(one[0], other[1], one=False),
+                                _alike(other[0], one[1], one=False)))
+            if meets is True:
+                crossed.append((one, other))
+    return crossed
+
+
+def _one_way(form: object) -> bool:
+    """Whether a form resolves to one value only: no setting in it that can hold two, and no
+    continuous draw."""
+    if isinstance(form, _Of):
+        return form.held is None or (len(form.held) == 1 and _one_way(form.held[0]))
+    if isinstance(form, _Spread):
+        return False
+    if isinstance(form, _Made):
+        return all(_one_way(part) for _, part in form.parts)
+    if isinstance(form, _Seq):
+        return all(_one_way(item) for item in form.items)
+    return True
+
+
+def _looks_said(looks: object) -> str:
+    """An array's looks as a sentence names them: a setting by name, a look as written."""
+    return f"`{looks.name}`" if isinstance(looks, P) else _said(looks)
+
+
+def _held_said(options: tuple) -> str:
+    """What a setting can hold on a trial, for a sentence: its one value, or each it can be, a
+    continuous draw's as its span."""
+    said = [f"{option.low:g} to {option.high:g}" if isinstance(option, _Spread) else _said(option)
+            for option in options]
+    return said[0] if len(said) == 1 else "one of " + ", ".join(said)
+
+
+def _settings_said(values: tuple, sources: dict[str, tuple]) -> str:
+    """Each setting `values` read and what it can hold, for a sentence."""
+    names = dict.fromkeys(ref.name for value in values for ref in _iter_param_refs(value))
+    return "; ".join(f"`{name}` {_held_said(sources[name])}" for name in names
+                     if name in sources)
+
+
+def _conditions_said(names: list[str]) -> str:
+    """Conditions as a sentence names them."""
+    quoted = ", ".join(map(repr, names))
+    return f"condition {quoted}" if len(names) == 1 else f"conditions {quoted}"
+
+
+def _pair_said(one: tuple, other: tuple) -> str:
+    """Two of `_swapped`'s pairs of looks as its sentence names them: the conditions of each, with
+    what their looks' settings hold."""
+    def said(pair: tuple) -> str:
+        return _conditions_said(pair[2]) + (f" ({pair[3]})" if pair[3] else "")
+
+    if other is one:
+        return f"{said(one)}, whose trials can swap them"
+    return f"{said(one)} beside {said(other)}"
+
+
+def _impossible_faults(task: Task) -> list[Finding]:
+    """**The trials no animal can get right, at load** (engine build C3's spec §9; the PI,
+    2026-10-30, Q10, "Refuse in file and live"): `impossible` over the plain run's one block,
+    under the task's draws, and each plan's blocks, at the task's starting values (`Param.start`).
+    A setting with no start that no condition or draw gives is not judged here: a run's
+    pre-flight refuses a number nothing gives, and judges the run's own values (the C3 plan's
+    Task 11)."""
+    starts = {param.name: param.start for param in task.params if param.start is not None}
+    plain = Block("session", [Condition("session", {}, target=1)])
+    found = [dataclasses.replace(finding, detail=f"the plain run: {finding.detail}")
+             for finding in impossible(task, [plain], starts, cued=True)]
+    for name, plan in task.plans.items():
+        found += [dataclasses.replace(finding, detail=f"plan {name!r}: {finding.detail}")
+                  for finding in impossible(task, plan.blocks, starts, cued=True)]
+    return found + _little_time_faults(task, starts)
+
+
+def _little_time_faults(task: Task, starts: dict) -> list[Finding]:
+    """**A hold its state's timeout leaves less than a saccade's latency after**, warned,
+    `little-time-to-answer`, and accepted in every kind (the C3 plan's science review, I-6;
+    `_little_time`): over the plain run's one block and each plan's blocks, their factorials
+    expanded, at the task's starting values, each condition's values and draws as `impossible`
+    reads them (`_sources`); one finding per sentence, naming each `"block: condition"` it is
+    true of. Only at load: a live change is judged for what no animal can get right
+    (`impossible`), never warned for this."""
+    declared = {param.name: param for param in task.params}
+    blocks = [("the plain run", Block("session", [Condition("session", {}, target=1)]))]
+    blocks += [(f"plan {name!r}", block) for name, plan in task.plans.items()
+               for block in plan.blocks]
+    said: dict[str, list[str]] = {}
+    for where, block in blocks:
+        if not isinstance(block, Block):
+            continue
+        block = expanded(block)
+        for condition in block.conditions if isinstance(block.conditions, list) else ():
+            if not (isinstance(condition, Condition) and isinstance(condition.values, dict)
+                    and isinstance(condition.structure, (str, type(None)))):
+                continue
+            structure = task.structures.get(condition.structure or task.default)
+            if not isinstance(structure, Trial):
+                continue
+            sources = _sources(task, block, condition, starts, frozenset(), {}, declared)
+            for sentence in _little_time(structure, sources):
+                said.setdefault(f"{where}: {sentence}", []).append(
+                    f"{block.name}: {condition.name}")
+    return [Finding("little-time-to-answer", detail, blocking=False, accepted_in=SESSION_KINDS,
+                    subjects=tuple(dict.fromkeys(names)))
+            for detail, names in said.items()]
 
 
 def _head_faults(task: Task, deployment: "Deployment | None") -> list[Finding]:

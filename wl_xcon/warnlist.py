@@ -35,7 +35,12 @@ played out, eased trials or not),
 `same-in-drum` and `same-wait-at-once` (engine build C3, its science review's I-5: a block that
 drums drawing a clear-cut setting `same`, which a drum can hold at its hardest; a block bringing
 a broken trial back at once drawing a non-aging wait `same`, which tells the animal the repeat's
-wait outlasts the moment it broke)
+wait outlasts the moment it broke), `little-time-to-answer` (engine build C3, its science review's
+I-6: a hold whose state's timeout leaves less than a saccade's latency after it, which only an
+anticipation answers in time), `cued-target` (engine build C3, the PI's "Refuse only odd-one-out
+tasks" of 2026-10-31: an array a cue names the target of whose target can look like its
+distractors, or whose looks swap, at load and at a run's start, where an odd-one-out array is
+refused)
 and, for a value outside its declared range at a run's start or live, `outside-range` and, for a
 wait longer than any the task declares, `longer-than-declared`, by his answer of 2026-10-12);
 and today's pre-flight unknowns, the pump calibration and the eye tracker (S9a §10). **What
