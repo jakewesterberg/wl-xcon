@@ -217,7 +217,8 @@ not a difficulty setting; which way raising it goes; relative to what (a number,
 live change (a person's value or a live range) keeps a trial out when:
 - it gave a **clear-cut** setting a value easier than the trial would otherwise have had (engineering, from XC-288
   §4.1): the condition's or the run's value, or, for a drawn setting, the value the seed draws for that trial from
-  the range as written (the keyed generator makes it computable). A criterion setting counts as a stimulus setting
+  the range as written (the keyed generator makes it computable; on a repeat, a `same` setting's is the value of
+  the trial it repeats, a `fresh` one's drawn on the repeat's own number). A criterion setting counts as a stimulus setting
   does: a larger window eases;
 - it held an **expected** setting at any value but the one the trial would otherwise have had, either way (the PI,
   2026-10-30, "No, after any change": trials after any change to an expected setting do not count toward moving up),
@@ -344,7 +345,7 @@ breaks a run; otherwise warn, saying why.
 
 | Refused | Why |
 |---|---|
-| A draw or live range naming a bounded setting (a reward size), as a condition naming one already is | Welfare |
+| A draw, a live range or a condition's value naming a bounded setting (a reward size); a condition's is refused at load as built, since delivery reads the session's bounds and the trial line would record a dose no trial was given | Welfare |
 | A drawn setting declaring neither same nor fresh (Q3) | Authoring rule |
 | A block that draws a setting its conditions give, without saying so (Q1b) | Authoring rule |
 | A distribution that cannot be drawn: lowest above highest, a non-finite number, an empty list, all-zero weights, a spread of zero or less, a non-aging average outside its shortest and longest | Breaks a run |

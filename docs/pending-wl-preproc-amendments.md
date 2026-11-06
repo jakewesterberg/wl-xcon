@@ -743,7 +743,8 @@ neither a stage's number of trials nor its targets, so a stage is never ended on
     `conditions` count it toward its condition.
   - A clear-cut setting keeps the trial out when a person's value set it easier than the trial would otherwise have
     had it. "Otherwise" means its condition's value, the run's value or, for a drawn setting, the value the seed draws
-    for that trial from the range as written. A setting whose values are choices, or are appearances, is read by what
+    for that trial from the range as written (on a repeat, a `same` setting's is the value of the trial it repeats, a
+    `fresh` one's drawn on the repeat's own number). A setting whose values are choices, or are appearances, is read by what
     its meaning says changing it does.
   - **A range changed live is judged as a whole** (the PI, 2026-10-31): every trial drawn from it is kept out while
     it reaches any value easier than the range the task writes allows (for a uniform, either end moved the easier

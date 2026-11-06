@@ -469,8 +469,15 @@ trials a lead-in. **The trial loop draws between trials**
 condition's own range, but one a person holds; a repeat, ordinary or a drum's, keeps a `same`
 setting's value and source and draws a `fresh` one anew; a factorial's conditions play as
 hand-listed ones (`Session._plan`). Each trial's line says what it drew and from where (`drawn`)
-and what a person held (`live`), a drawn direction written from 0 to 360; each run's start row
-records the task's draws, every field, and what each factorial made (`generated`). **A designed
+and what a person held (`live`), a drawn direction written from 0 to 360, which of a person's
+changes kept it out of moving up (`eased`) and its place in a designed block's plan (`planned`);
+each run's start row records the task's draws, every field, and what each factorial made
+(`generated`), and its end row, for each block, what varied in it -- by its conditions, by a draw
+and from which range, or by a person (`varied`) -- and a designed block's plan (`planned`). The
+change log (`parameter_changes.jsonl`) holds every change by its kind, each act with a change id:
+a value set, a hand-back, a range, a revert, and the clears and switches also written to
+`controls.jsonl`; those that strobe `PARAM_CHANGED` carry `sequence`, and resume reads every kind,
+failing closed on a row it cannot (REC-28; XC-288 §3.4). **A designed
 block** (`task.SequenceBalanced`,
 `task.Priming`) plays a plan the scheduler draws as it opens, from a generator of its own: a break
 in it is never placed as a repeat, a sequence-balanced block's lost place recorded as a `designed`
