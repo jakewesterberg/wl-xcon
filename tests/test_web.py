@@ -1107,7 +1107,8 @@ def test_the_script_does_only_what_spec_4_3_and_5_2_ask():
     # right-hand side, not just the identifier -- `node.innerHTML = "<b>" + name`
     # would have slipped past a pin that only read the trailing word -- and allow
     # only the fragment renderer's own two forms. No other way to write markup.
-    assert re.findall(r"\.innerHTML\s*\+?=\s*([^;]+);", _SCRIPT) == ["html", "heldParams"]
+    assert re.findall(r"\.innerHTML\s*\+?=\s*([^;]+);", _SCRIPT) == [
+        "html", "heldParams", "heldMoments"]
     assert "outerHTML" not in _SCRIPT
     assert "insertAdjacentHTML" not in _SCRIPT
     assert "document.write" not in _SCRIPT

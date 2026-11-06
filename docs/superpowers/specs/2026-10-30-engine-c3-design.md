@@ -197,7 +197,7 @@ to the rig-edit build.
 **The console** (engine spec §14.7; S8 §3.4): each setting's card says where its value comes from (task, run,
 conditions, a draw and its range, or a person) and which conditions set or draw it. A staged change names the
 conditions it will override **before** it applies; today only the applied line on the feed does. Telemetry schema 19
-(18 since XC-401); closes XC-418; retires `taskd._overriding`'s stand-in.
+(18 since XC-401); narrows XC-418; retires `taskd._overriding`'s stand-in.
 
 ---
 

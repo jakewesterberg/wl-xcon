@@ -1543,7 +1543,9 @@ def _range_editor(row, view: View) -> str:
         for number, value in row.numbers.items()
     )
     return (f'<div class="rng">{fields}<button type="button" class="btn small" data-cmd="range" '
-            f'data-name="{name}"{off}>change the range</button></div>')
+            f'data-name="{name}"{off}>change the range</button></div>'
+            f'<span class="src rhold" hidden>not sent: press change the range, or put its '
+            f'numbers back; the cards wait for it</span>')
 
 
 def _whence(row, view: View) -> str:
@@ -1600,12 +1602,12 @@ def _params(frame: Telemetry | None, view: View) -> str:
     cards unguarded, so the page went blank and took the controls with it.
 
     **Where each value comes from** (telemetry schema 19; engine build C3's spec §6; narrows
-    XC-418, whose spinner stays on a card the rig sends no source for): a card whose conditions
+    XC-418, whose spinner stays on a setting holding no value of its own): a card whose conditions
     or whose draw give each trial a value of its own says so in the value's place, never a
     spinner, with a field to set one value over them (`_over`); then, beneath its range, where
     its value comes from, the conditions that set or draw it, its draw, the numbers of that draw
-    a person may change live, and *hand back* (`_whence`). A staged change on the card is led by its kind and says what it leaves the
-    setting with (`_becomes`)."""
+    a person may change live, and *hand back* (`_whence`). A staged change on the card is led by
+    its kind and says what it leaves the setting with (`_becomes`)."""
     if frame is None:
         return _NONE
     if not frame.params:
@@ -2802,6 +2804,8 @@ _SCRIPT = """
   var closed = false;
   var timers = {};
   var heldParams = null;
+  var heldMoments = null;
+  var pressedAt = null;
   var markNo = null;
   var rewarding = false;
   var REWARD_LOST = "unknown: this page lost wlx serve's answer, so whether the reward was given is not known, and it was not sent again; check the session's fluid total before pressing again";
@@ -2850,15 +2854,42 @@ _SCRIPT = """
     }
   }
   // A range's number typed and not yet sent (fix round 1 of the C3 plan's Task 18): its field
-  // differs from the number in force. It keeps the cards held as a field with focus does, since
-  // WebKit (Safari) takes focus off the field as the mouse goes down on *change the range*, and
-  // a frame swapped in then would put the old number back and the clicked button out from under
-  // the click.
+  // differs from the number in force, **read as `sendRange` reads it** (fix round 2): a text that
+  // is no finite number, or a different number -- "1.250" over 1.25 is the same number, which
+  // *change the range* would refuse as unchanged, so it holds nothing. It keeps the cards held
+  // as a field with focus does, since WebKit (Safari) takes focus off the field as the mouse
+  // goes down on *change the range*, and a frame swapped in then would put the old number back
+  // and the clicked button out from under the click.
+  function rangeChanged(input) {
+    var raw = input.value.trim();
+    var value = Number(raw);
+    return raw === "" || !isFinite(value) || value !== Number(input.defaultValue);
+  }
   function rangeEdited() {
     var fields = document.querySelectorAll("#params input[data-number]");
-    return Array.prototype.some.call(fields, function (input) {
-      return input.value !== input.defaultValue;
+    return Array.prototype.some.call(fields, rangeChanged);
+  }
+  // A number typed and not sent is marked pending, and, while a frame is held because of it,
+  // its card says so under the editor: never a silent freeze of the cards (fix round 2).
+  function markRanges() {
+    Array.prototype.forEach.call(document.querySelectorAll("#params .param"), function (card) {
+      var fields = card.querySelectorAll("input[data-number]");
+      var edited = false;
+      Array.prototype.forEach.call(fields, function (input) {
+        var changed = rangeChanged(input);
+        input.classList.toggle("pending", changed);
+        edited = edited || changed;
+      });
+      var line = card.querySelector(".rhold");
+      if (line) { line.hidden = !(edited && heldParams !== null); }
     });
+  }
+  // A pointer down inside the cards or the moments pane holds them until it is up (fix round 2:
+  // a frame landing between the mouse going down and up replaced the button under it, so the
+  // press was lost -- in WebKit, which never focuses a clicked button, and now in Chromium). A
+  // release the page never sees ends the hold after ten seconds.
+  function pressing() {
+    return pressedAt !== null && performance.now() - pressedAt < 10000;
   }
   // Only a field being typed in holds the cards, not a button clicked: Chromium focuses the
   // button a person pressed (*hand back*, *change the range*), and the cards then never showed
@@ -2866,10 +2897,11 @@ _SCRIPT = """
   function busy() {
     var focused = document.activeElement;
     return Boolean(focused && focused.matches && focused.matches("#params input")) ||
-      rangeEdited() || Object.keys(timers).length > 0;
+      rangeEdited() || pressing() || Object.keys(timers).length > 0;
   }
   function swap(id, html) {
     if (id === "params" && busy()) { heldParams = html; return; }
+    if (id === "moments" && pressing()) { heldMoments = html; return; }
     var node = el(id);
     // The plan picker shows the plan its pre-flight was taken for, so a frame's choice stands.
     var chosen = node && node.tagName === "SELECT" && id !== "plan-sel" ? node.value : null;
@@ -2886,6 +2918,11 @@ _SCRIPT = """
     if (heldParams !== null && !busy()) {
       el("params").innerHTML = heldParams;
       heldParams = null;
+      applySignIn();
+    }
+    if (heldMoments !== null && !pressing()) {
+      el("moments").innerHTML = heldMoments;
+      heldMoments = null;
       applySignIn();
     }
   }
@@ -2922,6 +2959,7 @@ _SCRIPT = """
   function onFrame(event) {
     var payload = JSON.parse(event.data);
     Object.keys(payload.frags).forEach(function (id) { swap(id, payload.frags[id]); });
+    markRanges();
     live = payload.live;
     baseline = payload.age === null ? null : performance.now() - payload.age * 1000;
     lost = false;
@@ -3081,10 +3119,14 @@ _SCRIPT = """
       return;
     }
     if (!clearAllowed(detail, "range/" + key)) { return; }
-    post({ kind: "range", name: key, numbers: numbers });
-    // Sent: the typed numbers no longer hold the cards, and any frame held meanwhile is shown.
-    Array.prototype.forEach.call(fields, function (input) { input.defaultValue = input.value; });
-    release();
+    post({ kind: "range", name: key, numbers: numbers }, function (answer) {
+      // Sent -- and only then (fix round 2): the typed numbers no longer hold the cards, and any
+      // frame held meanwhile is shown. A press the rig did not take can be sent again.
+      if (answer.status !== "sent") { return; }
+      Array.prototype.forEach.call(fields, function (input) { input.defaultValue = input.value; });
+      markRanges();
+      release();
+    });
   }
   function closeNote(note) {
     if (markNo === null) { return; }
@@ -3396,6 +3438,21 @@ _SCRIPT = """
     }
   });
   document.addEventListener("focusout", function () { setTimeout(release, 0); });
+  document.addEventListener("input", function (e) {
+    if (e.target && e.target.matches && e.target.matches("#params input[data-number]")) {
+      markRanges();
+      release();
+    }
+  });
+  document.addEventListener("pointerdown", function (e) {
+    if (e.target && e.target.closest && e.target.closest("#params, #moments")) {
+      pressedAt = performance.now();
+    }
+  });
+  // After the click that follows the pointer going up has been handled.
+  function unpress() { pressedAt = null; setTimeout(release, 0); }
+  document.addEventListener("pointerup", function () { setTimeout(unpress, 0); });
+  document.addEventListener("pointercancel", unpress);
   document.addEventListener("keydown", function (e) {
     if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) { return; }
     var t = e.target;
