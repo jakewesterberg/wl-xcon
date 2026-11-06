@@ -454,7 +454,7 @@ and `wlworks-docs-sync` `3c9c0dd` (4828). Suite **4828 passed** on this entry's 
 (`WLX_REQUIRE_PREPROC=1 WLX_REQUIRE_BROWSER=1`). The merges were made in the detached worktree
 `.claude/worktrees/finalize-1031` by `.superpowers/merge-tools/run.sh`, their messages in
 `.superpowers/merge-tools/msgs-2026-10-31/*.final`; the interpreter is still `engine-a2`'s venv. **The push waits on
-his permission**: then `main` moves from `957ec98` to `3c9c0dd` and this entry's commit (⟦TO FILL: pushed⟧). No
+his permission**: then `main` moves from `957ec98` to `3c9c0dd` and this entry's commit (pushed: `3c9c0dd` by the PI himself on 2026-11-06, the auto-mode check having refused the controller's push on 11-04; this entry's commit after it, once CI on it read clean). No
 decision is new; EYE-19, EYE-29 and TSK-51 carry the dated revisions of 2026-10-30 these merges build. **Next free
 XC-441.** Read in this order: this entry, the backlog, then C3's plan (below).
 
@@ -544,7 +544,7 @@ inert, 4563 on each Python. Nightlies on `957ec98`: 2026-10-31 (`41190115767`) a
 24, 1086 caught; 11-01 (`41298305456`) and 11-02 (`41436512685`) green, not read shard by shard; 11-04
 (`41818945953`) failed only in shard 9, at `pip install` ("Connection reset by peer"), so that shard swept nothing; it
 was re-run (attempt 2): its 4 modules passed, and the run reads 24 of 24, 1086 caught. 11-05 (`42016579288`) green,
-not read shard by shard. **`main`**: ⟦TO FILL: pushed⟧.
+not read shard by shard; 11-06 (`42207678660`) green, not read shard by shard. **`main`**: `3c9c0dd` from 2026-11-06, its push run `42295141320`.
 
 **Merging them.** A rehearsal (`.claude/worktrees/prospect`, `ed23ccc`) merged the five on `957ec98` in the same
 order; its resolutions (the backlog's by item, keeping both sides, and `tests/test_link.py`'s) were recorded by git's
