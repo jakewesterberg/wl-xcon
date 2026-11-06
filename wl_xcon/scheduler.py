@@ -189,9 +189,11 @@ class Counts:
     a trial and its drummed repeats one, and the tries recorded, every presentation (`presented`;
     `attempted` counts every draw, a trial that faulted included); every answer, any try's, `right`
     or `wrong`; and the trials whose first try was right (`right_first`). **And in a training
-    progression, the trials a live change eased** (`eased`; engine build C3, the PI, 2026-10-30,
-    Q8, "Merge; fix eased trials in C3"), **and the tries among them that paid** (`eased_paid`,
-    answers counted and trials spent): its stage's number of trials and its targets leave them out
+    progression, the trials a live change eased**, on their first try or on the try that paid
+    them (`eased`; engine build C3, the PI, 2026-10-30, Q8, "Merge; fix eased trials in C3"; the
+    controller's ruling on the engine C3 plan's Task 15), **and the eased tries that paid**
+    (`eased_paid`, answers counted and trials spent): its stage's number of trials and its targets
+    leave them out
     (`block_trials`, `owed`; the engine C3 plan's review, I-7), and every other count keeps them."""
 
     attempted: int = 0
@@ -342,6 +344,10 @@ class Scheduler:
     #: Whether this drum chain (a trial's first try and its drummed repeats) has had a judged
     #: trial: an answer, or what the block's own table scores (`_scored`).
     _answered: bool = field(init=False, default=False, repr=False)
+    #: Whether this drum chain's trial is counted eased toward its stage's number of trials
+    #: (`Counts.eased`, a training progression's only): its first try was eased, or the try that
+    #: paid it (the controller's ruling on the engine C3 plan's Task 15).
+    _eased_chain: bool = field(init=False, default=False, repr=False)
     #: The blocks left behind's `ConditionReport`s, in order (`report`).
     _reports: list = field(init=False, default_factory=list, repr=False)
     #: The run's trials so far, a trial and its drummed repeats one (the PI, 2026-10-18: "200
@@ -531,6 +537,15 @@ class Scheduler:
         return isinstance(self.order, ByCriterion) and self._position == len(self.blocks) - 1
 
     @property
+    def moves_up(self) -> bool:
+        """Whether the open block has a rule that moves the animal on, which a trial a live change
+        eased is kept out of (`record`): its criterion, or a training progression's stage
+        (`ByCriterion`), whose number of trials and targets leave eased trials out. Where the
+        changes feed says a trial is kept out (`taskd._kept_out`; the engine C3 plan's engineering
+        review, I-2)."""
+        return self.block.criterion is not None or isinstance(self.order, ByCriterion)
+
+    @property
     def _falls_back(self) -> bool:
         """Whether a training progression's fall-back rule is met (`ByCriterion.fall_back`): fewer
         than its proportion of the last window's answers right, judged once that many answers are
@@ -645,7 +660,9 @@ class Scheduler:
         trials counts (`Block.trials`). **In a training progression a trial a live change eased is
         left out** (engine build C3; the PI, 2026-10-30, Q8, "Merge; fix eased trials in C3": eased
         trials do not count toward moving up; the engine C3 plan's review, I-7): a stage ending on
-        its number of trials is not passed on eased trials (`Counts.eased`)."""
+        its number of trials is not passed on eased trials (`Counts.eased`), a drummed trial whose
+        paying try was eased among them (the controller's ruling on the engine C3 plan's Task
+        15)."""
         return sum(counts.trials - counts.eased for counts in self._counts.values())
 
     @property
@@ -1361,7 +1378,9 @@ class Scheduler:
         rule read, and still judged toward the fall-back and counted toward its condition. **In a
         training progression** (`ByCriterion`) it counts toward neither its stage's number of
         trials nor its targets either (`Counts.eased`; the engine C3 plan's review, I-7), so an
-        animal is never moved up on eased trials."""
+        animal is never moved up on eased trials. **A trial whose paying try was eased is eased**
+        toward its stage's number of trials, whatever its first try was (the controller's ruling on
+        the engine C3 plan's Task 15): a drum's try that pays it answered an easier task."""
         counts = self._counts[condition]
         kind = self._class(outcome, shown, condition)
         first_try = self.drawn is None or not self.drawn.drummed
@@ -1373,6 +1392,8 @@ class Scheduler:
         # faulted, which has no line, is in neither (the controller's ruling M5).
         counts.presented += 1
         counts.trials += first_try
+        if first_try:
+            self._eased_chain = kept
         counts.eased += kept and first_try
         self.trials += first_try
         if isinstance(self.block.order, Priming) and shown and self._runs and not self._seen:
@@ -1440,6 +1461,12 @@ class Scheduler:
         elif kind == SPENT:
             counts.spent += 1
         counts.eased_paid += kept and kind in (COUNTED, SPENT)
+        if kept and kind in (COUNTED, SPENT) and not self._eased_chain:
+            # **A trial whose paying try was eased is eased** toward its stage's number of trials
+            # (the controller's ruling on the engine C3 plan's Task 15): its first try was not, and
+            # the drum's try that pays it answered an easier task. Counted once a trial.
+            self._eased_chain = True
+            counts.eased += 1
         if self._designed:
             if kind == OWED:
                 self._break(condition, outcome)

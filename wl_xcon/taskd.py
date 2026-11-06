@@ -90,7 +90,7 @@ from wl_xcon.task import (
     COUNTED, OWED, SPENT, UNPAID, Entered, Exited, Param, Plan, SaccadeTo, Task, Trial,
 )
 from wl_xcon.task import (
-    EASIER, HARDER, NOT_DIFFICULTY, SAME, Background, Distribution, Factorial, Listed,
+    EASIER, EXPECTED, HARDER, NOT_DIFFICULTY, SAME, Background, Distribution, Factorial, Listed,
 )
 from wl_xcon.variation import easier
 from wl_xcon.warnlist import PAUSE_UNMARKED, Entry, of_findings, sentence
@@ -280,6 +280,21 @@ def _drum_warned(condition: str, index: int, owed: int, clearing: bool = False) 
            else "stop drumming ends it")
     return (f"{condition} has failed {DRUM_WARNING} tries in a row under drumming, the last trial "
             f"{index}; drumming goes on: {way}")
+
+
+def _kept_out(index: int, held: list[str], ranged: list[str]) -> str:
+    """The changes feed's warning the first time in a block a live change keeps a trial out of
+    moving up (engine build C3's spec §7; the C3 plan's engineering review, I-2, and its science
+    review, I-4): the trial, the settings, and the way back from each -- *hand back* for one a
+    person holds, the range as the task writes it or *revert* for one drawn from a range changed
+    live. Said once a block for each setting (`Session._eased_said`), and only where the block has
+    a rule that moves the animal on (`Scheduler.moves_up`): each trial's line names its own
+    (`eased`), and a flood would bury the feed."""
+    ways = [f"hand {name} back" for name in held] + [
+        f"send {name}'s range as the task writes it or revert that change" for name in ranged]
+    return (f"trial {index} is kept out of moving up: a live change eased "
+            f"{' and '.join(held + ranged)}; {', and '.join(ways)}, to count trials toward moving "
+            f"up again")
 
 
 def _unresolved(index: int, entries: list[dict]) -> str:
@@ -3221,6 +3236,9 @@ class Session:
     #: The (stimulus name, reason) pairs the run in progress has said on the changes feed a trial's
     #: line could not resolve (`_unresolved`; XC-399): each once a run.
     _unresolved_said: frozenset = field(init=False, default=frozenset(), repr=False)
+    #: The (run, block, setting) a changes feed's warning has said a live change keeps trials out
+    #: of moving up in (`_kept_out`; the C3 plan's engineering review, I-2): each once a block.
+    _eased_said: frozenset = field(init=False, default=frozenset(), repr=False)
     #: `_task`'s settings by name, built once as it is taken (`_take`).
     _declared: dict[str, Param] = field(init=False, default_factory=dict, repr=False)
     #: **The run's own values** (engine build C3): the task's starting values under the run's
@@ -3299,6 +3317,119 @@ class Session:
                 return (f"the record cannot write {said}, {value!r} ({why}), and a row holding it "
                         f"would fault the run, so it does not start")
         return None
+
+    def _eased(self, condition: Condition, values: dict, drawn: dict,
+               number: int) -> tuple[str, ...]:
+        """**The settings whose live change keeps this trial out of moving up**, sorted (engine
+        build C3's spec §7; the PI: with the C2b merge, Q8, "Merge; fix eased trials in C3" -- a
+        trial a person's change made easier does not count toward moving up, a training stage's
+        pass rule or the criterion that ends a block, and does count toward moving back -- and on
+        an expected setting, "No, after any change"; TRN-14). The trial's line names them
+        (`eased`), and `Scheduler.record` keeps a trial with any out of moving up. Judged between
+        trials, before the trial runs, never in a frame.
+
+        **The settings a live change reaches on the trial:** each a person holds (`_edited`), and
+        each drawn from a range changed live (`drawn`, the line's sources, naming the change that
+        put the range in force). **A range changed live is judged as a whole**, never by the value
+        the trial drew (`_range_eases`; the PI, 2026-10-31, on the engine C3 plan's Appendix B,
+        item 18): every trial drawn from it is kept out while it counts as easier than the range
+        the task writes, or which way it went cannot be read, until it is put back. **A value a
+        person holds** is read by its declared meaning (`declarations.resolved`; TRN-03), its
+        value in `values` against what the trial would otherwise have had:
+        - **where a draw gives the setting in the open block** -- its own or the task's
+          (`variation.in_force`), or the condition's own range (`own_ranges`) -- the value the
+          seed draws for the trial **from the range as written**, never from one changed live: on
+          a `SAME` setting's repeat, for the trial whose key drew it (`_kept`'s `original`; the
+          engine C3 plan's call 13), else for this one (`number`), a prepared list at the place
+          its next fresh draw takes; where the trial a repeat shows again drew the value from the
+          declaration, that value;
+        - **else** the value the trial's condition gives;
+        - **else** the run's own (`_run_values`), `None` where the run gives it none.
+
+        An **expected** setting keeps the trial out at any value but that one, either way (the PI,
+        "No, after any change"; TRN-06: "each expected setting at that value"). A **clear-cut**
+        one does where its value is easier (`variation.easier`; a choice, or an appearance, read
+        by its `raising`, TRN-11) **and where which way it went cannot be read** -- relative to the
+        trial's background or to a setting holding no number, or against no value: an animal is
+        never moved up on doubt (the engine C3 plan's Appendix B, item 2). One declared **not a
+        difficulty setting** never does (`easier` reads it as moving the task neither way). A
+        meaning relative to another setting reads that setting as the trial has it. A name that
+        is no setting of the run's task (a value staged before the run under the task the session
+        last named) nothing of the trial reads, and it keeps nothing out. A hand-back ends a
+        hold, so from the next trial its setting is judged no more."""
+        task, scheduler = self._task, self._scheduler
+        draws = {**variation.in_force(task, scheduler.block), **variation.own_ranges(condition)}
+        # `_draw` carries a `same` value a repeat takes, or a held try passes over, under the
+        # repeat's own number with the number whose key drew it, so this trial's entry is the
+        # trial-it-repeats' entry on a repeat.
+        mine = self._kept.get(number, {})
+        meanings = resolved(task)
+        reached = self._edited | {name for name, source in drawn.items()
+                                  if not isinstance(source, str)}
+        eased = []
+        for name in sorted(name for name in reached if name in meanings):
+            meaning = meanings[name][0]
+            source = drawn.get(name)
+            if source is not None and not isinstance(source, str) and name in draws:
+                # **Drawn from a range changed live: the range judged as a whole** against the
+                # range as written, never the value it drew (the PI, 2026-10-31, on the engine C3
+                # plan's Appendix B, item 18, "Judge the range as a whole").
+                if self._range_eases(meaning, name, *draws[name], source, values):
+                    eased.append(name)
+                continue
+            if name in draws:
+                declaration, key = draws[name]
+                entry = mine.get(name)
+                if entry is not None and isinstance(entry[1], str):
+                    otherwise = entry[0]
+                else:
+                    otherwise = variation.draw(
+                        declaration, self._run.seed, number if entry is None else entry[2], key,
+                        declared=self._declared.get(name),
+                        ordinal=self._listed.get(key, 0) if isinstance(declaration, Listed) else 0)
+            elif name in condition.values:
+                otherwise = condition.values[name]
+            else:
+                otherwise = self._run_values.get(name)
+            now = values.get(name)
+            if meaning.kind == EXPECTED:
+                if now != otherwise:
+                    eased.append(name)
+                continue
+            relative = meaning.relative_to
+            reference = values.get(relative) if isinstance(relative, str) else None
+            if easier(meaning, now, otherwise, reference,
+                      choices=bool(self._declared[name].choices)) is not False:
+                eased.append(name)
+        return tuple(eased)
+
+    def _range_eases(self, meaning, name: str, declaration: Distribution, key: tuple,
+                     change: int, values: dict) -> bool:
+        """**Whether a trial drawn from a range changed live is kept out of moving up**, the range
+        judged as a whole against the one the task writes (`declaration`; the PI, 2026-10-31, on
+        the engine C3 plan's Appendix B, item 18, "Judge the range as a whole (Recommended)": "if
+        it reaches any value easier than the written range allows ..., none of its trials count
+        toward moving up until the range is put back"): an expected setting's wherever it differs
+        from the one written ("No, after any change"); a clear-cut one's where it counts as
+        easier, or which way cannot be read (`variation.easier_range`; never moved up on doubt,
+        Appendix B item 2), a meaning relative to another setting reading that setting as the
+        trial has it. **The range is the one the trial's value was drawn from**, named by the
+        change that put it in force (`change`, the line's `drawn`): in force now, or kept with that
+        change's moment (`_moments`) where a later act replaced it, as a `same` repeat keeps a
+        value drawn before; where neither holds it, none, which no reading takes for the range
+        written, so the trial is kept out. Between trials, never in a frame."""
+        if self._ranges.get(key, (None, None))[1] == change:
+            ranged = self._ranges[key][0]
+        else:
+            ranged = next((moment.ranges.get(key) for moment in self._moments
+                           if moment.change == change), None)
+        if meaning.kind == EXPECTED:
+            return ranged != declaration
+        relative = meaning.relative_to
+        reference = values.get(relative) if isinstance(relative, str) else None
+        return variation.easier_range(meaning, ranged, declaration, self._declared.get(name),
+                                      reference) is not False
+
 
     def _plan(self, run: RunSpec, task: Task) -> Plan:
         """The plan the run plays: the task's plan the run names, blocks given in code (a test's),
@@ -4048,6 +4179,11 @@ class Session:
                        if name not in self._edited},
                     **taken,
                 }
+                # **Whether a live change eased it** (engine build C3's spec §7; the PI, Q8,
+                # "Merge; fix eased trials in C3", and "No, after any change"): judged here, before
+                # it runs (`_eased`). An eased trial is left out of moving up and still counts
+                # toward moving back and toward its condition (`Scheduler.record`).
+                eased = self._eased(condition, values, sources, drawn.number)
                 # **A drawn direction is written from 0 to 360** (the PI, 2026-10-30; engine build
                 # C3's call 11): the rig chose the number, so the rig spells it; the trial runs on
                 # the value as drawn, in the task's own terms, at the same place. A value a person
@@ -4128,7 +4264,8 @@ class Session:
                 levels.end_trial(result, drummed=drawn.drummed)
                 shown = _appeared(trial, result)
                 written = len(scheduler.shortfalls)
-                counted = scheduler.record(condition.name, result.outcome, shown=shown)
+                counted = scheduler.record(condition.name, result.outcome, shown=shown,
+                                           eased=bool(eased))
                 # **A trial's draws are kept only while a repeat of it waits** (engine build C3's
                 # call 13): a repeat placed, a drum's try or a trial again at once.
                 waiting = scheduler.waiting
@@ -4149,6 +4286,17 @@ class Session:
                     self._feed("warning", None, self.wall_now(), _drum_warned(
                         condition.name, index, scheduler.owed(condition.name),
                         scheduler.clearing))
+                # **A warning on the changes feed, once a block for each setting** (the C3 plan's
+                # engineering review, I-2, and its science review, I-4): a person who eased a
+                # block that ends on a criterion, or a training stage, sees a perfect streak and a
+                # block that will not end unless told why, and how to undo it (`_kept_out`).
+                opened = (self.run_index, len(scheduler.ended))
+                told = [name for name in eased if (*opened, name) not in self._eased_said]
+                if told and scheduler.moves_up:
+                    self._eased_said |= {(*opened, name) for name in told}
+                    self._feed("warning", None, self.wall_now(), _kept_out(
+                        index, [name for name in told if name in self._edited],
+                        [name for name in told if name not in self._edited]))
                 # One string for the record and for a console's recent outcomes, so
                 # the two cannot disagree (P4d-2b spec §4.1).
                 recorded = result.outcome.value if result.outcome else "hang"
@@ -4161,11 +4309,12 @@ class Session:
                     condition=condition.name,
                     structure=structure,
                     overridden=tuple(overridden),
-                    # What it drew and from where, and what a person held (engine build C3).
-                    # `eased` and `planned` stay at their defaults (`[]`, `None`) until Tasks 15
-                    # and 16 pass values (engine build C3), so a designed trial's `planned` is null.
+                    # What it drew and from where, what a person held, and what of that kept
+                    # it out of moving up (engine build C3). `planned` stays at its default
+                    # (`None`) until Task 16 passes values, so a designed trial's `planned` is null.
                     drawn=sources,
                     live=tuple(sorted(self._edited)),
+                    eased=eased,
                     # Where each stimulus it showed was (XC-399), turned into positions as the
                     # line is written, between trials.
                     placed=result.placed,

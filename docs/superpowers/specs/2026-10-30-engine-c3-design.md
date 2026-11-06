@@ -229,6 +229,14 @@ A setting declared not a difficulty setting never keeps a trial out. A hand-back
 *Engineering:* `Scheduler.record` learns whether a trial was kept out; such a trial skips the rule's window
 (`_window`) and still feeds the fall-back's (`_back`).
 
+*Amended 2026-10-31 (the PI, on the engine C3 plan's Appendix B):* **a range changed live is judged as a whole**
+(item 18, "Judge the range as a whole (Recommended)"): against the written range, if it reaches any value easier than
+that allows (for a uniform, either end moved the easier way; anything that cannot be read, or mixed, counts as
+easier), none of its trials count toward moving up until it is put back, by typing the written numbers again or by
+revert, and its change row says which way it went; a trial is no longer compared, trial by trial, with what the
+written range would have drawn. **A sequence-balanced stage below a training progression's top** moves up when its
+sequence is played out, eased trials or not, and the load warns of it (item 10, "Only warn at load").
+
 ---
 
 ## 8. The change log and revert
