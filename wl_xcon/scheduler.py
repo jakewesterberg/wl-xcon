@@ -133,8 +133,8 @@ class Draw:
     place** (engine build C3): `{"cycle": c, "position": p, "lead_in": l}` in a sequence-balanced
     block, each from 0, `lead_in` true on the first `depth - 1` places of each cycle, which only
     precede what follows (the PI, 2026-10-31), or `{"run": r, "switch": s, "value": v}` in a
-    priming block -- its run from 0, whether
-    it is its run's first trial, and the feature's value planned, as the block's conditions give
+    priming block -- its run from 0, `switch` true for each try at the run's first place until one
+    shows its stimulus, and the feature's value planned, as the block's conditions give
     it; a drum's try and a trial shown again at once carry the place of the trial they show again.
     `None` in any other block."""
 
@@ -420,6 +420,17 @@ class Scheduler:
                 group[2].append(condition.name)
         if self._groups:
             self._coming = self._new_run(None)
+        for index in range(len(self._groups)):
+            self._passes[index] = deque()
+            self._refill_pass(index)
+
+    def _refill_pass(self, group: int) -> None:
+        """A priming value's conditions in a new shuffled pass. Drawn as the block opens and as a
+        pass is used up (`_take`), never as the next trial is looked at, so reading `drawable`
+        moves nothing in the seeded plan."""
+        shuffled = list(self._groups[group][2])
+        self._design.shuffle(shuffled)
+        self._passes[group].extend(shuffled)
 
     @property
     def _designed(self) -> bool:
@@ -749,12 +760,7 @@ class Scheduler:
         run = self._coming if self._coming is not None else (self._runs[-1] if self._runs else None)
         if run is None:
             return None
-        names = self._passes.setdefault(run[0], deque())
-        if not names:
-            shuffled = list(self._groups[run[0]][2])
-            self._design.shuffle(shuffled)
-            names.extend(shuffled)
-        return names[0]
+        return self._passes[run[0]][0]
 
     def _move_on(self) -> None:
         """**A priming block's place moves on** past a trial whose stimulus appeared, its last try
@@ -809,7 +815,8 @@ class Scheduler:
         gave, and return the place for its `Draw.planned`: a sequence-balanced block's cycle and
         position, each from 0, and whether the place is its cycle's lead-in, one of its first
         `depth - 1`, which only precede what follows (the PI, 2026-10-31); a priming block's run
-        from 0, whether the trial is its run's first, and the value it plans."""
+        from 0, `switch` true for each try at the run's first place until one has shown its
+        stimulus, and the value it plans."""
         if isinstance(self.block.order, SequenceBalanced):
             place = self._place
             self._place += 1
@@ -821,6 +828,8 @@ class Scheduler:
             self._coming = None
         group = self._runs[-1][0]
         self._passes[group].popleft()
+        if not self._passes[group]:
+            self._refill_pass(group)
         return {"run": len(self._runs) - 1, "switch": self._at == 0,
                 "value": self._groups[group][1]}
 

@@ -300,7 +300,7 @@ def test_priming_by_chance_repeats_at_its_rate_and_every_switch_changes_the_valu
     assert len(draws) == 400
     assert all(draw.planned["value"] == color for draw, color in zip(draws, colors))
     repeats = sum(a == b for a, b in zip(colors, colors[1:]))
-    assert repeats == 269 and 0.62 < repeats / 399 < 0.78
+    assert repeats == 273 and 0.62 < repeats / 399 < 0.78
     assert [draw.planned["switch"] for draw in draws] == [
         i == 0 or colors[i] != colors[i - 1] for i in range(400)]
     runs = scheduler.planned
@@ -396,7 +396,7 @@ def test_an_eased_trial_never_counts_toward_a_rule_and_always_toward_the_fall_ba
         "fell back: 0 of its last 4 first answers right, under 50%")
 
 
-def test_in_a_training_progression_an_eased_trial_counts_toward_neither_a_stages_trials_nor_its_targets():
+def test_in_a_progression_an_eased_trial_counts_toward_neither_a_stages_trials_nor_targets():
     """The engine C3 plan's review, I-7, and its Appendix B, item 10: a stage with no criterion
     ends when its trials are run and its targets met, so an eased trial counts toward neither --
     an answer that paid nothing leaves its condition owing as before -- and its condition is drawn
@@ -676,3 +676,58 @@ def test_an_ordinary_blocks_draws_are_as_the_seed_gave_them():
     assert draws([weighted], 9, 12) == pinned_b
     assert draws([_sequence("pq", again=True), shuffled], 5, 11) == pinned_a
     assert draws([_priming(runs=(1, 2), trials=6), weighted], 9, 12) == pinned_b
+
+
+def test_a_time_limit_does_not_wait_for_a_trial_due_again_at_once():
+    """Appendix B item 13, which the PI confirmed on 2026-10-31: only a drum holds a time limit
+    ("Finish the drum first"). A trial due again at once is dropped by the cut, as a waiting
+    repeat is: the block ends on its time, owes nothing, and writes no shortfall for it."""
+    sequence = Scheduler([_sequence(again=True)], seed=11, counting=LIMITED)
+    _play(sequence, [Outcome.CORRECT, Outcome.FIXATION_BREAK])
+    assert sequence.waiting == frozenset({1})
+    sequence.expire()
+    assert sequence.ends == TIME
+    assert [sequence.owed(name) for name in "abcd"] == [0] * 4
+    sequence.close(TIME)
+    assert sequence.shortfalls == []
+
+    priming = Scheduler([_priming(runs=(2, 2), again=True)], seed=4, counting=LIMITED)
+    _play(priming, [Outcome.FIXATION_BREAK], shown=False)
+    assert priming.waiting == frozenset({0})
+    priming.expire()
+    assert priming.ends == TIME
+    assert [priming.owed(c.name) for c in priming.block.conditions] == [0] * 4
+    priming.close(TIME)
+    assert priming.shortfalls == []
+
+
+def test_reading_drawable_between_trials_does_not_move_a_priming_blocks_plan():
+    """`drawable` is a property any reader may use; a priming block's seeded plan must not depend
+    on when it is read, so a plan replays from its seed whoever looks."""
+    def played(extra_reads: bool) -> list:
+        scheduler = Scheduler([_priming(chance=0.5, trials=200)], seed=3, counting=LIMITED)
+        names = []
+        for _ in range(40):
+            scheduler.next_trial()
+            draw = scheduler.drawn
+            if extra_reads:
+                assert scheduler.drawable
+            scheduler.record(draw.condition.name, Outcome.CORRECT)
+            if extra_reads:
+                assert scheduler.drawable
+            names.append((draw.condition.name, draw.planned["run"]))
+        return names
+
+    assert played(True) == played(False)
+
+
+def test_a_trial_due_again_at_once_is_still_owed_after_the_blocks_trials_are_run():
+    """A sequence-balanced block whose last allowed trial breaks, again at once, owes that one
+    trial of its condition and nothing else, and is not finished until it comes back."""
+    scheduler = Scheduler([_sequence(trials=5, again=True)], seed=11, counting=LIMITED)
+    plan = scheduler.planned
+    _play(scheduler, [Outcome.CORRECT] * 4 + [Outcome.FIXATION_BREAK])
+    assert scheduler.block_trials >= 5 and not scheduler.finished
+    assert [scheduler.owed(name) for name in "abcd"] == [int(name == plan[4]) for name in "abcd"]
+    _play(scheduler, [Outcome.CORRECT])
+    assert scheduler.finished and [scheduler.owed(name) for name in "abcd"] == [0] * 4
