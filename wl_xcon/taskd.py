@@ -1743,11 +1743,14 @@ class Session:
     @property
     def staged(self) -> tuple:
         """Every change accepted and not yet applied, in the order offered (`_offered_acts`):
-        `(name, was, now, by, bounded, kind, overrides)`, the exact shape `link.Telemetry.of` reads
+        `(name, was, now, by, bounded, kind, overrides, hands_back)`, the exact shape
+        `link.Telemetry.of` reads
         to build its `Staged` rows (telemetry schema 19; engine build C3's spec §6).
 
         - **A value staged** (`_staged`, as `set` stages it): its `was` and `now`; `kind` `set`, or
           `revert` where a revert staged it (`_acts`).
+        - **`hands_back`**: true for every hand-back offered, a button's or a revert's, which
+          `kind` alone cannot say of a revert's (telemetry schema 19, fix round 1).
         - **A hand-back offered** (`_pending`): the person's value, then the run's own where the
           run takes the setting back, else `None`, the open block's conditions or its draw giving
           it again; `kind` `hand_back`, or `revert`.
@@ -1782,11 +1785,11 @@ class Session:
             if not isinstance(offer, Pending):
                 name, was, now, by, bounded = offer
                 rows.append((name, was, now, by, bounded, "set" if act is None else "revert",
-                             () if bounded else self._overrides(name)))
+                             () if bounded else self._overrides(name), False))
                 continue
             kind = offer.kind if act is None else "revert"
             if offer.kind == "hand_back":
-                rows.append((offer.name, offer.was, offer.now, offer.by, False, kind, ()))
+                rows.append((offer.name, offer.was, offer.now, offer.by, False, kind, (), True))
                 continue
             declared, unit = self._declared_draw(offer.key), self._declared[offer.name].unit
             before = ranges.get(offer.key)
@@ -1794,7 +1797,8 @@ class Session:
             rows.append((
                 offer.name, variation.words(declared if before is None else before, unit),
                 variation.words(declared if offer.draw is None else offer.draw, unit),
-                offer.by, False, kind, () if act is not None else self._reaches(offer.key)))
+                offer.by, False, kind, () if act is not None else self._reaches(offer.key),
+                False))
         return tuple(rows)
 
     @property
@@ -1856,7 +1860,7 @@ class Session:
             source, conditions, draw, numbers = None, (), None, None
             if running:
                 source, conditions = self._source(p.name, in_force), self._overrides(p.name)
-                if p.name in in_force:
+                if p.name in in_force and not self._own_range(p.name):
                     drawn, key = in_force[p.name]
                     drawn = self._ranges.get(key, (drawn,))[0]
                     draw = variation.words(drawn, p.unit, direction=p.name in turned)
@@ -1875,7 +1879,9 @@ class Session:
     def _source(self, name: str, in_force: dict) -> str | None:
         """**Where `name`'s value comes from in the open block** (telemetry schema 19; engine build
         C3's spec §6), read from the layer a trial's values take last (engine spec §17.1), which
-        wins, down: `"person"` where a person holds it (`_edited`); `"draw"` where the open block
+        wins, down: `"person"` where a person holds it (`_edited`); `"conditions"` where a
+        condition of the open block draws it from its own range, which `_draw` lets win over the
+        block's and the task's draw (`_own_range`); `"draw"` where the open block
         draws it (`in_force`, its `variation.in_force`), as written, or `"range"` where that
         draw's range was changed live (`_ranges`; the C3 plan's science review, I-4);
         `"conditions"` where a condition of the
@@ -1884,6 +1890,8 @@ class Session:
         hand-back's `to` reads the open block the same way (`_to`)."""
         if name in self._edited:
             return "person"
+        if self._own_range(name):
+            return "conditions"
         if name in in_force:
             return "range" if in_force[name][1] in self._ranges else "draw"
         if any(name in condition.values for condition in self._scheduler.block.conditions):
@@ -2590,10 +2598,19 @@ class Session:
         the block its next trial plays (`_apply_pending`; the C3 plan's engineering review, M-1);
         each one a revert makes too (`_revert`)."""
         block = self._scheduler.block
-        return ("draw" if name in variation.in_force(self._task, block)
+        return ("conditions" if self._own_range(name)
+                else "draw" if name in variation.in_force(self._task, block)
                 else "conditions" if any(name in condition.values
                                          for condition in block.conditions)
                 else "run")
+
+    def _own_range(self, name: str) -> bool:
+        """Whether a condition of the open block draws `name` from its own range, which wins over
+        the block's and the task's draw of it in the trial loop (`_draw`; Q1b), so a card, a
+        hand-back's `to` and `_source` read it first. Plans refuse a setting both drawn and given a
+        range of a condition's own (`check`); blocks given in code do not."""
+        return any(name in variation.own_ranges(condition)
+                   for condition in self._scheduler.block.conditions)
 
     def _revert(self, command, index: int) -> None:
         """**A person takes the run back to an earlier moment** (`link.Revert`; engine build C3's
@@ -2669,7 +2686,7 @@ class Session:
                 self._pending.append(Pending(
                     "hand_back", name, was=values.get(name),
                     # `now` is read as it applies today (`_apply_pending`); `Session.staged`
-                    # (Task 17) reads this one, for the console's list of what is staged.
+                    # reads this one, for the console's list of what is staged.
                     now=self._run_values.get(name) if to == "run" else None, by=command.by,
                     after=staged, to=to, act=act,
                 ))

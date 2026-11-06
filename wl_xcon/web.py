@@ -1327,9 +1327,10 @@ def _becomes(change, draws: dict) -> str:
     own value where the run does (its `now`), else the draw where the setting's card says one
     (`draws`, each card's `ParamRow.draw`, read from the open block as the hand-back is), else
     its conditions -- never "unset", which it is not. A revert's change that hands a setting back
-    (`now` `None`) says so the same way. Any other change's is its new value, a range's its new
-    draw in the rig's words, as `_num` shows a value. Escaped (`_e`), ready for the page."""
-    if change.kind == "hand_back" or (change.kind == "revert" and change.now is None):
+    (`Staged.hands_back`, whatever its `now`) says so the same way, "handed back to ...". Any other
+    change's is its new value, a range's its new draw in the rig's words, as `_num` shows a
+    value. Escaped (`_e`), ready for the page."""
+    if change.hands_back:
         back = ("the run's " + _e(_num(change.now)) if change.now is not None
                 else "its draw" if draws.get(change.name) is not None else "its conditions")
         return back if change.kind == "hand_back" else "handed back to " + back

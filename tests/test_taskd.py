@@ -2234,7 +2234,8 @@ def test_a_live_write_to_a_welfare_bounded_value_goes_through_its_ceiling(tmp_pa
     assert session.spec.bounds.value("reward_correct") == 0.15, (
         "the value moved as the command was offered rather than at the boundary"
     )
-    assert session.staged[-1] == ("reward_correct", 0.15, 0.30, Box("console"), True, "set", ())
+    assert session.staged[-1] == (
+        "reward_correct", 0.15, 0.30, Box("console"), True, "set", (), False)
 
     with pytest.raises(Exceeded, match="reward_correct"):
         session.set("reward_correct", 0.90, by=Box("console"))

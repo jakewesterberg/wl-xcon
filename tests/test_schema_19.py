@@ -18,6 +18,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+import msgpack
 import pytest
 
 import _sessions
@@ -301,8 +302,8 @@ def test_a_staged_hand_back_and_range_are_shown_staged_in_words(tmp_path):
 
     assert session.refusals == []
     assert link.seen[4].staged == (
-        Staged("target_x", 12.0, None, JAKE, False, "hand_back", ()),
-        Staged("target_y", 2.0, 0.0, JAKE, False, "hand_back", ()),
+        Staged("target_x", 12.0, None, JAKE, False, "hand_back", (), True),
+        Staged("target_y", 2.0, 0.0, JAKE, False, "hand_back", (), True),
         Staged("fix_hold", "uniform from 0.2 s to 0.4 s", "uniform from 0.25 s to 0.4 s", JAKE,
                False, "range", ("b",)),
         Staged("fix_hold", "uniform from 0.25 s to 0.4 s", "uniform from 0.25 s to 0.35 s", JAKE,
@@ -333,7 +334,7 @@ def test_a_reverts_staged_changes_are_shown_as_one_revert(tmp_path):
 
     assert session.refusals == []
     assert link.seen[6].staged == (
-        Staged("target_y", 2.0, 0.0, JAKE, False, "revert", ()),
+        Staged("target_y", 2.0, 0.0, JAKE, False, "revert", (), True),
         Staged("fix_hold", "uniform from 0.2 s to 0.3 s", "uniform from 0.2 s to 0.4 s", JAKE,
                False, "revert", ()),
         Staged("target_x", 10.0, 12.0, JAKE, False, "revert", ("near",)),
@@ -398,10 +399,11 @@ def test_a_frame_with_every_new_field_round_trips():
             ParamRow("reward_correct", "mL", 0.0, 0.4, 0.15, True),
         ),
         staged=(
-            Staged("target_x", 12.0, None, JAKE, False, "hand_back", ()),
+            Staged("target_x", 12.0, None, JAKE, False, "hand_back", (), True),
             Staged("fix_hold", "uniform from 0.2 s to 0.4 s", "uniform from 0.25 s to 0.4 s",
                    JAKE, False, "range", ()),
             Staged("target_y", 0.0, 2.0, JAKE, False, "revert", ("near", "far")),
+            Staged("target_y", 2.0, 0.0, JAKE, False, "revert", (), True),
         ),
         moments=(
             wire.MomentRow(3, 1_700_000_030.0, "target_x 12.00 handed back to its conditions"),
@@ -421,6 +423,7 @@ def test_a_frame_with_every_new_field_round_trips():
     assert (ceiling.source, ceiling.conditions, ceiling.draw) == (None, (), None)
     assert [type(row) for row in restored.moments] == [wire.MomentRow, wire.MomentRow]
     assert restored.staged[0].now is None and restored.staged[2].overrides == ("near", "far")
+    assert [row.hands_back for row in restored.staged] == [True, False, False, True]
     assert restored.moments[1].changes == ("target_y handed back", "fix_hold → 0.30")
     assert restored.eased == ("fix_window", "target_luminance")
 
@@ -555,3 +558,49 @@ def test_each_moment_says_what_a_revert_to_it_would_change(tmp_path):
     assert {moment.change: moment.changes for moment in link.seen[6].moments}[1] == ()
     assert (link.seen[7].moments[0].change, link.seen[7].moments[0].changes) == (5, ())
     assert [row.name for row in link.seen[6].staged] == ["target_y", "fix_hold", "target_x"]
+
+
+def test_a_staged_row_says_whether_it_hands_a_setting_back_and_a_malformed_one_is_refused():
+    """A revert's hand-back to the run's own value and a revert's value look the same by `kind` and
+    `now` (`Staged("target_y", 2.0, 0.0, ..., "revert")` for both), yet one ends the person's hold
+    and the other keeps it, so each staged row carries `hands_back` (schema 19, fix round 1 of the
+    C3 plan's Task 17): it is carried by name, a bool, and a frame without it, or with something
+    else, is a `FrameError`, as every field's absence is."""
+    sent = frame(staged=(Staged("target_y", 2.0, 0.0, JAKE, False, "revert", (), True),
+                         Staged("target_y", 2.0, 0.0, JAKE, False, "revert", ())))
+
+    assert [row.hands_back for row in decode(encode(sent)).staged] == [True, False]
+    for broken in ("gone", "yes", 1):
+        bad = msgpack.unpackb(encode(sent), raw=False)
+        if broken == "gone":
+            del bad["staged"][0]["hands_back"]
+        else:
+            bad["staged"][0]["hands_back"] = broken
+        with pytest.raises(wire.FrameError):
+            decode(msgpack.packb(bad))
+
+
+def test_a_conditions_own_range_beats_the_tasks_draw_on_the_card_as_in_the_trial_loop(tmp_path):
+    """Fix round 1, minor 2: for blocks given in code, a condition drawing a setting from its own
+    range over a setting the task draws wins in the trial loop (`_draw`: the trials' lines say
+    `drawn: condition`), so the card says `conditions`, with no draw of the task's and no numbers
+    to change (a range sent from it would change a draw no trial takes), and a hand-back is to its
+    conditions, not its draw."""
+    path = _sessions.varied_task(tmp_path, draws='{"fix_hold": Uniform(0.2, 0.4, repeat=FRESH)}')
+    link = _Watched({2: [SetParameter(name="fix_hold", value=0.55, by=JAKE)],
+                     4: [HandBack(name="fix_hold", by=JAKE)]})
+    session = _session(_spec(tmp_path, path, blocks=[
+        Block("b", [Condition("far", {"fix_hold": Uniform(0.5, 0.6, repeat=FRESH)}, target=6)])]),
+        link)
+
+    session.run()
+
+    assert session.refusals == []
+    lines = [json.loads(line)
+             for line in (session.directory / "trials.jsonl").read_text().splitlines()]
+    assert [line["drawn"] for line in lines[:2]] == [{"fix_hold": "condition"}] * 2
+    card = {row.name: row for row in link.seen[1].params}["fix_hold"]
+    assert (card.source, card.conditions, card.draw, card.numbers) == (
+        "conditions", ("far",), None, None)
+    assert [said for kind, _, _, said in session.controls if kind == "hand_back"] == [
+        "fix_hold 0.55 handed back to its conditions, from trial 4"]

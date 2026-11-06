@@ -3412,9 +3412,9 @@ def test_a_staged_hand_back_a_range_and_a_revert_are_said_in_words():
                  "uniform from 0.2 s to 0.4 s", {"low": 0.2, "high": 0.4}),
     )
     parts = fragments(frame(params=params, staged=(
-        Staged("fix_hold", 0.4, 0.3, jake, False, "hand_back"),
-        Staged("wait", 1.0, None, jake, False, "hand_back"),
-        Staged("target_x", 6.0, None, jake, False, "hand_back"),
+        Staged("fix_hold", 0.4, 0.3, jake, False, "hand_back", (), True),
+        Staged("wait", 1.0, None, jake, False, "hand_back", (), True),
+        Staged("target_x", 6.0, None, jake, False, "hand_back", (), True),
         Staged("gap", "uniform from 0.2 s to 0.4 s", "uniform from 0.2 s to 0.5 s", jake, False,
                "range"),
     )), view())
@@ -3433,7 +3433,7 @@ def test_a_staged_hand_back_a_range_and_a_revert_are_said_in_words():
 
     reverted = fragments(frame(params=params, staged=(
         Staged("target_x", 6.0, 5.0, jake, False, "revert", ("near",)),
-        Staged("fix_hold", 0.4, None, jake, False, "revert"),
+        Staged("fix_hold", 0.4, None, jake, False, "revert", (), True),
         Staged("gap", "uniform from 0.2 s to 0.4 s", "uniform from 0.2 s to 0.3 s", jake, False,
                "revert"),
     )), view())
@@ -3447,6 +3447,20 @@ def test_a_staged_hand_back_a_range_and_a_revert_are_said_in_words():
     assert "unset" not in feed
     assert f"staged revert → handed back to its conditions by {who}" in cards["fix_hold"]
     assert f"staged revert → 5.00 by {who}" in cards["target_x"]
+
+
+    held = (ParamRow("target_y", "deg", None, None, 2.0, False, None, "person"),
+            ParamRow("target_z", "deg", None, None, 2.0, False, None, "person"))
+    same = fragments(frame(params=held, staged=(
+        Staged("target_y", 2.0, 0.0, jake, False, "revert", (), True),
+        Staged("target_z", 2.0, 0.0, jake, False, "revert", ()),
+    )), view())
+    feed, cards = same["rt-changes"], _cards(same["params"])
+
+    assert f"revert: target_y 2.00 → handed back to the run's 0.00 by {who}" in feed
+    assert f"revert: target_z 2.00 → 0.00 by {who}" in feed
+    assert f"staged revert → handed back to the run's 0.00 by {who}" in cards["target_y"]
+    assert f"staged revert → 0.00 by {who}" in cards["target_z"]
 
 
 def test_the_moments_pane_offers_a_revert_to_each_newest_first_and_the_runs_start_last():
@@ -3484,7 +3498,7 @@ def test_where_a_value_comes_from_its_draw_its_numbers_and_the_moments_are_escap
         staged=(Staged("fix_hold", 0.3, 0.4, jake, False, "set", (EVIL,)),
                 Staged("fix_hold", 0.4, 0.5, jake, False, "set", (EVIL, "near")),
                 Staged("gap", EVIL, EVIL, jake, False, "range", (EVIL,)),
-                Staged("gap", 0.2, EVIL, jake, False, "hand_back")),
+                Staged("gap", 0.2, EVIL, jake, False, "hand_back", (), True)),
         moments=(MomentRow(1, _SINCE, EVIL, (EVIL,)),),
         eased=(EVIL,),
     ), view())

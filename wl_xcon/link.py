@@ -202,8 +202,10 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: (`MomentRow.changes`); a card whose draw's range a person changed live says `"range"`, and names
 #: at most `CONDITIONS_SHOWN` conditions, the rest counted (`ParamRow.more`); a staged range's
 #: `overrides` names the blocks it reaches; and `Telemetry.eased`, the settings a person's change
-#: kept the latest trial out of moving up by (the engine C3 plan's reviews). A reader of 18
-#: refuses 19 and 19 refuses 18, by name.
+#: kept the latest trial out of moving up by (the engine C3 plan's reviews); and
+#: `Staged.hands_back`, whether a staged row hands a setting back, a revert's included (its
+#: `kind` is `revert` and its `now` may be a value). A reader of 18 refuses 19 and 19 refuses 18,
+#: by name.
 SCHEMA = 19
 
 #: How many refusals a session keeps, per source, and therefore how many one
@@ -308,6 +310,11 @@ class Staged:
     bounded: bool
     kind: str = "set"
     overrides: tuple = ()
+    #: **Whether it hands the setting back** (schema 19; fix round 1 of the C3 plan's Task 17): a
+    #: hand-back a person sent and a revert's hand-back both end the person's hold, and a revert's
+    #: carries `kind` `revert` and, where the run takes the setting back, a `now` that is a value,
+    #: so neither field tells it from a revert's value that keeps the hold.
+    hands_back: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -1094,8 +1101,8 @@ class Telemetry:
             staged=tuple(
                 Staged(name=n, was=_carried(w, choices.get(n, ())),
                        now=_carried(v, choices.get(n, ())), by=b, bounded=bd, kind=k,
-                       overrides=o)
-                for n, w, v, b, bd, k, o in session.staged
+                       overrides=o, hands_back=h)
+                for n, w, v, b, bd, k, o, h in session.staged
             ),
             # `session.refusals`, already public -- unlike `_staged`, nothing private
             # to reach around -- plus `session.link.refused`, fix round 1's CRITICAL
@@ -1393,6 +1400,7 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
                 "bounded": s.bounded,
                 "kind": s.kind,
                 "overrides": list(s.overrides),
+                "hands_back": s.hands_back,
             }
             for s in telemetry.staged
         ],
@@ -1609,6 +1617,14 @@ def _idle_from(data: dict) -> Idle:
     )
 
 
+def _flag(value: object) -> bool:
+    """A wire flag, which must be a bool: anything else is a malformed frame (`TypeError`, which
+    `decode` makes a `FrameError`)."""
+    if not isinstance(value, bool):
+        raise TypeError(f"a flag is true or false, not {value!r}")
+    return value
+
+
 def _telemetry_from(data: dict) -> Telemetry:
     """The field-by-field rebuild `decode` used to do inline. Split out so `decode`
     can wrap only this part's `KeyError`/`TypeError` in `FrameError` -- the schema
@@ -1634,7 +1650,9 @@ def _telemetry_from(data: dict) -> Telemetry:
         hangs=data["hangs"],
         owed=data["owed"],
         staged=tuple(Staged(**{**s, "by": actors.from_map(s["by"]),
-                                 "overrides": tuple(s["overrides"])}) for s in data["staged"]),
+                                 "overrides": tuple(s["overrides"]),
+                                 "hands_back": _flag(s["hands_back"])})
+                     for s in data["staged"]),
         refusals=tuple(_refused_in(r) for r in data["refusals"]),
         refusals_dropped=data["refusals_dropped"],
         task=data["task"],

@@ -396,7 +396,7 @@ def test_a_moment_is_kept_after_each_act_the_first_the_runs_start(tmp_path):
 
 def test_every_moment_of_the_run_is_kept_past_the_consoles_cap_its_start_first(tmp_path):
     """The outline review's M-15: the console's list of moments is capped, keeping the run's start
-    (`link.CONTROL_HISTORY`; telemetry schema 19, the engine C3 plan's Task 17). The session keeps
+    (`link.CONTROL_HISTORY`; telemetry schema 19). The session keeps
     every moment of the run, its start first, so a revert reaches any change of it, the first
     among them, however many came after: 55 values set in one drain, then a revert to change 1."""
     held = [SetParameter(name="fix_hold", value=round(0.3 + step / 100, 2), by=JAKE)

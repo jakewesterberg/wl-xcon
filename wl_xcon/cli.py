@@ -1185,7 +1185,7 @@ def render(frame: _link.Telemetry | _link.Idle) -> str:
         value = _printable(row.value) if isinstance(row.value, str) else row.value
         # A whole position in the rig's words, eccentricity and direction first, its unit in
         # them (`ParamRow.position`, schema 18; XC-401): the line `wlx console` already has,
-        # though it shows none of schema 16's and 17's additions (XC-387).
+        # though it shows none of schema 16's, 17's and 19's additions (XC-387).
         shown = (
             _printable(row.position) if row.position is not None
             else _with_unit(_shown(value), unit)
@@ -1231,9 +1231,15 @@ def render(frame: _link.Telemetry | _link.Idle) -> str:
                 if change.bounded
                 else "task parameter, applies at the next trial"
             )
+            # A hand-back (a button's or a revert's, schema 19) has no value to become: it is
+            # handed back, to the run's own where the run takes the setting back.
+            becomes = (
+                ("handed back" if change.now is None else f"handed back to {_value(change.now)}")
+                if change.hands_back else f"-> {_value(change.now)}"
+            )
             lines.append(
-                f"  staged: {_printable(change.name)} {_value(change.was)} -> "
-                f"{_value(change.now)} by {_printable(actors.shown(change.by))} ({kind})"
+                f"  staged: {_printable(change.name)} {_value(change.was)} {becomes} "
+                f"by {_printable(actors.shown(change.by))} ({kind})"
             )
     else:
         lines.append("  staged: none")
