@@ -132,7 +132,15 @@ _WEIGHT_SUM = 6.0
 #: far kept if long enough by its measured velocities. 4 and 5 detect the same thing wherever
 #: no stretch of lost samples is longer than that. **Not wl-preproc's fixture set "v2"**: that
 #: numbers their published fixture files, and this numbers our detector.
-VERSION = 5
+#:
+#: **6 since 2026-11-06**: **a gaze sample that is no number makes the velocities that read it
+#: NaN** again, as the per-axis difference did until 4 and as wl-preproc's `local_velocity`
+#: does. 4's local frame read a direction it could not normalize as the origin, so a NaN from
+#: the tracker became velocities near zero, taken into the thresholds as though measured, and
+#: `Detector`'s handling of a NaN among them (`_thresholds_as_listed`) could no longer be
+#: reached (CI's mutation gate on 5 found it). 5 and 6 detect the same thing wherever every
+#: gaze sample is a number or missing.
+VERSION = 6
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,7 +237,9 @@ def _toward(ux: list, uy: list, uz: list, i: int, cx: float, cy: float, cz: floa
     along `c`'s rightward axis `ex` and upward axis `ey`, into `out[0]` and `out[1]`
     (`viewport.local_true_angle`'s formula, wl-preproc's `geometry.local_coordinates_deg`): `v` at
     `angle(c, v)` from the origin, in the direction of its tangent `t = v - (v.c)c`; the origin
-    where `t` has no length."""
+    where `t` has no length, and NaN where it has none at all, a direction or centre that is no
+    number (version 6): **a non-finite position makes every window that reads it NaN**, as in
+    wl-preproc's `local_velocity`, whose divisor is 1 there and whose angle is NaN."""
     vx = ux[i]
     vy = uy[i]
     vz = uz[i]
@@ -246,9 +256,14 @@ def _toward(ux: list, uy: list, uz: list, i: int, cx: float, cy: float, cz: floa
         theta = math.degrees(math.atan2(tn, cos_t))
         out[0] = theta * (tx * exx + ty * exy + tz * exz) / tn
         out[1] = theta * (tx * eyx + ty * eyy + tz * eyz) / tn
-    else:
+    elif tn == 0:
         out[0] = 0.0
         out[1] = 0.0
+    else:
+        # NaN, which no comparison passes: version 4 read it as the origin, a velocity of about
+        # zero taken into the thresholds as though measured.
+        out[0] = tn
+        out[1] = tn
 
 
 def _local_velocity(ux: list, uy: list, uz: list, i0: int, i1: int, i2: int, i3: int, i4: int,

@@ -327,6 +327,23 @@ def test_a_sample_builds_nothing_whatever_it_does():
     assert sorted(built) == []
 
 
+def test_a_gaze_sample_that_is_no_number_makes_every_velocity_reading_it_no_number():
+    """**A non-finite position propagates** (version 6), as wl-preproc's `local_velocity` says
+    of its own ("a non-finite position makes every window that reads it NaN") and as the per-axis
+    difference did until version 4: a NaN in sample 650's gaze makes the five velocities whose
+    windows hold it NaN on both axes, batch and online alike, and no others. Version 4's local
+    frame read a direction it could not normalize as the origin, so those velocities were
+    numbers, near zero, and the thresholds were taken over them as if measured."""
+    gaze, at = _trace([(200, 10, 8.0, 0.0), (450, 12, -7.0, 3.0)], n=700)
+    gaze[650] = (math.nan, gaze[650][1])
+
+    velocities = velocity(gaze, at, Params())
+
+    assert [n for n, v in enumerate(velocities)
+            if v is not None and (v[0] != v[0] or v[1] != v[1])] == list(range(648, 653))
+    assert all(v[0] != v[0] and v[1] != v[1] for v in velocities[648:653])
+
+
 @pytest.mark.parametrize("history,nan", [(60, False), (1000, False), (1000, True)],
                          ids=["wrapped", "filling", "filling, a NaN among them"])
 def test_the_online_thresholds_are_the_batch_form_s_over_the_last_history_velocities(history,
@@ -703,13 +720,15 @@ def test_every_run_is_confirmed_while_it_is_open(seed):
     assert confirmed > 100
 
 
-def test_the_detector_that_bounds_a_lost_stretch_is_version_5():
+def test_the_detector_whose_no_number_gaze_reads_as_no_number_is_version_6():
     """`VERSION` is bumped whenever a session would detect something else: version 2 reports what
     version 1 never did, version 3 no longer reports a run whose minimum duration only unknown
-    velocities met, version 4 detects and sizes in true visual angle (XC-398), and version 5 ends
-    a run at a lost stretch longer than `max_gap_s`. **Not wl-preproc's fixture set "v2"**, which
-    version 4 is pinned to: that is their file's version, and this constant is ours."""
-    assert VERSION == 5
+    velocities met, version 4 detects and sizes in true visual angle (XC-398), version 5 ends a
+    run at a lost stretch longer than `max_gap_s`, and version 6 makes a gaze sample that is no
+    number NaN in every velocity reading it, as before version 4. **Not wl-preproc's fixture set
+    "v2"**, which version 4 is pinned to: that is their file's version, and this constant is
+    ours."""
+    assert VERSION == 6
 
 
 # ---------------------------------------------------------------------------
