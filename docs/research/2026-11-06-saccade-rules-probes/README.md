@@ -10,8 +10,9 @@ minimum-jerk saccades, Gaussian or heavy-tailed noise, lost samples placed by ha
 wl-preproc's contract fixtures, replayed through the detector and the trial loop. No number here is
 a measurement of the rig, its tracker or its timing, and none is a timing claim.
 
-With `cur` at version 5 (the lost-stretch bound, 2026-11-06) `p10_trial_false.py` and `p3_fixation.py` give the
-same numbers as with version 4: none of their losses is longer than one sample.
+With `cur` at versions 5 to 7 (2026-11-06: the lost-stretch bound; a gaze sample that is no number; five of
+wl-preproc's lost-data rules) `p10_trial_false.py` and `p3_fixation.py` give the same numbers as with version 4: none
+of their losses is longer than one sample, none of their samples is no number, and none of their runs ends in a loss.
 
 ## Running them
 
@@ -47,7 +48,7 @@ take minutes each.
 | `pL_exited_then_saccade.py` (with `probe_common.py`) | The XC-410 review's probe L: a state entered as gaze leaves the fixation window, asking for a saccade to the target; the rig's world for a replayed saccade to each of four objects (two profiles, three window sizes), and `simulate.Subject` over 200 trials. | 2026-11-04 (exit carry): every replayed saccade scored where it lands, where all were "no response"; the simulated animal 115 CORRECT, 85 WRONG_TARGET. |
 | `drift_then_saccade.py` | Gaze drifts out of a window with no saccade; a saccade begins k samples after the exit. | 2026-11-04 (exit carry): a saccade beginning a sample or two after the exit is carried, its onset put up to two samples early. |
 | `r1_relay.py` | The exit-carry review's I1: a `hold` → `go` → `Exited` relay against `go` asking itself, for saccades whose detected onset is on every frame around the cue, 1.5° and 4° windows. | 2026-11-06 (rulings, I1): an onset up to six frames before the cue was scored on the relay; now the relay agrees with the direct form on every row. |
-| `p10_trial_false.py` | A catch trial (any saccade an early response), fixation with a 0.12° step at sample 300 and datagram 302 lost, through the loop, versions 1 to 3 and the working tree's. | 2026-11-04 (measured samples): version 2 ended it early at frame 308; versions 3, 4 and 5 a correct reject. Version 2's detector is now refused by the gaze world (it confirms on a closed run). |
+| `p10_trial_false.py` | A catch trial (any saccade an early response), fixation with a 0.12° step at sample 300 and datagram 302 lost, through the loop, versions 1 to 3 and the working tree's. | 2026-11-04 (measured samples): version 2 ended it early at frame 308; versions 3 to 7 a correct reject. Version 2's detector is now refused by the gaze world (it confirms on a closed run). |
 | `p3_fixation.py` (with `p2_offline.py`, `p1_clean.py`) | The saccade-gap-onset review's probe 3: (a) the 0.12° step with each of samples 298 to 305 lost; (b) fixation only, Gaussian or heavy-tailed noise, one or three lost samples per 2 s trial, 2000 trials: trials with a "saccade", versions 1, 2 and the working tree's, online and batch, and wl-preproc per axis, whole and masked. | 2026-11-04 (measured samples): heavy-tailed, three lost, 166 under version 2 against 44 under version 1; with version 3, 44 online and 36 batch; wl-preproc 37 whole, 34 masked. Version 4 as `cur` (2026-11-06) gives the same. |
 | `p3_fixation_v4.py` (with `p2ta.py`) | The same table in true angle, versions 1 to 3, the working tree's (labelled v4) and wl-preproc's true-angle detector, at (0°, 0°) and (20°, 0°). | 2026-11-06 (true angle), as commit 3's report gives it: unchanged in true angle. wl-preproc's default validity mask masks gaze at (20°, 0°) entirely (its screen region), so its columns read 0 there for that reason. |
 | `p1_clean.py` | Version 1 against 2, 2 against the working tree's, and 1 against it, online, sample for sample, on 3000 random traces with nothing missing. | 2026-11-04 (measured samples): clean traces unchanged online, sample for sample, between versions 1, 2 and 3. Against version 4 they differ (8308 samples on 2026-11-06), its sizes being true angle. |

@@ -64,7 +64,7 @@ from typing import Mapping as MappingType, NoReturn
 from wl_xcon.calibration import Collector, Mapping, MappingLog
 from wl_xcon.eye import Replay, Tracker
 from wl_xcon.geometry import separation_deg
-from wl_xcon.saccade import HALF_WINDOW, Detector
+from wl_xcon.saccade import Detector
 from wl_xcon.task import (
     After,
     Exited,
@@ -554,13 +554,15 @@ class Tracked:
             self._landed_on = None
         elif self._in_flight and not self.detector.in_flight:
             # The run closed: the eye has landed, so `SaccadeTo` can now ask where, on this frame.
-            # **Where the eye stopped** (the review's I1): a run closes on the sample whose
-            # velocity, centred `HALF_WINDOW` samples back, is the first below the threshold, and
-            # that sample is the run's end, `saccade.detect`'s `Saccade.stop`, fed that many
-            # frames ago (pinned against `detect` by `tests/test_gaze.py`).
+            # **Where the eye stopped** (the review's I1): the run's end as the detector closed it,
+            # `saccade.detect`'s `Saccade.stop`, one past its last measured velocity
+            # (`Detector.last_stop`; version 7), fed `fed - last_stop` frames ago. Until version 7
+            # it was always the closing velocity's own sample, `HALF_WINDOW` back, so a run whose
+            # last samples were lost, or that a long loss ended, stopped past the loss (pinned
+            # against `detect` by `tests/test_gaze.py` and `tests/test_saccade.py`).
             self._in_flight = False
             self._landed_on = frame
-            self._stopped = frame - HALF_WINDOW
+            self._stopped = frame - (fed - self.detector.last_stop)
 
 
 @dataclass
