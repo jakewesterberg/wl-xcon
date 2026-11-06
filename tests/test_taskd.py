@@ -1791,7 +1791,7 @@ def test_a_live_edits_feed_line_names_the_conditions_it_now_overrides(tmp_path):
     session.run()
 
     assert [said for kind, _, _, said in session.controls if kind == "set"] == [
-        "target_x 10.00 → 12.00, from trial 1; until handed back it overrides what conditions "
+        "target_x its conditions → 12.00, from trial 1; until handed back it overrides what conditions "
         "near, far set or draw",
         "target_y 0.00 → 2.00, from trial 1",
     ]

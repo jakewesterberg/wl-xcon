@@ -27,7 +27,7 @@ from wl_xcon.marks import TIME_FORMATS as _TIME_FORMATS
 from wl_xcon.marks import clock_or_now as _clock_or_now
 from wl_xcon.marks import clock_time as _wall_clock_time
 from wl_xcon.bounds import Bounds, Exceeded
-from wl_xcon.check import check_task, unplaced
+from wl_xcon.check import check_task, impossible, unplaced
 from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.review import position_words
 from wl_xcon.review import render_task as render_review
@@ -35,7 +35,7 @@ from wl_xcon.codes import PROVISIONAL, Allocation
 from wl_xcon.geometry import NOMINAL_HALF_IPD_CM, VIEWS, Geometry, Rig, SubjectSettings
 from wl_xcon.photometry import SRGB, Calibration, read_calibration
 from wl_xcon.actor import Actor, Box
-from wl_xcon.task import Task, Trial
+from wl_xcon.task import Block, Condition, Task, Trial
 from wl_xcon.variation import expanded
 from wl_xcon.welfare import Deployment
 
@@ -1814,6 +1814,26 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit(
                 "task refused, session not started, nothing recorded: "
                 + "; ".join(_printable(said) for _, said in unset)
+            )
+
+        # **No trial no animal can get right, at the run's own values, refused before the session
+        # opens** (engine build C3's spec §9; the C3 plan's Task 19 review, Important 2), as the
+        # place with no value above and for the same reason: `Session.run`'s backstop refuses it
+        # too, but after the departure was marked, which left the session stranded. Judged as the
+        # pre-flight judges it (`cued=True`), over the blocks the run plays, each factorial
+        # expanded, or the plain run's one block; the cued array's warning is no refusal.
+        no_answer = [finding for finding in impossible(
+            task,
+            [Block("session", [Condition("session", {}, target=1)])] if args.plan is None
+            else [expanded(b) for b in task.plans[args.plan].blocks],
+            {**{p.name: p.start for p in task.params if p.start is not None}, **values},
+            cued=True)
+            if finding.refuses(args.session_kind)]
+        if no_answer:
+            raise SystemExit(
+                "task refused, session not started: its starting values leave trials no animal "
+                "can get right:\n"
+                + "\n".join(f"  {_printable(f.code)}: {_printable(f.detail)}" for f in no_answer)
             )
 
         # **The warnings this session runs with** (engine spec §19.2-19.3): the calibration's,

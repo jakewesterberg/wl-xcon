@@ -2632,11 +2632,31 @@ class Session:
         line's (`params`, `drawn`). The controller's rulings of 2026-10-30 on the engine C3 plan's
         path test (Task 19): a record must not claim a value no trial held; engine build C2b wrote
         the run's value here for a setting its conditions give, and C3, which formalizes the change
-        log, corrects it."""
-        block = self._scheduler.block
-        return name not in self._edited and (
-            name in variation.in_force(self._task, block)
-            or any(name in condition.values for condition in block.conditions))
+        log, corrects it. Read in the block the row's trial plays (`_playing`), not the one a block's
+        end finds still open."""
+        return self._given_by(name, self._playing()) is not None
+
+    def _playing(self):
+        """**The block the next trial plays**: the one that follows the open block where it ends at
+        this boundary by its rule (`Scheduler.following`), else the open one. A value applied as a
+        block ends is judged, worded and recorded by the block its row's `trial_number` plays
+        (the brief of Task 19; its review, Minor 1)."""
+        return self._scheduler.following or self._scheduler.block
+
+    def _given_by(self, name: str, block) -> str | None:
+        """What gives `name` in `block` while no person holds it: `"conditions"` where every
+        condition draws it from its own range (`_own_range`'s rule) or any gives it a value,
+        `"draw"` where a draw of it is in force (`variation.in_force`), else None."""
+        if name in self._edited:
+            return None
+        conditions = block.conditions
+        if conditions and all(name in variation.own_ranges(c) for c in conditions):
+            return "conditions"
+        if name in variation.in_force(self._task, block):
+            return "draw"
+        if any(name in condition.values for condition in conditions):
+            return "conditions"
+        return None
 
     def _revert(self, command, index: int) -> None:
         """**A person takes the run back to an earlier moment** (`link.Revert`; engine build C3's
@@ -3263,6 +3283,13 @@ class Session:
         # The next trial to start (`Levels.start_trial`), numbered as its line will be.
         trial_number = self._levels.trials + 1
         offered = self._offered_acts()
+        # What gave each value's setting before this pass, in the block its trial plays: a `set`
+        # row's `was` was read then (`set`), so two values of one setting in one drain both write
+        # none; a revert row reads its `was` at its own place, so it is judged live (`_apply_staged`).
+        playing = self._playing()
+        # A reward size is no task setting a draw or a condition gives (Call 2): it keeps its `was`.
+        before = {offer[0]: None if offer[4] else self._given_by(offer[0], playing)
+                  for offer, _ in offered if not isinstance(offer, Pending)}
         for place, (offer, act) in enumerate(offered):
             self._sequence += 1
             # One change id for each act: a change offered on its own, or all of one revert's,
@@ -3286,7 +3313,9 @@ class Session:
                 was = self.spec.values.get(name)
             # No single value is "before" on a setting the open block draws or its conditions give:
             # its row says none, and no way it went (`_block_gives`); the feed says what `set` read.
-            written = None if self._block_gives(name) else was
+            given = (before[name] if moment is None
+                     else None if bounded else self._given_by(name, playing))
+            written = None if given else was
             if bounded:
                 self.spec.bounds.set(name, now, by=by)
             else:
@@ -3309,7 +3338,10 @@ class Session:
             # A pair as a position only for a setting whose choices declare one (XC-401's fix
             # round, M2): a ceiling's name is no setting the task declares.
             choices = () if bounded or name not in self._declared else self._declared[name].choices
-            said = f"{name} {_shown(was, choices)} → {_shown(now, choices)}"
+            # Where the record writes no `was`, the feed says what gave the setting, not a value no
+            # trial held (the controller's ruling on Task 19's review, Minor 4).
+            held = f"its {given}" if given else _shown(was, choices)
+            said = f"{name} {held} → {_shown(now, choices)}"
             back = "" if moment is None else f", reverting to {_back_to(moment)}"
             self._feed(
                 kind,

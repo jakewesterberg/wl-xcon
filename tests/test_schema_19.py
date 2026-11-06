@@ -274,7 +274,7 @@ def test_a_staged_change_names_its_kind_and_the_conditions_it_will_override_befo
     card = {row.name: row for row in link.seen[3].params}["target_x"]
     assert (card.value, card.source, card.conditions) == (12.0, "person", ("near", "far"))
     assert [said for kind, _, _, said in session.controls if kind == "set"] == [
-        "target_x 10.00 → 12.00, from trial 2; until handed back it overrides what conditions "
+        "target_x its conditions → 12.00, from trial 2; until handed back it overrides what conditions "
         "near, far set or draw",
         "fix_hold 0.30 → 0.40, from trial 2",
         "reward_correct 0.15 → 0.20, from trial 2",
@@ -443,7 +443,7 @@ def test_the_applied_feed_line_still_names_the_conditions_it_overrides(tmp_path)
 
     assert session.refusals == []
     assert [said for kind, _, _, said in session.controls if kind == "set"] == [
-        "target_luminance 40.00 → 45.00, from trial 2; until handed back it overrides what "
+        "target_luminance its conditions → 45.00, from trial 2; until handed back it overrides what "
         "condition far sets or draws",
         "fix_hold 0.30 → 0.40, from trial 2",
     ]

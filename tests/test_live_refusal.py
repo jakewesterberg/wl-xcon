@@ -27,7 +27,7 @@ from pathlib import Path
 import pytest
 
 from _rig import DIRECT, PATH as RIG_FILE
-from wl_xcon import taskd
+from wl_xcon import stranded, taskd
 from wl_xcon.actor import Box
 from wl_xcon.bounds import Bounds, Ceiling, Exceeded, Floor
 from wl_xcon.cli import _load_task, main
@@ -379,12 +379,15 @@ def test_a_value_outside_its_range_is_rechecked_with_each_condition_and_draw_onc
         "block 'drawn', condition 'any', block 'drawn''s draw of 'array_eccentricity' at 3"]
 
 
-def test_wlx_run_given_values_that_make_an_impossible_trial_does_not_start(tmp_path):
+def test_wlx_run_given_values_that_make_an_impossible_trial_does_not_start(tmp_path, capsys):
     """The outline review's I-5: `wlx run` takes no pre-flight (XC-159), so its `--set` values were
     judged by nothing, and a target hold of 3.5 s against the 3 s the reference task's `verify`
     state waits ran trials no animal could get right. `Session.run`'s backstop, beside the
     record's, refuses the run before its first trial, naming the condition, the values and the fix;
-    no trial and no run row is written."""
+    no trial and no run row is written. **And it is refused before the session opens** (the C3
+    plan's Task 19 review, Important 2): no "out of cage" is said, no departure is marked and
+    nothing is left under the root, so `stranded.find` lists no session. Refused by the backstop
+    alone, after the departure, it left one stranded, as XC-415's unplaced value did."""
     argv = [
         "run", "tasks/fixation_detection.py",
         "--rig", RIG_FILE, "--view", "direct", "--kind", "training", "--accept-warnings",
@@ -409,6 +412,9 @@ def test_wlx_run_given_values_that_make_an_impossible_trial_does_not_start(tmp_p
         "as the reference tasks hold their target")
     folder = tmp_path / "2027-01-14_01" / "xcon"
     assert _rows_at(folder / "trials.jsonl") == [] and _rows_at(folder / "runs.jsonl") == []
+    assert "out of cage" not in capsys.readouterr().out
+    assert list(tmp_path.iterdir()) == []
+    assert stranded.find(tmp_path) == []
 
 
 def test_possible_judges_a_hand_back_a_range_and_a_whole_revert(tmp_path):

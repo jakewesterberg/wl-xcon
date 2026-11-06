@@ -42,6 +42,7 @@ import _sessions
 from _rig import DIRECT, RIG
 from _rig import PATH as RIG_FILE
 from _sessions import OPEN_ACCEPTED, WALL, typed
+from wl_xcon import link as _link
 from wl_xcon import resume, stranded, taskd, variation
 from wl_xcon.actor import Box
 from wl_xcon.check import IMPOSSIBLE
@@ -168,7 +169,8 @@ class _Page(Simulated):
     def drain(self) -> list:
         self.drains += 1
         for body in self.script.get(self.drains, ()):
-            self.queue(parse_command(body))
+            # Through the command codec as well, as `Server.dispatch` and `ZmqLink` carry it.
+            self.queue(_link._decode_command(_link._encode_command(parse_command(body))))
         return super().drain()
 
 
@@ -298,6 +300,45 @@ def test_a_session_driven_through_the_consoles_commands_reads_back_whole(tmp_pat
     assert "to" not in changes[5] and (changes[6]["from"], changes[6]["block"]) == ("task", None)
     assert [row["event_code"] for row in changes] == [None] + [PARAM_CHANGED] * 7
     assert all(row["by"] == {"kind": "box", "name": "jake"} for row in changes)
+    # Each kind's whole row, as the ask's table fixes it (the instants aside: `at` is the rig's
+    # bookkeeping, XC-383, and `at_local` its local reading).
+    assert all(isinstance(row["at_local"], str) for row in changes)
+    bare = [{key: value for key, value in row.items() if key not in ("at", "at_local")}
+            for row in changes]
+    jake = {"kind": "box", "name": "jake"}
+    common = {"by": jake, "offered": [], "odds": None, "run": 0, "event_code": PARAM_CHANGED}
+    hold = {"kind": "clear-cut", "raising": "harder", "relative_to": None, "role": "criterion"}
+    shine = {"kind": "expected", "raising": "easier", "relative_to": "background",
+             "role": "stimulus"}
+    assert bare[0] == {
+        "by": jake, "offered": [], "odds": None, "run": 0, "event_code": None, "change": 1,
+        "kind": "drum", "name": "drumming", "was": None, "now": "run", "scope": "run",
+        "block": "grid", "meaning": None, "trial_number": 3}
+    assert bare[1] == {**common, "change": 2, "kind": "set", "name": "fix_hold", "was": None,
+                       "now": 0.25, "sequence": 1, "trial_number": 4,
+                       "meaning": {**hold, "step": None, "went": None}}
+    assert bare[3] == {**common, "change": 4, "kind": "hand_back", "name": "fix_hold",
+                       "was": 0.25, "now": None, "to": "draw", "sequence": 3, "trial_number": 7,
+                       "meaning": {**hold, "step": None, "went": None}}
+    assert bare[4] == {**common, "change": 5, "kind": "range", "name": "fix_hold",
+                       "was": declared, "now": narrowed, "from": "task", "block": None,
+                       "sequence": 4, "trial_number": 11,
+                       "meaning": {**hold, "step": None, "went": "easier"}}
+    assert bare[5:] == [
+        {**common, "change": 6, "kind": "revert", "name": "target_luminance", "was": 45.0,
+         "now": None, "moment": 2, "sequence": 5, "trial_number": 14,
+         "meaning": {**shine, "step": None, "went": None}},
+        {**common, "change": 6, "kind": "revert", "name": "fix_hold", "was": narrowed,
+         "now": declared, "from": "task", "block": None, "moment": 2, "sequence": 6,
+         "trial_number": 14, "meaning": {**hold, "step": None, "went": None}},
+        {**common, "change": 6, "kind": "revert", "name": "fix_hold", "was": None, "now": 0.25,
+         "moment": 2, "sequence": 7, "trial_number": 14,
+         "meaning": {**hold, "step": None, "went": None}}]
+    # The drum switch is a control too, in `controls.jsonl`, with the trial it was drained before.
+    (control,) = _rows(xcon, "controls.jsonl")
+    assert {key: value for key, value in control.items() if key not in ("at", "at_local")} == {
+        "kind": "drum", "scope": "run", "block": "grid", "was": None, "now": "run", "by": jake,
+        "event_code": None, "run": 0, "trial_index": 2}
 
     # Each trial line, as the acts leave things from the trial each row names: trials 1-3 drawn
     # as declared; 4-6 the two values held, the luminance over the conditions that give it (so
@@ -342,6 +383,10 @@ def test_a_session_driven_through_the_consoles_commands_reads_back_whole(tmp_pat
                     for x in (-10.0, 10.0) for luminance in (30.0, 60.0)]
     played = Counter(line["condition"] for line in lines if line["block"] == "grid")
     assert played == dict.fromkeys(made, 2)
+    assert start["generated"] == [{"block": "grid", "excluded": [], "conditions": [
+        {"name": name, "target": 2, "values": {"target_x": x, "target_luminance": lum}}
+        for name, (x, lum) in zip(made, [(-10.0, 30.0), (-10.0, 60.0), (10.0, 30.0),
+                                         (10.0, 60.0)], strict=True)]}]
     grid, seq = end["block_ends"]
     sequence = [line for line in lines if line["block"] == "seq"]
     assert seq["planned"] == list(variation.balanced_sequence(
@@ -591,3 +636,66 @@ def test_a_value_set_over_its_conditions_writes_no_was_and_no_way_it_went(tmp_pa
     lines = _rows(session.directory, "trials.jsonl")
     assert [line["block"] for line in lines] == ["given"] * 6 + ["bare"] * 4
     assert [line["params"]["fix_window"] for line in lines[8:]] == [2.5, 2.5]
+
+
+def test_two_values_of_one_setting_in_one_drain_both_write_no_was(tmp_path):
+    """The path test's finding, held for a second value in one inter-trial interval (the review of
+    Task 19, Important 1): `set` reads `was` before the interval, so both rows are judged by what
+    gave the setting then, not by the first row's hold. Over the task's draw, 0.4 then 0.35 of the
+    fixation hold; over block `given`'s conditions, 2.5 then 2.6 of the fixation window. Each row
+    writes `was` null and no way it went; it was the run's own value, which no trial held."""
+    hold = [{"kind": "set", "by": "jake", "name": "fix_hold", "value": 0.4},
+            {"kind": "set", "by": "jake", "name": "fix_hold", "value": 0.35}]
+    window = [{"kind": "set", "by": "jake", "name": "fix_window", "value": 2.5},
+              {"kind": "set", "by": "jake", "name": "fix_window", "value": 2.6}]
+    drawn = _session(tmp_path / "a", {2: hold})
+    drawn.run()
+    given = _session(tmp_path / "b", {2: window}, plans=GIVEN, plan="given")
+    given.run()
+
+    for session, name in ((drawn, "fix_hold"), (given, "fix_window")):
+        rows = _rows(session.directory, "parameter_changes.jsonl")
+        assert [(row["name"], row["was"], row["trial_number"]) for row in rows] == [
+            (name, None, 3)] * 2
+        assert [(row["meaning"]["went"], row["meaning"]["step"]) for row in rows] == [
+            (None, None)] * 2
+
+
+@pytest.mark.parametrize("drain", (6, 7))
+def test_a_value_applied_as_a_block_ends_is_judged_by_the_block_its_trial_plays(tmp_path, drain):
+    """The review of Task 19, Minor 1: the fixation window set as block `given`'s sixth trial ends
+    -- drained before it (6), or one drain later, as the plan moves on (7) -- applies from trial 7,
+    in block `bare`, whose conditions give nothing. Both rows are judged by `bare`, as the
+    row's `trial_number` says: the run's own window was held, so each keeps its `was` and the way
+    it went."""
+    session = _session(tmp_path, {drain: [
+        {"kind": "set", "by": "jake", "name": "fix_window", "value": 2.5}]},
+        plans=GIVEN, plan="given")
+
+    session.run()
+
+    (row,) = _rows(session.directory, "parameter_changes.jsonl")
+    assert (row["trial_number"], row["was"], row["now"]) == (7, 2.0, 2.5)
+    assert (row["meaning"]["went"], row["meaning"]["step"]) == ("easier", 2.5 - 2.0)
+    lines = _rows(session.directory, "trials.jsonl")
+    assert [line["block"] for line in lines[6:]] == ["bare"] * 4
+    assert [line["params"]["fix_window"] for line in lines[6:]] == [2.5] * 4
+
+
+def test_the_feed_and_the_moments_word_a_value_over_a_draw_or_conditions_as_such(tmp_path):
+    """The review of Task 19, Minor 4 (settling Task 18's Minor 2): where the record writes `was`
+    null, the changes feed's line and the revert list's moment say what gave the setting, not a
+    value no trial held: "fix_hold its draw → 0.4", "fix_window its conditions → 2.5"."""
+    drawn = _session(tmp_path / "a", {2: [
+        {"kind": "set", "by": "jake", "name": "fix_hold", "value": 0.4}]})
+    drawn.run()
+    given = _session(tmp_path / "b", {2: [
+        {"kind": "set", "by": "jake", "name": "fix_window", "value": 2.5}]},
+        plans=GIVEN, plan="given")
+    given.run()
+
+    for session, said in ((drawn, "fix_hold its draw → 0.40"),
+                          (given, "fix_window its conditions → 2.50")):
+        sets = [line for kind, _, _, line in session._controls if kind == "set"]
+        assert [line.startswith(said) for line in sets] == [True], (said, sets)
+        assert [moment.said for moment in session._moments] == ["the run's start", said]

@@ -387,7 +387,7 @@ def test_a_moment_is_kept_after_each_act_the_first_the_runs_start(tmp_path):
     at, moment = {row["change"]: row["at"] for row in _changes(session)}, taskd.Moment
     assert session._moments == [
         moment(0, WALL_NOW, "the run's start", {}, {}),
-        moment(1, at[1], "target_x 10.00 → 12.00", {"target_x": 12.0}, {}),
+        moment(1, at[1], "target_x its conditions → 12.00", {"target_x": 12.0}, {}),
         moment(2, at[2], "the task's draw of 'fix_hold' → uniform from 0.2 s to 0.3 s",
                {"target_x": 12.0}, {key: narrowed}),
         moment(3, at[3], "target_x 12.00 handed back to its conditions", {}, {key: narrowed}),
@@ -765,7 +765,7 @@ def test_a_hand_backs_moment_says_what_took_the_setting_where_it_applied(tmp_pat
     said = "target_x 12.00 handed back to the run's 10.00"
     assert [said_ for _, _, said_ in _fed(session, "hand_back")] == [f"{said}, from trial 3"]
     assert [(m.change, m.said) for m in session._moments] == [
-        (0, "the run's start"), (1, "target_x 10.00 → 12.00"), (2, said)]
+        (0, "the run's start"), (1, "target_x its conditions → 12.00"), (2, said)]
 
 
 def test_two_identical_reverts_in_one_drain_apply_once_and_the_second_changes_nothing(tmp_path):
