@@ -2253,3 +2253,17 @@ def test_a_persons_clear_starts_the_progress_check_afresh():
 def test_a_plan_with_no_blocks_is_refused_plainly_whatever_its_order(order):
     with pytest.raises(IndexError, match="no block to start"):
         Scheduler([], seed=1, order=order)
+
+
+def test_waiting_and_waiting_conditions_name_the_same_trials_on_a_drum_a_due_repeat_and_an_again():
+    """`waiting` is `waiting_conditions`' numbers: a new holder of a trial to show again joins
+    one list (engine build C3's Task 13, review minor 3)."""
+    from wl_xcon.scheduler import Scheduler
+    scheduler = Scheduler.__new__(Scheduler)
+    scheduler._due = [(5, 3, "a"), (6, 4, "b")]
+    scheduler._drum = ("c", 7)
+    scheduler._again = ("d", 8, None)
+    assert scheduler.waiting_conditions == {3: "a", 4: "b", 7: "c", 8: "d"}
+    assert scheduler.waiting == frozenset(scheduler.waiting_conditions)
+    scheduler._due, scheduler._drum, scheduler._again = [], None, None
+    assert (scheduler.waiting, scheduler.waiting_conditions) == (frozenset(), {})

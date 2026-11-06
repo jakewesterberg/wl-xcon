@@ -1081,3 +1081,26 @@ def test_while_paused_a_change_is_judged_against_the_ranges_its_next_trial_will_
     assert (session.stop_kind, len(lines)) == ("completed", 3)
     assert all(line["params"]["target_hold"] == 0.7 <= 0.75 <= line["params"]["response_deadline"]
                for line in lines)
+
+
+def test_a_hand_back_or_range_naming_a_ceiling_is_refused_into_the_session_record_too(tmp_path):
+    """The PI, 2026-09-19 (`record.SessionRecord.refusal`): a refusal of a ceiling-bounded name
+    also goes into the session record, since telemetry is lossy. `_command`'s setting path writes
+    it; the two acts, which run beside it, write the same row: the numbers asked for a range,
+    nothing for a hand-back, who asked, the sentence the console was told and where in the run."""
+    link = _Drained({3: [HandBack(name="reward_correct", by=JAKE),
+                         HandBack(name="target_hold", by=JAKE),
+                         SetRange(name="reward_correct", numbers={"low": 0.1}, by=JAKE)]})
+    session = _session(_spec(tmp_path, _ceiling(tmp_path), trials=5), link)
+
+    session.run()
+
+    assert [name for name, _, _ in session.refusals] == [
+        "reward_correct", "target_hold", "reward_correct"], "a mistyped or unheld name is no row"
+    rows = _rows(session, "refusals.jsonl")
+    assert [(row["name"], row["asked"], row["why"]) for row in rows] == [
+        ("reward_correct", None, session.refusals[0][2]),
+        ("reward_correct", {"low": 0.1}, session.refusals[2][2])]
+    assert [session.refusals[i][2].split(":")[0] for i in (0, 2)] == [
+        "'reward_correct' is not handed back", "the range of 'reward_correct' is not changed"]
+    assert all(row["by"] == BY and row["trial_index"] == 2 for row in rows)

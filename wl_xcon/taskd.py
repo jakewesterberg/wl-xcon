@@ -49,7 +49,9 @@ from wl_xcon import link as _link
 from wl_xcon import variation
 from wl_xcon.actor import Actor, to_map_or_none
 from wl_xcon.bounds import Bounds, Exceeded, _finite
-from wl_xcon.check import IMPOSSIBLE, _outside, beyond_range, check_task, impossible, undrawable, unplaced
+from wl_xcon.check import (
+    IMPOSSIBLE, _outside, beyond_range, check_task, impossible, undrawable, unplaced,
+)
 from wl_xcon.cli import _clock, _load_allocation, _load_task, _printable, _shown
 from wl_xcon.codes import BLOCK_END, RUN_END_MARKER, TRIAL_END, TRIAL_START, Allocation
 from wl_xcon.declarations import canonical, content_hash, resolved
@@ -2219,7 +2221,7 @@ class Session:
         could not be checked, and the session runs on. **It does not pass through `set`**: it
         carries no new value, only the run's own, as the run started (judged then for trials no
         animal can get right, and in a `wlx taskd` session checked by its pre-flight); the C3
-        plan's Appendix A, item 5, put to the PI with the plan. Run between trials, never in a
+        plan's Appendix A, item 5, approved by the PI, 2026-10-31. Run between trials, never in a
         frame. Not welfare-critical: the branch handing to it is `_command`'s."""
         name = command.name
         try:
@@ -2246,7 +2248,9 @@ class Session:
                 after=len(self._staged), to=to,
             ))
         except Exceeded as refused:
-            self._refuse(name, command.by, f"{name!r} is not handed back: {refused}")
+            why = f"{name!r} is not handed back: {refused}"
+            self._ceiling_refused(name, None, command.by, why, index)
+            self._refuse(name, command.by, why)
         except Exception as broken:  # noqa: BLE001 -- see the docstring
             self._refuse(name, command.by, (
                 f"the hand-back of {name!r} could not be checked ({type(broken).__name__}: "
@@ -2285,7 +2289,7 @@ class Session:
         outside `_command`'s listed `try`, so a check that raises refuses the range, saying it
         could not be checked, and the session runs on. **It does not pass through `set`**: a range
         is a draw's numbers, never one value, each a finite number decoded by `link._setting` on
-        the wire; the C3 plan's Appendix A, item 5, put to the PI with the plan. Run between
+        the wire; the C3 plan's Appendix A, item 5, approved by the PI, 2026-10-31. Run between
         trials, never in a frame. Not welfare-critical: the branch handing to it is
         `_command`'s."""
         name = command.name
@@ -2346,7 +2350,9 @@ class Session:
                 key=key, draw=new,
             ))
         except Exceeded as refused:
-            self._refuse(name, command.by, f"the range of {name!r} is not changed: {refused}")
+            why = f"the range of {name!r} is not changed: {refused}"
+            self._ceiling_refused(name, dict(command.numbers), command.by, why, index)
+            self._refuse(name, command.by, why)
         except Exception as broken:  # noqa: BLE001 -- see the docstring
             self._refuse(name, command.by, (
                 f"the range of {name!r} could not be checked ({type(broken).__name__}: "
@@ -2403,8 +2409,8 @@ class Session:
         **It never raises** (the C3 plan's call 20; its review, I-1): it runs beside the pause,
         outside `_command`'s listed `try`, so a check that raises refuses the revert, saying it
         could not be checked, and the session runs on. Its hand-backs and ranges do not pass
-        through `set`, as the buttons' do not (the C3 plan's Appendix A, item 5, put to the PI
-        with the plan): a hand-back puts back the run's own value, and a range puts back one in
+        through `set`, as the buttons' do not (the C3 plan's Appendix A, item 5, approved by the PI,
+        2026-10-31): a hand-back puts back the run's own value, and a range puts back one in
         force before, accepted when it was offered, or the declared one. Run between trials, never
         in a frame. Not welfare-critical: the branch handing to it is `_command`'s."""
         change = command.change
@@ -2480,16 +2486,16 @@ class Session:
         return next(block for block in self._played.blocks if block.name == key[1]).draws[key[2]]
 
     def _range_went(self, act: Pending) -> str | None:
-        """**Which way a range changed live went**, as its row's `meaning` says it, judged as a whole
-        against the range the task writes (`_declared_draw`; the PI, 2026-10-31, on the engine C3
-        plan's Appendix B, item 18, "Judge the range as a whole (Recommended)": "The change's row in
-        the change log says which way it went"): `"easier"` where it counts as easier than the
-        written range (`variation.easier_range`: a number placing its values moved the easier way,
-        a mixed change among them), `"harder"` where it moved only the harder way, `None` where it
-        is the written range again -- by its numbers or a revert to the declaration -- where which
-        way cannot be read, or for a name no setting of the task. A meaning relative to another
-        setting reads that setting's value in the run's values as the row applies, as `_meaning`
-        does."""
+        """**Which way a range changed live went**, as its row's `meaning` says it, judged as a
+        whole against the range the task writes (`_declared_draw`; the PI, 2026-10-31, on the
+        engine C3 plan's Appendix B, item 18, "Judge the range as a whole (Recommended)": "The
+        change's row in the change log says which way it went"): `"easier"` where it counts as
+        easier than the written range (`variation.easier_range`: a number placing its values moved
+        the easier way, a mixed change among them), `"harder"` where it moved only the harder way,
+        `None` where it is the written range again -- by its numbers or a revert to the declaration
+        -- where which way cannot be read, or for a name no setting of the task. A meaning relative
+        to another setting reads that setting's value in the run's values as the row applies, as
+        `_meaning` does."""
         found = None if self._task is None else resolved(self._task).get(act.name)
         if found is None:
             return None
@@ -2724,6 +2730,20 @@ class Session:
         if len(self.refusals) > _link.REFUSAL_HISTORY:
             self.refusals_dropped += len(self.refusals) - _link.REFUSAL_HISTORY
             del self.refusals[: -_link.REFUSAL_HISTORY]
+
+    def _ceiling_refused(self, name: str, asked, by: Actor | None, why: str, index: int) -> None:
+        """**A hand-back or a range that named a ceiling, refused, into the session record too**
+        (the PI, 2026-09-19, `record.SessionRecord.refusal`: telemetry is lossy, and an attempt on
+        a dose is asked months later): the row `_command`'s setting path writes, with `asked` the
+        range's numbers, or `None` for a hand-back. Nothing for any other name. Never raises."""
+        if name not in self.spec.bounds.ceilings or self._record is None:
+            return
+        try:
+            self._record.refusal(name=name, asked=asked, by=by, why=why, trial_index=index,
+                                 session_seconds=self.now())
+        except Exception as broken:  # noqa: BLE001 -- the refusal itself still stands
+            self._refuse(name, by, f"the refusal of {name!r} could not be recorded "
+                                   f"({type(broken).__name__}: {broken})")
 
     def _command(self, command, index: int, held: bool = False) -> None:
         """A console's request, routed to the one write path.

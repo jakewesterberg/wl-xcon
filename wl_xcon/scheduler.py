@@ -455,12 +455,7 @@ class Scheduler:
         """**The trials that will be shown again**, by number (engine build C3): a repeat waiting
         for its slot, a drum's trial, a designed block's trial again at once. What the trial loop
         keeps a trial's drawn values for, so a repeat that keeps them finds them."""
-        numbers = {repeat_of for _, repeat_of, _ in self._due}
-        if self._drum is not None:
-            numbers.add(self._drum[1])
-        if self._again is not None:
-            numbers.add(self._again[1])
-        return frozenset(numbers)
+        return frozenset(self.waiting_conditions)
 
     @property
     def waiting_conditions(self) -> dict[int, str]:
