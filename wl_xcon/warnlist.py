@@ -25,7 +25,17 @@ window scored after a `Show` or an `Update` that can draw it as no array), `cycl
 or a disparity, its windows staying about its cyclopean position), `direction-outside-0-360` and
 `negative-eccentricity` (2026-10-30, the PI's "Warn at load" twice: a setting used as a direction,
 a position's or a grating's drift, that can be outside 0 to 360, and a position at an eccentricity
-below 0, each written two ways, a plan condition's value included)
+below 0, each written two ways, a plan condition's value included), `cut-sequence` and
+`long-condition-name` (engine build C3: a sequence-balanced block a number of trials or a time
+limit can cut short, unbalanced; a condition, a generated one most likely, named in more
+characters than a console's clear carries, which wl-preproc's main-sequence table drops past 255),
+`sequence-stage-moves-up` (engine build C3, the PI's "Only warn at load" of 2026-10-31: a
+sequence-balanced stage below a training progression's top, which moves up when its sequence is
+played out, eased trials or not),
+`same-in-drum` and `same-wait-at-once` (engine build C3, its science review's I-5: a block that
+drums drawing a clear-cut setting `same`, which a drum can hold at its hardest; a block bringing
+a broken trial back at once drawing a non-aging wait `same`, which tells the animal the repeat's
+wait outlasts the moment it broke)
 and, for a value outside its declared range at a run's start or live, `outside-range` and, for a
 wait longer than any the task declares, `longer-than-declared`, by his answer of 2026-10-12);
 and today's pre-flight unknowns, the pump calibration and the eye tracker (S9a §10). **What

@@ -15,13 +15,16 @@ import ast
 import dataclasses
 import itertools
 import math
+import sys
 from decimal import Decimal
 from pathlib import Path
+from statistics import NormalDist
 from typing import NamedTuple
 
 from wl_xcon.actor import TEXT_LIMIT
 from wl_xcon.codes import PROVISIONAL, Allocation
 from wl_xcon.components import Registry
+from wl_xcon.declarations import BOUNDED, canonical, resolved
 from wl_xcon.findings import SESSION_KINDS, Finding
 from wl_xcon.geometry import (
     VIEWS, Geometry, circle_extent_deg, least_separation_deg, polar_box_deg, polar_deg,
@@ -44,46 +47,64 @@ from wl_xcon.photometry import (
 from wl_xcon.run import LONGEST_TRIAL_S
 from wl_xcon.task import (
     ANSWERS,
+    BY_CONDITIONS,
     CHOSEN_BY,
+    CLEAR_CUT,
     COUNTED,
+    FOUND_BY,
     RDS,
+    REPEATS,
+    SAME,
     SPENT,
     After,
     Array,
     Balanced,
+    Block,
     ByCriterion,
     Condition,
     Constrained,
     Counting,
     Custom,
     Cyclic,
+    Distribution,
     Entered,
     Exited,
+    Factorial,
     Hide,
     Hold,
+    Listed,
     Mark,
     NoChoice,
+    NonAging,
     ObjectWindows,
     Outcome,
     P,
     Param,
     Polar,
+    Priming,
     Random,
     Remembered,
     SaccadeTo,
+    SequenceBalanced,
     Show,
     Shuffled,
     Stimulus,
     Task,
     Touched,
     Trial,
+    TruncatedNormal,
     Unchanged,
+    Uniform,
     Update,
+    Weighted,
     Window,
     WithReplacement,
     actions_of,
     array_actions,
     is_point,
+)
+from wl_xcon.variation import (
+    bounds_of, directions, expanded, generated, in_force, level_name, own_ranges,
 )
 from wl_xcon.welfare import Deployment
 
@@ -153,11 +174,20 @@ def check_task(
     head-fixed one, never a refusal (engine spec §20.1; XC-277; the PI, 2026-10-11); without one --
     `wlx check`, the review report -- nothing is said of it. **Given the file it was loaded
     from**, a position the file computes from `cos` and `sin` is a warning (`computed-position`;
-    the PI, 2026-10-19)."""
+    the PI, 2026-10-19).
+
+    **What it draws** (engine build C3) is checked with its plans (`_draw_faults`), and a
+    direction setting the rig alone writes, drawn in every block, is not warned
+    `direction-outside-0-360` for the range it is declared in (`_drawn_directions`)."""
     several = len(task.structures) > 1
+    # A structure's check reads a direction setting's declaration alone and knows nothing of
+    # draws (the C3 plan's call 39).
+    drawn = {(f"setting {name!r}",) for name in _drawn_directions(task)}
     findings: list[Finding] = []
     for name, structure in task.structures.items():
         for finding in check(structure, allocation, components, geometry, calibration):
+            if finding.code == "direction-outside-0-360" and finding.subjects in drawn:
+                continue
             findings.append(
                 dataclasses.replace(
                     finding, detail=f"in structure {name!r}: {finding.detail}",
@@ -174,6 +204,8 @@ def check_task(
         + _head_faults(task, deployment)
         + _counting_faults(task)
         + _plan_faults(task)
+        + _draw_faults(task)
+        + _found_by_faults(task)
         + _condition_spellings(task)
         + ([] if source is None else _computed_positions(Path(source)))
     )
@@ -193,6 +225,17 @@ BREAKS_A_RUN = ("overlapping-windows", "crowded-array", "unrealizable-color")
 #: the session's rate (`run.LONGEST_TRIAL_S`, `run_trial`'s `max_frames` since engine build C2a;
 #: engine spec §6.8), where it was 100,000 frames, about 417 s at 240 Hz.
 TRIAL_CAP = f"the longest trial ({LONGEST_TRIAL_S / 60:g} minutes)"
+
+#: **The longest condition name a person can clear from the console** (the controller's ruling 5
+#: and the C3 plan's call 36, 2026-10-30): a clear names its condition in at most the wire's
+#: `link.TEXT_LIMIT` characters (`ClearOwed.condition`), which `actor.TEXT_LIMIT` restates and
+#: `tests/test_actor.py` pins. A longer name, a generated one most likely, is warned at load,
+#: `long-condition-name`.
+CONDITION_NAME_LIMIT = TEXT_LIMIT
+#: The longest condition name wl-preproc's main-sequence table groups trials under: a longer one's
+#: trials are dropped from its group there (`wl_preproc/schema/main_sequence.py`'s
+#: `_VARCHAR_LEN`, read 2026-10-30). Named in the same warning.
+_GROUP_NAME_LIMIT = 255
 
 
 def _among(finding: Finding, findings: list[Finding]) -> bool:
@@ -682,7 +725,16 @@ def _plan_faults(task: Task) -> list[Finding]:
     of one stage, or at a stage that always ends before its window is in (Minor 3); and a
     progression prone to move up and back between two stages (the science review, M2). A
     condition's value outside its range is the pre-flight's to re-check widened
-    (`preflight.beyond`)."""
+    (`preflight.beyond`).
+
+    **Since engine build C3** (its spec §4, §5, §11): a block's conditions are its hand-listed
+    ones and those its factorial makes (`variation.expanded`), each checked as a hand-listed one
+    is, its name among them; a condition's own range is `_draw_faults`'. **Refused**, `bad-plan`,
+    a factorial that cannot make conditions (`refused_factorial`) and a designed order that cannot
+    be played as declared (`refused_design`). **Warned**, a sequence a number of trials or a time
+    limit can cut short (`cut-sequence`), and a condition's name over `CONDITION_NAME_LIMIT`
+    characters (`long-condition-name`). A designed block owes what its order says, so it meets
+    neither `empty-block` nor `late-condition`."""
     findings: list[Finding] = []
     declared = {param.name: param for param in task.params}
 
@@ -737,6 +789,237 @@ def _plan_faults(task: Task) -> list[Finding]:
 
     def seconds(value: object) -> bool:
         return value is None or (_finite(value) and value > 0)
+
+    def refused_factorial(plan: str, where: str, block: Block) -> bool:
+        """Whether `block`'s factorial is refused (engine build C3's call 14; TSK-22), each fault
+        refused saying what to write: one that is no `Factorial`; factors that are no dict, or
+        none; a factor naming no setting the task declares, or a bounded one; levels that are no
+        tuple, or none; a level its setting cannot hold -- one of its choices, a finite number, or
+        its own range, a `Distribution`, held to the draw rules by `_draw_faults` -- or one
+        `variation.level_name` would write by its place in memory; an exclusion that is no dict,
+        is empty, or names a factor or a level the factorial has not; `targets` that are no
+        dict; then exclusions leaving no condition, and `targets` naming a condition it does not
+        make. A refused factorial's conditions are not made, so its faults are said once."""
+        factorial = block.factorial
+        if factorial is None:
+            return False
+        before = len(findings)
+        of = f"{where}'s factorial"
+        if not isinstance(factorial, Factorial):
+            refuse(plan, f"{of} is {factorial!r}, and a block's factorial is a "
+                         f"Factorial(factors={{setting: (level, ...)}}), or None")
+            return True
+        factors = factorial.factors
+        if not isinstance(factors, dict) or not factors:
+            refuse(plan, f"{of}'s factors are {factors!r}, and they are a dict of one or more of "
+                         f"the task's settings to their levels: {{'target_x': (-8.0, 8.0)}}")
+            return True
+        for factor, levels in factors.items():
+            param = declared.get(factor) if isinstance(factor, str) else None
+            if factor in BOUNDED:
+                refuse(plan, f"{of} varies {factor!r}, a bounded setting, which the subject's "
+                             f"bounded config sets and no condition varies (welfare); take it out "
+                             f"of the factors")
+                continue
+            if param is None:
+                refuse(plan, f"{of} varies {factor!r}, which is no setting the task declares; a "
+                             f"factor is one of the task's own settings")
+                continue
+            if not isinstance(levels, tuple) or not levels:
+                refuse(plan, f"{of}'s levels of {factor!r} are {levels!r}, and a factor's levels "
+                             f"are a tuple of one or more: (-8.0, 8.0)")
+                continue
+            for level in levels:
+                if isinstance(level, Distribution):
+                    continue  # its own range (Q1b), held to the draw rules by `_draw_faults`
+                if param.choices and level not in param.choices:
+                    refuse(plan, f"{of} gives {factor!r} the level "
+                                 f"{_position_said(level, param.choices)}, and it is one of "
+                                 f"{_one_of(param.choices)}")
+                elif not param.choices and not _finite(level):
+                    said = _said(level) if _is_number(level) else repr(level)
+                    refuse(plan, f"{of} gives {factor!r} the level {said}, and it takes a finite "
+                                 f"number ({param.unit})")
+                elif " at 0x" in level_name(level):
+                    refuse(plan, f"{of} gives {factor!r} a level written {level_name(level)}, by "
+                                 f"its place in memory, which names its conditions differently in "
+                                 f"every process; give {factor!r} choices written as text or "
+                                 f"numbers")
+        exclude = factorial.exclude
+        if not isinstance(exclude, tuple):
+            refuse(plan, f"{of}'s exclusions are {exclude!r}, and they are a tuple of dicts, each "
+                         f"of factors to a level: ({{'target_x': 8.0}},)")
+            exclude = ()
+        for exclusion in exclude:
+            if not isinstance(exclusion, dict) or not exclusion:
+                refuse(plan, f"{of} excludes {exclusion!r}, and an exclusion is a dict of one or "
+                             f"more factors to a level of each, excluding every combination "
+                             f"holding them all: {{'target_x': 8.0}}")
+                continue
+            for factor, level in exclusion.items():
+                if factor not in factors:
+                    refuse(plan, f"{of} excludes {exclusion!r}, and {factor!r} is not one of its "
+                                 f"factors ({', '.join(map(repr, factors))})")
+                elif isinstance(factors[factor], tuple) and level not in factors[factor]:
+                    refuse(plan, f"{of} excludes {exclusion!r}, and {level!r} is not one of "
+                                 f"{factor!r}'s levels {factors[factor]!r}")
+        if not isinstance(factorial.targets, dict):
+            refuse(plan, f"{of}'s targets are {factorial.targets!r}, and they are a dict of a "
+                         f"condition's name to its target: {{'target_x=8.0': 2}}")
+        if len(findings) > before:
+            return True
+        made = generated(block)
+        if not made:
+            refuse(plan, f"{of}'s exclusions leave no condition: they exclude every combination "
+                         f"of its levels; exclude fewer")
+            return True
+        names = [condition.name for condition in made]
+        stray = [key for key in factorial.targets if key not in names]
+        if stray:
+            refuse(plan, f"{of}'s targets name {', '.join(map(repr, stray))}, and it makes no "
+                         f"condition of that name; its conditions are named from their levels, "
+                         f"such as {names[0]!r}")
+        return len(findings) > before
+
+    def refused_design(plan_name: str, plan, block: Block, where: str,
+                       conditions: list) -> None:
+        """A designed order that cannot be played as declared (engine build C3's calls 15 and 16;
+        the spec's §5, §11), refused saying what to write, and a sequence that can be cut short,
+        warned. **Either**: a criterion, since a designed block ends on its own plan, its number of
+        trials or its time limit. **Sequence-balanced**: a depth under 2 or cycles under 1, each a
+        whole number; fewer than 2 conditions; a target other than the `cycles * n**(depth - 1)`
+        times its sequence plays each past its lead-ins; a number of trials past its sequence,
+        which ends it first, each cycle the linear de Bruijn sequence of `n**depth + depth - 1`
+        trials, its first `depth - 1` a lead-in (the PI, 2026-10-31, on the engine C3 plan's
+        Appendix B, item 1); and the top stage of a training progression, which keeps working past
+        its rule while a sequence played out has nothing to draw (review M-8). Warned,
+        `cut-sequence`: a number of trials under its sequence, or a time limit, its own or its
+        plan's; and `sequence-stage-moves-up`: a stage below a training progression's top, which
+        moves up when its sequence is played out, eased trials or not (the PI, 2026-10-31, on
+        Appendix B, item 10, "Only warn at load"). **Priming**: a feature
+        naming no setting, or one a condition does not set to a value, or set to fewer than two;
+        not exactly one of a chance from 0 to 1 and runs, `(low, high)`, whole, `1 <= low <=
+        high`; neither a number of trials nor a time limit, which is how it ends; a target other
+        than 0, since its order picks each trial. Runs may instead be any of the five
+        distributions, each length its draw rounded down, refused where one cannot be drawn or can
+        give a length under 1 (`_unrunnable`; the C3 plan's science review, I-8). **Either,
+        too**: an `again_at_once` neither True nor False (the C3 plan's engineering review, M-4:
+        any other value would be read as one of them)."""
+        order = block.order
+        if block.criterion is not None:
+            refuse(plan_name, f"{where} plays a designed order, {type(order).__name__}, and ends "
+                              f"on a criterion; a designed block ends on its own plan, its number "
+                              f"of trials or its time limit, so take the criterion out")
+        if not isinstance(order.again_at_once, bool):
+            refuse(plan_name, f"{where}'s again_at_once is {order.again_at_once!r}, and it is "
+                              f"True, a broken trial brought straight back, or False; write one "
+                              f"of them")
+        if isinstance(order, SequenceBalanced):
+            depth, cycles, count_ = order.depth, order.cycles, len(conditions)
+            if not _whole_from(depth, 2):
+                refuse(plan_name, f"{where}'s sequence has depth {depth!r}, and a depth is a "
+                                  f"whole number from 2: 2 balances each pair of conditions, 3 "
+                                  f"each triple")
+            if not _whole_from(cycles, 1):
+                refuse(plan_name, f"{where}'s sequence has {cycles!r} cycles, and its cycles are "
+                                  f"a whole number from 1")
+            if count_ < 2:
+                refuse(plan_name, f"{where} is sequence-balanced over {count_} condition(s), and "
+                                  f"a sequence balances how 2 or more follow one another; give it "
+                                  f"another condition, or an ordinary order")
+            if isinstance(plan.order, ByCriterion) and plan.blocks[-1] is block:
+                refuse(plan_name, f"{where} is the top stage of a training progression, which "
+                                  f"keeps working past its rule, and a sequence played out has "
+                                  f"nothing left to draw; give the top stage an ordinary order")
+            elif isinstance(plan.order, ByCriterion):
+                # Below the top it ends when its sequence is played out, eased trials included,
+                # and the animal moves up (the PI, 2026-10-31, "Only warn at load").
+                warn("sequence-stage-moves-up", plan_name, (
+                    f"{where} is a training progression's stage below its top, and it is "
+                    f"sequence-balanced: it moves up when its sequence is played out, eased "
+                    f"trials or not, since its places are not played again, so trials a live "
+                    f"change made easier can move the animal up; each such trial's line names "
+                    f"what eased it (eased)"))
+            if not (_whole_from(depth, 2) and _whole_from(cycles, 1) and count_ >= 2):
+                return
+            # Each cycle the linear sequence, its first `depth - 1` trials a lead-in (the PI,
+            # 2026-10-31): each condition `n**(depth - 1)` times a cycle past them.
+            each = cycles * count_ ** (depth - 1)
+            cycle = count_ ** depth + depth - 1
+            planned = cycles * cycle
+            plays = (f"{planned} trials, {cycles} cycle(s) of {cycle}, each opening on a lead-in "
+                     f"of {depth - 1}")
+            wrong = [condition.name for condition in conditions if condition.target != each]
+            if wrong:
+                refuse(plan_name, f"{where}'s sequence plays each condition {each} times past its "
+                                  f"lead-ins ({plays}), and {', '.join(map(repr, wrong))} "
+                                  f"{'is' if len(wrong) == 1 else 'are'} owed otherwise; write "
+                                  f"target={each} for each")
+            trials = block.trials if count(block.trials) else None
+            if trials is not None and trials > planned:
+                refuse(plan_name, f"{where} runs {trials} trials, past its sequence ({plays}), "
+                                  f"which ends it first; write trials={planned} or fewer, or none")
+            cut = [said for said, cuts in (
+                (f"its {trials} trials end it before its {planned}",
+                 trials is not None and trials < planned),
+                ("its time limit can end it first", block.time_limit_s is not None),
+                ("the plan's time limit can end it first", plan.time_limit_s is not None),
+            ) if cuts]
+            if cut:
+                warn("cut-sequence", plan_name, (
+                    f"{where}'s sequence ({plays}) can be cut short -- {'; '.join(cut)} -- and "
+                    f"a sequence cut short is not balanced: the transitions it did not play are "
+                    f"missing, recorded on its block's planned sequence and owed by no "
+                    f"shortfall"))
+            return
+        feature = order.feature
+        if not isinstance(feature, str) or feature not in declared:
+            refuse(plan_name, f"{where} primes {feature!r}, which is no setting the task "
+                              f"declares; a priming block's feature is the setting its conditions "
+                              f"set apart, such as the target's appearance")
+        else:
+            unset = [condition.name for condition in conditions
+                     if not isinstance(condition.values, dict) or feature not in condition.values
+                     or isinstance(condition.values[feature], Distribution)]
+            values = {_grouped(condition.values[feature]) for condition in conditions
+                      if condition.name not in unset}
+            if unset:
+                refuse(plan_name, f"{where} primes {feature!r}, and its condition(s) "
+                                  f"{', '.join(map(repr, unset))} set it to no value; each of its "
+                                  f"conditions sets the feature to a value, which a run repeats "
+                                  f"or switches")
+            elif len(values) < 2:
+                refuse(plan_name, f"{where} primes {feature!r}, which its conditions set to "
+                                  f"{len(values)} value(s), and priming repeats or switches "
+                                  f"between 2 or more; give its conditions two values or more")
+        chance, runs = order.chance, order.runs
+        if (chance is None) == (runs is None):
+            refuse(plan_name, f"{where}'s priming gives {'neither' if chance is None else 'both'} "
+                              f"a chance and runs; give exactly one: chance=, the chance the next "
+                              f"trial repeats the last one's feature, or runs=(low, high), how "
+                              f"many trials of one feature come before a switch")
+        elif chance is not None and not (_finite(chance) and 0 <= chance <= 1):
+            refuse(plan_name, f"{where}'s chance of a repeat is {chance!r}, and a chance is a "
+                              f"number from 0 to 1")
+        elif isinstance(runs, Distribution):
+            why = _unrunnable(runs)
+            if why is not None:
+                refuse(plan_name, f"{where}'s runs cannot be drawn: {why}")
+        elif runs is not None and not (
+                isinstance(runs, tuple) and len(runs) == 2
+                and all(_whole_from(length, 1) for length in runs) and runs[0] <= runs[1]):
+            refuse(plan_name, f"{where}'s runs are {runs!r}, and runs are (low, high), whole "
+                              f"numbers with 1 <= low <= high, such as (3, 7), or a distribution "
+                              f"of lengths, such as NonAging(3, 5, 12)")
+        if block.trials is None and block.time_limit_s is None:
+            refuse(plan_name, f"{where} primes with no number of trials and no time limit, which "
+                              f"is how a priming block ends; give it trials= or time_limit_s=")
+        owed = [condition.name for condition in conditions if condition.target != 0]
+        if owed:
+            refuse(plan_name, f"{where} primes, and {', '.join(map(repr, owed))} "
+                              f"{'is' if len(owed) == 1 else 'are'} owed trials; a priming "
+                              f"block owes none, its order picking each trial, so write target=0 "
+                              f"for each")
 
     for name, plan in task.plans.items():
         order = plan.order
@@ -804,7 +1087,7 @@ def _plan_faults(task: Task) -> list[Finding]:
                     "it to fall back to, so the rule is never applied; give the plan another "
                     "stage, or no fall_back"))
             for block in plan.blocks[1:-1]:
-                most = most_answers(block)
+                most = most_answers(expanded(block))
                 if most is not None and most < window:
                     warn("fall-back-unjudged", name, (
                         f"stage {block.name!r} has no criterion and every answer pays its "
@@ -846,7 +1129,10 @@ def _plan_faults(task: Task) -> list[Finding]:
                 refuse(name, f"{where}'s conditions are {block.conditions!r}, and a block's "
                              f"conditions are a list of Conditions")
                 continue
-            conditions = list(block.conditions)
+            # **A factorial's conditions are ordinary ones** (engine build C3's call 14), made
+            # after the hand-listed ones and checked as they are; a refused factorial makes none.
+            unmade = refused_factorial(name, where, block)
+            conditions = list(block.conditions if unmade else expanded(block).conditions)
             untexted = [c.name for c in conditions if not isinstance(c.name, str)]
             if untexted:
                 # A trial's condition is recorded by its name (TSK-61): one named by a number is
@@ -876,17 +1162,22 @@ def _plan_faults(task: Task) -> list[Finding]:
             if not seconds(block.time_limit_s):
                 refuse(name, f"{where}'s time limit is {block.time_limit_s!r}; a time limit is a "
                              f"number of seconds above zero, or None")
-            if not isinstance(block.order, (Shuffled, WithReplacement, Constrained)):
-                # The three the scheduler draws by: anything else, a bare `Order()` among them,
+            designed = isinstance(block.order, (SequenceBalanced, Priming))
+            if not isinstance(block.order, (
+                    Shuffled, WithReplacement, Constrained, SequenceBalanced, Priming)):
+                # The five the scheduler draws by: anything else, a bare `Order()` among them,
                 # faulted the block's first draw (the final review's I1).
                 refuse(name, f"{where}'s order is {block.order!r}, and a block's order is how its "
-                             f"conditions follow one another: Shuffled(), WithReplacement(), or "
-                             f"Constrained(); the order of the blocks is the plan's, order=")
+                             f"conditions follow one another: Shuffled(), WithReplacement(), "
+                             f"Constrained(), SequenceBalanced() or Priming(feature=...); the "
+                             f"order of the blocks is the plan's, order=")
             elif isinstance(block.order, Constrained) and (
                     isinstance(block.order.max_run, bool)
                     or not isinstance(block.order.max_run, int)):
                 refuse(name, f"{where}'s longest run is {block.order.max_run!r}, and it is a whole "
                              f"number of trials, 1 or more")
+            elif designed:
+                refused_design(name, plan, block, where, conditions)
             weights = getattr(block.order, "weights", {})
             if not isinstance(weights, dict):
                 refuse(name, f"{where}'s weights are {weights!r}, and weights are a dict of "
@@ -923,6 +1214,20 @@ def _plan_faults(task: Task) -> list[Finding]:
                     f"condition; give it 1 or more"))
             for condition in conditions:
                 of = f"{where}'s condition {condition.name!r}"
+                if len(condition.name) > CONDITION_NAME_LIMIT:
+                    # The controller's ruling 5 and the outline review's M-14 (2026-10-30).
+                    longest = len(condition.name)
+                    warn("long-condition-name", name, (
+                        f"{where}'s condition {condition.name[:40] + '…'!r} is named in "
+                        f"{longest} characters, over {CONDITION_NAME_LIMIT}: a person clears what "
+                        f"a condition owes by naming it in at most {CONDITION_NAME_LIMIT}, so "
+                        f"cannot clear this one from the console, and wl-preproc's main-sequence "
+                        f"table, whose condition names hold at most {_GROUP_NAME_LIMIT}, "
+                        + ("leaves its trials out of their condition's group"
+                           if longest > _GROUP_NAME_LIMIT
+                           else f"would leave its trials out of their group past "
+                                f"{_GROUP_NAME_LIMIT}")
+                        + "; give it, or its factors and levels, shorter names"))
                 if (isinstance(condition.target, bool) or not isinstance(condition.target, int)
                         or condition.target < 0):
                     refuse(name, f"{of} has target {condition.target!r}; a target is a whole "
@@ -940,6 +1245,8 @@ def _plan_faults(task: Task) -> list[Finding]:
                     values = {}
                 for setting, value in values.items():
                     param = declared.get(setting)
+                    if isinstance(value, Distribution):
+                        continue  # its own range (Q1b), held to the draw rules by `_draw_faults`
                     if not isinstance(setting, str):
                         refuse(name, f"{of} sets a value keyed {setting!r}, and a condition names "
                                      f"each setting it sets by text, as the task declares it")
@@ -961,8 +1268,10 @@ def _plan_faults(task: Task) -> list[Finding]:
                         said = _said(value) if _is_number(value) else repr(value)
                         refuse(name, f"{of} sets {setting!r} to {said}, and it takes a finite "
                                      f"number ({param.unit})")
+            # A designed block owes what its order says (review M-8): a priming block none, a
+            # sequence each condition alike, each refused otherwise above.
             targets = [c.target for c in conditions if isinstance(c.target, int)]
-            if (block.criterion is not None or block.trials is not None) and (
+            if not designed and (block.criterion is not None or block.trials is not None) and (
                     0 in targets and any(targets)):
                 zero = ", ".join(repr(c.name) for c in conditions if c.target == 0)
                 warn("late-condition", name, (
@@ -971,7 +1280,7 @@ def _plan_faults(task: Task) -> list[Finding]:
                     f"condition is drawn only while it is owed, or once every target is used "
                     f"up, so {zero} come only after the others' targets "
                     f"(XC-386)"))
-            if (block.criterion is None and block.trials is None
+            if (not designed and block.criterion is None and block.trials is None
                     and all(c.target == 0 for c in conditions)):
                 none = "no conditions" if not conditions else "every target 0"
                 warn("empty-block", name, (
@@ -993,6 +1302,431 @@ def _plan_faults(task: Task) -> list[Finding]:
                     + ", which only a structure says: where its stimulus appears and what is an "
                       "answer are each condition's structure's, and the block's are not read"))
     return findings
+
+
+def _whole_from(value: object, least: int) -> bool:
+    """Whether `value` is a whole number, never a `bool`, of `least` or more."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= least
+
+
+def _one_of(choices: tuple) -> str:
+    """A setting's choices as a refusal names them: positions in the review report's words, as a
+    condition's are (STE-29), anything else as written."""
+    offered = [_position_said(choice, choices) for choice in choices]
+    if any(said != repr(choice) for said, choice in zip(offered, choices)):
+        return ", ".join(offered)
+    return f"{choices}"
+
+
+def _grouped(value: object) -> str:
+    """A priming feature's value as its group is told apart (the C3 plan's call 16, by
+    `declarations.canonical`); one canonical cannot read, by its `repr`."""
+    try:
+        return repr(canonical(value))
+    except TypeError:
+        return repr(value)
+
+
+#: **The five distributions a setting is drawn from** (TSK-24, the PI, 2026-10-07), each by its
+#: own class: a bare `Distribution`, or an author's subclass of one, draws nothing
+#: (`variation.draw`), so it is refused wherever a distribution can appear (the controller,
+#: 2026-10-30).
+_DRAWN_KINDS = (Uniform, Weighted, TruncatedNormal, Listed, NonAging)
+
+#: The numbers each kind of range is drawn from, each a finite number: a normal's cut ends may be
+#: `None`, cut to its setting's declared range.
+_DRAWN_NUMBERS = {
+    Uniform: ("low", "high"),
+    TruncatedNormal: ("mean", "sd", "low", "high"),
+    NonAging: ("minimum", "mean", "maximum"),
+}
+
+#: **The least share of its normal a truncated normal's cut may hold** (the C3 plan's outline
+#: review, I-2): below it floating point holds almost none of the normal there, and every draw
+#: gives the cut's nearer end.
+_LEAST_CUT = 1e-12
+
+
+def undrawable(distribution: object, declared: Param | None, *,
+               direction: bool = False) -> str | None:
+    """**Why `distribution` cannot be drawn for a setting declared `declared`, or `None`** (engine
+    build C3's spec §11: "a distribution that cannot be drawn ... breaks a run"), saying what to
+    write: what `variation.draw`, which judges nothing, would raise on or draw wrongly. At load
+    (`_draw_faults`), and before a live range applies (the C3 plan's Task 13).
+
+    - **None of the five** (`_DRAWN_KINDS`).
+    - **A number that is no finite number**: a uniform's, a normal's (its cut's ends `None` or
+      finite), a wait's.
+    - **A weighted set or a list**: values or weights that are no tuple (a list hashes as a tuple
+      does and compares unequal; the controller, 2026-10-30); no values; weights not one a value,
+      not each a finite number of 0 or more, or all 0; weights adding up past what a float holds,
+      or one above 0 too small to add to the rest (the C3 plan's engineering review, M-2: each
+      made the draw run past its values); a list's `in_order` neither True nor False (M-4).
+    - **A spread of zero or less**: a normal's `sd`.
+    - **A normal with nothing to cut to**: an end neither it nor its setting declares
+      (`variation.bounds_of`).
+    - **Lowest above highest**: a uniform's ends, a normal's cut, a wait's shortest and longest;
+      and a span past what a float holds.
+    - **A direction spanning more than 360°** (`direction`; the controller's ruling 1): a
+      direction is drawn in the task's own terms over at most a whole turn, Uniform(-45, 45) say.
+    - **A wait's mean outside its shortest and longest**, `(minimum, maximum]` (the C3 plan's
+      call 6): at its shortest, a spread of zero.
+    - **A normal whose cut holds almost none of it** in floating point (`_LEAST_CUT`; review
+      I-2)."""
+    kind = type(distribution).__name__
+    if type(distribution) not in _DRAWN_KINDS:
+        return (f"it is a {kind}, and a setting is drawn from one of five: Uniform, Weighted, "
+                f"TruncatedNormal, Listed or NonAging")
+    if isinstance(distribution, (Weighted, Listed)):
+        values = distribution.values
+        if not isinstance(values, tuple):
+            return f"its values are {values!r}, and a {kind}'s values are a tuple: (2, 4, 6)"
+        if not values:
+            return "it has no values, so nothing can be drawn; give it one or more"
+        if isinstance(distribution, Listed):
+            if not isinstance(distribution.in_order, bool):
+                return (f"its in_order is {distribution.in_order!r}, and a Listed's in_order is "
+                        f"True, played as listed, or False, in shuffled passes")
+            return None
+        weights = distribution.weights
+        if not isinstance(weights, tuple):
+            return f"its weights are {weights!r}, and a Weighted's weights are a tuple: (3, 1)"
+        if len(weights) != len(values):
+            return (f"it has {len(values)} value(s) and {len(weights)} weight(s); give each value "
+                    f"one weight")
+        if not all(_finite(weight) and weight >= 0 for weight in weights):
+            return f"its weights are {weights!r}, and each is a finite number of 0 or more"
+        if not any(weight > 0 for weight in weights):
+            return "its weights are all 0, so nothing can be drawn; give one or more above 0"
+        if not math.isfinite(sum(weights)):
+            return (f"its weights, {weights!r}, add up past what a float holds; give smaller "
+                    f"weights in the same proportions")
+        if any(0 < weight < sys.float_info.min for weight in weights):
+            return (f"its weights are {weights!r}, one of them above 0 and too small to add to "
+                    f"the rest in floating point; give each weight 0 or at least "
+                    f"{sys.float_info.min!r}")
+        return None
+    optional = ("low", "high") if isinstance(distribution, TruncatedNormal) else ()
+    for field in _DRAWN_NUMBERS[type(distribution)]:
+        value = getattr(distribution, field)
+        if not _finite(value) and not (value is None and field in optional):
+            said = _said(value) if _is_number(value) else repr(value)
+            return f"its {field} is {said}, and each of a {kind}'s numbers is a finite one"
+    if isinstance(distribution, TruncatedNormal) and distribution.sd <= 0:
+        return (f"its spread, sd {distribution.sd!r}, is not above 0, so it is no normal; give it "
+                f"an sd above 0")
+    low, high = bounds_of(distribution, declared)
+    if not (math.isfinite(low) and math.isfinite(high)):
+        missing = " or ".join(end for end, at in (("lowest", low), ("highest", high))
+                              if not math.isfinite(at))
+        return (f"it has no {missing} to be cut to: neither it nor its setting declares one; give "
+                f"it low= and high=, or declare the setting's range")
+    lowest, highest = ("shortest", "longest") if isinstance(distribution, NonAging) else (
+        "lowest", "highest")
+    if low > high:
+        return (f"its {lowest}, {low!r}, is above its {highest}, {high!r}; write the {lowest} "
+                f"first")
+    if not math.isfinite(high - low):
+        return (f"it spans from {low!r} to {high!r}, past what a float holds; give it a narrower "
+                f"range")
+    if direction and high - low > 360:
+        return (f"it spans {high - low!r}°, from {low!r} to {high!r}, and a direction is drawn "
+                f"over at most a whole turn, in the task's own terms -- Uniform(-45, 45), say -- "
+                f"and written from 0 to 360; give it a span of 360 or less")
+    if isinstance(distribution, NonAging):
+        mean = distribution.mean
+        if mean <= low:
+            return (f"its mean, {mean!r}, is not above its shortest, {low!r}: a wait of no "
+                    f"spread; give it a mean above its shortest and at most its longest")
+        if mean > high:
+            return (f"its mean, {mean!r}, is above its longest, {high!r}; give it a mean above "
+                    f"its shortest and at most its longest")
+    if isinstance(distribution, TruncatedNormal):
+        normal = NormalDist(distribution.mean, distribution.sd)
+        try:
+            held = normal.cdf(high) - normal.cdf(low)
+        except (ArithmeticError, ValueError):
+            held = 0.0
+        if held <= _LEAST_CUT:
+            return (f"its cut, from {low!r} to {high!r}, holds almost none of a normal of mean "
+                    f"{distribution.mean!r} and sd {distribution.sd!r} (no more than "
+                    f"{_LEAST_CUT:g} of it, in floating point), so every draw would give the "
+                    f"cut's nearer end; move the mean or the cut, or widen the spread")
+    return None
+
+
+def _whole_numbers(task: Task) -> frozenset[str]:
+    """The settings an `Array` reads as a whole number -- its set size, `n`, or its target's
+    place, `target` -- each read through `int()` by the trial (`task.Array`), in any structure,
+    as written or among a setting's choices (`task.array_actions`)."""
+    return frozenset(
+        part.name
+        for structure in task.structures.values()
+        for _, _, _, array in array_actions(structure)
+        for part in (array.n, array.target) if isinstance(part, P)
+    )
+
+
+def _draw_faults(task: Task) -> list[Finding]:
+    """**The load-time checks of what a task draws** (engine build C3; its spec §2, §11), each
+    refused, `bad-draw`, saying which draw and what to write. A draw is the task's (`Task.draws`),
+    a block type's (`Block.draws`), or a condition's own range (the PI, 2026-10-30, Q1b), a
+    factorial's conditions included (`variation.expanded`):
+
+    - **a bounded setting** (`declarations.BOUNDED`, a reward size), refused by name whether or
+      not the task declares a setting of that name (welfare; the outline review's M-24); and a
+      setting the task does not declare;
+    - **a distribution that cannot be drawn** (`undrawable`);
+    - **no `repeat`, or one neither `SAME` nor `FRESH`** (the PI, 2026-10-30, Q3, "Per drawn
+      setting, required": "a task that draws and does not say is refused at load");
+    - **a draw its setting cannot hold**, which would leave the record unreadable: numbers -- a
+      `Uniform`, a `TruncatedNormal` or a `NonAging` -- for a setting of choices; a set's value
+      that is none of its choices, or for a setting of numbers no finite number; and real numbers
+      for a setting an `Array` reads as a whole number (`_whole_numbers`; the C3 plan's call 8),
+      which would record 4.7 while 4 objects show, or a set's value there that is no whole
+      number;
+    - **"never both", block by block** (Q1b; the C3 plan's call 3): a block drawing a setting its
+      conditions give, a value or their own range; a block whose conditions give a setting the
+      task draws without saying so, `BY_CONDITIONS`; `BY_CONDITIONS` for a setting the task does
+      not draw; and a block's draws that are no dict, or an entry that is neither a
+      `Distribution` nor `BY_CONDITIONS`."""
+    declared = {param.name: param for param in task.params}
+    turned = directions(task)
+    whole = _whole_numbers(task)
+    findings: list[Finding] = []
+
+    def refuse(said: str) -> None:
+        findings.append(Finding("bad-draw", said))
+
+    def judge(where: str, setting: object, drawn: object) -> None:
+        """One draw, named `where`, of `setting`."""
+        if setting in BOUNDED:
+            refuse(f"{where} draws {setting!r}, a bounded setting, which the subject's bounded "
+                   f"config sets and nothing draws (welfare); take it out")
+            return
+        param = declared.get(setting) if isinstance(setting, str) else None
+        if param is None:
+            refuse(f"{where} draws {setting!r}, which is no setting the task declares; a draw "
+                   f"names one of the task's own settings")
+            return
+        why = undrawable(drawn, param, direction=setting in turned)
+        if why is not None:
+            refuse(f"{where} cannot be drawn: {why}")
+        if type(drawn) not in _DRAWN_KINDS:
+            return
+        if drawn.repeat not in REPEATS:
+            refuse(f"{where} says neither same nor fresh (its repeat is {drawn.repeat!r}), and "
+                   f"each drawn setting says what a repeat of its trial takes (the PI, "
+                   f"2026-10-30, Q3); give it repeat=SAME, the value the trial it repeats drew, "
+                   f"or repeat=FRESH, a new draw")
+        kind = type(drawn).__name__
+        numbers = isinstance(drawn, (Uniform, TruncatedNormal, NonAging))
+        if numbers and param.choices:
+            refuse(f"{where} draws numbers, a {kind}, and {setting!r} is a setting of choices; "
+                   f"draw among its choices with a Weighted or a Listed")
+        elif numbers and setting in whole:
+            refuse(f"{where} draws real numbers, a {kind}, and an array reads {setting!r} as a "
+                   f"whole number, its set size or its target's place, so the record would write "
+                   f"4.7 while 4 objects show; draw it from a set of whole numbers, a Weighted "
+                   f"or a Listed")
+        elif not numbers and isinstance(drawn.values, tuple):
+            if param.choices:
+                stray = [value for value in drawn.values if value not in param.choices]
+                if stray:
+                    refuse(f"{where} can draw "
+                           f"{', '.join(_position_said(v, param.choices) for v in stray)}, and "
+                           f"{setting!r} is one of {_one_of(param.choices)}")
+                return
+            stray = [value for value in drawn.values if not _finite(value)]
+            if stray:
+                said = ", ".join(_said(v) if _is_number(v) else repr(v) for v in stray)
+                refuse(f"{where} can draw {said}, and {setting!r} takes a finite number "
+                       f"({param.unit})")
+            elif setting in whole and not all(float(v).is_integer() for v in drawn.values):
+                said = ", ".join(repr(v) for v in drawn.values if not float(v).is_integer())
+                refuse(f"{where} can draw {said}, and an array reads {setting!r} as a whole "
+                       f"number, its set size or its target's place; give it whole numbers")
+
+    for setting, drawn in task.draws.items():
+        judge(f"the task's draw of {setting!r}", setting, drawn)
+    for plan_name, plan in task.plans.items():
+        for block in plan.blocks:
+            where = f"plan {plan_name!r}: block {block.name!r}"
+            own = block.draws
+            if not isinstance(own, dict):
+                refuse(f"{where}'s draws are {own!r}, and a block's draws are a dict of setting "
+                       f"name to a Distribution, or BY_CONDITIONS")
+                own = {}
+            for setting, drawn in own.items():
+                if isinstance(drawn, Distribution):
+                    judge(f"{where}'s draw of {setting!r}", setting, drawn)
+                elif not (isinstance(drawn, str) and drawn == BY_CONDITIONS):
+                    refuse(f"{where}'s draw of {setting!r} is {drawn!r}, and a block's draw is a "
+                           f"Distribution, or BY_CONDITIONS for a setting the task draws and its "
+                           f"conditions give")
+                elif setting not in task.draws:
+                    refuse(f"{where} says its conditions give {setting!r} (BY_CONDITIONS), and "
+                           f"the task draws no {setting!r}, so no draw is set aside; take it out "
+                           f"of the block's draws")
+            conditions = expanded(block).conditions
+            giving: dict[object, list[str]] = {}
+            for condition in conditions if isinstance(conditions, list) else ():
+                if not isinstance(condition, Condition) or not isinstance(condition.values, dict):
+                    continue  # refused by `_plan_faults`
+                for setting, (value, _) in own_ranges(condition).items():
+                    judge(f"{where}'s condition {condition.name!r}'s own range for {setting!r}",
+                          setting, value)
+                for setting in condition.values:
+                    giving.setdefault(setting, []).append(condition.name)
+            force = in_force(task, block)
+            for setting, names in giving.items():
+                if setting not in force:
+                    continue
+                said = ", ".join(map(repr, names))
+                if force[setting][1][0] == "block":
+                    refuse(f"{where} draws {setting!r}, and its condition(s) {said} give it too: "
+                           f"a setting is drawn by its block or given by its conditions, never "
+                           f"both (the PI, 2026-10-30, Q1b); take {setting!r} out of the block's "
+                           f"draws or out of those conditions")
+                else:
+                    refuse(f"{where}'s condition(s) {said} give {setting!r}, which the task "
+                           f"draws, and the block does not say so; a block whose conditions give "
+                           f"a setting the task draws says draws={{{setting!r}: BY_CONDITIONS}} "
+                           f"(the PI, 2026-10-30, Q1b)")
+    return findings + _repeat_warnings(task)
+
+
+def _repeat_warnings(task: Task) -> list[Finding]:
+    """**Two `same` draws a repeat turns against its block's design**, warned and accepted in every
+    kind (the C3 plan's science review, I-5; warnings over refusals, TSK-51):
+
+    - **`same-in-drum`**: a block that drums (`Block.drum`) drawing a clear-cut difficulty setting
+      `same` (its meaning, `declarations.resolved`). A drum brings a trial back until it is right,
+      with no cap but the console's warning at ten tries, so a hard value drawn once is held try
+      after try -- the loop §9 refuses for certain, here by chance.
+    - **`same-wait-at-once`**: a designed block bringing a broken trial straight back
+      (`again_at_once`) and drawing a non-aging wait `same`: the repeat's wait is then known to
+      last past the moment its trial broke, a cue in the very time the wait keeps unforeseeable
+      [@han2022revisiting].
+
+    Each block type of each plan, under the draws in force there (`variation.in_force`) and its
+    conditions' own ranges, its factorial expanded; each setting once a block. A block whose
+    shape is refused elsewhere (`_plan_faults`, the draws' checks above) is passed over."""
+    meanings = resolved(task)
+    found: list[Finding] = []
+    for plan_name, plan in task.plans.items():
+        for block in plan.blocks:
+            if not isinstance(block, Block) or not isinstance(block.draws, dict):
+                continue
+            order = block.order
+            again = (isinstance(order, (SequenceBalanced, Priming))
+                     and order.again_at_once is True)
+            if block.drum is not True and not again:
+                continue
+            drawn = list(in_force(task, block).items())
+            conditions = expanded(block).conditions
+            for condition in conditions if isinstance(conditions, list) else ():
+                if isinstance(condition, Condition) and isinstance(condition.values, dict):
+                    drawn += own_ranges(condition).items()
+            same = sorted({(name, isinstance(distribution, NonAging))
+                           for name, (distribution, _) in drawn
+                           if getattr(distribution, "repeat", None) == SAME})
+            where = f"plan {plan_name!r}: block {block.name!r}"
+            for name, wait in same:
+                meaning = meanings.get(name)
+                if block.drum is True and meaning is not None and meaning[0].kind == CLEAR_CUT:
+                    found.append(Finding("same-in-drum", (
+                        f"{where} drums and draws {name!r} same, a clear-cut setting: a drum "
+                        f"brings a trial back until it is right, so a hard value drawn once is "
+                        f"held try after try; draw it fresh, or drum another block (the C3 plan's "
+                        f"science review, I-5)"), blocking=False, accepted_in=SESSION_KINDS))
+                if again and wait:
+                    found.append(Finding("same-wait-at-once", (
+                        f"{where} brings a broken trial straight back and draws the wait "
+                        f"{name!r} same, so the repeat's wait is known to last past the moment "
+                        f"its trial broke, a cue in the very time the wait keeps unforeseeable; "
+                        f"draw it fresh (the C3 plan's science review, I-5)"),
+                        blocking=False, accepted_in=SESSION_KINDS))
+    return found
+
+
+def _unrunnable(runs: Distribution) -> str | None:
+    """**Why a distribution cannot give a priming block's run lengths, or `None`** (the C3 plan's
+    science review, I-8; `variation.run_length`): one `undrawable` refuses, a normal with no cut
+    of its own among them (no setting declares one for it), and one that can give a length under
+    1, each length its draw rounded down, or anything but numbers."""
+    why = undrawable(runs, None)
+    if why is not None:
+        return why
+    bounds = bounds_of(runs)
+    if bounds is None:
+        weights = runs.weights if isinstance(runs, Weighted) else (1,) * len(runs.values)
+        lengths = [value for value, weight in zip(runs.values, weights) if weight > 0]
+        if not all(_is_number(value) and _finite(value) for value in lengths):
+            return (f"its lengths are {runs.values!r}, and a run's length is a number of trials, "
+                    f"from 1")
+        bounds = (min(lengths), max(lengths))
+    if bounds[0] < 1:
+        return (f"it can give {bounds[0]!r}, and a run is at least 1 trial long, each length its "
+                f"draw rounded down; draw from 1 up")
+    return None
+
+
+def _drawn_directions(task: Task) -> frozenset[str]:
+    """**The direction settings whose every recorded number the rig writes** (the C3 plan's call
+    39): each setting a `Polar` reads as its direction (`variation.directions`) that offers no
+    choices, starts at none or inside [0, 360), and is drawn in every block every run of the task
+    can play -- the plain run's one block, under the task's draws, and each plan's, its factorial
+    expanded -- by its block's draw, the task's, or each condition's own range, with no condition
+    giving it a value (`_drawn_in`). Each number the record writes for it is then drawn and
+    written from 0 to 360, so the warning `direction-outside-0-360`, which reads its declared
+    range alone, is about nothing; a person's live value is written as given, as anywhere."""
+    declared = {param.name: param for param in task.params}
+    plain = Block("session", [Condition("session", {}, target=1)])
+    blocks = [plain, *(expanded(block) for plan in task.plans.values() for block in plan.blocks)]
+    return frozenset(
+        name for name in directions(task)
+        if name in declared and not declared[name].choices
+        and (declared[name].start is None or 0 <= declared[name].start < 360)
+        and all(_drawn_in(task, block, name) for block in blocks)
+    )
+
+
+def _drawn_in(task: Task, block: Block, name: str) -> bool:
+    """Whether every trial of `block` draws `name`: no condition gives it a value, and the block's
+    draw or the task's is in force there (`variation.in_force`), or each condition draws it from
+    its own range (`variation.own_ranges`)."""
+    conditions = [condition for condition in block.conditions if isinstance(condition, Condition)
+                  ] if isinstance(block.conditions, list) else []
+    if any(isinstance(condition.values, dict) and name in condition.values
+           and name not in own_ranges(condition) for condition in conditions):
+        return False
+    return name in in_force(task, block) or all(
+        name in own_ranges(condition) for condition in conditions)
+
+
+def _found_by_faults(task: Task) -> list[Finding]:
+    """**An array says what names its target by one of `task.FOUND_BY`** (the PI, 2026-10-31, on
+    the engine C3 plan's Appendix B, item 17, "Refuse only odd-one-out tasks"), refused at load
+    otherwise, `bad-array`: its word decides whether a target that can look like its distractors,
+    or looks that swap, are refused or only warned (`impossible`), so a misspelling would quietly
+    soften a pop-out search's refusal. Every array a `Show` or an `Update` gives, as written or
+    among a setting's choices (`task.array_actions`), each stimulus and word said once."""
+    found: list[Finding] = []
+    said: set[tuple] = set()
+    for structure in task.structures.values():
+        if not isinstance(structure, Trial):
+            continue
+        for _, name, _, array in array_actions(structure):
+            word = array.found_by
+            if word in FOUND_BY or (name, repr(word)) in said:
+                continue
+            said.add((name, repr(word)))
+            found.append(Finding("bad-array", (
+                f"array {name!r} is found by {word!r}, and an array's found_by is one of "
+                f"{', '.join(map(repr, FOUND_BY))}: 'look', its target the odd one out by its "
+                f"look, or 'cue', something else the trial shows naming it")))
+    return found
 
 
 def _head_faults(task: Task, deployment: "Deployment | None") -> list[Finding]:
@@ -4939,7 +5673,9 @@ def _condition_spellings(task: Task) -> list[Finding]:
     task holds as surely as a choice does): a condition giving a setting used as a direction a
     number outside [0, 360), or one used as an eccentricity a number below 0, or a whole position
     a `Polar` below 0, is warned once per setting and condition, in every kind, its reason from
-    where the setting is used in any of the task's structures (`_spelling_uses`). Plans that are
+    where the setting is used in any of the task's structures (`_spelling_uses`), a factorial's
+    conditions included (`variation.expanded`; engine build C3): a level is a value the task
+    gives. A condition's own range is drawn, and its draws written from 0 to 360. Plans that are
     no plans are `_plan_faults`', and read here only as far as they are."""
     several = len(task.structures) > 1
     uses: dict[tuple[str, str], list[tuple[str, str]]] = {}
@@ -4958,7 +5694,8 @@ def _condition_spellings(task: Task) -> list[Finding]:
 
     for plan_name, plan in task.plans.items():
         for block in plan.blocks if isinstance(plan.blocks, (list, tuple)) else ():
-            conditions = getattr(block, "conditions", ())
+            conditions = getattr(expanded(block) if isinstance(block, Block) else block,
+                                 "conditions", ())
             for condition in conditions if isinstance(conditions, (list, tuple)) else ():
                 values = getattr(condition, "values", None)
                 if not isinstance(values, dict):
