@@ -297,8 +297,10 @@ def _ends(draw: Distribution, declared: Param | None, direction: bool = False) -
     of no numbers none), each one outside the declared range (`check._outside`). None for a
     setting the task does not declare, nor for a draw the load refuses (`check.undrawable`),
     which no run takes. **A direction setting** (`direction`; `variation.directions`) is asked of
-    `undrawable` as the load asks, and its extremes are judged on the 0 to 360 circle it is shown
-    on, so a draw across 0 inside a range declared [0, 360] is no warning."""
+    `undrawable` as the load asks, and its draw is judged on the circle by arc containment
+    (`variation.extremes`; the final whole-branch review's Minor 1), so a draw across 0 inside a
+    range declared [0, 360], or in signed terms [-180, 180], is no warning, and an end past it is
+    given as far past as the draw reaches, the range widened to it then holding the draw."""
     if declared is None or undrawable(draw, declared, direction=direction) is not None:
         return []
     return [end for end in extremes(draw, declared, direction=direction)

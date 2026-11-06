@@ -541,29 +541,38 @@ def test_possible_judges_a_hand_back_a_range_and_a_whole_revert(tmp_path):
                              handed=frozenset({"target_hold"})) is None
 
 
-@pytest.mark.parametrize("high, shown", [(360.0, None), (180.0, "315")])
+@pytest.mark.parametrize("low, high, draw, shown", [
+    (0.0, 360.0, "Uniform(-45.0, 45.0, repeat=FRESH)", ()),
+    (-180.0, 180.0, "Uniform(-45.0, 45.0, repeat=FRESH)", ()),
+    (0.0, 180.0, "Uniform(-45.0, 45.0, repeat=FRESH)", ("-45",)),
+    (0.0, 90.0, "Uniform(100.0, 120.0, repeat=FRESH)", ("100", "120")),
+    (-30.0, 30.0, "Uniform(-45.0, 45.0, repeat=FRESH)", ("-45", "45")),
+])
 def test_a_live_value_outside_its_range_widens_a_direction_draw_as_the_runs_start_does(
-    tmp_path, high, shown
+    tmp_path, low, high, draw, shown
 ):
     """The review of Task 12 (Important 1; the controller's ruling that the live check widens a
-    draw by the one rule a run's start does): a direction drawn `Uniform(-45, 45)` is the angles
-    315 to 45, judged on the circle it is shown on. Declared [0, 360], it is inside its range, so a
-    person's `fix_hold` of 2.5, outside its own, writes that setting's warning alone and no
-    `target_dir` row; declared [0, 180], it reaches past at 315, which the start warns and the
-    live check says too, once, and no `direction-outside-0-360` row (the load suppresses that
-    warning for a drawn direction). A setting that is no direction keeps its live warning."""
+    draw by the one rule a run's start does), with the final whole-branch review's Minor 1 (the
+    controller's revised ruling): a direction draw is judged against its declared range on the
+    circle by arc containment. `Uniform(-45, 45)`, declared [0, 360] or in signed terms [-180,
+    180], is inside the whole turn, so a person's `fix_hold` of 2.5, outside its own, writes that
+    setting's warning alone and no `target_dir` row. Declared [0, 180] it reaches past at -45, as
+    drawn; declared [-30, 30], at -45 and 45; and `Uniform(100, 120)`, declared [0, 90], is wholly
+    past it, at 100 and 120. Each the start warns and the live check says too, once, and no
+    `direction-outside-0-360` row (the load suppresses that warning for a drawn direction). A
+    setting that is no direction keeps its live warning."""
     from test_draws_in_runs import _directed, _right, _rows as _run_rows
     from test_draws_in_runs import _session as _run_session, _spec as _run_spec
     from wl_xcon import preflight
     from wl_xcon.cli import _load_allocation
     from wl_xcon.photometry import SRGB as _SRGB
 
-    path = _directed(tmp_path, '{"target_dir": Uniform(-45.0, 45.0, repeat=FRESH)}',
+    path = _directed(tmp_path, f'{{"target_dir": {draw}}}',
                      plans='{"p": Plan([Block("drawn", [Condition("c", {}, target=6)])])}')
     text = path.read_text()
     old = 'Param("target_dir", unit="deg", low=-180.0, high=180.0, start=0.0)'
     assert text.count(old) == 1
-    path.write_text(text.replace(old, f'Param("target_dir", unit="deg", low=0.0, high={high},'
+    path.write_text(text.replace(old, f'Param("target_dir", unit="deg", low={low}, high={high},'
                                       f' start=0.0)'))
     task = _load_task(path)
     start = [f for f in preflight.beyond(task, {}, _load_allocation(Path("tasks/allocation.py")),
@@ -579,11 +588,10 @@ def test_a_live_value_outside_its_range_widens_a_direction_draw_as_the_runs_star
     live = [row for row in rows if "target_dir" in row["detail"]]
     assert [row["code"] for row in live] == [f.code for f in start]
     assert [row["code"] for row in rows if "fix_hold" in row["detail"]] == ["outside-range"]
-    if shown is None:
-        assert start == [] and live == []
-    else:
-        assert [row["code"] for row in live] == ["outside-range"]
-        assert f"target_dir' is {shown}" in live[0]["detail"]
+    assert [row["code"] for row in live] == ["outside-range"] * len(shown)
+    for details in ([f.detail for f in start], [row["detail"] for row in live]):
+        assert [f"target_dir' is {end} deg" in detail
+                for detail, end in zip(details, shown)] == [True] * len(shown)
 
 
 def _choosing_task(folder: Path) -> Path:

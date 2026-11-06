@@ -151,9 +151,15 @@ def extremes(distribution: object, declared: Param | None = None, *,
     check widened to an extreme reasons over every value between it and the declared range, so the
     two ends are all it needs. For a distribution the load accepts (`check.undrawable`).
 
-    **A direction** (`direction=True`, for a setting `directions` names) is judged on the circle it
-    is shown on, 0 to 360 (`geometry.shown_direction`; the controller's ruling on the review of
-    Task 11): `Uniform(-45, 45)` gives 315 and 45, inside a setting declared [0, 360]."""
+    **A direction** (`direction=True`, for a setting `directions` names) is judged on the circle
+    by arc containment (the final whole-branch review of engine build C3, Minor 1; the
+    controller's revised ruling, which replaces Task 11's turning of each end to 0 to 360): the
+    draw's arc, from its least up to its most as drawn, against its declared arc (`_on_circle`); a
+    set's values each their own point on the circle. A draw the declared arc holds gives ends
+    inside the declared numbers, so nothing is widened: `Uniform(-45, 45)` gives 315 and 45
+    against [0, 360], and -45 and 45 against [-180, 180]. One it does not hold gives its ends
+    where the draw reaches least past them, so the end past is as far past as the draw really
+    reaches: -45 against [0, 180]; 100 and 120 for `Uniform(100, 120)` against [0, 90]."""
     ends = bounds_of(distribution, declared)
     if ends is None:
         values = values_of(distribution)
@@ -162,10 +168,36 @@ def extremes(distribution: object, declared: Param | None = None, *,
         numbers = [value for value, weight in zip(values, weights)
                    if weight > 0 and isinstance(value, (int, float))
                    and not isinstance(value, bool)]
+        if direction:
+            numbers = [_on_circle(number, number, declared)[0] for number in numbers
+                       if math.isfinite(number)]
         ends = (min(numbers), max(numbers)) if numbers else ()
-    if direction:
-        ends = tuple(shown_direction(end) for end in ends if math.isfinite(end))
+    elif direction:
+        ends = _on_circle(*ends, declared)
     return tuple(dict.fromkeys(end for end in ends if math.isfinite(end)))
+
+
+def _on_circle(low: float, high: float, declared: Param | None) -> tuple:
+    """**A direction draw's arc, from `low` up to `high` as drawn, read against the arc its
+    setting declares** (`extremes`; the final whole-branch review's Minor 1), and moved only by
+    whole turns, so it stays the same directions. Against a declared arc of the whole turn -- a
+    span of 360 or more, or a side open -- every end is on it, and each is given a whole number of
+    turns into the declared numbers: from the lowest declared up, or a turn below the highest.
+    Against any other, the arc is given where it reaches least past the declared numbers, inside
+    them where the declared arc holds it; that is the turn about which it is centred on them, or
+    one either side, since how far it reaches past only grows as it is moved further away."""
+    first = None if declared is None else declared.low
+    last = None if declared is None else declared.high
+    if not (_finite(first) and _finite(last)) or last - first >= 360:
+        base = first if _finite(first) else last - 360 if _finite(last) else 0
+        return tuple(base + (end - base) % 360 for end in (low, high))
+    centred = round(((first - low) + (last - high)) / 720)
+
+    def past(turns: int) -> float:
+        return max(0.0, first - (low + 360 * turns)) + max(0.0, high + 360 * turns - last)
+
+    turns = min((centred, centred - 1, centred + 1), key=past)
+    return (low + 360 * turns, high + 360 * turns)
 
 
 #: **The numbers that place a draw's values on its setting's axis**, by kind (the PI, 2026-10-31,

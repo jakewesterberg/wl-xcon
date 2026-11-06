@@ -23,6 +23,8 @@ import json
 import time
 from pathlib import Path
 
+import pytest
+
 import _sessions
 from _rig import DIRECT, PATH as RIG_FILE
 from wl_xcon import check, preflight, service, variation
@@ -470,16 +472,59 @@ def test_a_direction_drawn_across_zero_is_judged_on_the_circle_it_is_shown_on():
     """The review of Task 11 (fix round 1, minor 1; the controller's ruling): a direction setting
     declared [0, 360] and drawn `Uniform(-45, 45)` -- the form `check.undrawable` recommends -- is
     the angles 315 to 45, all inside it, so a run's start warns nothing, as for the same angles
-    written `Weighted((350, 10))`; `variation.extremes(direction=True)` gives the ends as shown. A
-    setting that is no direction keeps its warning, and a direction really outside its range is
-    still warned."""
+    written `Weighted((350, 10))`; `variation.extremes(direction=True)` gives the ends in the
+    declared range's numbers (the final review's M1 ruling): as shown for [0, 360], or with no
+    range declared, and as drawn for [-180, 180]. A setting that is no direction keeps its
+    warning, and a direction really outside its range is still warned."""
     spun = Param("target_dir", unit="deg", low=0.0, high=360.0)
+    signed = Param("target_dir", unit="deg", low=-180.0, high=180.0)
     assert variation.extremes(Uniform(-45.0, 45.0), spun, direction=True) == (315.0, 45.0)
+    assert variation.extremes(Uniform(-45.0, 45.0), direction=True) == (315.0, 45.0)
+    assert variation.extremes(Uniform(-45.0, 45.0), signed, direction=True) == (-45.0, 45.0)
+    assert variation.extremes(Weighted((350.0, 10.0), (1, 1)), spun, direction=True) == (
+        10.0, 350.0)
+    assert variation.extremes(Weighted((350.0, 10.0), (1, 1)), signed, direction=True) == (
+        -10.0, 10.0)
     assert variation.extremes(Uniform(-45.0, 45.0), spun) == (-45.0, 45.0)
     assert preflight._ends(Uniform(-45.0, 45.0), spun, direction=True) == []
     assert preflight._ends(Uniform(-45.0, 45.0), spun) == [-45.0]
     half = Param("target_dir", unit="deg", low=0.0, high=180.0)
-    assert preflight._ends(Uniform(-45.0, 45.0), half, direction=True) == [315.0]
+    # Past [0, 180] at -45 as drawn (the final review's M1 ruling): widened to -45 the range
+    # reads -45 to 180, which holds the draw; widened to 315 it would read 0 to 315, which
+    # leaves out the 315 to 360 drawn and takes in the 180 to 315 never drawn.
+    assert preflight._ends(Uniform(-45.0, 45.0), half, direction=True) == [-45.0]
+
+
+@pytest.mark.parametrize("low, high, draw, past", [
+    # The four the final review's M1 ruling names: a range declared in signed terms or from 0 to
+    # 360 is the whole turn, so a draw across 0 is inside either; a draw wholly past its range
+    # (Task 11's deferred test) and one past a signed range on both sides are warned.
+    (-180.0, 180.0, Uniform(-45.0, 45.0), []),
+    (0.0, 360.0, Uniform(-45.0, 45.0), []),
+    (0.0, 90.0, Uniform(100.0, 120.0), [100.0, 120.0]),
+    (-30.0, 30.0, Uniform(-45.0, 45.0), [-45.0, 45.0]),
+    # Inside, or past, only a whole turn on: the end past is given where the draw really reaches.
+    (-180.0, -90.0, Uniform(190.0, 260.0), []),
+    (-180.0, -90.0, Uniform(170.0, 200.0), [-190.0]),
+    (0.0, 90.0, Uniform(0.0, 360.0), [360.0]),
+    # A range open on a side is the whole turn.
+    (0.0, None, Uniform(-45.0, 45.0), []),
+    (None, 0.0, Uniform(-45.0, 45.0), []),
+    # Each value of a set is its own point on the circle: 350 is -10.
+    (-30.0, 30.0, Weighted((350.0, 10.0), (1, 1)), []),
+    (-30.0, 30.0, Weighted((350.0, 100.0), (1, 1)), [100.0]),
+])
+def test_a_direction_draw_is_judged_against_its_declared_range_by_arc_containment(
+        low, high, draw, past):
+    """The final whole-branch review of engine build C3, Minor 1 (the controller's revised ruling):
+    a direction's draw is judged against its declared range on the circle by arc containment --
+    the declared arc, the whole turn where its span is 360 or more, holding the draw's arc, from
+    its ends as drawn -- so a range declared in signed terms, [-180, 180], no longer warns its own
+    `Uniform(-45, 45)` "outside" at 315, at a run's start or live, and one declared [0, 360] still
+    does not. A setting that is no direction is judged as before, on the numbers."""
+    declared = Param("target_dir", unit="deg", low=low, high=high)
+
+    assert preflight._ends(draw, declared, direction=True) == past
 
 
 def test_a_draw_the_load_refuses_as_a_direction_is_not_also_widened():
