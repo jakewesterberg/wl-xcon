@@ -662,8 +662,8 @@ code versions, plot declaration, parameter-change log), and a DONE marker confor
 no route in **for the application layer**, and `wl-preproc` enforces "never initiates a
 connection" with an AST guardrail. **One narrow exception exists since ADR-0009
 (2026-09-20): a lab host has a route to wl-works on UDP 123 only, to synchronize its
-wall clock over NTP against `ntp.wl.works`** — the hostname is the PI's, named
-2026-09-20 — because welfare marks are now clock times and the daily fluid figure
+wall clock over NTP against `time.wl.works`** — the hostname was the PI's, named
+2026-09-20 as `ntp.wl.works` and changed on 2026-11-04 to wl.works' own `time.wl.works` (ADR-0009) — because welfare marks are now clock times and the daily fluid figure
 spans deployments that must agree what time it is, and nothing did. **That route does
 not exist yet**: naming the server settled which system serves the time and not how a
 lab host reaches it, and the ask is open in `docs/pending-wl-works-amendments.md`. Be precise about
