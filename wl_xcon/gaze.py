@@ -411,8 +411,9 @@ class Tracked:
         review's M1): every one of the state's asking on that frame sees it, a clock's and an
         edge's alike, and it is seen once, on that frame. **`SaccadeTo` takes the landing**, so
         one saccade is one response; **and the carried saccade's** (`began`), whose onset ended
-        the state before, or which was under way as the eye left a window into this state, if the
-        detector puts its eye at rest on the state's first frame or after (the review's I1). The
+        the state before, or which was under way as the eye left a window into this state, begun
+        in the state the exit ended or carried into it (the controller's ruling of 2026-11-06), if
+        the detector puts its eye at rest on the state's first frame or after (the review's I1). The
         carried saccade is never a `SaccadeOnset`'s: its onset was in the state before, whether
         the detector confirmed it there or, after an exit, here.
 

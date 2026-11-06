@@ -267,7 +267,7 @@ def test_the_onset_edge_survives_exactly_one_question():
 
 
 #: Every buffer `Detector` keeps (XC-414).
-_BUFFERS = ("_x", "_y", "_t", "_present", "_vx", "_vy", "_sorting")
+_BUFFERS = ("_x", "_y", "_t", "_present", "_ux", "_uy", "_uz", "_local", "_vx", "_vy", "_sorting")
 
 
 def test_the_buffer_stays_bounded_over_a_long_trial():
