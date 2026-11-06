@@ -2147,7 +2147,10 @@ def test_a_live_write_is_staged_and_applied_at_a_trial_boundary(tmp_path):
 
 def test_a_live_write_is_recorded_with_its_origin(tmp_path):
     """One validated write path whatever the origin, and the actor recorded -- half
-    a guarantee otherwise (S8 §3.3)."""
+    a guarantee otherwise (S8 §3.3). The row as the change log writes it since engine build C3
+    (XC-288 §3.4): its change id, kind, instant, first trial and meaning beside them."""
+    from wl_xcon.record import _local
+
     session = _session(_spec(tmp_path, trials=4))
     session.set("fix_hold", 0.5, by=Box("console"))
 
@@ -2161,8 +2164,12 @@ def test_a_live_write_is_recorded_with_its_origin(tmp_path):
     ]
     assert changes == [
         {
-            "sequence": 1, "name": "fix_hold", "was": 0.3, "now": 0.5,
-            "by": {"kind": "box", "name": "console"}, "run": 0, "event_code": 4130,
+            "change": 1, "kind": "set", "sequence": 1, "name": "fix_hold", "was": 0.3,
+            "now": 0.5, "by": {"kind": "box", "name": "console"}, "at": WALL_NOW,
+            "at_local": _local(WALL_NOW), "trial_number": 1, "run": 0,
+            "meaning": {"kind": "clear-cut", "role": "criterion", "raising": "harder",
+                        "relative_to": None, "went": "harder", "step": 0.2},
+            "offered": [], "odds": None, "event_code": 4130,
         }
     ]
 

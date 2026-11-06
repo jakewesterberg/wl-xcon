@@ -50,7 +50,7 @@ from wl_xcon.bounds import Bounds, Exceeded, _finite
 from wl_xcon.check import beyond_range, check_task, unplaced
 from wl_xcon.cli import _clock, _load_allocation, _load_task, _printable, _shown
 from wl_xcon.codes import BLOCK_END, RUN_END_MARKER, TRIAL_END, TRIAL_START, Allocation
-from wl_xcon.declarations import canonical, content_hash
+from wl_xcon.declarations import canonical, content_hash, resolved
 from wl_xcon.dio import Absent as NoCard
 from wl_xcon.encode import (
     TRIAL_NUMBER,
@@ -84,6 +84,8 @@ from wl_xcon.run import LONGEST_TRIAL_S, run_trial
 from wl_xcon.task import (
     COUNTED, OWED, SPENT, UNPAID, Entered, Exited, Param, Plan, SaccadeTo, Task, Trial,
 )
+from wl_xcon.task import EASIER, HARDER, NOT_DIFFICULTY, Background, Distribution
+from wl_xcon.variation import easier
 from wl_xcon.warnlist import PAUSE_UNMARKED, Entry, of_findings, sentence
 from wl_xcon.welfare import (
     OUT_OF_CAGE,
@@ -521,6 +523,11 @@ class Session:
     #: `Actor` -- see `staged`.
     _staged: list = field(init=False, default_factory=list, repr=False)
     _sequence: int = field(init=False, default=0, repr=False)
+    #: **The last change id the session gave** (XC-288 §3.4; engine build C3's spec §8): one for
+    #: each act in the change log -- a person's value, a clear, a switch -- from 1, never 0. Kept
+    #: for the session beside `_sequence`, which a run's reset leaves alone, and restored by
+    #: `resume` from the largest in the log, so no id names two acts.
+    _change: int = field(init=False, default=0, repr=False)
     #: **Where each trial sits in the session at every level** (session-levels spec
     #: §3): its ten position numbers, `trial_number` (XC-155) among them, and the
     #: outcome counts the strip shows at the session, task and block levels. Kept for
@@ -830,6 +837,8 @@ class Session:
             self._warnings[entry.key] = (entry, accepted_by, accepted_at)
         self.run_index = restoration.run_index
         self._sequence = restoration.sequence
+        # And the change log's ids (engine build C3's spec §8), so its next act takes a new one.
+        self._change = restoration.change
         # How its last run ended (the final review's M1), so `end_runs` never says "before
         # any run" of a session that ran one before its process stopped.
         self.stopped_because, self.stop_kind = restoration.stopped_because, restoration.stop_kind
@@ -1640,11 +1649,12 @@ class Session:
         2026-10-11: "manually advance beyond or clear a specific trial in the count"), between
         trials or while paused: the open block's scheduler forgives it (`Scheduler.clear`), the
         run's end row records the shortfall with who cleared it, and `controls.jsonl` the control,
-        how many it cleared and what the condition still owes. **Refused with the sentence**, and
-        nothing changed, where the block owes the condition nothing or has no such condition. A
-        clear starts the condition's failed tries in a row over (the PI, 2026-10-18). **The wire's
-        rule again**, so a command that reached the session another way meets it: a `rest` that is
-        not true or false is refused with its sentence, as `_schedule` does."""
+        how many it cleared and what the condition still owes; since engine build C3 the change
+        log too, what it owed before and after (`_logged`; XC-363). **Refused with the
+        sentence**, and nothing changed, where the block owes the condition nothing or has no such
+        condition. A clear starts the condition's failed tries in a row over (the PI, 2026-10-18).
+        **The wire's rule again**, so a command that reached the session another way meets it: a
+        `rest` that is not true or false is refused with its sentence, as `_schedule` does."""
         if not isinstance(command.rest, bool):
             self._refuse(
                 "clear", command.by,
@@ -1662,21 +1672,27 @@ class Session:
             f"the rest, {cleared} trial{'' if cleared == 1 else 's'}," if command.rest
             else "one trial"
         )
-        self._control(
+        at = self._control(
             "clear", command.by,
             f"cleared {what} of {command.condition} in block {scheduler.block.name}; it owes "
             f"{owed}",
             index, condition=command.condition, block=scheduler.block.name, rest=command.rest,
             cleared=cleared, owed=owed,
         )
+        # What the condition owed before: what it owes now and what was cleared, which
+        # `Scheduler.clear` forgives exactly.
+        self._logged("clear", "owed", owed + cleared, owed, command.by, at,
+                     condition=command.condition, block=scheduler.block.name, rest=command.rest,
+                     cleared=cleared)
 
     def _drum(self, command, index: int) -> None:
         """**Switch drumming** (`link.Drum`; the PI, 2026-10-11: "switched on per block or run by
         the trainer", and recorded): the scheduler drums from the next trial (`Scheduler.drum`),
         `controls.jsonl` records the switch with who made it, and every trial row says whether
-        drumming was on as it was drawn. Engine build C3's change log takes it over, with its
-        reason. **The wire's rule again**, so a command that reached the session another way meets
-        it: a `scope` that is none of `DRUM_SCOPES` is refused with its sentence. `was` is what
+        drumming was on as it was drawn. Since engine build C3 the change log records it too
+        (`_logged`; XC-363), its reason build C4's (TRN-04). **The wire's rule again**, so a
+        command that reached the session another way meets it: a `scope` that is none of
+        `DRUM_SCOPES` is refused with its sentence. `was` is what
         drumming read for the block the switch is for before it (`Scheduler.drumming_switched`),
         which is the next block's when the switch is carried to it."""
         if command.scope not in DRUM_SCOPES:
@@ -1690,16 +1706,19 @@ class Session:
         was = scheduler.drumming_switched
         # The block it is for: this one, or the next when this one's end rule is already met.
         block = scheduler.drum(command.scope)
-        self._control(
+        at = self._control(
             "drum", command.by, f"drumming {command.scope} in block {block}",
             index, scope=command.scope, block=block, was=was, now=scheduler.drumming,
         )
+        self._logged("drum", "drumming", was, scheduler.drumming, command.by, at,
+                     scope=command.scope, block=block)
 
     def _train(self, command, index: int) -> None:
         """**Switch a training setting** (`link.Training`; the PI, 2026-10-18): the training aid
         *clear*, off by default, or the setting "first answers only" for a percentage rule under
         drumming, on or off for the rest of the run (`Scheduler.train`); `controls.jsonl` records
-        it with who switched it. In every kind of session ("Allow it, with a warning": a training
+        it with who switched it, and since engine build C3 the change log too (`_logged`; XC-363).
+        In every kind of session ("Allow it, with a warning": a training
         aid is meant for training sessions and works in the others, the console warning while one
         is on and every trial's row marking it). **A switch to the value already set is refused**,
         with its sentence, as a pause of a paused session is."""
@@ -1726,11 +1745,13 @@ class Session:
             self._refuse("training", command.by, f"{name} is already {state}, so nothing changed")
             return
         scheduler.train(command.setting, command.on)
-        self._control(
+        at = self._control(
             "training", command.by,
             f"{name} {'on' if command.on else 'off'} for the rest of the run",
             index, setting=command.setting, was=was, now=command.on,
         )
+        self._logged("training", command.setting, was, command.on, command.by, at,
+                     setting=command.setting)
 
     def _move(self, command, index: int, step: str) -> None:
         """**A person moves the run on to its next block, or back one** (`link.NextBlock`,
@@ -2197,6 +2218,14 @@ class Session:
         lists every setting change, with who made it), as `set`, naming `index`,
         the first trial it applies to: its staged row leaves `Telemetry.staged`
         here, and the feed is where a console still sees it.
+
+        **Each row is an act of its own in the change log** (XC-288 §3.4; engine build C3's
+        spec §8): a change id of its own, assigned here where it applies and never in `set`,
+        which stays as it was; one `PARAM_CHANGED` strobe with its `sequence`; then its row,
+        kind `set` (`record.SessionRecord.change`), at the instant it applied, naming the next
+        trial to start as the first it applies to, with the setting's meaning (`_meaning`; none
+        for a ceiling's), the value written as given; then its line on the feed, at that instant.
+        A bounded row still goes through `bounds.set`, in the same pass as its strobe and row.
         """
         if not self._staged:
             return
@@ -2204,8 +2233,11 @@ class Session:
         # raises here, not after the first value is applied and its row written (XC-321
         # ask 1; the orphan row a `wlx run` session used to leave).
         code = self.allocation.code_for("PARAM_CHANGED")
+        # The next trial to start (`Levels.start_trial`), numbered as its line will be.
+        trial_number = self._levels.trials + 1
         for name, was, now, by, bounded in self._staged:
             self._sequence += 1
+            self._change += 1
             if bounded:
                 self.spec.bounds.set(name, now, by=by)
             else:
@@ -2216,9 +2248,13 @@ class Session:
             # Strobed before its row is written, as every other writer does: a card that
             # faults here leaves no row naming a code that never went out (XC-321 ask 1).
             self.card.emit(code)
+            at = self.wall_now()
             if self._record is not None:
-                self._record.parameter_change(
-                    self._sequence, name, was, now, by, run=self.run_index, event_code=code
+                self._record.change(
+                    change=self._change, kind="set", name=name, was=was, now=now, by=by, at=at,
+                    trial_number=trial_number, run=self.run_index,
+                    meaning=None if bounded else self._meaning(name, was, now),
+                    event_code=code, sequence=self._sequence,
                 )
             # A pair as a position only for a setting whose choices declare one (XC-401's fix
             # round, M2): a ceiling's name is no setting the task declares.
@@ -2226,11 +2262,72 @@ class Session:
             self._feed(
                 "set",
                 by,
-                self.wall_now(),
+                at,
                 f"{name} {_shown(was, choices)} → {_shown(now, choices)}, from trial {index}"
                 + ("" if bounded else _overriding(self._scheduler.blocks, name)),
             )
         self._staged.clear()
+
+    def _meaning(self, name: str, was: object, now: object) -> dict | None:
+        """**What a change of `name` from `was` to `now` means**, as its change row writes it
+        (XC-288 §3.4 and §4.1; TRN-03): the setting's resolved meaning (`declarations.resolved`),
+        its `kind`, `role`, `raising` and `relative_to` as written (`"background"` for the trial's
+        background), with `went`, the way this change went by that meaning, `"easier"` or
+        `"harder"` (for an expected setting the expected way, never a fact), and `step`, `now`
+        minus `was` in the setting's unit. **`None` for a name that is no setting of the run's
+        task**, whose row writes no meaning.
+
+        **`went`** is `variation.easier` read both ways round: easier one way is `"easier"`, the
+        other way `"harder"`. **A choice, or a value that is not a number, has no order** (TRN-11:
+        a task's own meaning for one "reads on changing it"), so a change goes the way its
+        `raising` says, as `easier` reads a choice, where it can read one at all. Null where it
+        cannot be read (relative to the background, or to a setting holding no number), for a
+        setting that is not a difficulty setting, for a value set to itself, and for two numbers
+        as far from what the meaning reads relative to. A meaning relative to another setting
+        reads that setting's value in the run's values as this row applies. **`step`** is null
+        where either value is not a number."""
+        found = None if self._task is None else resolved(self._task).get(name)
+        if found is None:
+            return None
+        meaning = found[0]
+        relative = meaning.relative_to
+        reference = self.spec.values.get(relative) if isinstance(relative, str) else None
+        choices = bool(self._declared[name].choices)
+        numbers = all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (was, now))
+        went = None
+        if meaning.kind != NOT_DIFFICULTY and was != now:
+            if choices or not numbers:
+                if easier(meaning, now, was, reference, choices=choices) is not None:
+                    went = meaning.raising
+            elif easier(meaning, now, was, reference):
+                went = EASIER
+            elif easier(meaning, was, now, reference):
+                went = HARDER
+        return {
+            "kind": meaning.kind,
+            "role": meaning.role,
+            "raising": meaning.raising,
+            "relative_to": "background" if isinstance(relative, Background) else relative,
+            "went": went,
+            "step": now - was if numbers else None,
+        }
+
+    def _logged(self, kind: str, name: str, was: object, now: object, by: Actor | None,
+                at: float, **detail: object) -> None:
+        """**A clear or a switch in the change log too** (XC-363; engine build C3's spec §8): its
+        control row is in `controls.jsonl` as engine build C2a writes it (`_control`), and this
+        row beside it, of `kind`, with a change id of its own, `name` what it moved, the control
+        row's instant, the next trial to start as the first it applies to, and no meaning, since
+        it names no task setting. **No `sequence`**: it strobes nothing. Both rows until
+        wl-preproc reads and times the change log's (XC-442; the C3 ask in
+        `docs/pending-wl-preproc-amendments.md`)."""
+        self._change += 1
+        if self._record is not None:
+            self._record.change(
+                change=self._change, kind=kind, name=name, was=was, now=now, by=by, at=at,
+                trial_number=self._levels.trials + 1, run=self.run_index, meaning=None,
+                event_code=None, **detail,
+            )
 
     # --- running ----------------------------------------------------------
 
@@ -2243,6 +2340,17 @@ class Session:
     _unresolved_said: frozenset = field(init=False, default=frozenset(), repr=False)
     #: `_task`'s settings by name, built once as it is taken (`_take`).
     _declared: dict[str, Param] = field(init=False, default_factory=dict, repr=False)
+    #: **The run's own values** (engine build C3): the task's starting values under the run's
+    #: given ones, as the run in progress started, before any live edit: what a hand-back puts a
+    #: setting back to, and what an eased trial is judged against where no condition gives it
+    #: (`Session._hand_back`, `_eased`: the engine C3 plan's Tasks 13 and 15).
+    _run_values: dict = field(init=False, default_factory=dict, repr=False)
+    #: **The draws a person changed live in the run in progress** (engine build C3's spec §6, Q7b):
+    #: each draw's key (`variation.in_force`'s) to the distribution in force and the change id that
+    #: put it there. Empty as each run starts; filled only by a live range (`Session._range`, the
+    #: engine C3 plan's Task 13).
+    _ranges: dict[tuple, tuple[Distribution, int]] = field(
+        init=False, default_factory=dict, repr=False)
 
     def _unwritable(self, task: Task, run: RunSpec, values: dict) -> str | None:
         """**What the record would refuse of a run, said before the run starts** (REC-27; the
@@ -2639,6 +2747,9 @@ class Session:
         # The settings edited live in this run, which win over a condition's (engine spec §14.7).
         self._edited = frozenset()
         self._unresolved_said = frozenset()
+        # The run's own values, before any live edit, and no draw changed live (engine build C3).
+        self._run_values = {**starts, **given}
+        self._ranges = {}
 
         # Counted by each condition's structure's table (engine spec §16.1; engine build C2a; each
         # condition naming its structure since C2b), which a block's own replaces.

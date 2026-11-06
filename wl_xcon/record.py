@@ -62,9 +62,10 @@ REFUSAL_LOG_LIMIT = 50
 #: Operator acts on a welfare input that is not a parameter and not a refusal (PI,
 #: 2026-09-20). One row per act, in the session directory.
 #:
-#: **Why its own file rather than one of the two beside it.** A row in
-#: `parameter_changes.jsonl` carries a `sequence` whose entire purpose is to join it
-#: to a `PARAM_CHANGE` escape on the recording clock -- and the out-of-cage marks are
+#: **Why its own file rather than one of the two beside it.** A row of
+#: `parameter_changes.jsonl` that strobed `PARAM_CHANGED` (`STROBED`) carries a `sequence`
+#: whose entire purpose is to join it to a `PARAM_CHANGE` escape on the recording clock -- and
+#: the out-of-cage marks are
 #: deliberately *not* event-coded (PI, 2026-09-20, closing S8 open item 8), so such a
 #: row would look alignable and be nothing of the kind. `refusals.jsonl` is for writes
 #: that did **not** happen, is capped at `REFUSAL_LOG_LIMIT` against a flooding
@@ -77,7 +78,7 @@ WELFARE_NOTES = "welfare_notes.jsonl"
 #: mark's stamp and its note, a schedule, a cancellation, a scheduled stop firing, and
 #: a manual reward given while paused, with its mL (PI, 2026-09-28).
 #:
-#: **Its own file**, for `WELFARE_NOTES`' reason: a row in `parameter_changes.jsonl`
+#: **Its own file**, for `WELFARE_NOTES`' reason: a strobed row of `parameter_changes.jsonl`
 #: carries a `sequence` for joining to a `PARAM_CHANGED` code, and these join to their
 #: own codes (`PAUSE`, `RESUME`, `OPERATOR_MARK`, `MANUAL_REWARD`, `HEAD_RELEASED`) by
 #: each row's `event_code`, the number its act strobed, or `null` when it strobed nothing
@@ -93,7 +94,25 @@ WELFARE_NOTES = "welfare_notes.jsonl"
 #: the REP port can then pause and resume the session, give manual rewards while it
 #: is paused, schedule, cancel and stop, each a row here, as fast as it can send them,
 #: and nothing caps this file against it.
+#: **A clear, a drumming switch and a training switch are written to the change log too**
+#: (engine build C3's spec §8; XC-363): each a row of its own kind there (`KINDS`), without a
+#: `sequence`, since it strobes nothing, and each still written here exactly as engine build C2a
+#: writes it, until wl-preproc reads and times the change log's rows (XC-442; the C3 ask in
+#: `docs/pending-wl-preproc-amendments.md`).
 CONTROLS = "controls.jsonl"
+
+#: **The change log's kinds** (`parameter_changes.jsonl`; XC-288 §3.4, engine build C3's spec
+#: §8), one row for each setting an act moves (`SessionRecord.change`): a person's value (`set`),
+#: a setting handed back (`hand_back`), a draw's numbers changed live (`range`), each setting a
+#: revert restores (`revert`), and a clear, a drumming switch and a training switch (`clear`,
+#: `drum`, `training`), which `CONTROLS` keeps as well. A row written before engine build C3 has
+#: no `kind`, and is a `set`, the only kind there was (`resume._read`).
+KINDS = ("set", "hand_back", "range", "revert", "clear", "drum", "training")
+
+#: **The kinds that strobe `PARAM_CHANGED`**, once for each row, and so carry its `sequence`, which
+#: joins the n-th such row to the n-th such code (XC-288 §3.4): the first four `KINDS`. A clear and
+#: a switch strobe nothing.
+STROBED = KINDS[:4]
 
 #: One row when each run starts and one when it ends (P4d-2b spec §6.3), joined by
 #: `run`: the task, the allocation and their versions, the values and the bounded values
@@ -569,52 +588,76 @@ class SessionRecord:
                 "at_local": _local(at), "how": how, "run": run,
             }, sort_keys=True) + "\n")
 
-    def parameter_change(
+    def change(
         self,
-        sequence: int,
+        *,
+        change: int,
+        kind: str,
         name: str,
         was: object,
         now: object,
-        by: Actor,
-        run: int | None = None,
-        *,
+        by: Actor | None,
+        at: float,
+        trial_number: int,
+        run: int | None,
+        meaning: dict | None,
         event_code: int | None,
+        sequence: int | None = None,
+        **detail: object,
     ) -> None:
-        """One live parameter change, joined to the recording by `sequence`.
+        """**One row of the change log** (`parameter_changes.jsonl`; XC-288 §3.4, engine build C3's
+        spec §8): one setting one act moved, of one of `KINDS`, from `was` to `now`.
 
-        The `PARAM_CHANGE` escape is to carry that number and nothing else: the values
-        live here (S2 §5.2). **Not yet**: until XC-008, `Session` strobes the
-        payload-less `PARAM_CHANGED` word, so a row joins its code by count, the n-th
-        row to the n-th code -- and since XC-321 ask 1 by `event_code` besides, the number
-        that row strobed (`PARAM_CHANGED`'s), `null` when it strobed nothing and absent on
-        a row written before that. If the two ever disagree the change cannot be placed on
-        the recording clock at all, so the join is the entire point of both halves.
+        - `change` is the act's id, from 1, shared by the rows of one act (a revert's); 0 names
+          no act, and a revert's `moment` reads it as a run's start.
+        - `at` is the instant it applied, on the session's anchored clock, written as the number
+          and as local clock time with its zone, as a control row's is: the rig's bookkeeping, of
+          no stated accuracy (XC-383), never a time on the recording's clock.
+        - `trial_number` is the first trial it applies to, as that trial's line and its
+          `TRIAL_NUMBER` escape number it; `run` the run it happened in.
+        - `meaning` is the setting's declared meaning with the way this change went and its step
+          (`taskd.Session._meaning`), or `None` on a row naming no task setting: a ceiling's, and
+          every clear and switch.
+        - `by` is who made it, an `Actor`, written as `actor.to_map`'s map, or `None`, null.
+        - `offered` is written empty and `odds` null, until a later build and build D fill them
+          (XC-288 §3.4, §4.5).
+        - `event_code` is the number the act strobed, `null` when it strobed nothing (XC-321 ask
+          1). **`sequence` is on a row of the kinds that strobe `PARAM_CHANGED` alone**
+          (`STROBED`): it joins the n-th such row to the n-th such code. The `PARAM_CHANGE`
+          escape is to carry that number and nothing else, the values living here (S2 §5.2);
+          until XC-008 the payload-less word goes out, so the join is by count.
+        - `detail` is the kind's own fields, written as given: a hand-back's `to`, a range's
+          `from` and `block`, a revert's `moment`, and a clear's and a switch's control-row
+          fields (`CONTROLS`).
 
-        `by` records the origin -- console, control API, or the task -- because one
-        validated write path with an unrecorded actor is only half the guarantee.
-
-        `run` is the run it happened in: `taskd` always passes it, since a session holds
-        several and each numbers its own changes from the session's one sequence.
+        A value is written as given, a person's -90 as -90 (the PI, 2026-10-30, "Warn at load");
+        `_written` writes what `json` cannot. **A row its readers would refuse is never written**:
+        a kind not in `KINDS`, a `sequence` on a kind outside `STROBED` or none on one inside it,
+        an empty `name` (wl-preproc leaves out a row naming nothing), and a `change` that is not a
+        whole number from 1 each raise `ValueError` here, before the file is opened -- reached by
+        no input, since every caller passes its own literal kind and the session's own counters.
         """
-        with (self.directory / "parameter_changes.jsonl").open(
-            "a", encoding="utf-8"
-        ) as handle:
-            handle.write(
-                json.dumps(
-                    {
-                        "sequence": sequence,
-                        "name": name,
-                        "was": was,
-                        "now": now,
-                        "by": actors.to_map(by),
-                        "run": run,
-                        "event_code": event_code,
-                    },
-                    sort_keys=True,
-                    default=_written,
-                )
-                + "\n"
+        if kind not in KINDS:
+            raise ValueError(f"a change row's kind is one of {', '.join(KINDS)}, not {kind!r}")
+        if (sequence is None) == (kind in STROBED):
+            raise ValueError(
+                f"a {kind} row carries a sequence exactly when its kind strobes PARAM_CHANGED "
+                f"({', '.join(STROBED)}), and it was given {sequence!r}"
             )
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"a change row names what it moved, and {name!r} names nothing")
+        if isinstance(change, bool) or not isinstance(change, int) or change < 1:
+            raise ValueError(f"a change id is a whole number from 1, not {change!r}")
+        row = {
+            "change": change, "kind": kind, "name": name, "was": was, "now": now,
+            "by": actors.to_map_or_none(by), "at": at, "at_local": _local(at),
+            "trial_number": trial_number, "run": run, "meaning": meaning, "offered": [],
+            "odds": None, "event_code": event_code, **detail,
+        }
+        if sequence is not None:
+            row["sequence"] = sequence
+        with (self.directory / "parameter_changes.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, sort_keys=True, default=_written) + "\n")
 
     def control(
         self,
@@ -684,13 +727,13 @@ class SessionRecord:
         *when* within the session, or a reader has only an ordering. `session_seconds`
         is `taskd.Session.now()` -- the frame-derived clock the trials are timed on,
         not a wall clock: a wall clock here would invite someone to align a refusal to
-        the neural recording, which is exactly what `parameter_change`'s `sequence`
+        the neural recording, which is exactly what a change row's `sequence` (`change`)
         exists to do properly and this cannot. (It was also the clock `chair_seconds`
         and the out-of-cage ceiling read, until P4d-2a moved every welfare duration to
         the wall -- spec §10. This row stays on the frame clock: it places a refusal
         among trials, and bounds nothing.)
 
-        No `sequence`, unlike `parameter_change`: that number exists to join a
+        No `sequence`, unlike a change row: that number exists to join a
         change to the `PARAM_CHANGE` escape on the recording clock, and a change
         that did not happen strobes nothing.
 
