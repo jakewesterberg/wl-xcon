@@ -6,9 +6,9 @@ idle frame `wlx taskd` publishes while no session is open (`Idle`, since schema 
 carrying the last closed session's summary since schema 11),
 the commands a console sends back (`SetParameter`, `Stop`, and since b3a the service's
 `OpenSession`, `CheckRun`, `StartRun` and `EndSession`, since XC-026 its
-`ResumeSession`, since engine build C2a `ClearOwed`, `Drum` and `Training`, and since C2b
-`NextBlock` and `BackBlock`; `Command`), the port a session publishes and drains through
-(`Link`, `Absent`, `Simulated`), its wire
+`ResumeSession`, since engine build C2a `ClearOwed`, `Drum` and `Training`, since C2b
+`NextBlock` and `BackBlock`, and since C3 `HandBack`, `SetRange` and `Revert`; `Command`), the
+port a session publishes and drains through (`Link`, `Absent`, `Simulated`), its wire
 encoding (`encode`/`decode`, plus the command-side `_encode_command`/`_decode_command`),
 and the one live transport that carries all of it over a real socket (`ZmqLink`,
 `ZmqConsole`). Nothing here is deferred to a later module -- an earlier version of
@@ -1860,6 +1860,56 @@ class BackBlock:
     by: Actor
 
 
+@dataclass(frozen=True, slots=True)
+class HandBack:
+    """**A person asks that a setting they hold be handed back** (engine build C3; the PI,
+    2026-10-30, Q7a: "Yes, a 'hand back' button"): from the next trial the conditions' values, or
+    the draw, apply to it again, its trials no longer marked, recorded as a change; where only the
+    run gives the setting, the run's own value. Typing the old value back does not hand it back;
+    this does. It carries the setting's name and who sent it, nothing else: what takes the setting
+    back is the session's to say, since only the task knows (the C3 spec §6)."""
+
+    KIND: ClassVar[str] = "hand_back"
+
+    name: str
+    by: Actor
+
+
+@dataclass(frozen=True, slots=True)
+class SetRange:
+    """**A person asks that a drawn range change live** (engine build C3; the PI, 2026-10-30, Q7b:
+    "Yes, range changes live"): new numbers for the draw of setting `name` that the open block uses
+    -- a uniform's `low` and `high`, a truncated normal's `mean`, `sd`, `low` and `high`, a
+    non-aging wait's `minimum`, `mean` and `maximum` -- from the next trial, recorded as a change;
+    its trials stay drawn, not overridden. **Its own command, never a `SetParameter`** (the C3 spec
+    §6): `numbers` is 1 to `NUMBERS_LIMIT` numbers by name, each decoded by `_setting`, M8's rule,
+    welfare-listed and called unchanged, so each is a finite `float`; a word among them is refused
+    (`_numbers`). Which names the draw takes live, and whether the numbers can be drawn, is the
+    session's to judge, since only the task knows its draws."""
+
+    KIND: ClassVar[str] = "range"
+
+    name: str
+    numbers: dict[str, float]
+    by: Actor
+
+
+@dataclass(frozen=True, slots=True)
+class Revert:
+    """**A person asks that the run go back to an earlier moment** (engine build C3; TSK-43, the
+    PI, 2026-10-07, "Yes, with revert": "any earlier state restored in one action, itself
+    recorded"): `change` names the moment by the change log's id, the change after which it held,
+    or 0 for the run's start -- a whole number from 0 to `TRIALS_LIMIT`, the wire's own
+    signed-integer range. Each task setting goes back to its value then, held or handed back as it
+    was, and each drawn range as it was, never a bounded setting (engine spec §17.6); whether
+    `change` is one of the run in progress is the session's to judge (the C3 spec §8)."""
+
+    KIND: ClassVar[str] = "revert"
+
+    change: int
+    by: Actor
+
+
 Command = (
     SetParameter
     | Stop
@@ -1879,6 +1929,9 @@ Command = (
     | Training
     | NextBlock
     | BackBlock
+    | HandBack
+    | SetRange
+    | Revert
 )
 
 #: The kinds of scheduled stop, in the order a person is offered them.
@@ -1947,8 +2000,8 @@ def _encode_command(command: Command) -> bytes:
     """A command to msgpack -- `SetParameter`, `Stop`, and since P4d-2b b2a `Pause`,
     `Resume`, `Mark`, `ScheduleStop`, `CancelScheduledStop` and `ManualReward`, and
     since P4d-2b b3a `OpenSession`, `CheckRun`, `StartRun` and `EndSession`, since
-    XC-026 `ResumeSession`, since engine build C2a `ClearOwed`, `Drum` and `Training`, and since
-    C2b `NextBlock` and `BackBlock` -- tagged
+    XC-026 `ResumeSession`, since engine build C2a `ClearOwed`, `Drum` and `Training`, since C2b
+    `NextBlock` and `BackBlock`, and since C3 `HandBack`, `SetRange` and `Revert` -- tagged
     by kind so `_decode_command` knows which dataclass to rebuild.
 
     Private, unlike `encode`/`decode`: its callers are `ZmqConsole.send` and
@@ -2029,6 +2082,13 @@ def _encode_command(command: Command) -> bytes:
     elif isinstance(command, Training):
         payload = {"kind": "training", "by": actors.to_map(command.by), "setting": command.setting,
                    "on": command.on}
+    elif isinstance(command, HandBack):
+        payload = {"kind": "hand_back", "by": actors.to_map(command.by), "name": command.name}
+    elif isinstance(command, SetRange):
+        payload = {"kind": "range", "by": actors.to_map(command.by), "name": command.name,
+                   "numbers": dict(command.numbers)}
+    elif isinstance(command, Revert):
+        payload = {"kind": "revert", "by": actors.to_map(command.by), "change": command.change}
     else:
         raise TypeError(f"no wire encoding for {command!r}")
     return msgpack.packb(payload, use_bin_type=True)
@@ -2058,6 +2118,10 @@ TEXT_LIMIT = 200
 #: every frame, not rules about tasks -- no task here declares a dozen parameters.
 VALUES_LIMIT = 64
 ACKNOWLEDGED_LIMIT = 16
+#: The most numbers one `SetRange` may carry: a bound on one packet's reach into a refusal row and
+#: the record, not a rule about draws -- the most any draw takes live is four, a truncated
+#: normal's (engine build C3, the C3 spec §6).
+NUMBERS_LIMIT = 8
 
 
 def _quoted(value: object) -> str:
@@ -2200,6 +2264,41 @@ def _values(data: dict, kind: str, by: Actor) -> dict:
                 kind, by, f"a starting value's name {_quoted(name)} is not one, so it is refused"
             )
         checked[name] = _setting(value, name, by)
+    return checked
+
+
+def _numbers(data: dict, name: str, by: Actor) -> dict[str, float]:
+    """A live range's numbers (engine build C3, the C3 spec §6): 1 to `NUMBERS_LIMIT` of them, each
+    named by text of 1 to `TEXT_LIMIT` characters, each value decoded by `_setting`, M8's rule,
+    called unchanged and filed under the setting `name` as a value is. `_setting` lets a word
+    through for a categorical setting; a range's numbers are numbers, so a word is refused here."""
+    numbers = data.get("numbers")
+    if not isinstance(numbers, dict) or not 1 <= len(numbers) <= NUMBERS_LIMIT:
+        raise CommandRefused(
+            "range",
+            by,
+            f"a 'range' command's numbers are 1 to {NUMBERS_LIMIT} named numbers, and "
+            f"{_quoted(numbers)} is not that, so it is refused",
+        )
+    checked = {}
+    for key, value in numbers.items():
+        if not isinstance(key, str) or not key or len(key) > TEXT_LIMIT:
+            raise CommandRefused(
+                "range",
+                by,
+                f"a range's number is named by text of 1 to {TEXT_LIMIT} characters, and "
+                f"{_quoted(key)} is not, so it is refused",
+            )
+        number = _setting(value, name, by)
+        if isinstance(number, str):
+            raise CommandRefused(
+                name,
+                by,
+                f"{name!r} was sent the word {_quoted(number)} as its {key!r}: a drawn range's "
+                f"numbers are finite numbers, never a word, so it is refused and the session "
+                f"runs on",
+            )
+        checked[key] = number
     return checked
 
 
@@ -2423,6 +2522,28 @@ def _command_from(data: dict) -> Command:
                 f"neither, so it is refused",
             )
         return Training(setting=data["setting"], on=data["on"], by=by)
+    if kind == "hand_back":
+        by = _actor(data.get("by"), kind)
+        return HandBack(name=_word(data, "name", kind, by), by=by)
+    if kind == "range":
+        by = _actor(data.get("by"), kind)
+        name = _word(data, "name", kind, by)
+        return SetRange(name=name, numbers=_numbers(data, name, by), by=by)
+    if kind == "revert":
+        by = _actor(data.get("by"), kind)
+        change = data.get("change")
+        if (
+            isinstance(change, bool)
+            or not isinstance(change, int)
+            or not 0 <= change <= TRIALS_LIMIT
+        ):
+            raise CommandRefused(
+                "revert",
+                by,
+                f"a 'revert' command's change is a whole number from 0 to {TRIALS_LIMIT}, the "
+                f"run's start or a change id, and {_quoted(change)} is not one, so it is refused",
+            )
+        return Revert(change=change, by=by)
     raise ValueError(f"unknown command kind on the wire: {_quoted(kind)}")
 
 

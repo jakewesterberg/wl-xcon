@@ -21,7 +21,9 @@ already runs, so no new dependency:
   the truth about delivery. On the plain-http listener it comes from the box's own page,
   under spec §2's four checks, and a command carrying a token is refused there. Since
   P4d-2b b3a-2 it also takes `wlx taskd`'s own four -- `open`, `check`, `start`, `end`
-  -- built by the wire's own rules (`link._command_from`).
+  -- built by the wire's own rules (`link._command_from`), as it builds a run's controls
+  since engine build C2a (`clear`, `drum`, `training`) and since C3 a setting handed back,
+  a drawn range changed live and a revert (`hand_back`, `range`, `revert`; `_WIRE_KINDS`).
 
 **The rig's https page (b2b, `--https` and its five companion flags).** A second
 listener, TLS, serves the same routes plus `POST /whoami` and `POST /signout`. A command
@@ -627,6 +629,11 @@ _SHAPES = {
     # Engine build C2b (the PI, 2026-10-19): a run moved on a block, or back one, by hand.
     "next_block": frozenset(),
     "back_block": frozenset(),
+    # Engine build C3 (the PI, 2026-10-30, Q7a and Q7b; TSK-43): a setting handed back, a drawn
+    # range changed live, and the run reverted to an earlier moment, by the wire's field names.
+    "hand_back": frozenset({"name"}),
+    "range": frozenset({"name", "numbers"}),
+    "revert": frozenset({"change"}),
 }
 _SCHEDULES = {"at": "clock", "trials": "trials", "ml": "fluid"}
 #: The kinds `wlx taskd` takes (open, check, start, end and resume_session) that the page sends by the wire's own field names, built
@@ -634,9 +641,10 @@ _SCHEDULES = {"at": "clock", "trials": "trials", "ml": "fluid"}
 _SERVICE_KINDS = frozenset({"open", "check", "start", "end", "resume_session"})
 
 #: The kinds the page sends by the wire's own field names and builds by the wire's own function
-#: (`link._command_from`): the service's, and since engine build C2a a run's `clear`, `drum` and
-#: `training`, which go to the run as any control does.
-_WIRE_KINDS = _SERVICE_KINDS | {"clear", "drum", "training"}
+#: (`link._command_from`): the service's, since engine build C2a a run's `clear`, `drum` and
+#: `training`, and since C3 its `hand_back`, `range` and `revert`, which go to the run as any
+#: control does. A range's numbers are decoded there by `link._setting`, as a setting's value is.
+_WIRE_KINDS = _SERVICE_KINDS | {"clear", "drum", "training", "hand_back", "range", "revert"}
 
 
 def _finite(value: int | float) -> bool:
