@@ -9,7 +9,7 @@ distrust the reasoning. Numbers go stale, arguments do not.
 > written with**, `wl-expcontroller` and `wl_expcontroller/…` paths included, as the PI
 > ruled for dated documents; read `wl_expcontroller/taskd.py` there as `wl_xcon/taskd.py`.
 >
-> **Running the suite locally with `WLX_REQUIRE_PREPROC=1`** (2026-11-07). wl-preproc's readers have imported
+> **Running the suite locally with `WLX_REQUIRE_PREPROC=1`** (2026-11-06). wl-preproc's readers have imported
 > `wl_sync` at module level since 2026-08 (`contracts.paths`, `contracts.manifest`, `events.extract`), and engine
 > build C3's tests are the first of ours to import a reader that reaches `contracts.paths` (`events.rigrecords`), so
 > the interpreter that runs the suite needs wl-sync installed the way CI installs it: at the commit

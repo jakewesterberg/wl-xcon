@@ -40,7 +40,7 @@ on:
 # not allowed to skip, so `WLX_REQUIRE_PREPROC=1` turns a skip into a failure: a
 # contract test that is allowed to not run is not a contract test.
 #
-# **wl-sync too, since 2026-11-07.** wl-preproc's readers have imported `wl_sync`
+# **wl-sync too, since 2026-11-06.** wl-preproc's readers have imported `wl_sync`
 # at module level since 2026-08 (`contracts.paths`, `contracts.manifest`,
 # `events.extract`), and these jobs install none of wl-preproc's own dependencies.
 # What changed is ours: engine build C3's tests are the first of ours to import a
