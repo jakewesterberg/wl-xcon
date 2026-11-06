@@ -3948,6 +3948,26 @@ def test_console_lists_control_events_and_counts_what_fell_off_before_them():
     assert dropped < stamp < note
 
 
+def test_console_lists_control_events_without_a_dropped_notice_when_none_fell_off():
+    """XC-132. The empty feed and the dropped-count case were covered; not a feed with
+    controls and `controls_dropped == 0`, which must show every control and no
+    "NOT SHOWN" line, nor "controls: none"."""
+    rendered = render(
+        _telemetry(
+            controls=(
+                Control("mark", None, 1_700_000_001.0, "mark 1 stamped in trial 3, frame 10"),
+                Control("note", Box("jake"), 1_700_000_002.0, 'mark 1: "bubble"'),
+            ),
+            controls_dropped=0,
+        )
+    ).splitlines()
+
+    assert "  control: mark: mark 1 stamped in trial 3, frame 10" in rendered
+    assert '  control: note by jake (box, unverified): mark 1: "bubble"' in rendered
+    assert not any("NOT SHOWN" in line for line in rendered)
+    assert "  controls: none" not in rendered
+
+
 def test_console_strips_control_characters_from_wire_text():
     """Fix round 1: wire text (a control's `said`/`by`, a refusal's `why`, and every
     other field `render` reads off the frame) must not be able to move the cursor,

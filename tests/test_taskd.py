@@ -4216,6 +4216,25 @@ def test_a_malformed_ceiling_write_is_recorded_as_asked(tmp_path):
     assert row["by"] == {"kind": "box", "name": "jake"}
 
 
+def test_a_ceiling_write_of_no_plain_type_is_recorded_as_its_repr(tmp_path):
+    """XC-125. `set`'s ceiling guard (M8) refuses a value that is not a number, and
+    `asked` is then written as its repr, so the refusal row is written whatever the
+    value was. The wire never builds one (`link._setting`), so it is queued in
+    process."""
+    link = Simulated()
+    link.queue(SetParameter(name="reward_correct", value=[0.4, "x"], by=Box("jake")))
+    session = _session(_spec(tmp_path, trials=3), link=link)
+
+    session.run()
+
+    assert session.stop_kind == "completed"
+    (row,) = _refusal_rows(session)
+    assert row["name"] == "reward_correct"
+    assert row["asked"] == "[0.4, 'x']"
+    assert "takes a number" in row["why"]
+    assert row["by"] == {"kind": "box", "name": "jake"}
+
+
 def test_a_command_the_session_does_not_act_on_is_refused_not_a_fault(tmp_path):
     """A command type `_command` has no branch for -- a newer console's, say -- is
     refused under its kind and the session runs on, the rule `drain` already applies
@@ -4742,6 +4761,29 @@ def test_a_stop_is_recorded_with_who_and_when(tmp_path):
     assert session.controls[0][3] == "stopped by sam (box, unverified)"
 
 
+def test_a_stop_with_a_blank_by_still_stops_and_is_recorded_with_its_blank(tmp_path):
+    """XC-125. No path sends one today: the wire and the page refuse an empty box
+    name, and `wlx console` requires `--as`. So it is queued in process. If one ever
+    arrives it must still stop, at the boundary, and its row keeps the blank name
+    rather than inventing one."""
+    link = Simulated()
+    link.queue(Stop(by=Box("")))
+    session = _session(_spec(tmp_path, trials=5), link=link)
+
+    census = session.run()
+
+    assert session.stop_kind == "operator"
+    assert sum(census.outcomes.values()) == 0  # drained before trial 0
+    # today's wording; a blank Box prints as nothing
+    assert session.stopped_because == "stopped by "
+    (row,) = _controls_rows(session)
+    assert (row["kind"], row["by"], row["trial_index"]) == (
+        "stop", {"kind": "box", "name": ""}, 0
+    )
+    assert session.controls[0][1] == Box("")
+    assert session.controls[0][3] == "stopped by "  # today's wording, as above
+
+
 def test_nothing_is_rewarded_while_paused(tmp_path):
     """Human review item 1 (spec §5.5, amended 2026-09-28): while paused, the task
     rewards nothing. No trial runs, so no `Reward` action reaches the pump, and with
@@ -5222,6 +5264,30 @@ def test_a_note_joins_its_stamp_with_the_three_instants_and_their_gaps(tmp_path)
     )
 
 
+def test_a_note_for_a_mark_stamped_in_a_later_trial_is_joined_to_that_trial(tmp_path):
+    """XC-130's other half: the stamp a note joins keeps the trial it was stamped in,
+    not 0 -- the only other note test stamps in trial 0."""
+    link = _MarkAfter(mark=77, calls=11)  # trial 2, frame 10, once armed after trial 1
+    session = _session(_spec(tmp_path, trials=5), link=link)
+    ran = [0]
+
+    def observe(condition, values, result) -> None:
+        ran[0] += 1
+        if ran[0] == 2:
+            link.armed = True
+        if ran[0] == 3:  # drained at the boundary before trial 3
+            link.queue(
+                Mark(mark=77, note="bubble", by=Box("jake"), pressed_at=None, received_at=None)
+            )
+
+    session.observe = observe
+    session.run()
+
+    stamp, note = _controls_rows(session)
+    assert (stamp["trial_index"], stamp["frame"]) == (2, 10)
+    assert (note["kind"], note["stamped_in_trial"], note["frame"]) == ("note", 2, 10)
+
+
 def test_a_note_left_bare_and_a_note_whose_instants_are_unknown_still_record(tmp_path):
     """Esc leaves the mark bare; a `wlx serve` restarted between the signal and the
     note knows no instants. Both are recorded as they are, never filled in."""
@@ -5318,6 +5384,41 @@ def test_a_mark_in_a_trial_that_faults_is_still_recorded(tmp_path, monkeypatch):
 
     (stamp,) = _controls_rows(session)
     assert (stamp["mark"], stamp["trial_index"], stamp["frame"]) == (8, 0, 1)
+
+
+def test_a_mark_in_a_later_trial_that_faults_is_recorded_with_that_trial_index(
+    tmp_path, monkeypatch
+):
+    """XC-130. The test above faults in trial 0, where the index the close-time write
+    uses and a hard-coded 0 agree. Here a trial runs clean first and the fault, with a
+    mark stamped in its frame 1, is in trial 1: the stamp is written as the session
+    closes, numbered 1 and saying trial 1, with trial 1 on its row."""
+    from wl_xcon import taskd
+
+    real = taskd.run_trial
+    link = Simulated()
+    calls = []
+
+    def faults_second(trial, world, frame_period, values=None, effects=None, each_frame=None):
+        calls.append(1)
+        if len(calls) == 1:
+            return real(trial, world, frame_period, values=values, effects=effects,
+                        each_frame=each_frame)
+        link.marks.append(8)  # mark 8 arrives in frame 1 of the second trial
+        each_frame(1)
+        raise RuntimeError("the display went away")
+
+    monkeypatch.setattr(taskd, "run_trial", faults_second)
+    session = _session(_spec(tmp_path, trials=3), link=link)
+
+    with pytest.raises(RuntimeError, match="the display went away"):
+        session.run()
+
+    assert len(calls) == 2
+    (stamp,) = [row for row in _controls_rows(session) if row["kind"] == "mark"]
+    assert (stamp["mark"], stamp["trial_index"], stamp["frame"]) == (8, 1, 1)
+    assert stamp["number"] == 1
+    assert "trial 1, frame 1" in session.controls[-1][3]
 
 
 def test_a_stamp_that_cannot_be_written_as_the_session_closes_still_closes_the_record(
