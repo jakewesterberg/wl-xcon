@@ -1801,3 +1801,91 @@ def test_a_next_block_the_rig_may_still_apply_says_so(rig):
     page.wait_for_selector("#sent:has-text('may still be applied')")
 
     assert page.inner_text("#sent") == answer[1]["said"]
+
+
+def test_hand_back_a_range_and_revert_send_their_bodies(rig):
+    """Engine build C3 (the PI, 2026-10-30, Q7a: "Yes, a 'hand back' button"; Q7b: "Yes, range
+    changes live"; TSK-43, "Yes, with revert"): *hand back* on a card a person holds sends its
+    setting's name, *change the range* the numbers of the card's draw a person changed, by name,
+    and *revert to this* its moment's change id, each reaching the rig as the signed-in member's.
+    Through the wire, in a real browser."""
+    from wl_xcon.link import HandBack, MomentRow, ParamRow, Revert, SetRange, decode, encode
+
+    rows = (
+        ParamRow("fix_hold", "s", 0.1, 1.0, 0.4, False, None, "person", ("near", "far")),
+        ParamRow("wait", "s", 0.5, 2.0, None, False, None, "draw", (),
+                 "uniform from 0.75 s to 1.25 s", {"low": 0.75, "high": 1.25}),
+    )
+    moments = (MomentRow(3, 1_700_000_030.0, "fix_hold 0.30 → 0.40"),
+               MomentRow(0, 1_700_000_000.0, "the run's start"))
+    rig.hub.offer(decode(encode(frame(params=rows, moments=moments))))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+
+    page.click('[data-cmd="hand_back"][data-name="fix_hold"]')
+    rig.wait_for(lambda: rig.dispatch.seen)
+    page.fill('#params input[data-number="high"]', "1.5")
+    page.click('[data-cmd="range"][data-name="wait"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
+    page.click('#moments [data-cmd="revert"][data-change="3"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 3)
+
+    handed, ranged, reverted = rig.dispatch.seen
+    member = "Jake Westerberg"
+    assert (type(handed), handed.name, handed.by.name) == (HandBack, "fix_hold", member)
+    assert (type(ranged), ranged.name, ranged.numbers, ranged.by.name) == (
+        SetRange, "wait", {"high": 1.5}, member)
+    assert (type(reverted), reverted.change, reverted.by.name) == (Revert, 3, member)
+
+
+def test_a_range_with_nothing_changed_or_a_word_for_a_number_is_not_sent(rig):
+    """The page's own refusals of a range, each said and nothing sent, as a setting's are: a
+    range none of whose numbers was changed -- `0.750` is the 0.75 shown -- which would record a
+    change that changed nothing, and a number that is not one."""
+    from wl_xcon.link import ParamRow, decode, encode
+
+    row = ParamRow("wait", "s", 0.5, 2.0, None, False, None, "draw", (),
+                   "uniform from 0.75 s to 1.25 s", {"low": 0.75, "high": 1.25})
+    rig.hub.offer(decode(encode(frame(params=(row,)))))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+
+    page.fill('#params input[data-number="low"]', "0.750")
+    page.click('[data-cmd="range"][data-name="wait"]')
+    page.wait_for_selector("#sent:has-text(\"not sent: no number of wait's range was changed\")")
+    page.fill('#params input[data-number="high"]', "soon")
+    page.click('[data-cmd="range"][data-name="wait"]')
+    page.wait_for_selector("#sent:has-text(\"not sent: wait's high needs a number\")")
+
+    assert rig.dispatch.seen == []
+
+
+def test_a_double_click_on_hand_back_change_the_range_or_revert_is_one_act(rig):
+    """Each of the three is held as *clear one* is (the engine C2a plan's Task 9 fix round,
+    Important 1): a double click, or two quick clicks, sends one command, never two -- a second
+    hand-back the rig would refuse, a second range or revert it would record again."""
+    from wl_xcon.link import HandBack, MomentRow, ParamRow, Revert, SetRange, decode, encode
+
+    rows = (
+        ParamRow("fix_hold", "s", 0.1, 1.0, 0.4, False, None, "person", ("near",)),
+        ParamRow("wait", "s", 0.5, 2.0, None, False, None, "draw", (),
+                 "uniform from 0.75 s to 1.25 s", {"low": 0.75, "high": 1.25}),
+    )
+    rig.hub.offer(decode(encode(frame(params=rows, moments=(
+        MomentRow(0, 1_700_000_000.0, "the run's start"),)))))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+
+    page.dblclick('[data-cmd="hand_back"][data-name="fix_hold"]')
+    rig.wait_for(lambda: rig.dispatch.seen)
+    page.fill('#params input[data-number="high"]', "1.5")
+    page.dblclick('[data-cmd="range"][data-name="wait"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) >= 2)
+    page.dblclick('#moments [data-cmd="revert"][data-change="0"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) >= 3)
+    time.sleep(0.5)  # housekeeping: room for a wrong second send to arrive
+
+    assert [type(seen) for seen in rig.dispatch.seen] == [HandBack, SetRange, Revert]
