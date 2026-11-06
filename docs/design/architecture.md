@@ -426,7 +426,14 @@ from a hash of the run's seed, the trial's number in the run and the setting, ne
 scheduler's generators, so adding a draw moves no condition or repeat; a prepared list in shuffled
 passes; the non-aging wait's tail drawn again; a factorial's conditions and their names; and a
 sequence-balanced block's de Bruijn sequence, each cycle played as the linear one, its first
-trials a lead-in. **A designed block** (`task.SequenceBalanced`,
+trials a lead-in. **The trial loop draws between trials**
+(`taskd.Session._draw`): each setting from the open block's own draw, else the task's, or from its
+condition's own range, but one a person holds; a repeat, ordinary or a drum's, keeps a `same`
+setting's value and source and draws a `fresh` one anew; a factorial's conditions play as
+hand-listed ones (`Session._plan`). Each trial's line says what it drew and from where (`drawn`)
+and what a person held (`live`), a drawn direction written from 0 to 360; each run's start row
+records the task's draws, every field, and what each factorial made (`generated`). **A designed
+block** (`task.SequenceBalanced`,
 `task.Priming`) plays a plan the scheduler draws as it opens, from a generator of its own: a break
 in it is never placed as a repeat, a sequence-balanced block's lost place recorded as a `designed`
 shortfall, unless the block brings the trial back at once, under the repeat limit. **A trial a

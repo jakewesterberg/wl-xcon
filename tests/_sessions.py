@@ -194,6 +194,33 @@ def planned_task(folder: Path, plans: str = "{}", *, name: str = "planned",
     return path
 
 
+def varied_task(folder: Path, *, draws: str = "{}", plans: str = "{}", name: str = "varied",
+                structures: str = "TASK.structures") -> Path:
+    """The reference detection task with draws and plans (engine build C3), written into `folder`
+    as `NAME.py`: `draws` is Python source for its draws dict, `plans` for its plans dict and
+    `structures` for its structures dict, each free to name `detection`, its one trial structure,
+    every word of the plan vocabulary, the five distributions, `SAME`, `FRESH`, `BY_CONDITIONS`,
+    `Factorial`, `SequenceBalanced` and `Priming`, and `Polar`, `Disc`, `Square`, `Gray` and `P`
+    for a value. Engine test material, run only in the simulator: no reference task draws, makes
+    conditions from factors or plays a designed order, since real ones are set with the PI in
+    wl-xtasks."""
+    text = Path("tasks/fixation_detection.py").read_text() + (
+        "\n\nimport dataclasses as _dataclasses\n"
+        "from wl_xcon.task import (\n"
+        "    BY_CONDITIONS, FRESH, NO_LIMIT, SAME, SPENT, Balanced, Block, ByCriterion,\n"
+        "    Condition, Constrained, Cyclic, Factorial, Fixed, Listed, NonAging, Plan, Polar,\n"
+        "    Priming, Random, SequenceBalanced, TruncatedNormal, Uniform, Weighted,\n"
+        "    WithReplacement,\n"
+        ")\n"
+        "TASK = _dataclasses.replace(\n"
+        f"    TASK, structures={structures}, plans={plans}, draws={draws})\n"
+    )
+    path = Path(folder) / f"{name}.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path
+
+
 def stimuli_task(folder: Path, *, name: str = "stimuli") -> Path:
     """The reference detection task showing three more stimuli beside its fixation point in
     `await_fix` -- `corner` at (20°, 20°), `oblique` at `Polar(10, 135)` and `ring`, an array of

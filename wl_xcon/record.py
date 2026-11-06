@@ -237,6 +237,12 @@ def _written(value: object) -> object:
     own `params`, a start row's `resolved`; for a change row, the lines of the trials it applies
     to). Never a choice's index, which a reader would take for a number.
 
+    **A draw** (`task.Distribution`: a task's, a block's or a condition's own range) **is written
+    the same way, every field** (engine build C3's call 12; the controller's ruling 2 of
+    2026-10-30), its `repeat` among them: `{"class": "Uniform", "fields": {"low": -10.0, "high":
+    10.0, "repeat": "fresh"}}`, so a reader never needs this build's defaults. A value drawn from
+    one is written as the value it is.
+
     **Anything else raises `TypeError`**, as `json` does: a `Polar` holding a setting, or a bare
     setting reference, is no value, and a record never writes a stand-in for one; nor does it write
     any other object, which reached here by mistake."""
@@ -244,7 +250,7 @@ def _written(value: object) -> object:
     from wl_xcon.geometry import polar_deg, shown_direction
     from wl_xcon.look import Edge, Fill, Outline, Shape
     from wl_xcon.photometry import Color, Contrast
-    from wl_xcon.task import Appearance, Polar
+    from wl_xcon.task import Appearance, Distribution, Polar
 
     def number(field: object) -> bool:
         return isinstance(field, (int, float)) and not isinstance(field, bool)
@@ -256,7 +262,7 @@ def _written(value: object) -> object:
         direction = None if value.eccentricity == 0 else shown_direction(value.direction)
         return {"eccentricity": value.eccentricity + 0, "direction": direction, "x": x + 0.0,
                 "y": y + 0.0}
-    if isinstance(value, (Appearance, Color, Contrast, Shape, Fill, Edge, Outline)):
+    if isinstance(value, (Appearance, Color, Contrast, Shape, Fill, Edge, Outline, Distribution)):
         return canonical(value, every_field=True)
     raise TypeError(f"the record writes no {type(value).__name__} value ({value!r})")
 
@@ -448,6 +454,10 @@ class SessionRecord:
         aids: tuple = (),
         structure: str | None = None,
         overridden: tuple = (),
+        drawn: dict | None = None,
+        live: tuple = (),
+        eased: tuple = (),
+        planned: dict | None = None,
     ) -> list[dict]:
         """One trial's record, flushed before returning.
 
@@ -491,6 +501,15 @@ class SessionRecord:
         overrode** (`overridden`, a list of names; engine spec §14.7: "the trial table carries an
         'overridden' flag"), so a grouping by condition can leave them out.
 
+        **And what it drew, and who held what** (engine build C3's spec §10; its record shapes):
+        `drawn`, each setting it drew and where that draw came from -- `"task"`, `"block"` or
+        `"condition"` (its condition's own range), or the change id of the live range it was
+        drawn from -- `{}` where it drew nothing, its values in `params` as every value is;
+        `live`, the settings a person held on it, sorted, of which `overridden` are those its
+        condition gave, a value or its own range; `eased`, the settings whose live change kept it
+        out of moving up; and `planned`, its place in a designed block's plan, or `None`. Design,
+        nuisance and a person's hold are then told apart by a reader of the line alone.
+
         **And where each stimulus it showed was, and when** (`stimuli`, from `placed`, the
         trial's `run.Result.placed`; XC-399, `_stimuli`): for each `Show` and `Update` it drew, its
         kind, frame and `off`, its (x, y) and its true eccentricity and direction beside them, a
@@ -525,6 +544,10 @@ class SessionRecord:
                     "aids": list(aids),
                     "structure": structure,
                     "overridden": list(overridden),
+                    "drawn": {} if drawn is None else dict(drawn),
+                    "live": list(live),
+                    "eased": list(eased),
+                    "planned": planned,
                     "stimuli": stimuli,
                 },
                 sort_keys=True,

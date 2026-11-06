@@ -45,6 +45,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from wl_xcon import link as _link
+from wl_xcon import variation
 from wl_xcon.actor import Actor, to_map_or_none
 from wl_xcon.bounds import Bounds, Exceeded, _finite
 from wl_xcon.check import beyond_range, check_task, unplaced
@@ -60,7 +61,7 @@ from wl_xcon.encode import (
     words_for_run,
 )
 from wl_xcon.findings import SESSION_KINDS, kind_named
-from wl_xcon.geometry import DISPARITY_CONVENTION, Geometry
+from wl_xcon.geometry import DISPARITY_CONVENTION, Geometry, shown_direction
 from wl_xcon.levels import Levels
 from wl_xcon.photometry import Calibration, cone_record
 from wl_xcon.record import XCON_DIRNAME, SessionRecord, _local, welfare_note
@@ -77,6 +78,7 @@ from wl_xcon.scheduler import (
     TRAINING,
     Block,
     Condition,
+    Draw,
     Scheduler,
 )
 from wl_xcon.simulate import Census, Subject, Tally, prepare
@@ -84,7 +86,9 @@ from wl_xcon.run import LONGEST_TRIAL_S, run_trial
 from wl_xcon.task import (
     COUNTED, OWED, SPENT, UNPAID, Entered, Exited, Param, Plan, SaccadeTo, Task, Trial,
 )
-from wl_xcon.task import EASIER, HARDER, NOT_DIFFICULTY, Background, Distribution
+from wl_xcon.task import (
+    EASIER, HARDER, NOT_DIFFICULTY, SAME, Background, Distribution, Factorial, Listed,
+)
 from wl_xcon.variation import easier
 from wl_xcon.warnlist import PAUSE_UNMARKED, Entry, of_findings, sentence
 from wl_xcon.welfare import (
@@ -174,6 +178,45 @@ def _overriding(blocks, name: str) -> str:
         return ""
     return (f"; for the rest of the run it overrides the value condition"
             f"{'s' if len(named) > 1 else ''} {', '.join(named)} set")
+
+
+def _draw_said(key: tuple) -> str:
+    """A draw named by its key (`variation.in_force`'s, `own_ranges`'), as a sentence says it."""
+    if key[0] == "task":
+        return f"the task's draw of {key[1]!r}"
+    if key[0] == "block":
+        return f"block {key[1]!r}'s draw of {key[2]!r}"
+    return f"condition {key[1]!r}'s own range for {key[2]!r}"
+
+
+def _generated(blocks, declared: dict[str, Param], turned: frozenset) -> list[dict]:
+    """**What each block's factorial made**, as a run's start row lists it (engine build C3's spec
+    §4: "each run's start row lists them too, so the record needs no task file"; pitfall P20):
+    for each block of `blocks`, as declared, that makes conditions from factors, its name, each
+    condition made with its values and its target, and the exclusions applied. A range of its own
+    is written as a draw is, every field (`variation.recorded`), its setting's declared range
+    filling a normal's cut (`declared`) and a direction's places from 0 to 360 (`turned`); every
+    other value as the record writes a value, as given. `[]` where no block makes any."""
+
+    def written(name: str, value: object) -> object:
+        if isinstance(value, Distribution):
+            return variation.recorded(value, declared.get(name), direction=name in turned)
+        return value
+
+    return [
+        {
+            "block": block.name,
+            "conditions": [
+                {"name": condition.name,
+                 "values": {name: written(name, value) for name, value in condition.values.items()},
+                 "target": condition.target}
+                for condition in variation.generated(block)
+            ],
+            "excluded": [{name: written(name, value) for name, value in exclusion.items()}
+                         for exclusion in block.factorial.exclude],
+        }
+        for block in blocks if isinstance(block.factorial, Factorial)
+    ]
 
 
 def _hung(index: int, condition: str, counted: str, owed: int, drummed: bool = False,
@@ -2356,14 +2399,32 @@ class Session:
     #: engine C3 plan's Task 13).
     _ranges: dict[tuple, tuple[Distribution, int]] = field(
         init=False, default_factory=dict, repr=False)
+    #: **What each trial of the run in progress drew, kept for a repeat of it** (engine build C3's
+    #: call 13; the PI, 2026-10-30, Q3 and "Follow same/fresh"): by the trial's number in the run
+    #: (`Draw.number`), each setting it drew as `(value, source, original)` -- the value in the
+    #: task's own terms, where it came from as its line's `drawn` writes it, and the number of the
+    #: trial whose key drew it. Kept only while a repeat, a drum's try or a trial again at once
+    #: names that trial (`Scheduler.waiting`), pruned between trials (`run`); empty as each run
+    #: starts. A `SAME` setting's repeat takes its value and source from here, never drawing it
+    #: again, so a range changed live meanwhile does not move it (`_draw`).
+    _kept: dict[int, dict[str, tuple[object, object, int]]] = field(
+        init=False, default_factory=dict, repr=False)
+    #: **How many fresh draws each prepared list has given in the run in progress** (engine build
+    #: C3's call 7), by its draw's key: the place in its shuffled passes its next fresh draw takes
+    #: (`variation.draw`'s `ordinal`). A `SAME` repeat does not advance it. Empty as each run
+    #: starts.
+    _listed: dict[tuple, int] = field(init=False, default_factory=dict, repr=False)
 
     def _unwritable(self, task: Task, run: RunSpec, values: dict) -> str | None:
         """**What the record would refuse of a run, said before the run starts** (REC-27; the
         appearance-record review's M2): every value the run can record, written as the record's
         writers write it (`record.unwritable`) -- its own values (`values`, the task's starting
         values under the run's), a change staged before it, which its first boundary records,
-        each value a condition of its plan sets, and each choice each setting offers, which a
-        console may set live. The sentence for the first the record refuses, or `None`.
+        each value a condition of its plan sets, its factorials' made among them, **each value a
+        draw in force can give** -- a weighted set's or a prepared list's, the task's, a block's
+        or a condition's own range (engine build C3; a value drawn from a range is a number,
+        which the record always writes) -- and each choice each setting offers, which a console
+        may set live. The sentence for the first the record refuses, or `None`.
 
         A value the record refuses otherwise faults the run at the first row that holds it: the
         start row, once the run is numbered; a change row, ending the run; or a condition's trial
@@ -2371,20 +2432,30 @@ class Session:
         resume counts it short. `check` refuses every such value the review of REC-27 found (a
         condition's value is one of its setting's choices, and a bare setting, or a `Polar` holding
         one, among an appearance's or a position's choices is refused), so this is the backstop for
-        one a later build admits. **Values drawn per trial (engine build C3) must join this list
-        when they exist**: a drawn value is recorded on its trial's line like a condition's. Not
-        welfare-critical: it reads, and faults a run before anything of it happens. Run once, as a
-        run starts, never in a trial."""
+        one a later build admits. A drawn value is recorded on its trial's line like a
+        condition's, so each a draw can give is tried here too. Not welfare-critical: it reads,
+        and faults a run before anything of it happens. Run once, as a run starts, never in a
+        trial."""
+        blocks = self._plan(run, task).blocks
         offered = [(f"the run's value of {name!r}", value) for name, value in values.items()]
         offered += [(f"the change to {name!r} staged before the run", value)
                     for name, was, now, _, _ in self._staged for value in (was, now)]
         offered += [
             (f"the value condition {condition.name!r} of block {block.name!r} sets for {name!r}",
              value)
-            for block in self._plan(run, task).blocks
+            for block in blocks
             for condition in block.conditions
             for name, value in condition.values.items()
         ]
+        draws: dict[tuple, Distribution] = {}
+        for block in blocks:
+            draws.update({key: drawn for drawn, key in variation.in_force(task, block).values()})
+            for condition in block.conditions:
+                draws.update({key: drawn
+                              for drawn, key in variation.own_ranges(condition).values()})
+        offered += [(f"value {at} of {_draw_said(key)}", value)
+                    for key, drawn in draws.items()
+                    for at, value in enumerate(variation.values_of(drawn), 1)]
         offered += [(f"choice {at} of setting {param.name!r}", choice)
                     for param in task.params for at, choice in enumerate(param.choices, 1)]
         for said, value in offered:
@@ -2403,11 +2474,17 @@ class Session:
         rig no day's plan): a task declares its plans in its task object (engine spec §13.1;
         engine build C2b), and the operator chooses one as the run starts. **With none chosen
         a run is the plain run**: one block of `run.trials` trials under one condition, of the
-        task's default structure, every trial paying."""
-        if run.plan is not None:
-            return task.plans[run.plan]
-        if run.blocks:
-            return Plan(blocks=list(run.blocks))
+        task's default structure, every trial paying.
+
+        **Each block with its factorial expanded** (engine build C3's call 14;
+        `variation.expanded`): its hand-listed conditions, then those its factors make, so a
+        made condition is drawn, counted, repeated and overridden as a hand-listed one is. The
+        run's start row records the plan as declared (`plan_form`) and what each factorial made
+        (`generated`)."""
+        if run.plan is not None or run.blocks:
+            plan = task.plans[run.plan] if run.plan is not None else Plan(blocks=list(run.blocks))
+            return dataclasses.replace(
+                plan, blocks=[variation.expanded(block) for block in plan.blocks])
         return Plan(blocks=[
             Block(
                 name="session",
@@ -2420,6 +2497,52 @@ class Session:
                 counting=EVERY_TRIAL,
             )
         ])
+
+    def _draw(self, task: Task, block: Block, condition: Condition,
+              draw: Draw) -> tuple[dict, dict]:
+        """**What one trial draws, and from where** (engine build C3's spec §2 and §6; its calls
+        7, 10 and 13), between trials, never in a frame: each setting a draw gives in `block` --
+        its own, else the task's (`variation.in_force`; the PI, 2026-10-30, Q1a, "Task default,
+        block may replace") -- or `condition`'s own range gives (`own_ranges`; Q1b), **but one a
+        person holds** (`_edited`), whose value replaces the draw and is not drawn (§6). Returns
+        the values, in the task's own terms, and where each came from, as the trial's line writes
+        it (`drawn`): the draw key's first part -- `"task"`, `"block"` or `"condition"` -- or the
+        change id of the live range in force for that key (`_ranges`). Each value is drawn from
+        the run's seed, the trial's number in the run and the setting (`variation.draw`), apart
+        from the scheduler's generators, so adding a draw moves no condition or repeat; a normal
+        is cut to its setting's declared range where it declares no cut of its own (`declared`);
+        a prepared list's fresh draw takes the next place in its run's passes (`_listed`).
+
+        **On a repeat**, ordinary, a drum's try or a trial again at once (the PI, 2026-10-30, Q3,
+        "Per drawn setting, required", and "Follow same/fresh"), a setting declared `SAME` takes
+        the value and the source the trial it repeats drew (`_kept`), never drawn again, so a
+        range changed live meanwhile does not move it, and a prepared list's place does not
+        advance; one declared `FRESH`, or one that trial did not draw (a person held it then), is
+        drawn on the repeat's own number. What this trial drew is kept under its number, with the
+        number whose key drew each value, for a repeat of it to find."""
+        kept = {} if draw.repeat_of is None else self._kept.get(draw.repeat_of, {})
+        taken: dict = {}
+        sources: dict = {}
+        mine: dict = {}
+        for name, (drawn, key) in {**variation.in_force(task, block),
+                                   **variation.own_ranges(condition)}.items():
+            if name in self._edited:
+                continue
+            if drawn.repeat == SAME and name in kept:
+                value, source, original = kept[name]
+            else:
+                drawn, source = self._ranges.get(key, (drawn, key[0]))
+                ordinal = 0
+                if isinstance(drawn, Listed):
+                    ordinal = self._listed.get(key, 0)
+                    self._listed[key] = ordinal + 1
+                value = variation.draw(drawn, self._run.seed, draw.number, key,
+                                       declared=self._declared.get(name), ordinal=ordinal)
+                original = draw.number
+            taken[name], sources[name] = value, source
+            mine[name] = (value, source, original)
+        self._kept[draw.number] = mine
+        return taken, sources
 
     def _agent(self, run: RunSpec):
         """The default world: one behaviour agent, told about each trial.
@@ -2755,6 +2878,13 @@ class Session:
         # The run's own values, before any live edit, and no draw changed live (engine build C3).
         self._run_values = {**starts, **given}
         self._ranges = {}
+        # No trial's draws kept for a repeat, and every prepared list at its first place (engine
+        # build C3).
+        self._kept = {}
+        self._listed = {}
+        # The settings the task places a direction by: a value drawn for one is written from 0
+        # to 360 (the PI, 2026-10-30, "0 to 360 in both repos"; engine build C3's call 11).
+        turned = variation.directions(task)
 
         # Counted by each condition's structure's table (engine spec §16.1; engine build C2a; each
         # condition naming its structure since C2b), which a block's own replaces.
@@ -2787,8 +2917,26 @@ class Session:
             # is above; a planned run's lengths are its plan's, so it records no trial count.
             plan=run.plan,
             # **And as declared** (the plan's science review, I4), in the form the content hash
-            # reads it, so the record tells a balanced plan from a random one by itself.
-            plan_form=None if run.plan is None else canonical(plan),
+            # reads it, so the record tells a balanced plan from a random one by itself: the
+            # task's plan, its factorials unexpanded (engine build C3), never the plan played.
+            plan_form=None if run.plan is None else canonical(task.plans[run.plan]),
+            # **What the task draws, as declared, every field** (engine build C3's spec §10; its
+            # call 12, which revises the spec's "in the hash's form"): a normal's cut filled from
+            # its setting's range, a direction's places from 0 to 360; `None` where it draws
+            # nothing. A block's draws and a condition's own ranges are in `plan_form`.
+            draws=None if not task.draws else {
+                name: variation.recorded(drawn, self._declared.get(name), direction=name in turned)
+                for name, drawn in task.draws.items()
+            },
+            # **And the conditions each block's factors made** (the spec's §4; pitfall P20), so
+            # the record needs no task file to name them.
+            generated=_generated(
+                task.plans[run.plan].blocks if run.plan is not None else run.blocks or [],
+                self._declared, turned),
+            # **Which settings are directions** (the plan's science review, M-4): each is an
+            # angle written from 0 to 360, so a reader takes circular statistics of it -- a draw
+            # from -45 to 45 sits near 0 and near 360, and a plain mean of it reads 180.
+            directions=sorted(turned),
             trials=None if run.plan is not None else run.trials,
             seed=run.seed,
             blocks=(None if run.plan is None and not run.blocks
@@ -3000,15 +3148,33 @@ class Session:
                 # is ordinary"); `check_task` refuses a condition naming one the task lacks.
                 structure = condition.structure or task.default
                 trial = task.structures[structure]
+                # **What it draws**, here between trials (engine build C3's spec §2; its call 10):
+                # each setting its block's draws or its condition's own range give, but one a
+                # person holds, on a repeat a `SAME` setting's value kept from the trial it shows
+                # again (`_draw`).
+                taken, sources = self._draw(task, scheduler.block, condition, drawn)
                 # **A live edit to a value a condition sets wins** (engine spec §14.7; §17.1's
-                # order: the task's start, the run's value, the condition's, a live edit), and the
-                # trial still counts toward its condition; its row names each value overridden.
+                # order: the task's start, the run's value, the condition's or a drawn value, a
+                # live edit), and the trial still counts toward its condition; its row names each
+                # value overridden, a condition's own range among them (engine build C3's §6).
                 overridden = sorted(name for name in condition.values if name in self._edited)
                 values = {
                     **self.spec.values,
                     **{name: value for name, value in condition.values.items()
                        if name not in self._edited},
+                    **taken,
                 }
+                # **A drawn direction is written from 0 to 360** (the PI, 2026-10-30; engine build
+                # C3's call 11): the rig chose the number, so the rig spells it; the trial runs on
+                # the value as drawn, in the task's own terms, at the same place. A value a person
+                # or the task gives is written as given.
+                params = values
+                spelled = [name for name in sources if name in turned
+                           and isinstance(values[name], (int, float))
+                           and not isinstance(values[name], bool)]
+                if spelled:
+                    params = {**values,
+                              **{name: shown_direction(values[name]) for name in spelled}}
                 world = make_world(trial, values, index)
                 # **The trial opens in the stream at the boundary, never in a frame**
                 # (XC-155; S1 §4's between-trial surface): `TRIAL_START`, then its number
@@ -3079,6 +3245,11 @@ class Session:
                 shown = _appeared(trial, result)
                 written = len(scheduler.shortfalls)
                 counted = scheduler.record(condition.name, result.outcome, shown=shown)
+                # **A trial's draws are kept only while a repeat of it waits** (engine build C3's
+                # call 13): a repeat placed, a drum's try or a trial again at once.
+                waiting = scheduler.waiting
+                for number in [number for number in self._kept if number not in waiting]:
+                    del self._kept[number]
                 if result.outcome is None:
                     # **A warning on the changes feed** (the engine C2a plan, its science review's
                     # D4): five minutes with no outcome is a loop that failed or an animal that
@@ -3101,11 +3272,14 @@ class Session:
                 stimuli = record.trial(
                     index=index,
                     outcome=recorded,
-                    params=values,
+                    params=params,
                     block=scheduler.block.name,
                     condition=condition.name,
                     structure=structure,
                     overridden=tuple(overridden),
+                    # What it drew and from where, and what a person held (engine build C3).
+                    drawn=sources,
+                    live=tuple(sorted(self._edited)),
                     # Where each stimulus it showed was (XC-399), turned into positions as the
                     # line is written, between trials.
                     placed=result.placed,

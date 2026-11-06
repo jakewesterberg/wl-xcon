@@ -796,6 +796,8 @@ operator's edits (item 2), C3's.
    conditions it overrides. Condition numbers (item 5) wait for the registry, build C5 (the PI, 2026-10-19: "Wait for the
    registry").
 
+*Engine build C3, 2026-10-30* (the C3 spec, `docs/superpowers/specs/2026-10-30-engine-c3-design.md` §2; the PI's answers of that day): **item 1 revised** -- "a parameter is set by a condition or drawn, never both (refused at load)" now reads block by block, because a condition may draw a setting from its own range ("Yes"; TSK-21): a setting is drawn by the block (its own draw, or the task's one it does not replace) or given by its conditions (each a value or its own range), not both; a block whose conditions give a setting the task draws must say so in its draws, or it is refused at load, naming the setting. The draw is written once for the task and a block may replace it ("Task default, block may replace").
+
 ## 15. Adaptivity (N§12)
 
 1. **Methods**: up-down staircases [@levitt1971transformed; @kaernbach1991simple], interleaved staircases
@@ -897,6 +899,8 @@ starts over"); all are each run's end row's `shortfalls` and the page's Still-ne
 each condition's counts (the PI, 2026-10-18); the end row's `trials` counts trials, a trial and its
 drummed repeats one, and its `presentations` the lines written.
 
+*Engine build C3, 2026-10-30* (the C3 spec §2 and §5; the PI's answers of that day): **item 5 revised** -- a repeat's drawn values are declared per drawn setting, `same` or `fresh`, and required: a task that draws a setting and does not say is refused at load ("Per drawn setting, required (Recommended)"; this replaces "declared per task"); a drummed repeat follows each setting's `same` or `fresh` too ("Follow same/fresh (Recommended)"), which closes XC-362 and revises its "a drum's repeat keeping its values". **Item 4's repeat rule** is built (XC-361): none by default; a block may choose "again at once" (TSK-31).
+
 ## 17. Parameters and live control (N§14, N§R7)
 
 1. **The order of values**: task start < run value < condition or drawn value < procedure < live edit,
@@ -914,6 +918,8 @@ drummed repeats one, and its `presentations` the lines written.
 6. **Presets, revert and carried-over values never carry a bounded setting** (a reward size), keeping
    the PI's b3a rule that a reward size changed in a run lasts only for that session. On the welfare
    summary for his confirmation.
+
+*Engine build C3, 2026-10-30* (the C3 spec §8, call 8): **item 1's "not merged into the run's values" is met in the record, not in the run.** The live layer stays merged in the run's values, because `Session.set` (welfare-listed) stays byte-identical; the names a person set are kept apart and recorded beside the values (each trial's `live` and `overridden`, beside `drawn`, and the change log), so a reader can always tell a person's value from the run's. Change ids are assigned where changes apply (`_apply_staged`, off the welfare list).
 
 ## 18. Recording and review (N§15)
 
