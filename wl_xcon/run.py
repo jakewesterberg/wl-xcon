@@ -78,7 +78,9 @@ class World(Protocol):
         be"), **except the one whose onset ended the state before** -- a transition taken on a
         `SaccadeOnset`, or on a timer counted from one, `After(since=SaccadeOnset())` -- which
         carries into this state, and no further, for its landing if its eye stopped in this state
-        ("Yes, that one saccade carries"; "Yes, carry it too"). So a world that remembers a saccade
+        ("Yes, that one saccade carries"; "Yes, carry it too"), **and the one under way as the eye
+        left a window**, a transition taken on `Exited`, on the same terms (the PI, 2026-11-04:
+        "the movement that ended the state is the response"). So a world that remembers a saccade
         across frames
         (`gaze.Tracked`) is told here when each state begins and by which guard, and refuses to
         judge a saccade for a state it was not told of. A world that draws each event as a guard

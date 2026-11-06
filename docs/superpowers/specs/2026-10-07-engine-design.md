@@ -394,12 +394,27 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    engineering): one whose eye stopped before the transition landed in the earlier state,
    whichever edge took it, where until then it carried while the detector's run was still open,
    two samples more. A transition on any other
-   guard carries nothing (the loop tells the world which guard took it). And a clock started by a
+   guard carries nothing (the loop tells the world which guard took it), but an `Exited` since
+   2026-11-04 (the note below). And a clock started by a
    saccade's onset takes nothing: its own state's `SaccadeTo` can still take the saccade if it lands
    before the timer ends, and its `SaccadeOnset` edge still fires on it, a `SaccadeOnset` being
    satisfied on the frame the saccade is confirmed by every one of the state's asking then (the
    controller's rulings, engineering; the review's M1). An object moving onto the eye still counts
    as arriving for `Entered` and `Exited` (EYE-19 and EYE-29, revised).
+   *Note, 2026-11-04 (the PI; the XC-410 review's M3):* **a saccade under way as the eye leaves a
+   window carries too** ("Carry it over (Recommended)": "A saccade already under way when the eye
+   leaves a window counts in the next state, as an onset already does: the movement that ended the
+   state is the response."). A state entered when gaze leaves the fixation window (`Exited("fix")`)
+   and asking for a saccade to the target had never scored one on a rig, the saccade having begun
+   in the state before. So a transition taken on `Exited` carries the saccade the detector puts in
+   flight on that frame, its onset before the next state's first frame, into that state, for its
+   landing alone, on the onset carry's terms: a `SaccadeTo` takes it on the frame it lands, against
+   the windows drawn then, if the detector puts its eye at rest on the state's first frame or
+   after, and no `SaccadeOnset` does, even when the detector confirms it only after the exit. An
+   `Exited` with no saccade in flight carries nothing (gaze drifting out of a window after its
+   saccade has stopped); the carry ends when the state is left, landed or not, unless by another
+   `Exited` with the saccade still in flight, which carries it on (EYE-19, revised that day;
+   `wl_xcon/gaze.py`, `Tracked.began`).
 8. **Off the field**: only when declared; check 8 grows to test extents (XC-143, XC-144).
 9. **Head-free chaired sessions**: nominal head position, recorded and listed; a task may require a
    fixed head.

@@ -37,6 +37,7 @@ from wl_xcon.findings import NOT_RECORDING, Finding
 from wl_xcon.gaze import Calibrating, Tracked
 from wl_xcon.geometry import Geometry
 from wl_xcon.photometry import SRGB
+from wl_xcon.saccade import HALF_WINDOW
 from wl_xcon.run import Recorded, run_trial
 from wl_xcon.scheduler import Block, Scheduler
 from wl_xcon.taskd import Session, SessionSpec
@@ -46,7 +47,7 @@ from tasks.calibration import calibration
 from wl_xcon import screen
 from wl_xcon.photometry import Gray
 from wl_xcon.task import (After, Array, Blank, Disc, Entered, Exited, Hide, Hold, ObjectWindows,
-                          On, P, Polar, Show, State, Stimulus, Trial, Update)
+                          On, P, Polar, Show, State, Stimulus, Trial, Update, Window)
 
 GEOMETRY = Geometry.stereoscope(
     panel_width_cm=58.997, panel_height_cm=33.293, screen_distance_cm=50.0, half_ipd_cm=1.6
@@ -2006,6 +2007,130 @@ def test_a_world_refuses_a_detector_that_has_already_been_fed():
         Tracked(Tracker(), _fitted_mapping(), calibration, 0.002, detector=fed)
     fed.reset()
     assert Tracked(Tracker(), _fitted_mapping(), calibration, 0.002, detector=fed).detector is fed
+
+
+# A saccade already under way when the eye leaves a window carries into the next state (the PI,
+# 2026-11-04; the XC-410 review's M3). Asked: a state entered when the eye leaves the fixation
+# window (`Exited("fix")`) asks for a saccade to the target; that saccade began in the state
+# before, so it never counted, and the trial ended "no response" on a rig, where it was correct
+# before XC-410. "Carry it over (Recommended)": "A saccade already under way when the eye leaves a
+# window counts in the next state, as an onset already does: the movement that ended the state is
+# the response."
+
+
+def _leaving(after: list, radius: float = 1.5, then: "list | None" = None,
+             windows: "list | None" = None) -> Trial:
+    """The array up from the first frame in `fix`, which goes to `left` on the frame gaze leaves
+    the fixation window, `radius` degrees about the origin where `_saccades` fixates
+    (`Exited("fix")`); `left`'s edges are `after`, and `then` the states after it, beside any
+    further `windows`."""
+    return Trial(start="fix",
+                 windows=[ObjectWindows(of="search", radius=1.5),
+                          Window("fix", at=(0.0, 0.0), radius=radius), *(windows or [])],
+                 states=[State("fix", enter=[Show(_PROBED)],
+                               go=[On(Exited("fix"), "left"), On(After(1.0), Outcome.NO_FIXATION)]),
+                         State("left", go=after), *(then or [])])
+
+
+def _exit_frame(trial: Trial, source: Replay, window: str = "fix") -> int:
+    """The first frame gaze from `source` is outside `window`: the frame `Exited(window)` fires
+    on, the state it enters beginning on the next."""
+    world = Tracked(Tracker(), _fitted_mapping(), trial, _PROBE_FRAME, {}, source=source)
+    for frame in range(1, len(source.payloads) + 1):
+        world.display({}, frame)
+        if not world.in_window(window, frame):
+            return frame
+    raise AssertionError(f"gaze never left {window!r}")
+
+
+@pytest.mark.parametrize("radius", [1.5, 6.0],
+                         ids=["left before it is confirmed", "left once it is confirmed"])
+@pytest.mark.parametrize("on, outcome", [("search.1", Outcome.CORRECT),
+                                         ("search.3", Outcome.WRONG_TARGET)])
+def test_the_saccade_that_left_the_fixation_window_is_scored_where_it_lands(radius, on, outcome):
+    """**The review's probe** (`pL`): `fix` ends as gaze leaves the fixation window, and `left`
+    asks for a saccade to the target. The saccade that left the window began in `fix` and carries
+    into `left`, where it is scored at the object it lands on, whether gaze left a 1.5° window
+    before the detector confirmed it or a 6° one after. It was `NO_RESPONSE` on a rig."""
+    trial = _leaving(_asks(), radius)
+    to = _drawn(_PROBED, {}, trial)[on]
+    onset, confirmed, landed = _timeline(trial, to)
+    left = _exit_frame(trial, _saccades(to))
+    assert onset <= left < landed - HALF_WINDOW, "it must be in flight as gaze leaves the window"
+    assert (left < confirmed) is (radius == 1.5), "the window must be left on the side named"
+
+    result = _replayed(trial, _saccades(to))
+
+    assert result.visited == ("fix", "left")
+    assert result.outcome is outcome
+
+
+def test_gaze_that_drifts_out_of_a_window_once_its_saccade_has_stopped_carries_nothing():
+    """**An exit with no saccade in flight carries nothing.** The eye saccades to just inside a 4°
+    fixation window's edge, where a window `near` also takes it, and drift too slow to be a
+    saccade, 10°/s, carries gaze across the edge a frame after the detector's stop field puts the
+    eye at rest. `left` begins after that and before the detector's run closes, where `Tracked`
+    lands the saccade: it stopped in `fix`, so it does not carry, and `left`, asking for a saccade
+    to `near`, has no response. Carried, it would be judged on the frame its run closes, in
+    `near`."""
+    trial = Trial(start="fix", windows=[Window("fix", at=(0.0, 0.0), radius=4.0),
+                                        Window("near", at=(4.5, 0.0), radius=1.5)],
+                  states=[State("fix", go=[On(Exited("fix"), "left"),
+                                           On(After(1.0), Outcome.NO_FIXATION)]),
+                          State("left", go=[On(SaccadeTo("near"), Outcome.CORRECT),
+                                            On(After(0.3), Outcome.NO_RESPONSE)])])
+    path = [(0.0, 0.0)] * 200 + [(3.96 * j / 10, 0.0) for j in range(1, 11)]
+    path += [(3.96 + 0.02 * j, 0.0) for j in range(1, 41)] + [(4.76, 0.0)] * 400
+    left = _exit_frame(trial, _replay_path(path))
+    _, stopped = _stopped(trial, _replay_path(path))
+    [(_, _, landed)] = _timelines(trial, _replay_path(path))
+    assert stopped <= left < landed, \
+        "the eye must stop by the frame gaze leaves, and its run close once `left` has begun"
+
+    result = _replayed(trial, _replay_path(path))
+
+    assert result.visited == ("fix", "left")
+    assert result.outcome is Outcome.NO_RESPONSE
+
+
+def test_the_saccade_that_left_the_window_does_not_satisfy_an_onset_guard_in_the_next_state():
+    """**Carried for its landing alone**, as the onset's carry is: gaze leaves the 1.5° window
+    before the detector confirms the saccade, so it is confirmed in `left`, but its onset was in
+    `fix`, and `SaccadeOnset`, asked first in `left`, is not satisfied by it. The saccade is still
+    scored where it lands."""
+    trial = _leaving([On(SaccadeOnset(), Outcome.ABORT), *_asks()])
+    to = _drawn(_PROBED, {}, trial)["search.1"]
+    _, confirmed, _ = _timeline(trial, to)
+    assert _exit_frame(trial, _saccades(to)) < confirmed, "it must be confirmed in `left`"
+
+    result = _replayed(trial, _saccades(to))
+
+    assert result.visited == ("fix", "left")
+    assert result.outcome is Outcome.CORRECT
+
+
+@pytest.mark.parametrize("by, outcome", [(After(2 * _PROBE_FRAME), Outcome.NO_RESPONSE),
+                                         (Exited("wide"), Outcome.CORRECT)],
+                         ids=["by a timer", "as gaze leaves a second window"])
+def test_a_saccade_an_exit_carried_carries_on_only_through_another_exit(by, outcome):
+    """**Left before it lands.** `left` ends two frames after it begins, and the carry ends with
+    it, as the onset's does: `asks` does not count the saccade. Or it ends as gaze leaves a second
+    window, 4° about the origin, the saccade still in flight: the movement that ended `left` is
+    under way as the eye leaves that window too, and counts in `asks`."""
+    trial = _leaving([On(by, "asks"), On(After(1.0), Outcome.ABORT)],
+                     then=[State("asks", go=_asks())],
+                     windows=[Window("wide", at=(0.0, 0.0), radius=4.0)])
+    to = _drawn(_PROBED, {}, trial)["search.1"]
+    _, _, landed = _timeline(trial, to)
+    _, stopped = _stopped(trial, _saccades(to))
+    asks = (_exit_frame(trial, _saccades(to)) + 3 if isinstance(by, After)
+            else _exit_frame(trial, _saccades(to), "wide") + 1)
+    assert stopped >= asks and landed > asks, "the eye must stop, and land, in `asks`"
+
+    result = _replayed(trial, _saccades(to))
+
+    assert result.visited == ("fix", "left", "asks")
+    assert result.outcome is outcome
 
 
 # ---------------------------------------------------------------------------

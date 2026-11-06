@@ -361,13 +361,16 @@ class SaccadeTo(Guard):
     """A detected saccade landing in a window. Detection is the versioned
     Engbert-Kliegl component (S5 §5), never re-derived per task.
 
-    **Only a saccade begun in this state, judged where it landed** (EYE-19, revised 2026-10-30,
-    the PI): one whose onset is before the state's first frame is anticipatory and never counts,
-    and the window is the one drawn on the frame the saccade lands, never later. **One
-    exception, the carry**: the saccade whose onset ended the state before -- a transition on
-    `SaccadeOnset`, or on `After(t, since=SaccadeOnset())` -- counts here too, if the detector
-    puts its eye at rest (its stop field, `Saccade.stop`, as `saccade.detect` reports it) on this
-    state's first frame or after, so an intrasaccadic jump is scored where the eye lands."""
+    **A saccade begun in this state, or carried in by the onset or the exit that ended the state
+    before, judged where it landed** (EYE-19, revised 2026-10-30 and 2026-11-04, the PI). Any
+    other saccade whose onset is before the state's first frame is anticipatory and never counts,
+    and the window is the one drawn on the frame the saccade lands, never later. **The carry**:
+    the saccade whose onset ended the state before -- a transition on `SaccadeOnset`, or on
+    `After(t, since=SaccadeOnset())` -- or the one under way as the eye left a window, a
+    transition on `Exited`, counts here if the detector puts its eye at rest (its stop field,
+    `Saccade.stop`, as `saccade.detect` reports it) on this state's first frame or after, so an
+    intrasaccadic jump is scored where the eye lands, and so is the saccade that leaves
+    fixation."""
 
     window: str
 
@@ -378,8 +381,10 @@ class SaccadeOnset(Guard):
 
     **Only a saccade begun in this state** (EYE-19, revised 2026-10-30), seen on the frame the
     detector confirms it, by every `SaccadeOnset` of the state asking then, a clock's
-    (`After(since=SaccadeOnset())`) and an edge's alike. A saccade carried in from the state
-    before (`SaccadeTo`'s carry) never satisfies it: its onset ended that state."""
+    (`After(since=SaccadeOnset())`) and an edge's alike. **A saccade carried in by the onset or
+    the exit that ended the state before never satisfies it** (EYE-19, revised 2026-11-04): it
+    counts here for its landing alone, a `SaccadeTo`'s, its onset having been in that state, even
+    when the detector confirms it only after the eye has left the window."""
 
 
 @dataclass(frozen=True, slots=True)
