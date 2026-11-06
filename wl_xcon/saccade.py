@@ -54,7 +54,10 @@ is continuous, so a run that lost a sample is still one run, flagged; but its mi
 duration is met only by measured velocities outside the threshold, online and in `detect`
 alike. Version 2 counted the unknown ones too, so one noise velocity beside a lost sample
 made a saccade of six. **And a short loss only** (version 5): a stretch from one measured
-sample to the next longer than `max_gap_s` ends the run, as a break in time does.
+sample to the next longer than `max_gap_s` ends the run, as a break in time does. **A run that
+reaches a short loss is carried through it to the landing** (version 8): the first measured
+velocity after the loss either carries the run on or, inside the threshold, ends it on its own
+sample, which the run holds, so the saccade is measured to where the eye landed and flagged.
 """
 
 from __future__ import annotations
@@ -161,7 +164,26 @@ _ROUNDING_S = 1e-9
 #: reads `[start - 2, stop)`, as the online form does, clipped to the trace, a trace's first and
 #: last two velocities, unknown only for want of a window, no loss of data. 6 and 7 detect the
 #: same runs wherever no sample is lost or no number and no run reaches a trace's edge.
-VERSION = 7
+#:
+#: **8 since 2026-11-06** (the controller's rulings on the review of 7, in the wording wl-preproc
+#: agreed that day for its spec): three rules for a loss. **A run that reaches a short loss ends on
+#: the first measured sample after it** (the review's I2 and I1): carried through the loss, as one
+#: inside a run is, it goes on if that sample's velocity is outside the threshold and else ends
+#: there, that sample its last, `stop` one past it, its size measured to the landing, flagged, the
+#: loss's unknown velocities inside it; 7 cut it back to its last measured velocity before the loss,
+#: unflagged, an 8° saccade 20 samples lost from 209 reported as 0.45°, and the gaze world, putting
+#: the eye at rest there while it was still moving, refused both carries for saccades that landed
+#: in the next state. The trimming stays only where the loss is withheld -- longer than `max_gap_s`
+#: from the last measured sample to the next, or with none after it to the trace's end. **A loss
+#: no run is carried across flags no run** (the review's M1): the unknown velocities a withheld
+#: loss leaves where a run could next begin -- one longer than the bound, or one with no measured
+#: sample before it, from the trace's start -- no longer flag a run starting just after it, as
+#: wl-preproc's withheld samples flag none; a short loss there still does. **The thresholds are
+#: taken over complete windows of known velocities** (the review's M2), as wl-preproc's are: a
+#: velocity is left out when any within two samples of it is unknown, so a loss also leaves out the
+#: two measured velocities either side of those it makes unknown, batch and online. 7 and 8 detect
+#: the same thing wherever every velocity of a trace but its first and last two is known.
+VERSION = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,9 +216,14 @@ class Saccade:
     #: Degrees of true visual angle, start point to end point (version 4; per axis until
     #: then) -- not path length.
     amplitude_deg: float
-    #: True when the detection window touched a tracker gap. **Never dropped, never
-    #: unmarked**: the velocity that triggered it may be an artifact of the gap
-    #: rather than of the eye, and only the record can decide that afterwards.
+    #: True when a velocity in `[start - 2, stop)` is unknown because data was lost inside the run
+    #: or just before it (`detect`). **Never dropped, never unmarked**: the velocity that triggered
+    #: it may be an artifact of the gap rather than of the eye, and only the record can decide that
+    #: afterwards. So a run that reaches a short loss holds it to the landing after it, and is
+    #: flagged (version 8; version 7 cut such a run back to before the loss, unflagged). What flags
+    #: nothing: a trace's first and last two velocities, which have no window (version 7), and the
+    #: unknown velocities of a withheld loss, longer than `max_gap_s` or from the trace's start,
+    #: before a run (version 8); one a withheld loss ends stops before it, unflagged.
     flagged: bool = False
 
 
@@ -371,13 +398,23 @@ def velocity(
 
 def thresholds(velocities: list[tuple[float, float] | None], params: Params) -> tuple[float, float]:
     """The elliptic thresholds, rightward and upward in each velocity's local frame (version 4),
-    from the usable velocities only: complete windows, as wl-preproc's v2 takes them.
+    from the usable velocities only: **complete windows of known velocities** (version 8), as
+    wl-preproc's scale takes them: a velocity counts only when every velocity from two samples
+    before it to two after is known, a trace's first and last two apart, which have no window and
+    are no loss of data (version 7's rule for the flag). So a loss leaves out, beside the velocities
+    it makes unknown, the two measured ones either side of them, whose own windows reach one; until
+    version 8 only the unknown ones were left out, as v2's complete windows of samples left out a
+    masked sample's.
 
     Unusable samples are excluded from the estimate as well as from the output, for
     the reason `wl-preproc`'s detector gives: a gap's velocity spike would otherwise
     inflate the scale and desensitise the detector for the rest of the trial.
     """
-    usable = [v for v in velocities if v is not None]
+    last = len(velocities) - HALF_WINDOW
+    usable = [v for n, v in enumerate(velocities)
+              if v is not None and all(velocities[m] is not None
+                                       for m in range(max(n - HALF_WINDOW, HALF_WINDOW),
+                                                      min(n + HALF_WINDOW + 1, last)))]
     return (
         params.lambda_ * median_scale([v[0] for v in usable]),
         params.lambda_ * median_scale([v[1] for v in usable]),
@@ -424,11 +461,22 @@ def detect(
     one NaN anywhere in a trace set a threshold to zero and the trace had no saccade. Only
     `velocity`, given a NaN directly, carries it into the velocities that read it (version 6).
 
-    **A run stops one past its last measured velocity** (version 7; R16 and R19): when a
-    long loss ends it, when the trace does, and when the first velocity inside the threshold
-    after some lost ones does, never past the loss and never taking in its lost samples, and
-    its size is measured to that sample. Until then it stopped on the first sample past the
-    bound, or on the closing velocity, its lost samples inside it."""
+    **A run that reaches a short loss ends on the first measured sample after it** (version 8;
+    the controller's ruling on the review of version 7, its I2, in the wording wl-preproc agreed):
+    carried through the loss, it goes on if that sample's velocity is outside the threshold, and
+    else ends there, that sample its last, `stop` one past it, its size measured to the landing,
+    and flagged, the loss's unknown velocities inside it. **A run stops one past its last measured
+    velocity** (version 7; R16) only where the loss is withheld: when a long loss ends it, and
+    when the trace does. Version 7 stopped every run so, one whose landing a short loss took cut
+    back to before the loss, unflagged; until version 7 a long loss stopped it on the first sample
+    past the bound, its lost samples inside it.
+
+    **A withheld loss flags no run** (version 8; the review's M1): the unknown velocities a lost
+    stretch leaves where a run could next begin, its window reaching back across the stretch's end,
+    flag nothing when no run could be carried across it -- longer than `max_gap_s`, or with no
+    measured sample before it, from the trace's start -- as wl-preproc's withheld samples flag
+    nothing. A run is carried across no such loss, so only one starting just after it could read
+    them."""
     gaze_deg = [None if position is None or not (math.isfinite(position[0])
                                                   and math.isfinite(position[1]))
                 else position for position in gaze_deg]
@@ -436,6 +484,19 @@ def detect(
     eta_x, eta_y = thresholds(velocities, params)
     if eta_x <= 0 or eta_y <= 0:
         return []
+    bound = params.max_gap_s + _ROUNDING_S
+    #: **The unknown velocities a withheld loss leaves** (version 8): for the first measured sample
+    #: `k` after a stretch from the last measured one longer than the bound, or after a loss from
+    #: the trace's start, the velocities at `k - 2` to `k + 1`, whose windows reach back across the
+    #: stretch's end, as `Detector` marks them as `k` arrives.
+    withheld = [False] * len(gaze_deg)
+    previous = None
+    for k, position in enumerate(gaze_deg):
+        if position is not None:
+            if (k > 0) if previous is None else (at[k] - previous > bound):
+                for n in range(max(k - HALF_WINDOW, 0), min(k + HALF_WINDOW, len(gaze_deg))):
+                    withheld[n] = True
+            previous = at[k]
 
     found: list[Saccade] = []
     run_start: int | None = None
@@ -443,10 +504,10 @@ def detect(
     #: the minimum duration counts it** (version 3; the PI, 2026-11-04, "Require measured
     #: samples"). The unknown velocities in it carry it and count for nothing.
     measured = 0
-    #: The open run's last measured velocity: **where it stops, one past it** (version 7).
+    #: The open run's last measured velocity: **where it stops, one past it** (version 7), unless
+    #: unknown velocities follow it to the one that ends it (version 8).
     last = 0
     shortest = params.min_duration_samples
-    bound = params.max_gap_s + _ROUNDING_S
     #: When the last present sample before `n` was taken, `None` before the first: **a lost
     #: stretch is bounded from it** (version 5).
     seen_at = None
@@ -474,7 +535,7 @@ def detect(
             # run however long they went on, 400 ms of nothing one run.
             if not continuous:
                 if run_start is not None and measured >= shortest:
-                    found.append(_saccade(gaze_deg, velocities, run_start, last + 1))
+                    found.append(_saccade(gaze_deg, velocities, withheld, run_start, last + 1))
                 run_start = None
             continue
         if _outside(v, eta_x, eta_y):
@@ -485,24 +546,29 @@ def detect(
             last = n
         elif run_start is not None:
             if measured >= shortest:
-                found.append(_saccade(gaze_deg, velocities, run_start, last + 1))
+                # **After unknown velocities, the run ends on this one's sample, which it holds**
+                # (version 8): they are a short loss's, the run carried through it, and this is the
+                # landing. Else one past the last measured velocity, this one's sample, as ever.
+                stop = last + 1 if last == n - 1 else n + 1
+                found.append(_saccade(gaze_deg, velocities, withheld, run_start, stop))
             run_start = None
     if run_start is not None and measured >= shortest:
-        found.append(_saccade(gaze_deg, velocities, run_start, last + 1))
+        found.append(_saccade(gaze_deg, velocities, withheld, run_start, last + 1))
     return found
 
 
-def _saccade(gaze_deg, velocities, start: int, stop: int) -> Saccade:
+def _saccade(gaze_deg, velocities, withheld, start: int, stop: int) -> Saccade:
     """Flagged when a velocity in `[start - 2, stop)` is unknown because data was lost -- the
     trace of a gap -- as the online form flags one (version 7; R18 of the check of wl-preproc's
     lost-data spec, at `c88fdc7`). Until then the window ran two past the stop, so a sample lost
     after the run flagged it. **A trace's edges are no loss of data**: the window is clipped to
     the trace, and its first and last two velocities, unknown only because their windows run off
     it, never flag a run (wl-preproc's answer of 2026-11-06), where until then they flagged one
-    from sample 0 or reaching the end."""
+    from sample 0 or reaching the end. **Nor is a withheld loss one a run is carried across**
+    (version 8): its unknown velocities, `withheld` (`detect`), flag no run that starts after it."""
     first = max(HALF_WINDOW, start - HALF_WINDOW)
     end = min(len(velocities) - HALF_WINDOW, stop)
-    touched_gap = any(velocities[i] is None for i in range(first, end))
+    touched_gap = any(velocities[i] is None and not withheld[i] for i in range(first, end))
     return Saccade(start, stop, _amplitude(gaze_deg, start, stop), flagged=touched_gap)
 
 
@@ -539,21 +605,29 @@ class Detector:
     on the first velocity that showed the run long enough, so one noise velocity outside
     the threshold, then the five a lost sample leaves unknown, then one inside it, was a
     saccade of six. **What a confirmation cannot know, it does not claim**: a gap after it,
-    in the run, flags the batch form's saccade and not this one. **A run stops one past its
-    last measured velocity** (version 7), kept in `last_stop` as it closes, as `detect` reports
-    it. *On the rig's default path none of this is reached yet (2026-10-30): `gaze.Tracked`
-    gives a lost datagram as the held sample again, never as a gap, until the tracker's
-    staleness runs out (backlog XC-428, waiting on build T and V3(a)).*
+    in the run, flags the batch form's saccade and not this one. **A run's stop is kept in
+    `last_stop` as it closes, as `detect` reports it**: one past its last measured velocity
+    (version 7), or, the run carried through a short loss to the velocity inside the threshold
+    that ends it, one past that velocity's own sample, the landing (version 8). **A withheld loss
+    flags no run** (version 8), as in `detect`: the unknown velocities whose windows reach back
+    across the end of a loss no run is carried across, as its first measured sample after it
+    arrives (`_withheld_to`). *On the rig's default path none of this is reached yet
+    (2026-10-30): `gaze.Tracked` gives a lost datagram as the held sample again, never as a gap,
+    until the tracker's staleness runs out (backlog XC-428, waiting on build T and V3(a)).*
 
     **Bounded work per sample.** Velocity is a fixed amount of arithmetic on a ring of the
     last five samples (`_WINDOW`): since version 4 one direction a sample (four trigonometric
     calls and a square root) and four local coordinates a velocity (an `atan2` and two square
     roots each), where it was five plain multiplications. The threshold is *not* recomputed per sample -- that
     would be a median over a growing list inside a trial loop, which is the unbounded
-    per-frame work CLAUDE.md forbids -- but every `refresh_every` usable velocities (and
-    every one while both thresholds are still zero), over the last `history` of them. What
-    that costs is unmeasured and stays unmeasured here: it is a number for a tools/ script
-    and `docs/measurements/`, not for a docstring.
+    per-frame work CLAUDE.md forbids -- but every `refresh_every` velocities taken (and
+    every one while both thresholds are still zero), over the last `history` of them, and once
+    more when a velocity a refresh took is withdrawn (version 8, `_withdraw`). **A velocity is
+    taken when its window's velocities are known** (version 8), as `thresholds` takes them: as it
+    comes, provisionally, since the two after it are not yet, and withdrawn if either is unknown;
+    the two after an unknown one are never taken. What that costs is unmeasured and stays
+    unmeasured here: it is a number for a tools/ script and `docs/measurements/`, not for a
+    docstring.
 
     **And nothing built per sample but what one returns** (XC-414): a sample is
     `gaze.Tracked.display`'s every frame, so every buffer is built with the detector, its
@@ -591,7 +665,7 @@ class Detector:
     #: How many samples this trial has accepted. A sample's index is absolute, which is
     #: what makes `Saccade.start` mean the same thing as it does in `detect`.
     _seen: int = field(default=0, init=False, repr=False)
-    #: **The last `history` usable velocities, a ring**: `_v_count` of them, the next
+    #: **The last `history` velocities taken, a ring**: `_v_count` of them, the next
     #: written at `_v_next`, the oldest `_v_count` slots before it.
     _vx: list = field(init=False, repr=False)
     _vy: list = field(init=False, repr=False)
@@ -621,17 +695,38 @@ class Detector:
     #: samples of it is flagged, as `_saccade` flags it (version 2). **A trace's first two
     #: velocities, which have no window, are no loss of data** (version 7; wl-preproc's spec at
     #: `c88fdc7`): until then this started at sample 1, so a run from the trial's start was
-    #: flagged.
+    #: flagged. **Nor are a withheld loss's** (version 8, `_withheld_to`): they are not kept here.
     _last_unknown: int = field(default=-(HALF_WINDOW + 1), init=False, repr=False)
     #: **The open run's last measured velocity**, by absolute index (version 7): where it stops,
-    #: one past it, when it closes.
+    #: one past it, when it closes, unless unknown velocities follow it to the one that ends it
+    #: (version 8).
     _run_last: int = field(default=0, init=False, repr=False)
-    #: **The stop of the run that closed last**, one past its last measured velocity, as `detect`
-    #: reports it (version 7; R16 and R19): what `gaze.Tracked` puts the eye at rest on.
+    #: **The stop of the run that closed last**, as `detect` reports it: one past its last measured
+    #: velocity (version 7; R16), or, carried through a short loss to the velocity that ends it, one
+    #: past that velocity's sample, the landing (version 8): what `gaze.Tracked` puts the eye at
+    #: rest on.
     last_stop: int = field(default=0, init=False, repr=False)
     #: **When the last present sample before the centre was taken** (version 5), `None` before the
     #: first: a lost stretch is bounded from it, as `detect` bounds it.
     _seen_at: float | None = field(default=None, init=False, repr=False)
+    #: **When the newest present sample was taken** (version 8), `None` before the first: a sample
+    #: ends a withheld loss when the stretch from it is longer than the bound.
+    _present_at: float | None = field(default=None, init=False, repr=False)
+    #: **The last velocity a withheld loss leaves unknown where a run could next begin**, by
+    #: absolute index (version 8): `k + 1` once the sample `k` that ends one arrives, so the
+    #: velocities `k - 2` to `k + 1` whose windows reach back across the loss's end, which are
+    #: computed after it, flag nothing (`_last_unknown`), as `detect` marks them.
+    _withheld_to: int = field(default=-(HALF_WINDOW + 1), init=False, repr=False)
+    #: **The last velocity not taken into the scale** (version 8): two past the last unknown one,
+    #: whose window holds it.
+    _skip_to: int = field(default=-(HALF_WINDOW + 1), init=False, repr=False)
+    #: **How many of the newest velocities taken are provisional** (version 8), none to two: the
+    #: last two computed, if taken, whose windows' later velocities are not yet known.
+    _provisional: int = field(default=0, init=False, repr=False)
+    #: **Whether `warmup_samples` velocities have been taken this trial** (version 8): a velocity
+    #: withdrawn just after the warmup is met would otherwise make the detector unready, and drop
+    #: an open run.
+    _warm: bool = field(default=False, init=False, repr=False)
     #: Set for the sample on which a saccade was confirmed, and cleared by the next
     #: `accept`. The trial loop asks once per frame, so an edge has to survive exactly
     #: one question, not until someone happens to ask.
@@ -671,6 +766,11 @@ class Detector:
         self._run_last = 0
         self.last_stop = 0
         self._seen_at = None
+        self._present_at = None
+        self._withheld_to = -(HALF_WINDOW + 1)
+        self._skip_to = -(HALF_WINDOW + 1)
+        self._provisional = 0
+        self._warm = False
         self.onset = None
 
     @property
@@ -689,11 +789,11 @@ class Detector:
     @property
     def ready(self) -> bool:
         """Whether the threshold rests on enough samples to mean anything: enough
-        velocities, and the smaller threshold above zero (`min`'s choice of the two)."""
+        velocities taken, once this trial (`_warm`; version 8), and the smaller threshold above
+        zero (`min`'s choice of the two)."""
         eta_x = self._eta_x
         eta_y = self._eta_y
-        return (self._v_count >= self.params.warmup_samples
-                and (eta_y if eta_y < eta_x else eta_x) > 0)
+        return self._warm and (eta_y if eta_y < eta_x else eta_x) > 0
 
     def accept(self, at: float, gaze_deg: tuple[float, float] | None) -> Saccade | None:
         """One sample. Returns a saccade on the sample that confirms it, else `None`.
@@ -721,6 +821,15 @@ class Detector:
             xs[slot] = gaze_deg[0]
             ys[slot] = gaze_deg[1]
             _direction_into(gaze_deg[0], gaze_deg[1], self._ux, self._uy, self._uz, slot)
+            # **The first measured sample after a withheld loss** (version 8), as `detect` judges
+            # it: the stretch from the newest present sample before it longer than the bound. Not
+            # a loss from the trial's start, which `detect` withholds too: online no run can start
+            # within two velocities of its unknown ones, the two after an unknown velocity never
+            # taken into the scale and the scale needing two, so they could flag none either way.
+            previous = self._present_at
+            if previous is not None and at - previous > self.params.max_gap_s + _ROUNDING_S:
+                self._withheld_to = self._seen + 1
+            self._present_at = at
         ts[slot] = at
         self._seen += 1
 
@@ -761,21 +870,34 @@ class Detector:
 
         if moved:
             kept = len(self._vx)
-            if kept:
+            # **Taken only with no unknown velocity in the two before it** (version 8), and
+            # provisionally: one in the two after it withdraws it (`_withdraw`).
+            if kept and centre > self._skip_to:
                 self._vx[self._v_next] = vx
                 self._vy[self._v_next] = vy
                 self._v_next = self._v_next + 1 if self._v_next + 1 < kept else 0
                 if self._v_count < kept:
                     self._v_count += 1
-            self._since_refresh += 1
-            if self._since_refresh >= self.refresh_every or (
-                    self._eta_x == 0.0 and self._eta_y == 0.0):
-                self._refresh()
-                self._since_refresh = 0
+                if self._v_count >= self.params.warmup_samples:
+                    self._warm = True
+                self._provisional = 2 if self._provisional else 1
+                self._since_refresh += 1
+                if self._since_refresh >= self.refresh_every or (
+                        self._eta_x == 0.0 and self._eta_y == 0.0):
+                    self._refresh()
+                    self._since_refresh = 0
+            else:
+                self._provisional = 0
         else:
-            # `velocity`'s `None`, remembered so a run starting within the window of it is
-            # flagged as `_saccade` flags one (version 2).
-            self._last_unknown = centre
+            # `velocity`'s `None`: the two velocities before it withdrawn from the scale and the
+            # two after it not taken, their windows holding it (version 8); and remembered so a run
+            # starting within the window of it is flagged as `_saccade` flags one (version 2),
+            # unless a withheld loss left it (version 8, `_withheld_to`).
+            self._skip_to = centre + HALF_WINDOW
+            if self._provisional:
+                self._withdraw()
+            if centre > self._withheld_to:
+                self._last_unknown = centre
 
         if not self.ready:
             if self._run_start is not None:
@@ -810,8 +932,10 @@ class Detector:
         # velocity of the run was counted, and the run reported if long enough, as it came.
         if not _outside_xy(vx, vy, self._eta_x, self._eta_y):
             if self._run_start is not None:
-                # Its stop: one past its last measured velocity, never past a loss (version 7).
-                self.last_stop = self._run_last + 1
+                # Its stop, as `detect` gives it: one past its last measured velocity, this one's
+                # sample (version 7); or, unknown velocities between, a short loss's, this sample,
+                # which the run holds, the landing, one past it (version 8).
+                self.last_stop = centre if self._run_last == centre - 1 else centre + 1
             self._run_start = None
             return None
         start = self._run_start
@@ -847,8 +971,25 @@ class Detector:
         last = (stop - 1) % len(self._t)
         return separation_deg(self._run_x, self._run_y, self._x[last], self._y[last])
 
+    def _withdraw(self) -> None:
+        """**The provisional velocities, withdrawn from the scale** (version 8): the newest
+        `_provisional` taken, whose windows an unknown velocity has now reached, so their slots are
+        the next written. If the last refresh took one, the thresholds are taken again at once, so
+        they never rest on a velocity known to have an incomplete window; else the refresh to come
+        counts them out. A buffer that had wrapped has lost the oldest values they were written
+        over, and holds one or two fewer than `history` until as many more are taken."""
+        withdrawn = self._provisional
+        self._provisional = 0
+        self._v_next = (self._v_next - withdrawn) % len(self._vx)
+        self._v_count -= withdrawn
+        if withdrawn > self._since_refresh:
+            self._refresh()
+            self._since_refresh = 0
+        else:
+            self._since_refresh -= withdrawn
+
     def _refresh(self) -> None:
-        """The thresholds, re-estimated from the last `history` velocities: `thresholds` over
+        """The thresholds, re-estimated from the last `history` velocities taken: `thresholds` over
         them, oldest first, **bit for bit** (XC-414), with nothing built. Each median sorts the
         values in `_sorting`, the velocities oldest first and, while fewer than `history` exist,
         +inf after them (`_median`); a stable sort over values `<` orders totally leaves the first

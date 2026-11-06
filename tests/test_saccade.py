@@ -11,6 +11,7 @@ expectation, so the online path is only ever compared with the shared algorithm.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import math
@@ -361,27 +362,76 @@ def test_a_gaze_sample_that_is_no_number_makes_every_velocity_reading_it_no_numb
     assert all(v[0] != v[0] and v[1] != v[1] for v in velocities[648:653])
 
 
-@pytest.mark.parametrize("history,nan", [(60, False), (1000, False), (1000, True)],
-                         ids=["wrapped", "filling", "filling, a NaN among them"])
+@pytest.mark.parametrize("history,lost", [(60, None), (1000, None), (1000, "a NaN"), (60, 650),
+                                          (1000, 697)],
+                         ids=["wrapped", "filling", "filling, a NaN among them",
+                              "wrapped, a sample lost", "a sample lost at the end"])
 def test_the_online_thresholds_are_the_batch_form_s_over_the_last_history_velocities(history,
-                                                                                       nan):
+                                                                                       lost):
     """Re-estimated in buffers built with the detector (XC-414), the thresholds are still
-    `thresholds` over the last `history` usable velocities, oldest first, bit for bit: once the
+    `thresholds` over the last `history` velocities it takes, oldest first, bit for bit: once the
     velocity buffer has wrapped, while it is still filling, and with a gaze sample that is no
     number in the trace, which is a lost sample to the detector (version 7), so the thresholds are
     those of the trace with it missing. Until version 7 its NaN velocities were among them, in the
-    order `sorted` met them."""
+    order `sorted` met them. **The velocities it takes have complete windows of known velocities**
+    (version 8, as `thresholds` takes them): a velocity is taken as it comes and withdrawn when an
+    unknown one follows within two samples, and the two after an unknown one are not taken, so a
+    sample lost at 650 leaves out 646 and 647 and 653 and 654, beside the five it makes unknown,
+    with the buffer wrapped or not; and lost at 697, its last velocities, the thresholds a refresh
+    took over 693 and 694 are taken again without them."""
     gaze, at = _trace([(200, 10, 8.0, 0.0), (450, 12, -7.0, 3.0)], n=700)
     seen = list(gaze)
-    if nan:
+    if lost == "a NaN":
         gaze[650] = (math.nan, gaze[650][1])
         seen[650] = None
+    elif lost is not None:
+        gaze[lost] = seen[lost] = None
     detector = Detector(history=history, refresh_every=1)
     for t, g in zip(at, gaze):
         detector.accept(t, g)
-    last = [v for v in velocity(seen, at, Params()) if v is not None][-history:]
+    velocities = velocity(seen, at, Params())
+    last = [velocities[n] for n in _complete(velocities)][-history:]
 
     assert repr((detector._eta_x, detector._eta_y)) == repr(thresholds(last, Params()))
+
+
+def test_a_detector_once_ready_stays_ready_while_its_thresholds_are_not_zero():
+    """**Ready stays ready** (version 8): a velocity withdrawn from the scale (the thresholds' own
+    test) can take the count of velocities back under `warmup_samples` just after it was met, and
+    an open run would then be dropped as the detector stops being ready, and its saccade found late,
+    mid-flight, or not at all. With a warmup met at the velocity at 197, a sample lost at 201, in
+    `_TWELVE`'s run from 198, withdraws 197 and 198: the run is carried, and reported at the batch
+    form's start, flagged, as with no warmup to speak of."""
+    gaze, at = _trace(_TWELVE)
+    lost = _lost(gaze, 201)
+    params = Params(warmup_samples=196)
+    [(_, whole, _)] = _confirmations(lost, at, Params(warmup_samples=50))
+
+    found = _confirmations(lost, at, params)
+
+    assert [(s.start, s.flagged) for _, s, _ in found] == [(whole.start, True)]
+
+
+def test_reset_leaves_a_detector_as_a_new_one_is():
+    """`reset` starts every count and mark over, so a trial is detected as by a new detector: every
+    field but the buffers, which are kept and written over (XC-414), and the open run's first sample
+    (`_run_x`, `_run_y`), written as a run starts and read only in it. The trial before ends with a
+    loss of 61 samples, withheld, a lost sample before it, and velocities taken after it, so each of
+    version 8's marks -- the last measured sample's time, the withheld loss's reach, the velocities
+    not taken after an unknown one, the newest taken ones, a warmup met -- is set to forget."""
+    gaze, at = _trace(_TWELVE)
+    detector = Detector()
+    _online_with(detector, _lost(gaze, 300, *range(500, 561)), at)
+    new = Detector()
+    kept = set(_BUFFERS) | {"_run_x", "_run_y"}
+    fields = [f.name for f in dataclasses.fields(Detector) if f.name not in kept]
+    assert [name for name in ("_present_at", "_withheld_to", "_skip_to", "_provisional", "_warm")
+            if getattr(detector, name) == getattr(new, name)] == [], "each must be set to forget"
+
+    detector.reset()
+
+    assert {name: getattr(detector, name) for name in fields} \
+        == {name: getattr(new, name) for name in fields}
 
 
 def test_indices_stay_absolute_once_the_buffer_has_been_trimmed():
@@ -502,10 +552,11 @@ def test_a_run_is_long_enough_only_by_its_measured_velocities(shortest, reported
     """**The boundary** (version 3): the 4-sample saccade with a sample lost 7 into its run has
     five measured velocities outside the threshold, then five unknown, then one inside it. With
     `min_duration_samples` 5 it is a saccade, confirmed in flight on its fifth, at the batch form's
-    start, and unflagged in both forms: the batch form's run stops one past its fifth measured
-    velocity, the unknown ones after it outside it (version 7; it ran on through them, flagged,
-    until then) -- and with 6 it is not, online or in the batch form, nor with 10, which version 2
-    met by counting the unknown ones, confirming it on the velocity that ends it, flagged."""
+    start, unflagged, since nothing before it was lost; the batch form's run is carried through the
+    loss and ends on that velocity inside the threshold, which it holds, flagged (version 8; version
+    7 stopped it one past its fifth measured velocity, unflagged) -- and with 6 it is not, online or
+    in the batch form, nor with 10, which version 2 met by counting the unknown ones, confirming it
+    on the velocity that ends it, flagged."""
     gaze, at = _trace([(200, 4, 4.0, 0.0)])
     [(_, whole, _)] = _confirmations(gaze, at)
     lost = _lost(gaze, whole.start + 7)
@@ -517,7 +568,7 @@ def test_a_run_is_long_enough_only_by_its_measured_velocities(shortest, reported
     assert [(s.start, s.flagged, flying) for _, s, flying in found] \
         == ([(whole.start, False, True)] if reported else [])
     assert [(s.start, s.stop, s.flagged) for s in batch] \
-        == ([(whole.start, whole.start + 5, False)] if reported else [])
+        == ([(whole.start, whole.start + 11, True)] if reported else [])
 
 
 def _flagged_as_the_batch_form_would(velocities, start, centre):
@@ -723,26 +774,10 @@ def test_the_same_lost_stretch_carries_a_run_wherever_it_falls(onset):
     assert [stop for _, stop in closed] == [runs[0][1]]
 
 
-@pytest.mark.parametrize("case, lost, run, size", [
-    ("R16, a long loss", range(214, 240), (201, 212), 2.095),
-    ("R19, a loss at the run's end", range(209, 213), (200, 207), 4.008),
-], ids=["R16, a long loss ends it", "R19, its last samples lost"])
-def test_a_run_whose_end_is_lost_stops_at_its_last_measured_velocity(case, lost, run, size):
-    """**R16 and R19.** A run ended by a loss longer than the bound (`None` at 214 to 239), and a
-    12-sample saccade whose last samples are lost (`None` at 209 to 212, its run closed by the
-    first measured velocity after them): each stops one past its last measured velocity, never past
-    the loss and never taking in its lost samples, and its size is measured to that sample. They
-    stopped at the first sample past the bound, `[201, 239)` and 3.008°, and at the closing
-    velocity, `[200, 215)` and 8.021°. Online the run closes with the same stop (`last_stop`), and
-    the gaze world puts the eye at rest on that sample's frame."""
-    gaze, at = (_minimum_jerk() if case.startswith("R16") else _minimum_jerk(duration=12))
-    trace = _lost(gaze, *lost)
-
-    found = detect(trace, at)
-
-    assert [(s.start, s.stop) for s in found] == [run]
-    assert found[0].amplitude_deg == pytest.approx(size, abs=1e-3)
-    assert [stop for _, stop in _online_closing(trace, at)[1]] == [run[1]]
+def _stopped_in_the_gaze_world(gaze, lost) -> int:
+    """Where the gaze world puts the eye at rest (`Tracked._stopped`) after `gaze` is sent through
+    it, the datagrams `lost` never arriving and the tracker's staleness half a frame, so each is a
+    lost sample to the detector."""
     payloads = [(0.0, "" if k in lost else _datagram(x, y, k)) for k, (x, y) in enumerate(gaze)]
     world = Tracked(Tracker(staleness=_FRAME / 2),
                     Mapping(version=1, targets=(), left=_IDENTITY, right=_IDENTITY), _RESPOND,
@@ -750,7 +785,109 @@ def test_a_run_whose_end_is_lost_stops_at_its_last_measured_velocity(case, lost,
     world.began("respond", 1, None)
     for frame in range(1, len(gaze) + 1):
         world.display({}, frame)
-    assert world._stopped == run[1] + 1, "sample k is frame k + 1's"
+    return world._stopped
+
+
+@pytest.mark.parametrize("ends", ["a long loss", "the trace's end"])
+def test_a_run_a_long_loss_or_the_trace_ends_stops_at_its_last_measured_velocity(ends):
+    """**R16, and the trace's end** (version 7, kept by version 8). A run ended by a loss longer
+    than the bound (`None` at 214 to 239), and one whose last samples are lost to the trace's end
+    (`None` at 209 to 214 of 215): the loss is withheld, no measured sample after it within the
+    bound, so the run stops one past its last measured velocity, never past the loss and never
+    taking in its lost samples, its size measured to that sample, unflagged. The long loss had
+    stopped it at the first sample past the bound, `[201, 239)` and 3.008°. Online the run the long
+    loss ends closes with the same stop (`last_stop`), and the gaze world puts the eye at rest on
+    that sample's frame; the one at the trace's end is still in flight there."""
+    gaze, at = _minimum_jerk()
+    if ends == "a long loss":
+        lost, run, size = range(214, 240), (201, 212), 2.095
+    else:
+        gaze, at = gaze[:215], at[:215]
+        lost, run, size = range(209, 215), (201, 207), 0.452
+    trace = _lost(gaze, *lost)
+
+    found = detect(trace, at)
+
+    assert [(s.start, s.stop, s.flagged) for s in found] == [(*run, False)]
+    assert found[0].amplitude_deg == pytest.approx(size, abs=1e-3)
+    if ends == "a long loss":
+        assert [stop for _, stop in _online_closing(trace, at)[1]] == [run[1]]
+        assert _stopped_in_the_gaze_world(gaze, lost) == run[1] + 1, "sample k is frame k + 1's"
+    else:
+        assert _online_closing(trace, at) == ([(run[0], False)], [])
+
+
+@pytest.mark.parametrize("duration, lost, stop", [
+    (12, range(209, 213), 216),
+    (30, range(209, 229), 232),
+], ids=["R19's case, a 12-sample saccade's last four samples lost",
+        "the review's worst, an 8° saccade 20 samples lost from 209"])
+def test_a_run_that_reaches_a_short_loss_ends_on_the_first_measured_sample_after_it(
+        duration, lost, stop):
+    """**Version 8** (ruling 1 on the review of version 7, its I2; wl-preproc's shared wording of
+    2026-11-06): a saccade whose landing falls in a loss within `max_gap_s`. Its run is carried
+    through the loss as one inside a run is (R11), and the first measured velocity after it, inside
+    the threshold, ends it on that sample, which it holds: its stop one past it, its size measured
+    to it, the landing, and flagged, the loss's unknown velocities inside it. Version 7 cut it back
+    to its last measured velocity before the loss and reported it unflagged: `[200, 207)` and
+    4.008°, and `[201, 207)` and 0.452° of an 8° saccade, under the 1° microsaccade cut. Online the
+    run closes with the same stop (`last_stop`), and the gaze world puts the eye at rest on that
+    sample's frame."""
+    gaze, at = _minimum_jerk(duration=duration)
+    trace = _lost(gaze, *lost)
+    velocities = velocity(trace, at, Params())
+    assert velocities[stop - 1] is not None and all(
+        v is None for v in velocities[lost[0] - HALF_WINDOW:stop - 1]), \
+        "the landing must be the first measured velocity after the loss"
+    [whole] = detect(gaze, at)
+
+    found = detect(trace, at)
+
+    assert [(s.start, s.stop, s.flagged) for s in found] == [(whole.start, stop, True)]
+    assert found[0].amplitude_deg == _amplitude(trace, whole.start, stop) \
+        == pytest.approx(whole.amplitude_deg, abs=0.05)
+    assert [stop for _, stop in _online_closing(trace, at)[1]] == [stop]
+    assert _stopped_in_the_gaze_world(gaze, lost) == stop + 1, "sample k is frame k + 1's"
+
+
+def test_every_saccade_whose_landing_falls_in_a_short_loss_is_measured_to_its_landing():
+    """**The review's sweep, reduced** (`trailing_loss.py` among the research probes): minimum-jerk
+    saccades of 12 and 30 samples, of 2° and 8°, each losing 1 to 24 samples from seven into it to
+    two past its end, so the run has its start before the loss reaches it. Each is one run at the
+    whole trace's start, its size within 0.05° of the whole trace's; one the loss reaches, its
+    velocities unknown from the whole run's closing one or before, is flagged and measured to the
+    first sample after the loss whose velocity is measured, and one it does not is the whole
+    trace's; or none, where too few of its velocities before the loss are measured. Online each
+    closes with the batch form's stop (`last_stop`). Version 7 cut 1316 of the review's 2970 back
+    to before the loss, unflagged, down to 6% of the movement."""
+    measured = 0
+    for duration in (12, 30):
+        for amplitude in (2.0, 8.0):
+            gaze, at = _minimum_jerk(duration=duration, amplitude=amplitude)
+            [whole] = detect(gaze, at)
+            for first in range(207, 200 + duration + 3, 2):
+                for m in (1, 3, 6, 10, 20, 24):
+                    trace = _lost(gaze, *range(first, first + m))
+                    velocities = velocity(trace, at, Params())
+
+                    found = detect(trace, at)
+
+                    case = (duration, amplitude, first, m)
+                    closed = [stop for _, stop in _online_closing(trace, at)[1]]
+                    if not found:
+                        assert first - HALF_WINDOW - whole.start < DEFAULT_MIN_DURATION_SAMPLES \
+                            and closed == [], case
+                        continue
+                    [run] = found
+                    reached = whole.stop >= first - HALF_WINDOW
+                    assert (run.start, run.flagged) == (whole.start, reached), case
+                    assert velocities[run.stop - 1] is not None, case
+                    assert run.stop > first + m if reached else run.stop == whole.stop, case
+                    assert abs(run.amplitude_deg - whole.amplitude_deg) < 0.05, case
+                    assert closed == [run.stop], case
+                    measured += reached
+
+    assert measured > 100
 
 
 def test_the_batch_flag_reads_the_run_and_the_two_samples_before_it():
@@ -765,7 +902,7 @@ def test_the_batch_flag_reads_the_run_and_the_two_samples_before_it():
     assert _online_closing(trace, at)[0] == [(201, False)]
 
 
-@pytest.mark.parametrize("edge, lose", [("start", ()), ("start", (6,)), ("end", ()), ("end", (590,))],
+@pytest.mark.parametrize("edge, lose", [("start", ()), ("start", (8,)), ("end", ()), ("end", (590,))],
                          ids=["from the trace's start", "from its start, a sample lost",
                               "to the trace's end", "to its end, a sample lost"])
 def test_a_trace_s_edges_are_no_loss_of_data_for_the_flag(edge, lose):
@@ -777,7 +914,9 @@ def test_a_trace_s_edges_are_no_loss_of_data_for_the_flag(edge, lose):
     start's two flagged a run from sample 0, both forms, and the end's a run reaching it in the
     batch form. Online is ready only after its warmup's velocities, so at the start it runs with a
     warmup of two, as `test_a_run_at_a_trial_s_first_velocities_is_unflagged` does, and its run
-    starts a sample later."""
+    starts later. The sample lost there is 8: until version 8 it was 6, whose unknown velocities
+    from 4 now withdraw from the scale both of the two the detector was ready on (`thresholds`'
+    complete windows), so it is not ready again until after the loss."""
     gaze, at = _minimum_jerk(onset=0) if edge == "start" else _minimum_jerk(onset=580)
     trace = _lost(gaze, *lose)
 
@@ -798,7 +937,7 @@ _SIXTY = [(200, 60, 24.0, 0.0)]
 
 @pytest.mark.parametrize("lost, runs", [
     (24, [(198, 261, True)]),
-    (25, [(198, 204, False), (233, 261, True)]),
+    (25, [(198, 204, False), (233, 261, False)]),
     (200, [(198, 204, False)]),
 ], ids=["50 ms from the last measured sample to the next", "52 ms", "400 ms"])
 def test_a_run_is_carried_across_a_short_loss_and_ended_by_a_long_one(lost, runs):
@@ -809,9 +948,11 @@ def test_a_run_is_carried_across_a_short_loss_and_ended_by_a_long_one(lost, runs
     samples, carries the run, flagged, to where the eye is seen at rest. A longer one ends it, the
     run so far kept, one past its last measured velocity (version 7): `[198, 204)`, unflagged, its
     lost samples outside it; the eye still moving after 52 ms of nothing is a run of its own, its
-    first velocities' windows reading the loss, so flagged. After 400 ms it has stopped. Until
-    version 5 a stretch of any length carried the run while the missing samples kept arriving.
-    **Online, each confirmed run closes with the batch form's stop** (`Detector.last_stop`)."""
+    first velocities' windows reading the loss, which is withheld, so unflagged (version 8; flagged
+    until then, `test_a_run_just_after_a_long_loss_is_unflagged`). After 400 ms it has stopped.
+    Until version 5 a stretch of any length carried the run while the missing samples kept
+    arriving. **Online, each confirmed run closes with the batch form's stop**
+    (`Detector.last_stop`)."""
     gaze, at = _trace(_SIXTY)
     trace = _lost(gaze, *range(206, 206 + lost))
 
@@ -819,6 +960,69 @@ def test_a_run_is_carried_across_a_short_loss_and_ended_by_a_long_one(lost, runs
     confirmed, closed = _online_closing(trace, at)
     assert [start for start, _ in confirmed] == [run[0] for run in runs]
     assert [stop for _, stop in closed] == [run[1] for run in runs]
+
+
+@pytest.mark.parametrize("case", ["after 52 ms of nothing", "the review's case 17",
+                                  "after a loss from the trace's start"])
+def test_a_run_just_after_a_long_loss_is_unflagged(case):
+    """**Version 8** (M1 of the review of version 7; wl-preproc's shared wording of 2026-11-06): a
+    loss no run is carried across -- from the last measured sample to the next longer than
+    `max_gap_s`, or with no measured sample before it -- is withheld, a break in the data rather
+    than a loss inside a run, and the unknown velocities it leaves where a run could next begin flag
+    nothing, as their withheld samples flag nothing. So a run starting within two samples of it is
+    unflagged, batch and online. Version 7 flagged it, its first velocities' windows reading the
+    loss: `_SIXTY` with 25 samples lost from 206, its second run `(233, 261)`; the review's case 17,
+    a 75-sample saccade of 13.4° from sample 139 with 140 to 165 lost, `(168, 210)`; and a saccade
+    at sample 12 of a trace whose first ten samples are lost. A short loss there still flags it
+    (`test_a_saccade_whose_first_velocity_follows_a_lost_sample_is_marked`)."""
+    if case == "after 52 ms of nothing":
+        gaze, at = _trace(_SIXTY)
+        trace, run = _lost(gaze, *range(206, 231)), (233, 261)
+    elif case == "the review's case 17":
+        gaze, at = _minimum_jerk(onset=139, duration=75, amplitude=13.44, n=560, seed=17)
+        trace, run = _lost(gaze, *range(140, 166)), (168, 210)
+    else:
+        gaze, at = _minimum_jerk(onset=12)
+        trace, run = _lost(gaze, *range(10)), (13, 41)
+    velocities = velocity(trace, at, Params())
+    assert velocities[run[0] - HALF_WINDOW] is None, \
+        "the run's flag window must hold one of the loss's unknown velocities"
+
+    found = [(s.start, s.stop, s.flagged) for s in detect(trace, at)]
+
+    assert (*run, False) in found
+    if case != "after a loss from the trace's start":
+        assert (run[0], False) in _online_closing(trace, at)[0]
+
+
+def _complete(velocities) -> list:
+    """The indices of `velocities` whose windows hold known velocities only: each velocity from two
+    before to two after known, a trace's first and last two, which have no window, apart."""
+    last = len(velocities) - HALF_WINDOW
+    return [n for n, v in enumerate(velocities)
+            if v is not None and all(velocities[m] is not None
+                                     for m in range(max(n - HALF_WINDOW, HALF_WINDOW),
+                                                    min(n + HALF_WINDOW + 1, last)))]
+
+
+def test_the_scale_leaves_out_the_measured_velocities_beside_a_loss():
+    """**Version 8** (M2 of the review of version 7; wl-preproc's shared wording of 2026-11-06):
+    the thresholds are taken over complete windows of known velocities, as wl-preproc's scale is,
+    so a loss leaves out, beside the velocities it makes unknown, the two measured ones either side
+    of them, whose own windows hold an unknown one. On R16's trace (`None` at 214 to 239, velocities
+    212 to 241 unknown) that is 210, 211, 242 and 243: 562 velocities, thresholds (6.845, 6.634)
+    as theirs, where version 7 took 566 and (6.900, 6.634)."""
+    gaze, at = _minimum_jerk()
+    velocities = velocity(_lost(gaze, *range(214, 240)), at, Params())
+    known = [n for n, v in enumerate(velocities) if v is not None]
+    taken = _complete(velocities)
+    assert sorted(set(known) - set(taken)) == [210, 211, 242, 243] and len(taken) == 562
+
+    eta = thresholds(velocities, Params())
+
+    assert eta == (DEFAULT_LAMBDA * median_scale([velocities[n][0] for n in taken]),
+                   DEFAULT_LAMBDA * median_scale([velocities[n][1] for n in taken]))
+    assert eta == pytest.approx((6.845, 6.634), abs=1e-3)
 
 
 def test_a_lost_stretch_exactly_max_gap_s_long_carries_the_run():
@@ -899,15 +1103,17 @@ def test_every_run_is_confirmed_while_it_is_open(seed):
     assert confirmed > 100
 
 
-def test_the_detector_that_takes_wl_preproc_s_lost_data_rules_is_version_7():
+def test_the_detector_that_ends_a_run_on_the_landing_after_a_short_loss_is_version_8():
     """`VERSION` is bumped whenever a session would detect something else: version 2 reports what
     version 1 never did, version 3 no longer reports a run whose minimum duration only unknown
     velocities met, version 4 detects and sizes in true visual angle (XC-398), version 5 ends a
     run at a lost stretch longer than `max_gap_s`, version 6 makes a gaze sample that is no number
-    NaN in every velocity reading it, and version 7 takes five of wl-preproc's lost-data rules (R3,
-    R11, R16, R18, R19). **Not wl-preproc's fixture set "v2"**, which version 4 is pinned to: that
-    is their file's version, and this constant is ours."""
-    assert VERSION == 7
+    NaN in every velocity reading it, version 7 takes five of wl-preproc's lost-data rules (R3,
+    R11, R16, R18, R19), and version 8 ends a run that reaches a short loss on the first measured
+    sample after it, flags no run for a withheld loss before it, and takes the thresholds over
+    complete windows of known velocities. **Not wl-preproc's fixture set "v2"**, which version 4 is
+    pinned to: that is their file's version, and this constant is ours."""
+    assert VERSION == 8
 
 
 # ---------------------------------------------------------------------------
@@ -1037,10 +1243,34 @@ def test_our_thresholds_are_theirs_in_true_angle(name):
     our velocities, which are `None` wherever a window is incomplete, against their `eta_deg_s`,
     held to v2's tolerance. Per axis theirs took every unmasked sample, zero-filled edges
     included, and ours stood 0.04-2.4% from it; the short trace's two differ from v1's rule by 9%
-    and 21%."""
-    gaze, at = _ours_on(_TRACES[name])
-    mine = thresholds(velocity(gaze, at, Params()), Params())
-    eta = _TRACES[name]["eta_deg_s"]
+    and 21%.
+
+    **A masked sample is a lost one to us** (version 8): our input has no mask, a sample the tracker
+    did not deliver being `None` (`_ours_on`), and since version 8 the scale also leaves out the
+    measured velocities beside a lost sample's unknown ones, as wl-preproc's scale leaves them out
+    beside a sample with no position
+    (`test_the_scale_leaves_out_the_measured_velocities_beside_a_loss`). v2 masks a sample in place
+    and keeps those, so on its two masked traces the two scales are over different velocities, and
+    ours stand up to 1% and 6% from v2's: there ours is held to v2's tolerance against the same
+    arithmetic over their published velocities at the ones ours takes, which are v2's less the two
+    either side of each masked stretch's unknown ones."""
+    trace = _TRACES[name]
+    gaze, at = _ours_on(trace)
+    velocities = velocity(gaze, at, Params())
+    mine = thresholds(velocities, Params())
+    eta = trace["eta_deg_s"]
+    masked = [k for k, label in enumerate(trace["available"] or []) if label is not None]
+    if masked:
+        theirs_v = trace["velocity_deg_s"]
+        taken = _complete(velocities)
+        available = trace["available"]
+        whole = [k for k in range(HALF_WINDOW, len(gaze) - HALF_WINDOW)
+                 if all(available[j] is None for j in range(k - HALF_WINDOW, k + HALF_WINDOW + 1))]
+        firsts = [k for k in masked if k - 1 not in masked]
+        lasts = [k for k in masked if k + 1 not in masked]
+        beside = {k for a, b in zip(firsts, lasts) for k in (a - 4, a - 3, b + 3, b + 4)}
+        assert set(taken) <= set(whole) and set(whole) - set(taken) == beside
+        eta = [DEFAULT_LAMBDA * median_scale([theirs_v[k][axis] for k in taken]) for axis in (0, 1)]
 
     assert _held(mine[0], eta[0]) and _held(mine[1], eta[1]), (mine, eta)
 

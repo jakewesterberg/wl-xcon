@@ -1984,6 +1984,38 @@ def test_an_onset_clock_observes_the_onset_and_leaves_it_to_an_onset_edge():
     assert (result.outcome, result.frames) == (Outcome.CORRECT, confirmed)
 
 
+@pytest.mark.parametrize("carry", ["the onset's edge", "the exit's edge"])
+def test_a_carried_saccade_whose_landing_falls_in_a_short_loss_is_scored_where_it_lands(carry):
+    """**Ruling 2 on the review of saccade version 7, its I1** (version 8). A 12-sample saccade to
+    the target, its datagrams 8 to 10 samples in lost, the tracker's staleness half a frame so the
+    detector is given them as lost samples, carried into the next state by its onset's edge (the
+    array jumps while it is in flight) or by gaze leaving a 4° fixation window. Its run is carried
+    through the loss and ends on the first measured sample after it, the landing, where the
+    detector's stop field puts the eye at rest, in the next state: it carries, and is scored at the
+    target. Version 7 stopped the run one past its last measured velocity before the loss, where the
+    eye was still moving, before the next state's first frame, so neither carry took it, and the
+    trial had no response (the review's probe, `docs/research/2026-11-06-saccade-rules-probes/
+    carry_short_loss.py`: 122 of 1820 trials). Whole, it is `CORRECT` under both."""
+    if carry == "the onset's edge":
+        trial, states = _contingent(_asks()), ("onset", "jumped")
+        to = _drawn(_moved(_PROBED, _JUMP), {}, trial)["search.1"]
+    else:
+        trial, states = _leaving(_asks(), radius=4.0), ("fix", "left")
+        to = _drawn(_PROBED, {}, trial)["search.1"]
+    path = _path(to, 12, "minimum jerk")
+
+    def played(lose: "set[int]"):
+        world = Tracked(Tracker(staleness=_PROBE_FRAME / 2), _fitted_mapping(), trial,
+                        _PROBE_FRAME, {}, source=_replay_path(path, lose=lose))
+        return run_trial(trial, world, _PROBE_FRAME, values={}, effects=Recorded())
+
+    assert played(set()).outcome is Outcome.CORRECT, "whole, it is a saccade to the target"
+
+    result = played({208, 209, 210})
+
+    assert (result.visited, result.outcome) == (states, Outcome.CORRECT)
+
+
 def test_a_short_saccade_a_lost_datagram_leaves_too_few_measured_velocities_is_no_response():
     """**I2's saccade, since version 3** (the PI, 2026-11-04, "Require measured samples"). A
     3-sample saccade to the target with the datagram 2 samples into it lost, the tracker's

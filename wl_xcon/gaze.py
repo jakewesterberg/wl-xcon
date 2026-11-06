@@ -320,7 +320,9 @@ class Tracked:
         if right is None:
             return left
         # Halved, then summed (the review of d932cb3, its I2): bit for bit `(a + b) / 2` wherever
-        # that is finite, and finite whenever both eyes are, where their sum could overflow.
+        # that is finite and no subnormal number arises (`5e-324 * 0.5` is 0, where
+        # `(5e-324 + 5e-324) / 2` is 5e-324; no gaze is near one), and finite whenever both eyes
+        # are, where their sum could overflow.
         return (left[0] * 0.5 + right[0] * 0.5, left[1] * 0.5 + right[1] * 0.5)
 
     def _look(self, frame: int) -> None:
@@ -601,11 +603,14 @@ class Tracked:
         elif self._in_flight and not self.detector.in_flight:
             # The run closed: the eye has landed, so `SaccadeTo` can now ask where, on this frame.
             # **Where the eye stopped** (the review's I1): the run's end as the detector closed it,
-            # `saccade.detect`'s `Saccade.stop`, one past its last measured velocity
-            # (`Detector.last_stop`; version 7), fed `fed - last_stop` frames ago. Until version 7
-            # it was always the closing velocity's own sample, `HALF_WINDOW` back, so a run whose
-            # last samples were lost, or that a long loss ended, stopped past the loss (pinned
-            # against `detect` by `tests/test_gaze.py` and `tests/test_saccade.py`).
+            # `saccade.detect`'s `Saccade.stop` (`Detector.last_stop`), fed `fed - last_stop`
+            # frames ago: the closing velocity's own sample, `HALF_WINDOW` back, the first known at
+            # rest; or, the run carried through a short loss to it, the sample after, the closing
+            # one the run's last (version 8); or, a long loss ending the run, one past its last
+            # measured velocity (version 7). Version 7 stopped a run whose landing a short loss took
+            # there too, while the eye was still moving, and both carries refused the saccade
+            # that landed in the next state; until version 7 a long loss stopped it past the loss
+            # (pinned against `detect` by `tests/test_gaze.py` and `tests/test_saccade.py`).
             self._in_flight = False
             self._landed_on = frame
             self._stopped = frame - (fed - self.detector.last_stop)

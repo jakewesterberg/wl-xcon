@@ -13,6 +13,10 @@ a measurement of the rig, its tracker or its timing, and none is a timing claim.
 With `cur` at versions 5 to 7 (2026-11-06: the lost-stretch bound; a gaze sample that is no number; five of
 wl-preproc's lost-data rules) `p10_trial_false.py` and `p3_fixation.py` give the same numbers as with version 4: none
 of their losses is longer than one sample, none of their samples is no number, and none of their runs ends in a loss.
+With `cur` at version 8 (the same day: the end after a short loss, a withheld loss flagging nothing, the scale over
+complete windows of known velocities) they give version 7's numbers but two, in `p3_fixation.py`'s heavy-tailed noise,
+where the scale leaves out the measured velocities beside each lost sample: one lost a trial, online, 34 trials of
+2000 with a saccade against 35; three lost a trial, batch, 35 against 36.
 
 ## Running them
 
@@ -38,6 +42,14 @@ themselves where they use its helpers.
   without it. Make one from a wl-preproc checkout:
   `git -C <wl-preproc> archive 82380d2 wl_preproc | tar -x -C <dir>`, then `WLPP_V2_SOURCE=<dir>`.
 
+**One more reads wl-preproc's proof code:** `versus_preproc_68b76b6.py` reads it at `68b76b6` (branch
+`proof/eye-lost`, unapproved) from the directory `WLPP_EYE_LOST_SOURCE` names:
+`git -C <wl-preproc> archive 68b76b6 wl_preproc | tar -x -C <dir>`.
+
+**One is run under two trees and compared:** `carry_short_loss.py` drives the whole gaze world, so it
+is run with each version's tree on `PYTHONPATH` (a `git archive` of the commit, extracted) and the rows
+compared, columns 1 to 7 for outcomes and frames.
+
 The long ones (`p1_clean`, `p3_fixation`, `p3_fixation_v4`, `p12b_missed_by_run`, `pinned_sweep`)
 take minutes each.
 
@@ -55,5 +67,8 @@ take minutes each.
 | `p12b_missed_by_run.py` | Real saccades (2 to 30 samples, 0.5° to 15°, linear and raised-cosine) with one to three consecutive samples lost at every offset: what version 2 reported and the working tree's misses, by the run's length on the whole trace and by amplitude, and whether version 1 missed it too. | 2026-11-04 (measured samples): 403 of 8277 with one lost; runs of 10 velocities or fewer (11, 12 with two, three lost), and 10 whose whole trace the batch form gave other than one run; version 1 missed every one. Measured with version 3 as `cur`; with version 4 (2026-11-06) every count is the same. |
 | `p13_v2_and_e.py` (with `p2ta.py`) | (a) wl-preproc's true-angle detector and ours reproduce v2's runs on all 11 traces; (b) where they part: a run meeting a lost or unavailable sample, ours against theirs whole, with the sample alone unavailable, and with their validity mask. | 2026-11-06 (true angle): a 12-sample saccade with one interior sample unavailable is two runs in wl-preproc, one flagged run in ours; at (20°, 0°) up 2°, their two are microsaccades. |
 | `pinned_sweep.py` | The sweep test's online/batch comparison over 61 seeds, the online threshold free and held at the batch form's. | The sweep test's docstring: 53 of 12,200 traces disagree free, none held. |
+| `trailing_loss.py` | The review of version 7, its check 3: minimum-jerk saccades of 8 to 40 samples and 2° to 15°, each losing 1 to 24 samples from three into it to two past its end, versions 6 and 7 against the working tree's, batch. | 2026-11-06 (version 8, I2): version 7 cut 1316 of 2970 back to before the loss, unflagged, as little as 0.45° of an 8° saccade; version 8 none, 1287 of them version 6's run with its landing sample added. |
+| `carry_short_loss.py` | The review of version 7, its checks 3 and 5: the onset and exit carries of saccades whose last datagrams are lost, at half a frame's staleness and the rig's 50 ms, under two trees. | 2026-11-06 (version 8, I1): version 7 refused 122 of 1820 trials versions 6 and 8 score `CORRECT`, and put the eye at rest while it was still moving in 704 of 1660 landings; versions 6 and 8 never do. |
+| `versus_preproc_68b76b6.py` | The review of version 7, its check 1's sweep: 1500 saccades with one or two losses against wl-preproc's proof code at `68b76b6`, thresholds and runs. | 2026-11-06 (version 8, M1 and M2): thresholds equal in all 1500, runs in 1253, the other 247 only by the agreed end after a short loss, which `68b76b6` predates. |
 
 `versions.py` and `probe_common.py` are shared helpers, not probes.
