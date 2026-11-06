@@ -1983,6 +1983,42 @@ def test_a_short_saccade_a_lost_datagram_leaves_too_few_measured_velocities_is_n
     assert played({202}).outcome is Outcome.NO_RESPONSE
 
 
+class _ConfirmsOnAClosedRun:
+    """**A stand-in detector that breaks `saccade.Detector`'s contract**: on its 260th sample it
+    confirms a saccade whose run has already closed (`in_flight` false), as version 2 could and no
+    `saccade.Detector` has since version 3."""
+
+    seen = 0
+    in_flight = False
+    onset = None
+
+    def __init__(self) -> None:
+        self.fed = 0
+
+    def accept(self, at: float, gaze_deg):
+        from wl_xcon.saccade import Saccade
+
+        self.fed += 1
+        return Saccade(start=250, stop=256, amplitude_deg=8.0) if self.fed == 260 else None
+
+
+def test_a_detector_that_confirms_a_saccade_on_a_closed_run_is_refused():
+    """**Fail closed** (the controller's ruling on the review's M3, 2026-11-06): a gaze world
+    lands a saccade as its detector's run closes, so it needs every saccade confirmed in flight,
+    as `saccade.Detector` confirms each since version 3. One confirmed on a closed run would have
+    landed a frame late, its stop two frames off, with nothing to say so; it is refused, naming the
+    contract. Until version 4 a branch took it as landed, which no detector reached."""
+    trial = _probe([State("s", enter=[Show(_PROBED)],
+                          go=[*_asks()[:2], On(After(1.0), Outcome.NO_RESPONSE)])])
+    world = Tracked(Tracker(), _fitted_mapping(), trial, _PROBE_FRAME, {},
+                    source=_saccades(_drawn(_PROBED, {}, trial)["search.1"]),
+                    detector=_ConfirmsOnAClosedRun())
+
+    with pytest.raises(RuntimeError, match="confirmed a saccade .* on a run already closed"):
+        run_trial(trial, world, _PROBE_FRAME, values={}, effects=Recorded())
+    assert world.detector.fed == 260, "refused on the frame it was confirmed"
+
+
 def test_a_world_refuses_a_detector_that_has_already_been_fed():
     """**M4.** `Tracked` numbers the samples it feeds the detector from the detector's first, so a
     detector fed before would put every onset later than it was, and a saccade begun before its

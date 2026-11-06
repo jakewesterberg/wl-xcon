@@ -124,6 +124,16 @@ def _untold(state: str, told: "str | None") -> NoReturn:
     )
 
 
+def _closed(confirmed) -> NoReturn:
+    """`Tracked.display`'s refusal of a saccade confirmed on a closed run, its message built as it
+    is raised, never on a frame that confirms one in flight."""
+    raise RuntimeError(
+        f"the detector confirmed a saccade ({confirmed.start} to {confirmed.stop}) on a run already "
+        f"closed: a gaze world lands a saccade as its detector's run closes, so it needs each one "
+        f"confirmed while its run is open, as `saccade.Detector` confirms every one since version 3"
+    )
+
+
 class Tracked:
     """A `World` whose gaze comes from a real (or replayed) tracker.
 
@@ -522,8 +532,12 @@ class Tracked:
             # (2026-11-04) a run is confirmed on the velocity outside the threshold that gives it
             # `min_duration_samples` measured ones, never on the sample that ends it, as version 2
             # could (`tests/test_saccade.py` sweeps it). So it is in flight, and lands as its run
-            # closes (below). Until version 4 this also took a saccade confirmed as its run ended
-            # as landed on that frame (the review of XC-410's I2), which no detector reached.
+            # closes (below). **A detector that confirms one on a closed run is refused** (the
+            # controller's ruling of 2026-11-06, fail closed): taken as in flight, it would land a
+            # frame late, its stop two frames off. Until version 4 a branch took such a saccade as
+            # landed on that frame (the review of XC-410's I2), which no detector reached.
+            if not self.detector.in_flight:
+                _closed(confirmed)
             self._in_flight = True
             self._landed_on = None
         elif self._in_flight and not self.detector.in_flight:
