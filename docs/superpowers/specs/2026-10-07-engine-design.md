@@ -919,7 +919,7 @@ drummed repeats one, and its `presentations` the lines written.
    the PI's b3a rule that a reward size changed in a run lasts only for that session. On the welfare
    summary for his confirmation.
 
-*Engine build C3, 2026-10-30* (the C3 spec §8, call 8): **item 1's "not merged into the run's values" is met in the record, not in the run.** The live layer stays merged in the run's values, because `Session.set` (welfare-listed) stays byte-identical; the names a person set are kept apart and recorded beside the values (each trial's `live` and `overridden`, beside `drawn`, and the change log), so a reader can always tell a person's value from the run's. Change ids are assigned where changes apply (`_apply_staged`, off the welfare list).
+*Engine build C3, 2026-10-30* (the C3 spec §8, call 8): **item 1's "not merged into the run's values" is met in the record, not in the run.** The live layer stays merged in the run's values, because `Session.set` (welfare-listed) stays byte-identical; the names a person set, the settings handed back and the drawn ranges changed are kept apart and recorded beside the values (each trial's `live`, `overridden` and `drawn`, and the change log), so a reader can always tell a person's value from the run's. Change ids are assigned where changes apply (`_apply_staged`, off the welfare list).
 
 ## 18. Recording and review (N§15)
 

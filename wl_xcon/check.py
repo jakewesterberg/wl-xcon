@@ -1363,7 +1363,7 @@ def undrawable(distribution: object, declared: Param | None, *,
     """**Why `distribution` cannot be drawn for a setting declared `declared`, or `None`** (engine
     build C3's spec §11: "a distribution that cannot be drawn ... breaks a run"), saying what to
     write: what `variation.draw`, which judges nothing, would raise on or draw wrongly. At load
-    (`_draw_faults`), and before a live range applies (the C3 plan's Task 13).
+    (`_draw_faults`), and before a live range is accepted (`taskd.Session._range`).
 
     - **None of the five** (`_DRAWN_KINDS`).
     - **A number that is no finite number**: a uniform's, a normal's (its cut's ends `None` or
@@ -1973,7 +1973,7 @@ def _drawable(distribution: Distribution, declared: Param | None) -> tuple | Non
     weight of 0 is never drawn), a list's items (`variation.values_of`), and a uniform's, a
     normal's or a wait's span as one `_Spread` (`variation.bounds_of`), or its one number where
     its lowest is its highest. `None` for a draw that cannot be drawn (`undrawable`): the load
-    refuses it (`_draw_faults`), and a live range is never applied (the C3 plan's Task 13)."""
+    refuses it (`_draw_faults`), and a live range never is (`taskd.Session._range`)."""
     if undrawable(distribution, declared) is not None:
         return None
     if isinstance(distribution, Weighted):

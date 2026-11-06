@@ -463,6 +463,19 @@ class Scheduler:
         return frozenset(numbers)
 
     @property
+    def waiting_conditions(self) -> dict[int, str]:
+        """**Each trial that will be shown again, by number, with its condition's name** (engine
+        build C3): `waiting`'s trials, each of the open block. What the live check of trials no
+        animal can get right judges with the `same` values each keeps (`taskd.Session.
+        _kept_trials`; the controller's ruling of 2026-10-30 on the engine C3 plan's fuzz)."""
+        named = {number: condition for _, number, condition in self._due}
+        if self._drum is not None:
+            named[self._drum[1]] = self._drum[0]
+        if self._again is not None:
+            named[self._again[1]] = self._again[0]
+        return named
+
+    @property
     def block(self) -> Block:
         return self.blocks[self._index]
 

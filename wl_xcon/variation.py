@@ -168,6 +168,56 @@ def extremes(distribution: object, declared: Param | None = None, *,
     return tuple(dict.fromkeys(end for end in ends if math.isfinite(end)))
 
 
+#: **The numbers that place a draw's values on its setting's axis**, by kind (the PI, 2026-10-31,
+#: on the engine C3 plan's Appendix B, item 18): each is read as a value of the setting is
+#: (`easier_range`). A normal's spread is not one: changing it moves its values both ways at once.
+_PLACED = {Uniform: ("low", "high"), TruncatedNormal: ("mean", "low", "high"),
+           NonAging: ("minimum", "mean", "maximum")}
+
+
+def easier_range(meaning: Meaning, drawn: object, written: object,
+                 declared: Param | None = None, reference: object = None) -> bool | None:
+    """**Whether a range changed live counts as easier than the range the task writes**, judged as
+    a whole (the PI, 2026-10-31, on the engine C3 plan's Appendix B, item 18, "Judge the range as a
+    whole (Recommended)": "if it reaches any value easier than the written range allows (for a
+    uniform, either end moved the easier way; anything that cannot be read, or mixed, counts as
+    easier, as doubt does under item 2)"). Each number placing its values (`_PLACED`: a uniform's
+    two ends, a normal's mean and cut, its cut filled from `declared` as `bounds_of` fills it, a
+    wait's shortest, average and longest) is read as a value of the setting is (`easier`, with
+    `reference` for a meaning relative to another setting): `True` where one moved the easier way,
+    a mixed change among them, or where a normal's spread changed, its values moving both ways;
+    `None` where none moved the easier way and which way one moved cannot be read; `False` where
+    none moved, or each that moved moved the harder way, and for a setting that is no difficulty
+    setting. Read the other way round, `easier_range(meaning, written, drawn)` true says it moved
+    the harder way somewhere. Two draws of other kinds, or of two kinds, cannot be read."""
+    if meaning.kind == NOT_DIFFICULTY:
+        return False
+    fields = _PLACED.get(type(written))
+    if fields is None or type(drawn) is not type(written):
+        return None
+    doubt = False
+    for field in fields:
+        now, was = _placed(drawn, field, declared), _placed(written, field, declared)
+        if now == was:
+            continue
+        way = easier(meaning, now, was, reference)
+        if way is None:
+            doubt = True
+        elif way:
+            return True
+    if isinstance(written, TruncatedNormal) and drawn.sd != written.sd:
+        return True
+    return None if doubt else False
+
+
+def _placed(distribution: Distribution, field: str, declared: Param | None) -> object:
+    """One of the numbers placing a draw's values (`_PLACED`): a normal's cut end filled from
+    `declared` as `bounds_of` fills it, so a cut written and one its setting gives read alike."""
+    if isinstance(distribution, TruncatedNormal) and field in ("low", "high"):
+        return bounds_of(distribution, declared)[0 if field == "low" else 1]
+    return getattr(distribution, field)
+
+
 def draw(
     distribution: Distribution,
     seed: int,
