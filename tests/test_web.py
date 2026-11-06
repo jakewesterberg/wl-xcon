@@ -3263,7 +3263,7 @@ def test_a_card_shows_where_its_value_comes_from_and_its_conditions():
     assert '<span class="src">from the task\'s start</span>' in cards["fix_hold"]
     assert '<span class="src">given by this run</span>' in cards["fix_window"]
     assert '<span class="src">set or drawn by condition wide</span>' in cards["fix_window"]
-    assert '<span class="pv">set by its conditions</span>' in cards["target_x"]
+    assert '<span class="pv">set or drawn by its conditions</span>' in cards["target_x"]
     assert '<span class="src">set or drawn by conditions near, far</span>' in cards["target_x"]
     assert "4.00" not in cards["target_x"]
     assert '<span class="pv">drawn each trial</span>' in cards["wait"]
@@ -3412,9 +3412,9 @@ def test_a_staged_hand_back_a_range_and_a_revert_are_said_in_words():
                  "uniform from 0.2 s to 0.4 s", {"low": 0.2, "high": 0.4}),
     )
     parts = fragments(frame(params=params, staged=(
-        Staged("fix_hold", 0.4, 0.3, jake, False, "hand_back", (), True),
-        Staged("wait", 1.0, None, jake, False, "hand_back", (), True),
-        Staged("target_x", 6.0, None, jake, False, "hand_back", (), True),
+        Staged("fix_hold", 0.4, 0.3, jake, False, "hand_back", (), True, "run"),
+        Staged("wait", 1.0, None, jake, False, "hand_back", (), True, "draw"),
+        Staged("target_x", 6.0, None, jake, False, "hand_back", (), True, "conditions"),
         Staged("gap", "uniform from 0.2 s to 0.4 s", "uniform from 0.2 s to 0.5 s", jake, False,
                "range"),
     )), view())
@@ -3431,9 +3431,23 @@ def test_a_staged_hand_back_a_range_and_a_revert_are_said_in_words():
     assert f"staged hand back → its conditions by {who}" in cards["target_x"]
     assert f"staged range → uniform from 0.2 s to 0.5 s by {who}" in cards["gap"]
 
+
+def test_a_staged_revert_is_said_in_words_and_a_hand_back_is_said_where_it_goes():
+    """The revert case of the words test above, a test of its own (fix round 1 of the C3 plan's
+    Task 18): a revert's changes say they are a revert, one handing a setting back saying so and
+    where it goes; and a hand-back to a run that gives the setting no value says that, as the
+    rig's applied line does (`Staged.to`, review minor 1), not "its conditions"."""
+    jake = Box("jake")
+    who = _who(jake)
+    params = (
+        ParamRow("fix_hold", "s", 0.1, 1.0, 0.4, False, None, "person"),
+        ParamRow("target_x", "deg", None, None, 6.0, False, None, "person", ("near",)),
+        ParamRow("gap", "s", None, None, None, False, None, "draw", (),
+                 "uniform from 0.2 s to 0.4 s", {"low": 0.2, "high": 0.4}),
+    )
     reverted = fragments(frame(params=params, staged=(
         Staged("target_x", 6.0, 5.0, jake, False, "revert", ("near",)),
-        Staged("fix_hold", 0.4, None, jake, False, "revert", (), True),
+        Staged("fix_hold", 0.4, None, jake, False, "revert", (), True, "conditions"),
         Staged("gap", "uniform from 0.2 s to 0.4 s", "uniform from 0.2 s to 0.3 s", jake, False,
                "revert"),
     )), view())
@@ -3448,11 +3462,22 @@ def test_a_staged_hand_back_a_range_and_a_revert_are_said_in_words():
     assert f"staged revert → handed back to its conditions by {who}" in cards["fix_hold"]
     assert f"staged revert → 5.00 by {who}" in cards["target_x"]
 
+    nothing = fragments(frame(params=params, staged=(
+        Staged("fix_hold", 0.4, None, jake, False, "hand_back", (), True, "run"),
+        Staged("target_x", 6.0, None, jake, False, "revert", (), True, "run"),
+    )), view())
+    feed, cards = nothing["rt-changes"], _cards(nothing["params"])
+
+    assert f"hand back: fix_hold 0.40 → the run, which gives it no value by {who}" in feed
+    assert (f"revert: target_x 6.00 → handed back to the run, which gives it no value by {who}"
+            in feed)
+    assert "its conditions" not in feed
+    assert f"staged hand back → the run, which gives it no value by {who}" in cards["fix_hold"]
 
     held = (ParamRow("target_y", "deg", None, None, 2.0, False, None, "person"),
             ParamRow("target_z", "deg", None, None, 2.0, False, None, "person"))
     same = fragments(frame(params=held, staged=(
-        Staged("target_y", 2.0, 0.0, jake, False, "revert", (), True),
+        Staged("target_y", 2.0, 0.0, jake, False, "revert", (), True, "run"),
         Staged("target_z", 2.0, 0.0, jake, False, "revert", ()),
     )), view())
     feed, cards = same["rt-changes"], _cards(same["params"])
@@ -3469,9 +3494,10 @@ def test_the_moments_pane_offers_a_revert_to_each_newest_first_and_the_runs_star
     the run's start last, with when it was kept, what was done then, and *revert to this*,
     sending its change id. Between runs nothing is offered, and before any frame the pane says
     so; greyed away from the box."""
-    moments = (MomentRow(7, _SINCE + 90, "target_x 4.00 → 5.00"),
-               MomentRow(3, _SINCE + 30, "fix_hold handed back to its conditions"),
-               MomentRow(0, _SINCE, "the run's start"))
+    moments = (MomentRow(7, _SINCE + 90, "target_x 4.00 → 5.00", ("target_x → 5.00",)),
+               MomentRow(3, _SINCE + 30, "fix_hold handed back to its conditions",
+                         ("fix_hold handed back",)),
+               MomentRow(0, _SINCE, "the run's start", ("target_x → 4.00",)))
     pane = fragments(frame(moments=moments), view())["moments"]
     lan = fragments(frame(moments=moments), view(can_write=False))["moments"]
     between = fragments(frame(moments=()), view())["moments"]
@@ -3498,7 +3524,7 @@ def test_where_a_value_comes_from_its_draw_its_numbers_and_the_moments_are_escap
         staged=(Staged("fix_hold", 0.3, 0.4, jake, False, "set", (EVIL,)),
                 Staged("fix_hold", 0.4, 0.5, jake, False, "set", (EVIL, "near")),
                 Staged("gap", EVIL, EVIL, jake, False, "range", (EVIL,)),
-                Staged("gap", 0.2, EVIL, jake, False, "hand_back", (), True)),
+                Staged("gap", 0.2, EVIL, jake, False, "hand_back", (), True, "run")),
         moments=(MomentRow(1, _SINCE, EVIL, (EVIL,)),),
         eased=(EVIL,),
     ), view())
@@ -3575,7 +3601,8 @@ def test_each_moment_says_what_a_revert_to_it_would_change():
     """The C3 plan's science review, M-1: one tap on *revert to this* restores many settings, so
     each moment says beneath it what a revert to it would change, in the changes feed's words, as
     the rig sends them (`MomentRow.changes`), or that it would change nothing now, which the rig
-    would refuse."""
+    would refuse, so its *revert to this* is greyed (fix round 1 of the C3 plan's Task 18, review
+    minor 7)."""
     pane = fragments(frame(moments=(
         MomentRow(4, _SINCE + 60, "target_y 0.00 → 2.00"),
         MomentRow(1, _SINCE + 10, "target_x 10.00 → 12.00",
@@ -3583,8 +3610,10 @@ def test_each_moment_says_what_a_revert_to_it_would_change():
                    "target_x → 12.00")),
     )), view())["moments"]
 
-    assert ('revert to this</button></div><div class="rv">would change nothing now</div>'
+    assert ('data-change="4" disabled title="a revert to this would change nothing now">'
+            'revert to this</button></div><div class="rv">would change nothing now</div>'
             '<div class="kv">') in pane
+    assert 'data-change="1">revert to this</button>' in pane
     assert pane.endswith(
         '<div class="rv">would change: target_y handed back; the task&#x27;s draw of '
         '&#x27;fix_hold&#x27; → as declared; target_x → 12.00</div>')

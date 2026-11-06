@@ -302,8 +302,8 @@ def test_a_staged_hand_back_and_range_are_shown_staged_in_words(tmp_path):
 
     assert session.refusals == []
     assert link.seen[4].staged == (
-        Staged("target_x", 12.0, None, JAKE, False, "hand_back", (), True),
-        Staged("target_y", 2.0, 0.0, JAKE, False, "hand_back", (), True),
+        Staged("target_x", 12.0, None, JAKE, False, "hand_back", (), True, "conditions"),
+        Staged("target_y", 2.0, 0.0, JAKE, False, "hand_back", (), True, "run"),
         Staged("fix_hold", "uniform from 0.2 s to 0.4 s", "uniform from 0.25 s to 0.4 s", JAKE,
                False, "range", ("b",)),
         Staged("fix_hold", "uniform from 0.25 s to 0.4 s", "uniform from 0.25 s to 0.35 s", JAKE,
@@ -334,7 +334,7 @@ def test_a_reverts_staged_changes_are_shown_as_one_revert(tmp_path):
 
     assert session.refusals == []
     assert link.seen[6].staged == (
-        Staged("target_y", 2.0, 0.0, JAKE, False, "revert", (), True),
+        Staged("target_y", 2.0, 0.0, JAKE, False, "revert", (), True, "run"),
         Staged("fix_hold", "uniform from 0.2 s to 0.3 s", "uniform from 0.2 s to 0.4 s", JAKE,
                False, "revert", ()),
         Staged("target_x", 10.0, 12.0, JAKE, False, "revert", ("near",)),
@@ -399,11 +399,11 @@ def test_a_frame_with_every_new_field_round_trips():
             ParamRow("reward_correct", "mL", 0.0, 0.4, 0.15, True),
         ),
         staged=(
-            Staged("target_x", 12.0, None, JAKE, False, "hand_back", (), True),
+            Staged("target_x", 12.0, None, JAKE, False, "hand_back", (), True, "conditions"),
             Staged("fix_hold", "uniform from 0.2 s to 0.4 s", "uniform from 0.25 s to 0.4 s",
                    JAKE, False, "range", ()),
             Staged("target_y", 0.0, 2.0, JAKE, False, "revert", ("near", "far")),
-            Staged("target_y", 2.0, 0.0, JAKE, False, "revert", (), True),
+            Staged("target_y", 2.0, 0.0, JAKE, False, "revert", (), True, "run"),
         ),
         moments=(
             wire.MomentRow(3, 1_700_000_030.0, "target_x 12.00 handed back to its conditions"),
@@ -604,3 +604,69 @@ def test_a_conditions_own_range_beats_the_tasks_draw_on_the_card_as_in_the_trial
         "conditions", ("far",), None, None)
     assert [said for kind, _, _, said in session.controls if kind == "hand_back"] == [
         "fix_hold 0.55 handed back to its conditions, from trial 4"]
+
+
+def test_a_staged_hand_back_says_where_it_goes_and_a_malformed_destination_is_refused():
+    """The rig says a hand-back goes to its conditions, its draw, or the run (`Pending.to`), and the
+    run's own value may be none, which the page must say as the applied line does (fix round 1 of
+    the C3 plan's Task 18, review minor 1): each staged row carries `to`, a word, empty for what
+    hands nothing back; a frame without it, or with something else, is a `FrameError`."""
+    sent = frame(staged=(Staged("a", 2.0, None, JAKE, False, "hand_back", (), True, "run"),
+                         Staged("b", 2.0, None, JAKE, False, "revert", (), True, "draw"),
+                         Staged("c", 2.0, None, JAKE, False, "hand_back", (), True, "conditions"),
+                         Staged("d", 2.0, 3.0, JAKE, False, "set")))
+
+    assert [row.to for row in decode(encode(sent)).staged] == ["run", "draw", "conditions", ""]
+    for broken in ("gone", 3, "elsewhere", None):
+        bad = msgpack.unpackb(encode(sent), raw=False)
+        if broken == "gone":
+            del bad["staged"][0]["to"]
+        else:
+            bad["staged"][0]["to"] = broken
+        with pytest.raises(wire.FrameError):
+            decode(msgpack.packb(bad))
+
+
+def test_a_staged_hand_back_carries_where_the_rig_will_send_it(tmp_path):
+    """Fix round 1 of the C3 plan's Task 18 (review, minor 1): a hand-back is staged with the
+    destination the rig read as it was offered -- the task's draw, the run's own value, a
+    condition -- so `Staged.to` is `draw`, `run` and `conditions`, which the console says as the
+    applied line does and does not guess from the card (the page test pins the run that gives the
+    setting no value)."""
+    path = _sessions.varied_task(tmp_path, draws='{"fix_hold": Uniform(0.2, 0.4, repeat=FRESH)}')
+    link = _Watched({2: [SetParameter(name="fix_hold", value=0.3, by=JAKE),
+                         SetParameter(name="target_x", value=12.0, by=JAKE),
+                         SetParameter(name="target_y", value=2.0, by=JAKE)],
+                     4: [HandBack(name="fix_hold", by=JAKE), HandBack(name="target_x", by=JAKE),
+                         HandBack(name="target_y", by=JAKE)]})
+    session = _session(_spec(tmp_path, path, blocks=[
+        Block("b", [Condition("near", {"target_y": 5.0}, target=6)])]), link)
+
+    session.run()
+
+    assert session.refusals == []
+    assert [(row.name, row.to, row.now) for row in link.seen[4].staged] == [
+        ("fix_hold", "draw", None), ("target_x", "run", 10.0), ("target_y", "conditions", None)]
+
+
+def test_a_block_mixing_conditions_with_and_without_their_own_range_keeps_the_tasks_draw(tmp_path):
+    """Carried from Task 17's re-review: a condition's own range wins over the task's draw only for
+    a block *every* condition of which draws the setting from its own (`_own_range`); one that
+    mixes `far`, with its own range, and `near`, with none, plays `near`'s trials from the task's
+    draw, so the card still shows the task's draw and numbers (a range sent from it changes what
+    `near` draws), names `far` among the conditions, and a hand-back is to the draw."""
+    path = _sessions.varied_task(tmp_path, draws='{"fix_hold": Uniform(0.2, 0.4, repeat=FRESH)}')
+    link = _Watched({2: [SetParameter(name="fix_hold", value=0.55, by=JAKE)],
+                     4: [HandBack(name="fix_hold", by=JAKE)]})
+    session = _session(_spec(tmp_path, path, blocks=[
+        Block("b", [Condition("far", {"fix_hold": Uniform(0.5, 0.6, repeat=FRESH)}, target=3),
+                    Condition("near", {"target_x": 5.0}, target=3)])]), link)
+
+    session.run()
+
+    assert session.refusals == []
+    card = {row.name: row for row in link.seen[3].params}["fix_hold"]
+    assert (card.source, card.conditions, card.draw, card.numbers) == (
+        "person", ("far",), "uniform from 0.2 s to 0.4 s", {"low": 0.2, "high": 0.4})
+    assert [said for kind, _, _, said in session.controls if kind == "hand_back"] == [
+        "fix_hold 0.55 handed back to its draw, from trial 4"]

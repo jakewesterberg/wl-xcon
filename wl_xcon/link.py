@@ -204,7 +204,8 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: `overrides` names the blocks it reaches; and `Telemetry.eased`, the settings a person's change
 #: kept the latest trial out of moving up by (the engine C3 plan's reviews); and
 #: `Staged.hands_back`, whether a staged row hands a setting back, a revert's included (its
-#: `kind` is `revert` and its `now` may be a value). A reader of 18 refuses 19 and 19 refuses 18,
+#: `kind` is `revert` and its `now` may be a value), and `Staged.to`, where it goes (`conditions`,
+#: `draw` or `run`, empty when nothing is handed back). A reader of 18 refuses 19 and 19 refuses 18,
 #: by name.
 SCHEMA = 19
 
@@ -315,6 +316,12 @@ class Staged:
     #: carries `kind` `revert` and, where the run takes the setting back, a `now` that is a value,
     #: so neither field tells it from a revert's value that keeps the hold.
     hands_back: bool = False
+    #: **Where a hand-back goes** (schema 19; fix round 1 of the C3 plan's Task 18, review minor
+    #: 1): what takes the setting back in the open block as it is offered, `"conditions"`,
+    #: `"draw"` or `"run"` -- the run's own value, which may be none, as the applied line says
+    #: ("handed back to the run, which gives it no value") -- for every row whose `hands_back`
+    #: is true; empty for any other.
+    to: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -372,10 +379,11 @@ class ParamRow:
     position: str | None = None
     #: **Where the value comes from in the open block** (schema 19), in the order a trial's values
     #: are built (engine spec §17.1): `"person"` where a person holds it, over all the rest;
-    #: `"draw"` where the open block draws it, by its own draw or the task's, as written, or
-    #: `"range"` where a person changed that draw's range live (the engine C3 plan's science
-    #: review, I-4); `"conditions"` where
-    #: the open block's conditions set it, each a value or its own range; else `"run"`, a value the
+    #: `"conditions"` first where every condition of the open block draws it from its own range,
+    #: which wins over the block's and the task's draw; `"draw"` where the open block draws it, by
+    #: its own draw or the task's, as written, or `"range"` where a person changed that draw's
+    #: range live (the engine C3 plan's science review, I-4); `"conditions"` where the open
+    #: block's conditions set it, each a value or its own range; else `"run"`, a value the
     #: run was given, or `"task"`, the task's start -- the run start row's two `layers`. `None`
     #: where nothing gives it, for a ceiling, and between runs.
     source: str | None = None
@@ -385,9 +393,10 @@ class ParamRow:
     #: the first in the plan's order (the engine C3 plan's engineering review, M-5).
     conditions: tuple = ()
     #: **The open block's draw of it, in the rig's words** (schema 19; `variation.words`), a range
-    #: changed live included, a direction's from 0 to 360: what a hand-back gives it back to, so
-    #: said while a person holds it too. `None` where the open block draws it by neither its own
-    #: draw nor the task's.
+    #: changed live included, a direction's from 0 to 360, and none where every condition of the
+    #: block draws it from its own range, which wins over any draw of it: what a hand-back gives it
+    #: back to, so said while a person holds it too. `None` where the open block draws it by neither
+    #: its own draw nor the task's.
     draw: str | None = None
     #: **That draw's numbers a person may change live** (schema 19; `variation.LIVE_NUMBERS`), by
     #: name, the range a console may send back (`SetRange`). `None` where none may be: no draw in
@@ -1101,8 +1110,8 @@ class Telemetry:
             staged=tuple(
                 Staged(name=n, was=_carried(w, choices.get(n, ())),
                        now=_carried(v, choices.get(n, ())), by=b, bounded=bd, kind=k,
-                       overrides=o, hands_back=h)
-                for n, w, v, b, bd, k, o, h in session.staged
+                       overrides=o, hands_back=h, to=t)
+                for n, w, v, b, bd, k, o, h, t in session.staged
             ),
             # `session.refusals`, already public -- unlike `_staged`, nothing private
             # to reach around -- plus `session.link.refused`, fix round 1's CRITICAL
@@ -1401,6 +1410,7 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
                 "kind": s.kind,
                 "overrides": list(s.overrides),
                 "hands_back": s.hands_back,
+                "to": s.to,
             }
             for s in telemetry.staged
         ],
@@ -1625,6 +1635,15 @@ def _flag(value: object) -> bool:
     return value
 
 
+def _destination(value: object) -> str:
+    """A staged hand-back's destination on the wire (`Staged.to`): one of the words the rig says,
+    or empty; anything else is a malformed frame (`TypeError`, which `decode` makes a
+    `FrameError`)."""
+    if value not in ("", "conditions", "draw", "run") or not isinstance(value, str):
+        raise TypeError(f"a hand-back goes to its conditions, its draw or the run, not {value!r}")
+    return value
+
+
 def _telemetry_from(data: dict) -> Telemetry:
     """The field-by-field rebuild `decode` used to do inline. Split out so `decode`
     can wrap only this part's `KeyError`/`TypeError` in `FrameError` -- the schema
@@ -1651,7 +1670,8 @@ def _telemetry_from(data: dict) -> Telemetry:
         owed=data["owed"],
         staged=tuple(Staged(**{**s, "by": actors.from_map(s["by"]),
                                  "overrides": tuple(s["overrides"]),
-                                 "hands_back": _flag(s["hands_back"])})
+                                 "hands_back": _flag(s["hands_back"]),
+                                 "to": _destination(s["to"])})
                      for s in data["staged"]),
         refusals=tuple(_refused_in(r) for r in data["refusals"]),
         refusals_dropped=data["refusals_dropped"],

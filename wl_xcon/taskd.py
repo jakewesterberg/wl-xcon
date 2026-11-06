@@ -1743,14 +1743,15 @@ class Session:
     @property
     def staged(self) -> tuple:
         """Every change accepted and not yet applied, in the order offered (`_offered_acts`):
-        `(name, was, now, by, bounded, kind, overrides, hands_back)`, the exact shape
+        `(name, was, now, by, bounded, kind, overrides, hands_back, to)`, the exact shape
         `link.Telemetry.of` reads
         to build its `Staged` rows (telemetry schema 19; engine build C3's spec §6).
 
         - **A value staged** (`_staged`, as `set` stages it): its `was` and `now`; `kind` `set`, or
           `revert` where a revert staged it (`_acts`).
         - **`hands_back`**: true for every hand-back offered, a button's or a revert's, which
-          `kind` alone cannot say of a revert's (telemetry schema 19, fix round 1).
+          `kind` alone cannot say of a revert's (telemetry schema 19, fix round 1). Beside it, `to`,
+          where it goes (`Pending.to`: `conditions`, `draw` or `run`), empty for any other row.
         - **A hand-back offered** (`_pending`): the person's value, then the run's own where the
           run takes the setting back, else `None`, the open block's conditions or its draw giving
           it again; `kind` `hand_back`, or `revert`.
@@ -1785,11 +1786,12 @@ class Session:
             if not isinstance(offer, Pending):
                 name, was, now, by, bounded = offer
                 rows.append((name, was, now, by, bounded, "set" if act is None else "revert",
-                             () if bounded else self._overrides(name), False))
+                             () if bounded else self._overrides(name), False, ""))
                 continue
             kind = offer.kind if act is None else "revert"
             if offer.kind == "hand_back":
-                rows.append((offer.name, offer.was, offer.now, offer.by, False, kind, (), True))
+                rows.append((offer.name, offer.was, offer.now, offer.by, False, kind, (), True,
+                             offer.to))
                 continue
             declared, unit = self._declared_draw(offer.key), self._declared[offer.name].unit
             before = ranges.get(offer.key)
@@ -1798,7 +1800,7 @@ class Session:
                 offer.name, variation.words(declared if before is None else before, unit),
                 variation.words(declared if offer.draw is None else offer.draw, unit),
                 offer.by, False, kind, () if act is not None else self._reaches(offer.key),
-                False))
+                False, ""))
         return tuple(rows)
 
     @property
@@ -1831,13 +1833,14 @@ class Session:
         range, or a person) and which conditions set or draw it"), read while a run goes, as its
         open block plays: `source` (`_source`); `conditions`, every condition of the run's plan
         that sets or draws it (`_overrides`); `draw`, the open block's draw of it, its own or the
-        task's (`variation.in_force`), a range changed live in force (`_ranges`), in the rig's
-        words (`variation.words`, a direction's from 0 to 360), said while a person holds it too,
-        since a hand-back gives it back to that draw; and `numbers`, that draw's numbers a person
-        may change live (`variation.numbers`), `None` for a setting declared not live and for one
-        placing a direction (`variation.directions`), whose ranges `_range` refuses. Between runs,
-        and before the first, none of them, as for a ceiling: `None`, `()`, `None`, `None`. Read
-        between trials, never in a frame.
+        task's (`variation.in_force`) -- none where every condition of the block draws it from
+        its own range, which wins (`_own_range`) -- a range changed live in force (`_ranges`), in
+        the rig's words (`variation.words`, a direction's from 0 to 360), said while a person holds
+        it too, since a hand-back gives it back to that draw; and `numbers`, that draw's numbers a
+        person may change live (`variation.numbers`), `None` for a setting declared not live and for
+        one placing a direction (`variation.directions`), whose ranges `_range` refuses. Between
+        runs, and before the first, none of them, as for a ceiling: `None`, `()`, `None`, `None`.
+        Read between trials, never in a frame.
 
         The task's own `Param` declarations first, in declaration order, each with
         its value in `spec.values` (`None` when nobody set it); then every welfare
@@ -1881,7 +1884,8 @@ class Session:
         C3's spec §6), read from the layer a trial's values take last (engine spec §17.1), which
         wins, down: `"person"` where a person holds it (`_edited`); `"conditions"` where a
         condition of the open block draws it from its own range, which `_draw` lets win over the
-        block's and the task's draw (`_own_range`); `"draw"` where the open block
+        block's and the task's draw (`_own_range`), every condition of the block doing so;
+        `"draw"` where the open block
         draws it (`in_force`, its `variation.in_force`), as written, or `"range"` where that
         draw's range was changed live (`_ranges`; the C3 plan's science review, I-4);
         `"conditions"` where a condition of the
@@ -2592,11 +2596,13 @@ class Session:
 
     def _to(self, name: str) -> str:
         """**What takes `name` back in the open block once a person's hold of it ends** (the C3
-        plan's call 23; its review, M-16): `"draw"` where a draw of it is in force there
-        (`variation.in_force`), `"conditions"` where a condition gives it, else `"run"`, the run's
-        own value. Said as a hand-back is offered (`_hand_back`), and read again as it applies, in
-        the block its next trial plays (`_apply_pending`; the C3 plan's engineering review, M-1);
-        each one a revert makes too (`_revert`)."""
+        plan's call 23; its review, M-16): `"conditions"` first where every condition of the block
+        draws it from its own range (`_own_range`), which wins over any draw of it in the trial
+        loop; else `"draw"` where a draw of it is in force there (`variation.in_force`),
+        `"conditions"` where a condition gives it, else `"run"`, the run's own value. Said as a
+        hand-back is offered (`_hand_back`), and read again as it applies, in the block its next
+        trial plays (`_apply_pending`; the C3 plan's engineering review, M-1); each one a revert
+        makes too (`_revert`)."""
         block = self._scheduler.block
         return ("conditions" if self._own_range(name)
                 else "draw" if name in variation.in_force(self._task, block)
@@ -2605,12 +2611,16 @@ class Session:
                 else "run")
 
     def _own_range(self, name: str) -> bool:
-        """Whether a condition of the open block draws `name` from its own range, which wins over
-        the block's and the task's draw of it in the trial loop (`_draw`; Q1b), so a card, a
-        hand-back's `to` and `_source` read it first. Plans refuse a setting both drawn and given a
-        range of a condition's own (`check`); blocks given in code do not."""
-        return any(name in variation.own_ranges(condition)
-                   for condition in self._scheduler.block.conditions)
+        """Whether every condition of the open block draws `name` from its own range, which then
+        wins over the block's and the task's draw of it in the trial loop (`_draw`; Q1b), so a
+        card, a hand-back's `to` and `_source` read it first. Plans refuse a setting both drawn
+        and given a range of a condition's own (`check`); blocks given in code do not, and one
+        that mixes conditions with and without their own range plays the latter's trials from the
+        block's or the task's draw, which the card keeps showing (fix round 1 of the C3 plan's
+        Task 18; Task 17's re-review). None for a block with no conditions."""
+        conditions = self._scheduler.block.conditions
+        return bool(conditions) and all(name in variation.own_ranges(condition)
+                                        for condition in conditions)
 
     def _block_gives(self, name: str) -> bool:
         """**Whether the open block gives `name` at this moment**, no person holding it: by its own

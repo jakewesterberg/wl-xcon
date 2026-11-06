@@ -1816,8 +1816,8 @@ def test_hand_back_a_range_and_revert_send_their_bodies(rig):
         ParamRow("wait", "s", 0.5, 2.0, None, False, None, "draw", (),
                  "uniform from 0.75 s to 1.25 s", {"low": 0.75, "high": 1.25}),
     )
-    moments = (MomentRow(3, 1_700_000_030.0, "fix_hold 0.30 → 0.40"),
-               MomentRow(0, 1_700_000_000.0, "the run's start"))
+    moments = (MomentRow(3, 1_700_000_030.0, "fix_hold 0.30 → 0.40", ("fix_hold → 0.30",)),
+               MomentRow(0, 1_700_000_000.0, "the run's start", ("fix_hold → 0.30",)))
     rig.hub.offer(decode(encode(frame(params=rows, moments=moments))))
     page = rig.browser_page()
     _sign_in(page)
@@ -1874,7 +1874,7 @@ def test_a_double_click_on_hand_back_change_the_range_or_revert_is_one_act(rig):
                  "uniform from 0.75 s to 1.25 s", {"low": 0.75, "high": 1.25}),
     )
     rig.hub.offer(decode(encode(frame(params=rows, moments=(
-        MomentRow(0, 1_700_000_000.0, "the run's start"),)))))
+        MomentRow(0, 1_700_000_000.0, "the run's start", ("fix_hold → 0.30",)),)))))
     page = rig.browser_page()
     _sign_in(page)
     page.click('label[for="t-task"]')
@@ -1889,3 +1889,70 @@ def test_a_double_click_on_hand_back_change_the_range_or_revert_is_one_act(rig):
     time.sleep(0.5)  # housekeeping: room for a wrong second send to arrive
 
     assert [type(seen) for seen in rig.dispatch.seen] == [HandBack, SetRange, Revert]
+
+
+def test_a_range_typed_while_a_frame_arrives_is_still_sent_after_the_field_is_left(rig):
+    """Fix round 1 of the C3 plan's Task 18 (review, Important 1): a person types a range's number,
+    a frame that changes the cards arrives, and the field is left before *change the range* is
+    pressed -- in WebKit, Safari's engine, pressing a button does not focus it, so the press
+    itself leaves the field. The frame was held while the field had focus; leaving it must not
+    swap the held frame in over the typed number and the button (the click would then land on
+    nothing: nothing sent, nothing said). The range is sent, with the number typed, and said."""
+    from wl_xcon.link import ParamRow, SetRange, decode, encode
+
+    def rows(hold):
+        return (
+            ParamRow("fix_hold", "s", 0.1, 1.0, hold, False, None, "run"),
+            ParamRow("wait", "s", 0.5, 2.0, None, False, None, "draw", (),
+                     "uniform from 0.75 s to 1.25 s", {"low": 0.75, "high": 1.25}),
+        )
+
+    rig.hub.offer(decode(encode(frame(params=rows(0.3)))))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+
+    page.fill('#params input[data-number="high"]', "1.5")
+    rig.hub.offer(decode(encode(frame(params=rows(0.4)))))
+    time.sleep(1.0)  # housekeeping: room for the frame to reach the page and be held
+    page.evaluate("document.activeElement.blur()")
+    time.sleep(0.3)  # housekeeping: the focus-out's release runs on a timer
+    page.click('[data-cmd="range"][data-name="wait"]')
+    rig.wait_for(lambda: rig.dispatch.seen)
+
+    (sent,) = rig.dispatch.seen
+    assert (type(sent), sent.name, sent.numbers) == (SetRange, "wait", {"high": 1.5})
+    assert not page.inner_text("#sent").startswith("not sent")
+    assert page.inner_text("#sent") != ""
+
+
+def test_a_card_updates_once_a_hand_back_or_a_range_has_applied(rig):
+    """Fix round 1 of the C3 plan's Task 18 (review, Important 2): Chromium focuses a button it
+    clicks, and the page held every parameter frame while anything inside the cards had focus, so
+    after *hand back* or *change the range* the card went on saying a person held the setting,
+    with a live *hand back*, after the rig had applied it. Only a field being typed in holds the
+    cards; the card shows the applied hand-back and the applied range."""
+    from wl_xcon.link import HandBack, ParamRow, SetRange, decode, encode
+
+    held = (ParamRow("fix_hold", "s", 0.1, 1.0, 0.4, False, None, "person", ("near",)),
+            ParamRow("wait", "s", 0.5, 2.0, None, False, None, "draw", (),
+                     "uniform from 0.75 s to 1.25 s", {"low": 0.75, "high": 1.25}))
+    rig.hub.offer(decode(encode(frame(params=held))))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+
+    page.click('[data-cmd="hand_back"][data-name="fix_hold"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 1)
+    page.fill('#params input[data-number="high"]', "1.5")
+    page.click('[data-cmd="range"][data-name="wait"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
+    applied = (ParamRow("fix_hold", "s", 0.1, 1.0, 0.3, False, None, "conditions", ("near",)),
+               ParamRow("wait", "s", 0.5, 2.0, None, False, None, "range", (),
+                        "uniform from 0.75 s to 1.5 s", {"low": 0.75, "high": 1.5}))
+    rig.hub.offer(decode(encode(frame(params=applied))))
+
+    rig.wait_for(lambda: "set or drawn by its conditions" in page.inner_text("#params")
+                 and page.input_value('#params input[data-number="high"]') == "1.5")
+    assert [type(seen) for seen in rig.dispatch.seen] == [HandBack, SetRange]
+    assert 'data-cmd="hand_back"' not in page.inner_html("#params")

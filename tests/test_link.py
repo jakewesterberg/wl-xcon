@@ -3218,8 +3218,8 @@ def test_a_staged_position_reaches_the_console_as_its_words():
     words for it, eccentricity and direction first, as a word value already travels there; a
     `Polar` was no value the wire could carry."""
     session = SimpleNamespace(**{**vars(_session_with(1.25, 3.0)), "staged": (
-        ("target_pos", Polar(8.0, 0.0), Polar(8.0, 45.0), Box("jake"), False, "set", (), False),
-        ("fix_hold", 0.3, 0.4, Box("jake"), False, "set", (), False),
+        ("target_pos", Polar(8.0, 0.0), Polar(8.0, 45.0), Box("jake"), False, "set", (), False, ""),
+        ("fix_hold", 0.3, 0.4, Box("jake"), False, "set", (), False, ""),
     ), "parameters": (
         ("target_pos", "deg", None, None, Polar(8.0, 0.0), False,
          (Polar(8.0, 0.0), Polar(8.0, 45.0))),
@@ -3262,8 +3262,8 @@ def test_a_pair_is_a_position_only_where_its_setting_is_declared_one():
         ("target_pos", "deg", None, None, (0.3, 0.6), False, ((0.3, 0.6), (5.0, 0.0))),
         ("cue", "deg", None, None, Polar(8.0, 0.0), False, ()),
     ), "staged": (
-        ("span", (0.3, 0.6), (0.4, 0.6), Box("jake"), False, "set", (), False),
-        ("target_pos", (5.0, 0.0), (0.3, 0.6), Box("jake"), False, "set", (), False),
+        ("span", (0.3, 0.6), (0.4, 0.6), Box("jake"), False, "set", (), False, ""),
+        ("target_pos", (5.0, 0.0), (0.3, 0.6), Box("jake"), False, "set", (), False, ""),
     )})
 
     frame = Telemetry.of(session, Tally(), _scheduler(), 0)
@@ -3289,7 +3289,7 @@ def test_a_position_that_is_not_finite_is_said_plainly_and_never_faults_the_fram
         ("target_pos", "deg", None, None, (math.inf, 0.0), False, ((math.inf, 0.0), (5.0, 0.0))),
         ("cue", "deg", None, None, Polar(math.nan, 45.0), False, ()),
     ), "staged": (
-        ("cue", Polar(8.0, 45.0), Polar(-math.inf, 45.0), Box("jake"), False, "set", (), False),
+        ("cue", Polar(8.0, 45.0), Polar(-math.inf, 45.0), Box("jake"), False, "set", (), False, ""),
     )})
 
     frame = Telemetry.of(session, Tally(), _scheduler(), 0)
