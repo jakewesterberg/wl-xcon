@@ -236,6 +236,30 @@ def _generated(blocks, declared: dict[str, Param], turned: frozenset) -> list[di
     ]
 
 
+def _varied_written(varied: dict) -> dict:
+    """**What varied in one block, as its end row writes it** (`block_ends`' `varied`; engine build
+    C3's spec §10; XC-344): each setting's ways in one order whatever order its trials met them,
+    its conditions' first, then its draws in the order its trials first named them, then a
+    person's (`Session._vary`)."""
+    order = ("condition", "draw", "person")
+    return {name: sorted(ways, key=lambda way: order.index(way["by"]))
+            for name, ways in varied.items()}
+
+
+def _plan_written(planned: tuple | None) -> list | None:
+    """**A designed block's plan, as its end row writes it** (`block_ends`' `planned`; engine build
+    C3's spec §5 and §10; `scheduler.BlockEnd.planned`): a sequence-balanced block's condition
+    names in the order planned, played or not, so a place no trial line's `planned` names was never
+    played; a priming block's runs as far as it played, `{"value": v, "length": n}` each (the
+    controller's ruling on the engine C3 plan's Task 6), the value written as a setting's is;
+    `None` for any other block."""
+    if planned is None:
+        return None
+    return [entry if isinstance(entry, str) else {"value": entry[0], "length": entry[1]}
+            for entry in planned]
+
+
+
 def _hung(index: int, condition: str, counted: str, owed: int, drummed: bool = False,
           forgiven: bool = False, past: bool = False) -> str:
     """What the console's changes feed says of a trial that reached the longest trial (engine spec
@@ -3271,6 +3295,19 @@ class Session:
     #: (`variation.draw`'s `ordinal`). A `SAME` repeat does not advance it. Empty as each run
     #: starts.
     _listed: dict[tuple, int] = field(init=False, default_factory=dict, repr=False)
+    #: **What varied in each block of the run in progress** (engine build C3's spec §10; XC-344),
+    #: by the block's occurrence in the run -- `len(Scheduler.ended)` while it is open, so its
+    #: place among the end row's `block_ends` -- each setting that varied in it to the ways it
+    #: varied (`_vary`). Filled between trials, as each trial is drawn, so a block that ran no
+    #: trial has no entry; empty as each run starts.
+    _varied: dict[int, dict[str, list[dict]]] = field(
+        init=False, default_factory=dict, repr=False)
+    #: **Each condition's trial lines in each block of the run in progress** (the C3 plan's
+    #: science review, M-4), keyed as `_varied` is: its lines, those a person's value overrode
+    #: and those kept out of moving up, for the block's end row (`counts`). Empty as each run
+    #: starts.
+    _tallies: dict[int, dict[str, dict[str, int]]] = field(
+        init=False, default_factory=dict, repr=False)
 
     def _unwritable(self, task: Task, run: RunSpec, values: dict) -> str | None:
         """**What the record would refuse of a run, said before the run starts** (REC-27; the
@@ -3522,6 +3559,55 @@ class Session:
             mine[name] = (value, source, original)
         self._kept[draw.number] = mine
         return taken, sources
+
+    def _vary(self, condition: Condition, number: int, turned: frozenset) -> None:
+        """**What one trial adds to what varied in its block** (engine build C3's spec §10;
+        XC-344: how much a setting varies is recorded beside its values), as the trial is drawn,
+        between trials, for its block's end row (`_varied`, `block_ends`' `varied`). Read from
+        what the block declared and did, never from the values its trials happened to get:
+        - **as the block's first trial is drawn**, each setting its conditions give different
+          values or ranges of their own, `{"by": "condition"}`: compared as the load compares
+          them (`declarations.canonical`), a condition giving it nothing differing from one that
+          gives it something;
+        - **each setting the trial drew** (`_draw`, its `_kept` entry), `{"by": "draw", "from":
+          source, "distribution": draw}`: `source` as the trial's line names it (`drawn`), and the
+          draw it was drawn from, the declaration or the range a person put in force
+          (`_ranges`), every field (`variation.recorded`; the engine C3 plan's call 12). One way
+          for each the block's trials name, so one for each different range of their own its
+          conditions draw from. **A value a repeat keeps from the trial it shows again adds
+          nothing** (a `SAME` setting; call 13): that trial, in the same block, since no repeat
+          outlives its block, named its draw already, so a range changed since never stands for
+          it;
+        - **each setting a person holds on it** (its line's `live`, `_edited`), `{"by":
+          "person"}`.
+
+        A block that ran no trial has no entry, and its end writes `{}`."""
+        scheduler = self._scheduler
+        varied = self._varied.get(len(scheduler.ended))
+        if varied is None:
+            conditions = scheduler.block.conditions
+            varied = self._varied[len(scheduler.ended)] = {
+                name: [{"by": "condition"}]
+                for name in sorted({name for each in conditions for name in each.values})
+                if len({repr(canonical(each.values[name])) if name in each.values else None
+                        for each in conditions}) > 1
+            }
+        draws = {**variation.in_force(self._task, scheduler.block),
+                 **variation.own_ranges(condition)}
+        for name, (_, source, original) in self._kept[number].items():
+            if original != number:
+                continue
+            declaration, key = draws[name]
+            way = {"by": "draw", "from": source, "distribution": variation.recorded(
+                self._ranges.get(key, (declaration,))[0], self._declared.get(name),
+                direction=name in turned)}
+            ways = varied.setdefault(name, [])
+            if way not in ways:
+                ways.append(way)
+        for name in self._edited:
+            ways = varied.setdefault(name, [])
+            if {"by": "person"} not in ways:
+                ways.append({"by": "person"})
 
     def _agent(self, run: RunSpec):
         """The default world: one behaviour agent, told about each trial.
@@ -3897,6 +3983,9 @@ class Session:
         # build C3).
         self._kept = {}
         self._listed = {}
+        # Nothing has varied in a block of this run yet, and no line is counted (engine build C3).
+        self._varied = {}
+        self._tallies = {}
         # The moments a revert can go back to, the run's start first, and the change ids that are
         # this run's own: those given from here (engine build C3's spec §8).
         self._moments = [Moment(0, self.wall_now(), "the run's start", {}, {})]
@@ -4172,6 +4261,10 @@ class Session:
                 # person holds, on a repeat a `SAME` setting's value kept from the trial it shows
                 # again (`_draw`).
                 taken, sources = self._draw(task, scheduler.block, condition, drawn)
+                # **What varied in its block** (engine build C3's spec §10; XC-344): what its
+                # conditions set apart, as the block's first trial is drawn, and this trial's
+                # draws and a person's holds, for the block's end row (`_vary`).
+                self._vary(condition, drawn.number, turned)
                 # **A live edit to a value a condition sets wins** (engine spec §14.7; §17.1's
                 # order: the task's start, the run's value, the condition's or a drawn value, a
                 # live edit), and the trial still counts toward its condition; its row names each
@@ -4301,6 +4394,14 @@ class Session:
                     self._feed("warning", None, self.wall_now(), _kept_out(
                         index, [name for name in told if name in self._edited],
                         [name for name in told if name not in self._edited]))
+                # **Its line counted toward its condition in its block's end** (the C3 plan's
+                # science review, M-4): the lines, those a person's value overrode and those kept
+                # out of moving up, as the line written next says (`counts`).
+                line_counts = self._tallies.setdefault(len(scheduler.ended), {}).setdefault(
+                    condition.name, {"trials": 0, "overridden": 0, "eased": 0})
+                line_counts["trials"] += 1
+                line_counts["overridden"] += bool(overridden)
+                line_counts["eased"] += bool(eased)
                 # One string for the record and for a console's recent outcomes, so
                 # the two cannot disagree (P4d-2b spec §4.1).
                 recorded = result.outcome.value if result.outcome else "hang"
@@ -4314,11 +4415,13 @@ class Session:
                     structure=structure,
                     overridden=tuple(overridden),
                     # What it drew and from where, what a person held, and what of that kept
-                    # it out of moving up (engine build C3). `planned` stays at its default
-                    # (`None`) until Task 16 passes values, so a designed trial's `planned` is null.
+                    # it out of moving up (engine build C3).
                     drawn=sources,
                     live=tuple(sorted(self._edited)),
                     eased=eased,
+                    # Its place in a designed block's plan, which a drum's try and a trial again
+                    # at once share with the trial they show again (engine build C3's spec §5).
+                    planned=drawn.planned,
                     # Where each stimulus it showed was (XC-399), turned into positions as the
                     # line is written, between trials.
                     placed=result.placed,
@@ -4457,8 +4560,18 @@ class Session:
                                 "block_in_session": end.block_in_session,
                                 "position": end.position,
                                 "passed_at": end.passed_at,
+                                # **What varied in it, and a designed block's plan** (engine build
+                                # C3's spec §10; XC-344): each setting its conditions set apart,
+                                # drew or a person held, read from what it declared and did, `{}`
+                                # for a block that ran no trial; its places, or its runs, played or
+                                # not.
+                                "varied": _varied_written(self._varied.get(occurrence, {})),
+                                "planned": _plan_written(end.planned),
+                                # Each condition's lines, those overridden and those eased (the
+                                # C3 plan's science review, M-4), `{}` for a block that ran none.
+                                "counts": self._tallies.get(occurrence, {}),
                             }
-                            for end in scheduler.ended
+                            for occurrence, end in enumerate(scheduler.ended)
                         ],
                         # Why a completed run ended, for a reader (`END_REASONS`).
                         end_reason=end_reason,

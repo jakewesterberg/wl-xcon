@@ -7875,7 +7875,9 @@ def test_a_plain_run_records_no_plan_and_its_trial_count(tmp_path):
         None, None, 3, None)
     assert end["block_ends"] == [{"block": "session", "ended": "rule", "by": None,
                                   "after_trial": 2, "block_in_session": 1, "position": 0,
-                                  "passed_at": None}]
+                                  "passed_at": None, "varied": {}, "planned": None,
+                                  "counts": {"session": {"trials": 3, "overridden": 0,
+                                                         "eased": 0}}}]
     assert end["end_reason"] == "plan_done"
 
 
