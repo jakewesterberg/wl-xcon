@@ -1,15 +1,17 @@
-"""Saccade version 9: each stretch of unknown velocities judged whole. The review of version 8 (its
-check 1, `q1_rule.py`) wrote the rule as an oracle from its text alone; this is that oracle with
-its loss rule replaced by wl-preproc's code on its branch `replay2/eye-lost` at `bb6180e`
+"""Saccade versions 9 and 10: each stretch of unknown velocities judged whole. The review of version
+8 (its check 1, `q1_rule.py`) wrote the rule as an oracle from its text alone; this is that oracle
+with its loss rule replaced by wl-preproc's code on its branch `replay2/eye-lost` at `bb6180e`
 (`validity._uncarried`, as `contract_fixtures.detector_input` applies it), and its run rule by the
-shape of their `detect_engbert_kliegl`, both read from the source:
+shape of their `detect_engbert_kliegl`, both read from the source; since version 10 with the edge
+rule wl-preproc's session sent on 2026-11-06 (`preproc_edge_rule.py`):
 
 - a velocity is unknown because data was lost when its window, `n - 2` to `n + 2` clipped to the
   trace, holds a lost sample or two consecutive samples more than `max_gap_s` apart (their
   `_dilate(missing, 2)`, and `rows_across_gaps` for a break in time);
-- each maximal stretch of them is carried only when the samples either side of it are in the trace
-  and no two measured samples, taken in turn from the one before it to the one after it, are more
-  than `max_gap_s` (plus 1e-9 s) apart; otherwise withheld whole;
+- each maximal stretch of them is carried only when the samples either side of it have known
+  velocities, so lie from a trace's third sample to its third-last (version 10; in the trace, until
+  then), and no two measured samples, taken in turn from the one before it to the one after it, are
+  more than `max_gap_s` (plus 1e-9 s) apart; otherwise withheld whole;
 - a run is a maximal stretch of velocities outside the threshold or in a carried stretch, from its
   first velocity outside the threshold; it stops one past its last such velocity, or, ending in a
   carried stretch whose next velocity is known, one past that one (the landing); it is dropped with
@@ -23,7 +25,8 @@ wl-preproc's v2. The cases: the review's 5093 (review 5's p1_rules, I2's worst, 
 sweeps, p3_trailing's 2970 and p1d_sweep's 1500), its 1500 with breaks in time and jittered clocks
 (`q1b_breaks.py`), and two sweeps of this commit's own: two losses at every separation from 0 to 6
 measured samples, each of them long or short, around a saccade; and a loss at each of a trace's first
-and last seven samples, a saccade from its start or to its end. Batch against the oracle; online,
+and last seven samples, a saccade from its start or to its end, and (since version 10) a 60 ms break
+in time between any two of them. Batch against the oracle; online,
 its thresholds held at the batch form's, each confirmation's start and flag (over `[start - 2,
 confirming velocity]`) and each closed run's `last_stop`.
 
@@ -31,7 +34,8 @@ confirming velocity]`) and each closed run's `last_stop`.
 `wl_xcon/saccade.py`, say `git show c9940a8:wl_xcon/saccade.py`) in place of the working tree's.
 With `WLPP_BB6180E_SOURCE` naming a directory holding wl-preproc's `wl_preproc` package at
 `bb6180e`, the oracle's runs on every trace with an `i / fs` clock are also compared with their
-code's (README.md)."""
+code's (README.md), its `_uncarried` given the edge rule in memory (`preproc_edge_rule.patch`);
+nothing in wl-preproc is edited."""
 from __future__ import annotations
 
 import dataclasses
@@ -65,7 +69,11 @@ if os.environ.get("WLPP_BB6180E_SOURCE"):
     from wl_preproc.eye.detect.geometry import TRUE_ANGLE
     from wl_preproc.eye.detect.labels import Label
     from wl_preproc.eye.detect.velocity import local_velocity
-    print("wl_preproc:", cf.__file__)
+
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import preproc_edge_rule
+    preproc_edge_rule.patch()
+    print("wl_preproc:", cf.__file__, "with its edge rule of 2026-11-06, in memory")
 
     def THEIRS(trace):
         gaze_deg = [None if p is None else list(p) for p in trace]
@@ -114,7 +122,7 @@ def oracle(gaze, at):
     carried = [False] * n
     for s, e in true_runs(lost):
         before, after = s - 1, e
-        whole = before >= 0 and after < n
+        whole = 2 <= before and after <= n - 3
         if whole:
             measured = [i for i in range(before, after + 1) if g[i] is not None]
             whole = all(at[b] - at[a] <= BOUND for a, b in zip(measured, measured[1:]))
@@ -215,7 +223,8 @@ def check(name, gaze, at, verbose=False, clock_exact=True):
             stats["theirs_equal"] += 1
         else:
             # Their velocity at a trace's last two samples is a zero they fill in (`local_velocity`), which
-            # can end a run carried across a stretch ending there, `stop` one past it; ours has none.
+            # ended a run carried across a stretch ending there, `stop` one past it, where ours has none
+            # (version 9's residual). Their edge rule withholds such a stretch, so none is expected now.
             n = len(gaze)
             residual = len(theirs) == len(want) and all(
                 a == b or (a[0] == b[0] and a[1] in (n - 1, n) and b[1] < a[1]) for a, b in zip(theirs, want))
@@ -351,4 +360,8 @@ for onset, n in ((0, 600), (2, 600), (580, 600), (585, 600)):
             for m in (1, 2, 3):
                 if first + m <= n:
                     check(f"edge onset {onset} {first}+{m}", lose(gg, range(first, first + m)), aa)
+        for after in edge:
+            if after + 1 < n:
+                broken = [t + (0.06 if i > after else 0.0) for i, t in enumerate(aa)]
+                check(f"edge onset {onset} break after {after}", gg, broken, clock_exact=False)
 report("edges")

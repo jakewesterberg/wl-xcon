@@ -59,9 +59,10 @@ reaches a short loss is carried through it to the landing** (version 8): the fir
 velocity after the loss either carries the run on or, inside the threshold, ends it on its own
 sample, which the run holds, so the saccade is measured to where the eye landed and flagged. **Each
 stretch of unknown velocities is judged whole** (version 9, `_carried`), as wl-preproc reads a trace
-for its detector: carried only between two samples of the trace and while no two measured samples
-in it, taken in turn, are more than `max_gap_s` apart; otherwise withheld whole, ending a run at its
-last measured velocity and flagging none.
+for its detector: carried only between two samples with known velocities (version 10; between two
+samples of the trace in 9) and while no two measured samples in it, taken in turn, are more than
+`max_gap_s` apart; otherwise withheld whole, ending a run at its last measured velocity and flagging
+none.
 """
 
 from __future__ import annotations
@@ -205,8 +206,25 @@ _ROUNDING_S = 1e-9
 #: taken, and the detector, ready, stopped being so and dropped the run open then; it now keeps the
 #: thresholds it found until a refresh can replace them. 8 and 9 detect the same thing wherever no
 #: two losses are within four samples of each other, none is within two samples of a trace's edge,
-#: and the warmup is 4 or more.
-VERSION = 9
+#: and no withdrawal's re-take would leave a threshold at zero while the detector is ready: likely
+#: with a warmup under 4, and not only then (the review of 9 found one at warmups 4, 5 and 10 with a
+#: history of 60 refreshed every velocity, and none at the default warmup of 50 in its sweep).
+#:
+#: **10 since 2026-11-06** (wl-preproc's change of that day to its `validity._uncarried`, for its
+#: contract fixtures v3, agreed with the controller): **a stretch of unknown velocities is carried
+#: only when the samples either side of it have known velocities** (`_carried`), so lie from a
+#: trace's third sample to its third-last, not merely in the trace: a loss within four samples of
+#: either end is withheld, where 9 withheld one within two. At the start a run from a trace's first
+#: samples with sample 3 or 4 lost is no longer flagged, which 9 flagged; at the end a run reaching
+#: a loss fourth- or fifth-last stops at its last measured velocity outside the threshold,
+#: unflagged, as in 9, where wl-preproc's ended on the zero velocity its `local_velocity` fills in
+#: at a trace's last two samples, flagged, until its change. Online nothing changes: a stretch
+#: beside the trial's first two velocities is one from the first velocity the detector computes,
+#: which no run can start within two velocities of, and the trial's end the detector never sees.
+#: Which runs there are, and where they start and stop, are 9's: only flags change. 9 and 10 detect
+#: the same thing wherever a trace's first five samples are present, none more than `max_gap_s`
+#: after the one before.
+VERSION = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,8 +264,8 @@ class Saccade:
     #: flagged (version 8; version 7 cut such a run back to before the loss, unflagged). What flags
     #: nothing: a trace's first and last two velocities, which have no window (version 7), and the
     #: unknown velocities of a stretch withheld whole -- one holding a loss longer than `max_gap_s`,
-    #: or within two samples of the trace's edge -- before a run (versions 8 and 9, `_carried`); one
-    #: a withheld stretch ends stops before it, unflagged.
+    #: or within four samples of the trace's edge (version 10; two in version 9) -- before a run
+    #: (versions 8 to 10, `_carried`); one a withheld stretch ends stops before it, unflagged.
     flagged: bool = False
 
 
@@ -503,7 +521,9 @@ def detect(
     `max_gap_s` anywhere in it, or within two samples of the trace's edge, is withheld, every
     unknown velocity in it; until then a short loss within four samples after a long one, and a
     loss at the trace's second or third sample, were carried, and flagged a run starting just after
-    them."""
+    them. **And within four samples of the edge** (version 10): the samples either side of a stretch
+    carried must have known velocities, so a loss at the trace's fourth or fifth sample no longer
+    flags a run starting just after it."""
     gaze_deg = [None if position is None or not (math.isfinite(position[0])
                                                   and math.isfinite(position[1]))
                 else position for position in gaze_deg]
@@ -567,45 +587,49 @@ def _carried(gaze_deg, at, velocities, params: Params) -> list[bool]:
     """**Each velocity unknown because data was lost, in a stretch a run is carried across**: true
     there, false elsewhere (version 9; wl-preproc's `validity._uncarried`, as its
     `contract_fixtures.detector_input` reads a trace for its detector, on its branch
-    `replay2/eye-lost` at `bb6180e`, the rule of its contract fixtures v3).
+    `replay2/eye-lost` at `bb6180e`, the rule of its contract fixtures v3; version 10 at both edges,
+    as wl-preproc changed it on 2026-11-06).
 
-    A velocity is unknown because data was lost when its window, `n - 2` to `n + 2` clipped to the
-    trace, holds a lost sample or two consecutive samples more than `max_gap_s` apart: inside the
-    trace exactly where `velocity` gives `None`, and at its first and last two, which have no
-    window, only so. **Each maximal stretch of them is judged whole**: carried when the samples
-    either side of it are in the trace and each sample from its first to the one after it is within
-    `max_gap_s` (to `_ROUNDING_S`) of the last measured sample before that one -- so no two
+    A velocity is unknown because data was lost where `velocity` gives `None` with a window, from a
+    trace's third sample to its third-last: its window holds a lost sample or two consecutive
+    samples more than `max_gap_s` apart. **Each maximal stretch of them is judged whole**: carried
+    when **the samples either side of it have known velocities** (version 10), so lie from the
+    trace's third sample to its third-last, and each sample from its first to the one after it is
+    within `max_gap_s` (to `_ROUNDING_S`) of the last measured sample before that one -- so no two
     measured samples, taken in turn from the one before it to the one after it, are further apart;
     otherwise withheld, every velocity in it. The bound is in seconds, not in whole samples as
     wl-preproc's `carried_frames` puts it: our samples carry their own times. So two losses with
     four measured samples or fewer between them, no velocity known between them, are one stretch,
     carried by each loss's own length, not by the stretch's span; a short loss beside a long one is
-    withheld with it; and a loss within two samples of a trace's edge is withheld. Version 8 judged
-    each loss alone, by the time from the last measured sample, and withheld only a loss from the
-    trace's first sample."""
+    withheld with it; and a loss within four samples of a trace's edge is withheld, as is a break
+    in time between its first two samples or its last two. Version 8 judged each loss alone, by
+    the time from the last measured sample, and withheld only a loss from the trace's first sample.
+    Version 9 carried a stretch whose neighbours were merely in the trace, so a loss within two
+    samples of an edge was withheld only because a trace's first and last two velocities, which
+    have no window, were marked unknown for a lost sample or a break in their windows clipped to
+    it, the stretch reaching them. That marking decides nothing now: a first or last two velocity
+    it marked has the third or third-last unknown with it, whose window holds its own, so the
+    stretch it joined them to holds that velocity, beside them, and is withheld without them. So it
+    is gone, and with it the check for a break at an edge that the review of version 9 found no
+    test pinned (its M2)."""
     n = len(velocities)
-    gap = params.max_gap_s
-    bound = gap + _ROUNDING_S
-    lost = [False] * n
-    for k in range(n):
-        if HALF_WINDOW <= k < n - HALF_WINDOW:
-            lost[k] = velocities[k] is None
-        else:
-            first, end = max(k - HALF_WINDOW, 0), min(k + HALF_WINDOW + 1, n)
-            lost[k] = (any(gaze_deg[i] is None for i in range(first, end))
-                       or any(at[i + 1] - at[i] > gap for i in range(first, end - 1)))
+    bound = params.max_gap_s + _ROUNDING_S
+    # One past the last velocity with a window, `n - 3`.
+    end = n - HALF_WINDOW
     carried = [False] * n
-    k = 0
-    while k < n:
-        if not lost[k]:
+    k = HALF_WINDOW
+    while k < end:
+        if velocities[k] is not None:
             k += 1
             continue
         first = k
-        while k < n and lost[k]:
+        while k < end and velocities[k] is None:
             k += 1
-        # The stretch is `[first, k)`: the sample before it, `first - 1`, and the one after it, `k`,
-        # each measured, since a velocity known holds its own sample.
-        whole = first > 0 and k < n
+        # The stretch is `[first, k)`, carried only when the sample before it, `first - 1`, and the
+        # one after it, `k`, have known velocities (version 10): beside a maximal stretch, those
+        # from the trace's third sample to its third-last. Each is then measured, since a known
+        # velocity holds its own sample.
+        whole = HALF_WINDOW < first and k < end
         if whole:
             measured_at = at[first - 1]
             for i in range(first, k + 1):
@@ -628,7 +652,7 @@ def _saccade(gaze_deg, carried, start: int, stop: int) -> Saccade:
     the trace, and its first and last two velocities, unknown only because their windows run off
     it, never flag a run (wl-preproc's answer of 2026-11-06), where until then they flagged one
     from sample 0 or reaching the end. **Nor is a withheld stretch one a run is carried across**
-    (versions 8 and 9): only a velocity in a carried stretch flags a run (`_carried`), as
+    (versions 8 to 10): only a velocity in a carried stretch flags a run (`_carried`), as
     wl-preproc's flag reads only a carried stretch's samples."""
     touched_gap = any(carried[i] for i in range(max(start - HALF_WINDOW, 0), min(stop, len(carried))))
     return Saccade(start, stop, _amplitude(gaze_deg, start, stop), flagged=touched_gap)
@@ -676,11 +700,14 @@ class Detector:
     measured one before it (`_withheld`), and its velocities are kept to flag a run starting just
     after it only if it was not, when the first known velocity after it ends it (`_last_unknown`).
     That is `detect`'s judgement (`_carried`) wherever a run can start online: a stretch that is
-    withheld for reaching the trace's first velocity no run can start within two velocities of,
-    the two after an unknown velocity never taken into the scale and the scale needing two, and
-    the trial's end the detector never sees. *On the rig's default path none of this is reached yet
-    (2026-10-30): `gaze.Tracked` gives a lost datagram as the held sample again, never as a gap,
-    until the tracker's staleness runs out (backlog XC-428, waiting on build T and V3(a)).*
+    withheld for lying beside the trace's first two velocities, which have no window (version 10;
+    for reaching the first in version 9), is online one from the first velocity the detector
+    computes, the third sample's, and no run can start within two velocities of it, the two after
+    an unknown velocity never taken into the scale and the scale needing two; and the trial's end,
+    where `detect` withholds a stretch beside its last two, the detector never sees. *On the rig's
+    default path none of this is reached yet (2026-10-30): `gaze.Tracked` gives a lost datagram as
+    the held sample again, never as a gap, until the tracker's staleness runs out (backlog XC-428,
+    waiting on build T and V3(a)).*
 
     **Bounded work per sample.** Velocity is a fixed amount of arithmetic on a ring of the
     last five samples (`_WINDOW`): since version 4 one direction a sample (four trigonometric
@@ -803,10 +830,13 @@ class Detector:
     _warm: bool = field(default=False, init=False, repr=False)
     #: **Whether the thresholds are ones a withdrawal kept** (version 9; the review of version 8,
     #: its N1): while the detector is ready, a withdrawal whose re-take would leave a threshold at
-    #: zero -- fewer than two velocities left, as with a warmup of 2 or 3, or none with any spread --
-    #: keeps the thresholds it found, so the detector stays ready and an open run is not dropped,
-    #: until a refresh gives two above zero (`_refresh`), when one is due, as any refresh's stand
-    #: until the next. A detector not ready re-takes them as version 8 did.
+    #: zero -- fewer than two velocities left, as with a warmup of 2 or 3, or a median scale of zero
+    #: on either axis, whose median square is no more than its median's square -- keeps the
+    #: thresholds it found, so the detector stays ready and an open run is not dropped, until a
+    #: refresh gives two above zero (`_refresh`), when one is due, as any refresh's stand until the
+    #: next. Either threshold at zero is enough (the review of version 9, its M1): kept only when
+    #: both were, one axis's zero would still drop an open run. A detector not ready re-takes them
+    #: as version 8 did.
     _kept: bool = field(default=False, init=False, repr=False)
     #: Set for the sample on which a saccade was confirmed, and cleared by the next
     #: `accept`. The trial loop asks once per frame, so an edge has to survive exactly
@@ -898,9 +928,10 @@ class Detector:
         # falls in** (version 9), present or not, as `_carried` judges it: the stretch of unknown
         # velocities that loss makes reaches back to the velocity computed as this sample arrives,
         # two before it, so it is the stretch under way, judged as it ends (`_last_unknown`). Not a
-        # loss from the trial's start, which `detect` withholds too: online no run can start within
-        # two velocities of its unknown ones, the two after an unknown velocity never taken into
-        # the scale and the scale needing two, so they could flag none either way.
+        # stretch beside the trial's first two velocities, which `detect` withholds too (version
+        # 10): online it is one from the first velocity computed, the third sample's, and no run
+        # can start within two velocities of its unknown ones, the two after an unknown velocity
+        # never taken into the scale and the scale needing two, so they could flag none either way.
         newest = self._present_at
         if newest is not None and at - newest > self.params.max_gap_s + _ROUNDING_S:
             self._withheld = True
