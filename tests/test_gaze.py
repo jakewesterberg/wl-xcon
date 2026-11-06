@@ -1967,8 +1967,8 @@ def test_a_short_saccade_a_lost_datagram_leaves_too_few_measured_velocities_is_n
     fewer than six of the rest are measured, so the detector does not report it, and the trial
     has no response, where whole it is `CORRECT`. Version 2 confirmed it on the sample that ended
     its run (the review of XC-410's I2, at the merge with saccade-gap-onset), and the trial was
-    `CORRECT`; version 3 confirms no run there (`test_saccade.py`), so the landing `Tracked` takes
-    from a confirmation made as its run ends is reached by none of our detectors."""
+    `CORRECT`; version 3 confirms no run there (`test_saccade.py`), so since version 4 `Tracked`
+    has no landing for a confirmation made as its run ends, which none of our detectors reached."""
     trial = _probe([State("s", enter=[Show(_PROBED)],
                           go=[*_asks()[:2], On(After(1.0), Outcome.NO_RESPONSE)])])
     path = _path(_drawn(_PROBED, {}, trial)["search.1"], 3)

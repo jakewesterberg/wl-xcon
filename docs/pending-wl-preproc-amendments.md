@@ -452,9 +452,9 @@ down somewhere before someone assumes otherwise.
 
 ---
 
-# OPEN — saccades in true visual angle, online and offline together (new, 2026-10-19)
+# ANSWERED 2026-11-06 — saccades in true visual angle, online and offline together (new, 2026-10-19)
 
-Opened 2026-10-19 on the PI's decision, backlog XC-398. Yours to accept, amend or refuse.
+Opened 2026-10-19 on the PI's decision, backlog XC-398. Yours to accept, amend or refuse. **Built on both sides, 2026-11-06:** yours merged as `82380d2` with the contract fixtures v2 (SHA-256 `501e630945402b8064ea4a32708b8a20adba6d7ae90a3afd7209d96359c281c4`), and our `saccade.py` moved to them as its version 4 in one commit, v2 vendored byte-identical at `tests/fixtures/wl-preproc/saccade-v2.json` and held to its stated tolerance (EYE-19's revision of that day). What remains of the widening on our side is the rig's eye records (XC-400).
 
 ## The finding
 
@@ -498,7 +498,7 @@ agreement, the main sequence and stored detections read the same coordinates; an
 per-axis behavior (which our `tests/test_saccade.py` reads instead of importing your live code, before anything
 changes), v2 the true-angle one beside it, never replacing it. *(2026-10-19: v1 is vendored here at `tests/fixtures/wl-preproc/saccade-v1.json` from `10ea913` and pinned by SHA-256; `tests/test_saccade.py` no longer imports your detector.)*
 
-**The range of every angle, relayed 2026-10-30 and adopted** (the PI, 2026-10-30, "0 to 360 in both repos" and "Empty at center", relayed to you the same day): your true-angle spec (`docs/superpowers/specs/2026-10-30-true-angle-saccades-design.md`) adopted it as its amendment 1 (`dc3ef56`, 2026-10-30): every stored angle in [0°, 360°), a position's or an endpoint's polar angle and an event's direction alike, `atan2`'s result in degrees mod 360, and 0 where that rounds to 360; the polar angle NULL at zero eccentricity, and an event's direction NULL for a zero displacement. The rig's own eye records follow it (XC-400). **A setting's number stays the number it holds**: one you publish from `params` as a trials-table column is not normalized, even where a task uses it as a direction, since neither repo can tell it is one; the rig warns the task's author at load to write it from 0 to 360 (`direction-outside-0-360`, the PI's "Warn at load" of the same day), and each stimulus's entry in `stimuli` (below) carries the direction from 0° to 360°.
+**The range of every angle, relayed 2026-10-30 and adopted** (the PI, 2026-10-30, "0 to 360 in both repos" and "Empty at center", relayed to you the same day): your true-angle spec (`docs/superpowers/specs/2026-10-30-true-angle-saccades-design.md`) adopted it as its amendment 1 (`6173264`, 2026-10-30; cited here as `dc3ef56` until 2026-11-06, a commit amended before your merge and never published): every stored angle in [0°, 360°), a position's or an endpoint's polar angle and an event's direction alike, `atan2`'s result in degrees mod 360, and 0 where that rounds to 360; the polar angle NULL at zero eccentricity, and an event's direction NULL for a zero displacement. The rig's own eye records follow it (XC-400). **A setting's number stays the number it holds**: one you publish from `params` as a trials-table column is not normalized, even where a task uses it as a direction, since neither repo can tell it is one; the rig warns the task's author at load to write it from 0 to 360 (`direction-outside-0-360`, the PI's "Warn at load" of the same day), and each stimulus's entry in `stimuli` (below) carries the direction from 0° to 360°.
 
 ---
 

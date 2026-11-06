@@ -4,8 +4,8 @@
 already `wl-preproc`'s offline baseline, so online-versus-offline disagreement measures
 *staleness and latency* rather than two different algorithms. Anything else would have
 made the disagreement uninterpretable, which is the whole point of running the same
-method twice. Read `wl_preproc/eye/detect/engbert_kliegl.py` and `.../velocity.py`
-before changing anything here; the constants below are theirs.
+method twice. Read `wl_preproc/eye/detect/engbert_kliegl.py`, `.../velocity.py` and
+`.../geometry.py` before changing anything here; the constants below are theirs.
 
 **Two functions and one class, in that order of trust.** `velocity` and `median_scale`
 are theirs, reimplemented (a task PC does not import a pipeline that pulls DataJoint)
@@ -14,13 +14,25 @@ with their detector interval for interval on the same trace. `Detector` is the o
 form the trial loop uses, and it is checked against `detect` -- so the online path is
 never compared against a second idea of the algorithm, only against the shared one.
 
+**In true visual angle** (version 4; the PI, 2026-10-19, "Change both repos"; XC-398, pinned
+to wl-preproc's v2 contract fixtures). Gaze arrives in per-axis degrees, `(atan(X/D),
+atan(Y/D))`, and distances taken in those coordinates shrink off centre -- 2° up from (20°,
+0°) is 1.879° of visual angle -- so a velocity, a threshold and a size that mean what they say
+are taken between *directions*: a position `(x, y)` is the direction `normalize(tan x, tan y,
+1)`, computed as `geometry.separation_deg` computes it, and the five samples of a velocity's
+window are read in the local frame at the centre sample's direction (azimuthal-equidistant,
+`viewport.local_true_angle`'s formula: rightward and upward about that direction, so the
+elliptic test keeps its two thresholds). A run's size is the true angle between its first and
+last samples' directions (`geometry.separation_deg`). At the centre each is what it was per
+axis, to the small-angle approximation; at 20° out it is not.
+
 **What online costs, stated rather than discovered later.** Their five-point estimator
-is `(x[n+2] + x[n+1] - x[n-1] - x[n-2]) * fs / 6`, so the velocity *at* sample n is not
-computable until sample n+2 has arrived. A run is then only a saccade once
-`min_duration_samples` of it exist. Detection therefore trails true onset by at least
-`2 + min_duration_samples` samples -- 16 ms at 500 Hz -- **before** any display can
-react, and later still when samples near its start are missing: at most five samples
-later for one (`Detector`). That number is arithmetic, not a measurement: whether it
+is `(p[n+2] + p[n+1] - p[n-1] - p[n-2]) * fs / 6`, `p` the positions in that local frame,
+so the velocity *at* sample n is not computable until sample n+2 has arrived. A run is
+then only a saccade once `min_duration_samples` of it exist. Detection therefore trails
+true onset by at least `2 + min_duration_samples` samples -- 16 ms at 500 Hz -- **before**
+any display can react, and later still when samples near its start are missing: at most
+five samples later for one (`Detector`). That number is arithmetic, not a measurement: whether it
 lands inside saccadic suppression is V3(b)'s to answer, photodiode to photodiode, and
 S5 says so explicitly because a budget computed from component latencies is the thing
 that is always wrong.
@@ -48,6 +60,8 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+
+from wl_xcon.geometry import separation_deg
 
 #: Engbert & Kliegl's own conventional values, and `wl-preproc`'s defaults. Mirrored
 #: rather than imported, and asserted equal to theirs in the contract tests: a
@@ -94,10 +108,20 @@ _WEIGHT_SUM = 6.0
 #: real saccade whose run a lost sample leaves fewer than `min_duration_samples` measured
 #: velocities -- one of ten velocities or fewer, losing a sample in its middle -- which 2
 #: reported flagged, and 1 did not (every such case of a sweep run on 2026-11-06, one to
-#: three samples lost). **Not wl-preproc's fixture set "v2"**
-#: (true angle, XC-398): that numbers their published fixture files, and this numbers our
-#: detector.
-VERSION = 3
+#: three samples lost).
+#:
+#: **4 since 2026-11-06** (XC-398; the PI, 2026-10-19, "Change both repos", and his rule of
+#: that day against an average pixels per degree): **true visual angle**, as wl-preproc's
+#: Engbert-Kliegl detects since its `82380d2`, pinned to its contract fixtures v2 (vendored at
+#: `tests/fixtures/wl-preproc/saccade-v2.json`): each velocity in the local frame at its
+#: window's centre sample, so the thresholds and the elliptic test are rightward and upward
+#: in the eye's own frame there, and a run's size the true angle between its first and last
+#: samples. 3 took both per axis, as wl-preproc's v1 did. Near the centre the two agree to the
+#: small-angle approximation; off it a run's size is what the eye turned, so 1.12° up from
+#: (30°, 0°), 0.98°, is under the 1° microsaccade cut. The thresholds were already taken over
+#: complete windows only, which v2 adopts. **Not wl-preproc's fixture set "v2"**: that numbers
+#: their published fixture files, and this numbers our detector.
+VERSION = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,7 +150,8 @@ class Saccade:
 
     start: int
     stop: int
-    #: Degrees, start point to end point -- not path length.
+    #: Degrees of true visual angle, start point to end point (version 4; per axis until
+    #: then) -- not path length.
     amplitude_deg: float
     #: True when the detection window touched a tracker gap. **Never dropped, never
     #: unmarked**: the velocity that triggered it may be an artifact of the gap
@@ -166,12 +191,101 @@ def median_scale(component: list[float]) -> float:
     return math.sqrt(variance) if variance > 0 else 0.0
 
 
+def _direction_into(x_deg: float, y_deg: float, ux: list, uy: list, uz: list, slot: int) -> None:
+    """**A per-axis position's unit direction**, into slot `slot` of `ux`, `uy` and `uz`:
+    `normalize(tan x, tan y, 1)`, computed as `geometry.separation_deg` computes it, `(sin x cos y,
+    cos x sin y, cos x cos y)`, then normalized, as wl-preproc's `geometry.directions` does (v2).
+    Written into the caller's lists rather than returned, so the online detector builds nothing
+    (XC-414)."""
+    ax = math.radians(x_deg)
+    ay = math.radians(y_deg)
+    cos_ax = math.cos(ax)
+    cos_ay = math.cos(ay)
+    across = math.sin(ax) * cos_ay
+    up = cos_ax * math.sin(ay)
+    ahead = cos_ax * cos_ay
+    norm = math.sqrt(across * across + up * up + ahead * ahead)
+    ux[slot] = across / norm
+    uy[slot] = up / norm
+    uz[slot] = ahead / norm
+
+
+def _toward(ux: list, uy: list, uz: list, i: int, cx: float, cy: float, cz: float,
+            exx: float, exy: float, exz: float, eyx: float, eyy: float, eyz: float,
+            out: list) -> None:
+    """**Direction `i`'s azimuthal-equidistant coordinates about the direction `c`**, in degrees
+    along `c`'s rightward axis `ex` and upward axis `ey`, into `out[0]` and `out[1]`
+    (`viewport.local_true_angle`'s formula, wl-preproc's `geometry.local_coordinates_deg`): `v` at
+    `angle(c, v)` from the origin, in the direction of its tangent `t = v - (v.c)c`; the origin
+    where `t` has no length."""
+    vx = ux[i]
+    vy = uy[i]
+    vz = uz[i]
+    cos_t = vx * cx + vy * cy + vz * cz
+    if cos_t > 1.0:
+        cos_t = 1.0
+    elif cos_t < -1.0:
+        cos_t = -1.0
+    tx = vx - cos_t * cx
+    ty = vy - cos_t * cy
+    tz = vz - cos_t * cz
+    tn = math.sqrt(tx * tx + ty * ty + tz * tz)
+    if tn > 0:
+        theta = math.degrees(math.atan2(tn, cos_t))
+        out[0] = theta * (tx * exx + ty * exy + tz * exz) / tn
+        out[1] = theta * (tx * eyx + ty * eyy + tz * eyz) / tn
+    else:
+        out[0] = 0.0
+        out[1] = 0.0
+
+
+def _local_velocity(ux: list, uy: list, uz: list, i0: int, i1: int, i2: int, i3: int, i4: int,
+                    fs: float, out: list) -> None:
+    """**The five-point weighted difference in the local frame at direction `i2`** (version 4;
+    wl-preproc's `velocity.local_velocity`, v2): the directions `i0` to `i4`, the window's five
+    samples in order, read about the centre's own, `ex = normalize(x - (x.c)c)` and `ey = c x ex`,
+    then `(p[n+2] + p[n+1] - p[n-1] - p[n-2]) * fs / 6`, into `out[0]` (rightward) and `out[1]`
+    (upward), degrees per second. Shared by `velocity` and `Detector`, so the batch and online
+    forms compute it alike, bit for bit; and built of floats alone, so a sample builds nothing
+    (XC-414)."""
+    cx = ux[i2]
+    cy = uy[i2]
+    cz = uz[i2]
+    exx = 1.0 - cx * cx
+    exy = 0.0 - cx * cy
+    exz = 0.0 - cx * cz
+    norm = math.sqrt(exx * exx + exy * exy + exz * exz)
+    exx = exx / norm
+    exy = exy / norm
+    exz = exz / norm
+    eyx = cy * exz - cz * exy
+    eyy = cz * exx - cx * exz
+    eyz = cx * exy - cy * exx
+    _toward(ux, uy, uz, i4, cx, cy, cz, exx, exy, exz, eyx, eyy, eyz, out)
+    across = out[0]
+    up = out[1]
+    _toward(ux, uy, uz, i3, cx, cy, cz, exx, exy, exz, eyx, eyy, eyz, out)
+    across = across + out[0]
+    up = up + out[1]
+    _toward(ux, uy, uz, i1, cx, cy, cz, exx, exy, exz, eyx, eyy, eyz, out)
+    across = across - out[0]
+    up = up - out[1]
+    _toward(ux, uy, uz, i0, cx, cy, cz, exx, exy, exz, eyx, eyy, eyz, out)
+    across = across - out[0]
+    up = up - out[1]
+    scale = fs / _WEIGHT_SUM
+    out[0] = across * scale
+    out[1] = up * scale
+
+
 def velocity(
     gaze_deg: list[tuple[float, float] | None],
     at: list[float],
     params: Params,
 ) -> list[tuple[float, float] | None]:
-    """Degrees per second per sample, or `None` where it cannot honestly be computed.
+    """Degrees per second per sample, or `None` where it cannot honestly be computed: **in the
+    local frame at the sample's own direction** (version 4, `_local_velocity`), rightward and
+    upward, so its size is the eye's angular speed wherever it looks.
 
     `None` in two cases, and they are the same case: the five-sample window is not
     fully present, or it spans a gap wider than `max_gap_s`. **The edges are `None`
@@ -182,6 +296,13 @@ def velocity(
     threshold as well as from the output.
     """
     out: list[tuple[float, float] | None] = [None] * len(gaze_deg)
+    ux = [0.0] * len(gaze_deg)
+    uy = [0.0] * len(gaze_deg)
+    uz = [0.0] * len(gaze_deg)
+    for i, position in enumerate(gaze_deg):
+        if position is not None:
+            _direction_into(position[0], position[1], ux, uy, uz, i)
+    local = [0.0, 0.0]
     for n in range(HALF_WINDOW, len(gaze_deg) - HALF_WINDOW):
         window = range(n - HALF_WINDOW, n + HALF_WINDOW + 1)
         if any(gaze_deg[i] is None for i in window):
@@ -195,17 +316,14 @@ def velocity(
         # protocol is poll-based and its interval is not guaranteed (`eye.py`), so a
         # nominal rate would be an assumption where a measurement is available.
         fs = 2 * HALF_WINDOW / span
-        out[n] = (
-            (gaze_deg[n + 2][0] + gaze_deg[n + 1][0] - gaze_deg[n - 1][0] - gaze_deg[n - 2][0])
-            * fs / _WEIGHT_SUM,
-            (gaze_deg[n + 2][1] + gaze_deg[n + 1][1] - gaze_deg[n - 1][1] - gaze_deg[n - 2][1])
-            * fs / _WEIGHT_SUM,
-        )
+        _local_velocity(ux, uy, uz, n - 2, n - 1, n, n + 1, n + 2, fs, local)
+        out[n] = (local[0], local[1])
     return out
 
 
 def thresholds(velocities: list[tuple[float, float] | None], params: Params) -> tuple[float, float]:
-    """The per-axis elliptic thresholds, from the usable velocities only.
+    """The elliptic thresholds, rightward and upward in each velocity's local frame (version 4),
+    from the usable velocities only: complete windows, as wl-preproc's v2 takes them.
 
     Unusable samples are excluded from the estimate as well as from the output, for
     the reason `wl-preproc`'s detector gives: a gap's velocity spike would otherwise
@@ -233,11 +351,14 @@ def _outside_xy(vx: float, vy: float, eta_x: float, eta_y: float) -> bool:
 
 
 def _amplitude(gaze_deg: list[tuple[float, float] | None], start: int, stop: int) -> float:
+    """**A run's size: the true angle between its first and last present samples' directions**
+    (version 4; `geometry.separation_deg`), as wl-preproc's v2 measures it, where 3 took the
+    `hypot` of their per-axis displacement."""
     first = next((gaze_deg[i] for i in range(start, stop) if gaze_deg[i] is not None), None)
     last = next((gaze_deg[i] for i in range(stop - 1, start - 1, -1) if gaze_deg[i] is not None), None)
     if first is None or last is None:
         return 0.0
-    return math.hypot(last[0] - first[0], last[1] - first[1])
+    return separation_deg(first[0], first[1], last[0], last[1])
 
 
 def detect(
@@ -336,8 +457,10 @@ class Detector:
     gives a lost datagram as the held sample again, never as a gap, until the tracker's
     staleness runs out (backlog XC-428, waiting on build T and V3(a)).*
 
-    **Bounded work per sample.** Velocity is five plain multiplications on a ring of the
-    last five samples (`_WINDOW`). The threshold is *not* recomputed per sample -- that
+    **Bounded work per sample.** Velocity is a fixed amount of arithmetic on a ring of the
+    last five samples (`_WINDOW`): since version 4 one direction a sample (four trigonometric
+    calls and a square root) and four local coordinates a velocity (an `atan2` and two square
+    roots each), where it was five plain multiplications. The threshold is *not* recomputed per sample -- that
     would be a median over a growing list inside a trial loop, which is the unbounded
     per-frame work CLAUDE.md forbids -- but every `refresh_every` usable velocities (and
     every one while both thresholds are still zero), over the last `history` of them. What
@@ -346,8 +469,9 @@ class Detector:
 
     **And nothing built per sample but what one returns** (XC-414): a sample is
     `gaze.Tracked.display`'s every frame, so every buffer is built with the detector, its
-    size fixed by its parameters -- the last five samples, the last `history` velocities,
-    and the list their medians are sorted in -- and a sample overwrites values in them.
+    size fixed by its parameters -- the last five samples and their directions, the last
+    `history` velocities, the list their medians are sorted in, and the two-slot list a
+    velocity is written into -- and a sample overwrites values in them.
     What a sample still builds: the `Saccade` a confirming sample returns, one a saccade,
     and the list `_refresh` re-estimates over when a NaN is among the velocities before
     `history` of them exist (`_thresholds_as_listed`). Until 2026-10-29 every sample
@@ -369,6 +493,12 @@ class Detector:
     _y: list = field(init=False, repr=False)
     _t: list = field(init=False, repr=False)
     _present: list = field(init=False, repr=False)
+    #: **Each sample's unit direction**, in the same ring (version 4, `_direction_into`): what a
+    #: velocity reads, about its centre sample's, and the list it is written into (`_local`).
+    _ux: list = field(init=False, repr=False)
+    _uy: list = field(init=False, repr=False)
+    _uz: list = field(init=False, repr=False)
+    _local: list = field(init=False, repr=False)
     #: How many samples this trial has accepted. A sample's index is absolute, which is
     #: what makes `Saccade.start` mean the same thing as it does in `detect`.
     _seen: int = field(default=0, init=False, repr=False)
@@ -413,6 +543,10 @@ class Detector:
         self._y = [0.0] * ring
         self._t = [0.0] * ring
         self._present = [False] * ring
+        self._ux = [0.0] * ring
+        self._uy = [0.0] * ring
+        self._uz = [0.0] * ring
+        self._local = [0.0, 0.0]
         kept = max(self.history, 0)
         self._vx = [0.0] * kept
         self._vy = [0.0] * kept
@@ -479,6 +613,7 @@ class Detector:
             present[slot] = True
             xs[slot] = gaze_deg[0]
             ys[slot] = gaze_deg[1]
+            _direction_into(gaze_deg[0], gaze_deg[1], self._ux, self._uy, self._uz, slot)
         ts[slot] = at
         self._seen += 1
 
@@ -501,8 +636,10 @@ class Detector:
             span = ts[w4] - ts[w0]
             if span > 0:
                 fs = 2 * HALF_WINDOW / span
-                vx = (xs[w4] + xs[w3] - xs[w1] - xs[w0]) * fs / _WEIGHT_SUM
-                vy = (ys[w4] + ys[w3] - ys[w1] - ys[w0]) * fs / _WEIGHT_SUM
+                local = self._local
+                _local_velocity(self._ux, self._uy, self._uz, w0, w1, w2, w3, w4, fs, local)
+                vx = local[0]
+                vy = local[1]
                 moved = True
 
         if moved:
@@ -574,13 +711,14 @@ class Detector:
         return found
 
     def _amplitude(self, stop: int) -> float:
-        """`_amplitude` over the open run's samples to `stop - 1`, start point to end point: the
+        """`_amplitude` over the open run's samples to `stop - 1`, start point to end point in true
+        visual angle (version 4): the
         run's first sample, kept as it started (`_run_x`, `_run_y`), to sample `stop - 1` in the
         ring. **Both are the first and last present samples `_amplitude` would find**: a run
         starts, and is confirmed, only on a sample with a velocity, whose window holds it and the
         two each side of it, and `stop - 1` is the confirming velocity's own sample."""
         last = (stop - 1) % len(self._t)
-        return math.hypot(self._x[last] - self._run_x, self._y[last] - self._run_y)
+        return separation_deg(self._run_x, self._run_y, self._x[last], self._y[last])
 
     def _refresh(self) -> None:
         """The thresholds, re-estimated from the last `history` velocities: `thresholds` over

@@ -490,17 +490,14 @@ class Tracked:
             self._onset_seen = False
             self._taken = False
             self._carried = False
-            # **Confirmed on the sample that ends its run** (version 2 of the detector; the review
-            # of XC-410's I2): it has landed already, on this frame, and its stop is the
-            # `Saccade.stop` it is confirmed with, the run's end as `saccade.detect` reports it.
-            # Version 3 (2026-11-04) confirms a run only while it is open, so since then no
-            # detector of ours confirms one so, and a saccade is landed when its run closes.
-            self._in_flight = self.detector.in_flight
-            if self._in_flight:
-                self._landed_on = None
-            else:
-                self._landed_on = frame
-                self._stopped = frame - (fed - confirmed.stop)
+            # **Confirmed while its run is open, always**: since version 3 of the detector
+            # (2026-11-04) a run is confirmed on the velocity outside the threshold that gives it
+            # `min_duration_samples` measured ones, never on the sample that ends it, as version 2
+            # could (`tests/test_saccade.py` sweeps it). So it is in flight, and lands as its run
+            # closes (below). Until version 4 this also took a saccade confirmed as its run ended
+            # as landed on that frame (the review of XC-410's I2), which no detector reached.
+            self._in_flight = True
+            self._landed_on = None
         elif self._in_flight and not self.detector.in_flight:
             # The run closed: the eye has landed, so `SaccadeTo` can now ask where, on this frame.
             # **Where the eye stopped** (the review's I1): a run closes on the sample whose

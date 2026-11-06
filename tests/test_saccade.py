@@ -612,12 +612,13 @@ def test_every_run_is_confirmed_while_it_is_open():
     assert confirmed > 100
 
 
-def test_the_detector_that_counts_a_saccade_by_its_measured_velocities_is_version_3():
+def test_the_detector_in_true_visual_angle_is_version_4():
     """`VERSION` is bumped whenever a session would detect something else: version 2 reports what
-    version 1 never did, and version 3 no longer reports a run whose minimum duration only unknown
-    velocities met. **Not wl-preproc's fixture set "v2"** (true angle, XC-398): that is their
-    file's version, and this constant is ours."""
-    assert VERSION == 3
+    version 1 never did, version 3 no longer reports a run whose minimum duration only unknown
+    velocities met, and version 4 detects and sizes in true visual angle (XC-398). **Not
+    wl-preproc's fixture set "v2"**, which version 4 is pinned to: that is their file's version,
+    and this constant is ours."""
+    assert VERSION == 4
 
 
 # ---------------------------------------------------------------------------
@@ -629,18 +630,36 @@ def test_the_detector_that_counts_a_saccade_by_its_measured_velocities_is_versio
 # detector to true visual angle (XC-398) this repository's main would have gone red
 # for a change that is theirs to make, and ours to follow in our own commit. So
 # wl-preproc publishes fixtures -- inputs and their detector's outputs -- by version,
-# and a published version is never edited: v1 pins today's per-axis behavior
-# (wl-preproc `10ea913`, `docs/fixtures/saccade/v1.json`). v2, the true-angle one, is
-# pinned in the commit that moves `saccade.py` to true angle (XC-398), beside v1 until
-# nothing here needs v1 any more. The copy is byte-identical and its SHA-256 is
-# asserted, so a copy that drifts fails rather than quietly redefining "theirs".
+# and a published version is never edited. Each copy is byte-identical and its SHA-256
+# is asserted, so a copy that drifts fails rather than quietly redefining "theirs".
 # Nothing here needs wl-preproc importable.
+#
+# **v2, the true-angle one, is the contract since version 4** (wl-preproc `82380d2`,
+# `docs/fixtures/saccade/v2.json`, sent with its merge on 2026-11-06): v1's eight traces
+# and its companion's two near-threshold ones, read from those files so the inputs are
+# identical, and a 60-sample trace that tells the complete-window scale from v1's.
+# **v1 is kept for its median-scale cases alone** (`docs/fixtures/saccade/v1.json`,
+# `10ea913`), which v2 does not carry and which do not depend on geometry: its traces
+# are per axis, which nothing here detects in any more. **Its thresholds companion
+# (`v1-thresholds.json`, `065da53`) is retired** with version 4: it pinned per-axis
+# thresholds and runs only, and v2 names its digest among the files it was derived from.
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "wl-preproc" / "saccade-v1.json"
 _FIXTURE_SHA256 = "f94ea3a32521e7c5bdfb80040f10fe82303f76550296145b21fbeb94d9667666"
+#: The thresholds companion's digest, vendored beside v1 until version 4.
+_COMPANION_SHA256 = "f6da9801eb3f196b50ba546710b27816879acc46011ac117ff7ddbdeaad56e8e"
 
 _V1 = json.loads(_FIXTURE.read_bytes())
-_TRACES = {t["name"]: t for t in _V1["traces"]}
+
+_V2_FIXTURE = Path(__file__).parent / "fixtures" / "wl-preproc" / "saccade-v2.json"
+_V2_SHA256 = "501e630945402b8064ea4a32708b8a20adba6d7ae90a3afd7209d96359c281c4"
+
+_V2 = json.loads(_V2_FIXTURE.read_bytes())
+_TRACES = {t["name"]: t for t in _V2["traces"]}
+#: The traces whose inputs are v1's, each a single movement or two far from any other: the online
+#: detector, its threshold the trial's so far, is held to their runs too. The near-threshold
+#: movements and the short trace are the batch form's to hold, on the whole trace's threshold.
+_FROM_V1 = [name for name, trace in _TRACES.items() if trace["inputs_from"] == "v1.json"]
 
 
 def _ours_on(trace):
@@ -652,8 +671,16 @@ def _ours_on(trace):
         None if mask is not None else (float(x), float(y))
         for (x, y), mask in zip(trace["gaze_deg"], trace["available"] or [None] * len(trace["gaze_deg"]))
     ]
-    at = [i / _V1["fs_hz"] for i in range(len(gaze))]
+    at = [i / _V2["fs_hz"] for i in range(len(gaze))]
     return gaze, at
+
+
+def _held(got: float, want: float) -> bool:
+    """**v2's tolerance**, as its `about` states it: `|got - want| <= 1e-9 + 1e-12 * |want|`, in
+    the number's own unit. Under true angle every number but an interval passes through `sin`,
+    `cos` and `atan2`, which round differently in the last places across C libraries and forms of
+    the direction, and a velocity component near zero is a cancelling difference."""
+    return abs(got - want) <= 1e-9 + 1e-12 * abs(want)
 
 
 def test_the_vendored_fixture_is_the_one_wl_preproc_published():
@@ -662,11 +689,20 @@ def test_the_vendored_fixture_is_the_one_wl_preproc_published():
     assert len(_V1["traces"]) == 8 and len(_V1["median_scale"]) == 6
 
 
+def test_the_vendored_v2_is_the_one_wl_preproc_published():
+    """Its digest, as wl-preproc sent it with the merge (2026-11-06), and the two files it was
+    derived from, the v1 vendored here and the companion vendored here until version 4."""
+    assert hashlib.sha256(_V2_FIXTURE.read_bytes()).hexdigest() == _V2_SHA256
+    assert (_V2["version"], _V2["geometry"], _V2["fs_hz"]) == (2, "true-angle", 500.0)
+    assert _V2["derived_from"] == {"v1.json": _FIXTURE_SHA256, "v1-thresholds.json": _COMPANION_SHA256}
+    assert len(_TRACES) == 11 and len(_FROM_V1) == 8
+
+
 def test_our_defaults_are_their_defaults():
-    assert DEFAULT_LAMBDA == _V1["defaults"]["lambda"]
-    assert DEFAULT_MIN_DURATION_SAMPLES == _V1["defaults"]["min_duration_samples"]
-    assert Params().lambda_ == _V1["defaults"]["lambda"]
-    assert Params().min_duration_samples == _V1["defaults"]["min_duration_samples"]
+    assert DEFAULT_LAMBDA == _V2["defaults"]["lambda"]
+    assert DEFAULT_MIN_DURATION_SAMPLES == _V2["defaults"]["min_duration_samples"]
+    assert Params().lambda_ == _V2["defaults"]["lambda"]
+    assert Params().min_duration_samples == _V2["defaults"]["min_duration_samples"]
 
 
 @pytest.mark.parametrize("case", _V1["median_scale"], ids=lambda c: c["name"])
@@ -675,16 +711,17 @@ def test_our_median_scale_is_theirs(case):
 
 
 @pytest.mark.parametrize("name", list(_TRACES))
-def test_our_velocity_is_their_velocity(name):
-    """Ours derives `fs` from the window's own timestamps because the protocol is
-    poll-based; on an evenly sampled trace that must reduce to their fixed-rate
-    estimator, or the two detectors are differentiating differently and every
-    comparison between them is partly about smoothing.
+def test_our_velocity_is_their_velocity_in_true_angle(name):
+    """**In the local frame at each sample** (v2; version 4): the five samples' directions read
+    about the centre sample's own, azimuthal-equidistant, then the five-point difference, so off
+    centre it is the eye's angular velocity and per axis it was not. Ours derives `fs` from the
+    window's own timestamps because the protocol is poll-based; on an evenly sampled trace that
+    reduces to their fixed rate.
 
-    Ours is `None` where the five-sample window is not fully present -- the two edge
-    samples at each end, and any window touching a masked sample -- where theirs is
-    0.0 at the edges (an array has to hold something). So: equal to rel 1e-9 wherever
-    ours has an answer, `None` only where it should be, and their edge values are 0."""
+    Ours is `None` where the five-sample window is not fully present -- the two edge samples at
+    each end, and any window touching a masked sample -- where theirs is 0.0 at the edges and,
+    beside a mask, a number read across the gaze the mask threw. So: held to v2's tolerance
+    wherever ours has an answer, `None` only where it should be, and their edges 0."""
     trace = _TRACES[name]
     gaze, at = _ours_on(trace)
     theirs_v = trace["velocity_deg_s"]
@@ -700,48 +737,75 @@ def test_our_velocity_is_their_velocity(name):
                 assert theirs_v[i] == [0.0, 0.0], f"edge sample {i}"
             continue
         answered += 1
-        assert mine[i][0] == pytest.approx(theirs_v[i][0], rel=1e-9)
-        assert mine[i][1] == pytest.approx(theirs_v[i][1], rel=1e-9)
+        assert _held(mine[i][0], theirs_v[i][0]) and _held(mine[i][1], theirs_v[i][1]), \
+            (i, mine[i], theirs_v[i])
     assert answered > n // 2
 
 
 @pytest.mark.parametrize("name", list(_TRACES))
-def test_our_detector_finds_the_intervals_theirs_finds(name):
-    """The claim S5 §5 rests on. Their detector labels by amplitude and ours does not
-    -- labelling is offline analysis, not something a task guard needs -- so the
-    contract is over the intervals, which is the detection itself. Their `label` is
-    not compared for that reason.
+def test_our_thresholds_are_theirs_in_true_angle(name):
+    """**Over complete windows only**, on both sides since v2 (its spec §6.1): `thresholds` over
+    our velocities, which are `None` wherever a window is incomplete, against their `eta_deg_s`,
+    held to v2's tolerance. Per axis theirs took every unmasked sample, zero-filled edges
+    included, and ours stood 0.04-2.4% from it; the short trace's two differ from v1's rule by 9%
+    and 21%."""
+    gaze, at = _ours_on(_TRACES[name])
+    mine = thresholds(velocity(gaze, at, Params()), Params())
+    eta = _TRACES[name]["eta_deg_s"]
 
-    The blink trace is run with its masked samples as `None` gaze (see `_ours_on`);
-    the detector must still find both saccades on either side of the blink and none
-    inside it."""
-    trace = _TRACES[name]
-    gaze, at = _ours_on(trace)
-    mine = detect(gaze, at)
-    expected = [(r["start"], r["stop"]) for r in trace["runs"]]
-    assert expected, "a fixture trace with no run would prove nothing"
-    assert [(s.start, s.stop) for s in mine] == expected
+    assert _held(mine[0], eta[0]) and _held(mine[1], eta[1]), (mine, eta)
 
 
 @pytest.mark.parametrize("name", list(_TRACES))
-def test_our_amplitude_is_their_amplitude(name):
-    """Per-axis today, so these are the same start-to-end distance. **Not bit-exact:**
-    on two traces ours is 1 ulp from theirs (`math.hypot` against `np.hypot`), so this
-    allows 4 ulp and no more -- far below anything a threshold or a label can see."""
+def test_our_detector_finds_the_intervals_theirs_finds_in_true_angle(name):
+    """The claim S5 §5 rests on, exactly: intervals are held exactly in v2. The blink trace is run
+    with its masked samples as `None` gaze (see `_ours_on`); the detector must still find both
+    saccades on either side of the blink and none inside it. The near-threshold traces' runs are
+    the ones lambda +/-5% or the ellipse's limit at 1.1 moves, and not every movement in them is
+    detected; the short trace has none."""
     trace = _TRACES[name]
     gaze, at = _ours_on(trace)
-    mine = detect(gaze, at)
-    for found, run in zip(mine, trace["runs"]):
-        assert abs(found.amplitude_deg - run["amplitude_deg"]) <= 4 * math.ulp(run["amplitude_deg"])
+
+    assert [(s.start, s.stop) for s in detect(gaze, at)] \
+        == [(r["start"], r["stop"]) for r in trace["runs"]]
 
 
-@pytest.mark.parametrize("name", list(_TRACES))
+@pytest.mark.parametrize("name", [n for n in _TRACES if _TRACES[n]["runs"]])
+def test_our_size_is_theirs_in_true_angle(name):
+    """**Size is the true angle between the run's first and last samples' directions** (v2),
+    `geometry.separation_deg`, held to v2's tolerance: 2° up from (20°, 0°) is 1.86° here, where
+    per axis it was the 2° step's `hypot`."""
+    trace = _TRACES[name]
+    gaze, at = _ours_on(trace)
+    found = detect(gaze, at)
+
+    assert len(found) == len(trace["runs"])
+    for saccade, run in zip(found, trace["runs"]):
+        assert _held(saccade.amplitude_deg, run["amplitude_deg"]), (saccade, run)
+
+
+@pytest.mark.parametrize("name", [n for n in _TRACES if _TRACES[n]["runs"]])
+def test_our_size_splits_their_runs_at_their_microsaccade_cut(name):
+    """**The 1° microsaccade cut, read in true angle.** Labelling is offline analysis, which ours
+    does not do -- no task guard needs it, and `Saccade` has no label -- but the cut reads the
+    size, so ours must put each of their runs on the side of `microsaccade_max_deg` their label
+    does, at or above it a saccade. 1.12° up from (30°, 0°) is 0.98° of true angle, a
+    microsaccade, which per axis read 1.12°, a saccade."""
+    trace = _TRACES[name]
+    gaze, at = _ours_on(trace)
+    cut = _V2["defaults"]["microsaccade_max_deg"]
+
+    assert ["saccade" if s.amplitude_deg >= cut else "microsaccade" for s in detect(gaze, at)] \
+        == [r["label"] for r in trace["runs"]]
+
+
+@pytest.mark.parametrize("name", _FROM_V1)
 def test_online_each_of_their_runs_is_confirmed_on_its_sixth_velocity_and_nothing_else(name):
-    """**What version 2 leaves alone, sample for sample.** On each v1 trace, nothing missing near a
-    run, the online detector reports exactly their runs, each at their start, unflagged, on the
-    sample that completes its sixth velocity, `start + min_duration_samples + HALF_WINDOW - 1`, as
-    version 1 did: confirming a run once it is long enough rather than exactly so moves nothing
-    where no velocity in it is unknown."""
+    """**What version 2 leaves alone, sample for sample.** On each trace of v1's inputs, nothing
+    missing near a run, the online detector reports exactly their runs, each at their start,
+    unflagged, on the sample that completes its sixth velocity, `start + min_duration_samples +
+    HALF_WINDOW - 1`, as version 1 did: confirming a run once it is long enough rather than
+    exactly so moves nothing where no velocity in it is unknown. In true angle since version 4."""
     gaze, at = _ours_on(_TRACES[name])
     runs = _TRACES[name]["runs"]
 
@@ -750,8 +814,8 @@ def test_online_each_of_their_runs_is_confirmed_on_its_sixth_velocity_and_nothin
          r["start"] + DEFAULT_MIN_DURATION_SAMPLES, False) for r in runs]
 
 
-_LOST_IN_A_RUN = [(name, index, into) for name, trace in _TRACES.items()
-                  for index in range(len(trace["runs"])) for into in range(3, 8)]
+_LOST_IN_A_RUN = [(name, index, into) for name in _FROM_V1
+                  for index in range(len(_TRACES[name]["runs"])) for into in range(3, 8)]
 
 
 @pytest.mark.parametrize("name,index,into", _LOST_IN_A_RUN,
@@ -815,102 +879,6 @@ def test_in_flight_is_false_on_a_still_eye():
     for t, g in zip(at, gaze):
         detector.accept(t, g)
     assert not detector.in_flight
-
-
-# ---------------------------------------------------------------------------
-# Contract: the thresholds companion
-# ---------------------------------------------------------------------------
-#
-# wl-preproc `065da53`, `docs/fixtures/saccade/v1-thresholds.json`, frozen beside v1 and
-# vendored the same way (byte-identical, SHA-256 pinned, and pinned to the v1 file it
-# accompanies). **What it pins that v1's traces do not:** v1's runs are far enough from
-# the ellipse that lambda and the ellipse's limit can drift a little without changing
-# one. The companion gives each v1 trace's thresholds (`eta_deg_s`), and two
-# near-threshold traces whose movements sit 0.95-1.6x the ellipse-crossing speed, on
-# which lambda off by 5% either way, or the limit at 1.1 or 1.5, changes the runs.
-#
-# **The two definitions of eta differ, and this is deliberate here.** Theirs is
-# lambda * median_scale over the velocity at every sample the mask leaves usable,
-# including the two zero-filled samples at each edge and any window touching a masked
-# sample. Ours drops incomplete windows (they are `None`), so ours moves by about
-# 0.1-0.2% on the 1200-sample traces (up to 2.4% on v1's 400-sample ones) and changes no run. Hence two checks: ours against `eta_deg_s` at rel 3e-3,
-# and theirs recomputed from the fixture's own velocities, with `median_scale`, to 1e-12.
-# Which one is meant is for the XC-398 spec to settle; until then this pins the runs
-# exactly and the thresholds both ways.
-
-_COMPANION = Path(__file__).parent / "fixtures" / "wl-preproc" / "saccade-v1-thresholds.json"
-_COMPANION_SHA256 = "f6da9801eb3f196b50ba546710b27816879acc46011ac117ff7ddbdeaad56e8e"
-
-_TH = json.loads(_COMPANION.read_bytes())
-_NEAR = {t["name"]: t for t in _TH["near_threshold_traces"]}
-_ETA_CASES = [(n, _TRACES[n], e["eta_deg_s"]) for n, e in ((e["name"], e) for e in _TH["v1_traces"])]
-_ETA_CASES += [(n, t, t["eta_deg_s"]) for n, t in _NEAR.items()]
-
-
-def test_the_vendored_companion_is_the_one_wl_preproc_published():
-    assert hashlib.sha256(_COMPANION.read_bytes()).hexdigest() == _COMPANION_SHA256
-    assert _TH["companion_to"]["sha256"] == _FIXTURE_SHA256
-    assert (_TH["version"], _TH["geometry"]) == (1, "per-axis")
-    assert _TH["companion_to"]["file"] == "v1.json"
-    assert [e["name"] for e in _TH["v1_traces"]] == list(_TRACES)
-    assert list(_NEAR) == ["near-threshold-horizontal", "near-threshold-oblique"]
-    for t in _NEAR.values():
-        assert len(t["gaze_deg"]) == 1200 and len(t["runs"]) == 3
-
-
-@pytest.mark.parametrize("name", list(_NEAR))
-def test_near_threshold_velocity_is_their_velocity(name):
-    trace = _NEAR[name]
-    gaze, at = _ours_on(trace)
-    mine = velocity(gaze, at, Params())
-    n = len(gaze)
-    answered = 0
-    for i in range(n):
-        window_present = 2 <= i < n - 2 and all(gaze[j] is not None for j in range(i - 2, i + 3))
-        assert (mine[i] is not None) == window_present, f"sample {i}"
-        if mine[i] is None:
-            continue
-        answered += 1
-        assert mine[i][0] == pytest.approx(trace["velocity_deg_s"][i][0], rel=1e-9)
-        assert mine[i][1] == pytest.approx(trace["velocity_deg_s"][i][1], rel=1e-9)
-    assert answered > n // 2
-
-
-@pytest.mark.parametrize("name", list(_NEAR))
-def test_our_detector_finds_the_near_threshold_intervals_exactly(name):
-    """Exactly, not approximately: these runs are the ones lambda +/-5% or the ellipse's
-    limit at 1.1 moves, so an exact match is what makes a drifted constant fail."""
-    trace = _NEAR[name]
-    gaze, at = _ours_on(trace)
-    expected = [(r["start"], r["stop"]) for r in trace["runs"]]
-    assert [(s.start, s.stop) for s in detect(gaze, at)] == expected
-
-
-@pytest.mark.parametrize("name,trace,eta", _ETA_CASES, ids=[c[0] for c in _ETA_CASES])
-def test_our_thresholds_are_theirs_within_the_window_rule(name, trace, eta):
-    """Ours (`thresholds` over our velocities, incomplete windows excluded) against their
-    `eta_deg_s`. The difference is the dropped edge and masked windows, so it scales with
-    their share of the trace: measured 0.04-0.2% on the 1200-sample near-threshold traces
-    (bound rel 3e-3, as wl-preproc suggested) but up to 2.4% on v1's 400-sample traces,
-    where the four zero-filled edge samples are 1% of the usable set and move the median.
-    Bound rel 3e-2 there. Still far inside the 5% that moves a run."""
-    gaze, at = _ours_on(trace)
-    mine = thresholds(velocity(gaze, at, Params()), Params())
-    rel = 3e-3 if len(gaze) >= 1200 else 3e-2
-    assert mine[0] == pytest.approx(eta[0], rel=rel)
-    assert mine[1] == pytest.approx(eta[1], rel=rel)
-
-
-@pytest.mark.parametrize("name,trace,eta", _ETA_CASES, ids=[c[0] for c in _ETA_CASES])
-def test_their_thresholds_follow_their_stated_rule(name, trace, eta):
-    """Their rule, built here from the fixture's own velocities and mask: lambda times
-    `median_scale` over every unmasked sample, zero-filled edges included. Our
-    `median_scale` and `DEFAULT_LAMBDA` must reproduce their `eta_deg_s` to 1e-12."""
-    available = trace["available"] or [None] * len(trace["velocity_deg_s"])
-    usable = [v for v, mask in zip(trace["velocity_deg_s"], available) if mask is None]
-    for axis in (0, 1):
-        rebuilt = DEFAULT_LAMBDA * median_scale([float(v[axis]) for v in usable])
-        assert rebuilt == pytest.approx(eta[axis], rel=1e-12)
 
 
 # ---------------------------------------------------------------------------
