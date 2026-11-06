@@ -900,3 +900,25 @@ def test_no_reference_task_gives_any_new_code(name):
     assert {f.code for f in check_task(task)} & {
         "bad-draw", "bad-array", "cut-sequence", "sequence-stage-moves-up",
         "long-condition-name"} == set()
+
+
+def test_a_condition_giving_a_reward_size_is_refused_as_a_draw_and_a_factor_are():
+    """The re-review of Task 19, out-of-scope 1 (the controller's ruling): a hand-listed condition
+    giving a bounded setting, a reward size, loaded and ran, delivery reading the session's bounds
+    while each trial line recorded the condition's number as the dose. Refused at load, `bad-plan`,
+    as a draw (`bad-draw`) and a factor of it are: reward sizes come from the subject's bounded
+    config and the console, not a condition. A condition giving a setting that is not bounded
+    loads, as before."""
+    big = Condition("big", {"reward_correct": 0.5}, target=3)
+
+    declaring = _redeclared(BASE, Param("reward_correct", unit="mL", low=0.0, high=1.0))
+    assert _codes(_with(declaring, p=Plan([Block("b", [NEAR, FAR])]))) == []
+
+    found = _found(_with(declaring, p=Plan([Block("b", [NEAR, big])])))
+
+    assert [f.code for f in found] == ["bad-plan"], found
+    assert ("block 'b''s condition 'big' sets 'reward_correct', a bounded setting, which the "
+            "subject's bounded config sets and no condition gives (welfare); reward sizes come "
+            "from the session's bounds and the console; take it out of the condition"
+            in found[0].detail)
+    assert _codes(_with(p=Plan([Block("b", [NEAR, FAR])]))) == []

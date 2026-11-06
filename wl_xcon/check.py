@@ -1264,6 +1264,15 @@ def _plan_faults(task: Task) -> list[Finding]:
                     elif param is None:
                         refuse(name, f"{of} sets {setting!r}, which is no setting the task "
                                      f"declares; a condition sets the task's own settings")
+                    elif setting in BOUNDED:
+                        # A reward size is delivered from the session's bounds, whatever a condition
+                        # says, so its trial line would record a dose no trial was given (the
+                        # re-review of the C3 plan's Task 19, out-of-scope 1): refused as a draw and
+                        # a factor of it are.
+                        refuse(name, f"{of} sets {setting!r}, a bounded setting, which the "
+                                     f"subject's bounded config sets and no condition gives "
+                                     f"(welfare); reward sizes come from the session's bounds and "
+                                     f"the console; take it out of the condition")
                     elif param.choices and value not in param.choices:
                         # A position in the review report's words, eccentricity and direction
                         # first (STE-29; review 1's I2), never as Python writes a `Polar`; any

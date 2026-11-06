@@ -26,7 +26,7 @@ from wl_xcon import warnlist
 from wl_xcon.marks import TIME_FORMATS as _TIME_FORMATS
 from wl_xcon.marks import clock_or_now as _clock_or_now
 from wl_xcon.marks import clock_time as _wall_clock_time
-from wl_xcon.bounds import Bounds, Exceeded
+from wl_xcon.bounds import Bounds, Exceeded, _finite
 from wl_xcon.check import check_task, impossible, unplaced
 from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.review import position_words
@@ -1796,6 +1796,26 @@ def main(argv: list[str] | None = None) -> int:
                 values[name] = float(raw)
             except ValueError:
                 values[name] = raw
+
+        # **A value its setting cannot hold, refused before the session opens** (the re-review of
+        # the C3 plan's Task 19, out-of-scope 2): a word for a number died with a `TypeError` in the
+        # first trial, after the departure was marked, and a `nan` or an infinity ran with a
+        # timeout that never elapses. Judged as `Session.set` judges a live value of a numeric
+        # setting -- a number, not a `bool`, and `bounds._finite` -- so the two paths say alike.
+        for name, value in values.items():
+            declared = next((p for p in task.params if p.name == name), None)
+            if declared is None or declared.choices:
+                continue
+            try:
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    raise Exceeded(f"{name!r} takes a number ({declared.unit}); {value!r} is not "
+                                   f"one")
+                _finite(f"{name!r}", value)
+            except Exceeded as refused:
+                raise SystemExit(
+                    f"task refused, session not started, nothing recorded: --set "
+                    f"{_printable(str(refused))}"
+                ) from refused
 
         # **A place with no value, refused before the session opens** (XC-415; the PI,
         # 2026-10-30, "Refuse to start"; the review of its fix, I2): a setting placing a window, a

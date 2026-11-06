@@ -699,3 +699,31 @@ def test_the_feed_and_the_moments_word_a_value_over_a_draw_or_conditions_as_such
         sets = [line for kind, _, _, line in session._controls if kind == "set"]
         assert [line.startswith(said) for line in sets] == [True], (said, sets)
         assert [moment.said for moment in session._moments] == ["the run's start", said]
+
+
+#: `GIVEN` with block `given` ended by a time limit of four seconds of trials instead of its counts.
+TIMED = GIVEN.replace('Condition("plain", {}, target=3)])', 'Condition("plain", {}, target=3)], '
+                      'time_limit_s=4.0)')
+
+
+@pytest.mark.parametrize("drain", (4, 5))
+def test_a_value_applied_as_a_block_ends_by_its_time_limit_is_judged_by_the_next_block(
+        tmp_path, drain):
+    """The re-review of Task 19, Minor 1: a block ended by its time limit is decided at the
+    boundary where the value applies (`Session._playing`), not a few lines after it, so the fixation
+    window set as `given` ends -- drained before the trial that ends it, or one drain later -- is
+    judged by block `bare`, whose conditions give nothing: the same row both times, `was` the
+    run's own 2.0 and the way it went."""
+    assert TIMED != GIVEN
+    session = _session(tmp_path, {drain: [
+        {"kind": "set", "by": "jake", "name": "fix_window", "value": 2.5}]},
+        plans=TIMED, plan="given")
+
+    session.run()
+
+    (row,) = _rows(session.directory, "parameter_changes.jsonl")
+    lines = _rows(session.directory, "trials.jsonl")
+    first = next(line["trial_number"] for line in lines if line["block"] == "bare")
+    assert row["trial_number"] == first
+    assert (row["was"], row["now"]) == (2.0, 2.5)
+    assert (row["meaning"]["went"], row["meaning"]["step"]) == ("easier", 2.5 - 2.0)

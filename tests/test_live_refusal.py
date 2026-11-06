@@ -26,6 +26,7 @@ from pathlib import Path
 
 import pytest
 
+import _sessions
 from _rig import DIRECT, PATH as RIG_FILE
 from wl_xcon import stranded, taskd
 from wl_xcon.actor import Box
@@ -415,6 +416,72 @@ def test_wlx_run_given_values_that_make_an_impossible_trial_does_not_start(tmp_p
     assert "out of cage" not in capsys.readouterr().out
     assert list(tmp_path.iterdir()) == []
     assert stranded.find(tmp_path) == []
+
+
+def _wlx_run(tmp_path: Path, task: str, *sets: str, plan: str | None = None) -> list[str]:
+    """`wlx run`'s argv for `task` with the reference detection task's values, `sets` over them."""
+    values = {"fix_acquisition": "4.0", "fix_hold": "0.3", "response_deadline": "0.6",
+              "target_hold": "0.2", "fix_window": "2.0", "target_window": "3.0",
+              "target_x": "10.0"}
+    values |= dict(item.split("=") for item in sets)
+    return [
+        "run", task, *(["--plan", plan] if plan else []),
+        "--rig", RIG_FILE, "--view", "direct", "--kind", "training", "--accept-warnings",
+        "--allocation", "tasks/allocation.py", "--bounds", "tasks/reference_bounds.py",
+        "--root", str(tmp_path / "root"), "--session-id", "2027-01-14_01",
+        "--subject", "REFERENCE", "--out-of-cage-at", time.strftime("%H:%M"),
+        "--delivered-today", "0", "--trials", "2",
+        *[arg for name, value in values.items() for arg in ("--set", f"{name}={value}")],
+    ]
+
+
+def test_wlx_run_of_a_plan_judges_the_conditions_its_factors_make_before_it_starts(
+        tmp_path, capsys):
+    """The re-review of Task 19: the check beside `unplaced` in `wlx run` reads the blocks of the
+    plan named, each factorial expanded, as the pre-flight does. A response deadline of 0.15 s
+    against a 0.2 s target hold is refused naming the conditions the factors make, before any
+    departure: unexpanded, the factorial's block has no condition and the run would be refused
+    only by the backstop, after the departure, stranded."""
+    task = _sessions.varied_task(tmp_path / "tasks", name="planned", plans=(
+        '{"p": Plan([Block("grid", [], factorial=Factorial({"target_x": (-10.0, 10.0)}, '
+        'target=1))])}'))
+    text = task.read_text()
+    old = "                On(After(3.0), Outcome.NO_RESPONSE),"
+    assert text.count(old) == 1
+    task.write_text(text.replace(
+        old, '                On(After(P("response_deadline")), Outcome.NO_RESPONSE),'))
+
+    with pytest.raises(SystemExit) as refused:
+        main(_wlx_run(tmp_path, str(task), "response_deadline=0.15", plan="p"))
+
+    assert str(refused.value).startswith(
+        "task refused, session not started: its starting values leave trials no animal can get "
+        "right:\n  impossible-trial: block 'grid', conditions 'target_x=-10.0', "
+        "'target_x=10.0': state 'verify' ends the trial NO_RESPONSE after `response_deadline`, "
+        "0.15 s, while its 'target' hold takes `target_hold`, 0.2 s")
+    assert "out of cage" not in capsys.readouterr().out
+    assert not (tmp_path / "root").exists() or list((tmp_path / "root").iterdir()) == []
+    assert stranded.find(tmp_path / "root") == []
+
+
+@pytest.mark.parametrize("value", ("abc", "nan", "inf", "-inf"))
+def test_wlx_run_refuses_a_value_its_setting_cannot_hold_before_the_departure(
+        tmp_path, capsys, value):
+    """The re-review of Task 19, out-of-scope 2: `--set target_hold=abc` passed every refusal, marked
+    the departure and died with a `TypeError` in the first trial; `nan` and `inf` ran. A numeric
+    setting takes a number that is real, as `Session.set` and `bounds._finite` hold a live value
+    to: refused before the session opens, so no "out of cage", nothing under the root, no stranded
+    session."""
+    with pytest.raises(SystemExit) as refused:
+        main(_wlx_run(tmp_path, "tasks/fixation_detection.py", f"target_hold={value}"))
+
+    said = str(refused.value)
+    assert said.startswith("task refused, session not started, nothing recorded: --set "
+                           "'target_hold' ")
+    assert ("takes a number (s)" in said) if value == "abc" else ("not a real number" in said)
+    assert "out of cage" not in capsys.readouterr().out
+    assert not (tmp_path / "root").exists()
+    assert stranded.find(tmp_path / "root") == []
 
 
 def test_possible_judges_a_hand_back_a_range_and_a_whole_revert(tmp_path):

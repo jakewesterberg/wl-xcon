@@ -2622,26 +2622,21 @@ class Session:
         return bool(conditions) and all(name in variation.own_ranges(condition)
                                         for condition in conditions)
 
-    def _block_gives(self, name: str) -> bool:
-        """**Whether the open block gives `name` at this moment**, no person holding it: by its own
-        draw or the task's (`variation.in_force`), or by its conditions, a value or a range of their
-        own (one condition giving it is enough). A value a person or a revert gives it then writes
-        its change row with `was` null, and its meaning's `went` and `step` null (`_apply_staged`):
-        no single value was held before it -- the value `set` read is the run's own, under the draw
-        or the conditions, which no trial they give it held -- and what the animal saw is each trial
-        line's (`params`, `drawn`). The controller's rulings of 2026-10-30 on the engine C3 plan's
-        path test (Task 19): a record must not claim a value no trial held; engine build C2b wrote
-        the run's value here for a setting its conditions give, and C3, which formalizes the change
-        log, corrects it. Read in the block the row's trial plays (`_playing`), not the one a block's
-        end finds still open."""
-        return self._given_by(name, self._playing()) is not None
-
     def _playing(self):
         """**The block the next trial plays**: the one that follows the open block where it ends at
         this boundary by its rule (`Scheduler.following`), else the open one. A value applied as a
         block ends is judged, worded and recorded by the block its row's `trial_number` plays
-        (the brief of Task 19; its review, Minor 1)."""
-        return self._scheduler.following or self._scheduler.block
+        (the brief of Task 19; its review, Minor 1). **An end by the block's time limit is decided
+        here too** (`_elapsed - _block_from >= time_limit_s`, which no pause moves; the loop asks
+        the same a few lines on, so expiring it now changes nothing). **The known case left out**:
+        a person's `next_block` drained in the same drain as a value at the boundary moves the
+        plan after the row is applied, so that row is judged by the block that was open."""
+        scheduler = self._scheduler
+        held = scheduler.block.time_limit_s
+        if (held is not None and not scheduler.expired
+                and self._elapsed - self._block_from >= held):
+            scheduler.expire()
+        return scheduler.following or scheduler.block
 
     def _given_by(self, name: str, block) -> str | None:
         """What gives `name` in `block` while no person holds it: `"conditions"` where every
@@ -3256,8 +3251,11 @@ class Session:
         kind `set` (`record.SessionRecord.change`), at the instant it applied, naming the next
         trial to start as the first it applies to, with the setting's meaning (`_meaning`; none
         for a ceiling's), the value written as given, and `was` written null, with the meaning's
-        `went` and `step`, where the open block's draw or conditions give the setting at that
-        moment (`_block_gives`); then its line on the feed, at that instant, saying what `set` read.
+        `went` and `step`, where no person held the setting and the block its trial plays gave
+        it, by its draw or its conditions (`_given_by`; judged, for a `set` row, by the state
+        before the pass, when its `was` was read; a revert row's, live); then its line on the
+        feed, at that instant, saying what gave the setting where the row writes `was` null ("its
+        draw", "its conditions"), else what `set` read.
         A bounded row still goes through `bounds.set`, in the same pass as its strobe and row.
 
         **A hand-back and a live range offered are applied here too** (`_pending`; engine build
@@ -3312,7 +3310,7 @@ class Session:
                 # inter-trial interval (its docstring), not before this row.
                 was = self.spec.values.get(name)
             # No single value is "before" on a setting the open block draws or its conditions give:
-            # its row says none, and no way it went (`_block_gives`); the feed says what `set` read.
+            # its row says none, and no way it went (`_given_by`); the feed says what gave it.
             given = (before[name] if moment is None
                      else None if bounded else self._given_by(name, playing))
             written = None if given else was
@@ -4197,7 +4195,9 @@ class Session:
         # judged the task's starting values (`check._impossible_faults`), and the run's own -- a
         # console's start, `wlx run --set` -- are judged here, over every block the run plays,
         # as the backstop for a caller that took no pre-flight, refusing as the blocking findings
-        # above do, before anything of the run is numbered, strobed or written.
+        # above do, before anything of the run is numbered, strobed or written. `wlx run` judges
+        # the same first, before its session opens and its departure is marked (`cli.main`); this
+        # is the backstop for its other callers.
         impossible_now = [f for f in impossible(task, self._plan(run, task).blocks,
                                                 {**starts, **given})
                           if f.refuses(self.spec.session_kind)]
