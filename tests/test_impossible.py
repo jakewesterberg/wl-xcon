@@ -564,7 +564,8 @@ def test_a_hold_leading_to_a_wrong_answer_that_the_timeout_cuts_off_is_not_refus
 def test_a_self_pair_already_judged_alike_says_no_swap_and_a_cut_off_hold_is_refused_when_cued():
     """Fix round 1, the review's Minor 1 and 2: one condition drawing its target from red or green
     among green at two objects has green among green (item 2) but no trial of green among red, so
-    it gets the item-2 sentence alone; and no time to answer is refused whatever names the target."""
+    it gets the item-2 sentence alone; and no time to answer is refused whatever names the
+    target."""
     drawn = Plan([Block("b", [Condition("both", {"set_size": 2, "distractor_appearance": GREEN},
                                         target=1)],
                         draws={"target_appearance": Listed((RED, GREEN), repeat=FRESH)})])
