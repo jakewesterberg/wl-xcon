@@ -36,6 +36,7 @@ from wl_xcon.geometry import NOMINAL_HALF_IPD_CM, VIEWS, Geometry, Rig, SubjectS
 from wl_xcon.photometry import SRGB, Calibration, read_calibration
 from wl_xcon.actor import Actor, Box
 from wl_xcon.task import Task, Trial
+from wl_xcon.variation import expanded
 from wl_xcon.welfare import Deployment
 
 
@@ -1794,13 +1795,14 @@ def main(argv: list[str] | None = None) -> int:
         # 2026-10-30, "Refuse to start"; the review of its fix, I2): a setting placing a window, a
         # stimulus, an update or an array's objects, or sizing a window, that neither the task's
         # starting values, `--set` nor the plan's condition playing it gives a value
-        # (`check.unplaced`). Refused by `Session.run` instead, it came after the departure was
-        # marked, and the session was left stranded, `wlx taskd` opening none under this root
+        # (`check.unplaced`), over the blocks the plan plays, each factorial expanded, as
+        # `Session.run` reads them. Refused by `Session.run` instead, it came after the departure
+        # was marked, and the session was left stranded, `wlx taskd` opening none under this root
         # until it was ended. `Session.run` refuses it too, as the backstop for its other callers.
         unset = unplaced(
             task,
             {**{p.name: p.start for p in task.params if p.start is not None}, **values},
-            None if args.plan is None else task.plans[args.plan].blocks,
+            None if args.plan is None else [expanded(b) for b in task.plans[args.plan].blocks],
         )
         if unset:
             raise SystemExit(

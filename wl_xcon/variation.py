@@ -139,7 +139,8 @@ def values_of(distribution: object) -> tuple:
     return ()
 
 
-def extremes(distribution: object, declared: Param | None = None) -> tuple:
+def extremes(distribution: object, declared: Param | None = None, *,
+             direction: bool = False) -> tuple:
     """**The least and the most a draw can give, where each is a finite number**, each once
     (engine build C3's spec §11): a uniform's, a normal's or a wait's ends (`bounds_of`, a normal
     cut to its setting's declared range, `declared`, where it gives no end of its own), or a
@@ -147,7 +148,11 @@ def extremes(distribution: object, declared: Param | None = None) -> tuple:
     is never drawn; `()` for a set of no numbers. What a draw is checked again with, widened, one
     extreme at a time with its condition's values, at a run's start (`preflight.beyond`): a check
     widened to an extreme reasons over every value between it and the declared range, so the two
-    ends are all it needs. For a distribution the load accepts (`check.undrawable`)."""
+    ends are all it needs. For a distribution the load accepts (`check.undrawable`).
+
+    **A direction** (`direction=True`, for a setting `directions` names) is judged on the circle it
+    is shown on, 0 to 360 (`geometry.shown_direction`; the controller's ruling on the review of
+    Task 11): `Uniform(-45, 45)` gives 315 and 45, inside a setting declared [0, 360]."""
     ends = bounds_of(distribution, declared)
     if ends is None:
         values = values_of(distribution)
@@ -157,6 +162,8 @@ def extremes(distribution: object, declared: Param | None = None) -> tuple:
                    if weight > 0 and isinstance(value, (int, float))
                    and not isinstance(value, bool)]
         ends = (min(numbers), max(numbers)) if numbers else ()
+    if direction:
+        ends = tuple(shown_direction(end) for end in ends if math.isfinite(end))
     return tuple(dict.fromkeys(end for end in ends if math.isfinite(end)))
 
 

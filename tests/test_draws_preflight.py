@@ -429,3 +429,84 @@ def test_wlx_run_without_a_seed_records_a_fresh_one_and_with_one_records_it(
     out = capsys.readouterr().out.splitlines()
     assert [line for line in out if line.startswith("  seed: ")] == [
         "  seed: 424242 (drawn fresh)", "  seed: 9 (given)"]
+
+
+def test_wlx_run_of_a_plan_whose_factorial_places_nothing_is_refused_before_any_departure(
+        tmp_path, capsys):
+    """The review of Task 11 (fix round 1): `wlx run --plan` reads its place check over the blocks
+    the plan plays, each factorial expanded (`Session.run`'s backstop reads them so), so a
+    factorial whose generated conditions place nothing is refused before the departure is marked.
+    Read over the declared blocks it passed, the animal was marked out of its cage, and
+    the backstop then refused, leaving the session stranded (XC-415's failure)."""
+    from wl_xcon import stranded
+    text = _sessions.polar_task(tmp_path, name="u").read_text()
+    text += (
+        "\nfrom wl_xcon.task import Block as _B, Factorial as _F, Plan as _P\n"
+        "TASK = _polar_dataclasses.replace(TASK, plans={'u': _P([_B('b', [], factorial=_F(\n"
+        "    {'target_luminance': (30.0, 60.0)}))])})\n")
+    path = tmp_path / "u.py"
+    path.write_text(text)
+    root = tmp_path / "root"
+
+    refused = None
+    try:
+        main([
+            "run", str(path), "--rig", RIG_FILE, "--view", "direct", "--kind", "training",
+            "--accept-warnings", "--allocation", "tasks/allocation.py",
+            "--bounds", "tasks/reference_bounds.py", "--root", str(root),
+            "--session-id", "2027-01-14_01", "--subject", "REFERENCE",
+            "--out-of-cage-at", time.strftime("%H:%M"), "--delivered-today", "0",
+            "--trials", "2", "--plan", "u", "--seed", "3"])
+    except SystemExit as stop:
+        refused = str(stop)
+
+    assert refused is not None and refused.startswith("task refused, session not started, nothing")
+    assert "has no value in condition 'target_luminance=30.0' of block 'b'" in refused
+    assert "out of cage" not in capsys.readouterr().out
+    assert stranded.find(root) == []
+
+
+def test_a_direction_drawn_across_zero_is_judged_on_the_circle_it_is_shown_on():
+    """The review of Task 11 (fix round 1, minor 1; the controller's ruling): a direction setting
+    declared [0, 360] and drawn `Uniform(-45, 45)` -- the form `check.undrawable` recommends -- is
+    the angles 315 to 45, all inside it, so a run's start warns nothing, as for the same angles
+    written `Weighted((350, 10))`; `variation.extremes(direction=True)` gives the ends as shown. A
+    setting that is no direction keeps its warning, and a direction really outside its range is
+    still warned."""
+    spun = Param("target_dir", unit="deg", low=0.0, high=360.0)
+    assert variation.extremes(Uniform(-45.0, 45.0), spun, direction=True) == (315.0, 45.0)
+    assert variation.extremes(Uniform(-45.0, 45.0), spun) == (-45.0, 45.0)
+    assert preflight._ends(Uniform(-45.0, 45.0), spun, direction=True) == []
+    assert preflight._ends(Uniform(-45.0, 45.0), spun) == [-45.0]
+    half = Param("target_dir", unit="deg", low=0.0, high=180.0)
+    assert preflight._ends(Uniform(-45.0, 45.0), half, direction=True) == [315.0]
+
+
+def test_a_draw_the_load_refuses_as_a_direction_is_not_also_widened():
+    """The review of Task 11 (minor 2): `_ends` asks `check.undrawable` as the load does, with
+    `direction=` for a setting the task places a direction by, so a direction drawn over more than
+    a whole turn, which the load refuses, is not also warned at a run's start."""
+    spun = Param("target_dir", unit="deg", low=0.0, high=360.0)
+    half = Param("target_dir", unit="deg", low=0.0, high=180.0)
+    assert preflight._ends(Uniform(100.0, 600.0), half, direction=True) == []
+    assert preflight._ends(Uniform(100.0, 600.0), half) == [600.0]
+
+
+def test_a_run_s_start_asks_for_a_direction_settings_draw_as_a_direction(monkeypatch):
+    """The review of Task 11 (minors 1 and 2) at a run's start: `beyond` hands `_ends` the flag
+    for each setting `variation.directions` names, and only those."""
+    asked = []
+    real = preflight._ends
+
+    def seen(draw, declared, direction=False):
+        asked.append((declared.name, direction))
+        return real(draw, declared, direction)
+
+    monkeypatch.setattr(preflight, "_ends", seen)
+    monkeypatch.setattr(preflight, "directions", lambda task: frozenset({"fix_hold"}))
+    task = _task(draws={"fix_hold": Uniform(0.2, 1.0, repeat=FRESH),
+                        "fix_window": Uniform(1.0, 2.0, repeat=FRESH)})
+
+    preflight.beyond(task, {}, ALLOCATION, DIRECT, SRGB, None)
+
+    assert sorted(asked) == [("fix_hold", True), ("fix_window", False)]

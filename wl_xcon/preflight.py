@@ -43,7 +43,7 @@ from wl_xcon.cli import _load_bounds, _load_subject_settings, _load_task, _setup
 from wl_xcon.findings import Finding
 from wl_xcon.link import Preflight, PreflightItem
 from wl_xcon.task import Block, Condition, Distribution, Param, Task
-from wl_xcon.variation import expanded, extremes, in_force, own_ranges
+from wl_xcon.variation import directions, expanded, extremes, in_force, own_ranges
 from wl_xcon.welfare import OUT_OF_CAGE, Absent, Simulated
 
 PASS, UNKNOWN, FAIL = "pass", "unknown", "fail"
@@ -253,6 +253,7 @@ def _widened(task: Task, start: dict, allocation, geometry, calibration, deploym
     draw cost one check. **A draw's finding is said once**, where the run first reaches it, and
     never one the starting values or a condition's values gave already."""
     declared = {param.name: param for param in task.params}
+    turned = directions(task)
     asked: dict[tuple, list] = {}
 
     def wide(values: dict) -> list:
@@ -279,7 +280,7 @@ def _widened(task: Task, start: dict, allocation, geometry, calibration, deploym
         drawn = in_force(task, block)
         for condition in block.conditions:
             for name, (draw, key) in {**drawn, **own_ranges(condition)}.items():
-                for reach in _ends(draw, declared.get(name)):
+                for reach in _ends(draw, declared.get(name), name in turned):
                     for finding in wide({**start, **condition.values, name: reach}):
                         if finding in said:
                             continue
@@ -290,15 +291,18 @@ def _widened(task: Task, start: dict, allocation, geometry, calibration, deploym
     return found
 
 
-def _ends(draw: Distribution, declared: Param | None) -> list[float]:
+def _ends(draw: Distribution, declared: Param | None, direction: bool = False) -> list[float]:
     """**Each extreme of a draw past its setting's declared range** (engine build C3's spec §11):
     the least and the most it can give (`variation.extremes`: a value of weight 0 left out, a set
     of no numbers none), each one outside the declared range (`check._outside`). None for a
     setting the task does not declare, nor for a draw the load refuses (`check.undrawable`),
-    which no run takes."""
-    if declared is None or undrawable(draw, declared) is not None:
+    which no run takes. **A direction setting** (`direction`; `variation.directions`) is asked of
+    `undrawable` as the load asks, and its extremes are judged on the 0 to 360 circle it is shown
+    on, so a draw across 0 inside a range declared [0, 360] is no warning."""
+    if declared is None or undrawable(draw, declared, direction=direction) is not None:
         return []
-    return [end for end in extremes(draw, declared) if _outside(declared, end)]
+    return [end for end in extremes(draw, declared, direction=direction)
+            if _outside(declared, end)]
 
 
 def _drawn_where(plan: str | None, block: Block, condition: Condition, key: tuple,
@@ -383,7 +387,7 @@ def values(task: Task | None, given: dict, refused=(), plan: str | None = None) 
                 *(parameters_used(s) for s in task.structures.values())) - frozenset(task.draws)
         else:
             used = frozenset()
-            for block in _played(task, plan):
+            for block in blocks:
                 drawn = in_force(task, block)
                 used |= {
                     name for c in block.conditions
