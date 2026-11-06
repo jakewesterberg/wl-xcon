@@ -16,7 +16,8 @@ against `wl_preproc/contracts/events.py` at commit `f7fb10a` (2026-08-31); the
 2026-10-11 section is wl-preproc's own reading of its source, not rechecked here.
 **And one from XC-026, opened 2026-10-01**: what a resumed session's stream holds, and **one
 from XC-288, opened 2026-10-10**: the change log, reasons, timed events and pauses, both at the
-end of this file, before the note that is not an ask.
+end of this file, before the note that is not an ask. **And one from engine build C3, opened 2026-10-30**:
+what varied in each trial and block, and the change log grown, the last section of this file.
 
 **Of the first three (all since done), two were free, and the third was small.** Items 2 and 3 change no numbers and
 no wire behaviour — one records an ownership split in a docstring, the other corrects a
@@ -409,6 +410,11 @@ Opened 2026-10-18 by engine build C2a ([its plan](superpowers/plans/2026-10-11-e
 
 Each `trials.jsonl` line keeps the six fields wl-preproc requires and gains eight beside them: `counting` (`counted`, `spent`, `owed` or `unpaid`: what the trial did to its condition's count), `shown` (whether its stimulus had appeared), `repeat_of` (the `index` of the trial it shows again), `at_once` (whether it came straight after that one), `previous` (the condition before it in its block), `drummed` (a drum's repeat), `drumming` (`block`, `run` or null) and `aids` (the training aids on as it was drawn: `drumming`, `clear`). Each `runs.jsonl` **end** row gains `shortfalls`: a list of `{block, condition, trials, because, possible_avoidance, after_trial, by}`, `because` one of `cap`, `rig` or `cleared`; `conditions`: a list of each block's per-condition `{block, condition, trials, presentations, right, wrong, right_first, owed, repeats, moved_past, possible_avoidance, drummed, failing}`, a trial and its drummed repeats one trial (the PI, 2026-10-18); and `presentations`, its lines, while its `trials` now counts trials, a trial and its drummed repeats one -- before C2a the two were equal. A trial that faulted has no line and is not in `presentations`; because a try is counted before its line is written, a run that ended in a fault can leave `trials` and the per-condition counts one try ahead of the lines. **`counting` records what the trial paid, not whether it was an answer**: under drumming every try that is not right is recorded `owed`, wrong answers included, and past a criterion block's targets, where nothing is owed, an `owed` line means "not shown again" unless drumming brought it back at once, which the next line's `drummed` and `repeat_of` say. Judge answers by `outcome`, never by `counting`. `controls.jsonl` gains three row kinds beside its existing ones, each with the common `kind`, `by`, `at`, `at_local`, `trial_index` and `run`: `clear` (a person's clearing from the count: `condition`, `block`, `rest`, `cleared`, the trials cleared, and `owed`, what the condition still owes), `drum` (a drumming switch: `scope`, `block`, the block it is for, `was` and `now`, what drumming read before and after) and `training` (a training switch: `setting`, `clear` or `first_answers`, `was` and `now`). **The `training` rows are the only record of when "first answers only" was on**: a trial's `aids` lists `drumming` and `clear` but not that setting, and it changes how a percentage rule judges the drummed tries. No new `runs.jsonl` row kind: the shortfalls ride the end row, since wl-preproc reports any row but a start or an end as a problem.
 
+*Amended 2026-10-30 (engine build C3)*: each `clear`, `drum` and `training` row above is also written to
+`parameter_changes.jsonl`, as a change row of the same kind (the C3 section below), and stays in `controls.jsonl`
+exactly as above until you read and time the change log's rows (our XC-442). The `training` rows, in either file,
+remain the only record of when "first answers only" was on.
+
 ## The ask
 
 **Read them into the published dataset**, so an analysis can tell what each trial paid (`counting`; it is not the answer, which `outcome` says), tell a spent trial from an answer, follow the realized sequence, tell a trial run under a training aid, and see each condition's counts, its forgiven debt and whether it was flagged as possible avoidance. Both readers tolerate the fields today (a trial line's extra fields are ignored; an end row is read with `.get`), so nothing breaks before this is done.
@@ -426,6 +432,12 @@ Opened 2026-10-20 by engine build C2b ([its plan](superpowers/plans/2026-10-19-e
 ## What changed on our side
 
 **A run plays one of its task's plans** (the PI, 2026-10-07: "the operator chooses at run start among the plans it declares"), or the plain run of N trials as before. Each `runs.jsonl` **start** row gains `plan`, the plan's name in its task (whose content hash `versions.task` already carries), or null for the plain run, and `plan_form`, the plan as declared, in the form the content hash reads it (each declaration by its class's name and the fields it sets away from their defaults), so a reader can tell a balanced plan from a random one without the task file; its `blocks` lists the plan's block types **as declared**, in the plan's order -- not the run's sequence of blocks, which the end row's `blocks_run` and `block_ends` give -- and its `trials` is null for a planned run, whose lengths are its plan's. Each **end** row gains `block_ends`: a list, one per block the run opened, in order, of `{block, ended, by, after_trial, block_in_session, position, passed_at}` -- `ended` one of `rule` (its own end rule met), `time` (its own time limit), `fall_back` (a training progression's fall-back rule), `next` and `back` (a person moved the run on a block, or back one, `by` naming who), `run_time` (the run's own time limit ended the run with it open) or `run` (the run ended with it open otherwise: a stop, the out-of-cage limit, a fault, or the plan unable to go on); `after_trial`, the run's last trial before it ended, counted from 0 as `trial_index` is; `block_in_session`, the block's number in the session's stream, the one its `BLOCK_START` carries, **or null for a block that ran no trial**, which is neither opened nor closed in the stream and takes no number (a plan's block can be over before it draws one); `position`, its place in the run's sequence of blocks, from 0 -- a training progression's stage, which a fall-back or a person's *back one* moves back by one; and `passed_at`, for a training progression's top stage, where the animal keeps working once its rule is met, the trial after which that rule was first met, null otherwise -- since `BLOCK_END` carries no reason and the stream cannot. The end row gains `end_reason` too, beside `stop_kind` `completed`: `plan_done` (its plan's last block ended), `plan_time` (the plan's time limit), `stalled` (every block type the plan has was opened since its last trial and each ended before it drew one) or `cannot_draw` (a block that can draw nothing and does not end); null for a run that ended any other way. Its `shortfalls` gain `because` `time`, what a block still owed when its own time ran out, and `run_time`, what the open block still owed when the run's time ran out (the PI, 2026-10-19: "recorded as not run, 'time ran out'"), each forgiving nothing. A run that a plan's time limit ends, or whose plan can draw no further trial, ends `completed` with a sentence saying so -- **never `limit`, which stays the out-of-cage welfare stop's** (a plan's time limit is not a welfare limit). Each `trials.jsonl` line gains `structure`, the trial structure it played (its condition's, or the task's default), and `overridden`, the names of the values its condition set that a live edit replaced (engine spec §14.7; empty otherwise). `controls.jsonl` gains `next_block` and `back_block` rows (`block`, the block left; `to`, the one moved to; `dropped`, the condition whose drummed trial was waiting to come back and was dropped by the move, or null). **Their `event_code` is null**: a move closes a block that ran a trial with `BLOCK_END` (code 3), as an advance does, but every block that ends on its own strobes one with no row, so the n-th row naming 3 would not be the n-th 3 in the recording, and each move row is timed by its own `at`. **Each block still opens with `BLOCK_START` before its first trial and closes with `BLOCK_END` after its last, every trial of it naming one `block`, its type** -- a cyclic plan's second visit to a type is a new block with its own number -- so a block's type is kept as today. No new `runs.jsonl` row kind. **And a setting's value that is a polar position** (since true visual angle merged on 2026-10-20, a setting whose value is a whole position may offer `task.Polar` values, and a plan's condition may set one) **is recorded, wherever a value is written -- each `trials.jsonl` line's `params`, a start row's `layers` and `resolved`, a `parameter_changes.jsonl` row's `was` and `now` -- as an object: `{"eccentricity": 8.0, "direction": 45.0, "x": 5.675270513286652, "y": 5.675270513286651}`**, eccentricity and direction first, in degrees of visual angle, the direction counter-clockwise from rightward (engine spec §5.1), and beside them the per-axis degrees the screen is drawn in, converted exactly (`geometry.polar_deg`: `atan(tan e cos θ)` across and `atan(tan e sin θ)` up), so a reader that wants (x, y) has it without converting (the PI, 2026-10-20, "Both, polar first"). Its keys are `Polar`'s own field names and the (x, y) every per-axis position is written in. A value written as an (x, y) pair is a two-item list, as today, and every existing task writes its positions so. This is not XC-399 -- each shown stimulus's true eccentricity and polar angle on its trial line, which comes after C2b -- only how a setting that holds a polar position is written. **Revised 2026-10-30** (the PI, "0 to 360 everywhere" and "Empty at center"): that direction is written as the task wrote it but from 0° to 360°, so `Polar(8, -90)` is written 270, and null at eccentricity 0, so `Polar(0, 45)` is written with a null direction, normalized as the XC-399 ask below says.
+
+*Amended 2026-10-30 (engine build C3)*: `overridden` also names a setting a person held over its condition's own
+range; each `block_ends` entry gains `varied`, `planned` and `counts`, and `shortfalls` gain `because` `designed`; and
+`plan_form`, still in the form the content hash reads, now carries a block type's own draws (`Block.draws`), a
+condition's own ranges and a block type's factorial (`Block.factorial`), as declared and unexpanded (the start row's
+`generated` lists what each factorial expanded to). Each is in the C3 section below.
 
 ## The ask
 
@@ -614,3 +626,331 @@ decide; the record keeps every field either way.
 
 No new escape, code or marker: parameter values travel in the session folder, never the stream (your own rule,
 `contracts/events.py`: "parameter VALUES do not"). No change to the six required trial fields.
+
+---
+
+# OPEN — engine build C3: what varied in each trial and block, and the change log grown (new, 2026-10-30)
+
+Opened 2026-10-30 by engine build C3 ([its spec](superpowers/specs/2026-10-30-engine-c3-design.md), approved by the
+PI that day, [§10](superpowers/specs/2026-10-30-engine-c3-design.md#10-the-record-and-wl-preproc);
+[its plan](superpowers/plans/2026-10-30-engine-c3.md), Task 3), backlog XC-383 (its C3 part) and XC-441, **before any
+of these fields is written**. The build's first task writes this section, and it is sent before the build merges.
+It also answers your own later ask 2 of 2026-10-18 for build C3: "the file name and row shape of the grown change
+log" (your `docs/pending-wl-xcon-amendments.md:85`). Read against wl-preproc's `main` at `4bd10f1` (2026-10-30), with
+`git show`: `wl_preproc/events/rigtrials.py`, `events/rigruns.py`, `events/rigrecords.py`, `events/rigtiming.py`,
+`schema/core.py`, `schema/events.py`, `schema/main_sequence.py`, `nwb/conditions.py`, `nwb/intervals.py`,
+`nwb/gather.py`, `nwb/rig_record.py`, `contracts/protocol.py` and `listing/entry.py`. Every line number below is at
+that commit. **This section amends the C2a section above**, because clears and the two switches are written to the
+change log too, **and widens the C2b section's `overridden`**. Neither section has reached your `main` (your
+handover names neither at `4bd10f1`; our XC-365 and XC-404), so all three go to you together. **One thing here
+differs from the spec**: a draw is recorded with every field, its defaults included, not in the form the task's
+content hash reads (its §10, "in the hash's form"), so a reader never needs the defaults of the wl-xcon that wrote
+it. The hash and `plan_form` keep their form.
+
+## What changes on our side
+
+**Values drawn at random each trial**
+([§2](superpowers/specs/2026-10-30-engine-c3-design.md#2-drawn-values-in-a-task),
+[§3](superpowers/specs/2026-10-30-engine-c3-design.md#3-the-non-aging-wait)). A task may draw a setting each trial
+from one of these distributions:
+- a uniform range, `Uniform`;
+- a weighted set, `Weighted`;
+- a normal cut to a range, `TruncatedNormal`, cut to the setting's declared range unless it declares its own;
+- a prepared list, `Listed`, played in shuffled passes unless it says "in order";
+- a non-aging wait, `NonAging(minimum, mean, maximum)`: the minimum, plus a wait whose chance of ending is the same at
+  every moment. A wait drawn past the maximum is drawn again, so every wait falls between the shortest and the
+  longest.
+
+The task declares a default (`Task.draws`), which a block type may replace (`Block.draws`), and a condition may draw a
+setting from a range of its own. **Each drawn setting declares what a repeat of its trial takes, a drummed repeat
+included: the same value (`same`) or a fresh one (`fresh`).** Each draw comes from a generator keyed by the run's
+seed, the trial and the setting, kept apart from the scheduler's. So a run replays from its start row's `seed` and the
+change log. `wlx run` given no seed now draws one and records it; until now it used 1. A drawn value is in the trial
+line's `params`, as every value is, so **today it reads exactly like a value its condition set** (the table below).
+A non-aging wait's declared `mean` is the mean of the constant-hazard wait before redrawing, so the waits' realized
+average is lower than the declared `mean`. These numbers describe the declared distribution, not the rig: durations are
+not yet converted to frames, and the realized interval before the stimulus is not yet recorded.
+
+**Conditions made from factors**
+([§4](superpowers/specs/2026-10-30-engine-c3-design.md#4-conditions-from-factors)). A block may declare
+`Factorial(factors, exclude, target)`. At load it expands into ordinary conditions, each named from its levels in the
+factors' declared order, for example `"target_contrast=0.1, side=left"`. That name is the trial line's `condition`, as
+any condition's name is. A level may be a number, a choice, a position, or a range of its own. **A condition's name
+longer than 200 characters is warned at load** (`long-condition-name`): past 200 a person cannot clear it from the
+console, and past 255 your main-sequence table gives it no group (the table below).
+
+**Designed orders** ([§5](superpowers/specs/2026-10-30-engine-c3-design.md#5-designed-orders)). A block may play one
+of two designed orders:
+- **sequence-balanced**, `SequenceBalanced(depth, cycles)`: a de Bruijn sequence of its conditions played `cycles`
+  times, drawn from the run's seed, and drawn again each time the block opens. **Each cycle is the linear de Bruijn
+  sequence** (the PI, 2026-10-31): with `n` conditions, `n` to the power `depth` trials plus `depth - 1` (17 for 4
+  conditions at depth 2, 66 at depth 3), so each pair of conditions in a row, a condition after itself included (at
+  depth 3, each triple), occurs exactly once in every cycle. **The first `depth - 1` trials of each cycle are a
+  lead-in** that only precedes what follows: each such trial's `planned` says so (`lead_in`, below), so an analysis
+  can drop it. The block ends when its sequence is played out or its number of trials is run, whichever comes first,
+  and owes nothing then.
+- **priming**, on one setting the block names (its `feature`): either a set chance that the next trial repeats the
+  value of the last trial whose stimulus appeared, or runs of one value whose lengths are drawn, each followed by a
+  switch to another value. A run's length counts only the trials whose stimulus appeared (`shown`). A priming block
+  ends on its number of trials or its time limit, and its conditions owe no number of trials.
+
+By default a trial that breaks is not played again, and the sequence goes on. In a sequence-balanced block the lost
+place is recorded as a shortfall (below). A priming block loses no place, since a break before the stimulus is not a
+trial of its run and a break after it is a shown one, so it writes no shortfall. A block may choose "again at once"
+instead: the broken trial comes straight back with the same planned place, and past the task's repeat limit it is
+moved past as any repeat is, a shortfall `because` `cap` or `rig` as the C2a section describes.
+
+**Live edits and eased trials** ([§6](superpowers/specs/2026-10-30-engine-c3-design.md#6-live-edits),
+[§7](superpowers/specs/2026-10-30-engine-c3-design.md#7-eased-trials-and-a-blocks-rule)). Each of these acts takes
+effect from the next trial:
+- A person's value now replaces a draw too: the task's, a block's, or a condition's own range.
+- A *hand back* button gives a setting a person holds back to what gives it in the open block: its conditions, its
+  draw, or the run's value.
+- A person may change the numbers of the draw the open block uses, its own or the task's, for the rest of the run
+  wherever that draw applies: a uniform's ends; a truncated normal's mean, spread and cut; a wait's shortest, average
+  and longest. The trials stay drawn. A condition's own range, a weighted set, a prepared list, a direction setting's
+  range and the draw of a setting the task declares not live are not changed live in C3.
+- A *revert* goes back to an earlier moment of the run, a change in it or the run's start: the values a person held
+  then, and the ranges in force then. A setting held now and not then is handed back. It never touches a reward size,
+  the out-of-cage limit, a count or a training aid.
+
+A trial that a live change made easier is an **eased** trial. Whether a change eased it is read from each setting's
+declared meaning. An eased trial does not count toward a block's end rule or a training stage's pass rule. It does
+count toward a plan's fall-back rule and toward its condition, except that in a training progression it counts toward
+neither a stage's number of trials nor its targets, so a stage is never ended on eased trials.
+
+**Each `trials.jsonl` line gains four fields**, beside the six you require and those the sections above add:
+- **`drawn`** (an object): each setting drawn for this trial, and where its range came from:
+  - `"task"` or `"block"`, while that draw is as declared;
+  - `"condition"`, for a condition's own range;
+  - the integer `change` id of the live act that put the range in force (a `range` row, or a `revert` that restored
+    a changed range; the change log is below).
+
+  It is `{}` when nothing was drawn. A setting that a person held for the trial was not drawn and is not listed. **On
+  a repeat, drummed or not** (the trial it repeats is its `repeat_of`), a `same` setting takes the value of the trial
+  it repeats and is listed with that trial's source, even after the range has changed live; a `fresh` setting is
+  drawn again and listed with the source in force. A `same` setting that the repeated trial did not draw, because a
+  person held it, is drawn again.
+- **`live`** (a sorted list of text): the settings a person held at a value for this trial, over its conditions, its
+  draw or the run's value. It is empty otherwise. **`overridden` stays the subset of them that a condition gave**, and
+  since C3 that includes a condition's own range. So C2b's meaning is unchanged for a value a condition sets. A live
+  range is not in `live`: its trials stay drawn, and `drawn` names the range's change id.
+- **`eased`** (a sorted list of text): the settings whose live change kept the trial out of moving up. It is empty
+  otherwise.
+  - **A trial whose `eased` is not empty was left out when its block's end rule was judged** (`block_ends`' `ended`
+    `rule` and its `passed_at`, in the C2b section), and, in a training progression, when its stage's number of
+    trials and its targets were judged. Its fall-back rule (`fall_back`) still counted it, and the end row's
+    `conditions` count it toward its condition.
+  - A clear-cut setting keeps the trial out when a person's value set it easier than the trial would otherwise have
+    had it. "Otherwise" means its condition's value, the run's value or, for a drawn setting, the value the seed draws
+    for that trial from the range as written. A setting whose values are choices, or are appearances, is read by what
+    its meaning says changing it does.
+  - **A range changed live is judged as a whole** (the PI, 2026-10-31): every trial drawn from it is kept out while
+    it reaches any value easier than the range the task writes allows (for a uniform, either end moved the easier
+    way) or which way it moved cannot be read, mixed changes among them, and, for an expected setting, while it
+    differs from the range written at all, until it is put back, by its written numbers sent again or by a revert.
+    Its change row says which way it went (`meaning`'s `went`, below).
+  - An expected setting keeps the trial out when a live change held it at any value other than that one, either way.
+  - Where which way a change went cannot be read, a live change keeps the trial out: an animal is never moved up on
+    doubt. It cannot be read only for a value read against the trial's background (a luminance, say), against another
+    setting that holds no number, or against no value at all.
+  - A setting declared not a difficulty setting never keeps a trial out.
+- **`planned`** (an object, or null): in a designed block, the trial's planned place.
+  - In a sequence-balanced block: `{"cycle": c, "position": p, "lead_in": l}`, `cycle` and `position` each counted
+    from 0. `lead_in` is true on the first `depth - 1` trials of each cycle, which only precede what follows (one
+    trial at pairs, two at triples), and false on the rest, whose pairs (or triples) each occur once a cycle.
+  - In a priming block: `{"run": r, "switch": s, "value": v}`. `run` counts the block's runs of one feature value
+    from 0. `switch` says whether this trial is the first of its run. `value` is the value planned, written as a
+    setting's value is.
+  - Null in any other block.
+
+  A trial played again at once has the same `planned` as the trial that broke. Read with C2a's `previous`, `shown`,
+  `repeat_of` and `at_once`, it lets an analysis set a block's planned sequence against its realized one.
+
+**Each `runs.jsonl` start row gains three fields:**
+- **`draws`**: the task's draws as declared, `{setting: draw}`, or null when the task draws nothing. **Each draw is
+  written with every field, its defaults included**, as a setting's value that is an appearance is (the section
+  above): `{"class": "Uniform", "fields": {"high": 0.8, "low": 0.2, "repeat": "fresh"}}`. A truncated normal is
+  written with its cut, the setting's declared range where the task gives none. A range of directions is written
+  from 0° to 360° (below). This is not `plan_form`'s form, which leaves out the fields at their defaults: `plan_form`
+  stays the declared plan as the C2b section says, so a block's draws, a condition's own ranges and a factorial are in
+  it in that form, unexpanded. Each drawn setting's `same` or `fresh` is in one or the other.
+- **`generated`**: for each block type whose factorial expanded, an entry `{block, conditions, excluded}`. Its
+  `conditions` lists every condition generated, each as `{name, values, target}`, a level that is a range of its own
+  written in `values` as `draws` writes a draw. `excluded` lists the exclusions applied, each `{factor: level}`. It
+  is `[]` when no factorial expanded, as in a plain run. The record then names every generated condition without the
+  task file.
+- **`directions`**: the names of the settings that place a position's direction (a `Polar`'s), sorted, `[]` when none.
+  Each is an angle, written from 0° to 360°, so take circular statistics of it: a draw declared -45° to 45° sits near
+  0° and near 360°, and a plain mean of it reads 180°.
+
+**Each `block_ends` entry on the end row gains three fields** (XC-344):
+- **`varied`**: an object naming each setting that varied in the block, each with a list of the ways it varied:
+  - `{"by": "condition"}`: its conditions give it different values, or ranges of their own;
+  - `{"by": "draw", "from": f, "distribution": d}`: it was drawn. One entry for each draw the block's trials were
+    drawn from (each condition's own range a draw of its own): `from` takes the values a trial line's `drawn` takes,
+    and `d` is that draw, written with every field as the start row's `draws` writes it;
+  - `{"by": "person"}`: a person held it on some of the block's trials.
+
+  It is read from what the block declared and did, never from the values its trials happened to get. A block that ran
+  no trial has `{}`.
+- **`planned`**: a designed block's planned sequence, or null for any other block. For a sequence-balanced block it
+  lists the conditions in planned order, played or not: a place that no trial line's `planned` names was never played.
+  For a priming block it lists each planned run as `{value, length}`, as far as the block played.
+- **`counts`**: for each condition that ran a trial in the block, `{"trials": n, "overridden": k, "eased": e}`: its
+  trial lines in the block, those on which a person's value overrode something its condition set (`overridden` not
+  empty), and those kept out of moving up (`eased` not empty). A condition's trials still count toward it whatever a
+  person did (the C2b section), so a factorial cell can be met by trials that never showed its level; these say how
+  many. `{}` for a block that ran no trial.
+
+**The end row's `shortfalls` gain `because` `"designed"`**: a planned trial in a sequence-balanced block that broke
+and was not played again. Each such trial gets one entry: `trials` 1, its planned condition, `after_trial` the trial
+that broke, and `by` null. It is never flagged as possible avoidance. That trial's `planned` names the place that was
+lost. A priming block writes none (above). **A sequence-balanced block cut short** by its number of trials or a time
+limit owes nothing, so the places it never reached are in its `planned` and in no shortfall.
+
+**The change log** ([§8](superpowers/specs/2026-10-30-engine-c3-design.md#8-the-change-log-and-revert);
+[XC-288 §3.4](superpowers/specs/2026-10-10-xc288-training-records-design.md#34-one-change-log)).
+`parameter_changes.jsonl` grows into one log of every change to what the animal experiences. It keeps its name and its
+rows' present fields: `name`, `was`, `now`, `by`, `run`, `event_code`, and `sequence` on a row whose act strobed
+`PARAM_CHANGED`. Each row gains these fields:
+- `kind`;
+- `change`: an integer id, never 0, unique in the session, shared by the rows of one act (a revert's, for example);
+- `at` and `at_local`: the instant it applied, on the session's anchored clock, written as a control row writes its
+  instant;
+- `trial_number`: the first trial it applies to, numbered as that trial's line and its `TRIAL_NUMBER` escape number
+  it. That trial may never run, if the session ends first;
+- `meaning`: the setting's declared meaning, an object of six keys, or null on a row that names no task setting (a
+  welfare ceiling's, such as a reward size, and every `clear`, `drum` and `training` row):
+  - `kind`: `"clear-cut"`, `"expected"` or `"not a difficulty setting"`;
+  - `role`: `"criterion"`, `"stimulus"` or `"neither"`;
+  - `raising`: what raising the value does to the task, `"easier"` or `"harder"`, or null for a setting that is not
+    a difficulty setting;
+  - `relative_to`: what `raising` is read against: null (the value itself), a number, another setting's name, or
+    `"background"` (the trial's background), raising then meaning moving the value away from it;
+  - `went`: the way this change went by that meaning, `"easier"` or `"harder"` (for an expected setting, the
+    expected way, not a fact), or null where that cannot be read or the setting is not a difficulty setting. **On a
+    `range` row, and a `revert` row that puts a range back**, it is the new range judged as a whole against the
+    range the task writes (the PI, 2026-10-31): `"easier"` where it reaches any value easier than the written range
+    allows (for a uniform, either end moved the easier way; a normal's spread changed counts so, its values moving
+    both ways), `"harder"` where it moved only the harder way, null where it is the written range again or which way
+    cannot be read;
+  - `step`: `now` minus `was`, in the setting's unit, or null where either is not a number;
+- `offered`: an empty list until a later build;
+- `odds`: null until build D.
+
+**Where a person's value, or a revert's, lands on a setting drawn or given by its conditions at that moment** (by the
+open block's draw or the task's, or by its conditions, a value or a range of their own, no person holding it), **its
+row writes `was` null, and `meaning`'s `went` and `step` null**: no trial held one value before it, and what the
+animal saw is in each trial line's `params`.
+
+C3 writes these kinds:
+
+| `kind` | One row for each | `name`; `was` and `now` | Its own fields | Strobes `PARAM_CHANGED` (so carries `sequence` and that code as `event_code`) |
+|---|---|---|---|---|
+| `set` | person's value applied | the setting; its value before and after | none | yes |
+| `hand_back` | setting handed back | the setting; the person's value, then the run's value where `to` is `"run"`, else null | `to`: what takes the setting back in the open block, `"conditions"`, `"draw"` or `"run"` | yes |
+| `range` | change to a draw's numbers | the setting; the draw before and after, with every field, as the start row's `draws` writes it | `from`: `"task"` or `"block"`, whose draw it changed; `block`: that block type's name where it is a block's own draw, else null | yes |
+| `revert` | setting a revert restores | the setting; what it held before, then what it holds again: a value, null for a setting handed back, or a draw as `range` writes it | `moment`: the change id of the moment it goes back to, 0 for the run's start; `from` and `block`, as `range` writes them, where it restores a range | yes, once for each row |
+| `clear` | person's clearing from a condition's count | `"owed"`; what the condition owed before and after | the control row's `condition`, `block`, `rest` and `cleared` | no |
+| `drum` | drumming switch | `"drumming"`; what drumming read before and after | the control row's `scope` and `block` | no |
+| `training` | training switch | the training setting, `"clear"` or `"first_answers"`; off or on, before and after | the control row's `setting` | no |
+
+**Every row names something in `name`, the three kinds also written to `controls.jsonl` included**, because your
+reader leaves out a row that does not (the table below). **A row written before C3 has no `kind`. Read it as a
+`set`**, the only kind there was. Each row that strobed `PARAM_CHANGED` strobed it once, so the n-th row carrying that
+number still matches the n-th such code. A revert never names a bounded setting (a reward size or the out-of-cage
+limit). `at` is the rig's bookkeeping, not a time on the recording's clock. It has no stated accuracy until a `tools/`
+script has measured the rig's clock.
+
+**Clears and the two switches are written to the change log too** (XC-363), amending the C2a section above. Today
+your reader carries every `controls.jsonl` row, and it would leave the change log's rows of these kinds untimed (the
+table below). So **C3 writes them in both files**: the control rows exactly as C2a writes them, and the change-log
+rows beside them. We write both until you say you read and time the change-log rows. We will tell you before we stop
+writing the control rows (our XC-442). `next_block` and `back_block` (C2b) stay control rows only.
+
+**Directions** (the PI, 2026-10-30: "0 to 360 in both repos", "Empty at center"; and the same day, "Warn at load": a
+setting's number is shown and recorded as the number it holds). Every direction the rig produces runs from 0° up to
+360°, counter-clockwise from rightward, and is null at eccentricity 0: the angle in degrees mod 360, and 0 where that
+gives 360.0. In C3 that covers:
+- **a drawn value of a direction setting** (a number a task's position reads as its direction), in the trial line's
+  `params`: a task declares the draw in its own terms, `Uniform(-45, 45)` say, and a value drawn as −30 is written
+  330;
+- **a range of directions**, wherever a draw is written, end by end, so its lowest may be above its highest:
+  `{"class": "Uniform", "fields": {"high": 45.0, "low": 315.0, "repeat": "fresh"}}` runs from 315° up through 0° to
+  45°, crossing rightward. A task still declares its lowest at most its highest, spanning at most 360°.
+
+**A value a person or the task gives a direction setting is written as given everywhere, change rows included**, as
+the XC-399 section above says: a person's −90 is −90 in `params` and in its change row's `was` and `now`. So are a
+condition's value and a run's starting value in `params`, a generated condition's `values` and a priming `planned`'s
+`value`. Only a value the rig draws is normalized when written. The rig warns the task's author at load to write a
+direction setting from 0 to 360 (`direction-outside-0-360`), but not for a setting it draws in every block of every
+run, with no choices and no start outside 0 to 360, whose every value in `params` is then drawn. A whole position (a
+`Polar`) is written as the C2b section says, its direction from 0° to 360° wherever it is written. On 2026-10-30 you
+adopted the same rule for every angle you store (your true-angle saccades spec,
+`docs/superpowers/specs/2026-10-30-true-angle-saccades-design.md`, amendment 1, at `dc3ef56` on your branch
+`proof/true-angle`). Your `main` still writes a saccade's direction in (−180°, 180°] (`eye/detect/measure.py:44-53`).
+
+## What your `main` does with each today
+
+| What | Today | Where |
+|---|---|---|
+| A trial line's `drawn`, `live`, `eased`, `planned` | **Ignored.** A line must carry the six fields, and only those six are kept | `events/rigtrials.py:37`, `:71`, `:90-91` |
+| A drawn value in `params` | **Read like a value the condition set.** It gets a trials-table column wherever it varies across the session, and appears in its condition's `varying` summary beside a person's values, with nothing to tell them apart | `nwb/conditions.py:98-106`, `:126-136`; `nwb/intervals.py:84-92` |
+| A person's value on every trial of a condition | **Misread** as the condition's own constant setting | `nwb/conditions.py:102-103` |
+| A drawn position (an object, not a number) | Summarized by at most 20 of its distinct values, with no range | `nwb/conditions.py:20`, `:62-70` |
+| A generated condition's name | Kept as text and grouped by. A name longer than 255 characters gets no main-sequence group | `events/rigtrials.py:91`; `nwb/conditions.py:83`; `schema/main_sequence.py:34`, `:98`, `:228` |
+| A start row's `draws`, `generated`, `directions` | **Ignored.** A start row is read only for `task`, `calibration`, `at` and `run_in_session` | `events/rigruns.py:119-124` |
+| A `block_ends` entry's `varied`, `planned`, `counts`; a shortfall's `because` `"designed"` | **Ignored.** An end row is read only for `stopped_because`, `stop_kind` and `at` | `events/rigruns.py:125-128` |
+| Change rows of kind `set`, `hand_back`, `range`, `revert` | Kept: each row's setting, its `was` and `now` as JSON text, and its whole line. Each is timed by its place in the count of `PARAM_CHANGED` codes | `events/rigrecords.py:166-171`; `events/rigtiming.py:140-164`, `:171`; `schema/core.py:162-189` |
+| A change row's `kind`, `change`, `at`, `trial_number`, `meaning`, `offered`, `odds`, and a kind's own `to`, `from`, `block`, `moment` | Kept only in the database's copy of the line (`row`). The NWB file publishes only the setting, `was`, `now`, `sequence`, run, the kind of actor and the session time. So **a hand-back, a range change and each row of a revert are misread as changes of value**: a range's `was` and `now` read as if the setting's value had become a distribution, and a revert reads as unrelated changes | `schema/core.py:188`; `nwb/gather.py:117-120`; `nwb/rig_record.py:84-101` |
+| The count wl.works is sent as "live parameter changes" | Counts every row, including hand-backs, range changes, revert rows, clears and switches | `contracts/protocol.py:530-540`; `listing/entry.py:274-275` |
+| A change row without a non-empty `name` | **Refused**: reported as "not a change naming its setting" and left out. At most 20 problems are kept per session | `events/rigrecords.py:153-155`, `:166`; `schema/core.py:86-87`; `schema/events.py:296` |
+| `clear`, `drum`, `training` rows in the change log | Kept, because they are named, but **untimed**. A change row is timed only by its code, these strobe nothing, and the rig's clock fit times control rows only. As control rows today, they are kept, timed through that fit, and published in the NWB `controls` table | `events/rigtiming.py:171`, `:173-186`; `events/rigrecords.py:173-179`; `nwb/rig_record.py:104-125` |
+| A direction in [0°, 360°), null at eccentricity 0 | Nothing on `main` reads a direction from the rig's record. A position is JSON text. A null where a number column holds numbers becomes NaN, the same as an absent value | `nwb/conditions.py:130-136` |
+
+## The ask
+
+1. **Read the trial line's `drawn`, `live`, `eased` and `planned` into the published dataset, beside `overridden`**
+   (XC-404). With them an analysis can:
+   - tell a condition's design from a drawn nuisance and from a person's override;
+   - leave eased trials out of a measure of learning, as the rig leaves them out of moving up;
+   - set a designed block's planned sequence against its realized one.
+
+   Today your reader keeps six trial fields (`events/rigtrials.py:37`) and summarizes every varying setting per
+   condition (`nwb/conditions.py:98-106`), so drawn, condition-set and overridden settings read alike. You accepted
+   the overridden flag on 2026-10-11 (your `HANDOVER-wl-expcontroller.md:287`) and have not built it. How to publish
+   these fields is yours to decide. In particular, decide whether a condition's `settings` and `varying` should leave
+   out, or mark, the values a person set (`live`) and the values drawn (`drawn`), which today read as the condition's
+   own.
+2. **Read the start row's `draws`, `generated` and `directions`, each `block_ends` entry's `varied`, `planned` and
+   `counts`, and the
+   `"designed"` shortfall**, beside the C2a and C2b fields (XC-365, XC-404). Whether the NWB `blocks` table should
+   carry `varied` is yours to decide, as is whether it carries a block's end reason.
+3. **Read the change log by its `kind`, and publish `kind` and `change` beside the setting in the NWB
+   `parameter_changes` table**, with a kind's own `to`, `from`, `block` and `moment`. Then a hand-back, a range change
+   and a revert are not read as changes of value, and a revert's rows read as one act. Say, too, whether wl.works'
+   count of "live parameter changes" should count only the `set` rows.
+4. **Time a change row that strobed nothing as you time such a control**: through the rig's clock fit, by its `at`.
+   `events/rigtiming.py:173-186` does this for control rows only. Until it does so for change rows too, the clears'
+   and switches' rows have no session time in the change log, which is why we write them in both files. Tell us when
+   we may stop writing the control rows.
+
+Your readers tolerate everything here today except a change row without a `name`, which we will not write. A trial
+line's extra fields are ignored, a start or end row is read with `.get`, and a change row is kept whole.
+
+## What is deliberately not asked for
+
+No new escape, code or marker. A drawn value, a range, a hand-back and a revert travel in the session folder. The four
+kinds that change a setting strobe `PARAM_CHANGED`, as a person's value does today; clears and switches strobe
+nothing, as now. No change to the six required trial fields. No condition numbers: `CONDITION` stays unsent until the
+condition registry (engine build C5). And none of these yet:
+- reasons for changes (C4, `reasons.jsonl`);
+- a preset applied, and a task revised (C5);
+- interludes (C6);
+- condition edits at the rig (the build right after C3);
+- the timed event log (C7);
+- a random pick's odds (D).
+
+No timing claim: the change rows' `at` is wall-clock bookkeeping, and a non-aging wait's declared numbers describe a
+distribution, not the rig.

@@ -77,6 +77,24 @@ animal stands in its training across sessions, with an id that lasts across task
 is what one run plays. A task with no plans keeps its plain run. Information, under item 1;
 nothing new is asked, and the `TaskTypeCode` in `BLOCK_START` stays 0 until wl-xtasks allocates.
 
+*Engine build C3, 2026-10-30*: the format gains **values drawn at random each trial**
+([the spec](superpowers/specs/2026-10-30-engine-c3-design.md), §2 to §5;
+[the plan](superpowers/plans/2026-10-30-engine-c3.md), Task 1): five distributions (`task.Uniform`,
+`Weighted`, `TruncatedNormal`, `Listed` and `NonAging`, the non-aging wait), each declaring what a
+repeat of its trial takes, `same` or `fresh` (`task.SAME`, `task.FRESH`; required, the load-time
+check refusing a draw without one); the task's own draws (`Task.draws`), which a block type may
+replace (`Block.draws`, where `task.BY_CONDITIONS` leaves a setting to the block's conditions); and
+a condition's own range (a value of `Condition.values` that is a distribution). **Conditions made
+from factors** (`Block.factorial`, a `task.Factorial`: factors, exclusions, the trials each
+combination is owed), expanded at load into conditions named from their levels; and **two designed
+orders** for a block's conditions, `task.SequenceBalanced` (each cycle a linear de Bruijn sequence,
+its first trials a lead-in) and `task.Priming` (by a set chance, or by runs). **And an array may say what
+names its target** (`task.Array.found_by`, one of `task.FOUND_BY`; the PI, 2026-10-31): its look
+(`"look"`, the default, the odd one out) or a cue (`"cue"`: a cue, a remembered sample or a place names
+it), for which the load warns, `cued-target`, where it would refuse a target that can look like its
+distractors. A task using none of them keeps its content hash. Information,
+under item 1; nothing new is asked: the PI's approval of this plan is the agreement (TSK-50).
+
 ---
 
 # OPEN — event codes for build F: `STIMULUS_ON`, `STIMULUS_OFF`, `STIMULUS_CHANGED`, and the anchor code
