@@ -414,7 +414,12 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    `Exited` with no saccade in flight carries nothing (gaze drifting out of a window after its
    saccade has stopped); the carry ends when the state is left, landed or not, unless by another
    `Exited` with the saccade still in flight, which carries it on (EYE-19, revised that day;
-   `wl_xcon/gaze.py`, `Tracked.began`).
+   `wl_xcon/gaze.py`, `Tracked.began`). *Narrowed 2026-11-06 (the controller's ruling on the
+   review's I1; the PI is asked at merge whether to widen it):* an exit carries only a saccade
+   whose onset, the detector's, fell in the state the `Exited` edge ended, or one carried into that
+   state (by the onset carry, or by an exit before), so a saccade begun before the go cue is
+   anticipatory however the state asking for it is entered; through a second `Exited` the carry
+   goes on for that same saccade alone. A transition taken on `Entered` carries nothing.
 8. **Off the field**: only when declared; check 8 grows to test extents (XC-143, XC-144).
 9. **Head-free chaired sessions**: nominal head position, recorded and listed; a task may require a
    fixed head.

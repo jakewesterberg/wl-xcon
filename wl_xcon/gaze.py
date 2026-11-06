@@ -43,7 +43,10 @@ window** (the PI, 2026-11-04: "A saccade already under way when the eye leaves a
 counts in the next state, as an onset already does: the movement that ended the state is the
 response"): a transition taken on `Exited` carries the saccade the detector puts in flight on
 its frame, for its landing alone, on the same condition of where its eye stopped, so a state
-entered as gaze leaves the fixation window scores the saccade that left it. Until then the last
+entered as gaze leaves the fixation window scores the saccade that left it -- **if it began in
+the state the exit ended, or was carried into it** (the controller's ruling of 2026-11-06, the
+narrow reading of "as an onset already does"), so a saccade begun before the go cue is
+anticipatory however the state asking for it is entered. `Entered` carries nothing. Until then the last
 saccade no guard had taken waited for the rest of the trial, so an object shown or moved onto
 where it had landed took it on the frame the object was drawn there.
 
@@ -184,8 +187,14 @@ class Tracked:
         #: **Or the one under way as the eye left a window** (the PI, 2026-11-04): whether this
         #: state was entered by an `Exited` edge, so a saccade the detector puts in flight on its
         #: frame -- onset before this state's first frame, eye at rest on it or after -- may be
-        #: taken by this state's `SaccadeTo` (`began`).
+        #: taken by this state's `SaccadeTo` (`began`), **if it began in the state the exit ended
+        #: or was carried into it** (the controller's ruling on the review's I1, 2026-11-06): its
+        #: onset on `_exit_from` or after, the ended state's first frame, or, the ended state
+        #: entered by an exit too, that state's own; or the onset `_exit_also`, of the saccade the
+        #: onset carry brought into the ended state, untaken, `None` for none.
         self._exited = False
+        self._exit_from = 0
+        self._exit_also: int | None = None
         #: How many samples this world has fed the detector, one each `display`: the next one's
         #: index in the detector's numbering, which `Saccade.start` counts in.
         self._fed = 0
@@ -359,7 +368,23 @@ class Tracked:
         saccade in flight carries nothing: gaze that drifts out of a window after its saccade has
         stopped gives a saccade at rest before `frame`. Left before it lands, the carry ends as the
         onset's does, unless the edge that leaves is another `Exited` with the saccade still in
-        flight, which carries it on by the same rule."""
+        flight, which carries it on by the same rule.
+
+        **Only a saccade begun in the state the exit ended, or carried into it** (the controller's
+        ruling on the review's I1, 2026-11-06: the narrow reading of "as an onset already does",
+        the PI asked at merge whether to widen it): the onset carry only ever carries a saccade
+        begun in the state it ended, and so does this, so a saccade begun before the go cue is
+        anticipatory however the state that asks for it is entered. Its onset is on the ended
+        state's first frame or after, the detector's as the begun-in-state rule reads it; or the
+        ended state was entered by an exit too, and it is that state's carried saccade; or it is the
+        saccade the onset carry brought into the ended state, not yet taken. Through a second exit
+        the carry goes on for that same saccade alone: one in flight across both state boundaries
+        is the one in flight across the first, since runs do not overlap."""
+        if isinstance(by, Exited):
+            # Read before the ended state's own are written over below.
+            if not self._exited:
+                self._exit_from = self._began
+                self._exit_also = self._onset if self._carried else None
         self._state = state
         self._began = frame
         self._carried = (
@@ -393,7 +418,10 @@ class Tracked:
             # saccade that landed on empty space is not one to an object drawn there later, or to a
             # window gaze drifts into (the PI, 2026-10-30).
             if (not (self._began_in(state)
-                     or ((self._carried or self._exited) and self._stopped >= self._began))
+                     or ((self._carried
+                          or (self._exited and (self._onset >= self._exit_from
+                                                or self._onset == self._exit_also)))
+                         and self._stopped >= self._began))
                     or self._taken or self._landed_on != frame):
                 return False
             members = self._members.get(guard.window)

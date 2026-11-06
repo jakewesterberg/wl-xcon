@@ -367,7 +367,8 @@ class SaccadeTo(Guard):
     and the window is the one drawn on the frame the saccade lands, never later. **The carry**:
     the saccade whose onset ended the state before -- a transition on `SaccadeOnset`, or on
     `After(t, since=SaccadeOnset())` -- or the one under way as the eye left a window, a
-    transition on `Exited`, counts here if the detector puts its eye at rest (its stop field,
+    transition on `Exited`, if it began in the state that exit ended or was carried into it
+    (EYE-19, revised 2026-11-06), counts here if the detector puts its eye at rest (its stop field,
     `Saccade.stop`, as `saccade.detect` reports it) on this state's first frame or after, so an
     intrasaccadic jump is scored where the eye lands, and so is the saccade that leaves
     fixation."""
