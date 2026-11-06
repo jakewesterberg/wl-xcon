@@ -421,6 +421,14 @@ in a plain "run N trials" run, whose table (`scheduler.EVERY_TRIAL`)
 spends every non-answer, and said on the console. A hold runs its own time: the load-time check warns where a timeout on its
 state can cut it short, a timeout listed before the hold that ties it included (`hold-cut-short`).
 
+**What a trial draws, since engine build C3,** is arithmetic in one pure module,
+`wl_xcon/variation.py`, shared by the code that checks, plays, records and reviews it: each value
+from a hash of the run's seed, the trial's number in the run and the setting, never from the
+scheduler's generators, so adding a draw moves no condition or repeat; a prepared list in shuffled
+passes; the non-aging wait's tail drawn again; a factorial's conditions and their names; and a
+sequence-balanced block's de Bruijn sequence, each cycle played as the linear one, its first
+trials a lead-in.
+
 **Plans and blocks, since engine build C2b.** A task declares its plans (`Task.plans`; engine spec
 §13.1), and the operator chooses one at run start -- from the page, its pre-flight taken for
 it, the task's first preselected for a session's first run and the plan last run for its later
