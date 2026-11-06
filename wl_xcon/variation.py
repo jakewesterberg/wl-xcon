@@ -242,9 +242,10 @@ def hazard_ratio(wait: NonAging, at: float) -> float:
 
 
 def run_length(runs: Distribution, share: float) -> int:
-    """**A priming run's length drawn from a distribution** (engine build C3's call 16; the C3 plan's
-    science review, I-8): its value at `share` (`quantile`), rounded down, at least 1. Runs of
-    `(low, high)`, and a prepared list's lengths, which play in passes, the scheduler draws itself."""
+    """**A priming run's length drawn from a distribution** (engine build C3's call 16; the C3
+    plan's science review, I-8): its value at `share` (`quantile`), rounded down, at least 1. Runs
+    of `(low, high)`, and a prepared list's lengths, which play in passes, the scheduler draws
+    itself."""
     return max(1, math.floor(quantile(runs, share)))
 
 
@@ -450,7 +451,7 @@ def balanced_sequence(
         used[node] += 1
         played.append(names[name])
         node = (node * count + name) % nodes
-    return tuple(played + played[:depth - 1]) * cycles
+    return tuple(played + (played * depth)[:depth - 1]) * cycles
 
 
 def numbers(distribution: object) -> dict[str, float] | None:
@@ -527,19 +528,28 @@ def words(distribution: Distribution, unit: str, *, direction: bool = False) -> 
     declares no cut of its own); `"each of 2, 4, 6 once a pass, shuffled"` or `"in order: 2, 4, 6,
     over and over"`; `"non-aging from 0.75 s to 1.25 s, mean 1.0 s"`."""
     shown = _shown(distribution, direction)
+    # In a direction draw, equal ends mean the whole turn (the controller's ruling on the review of
+    # Task 4): a span of 360 in the task's own terms reads as both ends the same direction.
+    turn = (direction and isinstance(distribution, (Uniform, TruncatedNormal))
+            and _number(distribution.low) and _number(distribution.high)
+            and distribution.high - distribution.low == 360)
 
     def amount(value: object) -> str:
         if not _number(value):
             return level_name(value)
         return f"{value!r} {unit}" if unit else repr(value)
 
+    if turn and isinstance(shown, Uniform):
+        return f"uniform over the whole turn, from {amount(shown.low)}"
     if isinstance(shown, Uniform):
         return f"uniform from {amount(shown.low)} to {amount(shown.high)}"
     if isinstance(shown, Weighted):
         weights = ":".join(repr(weight) for weight in _items(shown.weights))
         return f"one of {', '.join(amount(v) for v in values_of(shown))}, weighted {weights}"
     if isinstance(shown, TruncatedNormal):
-        if shown.low is None and shown.high is None:
+        if turn:
+            cut = f"cut to the whole turn, from {amount(shown.low)}"
+        elif shown.low is None and shown.high is None:
             cut = "cut to the setting's range"
         else:
             lowest = "the setting's lowest" if shown.low is None else amount(shown.low)

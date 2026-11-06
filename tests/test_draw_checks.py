@@ -362,6 +362,24 @@ def test_a_draw_its_setting_cannot_hold_is_refused():
         "number, its set size or its target's place; give it whole numbers")
 
 
+def test_a_direction_drawn_from_one_value_is_refused_and_a_plain_setting_may_be():
+    """The controller's ruling on the review of Task 4, I-2: in a direction draw equal ends mean the
+    whole turn (the record writes both ends from 0 to 360), so a draw whose ends are one value in
+    the task's terms -- a uniform's, a cut normal's -- is no draw: write the value instead. A setting
+    that is no direction may draw from one value."""
+    wide = Param("dir", unit="deg", low=-180.0, high=180.0)
+    for drawn in (Uniform(45.0, 45.0, repeat=FRESH),
+                  TruncatedNormal(45.0, 10.0, low=45.0, high=45.0, repeat=FRESH)):
+        found = _found(_aimed(wide, draws={"dir": drawn}))
+        assert [f.code for f in found] == ["bad-draw"], found
+        assert found[0].detail == (
+            "the task's draw of 'dir' cannot be drawn: it draws a direction from one value, "
+            "45.0, which is not a draw (in a direction draw, equal ends mean the whole turn); "
+            "write the value instead")
+    assert _codes(_aimed(wide, draws={"dir": Uniform(-180.0, 180.0, repeat=FRESH)})) == []
+    assert _codes(_aimed(wide, draws={"ecc": Uniform(8.0, 8.0, repeat=FRESH)})) == []
+
+
 def test_a_direction_drawn_in_its_own_terms_is_accepted_and_one_over_360_refused():
     """The controller's ruling 1 (2026-10-30, the PI's "0 to 360 in both repos"): a drawn
     direction is declared in the task's own terms, lowest at most highest -- Uniform(-45, 45) --

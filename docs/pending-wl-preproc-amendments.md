@@ -879,6 +879,8 @@ gives 360.0. In C3 that covers:
 - **a range of directions**, wherever a draw is written, end by end, so its lowest may be above its highest:
   `{"class": "Uniform", "fields": {"high": 45.0, "low": 315.0, "repeat": "fresh"}}` runs from 315° up through 0° to
   45°, crossing rightward. A task still declares its lowest at most its highest, spanning at most 360°.
+  In a direction draw, equal ends mean the whole turn (a span of 360 is written `low` equal to `high`), and a draw
+  from one direction is refused at load: write the value.
 
 **A value a person or the task gives a direction setting is written as given everywhere, change rows included**, as
 the XC-399 section above says: a person's −90 is −90 in `params` and in its change row's `was` and `now`. So are a

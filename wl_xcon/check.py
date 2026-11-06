@@ -1367,6 +1367,9 @@ def undrawable(distribution: object, declared: Param | None, *,
       (`variation.bounds_of`).
     - **Lowest above highest**: a uniform's ends, a normal's cut, a wait's shortest and longest;
       and a span past what a float holds.
+    - **A direction drawn from one value** (`direction`; the controller's ruling on the review of
+      Task 4): both ends of a direction are written from 0 to 360, where equal ends mean the whole
+      turn, so a uniform or a cut normal of one value is no draw; write the value instead.
     - **A direction spanning more than 360°** (`direction`; the controller's ruling 1): a
       direction is drawn in the task's own terms over at most a whole turn, Uniform(-45, 45) say.
     - **A wait's mean outside its shortest and longest**, `(minimum, maximum]` (the C3 plan's
@@ -1429,6 +1432,9 @@ def undrawable(distribution: object, declared: Param | None, *,
     if not math.isfinite(high - low):
         return (f"it spans from {low!r} to {high!r}, past what a float holds; give it a narrower "
                 f"range")
+    if direction and high == low:
+        return (f"it draws a direction from one value, {low!r}, which is not a draw (in a "
+                f"direction draw, equal ends mean the whole turn); write the value instead")
     if direction and high - low > 360:
         return (f"it spans {high - low!r}°, from {low!r} to {high!r}, and a direction is drawn "
                 f"over at most a whole turn, in the task's own terms -- Uniform(-45, 45), say -- "

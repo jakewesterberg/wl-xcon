@@ -420,7 +420,6 @@ trial, five minutes at the session's rate (`run.LONGEST_TRIAL_S`), is a missed a
 in a plain "run N trials" run, whose table (`scheduler.EVERY_TRIAL`)
 spends every non-answer, and said on the console. A hold runs its own time: the load-time check warns where a timeout on its
 state can cut it short, a timeout listed before the hold that ties it included (`hold-cut-short`).
-
 **What a trial draws, since engine build C3,** is arithmetic in one pure module,
 `wl_xcon/variation.py`, shared by the code that checks, plays, records and reviews it: each value
 from a hash of the run's seed, the trial's number in the run and the setting, never from the

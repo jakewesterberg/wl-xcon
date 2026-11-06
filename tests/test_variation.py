@@ -616,3 +616,46 @@ def test_a_runs_switch_chance_at_each_position_rises_when_even_and_holds_when_no
         [expected(length) for length in range(3, 11)])
     assert flat[-1] == (11, 1.0)
     assert all(0.39 < chance < 0.42 for _, chance in flat[2:6])
+
+
+def test_a_setting_draws_the_same_unit_whichever_scope_its_draw_comes_from_and_settings_differ():
+    """Engine build C3's call 4 (the review of Task 4, I-1): a setting's unit on a trial is
+    `unit(seed, trial, setting, 0)`, so the task's draw, a block's and a condition's of one setting
+    give the same quantile of whatever range each has -- Task 15's draw "from the range as written"
+    on the original's number relies on it -- while two settings on one trial draw independently."""
+    kinds = (Uniform(0.2, 0.4, repeat=FRESH),
+             Weighted((0.1, 0.5, 0.9), (1, 1, 2), repeat=FRESH),
+             TruncatedNormal(1.0, 0.1, low=0.8, high=1.2, repeat=FRESH),
+             NonAging(0.75, 1.0, 1.25, repeat=FRESH))
+    for each in kinds:
+        for trial in range(20):
+            assert draw(each, 7, trial, ("task", "wait")) == draw(
+                each, 7, trial, ("block", "b", "wait")) == draw(
+                each, 7, trial, ("condition", "c", "wait"))
+    uniform = kinds[0]
+    waits = [draw(uniform, 7, trial, ("task", "wait")) for trial in range(300)]
+    holds = [draw(uniform, 7, trial, ("task", "fix_hold")) for trial in range(300)]
+    assert waits != holds and sum(a != b for a, b in zip(waits, holds)) > 290
+    assert statistics.correlation(waits, holds) == pytest.approx(0.0, abs=0.15)
+    assert draw(uniform, 7, 3, ("task", "wait")) != draw(uniform, 8, 3, ("task", "wait"))
+
+
+def test_a_whole_turn_of_directions_is_said_so_and_a_direction_drawn_from_one_value_is_no_draw():
+    """The controller's ruling on the review of Task 4, I-2: both ends of a direction draw are
+    written from 0 to 360 (the PI), so a span of 360 reads as equal ends; in a direction draw,
+    equal ends mean the whole turn, and `words` says so rather than 'from 180 deg to 180 deg'."""
+    assert words(Uniform(-180, 180), "deg", direction=True) == (
+        "uniform over the whole turn, from 180 deg")
+    assert words(Uniform(0, 360), "deg", direction=True) == "uniform over the whole turn, from 0 deg"
+    assert words(TruncatedNormal(0, 90, low=-180, high=180), "deg", direction=True) == (
+        "normal of mean 0 deg and sd 90 deg, cut to the whole turn, from 180 deg")
+    assert words(Uniform(-45, 45), "deg", direction=True) == "uniform from 315 deg to 45 deg"
+    assert words(Uniform(-180, 180), "deg") == "uniform from -180 deg to 180 deg"
+
+
+def test_a_closing_tuple_of_one_name_at_any_depth_holds_depth_minus_one_names():
+    """The review of Task 4, minor 1: one name at depth 3 or more gave a cycle of one and a closing
+    tuple shorter than `depth - 1`, so its closing run was never a window."""
+    for depth in (1, 2, 3, 4):
+        played = balanced_sequence(["a"], depth, 1, random.Random(0))
+        assert played == ("a",) * depth
