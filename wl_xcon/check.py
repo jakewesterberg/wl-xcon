@@ -5957,15 +5957,21 @@ def unplaced(task: Task, values: dict, blocks=None) -> "list[tuple[str, str]]":
     A setting with `None` among its choices is refused at load (`_position_kind_faults`), and a
     condition sets only a choice of its setting or a finite number (`_plan_faults`), so a live edit
     (`Session.set`, which takes only a choice or a number) and a condition cannot make a place have
-    no value once a run has started; this refuses one it would start with."""
-    plays = ([(task.default, {}, "")] if blocks is None else [
+    no value once a run has started; this refuses one it would start with. **A place a draw gives
+    each trial is given** (engine build C3; the ruling on its plan's prospect run, the plan's call
+    24 carried to places): in the plain run one the task draws, in a plan's block one its own draw
+    or the task's gives there (`variation.in_force`), as a condition's own range is one of the
+    values it sets."""
+    tasks = frozenset(name for name, d in task.draws.items() if isinstance(d, Distribution))
+    plays = ([(task.default, {}, "", tasks)] if blocks is None else [
         (condition.structure or task.default, condition.values,
-         f" in condition {condition.name!r} of block {block.name!r}")
+         f" in condition {condition.name!r} of block {block.name!r}",
+         frozenset(in_force(task, block)))
         for block in blocks for condition in block.conditions])
     found: dict[str, str] = {}
-    for structure, sets, where in plays:
+    for structure, sets, where, drawn in plays:
         for name, (role, cannot) in placing(task.structures[structure]).items():
-            if name in found or name in sets or values.get(name) is not None:
+            if name in found or name in sets or name in drawn or values.get(name) is not None:
                 continue
             said = (f"setting {name!r} {role} and the run's value of it is None"
                     if name in values else

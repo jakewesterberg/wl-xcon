@@ -1326,7 +1326,13 @@ def main(argv: list[str] | None = None) -> int:
         help="run one of the task's plans by its name (engine spec §13.1); without it the plain "
         "run of --trials trials",
     )
-    runner.add_argument("--seed", type=int, default=1)
+    runner.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="the run's seed, which decides its draws, its order and the simulated animal; "
+        "omitted, a fresh one is drawn, said and recorded (TSK-06)",
+    )
     runner.add_argument("--set", action="append", default=[], metavar="NAME=VALUE")
     runner.add_argument(
         "--bounds",
@@ -1840,6 +1846,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  calibration: {_printable(_calibration_words(calibration))}")
         for entry in warnings:
             print(f"  warning accepted: {_printable(entry.code)}: {_printable(entry.detail)}")
+        # **A fresh seed when none is given** (TSK-06, the PI, 2026-10-07: "a fresh seed per run,
+        # recorded"; engine build C3's call 23): drawn as `wlx taskd`'s service draws one,
+        # recorded on the run's start row and said here, once. Every run given none had seed 1.
+        seed = _service._fresh_seed() if args.seed is None else args.seed
+        print(f"  seed: {seed} ({'given' if args.seed is not None else 'drawn fresh'})")
 
         # **A session id is used once** (XC-201). `SessionRecord.open` makes the
         # folder with `exist_ok`, so running into an existing one appended to its
@@ -1923,7 +1934,7 @@ def main(argv: list[str] | None = None) -> int:
                         trials=args.trials,
                         plan=args.plan,
                         frame_period=1 / 240,
-                        seed=args.seed,
+                        seed=seed,
                         values=values,
                         bounds=_load_bounds(args.bounds),
                         already_delivered_today=args.delivered_today,

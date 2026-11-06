@@ -139,6 +139,27 @@ def values_of(distribution: object) -> tuple:
     return ()
 
 
+def extremes(distribution: object, declared: Param | None = None) -> tuple:
+    """**The least and the most a draw can give, where each is a finite number**, each once
+    (engine build C3's spec §11): a uniform's, a normal's or a wait's ends (`bounds_of`, a normal
+    cut to its setting's declared range, `declared`, where it gives no end of its own), or a
+    finite set's least and greatest number (`values_of`), a value of weight 0 left out, since it
+    is never drawn; `()` for a set of no numbers. What a draw is checked again with, widened, one
+    extreme at a time with its condition's values, at a run's start (`preflight.beyond`): a check
+    widened to an extreme reasons over every value between it and the declared range, so the two
+    ends are all it needs. For a distribution the load accepts (`check.undrawable`)."""
+    ends = bounds_of(distribution, declared)
+    if ends is None:
+        values = values_of(distribution)
+        weights = (_items(distribution.weights) if isinstance(distribution, Weighted)
+                   else (1,) * len(values))
+        numbers = [value for value, weight in zip(values, weights)
+                   if weight > 0 and isinstance(value, (int, float))
+                   and not isinstance(value, bool)]
+        ends = (min(numbers), max(numbers)) if numbers else ()
+    return tuple(dict.fromkeys(end for end in ends if math.isfinite(end)))
+
+
 def draw(
     distribution: Distribution,
     seed: int,
