@@ -83,6 +83,30 @@ def test_a_malformed_payload_does_not_reach_the_trial_loop():
     assert parse(json.dumps({"Left": {}}), at=1.0) is None
 
 
+@pytest.mark.parametrize("token", ["Infinity", "-Infinity", "NaN"])
+@pytest.mark.parametrize("where", ["P1 across", "P4 up"])
+def test_a_datagram_whose_gaze_is_no_finite_number_is_no_sample(token, where):
+    """**A gaze value that is not finite is a lost sample** (the controller's ruling of
+    2026-11-06): a datagram whose Purkinje image reads a bare `Infinity`, `-Infinity` or `NaN`,
+    which Python's `json.loads` accepts, is no sample, as a malformed one is, so nothing after it
+    does arithmetic on it and the tracker counts it dropped. The pupil, which no gaze reads, is
+    not judged."""
+    eye = ('{"FrameNumber": 7, "Pupil": {"Center": {"X": 1.0, "Y": 2.0}, '
+           '"Size": {"Width": 3.0, "Height": 4.0}}, "CRs": [%s, {"X": 0, "Y": 0}, '
+           '{"X": 0, "Y": 0}, %s]}')
+    p1, p4 = '{"X": 10.0, "Y": 20.0}', '{"X": 30.0, "Y": 40.0}'
+    bad = (('{"X": %s, "Y": 20.0}' % token, p4) if where == "P1 across" else
+           (p1, '{"X": 30.0, "Y": %s}' % token))
+    payload = '{"Left": %s, "Right": %s}' % (eye % bad, eye % (p1, p4))
+    assert json.loads(payload), "Python reads the bare token"
+
+    tracker = Tracker()
+    tracker.accept(parse(payload, at=1.0))
+
+    assert parse(payload, at=1.0) is None
+    assert (tracker.received, tracker.dropped, tracker.latest) == (0, 1, None)
+
+
 def test_a_sample_arriving_is_fresh_and_then_goes_stale():
     """Hold-last with a ceiling, which is P6's mitigation made concrete.
 

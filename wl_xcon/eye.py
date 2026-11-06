@@ -28,11 +28,22 @@ or an absent key -- is not documented in the material read, and guessing would p
 fabricated validity rule in the one place that decides whether an animal is looking.
 `parse` therefore treats a structurally incomplete eye as no sample at all, and the
 real failure representation is a bench measurement (V3) before this runs on an animal.
+
+**A gaze value that is not finite is a lost sample** (the controller's ruling of 2026-11-06,
+on the definitions the PI agreed that day in wl-preproc's session: "Lost: no measurement, or
+none to trust ... a value that is not a number"): a Purkinje image read as `NaN`, `Infinity` or
+`-Infinity`, which Python's `json.loads` accepts as bare tokens, makes the datagram no sample,
+as a malformed one is. Judged here, where the datagram's numbers first become floats and before
+anything does arithmetic on them, so the tracker counts it dropped and holds its last sample
+through it as through any lost datagram, its staleness running from the last sample it kept,
+and nothing downstream (the map, a window's angle, the saccade detector's directions, where an
+infinity raised mid-session) ever sees it. The pupil, which no gaze reads, is not judged.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import socket
 from dataclasses import dataclass, field
 
@@ -94,12 +105,18 @@ def _eye(struct: object) -> EyeReading | None:
         crs = struct["CRs"]
         if len(crs) <= _P4:
             return None
+        p1 = (float(crs[_P1]["X"]), float(crs[_P1]["Y"]))
+        p4 = (float(crs[_P4]["X"]), float(crs[_P4]["Y"]))
+        if not (math.isfinite(p1[0]) and math.isfinite(p1[1])
+                and math.isfinite(p4[0]) and math.isfinite(p4[1])):
+            # A gaze value that is not finite: a lost sample (the module docstring).
+            return None
         return EyeReading(
             frame=int(struct["FrameNumber"]),
             pupil=(float(centre["X"]), float(centre["Y"])),
             pupil_area=float(size["Width"]) * float(size["Height"]),
-            p1=(float(crs[_P1]["X"]), float(crs[_P1]["Y"])),
-            p4=(float(crs[_P4]["X"]), float(crs[_P4]["Y"])),
+            p1=p1,
+            p4=p4,
         )
     except (KeyError, TypeError, ValueError, IndexError):
         return None

@@ -1031,8 +1031,15 @@ def _responded(to_x: float, lose=()):
     """`_RESPOND` through the loop, the eye fixating the origin for 200 frames and then making
     `_TWELVE`'s saccade to `(to_x, 0)`, each sample in `lose` a datagram that never arrived: the
     result, and every saccade the detector confirmed."""
+    result, confirmed, _ = _responded_with(to_x, {k: "" for k in lose})
+    return result, confirmed
+
+
+def _responded_with(to_x: float, sent: dict):
+    """`_responded`, each datagram `k` in `sent` replaced by `sent[k]`: the result, every saccade
+    the detector confirmed, and the tracker, which counts what it received and dropped."""
     gaze, _ = _trace([(200, 12, to_x, 0.0)], n=800)
-    payloads = [(0.0, "" if k in lose else _datagram(x, y, k)) for k, (x, y) in enumerate(gaze)]
+    payloads = [(0.0, sent[k] if k in sent else _datagram(x, y, k)) for k, (x, y) in enumerate(gaze)]
     detector, confirmed = Detector(), []
     accept = detector.accept
 
@@ -1043,10 +1050,44 @@ def _responded(to_x: float, lose=()):
         return saccade
 
     detector.accept = keeping
-    world = Tracked(Tracker(staleness=_FRAME / 2),
-                    Mapping(version=1, targets=(), left=_IDENTITY, right=_IDENTITY), _RESPOND,
-                    _FRAME, {}, source=Replay(payloads=payloads), detector=detector)
-    return run_trial(_RESPOND, world, _FRAME, values={}, effects=Recorded()), confirmed
+    tracker = Tracker(staleness=_FRAME / 2)
+    world = Tracked(tracker, Mapping(version=1, targets=(), left=_IDENTITY, right=_IDENTITY),
+                    _RESPOND, _FRAME, {}, source=Replay(payloads=payloads), detector=detector)
+    return run_trial(_RESPOND, world, _FRAME, values={}, effects=Recorded()), confirmed, tracker
+
+
+def _left_eye_at(x: float, y: float, frame: int, p1_x: float) -> str:
+    """`_datagram`, the left eye's first Purkinje image read at `p1_x` across: what the tracker
+    would send with one eye's position no number, as `json.dumps` writes a float that is none,
+    a bare `Infinity`, `-Infinity` or `NaN`, which Python's `json.loads` accepts."""
+    datagram = json.loads(_datagram(x, y, frame))
+    datagram["Left"]["CRs"][0]["X"] = p1_x
+    return json.dumps(datagram)
+
+
+@pytest.mark.parametrize("value", [math.inf, -math.inf, math.nan],
+                         ids=["Infinity", "-Infinity", "NaN"])
+def test_a_datagram_whose_gaze_is_no_finite_number_is_a_lost_sample(value):
+    """**A gaze value that is not finite is a lost sample** (the controller's ruling of 2026-11-06,
+    on the definitions the PI agreed that day in wl-preproc's session: "Lost: no measurement, or
+    none to trust ... a value that is not a number"). The left eye's first Purkinje image reads
+    `value` in the datagram five samples into `_TWELVE`'s saccade to the target: the trial runs on,
+    the tracker counts the datagram dropped, and the trial ends, and its saccade is confirmed and
+    flagged, exactly as with that datagram missing. Until then `Infinity` raised in the true-angle
+    arithmetic mid-session, and `NaN` was taken as a sample."""
+    _, kept = _responded(8.0)
+    bad = kept[0].start + 5
+    gaze, _ = _trace([(200, 12, 8.0, 0.0)], n=800)
+    missing, missed, lost = _responded_with(8.0, {bad: ""})
+    assert missing.outcome is Outcome.CORRECT and lost.dropped == 1
+
+    result, confirmed, tracker = _responded_with(
+        8.0, {bad: _left_eye_at(gaze[bad][0], gaze[bad][1], bad, value)})
+
+    assert (result.outcome, result.frames) == (missing.outcome, missing.frames)
+    assert [(s.start, s.stop, s.flagged) for s in confirmed] \
+        == [(s.start, s.stop, s.flagged) for s in missed]
+    assert (tracker.received, tracker.dropped) == (lost.received, lost.dropped)
 
 
 @pytest.mark.parametrize("to_x,outcome", [(8.0, Outcome.CORRECT), (-8.0, Outcome.WRONG_TARGET)],
@@ -1064,6 +1105,27 @@ def test_a_trial_waiting_for_a_saccade_takes_one_that_lost_a_sample_near_its_sta
 
     assert result.outcome is outcome
     assert [(s.start, s.flagged) for s in confirmed] == [(kept[0].start, True)]
+
+
+def test_a_reading_whose_degrees_overflow_is_no_position_for_that_eye():
+    """**A finite datagram whose conversion is not finite** does not raise either: the left eye's
+    Purkinje images read 1e308 and -1e308 across five samples into the saccade, finite, so `parse`
+    keeps the datagram, but their difference overflows to infinity. That eye has no position on
+    that frame (`gaze.Tracked.gaze`, as for an eye with no map), the right eye stands for gaze, and
+    the trial runs on and ends as it does whole, the datagram received. Until then the infinity
+    reached the true-angle arithmetic and raised."""
+    whole, kept = _responded(8.0)
+    bad = kept[0].start + 5
+    gaze, _ = _trace([(200, 12, 8.0, 0.0)], n=800)
+    datagram = json.loads(_datagram(gaze[bad][0], gaze[bad][1], bad))
+    datagram["Left"]["CRs"][0]["X"] = 1e308
+    datagram["Left"]["CRs"][3]["X"] = -1e308
+
+    result, confirmed, tracker = _responded_with(8.0, {bad: json.dumps(datagram)})
+
+    assert (result.outcome, result.frames) == (whole.outcome, whole.frames)
+    assert [(s.start, s.flagged) for s in confirmed] == [(s.start, s.flagged) for s in kept]
+    assert tracker.dropped == 0
 
 
 #: **A catch trial**: any saccade in its second is an early response, and none a correct reject.

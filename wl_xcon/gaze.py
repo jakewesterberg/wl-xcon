@@ -56,6 +56,7 @@ carried across would let a quiet trial set a noisy one's sensitivity.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping as MappingType, NoReturn
@@ -276,6 +277,12 @@ class Tracked:
         **On the trial loop's path**, once a frame for each eye (`_look`), so the eye's
         dual-Purkinje vector reaches its map as its two numbers (`EyeReading.dpi_x`, `dpi_y`;
         `Mapping.degrees_of`) and the one thing built is the position returned (XC-414).
+
+        **No position either where the map's answer is not finite** (the controller's ruling of
+        2026-11-06): a datagram whose gaze values are not finite never reaches here, being no
+        sample (`eye.parse`), but finite ones can still overflow, their difference or the map's
+        polynomial; that eye then has no position on the frame, as an eye with no map has none,
+        so no window's angle and no saccade's direction is taken of an infinity, which raised.
         """
         if self.tracker.state(self.when(frame)) != "ok":
             return None
@@ -283,7 +290,11 @@ class Tracked:
         if sample is None:
             return None
         reading = getattr(sample, which)
-        return self.mapping.degrees_of(which, reading.dpi_x(), reading.dpi_y())
+        position = self.mapping.degrees_of(which, reading.dpi_x(), reading.dpi_y())
+        if position is not None and not (math.isfinite(position[0])
+                                         and math.isfinite(position[1])):
+            return None
+        return position
 
     def gaze_cyclopean(self, frame: int) -> tuple[float, float] | None:
         """Both eyes averaged, which is what the detector runs on. A per-eye detector
