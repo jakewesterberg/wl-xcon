@@ -80,12 +80,12 @@ class World(Protocol):
         carries into this state, and no further, for its landing if its eye stopped in this state
         ("Yes, that one saccade carries"; "Yes, carry it too"), **and the one under way as the eye
         left a window**, a transition taken on `Exited`, on the same terms (the PI, 2026-11-04:
-        "the movement that ended the state is the response"), if it began in the state the exit
-        ended or was carried into it (the controller's ruling of 2026-11-06). So a world that remembers a saccade
-        across frames
-        (`gaze.Tracked`) is told here when each state begins and by which guard, and refuses to
-        judge a saccade for a state it was not told of. A world that draws each event as a guard
-        asks for it has nothing to forget, and does nothing.
+        "the movement that ended the state is the response"), wherever its onset fell, so an
+        anticipation begun before the cue counts where it lands (the PI, 2026-11-06: "Yes, count
+        it"). So a world that remembers a saccade across frames (`gaze.Tracked`) is told here when
+        each state begins and by which guard, and refuses to judge a saccade for a state it was not
+        told of. A world that draws each event as a guard asks for it has nothing to forget, and
+        does nothing.
         """
 
     def signal(self, frame: int) -> str:

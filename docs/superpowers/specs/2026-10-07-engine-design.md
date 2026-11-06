@@ -415,11 +415,17 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    saccade has stopped); the carry ends when the state is left, landed or not, unless by another
    `Exited` with the saccade still in flight, which carries it on (EYE-19, revised that day;
    `wl_xcon/gaze.py`, `Tracked.began`). *Narrowed 2026-11-06 (the controller's ruling on the
-   review's I1; the PI is asked at merge whether to widen it):* an exit carries only a saccade
-   whose onset, the detector's, fell in the state the `Exited` edge ended, or one carried into that
-   state (by the onset carry, or by an exit before), so a saccade begun before the go cue is
-   anticipatory however the state asking for it is entered; through a second `Exited` the carry
-   goes on for that same saccade alone. A transition taken on `Entered` carries nothing.
+   review's I1), superseded the same day by the PI:* an exit carried only a saccade whose onset,
+   the detector's, fell in the state the `Exited` edge ended, or one carried into that state.
+   *Widened 2026-11-06 (the PI, asked in the UI whether a saccade that started before the go cue
+   should count: "Yes, count it", "Widen the carry so a saccade already under way before the cue
+   counts where it lands"):* an `Exited` edge carries the saccade in flight on its frame -- by the
+   detector's onset and stop, its run holding that frame -- whatever state its onset fell in, so
+   an anticipation relayed by an exit counts where it lands, however many states back it began;
+   the rest of the carry stands (its eye at rest in the next state; through a second `Exited`
+   that same saccade alone, still in flight; never a `SaccadeOnset`'s; ended at the next
+   transition). A state that asks for a saccade itself still counts only one begun in it. A
+   transition taken on `Entered` carries nothing (EYE-19, its revision quoting the PI).
 8. **Off the field**: only when declared; check 8 grows to test extents (XC-143, XC-144).
 9. **Head-free chaired sessions**: nominal head position, recorded and listed; a task may require a
    fixed head.

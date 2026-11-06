@@ -367,11 +367,11 @@ class SaccadeTo(Guard):
     and the window is the one drawn on the frame the saccade lands, never later. **The carry**:
     the saccade whose onset ended the state before -- a transition on `SaccadeOnset`, or on
     `After(t, since=SaccadeOnset())` -- or the one under way as the eye left a window, a
-    transition on `Exited`, if it began in the state that exit ended or was carried into it
-    (EYE-19, revised 2026-11-06), counts here if the detector puts its eye at rest (its stop field,
-    `Saccade.stop`, as `saccade.detect` reports it) on this state's first frame or after, so an
-    intrasaccadic jump is scored where the eye lands, and so is the saccade that leaves
-    fixation."""
+    transition on `Exited`, wherever its onset fell, an anticipation begun before the cue included
+    (EYE-19, revised 2026-11-06, the PI), counts here if the detector puts its eye at rest (its
+    stop field, `Saccade.stop`, as `saccade.detect` reports it) on this state's first frame or
+    after, so an intrasaccadic jump is scored where the eye lands, and so is the saccade that
+    leaves fixation."""
 
     window: str
 
@@ -384,8 +384,8 @@ class SaccadeOnset(Guard):
     detector confirms it, by every `SaccadeOnset` of the state asking then, a clock's
     (`After(since=SaccadeOnset())`) and an edge's alike. **A saccade carried in by the onset or
     the exit that ended the state before never satisfies it** (EYE-19, revised 2026-11-04): it
-    counts here for its landing alone, a `SaccadeTo`'s, its onset having been in that state, even
-    when the detector confirms it only after the eye has left the window."""
+    counts here for its landing alone, a `SaccadeTo`'s, its onset having been before this state,
+    even when the detector confirms it only after the eye has left the window."""
 
 
 @dataclass(frozen=True, slots=True)
