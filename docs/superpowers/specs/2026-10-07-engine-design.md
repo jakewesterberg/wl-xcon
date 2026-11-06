@@ -458,6 +458,8 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
     resuming after one (e.g. rerun an initial adaptation)
     [@patterson2013distinct; @janssen2005representation].
 
+*Engine build C3, 2026-10-30* (the C3 spec §3; the PI, Q2, "Draw again (Recommended)"): **item 11 revised** -- there is one tail rule, not one each task declares: a non-aging wait drawn past the maximum is drawn again, so every wait falls between the shortest and the longest. The review report's plan tables give the hazard the declared numbers produce across the range against the flat rate, and the declared and realized averages ("mean" being the constant-hazard wait's own, before redrawing); its timing diagram stays build C8's (§18.1). These describe the declared distribution, not the rig, and carry no timing claim.
+
 ## 7. Color and luminance (N§4, N§R4, N§R5)
 
 1. **The default calibration is standard sRGB** (the panel in its sRGB mode; how closely it follows the
@@ -927,6 +929,13 @@ drummed repeats one, and its `presentations` the lines written.
    *Engine build C2b, 2026-10-22*: the plan in tables built -- each plan's order and time limit,
    each block's end rules, draw, table and drumming, each condition's structure, target and
    values.
+   *Engine build C3, 2026-10-30* (the C3 spec §3-§5): the plan tables show what varies -- the
+   task's draws and each block's, its own or the task's, with what a repeat takes, a direction
+   from 0 to 360; a condition's own range; the conditions a block makes from factors, with the
+   exclusions applied and each level's share of the trials they owe; a designed order in words;
+   and each non-aging wait's chance of ending against the flat rate, with its declared and
+   realized averages (§6.11). The census per condition and per factorial cell, and the timing
+   diagram, stay build C8's.
 2. **Simulation is advised, not enforced.**
 3. **The simulated animal** follows declared functions [@wichmann2001psychometric; @carpenter1995neural]
    with named profiles: perfect, chance, an incorrect strategy, normal (85% correct), trying to break the
