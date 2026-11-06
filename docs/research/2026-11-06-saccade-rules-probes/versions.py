@@ -1,7 +1,7 @@
 """The saccade detector's versions side by side, each read from this repository's own history with
 `git show`, so none is a copy: version 1 at `d3a1070` (before saccade-gap-onset), version 2 at
-`3c9c0dd`, version 3 at `acb57a2`, and `cur`, the working tree's `wl_xcon.saccade` (version 4 at
-the time of writing). Run from the repository's root with it on `PYTHONPATH` (see README.md)."""
+`3c9c0dd`, version 3 at `acb57a2`, and `cur`, the working tree's `wl_xcon.saccade`, whatever its
+version (4 when the probes were written, 5 since the same day's lost-stretch bound). Run from the repository's root with it on `PYTHONPATH` (see README.md)."""
 from __future__ import annotations
 
 import subprocess

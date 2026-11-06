@@ -587,6 +587,56 @@ def test_a_lost_sample_beside_one_noise_velocity_is_no_saccade(lost):
     assert detect(trace, at) == []
 
 
+#: A 30-sample saccade at sample 200, whose run starts at 198 and has six measured velocities (198
+#: to 203) before sample 206.
+_THIRTY = [(200, 30, 12.0, 0.0)]
+
+
+@pytest.mark.parametrize("lost, stop", [(24, 232), (25, 231), (200, 231)],
+                         ids=["50 ms from the last measured sample to the next",
+                              "52 ms", "400 ms"])
+def test_a_run_is_carried_across_a_short_loss_and_ended_by_a_long_one(lost, stop):
+    """**A lost stretch is bounded** (version 5; the PI, in wl-preproc's session of 2026-11-06,
+    "Agree: bridge lost data": a saccade is carried across a short loss of data, counted and
+    flagged). `lost` samples go missing from 206, inside `_THIRTY`'s run, after its sixth measured
+    velocity. A stretch from the last measured sample, 205, to the next of `max_gap_s` or less
+    carries the run, flagged, to where the eye is seen at rest: 25 samples on, 50 ms as this trace's
+    clock writes it (`i / 500` s, which here rounds to 0.04999999999999999 s). A longer one ends it
+    on the first sample past the bound, 231, 52 ms on, keeping the run so far since six of its
+    velocities are measured; until then a stretch of any length carried it while the missing
+    samples kept arriving, so 400 ms of nothing was one run. **Online it ends on the same sample**:
+    the detector is in flight until the sample that completes the velocity at the batch form's
+    stop, `stop + HALF_WINDOW`, and not after."""
+    gaze, at = _trace(_THIRTY)
+    trace = _lost(gaze, *range(206, 206 + lost))
+
+    assert [(s.start, s.stop, s.flagged) for s in detect(trace, at)] == [(198, stop, True)]
+    detector, flying = Detector(), []
+    for t, g in zip(at, trace):
+        detector.accept(t, g)
+        flying.append(detector.in_flight)
+    assert flying[stop + HALF_WINDOW - 1] and not flying[stop + HALF_WINDOW], \
+        "online the run must end as the batch form ends it"
+    assert not any(flying[stop + HALF_WINDOW:])
+
+
+def test_a_lost_stretch_exactly_max_gap_s_long_carries_the_run():
+    """**The bound is inclusive**, as the gap between two samples is: with `max_gap_s` the
+    24-sample loss's own stretch as the clock writes it, from the last measured sample, 205, to the
+    next, 230, the run is carried, batch and online, as with the default bound. On a clock of
+    `i / 500` s no 25-sample stretch is exactly 0.05 s, so the default cannot show the boundary."""
+    gaze, at = _trace(_THIRTY)
+    trace = _lost(gaze, *range(206, 230))
+    params = Params(max_gap_s=at[230] - at[205])
+
+    assert [(s.start, s.stop, s.flagged) for s in detect(trace, at, params)] == [(198, 232, True)]
+    detector, flying = Detector(params=params), []
+    for t, g in zip(at, trace):
+        detector.accept(t, g)
+        flying.append(detector.in_flight)
+    assert flying[232 + HALF_WINDOW - 1] and not flying[232 + HALF_WINDOW]
+
+
 @pytest.mark.parametrize("ends", ["a break in time", "the trace's end"])
 def test_a_run_a_gap_or_the_trace_ends_is_long_enough_only_by_its_measured_velocities(ends):
     """**The batch form's two other ways a run ends apply the rule too** (the review of
@@ -653,13 +703,13 @@ def test_every_run_is_confirmed_while_it_is_open(seed):
     assert confirmed > 100
 
 
-def test_the_detector_in_true_visual_angle_is_version_4():
+def test_the_detector_that_bounds_a_lost_stretch_is_version_5():
     """`VERSION` is bumped whenever a session would detect something else: version 2 reports what
     version 1 never did, version 3 no longer reports a run whose minimum duration only unknown
-    velocities met, and version 4 detects and sizes in true visual angle (XC-398). **Not
-    wl-preproc's fixture set "v2"**, which version 4 is pinned to: that is their file's version,
-    and this constant is ours."""
-    assert VERSION == 4
+    velocities met, version 4 detects and sizes in true visual angle (XC-398), and version 5 ends
+    a run at a lost stretch longer than `max_gap_s`. **Not wl-preproc's fixture set "v2"**, which
+    version 4 is pinned to: that is their file's version, and this constant is ours."""
+    assert VERSION == 5
 
 
 # ---------------------------------------------------------------------------

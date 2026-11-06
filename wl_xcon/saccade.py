@@ -53,7 +53,8 @@ first velocity went unmarked (`Detector`; the PI, 2026-10-30, "Count it, marked"
 is continuous, so a run that lost a sample is still one run, flagged; but its minimum
 duration is met only by measured velocities outside the threshold, online and in `detect`
 alike. Version 2 counted the unknown ones too, so one noise velocity beside a lost sample
-made a saccade of six.
+made a saccade of six. **And a short loss only** (version 5): a stretch from one measured
+sample to the next longer than `max_gap_s` ends the run, as a break in time does.
 """
 
 from __future__ import annotations
@@ -119,9 +120,19 @@ _WEIGHT_SUM = 6.0
 #: samples. 3 took both per axis, as wl-preproc's v1 did. Near the centre the two agree to the
 #: small-angle approximation; off it a run's size is what the eye turned, so 1.12° up from
 #: (30°, 0°), 0.98°, is under the 1° microsaccade cut. The thresholds were already taken over
-#: complete windows only, which v2 adopts. **Not wl-preproc's fixture set "v2"**: that numbers
-#: their published fixture files, and this numbers our detector.
-VERSION = 4
+#: complete windows only, which v2 adopts.
+#:
+#: **5 since 2026-11-06** (the PI, in wl-preproc's session that day, "Agree: bridge lost
+#: data": a saccade is carried across a short loss of data, counted and flagged): **a lost
+#: stretch is bounded**. `max_gap_s` bounded only the time between consecutive entries, so
+#: missing samples that kept arriving, as the trial loop feeds one a frame once the tracker is
+#: stale, carried a run however long they went on (wl-preproc's probe of `detect`: one flagged
+#: run across 400 ms of nothing). Now a run ends, in `detect` and `Detector` alike and on the
+#: same sample, where the stretch from the last measured sample passes `max_gap_s`, the run so
+#: far kept if long enough by its measured velocities. 4 and 5 detect the same thing wherever
+#: no stretch of lost samples is longer than that. **Not wl-preproc's fixture set "v2"**: that
+#: numbers their published fixture files, and this numbers our detector.
+VERSION = 5
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,7 +143,8 @@ class Params:
 
     lambda_: float = DEFAULT_LAMBDA
     min_duration_samples: int = DEFAULT_MIN_DURATION_SAMPLES
-    #: The largest gap between consecutive samples that still counts as consecutive.
+    #: The largest gap between consecutive samples that still counts as consecutive, and since
+    #: version 5 the longest stretch from one measured sample to the next a run is carried across.
     #: Defaults to `eye.Tracker.staleness`, because the two answer the same question
     #: -- is this information still about the same stretch of time -- and two answers
     #: to it would drift.
@@ -381,8 +393,18 @@ def detect(
     #: samples"). The unknown velocities in it carry it and count for nothing.
     measured = 0
     shortest = params.min_duration_samples
+    #: When the last present sample before `n` was taken, `None` before the first: **a lost
+    #: stretch is bounded from it** (version 5).
+    seen_at = None
     for n, v in enumerate(velocities):
-        continuous = n == 0 or (at[n] - at[n - 1]) <= params.max_gap_s
+        # **Time is continuous at `n` while the stretch from the last measured sample is within
+        # `max_gap_s`** (version 5; the PI, in wl-preproc's session of 2026-11-06, "Agree:
+        # bridge lost data"): the gap to the sample before when it was measured, as until then,
+        # and the whole lost stretch so far when it was not, so missing samples that keep
+        # arriving carry a run no longer than a gap would.
+        continuous = seen_at is None or at[n] - seen_at <= params.max_gap_s
+        if gaze_deg[n] is not None:
+            seen_at = at[n]
         if v is None:
             # **An unknown velocity does not end a run, as long as time is
             # continuous.** One dropped camera frame in the middle of a saccade used
@@ -392,7 +414,10 @@ def detect(
             # carries on and is flagged, **and is no longer for it** (version 3): one
             # noise velocity beside a lost sample is not a saccade of six. A break in
             # *time*, though, is different, and ends the run: we no longer know what the
-            # eye did in between.
+            # eye did in between. **So does a lost stretch longer than `max_gap_s`** (version
+            # 5), from the last measured sample, on the first sample past the bound, the run so
+            # far kept if long enough: until then missing samples that kept arriving carried a
+            # run however long they went on, 400 ms of nothing one run.
             if not continuous:
                 if run_start is not None and measured >= shortest:
                     found.append(_saccade(gaze_deg, velocities, run_start, n))
@@ -438,7 +463,9 @@ class Detector:
     samples; the offline detection applies the same rule"). A velocity the five-sample
     window cannot give -- a sample missing, or two more than `max_gap_s` apart -- does not
     end an open run while time is continuous, as in `detect`, and counts for nothing
-    toward its length. So a run is reported on the velocity outside the threshold that
+    toward its length; **time is continuous while the stretch from the last measured sample
+    is within `max_gap_s`** (version 5), so a longer loss ends the run on the sample past the
+    bound, the run so far kept if long enough, on the same sample as in `detect`. So a run is reported on the velocity outside the threshold that
     gives it `min_duration_samples` of them, the run still open and `stop` the sample after
     it; the velocity inside the threshold that ends a run never confirms it, since every
     measured velocity was counted as it came. A sample lost in a run delays its
@@ -531,6 +558,9 @@ class Detector:
     #: later of the two `velocity` gives none for want of a window. A run whose first velocity
     #: is within `HALF_WINDOW` samples of it is flagged, as `_saccade` flags it (version 2).
     _last_unknown: int = field(default=HALF_WINDOW - 1, init=False, repr=False)
+    #: **When the last present sample before the centre was taken** (version 5), `None` before the
+    #: first: a lost stretch is bounded from it, as `detect` bounds it.
+    _seen_at: float | None = field(default=None, init=False, repr=False)
     #: Set for the sample on which a saccade was confirmed, and cleared by the next
     #: `accept`. The trial loop asks once per frame, so an edge has to survive exactly
     #: one question, not until someone happens to ask.
@@ -567,6 +597,7 @@ class Detector:
         self._run_confirmed = False
         self._run_measured = 0
         self._last_unknown = HALF_WINDOW - 1
+        self._seen_at = None
         self.onset = None
 
     @property
@@ -628,6 +659,16 @@ class Detector:
         w3 = (centre + 1) % ring
         w4 = slot
         gap = self.params.max_gap_s
+        # The last present sample before the centre (version 5): the one before it, `w1`, when it
+        # is present, or on the first centre the one before that, `w0`; else as it was.
+        if present[w1]:
+            seen_at = ts[w1]
+            self._seen_at = seen_at
+        elif centre == HALF_WINDOW and present[w0]:
+            seen_at = ts[w0]
+            self._seen_at = seen_at
+        else:
+            seen_at = self._seen_at
         moved = False
         vx = vy = 0.0
         if (present[w0] and present[w1] and present[w2] and present[w3] and present[w4]
@@ -665,7 +706,8 @@ class Detector:
             self._run_had_gap = False
             return None
 
-        continuous = ts[w2] - ts[w1] <= gap
+        # As `detect` reads it (version 5): the stretch from the last measured sample.
+        continuous = seen_at is None or ts[w2] - seen_at <= gap
         if not moved:
             # Same rule as `detect`: unknown velocity flags an open run rather than
             # ending it, and counts for nothing toward its length (version 3); a break in
@@ -673,7 +715,8 @@ class Detector:
             # disagree about gaps specifically, which is the one thing S5 §5 wants their
             # disagreement to be measurable against. A run a break in time ends
             # unconfirmed has fewer measured velocities than the minimum, so `detect`
-            # does not report it either.
+            # does not report it either; and since version 5 a lost stretch past `max_gap_s`
+            # ends it as a break in time does, on the same sample as in `detect`.
             if self._run_start is not None:
                 self._run_had_gap = True
                 if not continuous:
