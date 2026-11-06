@@ -715,9 +715,15 @@ effect from the next trial:
   the out-of-cage limit, a count or a training aid.
 
 A trial that a live change made easier is an **eased** trial. Whether a change eased it is read from each setting's
-declared meaning. An eased trial does not count toward a block's end rule or a training stage's pass rule. It does
-count toward a plan's fall-back rule and toward its condition, except that in a training progression it counts toward
-neither a stage's number of trials nor its targets, so a stage is never ended on eased trials.
+declared meaning. An eased trial is left out of moving up: of the answers its block's criterion judges (the criterion
+that ends a block, or a training stage's pass rule) and, in a training progression, of its stage's number of trials
+and its targets. Otherwise it counts as any trial does: toward moving back (a plan's fall-back rule), and, outside a
+training progression, toward its block's own number of trials and its condition's target, so such a block can end on
+eased trials. And a sequence-balanced stage below a training progression's top moves up when its sequence is played
+out, eased trials or not (the PI, 2026-10-31, "Only warn at load"; the load warns of such a stage,
+`sequence-stage-moves-up`). *Corrected 2026-11-07: the ask as sent on 2026-11-06 said an eased trial does not count
+toward a block's end rule, and that a stage is never ended on eased trials; neither is so, as built or by the spec's
+[§7](superpowers/specs/2026-10-30-engine-c3-design.md#7-eased-trials-and-a-blocks-rule).*
 
 **Each `trials.jsonl` line gains four fields**, beside the six you require and those the sections above add:
 - **`drawn`** (an object): each setting drawn for this trial, and where its range came from:
@@ -737,10 +743,15 @@ neither a stage's number of trials nor its targets, so a stage is never ended on
   range is not in `live`: its trials stay drawn, and `drawn` names the range's change id.
 - **`eased`** (a sorted list of text): the settings whose live change kept the trial out of moving up. It is empty
   otherwise.
-  - **A trial whose `eased` is not empty was left out when its block's end rule was judged** (`block_ends`' `ended`
-    `rule` and its `passed_at`, in the C2b section), and, in a training progression, when its stage's number of
-    trials and its targets were judged. Its fall-back rule (`fall_back`) still counted it, and the end row's
-    `conditions` count it toward its condition.
+  - **A trial whose `eased` is not empty was left out of moving up**: of the answers its block's criterion judged
+    (a block's own criterion, or a training stage's rule, which decide `block_ends`' `ended` `rule` and its
+    `passed_at`, in the C2b section), and, in a training progression, of its stage's number of trials and its
+    targets. Otherwise it was counted as any trial: its fall-back rule (`fall_back`) counted it; outside a training
+    progression its block's own number of trials and its condition's target counted it, so a block can end `rule` on
+    eased trials there; and the end row's `conditions` count it toward its condition. A sequence-balanced stage below
+    a training progression's top ends `rule` when its sequence is played out, eased trials or not (the PI,
+    2026-10-31, "Only warn at load"). *Corrected 2026-11-07: the ask as sent on 2026-11-06 said such a trial was left
+    out whenever its block's end rule was judged.*
   - A clear-cut setting keeps the trial out when a person's value set it easier than the trial would otherwise have
     had it. "Otherwise" means its condition's value, the run's value or, for a drawn setting, the value the seed draws
     for that trial from the range as written (on a repeat, a `same` setting's is the value of the trial it repeats, a
@@ -780,7 +791,9 @@ neither a stage's number of trials nor its targets, so a stage is never ended on
   `conditions` lists every condition generated, each as `{name, values, target}`, a level that is a range of its own
   written in `values` as `draws` writes a draw. `excluded` lists the exclusions applied, each `{factor: level}`. It
   is `[]` when no factorial expanded, as in a plain run. The record then names every generated condition without the
-  task file.
+  task file. *Added 2026-11-07:* a generated condition's name keeps the task's own terms for a level of a direction
+  setting, a number or a range of its own (`target_dir=-90.0`, `target_dir=uniform from -45.0 to 45.0`), never
+  turned to 0° to 360°, since a condition's name is the task's words, as a given value is written as given.
 - **`directions`**: the names of the settings that place a position's direction (a `Polar`'s), sorted, `[]` when none.
   Each is an angle, written from 0° to 360°, so take circular statistics of it: a draw declared -45° to 45° sits near
   0° and near 360°, and a plain mean of it reads 180°.
