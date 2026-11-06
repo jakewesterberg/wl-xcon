@@ -838,6 +838,13 @@ class RDS(Appearance):
         return self.form.range(values)
 
 
+#: What tells the animal which object of an `Array` is its target (`Array.found_by`; the PI,
+#: 2026-10-31, on the engine C3 plan's Appendix B, item 17, "Refuse only odd-one-out tasks
+#: (Recommended)"): `"look"`, its look alone, the odd one out; or `"cue"`, something else the trial
+#: shows -- a cue, a remembered sample, a place.
+FOUND_BY = ("look", "cue")
+
+
 @dataclass(frozen=True, slots=True)
 class Array(Appearance):
     """`n` objects evenly spaced on a ring, one of them the target.
@@ -867,6 +874,15 @@ class Array(Appearance):
     #: Where object 0 sits, in degrees counter-clockwise from the positive x axis.
     #: Randomising it between trials is what stops an animal learning positions.
     phase: "float | P" = 0.0
+    #: **What tells the animal which object is the target**, one of `FOUND_BY` (the PI,
+    #: 2026-10-31, "Refuse only odd-one-out tasks (Recommended)"). `"look"`, the default: the
+    #: target is the object whose look differs from its distractors', the odd one out, as in a
+    #: pop-out search, so a target that can look like its distractors, or two objects whose looks
+    #: swap within a block, leaves no answer and is refused at load (`check.impossible`).
+    #: `"cue"`: something else the trial shows names it -- a cue, a remembered sample, a place --
+    #: as in a cued two-choice task, whose target and distractor can look alike by design; the
+    #: load then warns that a cue must name the target, and refuses neither (`cued-target`).
+    found_by: str = "look"
 
     def positions(
         self, values: dict, at: "tuple[float, float]" = (0.0, 0.0)
@@ -1701,6 +1717,115 @@ class Counting:
         return self.after_stimulus
 
 
+# --- Drawn values (engine spec §14.1, §14.6; engine build C3, its spec §2-§3) ------------------
+#
+# **A task may draw a setting at random each trial** (TSK-21, the PI, 2026-10-07: "values drawn
+# per trial from declared distributions for nuisance variables ... recorded per trial but not
+# conditions"), from the distributions he chose (TSK-24): a uniform range, a weighted set, a
+# normal cut to a range, a prepared list and the non-aging wait. **Where** (the PI, 2026-10-30,
+# Q1a, "Task default, block may replace"): one default for the task (`Task.draws`), the plain run
+# included, which a block type may replace, narrower or wider (`Block.draws`); and a condition
+# may draw its own setting from its own range (Q1b). Each draw is taken between trials, never in
+# a frame, from a generator keyed by the run's seed, the trial and the setting
+# [@salmon2011parallel], apart from the scheduler's (`variation.draw`). **A distribution is not
+# refused as it is built**: what it declares is checked at load (`check.check_task`, `bad-draw`),
+# so a draw that cannot be drawn is a finding with a sentence, never a task file that will not
+# import.
+
+#: **What a repeat of a trial takes of each drawn setting** (the PI, 2026-10-30, Q3, "Per drawn
+#: setting, required": "each drawn setting declares same or fresh on a repeat; a task that draws
+#: and does not say is refused at load"): `SAME`, the value the trial it repeats drew; `FRESH`, a
+#: new draw. **A drummed repeat follows it too** ("Follow same/fresh": the target stays where it
+#: was and the wait is new, so the drum teaches the problem, not the timing).
+SAME = "same"
+FRESH = "fresh"
+REPEATS = (SAME, FRESH)
+
+#: **A block whose conditions give a setting the task draws says so**, with this in its own draws
+#: (`Block.draws`) in place of a distribution. "Never both" is judged block by block (the PI,
+#: 2026-10-30, Q1b): a setting is drawn by the block, by its own draw or the task's it does not
+#: replace, or given by its conditions, each a value or its own range, not both; a block whose
+#: conditions overrule the task's draw without saying so is refused at load (`check.check_task`).
+BY_CONDITIONS = "by conditions"
+
+
+@dataclass(frozen=True, slots=True)
+class Distribution:
+    """What a drawn setting's value is drawn from (TSK-24): `Uniform`, `Weighted`,
+    `TruncatedNormal`, `Listed` or `NonAging`, each closing with **`repeat`**, `SAME` or `FRESH`,
+    what a repeat of its trial takes (`None` until the author says, refused at load). Its numbers
+    are in its setting's unit. **A direction is drawn in the task's own terms**, lowest at most
+    highest and spanning at most 360 degrees (`Uniform(-45, 45)`, say), and each value drawn for
+    it is written from 0 to 360 (the PI, 2026-10-30, "0 to 360 in both repos")."""
+
+
+@dataclass(frozen=True, slots=True)
+class Uniform(Distribution):
+    """Any number from `low` to `high`, each as likely. **It draws real numbers, so a setting
+    read as a whole number is drawn from a set** (`Weighted` or `Listed`): an `Array` reads its
+    `n` and its `target` through `int()`, so a uniform there would record 4.7 while 4 objects
+    showed. `check.check_task` refuses a `Uniform`, a `TruncatedNormal` or a `NonAging` on such a
+    setting (`bad-draw`)."""
+
+    low: float
+    high: float
+    repeat: "str | None" = None
+
+
+@dataclass(frozen=True, slots=True)
+class Weighted(Distribution):
+    """One of `values`, each drawn in proportion to its weight in `weights`, one weight a value:
+    numbers, a setting's choices, or positions. A position is drawn whole from such a set, or
+    continuously through an eccentricity setting and a direction setting, each drawn as a number
+    (engine build C3's spec §2: "a position may be drawn by eccentricity and direction")."""
+
+    values: tuple
+    weights: tuple
+    repeat: "str | None" = None
+
+
+@dataclass(frozen=True, slots=True)
+class TruncatedNormal(Distribution):
+    """A normal of `mean` and `sd`, **cut to its setting's declared range unless it declares its
+    own** (`low`, `high`; TSK-24): a value is drawn inside the cut, never clamped to its edge. A
+    cut holding almost none of the normal cannot be drawn and is refused at load
+    (`check.check_task`)."""
+
+    mean: float
+    sd: float
+    low: "float | None" = None
+    high: "float | None" = None
+    repeat: "str | None" = None
+
+
+@dataclass(frozen=True, slots=True)
+class Listed(Distribution):
+    """A prepared list (TSK-24): its `values` **played in shuffled passes**, each once before any
+    is played again, in a new order each pass; with `in_order`, as listed, over and over
+    (engineering, engine build C3)."""
+
+    values: tuple
+    in_order: bool = False
+    repeat: "str | None" = None
+
+
+@dataclass(frozen=True, slots=True)
+class NonAging(Distribution):
+    """**The non-aging wait** (TSK-15, TSK-24): `minimum` plus a wait whose chance of ending is the
+    same at every moment, the PI's tasks' foreperiod, 750 to 1250 ms "to reduce expectancy"
+    [@westerberg2020priming], which keeps the target's chance constant [@han2022revisiting].
+    `mean` is that constant-hazard wait's own mean, its time constant past `minimum`, before the
+    tail is drawn again. **A wait drawn past `maximum` is drawn again** (the PI, 2026-10-30, Q2,
+    "Draw again": "every wait falls between the shortest and the longest"), so its realized mean
+    is below `mean`, and the target's chance rises near the longest, as the review report
+    shows."""
+
+    minimum: float
+    mean: float
+    maximum: float
+    repeat: "str | None" = None
+
+
 # --- Plans and blocks (engine spec §13.1, §13.3, §13.5, §13.8; engine build C2b) --------------
 #
 # **A task's plans live in its task object** (the PI, 2026-10-07: "In the task file": "beside its
@@ -1752,15 +1877,60 @@ class Constrained(Order):
 
 
 @dataclass(frozen=True, slots=True)
+class SequenceBalanced(Order):
+    """**Sequence-balanced** (TSK-23, the PI, 2026-10-07: "each condition follows each other
+    equally often, e.g. de Bruijn"): the block plays a de Bruijn cycle of its conditions
+    [@aguirre2011de], a random Euler circuit through them drawn from the run's seed
+    [@brooks2012counterbalancing], `cycles` times over. **`depth`** is how far back the balance
+    reaches (the PI, 2026-10-30, Q5a, "Block picks; pairs default"): at 2, each condition follows
+    each, itself included, once a cycle; at 3, each triple. Each cycle is the linear de Bruijn
+    sequence, `n**depth + depth - 1` trials of `n` conditions (4 give 17 at 2, 66 at 3), its first
+    `depth - 1` a lead-in that only precedes what follows (the PI, 2026-10-31, "Add one closing
+    trial"). Each condition's target is then `cycles * n**(depth - 1)`. The block ends once
+    its plan is played out or its `trials` are run, owing nothing then. **A broken trial is not
+    repeated** (TSK-31): the sequence goes on, the lost place recorded as a shortfall,
+    `"designed"`, unless **`again_at_once`** brings it straight back (Q5b, "'Again at once' as an
+    option"), under the repeat limit. Named apart from `Balanced`, a plan's order of blocks."""
+
+    depth: int = 2
+    cycles: int = 1
+    again_at_once: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class Priming(Order):
+    """**Priming** (the PI, 2026-10-30, Q6, "Both of the last two"), on `feature`, a setting every
+    condition of the block sets to a value (the target's color, say), in exactly one of two ways:
+    `chance`, from 0 to 1, "a set chance that the next trial repeats the last one's feature,
+    interleaved"; or `runs`, "runs of one feature whose lengths are drawn, then a switch": `(low,
+    high)`, whole numbers drawn evenly, or any of the five distributions, each length its draw
+    rounded down -- `NonAging`, say, whose switch is as likely after every trial of a run (the C3
+    plan's science review, I-8). A switch picks another value at random; within a value its
+    conditions play in
+    shuffled passes; the last trial is the last whose stimulus appeared, and a run counts only
+    those. The block ends on its `trials` or its time limit. A broken trial is not repeated and
+    is no shortfall, unless `again_at_once` brings it straight back. Block swaps, his 2020 design
+    [@westerberg2020priming; @bichot2002priming], stay a plan's block types (engine build C2b)."""
+
+    feature: str
+    chance: "float | None" = None
+    runs: "tuple[int, int] | Distribution | None" = None
+    again_at_once: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class Condition:
     """One condition of a block (engine spec §14.1): its `name`, the `values` it sets, the trials
     it is owed (`target`; a minimum where its block has another end rule), and **the trial
     structure it plays** (`structure`, one of the task's by name; `None`, the task's default) --
     the PI, 2026-10-07: "a task declares several trial structures; each condition names its own;
     interleaving them in a block is ordinary". Its trials count by that structure's table
-    (`Trial.counting`) unless its block counts by one of its own. **A value it sets gives way to
-    a live edit** of the same setting for the rest of the run (engine spec §14.7), and the trial
-    still counts toward it."""
+    (`Trial.counting`) unless its block counts by one of its own. **A value it sets may be a
+    `Distribution`, its own range** (the PI, 2026-10-30, Q1b: "a condition may draw its own
+    setting from its own range; the trial counts toward the condition and records the value it
+    got"), held at load to the rules a task's draw is. **A value it sets gives way to a live
+    edit** of the same setting for the rest of the run (engine spec §14.7), and the trial still
+    counts toward it."""
 
     name: str
     values: dict
@@ -1769,12 +1939,35 @@ class Condition:
 
 
 @dataclass(frozen=True, slots=True)
+class Factorial:
+    """**A block's conditions made from factors** (TSK-22, the PI, 2026-10-07: "factors and
+    levels declared; the framework makes the combinations minus declared exclusions, each named
+    from its levels; hand-listed conditions remain possible"). `factors` names settings the task
+    declares, each with its levels in order, each level a value its setting can hold or its own
+    range, a `Distribution` (Q1b). Every combination but those an exclusion matches becomes a
+    condition at load, after the block's hand-listed ones: `exclude` holds `{factor: level}`
+    dicts, each excluding every combination with all the levels it names. Each is named from its
+    levels in the factors' order (`"target_contrast=0.1, side=left"`), plays `structure` (`None`,
+    the task's default) and **is owed the same number of trials**, `target`, unless `targets`
+    gives its own by that name (the PI, 2026-10-30, Q4, "Yes, each cell equal": "a hand-written
+    number per combination allowed"). The review report lists them all, and each run's start row
+    records them."""
+
+    factors: "dict[str, tuple]"
+    exclude: tuple = ()
+    target: int = 1
+    targets: "dict[str, int]" = field(default_factory=dict)
+    structure: "str | None" = None
+
+
+@dataclass(frozen=True, slots=True)
 class Block:
     """One block type (engine spec §13.5): its `name`, its `conditions`, and how a block of it
     ends -- every condition's target used up, and where it declares them a criterion, a number of
-    trials, or a time limit -- with how it orders its conditions, what it counts by and whether it
-    drums. A name is what each trial's row records as its `block`, the block's type (wl-preproc
-    reads it so), so no two block types of one plan share one."""
+    trials, or a time limit -- with how it orders its conditions, what it counts by, whether it
+    drums, what it draws and the conditions it makes from factors (engine build C3). A name is
+    what each trial's row records as its `block`, the block's type (wl-preproc reads it so), so no
+    two block types of one plan share one."""
 
     name: str
     conditions: "list[Condition]"
@@ -1815,6 +2008,17 @@ class Block:
     #: not run, "time ran out" (`scheduler.TIME`). `None`, no limit. Not a welfare limit: the
     #: out-of-cage limit ends the session whatever a block says.
     time_limit_s: "float | None" = None
+    #: **Its own draws**, by setting (the PI, 2026-10-30, Q1a: "a block type may replace it
+    #: (narrow or widen)"): a `Distribution` here replaces the task's (`Task.draws`) in this block,
+    #: or draws a setting the task does not. **"Never both", block by block**: a setting is drawn
+    #: by the block or given by its conditions, not both, so a block whose conditions give a
+    #: setting the task draws says `BY_CONDITIONS` for it here, or is refused at load
+    #: (`check.check_task`). Empty, the task's draws.
+    draws: "dict[str, Distribution | str]" = field(default_factory=dict)
+    #: **Conditions made from factors** (`Factorial`), expanded at load into ordinary conditions
+    #: after `conditions`, each counted, repeated, overridden and checked as a hand-listed one is
+    #: (engine build C3). `None`, its hand-listed conditions only.
+    factorial: "Factorial | None" = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1915,7 +2119,8 @@ class Plan:
 class Task:
     """One task (engine spec §3.5): its trial structures by name (§13.3), `default` the one the
     plain run plays and a condition naming no structure plays, its plans by name (§13.1; engine
-    build C2b), and what XC-288 §4 has it declare: what its settings mean beyond the shared list
+    build C2b), what it draws each trial (`draws`; engine build C3), and what XC-288 §4 has it
+    declare: what its settings mean beyond the shared list
     (`meanings`; `declarations.COMMON`), what it offers to choose -- a `Choice`, or `NO_CHOICE` --
     how its reaction time is defined, and whether it needs a fixed head. **Its shape is refused as
     it is built**, as a `Param`'s start is; what it declares is checked at load
@@ -1934,6 +2139,12 @@ class Task:
     #: at run start, the first preselected on the page (the PI, 2026-10-19, "Preselect first, keep
     #: plain"). Empty, the plain run only: one block of the default structure, every trial paying.
     plans: "dict[str, Plan]" = field(default_factory=dict)
+    #: **Its draws, by setting** (engine build C3; the PI, 2026-10-30, Q1a: "one default for the
+    #: task, the plain run included; a block type may replace it"): each drawn setting's
+    #: `Distribution`, drawn on every trial of a block that neither replaces it (`Block.draws`)
+    #: nor gives the setting by its conditions. Empty, nothing drawn. Its shape is refused as it is
+    #: built; what each draw declares, at load (`check.check_task`).
+    draws: "dict[str, Distribution]" = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not isinstance(self.structures, dict) or not self.structures:
@@ -1969,6 +2180,16 @@ class Task:
                 raise ValueError(f"a plan is named by text, not {name!r}")
             if not isinstance(plan, Plan):
                 raise ValueError(f"plan {name!r} is a Plan, not {type(plan).__name__}")
+        if not isinstance(self.draws, dict):
+            raise ValueError("a task's draws are a dict of setting names to Distributions")
+        for name, drawn in self.draws.items():
+            if not isinstance(name, str) or not name:
+                raise ValueError(f"a draw names its setting by text, not {name!r}")
+            if not isinstance(drawn, Distribution):
+                raise ValueError(
+                    f"draw {name!r} is a Distribution (Uniform, Weighted, TruncatedNormal, "
+                    f"Listed or NonAging), not {type(drawn).__name__}"
+                )
 
     @property
     def trial(self) -> Trial:

@@ -373,7 +373,9 @@ an unregistered code at load time.
 
 **The task object, since engine build C1.** A task file defines one `Task` (`wl_xcon/task.py`;
 engine spec §3.5): its trial structures by name, the default one -- the plain run's, and a
-condition's that names none -- its plans (since engine build C2b, below), what each of its
+condition's that names none -- its plans (since engine build C2b, below), the settings it draws
+at random each trial and from what (`Task.draws`, which a block type may replace with its own,
+`Block.draws`; since engine build C3), what each of its
 settings means (XC-288 §4.1: clear-cut with a direction, expected with
 a direction and a note, or not a difficulty setting; and whether the setting is a criterion or a
 stimulus), what it offers to choose (or `NO_CHOICE`) and how its reaction time is defined (§4.3),
