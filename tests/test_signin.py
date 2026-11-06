@@ -762,7 +762,9 @@ def test_keys_that_cannot_be_cached_are_still_live_keys_and_the_thread_holds(tmp
 
 
 @pytest.mark.parametrize("first_load_raises_early", [False, True])
-def test_a_load_that_raises_after_it_holds_keys_is_a_load_that_brought_them(tmp_path, monkeypatch, first_load_raises_early):
+def test_a_load_that_raises_after_it_holds_keys_is_a_load_that_brought_them(
+    tmp_path, monkeypatch, first_load_raises_early
+):
     monkeypatch.setattr(signin, "RETRY_EVERY_S", 0.05)
     monkeypatch.setattr(signin, "KEY_REFRESH_S", 30)
     issuer = Issuer()
@@ -799,7 +801,15 @@ def test_the_keys_thread_outlives_a_say_that_raises(tmp_path, monkeypatch):
     monkeypatch.setattr(signin, "RETRY_EVERY_S", 0.05)
     monkeypatch.setattr(signin, "KEY_REFRESH_S", 0.05)
     issuer = Issuer()
-    checker = _checker(tmp_path, issuer)
+    unnamed = {"to_raise": 1}  # the first load raises an unnamed error too: `say` is called from `except`
+
+    def fetch(url, **kwargs):
+        if unnamed["to_raise"]:
+            unnamed["to_raise"] -= 1
+            raise RuntimeError("nobody named this")
+        return issuer.fetch(url, **kwargs)
+
+    checker = _checker(tmp_path, issuer, fetch)
 
     def broken(said):
         raise BrokenPipeError("the terminal is gone")
