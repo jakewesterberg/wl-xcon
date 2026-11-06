@@ -392,6 +392,13 @@ PANDOC_KEY = re.compile(r"[A-Za-z0-9_](?:[A-Za-z0-9_]|[:.#$%&+?<>~/-](?=[A-Za-z0
 #: short name included) is read, so a decorator (`@dataclass`) or a handle is not taken
 #: for a citation.
 LIBRARY_SHAPED = re.compile(r"[a-z0-9]+[0-9]{4}[a-z]+(?![A-Za-z0-9_])")
+#: Pandoc's braced key, `@{...}`, in brackets or out. The rule is as pandoc 3.8 behaved
+#: when run on 2026-11-06 (`-f markdown -t json`): no whitespace inside it, so `@{Jones 2021}`
+#: is not a citation; a final period is kept; `@{}` is a citation with an empty key (read
+#: here, so that it fails to resolve); balanced braces inside are allowed and are not read
+#: here (`@{a{b}c}`). The manual's wording of this rule was not read: UNVERIFIED. Read
+#: wherever an `@` starts a citation, whatever its shape.
+BRACED_KEY = re.compile(r"\{([^{}\s]*)\}")
 
 
 def prose(text: str) -> str:
@@ -436,12 +443,15 @@ def citations(text: str) -> list[tuple[int, str]]:
             before = text[start - 1] if start else " "
             if depth:
                 starts_word = before.isspace() or before in "[;"
-                key = PANDOC_KEY.match(text, at + 1) if starts_word else None
+                bare = starts_word and PANDOC_KEY.match(text, at + 1) or None
             else:
                 inside_word = before.isalnum() or before in "_.@"
-                key = None if inside_word else LIBRARY_SHAPED.match(text, at + 1)
-            if key:
-                found.append((text.count("\n", 0, at) + 1, key[0]))
+                bare = None if inside_word else LIBRARY_SHAPED.match(text, at + 1)
+            braced = None if (before.isalnum() or before in "_.@") else BRACED_KEY.match(text, at + 1)
+            if braced and (not depth or starts_word):
+                found.append((text.count("\n", 0, at) + 1, braced[1]))
+            elif bare:
+                found.append((text.count("\n", 0, at) + 1, bare[0]))
     return found
 
 
@@ -466,6 +476,9 @@ def test_citations_are_read_from_prose_only():
             "nor @dataclass; [@nu2002thirteen] is, and `[@xi2003fourteen]` in code is not.",
             "Any Pandoc key is read in brackets, after an inner one too: [see [sic] @Doe99].",
             "A short name's digit does not hide a bare key: @nc3rs2012refining says so.",
+            "Pandoc's braced key is read outside brackets, @{Smith:2020/a} says, and in them:",
+            "[see @{Foo_bar.baz.}; -@{brace.key}, p. 3], but a space ends it, so @{Jones 2021} and [@{x y}]",
+            "are not citations, and an empty one, @{}, is one with an empty key, nor [@{] unclosed.",
         ]
     )
     assert citations(text) == [
@@ -479,6 +492,10 @@ def test_citations_are_read_from_prose_only():
         (16, "nu2002thirteen"),
         (17, "Doe99"),
         (18, "nc3rs2012refining"),
+        (19, "Smith:2020/a"),
+        (20, "Foo_bar.baz."),
+        (20, "brace.key"),
+        (21, ""),
     ]
 
 

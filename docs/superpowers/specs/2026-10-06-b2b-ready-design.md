@@ -87,6 +87,10 @@ keeps going:
 - It prints the first outcome to the terminal (`wlx serve: sign-in keys from …`, or the
   keys-unavailable sentence), and again whenever the rig goes from no keys to keys or back.
   Each retry that changes nothing prints nothing.
+  *(2026-10-31, XC-233: an error the load or refresh does not name is printed once,
+  `sign-in keys: <Error>: ...; trying again`, until the next attempt that returns, and the
+  schedule goes on. A cache write that fails for any reason leaves the keys held; a load's
+  sentence then says "not cached" and a refresh says nothing. A `say` that raises is dropped.)*
 
 Until the first load returns, the https page is served in its keys-unavailable mode, and
 commands from the network are refused with that sentence (b2b spec §5, unchanged).
