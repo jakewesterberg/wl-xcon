@@ -2806,6 +2806,8 @@ _SCRIPT = """
   var heldParams = null;
   var heldMoments = null;
   var pressedAt = null;
+  var PRESS_MS = 10000;
+  var rangeOut = {};
   var markNo = null;
   var rewarding = false;
   var REWARD_LOST = "unknown: this page lost wlx serve's answer, so whether the reward was given is not known, and it was not sent again; check the session's fluid total before pressing again";
@@ -2889,7 +2891,7 @@ _SCRIPT = """
   // press was lost -- in WebKit, which never focuses a clicked button, and now in Chromium). A
   // release the page never sees ends the hold after ten seconds.
   function pressing() {
-    return pressedAt !== null && performance.now() - pressedAt < 10000;
+    return pressedAt !== null && performance.now() - pressedAt < PRESS_MS;
   }
   // Only a field being typed in holds the cards, not a button clicked: Chromium focuses the
   // button a person pressed (*hand back*, *change the range*), and the cards then never showed
@@ -2902,6 +2904,10 @@ _SCRIPT = """
   function swap(id, html) {
     if (id === "params" && busy()) { heldParams = html; return; }
     if (id === "moments" && pressing()) { heldMoments = html; return; }
+    // A frame shown is the newest: an older one held meanwhile must never be written back over
+    // it by a later release (fix round 3 of the C3 plan's Task 18).
+    if (id === "params") { heldParams = null; }
+    if (id === "moments") { heldMoments = null; }
     var node = el(id);
     // The plan picker shows the plan its pre-flight was taken for, so a frame's choice stands.
     var chosen = node && node.tagName === "SELECT" && id !== "plan-sel" ? node.value : null;
@@ -3118,15 +3124,26 @@ _SCRIPT = """
       tell("not sent: no number of " + key + "'s range was changed", "crit");
       return;
     }
+    // The rig answers a range at its next trial boundary: while one is out, a second press of
+    // the same card would send the same range again (fix round 3).
+    if (rangeOut[key]) {
+      tell("not sent: the range of " + key + " is still being sent; wait for its answer", "crit");
+      return;
+    }
     if (!clearAllowed(detail, "range/" + key)) { return; }
+    // The text of each field as it is sent: a number typed while the press is out is not.
+    var sentText = Array.prototype.map.call(fields, function (input) { return input.value; });
+    rangeOut[key] = true;
     post({ kind: "range", name: key, numbers: numbers }, function (answer) {
-      // Sent -- and only then (fix round 2): the typed numbers no longer hold the cards, and any
+      // Sent -- and only then (fix round 2): the numbers sent no longer hold the cards, and any
       // frame held meanwhile is shown. A press the rig did not take can be sent again.
       if (answer.status !== "sent") { return; }
-      Array.prototype.forEach.call(fields, function (input) { input.defaultValue = input.value; });
+      Array.prototype.forEach.call(fields, function (input, i) {
+        input.defaultValue = sentText[i];
+      });
       markRanges();
       release();
-    });
+    }, function () { delete rangeOut[key]; });
   }
   function closeNote(note) {
     if (markNo === null) { return; }
@@ -3444,15 +3461,23 @@ _SCRIPT = """
       release();
     }
   });
+  // The primary button only; the hold ends with the press -- its pointer going up, cancelled,
+  // a context menu or a drag taking it over, the window losing focus -- or, a release the page
+  // never sees, when the ten seconds are up, when the held frame is shown (fix round 3).
   document.addEventListener("pointerdown", function (e) {
-    if (e.target && e.target.closest && e.target.closest("#params, #moments")) {
+    if (e.button === 0 && e.target && e.target.closest &&
+        e.target.closest("#params, #moments")) {
       pressedAt = performance.now();
+      setTimeout(release, PRESS_MS + 50);
     }
   });
   // After the click that follows the pointer going up has been handled.
   function unpress() { pressedAt = null; setTimeout(release, 0); }
   document.addEventListener("pointerup", function () { setTimeout(unpress, 0); });
   document.addEventListener("pointercancel", unpress);
+  document.addEventListener("contextmenu", unpress);
+  document.addEventListener("dragstart", unpress);
+  window.addEventListener("blur", unpress);
   document.addEventListener("keydown", function (e) {
     if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) { return; }
     var t = e.target;
