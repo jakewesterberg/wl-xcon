@@ -160,14 +160,27 @@ class _Page(Simulated):
     """The page, as the service's link: its `n`th drain hands over `script[n]`, each body built
     into a command as `wlx serve` builds it (`serve.parse_command`), so a body the page could not
     send fails here. The service's own drains and a run's are counted alike, as
-    `tests/test_service.py`'s `_Script` counts them."""
+    `tests/test_service.py`'s `_Script` counts them.
+
+    It also bounds the session: the longest passing test here drains 23 times, so one past
+    `BUDGET` is a plan that never completes (a mutant of `scheduler.advance` or `task.of` runs it
+    toward the eight-hour limit), and fails here by name at once rather than hanging."""
+
+    BUDGET = 120
 
     def __init__(self, script: dict) -> None:
         super().__init__()
-        self.script, self.drains = script, 0
+        self.script, self.drains, self.exceeded = script, 0, None
 
     def drain(self) -> list:
         self.drains += 1
+        if self.drains > self.BUDGET:
+            # The session turns an exception in its loop into a fault stop, so the message is kept
+            # for the test's assertion on the stop to name (`exceeded`) as well as raised.
+            self.exceeded = (f"the session drained {self.drains} times, past the budget of "
+                             f"{self.BUDGET} (the longest passing test here counts 23): the "
+                             "plan is not completing")
+            raise AssertionError(self.exceeded)
         for body in self.script.get(self.drains, ()):
             # Through the command codec as well, as `Server.dispatch` and `ZmqLink` carry it.
             self.queue(_link._decode_command(_link._encode_command(parse_command(body))))
@@ -258,7 +271,7 @@ def test_a_session_driven_through_the_consoles_commands_reads_back_whole(tmp_pat
     session = service.session
     xcon = session.directory
     frame = service.link.published[-1]
-    assert (frame.phase, frame.stop_kind) == ("between_runs", "completed")
+    assert (frame.phase, frame.stop_kind) == ("between_runs", "completed"), service.link.exceeded
     # The value no animal could answer with: refused on the feed, never staged or applied.
     ((name, by, why),) = session.refusals
     assert (name, by) == ("target_hold", JAKE)

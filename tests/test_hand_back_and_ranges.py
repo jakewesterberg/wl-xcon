@@ -101,7 +101,14 @@ def _session(spec, link=None, world=_always_right, *, service=False) -> Session:
 class _Drained(Simulated):
     """A link that queues `script[n]` as the `n`th drain begins. The loop drains once before each
     trial, once each time the plan moves to another block, and once each pass while paused; a
-    command drained before trial `n` applies from trial `n + 1`."""
+    command drained before trial `n` applies from trial `n + 1`.
+
+    It also bounds the session: the longest passing test here drains 18 times (the paused one 8),
+    so a session past `BUDGET` drains is one that never ends or never resumes (a mutant of
+    `taskd._resume` leaves it paused toward the eight-hour limit), and fails here by name at once
+    rather than hanging."""
+
+    BUDGET = 100
 
     def __init__(self, script):
         super().__init__()
@@ -109,6 +116,9 @@ class _Drained(Simulated):
 
     def drain(self) -> list:
         self.drains += 1
+        assert self.drains <= self.BUDGET, (
+            f"the session drained {self.drains} times, past the budget of {self.BUDGET} (the "
+            "longest passing test here counts 18): it is not ending or not resuming")
         for command in self.script.get(self.drains, ()):
             self.queue(command)
         return super().drain()
