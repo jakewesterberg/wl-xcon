@@ -587,15 +587,56 @@ def test_a_lost_sample_beside_one_noise_velocity_is_no_saccade(lost):
     assert detect(trace, at) == []
 
 
-def test_every_run_is_confirmed_while_it_is_open():
+@pytest.mark.parametrize("ends", ["a break in time", "the trace's end"])
+def test_a_run_a_gap_or_the_trace_ends_is_long_enough_only_by_its_measured_velocities(ends):
+    """**The batch form's two other ways a run ends apply the rule too** (the review of
+    2026-11-06, its I2): the noise velocity beside a lost sample (`_stepped`, sample 302 lost) whose
+    run is ended by a 0.1 s hole in time at sample 306, or by the trace ending there, rather than
+    by a velocity inside the threshold. One measured velocity, the rest unknown: no saccade, where
+    version 2's rule, the run's length with its unknown velocities, made it (299, 306)."""
+    gaze, at = _fixating()
+    trace = _lost(_stepped(gaze), 302)
+    if ends == "a break in time":
+        at = [t + (0.1 if i >= 306 else 0.0) for i, t in enumerate(at)]
+    else:
+        trace, at = trace[:306], at[:306]
+    velocities = velocity(trace, at, Params())
+    eta = thresholds(velocities, Params())
+    assert [k for k in range(290, 306) if velocities[k] is not None and _outside(velocities[k], *eta)] \
+        == [299] and all(velocities[k] is None for k in range(300, 306)), \
+        "one velocity outside the threshold, then unknown ones to where the run ends"
+
+    assert detect(trace, at) == []
+
+
+class _Pinned(Detector):
+    """**The online detector with its thresholds held**, at `eta`: the batch form's, so the two
+    forms' rule is compared apart from the online threshold, which is the trial's so far and
+    differs from the whole trace's by design (S5 §5: per trial and adaptive)."""
+
+    def __init__(self, eta: "tuple[float, float]") -> None:
+        super().__init__()
+        self.eta = eta
+
+    def _refresh(self) -> None:
+        self._eta_x, self._eta_y = self.eta
+
+
+@pytest.mark.parametrize("seed", [20261104, 5, 9, 23, 28])
+def test_every_run_is_confirmed_while_it_is_open(seed):
     """**Version 3 confirms a run only while it is open** (seeded): 200 saccades of 2 to 16
     samples, of random size and direction, each losing one to three samples from six before its
     onset to twelve into it. A run's measured velocities are counted as they come, so the one that
     makes six is outside the threshold and the run still open: every confirmation is made in
-    flight, and the online detector reports each saccade the batch form does, within two samples
-    of its start (its threshold is the trial's so far, the batch form's the whole trace's). Version
-    2 confirmed some on the velocity that ends the run."""
-    rng = random.Random(20261104)
+    flight. Version 2 confirmed some on the velocity that ends the run.
+
+    **And online and batch apply one rule**: with the online thresholds held at the batch form's
+    (`_Pinned`), the online detector reports exactly the saccades the batch form does, at the same
+    starts. Left adaptive, the online threshold is the trial's so far, and a run near it can have
+    six measured velocities outside one threshold and five outside the other: compared so, with
+    starts within two samples, this held on the first seed and failed on four of these (the review
+    of 2026-11-06, its M4; 53 of 12,200 traces over 61 seeds, against none held)."""
+    rng = random.Random(seed)
     confirmed = 0
     for _ in range(200):
         onset = rng.randint(150, 300)
@@ -605,9 +646,9 @@ def test_every_run_is_confirmed_while_it_is_open():
         found = _confirmations(lost, at)
         confirmed += len(found)
         assert all(flying for _, _, flying in found), (onset, found)
-        batch = detect(lost, at)
-        assert len(found) == len(batch) and all(
-            abs(got.start - want.start) <= 2 for (_, got, _), want in zip(found, batch)), onset
+        held = _Pinned(thresholds(velocity(lost, at, Params()), Params()))
+        assert [s.start for t, g in zip(at, lost) if (s := held.accept(t, g)) is not None] \
+            == [s.start for s in detect(lost, at)], onset
 
     assert confirmed > 100
 
