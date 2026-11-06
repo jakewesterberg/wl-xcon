@@ -188,7 +188,23 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: holding a `Polar` could not be encoded at all. Every other value, a pair another setting holds
 #: included, is carried as before, and no value a console can send is a position (`_setting`). A
 #: reader of 17 refuses 18 and 18 refuses 17, by name.
-SCHEMA = 18
+#:
+#: 19 (engine build C3; its spec §6, the PI, 2026-10-30; engine spec §14.7: "the console shows
+#: which conditions an edit overrides"): where each setting's value comes from -- `ParamRow.source`,
+#: `"task"`, `"run"`, `"conditions"`, `"draw"` or `"person"` in the open block, `None` between runs
+#: and for a ceiling; `ParamRow.conditions`, the run's plan's conditions that set or draw it;
+#: `ParamRow.draw`, the open block's draw of it in the rig's words; `ParamRow.numbers`, that draw's
+#: numbers a person may change live, `None` where none may be -- and each staged change's `kind`
+#: and `overrides`, the conditions it will override, named before it applies: a hand-back, a live
+#: range and a revert's changes are staged rows too, a range's `was` and `now` the rig's words and
+#: a hand-back's `now` the run's own value or `None`; and `Telemetry.moments`, the moments of the
+#: run in progress a revert can go back to (`MomentRow`), each with what a revert to it changes
+#: (`MomentRow.changes`); a card whose draw's range a person changed live says `"range"`, and names
+#: at most `CONDITIONS_SHOWN` conditions, the rest counted (`ParamRow.more`); a staged range's
+#: `overrides` names the blocks it reaches; and `Telemetry.eased`, the settings a person's change
+#: kept the latest trial out of moving up by (the engine C3 plan's reviews). A reader of 18
+#: refuses 19 and 19 refuses 18, by name.
+SCHEMA = 19
 
 #: How many refusals a session keeps, per source, and therefore how many one
 #: `Telemetry` frame can carry.
@@ -230,6 +246,12 @@ RECENT_OUTCOMES = 60
 #: and the session record keeps every one (`record.CONTROLS`).
 CONTROL_HISTORY = 50
 
+#: How many conditions a card names that set or draw its setting (`ParamRow.conditions`; schema
+#: 19), the rest counted (`ParamRow.more`): a factorial can make thousands, and a frame is
+#: re-encoded at every trial boundary (the engine C3 plan's engineering review, M-5). An
+#: engineering default, a display bound as `CONTROL_HISTORY` is, not a measurement.
+CONDITIONS_SHOWN = 20
+
 
 @dataclass(frozen=True, slots=True)
 class Staged:
@@ -263,13 +285,29 @@ class Staged:
     a whole position, which only code stages, a console sending numbers and words alone
     (`_setting`) -- the rig's words for that position, eccentricity and direction first with its
     (x, y) beside them (`review.position_words`; schema 18, XC-401). A console only shows them.
+
+    **What kind of change it is, and what it will override** (schema 19; engine build C3's spec
+    §6), from `taskd.Session.staged`, in the order offered. `kind` is `set`, a value a person
+    staged; `hand_back`, a setting a person holds handed back, `was` the person's value and `now`
+    the run's own where the run takes it back, else `None` (the conditions or the draw give it
+    again); `range`, the numbers of the draw the open block uses changed live, `was` and `now` that
+    draw before and after in the rig's words (`variation.words`); or `revert`, any of those a
+    revert offers, all of one revert's rows staged together. `overrides` names the conditions of the
+    run's plan that set or draw the setting, whose value the change will replace from the next
+    trial (TSK-19), **before it applies**: empty for a ceiling and a hand-back, which override no
+    condition, and before a run, when no plan is played. **For a person's range** (`kind`
+    `range`) it names instead the blocks of the run's plan that draw from the draw it changes,
+    which it reaches for the rest of the run (the engine C3 plan's science review, M-2); a
+    revert's range names none.
     """
 
     name: str
     was: float | str | None
-    now: float | str
+    now: float | str | None
     by: Actor
     bounded: bool
+    kind: str = "set"
+    overrides: tuple = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -306,6 +344,11 @@ class ParamRow:
     (x, y) pair where its choices declare it a position -- which only code puts there, a console
     sending numbers and words alone (`_setting`) -- carries it in `position`, the rig's words for
     it, and `value` is `None`.
+
+    **Where its value comes from** (schema 19; engine build C3's spec §6: "each setting's card
+    says where its value comes from ... and which conditions set or draw it"), read as the run in
+    progress plays its open block: `source`, `conditions`, `draw` and `numbers`, below. Between
+    runs, and for a ceiling, there is none.
     """
 
     name: str
@@ -320,10 +363,38 @@ class ParamRow:
     #: console converts a position or formats one its own way; what is converted to a thousandth,
     #: what the value holds to six significant figures. `None` for every other value.
     position: str | None = None
+    #: **Where the value comes from in the open block** (schema 19), in the order a trial's values
+    #: are built (engine spec §17.1): `"person"` where a person holds it, over all the rest;
+    #: `"draw"` where the open block draws it, by its own draw or the task's, as written, or
+    #: `"range"` where a person changed that draw's range live (the engine C3 plan's science
+    #: review, I-4); `"conditions"` where
+    #: the open block's conditions set it, each a value or its own range; else `"run"`, a value the
+    #: run was given, or `"task"`, the task's start -- the run start row's two `layers`. `None`
+    #: where nothing gives it, for a ceiling, and between runs.
+    source: str | None = None
+    #: **Every condition of the run's plan that sets or draws it** (schema 19; TSK-19), by name, in
+    #: the plan's order: what a person's value replaces from the next trial until it is handed
+    #: back. Empty where none does, for a ceiling, and between runs. At most `CONDITIONS_SHOWN`,
+    #: the first in the plan's order (the engine C3 plan's engineering review, M-5).
+    conditions: tuple = ()
+    #: **The open block's draw of it, in the rig's words** (schema 19; `variation.words`), a range
+    #: changed live included, a direction's from 0 to 360: what a hand-back gives it back to, so
+    #: said while a person holds it too. `None` where the open block draws it by neither its own
+    #: draw nor the task's.
+    draw: str | None = None
+    #: **That draw's numbers a person may change live** (schema 19; `variation.LIVE_NUMBERS`), by
+    #: name, the range a console may send back (`SetRange`). `None` where none may be: no draw in
+    #: force, a weighted set or a prepared list (XC-443), a setting declared not live, or one
+    #: placing a direction, whose range is not changed live in engine build C3 (XC-445).
+    numbers: dict | None = None
+    #: **How many more conditions set or draw it** than `conditions` names (schema 19; the engine
+    #: C3 plan's engineering review, M-5): 0 where it names them all.
+    more: int = 0
 
     @classmethod
     def of(cls, name: str, unit: str, low: float | None, high: float | None, value: object,
-           bounded: bool, choices=()) -> "ParamRow":
+           bounded: bool, choices=(), source: str | None = None, conditions=(),
+           draw: str | None = None, numbers: dict | None = None) -> "ParamRow":
         """One row from `Session.parameters`' shape, `choices` the setting's own: a value that
         is a whole position (`review.position_words`: a `Polar`, or a pair where `choices`
         declare one) as its words in `position` -- a pair's eccentricity the true visual angle
@@ -332,13 +403,20 @@ class ParamRow:
         `geometry.polar_deg`; what is converted shown to a thousandth, and what the value holds
         to six significant figures (`:g`), so
         `Polar(8.123456789, 45)` reads `8.12346°`; a position holding an infinity or a NaN is
-        said to be no position, as written. Any other value as it is."""
+        said to be no position, as written. Any other value as it is. Where it comes from
+        (`source`, `conditions`, `draw`, `numbers`; schema 19) as given, the conditions cut to the
+        first `CONDITIONS_SHOWN` and the rest counted (`more`)."""
         from wl_xcon.review import position_words
 
+        named = tuple(conditions)
+        shown = named[:CONDITIONS_SHOWN]
+        more = len(named) - len(shown)
         words = position_words(value, choices)
         if words is None:
-            return cls(name, unit, low, high, value, bounded)
-        return cls(name, unit, low, high, None, bounded, words)
+            return cls(name, unit, low, high, value, bounded, None, source, shown, draw,
+                       numbers, more)
+        return cls(name, unit, low, high, None, bounded, words, source, shown, draw, numbers,
+                   more)
 
 
 @dataclass(frozen=True, slots=True)
@@ -363,9 +441,15 @@ class Control:
     """One recent control event for a console's changes feed (P4d-2b spec §5.1):
     from `taskd.Session.controls`. `kind` is `stop`, `pause`, `resume`, `mark`,
     `note`, `schedule`, `cancel`, `scheduled_stop`, `set` (a staged setting applied),
-    `reward` (a manual reward, given while paused), `clear` (a condition's debt cleared by a
+    `reward` (a manual reward, given while paused), `end` (a `wlx taskd` session ended by a
+    person, its animal's return awaited), `clear` (a condition's debt cleared by a
     person), `drum` (drumming switched by a trainer), `training` (a training setting
-    switched by a trainer) or `warning` (a warning said as it
+    switched by a trainer), `next_block` and `back_block` (the run moved on a block, or back
+    one, by a person) and `block` (the plan moving to another block on its rule or its time;
+    engine build C2b), `hand_back` (a setting a person held handed back), `range` (a drawn
+    range changed live) and `revert` (each change of a revert; engine build C3) -- each of
+    `set`, `hand_back`, `range` and `revert` applied, or said dropped as a run ends before it
+    applies -- or `warning` (a warning said as it
     happens, since the PI's rulings on XC-352, 2026-10-11);
     `by` is who sent it, `None` for a mark's stamp, whose sender arrives with its note;
     `at` is on the session's anchored clock; `said` is the sentence after the kind.
@@ -379,6 +463,23 @@ class Control:
     by: Actor | None
     at: float
     said: str
+
+
+@dataclass(frozen=True, slots=True)
+class MomentRow:
+    """**One moment of the run in progress a revert can go back to** (schema 19; engine build C3's
+    spec §8; the PI, 2026-10-07, TSK-43, "Yes, with revert"): from `taskd.Session.moments`.
+    `change` is the change id a console sends back (`Revert`), 0 for the run's start; `at`, when
+    it was kept, on the session's anchored clock; `said`, the act in the changes feed's words, or
+    "the run's start"; `changes`, what a revert to it would change, from what the run will hold
+    once all offered applies, in the changes feed's words, empty where it would change nothing
+    (`taskd.Session._preview`; the engine C3 plan's science review, M-1: a preview before one tap
+    restores many settings)."""
+
+    change: int
+    at: float
+    said: str
+    changes: tuple = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -707,7 +808,9 @@ class Telemetry:
     owed: dict
     #: Every change accepted but not yet applied, from `session.staged` -- see
     #: `Staged`, whose `bounded` flag says which vocabulary the name belongs to, not
-    #: when it lands. Every row lands at the next trial boundary.
+    #: when it lands. Every row lands at the next trial boundary. Since schema 19 a hand-back, a
+    #: live range and a revert's changes too, in the order offered, each with its kind and the
+    #: conditions it will override.
     staged: tuple
     #: The most recent `REFUSAL_HISTORY` refusals, oldest first, from
     #: `session.refusals` (itself capped) and `session.link.refused` -- see
@@ -732,7 +835,8 @@ class Telemetry:
     #: named one, which a console says rather than filling in.
     bounds_config: str
     #: `session.parameters`, as `ParamRow`s: the task's declarations, then the welfare
-    #: ceilings a console may stage (P4d-2b spec §3).
+    #: ceilings a console may stage (P4d-2b spec §3); since schema 19 each with where its value
+    #: comes from in the open block and the conditions that set or draw it.
     params: tuple
     #: The day's fluid floor, `welfare.bounds.minima[DAILY_FLUID].value` -- what
     #: `fluid_today_ml` is read against. `Welfare` refuses a config without one, so it
@@ -865,6 +969,14 @@ class Telemetry:
     #: `scheduler.fell_back` (schema 17): how many times the run's plan fell back a stage (the
     #: science review, I2); 0 between runs.
     fell_back: int
+    #: `session.moments`, as `MomentRow`s (schema 19; engine build C3's spec §8): the moments of
+    #: the run in progress a revert can go back to, newest first, at most `CONTROL_HISTORY`, the
+    #: run's start always kept, last; none between runs, when no revert reaches back.
+    moments: tuple
+    #: `session.eased` (schema 19; the engine C3 plan's engineering review, I-2, and its science
+    #: review, I-4): the settings a person's live change kept the latest trial out of moving up
+    #: by, sorted, where its block's rule moves the animal on; empty otherwise and between runs.
+    eased: tuple
 
     @classmethod
     def of(cls, session, tally, scheduler, index: int) -> "Telemetry":
@@ -919,7 +1031,7 @@ class Telemetry:
         limit = session.welfare.bounds.ceilings.get(OUT_OF_CAGE)
         parameters = session.parameters
         # Each setting's choices, which say whether a pair it holds is a position (XC-401's fix
-        # round, M2): `Session.parameters`' last item.
+        # round, M2): `Session.parameters`' seventh item.
         choices = {row[0]: row[6] for row in parameters}
         return cls(
             schema=SCHEMA,
@@ -977,11 +1089,13 @@ class Telemetry:
             # of coupling that breaks silently the day the private shape changes.
             # A value that is a whole position as the rig's words for it (schema 18, XC-401):
             # a `Polar` is no value the wire carries, and no console converts one. A pair is
-            # one only where its setting's choices say so (`parameters`' last item).
+            # one only where its setting's choices say so (`parameters`' seventh item). Each
+            # row's kind and the conditions it will override (schema 19).
             staged=tuple(
                 Staged(name=n, was=_carried(w, choices.get(n, ())),
-                       now=_carried(v, choices.get(n, ())), by=b, bounded=bd)
-                for n, w, v, b, bd in session.staged
+                       now=_carried(v, choices.get(n, ())), by=b, bounded=bd, kind=k,
+                       overrides=o)
+                for n, w, v, b, bd, k, o in session.staged
             ),
             # `session.refusals`, already public -- unlike `_staged`, nothing private
             # to reach around -- plus `session.link.refused`, fix round 1's CRITICAL
@@ -1086,6 +1200,10 @@ class Telemetry:
             passed_at=(None if scheduler is None or session.phase != "running"
                        else scheduler.passed_at),
             fell_back=0 if scheduler is None or session.phase != "running" else scheduler.fell_back,
+            # Engine build C3 (schema 19): the run's moments a revert can go back to, read from the
+            # session, which keeps none between runs.
+            moments=tuple(MomentRow(*row) for row in session.moments),
+            eased=session.eased,
         )
 
 
@@ -1273,6 +1391,8 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
                 "now": s.now,
                 "by": actors.to_map(s.by),
                 "bounded": s.bounded,
+                "kind": s.kind,
+                "overrides": list(s.overrides),
             }
             for s in telemetry.staged
         ],
@@ -1290,6 +1410,11 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
                 "value": p.value,
                 "bounded": p.bounded,
                 "position": p.position,
+                "source": p.source,
+                "conditions": list(p.conditions),
+                "draw": p.draw,
+                "numbers": p.numbers,
+                "more": p.more,
             }
             for p in telemetry.params
         ],
@@ -1352,6 +1477,9 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
         "trials_to_run": telemetry.trials_to_run,
         "passed_at": telemetry.passed_at,
         "fell_back": telemetry.fell_back,
+        "moments": [{"change": m.change, "at": m.at, "said": m.said, "changes": list(m.changes)}
+                    for m in telemetry.moments],
+        "eased": list(telemetry.eased),
     }
 
 
@@ -1505,13 +1633,15 @@ def _telemetry_from(data: dict) -> Telemetry:
         outcomes=data["outcomes"],
         hangs=data["hangs"],
         owed=data["owed"],
-        staged=tuple(Staged(**{**s, "by": actors.from_map(s["by"])}) for s in data["staged"]),
+        staged=tuple(Staged(**{**s, "by": actors.from_map(s["by"]),
+                                 "overrides": tuple(s["overrides"])}) for s in data["staged"]),
         refusals=tuple(_refused_in(r) for r in data["refusals"]),
         refusals_dropped=data["refusals_dropped"],
         task=data["task"],
         allocation=data["allocation"],
         bounds_config=data["bounds_config"],
-        params=tuple(ParamRow(**p) for p in data["params"]),
+        params=tuple(ParamRow(**{**p, "conditions": tuple(p["conditions"])})
+                     for p in data["params"]),
         floor_ml=data["floor_ml"],
         out_of_cage_limit_s=data["out_of_cage_limit_s"],
         wall_at=data["wall_at"],
@@ -1572,6 +1702,9 @@ def _telemetry_from(data: dict) -> Telemetry:
         trials_to_run=data["trials_to_run"],
         passed_at=data["passed_at"],
         fell_back=data["fell_back"],
+        moments=tuple(MomentRow(**{**m, "changes": tuple(m["changes"])})
+                      for m in data["moments"]),
+        eased=tuple(data["eased"]),
     )
 
 

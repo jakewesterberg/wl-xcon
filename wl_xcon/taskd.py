@@ -169,18 +169,18 @@ def _next_occurrence(hhmm: str, wall: float) -> float:
     raise ValueError(f"no occurrence of {hhmm} after {wall} within a day")
 
 
-def _overriding(blocks, name: str) -> str:
-    """What a live edit of `name` now overrides, for its line on the changes feed (engine spec
-    §14.7; the engine C2b plan's science review, I5): the conditions of the run's blocks that set
-    it, whose value the edit replaces for the rest of the run -- setting it back does not undo
-    that -- since the console's own showing of them is build C3's. Empty when none sets it."""
-    named = list(dict.fromkeys(
-        condition.name for block in blocks for condition in block.conditions
-        if name in condition.values))
+def _overrides_said(named: tuple[str, ...]) -> str:
+    """**What a live edit overrides, as its line on the changes feed says it** (engine spec §14.7;
+    the engine C2b plan's science review, I5; TSK-19): the conditions of the run's plan that set or
+    draw the setting (`Session._overrides`), whose value the edit replaces until it is handed back
+    (engine build C3's spec §6; typing the old value back does not hand it back). The card and the
+    staged change name them too since telemetry schema 19, and this line stays. Empty where none
+    does."""
     if not named:
         return ""
-    return (f"; for the rest of the run it overrides the value condition"
-            f"{'s' if len(named) > 1 else ''} {', '.join(named)} set")
+    if len(named) == 1:
+        return f"; until handed back it overrides what condition {named[0]} sets or draws"
+    return f"; until handed back it overrides what conditions {', '.join(named)} set or draw"
 
 
 def _draw_said(key: tuple) -> str:
@@ -707,7 +707,7 @@ class Session:
     #: spec §8): the run's start, then one kept after each act that moved a task setting or a
     #: range (`_apply_staged`), in the order applied. As each run starts, its start alone. **Never
     #: capped**, so a revert reaches any change of the run; the console's list of them is the
-    #: capped one, keeping the run's start (telemetry schema 19, the engine C3 plan's Task 17).
+    #: capped one, keeping the run's start (`moments`, telemetry schema 19).
     _moments: list = field(init=False, default_factory=list, repr=False)
     #: The session's last change id as the run in progress started (`_change`): the run's own
     #: change ids are those above it, the only ones a revert goes back to (`_revert`).
@@ -1742,10 +1742,27 @@ class Session:
 
     @property
     def staged(self) -> tuple:
-        """Every value accepted and not yet applied: `(name, was, now, by, bounded)`,
-        the exact shape `link.Telemetry.of` reads to build its `Staged` rows. A hand-back
-        and a live range waiting (`_pending`) are not among them: telemetry schema 18's
-        `Staged` row carries a value, and neither is one (engine build C3).
+        """Every change accepted and not yet applied, in the order offered (`_offered_acts`):
+        `(name, was, now, by, bounded, kind, overrides)`, the exact shape `link.Telemetry.of` reads
+        to build its `Staged` rows (telemetry schema 19; engine build C3's spec §6).
+
+        - **A value staged** (`_staged`, as `set` stages it): its `was` and `now`; `kind` `set`, or
+          `revert` where a revert staged it (`_acts`).
+        - **A hand-back offered** (`_pending`): the person's value, then the run's own where the
+          run takes the setting back, else `None`, the open block's conditions or its draw giving
+          it again; `kind` `hand_back`, or `revert`.
+        - **A live range offered** (`_pending`): the draw before and after it, in the rig's words
+          (`variation.words`), a range offered ahead of it on the same draw counted; `kind`
+          `range`, or `revert`. No direction's range is ever offered (XC-445), so none is said
+          from 0 to 360 here.
+        - **`overrides`**, what a value will override from the next trial, named **before it
+          applies** (TSK-19; the C3 spec §6: "today only the applied line on the feed does"):
+          every condition of the run's plan that sets or draws the setting (`_overrides`); none
+          for a ceiling (a reward size, though a task setting and a condition share its name) or
+          a hand-back, which override no condition, and none before a run, when no plan is
+          played. **For a person's range**, the blocks of the run's plan it reaches
+          (`_reaches`; the C3 plan's science review, M-2); none for a revert's, which puts back a
+          range the run held.
 
         **"Not yet applied" is true of every row, bounded or not** (PI, 2026-09-19).
         It was true of only the ordinary ones until then: a bounded row's value had
@@ -1755,11 +1772,30 @@ class Session:
         belongs to -- a welfare ceiling or the task's own `Param` -- and no longer
         says anything about when it lands.
 
-        The public face of `_staged`. `link.py` reaches `Session` only through its
+        The public face of `_staged` and `_pending`. `link.py` reaches `Session` only through its
         declared surface, never a private attribute -- this is what makes that true
         rather than merely stated.
         """
-        return tuple(self._staged)
+        ranges = {key: draw for key, (draw, _) in self._ranges.items()}
+        rows = []
+        for offer, act in self._offered_acts():
+            if not isinstance(offer, Pending):
+                name, was, now, by, bounded = offer
+                rows.append((name, was, now, by, bounded, "set" if act is None else "revert",
+                             () if bounded else self._overrides(name)))
+                continue
+            kind = offer.kind if act is None else "revert"
+            if offer.kind == "hand_back":
+                rows.append((offer.name, offer.was, offer.now, offer.by, False, kind, ()))
+                continue
+            declared, unit = self._declared_draw(offer.key), self._declared[offer.name].unit
+            before = ranges.get(offer.key)
+            ranges[offer.key] = offer.draw
+            rows.append((
+                offer.name, variation.words(declared if before is None else before, unit),
+                variation.words(declared if offer.draw is None else offer.draw, unit),
+                offer.by, False, kind, () if act is not None else self._reaches(offer.key)))
+        return tuple(rows)
 
     @property
     def recent_outcomes(self) -> tuple:
@@ -1770,21 +1806,34 @@ class Session:
     @property
     def controls(self) -> tuple:
         """The recent control events a console's changes feed lists, as `(kind, by,
-        at, said)`, oldest first (P4d-2b spec §5.1): `stop`, `pause`, `resume`, and
-        -- from the tasks that add them -- `mark`, `note`, `schedule`, `cancel`,
-        `scheduled_stop`, `set` (a staged setting applied) and `reward` (a manual
-        reward given while paused). `at` is the session's anchored clock; `said` is the
-        sentence a console shows after the kind. The public face of `_controls`,
-        for the reason `staged` is public; the session record keeps every one."""
+        at, said)`, oldest first (P4d-2b spec §5.1), each of a kind `link.Control` lists --
+        `stop`, `pause`, `resume`, `mark`, `note`, `set` (a staged setting applied), a hand-back,
+        a live range or a revert's change applied (engine build C3), and the rest. `at` is the
+        session's anchored clock; `said` is the sentence a console shows after the kind. The
+        public face of `_controls`, for the reason `staged` is public; the session record keeps
+        every one."""
         return tuple(self._controls)
 
     @property
     def parameters(self) -> tuple:
-        """Every settable value a console shows, as `(name, unit, low, high, value,
-        bounded, choices)` -- the shape `link.Telemetry.of` builds its `ParamRow`s from (P4d-2b
-        spec §3: "the parameter row is generated from it"). `choices` is the setting's own,
-        empty for a ceiling: they say whether a pair it holds is a position (schema 18, XC-401's
-        fix round, M2; `review.declares_position`).
+        """Every settable value a console shows, as `(name, unit, low, high, value, bounded,
+        choices, source, conditions, draw, numbers)` -- the shape `link.Telemetry.of` builds its
+        `ParamRow`s from (P4d-2b spec §3: "the parameter row is generated from it"). `choices` is
+        the setting's own, empty for a ceiling: they say whether a pair it holds is a position
+        (schema 18, XC-401's fix round, M2; `review.declares_position`).
+
+        **Where each value comes from** (telemetry schema 19; engine build C3's spec §6: "each
+        setting's card says where its value comes from (task, run, conditions, a draw and its
+        range, or a person) and which conditions set or draw it"), read while a run goes, as its
+        open block plays: `source` (`_source`); `conditions`, every condition of the run's plan
+        that sets or draws it (`_overrides`); `draw`, the open block's draw of it, its own or the
+        task's (`variation.in_force`), a range changed live in force (`_ranges`), in the rig's
+        words (`variation.words`, a direction's from 0 to 360), said while a person holds it too,
+        since a hand-back gives it back to that draw; and `numbers`, that draw's numbers a person
+        may change live (`variation.numbers`), `None` for a setting declared not live and for one
+        placing a direction (`variation.directions`), whose ranges `_range` refuses. Between runs,
+        and before the first, none of them, as for a ceiling: `None`, `()`, `None`, `None`. Read
+        between trials, never in a frame.
 
         The task's own `Param` declarations first, in declaration order, each with
         its value in `spec.values` (`None` when nobody set it); then every welfare
@@ -1796,16 +1845,145 @@ class Session:
         card for it would set the duration limit beside a fixation hold as though it
         were a task setting.
         """
-        declared = tuple(
-            (p.name, p.unit, p.low, p.high, self.spec.values.get(p.name), False, p.choices)
-            for p in self._params().values()
-        )
+        running = self.phase == "running"
+        in_force: dict = {}
+        turned: frozenset = frozenset()
+        if running:
+            in_force = variation.in_force(self._task, self._scheduler.block)
+            turned = variation.directions(self._task)
+        declared = []
+        for p in self._params().values():
+            source, conditions, draw, numbers = None, (), None, None
+            if running:
+                source, conditions = self._source(p.name, in_force), self._overrides(p.name)
+                if p.name in in_force:
+                    drawn, key = in_force[p.name]
+                    drawn = self._ranges.get(key, (drawn,))[0]
+                    draw = variation.words(drawn, p.unit, direction=p.name in turned)
+                    if p.live and p.name not in turned:
+                        numbers = variation.numbers(drawn)
+            declared.append((p.name, p.unit, p.low, p.high, self.spec.values.get(p.name), False,
+                             p.choices, source, conditions, draw, numbers))
         ceilings = tuple(
-            (name, ceiling.unit, 0.0, ceiling.maximum, ceiling.value, True, ())
+            (name, ceiling.unit, 0.0, ceiling.maximum, ceiling.value, True, (), None, (), None,
+             None)
             for name, ceiling in self.spec.bounds.ceilings.items()
             if name != OUT_OF_CAGE
         )
-        return declared + ceilings
+        return tuple(declared) + ceilings
+
+    def _source(self, name: str, in_force: dict) -> str | None:
+        """**Where `name`'s value comes from in the open block** (telemetry schema 19; engine build
+        C3's spec §6), read from the layer a trial's values take last (engine spec §17.1), which
+        wins, down: `"person"` where a person holds it (`_edited`); `"draw"` where the open block
+        draws it (`in_force`, its `variation.in_force`), as written, or `"range"` where that
+        draw's range was changed live (`_ranges`; the C3 plan's science review, I-4);
+        `"conditions"` where a condition of the
+        open block sets it, a value or its own range; `"run"` where the run was given it
+        (`_given`); `"task"` where only the task's start gives it (`_run_values`); else `None`. A
+        hand-back's `to` reads the open block the same way (`_to`)."""
+        if name in self._edited:
+            return "person"
+        if name in in_force:
+            return "range" if in_force[name][1] in self._ranges else "draw"
+        if any(name in condition.values for condition in self._scheduler.block.conditions):
+            return "conditions"
+        if name in self._given:
+            return "run"
+        if name in self._run_values:
+            return "task"
+        return None
+
+    def _overrides(self, name: str) -> tuple[str, ...]:
+        """**The conditions a person's value of `name` overrides**: every condition of the run's
+        plan (`_played`, its factorials expanded) that sets it or draws it from its own range, by
+        name, each once, in the plan's order (engine spec §14.7; TSK-19, "a live edit to a value a
+        condition sets wins"; engine build C3's spec §6). What a card names (`parameters`), what a
+        staged change names before it applies (`staged`), and what the changes feed's line says
+        as it applies (`_apply_staged`). Empty before any run, and where no condition gives it."""
+        if self._played is None:
+            return ()
+        return tuple(dict.fromkeys(
+            condition.name for block in self._played.blocks for condition in block.conditions
+            if name in condition.values))
+
+    @property
+    def moments(self) -> tuple:
+        """**The moments of the run in progress a revert can go back to**, as `(change, at, said,
+        changes)`, newest first -- the shape `link.Telemetry.of` builds its `MomentRow`s from
+        (telemetry schema 19; engine build C3's spec §8; the outline review's M-15): from
+        `_moments`, at most `link.CONTROL_HISTORY`, since a frame is re-encoded at every boundary,
+        and **the run's start always kept**, last, so a revert to it is offered however many acts
+        came after. The session keeps every moment, so a revert sent by its change id reaches one
+        not listed here.
+        None between runs, when no revert reaches back. **Each with what a revert to it would
+        change** (`_preview`; the C3 plan's science review, M-1). The public face of `_moments`,
+        for the reason `staged` is public."""
+        if self.phase != "running":
+            return ()
+        start, *since = self._moments
+        kept = since[::-1][:_link.CONTROL_HISTORY - 1]
+        ahead = self._ahead()
+        return tuple((moment.change, moment.at, moment.said, self._preview(moment, *ahead))
+                     for moment in (*kept, start))
+
+    def _reaches(self, key: tuple) -> tuple[str, ...]:
+        """**The blocks of the run's plan a range of the draw `key` reaches** (the C3 plan's
+        science review, M-2: "the staged row names the blocks it reaches, as it names the
+        conditions a value overrides"), by name, each once, in the plan's order: each that draws
+        its setting from that draw (`variation.in_force`), so the task's draw reaches every block
+        with no draw of its own of the setting, and a block's own draw that block alone. Read
+        between trials; a range is offered only while a run goes (`_range`)."""
+        name = key[-1]
+        return tuple(dict.fromkeys(
+            block.name for block in self._played.blocks
+            if variation.in_force(self._task, block).get(name, (None, None))[1] == key))
+
+    def _undone(self, then: Moment, values: dict, held: set,
+                ranges: dict) -> tuple[dict, list, dict]:
+        """**What going back to the moment `then` changes**, from what the run will hold once all
+        offered applies (`_ahead`'s `values`, `held` and `ranges`): each setting a person held
+        then, at another value now or not held now, with its value then; each setting held now
+        and not then, sorted, handed back; and each draw changed live then or since, by key,
+        sorted, to its range then (`None`, the declared one). `_revert` applies it, and each
+        moment previews it (`_preview`), so the two cannot disagree (the C3 plan's science
+        review, M-1)."""
+        restored = {name: value for name, value in then.held.items()
+                    if name not in held or values.get(name) != value}
+        handed = sorted(held - then.held.keys())
+        drawn = {key: then.ranges.get(key) for key in sorted({*ranges, *then.ranges})
+                 if ranges.get(key) != then.ranges.get(key)}
+        return restored, handed, drawn
+
+    def _preview(self, then: Moment, values: dict, held: set, ranges: dict) -> tuple[str, ...]:
+        """**What a revert to `then` would change, in the changes feed's words** (`MomentRow`'s
+        `changes`; the C3 plan's science review, M-1: "a one-step preview listing each setting and
+        the value it will take"), in the order the revert offers them (`_revert`): each setting
+        handed back, each draw put back to its range then (`_draw_said`, "as declared" for the
+        written one), then each value set back, by name. Empty where it would change nothing,
+        which a revert refuses."""
+        restored, handed, drawn = self._undone(then, values, held, ranges)
+        said = [f"{name} handed back" for name in handed]
+        for key, draw in drawn.items():
+            declared = self._declared.get(key[-1])
+            unit = "" if declared is None else declared.unit
+            said.append(f"{_draw_said(key)} → "
+                        f"{'as declared' if draw is None else variation.words(draw, unit)}")
+        for name in sorted(restored):
+            choices = self._declared[name].choices if name in self._declared else ()
+            said.append(f"{name} → {_shown(restored[name], choices)}")
+        return tuple(said)
+
+    @property
+    def eased(self) -> tuple:
+        """**The settings a person's live change kept the latest trial out of moving up by**,
+        sorted -- the shape `link.Telemetry.of` carries as `eased` (telemetry schema 19; the
+        C3 plan's engineering review, I-2, and its science review, I-4): the loop's latest verdict
+        (`_eased`), where its block has a rule that moves the animal on (`Scheduler.moves_up`), so
+        a console says it for as long as it lasts, beside the changes feed's warning said once a
+        block. Empty where nothing is kept out, and between runs. The public face of
+        `_eased_now`."""
+        return self._eased_now if self.phase == "running" else ()
 
     def _control(
         self,
@@ -2477,11 +2655,7 @@ class Session:
                 raise Exceeded(f"no change {change} has been made yet")
             then = next(moment for moment in reversed(self._moments) if moment.change <= change)
             values, held, ranges = self._ahead()
-            restored = {name: value for name, value in then.held.items()
-                        if name not in held or values.get(name) != value}
-            handed = sorted(held - then.held.keys())
-            drawn = {key: then.ranges.get(key) for key in sorted({*ranges, *then.ranges})
-                     if ranges.get(key) != then.ranges.get(key)}
+            restored, handed, drawn = self._undone(then, values, held, ranges)
             if not (restored or handed or drawn):
                 raise Exceeded(
                     "the run holds now what it held then, so there is nothing to revert")
@@ -3094,7 +3268,7 @@ class Session:
                 by,
                 at,
                 f"{said}{back}, from trial {index}"
-                + ("" if bounded else _overriding(self._scheduler.blocks, name)),
+                + ("" if bounded else _overrides_said(self._overrides(name))),
             )
             # A reward size's act moves no task setting and no range: it keeps no moment, and no
             # revert reaches it.
@@ -3281,6 +3455,13 @@ class Session:
     #: setting back to, and what an eased trial is judged against where no condition gives it
     #: (`Session._hand_back`, `_eased`: the engine C3 plan's Tasks 13 and 15).
     _run_values: dict = field(init=False, default_factory=dict, repr=False)
+    #: **The names the run in progress was given a value for** (its start row's `run` layer), the
+    #: rest of `_run_values` the task's starts: a card says which its value comes from
+    #: (`_source`; telemetry schema 19).
+    _given: frozenset = field(init=False, default=frozenset(), repr=False)
+    #: **The settings a person's change kept the latest trial out of moving up by**, where
+    #: its block's rule moves the animal on (`eased`; the C3 plan's engineering review, I-2).
+    _eased_now: tuple = field(init=False, default=(), repr=False)
     #: **The draws a person changed live in the run in progress** (engine build C3's spec §6, Q7b):
     #: each draw's key (`variation.in_force`'s) to the distribution in force and the change id that
     #: put it there. Empty as each run starts; filled only by a live range as it applies
@@ -3986,8 +4167,11 @@ class Session:
         # The settings edited live in this run, which win over a condition's (engine spec §14.7).
         self._edited = frozenset()
         self._unresolved_said = frozenset()
-        # The run's own values, before any live edit, and no draw changed live (engine build C3).
+        # The run's own values, before any live edit, which of them the run was given, and no draw
+        # changed live (engine build C3).
         self._run_values = {**starts, **given}
+        self._given = frozenset(given)
+        self._eased_now = ()
         self._ranges = {}
         # No trial's draws kept for a repeat, and every prepared list at its first place (engine
         # build C3).
@@ -4291,6 +4475,9 @@ class Session:
                 # it runs (`_eased`). An eased trial is left out of moving up and still counts
                 # toward moving back and toward its condition (`Scheduler.record`).
                 eased = self._eased(condition, values, sources, drawn.number)
+                # Said on the console as long as it lasts (`eased`; the C3 plan's engineering
+                # review, I-2), where the block's rule moves the animal on.
+                self._eased_now = eased if scheduler.moves_up else ()
                 # **A drawn direction is written from 0 to 360** (the PI, 2026-10-30; engine build
                 # C3's call 11): the rig chose the number, so the rig spells it; the trial runs on
                 # the value as drawn, in the task's own terms, at the same place. A value a person

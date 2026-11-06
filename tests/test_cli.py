@@ -1234,6 +1234,8 @@ def _telemetry(**overrides) -> Telemetry:
         trials_to_run=None,
         passed_at=None,
         fell_back=0,
+        moments=(),
+        eased=(),
     )
     return replace(base, **overrides) if overrides else base
 
