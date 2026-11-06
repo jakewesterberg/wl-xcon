@@ -283,8 +283,9 @@ Since engine build C3 a third branch beside the pause hands `Revert` to `Session
 list (the C3 spec's §14 items 1 and 3, approved by the PI for the design, "Approve all four",
 2026-10-30). **Revert is on the welfare summary**: it takes the run back to an earlier moment of
 it, restoring task settings and drawn ranges only. Each value it puts back goes through `set`,
-unchanged; its hand-backs and ranges go as the two buttons' do (approved by the PI on 2026-10-31: the
-engine C3 plan's Appendix A, item 5); and all of it is judged at once for trials no animal can get
+unchanged; its hand-backs and ranges go as the two buttons' do, without the buttons' widened
+re-checks of ranges widened since (each layer it restores was checked as it was made), as approved
+by the PI on 2026-10-31 (the engine C3 plan's Appendix A, item 5); and all of it is judged at once for trials no animal can get
 right. If `set` refuses any one value, or that judgment refuses the whole, or a check raises, none
 of it applies and no change row is written, though a warning `set` accepted for one of its values
 ahead of the refused one stays accepted. **It never reaches a bounded setting**: a reward size is

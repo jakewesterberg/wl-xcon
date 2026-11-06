@@ -2463,6 +2463,8 @@ class Session:
                 to = self._to(name)
                 self._pending.append(Pending(
                     "hand_back", name, was=values.get(name),
+                    # `now` is read as it applies today (`_apply_pending`); `Session.staged`
+                    # (Task 17) reads this one, for the console's list of what is staged.
                     now=self._run_values.get(name) if to == "run" else None, by=command.by,
                     after=staged, to=to, act=act,
                 ))
@@ -3020,9 +3022,9 @@ class Session:
             closes = act is None or place + 1 == len(offered) or offered[place + 1][1] != act
             moment = None if act is None else self._act_moments[act]
             if isinstance(offer, Pending):
-                self._apply_pending(offer, code, trial_number, index)
+                applied = self._apply_pending(offer, code, trial_number, index)
                 if closes:
-                    self._keep_moment(self._pending_said(offer) if moment is None
+                    self._keep_moment(self._pending_said(applied) if moment is None
                                       else f"reverted to {_back_to(moment)}")
                 continue
             name, was, now, by, bounded = offer
@@ -3072,7 +3074,7 @@ class Session:
         self._acts.clear()
         self._act_moments.clear()
 
-    def _apply_pending(self, act: Pending, code: int, trial_number: int, index: int) -> None:
+    def _apply_pending(self, act: Pending, code: int, trial_number: int, index: int) -> Pending:
         """**One hand-back or live range applied** (`_apply_staged`, whose change id, `sequence`,
         code and first trial it is given; engine build C3's spec §6 and §8). A hand-back ends the
         person's hold (`_edited`), so the open block's conditions or its draw give the setting
@@ -3088,7 +3090,8 @@ class Session:
         `to` and `now` are read as it applies** (`_to`), in the block its next trial plays, not as
         offered. **A revert's** (`Pending.act`) is written as a `revert` row naming the moment it
         goes back to, and one it hands back reads `now` null with no `to`, as the change log's
-        `revert` row is told to wl-preproc."""
+        `revert` row is told to wl-preproc. **Returns the change as it applied** (a hand-back with
+        the `to` and `now` it was read with), which is what the moment `_apply_staged` keeps says."""
         name = act.name
         moment = None if act.act is None else self._act_moments[act.act]
         if act.kind == "hand_back":
@@ -3134,6 +3137,7 @@ class Session:
             )
         back = "" if moment is None else f", reverting to {_back_to(moment)}"
         self._feed(kind, act.by, at, f"{self._pending_said(act)}{back}, from trial {index}")
+        return act
 
     def _pending_said(self, act: Pending) -> str:
         """A hand-back or a live range as the changes feed says it, applied (`_apply_pending`) or

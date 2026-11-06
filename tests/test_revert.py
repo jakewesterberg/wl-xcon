@@ -31,7 +31,7 @@ from wl_xcon.link import (
 )
 from wl_xcon.photometry import SRGB
 from wl_xcon.run import Scripted
-from wl_xcon.task import FRESH, Block, Condition, SaccadeTo, Uniform
+from wl_xcon.task import FRESH, SAME, Block, Condition, SaccadeTo, Uniform
 from wl_xcon.taskd import RunSpec, Session, SessionSpec
 from wl_xcon.welfare import Deployment, Simulated as Pump
 
@@ -74,6 +74,10 @@ def _right(values: dict) -> Scripted:
     return Scripted({SaccadeTo("target"): held + 10},
                     inside={frame: "fix" if frame <= held else "target"
                             for frame in range(1, held + 400)})
+
+
+#: A trial the animal breaks: it looks at the fixation point five frames and looks away.
+BREAK = Scripted({}, inside={frame: "fix" for frame in range(1, 6)})
 
 
 def _always_right(trial, values, index) -> Scripted:
@@ -181,7 +185,9 @@ def _breaks(monkeypatch, refused: tuple[str, float], warned: tuple[str, float] |
     values holding `refused`'s setting at its value with a finding that blocks, and gives values
     holding `warned`'s, where given, a warning of its own, a sentence never accepted before. A
     revert restores what the run held at an earlier moment, which every check passed when it was
-    set, so no check of the task itself refuses one: only a check that answers otherwise now."""
+    set, so a check of the task refuses one only through something that changed since, as a trial
+    waiting to be shown again keeps a value (`test_a_revert_the_waiting_trial_cannot_meet_...`);
+    this stand-in is for a value whose widened checks answer otherwise now."""
     real = taskd.beyond_range
 
     def standing_in(task, values, *args, **kwargs):
@@ -736,3 +742,85 @@ def test_a_revert_judges_each_value_over_what_it_hands_back_and_restores(tmp_pat
     assert len(lines) > 6 and all(
         (line["params"]["set_size"], line["params"]["array_eccentricity"]) == (13, 8.0)
         for line in lines[5:])
+
+
+def test_a_hand_backs_moment_says_what_took_the_setting_where_it_applied(tmp_path):
+    """The review of Task 14, Important 1 (the plan's engineering review, M-1, for the moment): a
+    hand-back offered as block A's rule is met applies in block B, whose conditions leave the
+    target's place to the run. Its row, its feed line and the moment it keeps say what takes it
+    back where it applies, the run's 10.00, never A's conditions, which no trial of B held."""
+    plans = ("{'p': Plan(blocks=[Block('A', conditions=[Condition('a', {'target_x': 5.0}, "
+             "target=3)]), Block('B', conditions=[Condition('b', {}, target=3)])])}")
+    path = _sessions.varied_task(tmp_path, plans=plans)
+    link = _Drained({1: [SetParameter(name="target_x", value=12.0, by=JAKE)],
+                     4: [HandBack(name="target_x", by=JAKE)]})
+    session = _session(_spec(tmp_path, path, trials=6, plan="p"), link)
+
+    session.run()
+
+    said = "target_x 12.00 handed back to the run's 10.00"
+    assert [said_ for _, _, said_ in _fed(session, "hand_back")] == [f"{said}, from trial 3"]
+    assert [(m.change, m.said) for m in session._moments] == [
+        (0, "the run's start"), (1, "target_x 10.00 → 12.00"), (2, said)]
+
+
+def test_two_identical_reverts_in_one_drain_apply_once_and_the_second_changes_nothing(tmp_path):
+    """The review of Task 14, Minor 4 (Appendix B item 15's backstop in the session): a double
+    click sends the same revert twice. The second is judged over what the first offers, finds the
+    run already holding that moment, and is refused as changing nothing; the first applies as one
+    act."""
+    link = _Drained({2: [SetParameter(name="fix_hold", value=0.5, by=JAKE)],
+                     4: [Revert(change=0, by=JAKE), Revert(change=0, by=JAKE)]})
+    session = _session(_spec(tmp_path, "tasks/fixation_detection.py", blocks=[_near(8)]), link)
+
+    session.run()
+
+    assert session.refusals == [("revert", JAKE, (
+        "the revert to the run's start is refused, and none of it applies: the run holds now "
+        "what it held then, so there is nothing to revert"))]
+    assert [(row["change"], row["name"], row["moment"]) for row in _reverted(session)] == [
+        (2, "fix_hold", 0)]
+    assert [m.change for m in session._moments] == [0, 1, 2]
+
+
+def test_a_revert_the_waiting_trial_cannot_meet_is_refused_whole_by_the_tasks_own_check(tmp_path):
+    """The review of Task 14, Minor 2 (probe P2), the real path of welfare item 3's refusal, no
+    stand-in: the fixation hold times out after `fix_acquisition`, and is drawn `same`. A person
+    sets the acquisition time to 1 s (change 1), hands it back and widens the hold's draw to 1.8 s
+    (changes 2 and 3) in a drummed block. A try breaks and waits, keeping a hold of more than 1 s
+    -- then a revert to change 1 would put back the 1 s timeout under it. `_possible` refuses the
+    whole, naming the condition, both values and the way on; nothing is staged, offered or
+    written."""
+    path = _edited(
+        _sessions.varied_task(
+            tmp_path, draws='{"fix_hold": Uniform(0.2, 0.4, repeat=SAME)}',
+            plans='{"p": Plan([Block("b", [Condition("c", {}, target=9)], drum=True)])}'),
+        ("                On(After(10.0), Outcome.NO_FIXATION),",
+         '                On(After(P("fix_acquisition")), Outcome.NO_FIXATION),'))
+
+    def world(trial, values, index):
+        return BREAK if index >= 7 else _right(values)
+
+    link = _Drained({2: [SetParameter(name="fix_acquisition", value=1.0, by=JAKE)],
+                     3: [HandBack(name="fix_acquisition", by=JAKE),
+                         SetRange(name="fix_hold", numbers={"high": 1.8}, by=JAKE)],
+                     10: [Revert(change=1, by=JAKE)], 14: [Stop(by=JAKE)]})
+    session = _session(_spec(tmp_path, path, plan="p"), link, world=world)
+
+    session.run()
+
+    ((kind, by, said),) = session.refusals
+    assert (kind, by) == ("revert", JAKE)
+    assert said.startswith(
+        "the revert to change 1 is refused, and none of it applies: it would leave trials no "
+        "animal can get right, in b: c (impossible-trial): block 'b', condition 'c': state "
+        "'hold_fix' ends the trial NO_FIXATION after `fix_acquisition`, 1 s, while its 'fix' hold "
+        "takes `fix_hold`, 1.56628 s: ")
+    assert said.endswith("a trial waiting to be shown again, or the next one drawn before the "
+                         "change applies, keeps the value it drew for a setting declared same: "
+                         "clear the waiting trial, switch drumming off or pause, then make the "
+                         "change")
+    assert [row["kind"] for row in _changes(session)] == ["set", "hand_back", "range"]
+    assert (session._staged, session._pending, session._acts, session._act_moments) == (
+        [], [], {}, {})
+    assert len({line["params"]["fix_hold"] for line in _lines(session)[7:]}) == 1
