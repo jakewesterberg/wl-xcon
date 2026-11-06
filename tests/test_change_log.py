@@ -465,3 +465,85 @@ def test_a_session_whose_log_holds_every_kind_is_found_resumable_and_goes_on_num
         (found,) = stranded.find(tmp_path / label.replace(" ", "_"))
         assert not found.resumable, label
         assert found.why.startswith(f"its parameter_changes.jsonl row 11 {said}"), found.why
+
+
+def _clear_after_a_failed_try(tmp_path, monkeypatch, block: Block,
+                              outcome=None) -> tuple[dict, dict]:
+    """A run whose every try fails, in `block` with drumming on from the start: *clear* is switched
+    on before the first trial and the condition it drew cleared before the second, with the
+    failed trial's drum waiting. The clear's control row and its change row."""
+    from wl_xcon import taskd
+    from wl_xcon.task import Outcome
+
+    outcome = outcome or Outcome.WRONG_TARGET
+    real = taskd.run_trial
+
+    def wrong(*args, **kwargs):
+        return dataclasses.replace(real(*args, **kwargs), outcome=outcome)
+
+    monkeypatch.setattr(taskd, "run_trial", wrong)
+    holder = []
+
+    class Clearing(_Drained):
+        """Names, as the second drain begins, the condition the failed trial drew."""
+
+        def drain(self) -> list:
+            if self.drains == 1:
+                drawn = holder[0]._scheduler.drawn.condition.name
+                self.script[2] = [ClearOwed(condition=drawn, by=Box("jake"))]
+            return super().drain()
+
+    link = Clearing({1: [Training(setting="clear", on=True, by=Box("jake"))]})
+    session = _session(_spec(tmp_path, trials=3, blocks=[block]), link)
+    holder.append(session)
+    session.run()
+    (control,) = [row for row in _rows(session, "controls.jsonl") if row["kind"] == "clear"]
+    (change,) = [row for row in _rows(session, "parameter_changes.jsonl")
+                 if row["kind"] == "clear"]
+    return control, change
+
+
+def test_a_clear_of_a_drums_waiting_trial_in_a_designed_block_was_owed_what_it_owes(
+        tmp_path, monkeypatch):
+    """Engine build C3's spec §8 and the C3 ask ("what the condition owed before and after"): in
+    a priming block, which owes nothing, a drum's waiting trial is no debt, so clearing it moves
+    what the condition owes not at all, and the change row says so (`was` equals `now`), as the
+    control row's `owed` does; a sequence-balanced block's is the next test."""
+    from wl_xcon.scheduler import Priming
+
+    priming = Block(name="p", conditions=[Condition("x", {"target_x": 5.0}, target=0),
+                                          Condition("y", {"target_x": 12.0}, target=0)],
+                    order=Priming("target_x", chance=0.5), trials=50, drum=True)
+    control, change = _clear_after_a_failed_try(tmp_path / "priming", monkeypatch, priming)
+    assert (control["cleared"], control["owed"]) == (1, 0)
+    assert (change["was"], change["now"], change["cleared"]) == (0, 0, 1)
+
+
+def test_a_clear_of_a_drums_waiting_trial_in_a_sequence_balanced_block_was_owed_what_it_owes(
+        tmp_path, monkeypatch):
+    """The sequence-balanced half of the case above: the block owes its plan's places, and a
+    drum's waiting trial is not among them, so the row's `was` equals its `now`."""
+    from wl_xcon.scheduler import SequenceBalanced
+
+    balanced = Block(name="s", conditions=[Condition("x", {"target_x": 5.0}, target=2),
+                                           Condition("y", {"target_x": 12.0}, target=2)],
+                     order=SequenceBalanced(depth=2), drum=True)
+    control, change = _clear_after_a_failed_try(tmp_path, monkeypatch, balanced)
+    assert (control["cleared"], control["owed"]) == (1, change["now"])
+    assert change["was"] == change["now"] > 0
+
+
+def test_a_clear_of_a_trial_shown_again_at_once_was_owed_one_more(tmp_path, monkeypatch):
+    """The other designed case: a sequence-balanced block that shows a failed trial again at
+    once owes that trial among its places, so clearing it takes one off what the condition owes
+    (`was` one more than `now`)."""
+    from wl_xcon.scheduler import SequenceBalanced
+    from wl_xcon.task import Outcome
+
+    block = Block(name="s", conditions=[Condition("x", {"target_x": 5.0}, target=2),
+                                        Condition("y", {"target_x": 12.0}, target=2)],
+                  order=SequenceBalanced(depth=2, again_at_once=True))
+    control, change = _clear_after_a_failed_try(tmp_path, monkeypatch, block,
+                                                Outcome.FIXATION_BREAK)
+    assert control["cleared"] == 1
+    assert (change["was"], change["now"]) == (control["owed"] + 1, control["owed"])

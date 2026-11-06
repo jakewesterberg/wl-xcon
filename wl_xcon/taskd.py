@@ -1663,6 +1663,11 @@ class Session:
             )
             return
         scheduler = self._scheduler
+        # What the condition owed before the clear, read before it (`was` of the change row). A
+        # name the block lacks is one `clear` refuses with its sentence, and nothing here raises.
+        owed_before = (scheduler.owed(command.condition)
+                       if command.condition in [c.name for c in scheduler.block.conditions]
+                       else None)
         said = scheduler.clear(command.condition, by=command.by, rest=command.rest)
         if said is not None:
             self._refuse("clear", command.by, said)
@@ -1679,9 +1684,9 @@ class Session:
             index, condition=command.condition, block=scheduler.block.name, rest=command.rest,
             cleared=cleared, owed=owed,
         )
-        # What the condition owed before: what it owes now and what was cleared, which
-        # `Scheduler.clear` forgives exactly.
-        self._logged("clear", "owed", owed + cleared, owed, command.by, at,
+        # `was` is what it owed before, read above: not what it owes now plus what was cleared,
+        # since a designed block's waiting trial is not among its owed places (priming owes none).
+        self._logged("clear", "owed", owed_before, owed, command.by, at,
                      condition=command.condition, block=scheduler.block.name, rest=command.rest,
                      cleared=cleared)
 
