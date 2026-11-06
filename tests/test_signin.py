@@ -110,12 +110,12 @@ def test_an_issuer_discovery_could_never_name_is_refused(issuer, says):
     assert says in str(refused.value)
 
 
-def _checker(tmp_path, issuer: Issuer) -> signin.Checker:
+def _checker(tmp_path, issuer: Issuer, fetch=None) -> signin.Checker:
     return signin.Checker(
         page=signin.parse_rig_page(f"rig-3={PAGE}"),
         issuer=ISSUER,
         cache=tmp_path / "wl-works.json",
-        fetch=issuer.fetch,
+        fetch=fetch or issuer.fetch,
     )
 
 
@@ -325,7 +325,7 @@ def test_fetch_json_refuses_a_certificate_from_an_authority_it_does_not_trust(tm
     "status, body, says",
     [
         (201, b"{}", "answered 201"),
-        (200, b"not json", None),
+        (200, b"not json", "not decode"),
         (200, b"[1, 2]", "did not answer a JSON object"),
         # A short id: pytest would otherwise print the whole body as the test's name (XC-331).
         pytest.param(200, b" " * (signin.FETCH_LIMIT + 1), "more than", id="over-the-limit"),
@@ -336,7 +336,7 @@ def test_fetch_json_refuses_a_certificate_from_an_authority_it_does_not_trust(tm
 def test_fetch_json_refuses_what_is_not_one_small_json_object(tmp_path, status, body, says):
     with _loopback(tmp_path, status=status, body=body) as (url, material):
         context = _tls.client_context(material["ca"])
-        with pytest.raises(ValueError) as refused:  # json.JSONDecodeError is a ValueError
+        with pytest.raises(ValueError) as refused:  # fetch_json raises its own for any decode failure
             signin.fetch_json(url, context=context)
         if says:
             assert says in str(refused.value)
@@ -696,17 +696,16 @@ def test_the_keys_thread_outlives_an_error_nobody_named_and_fetches_again(tmp_pa
     monkeypatch.setattr(signin, "RETRY_EVERY_S", 0.05)
     monkeypatch.setattr(signin, "KEY_REFRESH_S", 0.05)
     issuer = Issuer()
-    state = {"calls": 0, "raise_from": None, "raised": 0}
+    state = {"calls": 0, "to_raise": 1}  # the first load raises; the test sets more later
 
     def fetch(url, **kwargs):
         state["calls"] += 1
-        if state["calls"] == 1 or (state["raise_from"] is not None and state["calls"] >= state["raise_from"] and state["raised"] < 3):
-            if state["calls"] != 1:
-                state["raised"] += 1
+        if state["to_raise"]:
+            state["to_raise"] -= 1
             raise RuntimeError("nobody named this")
         return issuer.fetch(url, **kwargs)
 
-    checker = signin.Checker(page=signin.parse_rig_page(f"rig-3={PAGE}"), issuer=ISSUER, cache=tmp_path / "wl-works.json", fetch=fetch)
+    checker = _checker(tmp_path, issuer, fetch)
     said: list[str] = []
     stop = threading.Event()
     thread = threading.Thread(target=checker.keep_keys, args=(stop, said.append), daemon=True)
@@ -715,11 +714,104 @@ def test_the_keys_thread_outlives_an_error_nobody_named_and_fetches_again(tmp_pa
         _eventually(lambda: checker.ready)  # the first load raised; a later one brought the keys
         assert "RuntimeError" in said[0]
         assert thread.is_alive()
-        state["raise_from"] = state["calls"] + 1  # now the refreshes raise, three times
-        _eventually(lambda: state["raised"] == 3)
+        state["to_raise"] = 3  # now the refreshes raise, three times
+        _eventually(lambda: state["to_raise"] == 0)
         calls = state["calls"]
         _eventually(lambda: state["calls"] > calls)  # and it fetches again afterwards
         assert thread.is_alive() and checker.ready
+        # Said once for the load and once for the three refreshes in a row, not every time.
+        assert sum("RuntimeError" in line for line in said) == 2
+    finally:
+        stop.set()
+        thread.join(5)
+    assert not thread.is_alive()
+
+
+def test_keys_that_cannot_be_cached_are_still_live_keys_and_the_thread_holds(tmp_path, monkeypatch):
+    """A cache write that fails with anything at all (a document `json.loads` took and the
+    encoder cannot write back raises RecursionError) leaves the keys held and the sentence
+    saying they were not cached; the thread then refreshes on its long schedule, not its retry."""
+
+    def cannot_write(path, discovery, jwks):
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(signin, "_save", cannot_write)
+    checker = _checker(tmp_path, Issuer())
+    said = checker.load()
+    assert checker.ready and "from wl.works" in said and "not cached: RecursionError" in said
+    assert checker.refresh()  # and a refresh, too, replaces the keys it could not keep
+
+    monkeypatch.setattr(signin, "RETRY_EVERY_S", 0.05)
+    monkeypatch.setattr(signin, "KEY_REFRESH_S", 30)
+    issuer = Issuer()
+    checker = _checker(tmp_path, issuer)
+    heard: list[str] = []
+    stop = threading.Event()
+    thread = threading.Thread(target=checker.keep_keys, args=(stop, heard.append), daemon=True)
+    thread.start()
+    try:
+        _eventually(lambda: checker.ready and heard)
+        assert "from wl.works" in heard[0] and "not cached" in heard[0]
+        fetched = len(issuer.fetched)
+        stop.wait(0.4)  # eight retry periods, if it were retrying
+        assert len(issuer.fetched) == fetched and len(heard) == 1
+    finally:
+        stop.set()
+        thread.join(5)
+    assert not thread.is_alive()
+
+
+@pytest.mark.parametrize("first_load_raises_early", [False, True])
+def test_a_load_that_raises_after_it_holds_keys_is_a_load_that_brought_them(tmp_path, monkeypatch, first_load_raises_early):
+    monkeypatch.setattr(signin, "RETRY_EVERY_S", 0.05)
+    monkeypatch.setattr(signin, "KEY_REFRESH_S", 30)
+    issuer = Issuer()
+    checker = _checker(tmp_path, issuer)
+    load, calls = checker.load, []
+
+    def load_then_raise():
+        calls.append(1)
+        if first_load_raises_early and len(calls) == 1:
+            raise RuntimeError("before the keys")  # so the keys arrive in the loop, not the first load
+        load()
+        raise RuntimeError("after the keys")
+
+    monkeypatch.setattr(checker, "load", load_then_raise)
+    heard: list[str] = []
+    stop = threading.Event()
+    thread = threading.Thread(target=checker.keep_keys, args=(stop, heard.append), daemon=True)
+    thread.start()
+    try:
+        _eventually(lambda: checker.ready and len(heard) == 2)
+        assert "RuntimeError" in heard[0] and "from wl.works" in heard[1]
+        fetched = len(issuer.fetched)
+        stop.wait(0.4)  # held: no retry
+        assert len(issuer.fetched) == fetched
+    finally:
+        stop.set()
+        thread.join(5)
+    assert not thread.is_alive()
+
+
+def test_the_keys_thread_outlives_a_say_that_raises(tmp_path, monkeypatch):
+    """`wlx serve`'s `say` prints to a terminal, which can be closed under it
+    (BrokenPipeError, or ValueError on a closed file). That ends nothing."""
+    monkeypatch.setattr(signin, "RETRY_EVERY_S", 0.05)
+    monkeypatch.setattr(signin, "KEY_REFRESH_S", 0.05)
+    issuer = Issuer()
+    checker = _checker(tmp_path, issuer)
+
+    def broken(said):
+        raise BrokenPipeError("the terminal is gone")
+
+    stop = threading.Event()
+    thread = threading.Thread(target=checker.keep_keys, args=(stop, broken), daemon=True)
+    thread.start()
+    try:
+        _eventually(lambda: checker.ready)
+        fetched = len(issuer.fetched)
+        _eventually(lambda: len(issuer.fetched) > fetched + 1)  # it still refreshes
+        assert thread.is_alive()
     finally:
         stop.set()
         thread.join(5)

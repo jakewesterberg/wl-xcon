@@ -404,9 +404,10 @@ class Checker:
             self._discovery, self._keys, self._document = discovery, keys, document
         try:
             _save(self.cache, document, jwks)
-        except OSError as err:
+        except Exception as err:  # not only OSError: json.loads takes nesting json.dump cannot write
             # Live keys are good whether or not they can be kept; say why they were not.
-            return f"sign-in keys from wl.works ({len(keys)}); not cached: {type(err).__name__} {err.strerror or ''}".rstrip()
+            why = getattr(err, "strerror", None) or ""
+            return f"sign-in keys from wl.works ({len(keys)}); not cached: {type(err).__name__} {why}".rstrip()
         return f"sign-in keys from wl.works ({len(keys)})"
 
     def _from_cache(self, why: str) -> str:
@@ -447,17 +448,25 @@ class Checker:
         if document is not None:
             try:
                 _save(self.cache, document, jwks)
-            except OSError:
-                pass  # New keys are good whether or not they can be kept.
+            except Exception:
+                pass  # New keys are good whether or not they can be kept, whatever stopped it.
         return True
 
     def keep_keys(self, stop: threading.Event, say) -> None:
         """The keys thread (b2b-ready §3.2-§3.3). It loads at once, then again every
         `RETRY_EVERY_S` until the rig holds keys, then fetches the key set every
         `KEY_REFRESH_S`, until `stop` is set. `say` gets the first load's sentence, and the
-        sentence of a later load that brings the keys. A refresh never drops the keys, so
-        the rig never goes back to none."""
+        sentence of a later load that brings the keys, and, once until the next attempt
+        that returns, an error the load or refresh does not name (XC-233). A refresh never
+        drops the keys, so the rig never goes back to none. A `say` that raises (a closed
+        terminal) is dropped: it ends nothing."""
         failed = False
+
+        def tell(sentence):
+            try:
+                say(sentence)
+            except Exception:
+                pass
 
         def attempt(step):
             # An error nobody named must not end the thread: wl.works' keys would never be
@@ -467,7 +476,7 @@ class Checker:
                 result = step()
             except Exception as err:  # never BaseException: a stop still ends the thread
                 if not failed:
-                    say(f"sign-in keys: {type(err).__name__}: {err}; trying again")
+                    tell(f"sign-in keys: {type(err).__name__}: {err}; trying again")
                 failed = True
                 return None
             failed = False
@@ -475,15 +484,17 @@ class Checker:
 
         said = attempt(self.load)
         if said is not None:
-            say(said)
+            tell(said)
+        elif self.ready:  # the load raised after it held keys
+            tell("sign-in keys from wl.works")
         held = self.ready
         while not stop.wait(KEY_REFRESH_S if held else RETRY_EVERY_S):
             if held:
                 attempt(self.refresh)
                 continue
             said = attempt(self.load)
-            if said is not None and self.ready:
-                say(said)
+            if self.ready:
+                tell(said or "sign-in keys from wl.works")
                 held = True
 
     def check(self, authorization: str | None) -> Accepted:
