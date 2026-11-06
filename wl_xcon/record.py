@@ -546,6 +546,8 @@ class SessionRecord:
                     "overridden": list(overridden),
                     "drawn": {} if drawn is None else dict(drawn),
                     "live": list(live),
+                    # Written empty/null until engine build C3's Tasks 15 (`eased`) and 16
+                    # (`planned`) pass values; the keys are here so a line's shape does not move.
                     "eased": list(eased),
                     "planned": planned,
                     "stimuli": stimuli,

@@ -621,3 +621,130 @@ def test_a_drawn_item_the_record_cannot_write_stops_the_run_before_it_starts(
     assert session.card.codes == before
     assert not (session.directory / "runs.jsonl").exists()
     assert not (session.directory / "trials.jsonl").exists()
+
+
+#: A plain block of one trial, then a drummed one whose one condition is owed one right try.
+CHAIN = dict(
+    draws='{"target_x": Uniform(-10.0, 10.0, repeat=SAME)}',
+    plans=('{"p": Plan([Block("plain", [Condition("p", {}, target=1)]), '
+           'Block("drummed", [Condition("d", {}, target=1)], drum=True)])}'),
+)
+
+
+def test_a_same_value_is_carried_through_a_try_a_person_held_and_drawn_fresh_if_none_was_drawn(
+        tmp_path):
+    """The engine C3 plan's call 13 (the controller's ruling on this task's review, I1): a repeat's
+    `same` setting takes what the trial it shows again drew, and `original` names the trial whose
+    key drew it. (b) Drawn on the first try, held on the next (the person's value stands, nothing
+    drawn), handed back before the third: the third keeps the first's value and source, its
+    `original` the first try's number -- not drawn anew. (a) Held on the first try, handed back
+    before the second: the first drew nothing for the setting, so the second draws fresh on its
+    own number. The hold and hand-back are set straight into `_edited` from the world, as the
+    same/fresh test sets `_ranges`."""
+    path = _sessions.varied_task(tmp_path, **CHAIN)
+    task = _load_task(path)
+    kept_for = {}
+
+    def world(trial, values, index):
+        if index == 0:
+            session._edited = frozenset({"target_x"})        # (a) held on the first try of d
+            session.spec.values["target_x"] = 12.0
+            return _right(values)
+        if index == 1:
+            session._edited = frozenset()                    # (a) handed back before its repeat
+            return BREAK
+        if index == 2:
+            session._edited = frozenset({"target_x"})        # (b) held on the next try
+            return BREAK
+        if index == 3:
+            session._edited = frozenset()                    # (b) handed back
+            return BREAK
+        kept_for.update(session._kept[index])
+        return _right(values)
+
+    session = _session(_spec(tmp_path, path, plan="p"), world=world)
+
+    session.run()
+
+    lines = _lines(session)
+    by_index = {line["index"]: line for line in lines}
+    assert [line["condition"] for line in lines] == ["p", "d", "d", "d", "d"]
+    # (a): the first try of d (index 1) was held and drew nothing; its repeat (index 2), the
+    # setting handed back, draws fresh on its own number.
+    assert (by_index[1]["drawn"], by_index[1]["params"]["target_x"]) == ({}, 12.0)
+    assert by_index[2]["drawn"] == {"target_x": "task"}
+    drawn = variation.draw(task.draws["target_x"], SEED, 2, ("task", "target_x"))
+    assert by_index[2]["params"]["target_x"] == drawn
+    # (b): index 3 is held, drawing nothing; index 4, handed back, keeps index 2's value and
+    # source, and its original is index 2, whose key drew it.
+    assert (by_index[3]["drawn"], by_index[3]["params"]["target_x"]) == ({}, 12.0)
+    assert by_index[4]["drawn"] == {"target_x": "task"}
+    assert by_index[4]["params"]["target_x"] == drawn
+    assert kept_for["target_x"] == (drawn, "task", 2)
+
+
+def test_a_repeat_whose_kept_draws_are_missing_warns_on_the_feed_and_does_not_raise(tmp_path):
+    """The scheduler's `waiting` and `Session._kept`'s pruning are meant never to disagree. If they
+    do, a `same` setting is drawn fresh on the repeat; the feed says so (a warning, never a raise;
+    the review of this task, minor 1), since the line's `drawn` alone would not show it."""
+    path = _sessions.varied_task(
+        tmp_path, draws='{"target_x": Uniform(-10.0, 10.0, repeat=SAME)}',
+        plans='{"p": Plan([Block("b", [Condition("a", {}, target=2)])])}')
+
+    def world(trial, values, index):
+        if index == 0:
+            del session._kept[0]
+            return BREAK
+        return _right(values)
+
+    session = _session(_spec(tmp_path, path, plan="p"), world=world)
+
+    session.run()
+
+    assert session.stop_kind == "completed"
+    warned = [said for kind, _, _, said in session._controls if kind == "warning"]
+    assert len(warned) == 1 and "shows trial 0 again" in warned[0], warned
+    assert all(line["repeat_of"] is None or line["drawn"] for line in _lines(session))
+
+    kept = _sessions.varied_task(
+        tmp_path / "kept", draws='{"target_x": Uniform(-10.0, 10.0, repeat=SAME)}',
+        plans='{"p": Plan([Block("b", [Condition("a", {}, target=2)])])}')
+    session = _session(_spec(tmp_path / "kept", kept, plan="p"),
+                       world=lambda trial, values, index: BREAK if index == 0 else _right(values))
+    session.run()
+    assert [k for k, *_ in session._controls if k == "warning"] == []
+
+
+def test_a_same_value_is_kept_through_a_designed_trial_brought_back_at_once(tmp_path):
+    """The PI, 2026-10-30, Q5b ("'Again at once' as an option") with Q3 ("Follow same/fresh"): a
+    sequence-balanced block that brings a broken trial straight back keeps its `same` setting's
+    value and source on that trial, and draws its `fresh` one anew (the review of this task, minor
+    2: the session path shared with a drum's)."""
+    path = _sessions.varied_task(
+        tmp_path,
+        draws=('{"target_x": Uniform(-10.0, 10.0, repeat=SAME), '
+               '"fix_luminance": Uniform(20.0, 60.0, repeat=FRESH)}'),
+        plans=('{"p": Plan([Block("seq", [Condition("a", {}, target=2), '
+               'Condition("b", {}, target=2)], '
+               'order=SequenceBalanced(depth=2, cycles=1, again_at_once=True))])}'))
+    broke = []
+
+    def world(trial, values, index):
+        if index == 1:
+            broke.append(index)
+            return BREAK
+        return _right(values)
+
+    session = _session(_spec(tmp_path, path, plan="p"), world=world)
+
+    session.run()
+
+    lines = _lines(session)
+    by_index = {line["index"]: line for line in lines}
+    (again,) = [line for line in lines if line["at_once"]]
+    shown = by_index[again["repeat_of"]]
+    assert shown["index"] == 1 and again["condition"] == shown["condition"]
+    assert again["params"]["target_x"] == shown["params"]["target_x"]
+    assert again["drawn"] == shown["drawn"] == {"target_x": "task", "fix_luminance": "task"}
+    assert again["params"]["fix_luminance"] != shown["params"]["fix_luminance"]
+    assert session._kept == {}

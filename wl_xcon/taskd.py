@@ -189,6 +189,14 @@ def _draw_said(key: tuple) -> str:
     return f"condition {key[1]!r}'s own range for {key[2]!r}"
 
 
+def _kept_missing(number: int, repeat_of: int) -> str:
+    """The changes feed's warning when a trial repeats one whose draws were not kept (the
+    scheduler's `waiting` and `Session._kept`'s pruning disagree): its `same` settings are drawn
+    anew, so what the animal saw may differ from what the repeat should show."""
+    return (f"trial {number} shows trial {repeat_of} again, but its drawn values were not kept; "
+            f"its settings that should stay the same were drawn anew")
+
+
 def _generated(blocks, declared: dict[str, Param], turned: frozenset) -> list[dict]:
     """**What each block's factorial made**, as a run's start row lists it (engine build C3's spec
     §4: "each run's start row lists them too, so the record needs no task file"; pitfall P20):
@@ -2521,12 +2529,21 @@ class Session:
         drawn on the repeat's own number. What this trial drew is kept under its number, with the
         number whose key drew each value, for a repeat of it to find."""
         kept = {} if draw.repeat_of is None else self._kept.get(draw.repeat_of, {})
+        if draw.repeat_of is not None and draw.repeat_of not in self._kept:
+            # `Scheduler.waiting` and the pruning have drifted apart: say so on the feed, since
+            # the `same` settings below are then drawn fresh and the line alone would not show it.
+            self._feed("warning", None, self.wall_now(), _kept_missing(draw.number, draw.repeat_of))
         taken: dict = {}
         sources: dict = {}
         mine: dict = {}
         for name, (drawn, key) in {**variation.in_force(task, block),
                                    **variation.own_ranges(condition)}.items():
             if name in self._edited:
+                # Held on this try: not drawn, but what the trial it repeats drew is carried on,
+                # so a later try, once the person hands the setting back, still finds it (the
+                # controller's ruling on Call 13: the chain's `original` stays the first try's).
+                if name in kept:
+                    mine[name] = kept[name]
                 continue
             if drawn.repeat == SAME and name in kept:
                 value, source, original = kept[name]
@@ -3278,6 +3295,8 @@ class Session:
                     structure=structure,
                     overridden=tuple(overridden),
                     # What it drew and from where, and what a person held (engine build C3).
+                    # `eased` and `planned` stay at their defaults (`[]`, `None`) until Tasks 15
+                    # and 16 pass values (engine build C3), so a designed trial's `planned` is null.
                     drawn=sources,
                     live=tuple(sorted(self._edited)),
                     # Where each stimulus it showed was (XC-399), turned into positions as the
