@@ -306,16 +306,23 @@ def _drum_warned(condition: str, index: int, owed: int, clearing: bool = False) 
             f"{index}; drumming goes on: {way}")
 
 
-def _kept_out(index: int, held: list[str], ranged: list[str]) -> str:
+def _kept_out(index: int, held: list[str], ranged: list[str], *, plays_out: bool = False) -> str:
     """The changes feed's warning the first time in a block a live change keeps a trial out of
     moving up (engine build C3's spec §7; the C3 plan's engineering review, I-2, and its science
     review, I-4): the trial, the settings, and the way back from each -- *hand back* for one a
     person holds, the range as the task writes it or *revert* for one drawn from a range changed
     live. Said once a block for each setting (`Session._eased_said`), and only where the block has
     a rule that moves the animal on (`Scheduler.moves_up`): each trial's line names its own
-    (`eased`), and a flood would bury the feed."""
+    (`eased`), and a flood would bury the feed. **A sequence-balanced stage below a training
+    progression's top** (`plays_out`) moves up when its sequence is played out, eased trials or
+    not (the PI, 2026-10-31, item 10, "Only warn at load"), so it is told that, and how to take
+    the change off, never that its trials are kept out."""
     ways = [f"hand {name} back" for name in held] + [
         f"send {name}'s range as the task writes it or revert that change" for name in ranged]
+    if plays_out:
+        return (f"trial {index} was eased by a live change to {' and '.join(held + ranged)}; "
+                f"this stage moves up when its sequence is played out, eased trials or not; "
+                f"{', and '.join(ways)}, to take the change off")
     return (f"trial {index} is kept out of moving up: a live change eased "
             f"{' and '.join(held + ranged)}; {', and '.join(ways)}, to count trials toward moving "
             f"up again")
@@ -3400,9 +3407,10 @@ class Session:
         hold, so from the next trial its setting is judged no more."""
         task, scheduler = self._task, self._scheduler
         draws = {**variation.in_force(task, scheduler.block), **variation.own_ranges(condition)}
-        # `_draw` carries a `same` value a repeat takes, or a held try passes over, under the
-        # repeat's own number with the number whose key drew it, so this trial's entry is the
-        # trial-it-repeats' entry on a repeat.
+        # `_draw` keeps under a repeat's own number the entry of the trial it repeats for each
+        # setting it takes (a `same` one) or a person holds (any), with the number whose key
+        # drew it; only a `same` setting's is what the repeat would have had, a `fresh` one being
+        # drawn on the repeat's own number.
         mine = self._kept.get(number, {})
         meanings = resolved(task)
         reached = self._edited | {name for name, source in drawn.items()
@@ -3420,7 +3428,7 @@ class Session:
                 continue
             if name in draws:
                 declaration, key = draws[name]
-                entry = mine.get(name)
+                entry = mine.get(name) if declaration.repeat == SAME else None
                 if entry is not None and isinstance(entry[1], str):
                     otherwise = entry[0]
                 else:
@@ -3465,12 +3473,14 @@ class Session:
             ranged = next((moment.ranges.get(key) for moment in self._moments
                            if moment.change == change), None)
         if meaning.kind == EXPECTED:
-            return ranged != declaration
+            # By the numbers that place the draws, as the change row's `went` reads them, so a
+            # range typed back to the written numbers is put back.
+            return ranged is None or not variation.same_range(
+                ranged, declaration, self._declared.get(name))
         relative = meaning.relative_to
         reference = values.get(relative) if isinstance(relative, str) else None
         return variation.easier_range(meaning, ranged, declaration, self._declared.get(name),
                                       reference) is not False
-
 
     def _plan(self, run: RunSpec, task: Task) -> Plan:
         """The plan the run plays: the task's plan the run names, blocks given in code (a test's),
@@ -4393,7 +4403,8 @@ class Session:
                     self._eased_said |= {(*opened, name) for name in told}
                     self._feed("warning", None, self.wall_now(), _kept_out(
                         index, [name for name in told if name in self._edited],
-                        [name for name in told if name not in self._edited]))
+                        [name for name in told if name not in self._edited],
+                        plays_out=scheduler.plays_out))
                 # **Its line counted toward its condition in its block's end** (the C3 plan's
                 # science review, M-4): the lines, those a person's value overrode and those kept
                 # out of moving up, as the line written next says (`counts`).

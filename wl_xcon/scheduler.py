@@ -546,6 +546,16 @@ class Scheduler:
         return self.block.criterion is not None or isinstance(self.order, ByCriterion)
 
     @property
+    def plays_out(self) -> bool:
+        """Whether the open block is a sequence-balanced one, which ends on its plan, never a
+        criterion, so where `moves_up` is true it is a training progression's stage below the
+        top (the load refuses one at the top), which moves up when its sequence is played out,
+        eased trials or not (the PI, 2026-10-31, on the engine C3 plan's Appendix B, item 10,
+        "Only warn at load"; `check`'s `sequence-stage-moves-up`): the changes feed says that of
+        it, not that its trials are kept out (`taskd._kept_out`)."""
+        return isinstance(self.block.order, SequenceBalanced)
+
+    @property
     def _falls_back(self) -> bool:
         """Whether a training progression's fall-back rule is met (`ByCriterion.fall_back`): fewer
         than its proportion of the last window's answers right, judged once that many answers are

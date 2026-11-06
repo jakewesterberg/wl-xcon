@@ -736,3 +736,125 @@ def test_a_range_changed_live_is_told_its_way_back_and_a_training_stage_is_told_
     assert _told(session) == [
         "trial 2 is kept out of moving up: a live change eased fix_window; send fix_window's range "
         "as the task writes it or revert that change, to count trials toward moving up again"]
+
+
+def test_a_value_held_on_a_fresh_repeat_is_judged_against_the_repeats_own_draw(tmp_path):
+    """Task 15 fix round 1 (the review's Important 1; the PI's rule, never move an animal up on
+    eased trials): a `FRESH` setting a person holds on a repeat would, had no one held it, have
+    been drawn on the repeat's own number, not taken from the trial it shows again, so that is
+    what the hold is judged against. The fourth trial breaks under drumming, and from its drum's
+    try a person holds the fixation window halfway between the written range's draws for the two
+    numbers."""
+    path = _sessions.varied_task(
+        tmp_path, draws='{"fix_window": Uniform(1.5, 2.5, repeat=FRESH)}')
+    declared, key = _load_task(path).draws["fix_window"], ("task", "fix_window")
+    # A trial whose draw is wider than its drum's try's own, so a hold between them is wider than
+    # the try's own draw (eased) and narrower than the original's (which would not call it so).
+    broke = next(number for number in range(2, 12)
+                 if variation.draw(declared, SEED, number, key)
+                 > variation.draw(declared, SEED, number + 1, key))
+    drew = variation.draw(declared, SEED, broke, key)
+    own = variation.draw(declared, SEED, broke + 1, key)
+    held = (drew + own) / 2
+
+    def world(trial, values, index):
+        return BREAK if index == broke else _right(values)
+
+    link = _Drained({1: [Drum(scope="run", by=JAKE)],
+                     broke + 1: [SetParameter(name="fix_window", value=held, by=JAKE)]})
+    session = _session(_spec(tmp_path, path, trials=broke + 2), link, world=world)
+
+    session.run()
+
+    assert session.refusals == []
+    again = _lines(session)[broke + 1]
+    assert (again["drummed"], again["repeat_of"], again["live"]) == (
+        True, broke, ["fix_window"])
+    assert again["eased"] == ["fix_window"]
+
+def test_a_range_lowered_live_and_put_back_still_counts_a_same_repeat_of_its_trial(tmp_path):
+    """Task 15 fix round 1 (the review's Minor 2): a trial drawn from a range lowered live (harder
+    at both ends) counts toward moving up, and so does its drum's try after the range is sent back
+    as written, since that try is judged by the range that drew the value it keeps, found through
+    the moment of its change (`_moments`), where a lookup that failed would read as doubt and keep
+    it out."""
+    path = _sessions.varied_task(
+        tmp_path, draws='{"fix_window": Uniform(1.5, 2.5, repeat=SAME)}')
+
+    def world(trial, values, index):
+        return BREAK if index == 3 else _right(values)
+
+    link = _Drained({1: [Drum(scope="run", by=JAKE)],
+                     2: [SetRange(name="fix_window", numbers={"low": 1.0, "high": 1.4},
+                                  by=JAKE)],
+                     4: [SetRange(name="fix_window", numbers={"low": 1.5, "high": 2.5},
+                                  by=JAKE)]})
+    session = _session(_spec(tmp_path, path, trials=6), link, world=world)
+
+    session.run()
+
+    assert session.refusals == []
+    lines = _lines(session)
+    assert [(line["drawn"], line["repeat_of"], line["eased"]) for line in lines] == [
+        ({"fix_window": "task"}, None, []), ({"fix_window": "task"}, None, []),
+        ({"fix_window": 2}, None, []), ({"fix_window": 2}, None, []),
+        ({"fix_window": 2}, 3, []), ({"fix_window": 3}, None, []),
+        ({"fix_window": 3}, None, [])]
+
+
+def test_an_expected_range_typed_back_to_its_written_numbers_counts_as_put_back(tmp_path):
+    """Task 15 fix round 1 (the review's Minor 1 and 3; the PI's item 18 names typing the written
+    numbers again as a way to put a range back): an expected setting's range is compared by the
+    numbers that place its draws, as the change row's `went` is, not as objects. The target window,
+    read as expected, is drawn as a normal about 4° with no written cut (its setting's own
+    stands in); its cut is lowered live, which keeps its trials out ("No, after any change"), and
+    sent back as the setting's own cut, which counts them again, its row saying `went: null`."""
+    path = _meant(tmp_path, meanings=(
+        "'target_window': Meaning(EXPECTED, CRITERION, raising=EASIER, "
+        "note='a wider window accepts a less accurate landing', "
+        "overrides='read as the search tasks read their object window')"),
+        draws='{"target_window": TruncatedNormal(4.0, 0.5, repeat=FRESH)}')
+    declared = next(p for p in _load_task(path).params if p.name == "target_window")
+    link = _Drained({2: [SetRange(name="target_window", numbers={"low": 3.0}, by=JAKE)],
+                     4: [SetRange(name="target_window", numbers={"low": declared.low}, by=JAKE)]})
+    session = _session(_spec(tmp_path, path, trials=6), link)
+
+    session.run()
+
+    assert session.refusals == []
+    assert [line["eased"] for line in _lines(session)] == (
+        [[]] * 2 + [["target_window"]] * 2 + [[]] * 2)
+    ranges = [row for row in _rows(session, "parameter_changes.jsonl") if row["kind"] == "range"]
+    assert [row["meaning"]["went"] for row in ranges][-1] is None
+
+
+def test_a_sequence_stage_that_moves_up_on_its_sequence_is_told_so_not_that_its_trials_are_out(
+        tmp_path):
+    """Task 15 fix round 1 (the review's Important 2; the PI, 2026-10-31, item 10, "Only warn at
+    load"): a sequence-balanced stage below a training progression's top moves up when its sequence
+    is played out, eased trials or not, so the changes feed tells a trainer what is true -- the
+    trial and the setting, that the stage moves up when its sequence is played out, eased trials
+    or not, and how to take the change off -- and never that the trials are kept out of moving
+    up, which a stage with a criterion is told."""
+    for name, stage, said in (
+        ("sequence", 'Block("S1", [Condition("a", {}, target=2), Condition("b", {}, target=2)], '
+                     'order=SequenceBalanced(depth=2))',
+         "trial 1 was eased by a live change to fix_window; this stage moves up when its "
+         "sequence is played out, eased trials or not; hand fix_window back, to take the "
+         "change off"),
+        ("criterion", 'Block("S1", [Condition("a", {}, target=1)], criterion=(1.0, 3))',
+         "trial 1 is kept out of moving up: a live change eased fix_window; hand fix_window "
+         "back, to count trials toward moving up again")):
+        path = _sessions.varied_task(tmp_path / name, plans=(
+            '{"p": Plan([' + stage + ', Block("S2", [Condition("c", {}, target=1)])], '
+            'order=ByCriterion())}'))
+        link = _Drained({1: [SetParameter(name="fix_window", value=3.0, by=JAKE)],
+                         3: [Stop(by=JAKE)]})
+        session = _session(_spec(tmp_path / name, path, plan="p"), link)
+
+        session.run()
+
+        assert session.refusals == []
+        assert _first_eased(_lines(session))[:1] == [1], name
+        assert [said_ for kind, _, _, said_ in session.controls if kind == "warning"
+                and "eased" in said_ and "fix_window" in said_][:1] == [said], name

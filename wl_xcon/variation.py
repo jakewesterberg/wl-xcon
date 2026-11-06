@@ -210,6 +210,22 @@ def easier_range(meaning: Meaning, drawn: object, written: object,
     return None if doubt else False
 
 
+def same_range(first: object, second: object, declared: Param | None = None) -> bool:
+    """**Whether two draws place their values alike**: of one kind, each number placing them
+    (`_PLACED`, a normal's cut filled from `declared`) equal, and a normal's spread; draws of
+    other kinds are compared as written. What `easier_range` calls unmoved, so a range typed back
+    to the written numbers is the written range (the PI, 2026-10-31, item 18; engine C3's Task
+    15)."""
+    if type(first) is not type(second):
+        return False
+    fields = _PLACED.get(type(first))
+    if fields is None:
+        return first == second
+    return (all(_placed(first, field, declared) == _placed(second, field, declared)
+                for field in fields)
+            and (not isinstance(first, TruncatedNormal) or first.sd == second.sd))
+
+
 def _placed(distribution: Distribution, field: str, declared: Param | None) -> object:
     """One of the numbers placing a draw's values (`_PLACED`): a normal's cut end filled from
     `declared` as `bounds_of` fills it, so a cut written and one its setting gives read alike."""
