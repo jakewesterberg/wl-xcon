@@ -233,8 +233,10 @@ and `link._setting` are what the PI's items 3 and 4 rest on, and `_schedule` is 
 guards refuse a value that is not a number, for a welfare ceiling and for a numeric
 parameter alike (M8, item 4), and it sends a ceiling's name to `bounds.validate`, which
 is what keeps a reward size set from the page under its approved ceiling (item 3). **A task's own
-setting outside its declared range** is checked again with the range widened to it
-(`Session._beyond_range`, not on this list), refused only for what breaks the run and otherwise
+setting outside its declared range** is checked again with the range widened to it, and since engine
+build C3 with each condition of the run's plan and each extreme of a draw in force, once per
+distinct set of values outside their ranges (`Session._beyond_range`, not on this list), refused
+only for what breaks the run and otherwise
 staged with its warnings, which are written to `warnings.jsonl` (the PI, 2026-10-11, XC-352's
 D2); the ceiling's branch is unchanged, byte for byte.
 `link._setting` is M8 where bytes become a command — in `_command_from` for the wire's
@@ -253,6 +255,15 @@ the third on 2026-10-18: the engine C2a plan's Appendix A, items 1 and 4).
 Since engine build C2b two more hand `NextBlock` and `BackBlock` to `Session._move`, likewise off
 this list, touching no reward, bounded setting, welfare clock or pump (the engine C2b plan's
 Appendix A, item 2, approved by the PI, 2026-10-19).
+Since engine build C3 one line of that rest, ahead of `set` in the setting path, runs the live
+refusal of settings no animal can get right (`Session._impossible`, off this list; TSK-69): it raises
+only `Exceeded`, or what `set` raises on the same value, which the listed `except` line turns into a
+refusal on the feed; a check that cannot run refuses the change, never the session; and it leaves to
+`set`, unjudged, a ceiling's name, so no reward size passes through it, and every value `set`
+refuses (the C3 spec's §14 item 2, approved by the PI for the design, "Approve all four",
+2026-10-30). A run's start is refused for the same combinations by `wlx taskd`'s pre-flight
+(`preflight.beyond`, failing its starting-values item) and, for a run that takes none, by
+`Session.run` before its first trial; neither is on this list.
 `_schedule` fixes the target `_ends` compares against — a
 trial count from the trial about to run, an instant on the session's clock, or mL this
 session, refused when already reached — so a wrong target ends a session early or late

@@ -146,9 +146,10 @@ def extremes(distribution: object, declared: Param | None = None, *,
     cut to its setting's declared range, `declared`, where it gives no end of its own), or a
     finite set's least and greatest number (`values_of`), a value of weight 0 left out, since it
     is never drawn; `()` for a set of no numbers. What a draw is checked again with, widened, one
-    extreme at a time with its condition's values, at a run's start (`preflight.beyond`): a check
-    widened to an extreme reasons over every value between it and the declared range, so the two
-    ends are all it needs. For a distribution the load accepts (`check.undrawable`).
+    extreme at a time with its condition's values, at a run's start (`preflight.beyond`) and live,
+    with a person's value outside its range (`taskd.Session._outside_sets`, `_beyond_range`): a
+    check widened to an extreme reasons over every value between it and the declared range, so the
+    two ends are all it needs. For a distribution the load accepts (`check.undrawable`).
 
     **A direction** (`direction=True`, for a setting `directions` names) is judged on the circle it
     is shown on, 0 to 360 (`geometry.shown_direction`; the controller's ruling on the review of

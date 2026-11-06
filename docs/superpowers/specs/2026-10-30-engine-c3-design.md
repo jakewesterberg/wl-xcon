@@ -288,6 +288,13 @@ the run's blocks and the draws in force, refused at once, naming the conditions 
 
 Each refusal names the values, the condition and the fix.
 
+*Amended 2026-10-31 (the PI, on the engine C3 plan's Appendix B, item 17: "Refuse only odd-one-out tasks
+(Recommended)"):* items 2 and 3 are refused only where the task says its target is found by its look, the default
+(`Array.found_by`, `"look"`). Where it says something else names the target (`"cue"`: a cue, a remembered sample, a
+place), each becomes a load warning, `cued-target` ("the target must be named by a cue; check that one is shown"),
+the same at a run's start, and live a change they would refuse on an odd-one-out array is accepted on a cued one.
+Item 1 is refused whatever names the target.
+
 ---
 
 ## 10. The record and wl-preproc

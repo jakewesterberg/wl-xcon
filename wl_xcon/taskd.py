@@ -38,6 +38,7 @@ which absence it is looking at. `welfare.Deployment` has the table.
 from __future__ import annotations
 
 import dataclasses
+import math
 import threading
 import time
 from collections import deque
@@ -48,7 +49,7 @@ from wl_xcon import link as _link
 from wl_xcon import variation
 from wl_xcon.actor import Actor, to_map_or_none
 from wl_xcon.bounds import Bounds, Exceeded, _finite
-from wl_xcon.check import beyond_range, check_task, unplaced
+from wl_xcon.check import IMPOSSIBLE, _outside, beyond_range, check_task, impossible, unplaced
 from wl_xcon.cli import _clock, _load_allocation, _load_task, _printable, _shown
 from wl_xcon.codes import BLOCK_END, RUN_END_MARKER, TRIAL_END, TRIAL_START, Allocation
 from wl_xcon.declarations import canonical, content_hash, resolved
@@ -1271,22 +1272,36 @@ class Session:
         break the run (off screen, windows colliding, colors unmakeable), saying what"). The run's
         task, checked again with each range widened to the values outside it -- the session's,
         those staged and this one (`check.beyond_range`) -- in the session's setup, calibration
-        and deployment. **Refused**, as `Exceeded` saying what breaks, when a finding refuses this
-        session's kind; otherwise its warnings are accepted by `by` (`warnings.jsonl`, once each)
-        and said on the changes feed, and `set` stages the value. **Nothing but `Exceeded` leaves
-        here** (`_command` catches it alone): a check that raises, a finding no warning can be
-        made of, or a warning that cannot be written, refuses the value. A write that fails part
-        way leaves the warnings written before it accepted (`accept`), in `warnings.jsonl` though
-        the value was refused: each says what was asked, and is not asked again this session.
-        Run between trials, as the command is drained, never in a frame. Not welfare-critical:
-        `set` calls it only for a task's own setting, never a ceiling."""
+        and deployment. **And with each condition of the run's plan and each draw in force**
+        (engine build C3's spec §11: "Live, `Session._beyond_range` learns conditions and draws"):
+        a trial holds its condition's values and its draws over the session's, so each set of
+        values outside their ranges a trial can hold with this one is checked too, once
+        (`_outside_sets`), each finding it adds naming where it is met. **Refused**, as `Exceeded`
+        saying what breaks, when a finding refuses this session's kind; otherwise its warnings are
+        accepted by `by` (`warnings.jsonl`, once each) and said on the changes feed, and `set`
+        stages the value. **Nothing but `Exceeded` leaves here** (`_command` catches it alone): a
+        check that raises, a finding no warning can be made of, or a warning that cannot be
+        written, refuses the value. A write that fails part way leaves the warnings written before
+        it accepted (`accept`), in `warnings.jsonl` though the value was refused: each says what
+        was asked, and is not asked again this session. Run between trials, as the command is
+        drained, never in a frame. Not welfare-critical: `set` calls it only for a task's own
+        setting, never a ceiling."""
         values = {**self.spec.values,
                   **{n: now for n, _, now, _, bounded in self._staged if not bounded},
                   name: value}
         try:
-            found = beyond_range(self._task, values, self.allocation,
-                                 geometry=self.spec.geometry, calibration=self.spec.calibration,
-                                 deployment=self.spec.deployment)
+            seen: list = []
+            found: list = []
+            for these, places in self._outside_sets(name, values):
+                for finding in beyond_range(self._task, these, self.allocation,
+                                            geometry=self.spec.geometry,
+                                            calibration=self.spec.calibration,
+                                            deployment=self.spec.deployment):
+                    if finding in seen:
+                        continue
+                    seen.append(finding)
+                    found.append(finding if not places else dataclasses.replace(
+                        finding, detail=f"{finding.detail} (on the trials of {'; '.join(places)})"))
         except Exception as broken:  # noqa: BLE001 -- see the docstring
             raise Exceeded(
                 f"{name!r} at {value:g} is outside its declared range, and the load-time checks "
@@ -1314,6 +1329,140 @@ class Session:
         at = self.wall_now()
         for entry in new:
             self._feed("warning", by, at, f"{entry.code}: {entry.detail}")
+
+    def _outside_sets(self, name: str, values: dict) -> list[tuple[dict, list[str]]]:
+        """**Each distinct set of values outside their ranges a trial of the run can hold, with
+        `name` at its value in `values`** (`_beyond_range`; engine build C3's spec §11 and call 27),
+        with the places it is met. First `values`, the session's own, with none. Then, for each
+        condition of each block of the run's plan (`_played`), its values over them -- but where a
+        person holds the setting (`name`, `_edited`, and those staged), whose value stands; a
+        condition's own range is no number, so it is never outside a range itself -- and that with
+        each extreme of each draw in force there (`variation.extremes`, as a run's start widens
+        it): the block's own or the task's (`variation.in_force`), or the condition's own range,
+        each as a live range changed it (`_ranges`), but one a person holds. A place reads "block
+        'b', condition 'c'", and for a draw's extreme ", <the draw> at <its extreme>". **Once per
+        distinct set** (the outline review's M-11): `check.beyond_range`'s result depends only on
+        the values outside their ranges, so a set met in several places is listed once, naming
+        each, and one the session's own values already hold names none. Before a run has a plan,
+        the session's own alone."""
+        declared = self._declared
+        held = {name, *self._edited,
+                *(staged for staged, _, _, _, bounded in self._staged if not bounded)}
+
+        def outside(these: dict) -> frozenset:
+            return frozenset((n, v) for n, v in these.items()
+                             if n in declared and _outside(declared[n], v))
+
+        own = outside(values)
+        sets: dict[frozenset, tuple[dict, list[str]]] = {own: (values, [])}
+        if self._played is None:
+            return list(sets.values())
+        for block in self._played.blocks:
+            draws = variation.in_force(self._task, block)
+            for condition in block.conditions:
+                given = {**values, **{n: v for n, v in condition.values.items() if n not in held}}
+                where = f"block {block.name!r}, condition {condition.name!r}"
+                met = [(given, where)]
+                for n, (drawn, key) in {**draws, **variation.own_ranges(condition)}.items():
+                    if n in held:
+                        continue
+                    drawn = self._ranges.get(key, (drawn,))[0]
+                    met += [({**given, n: end}, f"{where}, {_draw_said(key)} at {end:g}")
+                            for end in variation.extremes(drawn, declared.get(n))]
+                for these, place in met:
+                    which = outside(these)
+                    if which != own:
+                        sets.setdefault(which, (these, []))[1].append(place)
+        return list(sets.values())
+
+    def _possible(self, changed: dict | None = None, *, handed: frozenset = frozenset(),
+                  ranges: dict | None = None) -> str | None:
+        """**Whether the run would still hold only trials an animal can get right after a change**
+        (engine build C3's spec §9: live, "each change as offered (a value, range, hand-back or
+        revert) against every condition of the run's blocks and the draws in force, refused at
+        once, naming the conditions it would make impossible"): `check.impossible` over every block
+        of the run's plan (`_played`), with the change over what the run holds now -- its values
+        (`spec.values`) with those staged ahead of the change over them (`_staged`, a ceiling's left
+        out), the names a person holds (`_edited`, and those staged) beating conditions and draws,
+        and the draws changed live (`_ranges`, their change ids left out). The change:
+        - `changed`, values a person would hold, `{name: value}`;
+        - `handed`, names handed back, each to the run's own value (`_run_values`; absent where
+          the run has none) and no longer held;
+        - `ranges`, draws changed, keyed as `variation.in_force` keys them, a `Distribution`
+          replacing the one in force and `None` restoring the one declared.
+
+        Called once per change (`_impossible`; the engine C3 plan's Tasks 13 and 14 for a
+        hand-back, a range and a revert): `check.impossible` judges each distinct combination once.
+        Returns the reason a change is refused -- the conditions it would make impossible, as
+        `"block: condition"`, then for each the values and the fix -- or `None`. **It never raises**
+        (the C3 plan's call 26, "the live refusal fails closed"): a check that raises, or no run's
+        plan to judge, is the reason, saying the check could not run, so the change is refused,
+        never the session. Run between trials, never in a frame."""
+        try:
+            values = dict(self.spec.values)
+            held = set(self._edited)
+            for name, _, now, _, bounded in self._staged:
+                if not bounded:
+                    values[name] = now
+                    held.add(name)
+            for name in handed:
+                held.discard(name)
+                if name in self._run_values:
+                    values[name] = self._run_values[name]
+                else:
+                    values.pop(name, None)
+            for name, value in (changed or {}).items():
+                values[name] = value
+                held.add(name)
+            drawn = {key: draw for key, (draw, _) in self._ranges.items()}
+            drawn.update(ranges or {})
+            found = impossible(self._task, self._played.blocks, values,
+                               held=frozenset(held), ranges=drawn)
+            if not found:
+                return None
+            named = ", ".join(dict.fromkeys(subject for finding in found
+                                            for subject in finding.subjects))
+            return (f"it would leave trials no animal can get right, in {named} ({IMPOSSIBLE}): "
+                    + "; ".join(finding.detail for finding in found))
+        except Exception as broken:  # noqa: BLE001 -- see the docstring
+            return (f"the check for trials no animal can get right could not be run "
+                    f"({type(broken).__name__}: {broken})")
+
+    def _impossible(self, name: str, value: object) -> None:
+        """**The live refusal of a value no animal can get right with** (engine build C3's spec §9;
+        the PI, 2026-10-30, Q10, "Refuse in file and live"). `_command`'s one line ahead of `set`
+        calls it with the value a console offers (the C3 spec's §14 item 2, approved for the
+        design, "Approve all four", 2026-10-30), and it raises `Exceeded` with `_possible`'s
+        reason, which the listed `except` line turns into a refusal on the feed, as it does
+        `set`'s. `set` is then never reached: nothing is staged, and a value outside its range
+        refused here writes no warning (`_beyond_range`; the outline review's I-1).
+
+        **It leaves to `set` all that `set` refuses**, so each is refused by `set`'s own sentence,
+        as it always was: a ceiling's name, never judged here, so a reward size never passes
+        through this check, even where a task declares a setting of its name; a name the task does
+        not declare, or declares not live-editable; a choice the setting does not offer; and for a
+        setting of numbers, a value that is no finite number. **Nothing but `Exceeded` leaves
+        here, but what `set` raises on the same value**: it asks what `set` asks first, in the same
+        order, so an int too large for a float, handed to `set` in this process, raises
+        `OverflowError` here as it does in `set`, and ends the session as a fault, as it did
+        before this line. A check that raises refuses the value (`_possible`). Run between trials,
+        as the command is drained, never in a frame. Not welfare-critical: the line calling it
+        is."""
+        if name in self.spec.bounds.ceilings:
+            return
+        declared = self._params().get(name)
+        if declared is None or not declared.live:
+            return
+        if declared.choices:
+            if value not in declared.choices:
+                return
+        elif (isinstance(value, bool) or not isinstance(value, (int, float))
+              or not math.isfinite(value)):
+            return
+        why = self._possible({name: value})
+        if why is not None:
+            said = _shown(value, declared.choices) if declared.choices else f"{value:g}"
+            raise Exceeded(f"{name!r} at {said} is refused, and the previous value stands: {why}")
 
     @property
     def task(self) -> str | None:
@@ -2188,6 +2337,7 @@ class Session:
             )
             return
         try:
+            self._impossible(command.name, command.value)
             self.set(command.name, command.value, by=command.by)
         # **Welfare-critical, this one line** (`docs/design/architecture.md`, like
         # `cli.main`'s `confirmed=` line): it makes a malformed setting a refusal
@@ -2853,6 +3003,22 @@ class Session:
         refused = self._unwritable(task, run, {**starts, **given})
         if refused is not None:
             raise TypeError(refused)
+        # **No trial no animal can get right, at the run's own values** (engine build C3's spec §9;
+        # the PI, 2026-10-30, Q10, "Refuse in file and live"; the outline review's I-5): the load
+        # judged the task's starting values (`check._impossible_faults`), and the run's own -- a
+        # console's start, `wlx run --set` -- are judged here, over every block the run plays,
+        # as the backstop for a caller that took no pre-flight, refusing as the blocking findings
+        # above do, before anything of the run is numbered, strobed or written.
+        impossible_now = [f for f in impossible(task, self._plan(run, task).blocks,
+                                                {**starts, **given})
+                          if f.refuses(self.spec.session_kind)]
+        if impossible_now:
+            raise SystemExit(
+                "task refused, session not started: its starting values leave trials no animal "
+                "can get right:\n"
+                + "\n".join(f"  {_printable(f.code)}: {_printable(f.detail)}"
+                            for f in impossible_now)
+            )
         # **What the start accepted, written as the run starts** (engine spec §19.3; the
         # engine B plan, call 23): after both refusals above, so a refused run leaves no row of
         # a warning accepted for it, and before the run's numbers are taken, so a fault here is
