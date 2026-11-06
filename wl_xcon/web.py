@@ -3124,13 +3124,16 @@ _SCRIPT = """
       tell("not sent: no number of " + key + "'s range was changed", "crit");
       return;
     }
+    // A double click's second press, or a second within the hold, is dropped first, as a clear's
+    // is: it reached the refusal below and said "not sent" in red until the rig answered, though
+    // the range was sent (the C3 plan's Task 18, its deferred minor).
+    if (!clearAllowed(detail, "range/" + key)) { return; }
     // The rig answers a range at its next trial boundary: while one is out, a second press of
     // the same card would send the same range again (fix round 3).
     if (rangeOut[key]) {
       tell("not sent: the range of " + key + " is still being sent; wait for its answer", "crit");
       return;
     }
-    if (!clearAllowed(detail, "range/" + key)) { return; }
     // The text of each field as it is sent: a number typed while the press is out is not.
     var sentText = Array.prototype.map.call(fields, function (input) { return input.value; });
     rangeOut[key] = true;
