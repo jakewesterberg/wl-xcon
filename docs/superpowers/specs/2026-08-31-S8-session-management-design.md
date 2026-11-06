@@ -104,6 +104,12 @@ unmakeable), saying what (`check.beyond_range`; decisions.md TSK-51).
   adaptive process disagree. Proposed: the console holds a soft lock a process cannot take, and
   a process write during a held lock is refused and surfaced rather than queued.
 
+  > **Superseded 2026-09-19 (PI), by S9a §8.** *"anybody connecting to the session should be
+  > able to access features full access."* **There is no write lock**: the console and the
+  > control API are ordinary writers, `bounds` is the welfare boundary, and last-write-wins
+  > within an ITI with both writes recorded with their actors and the resolution shown. The
+  > soft lock proposed above is not built; §8 item 1 records the answer.
+
 ### 3.4 Precedence
 
 **deployment → rig → subject → task → session → live edits**, all under the bounded config's
