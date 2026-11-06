@@ -40,8 +40,8 @@ that they do: each host keeps whatever clock it booted with.
   (134.58.255.1) as the synchronization source for users within KU Leuven, confirmed
   independently by DNS resolution the same day. ~~Its reachability from the rig's
   specific network segment is **UNVERIFIED** and is a question for the PI or ICTS, not
-  settled here.~~ **Closed 2026-09-20: the PI named the server, and it is
-  `ntp.wl.works`.** So the ICTS service is checked and not chosen rather than pending,
+  settled here.~~ **Closed 2026-09-20: the PI named the server, and it was
+  `ntp.wl.works`.** (Since 2026-11-04: `time.wl.works`.) So the ICTS service is checked and not chosen rather than pending,
   and its segment reachability is no longer an open question about anything — the
   verification is kept above because it is why the alternative was worth considering
   at all, and moves to *Alternatives considered* below.
@@ -66,15 +66,23 @@ that they do: each host keeps whatever clock it booted with.
 
 ## Decision
 
-**wl-works runs an NTP server at `ntp.wl.works`. Lab hosts synchronize their wall
-clocks to it.** The hostname is the PI's, named 2026-09-20, which is what turns this
+**wl-works runs an NTP server at `time.wl.works`. Lab hosts synchronize their wall
+clocks to it.** The hostname was the PI's, named 2026-09-20, which is what turns this
 from a decision about *which system* serves the time into a configuration a host can
 actually be pointed at. Today that host is the task PC; the cage-side kiosk joins once
 `wl-touchtrain` specifies a platform for it. This is ordinary client-initiated NTP: the
-lab host asks, `ntp.wl.works` answers.
+lab host asks, `time.wl.works` answers.
+
+> **Amended 2026-11-04 (PI): the name is `time.wl.works`, not `ntp.wl.works`.** The PI named
+> `ntp.wl.works` on 2026-09-20; wl.works, which runs the server, had chosen `time.wl.works`
+> the same day (its row 60 §8, over `ptp.` and `ntp.`), and said so on 2026-10-11 (XC-103).
+> Asked which the lab uses, he answered *"time.wl.works"*, following wl.works. Every
+> `ntp.wl.works` below that is not marked as history now reads `time.wl.works`; the two that
+> are history (the Context's closing of the ICTS question, and the Alternatives' account of
+> it) say what the PI named on 2026-09-20 and keep that name. Nothing else here changes.
 
 **A named hostname does not make the service more authoritative than it is**, and this
-is the line in this ADR most likely to be misread once `ntp.wl.works` appears in a
+is the line in this ADR most likely to be misread once `time.wl.works` appears in a
 config file. It serves bookkeeping time, as the next paragraph says, and nothing else.
 
 **This serves bookkeeping time only, never experimental time.** Which day it is, which
@@ -94,7 +102,7 @@ by this ADR.
 ## Alternatives considered
 
 **`ntp.kuleuven.be` (KU Leuven ICTS's central service). Checked, and not chosen —
-settled 2026-09-20 by the PI naming `ntp.wl.works`.** It loses on none of its merits: it
+settled 2026-09-20 by the PI naming `ntp.wl.works` (since 2026-11-04, `time.wl.works`).** It loses on none of its merits: it
 exists (verified against ICTS's own service page, above — the verification is kept
 precisely because it is why this was a real alternative rather than a straw one), it is
 free, and it is the institution's own answer to this exact problem. It loses because the
@@ -103,7 +111,7 @@ on for other pull-based integration (`docs/pending-wl-works-amendments.md`).
 
 **What this closes and what it does not.** Whether `ntp.kuleuven.be` is reachable from
 the rig segment was carried here as an open question for the PI or ICTS; it is **no
-longer one**, because nothing is going to depend on it. **The route to `ntp.wl.works` is
+longer one**, because nothing is going to depend on it. **The route to `time.wl.works` is
 still open** — see *Consequences* — and the two must not be confused: one question is
 closed by not being asked any more, and the other is unanswered.
 
@@ -118,12 +126,12 @@ makes them agree with each other.
 
 **A route that does not exist today has to exist, and it is narrower than it sounds.
 Still open, and naming the server did not close it** (2026-09-20): lab hosts need a path
-to `ntp.wl.works` on **UDP 123**, and the current topology does not give them one.
+to `time.wl.works` on **UDP 123**, and the current topology does not give them one.
 `docs/design/architecture.md`'s topology paragraph is amended in this commit: lab
 machines still have no route in for the application layer, and `wl-preproc`'s AST
 guardrail — a check over application source — is completely untouched by this decision.
 What changes is one routing exception, one port, one direction: a lab host may reach
-`ntp.wl.works` on UDP 123 to ask the time. Do not read this as the guardrail being relaxed; it
+`time.wl.works` on UDP 123 to ask the time. Do not read this as the guardrail being relaxed; it
 refuses exactly what it always refused, and nothing in `wl_preproc` gains a socket it
 did not have.
 
@@ -143,7 +151,7 @@ through the lab-host protocol. It does not change what the timing record is (S3)
 **Follow-ups, not done here:**
 
 - `docs/pending-wl-works-amendments.md` gains a new ask — wl-works runs the service at
-  `ntp.wl.works` and opens the routing exception it needs (UDP 123, lab host → wl-works)
+  `time.wl.works` and opens the routing exception it needs (UDP 123, lab host → wl-works)
   — drafted for that repository's owner to accept, amend or refuse, the same as every
   other ask recorded there. **The hostname is settled and the route is not**, which is
   the whole of what that ask is now about.

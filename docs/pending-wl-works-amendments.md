@@ -418,9 +418,9 @@ still runs, and its own PC keeps every control; only remote, attributed control 
 
 ## wl-works runs an NTP server, and lab hosts synchronize to it (new, 2026-09-20)
 
-**The ask: run an NTP server on wl-works at `ntp.wl.works`, reachable from the lab
-network on UDP 123, and let a lab host initiate that one connection.** The hostname is
-the PI's, named 2026-09-20; **the route is the part still open**, and it is the whole of
+**The ask: run an NTP server on wl-works at `time.wl.works`, reachable from the lab
+network on UDP 123, and let a lab host initiate that one connection.** The hostname was
+the PI's, named `ntp.wl.works` on 2026-09-20 and changed to wl.works' own `time.wl.works` on 2026-11-04 (the note below); **the route is the part still open**, and it is the whole of
 what this ask is now about. `ADR-0009` (this repository, 2026-09-20)
 is the PI's decision behind it — welfare marks are now clock times (the out-of-cage
 departure mark, among them) rather than intervals, and the daily fluid figure spans two
@@ -441,8 +441,11 @@ for time needs a route to it that does not exist today, on UDP 123 only.
 > is not designed: how a lab host's UDP 123 to that name reaches the time appliance is row 60's plan's, and row 60
 > is filed under its "Waiting on final hardware", since no appliance, switch, fiber or antenna exists. It calls
 > this section's framing (one port, one direction, bookkeeping time, the rig's clock the floor) consistent with
-> row 60. (Its handover, "XC-103 — the NTP hostname", lines 540-549; read 2026-10-31 at its `main` `b3c1b933`.) This repository's
-> ADR-0009 and architecture.md still write `ntp.wl.works`, the PI's name of 2026-09-20. Backlog XC-103.
+> row 60. (Its handover, "XC-103 — the NTP hostname", lines 540-549; read 2026-10-31 at its `main` `b3c1b933`.) Backlog XC-103.
+
+> **Settled 2026-11-04 (PI): the lab uses `time.wl.works`.** Asked which name, he answered "time.wl.works",
+> following wl.works, which runs the server. ADR-0009 and architecture.md now write `time.wl.works`; REC-23 carries
+> a dated revision. The 2026-10-11 note above, which says wl-xcon asserts no name, is history. The route is still row 60's.
 
 **This is not the AST guardrail changing.** `wl-preproc`'s "never initiates a connection"
 check (`tests/test_cli_guardrails.py`, read from source 2026-09-20) is a static walk over
@@ -470,7 +473,7 @@ the ICTS service is checked and not chosen.** Its segment reachability stops bei
 question because nothing is going to depend on it. The verification is kept, struck
 through rather than deleted, because it is why the alternative was worth considering —
 ADR-0009's *Alternatives considered* carries it. **Do not read this as the routing
-question closing with it**: the lab host still needs a path to `ntp.wl.works` on UDP 123,
+question closing with it**: the lab host still needs a path to `time.wl.works` on UDP 123,
 and that is item 5 below.
 
 ---
@@ -597,9 +600,9 @@ holds no ELN notes; it holds the rig name and not the id) and is rebuilt when it
    What stands of wl.works' answers of 2026-08-31: `prepare-session` (with no plan fields),
    the fluid figure as an envelope, the host list as configuration (item 1) and alerts.
    *(2026-10-11: `prepare-session` withdrawn, item 2; the envelope stands, read by the rig's page.)*
-5. Whether wl-works can run an NTP server at `ntp.wl.works` reachable from the lab
+5. Whether wl-works can run an NTP server at `time.wl.works` reachable from the lab
    network on UDP 123, and open the one-port routing exception that requires (new,
-   2026-09-20 — see above). **The hostname is the PI's; the route is not settled. As of 2026-10-11 wl-works names two other hostnames (see the update in the NTP section), and its answer is awaited on which a lab host is given.** *(Answered 2026-10-11: `time.wl.works`; the route is row 60's, waiting on its final hardware. The NTP section's note.)*
+   2026-09-20 — see above). **The hostname is settled: `time.wl.works` (wl.works' answer of 2026-10-11, followed by the PI on 2026-11-04). The route is not: it is row 60's, waiting on its final hardware.** *(See the NTP section's notes.)*
 6. **Answered 2026-09-29: yes, with conditions (above).** Whether signed-in members may send controls to a rig from its page, and, if so, the four
    changes that needs: a client per rig, the rig's callback URL allowed, tokens whose
    audience is the rig, and the rig's page exchanging a code for a token (new, 2026-09-29 —

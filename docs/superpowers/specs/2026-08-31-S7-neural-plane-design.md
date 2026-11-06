@@ -170,8 +170,8 @@ a target, because inventing a threshold for an unmeasured path would be P1.
 
 | # | Item | Owner |
 |---|---|---|
-| 1 | **MUA feature definition v0** — band, rectification, window, channel combination | PI, scientific |
-| 2 | Whether `rhxfeatd` and `neurofeatd` share an implementation or only a contract | S7 |
+| 1 | ~~**MUA feature definition v0** — band, rectification, window, channel combination~~ **Answered 2026-08-31, recorded in M0-REVIEW §3.1: both types, selectable per experiment** — envelope on the SpikeGLX path, RHX's own threshold crossings on the Intan path. Band, threshold and window stay per-experiment (M0-REVIEW §3.1 item 1; §5 above) | PI, scientific |
+| 2 | ~~Whether `rhxfeatd` and `neurofeatd` share an implementation or only a contract~~ **Answered: `rhxfeatd` and `neurofeatd` share a contract, not an implementation** — the two paths differ enough that a shared base would be a false economy (an engineering call, M0-REVIEW §4, "Platform") | S7 |
 | 3 | Whether the two paths' features are deliberately matched or allowed to differ | PI, scientific |
-| 4 | Runaway thresholds: rate window and per-session total | PI + welfare review |
+| 4 | ~~Runaway thresholds: rate window and per-session total~~ **Answered 2026-08-31, recorded in M0-REVIEW §3.1: rate window plus session total, numbers from protocol.** Per-delivery charge bounds already exist, so a count bound gives a session charge ceiling implicitly (M0-REVIEW §3.1 item 6; §4.3 above). Numbers pending protocol | PI + welfare review |
 | 5 | Whether `rig/intan` and `rig/sglx` are one machine (S0 open item 2) | V8 decides |

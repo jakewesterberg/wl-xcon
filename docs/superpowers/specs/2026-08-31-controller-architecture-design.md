@@ -768,14 +768,14 @@ plus vocalization monitoring.
 |---|---|---|---|
 | 1 | ~~Escape-hatch strictness in the within-trial layer~~ **Answered in S1**: typed seam, novelty promoted into reviewed framework code, tasks using one are flagged. The bake-off's permissive version contained two defects the author did not notice | S1 | — |
 | 2 | Touchscreen: second panel, rig mode, or deferred | PI | S4, S6 |
-| 3 | ~~Display panel, refresh target, panel technology~~ **Answered in S0**: 32-inch-class 16:9 flat OLED, tandem model deferred to late 2026, bench panel bought now, 57 cm build distance, mode as rig config. Remaining: whether burn-in protection is defeatable, and whether GPU + panel can avoid DSC (Superseded: the 26.5-inch PG27UCDM, PI 2026-09-27, at 50 cm in both setups, PI 2026-09-28; S0 §5.1-§5.2.) | S0 | panel purchase only |
+| 3 | ~~Display panel, refresh target, panel technology~~ **Answered in S0**: 32-inch-class 16:9 flat OLED, tandem model deferred to late 2026, bench panel bought now, 57 cm build distance, mode as rig config. Remaining: whether burn-in protection is defeatable, ~~and whether GPU + panel can avoid DSC~~ (Superseded: the 26.5-inch PG27UCDM, PI 2026-09-27, at 50 cm in both setups, PI 2026-09-28; S0 §5.1-§5.2.) **DSC closed 2026-09-26: yes** (S0 §8 item 4). Burn-in stays open as S0 §8 item 3 | S0 | panel purchase only |
 | 4 | Photodiode patch placement against the real optics | PI + `wl-sync` | rig build |
 | 5 | Misc BNC assignment for the audio verification tap | `wl-sync` agreement | S0 |
-| 6 | ~~Event-code vocabulary allocation~~ **Largely answered in S2**: the protocol exists and is frozen; ADR-0007 splits ownership. Remaining: `wl-preproc` agreeing that `TaskEvent` 256–4095 moves, and accepting one new escape | `wl-preproc` | allocation, then S1 |
+| 6 | ~~Event-code vocabulary allocation~~ **Largely answered in S2**: the protocol exists and is frozen; ADR-0007 splits ownership. ~~Remaining: `wl-preproc` agreeing that `TaskEvent` 256–4095 moves, and accepting one new escape~~ **Both done**: `wl-preproc` agreed on 2026-09-01 ("we agree", in its `docs/CHECKPOINT.md`; `7e100ab`) and added the escape, `PARAM_CHANGE` (`0x8005`), in `5ea827b` (pending-wl-preproc-amendments.md) | `wl-preproc` | — |
 | 7 | wl-works amendment for the session-summary contract | drafted here, theirs to accept | S10 |
-| 8 | MUA feature definition v0 (band, rectification, window, CAR) | PI, scientific | S7 |
-| 9 | Console toolkit (PyQtGraph is the working recommendation) | S9 | S9 |
-| 10 | Whether `rhxfeatd` and `neurofeatd` share an implementation | S7 | S7 |
+| 8 | ~~MUA feature definition v0 (band, rectification, window, CAR)~~ **Answered 2026-08-31, recorded in M0-REVIEW §3.1 item 1** (S7 §5): both types, selectable per experiment — envelope on the SpikeGLX path, RHX's own threshold crossings on the Intan path. Band, threshold and window stay per-experiment | PI, scientific | — |
+| 9 | ~~Console toolkit (PyQtGraph is the working recommendation)~~ **Answered by ADR-0008** (PI, 2026-09-19): the experimenter console is a web application served by each control box, and "The Qt stack (PySide6, PyQtGraph) is **not** added", overturning M0-REVIEW §4's "PyQtGraph for live plots". Remaining: the replica pane, which ADR-0008 leaves "gated on a measurement rather than an opinion" (V11; XC-024) | S9 | the replica pane only |
+| 10 | ~~Whether `rhxfeatd` and `neurofeatd` share an implementation~~ **Answered in M0-REVIEW §4** (an engineering call, 2026-08-31): `rhxfeatd` and `neurofeatd` share a contract, not an implementation — the two paths differ enough that a shared base would be a false economy | S7 | — |
 | 11 | ~~Restart-safety: can a session resume after a `taskd` crash~~ **Answered by XC-026** (2026-10-01): a `wlx taskd` session resumes from its record, its departure read back and every number carried on; `wlx run` does not resume | S8 | — |
 
 ---

@@ -104,6 +104,12 @@ unmakeable), saying what (`check.beyond_range`; decisions.md TSK-51).
   adaptive process disagree. Proposed: the console holds a soft lock a process cannot take, and
   a process write during a held lock is refused and surfaced rather than queued.
 
+  > **Superseded 2026-09-19 (PI), by S9a §8.** *"anybody connecting to the session should be
+  > able to access features full access."* **There is no write lock**: the console and the
+  > control API are ordinary writers, `bounds` is the welfare boundary, and last-write-wins
+  > within an ITI with both writes recorded with their actors and the resolution shown. The
+  > soft lock proposed above is not built; §8 item 1 records the answer.
+
 ### 3.4 Precedence
 
 **deployment → rig → subject → task → session → live edits**, all under the bounded config's
@@ -871,7 +877,7 @@ Everything else may change without a welfare review. These four may not.
 
 | # | Item | Blocks |
 |---|---|---|
-| 1 | Arbitration rule between console and control-API writers (§3.3) | S9 |
+| 1 | ~~Arbitration rule between console and control-API writers (§3.3)~~ **Answered 2026-09-19 (PI):** *"anybody connecting to the session should be able to access features full access."* There is no write lock, so there is nothing to arbitrate: both are ordinary writers and `bounds` is the welfare boundary; presence, a live change feed and staged changes visible to everyone replace the lock, and last-write-wins within an ITI, both writes recorded with their actors and the resolution shown (S9a §8; S9 §10 item 1). This overturns the soft lock §3.3 proposes and M0-REVIEW §4's "until it takes the write lock" | — |
 | 2 | ~~Whether the sync box's delivered-line record is readable by us live, or only at session end~~ **Answered 2026-10-18 by `wl-sync`** ([its answers](../../pending-wl-sync-amendments.md#answered-2026-10-18--wl-syncs-reply-at-9e60ed6), XC-091): on the box itself any process can read the open segment while it is written, new records appearing once per write loop; **from another host nothing makes it readable, live or at session end**, and a task-PC read needs the same reader as XC-087. The box has no session end (it records all day), a restart splits the record into segments on separate clocks, and an edge lost to a buffer overflow is not marked in the file. Today the box does not record the real line at all: it runs only with `--fake` until its RP1 backend is wired into its run loop. **wl-sync also states that the line records what the reward driver was told, not fluid delivered**: an unpowered driver, an empty reservoir or a blocked line still records as delivered. This row records the answer only; §5.1 is unchanged *(until 2026-10-18, when the PI corrected it: the line is a count of reward commands, and what the animal received is checked by a reservoir reading, XC-389)*. Remaining: reading the record, XC-384 | §5.1's "continuously" — **less urgent since 2026-09-06**: with a floor rather than a ceiling nothing in-session depends on it, and session-end is enough to compute a supplement |
 | 6 | ~~**Is a runaway-fluid fault limit wanted?**~~ **Answered 2026-09-19 (PI): yes, and it is `reward_correct`'s maximum.** Set to **10 mL** — far above any dose, so what it refuses is software delivering litres, not an animal earning a ration. `Ceiling` therefore no longer means "a protocol figure" at every entry: `bounds.Ceiling` names the two kinds, and a bounded config states at each entry which it is — `tasks/reference_bounds.py` labels `reward_correct` a fault bound and `out_of_cage` a protocol figure. The *value* beside it stays a placeholder until there are animals | ✔ |
 | 7 | ~~**There is no session-length maximum**~~ **Done 2026-09-19.** `max_trials` is gone — from `welfare`, from `must_stop`, from `tasks/reference_bounds.py` and from every document that said two ceilings end a session. Per-condition targets were always `scheduler`'s (`Counts`, `owed()`, `upcoming()`), which the console renders as *still needed by condition*. The clock question that blocked it is answered in the same change: `welfare.must_stop` reads **out-of-cage time** against an eight-hour ceiling (the PI corrected the twelve recorded here on 2026-10-01), and chair time is recorded and bounds nothing. See §5.2 item 4 | ✔ |

@@ -1366,10 +1366,11 @@ entry has its three lines, that every link names a file that exists, and that ev
 - **Where:** [engine spec §14](../superpowers/specs/2026-10-07-engine-design.md#14-variation-n11-nr1-nr2) item 5; the brainstorm notes, [§11, Batch 2](../superpowers/specs/2026-10-07-engine-brainstorm-notes.md#11-variation); [XC-155 trial-markers spec §2.3](../superpowers/specs/2026-09-30-xc155-trial-markers-design.md#23-not-in-this-change).
 - **Basis:** PI decision; no published basis found (searched as for REC-04).
 
-### REC-23 — NTP (`ntp.wl.works`) serves bookkeeping time only (which day, when a mark was made), never the timing record
+### REC-23 — NTP (`time.wl.works`) serves bookkeeping time only (which day, when a mark was made), never the timing record
 - **Decided:** 2026-09-20, the PI (ADR-0009).
 - **Where:** [ADR-0009, "Decision"](../design/decisions/ADR-0009-ntp-time-synchronization.md#decision); [architecture.md, "Data outputs and lab integration"](../design/architecture.md#data-outputs-and-lab-integration).
 - **Basis:** PI decision, supported by the standards. [@mills2010network] — standard: typical secondary servers and clients on fast LANs are within a few hundred microseconds, and with long poll intervals precise within a few tens of milliseconds (RFC 5905 §1, p. 4), ample for which day and which minute. [@karsh2026sync] — software documentation: hardware sync edges align recorded streams with typical errors of about 0.01 ms (Overview), one to three orders of magnitude finer, which is why the timing record stays on hardware edges. [@ieee2020ieee] — standard: PTP, the network protocol for experimental-grade time, targets synchronization accuracy and precision in the sub-microsecond range (IEEE Std 1588-2019, abstract), the route if network time were ever wanted for timing; ADR-0009 does not propose it.
+- **Revised:** 2026-11-04, the PI: the server's name is `time.wl.works` (wl.works' own choice, which he followed), not `ntp.wl.works`; the decision and its basis are unchanged (ADR-0009's amendment of that day).
 
 ### REC-24 — A task's identity in the record is a hash of what it declares: sha256 of its declarations as JSON with sorted keys, fields at their defaults left out and the format of those defaults in, in each run's start row as `versions.task`, never its path
 - **Decided:** 2026-10-10, the PI (approving XC-288's spec, §4.4: "always: a hash of its content, never its file path"); how it is computed, engineering (the engine C1 plan's calls 11 and 12), 2026-10-11.
