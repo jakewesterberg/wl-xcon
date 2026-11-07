@@ -226,6 +226,8 @@ def _session_with(
         # setting keeps trials out of moving up (`Session.eased`).
         moments=((0, 0.0, "the run's start"),),
         eased=(),
+        # `Session.suggestion` (schema 20): the rig suggests nothing.
+        suggestion=None,
     )
 
 
@@ -2387,7 +2389,7 @@ def test_schema_8_reads_the_pause_the_schedule_and_the_feed_from_the_session():
 
     telemetry = Telemetry.of(session, Tally(), _scheduler(), index=40)
 
-    assert telemetry.schema == SCHEMA == 19
+    assert telemetry.schema == SCHEMA == 20
     assert telemetry.paused_at == 1_700_000_100.0
     assert telemetry.scheduled_stop == ScheduledStop(
         kind="trials", target=48.0, by=Box("jake"), said="after trial 48"
@@ -2450,15 +2452,15 @@ def test_a_frame_carries_the_setup_the_session_runs_in():
     assert decode(encode(stereo)).view == "stereoscope"
     assert decode(encode(stereo)).half_ipd_cm == 1.6
     assert decode(encode(_telemetry())).half_ipd_cm is None
-    assert SCHEMA == 19
+    assert SCHEMA == 20
 
 
-def test_a_schema_7_frame_is_refused_by_a_schema_19_reader():
-    """§3's schema rule: a reader built for 19 refuses 7 by name, before touching a
+def test_a_schema_7_frame_is_refused_by_a_schema_20_reader():
+    """§3's schema rule: a reader built for 20 refuses 7 by name, before touching a
     field (`SchemaMismatch`), and says which it reads."""
     old = encode(replace(_telemetry(), schema=7))
 
-    with pytest.raises(SchemaMismatch, match="carried schema 7 and this console reads schema 19"):
+    with pytest.raises(SchemaMismatch, match="carried schema 7 and this console reads schema 20"):
         decode(old)
 
 
@@ -2632,7 +2634,7 @@ def test_schema_10_survives_the_wire_with_its_absences_intact():
         assert decode(encode(original)) == original
     assert type(decode(encode(populated)).preflight.items[0]) is PreflightItem
     assert type(decode(encode(populated)).question) is Question
-    assert SCHEMA == 19
+    assert SCHEMA == 20
 
 
 def test_a_session_before_its_first_run_has_no_block_task_or_counts():
@@ -2688,7 +2690,7 @@ def test_an_idle_frame_carries_the_last_closed_sessions_summary_across_the_wire(
     assert type(restored.closed) is Telemetry and restored.closed.phase == "closed"
     assert (restored.closed.fluid_today_ml, restored.closed.shortfall_ml) == (None, None)
     assert decode(encode(replace(idle, closed=None))).closed is None
-    assert SCHEMA == 19
+    assert SCHEMA == 20
 
 
 def test_idle_of_carries_what_it_is_given_as_the_closed_summary():
@@ -2710,7 +2712,7 @@ def test_an_idle_frame_of_another_schema_is_refused_by_name():
         )
     )
 
-    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 19"):
+    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 20"):
         decode(old)
 
 
@@ -2854,7 +2856,7 @@ def test_the_strips_levels_and_the_return_survive_the_wire():
     assert decode(encode(original)) == original
     # 12 added `performance` (the strip's session, task, run and block counts) and
     # `returned_at` (the recorded return).
-    assert SCHEMA == 19
+    assert SCHEMA == 20
 
 
 def test_a_frame_between_runs_carries_the_session_alone():
@@ -2924,7 +2926,7 @@ def test_the_instant_a_session_was_resumed_survives_the_wire_and_none_stays_none
     assert decode(encode(resumed)).resumed_at == 1_700_000_050.0
     assert decode(encode(_telemetry())).resumed_at is None
     # 13 added `Stranded.resumable` and `why`, and `Telemetry.resumed_at`.
-    assert SCHEMA == 19
+    assert SCHEMA == 20
 
 
 def test_the_frame_reads_the_resume_from_the_session():
@@ -2941,7 +2943,7 @@ def test_the_frame_reads_the_resume_from_the_session():
 def test_a_schema_13_frame_is_refused_by_name():
     """b2b (schema 14): a frame whose `by`s are strings is refused by its schema, by
     name, before any `by` is read."""
-    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 19"):
+    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 20"):
         decode(encode(replace(_telemetry(), schema=13)))
 
 
@@ -2978,7 +2980,7 @@ def test_schema_15_carries_the_kind_the_calibration_and_the_warnings_both_ways()
         warnings=(WarningRow("default calibration", "the standard's", SESSION_KINDS, None, None),),
     )
 
-    assert (sent.schema, decode(encode(sent))) == (19, sent)
+    assert (sent.schema, decode(encode(sent))) == (20, sent)
     assert type(decode(encode(sent)).warnings[0]) is WarningRow
     assert decode(encode(unloaded)).calibration is None
     assert decode(encode(idle)) == idle
@@ -3017,7 +3019,7 @@ def test_schema_16_carries_each_shortfall_drumming_the_training_aids_and_each_co
         only = replace(sent, rule="streak", **flags)
         assert decode(encode(only)) == only
     assert decode(encode(replace(sent, rule=None))).rule is None
-    with pytest.raises(SchemaMismatch, match="carried schema 15 and this console reads schema 19"):
+    with pytest.raises(SchemaMismatch, match="carried schema 15 and this console reads schema 20"):
         decode(encode(replace(sent, schema=15)))
 
 
@@ -3105,7 +3107,7 @@ def test_a_schema_14_frame_of_either_shape_is_refused_by_name():
 
     for old in (replace(_telemetry(), schema=14), idle):
         with pytest.raises(
-                SchemaMismatch, match="carried schema 14 and this console reads schema 19"):
+                SchemaMismatch, match="carried schema 14 and this console reads schema 20"):
             decode(encode(old))
 
 
@@ -3161,7 +3163,7 @@ def test_schema_17_carries_the_plan_the_next_block_the_time_left_and_the_plans_o
     assert decode(encode(replace(sent, plan=None, next_block=None, block_left_s=None,
                                  run_left_s=None, preflight=replace(preflight, plan=None,
                                                                     plans=())))).plan is None
-    with pytest.raises(SchemaMismatch, match="carried schema 16 and this console reads schema 19"):
+    with pytest.raises(SchemaMismatch, match="carried schema 16 and this console reads schema 20"):
         decode(encode(replace(sent, schema=16)))
 
 
@@ -3323,9 +3325,9 @@ def test_schema_18_carries_a_settings_position_and_refuses_17_by_name():
         ParamRow("fix_hold", "s", 0.1, 1.0, 0.3, False),
     ))
 
-    assert (sent.schema, decode(encode(sent))) == (19, sent)
+    assert (sent.schema, decode(encode(sent))) == (20, sent)
     assert decode(encode(sent)).params[1].position is None
-    with pytest.raises(SchemaMismatch, match="carried schema 17 and this console reads schema 19"):
+    with pytest.raises(SchemaMismatch, match="carried schema 17 and this console reads schema 20"):
         decode(encode(replace(sent, schema=17)))
 
 

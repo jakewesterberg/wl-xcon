@@ -346,7 +346,8 @@ def test_a_change_row_its_readers_would_refuse_is_never_written(tmp_path):
     the kind strobes nothing or none where it strobes `PARAM_CHANGED`, a row naming nothing
     (wl-preproc leaves one out), and a change id that is not a whole number from 1 are each
     refused before the file is opened."""
-    assert record.KINDS == ("set", "hand_back", "range", "revert", "clear", "drum", "training")
+    assert record.KINDS == ("set", "hand_back", "range", "revert", "clear", "drum", "training",
+                            "suggested", "declined")
     assert record.STROBED == ("set", "hand_back", "range", "revert")
     log = SessionRecord.open(tmp_path, "2027-01-14_01", "A")
     good = dict(change=1, kind="set", name="fix_hold", was=0.3, now=0.5, by=Box("jake"),

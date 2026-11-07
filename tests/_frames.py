@@ -20,7 +20,8 @@ nothing drummed; `clearable` is true, a block whose trials can be owed; the trai
 is off and a percentage counts every answer, as a run starts; no condition's counts are carried;
 as many trials as presentations, no aid on, no rule, and no block past its targets. Schema 19's
 `moments` are none, no setting keeps trials out of moving up (`eased`), and the `ParamRow`s name
-no source, conditions, draw or numbers: a test that wants them asks for them by name.
+no source, conditions, draw or numbers: a test that wants them asks for them by name. Schema 20's
+`suggestion` is `None`, its default: the rig suggests nothing.
 """
 
 from __future__ import annotations

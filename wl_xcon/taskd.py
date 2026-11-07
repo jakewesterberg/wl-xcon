@@ -74,6 +74,8 @@ from wl_xcon.scheduler import (
     DRUM_SCOPES,
     DRUM_WARNING,
     EVERY_TRIAL,
+    MOVE_BACK,
+    MOVE_UP,
     NEXT,
     RULE,
     RUN,
@@ -641,6 +643,28 @@ class _Climb:
         if nearest is not None:
             self.level = nearest
         self.right = self.wrong = 0
+
+
+#: **What became of a suggestion the rig made** (`_Suggested.fate`; the pop-out search build,
+#: 2026-11-07): `None` while it stands; withdrawn as its bar stopped being met (the plan's Review
+#: Focus 2), declined by a person, confirmed by a person's move, or lapsed as the run left its
+#: stage otherwise (a move by hand, or the stage's time). An answer to any but a standing one is
+#: refused with a sentence naming which (`Session._unanswerable`).
+WITHDRAWN, DECLINED, CONFIRMED, LAPSED = "withdrawn", "declined", "confirmed", "lapsed"
+
+
+@dataclass
+class _Suggested:
+    """**A suggestion the rig made in the run in progress** (`scheduler.Suggestion`; the pop-out
+    search build, 2026-11-07): the `change` id of its `suggested` row, which a person's answer
+    names, the `move`, the stage it was judged in (`block`) and the stage it suggests (`to`), and
+    what became of it (`fate`, `None` while it stands)."""
+
+    change: int
+    move: str
+    block: str
+    to: str
+    fate: str | None = None
 
 
 @dataclass
@@ -2046,6 +2070,20 @@ class Session:
         return tuple(said)
 
     @property
+    def suggestion(self) -> tuple | None:
+        """**What the rig suggests now**, under a confirmed progression (`task.ByCriterion.confirm`;
+        the pop-out search build, 2026-11-07; telemetry schema 20), as `link.Suggestion`'s fields:
+        the id of its `suggested` row, which a person's answer names, its move, the stage it was
+        judged in and the stage it suggests, and its bar as it reads now
+        (`scheduler.Scheduler.bar`). `None` where none stands -- none made, one withdrawn or
+        answered -- and between runs. The public face of `_suggested`."""
+        offered = self._suggested
+        if offered is None or self.phase != "running" or self._scheduler is None:
+            return None
+        correct, of, hardest = self._scheduler.bar(offered.move)
+        return (offered.change, offered.move, offered.block, offered.to, correct, of, hardest)
+
+    @property
     def eased(self) -> tuple:
         """**The settings a person's live change kept the latest trial out of moving up by**,
         sorted -- the shape `link.Telemetry.of` carries as `eased` (telemetry schema 19; the
@@ -2467,18 +2505,38 @@ class Session:
         n-th time that code was strobed, and every block that ends on its own strobes `BLOCK_END`
         with no row, so a move's row is timed by its own instant. **Refused with the sentence**,
         nothing changed, where there is no such block: a plain run is one block, and the first or
-        last block of a plan has none before or after it."""
+        last block of a plan has none before or after it.
+
+        **A confirmation** (the pop-out search build, 2026-11-07; the PI, "Rig suggests, trainer
+        confirms"): a move naming the rig's suggestion it answers (`command.suggestion`) is
+        refused with the sentence, nothing moved, unless that suggestion stands and is this move
+        (`_unanswerable`) -- one withdrawn as its bar dropped before the answer arrived among them
+        (the plan's Review Focus 2) -- and its row names it (`suggestion`), as wl-preproc accepted.
+        A move naming none is a move by hand, as before, and a suggestion standing lapses with
+        it (`_lapse`)."""
         scheduler = self._scheduler
         if self._run is not None and self._run.plan is None and not self._run.blocks:
             self._refuse(command.KIND, command.by, (
                 "a plain run is one block, so there is no block to move to; a run of one of the "
                 "task's plans moves between its blocks"))
             return
+        answered = command.suggestion
+        if answered is not None:
+            said = self._unanswerable(
+                command.KIND, answered, MOVE_UP if step == NEXT else MOVE_BACK,
+                f"nothing moved, and the run stays in block {scheduler.block.name}")
+            if said is not None:
+                self._refuse(command.KIND, command.by, said)
+                return
         was, dropped = scheduler.block.name, scheduler.drum_waiting
         said = scheduler.move(step, command.by)
         if said is not None:
             self._refuse(command.KIND, command.by, said)
             return
+        if answered is not None:
+            self._suggested.fate = CONFIRMED
+            self._suggested = None
+        self._lapse()
         if self._levels.end_block():
             self.card.emit(BLOCK_END)
         self.blocks_run.append(scheduler.block.name)
@@ -2487,9 +2545,118 @@ class Session:
         self._control(
             command.KIND, command.by,
             f"{what}: from block {was} to block {scheduler.block.name}"
+            + ("" if answered is None else f", confirming the rig's suggestion {answered}")
             + ("" if dropped is None else f"; the drummed trial of {dropped} waiting was dropped"),
             index, block=was, to=scheduler.block.name, dropped=dropped,
+            **({} if answered is None else {"suggestion": answered}),
         )
+
+    def _decline(self, command, index: int) -> None:
+        """**A person holds instead of making the move the rig suggests** (`link.Decline`, the
+        console's *Hold*; the pop-out search build, 2026-11-07; the PI, "Rig suggests, trainer
+        confirms"), between trials or while paused: the run stays where it is, the change log
+        records a `declined` row with who held and the suggestion it answers (as wl-preproc
+        accepted), and the rig suggests that move again only once a fresh window of answers
+        meets its bar (`scheduler.Scheduler.decline`; an engineering call: a hold is not asked
+        again on the answers it was given on). **Refused with the sentence**, nothing recorded,
+        unless that suggestion stands (`_unanswerable`). Touches no reward, bounded setting,
+        clock or pump."""
+        said = self._unanswerable(command.KIND, command.suggestion, None,
+                                  "there is nothing to hold")
+        if said is not None:
+            self._refuse(command.KIND, command.by, said)
+            return
+        offered, held = self._suggested, self._scheduler.block.name
+        offered.fate, self._suggested = DECLINED, None
+        self._scheduler.decline(offered.move)
+        at = self.wall_now()
+        self._feed("decline", command.by, at,
+                   f"held in block {held}: the rig's suggestion {offered.change}, to move "
+                   f"{offered.move} to {offered.to}, declined; it is suggested again once a fresh "
+                   f"window of answers meets its bar")
+        self._logged("declined", "block", held, held, command.by, at, suggestion=offered.change)
+
+    def _unanswerable(self, kind: str, answered: object, move: str | None,
+                      tail: str) -> str | None:
+        """**Why an answer to the rig's suggestion `answered` is refused**, ending in `tail`, or
+        `None` where it may be given (the pop-out search build; the plan's Review Focus 2): it
+        names a suggestion by its id, a whole number from 1 (the wire's rule again, so a command
+        that reached the session another way meets it); one the rig made in this run; one still
+        standing -- not withdrawn as its bar stopped being met, nor already declined or confirmed,
+        nor lapsed as the run left its stage; and, for a move (`move`), that move."""
+        if isinstance(answered, bool) or not isinstance(answered, int) or answered < 1:
+            return (f"a {kind!r} command names the rig's suggestion by its id, a whole number "
+                    f"from 1, and {_link._quoted(answered)} is not one; {tail}")
+        offered = self._suggestions.get(answered)
+        if offered is None:
+            return f"the rig made no suggestion {answered} in this run; {tail}"
+        which = f"to move {offered.move} from {offered.block} to {offered.to}"
+        if offered.fate == WITHDRAWN:
+            return (f"the rig's suggestion {answered}, {which}, was withdrawn when its bar stopped "
+                    f"being met, before this answer arrived; {tail}")
+        if offered.fate == LAPSED:
+            return (f"the rig's suggestion {answered}, {which}, lapsed when the run left block "
+                    f"{offered.block}; {tail}")
+        if offered.fate is not None:
+            return f"the rig's suggestion {answered}, {which}, was already {offered.fate}; {tail}"
+        if move is not None and offered.move != move:
+            return f"the rig's suggestion {answered} is {which}, not {move}; {tail}"
+        return None
+
+    def _suggest(self) -> None:
+        """**What the rig suggests, kept in step with its bar** (`scheduler.Scheduler.suggestion`;
+        the pop-out search build, 2026-11-07; the PI, "Rig suggests, trainer confirms"), between
+        trials, after each trial is recorded, never in a frame. **A suggestion whose bar stops
+        being met withdraws itself** (the plan's Review Focus 2): the changes feed says so with
+        the numbers, and an answer arriving after is refused (`_unanswerable`); no row records
+        a withdrawal (wl-preproc was told of no such kind), the trial lines holding what withdrew
+        it. **A new one** is a `suggested` change row, from no one, naming the move, the stage it
+        was judged in and the one it suggests, the bar's numbers and whether every trial of its
+        window was at the stage's hardest step (always, to move up, whose window holds only
+        those), strobing nothing (as wl-preproc accepted), and a line on the changes feed; a
+        person answers it by its row's id (`Session.suggestion`). One stands at a time, made once
+        however long its bar stays met."""
+        scheduler = self._scheduler
+        now = scheduler.suggestion
+        standing = self._suggested
+        if standing is not None and (now is None or now.move != standing.move):
+            standing.fate, self._suggested = WITHDRAWN, None
+            correct, of, hardest = scheduler.bar(standing.move)
+            if standing.move == MOVE_UP:
+                why = (f"{correct} of the last {of} answers at its hardest step right, under its "
+                       f"{scheduler.block.criterion[0]:.0%}")
+            else:
+                why = (f"{correct} of the last {of} first answers right, no longer under its "
+                       f"{scheduler.order.fall_back[0]:.0%}")
+            self._feed("suggestion", None, self.wall_now(),
+                       f"the rig's suggestion {standing.change}, to move {standing.move} from "
+                       f"{standing.block} to {standing.to}, is withdrawn: {why}")
+        if now is None or self._suggested is not None:
+            return
+        at = self.wall_now()
+        self._logged("suggested", "block", now.block, now.to, None, at, move=now.move,
+                     block=now.block, bar={"correct": now.correct, "of": now.of},
+                     at_hardest=now.at_hardest)
+        self._suggested = _Suggested(self._change, now.move, now.block, now.to)
+        self._suggestions[self._change] = self._suggested
+        if now.move == MOVE_UP:
+            bar = f"{now.correct} of the last {now.of} answers at its hardest step right"
+            answer = "next block"
+        else:
+            bar = (f"{now.correct} of the last {now.of} first answers right, under its "
+                   f"{scheduler.order.fall_back[0]:.0%}")
+            answer = "back one"
+        self._feed("suggestion", None, at,
+                   f"the rig suggests moving {now.move} from {now.block} to {now.to}: {bar}; "
+                   f"confirm with {answer}, or hold")
+
+    def _lapse(self) -> None:
+        """**A suggestion standing lapses as the run leaves its stage otherwise** -- a person's
+        move naming none, or the stage's time (the pop-out search build): an answer naming it is
+        refused, saying so (`_unanswerable`). Nothing is said or recorded: the move's own line
+        and row say where the run went."""
+        if self._suggested is not None:
+            self._suggested.fate, self._suggested = LAPSED, None
 
     def _hand_back(self, command, index: int) -> None:
         """**A person hands a setting back** (`link.HandBack`; engine build C3's spec §6; the PI,
@@ -3218,6 +3385,9 @@ class Session:
         if isinstance(command, _link.BackBlock):
             self._move(command, index, BACK)
             return
+        if isinstance(command, _link.Decline):
+            self._decline(command, index)
+            return
         if isinstance(command, _link.HandBack):
             self._hand_back(command, index)
             return
@@ -3669,6 +3839,13 @@ class Session:
     #: each run starts.
     _climb: _Climb | None = field(init=False, default=None, repr=False)
     _climb_block: int | None = field(init=False, default=None, repr=False)
+    #: **The rig's suggestion standing** under a confirmed progression (`_Suggested`;
+    #: `task.ByCriterion.confirm`; the pop-out search build, 2026-11-07), `None` where none
+    #: stands, and **every suggestion it made in the run in progress**, by its row's id, each
+    #: with what became of it, so a late answer is refused saying which (`_unanswerable`). Kept
+    #: in step with the bar between trials (`_suggest`); empty as each run starts.
+    _suggested: _Suggested | None = field(init=False, default=None, repr=False)
+    _suggestions: dict[int, _Suggested] = field(init=False, default_factory=dict, repr=False)
 
     def _climbing(self) -> _Climb | None:
         """**The open block's staircase, started afresh as the block opens** (`task.Staircase`;
@@ -4387,8 +4564,9 @@ class Session:
         self._kept = {}
         self._listed = {}
         # No block's staircase has run yet (the pop-out search build): each starts as its block
-        # opens (`_climbing`).
+        # opens (`_climbing`). And the rig has suggested nothing in this run.
         self._climb = self._climb_block = None
+        self._suggested, self._suggestions = None, {}
         # Nothing has varied in a block of this run yet, and no line is counted (engine build C3).
         self._varied = {}
         self._tallies = {}
@@ -4638,6 +4816,8 @@ class Session:
                     if levels.end_block():
                         self.card.emit(BLOCK_END)
                     said_end(ending, scheduler.following.name)
+                    # A suggestion standing lapses as its stage ends of itself (its time).
+                    self._lapse()
                     scheduler.advance(ending)
                     self.blocks_run.append(scheduler.block.name)
                     self._block_from = self._elapsed
@@ -4675,6 +4855,11 @@ class Session:
                 # ends; a hand-back resumes it (`_apply_pending`).
                 climb = self._climbing()
                 stepping = climb is not None and climb.staircase.setting not in self._edited
+                # **At its stage's hardest step** (the PI, 2026-11-07, "Hardest step reached, 80%
+                # there"): the block's staircase at its last level as the trial is drawn, given or
+                # stopped there under a person's value; a block with none always is. A confirmed
+                # progression's bar to move up counts only such answers (`Scheduler.suggestion`).
+                hardest = climb is None or climb.level == len(climb.staircase.levels) - 1
                 if stepping:
                     taken[climb.staircase.setting] = climb.value
                     sources[climb.staircase.setting] = STAIRCASE
@@ -4782,11 +4967,14 @@ class Session:
                 shown = _appeared(trial, result)
                 written = len(scheduler.shortfalls)
                 counted = scheduler.record(condition.name, result.outcome, shown=shown,
-                                           eased=bool(eased))
+                                           eased=bool(eased), hardest=hardest)
                 if stepping:
                     # **Stepped by how the trial ended** (`task.staircase_verdict`; TSK-33),
                     # between trials, for the next: one whose value a person held moves nothing.
                     climb.step(result.outcome, shown)
+                # **What the rig suggests** under a confirmed progression (the pop-out search
+                # build): made, or withdrawn as its bar stops being met, between trials.
+                self._suggest()
                 # **A trial's draws are kept only while a repeat of it waits** (engine build C3's
                 # call 13): a repeat placed, a drum's try or a trial again at once.
                 waiting = scheduler.waiting

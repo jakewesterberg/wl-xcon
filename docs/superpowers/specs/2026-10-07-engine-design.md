@@ -861,6 +861,20 @@ plan's decision 38 ("Operator edits at the rig ... C3's") and the PI's split of 
 (CHECKPOINT: "C6 programs, rig edits and interludes") -- and his answer is followed; C6 keeps
 interludes and session programs.
 
+*The pop-out search build, 2026-11-07* (its design, `docs/superpowers/specs/2026-11-07-popout-search-design.md`
+§3.4; the PI's answers of that day, "Rig suggests, trainer confirms", "Hardest step reached, 80% there" and "Below
+50% of the last 50"): **item 5's progression by criterion may be confirmed** (`ByCriterion(confirm=True)`; TSK-72):
+no stage moves on its rules; between trials the rig suggests moving up where a stage's criterion is met on its
+last answers given at its hardest step (its staircase, §15, at its last level, or any for a stage with none; an
+answer at an easier level neither counting nor breaking the window), and back where the fall-back's is, each judged
+on answers as a staircase classes them (TSK-33), a trial ending before the decision in neither window and one a
+person's change eased never toward moving up. Each suggestion is a
+change-log row (`suggested`) and the console frame's (telemetry schema 20), withdrawn as its bar stops being met; a
+person confirms it with *next block* or *back one* naming it, or holds (`decline`, a `declined` row, the declined
+move's window started afresh), and an answer to one no longer standing is refused with a sentence. Every stage works
+on until a person moves the run; a stage's time running out still moves it up. The design's second dimension, the
+pairing pool, is that build's next task.
+
 ## 14. Variation (N§11, N§R1, N§R2)
 
 1. **Named conditions plus drawn values.** [@asaad2008flexible] A parameter is set by a condition or

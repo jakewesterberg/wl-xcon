@@ -106,12 +106,20 @@ CONTROLS = "controls.jsonl"
 #: a setting handed back (`hand_back`), a draw's numbers changed live (`range`), each setting a
 #: revert restores (`revert`), and a clear, a drumming switch and a training switch (`clear`,
 #: `drum`, `training`), which `CONTROLS` keeps as well. A row written before engine build C3 has
-#: no `kind`, and is a `set`, the only kind there was (`resume._read`).
-KINDS = ("set", "hand_back", "range", "revert", "clear", "drum", "training")
+#: no `kind`, and is a `set`, the only kind there was (`resume._read`). **Since the pop-out search
+#: build (2026-11-07), a confirmed progression's two** (`task.ByCriterion.confirm`; wl-preproc's
+#: answer of that day): the rig's suggestion of a move (`suggested`: `name` `"block"`, `was` the
+#: open stage and `now` the stage suggested, `by` none, and its `move`, `block`, `bar` --
+#: `{"correct", "of"}` -- and `at_hardest`), and a person's hold of one (`declined`: `was` and
+#: `now` the stage it stays in, and the `suggestion` it answers, the suggested row's `change`); a
+#: confirmation is the `next_block` or `back_block` row of `CONTROLS`, naming that `suggestion`.
+#: **Appended only**, after `training`: `STROBED` is the first four by place.
+KINDS = ("set", "hand_back", "range", "revert", "clear", "drum", "training", "suggested",
+         "declined")
 
 #: **The kinds that strobe `PARAM_CHANGED`**, once for each row, and so carry its `sequence`, which
-#: joins the n-th such row to the n-th such code (XC-288 §3.4): the first four `KINDS`. A clear and
-#: a switch strobe nothing.
+#: joins the n-th such row to the n-th such code (XC-288 §3.4): the first four `KINDS`. A clear,
+#: a switch, a suggestion and a hold strobe nothing.
 STROBED = KINDS[:4]
 
 #: One row when each run starts and one when it ends (P4d-2b spec §6.3), joined by

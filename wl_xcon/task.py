@@ -2212,9 +2212,21 @@ class ByCriterion(BlockOrder):
     a stage the animal is otherwise doing well in"), and a broken hold where the stage's own table
     scores one, as toward moving up ("Yes, the same"). **At the top stage the animal keeps
     working** once its rule is met, until a time limit, a stop or the session's end; the top
-    stage's own time limit, with nowhere to move on to, ends the run. `None`, no fall-back."""
+    stage's own time limit, with nowhere to move on to, ends the run. `None`, no fall-back.
+
+    **`confirm`, the rig suggests and a person confirms** (the PI, 2026-11-07, "Rig suggests,
+    trainer confirms"; the pop-out search build): no stage moves up or back on its rules; the rig
+    suggests each move, and a person makes it, or holds (`scheduler.Scheduler.suggestion`). Up
+    where a stage's own criterion is met **on its last answers given at the stage's hardest step**
+    -- its staircase at its last level, or any for a stage with none ("Hardest step reached, 80%
+    there") -- and back where the fall-back's is on its last answers ("Below 50% of the last 50"),
+    each judged on answers as a staircase classes them (TSK-33): a trial ending before the
+    decision is in neither. Every stage works on, as the top stage does, until a person moves
+    the run; a stage's time running out still moves it up. `False`, the progression moves
+    itself, as above."""
 
     fall_back: "tuple[float, int] | None" = None
+    confirm: bool = False
 
 
 @dataclass(frozen=True, slots=True)

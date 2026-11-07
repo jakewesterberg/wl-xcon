@@ -7,7 +7,8 @@ carrying the last closed session's summary since schema 11),
 the commands a console sends back (`SetParameter`, `Stop`, and since b3a the service's
 `OpenSession`, `CheckRun`, `StartRun` and `EndSession`, since XC-026 its
 `ResumeSession`, since engine build C2a `ClearOwed`, `Drum` and `Training`, since C2b
-`NextBlock` and `BackBlock`, and since C3 `HandBack`, `SetRange` and `Revert`; `Command`), the
+`NextBlock` and `BackBlock`, since C3 `HandBack`, `SetRange` and `Revert`, and since the pop-out
+search build `Decline`, the trainer's hold of the rig's `Suggestion`; `Command`), the
 port a session publishes and drains through (`Link`, `Absent`, `Simulated`), its wire
 encoding (`encode`/`decode`, plus the command-side `_encode_command`/`_decode_command`),
 and the one live transport that carries all of it over a real socket (`ZmqLink`,
@@ -207,7 +208,14 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: `kind` is `revert` and its `now` may be a value), and `Staged.to`, where it goes (`conditions`,
 #: `draw` or `run`, empty when nothing is handed back). A reader of 18 refuses 19 and 19 refuses 18,
 #: by name.
-SCHEMA = 19
+#:
+#: 20 (the pop-out search build, 2026-11-07; the PI, "Rig suggests, trainer confirms"):
+#: `Telemetry.suggestion`, what the rig suggests under a confirmed progression
+#: (`task.ByCriterion.confirm`), a `Suggestion` -- the `suggested` change row's id, which a
+#: console's answer names, the move, the stage it was judged in and the stage it suggests, and the
+#: bar's numbers now -- or `None`: no suggestion, one withdrawn as its bar stopped being met, one
+#: answered, and between runs. A reader of 19 refuses 20 and 20 refuses 19, by name.
+SCHEMA = 20
 
 #: How many refusals a session keeps, per source, and therefore how many one
 #: `Telemetry` frame can carry.
@@ -467,12 +475,16 @@ class Control:
     engine build C2b), `hand_back` (a setting a person held handed back), `range` (a drawn
     range changed live) and `revert` (each change of a revert; engine build C3) -- each of
     `set`, `hand_back`, `range` and `revert` applied, or said dropped as a run ends before it
-    applies -- or `warning` (a warning said as it
+    applies -- `suggestion` (the rig's suggestion of a move under a confirmed progression, or its
+    withdrawal as its bar stops being met) and `decline` (a person's hold of one; the pop-out
+    search build, 2026-11-07), or `warning` (a warning said as it
     happens, since the PI's rulings on XC-352, 2026-10-11);
     `by` is who sent it, `None` for a mark's stamp, whose sender arrives with its note;
     `at` is on the session's anchored clock; `said` is the sentence after the kind.
-    The session record (`record.CONTROLS`) keeps every one but a `warning`, which reaches this
-    feed through `taskd.Session._feed` and is kept elsewhere by its kind: a pause the allocation
+    The session record (`record.CONTROLS`) keeps every one but a `warning`, a `suggestion` and a
+    `decline`, which reach this feed through `taskd.Session._feed`: a suggestion and a hold are
+    the change log's (`record.KINDS`), a withdrawal is said here alone, and a warning is kept
+    elsewhere by its kind: a pause the allocation
     cannot mark is accepted into `warnings.jsonl`; a resume's, for a damaged `warnings.jsonl`
     row, is kept in the `session resumed` row of `welfare_notes.jsonl`. This feed keeps the last
     `CONTROL_HISTORY`."""
@@ -498,6 +510,26 @@ class MomentRow:
     at: float
     said: str
     changes: tuple = ()
+
+
+@dataclass(frozen=True, slots=True)
+class Suggestion:
+    """**What the rig suggests** under a confirmed progression (schema 20; `Telemetry.suggestion`;
+    the PI, 2026-11-07, "Rig suggests, trainer confirms"), from `taskd.Session.suggestion`:
+    `change`, the id of its `suggested` change row, which a person's answer names (`NextBlock`,
+    `BackBlock` or `Decline`'s `suggestion`); its `move`, `"up"` or `"back"`; the stage it was
+    judged in (`block`) and the stage it suggests (`to`); and its bar as it reads at this
+    boundary, `correct` of the last `of` answers right, and whether every one was at the stage's
+    hardest step (`at_hardest`). The row records the numbers it was made on; these move with each
+    answer while it stands."""
+
+    change: int
+    move: str
+    block: str
+    to: str | None
+    correct: int
+    of: int
+    at_hardest: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -995,6 +1027,10 @@ class Telemetry:
     #: review, I-4): the settings a person's live change kept the latest trial out of moving up
     #: by, sorted, where its block's rule moves the animal on; empty otherwise and between runs.
     eased: tuple
+    #: `session.suggestion` (schema 20; the pop-out search build, 2026-11-07): what the rig
+    #: suggests under a confirmed progression, a `Suggestion`, or `None` -- none made, one withdrawn
+    #: or answered, and between runs. `None` by default, a frame with no suggestion.
+    suggestion: "Suggestion | None" = None
 
     @classmethod
     def of(cls, session, tally, scheduler, index: int) -> "Telemetry":
@@ -1222,6 +1258,9 @@ class Telemetry:
             # session, which keeps none between runs.
             moments=tuple(MomentRow(*row) for row in session.moments),
             eased=session.eased,
+            # The pop-out search build (schema 20): the rig's suggestion, read from the session,
+            # which offers none between runs.
+            suggestion=None if session.suggestion is None else Suggestion(*session.suggestion),
         )
 
 
@@ -1379,6 +1418,10 @@ def encode(telemetry: Telemetry | Idle) -> bytes:
     return msgpack.packb(_telemetry_out(telemetry), use_bin_type=True)
 
 
+#: A `Suggestion`'s fields, in order, as a frame carries them (schema 20).
+_SUGGESTION_FIELDS = ("change", "move", "block", "to", "correct", "of", "at_hardest")
+
+
 def _telemetry_out(telemetry: Telemetry) -> dict:
     """A `Telemetry` as the plain mapping `encode` packs: the frame itself, or an idle
     frame's closed summary (schema 11), written out by name for `_telemetry_from`."""
@@ -1500,6 +1543,11 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
         "moments": [{"change": m.change, "at": m.at, "said": m.said, "changes": list(m.changes)}
                     for m in telemetry.moments],
         "eased": list(telemetry.eased),
+        "suggestion": (
+            None
+            if telemetry.suggestion is None
+            else {name: getattr(telemetry.suggestion, name) for name in _SUGGESTION_FIELDS}
+        ),
     }
 
 
@@ -1745,6 +1793,8 @@ def _telemetry_from(data: dict) -> Telemetry:
         moments=tuple(MomentRow(**{**m, "changes": tuple(m["changes"])})
                       for m in data["moments"]),
         eased=tuple(data["eased"]),
+        suggestion=(None if data["suggestion"] is None
+                    else Suggestion(**data["suggestion"])),
     )
 
 
@@ -2016,20 +2066,41 @@ class NextBlock:
     """**Move the run on to its next block** (engine build C2b; the PI, 2026-10-19, "'Next' and
     'back one'": "Both directions by hand, each recorded with who"): the block its plan's order
     gives next, a training progression's next stage up, at the boundary the command reaches, or
-    at once while paused (`scheduler.Scheduler.move`)."""
+    at once while paused (`scheduler.Scheduler.move`). **`suggestion`, the rig's suggestion it
+    confirms** (the pop-out search build, 2026-11-07; the PI, "Rig suggests, trainer confirms"):
+    the id of the `suggested` change row it answers (`Telemetry.suggestion`'s `change`), a whole
+    number from 1, refused by the session with a sentence where that suggestion is no longer
+    offered -- withdrawn, answered, or another move's -- or `None`, a move by hand."""
 
     KIND: ClassVar[str] = "next_block"
 
     by: Actor
+    suggestion: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class BackBlock:
     """**Move the run back one block** (engine build C2b; the PI, 2026-10-19): the block before the
-    open one in the run's sequence, a training progression's stage below, started fresh."""
+    open one in the run's sequence, a training progression's stage below, started fresh.
+    `suggestion`, the rig's suggestion it confirms, or `None`, as `NextBlock`'s."""
 
     KIND: ClassVar[str] = "back_block"
 
+    by: Actor
+    suggestion: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Decline:
+    """**A person holds instead of making the move the rig suggests** (the console's *Hold*; the
+    pop-out search build, 2026-11-07; the PI, "Rig suggests, trainer confirms"): `suggestion` is
+    the id of the `suggested` change row it answers, a whole number from 1. The session records a
+    `declined` change row with who held, and the run stays where it is; it is refused with a
+    sentence where that suggestion is no longer offered."""
+
+    KIND: ClassVar[str] = "decline"
+
+    suggestion: int
     by: Actor
 
 
@@ -2105,6 +2176,7 @@ Command = (
     | HandBack
     | SetRange
     | Revert
+    | Decline
 )
 
 #: The kinds of scheduled stop, in the order a person is offered them.
@@ -2174,8 +2246,9 @@ def _encode_command(command: Command) -> bytes:
     `Resume`, `Mark`, `ScheduleStop`, `CancelScheduledStop` and `ManualReward`, and
     since P4d-2b b3a `OpenSession`, `CheckRun`, `StartRun` and `EndSession`, since
     XC-026 `ResumeSession`, since engine build C2a `ClearOwed`, `Drum` and `Training`, since C2b
-    `NextBlock` and `BackBlock`, and since C3 `HandBack`, `SetRange` and `Revert` -- tagged
-    by kind so `_decode_command` knows which dataclass to rebuild.
+    `NextBlock` and `BackBlock`, since C3 `HandBack`, `SetRange` and `Revert`, and since the
+    pop-out search build `Decline` and the `suggestion` a `NextBlock` or a `BackBlock` confirms --
+    tagged by kind so `_decode_command` knows which dataclass to rebuild.
 
     Private, unlike `encode`/`decode`: its callers are `ZmqConsole.send` and
     `ZmqCommands.deliver`, both in this same file, so this is an implementation detail
@@ -2198,10 +2271,14 @@ def _encode_command(command: Command) -> bytes:
             "value": command.value,
             "by": actors.to_map(command.by),
         }
-    elif isinstance(
-        command, (Stop, Pause, Resume, CancelScheduledStop, ManualReward, NextBlock, BackBlock)
-    ):
+    elif isinstance(command, (Stop, Pause, Resume, CancelScheduledStop, ManualReward)):
         payload = {"kind": command.KIND, "by": actors.to_map(command.by)}
+    elif isinstance(command, (NextBlock, BackBlock)):
+        payload = {"kind": command.KIND, "by": actors.to_map(command.by),
+                   "suggestion": command.suggestion}
+    elif isinstance(command, Decline):
+        payload = {"kind": command.KIND, "by": actors.to_map(command.by),
+                   "suggestion": command.suggestion}
     elif isinstance(command, Mark):
         payload = {
             "kind": "mark",
@@ -2516,11 +2593,17 @@ def _command_from(data: dict) -> Command:
         return SetParameter(name=name, value=_setting(data.get("value"), name, by), by=by)
     simple = {
         command.KIND: command
-        for command in (Stop, Pause, Resume, CancelScheduledStop, ManualReward, NextBlock,
-                        BackBlock)
+        for command in (Stop, Pause, Resume, CancelScheduledStop, ManualReward)
     }
     if kind in simple:
         return simple[kind](by=_actor(data.get("by"), kind))
+    if kind in (NextBlock.KIND, BackBlock.KIND):
+        by = _actor(data.get("by"), kind)
+        moved = NextBlock if kind == NextBlock.KIND else BackBlock
+        return moved(by=by, suggestion=_suggestion(data, kind, by, optional=True))
+    if kind == Decline.KIND:
+        by = _actor(data.get("by"), kind)
+        return Decline(suggestion=_suggestion(data, kind, by), by=by)
     if kind == "mark":
         return _mark(data)
     if kind == "schedule":
@@ -2718,6 +2801,24 @@ def _command_from(data: dict) -> Command:
             )
         return Revert(change=change, by=by)
     raise ValueError(f"unknown command kind on the wire: {_quoted(kind)}")
+
+
+def _suggestion(data: dict, kind: str, by: Actor, *, optional: bool = False) -> int | None:
+    """**The rig's suggestion a command answers** (the pop-out search build, 2026-11-07): the id of
+    its `suggested` change row, a whole number from 1 to `TRIALS_LIMIT`, the wire's own
+    signed-integer range -- or, where `optional`, absent or `None`, a move by hand. Anything else
+    is refused here, before any session sees it (`CommandRefused`)."""
+    value = data.get("suggestion")
+    if value is None and optional:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= TRIALS_LIMIT:
+        named = "it names none" if value is None else f"{_quoted(value)} is not one"
+        raise CommandRefused(
+            kind, by,
+            f"a {kind!r} command names the rig's suggestion by its id, a whole number from 1, and "
+            f"{named}, so it is refused",
+        )
+    return value
 
 
 def _instant(data: dict, key: str, by: Actor) -> float | None:

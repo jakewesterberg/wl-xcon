@@ -34,6 +34,7 @@ from wl_xcon.task import (
     ANSWERS, COUNTED, HANG_COUNTS_AS, NO_LIMIT, OWED, REPEATED, RIGHT, SPENT, UNPAID, Balanced,
     Block, BlockOrder, ByCriterion, Condition, Constrained, Counting, Cyclic, Family, Fixed, Order,
     Listed, Outcome, Priming, Random, SequenceBalanced, Shuffled, WithReplacement,
+    staircase_verdict,
 )
 from wl_xcon.variation import balanced_sequence, run_length
 
@@ -103,6 +104,13 @@ FALL_BACK = "fall_back"
 NEXT = "next"
 BACK = "back"
 RUN = "run"
+
+#: **What the rig suggests** under a confirmed progression (`ByCriterion.confirm`; the pop-out
+#: search build, 2026-11-07; the PI, "Rig suggests, trainer confirms"): moving up a stage
+#: (`MOVE_UP`) or back one (`MOVE_BACK`), the words a `suggested` change row's `move` writes, as
+#: wl-preproc accepted them (`docs/pending-wl-preproc-amendments.md`).
+MOVE_UP = "up"
+MOVE_BACK = "back"
 
 #: What a trainer may switch drumming to (`Scheduler.drum`): on for the rest of the block, on for
 #: the rest of the run, or off for the rest of the block.
@@ -174,6 +182,22 @@ class BlockEnd:
     block_in_session: int | None = None
     passed_at: int | None = None
     planned: tuple | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Suggestion:
+    """**What the rig suggests at this boundary** under a confirmed progression
+    (`ByCriterion.confirm`; `Scheduler.suggestion`): to `move` (`MOVE_UP` or `MOVE_BACK`) from the
+    open stage, `block`, to the stage `to`, because `correct` of the last `of` answers its bar
+    judges were right, and whether every one of them was at the stage's hardest step
+    (`at_hardest`; always true of a move up, whose bar counts only those)."""
+
+    move: str
+    block: str
+    to: str
+    correct: int
+    of: int
+    at_hardest: bool
 
 
 @dataclass
@@ -302,6 +326,14 @@ class Scheduler:
     #: The open block's last answers judged, 1 right and 0 wrong, as long as a `ByCriterion`
     #: order's fall-back rule's window: what that rule reads.
     _back: deque = field(init=False, default_factory=deque, repr=False)
+    #: **Under a confirmed progression** (`ByCriterion.confirm`; the pop-out search build,
+    #: 2026-11-07), the open stage's last answers as its suggestion's bars judge them (`_bar`),
+    #: each `(right, at its hardest step)`: toward moving up, as long as its criterion's window
+    #: (`_up`), and toward moving back, as long as the fall-back's (`_down`); and whether the trial
+    #: being drummed has had such an answer yet (`_bar_answered`). Empty otherwise.
+    _up: deque = field(init=False, default_factory=deque, repr=False)
+    _down: deque = field(init=False, default_factory=deque, repr=False)
+    _bar_answered: bool = field(init=False, default=False, repr=False)
     #: How each block left behind ended, in order, and whether the open one's end is recorded
     #: (`close`): the run's end row's.
     ended: list = field(init=False, default_factory=list)
@@ -391,6 +423,7 @@ class Scheduler:
         self._index = first
         self._opened = {first}
         self._back = self._fall_back_window()
+        self._up, self._down = self._bar_windows()
         self._counts = {c.name: Counts() for c in self.block.conditions}
         self._begin()
         self._refill()
@@ -530,6 +563,83 @@ class Scheduler:
         return deque(maxlen=rule[1] if rule is not None and rule[1] >= 1 else 0)
 
     @property
+    def _confirming(self) -> bool:
+        """Whether the plan is a confirmed progression (`ByCriterion.confirm`; the PI, 2026-11-07,
+        "Rig suggests, trainer confirms"): no stage moves up or back on its rules, which the rig
+        suggests instead (`suggestion`), a person confirming each move (`move`)."""
+        return isinstance(self.order, ByCriterion) and self.order.confirm
+
+    def _bar_windows(self) -> tuple[deque, deque]:
+        """The open stage's two windows for its suggestion's bars, empty: as long as its criterion's
+        window toward moving up, and as long as the fall-back's toward moving back -- each of no
+        length where there is no such rule, or the plan is no confirmed progression."""
+
+        def window(rule) -> deque:
+            return deque(maxlen=rule[1] if self._confirming and rule is not None
+                         and rule[1] >= 1 else 0)
+
+        return window(self.block.criterion), window(getattr(self.order, "fall_back", None))
+
+    def bar(self, move: str) -> tuple[int, int, bool]:
+        """**The numbers a suggestion's bar reads now** (`suggestion`): how many of the last
+        answers in its window were right, how many answers are in it, and whether every one was at
+        the stage's hardest step -- toward moving up (`MOVE_UP`), or back (`MOVE_BACK`)."""
+        answers = self._up if move == MOVE_UP else self._down
+        return (sum(right for right, _ in answers), len(answers),
+                all(hardest for _, hardest in answers))
+
+    @property
+    def suggestion(self) -> Suggestion | None:
+        """**What the rig suggests at this boundary**, under a confirmed progression
+        (`ByCriterion.confirm`; the pop-out search build's design §3.4; the PI, 2026-11-07), or
+        `None`, read between trials, never in a frame:
+
+        - **up** to the next stage where the open stage's criterion is met ("80% correct, last 50
+          trials") **at its hardest step** ("Hardest step reached, 80% there"): at least its
+          proportion right of **the last window's answers given at the stage's hardest step** --
+          its staircase at its last level, or any for a stage with none (`record`'s `hardest`) --
+          the window full. An answer at an easier level is left out, neither counting nor
+          breaking the window: a failure at the top steps a one-up staircase down, so a window
+          that every answer had to share would ask for an unbroken run of right answers there,
+          not 80%;
+        - **back** to the stage below where fewer than the fall-back's proportion of its last
+          window's first answers are right ("Below 50% of the last 50"), judged once that many
+          are in, at any stage but the first, which has none below it.
+
+        **Answers only**, as the stage's staircase classes them (`task.staircase_verdict`;
+        TSK-33; the design's §3.4): a trial that moves no staircase -- no fixation, an early
+        saccade, any whose stimulus never appeared -- is in neither window, and a look to empty
+        space or leaving the target before its hold is a failure in both. A trial a person's
+        change eased is in the window to move back, never in the one to move up (engine build C3;
+        the PI, Q8). A met bar to move up counts before one to move back, as `ends` counts a met
+        rule before a fall-back. Live: a suggestion whose bar stops being met is gone at the next
+        boundary (the plan's Review Focus 2), and a person's move or hold starts its window
+        afresh (`advance`, `decline`)."""
+        if not self._confirming:
+            return None
+        criterion = self.block.criterion
+        above = self._type_at(self._position + 1)
+        if criterion is not None and above is not None and self._up.maxlen:
+            right, of, hardest = self.bar(MOVE_UP)
+            if of >= self._up.maxlen and right / of >= criterion[0]:
+                return Suggestion(MOVE_UP, self.block.name, self.blocks[above].name, right, of,
+                                  hardest)
+        below = self._type_at(self._position - 1)
+        if below is not None and self._down.maxlen:
+            right, of, hardest = self.bar(MOVE_BACK)
+            if of >= self._down.maxlen and right / of < self.order.fall_back[0]:
+                return Suggestion(MOVE_BACK, self.block.name, self.blocks[below].name, right, of,
+                                  hardest)
+        return None
+
+    def decline(self, move: str) -> None:
+        """**A person holds instead of moving** (`link.Decline`; the PI, 2026-11-07, "Rig suggests,
+        trainer confirms"): the window of the declined move starts afresh, so the rig suggests
+        that move again only once a fresh window of answers meets its bar, never on the answers a
+        person has already held on. The other window goes on."""
+        (self._up if move == MOVE_UP else self._down).clear()
+
+    @property
     def _top(self) -> bool:
         """Whether the open block is a training progression's top stage (`ByCriterion`), where the
         animal keeps working once its rule is met (the PI, 2026-10-19, "Same, but top keeps
@@ -561,8 +671,10 @@ class Scheduler:
         than its proportion of the last window's answers right, judged once that many answers are
         in (the PI, 2026-10-19: "under 50% over the last 20", answers only) -- **each trial's first
         answer only** ("First answer only"; `record`) -- at any stage but the first, which has none
-        below it."""
-        if not isinstance(self.order, ByCriterion) or self.order.fall_back is None:
+        below it. **Never under a confirmed progression**, whose fall-back the rig suggests
+        instead (`suggestion`)."""
+        if (not isinstance(self.order, ByCriterion) or self.order.fall_back is None
+                or self._confirming):
             return False
         proportion, window = self.order.fall_back
         return (self._position > 0 and window >= 1 and len(self._back) >= window
@@ -579,10 +691,13 @@ class Scheduler:
         block ends. A met rule counts before a fall-back -- at the top stage too, which works on
         while its rule holds -- and either before the time. **The top stage's rule met the first
         time is noted** (`passed_at`; the engine C2b plan's science review, I1): the record and
-        the console say when it passed."""
+        the console say when it passed. **Under a confirmed progression** (`ByCriterion.confirm`)
+        neither its rule nor its fall-back ends a stage: the rig suggests the move
+        (`suggestion`) and a person makes it (`move`); a stage's time running out still moves it
+        up, a time limit being the task author's declaration and no judgment of the animal."""
         if self._drum is not None:
             return None
-        if self.finished and not self._top:
+        if self.finished and not self._top and not self._confirming:
             return RULE
         self._note_passed()
         if self._falls_back and not self.finished:
@@ -758,10 +873,12 @@ class Scheduler:
         top keeps going"). Nothing is owed then, so a break is not shown again and nothing is
         forgiven, but a drummed trial still comes back until it is right (`record`). **Never in
         a designed block** (engine build C3): its plan gives its trials, and nothing is drawn past
-        it."""
+        it. **Every stage of a confirmed progression** (`ByCriterion.confirm`) works on as a top
+        stage does, until a person moves the run, since none moves of itself."""
         if self._designed:
             return False
-        if self.block.criterion is None and self.block.trials is None and not self._top:
+        if (self.block.criterion is None and self.block.trials is None and not self._top
+                and not self._confirming):
             return False
         # The terms of `owed`, read from the counts: `owed` finds its condition by name.
         counts = self._counts
@@ -1097,6 +1214,7 @@ class Scheduler:
         self._queue.clear()
         self._window.clear()
         self._back = self._fall_back_window()
+        self._up, self._down = self._bar_windows()
         self._drawn.clear()
         self._due.clear()
         self._drum = None
@@ -1379,7 +1497,7 @@ class Scheduler:
         return condition
 
     def record(self, condition: str, outcome: Outcome | None, shown: bool = True,
-               eased: bool = False) -> str:
+               eased: bool = False, hardest: bool = True) -> str:
         """Count one trial of `condition` by its table (engine spec §16.1-16.2), and return what it
         did to the count: `COUNTED`, `SPENT`, `OWED` or `UNPAID`. `outcome` `None` is a trial that
         reached the longest trial (`task.HANG_COUNTS_AS`); `shown`, whether its stimulus had
@@ -1403,7 +1521,12 @@ class Scheduler:
         trials nor its targets either (`Counts.eased`; the engine C3 plan's review, I-7), so an
         animal is never moved up on eased trials. **A trial whose paying try was eased is eased**
         toward its stage's number of trials, whatever its first try was (the controller's ruling on
-        the engine C3 plan's Task 15): a drum's try that pays it answered an easier task."""
+        the engine C3 plan's Task 15): a drum's try that pays it answered an easier task.
+
+        **`hardest`, whether the trial was at its stage's hardest step** (the pop-out search build,
+        2026-11-07; the PI, "Hardest step reached, 80% there"): its block's staircase at its last
+        level, true for a block with none. Read only under a confirmed progression, by the bars
+        of what the rig suggests (`_bar`, `suggestion`)."""
         counts = self._counts[condition]
         kind = self._class(outcome, shown, condition)
         first_try = self.drawn is None or not self.drawn.drummed
@@ -1459,6 +1582,8 @@ class Scheduler:
             # toward moving up ("Yes, the same").
             self._back.append(1 if outcome in RIGHT else 0)
         self._answered = self._answered or judged
+        if self._confirming:
+            self._bar(outcome, shown, first_try, eased, hardest)
         if kind != OWED:
             # **The trial is over, so its failed tries in a row start again** (the PI, 2026-10-18,
             # "1: an answer ends the trial": the limit counts failed tries of one trial, and any
@@ -1508,6 +1633,29 @@ class Scheduler:
                 self.requeued.append(condition)
                 self._repeat(condition)
         return kind
+
+    def _bar(self, outcome: Outcome | None, shown: bool, first_try: bool, eased: bool,
+             hardest: bool) -> None:
+        """**One trial toward the bars of what the rig suggests** (`suggestion`; the pop-out search
+        build's design §3.4), under a confirmed progression, between trials: **answers only**, as
+        a staircase classes them (`task.staircase_verdict`; TSK-33) -- a right answer right, any
+        failure wrong, a trial that moves no staircase in neither window -- each kept with whether
+        it was at its stage's hardest step. **Toward moving up** every answer given at the stage's
+        hardest step ("Hardest step reached, 80% there"), as the stage's own rule judges them, each
+        trial's first only under the training setting "first answers" (`_first_answers`),
+        **never one a person's change eased** (engine build C3; the PI, Q8);
+        **toward moving back each trial's first answer only** (the PI, 2026-10-19, "First answer
+        only"), an eased one included, as `_back` judges them."""
+        if first_try:
+            self._bar_answered = False
+        verdict = staircase_verdict(outcome, shown)
+        if verdict is None:
+            return
+        if hardest and not eased and not (self._bar_answered and self._first_answers):
+            self._up.append((verdict, hardest))
+        if not self._bar_answered:
+            self._down.append((verdict, hardest))
+        self._bar_answered = True
 
     def _break(self, condition: str, outcome: Outcome | None) -> None:
         """**A break in a designed block** (engine build C3; the PI, 2026-10-30, Q5b, "'Again at
