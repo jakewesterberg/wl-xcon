@@ -87,7 +87,8 @@ from wl_xcon.scheduler import (
 from wl_xcon.simulate import Census, Subject, Tally, prepare
 from wl_xcon.run import LONGEST_TRIAL_S, run_trial
 from wl_xcon.task import (
-    COUNTED, OWED, SPENT, UNPAID, Entered, Exited, Param, Plan, SaccadeTo, Task, Trial,
+    COUNTED, OWED, SPENT, UNPAID, Entered, Exited, Outcome, Param, Plan, SaccadeTo, Staircase,
+    Task, Trial, staircase_verdict,
 )
 from wl_xcon.task import (
     EASIER, EXPECTED, HARDER, NOT_DIFFICULTY, SAME, Background, Distribution, Factorial, Listed,
@@ -587,6 +588,59 @@ class Moment:
     said: str
     held: dict
     ranges: dict
+
+
+#: **The source a trial's line names for a value its block's staircase gave** (`drawn`; wl-preproc's
+#: answer of 2026-11-07 to the pop-out search's ask, `docs/pending-wl-preproc-amendments.md`), and
+#: what a setting's card says gives it (`Session._source`; telemetry schema 19's `source`).
+STAIRCASE = "staircase"
+
+
+@dataclass
+class _Climb:
+    """**A block's staircase as it runs** (`task.Staircase`; engine spec §15; the pop-out search
+    build, 2026-11-07): its `level`, an index into its levels, and its count toward its next step,
+    successes in a row toward `down` (`right`) and failures in a row toward `up` (`wrong`). One for
+    each block as it opens (`Session._climbing`); stepped by each trial whose value it gave
+    (`step`), and moved by a hand-back (`resume`). Between trials, never in a frame."""
+
+    staircase: Staircase
+    level: int
+    right: int = 0
+    wrong: int = 0
+
+    @property
+    def value(self) -> object:
+        """The value it gives its setting: the level it is at."""
+        return self.staircase.levels[self.level]
+
+    def step(self, outcome: Outcome | None, shown: bool) -> None:
+        """**One trial, by how it ended** (`task.staircase_verdict`; TSK-33): a success counts
+        toward a step harder and ends a run of failures, a failure counts toward a step easier and
+        ends a run of successes, and anything else moves nothing, neither counting nor ending a
+        run. **Never past either end**: a step due there leaves the level where it is, and the
+        count starts again."""
+        verdict = staircase_verdict(outcome, shown)
+        if verdict is None:
+            return
+        if verdict:
+            self.right, self.wrong = self.right + 1, 0
+            if self.right >= self.staircase.down:
+                self.level, self.right = min(self.level + 1, len(self.staircase.levels) - 1), 0
+        else:
+            self.right, self.wrong = 0, self.wrong + 1
+            if self.wrong >= self.staircase.up:
+                self.level, self.wrong = max(self.level - 1, 0), 0
+
+    def resume(self, held: object) -> None:
+        """**A hand-back** (TSK-32: "a live value on its parameter holds it"; the pop-out search
+        plan's Review Focus 1): at the level nearest the value a person held
+        (`task.Staircase.nearest`), never where it was before the hold -- where it stopped only
+        for a held value that is no number, which no level is near -- its count started again."""
+        nearest = self.staircase.nearest(held)
+        if nearest is not None:
+            self.level = nearest
+        self.right = self.wrong = 0
 
 
 @dataclass
@@ -1891,9 +1945,14 @@ class Session:
         `"conditions"` where a condition of the
         open block sets it, a value or its own range; `"run"` where the run was given it
         (`_given`); `"task"` where only the task's start gives it (`_run_values`); else `None`. A
-        hand-back's `to` reads the open block the same way (`_to`)."""
+        hand-back's `to` reads the open block the same way (`_to`). **`"staircase"` where the open
+        block's staircase steps it** (`STAIRCASE`; `task.Staircase`; the pop-out search build,
+        2026-11-07), under a person's value and over every other source, as the trial loop takes
+        it."""
         if name in self._edited:
             return "person"
+        if self._steps(name):
+            return STAIRCASE
         if self._own_range(name):
             return "conditions"
         if name in in_force:
@@ -2602,9 +2661,17 @@ class Session:
         `"conditions"` where a condition gives it, else `"run"`, the run's own value. Said as a
         hand-back is offered (`_hand_back`), and read again as it applies, in the block its next
         trial plays (`_apply_pending`; the C3 plan's engineering review, M-1); each one a revert
-        makes too (`_revert`)."""
+        makes too (`_revert`).
+
+        **`"draw"` first where the block's staircase steps it** (`task.Staircase`; the pop-out
+        search build, 2026-11-07), which wins over a draw and the conditions in the trial loop: a
+        staircase gives its setting each trial as a draw does, its `now` null, and `"draw"` is the
+        word wl-preproc was told for a hand-back's `to` (`docs/pending-wl-preproc-amendments.md`,
+        the change log's table) and the wire carries (`link._destination`), each trial's line
+        naming the staircase (`STAIRCASE`)."""
         block = self._scheduler.block
-        return ("conditions" if self._own_range(name)
+        return ("draw" if self._steps(name)
+                else "conditions" if self._own_range(name)
                 else "draw" if name in variation.in_force(self._task, block)
                 else "conditions" if any(name in condition.values
                                          for condition in block.conditions)
@@ -2652,9 +2719,13 @@ class Session:
         line's `params` and `drawn`. Where it gives None (a setting a person holds, one nothing
         gives, a reward size) the row keeps `was` and the way it went. Judged in the block the
         row's trial plays (`_playing`); for a `set` row by the state before the pass, when its
-        `was` was read."""
+        `was` was read. **`"staircase"` first where the block's staircase steps it**
+        (`task.Staircase`; the pop-out search build, 2026-11-07), which gives each trial its own
+        level and wins over a draw and the conditions."""
         if name in self._edited:
             return None
+        if self._steps(name, block):
+            return STAIRCASE
         conditions = block.conditions
         if conditions and all(name in variation.own_ranges(c) for c in conditions):
             return "conditions"
@@ -3397,6 +3468,12 @@ class Session:
             act = dataclasses.replace(act, to=to,
                                       now=self._run_values.get(name) if to == "run" else None)
             self._edited -= {name}
+            climb = self._climb
+            if climb is not None and climb.staircase.setting == name:
+                # **A staircase on it resumes at the level nearest the value held** (the pop-out
+                # search plan's Review Focus 1), read before the run's own value replaces it. A
+                # staircase whose block has ended is dropped as the next one opens (`_climbing`).
+                climb.resume(self.spec.values.get(name))
             if name in self._run_values:
                 self.spec.values[name] = self._run_values[name]
             else:
@@ -3586,6 +3663,38 @@ class Session:
     #: starts.
     _tallies: dict[int, dict[str, dict[str, int]]] = field(
         init=False, default_factory=dict, repr=False)
+    #: **The open block's staircase as it runs** (`_Climb`; `task.Staircase`; the pop-out search
+    #: build, 2026-11-07), `None` in a block with none, and **the block it belongs to**, keyed as
+    #: `_varied` is: started afresh as each block's first trial is drawn (`_climbing`). `None` as
+    #: each run starts.
+    _climb: _Climb | None = field(init=False, default=None, repr=False)
+    _climb_block: int | None = field(init=False, default=None, repr=False)
+
+    def _climbing(self) -> _Climb | None:
+        """**The open block's staircase, started afresh as the block opens** (`task.Staircase`;
+        TSK-57's "started fresh"), between trials, as its trials are drawn: at its `start`, else
+        at the level nearest the run's own value of its setting (`_run_values`, the task's start
+        under the run's; `Staircase.nearest`), else at its easiest. A block of the same type
+        opened again, a stage a plan moves back to included, starts afresh too: the block is its
+        occurrence in the run, `len(Scheduler.ended)` while it is open, as `_varied`'s key is.
+        `None` in a block with no staircase."""
+        occurrence = len(self._scheduler.ended)
+        if self._climb_block != occurrence:
+            staircase = self._scheduler.block.staircase
+            self._climb_block, self._climb = occurrence, None
+            if staircase is not None:
+                start = staircase.start
+                if start is None:
+                    start = staircase.nearest(self._run_values.get(staircase.setting))
+                self._climb = _Climb(staircase, 0 if start is None else start)
+        return self._climb
+
+    def _steps(self, name: str, block=None) -> bool:
+        """Whether `block`'s staircase steps `name` (`Block.staircase`), the open block's where
+        none is given: what gives the setting each trial while no person holds it, as a card
+        (`_source`), a hand-back (`_to`) and a change row's `was` (`_given_by`) say it."""
+        staircase = (self._scheduler.block if block is None else block).staircase
+        return staircase is not None and staircase.setting == name
 
     def _unwritable(self, task: Task, run: RunSpec, values: dict) -> str | None:
         """**What the record would refuse of a run, said before the run starts** (REC-27; the
@@ -3655,6 +3764,8 @@ class Session:
         the task writes, or which way it went cannot be read, until it is put back. **A value a
         person holds** is read by its declared meaning (`declarations.resolved`; TRN-03), its
         value in `values` against what the trial would otherwise have had:
+        - **where the open block's staircase steps it** (`task.Staircase`; the pop-out search
+          build, 2026-11-07), the level the staircase stopped at (`_climb`);
         - **where a draw gives the setting in the open block** -- its own or the task's
           (`variation.in_force`), or the condition's own range (`own_ranges`) -- the value the
           seed draws for the trial **from the range as written**, never from one changed live: on
@@ -3697,7 +3808,13 @@ class Session:
                 if self._range_eases(meaning, name, *draws[name], source, values):
                     eased.append(name)
                 continue
-            if name in draws:
+            climb = self._climb
+            if climb is not None and climb.staircase.setting == name:
+                # **A value held over the open block's staircase is judged against its level**,
+                # where it stopped, which the trial would otherwise have had (`_climbing`, called
+                # for this trial first; the pop-out search build, 2026-11-07).
+                otherwise = climb.value
+            elif name in draws:
                 declaration, key = draws[name]
                 entry = mine.get(name) if declaration.repeat == SAME else None
                 if entry is not None and isinstance(entry[1], str):
@@ -4269,6 +4386,9 @@ class Session:
         # build C3).
         self._kept = {}
         self._listed = {}
+        # No block's staircase has run yet (the pop-out search build): each starts as its block
+        # opens (`_climbing`).
+        self._climb = self._climb_block = None
         # Nothing has varied in a block of this run yet, and no line is counted (engine build C3).
         self._varied = {}
         self._tallies = {}
@@ -4547,6 +4667,17 @@ class Session:
                 # person holds, on a repeat a `SAME` setting's value kept from the trial it shows
                 # again (`_draw`).
                 taken, sources = self._draw(task, scheduler.block, condition, drawn)
+                # **The open block's staircase** (`task.Staircase`; engine spec §15; the pop-out
+                # search build, 2026-11-07), here between trials: its level, over the run's value,
+                # a condition's or a draw's, and its line names it (`STAIRCASE`) -- **unless a
+                # person holds its setting** (TSK-32: "a live value on its parameter holds it"),
+                # whose value then plays and leaves the staircase where it is, however the trial
+                # ends; a hand-back resumes it (`_apply_pending`).
+                climb = self._climbing()
+                stepping = climb is not None and climb.staircase.setting not in self._edited
+                if stepping:
+                    taken[climb.staircase.setting] = climb.value
+                    sources[climb.staircase.setting] = STAIRCASE
                 # **What varied in its block** (engine build C3's spec §10; XC-344): what its
                 # conditions set apart, as the block's first trial is drawn, and this trial's
                 # draws and a person's holds, for the block's end row (`_vary`).
@@ -4652,6 +4783,10 @@ class Session:
                 written = len(scheduler.shortfalls)
                 counted = scheduler.record(condition.name, result.outcome, shown=shown,
                                            eased=bool(eased))
+                if stepping:
+                    # **Stepped by how the trial ended** (`task.staircase_verdict`; TSK-33),
+                    # between trials, for the next: one whose value a person held moves nothing.
+                    climb.step(result.outcome, shown)
                 # **A trial's draws are kept only while a repeat of it waits** (engine build C3's
                 # call 13): a repeat placed, a drum's try or a trial again at once.
                 waiting = scheduler.waiting

@@ -1515,6 +1515,9 @@ _PER_TRIAL = {
     # A draw whose range a person changed live says so where its value would stand (the C3
     # plan's science review, I-4: "a card whose range was changed live says so").
     "range": ("drawn each trial, from a range a person changed live", "a value over its draw"),
+    # A block's staircase (`task.Staircase`; the pop-out search build, 2026-11-07): its level moves
+    # between trials, and a value set over it holds it, the lock, until handed back.
+    "staircase": ("set each trial by its staircase", "a value over its staircase"),
 }
 
 

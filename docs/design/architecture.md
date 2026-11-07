@@ -496,7 +496,13 @@ structure it plays and counted by that structure's table unless its block has it
 every target is used up and, as declared, a criterion is met, a number of trials is run, or its
 time runs out), how they follow (`Fixed`, `Cyclic`, `Balanced` -- shuffled rounds within the run --
 `Random`, or `ByCriterion`, a training progression that moves up on a stage's rule or its time,
-back one on a fall-back rule, and keeps its top stage going) and a run time limit. A block is one
+back one on a fall-back rule, and keeps its top stage going) and a run time limit. **A block may
+step one of its settings by a staircase** (`task.Staircase`, `Block.staircase`; the pop-out search
+build, 2026-11-07): between trials, as the trial loop draws (`taskd.Session._climbing`), a level
+harder after `down` right answers in a row and a level easier after `up` failures, by TSK-33's
+classes (`task.staircase_verdict`), never past either end, started afresh as each block opens; a
+person's value on the setting holds it and a hand-back resumes it at the level nearest that value,
+and each trial's line marks the value it gave `drawn` `"staircase"`. A block is one
 stretch of trials under one type inside one run, opened by `BLOCK_START` before its first trial
 and closed by `BLOCK_END` after its last. **Time limits are read between trials, in the run loop,
 never in `Session._ends`**: on the time trials ran, pauses not counting; a drummed trial waiting

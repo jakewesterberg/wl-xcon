@@ -92,6 +92,7 @@ from wl_xcon.task import (
     SequenceBalanced,
     Show,
     Shuffled,
+    Staircase,
     Stimulus,
     Task,
     Touched,
@@ -212,6 +213,7 @@ def check_task(
         + _counting_faults(task)
         + _plan_faults(task)
         + _draw_faults(task)
+        + _staircase_faults(task)
         + _impossible_faults(task)
         + _found_by_faults(task)
         + _condition_spellings(task)
@@ -1627,6 +1629,91 @@ def _draw_faults(task: Task) -> list[Finding]:
     return findings + _repeat_warnings(task)
 
 
+def _staircase_faults(task: Task) -> list[Finding]:
+    """**The load-time checks of a block's staircase** (`task.Staircase`, `Block.staircase`; engine
+    spec §15; the pop-out search build, 2026-11-07), each refused, `bad-staircase`, saying which
+    plan, block and setting and what to write, under the PI's rule of warnings over refusals
+    (2026-10-11): only what a staircase cannot step, or would leave the record unreadable. Its own
+    shape is refused as it is built (`Staircase.__post_init__`); here, what it steps, in each block
+    of each plan:
+
+    - **a bounded setting** (`declarations.BOUNDED`, a reward size), by name whether or not the
+      task declares a setting of that name (welfare: a task names how reward is configured, never
+      how much, as a draw of one is refused); and a setting the task does not declare;
+    - **a setting of choices**: a staircase steps among numbers;
+    - **a level outside the setting's declared range**, which no trial could be given (a person's
+      typed value outside it is staged with its warnings, the pre-flight's to judge widened; a
+      staircase's levels are the task's own, written inside it);
+    - **a level that is no whole number for a setting an array reads as one** (`_whole_numbers`),
+      which would record 4.5 while 4 objects show, as a draw's is refused;
+    - **"never both", as for draws** (Q1b): a setting the block draws, by its own draw or the
+      task's in force there (`variation.in_force`), or its conditions give, a value or their own
+      range, a factorial's made conditions among them;
+    - **and a block's staircase that is no `Staircase`**."""
+    declared = {param.name: param for param in task.params}
+    whole = _whole_numbers(task)
+    findings: list[Finding] = []
+    for plan_name, plan in task.plans.items():
+        for block in plan.blocks:
+            if not isinstance(block, Block) or block.staircase is None:
+                continue
+            where = f"plan {plan_name!r}: block {block.name!r}"
+            staircase = block.staircase
+            said = _staircase_said(task, block, staircase, declared, whole)
+            findings += [Finding("bad-staircase", f"{where}{sentence}") for sentence in said]
+    return findings
+
+
+def _staircase_said(task: Task, block: Block, staircase: object, declared: dict[str, Param],
+                    whole: frozenset[str]) -> list[str]:
+    """What `_staircase_faults` refuses of one block's `staircase`, each sentence following the
+    block's name."""
+    if not isinstance(staircase, Staircase):
+        return [f"'s staircase is {staircase!r}, and a block's staircase is a Staircase, or None"]
+    setting = staircase.setting
+    if setting in BOUNDED:
+        return [f" has a staircase on {setting!r}, a bounded setting, which the subject's bounded "
+                f"config sets and no staircase steps (welfare); take it out"]
+    param = declared.get(setting) if isinstance(setting, str) else None
+    if param is None:
+        return [f" has a staircase on {setting!r}, which is no setting the task declares; a "
+                f"staircase steps one of the task's own settings"]
+    if param.choices:
+        return [f" has a staircase on {setting!r}, a setting of choices, and a staircase steps "
+                f"among numbers; declare it with a range, or vary it by conditions"]
+    said = []
+    outside = [level for level in staircase.levels if _outside(param, level)]
+    if outside:
+        said.append(
+            f"'s staircase on {setting!r} has the level{'s' if len(outside) > 1 else ''} "
+            f"{', '.join(_said(level) for level in outside)} outside the range the setting "
+            f"declares, {_said(param.low)} to {_said(param.high)} {param.unit}; give it levels "
+            f"inside it")
+    halves = [level for level in staircase.levels
+              if setting in whole and not float(level).is_integer()]
+    if halves:
+        shown = ", ".join(_said(level) for level in halves)
+        said.append(
+            f"'s staircase on {setting!r} has the level{'s' if len(halves) > 1 else ''} {shown}, "
+            f"and an array reads {setting!r} as a whole number, its set size or its target's "
+            f"place, so the record would write {_said(halves[0])} while {math.floor(halves[0])} "
+            f"objects show; give it whole numbers")
+    if setting in in_force(task, block):
+        said.append(
+            f" draws {setting!r} and its staircase steps it: a setting is drawn or stepped by a "
+            f"staircase, never both; take it out of the block's draws, or the staircase off it")
+    conditions = expanded(block).conditions
+    giving = [condition.name for condition in conditions
+              if isinstance(condition, Condition) and isinstance(condition.values, dict)
+              and setting in condition.values] if isinstance(conditions, list) else []
+    if giving:
+        said.append(
+            f"'s condition(s) {', '.join(map(repr, giving))} give {setting!r} and its staircase "
+            f"steps it: a setting is given by conditions or stepped by a staircase, never both; "
+            f"take it out of those conditions, or the staircase off it")
+    return said
+
+
 def _repeat_warnings(task: Task) -> list[Finding]:
     """**Two `same` draws a repeat turns against its block's design**, warned and accepted in every
     kind (the C3 plan's science review, I-5; warnings over refusals, TSK-51):
@@ -1965,7 +2052,8 @@ def _sources(task: Task, block: Block, condition: Condition, values: dict, held:
     """**What each setting can hold on a trial of `condition` in `block`**, in the order the C3
     plan's call 10 builds a trial's values: the run's value (`values`), under the condition's value
     or a draw -- its own range, else the block's or the task's draw in force (`variation.in_force`,
-    `own_ranges`), each as `ranges` changes it -- and a value a person holds (`held`) over both.
+    `own_ranges`), each as `ranges` changes it -- or the block's staircase, each of its levels
+    (`Block.staircase`), and a value a person holds (`held`) over all of them.
     Each is a tuple: one value, or what its draw can give (`_drawable`). A setting nothing gives,
     or a draw that cannot be drawn, is absent, and so not judged."""
     found: dict[str, tuple | None] = {name: (value,) for name, value in values.items()}
@@ -1976,6 +2064,11 @@ def _sources(task: Task, block: Block, condition: Condition, values: dict, held:
     for name, value in condition.values.items():
         if not isinstance(value, Distribution):
             found[name] = (value,)
+    staircase = block.staircase
+    if isinstance(staircase, Staircase) and isinstance(staircase.setting, str):
+        # **Each level of the block's staircase** (the pop-out search build, 2026-11-07), which
+        # gives its setting each trial over the rest, a person's value aside.
+        found[staircase.setting] = tuple(staircase.levels)
     for name in held:
         if name in values:
             found[name] = (values[name],)
@@ -6053,12 +6146,13 @@ def unplaced(task: Task, values: dict, blocks=None) -> "list[tuple[str, str]]":
     each trial is given** (engine build C3; the ruling on its plan's prospect run, the plan's call
     24 carried to places): in the plain run one the task draws, in a plan's block one its own draw
     or the task's gives there (`variation.in_force`), as a condition's own range is one of the
-    values it sets."""
+    values it sets. **So is one a block's staircase gives each trial** (`Block.staircase`; the
+    pop-out search build, 2026-11-07)."""
     tasks = frozenset(name for name, d in task.draws.items() if isinstance(d, Distribution))
     plays = ([(task.default, {}, "", tasks)] if blocks is None else [
         (condition.structure or task.default, condition.values,
          f" in condition {condition.name!r} of block {block.name!r}",
-         frozenset(in_force(task, block)))
+         frozenset(in_force(task, block)) | _stepped(block))
         for block in blocks for condition in block.conditions])
     found: dict[str, str] = {}
     for structure, sets, where, drawn in plays:
@@ -6072,6 +6166,12 @@ def unplaced(task: Task, values: dict, blocks=None) -> "list[tuple[str, str]]":
                     + " gives it one")
             found[name] = f"{said}, and {cannot}, so the run does not start"
     return list(found.items())
+
+
+def _stepped(block: Block) -> frozenset[str]:
+    """The setting `block`'s staircase gives each trial (`Block.staircase`), or none."""
+    staircase = block.staircase
+    return frozenset({staircase.setting} if isinstance(staircase, Staircase) else ())
 
 
 def _position_kind_faults(trial: Trial) -> list[Finding]:

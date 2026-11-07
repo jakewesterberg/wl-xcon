@@ -379,7 +379,9 @@ class ParamRow:
     position: str | None = None
     #: **Where the value comes from in the open block** (schema 19), in the order a trial's values
     #: are built (engine spec §17.1): `"person"` where a person holds it, over all the rest;
-    #: `"conditions"` first where every condition of the open block draws it from its own range,
+    #: `"staircase"` where the open block's staircase steps it (`task.Staircase`; the pop-out
+    #: search build, 2026-11-07), over the rest but a person's value; `"conditions"` first where
+    #: every condition of the open block draws it from its own range,
     #: which wins over the block's and the task's draw; `"draw"` where the open block draws it, by
     #: its own draw or the task's, as written, or `"range"` where a person changed that draw's
     #: range live (the engine C3 plan's science review, I-4); `"conditions"` where the open

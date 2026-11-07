@@ -1983,6 +1983,111 @@ class Factorial:
     structure: "str | None" = None
 
 
+# --- A staircase on a block's setting (engine spec §15; the pop-out search build, 2026-11-07) ---
+
+#: **What steps a staircase easier** (TSK-33, the PI, 2026-10-07: "correct is success; wrong target
+#: and no response are failures; trials ending before the decision are ignored"): every answer that
+#: is not right (`ANSWERS - RIGHT`: a wrong target, an early or a late response or error, a false
+#: alarm), no response, and the two endings after the stimulus that the pop-out search scores as
+#: errors though the engine counts neither as an answer (its design, §3.1: "anything other than
+#: looking at the target with the next saccade from fix to the target is an error") -- a look that
+#: lands on neither the target nor a distractor, empty space (`ABORT`), and leaving the target
+#: before its hold (`TARGET_BREAK`). `adaptive_detection`'s own staircase differs (TSK-34: a target
+#: break moves it not at all); it is no `Staircase`.
+STAIRCASE_FAILURES = frozenset(
+    (ANSWERS - RIGHT) | {Outcome.NO_RESPONSE, Outcome.TARGET_BREAK, Outcome.ABORT}
+)
+
+
+def staircase_verdict(outcome: "Outcome | None", shown: bool) -> "bool | None":
+    """**How one trial moves a staircase** (TSK-33): `True`, a success, a right answer
+    (`RIGHT`); `False`, a failure (`STAIRCASE_FAILURES`); `None`, neither, and it moves nothing --
+    a fixation break (in the pop-out search, an early saccade), no fixation, a break other than the
+    target's, a lost tracker, a fault, a hang (`None`), and **any trial whose stimulus never
+    appeared** (`shown` false: it entered no state its structure's counting table names,
+    `Counting.appears`), which ended before the decision. In the pop-out search the array appears
+    with the go, so a trial ending before the go moves nothing. Between trials, never in a
+    frame."""
+    if outcome is None or not shown:
+        return None
+    if outcome in RIGHT:
+        return True
+    if outcome in STAIRCASE_FAILURES:
+        return False
+    return None
+
+
+@dataclass(frozen=True, slots=True)
+class Staircase:
+    """**A staircase on one setting of a block** (engine spec §15 items 1, 3 and 6; TSK-32, TSK-33;
+    the PI, 2026-11-07, "Automatic within a stage"): between trials, never in a frame, it gives
+    `setting` one of `levels` on each trial of its block, **`levels` easiest first**. **`down`
+    successes in a row step it one level harder and `up` failures in a row one level easier**
+    (`staircase_verdict`), a trial that moves nothing neither adding to a run nor breaking it; the
+    PI's three down, one up converges where three successes in a row are as likely as not, near
+    79.4% right, since a transformed up-down rule converges where its "down" sequence has
+    probability 0.5 [@levitt1971transformed]. **It never steps past either end**: a step due
+    there leaves it where it is, and its count starts again. The step sizes, its floor and its
+    ceiling are its levels, the task author's (the design's §7).
+
+    **`start`**: the index of the level each block of it starts at; `None`, the level nearest the
+    run's own value of the setting (the task's start under the run's; `nearest`), or the easiest
+    where the run gives it none. **Each block starts its staircase afresh as it opens**, a stage a
+    plan moves back to included (TSK-57's "started fresh").
+
+    **A person's value on the setting holds it** (TSK-32: "a live value on its parameter holds it";
+    engine build C3's held setting): its trials take the person's value and leave the staircase
+    where it was, however they end; **a hand-back resumes it at the level nearest the value held**
+    (`nearest`), its count started again, never where it was before the lock. Each trial's line
+    marks the value it gave `drawn` `"staircase"` (wl-preproc's answer of 2026-11-07).
+
+    **Refused as it is built**, as a setting's declaration is (`Param`): no levels, levels that are
+    not a tuple of finite numbers, a `down` or an `up` that is no whole number from 1, and a
+    `start` that is no index of its levels. What it steps is checked at load with its block
+    (`check.check_task`, `bad-staircase`): a setting the task declares, of numbers, never a
+    reward size, each level inside its declared range, and neither drawn nor given by the block's
+    conditions."""
+
+    setting: str
+    levels: tuple
+    down: int = 3
+    up: int = 1
+    start: "int | None" = None
+
+    def __post_init__(self) -> None:
+        def refuse(said: str) -> None:
+            raise ValueError(f"setting {self.setting!r}: {said}")
+
+        if not isinstance(self.levels, tuple):
+            refuse(f"a staircase's levels are a tuple, easiest first, not a "
+                   f"{type(self.levels).__name__}")
+        if not self.levels:
+            refuse("a staircase has at least one level, and this one has none")
+        for level in self.levels:
+            if (isinstance(level, bool) or not isinstance(level, (int, float))
+                    or not math.isfinite(level)):
+                refuse(f"a staircase's levels are finite numbers, and {level!r} is not one")
+        for name in ("down", "up"):
+            count = getattr(self, name)
+            if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+                refuse(f"a staircase's {name} is a whole number from 1, not {count!r}")
+        start = self.start
+        if start is not None and (isinstance(start, bool) or not isinstance(start, int)
+                                  or not 0 <= start < len(self.levels)):
+            refuse(f"a staircase's start is the index of one of its {len(self.levels)} levels, "
+                   f"from 0, or None, not {start!r}")
+
+    def nearest(self, value: object) -> "int | None":
+        """**The index of the level nearest `value`**, the easier of two as near; `None` for a
+        value that is no finite real number, which no level is near. Where a block of it starts
+        with no `start` (the run's own value), and where a hand-back resumes it (the value
+        held)."""
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value)):
+            return None
+        return min(range(len(self.levels)), key=lambda index: abs(self.levels[index] - value))
+
+
 @dataclass(frozen=True, slots=True)
 class Block:
     """One block type (engine spec §13.5): its `name`, its `conditions`, and how a block of it
@@ -2002,6 +2107,12 @@ class Block:
     #: nothing and, with a criterion, the criterion is met too: **its targets are a minimum**
     #: (`scheduler.Scheduler.finished`).
     criterion: "tuple[float, int] | None" = None
+    #: **A staircase on one of its settings** (`Staircase`; engine spec §15; the pop-out search
+    #: build, 2026-11-07): a level harder after `down` right in a row, three by default, and a
+    #: level easier after `up` failures, one, between trials, started afresh as each block of this
+    #: type opens; a person's value on the setting holds it, and a hand-back resumes it at the
+    #: level nearest that value. `None`, no staircase.
+    staircase: "Staircase | None" = None
     #: The table this block counts by, **replacing its conditions' structures'** (TSK-26: what
     #: counts is declared per block): `scheduler.CORRECT_ONLY`, `PRESENTED`, `EVERY_TRIAL` or any
     #: `Counting` -- a block training an animal to hold fixation may count a fixation break as an

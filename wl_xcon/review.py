@@ -33,6 +33,7 @@ from wl_xcon.task import (
     Priming,
     Random,
     SequenceBalanced,
+    Staircase,
     WithReplacement,
     SPENT,
     UNPAID,
@@ -669,7 +670,8 @@ def _plans(task: Task) -> list[str]:
     hand-listed ones (`variation.generated`), then its factors, exclusions and each level's share
     (`_factorial`); a condition's own range in words (`_set_label`); the draws in force in each
     block, its own or the task's, and a setting it leaves to its conditions (`_block_draws`); and
-    each wait the block or its conditions draw of their own, with its hazard (`_block_waits`)."""
+    each wait the block or its conditions draw of their own, with its hazard (`_block_waits`).
+    **And each block's staircase** (`_staircases`; the pop-out search build, 2026-11-07)."""
     lines = ["### Plans", ""]
     if not task.plans:
         return lines + ["None: the plain run only -- one block of the default structure, every "
@@ -703,9 +705,44 @@ def _plans(task: Task) -> list[str]:
                              f"{condition.target} | {_cell(values)} |")
         lines.append("")
         lines += _block_draws(task, plan, params, turned)
+        lines += _staircases(plan, params)
         for block in plan.blocks:
             lines += _factorial(block) + _block_waits(task, block, params) + _switches(block)
     return lines
+
+
+def _staircases(plan, params: dict) -> list[str]:
+    """**Each block's staircase** (`task.Staircase`; engine spec §15; the pop-out search build,
+    2026-11-07): the setting it steps, its levels easiest first in the setting's unit, how many
+    right answers in a row step it a level harder and how many failures a level easier, and where
+    each block of it starts; a block's staircase that is no `Staircase` said not to be one
+    (refused at load). Nothing where no block has one."""
+    rows = []
+    for block in plan.blocks:
+        staircase = block.staircase
+        if staircase is None:
+            continue
+        named = _cell(f"{block.name}")
+        if not isinstance(staircase, Staircase):
+            rows.append(f"| {named} | | **not a staircase**: {_cell(repr(staircase))} | | | |")
+            continue
+        unit = _unit(staircase.setting, params)
+        levels = ", ".join(f"{level:g}" for level in staircase.levels)
+        levels += f" {unit}" if unit else ""
+        start = ("the level nearest the run's value, else the easiest" if staircase.start is None
+                 else f"{staircase.levels[staircase.start]:g}")
+        rows.append(f"| {named} | {_cell(f'{staircase.setting}')} | {_cell(levels)} | "
+                    f"{staircase.down} right in a row | {staircase.up} failed in a row | "
+                    f"{_cell(start)} |")
+    if not rows:
+        return []
+    return ["Each block's staircase, between trials (TSK-32, TSK-33): a level harder after its run "
+            "of right answers, a level easier after its run of failures -- any other answer, no "
+            "response, a look to empty space or leaving the target before its hold -- never past "
+            "either end, a trial ending before its stimulus appears moving nothing; started afresh "
+            "as each block opens; a person's value on the setting holds it until handed back.", "",
+            "| Block | Steps | Levels, easiest first | A level harder after | A level easier after "
+            "| Starts at |", "|---|---|---|---|---|---|", *rows, ""]
 
 
 def _switches(block) -> list[str]:

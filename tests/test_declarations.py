@@ -212,6 +212,7 @@ DEFAULTS = {
         "name": REQUIRED,
         "conditions": REQUIRED,
         "criterion": None,
+        "staircase": None,
         "counting": None,
         "order": {"class": "Shuffled", "fields": {}},
         "drum": False,
@@ -357,6 +358,7 @@ DEFAULTS = {
     "Shuffled": {},
     "Slant": {"gradient": 0.05, "orientation": 0.0},
     "Square": {"size": 1.0, "contrast": None, "color": None},
+    "Staircase": {"setting": REQUIRED, "levels": REQUIRED, "down": 3, "up": 1, "start": None},
     "State": {"name": REQUIRED, "enter": [], "go": [], "unbounded": False},
     "Stimulus": {
         "name": REQUIRED,

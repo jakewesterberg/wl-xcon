@@ -903,6 +903,20 @@ interludes and session programs.
 7. **Reward** (welfare, §20): a procedure may choose among the bounded config's named reward entries;
    never an amount.
 
+*The pop-out search build, 2026-11-07* (its design, `docs/superpowers/specs/2026-11-07-popout-search-design.md`
+§3.4; the PI's answers of that day, "Automatic within a stage"): **one method of item 1 is built, a transformed
+up-down staircase declared on a block's setting** (`task.Staircase`, `Block.staircase`): its levels easiest first,
+`down` right answers in a row a level harder and `up` failures a level easier (three and one by default, which
+converges near 79% right [@levitt1971transformed]), never past either end, between trials, started afresh as each
+block opens; each trial's line marks the value it gave `drawn` `"staircase"`. **Item 3's default is TSK-33's, the
+same for every staircase** (`task.staircase_verdict`; not yet declared per procedure): a right answer a success;
+every other answer, no response, and the two endings the pop-out search scores as errors after the go though they
+are no answer here, a look to empty space (`ABORT`) and leaving the target before its hold (`TARGET_BREAK`), each a
+failure; anything else, and any trial whose stimulus never appeared, moving nothing. **Item 6 is engine build C3's
+held setting**: a person's value on the setting holds it, and a hand-back resumes it at the level nearest the value
+held. The other methods, item 2's library beside task code (XC-242 calls none yet), item 4's state per animal and
+item 5's other readings remain.
+
 ## 16. Counting and repeats (N§13, N§R1, N§R2)
 
 1. **One table classifies every outcome**, per trial structure: whether it **counts** toward its

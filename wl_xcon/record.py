@@ -504,7 +504,9 @@ class SessionRecord:
         **And what it drew, and who held what** (engine build C3's spec §10; its record shapes):
         `drawn`, each setting it drew and where that draw came from -- `"task"`, `"block"` or
         `"condition"` (its condition's own range), or the change id of the live range it was
-        drawn from -- `{}` where it drew nothing, its values in `params` as every value is;
+        drawn from, or `"staircase"` where its block's staircase gave it (`task.Staircase`; the
+        pop-out search build, 2026-11-07, as wl-preproc accepted that day) -- `{}` where it drew
+        nothing, its values in `params` as every value is;
         `live`, the settings a person held on it, sorted, of which `overridden` are those its
         condition gave, a value or its own range; `eased`, the settings whose live change kept it
         out of moving up; and `planned`, its place in a designed block's plan, or `None`. Design,
