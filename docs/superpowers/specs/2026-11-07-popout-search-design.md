@@ -123,7 +123,10 @@ At the end of Fade-in the distractors match the odd one's luminance, so it diffe
 - **Widening the pairing pool** uses the same bar; at the prompt **the trainer picks** which pairings to add ("Trainer
   picks at the prompt"). My calls: the bar is judged over all the current pairings pooled; in Alone, where no distractor
   shows, a pairing is only the odd one's color; when one window of trials meets both bars, one prompt offers both, the
-  stage first; a widening leaves the staircase where it is; the pool carries into the next stage.
+  stage first; a widening leaves the staircase where it is; the pool carries into the next stage. **Taking one
+  re-offers the other at once** (the PI, 2026-11-07, on the build's review: "Re-offer the other at once"): a move up
+  taken, the widening comes straight back in the next stage on the window that met it; a widening taken, the move up
+  comes straight back on its window, which the widening does not empty.
 - **The last 50** (my call, following the engine's rule that moving up judges answers only, and TSK-33): the trials
   that reached the go and ended with an answer (correct, an error of §3.1, or no response); no-fixation trials and early
   saccades are left out of the 50 and shown beside it, so the trainer sees them.

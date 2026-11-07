@@ -1004,6 +1004,13 @@ A person's confirmation is the existing `next_block` or `back_block` row (who an
 
 Yours to accept, rename or refuse before we write them; until your answer we build to these names.
 
+**Added in the build's fix round, 2026-11-07, told before it is written (with the color-set ask below, not yet sent,
+XC-491): a `suggested` row may carry `"remakes": <the id of the suggested row it makes again>`.** The PI's rule
+("Re-offer the other at once"): when one prompt offers a move up and a widening and the trainer takes one, the other is
+offered again at once under a new id -- a move up taken, the widening in the stage moved to (its `block` that stage,
+its `bar` the numbers that met it in the stage left); a widening taken, the move up on its own window. Absent on every
+other `suggested` row. The old suggestion gets no row of its own: the new row naming it is its answer.
+
 **Answered the same day** (wl-preproc, in its session, with the requester's answer): accepted `suggested`, `declined`, the
 `suggestion` id and `start_block` as named. The trial-line keys were simplified at its question: `stage` is dropped (it is
 always the line's existing `block`); the pairing and the set size travel in `params` as settings, `odd_color` and

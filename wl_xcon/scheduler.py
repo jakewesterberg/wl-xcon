@@ -387,6 +387,11 @@ class Scheduler:
     #: person holds a move or changes the pool, which start the bars' own windows afresh.
     _up: deque = field(init=False, default_factory=deque, repr=False)
     _down: deque = field(init=False, default_factory=deque, repr=False)
+    #: **The window the bar to widen the pool reads** (the pop-out search build's fix round), the
+    #: same answers as `_up`, apart only after a widening taken while a move up stood: the PI,
+    #: 2026-11-07, "Re-offer the other at once" -- the move up comes straight back on its own
+    #: window, not emptied (`afresh`'s `keep_up`), and the widening waits for a fresh one.
+    _widen: deque = field(init=False, default_factory=deque, repr=False)
     _bar_answered: bool = field(init=False, default=False, repr=False)
     _shown: deque = field(init=False, default_factory=deque, repr=False)
     _aside: dict = field(init=False, default_factory=dict, repr=False)
@@ -481,6 +486,7 @@ class Scheduler:
         self._opened = {first}
         self._back = self._fall_back_window()
         self._up, self._down = self._bar_windows()
+        self._widen = deque(maxlen=self._up.maxlen)
         self._shown = deque(maxlen=self._down.maxlen)
         self._counts = {c.name: Counts() for c in self.block.conditions}
         self._begin()
@@ -679,6 +685,7 @@ class Scheduler:
         criterion = self._criterion
         if criterion is not None and self._up.maxlen and criterion[1] > self._up.maxlen:
             self._up = deque(self._up, maxlen=criterion[1])
+            self._widen = deque(self._widen, maxlen=criterion[1])
         if fall_back is not None and self._down.maxlen and fall_back[1] > self._down.maxlen:
             self._down = deque(self._down, maxlen=fall_back[1])
             self._shown = deque(self._shown, maxlen=fall_back[1])
@@ -711,10 +718,12 @@ class Scheduler:
         return window(self.block.criterion), window(getattr(self.order, "fall_back", None))
 
     def _answers_for(self, move: str) -> deque:
-        """The window `move`'s bar reads: the one toward moving up for a move up and for widening
-        the pool (`MOVE_WIDEN`; "Same rule: rig suggests"), the one toward moving back for a move
-        back."""
-        return self._down if move == MOVE_BACK else self._up
+        """The window `move`'s bar reads: the one toward moving up for a move up, its twin for
+        widening the pool (`MOVE_WIDEN`; "Same rule: rig suggests"; `_widen`, the same answers but
+        after a widening taken beside a move up), the one toward moving back for a move back."""
+        if move == MOVE_BACK:
+            return self._down
+        return self._widen if move == MOVE_WIDEN else self._up
 
     def bar(self, move: str) -> tuple[int, int, bool]:
         """**The numbers a suggestion's bar reads now** (`suggestion`): how many of the last
@@ -757,14 +766,15 @@ class Scheduler:
                        None if criterion is None else criterion[0],
                        None if fall_back is None else fall_back[0])
 
-    def _met_up(self) -> tuple[int, int, bool] | None:
+    def _met_up(self, move: str = MOVE_UP) -> tuple[int, int, bool] | None:
         """The bar to move up's numbers (`bar`) where it is met -- its window full and at least
         the stage's criterion's proportion right -- else `None`, as under no confirmed
-        progression, or in a stage with no criterion."""
+        progression, or in a stage with no criterion. Read on the widening's twin window for
+        `MOVE_WIDEN` (`_widen`)."""
         if not self._confirming or self.block.criterion is None or not self._up.maxlen:
             return None
         criterion = self._criterion
-        right, of, hardest = self.bar(MOVE_UP)
+        right, of, hardest = self.bar(move)
         met = of >= criterion[1] and right / of >= criterion[0]
         return (right, of, hardest) if met else None
 
@@ -821,7 +831,7 @@ class Scheduler:
         (`taskd.Session._suggest`). One window meeting both bars, the move up and the widening are
         one prompt, the stage's first (the design's §3.4). Read between trials, never in a
         frame."""
-        met = self._met_up()
+        met = self._met_up(MOVE_WIDEN)
         return None if met is None else Suggestion(MOVE_WIDEN, self.block.name, None, *met)
 
     def judged(self, outcome: Outcome | None, shown: bool, first_try: bool, eased: bool,
@@ -845,16 +855,25 @@ class Scheduler:
         starts both afresh. **The last answers shown stay**, and the trials left out beside them
         (`_shown`; the build's final fixes, on Task 7's report, whose panel read "no answers yet"
         after a hold)."""
-        self._answers_for(move).clear()
+        if move == MOVE_BACK:
+            self._down.clear()
+        else:
+            self._up.clear()
+            self._widen.clear()
 
-    def afresh(self) -> None:
+    def afresh(self, keep_up: bool = False) -> None:
         """**The open stage's bars start afresh** (the pop-out search build, 2026-11-07): its pool
         of pairings changed (`task.Pool`), and the bars judge the pairings pooled now (the
         design's §3.4: "the bar is judged over all the current pairings pooled"), so neither
         window keeps the answers given on the pool before. The staircase stays where it is
         ("a widening leaves the staircase where it is"), and so do the last answers shown
-        (`_shown`), which are the stage's."""
-        self._up.clear()
+        (`_shown`), which are the stage's. **`keep_up`: a widening taken while a move up stood**
+        (the PI, 2026-11-07, "Re-offer the other at once": "Taking the widening does not first
+        empty the move-up window") keeps the window to move up, which the move up is offered again
+        on; the widening's own twin and the window to move back start afresh."""
+        if not keep_up:
+            self._up.clear()
+        self._widen.clear()
         self._down.clear()
 
     @property
@@ -1435,6 +1454,7 @@ class Scheduler:
         self._window.clear()
         self._back = self._fall_back_window()
         self._up, self._down = self._bar_windows()
+        self._widen = deque(maxlen=self._up.maxlen)
         self._shown = deque(maxlen=self._down.maxlen)
         self._aside = {}
         self._drawn.clear()
@@ -1883,6 +1903,7 @@ class Scheduler:
             return
         if hardest and not eased and not (self._bar_answered and self._first_answers):
             self._up.append((verdict, hardest))
+            self._widen.append((verdict, hardest))
         if not self._bar_answered:
             self._down.append((verdict, hardest))
             self._shown.append((verdict, said, tuple(self._aside.items())))

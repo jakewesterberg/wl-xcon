@@ -793,6 +793,10 @@ def _at_hardest(climb: "_Climb | None", held: "dict | None") -> bool:
 #: stage otherwise (a move by hand, or the stage's time). An answer to any but a standing one is
 #: refused with a sentence naming which (`Session._unanswerable`).
 WITHDRAWN, DECLINED, CONFIRMED, LAPSED = "withdrawn", "declined", "confirmed", "lapsed"
+#: **Made again** (the pop-out search build's fix round; the PI, 2026-11-07, "Re-offer the other at
+#: once"): the trainer took the other half of its prompt, and it was offered again at once under a
+#: new id (`_Suggested.remade_as`), which an answer names instead.
+REMADE = "made again"
 
 
 @dataclass
@@ -807,6 +811,13 @@ class _Suggested:
     block: str
     to: str
     fate: str | None = None
+    #: The id it was made again under, where its fate is `REMADE`.
+    remade_as: int | None = None
+    #: **A widening made again after the trainer took the move up beside it** (the PI,
+    #: 2026-11-07, "Re-offer the other at once"): the bar it was met on in the stage left,
+    #: `(correct, of, at_hardest)`, which it stands on in the stage moved to, "judged on the window
+    #: that met it", until answered or the pool is full; `None` for any other.
+    carried: tuple | None = None
 
 
 #: **How a run's stop reads when Ctrl-C at the terminal ended it** (P4d-2a final review I4): its
@@ -902,15 +913,24 @@ def went_on(task: Task, last) -> _WentOn | None:
             climb = _Climb.started(staircase, {**live, **resolved, **current}, first,
                                    whole=staircase.setting in whole)
         state.update(stage=name, climb=climb, bars=[], offered={}, answered=set())
+        # A suggestion made again in this stage as the run moved here (`_remake_widening`),
+        # written beside the move, whichever row sorts first.
+        for row in [row for row in pending if row.get("block") == name]:
+            pending.remove(row)
+            state["offered"][row["change"]] = row
 
     def changed_pool() -> None:
-        state["bars"].append(("afresh",))
-        state["answered"] |= set(state["offered"])
+        # A widening taken beside a move up keeps the move's window, the move made again on it
+        # (`Session._repooled`, `_remake_move`).
+        kept = state.pop("kept_up", None)
+        state["bars"].append(("afresh", True) if kept is not None else ("afresh",))
+        state["answered"] |= set(state["offered"]) - ({kept} if kept is not None else set())
 
     # The run's values as its rows set them, for its staircase's counts and steps (`_Climb`) and
     # what a scheduler judges the stage's bars with again (`_WentOn.values`).
     live: dict = {param.name: param.start for param in task.params if param.start is not None}
     current: dict = {}
+    pending: list = []
     enter(last.start.get("start_block") or names[0])
     value = resolved.get(pool.setting) if pool is not None else None
     seen = None
@@ -922,7 +942,13 @@ def went_on(task: Task, last) -> _WentOn | None:
         if what == "change":
             kind, name = row.get("kind", "set"), row.get("name")
             if kind == "suggested":
+                if row.get("remakes") is not None and row.get("block") not in (None,
+                                                                              state["stage"]):
+                    pending.append(row)
+                    continue
                 state["offered"][row["change"]] = row
+                if row.get("remakes") is not None and row.get("move") == MOVE_UP:
+                    state["kept_up"] = row["change"]
             elif kind == "declined":
                 # A hold starts the held move's window afresh, so its bar no longer offers it.
                 held = state["offered"].get(row.get("suggestion"))
@@ -999,16 +1025,21 @@ def _carried(task: Task, went: _WentOn, scheduler: Scheduler) -> tuple:
         elif event[0] == "decline":
             scheduler.decline(event[1])
         else:
-            scheduler.afresh()
+            scheduler.afresh(keep_up=len(event) > 1)
     offered = widen = None
     now = scheduler.suggestion
     if went.offered is not None and now is not None and now.move == went.offered.get("move"):
         offered = _Suggested(went.offered["change"], now.move, now.block, now.to)
     pool = task.pool
+    # A widening made again beside a move up stands on the bar that met it, as the run kept it.
+    remade = went.widen is not None and went.widen.get("remakes") is not None
     if (went.widen is not None and pool is not None and pool.unpooled(went.pool) is None
             and len(pool.pairings(went.pool)) < len(pool.choices)
-            and scheduler.widening is not None):
-        widen = _Suggested(went.widen["change"], MOVE_WIDEN, scheduler.block.name, None)
+            and (remade or scheduler.widening is not None)):
+        bar = went.widen.get("bar") or {}
+        widen = _Suggested(went.widen["change"], MOVE_WIDEN, scheduler.block.name, None,
+                           carried=((bar.get("correct"), bar.get("of"),
+                                     bool(went.widen.get("at_hardest"))) if remade else None))
     return offered, widen
 
 
@@ -2572,7 +2603,8 @@ class Session:
         """A suggestion standing as `link.Suggestion`'s fields, its bar read now, or `None`."""
         if offered is None or self.phase != "running" or self._scheduler is None:
             return None
-        correct, of, hardest = self._scheduler.bar(offered.move)
+        correct, of, hardest = (offered.carried if offered.carried is not None
+                                else self._scheduler.bar(offered.move))
         return (offered.change, offered.move, offered.block, offered.to, correct, of, hardest)
 
     @property
@@ -3021,6 +3053,10 @@ class Session:
                 self._refuse(command.KIND, command.by, said)
                 return
         was, dropped = scheduler.block.name, scheduler.drum_waiting
+        # **The widening offered beside a move up the trainer takes** (the PI, 2026-11-07,
+        # "Re-offer the other at once"), with the bar it stands on, before the move empties it.
+        beside = (self._widening if answered is not None and step == NEXT else None)
+        bar = None if beside is None else scheduler.bar(MOVE_WIDEN)
         said = scheduler.move(step, command.by)
         if said is not None:
             self._refuse(command.KIND, command.by, said)
@@ -3042,6 +3078,8 @@ class Session:
             index, block=was, to=scheduler.block.name, dropped=dropped,
             **({} if answered is None else {"suggestion": answered}),
         )
+        if beside is not None:
+            self._remake_widening(beside, bar)
 
     def _decline(self, command, index: int) -> None:
         """**A person holds instead of making the move the rig suggests** (`link.Decline`, the
@@ -3120,6 +3158,10 @@ class Session:
         if offered.fate == LAPSED:
             return (f"the rig's suggestion {answered}, {which}, lapsed when the run left block "
                     f"{offered.block}; {tail}")
+        if offered.fate == REMADE:
+            return (f"the rig's suggestion {answered}, {which}, was made again as suggestion "
+                    f"{offered.remade_as} when the trainer took the other half of its prompt; "
+                    f"answer that one; {tail}")
         if offered.fate is not None:
             return f"the rig's suggestion {answered}, {which}, was already {offered.fate}; {tail}"
         if move is not None and offered.move != move:
@@ -3193,6 +3235,65 @@ class Session:
                 offered.fate = LAPSED
         self._suggested = self._widening = None
 
+    def _remake_widening(self, beside: "_Suggested", bar: tuple) -> None:
+        """**The widening offered beside a move up the trainer took, offered again at once** (the
+        PI, 2026-11-07, on the build's review, I8: "Re-offer the other at once": "After the trainer
+        takes one, the other comes straight back if its bar still holds"), between trials, in the
+        stage moved to, where the pool carried over: a new suggestion, its own `suggested` row
+        naming the one it makes again (`remakes`), **judged on the window that met it** -- the bar
+        it stood on in the stage left (`_Suggested.carried`), which no answer in the new stage
+        withdraws; it stands until the trainer widens the pool, holds it (the decline rule as
+        ever) or the run leaves the stage, or the pool holds every pairing. The one it makes again
+        is answered (`REMADE`)."""
+        pool = self._task.pool if self._task is not None else None
+        if pool is None:
+            return
+        value = self.spec.values.get(pool.setting)
+        pooled = pool.pairings(value) if pool.unpooled(value) is None else pool.choices
+        if len(pooled) >= len(pool.choices):
+            return
+        correct, of, hardest = bar
+        at = self.wall_now()
+        stage = self._scheduler.block.name
+        self._logged("suggested", pool.setting, value, None, None, at, move=MOVE_WIDEN,
+                     block=stage, bar={"correct": correct, "of": of}, at_hardest=hardest,
+                     remakes=beside.change)
+        made = _Suggested(self._change, MOVE_WIDEN, stage, None, carried=(correct, of, hardest))
+        beside.fate, beside.remade_as = REMADE, made.change
+        self._widening = made
+        self._suggestions[made.change] = made
+        self._feed("suggestion", None, at,
+                   f"the rig suggests widening the pool in {stage} again, as suggestion "
+                   f"{made.change} (its suggestion {beside.change} beside the move up): {correct} "
+                   f"of the last {of} answers at {beside.block}'s hardest step right, the window "
+                   f"that met it; widen it with a value of {pool.setting} holding more, or hold")
+
+    def _remake_move(self, stage: "_Suggested") -> None:
+        """**The move up offered beside a widening the trainer took, offered again at once** (the
+        PI, 2026-11-07, "Re-offer the other at once"; `_repooled`), between trials: a new
+        suggestion, its own `suggested` row naming the one it makes again (`remakes`), judged on
+        the window that met it, which the widening did not empty (`Scheduler.afresh`'s
+        `keep_up`), and kept in step with it from then on, as any (`_suggest_stage`). The one it
+        makes again is answered (`REMADE`)."""
+        scheduler = self._scheduler
+        now = scheduler.suggestion
+        if now is None or now.move != MOVE_UP:
+            stage.fate = WITHDRAWN
+            return
+        at = self.wall_now()
+        self._logged("suggested", "block", now.block, now.to, None, at, move=now.move,
+                     block=now.block, bar={"correct": now.correct, "of": now.of},
+                     at_hardest=now.at_hardest, remakes=stage.change)
+        made = _Suggested(self._change, now.move, now.block, now.to)
+        stage.fate, stage.remade_as = REMADE, made.change
+        self._suggested = made
+        self._suggestions[made.change] = made
+        self._feed("suggestion", None, at,
+                   f"the rig suggests moving up from {now.block} to {now.to} again, as suggestion "
+                   f"{made.change} (its suggestion {stage.change} beside the widening): "
+                   f"{now.correct} of the last {now.of} answers at its hardest step right; confirm "
+                   f"with next block, or hold")
+
     def _suggest_widening(self) -> None:
         """**The rig's suggestion to widen the pool, kept in step with its bar** (`task.Pool`;
         `scheduler.Scheduler.widening`; the pop-out search build, 2026-11-07, its design §3.2 and
@@ -3214,6 +3315,10 @@ class Session:
         pooled = pool.pairings(value) if pool.unpooled(value) is None else pool.choices
         now = scheduler.widening if len(pooled) < len(pool.choices) else None
         standing = self._widening
+        if (standing is not None and standing.carried is not None
+                and len(pooled) < len(pool.choices)):
+            # Made again beside a move up the trainer took: judged on the window that met it.
+            return
         if standing is not None and now is None:
             standing.fate, self._widening = WITHDRAWN, None
             correct, of, _ = scheduler.bar(MOVE_WIDEN)
@@ -3255,16 +3360,21 @@ class Session:
         if was is None or now == was or pool.unpooled(now) is not None:
             return
         scheduler = self._scheduler
-        scheduler.afresh()
         added = (pool.unpooled(was) is not None
                  or bool(set(pool.pairings(now)) - set(pool.pairings(was))))
         said = []
         widening, stage = self._widening, self._suggested
+        # **The trainer took the widening while a move up stood beside it** (the PI, 2026-11-07,
+        # "Re-offer the other at once": "Taking the widening does not first empty the move-up
+        # window"): the move up keeps its window and is offered again at once (`_remake_move`).
+        again = (added and widening is not None and stage is not None
+                 and stage.move == MOVE_UP)
+        scheduler.afresh(keep_up=again)
         if widening is not None:
             widening.fate = CONFIRMED if added else WITHDRAWN
             said.append(f"the rig's suggestion {widening.change}, to widen the pool, is "
                         f"{widening.fate}")
-        if stage is not None:
+        if stage is not None and not again:
             stage.fate = WITHDRAWN
             said.append(f"the rig's suggestion {stage.change}, {self._offer_said(stage)}, is "
                         f"withdrawn")
@@ -3272,7 +3382,12 @@ class Session:
         if scheduler.confirming:
             self._feed("suggestion", None, self.wall_now(),
                        f"the pool changed in {scheduler.block.name}, so the bars start afresh on "
-                       f"the pairings pooled now" + "".join(f"; {each}" for each in said))
+                       f"the pairings pooled now"
+                       + (", but the window to move up, which the move up beside the widening "
+                          "stands on" if again else "")
+                       + "".join(f"; {each}" for each in said))
+        if again:
+            self._remake_move(stage)
 
     def _hand_back(self, command, index: int) -> None:
         """**A person hands a setting back** (`link.HandBack`; engine build C3's spec §6; the PI,

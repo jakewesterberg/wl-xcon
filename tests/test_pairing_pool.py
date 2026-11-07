@@ -399,38 +399,52 @@ def test_the_top_stage_suggests_widening_alone_and_a_full_pool_never(tmp_path):
     assert _offered(full)[5] == (None, None)
 
 
-def test_widening_the_pool_answers_the_prompt_and_the_bars_start_afresh(tmp_path):
+def test_taking_the_widening_offers_the_move_up_again_at_once(tmp_path):
     """The trainer answers the widening with a `set` of the pool holding more pairings (the
-    change log's `set` row says who). As it applies, the widening is confirmed and the move up
-    offered beside it is withdrawn -- one prompt, answered -- and both bars start afresh, judged
-    over the pairings pooled now: a confirmation of the move up arriving after is refused with a
-    sentence, nothing moved, and the rig suggests again only once five new answers meet the bar
-    ("After 50 new tries", the PI, of a hold)."""
+    change log's `set` row says who): as it applies the widening is confirmed and -- the PI,
+    2026-11-07, "Re-offer the other at once": "After the trainer takes one, the other comes
+    straight back if its bar still holds" -- **the move up offered beside it is made again at
+    once**, a new suggestion with its own `suggested` row naming the one it makes again
+    (`remakes`), **on the window that met it**, which the widening did not empty ("Taking the
+    widening does not first empty the move-up window"). A confirmation naming the old id is
+    refused with a sentence naming the new; one naming the new moves the run up. The widening's
+    own bar starts afresh, so it is not offered again on the answers it was taken on."""
     script = ["right"] * 13
     session = _session(tmp_path, [_stage("Alone", set_size=1), _stage("Crowd")], script,
                        {7: [SetParameter("pairings", 3, JAKE)],
-                        9: [NextBlock(by=JAKE, suggestion=1)]})
+                        9: [NextBlock(by=JAKE, suggestion=1)],
+                        10: [NextBlock(by=JAKE, suggestion=4)]})
 
     session.run()
 
     assert session.refusals == [
-        ("next_block", JAKE, "the rig's suggestion 1, to move up from Alone to Crowd, was "
-         "withdrawn when its bar stopped being met, before this answer arrived; nothing moved, "
-         "and the run stays in block Alone")]
-    assert [line["block"] for line in _lines(session)] == ["Alone"] * 13
-    assert [(row["change"], row["kind"], row["name"], row.get("move"), row["trial_number"])
-            for row in _changes(session)] == [
-        (1, "suggested", "block", "up", 6), (2, "suggested", "pairings", "widen", 6),
-        (3, "set", "pairings", None, 8),
-        (4, "suggested", "block", "up", 13), (5, "suggested", "pairings", "widen", 13)]
+        ("next_block", JAKE, "the rig's suggestion 1, to move up from Alone to Crowd, was made "
+         "again as suggestion 4 when the trainer took the other half of its prompt; answer that "
+         "one; nothing moved, and the run stays in block Alone")]
+    lines = _lines(session)
+    assert [line["block"] for line in lines] == ["Alone"] * 9 + ["Crowd"] * 4
+    assert [(row["change"], row["kind"], row["name"], row.get("move"), row["trial_number"],
+             row.get("remakes")) for row in _changes(session)] == [
+        (1, "suggested", "block", "up", 6, None), (2, "suggested", "pairings", "widen", 6, None),
+        (3, "set", "pairings", None, 8, None), (4, "suggested", "block", "up", 8, 1)]
+    remade = _changes(session)[3]
+    assert (remade["block"], remade["now"], remade["bar"], remade["at_hardest"]) == (
+        "Alone", "Crowd", {"correct": 5, "of": 5}, True)
     assert _changes(session)[2]["by"] == BY
+    (move,) = [row for row in _rows(session, "controls.jsonl") if row["kind"] == "next_block"]
+    assert move["suggestion"] == 4
     offered = _offered(session)
-    assert [offered[index] for index in range(7, 12)] == [(None, None)] * 5
-    assert _fed(session, "suggestion")[2] == (
-        "the pool changed in Alone, so the bars start afresh on the pairings pooled now; the "
-        "rig's suggestion 2, to widen the pool, is confirmed; the rig's suggestion 1, to move up "
-        "from Alone to Crowd, is withdrawn")
-    assert {_pairing(line) for line in _lines(session)[7:]} == {P1, P2}
+    up = Suggestion(change=4, move="up", block="Alone", to="Crowd", correct=5, of=5,
+                    at_hardest=True)
+    assert offered[7] == (up, None) and offered[8][1] is None
+    assert _fed(session, "suggestion")[2:4] == [
+        "the pool changed in Alone, so the bars start afresh on the pairings pooled now, but the "
+        "window to move up, which the move up beside the widening stands on; the rig's suggestion "
+        "2, to widen the pool, is confirmed",
+        "the rig suggests moving up from Alone to Crowd again, as suggestion 4 (its suggestion 1 "
+        "beside the widening): 5 of the last 5 answers at its hardest step right; confirm with "
+        "next block, or hold"]
+    assert {_pairing(line) for line in lines[7:]} == {P1, P2}
 
 
 def test_a_widening_leaves_the_staircase_where_it_is(tmp_path):
@@ -512,32 +526,85 @@ def test_a_hold_of_a_move_back_leaves_the_widening_standing(tmp_path):
         "suggested again once a fresh window of answers meets its bar"]
 
 
-def test_a_move_up_confirmed_lapses_the_widening_and_the_pool_carries_into_the_next_stage(
-        tmp_path):
-    """"The pool carries into the next stage" (the design's §3.4): the trainer widens the pool in
-    Alone and later confirms the move up; Crowd's trials draw from the pool as it was widened, its
-    setting's value carried over, and the widening the rig offered beside the move lapses with
-    it: a hold naming it is refused with a sentence. Crowd's own bar, judged afresh, later
-    suggests widening the pool it carried, its value 5."""
+def test_taking_the_move_up_offers_the_widening_again_in_the_next_stage(tmp_path):
+    """"The pool carries into the next stage" (the design's §3.4), and the PI, 2026-11-07, "Re-offer
+    the other at once": the trainer widens the pool in Alone, and later confirms the move up while
+    the rig offers widening beside it. Crowd's trials draw from the pool as it was widened, its
+    value carried over, and **the widening is made again at once in Crowd**: a new suggestion, its
+    own `suggested` row naming the one it makes again (`remakes`), **judged on the window that met
+    it**, Alone's, so Crowd's empty window does not withdraw it. A hold naming the old id is
+    refused with a sentence naming the new; a hold of the new is the existing decline rule, a
+    `declined` row, and Crowd's own bar, judged afresh, later suggests widening again."""
     script = ["right"] * 14
     session = _session(tmp_path, [_stage("Alone", set_size=1), _stage("Crowd")], script,
                        {2: [SetParameter("pairings", 5, JAKE)],
                         9: [NextBlock(by=JAKE, suggestion=2)],
-                        10: [Decline(suggestion=3, by=JAKE)]})
+                        10: [Decline(suggestion=3, by=JAKE), Decline(suggestion=4, by=JAKE)]})
 
     session.run()
 
     assert session.refusals == [
-        ("decline", JAKE, "the rig's suggestion 3, to widen the pool in Alone, lapsed when the "
-         "run left block Alone; there is nothing to hold")]
+        ("decline", JAKE, "the rig's suggestion 3, to widen the pool in Alone, was made again as "
+         "suggestion 4 when the trainer took the other half of its prompt; answer that one; there "
+         "is nothing to hold")]
     lines = _lines(session)
     assert [line["block"] for line in lines] == ["Alone"] * 8 + ["Crowd"] * 6
     assert [line["params"]["pairings"] for line in lines] == [1, 1] + [5] * 12
     assert {_pairing(line) for line in lines[8:]} == {P1, P3}
-    assert [(row["change"], row["kind"], row.get("move"), row["was"])
-            for row in _changes(session)] == [
-        (1, "set", None, 1), (2, "suggested", "up", "Alone"), (3, "suggested", "widen", 5),
-        (4, "suggested", "widen", 5)]
+    assert [(row["change"], row["kind"], row.get("move"), row.get("block"), row["was"],
+             row.get("remakes"), row.get("suggestion")) for row in _changes(session)] == [
+        (1, "set", None, None, 1, None, None), (2, "suggested", "up", "Alone", "Alone", None, None),
+        (3, "suggested", "widen", "Alone", 5, None, None),
+        (4, "suggested", "widen", "Crowd", 5, 3, None),
+        (5, "declined", None, None, 5, None, 4),
+        (6, "suggested", "widen", "Crowd", 5, None, None)]
+    remade = _changes(session)[3]
+    assert (remade["bar"], remade["at_hardest"]) == ({"correct": 5, "of": 5}, True)
+    assert _offered(session)[8] == (None, _widen(4, "Crowd"))
+    assert (
+        "the rig suggests widening the pool in Crowd again, as suggestion 4 (its suggestion 3 "
+        "beside the move up): 5 of the last 5 answers at Alone's hardest step right, the window "
+        "that met it; widen it with a value of pairings holding more, or hold"
+    ) in _fed(session, "suggestion")
+
+
+def test_a_suggestion_made_again_stands_where_a_run_stopped_with_its_process(tmp_path):
+    """The record replayed (`taskd.went_on`, `_carried`; the pop-out search build's Task 6), as a
+    resumed session's next run goes on from it: **a move up made again beside a widening taken**
+    stands, its window kept through the pool's change, and **a widening made again in the stage
+    moved to** stands on the bar that met it, though the new stage's own window is empty -- each
+    as the run kept it (the PI, 2026-11-07, "Re-offer the other at once")."""
+    from wl_xcon import resume, variation
+    from wl_xcon.scheduler import Scheduler
+    from wl_xcon.taskd import _carried, went_on
+
+    def carried(session):
+        task = _load_task(Path(session.spec.task))
+        went = went_on(task, resume.read(session.directory, departure=WALL_NOW).last_run)
+        plan = task.plans["train"]
+        scheduler = Scheduler(
+            blocks=[variation.expanded(block) for block in plan.blocks], seed=0,
+            counting=task.trial.counting,
+            countings={name: structure.counting for name, structure in task.structures.items()},
+            order=plan.order, start=went.position, values=lambda: went.values,
+            params={param.name: param for param in task.params})
+        return went, _carried(task, went, scheduler)
+
+    stages = [_stage("Alone", set_size=1), _stage("Crowd")]
+    widened = _session(tmp_path / "widened", stages, ["right"] * 9,
+                       {7: [SetParameter("pairings", 3, JAKE)]})
+    moved = _session(tmp_path / "moved", stages, ["right"] * 10,
+                     {2: [SetParameter("pairings", 5, JAKE)], 9: [NextBlock(by=JAKE, suggestion=2)]})
+    widened.run()
+    moved.run()
+
+    went, (offered, widen) = carried(widened)
+    assert (went.stage, went.offered["change"], went.offered["remakes"]) == ("Alone", 4, 1)
+    assert (offered.change, offered.move, offered.to, widen) == (4, "up", "Crowd", None)
+    went, (offered, widen) = carried(moved)
+    assert (went.stage, went.widen["change"], went.widen["remakes"]) == ("Crowd", 4, 3)
+    assert offered is None
+    assert (widen.change, widen.block, widen.carried) == (4, "Crowd", (5, 5, True))
 
 
 def test_in_alone_any_pool_runs(tmp_path):

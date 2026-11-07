@@ -559,7 +559,13 @@ it; under a confirmed progression the stage's bar to move up, judged over every 
 also suggests widening it (`Scheduler.widening`, a `suggested` row of move `"widen"`, the frame's
 `widen`), the stage's move offered first in one prompt that one hold answers whole, the trainer
 widening with a `set`, which, as any change to the pool, starts both bars afresh and leaves the
-staircase where it is (`Session._repooled`); the pool carries into the next stage. **A block may
+staircase where it is (`Session._repooled`); the pool carries into the next stage. **The trainer
+taking one half of a prompt re-offers the other at once** (the PI, 2026-11-07, "Re-offer the other
+at once"): a move up taken, the widening beside it is made again in the next stage on the bar that
+met it (`Session._remake_widening`); a widening taken, the move up beside it is made again on its
+own window, which the widening does not empty (`Scheduler.afresh`'s `keep_up`, the widening judged
+on a twin window, `_widen`; `Session._remake_move`) -- each a new `suggested` row naming the one it
+makes again (`remakes`), the old one answered "made again". **A block may
 step one of its settings by a staircase** (`task.Staircase`, `Block.staircase`; the pop-out search
 build, 2026-11-07): between trials, as the trial loop draws (`taskd.Session._climbing`), a level
 harder after `down` right answers in a row and a level easier after `up` failures, by TSK-33's
