@@ -3887,3 +3887,18 @@ def test_every_string_the_panel_draws_is_escaped():
 
     assert "<script" not in pane and EVIL not in pane
     assert html.escape(EVIL, quote=True) in pane
+
+
+def test_the_lock_holds_the_level_exactly_not_as_shown():
+    """*lock at* sends the level the staircase is at, exactly as the rig sent it -- a held value is
+    judged against the level it stopped at (`taskd.Session._eased`), so one a hair fainter than a
+    computed level of 1/3 would keep the held trials out of moving up as eased -- while the panel
+    shows it to six figures."""
+    third = (1 / 3, 2 / 3, 1.0)
+    pane = _train(_training(staircase=replace(_LADDER, levels=third, level=0)))
+
+    assert ('data-cmd="lock" data-name="distractor_luminance" data-value="0.3333333333333333">'
+            "lock at 0.333333</button>") in pane
+    assert "<b>0.333333</b>" in pane
+    assert parse_command({"kind": "set", "name": "distractor_luminance",
+                          "value": float("0.3333333333333333"), "by": "jake"}).value == 1 / 3

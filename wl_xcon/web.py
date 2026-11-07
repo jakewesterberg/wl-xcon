@@ -1401,6 +1401,10 @@ def _ladder(frame: Telemetry, view: View) -> str:
     known = (isinstance(ladder.level, int) and not isinstance(ladder.level, bool)
              and 0 <= ladder.level < len(ladder.levels))
     at = _e(_rung(ladder.levels[ladder.level])) if known else None
+    # The value *lock at* sends, the level exactly (`repr`, which reads back as the same number):
+    # a held value is judged against the level the staircase stopped at (`taskd.Session._eased`),
+    # so one rounded to the six figures shown could count as eased.
+    exact = _e(repr(ladder.levels[ladder.level])) if known else None
     where = (f"level {ladder.level + 1} of {len(ladder.levels)}" if known
              else "at a level its staircase does not have")
     if ladder.held:
@@ -1416,7 +1420,7 @@ def _ladder(frame: Telemetry, view: View) -> str:
                 "</div>")
     return (f'<div class="kv"><span>{name} <b>{at}</b>{unit}</span>'
             f'<span class="nm">{where}, {rule}</span><button type="button" class="btn small" '
-            f'data-cmd="lock" data-name="{name}" data-value="{at}"{_gate(view)}>lock at {at}'
+            f'data-cmd="lock" data-name="{name}" data-value="{exact}"{_gate(view)}>lock at {at}'
             "</button></div>")
 
 
