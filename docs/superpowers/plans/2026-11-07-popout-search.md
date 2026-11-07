@@ -33,7 +33,7 @@
 ### Task 1: Tell wl-preproc the new record fields, before they are written
 
 **Files:** Modify `docs/pending-wl-preproc-amendments.md` (a dated ask section); `docs/backlog.md` (one line for the ask, Next free).
-**Interfaces:** Produces the field names every later task writes: trial line `stage` (block name, string), `staircase` (`{"setting": str, "level": number}` or null), `pairing` (`{"odd": str, "distractors": str}` or null), `set_size` (int or null); change-log kinds `suggested` (`{"move": "up"|"back"|"widen", "block": str, "bar": {"correct": int, "of": int}, "at_hardest": bool}`) and `declined` (`{"suggestion": <the suggested row's id>}`), appended to `record.KINDS` after `training`; the run's start row gains `start_block` (block name) beside `plan`.
+**Interfaces (as wl-preproc accepted them, 2026-11-07):** no new key on a trial line: the stage is the existing `block`; the pairing is two settings in `params`, `odd_color` and `distractor_color`, marked `drawn: "pool"`; a staircase's setting (`distractor_fraction` in Fade-in, `set_size` in Crowd) is marked `drawn: "staircase"`; change-log kinds `suggested` (`{"move": "up"|"back"|"widen", "block": str, "bar": {"correct": int, "of": int}, "at_hardest": bool}`) and `declined` (`{"suggestion": <the suggested row's id>}`), appended to `record.KINDS` after `training`; the run's start row gains `start_block` (block name) beside `plan`.
 - [ ] **Step 1:** Write the ask (fields, shapes, which rows strobe: `suggested` and `declined` do not strobe, so wl-preproc times them by its clock fit; see the c3-timing diagnosis before sending if it changes that).
 - [ ] **Step 2:** `tests/test_backlog.py` and `tests/test_references.py` pass; commit. The controller sends the ask (a peer session); Tasks 3 to 5, which write the fields, start only after it is sent, and adjust if wl-preproc's answer asks a change.
 
@@ -53,9 +53,9 @@
 
 ### Task 3: A staircase on a setting, between trials, that a person's held value stops
 
-**Files:** Modify `wl_xcon/task.py` (a declaration), `wl_xcon/taskd.py` (applied where the scheduler chooses the next trial's values; `Session.observe` or the inter-trial step the map names), `wl_xcon/check.py` (its load checks), `wl_xcon/record.py` (the trial line's `staircase`, after Task 1's answer); Test `tests/test_staircase.py`.
+**Files:** Modify `wl_xcon/task.py` (a declaration), `wl_xcon/taskd.py` (applied where the scheduler chooses the next trial's values; `Session.observe` or the inter-trial step the map names), `wl_xcon/check.py` (its load checks), `wl_xcon/record.py` (the setting's `drawn` source `"staircase"`); Test `tests/test_staircase.py`.
 **Interfaces:** `task.Staircase(setting: str, levels: tuple[float, ...], down: int = 3, up: int = 1, start: int | None = None)`: `levels` easiest first; correct counts toward `down` (harder), a failure steps easier; TSK-33's classes (correct = success; wrong target, any §3.1 error after the go, and no response = failure; a trial ending before the go moves nothing). `Block.staircase: Staircase | None = None`. The staircase's current level is the setting's value unless a person holds the setting (C3's held value); a hand-back resumes the staircase at the held value's nearest level.
-- [ ] **Step 1: failing tests.** `test_three_correct_step_harder_one_error_easier`; `test_an_early_saccade_moves_nothing`; `test_a_held_value_stops_the_staircase_and_a_hand_back_resumes_from_it` (Review Focus 1); `test_the_trial_line_records_the_level`; `test_a_staircase_on_an_undeclared_setting_is_refused_at_load`; `test_it_stops_at_its_ends` (never past `levels[0]` or `levels[-1]`).
+- [ ] **Step 1: failing tests.** `test_three_correct_step_harder_one_error_easier`; `test_an_early_saccade_moves_nothing`; `test_a_held_value_stops_the_staircase_and_a_hand_back_resumes_from_it` (Review Focus 1); `test_the_trial_line_marks_the_setting_drawn_by_the_staircase`; `test_a_staircase_on_an_undeclared_setting_is_refused_at_load`; `test_it_stops_at_its_ends` (never past `levels[0]` or `levels[-1]`).
 - [ ] **Steps 2-4:** run (fail), implement, pass, hand breaks, full suite, commit. Close XC-242's part this covers, narrow its line.
 
 ### Task 4: A progression that suggests, and a person who confirms
@@ -68,7 +68,7 @@
 
 ### Task 5: The pairing pool
 
-**Files:** Modify `wl_xcon/task.py` (`Pool(setting: str, choices: tuple[tuple[str, str], ...])` declared on the task; each trial draws one pairing uniformly from the setting's current value), `wl_xcon/taskd.py` (the draw, and a `widen` suggestion by Task 4's bar over the pooled current pairings), `wl_xcon/record.py` (the trial line's `pairing`); Test `tests/test_pairing_pool.py`.
+**Files:** Modify `wl_xcon/task.py` (`Pool(setting: str, choices: tuple[tuple[str, str], ...], odd: str = "odd_color", distractor: str = "distractor_color")` declared on the task; each trial draws one pairing uniformly from the pool setting's current value into the two settings, each marked `drawn: "pool"`), `wl_xcon/taskd.py` (the draw, and a `widen` suggestion by Task 4's bar over the pooled current pairings), `wl_xcon/record.py` (the `drawn` source `"pool"`); Test `tests/test_pairing_pool.py`.
 **Interfaces:** The pool's current value is a tuple of pairings a person sets with the existing `set` command (the trainer's picks at the prompt); a `widen` suggestion names no pairings (the trainer picks, spec §3.4).
 - [ ] **Step 1: failing tests.** `test_each_trial_draws_a_pairing_from_the_current_pool`; `test_the_bar_on_the_pooled_pairings_suggests_widen`; `test_an_empty_pool_is_refused_with_a_sentence` (Review Focus 5); `test_in_alone_any_pool_runs`; `test_the_pool_carries_into_the_next_stage`.
 - [ ] **Steps 2-4:** as above; commit.

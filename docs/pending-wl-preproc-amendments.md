@@ -979,7 +979,7 @@ distribution, not the rig.
 
 ---
 
-# OPEN — the pop-out search: each trial's stage, staircase, pairing and set size, and two change kinds (new, 2026-11-07)
+# ANSWERED 2026-11-07 — the pop-out search: each trial's stage, staircase, pairing and set size, and two change kinds (new, 2026-11-07)
 
 The lab's first real task (`docs/superpowers/specs/2026-11-07-popout-search-design.md`, approved by the PI 2026-11-07) adds
 fields to two files we write, told here before any is written, as our convention is. Shapes are JSON.
@@ -1003,4 +1003,12 @@ A person's confirmation is the existing `next_block` or `back_block` row (who an
 `plan`; absent or `null` means the first.
 
 Yours to accept, rename or refuse before we write them; until your answer we build to these names.
+
+**Answered the same day** (wl-preproc, in its session, with the requester's answer): accepted `suggested`, `declined`, the
+`suggestion` id and `start_block` as named. The trial-line keys were simplified at its question: `stage` is dropped (it is
+always the line's existing `block`); the pairing and the set size travel in `params` as settings, `odd_color` and
+`distractor_color` marked `drawn: "pool"`, and a staircase's setting (`distractor_fraction`, `set_size`) marked
+`drawn: "staircase"`, two new source tokens its reader reads today; so no top-level `staircase`, `pairing` or `set_size`
+key is written. Its reader of the two change kinds comes after its current minors; until then such a row is published as
+written and noted as a kind it does not yet know.
 
