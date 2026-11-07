@@ -19,7 +19,8 @@ merge, 1,000 sessions and every control (docs/CHECKPOINT.md); here, on every pus
 **Each run is a process of its own**, as the fuzzer is built to be run: importing it replaces
 scheduler and session methods with instrumented ones for the rest of the process, and a control
 replaces more, which a test worker's process must never carry. `PYTHONHASHSEED=0`, as its
-docstring runs it, so a seed's session is the same session on every run.
+docstring runs it, so a seed's session is the same session on every run; and a bound on each
+process's CPU time (`CPU_S`), so one a mutant sets spinning dies rather than outlives its suite.
 
 **Its wall time**, measured with `time` on the development machine (2026-11-07; an Apple M3 Max,
 14 cores, Python 3.13.9, while other suites held its load average near 200): 18.5 s for this file
@@ -46,6 +47,10 @@ ROOT = Path(__file__).resolve().parents[1]
 FUZZER = ROOT / "tools" / "fuzz_sessions.py"
 #: Past this, a run is a hang, never a slow pass: seconds, far above any run here.
 TIMEOUT_S = 300
+#: The CPU-seconds each fuzzer process may use (the fuzzer's `WLX_FUZZ_CPU_S`), far above the few
+#: any run here uses. A mutant that makes a session spin is killed by it: `mutate.py`'s timeout
+#: kills only pytest, which would leave a fuzzer child running with the mutant in memory.
+CPU_S = 120
 
 _REQUIRED = os.environ.get("WLX_REQUIRE_PREPROC") == "1"
 try:
@@ -75,7 +80,7 @@ def _fuzz(tmp_path: Path, *args: str) -> str:
         done = subprocess.run(
             [sys.executable, str(FUZZER), *args, str(tmp_path / "fuzz")],
             cwd=ROOT,
-            env={**os.environ, "PYTHONHASHSEED": "0"},
+            env={**os.environ, "PYTHONHASHSEED": "0", "WLX_FUZZ_CPU_S": str(CPU_S)},
             capture_output=True,
             text=True,
             timeout=TIMEOUT_S,
