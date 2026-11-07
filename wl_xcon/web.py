@@ -1521,7 +1521,11 @@ def _prompts(frame: Telemetry, view: View) -> list[str]:
     if stage is not None and stage.move == "up":
         ladder = frame.staircase
         pct = _percent(stage.correct, stage.of) if stage.of else "—"
-        if ladder is not None and ladder.levels and frame.block == stage.block:
+        if ladder is not None and ladder.hardest and frame.block == stage.block:
+            # The task's own words for its hardest step (the build's review, M7; the PI's sketch).
+            why = (f"{ladder.hardest[:1].upper()}{ladder.hardest[1:]} and {stage.correct} of the "
+                   f"last {stage.of} were correct ({pct}).")
+        elif ladder is not None and ladder.levels and frame.block == stage.block:
             why = (f"{ladder.setting} is at its hardest step, {_rung(ladder.levels[-1])}, and "
                    f"{stage.correct} of the last {stage.of} answers there were right ({pct}).")
         else:

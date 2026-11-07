@@ -1,13 +1,15 @@
 # P4d-2b b4: demo mode, the mouse as the eye
 
-**Status: revised 2026-11-07, for the PI's review** (it was parked on 2026-10-07). Designed 2026-10-06, in
+**Status: approved 2026-11-07** (the PI, asked in the UI: "Approve both and the design"; §15). It was parked on
+2026-10-07 and revised the same day it was approved. Designed 2026-10-06, in
 three parts, each approved by the PI in conversation ("Looks right"); two design reviews then found what §14 lists,
 and the PI chose to build other things first. It is part 3 of the pop-out search build
 ([its design, §2](2026-11-07-popout-search-design.md)), built after the PI approves this revision. It builds slice
 **b4** of [the P4d-2b console spec](2026-09-26-P4d2b-browser-console-design.md) ("b4 — simulation with mouse
 gaze") and closes backlog **XC-013**.
 
-**For the PI:** §8 (welfare: no welfare-listed function changes) and §15 (one question).
+**For the PI:** §8 (welfare: the two approved `Service._open` changes, §15, and the manifest update they need) and
+§15 (one question, answered).
 
 ## Revised 2026-11-07: what changed, and why
 
@@ -15,8 +17,10 @@ gaze") and closes backlog **XC-013**.
    "simulation session" in any rig service, which needed two rules in `Service._open` (welfare-listed) and could
    leave a crashed demo stranded among a rig's real sessions, coming back as a live one (§14 item 10). The quick
    command's private copy of the rig service, which the PI already approved as one of the two doors, now holds
-   every demo: its folder, its one animal and its simulated card and pump are its own from the start. **No
-   welfare-listed function changes** (§8). The rig page's own door is the PI's to keep or drop (§15).
+   every demo: its folder, its one animal and its simulated card and pump are its own from the start. **The PI
+   kept the rig page's door too** ("Also from a live rig's page", §15), so **two welfare-listed changes, both in
+   `Service._open`, approved 2026-11-07** ("Approve both and the design"), with `tests/welfare_manifest.json`
+   updated naming that approval when they are built (§8).
 2. **The pop-out search is the first task it plays** (§5, §10), the mouse as the eye through `gaze.Tracked`, as
    the simulated eye of the same build plays it (§3.3 says how the two relate).
 3. **It shows frames from the exact drawer, labeled** (engine spec §23), not the schematic §4.4 drew (§4.4).
@@ -427,10 +431,12 @@ it), so they draw as §4.4 says until a run sets them.
 
 ## 8. Welfare
 
-**This design changes no welfare-listed function.** Every item of architecture.md's list, held by
-`tests/welfare_manifest.json` (26 items), stays byte for byte; `tools/welfare_diff.py` at the merge shows each one
-`SAME`. A demo session goes through `Service._open`, `_start` and `_end` exactly as a page's session does, and every
-limit runs against `REFERENCE`'s eight-hour file.
+**This design changes one welfare-listed function, `Service._open`, in two ways the PI approved on 2026-11-07**
+(§15: "Also from a live rig's page", and "Approve both and the design"), below: a demo is opened inside a live rig
+service too, from the rig's own page. When they are built, `tests/welfare_manifest.json`'s entry for `Service._open`
+is updated in a commit naming that approval, and `tools/welfare_diff.py` at the merge shows `Service._open` DIFFERS and
+every other item `SAME`. A demo session goes through `Service._open`, `_start` and `_end` exactly as a page's session
+does, and every limit runs against `REFERENCE`'s eight-hour file.
 
 What keeps a demo away from any animal is where it runs, not a new rule in reviewed code: its one animal is
 `REFERENCE`, whose files it writes itself (§3.1); its card and pump are the simulators and it drives no display
@@ -438,8 +444,7 @@ What keeps a demo away from any animal is where it runs, not a new rule in revie
 Those live in `service.run` and `cli`, with `Service._build` passing a demo's world and record on (none on the list,
 which stays unchanged, the PI's rule of 2026-09-30).
 
-**Only if the PI keeps the rig page's door (§15)**, a demo is opened inside a live rig service, and it needs two
-changes, both in `Service._open`, for his review:
+**The two approved changes**, both in `Service._open`, for a demo opened inside a live rig service:
 
 1. **A demo is refused for any animal but `REFERENCE`**, before anything is written. *What it does:* keeps
    simulated trials, rewards and times out of a real animal's records. *What it never touches:* a reward's size, a

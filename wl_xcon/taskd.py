@@ -2574,7 +2574,8 @@ class Session:
         else:
             staircase, level = climb.staircase, climb.level
         return (staircase.setting, tuple(staircase.levels), level,
-                staircase.setting in self._edited, staircase.down, staircase.up)
+                staircase.setting in self._edited, staircase.down, staircase.up,
+                staircase.hardest)
 
     @property
     def bars(self) -> tuple | None:
@@ -4303,6 +4304,7 @@ class Session:
             if bounded:
                 self.spec.bounds.set(name, now, by=by)
             else:
+                now = self._whole(name, now)
                 self.spec.values[name] = now
                 # A live edit, which wins over a value a condition sets for the rest of the run
                 # (engine spec §14.7).
@@ -4662,6 +4664,21 @@ class Session:
         if self._climb is not None:
             self._climb.restep(self.spec.values)
         return self._climb
+
+    def _whole(self, name: str, value: object) -> object:
+        """**A whole value of a setting the task reads as whole, kept whole** (the build's review,
+        M8: a pool's value read `pairings: 66`, then `67.0` after a `set`): the wire carries every
+        number as a float (`link._setting`), so a person's 67 arrives as 67.0; for the task's
+        pool's setting and each an array reads as a whole number (`check._whole_numbers`), a float
+        that is a whole number is applied as the integer it is. Any other value as given."""
+        task = self._task
+        if (task is None or isinstance(value, bool) or not isinstance(value, float)
+                or not value.is_integer()):
+            return value
+        pool = task.pool
+        if (pool is not None and name == pool.setting) or name in _whole_numbers(task):
+            return int(value)
+        return value
 
     def _color_sets_at_start(self, task: Task) -> dict | None:
         """The run's start row's `color_sets` (`_color_sets`), at the run's values, each set's

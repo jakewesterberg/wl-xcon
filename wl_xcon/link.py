@@ -618,7 +618,9 @@ class StaircaseRow:
     the level it is at as an index into them -- before the block's first trial, the one it will
     start at -- whether a person holds the setting (`held`), whose value then gives each trial
     while the staircase waits where it stopped, and its rule: `down` right answers in a row step it
-    a level harder, `up` wrong ones in a row a level easier."""
+    a level harder, `up` wrong ones in a row a level easier; and its hardest step in the
+    trainer's words (`task.Staircase.hardest`; the build's review, M7), empty where the task gives
+    none, absent from a frame written before it."""
 
     setting: str
     levels: tuple
@@ -626,6 +628,7 @@ class StaircaseRow:
     held: bool
     down: int
     up: int
+    hardest: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -1883,7 +1886,7 @@ def _staircase_in(data: dict | None) -> StaircaseRow | None:
         return None
     return StaircaseRow(setting=data["setting"], levels=tuple(data["levels"]),
                         level=data["level"], held=_flag(data["held"]), down=data["down"],
-                        up=data["up"])
+                        up=data["up"], hardest=str(data.get("hardest") or ""))
 
 
 def _bars_in(data: dict | None) -> Bars | None:

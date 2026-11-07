@@ -3762,6 +3762,15 @@ def test_a_suggestion_shows_why_and_its_two_buttons():
     # A stage with no staircase is always at its hardest: the answers alone.
     assert ("<b>Ready for Crowd.</b> 41 of the last 50 answers were right (82%).</div>"
             in _train(_training(suggestion=_up(), staircase=None)))
+    # **The task's own words for its hardest step** (the build's review, M7; the PI's sketch: "the
+    # distractors are at full brightness and 41 of the last 50 were correct").
+    worded = replace(_LADDER, hardest="the distractors are at full brightness")
+    # The words ride the frame's staircase (ADR-0003's round trip), absent from an older frame.
+    from wl_xcon.link import decode, encode
+    assert decode(encode(_training(staircase=worded))).staircase == worded
+    assert ("<b>Ready for Crowd.</b> The distractors are at full brightness and 41 of the last "
+            "50 were correct (82%).</div>") in _train(_training(suggestion=_up(),
+                                                              staircase=worded))
     # Nothing suggested, no prompt.
     assert "prompt" not in _train(_training())
 

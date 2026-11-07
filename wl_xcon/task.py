@@ -2167,6 +2167,11 @@ class Staircase:
     down: "int | P" = 3
     up: "int | P" = 1
     start: "int | None" = None
+    #: **Its hardest step in the trainer's words** (the build's review, M7; the PI's sketch, §3.5:
+    #: "the distractors are at full brightness and 41 of the last 50 were correct"): what the
+    #: prompt to move up says of it, a short clause; empty, the prompt names the setting and its
+    #: last level.
+    hardest: str = ""
 
     def __post_init__(self) -> None:
         def refuse(said: str) -> None:
@@ -2190,6 +2195,10 @@ class Staircase:
                 continue
             if isinstance(count, bool) or not isinstance(count, int) or count < 1:
                 refuse(f"a staircase's {name} is a whole number from 1, not {count!r}")
+        if not (isinstance(self.hardest, str) and self.hardest.isprintable()
+                and len(self.hardest) <= 120):
+            refuse(f"a staircase's hardest step in words is printable text of 120 characters at "
+                   f"most, not {self.hardest!r}")
         start = self.start
         stepped = isinstance(self.levels, Steps)
         bound = STEPS_LIMIT if stepped else len(self.levels)
@@ -2229,7 +2238,7 @@ class Staircase:
             levels = levels.levels(by, whole=whole)
         start = self.start if self.start is None else min(self.start, len(levels) - 1)
         return Staircase(self.setting, levels, _count_now(self.down, values, "down"),
-                         _count_now(self.up, values, "up"), start)
+                         _count_now(self.up, values, "up"), start, self.hardest)
 
     def nearest(self, value: object) -> "int | None":
         """**The index of the level nearest `value`**, the easier of two as near; `None` for a

@@ -162,7 +162,7 @@ across sessions on its own (that is the paused build C7's).
 3. **A second dimension of progression**, the pairing pool, widened by the same bar.
 4. **Macaque cone luminance** as a luminance the photometry holds equal (L + M at L:M 1 on the Stockman–Sharpe 2°
    fundamentals, as wl-style computes it), beside the CIE 2006 10° set the engine uses today (a new bundled table:
-   ADR-0012's licence and source rules apply), and the isohue colors computed from their definition on a measured panel
+   ADR-0012's license and source rules apply), and the isohue colors computed from their definition on a measured panel
    at 15 cd/m² (wl-style's `build_from_measurement.py` is the reference method; a test reproduces wl-style's delivered
    values on its sRGB model).
 5. **The day's start**: the trainer picks the stage, the staircase's level and the pairings when the run starts, with

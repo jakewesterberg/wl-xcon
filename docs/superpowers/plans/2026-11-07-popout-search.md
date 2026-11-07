@@ -39,7 +39,7 @@
 
 ### Task 2: Macaque cone luminance and the color-set light kind
 
-**Files:** Create `wl_xcon/data/stockman_sharpe_2deg.csv` (or the repository's existing data path for CIE tables; its sha256 checked as ADR-0012 does); Modify `wl_xcon/cones.py`, `wl_xcon/photometry.py`, `wl_xcon/check.py`, `docs/design/decisions/ADR-0012-cie-tables.md` and ADR-0004's inventory (the table's licence and source), `docs/references/decisions.md` (a COL entry: the PI's "wl-style's 2-degree set"); Test `tests/test_color_set.py`.
+**Files:** Create `wl_xcon/data/stockman_sharpe_2deg.csv` (or the repository's existing data path for CIE tables; its sha256 checked as ADR-0012 does); Modify `wl_xcon/cones.py`, `wl_xcon/photometry.py`, `wl_xcon/check.py`, `docs/design/decisions/ADR-0012-cie-tables.md` and ADR-0004's inventory (the table's license and source), `docs/references/decisions.md` (a COL entry: the PI's "wl-style's 2-degree set"); Test `tests/test_color_set.py`.
 **Interfaces:**
 - `cones.macaque_luminance(spectrum) -> float`: L + M at L:M 1 on the Stockman–Sharpe 2° fundamentals.
 - `photometry.ColorSet` (frozen dataclass): `name: str`, `colors: Mapping[str, tuple[float, float]]` (CIE 1931 xy per color name), `apex: tuple[float, float]`, `luminance_cd_m2: float = 15.0`, `held: str = "macaque_2deg_LM1"`; `ColorSet.load(path) -> ColorSet` reads the plain-data file (Task 9's `stimuli/isohue.json`).

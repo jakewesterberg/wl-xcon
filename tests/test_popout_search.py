@@ -1066,3 +1066,36 @@ def test_the_colors_brightness_changed_live_is_realized_once_and_written_once(tm
     for line in lines:
         assert line["params"]["color_luminance"] in found
 
+
+def test_the_prompt_names_the_hardest_step_in_plain_words_and_a_pool_stays_whole(tmp_path):
+    """The build's review, M7 and M8. **The prompt to move up says the stage's hardest step in the
+    trainer's words**, the PI's sketch (§3.5): "the distractors are at full brightness and 41 of
+    the last 50 were correct" -- Fade-in's staircase declares its words, which the panel's prompt
+    says with the bar's numbers. **And a pool's value stays a whole number after a `set`**: the wire
+    carries every number as a float, and the trainer's 67 is applied, recorded and drawn from as
+    67, never 67.0."""
+    from wl_xcon.web import fragments
+    from _frames import view
+
+    trainer = _Locks("distractor_fraction", 1.0)
+    session = _opened(replace(_spec(tmp_path / "up", seed=5, start_block="Fade-in"),
+                              accuracy=0.95), trainer)
+    trainer.session = session
+    session.run()
+    (shown, *_) = [frame for frame in session.link.published
+                   if frame.suggestion is not None and frame.suggestion.move == "up"]
+    prompt = fragments(shown, view(can_write=True))["rt-train"]
+    assert shown.staircase.hardest == "the distractors are at full brightness"
+    assert (f"The distractors are at full brightness and {shown.suggestion.correct} of the last "
+            f"50 were correct") in prompt
+
+    widened = _Locks("pairings", 67.0, stop_at=6)
+    pooled = _opened(_spec(tmp_path / "pool", seed=5, start_block="Fade-in"), widened)
+    widened.session = pooled
+    pooled.run()
+    lines = _rows(pooled, "trials.jsonl")
+    assert [line["params"]["pairings"] for line in lines[1:]] == [67] * (len(lines) - 1)
+    assert all(type(line["params"]["pairings"]) is int for line in lines)
+    (row,) = [row for row in _rows(pooled, "parameter_changes.jsonl") if row["kind"] == "set"]
+    assert row["now"] == 67 and type(row["now"]) is int
+
