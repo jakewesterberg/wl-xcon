@@ -40,7 +40,9 @@ I-6: a hold whose state's timeout leaves less than a saccade's latency after it,
 anticipation answers in time), `cued-target` (engine build C3, the PI's "Refuse only odd-one-out
 tasks" of 2026-10-31: an array a cue names the target of whose target can look like its
 distractors, or whose looks swap, at load and at a run's start, where an odd-one-out array is
-refused)
+refused), `framework-code` (XC-382, 2026-11-07: a task's `Mark` of a code the allocation gives
+an event the framework strobes itself, `codes.FRAMEWORK_EVENTS`, which no controls or change row
+explains)
 and, for a value outside its declared range at a run's start or live, `outside-range` and, for a
 wait longer than any the task declares, `longer-than-declared`, by his answer of 2026-10-12);
 and today's pre-flight unknowns, the pump calibration and the eye tracker (S9a §10). **What

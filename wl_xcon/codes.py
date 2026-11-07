@@ -25,6 +25,23 @@ from dataclasses import dataclass, field
 #: range this project allocates into while the `TaskEvent` question is open.
 TASK_SPECIFIC = range(4096, 32768)
 
+#: **The events the framework strobes itself, by the names it looks their codes up by**
+#: (`Allocation.code_for`, `taskd.Session._code`; XC-382), and the one list of them:
+#: head-fixation and its release, a setting applied live, a pause and its resume, an
+#: operator's mark, a manual reward, a run's start and end, and a stranded session resumed.
+#: **Names, not numbers**: the allocation numbers them (`tasks/allocation.py` today, 4128 to
+#: 4137, provisionally; wl-xtasks owns the final numbering), and wl-preproc's frozen codec
+#: (`wl_preproc/contracts/events.py`, read 2026-11-07) declares none of them -- its own are
+#: `Marker` 1-255 and the escapes, which no allocation here gives a task. A task's `Mark` of
+#: one is warned at load (`check._framework_codes`): no controls or change row explains it.
+#: `service.FRAMEWORK_CODES` names those of them every `wlx taskd` session strobes, which its
+#: allocation must give; `tests/test_task_checks.py` reads the package's source to hold this
+#: list to the names it looks up.
+FRAMEWORK_EVENTS = (
+    "HEAD_FIXED", "HEAD_RELEASED", "PARAM_CHANGED", "PAUSE", "RESUME", "OPERATOR_MARK",
+    "MANUAL_REWARD", "RUN_START", "RUN_END", "SESSION_RESUMED",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class Allocation:

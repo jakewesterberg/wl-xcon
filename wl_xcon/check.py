@@ -22,7 +22,7 @@ from statistics import NormalDist
 from typing import NamedTuple
 
 from wl_xcon.actor import TEXT_LIMIT
-from wl_xcon.codes import PROVISIONAL, Allocation
+from wl_xcon.codes import FRAMEWORK_EVENTS, PROVISIONAL, Allocation
 from wl_xcon.components import Registry
 from wl_xcon.declarations import BOUNDED, canonical, resolved
 from wl_xcon.findings import SESSION_KINDS, Finding
@@ -126,6 +126,7 @@ def check(
         + _states_with_no_outcome_path(valued)
         + _shadowed_transitions(valued)
         + _unallocated_codes(valued, allocation)
+        + _framework_codes(valued, allocation)
         + _undeclared_parameters(valued)
         + _custom_components(valued, components or Registry())
         + _offscreen_stimuli(valued, geometry)
@@ -2586,6 +2587,34 @@ def _unallocated_codes(trial: Trial, allocation: Allocation) -> list[Finding]:
         )
         for name, action in actions_of(trial)
         if isinstance(action, Mark) and action.code not in allocation
+    ]
+
+
+def _framework_codes(trial: Trial, allocation: Allocation) -> list[Finding]:
+    """**A task's `Mark` of a code the framework strobes itself** (XC-382): one the allocation
+    gives an event of `codes.FRAMEWORK_EVENTS` -- a pause, a resume, an operator's mark, a manual
+    reward, a setting applied, the head fixed or released, a run's start or end, a session
+    resumed. `_unallocated_codes` accepts it, as it is in the allocation, but no controls or
+    change row explains it, and wl-preproc times each of those rows by the strobes of the code
+    the row carries (its `event_code`), the n-th row by the n-th strobe, so a count one too many
+    leaves every row carrying it untimed. **A warning in every kind, never a refusal** (the PI's
+    warnings over refusals, 2026-10-11), once for each place the task strobes it."""
+    framework = {code: name for code, name in allocation.task_events.items()
+                 if name in FRAMEWORK_EVENTS}
+    return [
+        Finding(
+            "framework-code",
+            f"state {name!r} emits code {action.code}, which the allocation gives "
+            f"{framework[action.code]!r}, an event the framework strobes itself: the session's "
+            f"controls and changes rows do not explain a task's strobe of it, and wl-preproc times "
+            f"each of those rows by the strobes of the code it carries (`event_code`), so one too "
+            f"many leaves every row carrying {action.code} untimed; give the task's event a code "
+            f"of its own",
+            blocking=False,
+            accepted_in=SESSION_KINDS,
+        )
+        for name, action in actions_of(trial)
+        if isinstance(action, Mark) and action.code in framework
     ]
 
 
