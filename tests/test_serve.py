@@ -5925,7 +5925,7 @@ def test_head_is_answered_with_headers_and_no_body(path):
         raw = _raw(port, f"HEAD {path} HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\n\r\n".encode("ascii"))
     head, separator, body = raw.partition(b"\r\n\r\n")
     assert separator and body == b""
-    assert head.startswith(b"HTTP/1.0 405") or path == "/nowhere"
+    assert head.startswith(b"HTTP/1.0 404" if path == "/nowhere" else b"HTTP/1.0 405")
     assert b"Content-Length" in head
 
 
@@ -6061,9 +6061,84 @@ def test_a_refused_chunked_post_closes_the_connection():
     with _served(_hub(), dispatch=_Dispatch()) as port:
         status, got, body, _took = _refused_unfinished(
             port,
-            lambda sock: sock.sendall(b"5\r\nhello\r\n0\r\n\r\n"),
+            # No chunks are sent: a client sending past the close may see a reset (the
+            # documented residual), and this asks only that the server says it closes.
+            lambda sock: None,
             extra=("Transfer-Encoding: chunked",),
             declare=0,
         )
     assert (status, body["status"]) == (403, "refused")
     assert got.get("Connection", "").lower() == "close"
+
+
+# --- /health says how many streams are open, so a full cap can be seen (review 1, finding 2) -----
+
+
+def test_health_reports_the_streams_open_against_the_cap():
+    hub = _hub()
+    with _served(hub, max_streams=3) as port:
+        before = {r["key"]: r for r in _health_body(port)["readings"]}["streams"]
+        held, response = _open_stream(port)
+        try:
+            next(_events(response))
+            after = {r["key"]: r for r in _health_body(port)["readings"]}["streams"]
+        finally:
+            response.close()
+            held.close()
+    assert before["value"] == "0 open of at most 3"
+    assert after["value"] == "1 open of at most 3"
+    assert after["featured"] is False
+
+
+# --- a stream's slot is freed however its stream ends (review 1, finding 5) ----------------------
+
+
+def _until_viewers(hub: Hub, expected: tuple) -> bool:
+    for _ in range(250):
+        if hub.viewers() == expected:
+            return True
+        time.sleep(0.02)
+    return False
+
+
+class _RaisingTakeHub(Hub):
+    """A hub whose `take` fails with something that is not an `OSError`."""
+
+    def __init__(self) -> None:
+        super().__init__(steady=_Clock(0.0), endpoint=ENDPOINT)
+
+    def take(self, subscriber, timeout):
+        raise RuntimeError("the stream loop failed")
+
+
+def test_a_stream_that_fails_with_a_non_os_error_frees_its_slot():
+    hub = _RaisingTakeHub()
+    with _served(hub, max_streams=1) as port:
+        for _ in range(2):  # the second gets in only if the first gave its slot back
+            held, response = _open_stream(port)
+            try:
+                assert response.status == 200
+            finally:
+                response.close()
+                held.close()
+            assert _until_viewers(hub, (0, 0))
+
+
+def test_closing_the_hub_ends_every_open_stream_and_leaves_no_slot_held():
+    hub = _hub()
+    with _served(hub, max_streams=2) as port:
+        first, first_response = _open_stream(port)
+        second, second_response = _open_stream(port)
+        try:
+            next(_events(first_response))
+            next(_events(second_response))
+            assert hub.viewers() == (2, 0)
+            hub.close()
+            assert _read_to_eof(first_response, within_s=5)
+            assert _read_to_eof(second_response, within_s=5)
+            assert _until_viewers(hub, (0, 0))
+        finally:
+            first_response.close()
+            first.close()
+            second_response.close()
+            second.close()

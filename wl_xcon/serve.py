@@ -1457,16 +1457,25 @@ def make_handler(
             latest, view = self._hub.snapshot(
                 on_box=False, stale_after_s=self._stale_after_s
             )
-            self._send_json(
-                200,
-                _health.response(
-                    latest,
-                    frame_age_s=view.frame_age_s,
-                    stale_after_s=view.stale_after_s,
-                    rejected=view.rejected,
-                    endpoint=view.endpoint,
-                ),
+            body = _health.response(
+                latest,
+                frame_age_s=view.frame_age_s,
+                stale_after_s=view.stale_after_s,
+                rejected=view.rejected,
+                endpoint=view.endpoint,
             )
+            # How many `/events` streams are open against the cap, as one more reading (the
+            # body's three fields are wl-preproc's `HealthResponse`, which gains none), so an
+            # operator can tell a full cap from a dead link when a page shows *stream lost*.
+            body["readings"].append(
+                {
+                    "key": "streams",
+                    "label": "Streams",
+                    "value": f"{sum(self._hub.viewers())} open of at most {self._max_streams}",
+                    "featured": False,
+                }
+            )
+            self._send_json(200, body)
 
         def _events(self) -> None:
             """One browser's stream (spec §4.3): a full render on connect, then an
