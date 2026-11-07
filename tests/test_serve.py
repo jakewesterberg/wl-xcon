@@ -6142,3 +6142,66 @@ def test_closing_the_hub_ends_every_open_stream_and_leaves_no_slot_held():
             first.close()
             second_response.close()
             second.close()
+
+
+# --- re-review 1: the drain's socket timeout is given back; the pane shows /health's readings ----
+
+
+def test_the_socket_timeout_is_restored_after_a_refusals_drain(monkeypatch):
+    """A keep-alive connection's next request gets `REQUEST_TIMEOUT_S`, not the little of
+    the drain's deadline that was left when the body was read."""
+    monkeypatch.setattr(serve, "REQUEST_TIMEOUT_S", 7.0)
+    monkeypatch.setattr(serve, "REFUSAL_DRAIN_S", 2.0)
+    seen: list = []
+    real = serve.make_handler
+
+    def recording(*args, **kwargs):
+        handler = real(*args, **kwargs)
+        original = handler._write
+
+        def write(self, status, body, content_type, headers=(), cache="no-store"):
+            seen.append(self.connection.gettimeout())
+            return original(self, status, body, content_type, headers, cache)
+
+        handler._write = write
+        return handler
+
+    # `_served` builds its handler from this module's own name for `make_handler`.
+    monkeypatch.setattr(sys.modules[__name__], "make_handler", recording)
+    with _served(_hub(), dispatch=_Dispatch()) as port:
+        body = b"x" * 20
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
+            sock.sendall(
+                (
+                    f"POST /commands HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
+                    f"Origin: http://evil.example\r\nContent-Type: application/json\r\n"
+                    f"Content-Length: {len(body)}\r\n\r\n"
+                ).encode("ascii")
+                + body
+            )
+            sock.recv(65536)
+    assert seen == [7.0]
+
+
+def _pane_rows(fragment: str) -> list[tuple[str, str]]:
+    return [
+        (html.unescape(label), html.unescape(value))
+        for label, value in re.findall(
+            r'<span class="l">(.*?)</span><span class="v">(.*?)</span>', fragment
+        )
+    ]
+
+
+def test_the_wl_works_sees_pane_shows_the_readings_health_sends_streams_included():
+    hub = _hub()
+    with _served(hub, max_streams=3) as port:
+        held, response = _open_stream(port)
+        try:
+            first = next(_events(response))
+            sent = _health_body(port)["readings"]
+        finally:
+            response.close()
+            held.close()
+    pane = _pane_rows(first["frags"]["rt-health"])
+    assert pane == [(r["label"], r["value"]) for r in sent]
+    assert ("Streams", "1 open of at most 3") in pane

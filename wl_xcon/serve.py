@@ -252,6 +252,7 @@ class Hub:
         can_write: bool = False,
         signin: bool = False,
         https_page: bool = False,
+        streams_max: int | None = None,
     ) -> tuple[_link.Telemetry | _link.Idle | None, _web.View]:
         """The latest frame and the `View` a render of it needs, read together. The
         frame's age is on `steady` alone (ledger Ruling 1). `can_write` is the
@@ -263,6 +264,7 @@ class Hub:
             age = None if self._received is None else now - self._received
             rate = self._rate()
             lan = sum(1 for box in self._subscribers.values() if not box)
+            streams = len(self._subscribers)
             rejected = self._rejected
         return latest, _web.View(
             frame_age_s=age,
@@ -276,6 +278,7 @@ class Hub:
             can_mark=self._marks,
             signin=signin,
             https_page=https_page,
+            streams=None if streams_max is None else (streams, streams_max),
         )
 
     def subscribe(self, *, on_box: bool, limit: int | None = None) -> queue.Queue:
@@ -1429,6 +1432,7 @@ def make_handler(
                 can_write=can_write,
                 signin=self._remote is not None,
                 https_page=self._https_page,
+                streams_max=self._max_streams,
             )
             nonce = secrets.token_urlsafe(16)
             body = _web.page(
@@ -1455,7 +1459,7 @@ def make_handler(
             """`health.response` from one snapshot, the refusal included (Ruling 11,
             2026-09-27): a console refusing every frame is `degraded`, never `ok`."""
             latest, view = self._hub.snapshot(
-                on_box=False, stale_after_s=self._stale_after_s
+                on_box=False, stale_after_s=self._stale_after_s, streams_max=self._max_streams
             )
             body = _health.response(
                 latest,
@@ -1463,17 +1467,7 @@ def make_handler(
                 stale_after_s=view.stale_after_s,
                 rejected=view.rejected,
                 endpoint=view.endpoint,
-            )
-            # How many `/events` streams are open against the cap, as one more reading (the
-            # body's three fields are wl-preproc's `HealthResponse`, which gains none), so an
-            # operator can tell a full cap from a dead link when a page shows *stream lost*.
-            body["readings"].append(
-                {
-                    "key": "streams",
-                    "label": "Streams",
-                    "value": f"{sum(self._hub.viewers())} open of at most {self._max_streams}",
-                    "featured": False,
-                }
+                streams=view.streams,
             )
             self._send_json(200, body)
 
@@ -1550,6 +1544,7 @@ def make_handler(
                 can_write=can_write,
                 signin=self._remote is not None,
                 https_page=self._https_page,
+                streams_max=self._max_streams,
             )
             parts = _web.fragments(latest, view)
             changed = {key: html for key, html in parts.items() if sent.get(key) != html}
