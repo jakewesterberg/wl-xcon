@@ -80,7 +80,7 @@ docs/measurements/       per-rig measured results (committed artifacts)
 docs/CHECKPOINT.md       where the build actually is -- read this first
 wl_xcon/                 the package
 tasks/                   reference tasks, the event allocation, a reference bounded config
-tools/                   the mutation harness, the gate that selects for it, the session fuzzer
+tools/                   the mutation harness and its gate, the session fuzzer, the welfare comparison
 CLAUDE.md                working conventions for AI-assisted development
 ```
 

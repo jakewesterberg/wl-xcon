@@ -445,6 +445,42 @@ def test_a_caught_mutant_says_which_tests_caught_it(monkeypatch, tmp_path):
     assert target.read_text() == "def covered():\n    return [1]\n"
 
 
+def test_the_welfare_manifest_reads_the_sentinel_mutate_writes(monkeypatch, tmp_path):
+    """The welfare manifest's test judges the file `mutate` holds as the original its sentinel
+    saved (`tools/welfare_diff.py`'s `as_reviewed`), so a neutered welfare function is judged by
+    the tests of what it does rather than caught by its hash. That rests on the sentinel's format,
+    which only this file can see change: `mutate` is driven on a scratch file, and the stub suite
+    reads the sentinel exactly as the manifest's test does, mid-run. A key renamed in either file
+    and the stub sees the mutation instead of the original."""
+    spec = importlib.util.spec_from_file_location(
+        "wlx_welfare_diff_for_mutate", Path(__file__).resolve().parents[1] / "tools" / "welfare_diff.py"
+    )
+    welfare_diff = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(welfare_diff)
+    original = "def covered():\n    return [1]\n"
+    target = tmp_path / "module.py"
+    target.write_text(original)
+    monkeypatch.setattr(mutate_tool, "SENTINEL", tmp_path / "sentinel.json")
+    monkeypatch.setattr(mutate_tool, "_clear_pycache", lambda: None)
+    seen = []
+
+    def suite(**_):
+        held = target.read_text()
+        seen.append((held, welfare_diff.as_reviewed(target, held, mutate_tool.SENTINEL, True)))
+        return mutate_tool.SuiteRun(True, "3 passed in 0.1s", [])
+
+    monkeypatch.setattr(mutate_tool, "_run_suite", suite)
+
+    caught, summary = mutate_tool.mutate(target, "covered", "[]")
+
+    assert (caught, summary) == (False, "3 passed in 0.1s")
+    [(held, judged)] = seen
+    assert held != original, "the stub suite never saw the mutation"
+    assert judged == original, "the sentinel mutate wrote is not one the welfare manifest reads"
+    assert target.read_text() == original
+    assert not mutate_tool.SENTINEL.exists()
+
+
 def test_a_mutant_caught_by_many_tests_names_a_few_and_counts_the_rest():
     failures = [f"FAILED tests/test_a.py::test_{n} - assert False" for n in range(40)]
 

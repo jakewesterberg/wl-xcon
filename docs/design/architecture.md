@@ -82,8 +82,9 @@ token-to-fluid conversion, stimulation bounds and gating, and the bounded-config
 **In code, that is `wl_xcon/bounds.py`, `wl_xcon/welfare.py`, `wl_xcon/marks.py` and
 `wl_xcon/stranded.py`, two functions in `wl_xcon/preflight.py` (`out_of_cage`, `gate`),
 seven in `wl_xcon/service.py` (`Service._open`, `Service._end` with `Service._unended`,
-`Service._close_stranded`, `Service._start`, `_unasked`, `_folder_name`), two functions in
-`wl_xcon/cli.py` plus one line inside a third — and, since
+`Service._close_stranded`, `Service._start`, `_unasked`, `_folder_name`), three functions in
+`wl_xcon/cli.py` (`_load_bounds`, `_settle_departure`, `_settle_return`) plus one line inside a
+fourth — and, since
 P4d-2b b2a, five functions in `wl_xcon/taskd.py` plus two parts of a sixth
 (`Session._command`'s `held` pass-through and one `except` line), and one function in
 `wl_xcon/link.py`.** The
@@ -96,19 +97,31 @@ clock time into an instant (`clock_time`, `clock_or_now`, which were
 `cli._wall_clock_time` and `cli._clock_or_now` and moved unchanged), whether a far mark
 was confirmed or amended, by whom and how, and the row that says so. `welfare` refuses
 what is impossible, but a wrong instant that is merely plausible passes every refusal,
-so the parsing and the confirmation are part of the limit. **The two `cli` functions are
+so the parsing and the confirmation are part of the limit. **Two of the `cli` functions are
 `_settle_departure` and `_settle_return`**, the terminal's prompting around `marks` —
 which answer a person gave, and the name and reason an amendment carries — and **the
 line is `main`'s `_marks.depart(session, departure)`**, which marks the departure as
 `marks` decided it, `confirmed=` included, which `welfare._refuse_unconfirmed` trusts
-its caller on. A change to any of these, or to the two `preflight` functions, the seven
+its caller on. **The third is `cli._load_bounds`**, the bounded-config loader this section's
+first sentence names (on the list since 2026-11-07; the PI, asked that day: "Add it to the
+list"): it loads a subject's bounded config, the file a `wlx run` or `wlx taskd` session's
+ceilings and floor are read from, and refuses a file that does not define a `Bounds` as
+`BOUNDS`. A change to any of these, or to the two `preflight` functions, the seven
 `service` functions, the `taskd` and `link` functions and the two parts of
 `Session._command` below, is a change requiring review; a change elsewhere is not.
 Since 2026-11-07 the list is also data, and enforced (the PI: "turn the welfare check ... into
 tests in the repository"): `tests/welfare_manifest.json` holds each item with the SHA-256 of its
-source as last approved, and `tests/test_welfare_manifest.py` fails when an item changes or
-cannot be found, and when this section and the manifest name different items, until the manifest
-is updated in a commit naming the PI's approval.
+source as last approved (a line, its count), and `tests/test_welfare_manifest.py` fails when an
+item changes, cannot be found, or has its name bound more than once in its module; when the
+manifest names what this section does not; and when the summary above counts or names a function
+or part, or this section names a constant (a module's upper-case name), that the manifest lacks.
+The suite cannot see an approval, only that a hash was updated, and the manifest lives in the
+branch it judges, so **at a merge** `git diff <base> <head> -- tests/welfare_manifest.json
+tests/test_welfare_manifest.py tools/welfare_diff.py` is empty, or each changed item's `approved`
+names the PI's approval with its date and any change to the check itself has been read:
+`tools/welfare_diff.py <base> <head>` prints each item `SAME` or `DIFFERS` between the two, and
+fails on a manifest change whose `approved` does not name the PI and a date or is the base's
+unchanged, on a removed item, and on a change to the check itself.
 
 **`preflight.out_of_cage` and `preflight.gate`** (P4d-2b b3a): the first is what refuses
 a new run once the out-of-cage limit is reached between runs, and the second is S9a
