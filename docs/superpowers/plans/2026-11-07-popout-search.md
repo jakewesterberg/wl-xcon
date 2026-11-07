@@ -35,7 +35,7 @@
 **Files:** Modify `docs/pending-wl-preproc-amendments.md` (a dated ask section); `docs/backlog.md` (one line for the ask, Next free).
 **Interfaces:** Produces the field names every later task writes: trial line `stage` (block name, string), `staircase` (`{"setting": str, "level": number}` or null), `pairing` (`{"odd": str, "distractors": str}` or null), `set_size` (int or null); change-log kinds `suggested` (`{"move": "up"|"back"|"widen", "block": str, "bar": {"correct": int, "of": int}, "at_hardest": bool}`) and `declined` (`{"suggestion": <the suggested row's id>}`), appended to `record.KINDS` after `training`; the run's start row gains `start_block` (block name) beside `plan`.
 - [ ] **Step 1:** Write the ask (fields, shapes, which rows strobe: `suggested` and `declined` do not strobe, so wl-preproc times them by its clock fit; see the c3-timing diagnosis before sending if it changes that).
-- [ ] **Step 2:** `tests/test_backlog.py` and `tests/test_references.py` pass; commit. The controller sends the ask (a peer session) and waits for wl-preproc's answer before Task 7 writes anything.
+- [ ] **Step 2:** `tests/test_backlog.py` and `tests/test_references.py` pass; commit. The controller sends the ask (a peer session); Tasks 3 to 5, which write the fields, start only after it is sent, and adjust if wl-preproc's answer asks a change.
 
 ### Task 2: Macaque cone luminance and the color-set light kind
 

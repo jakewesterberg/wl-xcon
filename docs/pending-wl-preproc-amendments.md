@@ -4,6 +4,12 @@ Delivered 2026-10-11 as a dated section of wl-preproc's `HANDOVER-wl-expcontroll
 
 **Reply read 2026-10-11 (wl-preproc `1dda41b`): see "ANSWERED 2026-10-11" below.**
 
+**Answered 2026-11-07 (wl-preproc `295f9c9`, its handover's "2026-11-07: the rig's record, read whole").** The asks of
+engine builds C2a, C2b and C3, XC-399's and the appearance-valued setting's are merged there: every field is read when
+the NWB file is built; a change row that strobed nothing is timed through the rig's clock fit; each change row's own
+fields are published as `parameter_changes.detail`; XC-442 (stop writing clears and switches twice) is unblocked. The
+sections below keep their headings as sent. **And one from the pop-out search, opened 2026-11-07**, the last section.
+
 **Updated 2026-10-11.** Of the four asks opened in August, **all four are done**; each is marked below
 with wl-preproc's evidence, and the headings are left as they were. What is open now is XC-288's ask
 (XC-321), the asks of engine spec §21 and the older backlog items, all delivered 2026-10-11 and listed
@@ -970,3 +976,31 @@ condition registry (engine build C5). And none of these yet:
 
 No timing claim: the change rows' `at` is wall-clock bookkeeping, and a non-aging wait's declared numbers describe a
 distribution, not the rig.
+
+---
+
+# OPEN — the pop-out search: each trial's stage, staircase, pairing and set size, and two change kinds (new, 2026-11-07)
+
+The lab's first real task (`docs/superpowers/specs/2026-11-07-popout-search-design.md`, approved by the PI 2026-11-07) adds
+fields to two files we write, told here before any is written, as our convention is. Shapes are JSON.
+
+**Each `trials.jsonl` line gains four keys** (absent on lines written before them; `null` where a trial has none):
+- `stage`: the name of the block (stage) the trial ran in, a string (`"Alone"`, `"Fade-in"`, `"Crowd"`), for any plan;
+- `staircase`: `{"setting": <name>, "level": <number>}`, the value a block's staircase gave its setting on this trial,
+  or `null` when the block has none or a person held the setting (the held value is already in the change log);
+- `pairing`: `{"odd": <color name>, "distractors": <color name>}`, the colors this trial drew from the task's pool;
+- `set_size`: an integer, the number of items the trial showed, when the task has an array.
+
+**`parameter_changes.jsonl` gains two kinds**, appended after `training` (they strobe nothing, so your clock fit times
+them, as for a switch):
+- `suggested`: the rig suggests a move; `detail` `{"move": "up" | "back" | "widen", "block": <name>, "bar": {"correct": <int>,
+  "of": <int>}, "at_hardest": <bool>}`;
+- `declined`: a person holds instead; `detail` `{"suggestion": <the suggested row's id>}`.
+A person's confirmation is the existing `next_block` or `back_block` row (who and when, as today), its `detail` gaining
+`"suggestion": <id>` when it answers one.
+
+**The run's start row gains `start_block`**: the name of the block the run started at (the trainer picks it), beside
+`plan`; absent or `null` means the first.
+
+Yours to accept, rename or refuse before we write them; until your answer we build to these names.
+
