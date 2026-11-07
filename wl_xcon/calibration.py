@@ -248,7 +248,22 @@ def fit_eye(
 
     raw = np.array([f.raw for f in fixations], dtype=float)
     degrees = np.array([f.target for f in fixations], dtype=float)
-    design = np.array([basis_row(dx, dy, model) for dx, dy in raw], dtype=float)
+    with np.errstate(over="ignore", invalid="ignore"):
+        design = np.array([basis_row(dx, dy, model) for dx, dy in raw], dtype=float)
+    # **A held reading too large for the basis is no map, and says so** (the review of 498460d and
+    # d932cb3, its M3): the second-order basis squares the raw vector, which passes a float's
+    # range from about 1.3e154, and the least-squares fit then raised `LinAlgError`, LAPACK
+    # complaining on stderr. Judged before the fit: a blocking finding, this eye unmapped, the
+    # other fitted as ever.
+    if not np.isfinite(design).all():
+        worst = raw[~np.isfinite(design).all(axis=1)][0]
+        findings.append(Finding(
+            "unusable-reading",
+            f"a held reading of ({worst[0]:.3g}, {worst[1]:.3g}) in the eye's raw units is too "
+            f"large for the {model.name.lower().replace('_', '-')} basis, whose terms pass a "
+            f"float's range; no map is produced for this eye",
+        ))
+        return None, findings
     coefficients, *_ = np.linalg.lstsq(design, degrees, rcond=None)
 
     residual = design @ coefficients - degrees

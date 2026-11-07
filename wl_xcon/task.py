@@ -361,13 +361,22 @@ class SaccadeTo(Guard):
     """A detected saccade landing in a window. Detection is the versioned
     Engbert-Kliegl component (S5 §5), never re-derived per task.
 
-    **Only a saccade begun in this state, judged where it landed** (EYE-19, revised 2026-10-30,
-    the PI): one whose onset is before the state's first frame is anticipatory and never counts,
-    and the window is the one drawn on the frame the saccade lands, never later. **One
-    exception, the carry**: the saccade whose onset ended the state before -- a transition on
-    `SaccadeOnset`, or on `After(t, since=SaccadeOnset())` -- counts here too, if the detector
-    puts its eye at rest (its stop field, `Saccade.stop`, as `saccade.detect` reports it) on this
-    state's first frame or after, so an intrasaccadic jump is scored where the eye lands."""
+    **Any saccade the detector puts at rest (its stop field, `Saccade.stop`, as `saccade.detect`
+    reports it) on this state's first frame or after, wherever its onset fell, judged where it
+    landed** (EYE-19, revised 2026-10-30 to 2026-11-07, the PI), the window being the one drawn on
+    the frame the saccade lands, never later. One begun in the state comes to rest on its first
+    frame or after, a stop following its onset, and one begun before it was in flight as it began,
+    which counts here, whatever edge began the state (the PI, 2026-11-06, "Count it both ways": "a
+    saccade already under way at the go cue counts where it lands"). So for this guard XC-410's "it
+    must start in the state" decides nothing, and governs only a `SaccadeOnset` (review 9 of the
+    saccade rules, its I1, 2026-11-07); a saccade whose eye stopped before the state's first frame
+    landed in the state before and counts for nothing here, wherever its onset fell. So an intrasaccadic jump is
+    scored where the eye lands, so is the saccade that leaves fixation, so is one begun just before
+    the go cue, whether the cue's own state asks for it or a state the eye leaving fixation enters,
+    and so, past the go cue, is one begun just before any state that asks for it, one a plain timer
+    began included: XC-410's own case. **The PI answered (2026-11-07, asked in the UI)**, whether a
+    state that waits for a saccade to the target counts any saccade whose eye stops there,
+    wherever its onset fell: "Yes, count where it lands (Recommended)"."""
 
     window: str
 
@@ -378,8 +387,22 @@ class SaccadeOnset(Guard):
 
     **Only a saccade begun in this state** (EYE-19, revised 2026-10-30), seen on the frame the
     detector confirms it, by every `SaccadeOnset` of the state asking then, a clock's
-    (`After(since=SaccadeOnset())`) and an edge's alike. A saccade carried in from the state
-    before (`SaccadeTo`'s carry) never satisfies it: its onset ended that state."""
+    (`After(since=SaccadeOnset())`) and an edge's alike: XC-410's "it must start in the state",
+    which since 2026-11-07 governs this guard alone (a `SaccadeTo` counts by where the eye stopped).
+    **A saccade in flight as the state began never satisfies it** (EYE-19, revised 2026-11-04 to
+    2026-11-07): it counts here for its landing alone, a `SaccadeTo`'s, its onset having been
+    before this state, even when the detector confirms it only here. So a state left on a
+    `SaccadeOnset` for one that asks where the eye lands waits, through a saccade begun before it,
+    for the next. Whether a saccade in flight as a go cue's state began should satisfy that state's
+    `SaccadeOnset` the PI answered on 2026-11-07 with a principle: "if a saccade starts during a
+    cue, before the go period, that would be an early saccade error"; of a saccade that starts a
+    little before the fixation point goes off, still in the window then: "if it is still in the
+    fix window when the fix dims (go cue), then it is fine". So it does not, as built: a timer
+    that opens a response window after the cue would otherwise count a response already moving as
+    that window's start, an early error where the window calls one. The one way of writing a task
+    where such a saccade does not count, a state a timer or a completed hold begins whose
+    `SaccadeOnset` edge goes on to another state, gets a warning at load (XC-455, not built yet;
+    waits on that item)."""
 
 
 @dataclass(frozen=True, slots=True)

@@ -67,22 +67,38 @@ class World(Protocol):
 
     def happened(self, guard: Guard, state: str, frame: int) -> bool: ...
 
-    def began(self, state: str, frame: int, by: "Guard | None") -> None:
+    def began(self, state: str, frame: int) -> None:
         """State `state` began, and `frame` is its first: the frame its guards are first asked on
         and its entry actions first drawn, as a hold first counts gaze in it. The start state's is
         frame 1; every other's is the frame after the transition that enters it, **a state entered
-        again included**. `by` is the guard of the edge that entered it, `None` for the start state.
+        again included**. Which edge entered it is not told: nothing reads it (the PI's answers of
+        2026-11-07 leave a rule that does not depend on it).
 
-        **A saccade counts for a state only if it began in that state** (XC-410; the PI,
-        2026-10-30: "one that began before the state is anticipatory, as an early response would
-        be"), **except the one whose onset ended the state before** -- a transition taken on a
-        `SaccadeOnset`, or on a timer counted from one, `After(since=SaccadeOnset())` -- which
-        carries into this state, and no further, for its landing if its eye stopped in this state
-        ("Yes, that one saccade carries"; "Yes, carry it too"). So a world that remembers a saccade
-        across frames
-        (`gaze.Tracked`) is told here when each state begins and by which guard, and refuses to
-        judge a saccade for a state it was not told of. A world that draws each event as a guard
-        asks for it has nothing to forget, and does nothing.
+        **A saccade counts for a state's `SaccadeOnset` only if it began in that state** (XC-410;
+        the PI, 2026-10-30: "one that began before the state is anticipatory, as an early response
+        would be"), **and for its `SaccadeTo` if the detector puts its eye at rest on `frame` or
+        after, wherever its onset fell**: one in flight as the state began counts there for its
+        landing, whatever edge entered it (the PI, 2026-11-06, "Count it both ways": "a saccade
+        already under way at the go cue counts where it lands"), and one begun in the state comes to
+        rest on `frame` or after too, a stop following its onset. So for a `SaccadeTo` XC-410's "it
+        must start in the state" decides nothing, and XC-410's own case, a saccade begun the frame
+        before a plain timer's state and landing in it, counts where it lands (review 9 of the
+        saccade rules, its I1, 2026-11-07; the PI, asked in the UI that day whether a state that
+        waits for a saccade to the target counts any saccade whose eye stops there, wherever its
+        onset fell: "Yes, count where it lands (Recommended)"). An anticipation begun just before
+        the cue counts where it lands when the cue's state asks where the eye lands or an `Exited`
+        relays it, though not when a `SaccadeOnset` relays it: **a `SaccadeOnset` counts a saccade
+        that begins in its state** (XC-410), and the PI's principle of 2026-11-07 keeps that ("if a
+        saccade starts during a cue, before the go period, that would be an early saccade error";
+        of a saccade that starts a little before the fixation point goes off, still in the window
+        then, and lands on the target just after: "if it is still in the fix window when the fix
+        dims (go cue), then it is fine"); the one way of writing a task where such a saccade does
+        not count is a state a timer or a completed hold begins whose `SaccadeOnset` edge goes on
+        to another state, which gets a warning at load (XC-455, not built yet; waits on that
+        item). So a world that remembers a saccade across frames (`gaze.Tracked`) is told here when
+        each state begins, and refuses to judge a saccade for a state it was not told of: the loop
+        tells the world each state's first frame. A world that draws each event as a guard asks
+        for it has nothing to forget, and does nothing.
         """
 
     def signal(self, frame: int) -> str:
@@ -189,7 +205,7 @@ class Quiet:
     def happened(self, guard: Guard, state: str, frame: int) -> bool:
         return False
 
-    def began(self, state: str, frame: int, by: "Guard | None") -> None:
+    def began(self, state: str, frame: int) -> None:
         return None
 
     def signal(self, frame: int) -> str:
@@ -219,7 +235,7 @@ class Scripted:
     def happened(self, guard: Guard, state: str, frame: int) -> bool:
         return self.at_frame.get(guard) == frame
 
-    def began(self, state: str, frame: int, by: "Guard | None") -> None:
+    def began(self, state: str, frame: int) -> None:
         """A script fires each guard on the frame it names, in whatever state the trial is in."""
         return None
 
@@ -630,7 +646,7 @@ class _Loop:
         # they put up is visible on frame 1 -- the same one-frame rule every other
         # entry action follows, counted from a notional frame 0. And frame 1 is the
         # start state's first, which the world is told (`World.began`, XC-410).
-        world.began(self.current.name, 1, None)
+        world.began(self.current.name, 1)
         _apply(self.current.enter, self.visible, self.shown, self.open_at, self.changed,
                self.placed, 1)
         _emit(self.current.enter, self.effects)
@@ -816,11 +832,13 @@ class _Loop:
             return True
         self.current = current = self.by_name[edge.to]
         self.entered_at = frame
-        # **A saccade counts for a state only if it began in it** (XC-410; the PI, 2026-10-30), as
-        # a hold counts only gaze since its state began (below), or if its onset ended the state
-        # before, at once or by a timer from it, for this state alone: the world is told the
-        # state's first frame, the next, re-entered or not, and the guard that took the edge.
-        self.world.began(current.name, frame + 1, edge.guard)
+        # **A saccade counts for a state by its onset or its stop against the state's first frame**
+        # (`World.began`: XC-410, the PI, 2026-10-30; "Count it both ways", the PI, 2026-11-06), as
+        # a hold counts only gaze since its state began (below): the world is told the state's
+        # first frame, the next, re-entered or not. Not the guard that took the edge: the PI's
+        # answer of 2026-11-07 (a `SaccadeOnset` keeps waiting for a saccade that begins in its
+        # state) left nothing that reads it, and the narrower reading that would have is not taken.
+        self.world.began(current.name, frame + 1)
         _apply(do, self.visible, self.shown, self.open_at, self.changed, self.placed, frame + 1)
         _emit(do, self.effects)
         _apply(current.enter, self.visible, self.shown, self.open_at, self.changed, self.placed,

@@ -83,6 +83,69 @@ def test_a_malformed_payload_does_not_reach_the_trial_loop():
     assert parse(json.dumps({"Left": {}}), at=1.0) is None
 
 
+#: One eye of a datagram, its first and fourth Purkinje images to be filled in, and its frame.
+_EYE = ('{"FrameNumber": %s, "Pupil": {"Center": {"X": 1.0, "Y": 2.0}, '
+        '"Size": {"Width": 3.0, "Height": 4.0}}, "CRs": [{"X": %s, "Y": %s}, {"X": 0, "Y": 0}, '
+        '{"X": 0, "Y": 0}, {"X": %s, "Y": %s}]}')
+
+
+def _datagram_reading(frame: str = "7", p1x: str = "10.0", p1y: str = "20.0", p4x: str = "30.0",
+                      p4y: str = "40.0") -> str:
+    """A datagram whose left eye reads the given JSON tokens, its right eye an ordinary one."""
+    return '{"Left": %s, "Right": %s}' % (_EYE % (frame, p1x, p1y, p4x, p4y),
+                                          _EYE % ("7", "10.0", "20.0", "30.0", "40.0"))
+
+
+def _dropped(payload: str) -> None:
+    """`payload` is no sample, and a tracker given it counts it dropped and holds nothing."""
+    tracker = Tracker()
+    tracker.accept(parse(payload, at=1.0))
+
+    assert parse(payload, at=1.0) is None
+    assert (tracker.received, tracker.dropped, tracker.latest) == (0, 1, None)
+
+
+@pytest.mark.parametrize("token", ["Infinity", "-Infinity", "NaN"])
+@pytest.mark.parametrize("where", ["p1x", "p1y", "p4x", "p4y"],
+                         ids=["P1 across", "P1 up", "P4 across", "P4 up"])
+def test_a_datagram_whose_gaze_is_no_finite_number_is_no_sample(token, where):
+    """**A gaze value that is not finite is a lost sample** (the controller's ruling of
+    2026-11-06): a datagram whose Purkinje image reads a bare `Infinity`, `-Infinity` or `NaN`,
+    which Python's `json.loads` accepts, in any of its four coordinates, is no sample, as a
+    malformed one is, so nothing after it does arithmetic on it and the tracker counts it dropped.
+    The pupil, which no gaze reads, is not judged."""
+    payload = _datagram_reading(**{where: token})
+    assert json.loads(payload), "Python reads the bare token"
+
+    _dropped(payload)
+
+
+def test_a_datagram_whose_gaze_difference_overflows_is_no_sample():
+    """**Nor one whose P1 - P4 is not finite** (the review of 498460d and d932cb3, its I3): images
+    at 1e308 and -1e308 are numbers, but their difference, the gaze signal, overflows, which parse
+    can tell from the floats it has just read."""
+    _dropped(_datagram_reading(p1x="1e308", p4x="-1e308"))
+
+
+@pytest.mark.parametrize("payload", [
+    _datagram_reading(frame="Infinity"),
+    _datagram_reading(frame="-Infinity"),
+    _datagram_reading(frame="1e400"),
+    _datagram_reading(p1x="9" * 309),
+    _datagram_reading(p1x="1" * 5000),
+    "[" * 65000 + "]" * 65000,
+], ids=["frame Infinity", "frame -Infinity", "frame 1e400", "a 309-digit integer",
+        "a 5000-digit integer", "65000 nested brackets"])
+def test_parse_never_raises(payload):
+    """**Any failure to read a datagram makes it no sample** (the controller's ruling of
+    2026-11-06, on the review's I1: nothing from the tracker may raise mid-trial): a frame number
+    that is no integer (`int` of an infinity raises `OverflowError`), an integer too large for a
+    float (`OverflowError`), one of more digits than Python reads (`ValueError` inside
+    `json.loads`), nesting too deep to read (`RecursionError`). Each raised, and `UdpSource.poll`
+    and `Tracked.display` call `parse` every frame, so the session ended mid-trial."""
+    _dropped(payload)
+
+
 def test_a_sample_arriving_is_fresh_and_then_goes_stale():
     """Hold-last with a ceiling, which is P6's mitigation made concrete.
 
