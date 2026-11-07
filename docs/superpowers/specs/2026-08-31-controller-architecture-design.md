@@ -629,7 +629,7 @@ and never block session-complete detection. Raw neural data never touches the ta
 The rig **cannot** push to the ELN (§1.1). Integration is pull-based and reuses
 `wl-preproc`'s existing `docs/ops/lab-host-protocol.md` — bearer token, `GET /health`
 verdict shape, published JSON Schemas — rather than inventing a second protocol.
-**wl-works' own contract tests already run against a fake implementation of it.**
+**wl-works' own contract tests already run against a fake implementation of it.** *(Corrected 2026-11-07: wl.works wrote on 2026-08-31, in its handover `HANDOVER-wl-expcontroller.md` lines 53-59 (read at wl-works commit `b090176`, `origin/main`), that this is "not true of this repository — there are no such tests": its lab-host client does not exist, only two seeded capability rows with no code behind them, and "nothing here is frozen by an implementation, so the shape is still free". The sentence above is kept as it was written.)*
 
 | Direction | Carries | Mechanism |
 |---|---|---|
