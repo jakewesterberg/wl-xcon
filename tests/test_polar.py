@@ -561,6 +561,88 @@ def test_a_literal_radius_that_is_no_number_is_refused_and_the_overlap_check_doe
     assert [f for f in found if f.code == "overlapping-windows"] == []
 
 
+#: XC-426's four kinds of radius choice that are no finite number, and what a refusal says of each:
+#: the choice, then why.
+_NOT_A_RADIUS = [("big", "'big'. That is not a number of degrees"),
+                 (_polar(1.0, 0.0), "1° at 0° · (x, y) (1, 0). That is a whole position, not a "
+                                    "number of degrees"),
+                 (float("inf"), "inf. That is not a finite number"),
+                 (10**400, "1.00000e+400. That is not a finite number")]
+_RADIUS_KINDS = ["word", "position", "infinity", "past-float"]
+
+
+def _radius_set(first_at, second_at, *choices) -> Trial:
+    """`_two_windows`, window `a`'s radius setting `r` offering `choices`."""
+    trial = _two_windows(first_at, second_at, Param("r", unit="deg", choices=choices))
+    return replace(trial, windows=[replace(trial.windows[0], radius=P("r")), trial.windows[1]])
+
+
+@pytest.mark.parametrize(("bad", "why"), _NOT_A_RADIUS, ids=_RADIUS_KINDS)
+def test_a_radius_setting_with_a_choice_that_is_no_finite_number_is_refused_at_load(bad, why):
+    """XC-426: a literal radius of each kind was refused `bad-placement`, and one placed by a
+    setting with such a choice loaded clean: a word or a position raised when the window was first
+    judged (`gaze.Tracked.in_window`), stopping the session, while an infinity or `10**400` held
+    every gaze. Refused as the literal is, with the rig's field or without."""
+    trial = _radius_set((0.0, 0.0), (5.0, 0.0), 1.0, bad)
+    for geometry in (None, DIRECT):
+        found = [f for f in check(trial, geometry=geometry) if f.code == "bad-placement"]
+        assert len(found) == 1, (geometry, found)
+        assert found[0].detail == (f"window 'a': its radius is parameter 'r', which can be "
+                                   f"{why}; give 'r' finite numbers of degrees"), found[0]
+
+
+@pytest.mark.parametrize(("bad", "why"), _NOT_A_RADIUS, ids=_RADIUS_KINDS)
+def test_the_object_windows_radius_is_held_to_the_same_rule(bad, why):
+    """XC-426, for an array's object windows, whose radius is a window's: a literal that is no
+    finite number made `check()` raise (`_crowded`) or loaded clean, and a setting's choice that is
+    none loaded clean. Each is refused, and the check never raises on it."""
+    lit = Disc(size=0.5, color=Gray(40.0))
+
+    def windowed(radius, *params) -> Trial:
+        return Trial(start="on", params=list(params), windows=[ObjectWindows("ring", radius=radius)],
+                     states=[State("on", enter=[Show(Stimulus("ring", at=(0.0, 0.0), looks=Array(
+                         n=4, radius=5.0, looks=lit, among=Disc(size=0.5, color=Gray(20.0)))))],
+                         go=[On(Hold("ring.target", 0.1), Outcome.CORRECT),
+                             On(After(1.0), Outcome.NO_RESPONSE)])])
+
+    choice = why.split(". ")[0]
+    for trial, said in (
+            (windowed(bad), f"their radius is {choice}, which is not a finite number of degrees"),
+            (windowed(P("r"), Param("r", unit="deg", choices=(0.5, bad))),
+             f"their radius is parameter 'r', which can be {why}; give 'r' finite numbers of "
+             f"degrees")):
+        for geometry in (None, DIRECT):
+            found = [f for f in check(trial, geometry=geometry) if f.code == "bad-placement"]
+            assert len(found) == 1, (trial.windows, geometry, found)
+            assert found[0].detail == f"the object windows of 'ring': {said}", found[0]
+
+
+def test_a_radius_setting_of_finite_choices_still_loads():
+    for choices in ((1.0, 2.0), (1, 2.5), (0.5,)):
+        found = check(_radius_set((0.0, 0.0), (5.0, 0.0), *choices))
+        assert [f for f in found if f.code in ("bad-placement", "overlapping-windows")] == [], (
+            choices, found)
+
+
+@pytest.mark.parametrize(("bad", "why"), _NOT_A_RADIUS, ids=_RADIUS_KINDS)
+def test_the_overlap_sentence_says_a_radius_setting_by_its_choices(bad, why):
+    """XC-426: the overlap warning said "a radius has no declared highest, so they can be any size"
+    of a setting that declares its choices, one of them no finite number (`_radius` read it
+    through `_span`, failing closed). Read over its choices that are radii, as `_places` reads a
+    place's (the others are refused, above): 1° and the other window's 1°, 2° in all; a setting
+    none of whose choices is one has no radius to compare, as a literal that is none has not."""
+    (found,) = _overlaps(_radius_set((0.0, 0.0), (1.5, 0.0), 1.0, bad))
+
+    assert "which can come within 1.50° while their radii sum to 2.00°" in found.detail
+    assert "no declared highest" not in found.detail
+    assert _overlaps(_radius_set((0.0, 0.0), (1.5, 0.0), bad)) == []
+    # A range with no highest is still said so: its highest is truly undeclared.
+    trial = _two_windows((0.0, 0.0), (1.5, 0.0), Param("r", unit="deg", low=0.5))
+    (ranged,) = _overlaps(replace(trial, windows=[replace(trial.windows[0], radius=P("r")),
+                                                  trial.windows[1]]))
+    assert "while a radius has no declared highest, so they can be any size" in ranged.detail
+
+
 def test_the_three_named_are_the_nearest_and_the_farthest_is_counted_not_named():
     """XC-156 fix round 2 (n1): five places at distinct distances, 0.5° to 2.5° out, from a window
     3° in radius with the target 1° in radius: all five overlap; the three nearest are named, in
