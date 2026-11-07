@@ -33,11 +33,26 @@ from then). **Hardware verified: none.**
   (reference tasks), C1 (the task object), C2a (how trials count), C2b (plans and blocks), C3 (drawn values,
   conditions from factors, designed orders, live edits and the change log). Five reference tasks in `tasks/` are
   engine fixtures; real tasks come from wl-xtasks, written with the PI.
-- **The first real task**: the pop-out search, wl-xtasks' `tasks/popout_search.py` (its branch
-  `popout-search-2026-11-07` until the PI merges it), tested here by path (`tests/test_popout_search.py`).
+- **The first real task: the pop-out search**, wl-xtasks' `tasks/popout_search.py` (on its branch
+  `popout-search-2026-11-07` until the PI merges it there), tested here by path (`tests/test_popout_search.py`). Its
+  choices are TSK-74; its design is `docs/superpowers/specs/2026-11-07-popout-search-design.md`. Built on branch
+  `popout-build-2026-11-07` (not on `main` until the PI says yes), and what it added to the engine:
+  - **a color set** (`photometry.ColorSet`, `ColorSetLight`): four named colors held at macaque cone luminance (L + M at
+    L:M 1, on the Stockman-Sharpe 2° fundamentals) at 15 cd/m², realized on the rig's measured panel; the record names a
+    color's set by name and each run's start row defines it once;
+  - **a staircase** between trials on a named setting (`task.Staircase`), which a person's held value stops and a
+    hand-back restarts;
+  - **a confirmed progression** (`ByCriterion(confirm=True)`): the rig suggests each move between stages and the trainer
+    confirms or holds, each recorded (`suggested`, `declined`);
+  - **a pool** of pairings the trainer starts small and widens (`task.Pool`), named by their colors;
+  - **a start at a named stage**, and a **resume that goes on** from the animal's previous session of the same task and
+    plan, with that session's end shown at the start;
+  - **the trainer's panel**: the stage, the staircase's level and lock, the stage's last answers and the trials left out
+    beside them, the pool, and the standing suggestion with *Move up* and *Hold* (telemetry schema 20);
+  - **the simulated eye** (`simeye.py`, XC-456), so a simulated session of a gaze task is scored as the rig would.
 - **Running**: the trial loop (`run.py`), the session daemon and CLI (`taskd.py`, `cli.py`: `wlx run`, `wlx taskd`),
-  the simulated animal (`simulate.py`; since XC-456 a gaze task's trials are played by the simulated eye, `simeye.py`,
-  through the rig's gaze world, `gaze.Tracked`).
+  the simulated animal (`simulate.py`; a gaze task's trials are played by the simulated eye through the rig's gaze
+  world, `gaze.Tracked`).
 - **The console**: a browser page on the LAN (`serve.py`, `web.py`, `link.py`); writes from the box only; sign-in from
   wl.works designed, waiting on the rig's https page (XC-151, XC-152).
 - **Welfare** (`bounds.py`, `welfare.py`, `marks.py`, `stranded.py` and the functions architecture.md lists; to be
@@ -47,15 +62,15 @@ from then). **Hardware verified: none.**
 - **The record**: the session folder `xcon/` that wl-preproc reads (`record.py`).
 
 ## What is next (the PI, 2026-11-07)
-1. Finish the work in flight, each reviewed: `small-guards-2026-11-07` and `check-hardening-2026-11-07` (small
-   guards, and the load check never raising; to rebase onto this `main`), and `tools-as-tests-2026-11-07` (the
-   welfare check and the session fuzzer as tracked tests, `cli._load_bounds` added to the welfare list on the PI's
-   word of 2026-11-07). Each merges on his yes.
-2. **One real training task**, written with the PI in wl-xtasks and run end to end; with it the simulated animal
-   through the rig's own eye logic, and demo mode (XC-013). The operator's guide (XC-014) and the session-number
-   client (XC-460) are side work on the same path.
-3. **Paused until that task runs**: engine builds C4 to C9 and the rig-edit build.
-4. Then the display (build E), in the PI's order.
+1. **Merge the pop-out search build**, behind one review of the whole build and the PI's yes by name; wl-xtasks' branch
+   `popout-search-2026-11-07` merges in its own repository (then `WLX_REQUIRE_XTASKS=1` goes into CI, XC-490). The
+   wl-preproc ask about the start row's `color_sets` is still to be sent (XC-491).
+2. **Demo mode**, with its own plan: its revised design (`docs/superpowers/specs/2026-10-06-demo-mode-design.md`,
+   revised 2026-11-07) and its two `Service._open` welfare items are approved by the PI (2026-11-07; XC-013).
+3. **Then the display (build E)**, designed with the PI; "done" includes a real screen.
+4. **Side work on the January path**: the sync-box client (XC-460), the operator's guide (XC-014), the default limits
+   file (XC-459, a welfare design with the PI).
+5. **Paused until the pop-out search has run on a rig**: engine builds C4 to C9 and the rig-edit build.
 
 **How the work is run** (the PI, 2026-11-07): a plan is a design and a list of tests, built once; one review of the
 whole build, and the PI's welfare review of any welfare-listed change; side work only on the January path; a rare edge
@@ -63,9 +78,10 @@ case is settled from his stated principles and told to him in one line; every me
 clean CI.
 
 ## Working here
-- **Suite**: `WLX_REQUIRE_PREPROC=1 WLX_REQUIRE_BROWSER=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p
-  no:cacheprovider -n auto` (a `wl-preproc` checkout or link at the root; wl-sync installed at the commit
-  `wl-preproc/pyproject.toml` pins). **5420 passed on `main`**, none skipped.
+- **Suite**: `WLX_REQUIRE_PREPROC=1 WLX_REQUIRE_BROWSER=1 WLX_REQUIRE_XTASKS=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p
+  no:cacheprovider -n auto` (a `wl-preproc` checkout or link at the root, and a `wl-xtasks` one beside it, git-ignored
+  at `/wl-xtasks`, holding `tasks/popout_search.py`; wl-sync installed at the commit `wl-preproc/pyproject.toml` pins).
+  **5420 passed on `main`**; the pop-out build's branch has more (**5647 passed**), none skipped.
 - **CI**: each push sweeps the changed modules with mutants (`tools/mutation_gate.py`); the nightly sweeps all, in 24
   shards. Read every shard's log to its closing line; the run's summary can be wrong.
 - **The neighbours** are read weekly, by their handover files (the PI, 2026-11-07): wl-preproc, wl-sync, wl-works,
