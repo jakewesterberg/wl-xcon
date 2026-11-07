@@ -1475,9 +1475,12 @@ def test_judging_a_saccade_builds_nothing_in_its_frame():
 # saccade to X lands in X's window at the moment it lands." Until then `gaze.Tracked` kept the last
 # saccade no guard had taken for the rest of the trial, so an object shown or moved onto where it
 # had landed took it on the frame the object was drawn there (the XC-402 review's probe), and a
-# saccade landing beside a window was taken when gaze drifted into it. One exception since the PI's
-# answer of 2026-11-06, "Count it both ways": a saccade in flight as a state begins counts there,
-# for its landing alone (below, after the exit carry).
+# saccade landing beside a window was taken when gaze drifted into it. Since the PI's answer of
+# 2026-11-06, "Count it both ways", a saccade in flight as a state begins counts there, for its
+# landing alone (below, after the exit carry); a stop following its onset, that makes a `SaccadeTo`
+# count any saccade whose eye stops on the state's first frame or after, wherever its onset fell,
+# and leaves "it must start in the state" to `SaccadeOnset` alone (review 9 of the saccade rules,
+# its I1, 2026-11-07; the PI is asked that day whether a `SaccadeTo` should count so).
 
 #: The array the probes show: four objects 8° out, the target at 90° (`search.1`), each object's
 #: window 1.5° in radius.
@@ -1581,13 +1584,13 @@ _SACCADE_GUARDS = pytest.mark.parametrize(
                                             (SaccadeOnset(), Outcome.NO_RESPONSE)],
                          ids=["SaccadeTo", "SaccadeOnset"])
 def test_a_saccade_begun_the_frame_before_its_state_counts_there_for_its_landing_alone(guard, outcome):
-    """**Straddling**: its onset on the last frame of the state before, and its landing on the
-    target well inside the state that asks. **In flight as the state begins, it counts there for
-    its landing** (the PI, 2026-11-06, asked in the UI: "Count it both ways": "a saccade already
-    under way at the go cue counts where it lands"), whatever edge began the state, here a timer
-    from the entry of the state before; its onset is not the state's, so a `SaccadeOnset` is never
-    satisfied by it. From XC-410 (2026-10-30) until that answer its landing did not count either,
-    and the state that asked for it had no response."""
+    """**Straddling, XC-410's own case**: its onset on the last frame of the state before, and its
+    landing on the target well inside the state that asks. **In flight as the state begins, it
+    counts there for its landing** (the PI, 2026-11-06, asked in the UI: "Count it both ways": "a
+    saccade already under way at the go cue counts where it lands"), whatever edge began the state,
+    here a timer from the entry of the state before; its onset is not the state's, so a
+    `SaccadeOnset` is never satisfied by it. From XC-410 (2026-10-30) until that answer its landing
+    did not count either, and the state that asked for it had no response."""
     to = _drawn(_PROBED, {}, _straddled(guard, 1))["search.1"]
     onset = _onset_frame(_straddled(guard, 1), to)
 

@@ -1327,22 +1327,12 @@ def test_every_run_is_confirmed_while_it_is_open(seed):
 # sample with a known velocity before the carried stretch, where the eye took off, to its last.
 
 
-def _took_off(trace, at, start: int) -> int:
-    """The sample before the carried stretch that ends on the sample before `start`: the last
-    sample with a known velocity before it, where the eye took off."""
-    carried = _carried(trace, at, velocity(trace, at, Params()), Params())
-    first = start
-    while carried[first - 1]:
-        first -= 1
-    assert first < start, "a carried stretch must end on the sample before the run's start"
-    return first - 1
-
-
-@pytest.mark.parametrize("lose, start", [((199,), 202), ((199, 200), 203),
-                                         (tuple(range(180, 202)), 204)],
+@pytest.mark.parametrize("lose, start, took_off", [((199,), 202, 196), ((199, 200), 203, 196),
+                                                   (tuple(range(180, 202)), 204, 177)],
                          ids=["one sample lost", "two samples lost",
                               "twenty-two lost, 46 ms, longer than the online ring"])
-def test_a_saccade_whose_take_off_a_short_loss_hides_is_measured_from_before_the_loss(lose, start):
+def test_a_saccade_whose_take_off_a_short_loss_hides_is_measured_from_before_the_loss(
+        lose, start, took_off):
     """**Version 11.** v1's centre-horizontal step (v2's trace, `(199, 213)`, 7.997°) with samples
     lost where it takes off: the run still opens on its first measured velocity outside the
     threshold, `start` as version 10 gives it, and is flagged, the carried stretch's last unknown
@@ -1351,12 +1341,14 @@ def test_a_saccade_whose_take_off_a_short_loss_hides_is_measured_from_before_the
     to 0.05°, as a run carried to its landing is measured (version 8). Version 10 measured it from
     its first sample, mid-flight: 6.551° for one sample lost, 5.802° for two, 5.082° for twenty-two.
     Online the confirmation is measured from the same sample, kept as the stretch began, which no
-    five-sample ring still holds when the run opens after twenty-two."""
+    five-sample ring still holds when the run opens after twenty-two. **The take-off samples are
+    written out** (review 9 of the saccade rules, its M1, 2026-11-07): until then a helper walked
+    back to them as `saccade._took_off` does, so it agreed with whatever walk the code took."""
     gaze, at = _ours_on(_TRACES["centre-horizontal"])
     [whole] = detect(gaze, at)
     assert (whole.start, whole.stop, whole.flagged) == (199, 213, False)
     trace = _lost(gaze, *lose)
-    took_off = _took_off(trace, at, start)
+    assert _carried_at(trace, at) == list(range(took_off + 1, start))
 
     [run] = detect(trace, at)
 
@@ -1407,6 +1399,29 @@ def test_a_run_after_a_withheld_loss_is_measured_from_its_own_first_sample():
     [(_, confirmed, _)] = _confirmations(trace, at)
     assert (confirmed.start, confirmed.flagged) == (204, False)
     assert confirmed.amplitude_deg == _amplitude(trace, 204, confirmed.stop)
+
+
+def test_a_carried_loss_that_ends_short_of_a_run_s_start_moves_no_take_off():
+    """**Only a carried stretch that adjoins the run's start moves its take-off**, not one anywhere
+    in the flag's window (review 9 of the saccade rules, its M1, 2026-11-07): v1's centre-horizontal
+    step with sample 195 lost. The stretch of unknown velocities it leaves, 193 to 197, is carried,
+    and velocity 198 is measured, so the stretch ends a sample short of the run, which opens at 199
+    as on the whole trace and is flagged, 197 being in its flag's window `[start - 2, stop)`; but no
+    loss hides where the eye took off. So the run is measured from its own first sample, 7.997°,
+    batch and online, as wl-preproc measures it at `5772c2e`; a take-off moved by any carried
+    stretch in the flag's window would measure it from 192, before the stretch, 7.988°."""
+    gaze, at = _ours_on(_TRACES["centre-horizontal"])
+    trace = _lost(gaze, 195)
+    assert _carried_at(trace, at) == [193, 194, 195, 196, 197]
+    assert _amplitude(trace, 192, 213) == pytest.approx(7.988, abs=1e-3)
+
+    [run] = detect(trace, at)
+
+    assert (run.start, run.stop, run.flagged) == (199, 213, True)
+    assert run.amplitude_deg == _amplitude(trace, 199, 213) == pytest.approx(7.997, abs=1e-3)
+    [(_, confirmed, _)] = _confirmations(trace, at)
+    assert (confirmed.start, confirmed.flagged) == (199, True)
+    assert confirmed.amplitude_deg == _amplitude(trace, 199, confirmed.stop)
 
 
 def test_the_detector_that_measures_a_run_from_before_a_loss_at_its_take_off_is_version_11():
