@@ -274,6 +274,11 @@ an operator says a reachable bind was meant. Until P4d-3 builds §6's `Actor`, a
 network can, under an invented name, change a setting (a reward volume among them), pause
 and resume a session, give manual rewards while it is paused, schedule or cancel a stop,
 or stop it — and since P4d-2b b2a, a reachable mark port lets it put marks on the record.
+*(Pointer, 2026-11-07, XC-172: this list was the one of 2026-09-19 and is kept as written. A reachable REP port
+accepts every command kind the link has since gained, among them opening and ending sessions, starting runs and
+acknowledging unknowns, and engine build C3's `hand_back`, `range` and `revert`, and `taskd`'s `--link-allow-remote` is
+the same flag: `ZmqLink`'s refusal of a remote bind names all of them, and `link._COMMAND_EXPOSURE` is where the list is
+kept.)*
 The paragraph above is the *whole* of the authentication, and a bind that leaves the
 machine voids it.
 `ZmqConsole` is not restricted the same way: it connects, and where a console looks is its
