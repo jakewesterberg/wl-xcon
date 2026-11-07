@@ -9,6 +9,7 @@
 .venv-spike/
 .venv/
 /wl-preproc
+/wl-xtasks
 __pycache__/
 
 # Spike S (tools/spike_vulkan): cargo build output

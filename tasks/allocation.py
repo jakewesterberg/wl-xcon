@@ -100,5 +100,11 @@ ALLOCATION: Allocation = replace(
         # strobed once at the resume. Provisional, in this range for the reason the
         # five above are; wl-xtasks owns the final numbering.
         4137: "SESSION_RESUMED",
+        # The blank screen after an error begins (wl-xtasks' pop-out search, its design
+        # §3.1, "A short timeout"): the frame the discs or the fixation point go off after
+        # a wrong disc, a look to empty space, leaving the odd one before its hold, or an
+        # early saccade, so a recording times that offset, and a look to empty space has an
+        # event of its own. A task's code, here until wl-xtasks publishes its allocation.
+        4138: "TIMEOUT_ON",
     },
 )

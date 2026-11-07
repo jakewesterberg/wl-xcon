@@ -32,7 +32,9 @@ from then). **Hardware verified: none.**
 - **Tasks**: the task object and its load check (`task.py`, `check.py`), engine builds A1-A2 (stimuli, color), B
   (reference tasks), C1 (the task object), C2a (how trials count), C2b (plans and blocks), C3 (drawn values,
   conditions from factors, designed orders, live edits and the change log). Five reference tasks in `tasks/` are
-  engine fixtures; **no real task exists yet** (they come from wl-xtasks, written with the PI).
+  engine fixtures; real tasks come from wl-xtasks, written with the PI.
+- **The first real task**: the pop-out search, wl-xtasks' `tasks/popout_search.py` (its branch
+  `popout-search-2026-11-07` until the PI merges it), tested here by path (`tests/test_popout_search.py`).
 - **Running**: the trial loop (`run.py`), the session daemon and CLI (`taskd.py`, `cli.py`: `wlx run`, `wlx taskd`),
   the simulated animal (`simulate.py`; since XC-456 a gaze task's trials are played by the simulated eye, `simeye.py`,
   through the rig's gaze world, `gaze.Tracked`).

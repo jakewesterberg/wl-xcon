@@ -49,6 +49,16 @@ on:
 # `No module named 'wl_sync'`. Each job now installs wl-sync alone, at the commit
 # wl-preproc's own pyproject pins (ADR-0004's inventory).
 #
+# **wl-xtasks too, since 2026-11-07**, checked out into `<repo>/wl-xtasks` beside
+# wl-preproc: `tests/test_popout_search.py` reads the lab's first real task, the pop-out
+# search, from its `tasks/popout_search.py`. Its main does not hold that task until the
+# PI merges it there, so `WLX_REQUIRE_XTASKS` is **not set yet** and those tests skip
+# until it does; set it, as `WLX_REQUIRE_PREPROC` is, once they run. **The step may fail
+# and is allowed to**: wl-xtasks's own `wl.yaml` says `visibility: private`, and
+# `GITHUB_TOKEN` reads no other private repository (failure 3 above), so until it is
+# public or a token is passed as `token:`, the checkout is `Not Found` and the tests
+# skip. Before `WLX_REQUIRE_XTASKS` is set, that is resolved, or the build goes red.
+#
 # Every job installs `console` (pyzmq, msgpack) as well as `dev,contract` -- on
 # every Python `test` runs, and on the single Python (3.13) the mutation jobs pin.
 # Added 2026-09-19 with the console link, and the reason is the same one that makes
@@ -87,6 +97,14 @@ jobs:
         with:
           repository: jakewesterberg/wl-preproc
           path: wl-preproc
+      - name: Check out wl-xtasks's main inside the workspace
+        # Allowed to fail while wl-xtasks is private: see the note at the top.
+        continue-on-error: true
+        uses: actions/checkout@v7
+        with:
+          repository: jakewesterberg/wl-xtasks
+          ref: main
+          path: wl-xtasks
       - name: Install wl-sync at wl-preproc's own pin
         # wl-preproc's contract readers import wl_sync at module level (since
         # 2026-08), and we deliberately do not install wl-preproc's own
@@ -177,6 +195,14 @@ jobs:
         with:
           repository: jakewesterberg/wl-preproc
           path: wl-preproc
+      - name: Check out wl-xtasks's main inside the workspace
+        # Allowed to fail while wl-xtasks is private: see the note at the top.
+        continue-on-error: true
+        uses: actions/checkout@v7
+        with:
+          repository: jakewesterberg/wl-xtasks
+          ref: main
+          path: wl-xtasks
       - name: Install wl-sync at wl-preproc's own pin
         # wl-preproc's contract readers import wl_sync at module level (since
         # 2026-08), and we deliberately do not install wl-preproc's own
@@ -275,6 +301,14 @@ jobs:
         with:
           repository: jakewesterberg/wl-preproc
           path: wl-preproc
+      - name: Check out wl-xtasks's main inside the workspace
+        # Allowed to fail while wl-xtasks is private: see the note at the top.
+        continue-on-error: true
+        uses: actions/checkout@v7
+        with:
+          repository: jakewesterberg/wl-xtasks
+          ref: main
+          path: wl-xtasks
       - name: Install wl-sync at wl-preproc's own pin
         # wl-preproc's contract readers import wl_sync at module level (since
         # 2026-08), and we deliberately do not install wl-preproc's own
