@@ -28,8 +28,10 @@ These conventions bind every session (human- or AI-driven) working in this repo.
   amounts/limits, session duration or fluid tracking, or stimulation triggering must
   be reviewed by a human lab member before merge. Keep these modules small and listed
   in `docs/design/architecture.md`. `tests/test_welfare_manifest.py` holds the listed
-  code to the hashes in `tests/welfare_manifest.json`, so a change to it fails the suite
-  until the manifest is updated in a commit that names the PI's approval.
+  code to the hashes in `tests/welfare_manifest.json`: a change to it fails the suite
+  until its hash there is updated, which only a commit naming the PI's approval may do
+  (the suite cannot see an approval). At a merge, `tools/welfare_diff.py <base> <head>`
+  lists each listed item, and any change to the check itself, for a person to read.
 - **ADRs for irreversible choices.** Engine, transport, file-format, and license
   decisions go through `docs/design/decisions/` using the template.
 - **Dependency policy.** New dependencies need a one-line justification and a license
