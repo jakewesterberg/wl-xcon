@@ -27,37 +27,36 @@ then, a clock's (`After(since=SaccadeOnset())`) and an edge's alike, so a clock 
 by an onset neither uses up the landing nor keeps the onset from an edge (the
 controller's rulings, 2026-10-30).
 
-**Which saccade counts for a state: a `SaccadeOnset` by its onset, a `SaccadeTo` by where its
-eye stopped, judged where it landed** (XC-410, the PI, 2026-10-30; "Count it both ways", the PI,
+**Which saccade counts for a state: a `SaccadeOnset` by its onset, a `SaccadeTo` by where its eye
+stopped, judged where it landed** (XC-410, the PI, 2026-10-30; "Count it both ways", the PI,
 2026-11-06). **A `SaccadeOnset` counts only a saccade begun in its state**: one begun before it is
 anticipatory, as an early response would be ("No; it must start in the state"). **A `SaccadeTo`
 counts any saccade the detector puts at rest (its stop field, `Saccade.stop`, as `saccade.detect`
-reports it) on its state's first frame or after, wherever its onset fell**, judged on the frame
-it lands, against the windows drawn then: "A saccade to X lands in X's window at the moment it
-lands." That rule is the PI's answer of 2026-11-06 as built: "The same eye movement scores the
-same whichever way the task is written: a saccade already under way at the go cue counts where it
-lands. The rule that a saccade counts only in the state it began in gets one exception: a saccade
-in flight when the go cue's state begins". Which state is the go cue's the world cannot know, so
-a saccade in flight as any state begins counts there, whatever edge entered it, and a stop always
-follows its onset, so one begun in the state comes to rest on its first frame or after too: **for
-a `SaccadeTo` the in-flight rule is the whole rule**, and XC-410's "it must start in the state"
-now governs only a `SaccadeOnset`, which a carried saccade never satisfies (review 9 of the
-saccade rules, its I1, 2026-11-07). One whose eye stopped before the state's first frame landed in
-the state before and counts for nothing there (the controller's ruling on the review's I1); a
-further transition while it is still in flight carries it on. **The PI answered (2026-11-07,
-asked in the UI)**, whether a state that waits for a saccade to the target counts any saccade
-whose eye stops there, wherever its onset fell: "Yes, count where it lands (Recommended)". So an intrasaccadic
-displacement, at once or delayed, is scored where the eye lands ("Yes, that one saccade carries";
-"Yes, carry it too"), so is the saccade that takes the eye out of a window (2026-11-04, "Carry it
-over"; 2026-11-06, "Yes, count it"), and so is an anticipation begun just before the go cue when
-the cue's state asks where the eye lands or an `Exited` relays it, though not when a
-`SaccadeOnset` relays it (`task.SaccadeOnset`): what were the onset's, the timer's and the exit's
-carries is one rule, and a timer from a state's entry and `Entered` carry as any edge does, where
-until then they carried nothing. Past the go cue too: XC-410's own case, a saccade begun the frame
-before a plain timer's state and landing in it, scored no response until that answer and is
-scored where it lands since. Until XC-410 the last saccade no guard had taken waited for the rest
-of the trial, so an object shown or moved onto where it had landed took it on the frame the object
-was drawn there.
+reports it) on its state's first frame or after, wherever its onset fell**, judged on the frame it
+lands, against the windows drawn then: "A saccade to X lands in X's window at the moment it lands."
+That rule is the PI's answer of 2026-11-06 as built: "The same eye movement scores the same
+whichever way the task is written: a saccade already under way at the go cue counts where it lands.
+The rule that a saccade counts only in the state it began in gets one exception: a saccade in flight
+when the go cue's state begins". Which state is the go cue's the world cannot know, so a saccade in
+flight as any state begins counts there, whatever edge entered it, and a stop always follows its
+onset, so one begun in the state comes to rest on its first frame or after too: **for a `SaccadeTo`
+the in-flight rule is the whole rule**, and XC-410's "it must start in the state" now governs only a
+`SaccadeOnset`, which a carried saccade never satisfies (review 9 of the saccade rules, its I1,
+2026-11-07). One whose eye stopped before the state's first frame landed in the state before and
+counts for nothing there (the controller's ruling on the review's I1); a further transition while it
+is still in flight carries it on. **The PI was asked (2026-11-07, in the UI)** whether a state that
+waits for a saccade to the target counts any saccade whose eye stops there, wherever its onset fell,
+and answered "Yes, count where it lands (Recommended)". So an intrasaccadic displacement, at once or
+delayed, is scored where the eye lands ("Yes, that one saccade carries"; "Yes, carry it too"), so is
+the saccade that takes the eye out of a window (2026-11-04, "Carry it over"; 2026-11-06, "Yes, count
+it"), and so is an anticipation begun just before the go cue when the cue's state asks where the eye
+lands or an `Exited` relays it, though not when a `SaccadeOnset` relays it (`task.SaccadeOnset`):
+what were the onset's, the timer's and the exit's carries is one rule, and a timer from a state's
+entry and `Entered` carry as any edge does, where until then they carried nothing. Past the go cue
+too: XC-410's own case, a saccade begun the frame before a plain timer's state and landing in it,
+scored no response until that answer and is scored where it lands since. Until XC-410 the last
+saccade no guard had taken waited for the rest of the trial, so an object shown or moved onto where
+it had landed took it on the frame the object was drawn there.
 
 **The detector is per trial** (S5 §5), so a world is reset per trial; a threshold
 carried across would let a quiet trial set a noisy one's sensitivity.
