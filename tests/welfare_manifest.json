@@ -115,6 +115,15 @@
       "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
     },
     {
+      "name": "cli._load_bounds",
+      "kind": "function",
+      "path": "wl_xcon/cli.py",
+      "qualname": "_load_bounds",
+      "doc": "`cli._load_bounds`",
+      "sha256": "1256b6fe10769c1c68e65f01024aee791579615858e3e6df47e0bf3627f683d7",
+      "approved": "the PI, 2026-11-07, asked in the UI: 'Add it to the list'"
+    },
+    {
       "name": "cli._settle_departure",
       "kind": "function",
       "path": "wl_xcon/cli.py",
