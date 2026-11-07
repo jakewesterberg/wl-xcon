@@ -1095,7 +1095,11 @@ drummed repeats one, and its `presentations` the lines written.
    plan's call 39): `direction-outside-0-360` is not given for a direction setting drawn in every
    block every run of the task can play, given a value by no condition, with no choices and a
    start of none or from 0 to 360: every number the record writes for it is drawn, and written
-   from 0 to 360 (§5 item 1's note of engine build C3).
+   from 0 to 360 (§5 item 1's note of engine build C3). *XC-382, 2026-11-07*: a task's warnings
+   gain `framework-code`, a `Mark` of a code the allocation gives an event the framework strobes
+   itself (`codes.FRAMEWORK_EVENTS`: a pause, a manual reward, a run's start and the rest), which
+   no controls or change row explains and which leaves wl-preproc's timing of the rows carrying
+   that code, by their `event_code`, a strobe too many.
 3. **Accepted once per session**, at open, recorded. **A warning appearing during a run that its kinds do
    not accept pauses the run at the next trial**, for the operator to accept (recorded) or stop (N§R6).
    Today's unknowns keep the 2026-09-19 rule: proceed on a recorded acknowledgment.

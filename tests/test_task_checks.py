@@ -210,6 +210,105 @@ def test_a_task_emitting_an_allocated_code_is_accepted():
     assert check(trial, allocation) == []
 
 
+def _marking(code: int) -> Trial:
+    """One state strobing `code` as it starts, and another strobing it on its way out."""
+    return Trial(start="show", states=[State(
+        "show", enter=[Mark(code)], go=[On(After(1.0), Outcome.CORRECT, do=[Mark(code)])])])
+
+
+def _framework_warnings(trial: Trial) -> list:
+    from tasks.allocation import ALLOCATION
+
+    return [f for f in check(trial, ALLOCATION) if f.code == "framework-code"]
+
+
+def test_a_task_strobing_a_framework_code_is_warned_never_refused():
+    """XC-382: `_unallocated_codes` accepts any code the allocation holds, so a task's
+    `Mark(4131)` loaded clean and strobed `PAUSE`, which no controls or change row explains, and
+    which leaves every pause row of the session untimed in wl-preproc (it times each row by the
+    strobes of the code the row carries, `event_code`). A warning in every kind, never a refusal
+    (the PI's warnings over refusals), once for each place the task strobes it."""
+    from tasks.allocation import ALLOCATION
+    from wl_xcon import warnlist
+
+    pause = ALLOCATION.code_for("PAUSE")
+    found = _framework_warnings(_marking(pause))
+
+    assert len(found) == 2, found
+    assert all(f.is_warning and f.accepted_in == SESSION_KINDS for f in found)
+    assert f"emits code {pause}, which the allocation gives 'PAUSE'" in found[0].detail
+    assert "controls and changes rows do not explain" in found[0].detail
+    assert "(`event_code`)" in found[0].detail and f"every row carrying {pause} untimed" in (
+        found[0].detail)
+    assert [entry.code for entry in warnlist.of_findings(check(_marking(pause), ALLOCATION))] == [
+        "framework-code", "framework-code"]
+
+
+def test_a_task_strobing_its_own_allocated_code_is_not_warned():
+    from tasks.allocation import ALLOCATION
+
+    assert check(_marking(ALLOCATION.code_for("FIX_ON")), ALLOCATION) == []
+
+
+def test_every_code_the_framework_strobes_itself_is_warned():
+    """XC-382: the framework's codes are read from one list, `codes.FRAMEWORK_EVENTS`, and every
+    one the reference allocation gives is warned."""
+    from tasks.allocation import ALLOCATION
+    from wl_xcon.codes import FRAMEWORK_EVENTS
+
+    assert FRAMEWORK_EVENTS and set(FRAMEWORK_EVENTS) <= set(ALLOCATION.task_events.values())
+    for name in FRAMEWORK_EVENTS:
+        found = _framework_warnings(_marking(ALLOCATION.code_for(name)))
+        assert len(found) == 2 and f"gives {name!r}" in found[0].detail, name
+
+
+def test_the_framework_events_are_the_names_the_package_strobes_by():
+    """XC-382: `codes.FRAMEWORK_EVENTS` is the one list of them, so it must hold every name the
+    package looks a code up by (`Allocation.code_for`, `Session._code`) and nothing else: read
+    from the source by the parser, so a framework event added beside it without joining it
+    fails here. `service.FRAMEWORK_CODES`, the ones every `wlx taskd` session strobes, is among
+    them."""
+    import ast
+    from pathlib import Path
+
+    from wl_xcon import service
+    from wl_xcon.codes import FRAMEWORK_EVENTS
+
+    def lookup(node) -> bool:
+        return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr in ("code_for", "_code") and len(node.args) == 1)
+
+    looked_up, unread = set(), []
+    for path in sorted((Path(__file__).parents[1] / "wl_xcon").glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        # A name looked up through a comprehension over written names (`Session._pause`'s
+        # `{name: self._code(name) for name in ("PAUSE", "RESUME")}`) is read from the names.
+        over = {}
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.DictComp, ast.ListComp, ast.SetComp, ast.GeneratorExp)):
+                for loop in node.generators:
+                    if isinstance(loop.target, ast.Name) and isinstance(
+                            loop.iter, (ast.Tuple, ast.List)):
+                        for call in ast.walk(node):
+                            over[id(call)] = (loop.target.id, loop.iter.elts)
+        for node in ast.walk(tree):
+            if not lookup(node):
+                continue
+            (arg,) = node.args
+            if isinstance(arg, ast.Constant):
+                looked_up.add(arg.value)
+            elif isinstance(arg, ast.Name) and over.get(id(node), ("",))[0] == arg.id:
+                looked_up |= {e.value for e in over[id(node)][1]}
+            elif not (path.name == "taskd.py" and isinstance(arg, ast.Name) and arg.id == "name"):
+                unread.append(f"{path.name}:{node.lineno}")
+
+    # `Session._code(name)` itself passes its argument on; any other lookup is a name written out.
+    assert unread == []
+    assert looked_up == set(FRAMEWORK_EVENTS)
+    assert len(FRAMEWORK_EVENTS) == len(set(FRAMEWORK_EVENTS))
+    assert set(service.FRAMEWORK_CODES) <= set(FRAMEWORK_EVENTS)
+
+
 def test_a_task_referencing_an_undeclared_parameter_is_refused():
     """S1 §9 check 6. Parameters are declared with type, unit and range (S8 §3.1),
     and that one declaration drives validation, the console's widgets and the saved
