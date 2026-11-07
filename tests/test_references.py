@@ -424,8 +424,9 @@ def citations(text: str) -> list[tuple[int, str]]:
     """`(line, key)` for every key cited in `text`'s prose.
 
     Inside brackets, at any depth (`[@key]`, `[@key, p. 3]`, `[see @a; @b]`, `[-@key]`,
-    `[@a, p. 3 [sic]]`), every Pandoc key whose `@` starts a word, so `[mail a@b.org]`
-    is not one. Outside brackets, Pandoc's author-in-text form (`@key says`) and
+    `[@a, p. 3 [sic]]`), every Pandoc key whose `@` starts a word, after a space, `[`, `;`,
+    `,` or `(`, braced or bare (`[see,@Doe99]`, `[see (@{Roe99})]`; XC-448), so
+    `[mail a@b.org]` is not one. Outside brackets, Pandoc's author-in-text form (`@key says`) and
     anything else shaped like this library's keys, `@` not inside a word: failing
     closed on a form the bracket scan would otherwise skip."""
     text = prose(text)
@@ -442,7 +443,7 @@ def citations(text: str) -> list[tuple[int, str]]:
             start = at - 1 if depth and at and text[at - 1] == "-" else at
             before = text[start - 1] if start else " "
             if depth:
-                starts_word = before.isspace() or before in "[;"
+                starts_word = before.isspace() or before in "[;,("
                 bare = starts_word and PANDOC_KEY.match(text, at + 1) or None
             else:
                 inside_word = before.isalnum() or before in "_.@"
@@ -497,6 +498,40 @@ def test_citations_are_read_from_prose_only():
         (20, "brace.key"),
         (21, ""),
     ]
+
+
+@pytest.mark.parametrize(
+    ("text", "key"),
+    [
+        ("[see,@{Doe99}]", "Doe99"),
+        ("[see,@Doe99]", "Doe99"),
+        ("[see (@{Roe99})]", "Roe99"),
+        ("[see (@Roe99)]", "Roe99"),
+    ],
+)
+def test_a_key_after_a_comma_or_a_parenthesis_in_brackets_is_read(text, key):
+    """XC-448: pandoc 3.8 cites `Doe99` in `[see,@{Doe99}]` and `[see,@Doe99]` and `Roe99` in
+    `[see (@{Roe99})]` and `[see (@Roe99)]` (`-f markdown -t json`, run 2026-11-06), but the
+    scan took an `@` in brackets to start a key only after a space, `[` or `;`, so a missing
+    paper cited that way passed the check."""
+    assert citations(text) == [(1, key)]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "[mail a@b.org]",
+        "[see Doe@Doe99]",
+        "[see,a@b.org]",
+        "[see (a@b.org)]",
+        "[see,x@{Doe99}]",
+        "[see (x@{Roe99})]",
+    ],
+)
+def test_a_key_inside_a_word_in_brackets_stays_unread(text):
+    """The controls to the case above: an `@` after a letter, digit or `_`, as in an email
+    address, is not a citation even after a comma or a parenthesis earlier in the bracket."""
+    assert citations(text) == []
 
 
 def test_every_citation_in_the_docs_resolves_to_the_library():
