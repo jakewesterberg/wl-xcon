@@ -817,6 +817,37 @@ def test_a_wait_declared_by_choices_counts_its_longest_choice():
     assert "a wait longer than any the task declares (its longest, 30 s)" in longer[1].detail
 
 
+@pytest.mark.parametrize(("bad", "said"), [
+    (10**400, "1.00000e+400"), (math.inf, "inf"), (math.nan, "nan")],
+    ids=["past-float", "infinity", "nan"])
+def test_a_wait_setting_that_can_be_no_finite_number_refuses_a_value_with_a_sentence(bad, said):
+    """XC-423: `_waits` read a wait setting's choices with `float`, so one of `10**400` raised
+    `OverflowError` out of `beyond_range`, which a run's pre-flight (`preflight.beyond`) and a live
+    edit (`Session._beyond_range`) both run: each caught it and refused, saying only that the
+    checks could not run, with the exception's words. An infinity or a NaN made the longest wait
+    without end or unread, and no wait was judged. Each is refused, `outside-range`, with a
+    sentence saying which setting and why, through `beyond_range` and the pre-flight both."""
+    from wl_xcon import preflight
+
+    task = _timing_out(Param("timeout", unit="s", choices=(1.0, bad)))
+    refusal = Finding("outside-range", (
+        f"'timeout', a wait the task declares, can be {said} s, which is not a finite number of "
+        f"seconds, so whether 'fix_acquisition' at 20 makes a wait longer than any the task "
+        f"declares cannot be judged; give 'timeout' finite numbers"))
+
+    assert [f for f in beyond_range(task, {"fix_acquisition": 20.0}) if f.blocking] == [refusal]
+    found = preflight.beyond(task, {"fix_acquisition": 20.0}, ALLOCATION, DIRECT, SRGB, None)
+    assert [f for f in found if f.blocking] == [refusal], found
+
+
+def test_a_value_no_float_holds_is_not_judged_outside_its_range_and_never_raises():
+    """XC-423: `_outside` read a value with `math.isfinite`, which raises on `10**400`. A value
+    that is no finite number is not judged here, as an infinity is not: the pre-flight's values
+    item refuses it as no real number (`preflight.values`)."""
+    assert beyond_range(_waiting_task(), {"fix_acquisition": 10**400}) == []
+    assert beyond_range(_waiting_task(), {"fix_acquisition": math.inf}) == []
+
+
 def test_a_finding_the_declared_ranges_already_give_is_not_refused_again():
     """What the declared task's checks already find was accepted with it; only what the
     widening adds is judged."""

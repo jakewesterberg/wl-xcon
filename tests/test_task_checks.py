@@ -1512,3 +1512,115 @@ def test_an_after_time_past_a_float_is_not_raised_on_at_load():
     trial = Trial(start="a", params=[Param("t", unit="s", choices=(1.0, 10**400))],
                   states=[State("a", go=[On(After(P("t")), Outcome.CORRECT)])])
     assert isinstance(check(trial), list) and isinstance(check(trial, geometry=GEOMETRY), list)
+
+
+# --- XC-423: a number no float holds finitely is refused where it is read, never raised on ------
+
+#: An integer past a float's range, an infinity and a NaN, as a sentence names each (`_said`).
+_NO_FLOAT = [(10**400, "1.00000e+400"), (float("inf"), "inf"), (float("nan"), "nan")]
+_NO_FLOAT_IDS = ["past-float", "infinity", "nan"]
+
+
+def _read_by_check_8(site: str, bad) -> Trial:
+    """A stimulus whose disparity, or its array's ring radius, is setting `x`, offering `bad`; or
+    placed by a coordinate setting whose highest is `bad`."""
+    chosen = [Param("x", unit="deg", choices=(1.0, bad))]
+    return {
+        "disparity": lambda: _showing((0.0, 0.0), chosen, disparity=P("x")),
+        "disparity written": lambda: _showing((0.0, 0.0), disparity=bad),
+        "array radius": lambda: _showing((0.0, 0.0), chosen, looks=Array(
+            radius=P("x"), looks=LIT, among=Disc(color=Gray(20.0)))),
+        "coordinate highest": lambda: _showing(
+            (P("x"), 0.0), [Param("x", unit="deg", low=0.0, high=bad)]),
+    }[site]()
+
+
+@pytest.mark.parametrize(("bad", "said"), _NO_FLOAT, ids=_NO_FLOAT_IDS)
+@pytest.mark.parametrize("site", ["disparity", "disparity written", "array radius",
+                                  "coordinate highest"])
+def test_check_8_refuses_a_setting_that_can_be_no_finite_number_and_never_raises(site, bad, said):
+    """XC-423: with the rig's field, check 8 raised `OverflowError` on a disparity or a ring radius
+    choice of `10**400` (`_numbers`), and a math domain error on a ring of `inf`
+    (`geometry.circle_extent_deg`); a NaN measured as nothing and passed. Each is refused,
+    `stimulus-off-screen`, naming the setting and the value (`check._floats`); one written in,
+    which raised out of `_disparity_is_zero` too (`_literal`), is said as the value it holds. A
+    highest of `10**400` is refused as the setting is built (`Param`), so the coordinate's is an
+    infinity or a NaN here."""
+    if site == "coordinate highest" and isinstance(bad, int):
+        with pytest.raises(ValueError, match="'x': its highest, 1.00000e[+]400, is past a float"):
+            _read_by_check_8(site, bad)
+        return
+    trial = _read_by_check_8(site, bad)
+    what = f"it holds {said}" if site == "disparity written" else f"'x' can be {said}"
+    for geometry in (GEOMETRY, DIRECT):
+        found = _off(trial, geometry)
+        assert len(found) == 1, (geometry, found)
+        assert (f"whose extent cannot be bounded: {what}, which is not a finite number, so it "
+                f"cannot be proved inside") in found[0].detail, found[0]
+
+
+@pytest.mark.parametrize(("bad", "said"), _NO_FLOAT, ids=_NO_FLOAT_IDS)
+def test_an_opacity_that_can_be_no_finite_number_is_refused_and_never_raised(bad, said):
+    """XC-423: an opacity choice of `10**400` raised `OverflowError` out of `check()`, with the
+    rig's field or without (`_reach`, `_numbers`); an infinity was "outside [0, 1]" and a NaN too.
+    Each is refused as no finite number, as written or among a setting's choices."""
+    chosen = _showing((0.0, 0.0), [Param("x", unit="", choices=(1.0, bad))], opacity=P("x"))
+    written = _showing((0.0, 0.0), opacity=bad)
+    for trial, refusal in (
+            (chosen, f"'s''s opacity can be {said} (parameter 'x'), which is not a finite number "
+                     f"in [0, 1]"),
+            (written, f"'s''s opacity is {said}, which is not a finite number in [0, 1]")):
+        for geometry in (None, GEOMETRY):
+            found = [f.detail for f in check(trial, geometry=geometry)
+                     if f.code == "bad-placement"]
+            assert found == [refusal], (geometry, found)
+
+
+@pytest.mark.parametrize(("bad", "said"), _NO_FLOAT, ids=_NO_FLOAT_IDS)
+def test_a_block_number_or_light_that_can_be_no_finite_number_is_refused_and_never_raised(
+        bad, said):
+    """XC-423, through the same reading (`_reach`): a size, a light and a background's light that
+    can be `10**400` raised `OverflowError` out of `check()`, and one of an infinity or a NaN
+    loaded clean. Refused `bad-block`, naming the field, the value and the setting."""
+    chosen = [Param("x", unit="", choices=(1.0, bad))]
+    for trial, refusal in (
+            (_showing((0.0, 0.0), chosen, looks=Disc(size=P("x"), color=Gray(40.0))),
+             f"Disc.size can be {said} (parameter 'x'), which is not a finite number"),
+            (_showing((0.0, 0.0), chosen, looks=Disc(color=Gray(P("x")))),
+             f"Gray.cd_m2 can be {said} (parameter 'x'), which is not a finite number"),
+            (replace(_showing((0.0, 0.0), chosen), background=Gray(P("x"))),
+             f"Gray.cd_m2 can be {said} (parameter 'x'), which is not a finite number"),
+            (_showing((0.0, 0.0), looks=Disc(size=bad, color=Gray(40.0))),
+             f"Disc.size is {said}, which is not a finite number")):
+        for geometry in (None, GEOMETRY):
+            found = [f.detail for f in check(trial, geometry=geometry) if f.code == "bad-block"]
+            assert found == [refusal], (refusal, geometry, found)
+    # A Weber contrast on that background is refused as on black (`_black` fails closed), and the
+    # fix it names says why, not that the setting has no range (`_background_fix`).
+    from wl_xcon.photometry import Weber
+
+    on = replace(_showing((0.0, 0.0), chosen, looks=Disc(contrast=Weber(0.5))),
+                 background=Gray(P("x")))
+    (black,) = [f.detail for f in check(on) if f.code == "weber-on-black"]
+    assert f"give parameter 'x' finite numbers above 0: 'x' can be {said}" in black, black
+    written = replace(_showing((0.0, 0.0), looks=Disc(contrast=Weber(0.5))), background=Gray(bad))
+    (black,) = [f.detail for f in check(written) if f.code == "weber-on-black"]
+    assert f"write the background's light as a finite number above 0: it holds {said}" in black
+
+
+@pytest.mark.parametrize(("bad", "said"), _NO_FLOAT, ids=_NO_FLOAT_IDS)
+def test_a_drift_direction_that_can_be_no_finite_number_is_refused_and_never_raised(bad, said):
+    """XC-423: a grating's drift direction choice of `10**400` raised `OverflowError` out of
+    `check()` (`_direction_faults`, which read the choices as floats itself); it is read through
+    the one helper and refused, `bad-block`, saying so."""
+    from wl_xcon import look
+    from wl_xcon.photometry import Michelson
+
+    trial = _showing((0.0, 0.0), [Param("x", unit="deg", choices=(90.0, bad))], looks=look.Look(
+        shape=look.Circle(size=1.0),
+        fill=look.SineGrating(sf=1.0, direction=P("x"), contrast=Michelson(0.5))))
+    for geometry in (None, GEOMETRY):
+        found = [f.detail for f in check(trial, geometry=geometry) if f.code == "bad-block"]
+        assert found and found[0].startswith(
+            f"SineGrating.direction is parameter 'x', which can be {said}, not a finite number; "
+        ), (geometry, found)

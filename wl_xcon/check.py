@@ -256,7 +256,7 @@ def _outside(param: Param, value: object) -> bool:
     choices has none)."""
     if param.choices or isinstance(value, bool) or not isinstance(value, (int, float)):
         return False
-    if not math.isfinite(value):
+    if not _real(value):  # `math.isfinite(10**400)` raises (XC-423)
         return False
     return ((param.low is not None and value < param.low)
             or (param.high is not None and value > param.high))
@@ -267,7 +267,10 @@ def _waits(task: Task) -> tuple[set[str], float]:
     the task declares: the highest bound any of them declares, the largest number a choice
     setting among them offers, or its longest literal wait. **A wait setting with no highest
     that is a number can be any length** (Task 10's review, M1), so the longest is unbounded
-    (`math.inf`) and no value of any wait is longer than one the task declares."""
+    (`math.inf`) and no value of any wait is longer than one the task declares. **A number it
+    reads that is no finite number is `_Unreal`** (`_floats`; XC-423): `float(10**400)` raised out
+    of `beyond_range`, and an infinity or a NaN makes no longest that a wait can be compared
+    with, so `beyond_range` refuses, saying so."""
     declared = {param.name: param for param in task.params}
     names: set[str] = set()
     longest = 0.0
@@ -283,14 +286,14 @@ def _waits(task: Task) -> tuple[set[str], float]:
                     if param is None:
                         continue  # refused at load (`_undeclared_parameters`)
                     if param.choices:
-                        offered = [float(c) for c in param.choices if _is_number(c)]
+                        offered = _floats([c for c in param.choices if _is_number(c)], param.name)
                         longest = max([longest, *offered])
                     elif _is_number(param.high):
-                        longest = max(longest, float(param.high))
+                        longest = max([longest, *_floats([param.high], param.name)])
                     else:
                         longest = math.inf
                 elif _is_number(seconds):
-                    longest = max(longest, float(seconds))
+                    longest = max([longest, *_floats([seconds], None)])
     return names, longest
 
 
@@ -335,7 +338,9 @@ def beyond_range(
     the declared task's findings are not (`Finding.subjects`); otherwise a warning, among them a
     value that only enlarges an overlap or a clip the task was accepted with at load. **And a
     set size above its highest whose objects would be drawn on one another is refused**,
-    whatever the task was accepted with (`_overlapping_objects`; the final review's I1). Nothing
+    whatever the task was accepted with (`_overlapping_objects`; the final review's I1). **And a
+    wait the task declares that can be no finite number refuses them**, `outside-range`, saying
+    which (`_waits`; XC-423): no longest wait can be found to judge them by. Nothing
     when every value is inside its range. The declared ranges are what every load-time proof is
     made over (the checks "Reasoning over the whole parameter space" below), which proves a value
     inside them cannot break the task from the console and says nothing of one outside them, so
@@ -351,8 +356,21 @@ def beyond_range(
     # heard between trials, never inside one, until they are checked about once a second inside
     # a trial (WEL-11; engine spec §6.8; XC-373), when this sentence changes; the trial cap it
     # names is the longest trial, five minutes since engine build C2a (`TRIAL_CAP`).
-    waits, longest = _waits(task)
     findings: list[Finding] = []
+    said = ", ".join(f"{name!r} at {value:g}" for name, value in outside.items())
+    try:
+        waits, longest = _waits(task)
+    except _Unreal as unreal:
+        # **A wait no float holds is refused, saying so** (XC-423): it raised out of here, and the
+        # pre-flight and a live edit said only that the checks could not run.
+        name, value = unreal.args
+        whose = (f"{name!r}, a wait the task declares, can be" if name is not None
+                 else "a wait the task declares is")
+        findings.append(Finding("outside-range", (
+            f"{whose} {_said(value)} s, which is not a finite number of seconds, so whether "
+            f"{said} makes a wait longer than any the task declares cannot be judged; give "
+            + (f"{name!r} finite numbers" if name is not None else "it a finite number"))))
+        waits, longest = set(), math.inf
     for name, value in outside.items():
         param = declared[name]
         # The bounds it declares, and only those (Task 10's review, M2): a setting with one bound
@@ -372,7 +390,6 @@ def beyond_range(
                 f"only between trials: while a trial waits on {name!r} they go unheard until that "
                 f"trial ends, and {TRIAL_CAP} ends any trial still running then, with no outcome "
                 f"(a hang)"), blocking=False, accepted_in=SESSION_KINDS))
-    said = ", ".join(f"{name!r} at {value:g}" for name, value in outside.items())
     before = check_task(task, allocation, components, geometry, calibration, deployment)
     # What the declared task's findings are about (the warnings-over-refusals review's I5): a
     # finding of `BREAKS_A_RUN` about the same thing, only larger, was accepted with the task.
@@ -2763,6 +2780,32 @@ class _Unmeasurable(_Unbounded):
     literal) and the value; `_offscreen_stimuli` names both."""
 
 
+class _Unreal(_Unbounded):
+    """**A number no float holds finitely** -- an infinity, a NaN, an integer past a float's range
+    -- where a check reads a number (`_floats`; XC-423), named: the setting's name (`None` for a
+    literal) and the value. Every check that catches `_Unbounded` refuses or passes over it, so
+    none raises on one; each that says why says this (`_unreal_said`)."""
+
+
+def _floats(values, name: str | None) -> list[float]:
+    """**Finite or refused** (XC-423): `values`, each a number, as floats, or `_Unreal` naming
+    `name` and the first that is no finite number (`_real`). The one reading of a number every
+    check that computes with one shares: `float(10**400)` raises `OverflowError`, an infinite ring
+    has no extent (`geometry.circle_extent_deg` raises), and a NaN compares false with everything,
+    so passes every rule it meets; none is computed with."""
+    for value in values:
+        if not _real(value):
+            raise _Unreal(name, value)
+    return [float(value) for value in values]
+
+
+def _unreal_said(unreal: _Unreal) -> str:
+    """What an `_Unreal` is, as a refusal says it: "'x' can be inf", or "it holds inf" for a
+    literal."""
+    name, value = unreal.args
+    return f"{name!r} can be {_said(value)}" if name is not None else f"it holds {_said(value)}"
+
+
 def _domain(value: object, params: dict[str, Param]) -> list:
     """Every value that matters for a property check 8 measures.
 
@@ -2786,11 +2829,12 @@ def _domain(value: object, params: dict[str, Param]) -> list:
 
 def _numbers(value: object, params: dict[str, Param]) -> list[float]:
     """`_domain`, for a property that is a number: a choice that is not one is not
-    something the field can be tested at."""
+    something the field can be tested at, and one that is no finite number is `_Unreal`
+    (`_floats`; XC-423)."""
     found = _domain(value, params)
     if not all(_is_number(v) for v in found):
         raise _Unbounded(value.name if isinstance(value, P) else repr(value))
-    return [float(v) for v in found]
+    return _floats(found, value.name if isinstance(value, P) else None)
 
 
 def _is_number(value: object) -> bool:
@@ -2813,11 +2857,11 @@ def _options(value: object, params: dict[str, Param]) -> list:
 def _reach(value: object, params: dict[str, Param]) -> list[float]:
     """Every number a field can hold, for a rule a literal is held to: a literal number is
     itself, a parameter each choice or both ends of its range (`_numbers`, `_Unbounded`
-    when it offers neither), and anything else no number this rule reads."""
+    when it offers neither), and anything else no number this rule reads. One that is no finite
+    number, written or chosen, is `_Unreal` (`_floats`; XC-423)."""
     if isinstance(value, P):
         return _numbers(value, params)
-    literal = _literal(value)
-    return [] if literal is None else [literal]
+    return _floats([value], None) if _is_number(value) else []
 
 
 #: Why a position with an infinity, a NaN or an integer past a float's range in it is none.
@@ -3137,6 +3181,17 @@ def _offscreen_stimuli(trial: Trial, geometry: Geometry | None) -> list[Finding]
                     + (f"{setting!r} can be" if setting else "its position holds")
                     + f" {_said(choice)}, which no position can be, so it cannot be proved "
                     f"inside {field}",
+                )
+            )
+            continue
+        except _Unreal as unreal:
+            # A disparity, a ring radius or a coordinate's bound no float holds (XC-423).
+            findings.append(
+                Finding(
+                    "stimulus-off-screen",
+                    f"state {name!r} {what} whose extent cannot be bounded: "
+                    f"{_unreal_said(unreal)}, which is not a finite number, so it cannot be "
+                    f"proved inside {field}",
                 )
             )
             continue
@@ -3649,10 +3704,17 @@ def _combined(trial: Trial, params: dict[str, Param]) -> list[tuple[object, obje
 
 
 def _literal(value) -> float | None:
-    """A literal number, or None for a parameter, a missing value or anything else."""
+    """A literal number, or None for a parameter, a missing value or anything else. **An integer
+    past a float's range is its sign's infinity** (XC-423): `float(10**400)` raised out of
+    `check()` here (a disparity's `_disparity_is_zero`); every question this answers -- zero,
+    black, nonzero -- it answers as the integer would, and where it is computed with it is
+    refused (`_floats`)."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return float(value)
+    try:
+        return float(value)
+    except OverflowError:
+        return math.inf if value > 0 else -math.inf
 
 
 def _colors(trial: Trial, params: dict[str, Param]):
@@ -4377,6 +4439,12 @@ def _background_fix(backgrounds: list, params: dict[str, Param]) -> str:
         light = _luminance(color)
         try:
             reached = [v for v in _reach(light, params) if v <= 0.0]
+        except _Unreal as unreal:  # XC-423
+            fix(f"give parameter {light.name!r} finite numbers above 0: {_unreal_said(unreal)}"
+                if isinstance(light, P) else
+                f"write the background's light as a finite number above 0: "
+                f"{_unreal_said(unreal)}")
+            return
         except _Unbounded:
             fix(f"bound parameter {light.name!r} above 0: it has neither a two-sided range nor "
                 f"numeric choices, so it can be anything")
@@ -4679,6 +4747,12 @@ def _block_faults(trial: Trial) -> list[Finding]:
         name = f"{type(part).__name__}.{attr}"
         try:
             reached = _reach(raw, params)
+        except _Unreal as unreal:
+            _, value = unreal.args
+            bad(f"{name} can be {_said(value)} (parameter {raw.name!r}), which is not a finite "
+                f"number" if isinstance(raw, P) else
+                f"{name} is {_said(value)}, which is not a finite number")
+            return []
         except _Unbounded as unbounded:
             bad(f"{name} is parameter {unbounded.args[0]!r}, which has neither a two-sided "
                 f"range nor numeric choices, so it cannot be bounded")
@@ -4831,13 +4905,20 @@ def _direction_faults(looks, grating, params: dict[str, Param], bad) -> None:
     direction, orientation = grating.direction, looks.orientation
 
     def choices(value, what: str, why: str) -> list[float] | None:
-        if not isinstance(value, P):
-            return _reach(value, params)
-        offered = params[value.name].choices if value.name in params else ()
-        if not offered or not all(_is_number(c) for c in offered):
-            bad(f"{what} is parameter {value.name!r}, which offers no numeric choices; {why}")
+        try:
+            if not isinstance(value, P):
+                return _reach(value, params)
+            offered = params[value.name].choices if value.name in params else ()
+            if not offered or not all(_is_number(c) for c in offered):
+                bad(f"{what} is parameter {value.name!r}, which offers no numeric choices; {why}")
+                return None
+            return _floats(offered, value.name)
+        except _Unreal as unreal:  # XC-423: `float(10**400)` raised out of `check()`
+            name, number = unreal.args
+            bad(f"{what} is parameter {name!r}, which can be {_said(number)}, not a finite number; "
+                f"give {name!r} finite numbers" if name is not None
+                else f"{what} is {_said(number)}, not a finite number")
             return None
-        return [float(c) for c in offered]
 
     directions = choices(direction, "SineGrating.direction", (
         "a range names directions that are not across the bars, so offer choices such as "
@@ -5812,6 +5893,13 @@ def _placement_faults(trial: Trial) -> list[Finding]:
             refuse("bad-placement", f"{name!r}'s opacity is {opacity!r}, not a number")
         try:
             outside = [v for v in _reach(opacity, params) if not 0.0 <= v <= 1.0]
+        except _Unreal as unreal:  # XC-423: `10**400` raised out of `check()`
+            _, value = unreal.args
+            refuse("bad-placement", (
+                f"{name!r}'s opacity can be {_said(value)} (parameter {opacity.name!r}), which is "
+                f"not a finite number in [0, 1]" if isinstance(opacity, P) else
+                f"{name!r}'s opacity is {_said(value)}, which is not a finite number in [0, 1]"))
+            outside = []
         except _Unbounded as unbounded:
             refuse("bad-placement", (
                 f"{name!r}'s opacity is parameter {unbounded.args[0]!r}, which has neither a "

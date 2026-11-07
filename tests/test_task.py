@@ -14,6 +14,8 @@ system cannot distinguish from a hand-written one.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from wl_xcon.task import Disc, Family, FixPoint, Outcome, P, Param, Stimulus
@@ -151,8 +153,24 @@ def test_a_start_on_its_range_edge_or_with_no_range_or_one_edge_is_kept():
         Param("n", unit="s", high=1.0, start=2.0)
 
 
+@pytest.mark.parametrize(("bound", "which", "said"), [
+    ("high", "highest", "1.00000e+400"), ("low", "lowest", "-1.00000e+400")])
+def test_a_parameter_refuses_a_bound_past_a_floats_range(bound, which, said):
+    """XC-423: `Param(high=10**400, start=...)` raised `OverflowError` as its task file loaded
+    (`task._real` read the bound with `math.isfinite`), and without a start it loaded, for every
+    check that reads a bound as a float to raise on. No float holds it, so it is refused as the
+    setting is built, with a start or without, saying which bound and why."""
+    for start in (None, 1.0):
+        with pytest.raises(ValueError, match="^" + re.escape(
+                f"parameter 'x': its {which}, {said}, is past a float's range, so no check can "
+                f"read it; a bound is a finite number, or None for none") + "$"):
+            Param("x", unit="deg", **{bound: 10**400 if bound == "high" else -10**400},
+                  start=start)
+
+
 def test_a_start_beside_a_bound_that_is_not_a_number_is_left_to_the_preflight():
-    """`Param` checks no other field, so a bound typed as text still loads, and the
-    pre-flight fails it closed (`tests/_sessions.malformed_task`); this check compares a
-    start only with a bound that is a real number, and raises nothing else."""
+    """`Param` checks no other field but a bound past a float's range (XC-423), so a bound typed
+    as text still loads, and the pre-flight fails it closed (`tests/_sessions.malformed_task`);
+    this check compares a start only with a bound that is a real number, and raises nothing
+    else."""
     assert Param("fix_hold", unit="s", low="0.05", high=2.0, start=0.3).start == 0.3
