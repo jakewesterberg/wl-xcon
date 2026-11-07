@@ -646,3 +646,9 @@ review, by number):
 1. A demo can run only as its own private copy of the rig service, which changes no welfare-listed code: is that
    enough, or do you also want a demo opened from a live rig's own page, which needs the two `Service._open` changes
    in §8 for your welfare review?
+
+   **Answered 2026-11-07, asked in the UI:** "Also from a live rig's page"; and, of the two `Service._open` changes
+   (a demo refused for any animal but the reference animal before anything is written; a demo session always given
+   the simulated card and pump, and the stand-in field on an unmeasured rig) and this revised design: **"Approve both
+   and the design"**. Demo mode is built in a plan of its own after the pop-out search build merges, with both
+   changes and `tests/welfare_manifest.json` updated naming this approval.
