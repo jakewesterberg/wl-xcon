@@ -4,7 +4,8 @@
 `resolve` is the one place a task's declarations become something to draw: parameters
 bound, named kinds expanded into `look` blocks, an `Array` into an `Item` per object, each eye's
 direction computed (disparity, then the vergence offset), colors turned into CIE XYZ, a cone
-color against the background through the session's calibration (engine build A2).
+color against the background through the session's calibration (engine build A2) and a color
+set's light as its set is realized on that calibration (the pop-out search plan, Task 2).
 Its consumers -- the exact drawer now; the display process (build E), the screen log
 (build F), the simulated animal (build C) and demo mode later -- read the `Screen` and
 nothing else. It is versioned like telemetry: `SCHEMA`, which the display process's
@@ -18,7 +19,9 @@ from dataclasses import dataclass, fields, replace
 
 from wl_xcon import look
 from wl_xcon.geometry import shown_direction
-from wl_xcon.photometry import CONE_COLORS, D65, Gray, Michelson, Weber, cone_xyz, to_xyz, xyY
+from wl_xcon.photometry import (
+    CONE_COLORS, D65, ColorSetLight, Gray, Michelson, Weber, colorset_xyz, cone_xyz, to_xyz, xyY,
+)
 from wl_xcon.task import (
     Annulus, Array, Bar, Blank, Cross, Disc, Gabor, Grating, P, Polygon, Square, _value,
     position_of,
@@ -149,7 +152,9 @@ def _absolute(color, values) -> xyY | None:
 @dataclass(frozen=True, slots=True)
 class _Lights:
     """How this trial's colors become CIE XYZ: an absolute one as itself, a cone color against
-    the background both eyes share, through `calibration` (engine build A2)."""
+    the background both eyes share, through `calibration` (engine build A2), and a color set's
+    light as its set is realized on `calibration` (`photometry.colorset_xyz`; the pop-out search
+    plan, Task 2), once per set and calibration, not per frame."""
 
     values: dict
     calibration: object
@@ -173,6 +178,11 @@ class _Lights:
                 raise ValueError(f"{color} is relative to the background, and {_TWO_BACKGROUNDS}")
             bound = type(color)(*(_num(getattr(color, f.name), values) for f in fields(color)))
             return cone_xyz(bound, self.calibration, self.background or xyY(*D65, 0.0))
+        if isinstance(color, ColorSetLight):
+            if self.calibration is None:
+                raise ValueError(f"{color} is realized on a calibration, and none was given")
+            return colorset_xyz(replace(color, fraction=_num(color.fraction, values)),
+                                self.calibration)
         raise ValueError(f"{color!r} is not a color; `check` refuses it at load (bad-block)")
 
 

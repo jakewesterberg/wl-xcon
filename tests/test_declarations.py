@@ -227,6 +227,9 @@ DEFAULTS = {
     "Checkerboard": {"check_size": 1.0, "contrast": None, "aperture": 10.0, "color": None},
     "Choice": {"objects": REQUIRED, "by": REQUIRED},
     "Color": {},
+    "ColorSet": {"name": REQUIRED, "colors": REQUIRED, "apex": REQUIRED, "luminance_cd_m2": 15.0,
+                 "held": "macaque_2deg_LM1", "source": ""},
+    "ColorSetLight": {"colorset": REQUIRED, "color": REQUIRED, "fraction": 1.0},
     "Condition": {"name": REQUIRED, "values": REQUIRED, "target": REQUIRED, "structure": None},
     "ConeContrast": {"L": 0.0, "M": 0.0, "S": 0.0},
     "Constrained": {"max_run": 2, "weights": {}},
@@ -431,7 +434,7 @@ def _loaded(path: Path):
 def _vocabulary() -> dict[str, type]:
     """Every class a task's content can hold, by name: each dataclass `wl_xcon.task` defines -- its
     vocabulary, the declarations and the task object -- and `wl_xcon.photometry`'s colors and
-    contrasts."""
+    contrasts, and the color set a color-set light carries (the pop-out search plan, Task 2)."""
     found = {
         name: value for name, value in vars(vocabulary).items()
         if isinstance(value, type) and dataclasses.is_dataclass(value)
@@ -441,6 +444,7 @@ def _vocabulary() -> dict[str, type]:
         name: value for name, value in vars(photometry).items()
         if isinstance(value, type) and issubclass(value, (photometry.Color, photometry.Contrast))
     })
+    found["ColorSet"] = photometry.ColorSet
     return found
 
 

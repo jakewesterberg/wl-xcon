@@ -13,6 +13,12 @@ V(λ), 10°"; COL-17): `V_F10`, the luminance row of the CIE's transformation fr
 fundamentals to XYZ_F,10 (`LMS_TO_XYZ_F10`), which `tests/test_cones.py` holds to the CIE's own
 tabulated XYZ_F,10. cd/m² stays on CIE V(λ): nothing here names an absolute luminance.
 
+**Beside it, one luminance a color set holds** (the pop-out search plan, Task 2; the PI, 2026-11-07:
+"wl-style's 2-degree set"): **macaque luminance, L + M at L:M 1 on the Stockman-Sharpe 2° cone
+fundamentals** (`macaque_luminance`), as wl-style's isohue set computes it. Its table is
+colour-science 0.4.7's, exported unchanged and checked by its sha256 (`TABLE_2DEG`; ADR-0012,
+amended 2026-11-07). It is not the lab observer: no cone color converts through it.
+
 Read when a calibration is converted, at load; never inside a frame.
 """
 
@@ -168,3 +174,64 @@ def excitations(nm, radiance) -> tuple[float, float, float]:
     steps = np.diff(at)[:, None]
     totals = ((weighted[1:] + weighted[:-1]) / 2.0 * steps).sum(axis=0)
     return (float(totals[0]), float(totals[1]), float(totals[2]))
+
+
+#: **The Stockman-Sharpe 2° cone fundamentals**, the table macaque luminance is computed on
+#: (`macaque_luminance`): colour-science 0.4.7's `DATA_CMFS_LMS["Stockman & Sharpe 2 Degree Cone
+#: Fundamentals"]` (`colour/colorimetry/datasets/cmfs.py`), the data set wl-style's isohue set was
+#: computed with, which colour cites to CVRL's "Cone Fundamentals" page [@stockman2000spectral].
+#: **Exported, not downloaded** (2026-11-07): one row per nanometre from 390 to 830, `nm,l,m,s`,
+#: each number's text as colour's source writes it, in energy units peaking at 1; the S cone is 0
+#: beyond 615 nm in colour's data. Its licence is UNVERIFIED (ADR-0012, amended 2026-11-07): colour
+#: is BSD-3-Clause, and its source states none. The CIE's 2015 2° matrix applied to it reproduces
+#: colour's tabulated CIE 2015 2° observer within 1.9e-6 (computed 2026-11-07), as the CIE 2006 2°
+#: fundamentals would; it was not compared with the CIE's own 2° file, which is not bundled.
+TABLE_2DEG = "stockman_sharpe_2deg.csv"
+#: Its sha256 as exported (ADR-0012, amended 2026-11-07). No metadata gives one: the export's own.
+TABLE_2DEG_SHA256 = "81ae6f81ce67e6b291638738cb404c3d79a0092c89a62329e45e99329ce8c228"
+
+#: Macaque luminance's weights on the 2° L and M fundamentals: equal (wl-style's
+#: `macaque_equal`, its METHODS.md citing Gelfand and Horwitz 2018 and Munds et al. 2022, neither in
+#: this repository's library; [@dobkins2000comparison] for L:M near 1:1 in macaques). No S.
+MACAQUE_LM = (1.0, 1.0)
+
+
+def file_2deg() -> bytes:
+    """The bundled 2° table, **refused unless its sha256 is the one ADR-0012 records**, as
+    `cie_file` refuses a CIE table: a changed table would weigh every color set's lights wrongly,
+    and nothing downstream could tell."""
+    raw = resources.files("wl_xcon").joinpath("cie", TABLE_2DEG).read_bytes()
+    found = hashlib.sha256(raw).hexdigest()
+    if found != TABLE_2DEG_SHA256:
+        raise ValueError(
+            f"wl_xcon/cie/{TABLE_2DEG} is not the table ADR-0012 records: its sha256 is {found}, "
+            f"and the export's is {TABLE_2DEG_SHA256}; restore it from the package"
+        )
+    return raw
+
+
+_TABLE_2DEG: list = []
+
+
+def table_2deg() -> np.ndarray:
+    """The Stockman-Sharpe 2° cone fundamentals, (441, 4): wavelength in nm, 390 to 830 by 1, then
+    l̄2, m̄2 and s̄2, each in energy units peaking at 1. Read once, on first use."""
+    if not _TABLE_2DEG:
+        _TABLE_2DEG.append(parse(file_2deg()))
+    return _TABLE_2DEG[0]
+
+
+def macaque_luminance(spectrum) -> float:
+    """**Macaque luminance** of a light, `spectrum` its wavelengths in nm and its spectral radiance at
+    each, as a pair: L + M at L:M 1 (`MACAQUE_LM`) on the Stockman-Sharpe 2° fundamentals
+    (`table_2deg`), each read between its 1 nm rows by straight lines and zero outside 390-830 nm,
+    integrated by the trapezoid rule over the light's own wavelengths, as `excitations` integrates
+    the lab observer's. In the radiance's units times nm; only ratios are read
+    (`photometry.macaque_cd_m2`)."""
+    nm, radiance = spectrum
+    at = np.asarray(nm, dtype=float)
+    t = table_2deg()
+    weight = (MACAQUE_LM[0] * np.interp(at, t[:, 0], t[:, 1], left=0.0, right=0.0)
+              + MACAQUE_LM[1] * np.interp(at, t[:, 0], t[:, 2], left=0.0, right=0.0))
+    weighted = weight * np.asarray(radiance, dtype=float)
+    return float(((weighted[1:] + weighted[:-1]) / 2.0 * np.diff(at)).sum())

@@ -1,0 +1,13 @@
+{
+  "name": "isohue",
+  "colors": {
+    "blue": [0.19104, 0.18939],
+    "purple": [0.28247, 0.20472],
+    "red": [0.45955, 0.32918],
+    "green": [0.31324, 0.50711]
+  },
+  "apex": [0.31272, 0.32900],
+  "luminance_cd_m2": 15.0,
+  "held": "macaque_2deg_LM1",
+  "source": "A test fixture in the shape of wl-xtasks' stimuli/isohue.json (pop-out plan, Task 9), not that file. wl-style 02-color/isohue_spectrum: blue (hue 260), purple (320) and red (20) are isohue_levels.csv's cone_macaque_equal rows at saturation 1; green (140) was computed with its isohue.py at the sector's chroma 29.49 under colour-science 0.4.7 on 2026-11-07 (sRGB preview #54a947); the apex is its reference gray #969696."
+}

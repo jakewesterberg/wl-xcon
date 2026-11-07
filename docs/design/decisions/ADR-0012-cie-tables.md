@@ -67,3 +67,41 @@ files keep CC BY-SA 4.0.
   its files, with their own rows.
 - Every session that converts a cone color records the observer and the table's DOI
   (`config.json`'s `calibration.cones`, engine build A2).
+
+## Amended 2026-11-07: the Stockman-Sharpe 2° table that macaque luminance is computed on
+
+The pop-out search (its spec §3.2 and §5 item 4; its plan's Task 2) holds a color set's lights
+equal in **macaque luminance**, L + M at L:M 1 on the Stockman-Sharpe 2° cone fundamentals, as
+wl-style computes it (the PI, 2026-11-07, asked in the UI: "wl-style's 2-degree set"; COL-37), so
+the package needs a 2° table beside the CIE's 10° one.
+
+- **What is bundled**: `wl_xcon/cie/stockman_sharpe_2deg.csv`, the data set wl-style's isohue set
+  was computed with, colour-science 0.4.7's `DATA_CMFS_LMS["Stockman & Sharpe 2 Degree Cone
+  Fundamentals"]` (`colour/colorimetry/datasets/cmfs.py`), **exported** on 2026-11-07 from the
+  installed package, with no network: one row per nanometre from 390 to 830, `nm,l,m,s`, each
+  number's text as colour's source writes it, LF line ends; every value parses to the double
+  colour's own dictionary holds (checked as it was written). Energy units, each function peaking
+  at 1; colour sets the S cone to 0 beyond 615 nm, where it was not measured. **Its sha256,
+  `81ae6f81ce67e6b291638738cb404c3d79a0092c89a62329e45e99329ce8c228`, is the export's own** (no
+  metadata gives one): pinned in `cones.TABLE_2DEG_SHA256`, held by `tests/test_color_set.py`, and
+  `cones.file_2deg` refuses a changed file as `cie_file` refuses a CIE one.
+- **Its source**: colour cites it to CVRL, "Stockman, A., & Sharpe, L. T. (2000). Cone
+  Fundamentals. Retrieved June 23, 2014, from http://www.cvrl.org/cones.htm"
+  [@stockman2000spectral]. The CIE 170-2:2015 2° LMS-to-XYZ_F matrix, as colour prints it
+  (`colour/colorimetry/transformations.py`), applied to it reproduces colour's tabulated CIE 2015
+  2° observer within 1.9e-6 at all 441 wavelengths (computed 2026-11-07), as the CIE 2006 2°
+  fundamentals would. It was not compared with the CIE's own 2° data set, which this build did not
+  download.
+- **Its licence is UNVERIFIED.** colour-science is BSD-3-Clause (its wheel's `LICENSE`,
+  "Copyright 2013 Colour Developers", and `cmfs.py`'s `__license__`, read 2026-11-07), whose notice
+  `NOTICE.md` keeps, as BSD-3 asks of a redistribution. Whether colour's licence reaches CVRL's
+  numbers is not established: CVRL states no licence grant (Q3-B above; the research note §1.3,
+  2026-10-09, not re-read). It is not CC BY-SA as far as is known, so it is not admitted under the
+  rule above for the CIE's files; it has its own row in ADR-0004's inventory, and the PI may prefer
+  the CIE's own 2° data set (CC BY-SA 4.0), which would replace this file and its pin.
+- **Written, not only interpolated**: the export changes the data's format, which BSD-3 permits.
+  It is not one of the CIE's files, so "nothing derived from them is written" does not reach it;
+  nothing derived from it is written either.
+- **What reads it**: `cones.macaque_luminance` alone, for color sets (`photometry.ColorSet`). No
+  cone color converts through it; the lab observer stays the CIE's 10° set, and a task naming the
+  2° fundamentals for its cone colors (XC-302) is still not built.

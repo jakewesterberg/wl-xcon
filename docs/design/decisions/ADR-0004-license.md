@@ -79,6 +79,14 @@ whether it reaches the code that reads them, which stays Apache-2.0, is a legal 
 Any other CC BY-SA table, a modified one, or any other copyleft asset or dependency, still
 reopens this ADR.
 
+**Amended 2026-11-07: a 2° cone fundamentals table exported from colour-science** (the pop-out
+search plan, Task 2; ADR-0012, amended the same day). `wl_xcon/cie/stockman_sharpe_2deg.csv`
+holds colour-science 0.4.7's Stockman-Sharpe 2° fundamentals, the data wl-style's isohue colors
+were computed with, for a color set's macaque luminance. colour distributes it under BSD-3-Clause,
+whose notice ships in `wl_xcon/cie/NOTICE.md`; **the data's own licence is UNVERIFIED** (CVRL, its
+source, states none; ADR-0012). Not copyleft as far as is known, so not a reopening under the rule
+above; its row is below. colour-science itself is not a dependency: nothing imports it.
+
 **The copyright holder is Jacob A. Westerberg**, decided 2026-09-05 and applied
 across the family in the same pass: `wl-expcontroller`, `wl-preproc`, `wl-sync`,
 `wl-stack`, `wl-expviz`, `wl-shook`, `wl-style`, `wl-orchestrator`. Every one shipped
@@ -111,6 +119,7 @@ justification and a license entry here.
 | Newsreader (font, bundled unmodified as woff2 in `wl_xcon/fonts/newsreader/`) | OFL-1.1 (`OFL.txt` at productiontype/Newsreader `cfcb4f7`, byte-identical to google/fonts `ofl/newsreader/OFL.txt`, verified 2026-09-26) | The wl.works logo's face on the console page: 700 upright and italic, from the 72pt optical-size cut, the size the logo's text is set at |
 | CIE 2006 LMS cone fundamentals, 10° (data, bundled unmodified as `wl_xcon/cie/CIE_lms_cf_10deg.csv` with its metadata JSON) | CC BY-SA 4.0 (the data set's metadata `rightsList`, DOI 10.25039/CIE.DS.nxsqeri8, verified 2026-10-09) | The lab observer every cone color converts through (engine build A2; PI, A2 Q3; ADR-0012). Never modified; read only when its sha256 is the CIE's |
 | CIE cone-fundamental-based tristimulus values XYZ_F,10 (data, `wl_xcon/cie/CIE_cfb_stv_10deg.csv` with its metadata JSON) | CC BY-SA 4.0 (its metadata, DOI 10.25039/CIE.DS.dm6qiig7, verified 2026-10-09) | What a test holds the CIE's LMS-to-XYZ_F,10 matrix to (A2 Q2); never read at runtime |
+| Stockman-Sharpe 2° cone fundamentals (data, exported from colour-science 0.4.7 as `wl_xcon/cie/stockman_sharpe_2deg.csv`) | BSD-3-Clause as colour-science distributes it (its wheel's `LICENSE` and `cmfs.py`'s `__license__`, read 2026-11-07); the data's own licence, from CVRL, UNVERIFIED (no grant stated; ADR-0012) | Macaque luminance, L + M at L:M 1, for color sets (the pop-out search plan, Task 2; COL-37; ADR-0012, amended 2026-11-07): the table wl-style's isohue set was computed with. Read only when its sha256 is the export's |
 | `pyjwt[crypto]` >= 2.10.1 (signin extra) | MIT (pypi.org/pypi/pyjwt/json `.info.license_expression`, 2.15.1, verified 2026-10-02) | Verifies a wl.works access token offline on the rig: RS256 against wl.works' published keys, audience, issuer and expiry (P4d-2b b2b spec §5). 2.10.1 is the floor because 2.10.0 compared a string issuer as a substring (read from its wheel, 2026-10-02) |
 | `cryptography` (via `pyjwt[crypto]`) | Apache-2.0 OR BSD-3-Clause (pypi.org/pypi/cryptography/json `.info.license_expression`, 50.0.2, verified 2026-10-02) | PyJWT's RSA backend; also generates the tests' throwaway keys and certificates |
 | `playwright` >= 1.63 (browser extra, tests only) | Apache-2.0 (pypi.org/pypi/playwright/json `.info.license_expression`, 1.63.0, verified 2026-10-02) | Drives the console page's script in headless Chromium (b2b spec §8, XC-186). Never installed on a rig |

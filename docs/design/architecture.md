@@ -692,6 +692,21 @@ turns each pixel into output levels through the calibration's measured, black-su
 `check`'s `unrealizable-color` warning names (the PI, 2026-10-11, XC-352's A20). Each session's `config.json` records
 the observer, how its cone colors converted and which luminance their isoluminance held.
 
+**Color sets, since the pop-out search build (2026-11-07).** A `ColorSet` (`wl_xcon/photometry.py`)
+is plain data, named CIE 1931 chromaticities with an apex and a luminance, read from a file beside
+its task (wl-xtasks' `stimuli/`), and a `ColorSetLight` is one of its colors as an absolute light,
+so it runs on the black background, where no cone color does. `photometry.realize` puts the set on
+the session's calibration with each color's **macaque luminance**, L + M at L:M 1 on the
+Stockman-Sharpe 2° fundamentals (`cones.macaque_luminance`; the table exported from colour-science
+and read only when its sha256 is the export's, ADR-0012 amended 2026-11-07), equal to a D65
+light's at the set's cd/m², 15 on every rig (the PI, 2026-11-07; COL-37): through the primaries'
+spectra on a measured record, through wl-style's model of the sRGB primaries on the default and on
+a record without spectra, with a warning there (`color-set-without-spectra`). A panel that cannot
+show the whole set moves every color toward the apex by one shared share, never dimming or
+clipping one, and `check` warns by how much (`color-set-desaturated`); one that cannot show even the
+apex refuses it. The set is realized at load, once per calibration, never in a frame. Cone colors
+still convert through the lab observer and hold V_F,10.
+
 ## Neural plane and stimulation
 
 Both systems record; either may gate the loop; **Intan always stimulates.**

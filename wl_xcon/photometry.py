@@ -14,6 +14,13 @@ through the calibration: a measured one's primaries' spectra, or the standard's 
 matrix. A measured record without spectra converts none, and isoluminance needs a
 measured calibration (`check`; engine spec §7.3).
 
+**A color set** (`ColorSet`, `ColorSetLight`; the pop-out search plan, Task 2) is the other way
+to hold colors equal: absolute lights at given chromaticities, each at the **macaque luminance**
+(L + M at L:M 1 on the Stockman-Sharpe 2° fundamentals, `cones.macaque_luminance`) of a D65 light
+at the set's cd/m² on the rig's own panel (`realize`), so it runs on black. A panel that cannot
+show them all moves every one toward the set's apex by one shared share, never dimming or
+clipping one, and `check` warns by how much.
+
 **No measured calibration for our panels exists yet** (build J measures one). Until a
 rig names one, sessions run on `SRGB`, the sRGB standard, and the warnings list says so
 (engine spec §7.1, build B). A measured one is a JSON record (`read_calibration`),
@@ -27,8 +34,10 @@ import math
 import os
 import re
 import stat
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date
+from types import MappingProxyType
 
 
 @dataclass(frozen=True, slots=True)
@@ -631,6 +640,8 @@ def unrealizable(color: Color, panel: Calibration, background: xyY | None = None
             xyz = cone_xyz(color, panel, background)
         elif isinstance(color, xyY):
             xyz = _XYZ(color)
+        elif isinstance(color, ColorSetLight):
+            xyz = colorset_xyz(color, panel)
         else:
             return None
         weights = panel.weights_of(xyz)
@@ -643,6 +654,315 @@ def unrealizable(color: Color, panel: Calibration, background: xyY | None = None
             f"chromaticity nor the requested luminance"
         )
     return None
+
+
+#: **The one luminance a color set holds** (the pop-out search plan, Task 2; the PI, 2026-11-07:
+#: "wl-style's 2-degree set"): macaque luminance, L + M at L:M 1 on the Stockman-Sharpe 2° cone
+#: fundamentals (`cones.macaque_luminance`), beside the lab observer's V_F,10, which cone colors keep.
+MACAQUE_2DEG_LM1 = "macaque_2deg_LM1"
+
+#: **Macaque luminance where a calibration has no spectra** (the sRGB standard; one measured
+#: without them): wl-style's model of the sRGB primaries, each primary's spectrum Mallett and
+#: Yuksel's (2019) sRGB basis times D65 (not in this repository's library), integrated against the
+#: 2° fundamentals at L:M 1, as a functional on CIE 1931 XYZ in cd/m², scaled so a D65 light gives
+#: its own cd/m². Computed 2026-11-07 by wl-style's own `conelum.lum_functional('macaque_equal')`
+#: under colour-science 0.4.7; wl-style's REPRODUCIBILITY.md §2.2 prints it to four places,
+#: −0.0527 X + 1.0111 Y + 0.0358 Z. **The CIE's 2° matrix inverted, as COL-18 converts cone colors
+#: on the default, does not reproduce wl-style's set**: its four sRGB previews then differ from their
+#: gray by up to 4.2% (the purple), where wl-style's model holds them within 0.4% (computed
+#: 2026-11-07).
+SRGB_MACAQUE = (-0.052719724350645765, 1.0111012781760944, 0.035816738164978705)
+#: How that model is said in a warning.
+MACAQUE_WITHOUT_SPECTRA = (
+    "wl-style's model of the sRGB primaries (smooth spectra that reproduce their chromaticities), "
+    "applied to the light's CIE 1931 XYZ, a model and not a measurement"
+)
+
+
+def macaque_row(panel: Calibration) -> tuple[float, float, float]:
+    """The functional on CIE 1931 XYZ (cd/m²) that gives a light's macaque luminance on `panel`,
+    **in the cd/m² of the D65 light it equals**: a D65 light at c cd/m² gives c. **Measured with
+    spectra**: each primary's macaque luminance from its spectrum (`cones.macaque_luminance`) times
+    the inverse of the primaries' measured XYZ -- exact for every mixture of the three, which is
+    every light the panel makes, as `Calibration.cones` is for the lab observer. **Without spectra**:
+    `SRGB_MACAQUE`, wl-style's model of the sRGB primaries."""
+    from wl_xcon import cones
+
+    if panel.standard or panel.spectra is None:
+        return SRGB_MACAQUE
+    s = panel.spectra
+    each = [cones.macaque_luminance((s.nm, getattr(s, c))) for c in _CHANNELS]
+    xyz = tuple(tuple(_XYZ(p)[i] for p in (panel.red, panel.green, panel.blue)) for i in range(3))
+    inverse = _inverse3(xyz)
+    raw = tuple(sum(each[k] * inverse[k][i] for k in range(3)) for i in range(3))
+    scale = sum(r * v for r, v in zip(raw, _XYZ(xyY(D65[0], D65[1], 1.0))))
+    if not scale > 0.0:
+        raise ValueError(
+            f"calibration {panel.id or panel.measured_on}'s spectra give a D65 light no positive "
+            f"macaque luminance, so no light on it can be matched to one"
+        )
+    return (raw[0] / scale, raw[1] / scale, raw[2] / scale)
+
+
+def macaque_cd_m2(xyz, panel: Calibration) -> float:
+    """A light's macaque luminance on `panel` (`macaque_row`), CIE XYZ in cd/m² given, **in the
+    cd/m² of the D65 light whose macaque luminance it equals**."""
+    row = macaque_row(panel)
+    return sum(r * float(v) for r, v in zip(row, xyz))
+
+
+def _chromaticity(value: object, what: str) -> tuple[float, float]:
+    """A pair of finite numbers that is a chromaticity some light has: x 0 or above, y above 0,
+    x + y at most 1 (within `TOLERANCE`)."""
+    if not (isinstance(value, (tuple, list)) and len(value) == 2
+            and all(_finite_number(v) for v in value)):
+        raise ValueError(f"{what} is {value!r}, not a CIE 1931 chromaticity, two numbers x and y")
+    x, y = float(value[0]), float(value[1])
+    if not (x >= 0.0 and y > 0.0 and x + y <= 1.0 + TOLERANCE):
+        raise ValueError(
+            f"{what} is ({x:g}, {y:g}), a chromaticity no light has: x is 0 or above, y above 0 "
+            f"and x + y at most 1"
+        )
+    return (x, y)
+
+
+#: The largest color-set file read, in bytes: 64 KiB. wl-style's four colors take under 1 KiB.
+COLORSET_LIMIT = 64 * 1024
+#: A color-set file's fields: these always, and `COLORSET_OPTIONAL` when given; no other.
+COLORSET_FIELDS = ("name", "colors", "apex")
+COLORSET_OPTIONAL = ("luminance_cd_m2", "held", "source")
+
+
+@dataclass(frozen=True, slots=True)
+class ColorSet:
+    """**Colors held equal in macaque luminance** (the pop-out search plan, Task 2; its spec, §3.2):
+    each named color's CIE 1931 chromaticity, the `apex` they lose chroma toward together where a
+    panel cannot show them all (`realize`), and how bright each is, `luminance_cd_m2`, **read as the
+    macaque luminance of a D65 light at that many cd/m²** -- the controller's reading of the PI's
+    "15 cd/m² on every rig" (2026-11-07): a color's own CIE luminance differs from it, wl-style's
+    blue's by 7% on the sRGB standard. Only `MACAQUE_2DEG_LM1` is held. Plain data, read from its
+    file (`load`); `source` says where its numbers came from."""
+
+    name: str
+    #: Each color's (x, y), by its name, in the order given.
+    colors: Mapping[str, tuple[float, float]] = field(hash=False)
+    apex: tuple[float, float]
+    luminance_cd_m2: float = 15.0
+    held: str = MACAQUE_2DEG_LM1
+    source: str = ""
+
+    def __post_init__(self) -> None:
+        if not (isinstance(self.name, str) and self.name.strip() and self.name.isprintable()):
+            raise ValueError(f"a color set's name is printable text, not {self.name!r}")
+        if not (isinstance(self.colors, Mapping) and self.colors):
+            raise ValueError(f"color set {self.name!r} names its colors, at least one, by name")
+        colors = {}
+        for color, xy in self.colors.items():
+            if not (isinstance(color, str) and color.strip() and color.isprintable()):
+                raise ValueError(f"color set {self.name!r} names a color {color!r}, not text")
+            colors[color] = _chromaticity(xy, f"color set {self.name!r}'s color {color!r}")
+        object.__setattr__(self, "colors", colors)
+        object.__setattr__(self, "apex", _chromaticity(self.apex, f"color set {self.name!r}'s apex"))
+        luminance = self.luminance_cd_m2
+        if not (_finite_number(luminance) and luminance > 0.0):
+            raise ValueError(
+                f"color set {self.name!r}'s luminance_cd_m2 is {luminance!r}; it is a number of "
+                f"cd/m² above 0"
+            )
+        object.__setattr__(self, "luminance_cd_m2", float(luminance))
+        if self.held != MACAQUE_2DEG_LM1:
+            raise ValueError(
+                f"color set {self.name!r} holds {self.held!r}; the luminance a color set holds is "
+                f"{MACAQUE_2DEG_LM1!r}, L + M at L:M 1 on the Stockman-Sharpe 2° fundamentals"
+            )
+        if not isinstance(self.source, str):
+            raise ValueError(f"color set {self.name!r}'s source is text")
+
+    def __repr__(self) -> str:
+        return f"ColorSet({self.name!r}, {', '.join(self.colors)})"
+
+    @classmethod
+    def load(cls, path) -> "ColorSet":
+        """A color set from its plain-data file, JSON (Task 9's `stimuli/isohue.json` in wl-xtasks):
+        `name`, `colors` (each name's `[x, y]`) and `apex` (`[x, y]`), and `luminance_cd_m2`,
+        `held` and `source` where given. **Fills in nothing else**: a missing field, one a color
+        set does not have or one given twice raises `ValueError` naming it, as does a value that is
+        not what its field holds. Only a regular file is read, opened without waiting, as
+        `read_calibration` reads a record; one that cannot be read raises `OSError`. Read at load,
+        never in a frame."""
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        try:
+            mode = os.fstat(descriptor).st_mode
+            if not stat.S_ISREG(mode):
+                raise ValueError(f"{path} is {_kind(mode)}, not a regular file, so it was not read")
+            file = os.fdopen(descriptor, "rb")
+        except BaseException:
+            os.close(descriptor)
+            raise
+        with file:
+            raw = file.read(COLORSET_LIMIT + 1)
+        if len(raw) > COLORSET_LIMIT:
+            raise ValueError(f"{path} is larger than {COLORSET_LIMIT} bytes, which no color set needs")
+        try:
+            data = json.loads(raw.decode("utf-8"), object_pairs_hook=_once_each)
+        except (json.JSONDecodeError, UnicodeDecodeError, RecursionError) as error:
+            raise ValueError(f"{path} is not JSON ({error})") from error
+        if not isinstance(data, dict):
+            raise ValueError(f"{path} is not one JSON object, which a color set's file is")
+        missing = [name for name in COLORSET_FIELDS if name not in data]
+        if missing:
+            raise ValueError(f"{path} has no {', '.join(missing)}")
+        extra = sorted(set(data) - set(COLORSET_FIELDS) - set(COLORSET_OPTIONAL))
+        if extra:
+            raise ValueError(f"{path} has {', '.join(extra)}, which a color set's file does not")
+        if not isinstance(data["colors"], dict):
+            raise ValueError(f"{path}'s colors are a JSON object, each name's [x, y]")
+        return cls(**data)
+
+
+@dataclass(frozen=True, slots=True)
+class ColorSetLight(Color):
+    """**One color of a `ColorSet`, as a light** (the pop-out search plan, Task 2): absolute, so it
+    runs on the default black background, where no cone color does. Its chromaticity is the set's
+    color -- moved toward the set's apex with all the others where the panel needs it -- and its
+    macaque luminance `fraction` times the set's, that of a D65 light at `fraction` times
+    `luminance_cd_m2` cd/m² (`realize`). `fraction` may be a parameter (Fade-in's distractors):
+    `screen.resolve` binds it, and `check` reads each value it can take."""
+
+    colorset: ColorSet
+    color: str
+    fraction: object = 1.0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.colorset, ColorSet):
+            raise ValueError(f"a color-set light's colorset is a ColorSet, not {self.colorset!r}")
+        if not (isinstance(self.color, str) and self.color in self.colorset.colors):
+            raise ValueError(
+                f"color set {self.colorset.name!r} has no color {self.color!r}; it has "
+                f"{', '.join(self.colorset.colors)}"
+            )
+
+    def __repr__(self) -> str:
+        return f"ColorSetLight({self.colorset.name!r}, {self.color!r}, fraction={self.fraction!r})"
+
+
+@dataclass(frozen=True, slots=True)
+class Realized:
+    """A color set on one panel (`realize`), at the set's full luminance."""
+
+    #: Each color's output levels, red, green and blue, each 0 to 1: the primary weights that make
+    #: its light, read back through the panel's measured transfer (`exact.inverse_transfer`).
+    drive: Mapping[str, tuple[float, float, float]]
+    #: The share of its distance from the apex in CIE 1931 xy that every color gave up so all fit:
+    #: 0 when the panel shows the set as written.
+    desaturation: float
+    #: Each color's chromaticity as shown.
+    xy: Mapping[str, tuple[float, float]]
+    #: Each color's light, CIE XYZ in cd/m².
+    xyz: Mapping[str, tuple[float, float, float]]
+
+
+#: How finely `realize` finds the shared share: the last width of each color's bisection.
+DESATURATION_STEP = 1e-9
+
+
+def realize(colorset: ColorSet, calibration: Calibration) -> Realized:
+    """**A color set on a panel** (the pop-out search spec, §3.2): each color at its chromaticity
+    and at the set's macaque luminance on this panel (`macaque_row`). **A panel that cannot show
+    them all there** has every color give up the same share of its distance from the apex in xy
+    (`Realized.desaturation`), the smallest that brings all of them inside the gamut, so their
+    luminance holds and no color is clipped (the spec's "all four lose chroma together, never
+    luminance"). At one luminance the lights a panel makes form a convex set, so each color fits from
+    its own share to the apex; each share is found by bisection and the largest taken (the plan's
+    call). **Raises `ValueError` when the panel cannot show even the apex at that luminance**: no
+    loss of chroma helps, and a dimmer set is a person's choice. At load or between trials, never in
+    a frame: `colorset_xyz` keeps what it returns."""
+    from wl_xcon import exact
+
+    row = macaque_row(calibration)
+    target = colorset.luminance_cd_m2
+    panel = calibration.id or calibration.measured_on
+
+    def light(xy) -> tuple[float, float, float]:
+        x, y = xy
+        unit = (x / y, 1.0, (1.0 - x - y) / y)
+        per = sum(r * u for r, u in zip(row, unit))
+        if not per > 0.0:
+            raise ValueError(
+                f"on calibration {panel}, chromaticity ({x:g}, {y:g}) of color set "
+                f"{colorset.name!r} has no positive macaque luminance"
+            )
+        return (unit[0] * target / per, target / per, unit[2] * target / per)
+
+    def fits(xy) -> bool:
+        return all(-TOLERANCE <= w <= 1.0 + TOLERANCE
+                   for w in calibration.weights_of(light(xy)))  # NaN fails closed
+
+    def toward(xy, share: float) -> tuple[float, float]:
+        (x, y), (ax, ay) = xy, colorset.apex
+        return (x + share * (ax - x), y + share * (ay - y))
+
+    if not fits(colorset.apex):
+        raise ValueError(
+            f"calibration {panel} cannot show color set {colorset.name!r}'s apex "
+            f"({colorset.apex[0]:g}, {colorset.apex[1]:g}) at {target:g} cd/m² of macaque "
+            f"luminance, so no loss of chroma brings the set inside its gamut; a lower "
+            f"luminance_cd_m2 would"
+        )
+    shares = {}
+    for color, xy in colorset.colors.items():
+        low, high = 0.0, 1.0
+        if fits(xy):
+            high = 0.0
+        while high - low > DESATURATION_STEP:
+            middle = (low + high) / 2.0
+            low, high = (low, middle) if fits(toward(xy, middle)) else (middle, high)
+        shares[color] = high
+    share = max(shares.values())
+    xys = {color: toward(xy, share) for color, xy in colorset.colors.items()}
+    xyzs = {color: light(xy) for color, xy in xys.items()}
+    drive = {}
+    for color, xyz in xyzs.items():
+        weights = calibration.weights_of(xyz)
+        drive[color] = tuple(
+            float(exact.inverse_transfer(transfer, min(max(w, 0.0), 1.0)))
+            for transfer, w in zip(calibration.transfer, weights))
+    return Realized(drive=MappingProxyType(drive), desaturation=share,
+                    xy=MappingProxyType(xys), xyz=MappingProxyType(xyzs))
+
+
+#: Each color set realized on each calibration, by the two objects' identities and holding both,
+#: so a frame's `screen.resolve` reads a set's lights rather than realizing it again: at most
+#: `_REALIZED_KEPT`, the oldest forgotten first.
+_REALIZED: dict = {}
+_REALIZED_KEPT = 8
+
+
+def realized(colorset: ColorSet, calibration: Calibration) -> Realized:
+    """`realize`, once per color set and calibration (`_REALIZED`)."""
+    key = (id(colorset), id(calibration))
+    kept = _REALIZED.get(key)
+    if kept is not None and kept[0] is colorset and kept[1] is calibration:
+        return kept[2]
+    made = realize(colorset, calibration)
+    if len(_REALIZED) >= _REALIZED_KEPT:
+        _REALIZED.pop(next(iter(_REALIZED)))
+    _REALIZED[key] = (colorset, calibration, made)
+    return made
+
+
+def colorset_xyz(light: ColorSetLight, calibration: Calibration) -> tuple[float, float, float]:
+    """CIE XYZ, Y in cd/m², of a color-set light on `calibration`: its color as the set is realized
+    there (`realized`), times its `fraction`, which is bound to a number first (`screen.resolve`;
+    `check` reads each value it can take)."""
+    fraction = light.fraction
+    if not _finite_number(fraction) or fraction < 0.0:
+        raise ValueError(
+            f"{light}'s fraction is {fraction!r}: a parameter is bound, or read at each value it "
+            f"can take, and a fraction of the set's luminance is a number, 0 or above"
+        )
+    X, Y, Z = realized(light.colorset, calibration).xyz[light.color]
+    return (fraction * X, fraction * Y, fraction * Z)
 
 
 #: A calibration record's fields, each required and no other but `RECORD_OPTIONAL` (Question 4:

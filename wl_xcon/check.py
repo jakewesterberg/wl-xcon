@@ -35,12 +35,15 @@ from wl_xcon.photometry import (
     D65,
     DKL,
     HELD_STANDARD,
+    MACAQUE_WITHOUT_SPECTRA,
     Calibration,
     Color,
+    ColorSetLight,
     ConeContrast,
     Gray,
     background_cones,
     luminance_contrast,
+    realized,
     unrealizable,
     xyY,
 )
@@ -3742,6 +3745,58 @@ def _color_faults(trial: Trial, panel: Calibration | None) -> list[Finding]:
         findings += _default_faults(trial, params)
     if panel is not None and not panel.standard and panel.spectra is None:
         findings += _spectra_faults(trial, params, panel)
+    if panel is not None:
+        findings += _color_set_faults(trial, params, panel)
+    return findings
+
+
+def _color_set_faults(trial: Trial, params: dict[str, Param], panel: Calibration) -> list[Finding]:
+    """What a panel does to a task's color sets (the pop-out search plan, Task 2; its spec, §3.2).
+    **A set it cannot show as written** is shown with every color moved toward the set's apex by
+    one share (`photometry.realize`): **one warning per set, in every session kind**, naming the
+    share lost and the colors as shown, since a desaturated set is still the set, equal in
+    luminance and unclipped, but less saturated than asked (the spec: "the load check warns saying
+    by how much"). A set whose apex the panel cannot show at all is refused where its lights are
+    checked (`unrealizable-color`). **On a calibration measured without spectra**, macaque
+    luminance is wl-style's model of the sRGB primaries, as on the default: a warning in every
+    kind, as cone colors have there (`cone-colors-without-spectra`)."""
+    sets: list[tuple] = []
+    for what, color in _colors(trial, params):
+        if not isinstance(color, ColorSetLight):
+            continue
+        for colorset, whats in sets:
+            if colorset == color.colorset:
+                if what not in whats:
+                    whats.append(what)
+                break
+        else:
+            sets.append((color.colorset, [what]))
+    findings: list[Finding] = []
+    name = panel.id or panel.measured_on
+    for colorset, whats in sets:
+        try:
+            shown = realized(colorset, panel)
+        except ValueError:
+            continue  # refused where its lights are checked (`_one_color`)
+        if shown.desaturation > 0.0:
+            findings.append(Finding("color-set-desaturated", (
+                f"calibration {name} cannot show color set {colorset.name!r} as written at "
+                f"{colorset.luminance_cd_m2:g} cd/m² of macaque luminance, so every color in it "
+                f"gives up {100 * shown.desaturation:.1f}% of its distance from the apex "
+                f"({colorset.apex[0]:.4f}, {colorset.apex[1]:.4f}) in CIE 1931 xy, together: their "
+                f"luminance holds and none is clipped, but each is less saturated than asked "
+                f"(the pop-out search spec §3.2); shown as "
+                f"{', '.join(f'{c} x={x:.4f}, y={y:.4f}' for c, (x, y) in shown.xy.items())}; "
+                f"asked for by {'; '.join(whats)}"),
+                blocking=False, accepted_in=SESSION_KINDS))
+    if sets and not panel.standard and panel.spectra is None:
+        findings.append(Finding("color-set-without-spectra", (
+            f"calibration {name} was measured without spectra, so this task's color-set lights "
+            f"hold their macaque luminance (L + M at L:M 1, Stockman-Sharpe 2°) through "
+            f"{MACAQUE_WITHOUT_SPECTRA}, whose fit to this panel is unknown: they are equal in "
+            f"macaque luminance only nominally; the lights it names: "
+            f"{'; '.join(what for _, whats in sets for what in whats)}"),
+            blocking=False, accepted_in=SESSION_KINDS))
     return findings
 
 
@@ -3994,6 +4049,9 @@ def _lights(color, params: dict[str, Param]) -> list:
     if isinstance(color, ConeContrast):
         return [ConeContrast(L, M, S) for L, M, S in itertools.product(
             *(_reach(v, params) for v in (color.L, color.M, color.S)))]
+    if isinstance(color, ColorSetLight):
+        return [ColorSetLight(color.colorset, color.color, fraction)
+                for fraction in _reach(color.fraction, params)]
     return [color]
 
 
@@ -4091,7 +4149,7 @@ def _clipped(light, panel: Calibration, background=None) -> "tuple[tuple, str] |
     import numpy as np
 
     from wl_xcon import exact
-    from wl_xcon.photometry import cone_xyz, to_xyz
+    from wl_xcon.photometry import colorset_xyz, cone_xyz, to_xyz
 
     try:
         if isinstance(light, CONE_COLORS):
@@ -4100,6 +4158,8 @@ def _clipped(light, panel: Calibration, background=None) -> "tuple[tuple, str] |
             xyz = cone_xyz(light, panel, background)
         elif isinstance(light, xyY):
             xyz = to_xyz(light)
+        elif isinstance(light, ColorSetLight):
+            xyz = colorset_xyz(light, panel)
         else:
             return None
         weights = tuple(round(float(w), 3) for w in panel.weights_of(xyz))
@@ -4123,8 +4183,13 @@ def _default_faults(trial: Trial, params: dict[str, Param]) -> list[Finding]:
     default's cone colors converted and which luminance they held."""
     findings = []
     colors = [(what, color) for what, color in _colors(trial, params)
-              if isinstance(color, (xyY, *CONE_COLORS))]
+              if isinstance(color, (xyY, ColorSetLight, *CONE_COLORS))]
     named = sorted({what for what, _ in colors})
+    # A color set's lights hold macaque luminance through a model on the default (Task 2 of the
+    # pop-out search plan), said before the colors' names, which nothing bounds.
+    sets = (f"; its color-set lights hold their macaque luminance through "
+            f"{MACAQUE_WITHOUT_SPECTRA}"
+            if any(isinstance(color, ColorSetLight) for _, color in colors) else "")
     if named and any(isinstance(color, CONE_COLORS) for _, color in colors):
         # 2026-10-08's Q2 (COL-18): the default's cone colors convert through the CIE's matrix
         # outside its definition, and the warning a person accepts says so, and which luminance
@@ -4137,15 +4202,15 @@ def _default_faults(trial: Trial, params: dict[str, Param]) -> list[Finding]:
             "the CIE's LMS-to-XYZ_F,10 matrix, a use outside the CIE's definition, so how far "
             "each is from the cone contrast it names is unknown, and the luminance they hold "
             f"constant is {HELD_STANDARD}; every color in the data is nominal, and the "
-            f"session's config.json names the default calibration; the colors it names: "
+            f"session's config.json names the default calibration{sets}; the colors it names: "
             f"{'; '.join(named)}"),
             blocking=False, accepted_in=SESSION_KINDS))
     elif named:
         findings.append(Finding("color-on-default", (
             f"the default calibration is the sRGB standard, measured by nobody, so every color "
             f"this task names is nominal, in a recording as in training, and the session's "
-            f"config.json names the default calibration (engine spec §7.2); the colors it names: "
-            f"{'; '.join(named)}"),
+            f"config.json names the default calibration (engine spec §7.2){sets}; the colors it "
+            f"names: {'; '.join(named)}"),
             blocking=False, accepted_in=SESSION_KINDS))
     set_by = _parameter_lights(trial, params)
     if set_by:
@@ -4709,7 +4774,7 @@ def _block_faults(trial: Trial) -> list[Finding]:
             if f.name in _NUMBERS:
                 kind(f"{name}.{f.name}", raw,
                      lambda v, f=f: _is_number(v) or (v is None and f.default is None), "a number")
-            if f.name in _LIGHTS:
+            if f.name in _LIGHTS and not isinstance(part, ColorSetLight):
                 kind(f"{name}.{f.name}", raw, light, "a color")
             if f.name in _SIZES:
                 first([(v, f"{said}; a size is a positive full width in degrees")
@@ -4725,6 +4790,12 @@ def _block_faults(trial: Trial) -> list[Finding]:
                    for v, said in values(part, "value")], lambda v: v < -1.0)
         if isinstance(part, Gray):
             first([(v, f"{said}: negative light") for v, said in values(part, "cd_m2")],
+                  lambda v: v < 0.0)
+        if isinstance(part, ColorSetLight):
+            # Its `color` was held to its set's names when it was made; its share of the set's
+            # luminance is a number, 0 or above (the pop-out search plan, Task 2).
+            kind(f"{name}.fraction", part.fraction, _is_number, "a number")
+            first([(v, f"{said}: negative light") for v, said in values(part, "fraction")],
                   lambda v: v < 0.0)
         if isinstance(part, xyY):
             for attr in ("x", "y", "Y"):
