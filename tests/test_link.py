@@ -645,6 +645,45 @@ def test_a_link_refuses_to_bind_where_other_hosts_can_reach_it():
         raise AssertionError("a remote REP endpoint was bound without being asked for")
 
 
+def _command_kinds() -> list[str]:
+    """Every command kind the link accepts, read from `Command`'s own members, so a kind
+    added later is in it without anyone editing this list."""
+    import typing
+
+    import wl_xcon.link as link_module
+
+    return [member.KIND for member in typing.get_args(link_module.Command)]
+
+
+def test_a_remote_bind_refusal_names_every_command_the_link_accepts_and_both_flags():
+    """XC-172: the refusal listed a few commands and named `wlx run --link-allow-remote`
+    alone, though the REP socket also takes (read from `Command`, not from a list here)
+    open and end sessions, start runs, and engine build C3's `hand_back`, `range` and
+    `revert`, and `wlx taskd` takes the same flag. A host that could reach the port could
+    send any of them under an invented name, so the sentence an operator reads before
+    passing the flag says all of them: each kind by its wire name, and which service
+    acts on it."""
+    with pytest.raises(RemoteBindRefused) as refused:
+        ZmqLink(pub_endpoint="tcp://127.0.0.1:0", rep_endpoint="tcp://0.0.0.0:0")
+    said = " ".join(str(refused.value).split())
+
+    kinds = _command_kinds()
+    assert len(kinds) >= 21, "the kinds were read from the code, and there are at least these"
+    for kind in kinds:
+        assert f"`{kind}`" in said, f"the refusal does not name the {kind!r} command"
+    assert "`wlx run`" in said and "`wlx taskd`" in said, "it says which service takes which"
+    assert "--link-allow-remote to `wlx run` or to `wlx taskd`" in said, "both flags are named"
+    assert "reward volume" in said
+
+
+def test_every_command_the_refusal_describes_is_one_the_link_accepts():
+    """The table the sentence is built from has no kind `Command` lacks: a command taken
+    out leaves no description of one the link no longer accepts."""
+    import wl_xcon.link as link_module
+
+    assert set(link_module._COMMAND_EXPOSURE) == set(_command_kinds())
+
+
 def test_which_endpoints_count_as_leaving_this_machine():
     """The classification on its own, with no socket involved, because some of the
     cases cannot be bound on every machine and binding is not what is being checked.

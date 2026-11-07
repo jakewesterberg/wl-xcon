@@ -2881,6 +2881,53 @@ class RemoteBindRefused(Exception):
     told to. See `ZmqLink.__init__`'s `allow_remote`."""
 
 
+#: What every command kind the REP socket accepts lets a sender do, for the sentence that
+#: refuses a remote bind (XC-172), keyed by the kind on the wire and in `Command`'s
+#: order: `(service, words)`, `service` being `"both"` for a kind `wlx run` and
+#: `wlx taskd` act on (in a run, or between runs where the words say so) and `"taskd"`
+#: for a kind only `wlx taskd` acts on and a `wlx run` session refuses
+#: (`taskd.Session._command`, `service._SERVICE_COMMANDS`). **A kind missing here is
+#: left out of the refusal**, and `test_link.py` fails on one: it derives the kinds from
+#: `Command`'s own members.
+_COMMAND_EXPOSURE = {
+    "set": ("both", "change a setting, a reward volume among them"),
+    "stop": ("both", "stop the session"),
+    "pause": ("both", "pause the session"),
+    "resume": ("both", "resume it"),
+    "mark": ("both", "put a mark's note on the record"),
+    "schedule": ("both", "schedule a stop"),
+    "cancel": ("both", "cancel a scheduled stop"),
+    "reward": ("both", "give a manual reward, while paused or, in `wlx taskd`, between runs"),
+    "clear": ("both", "clear trials from a condition's count"),
+    "drum": ("both", "switch drumming"),
+    "training": ("both", "switch a training setting"),
+    "next_block": ("both", "move the run on a block"),
+    "back_block": ("both", "move the run back a block"),
+    "hand_back": ("both", "hand a held setting back"),
+    "range": ("both", "change a drawn range"),
+    "revert": ("both", "take the run's settings and ranges back to an earlier change"),
+    "open": ("taskd", "open a session, recording the animal's departure time"),
+    "check": ("taskd", "take a run's pre-flight"),
+    "start": ("taskd", "start a run, acknowledging its unknown pre-flight items"),
+    "end": ("taskd", "end a session, recording the animal's return time"),
+    "resume_session": ("taskd", "resume a stranded session"),
+}
+
+
+def _what_a_command_port_exposes() -> str:
+    """The commands the REP socket accepts, each kind by its wire name with what it does
+    and which service acts on it, as one sentence's worth of words (XC-172): what
+    `ZmqLink.__init__`'s refusal of a remote bind says an unauthenticated host could send.
+    A cold path, built only when a bind is refused."""
+    both = [f"`{kind}` ({words})" for kind, (service, words) in _COMMAND_EXPOSURE.items() if service == "both"]
+    taskd = [f"`{kind}` ({words})" for kind, (service, words) in _COMMAND_EXPOSURE.items() if service == "taskd"]
+    return (
+        f"send any command the link accepts: to a `wlx run` session or a `wlx taskd` run, "
+        f"{', '.join(both)}; and to `wlx taskd` alone, which a `wlx run` session refuses, "
+        f"{', '.join(taskd)}"
+    )
+
+
 #: Transports that cannot leave this machine whatever follows them, so binding on one
 #: is never a remote bind. `inproc` is in-process; `ipc` is a Unix socket on the local
 #: filesystem.
@@ -3118,13 +3165,12 @@ class ZmqLink:
                         f"reachable from other hosts, and a console link has no "
                         f"authentication yet -- `by` is whatever the sender typed, so "
                         f"any host that can reach the REP port can, under an invented "
-                        f"name, change a setting (a reward volume among them), pause "
-                        f"and resume the session, give manual rewards while it is "
-                        f"paused, schedule or cancel a stop, or stop it, and any host "
+                        f"name, {_what_a_command_port_exposes()}, and any host "
                         f"that can reach the mark port can put marks on the record "
                         f"(S9a §6 designs the real thing; it is "
                         f"P4d-3's). Bind on loopback (tcp://127.0.0.1:PORT), or pass "
-                        f"--link-allow-remote / allow_remote=True to say you meant it."
+                        f"--link-allow-remote to `wlx run` or to `wlx taskd` "
+                        f"(allow_remote=True in code) to say you meant it."
                     )
 
         self._ctx = zmq.Context()
