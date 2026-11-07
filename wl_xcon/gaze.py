@@ -44,8 +44,9 @@ a `SaccadeTo` the in-flight rule is the whole rule**, and XC-410's "it must star
 now governs only a `SaccadeOnset`, which a carried saccade never satisfies (review 9 of the
 saccade rules, its I1, 2026-11-07). One whose eye stopped before the state's first frame landed in
 the state before and counts for nothing there (the controller's ruling on the review's I1); a
-further transition while it is still in flight carries it on. **The PI is asked (2026-11-07)
-whether a `SaccadeTo` should count so**; until he answers it is built so. So an intrasaccadic
+further transition while it is still in flight carries it on. **The PI answered (2026-11-07,
+asked in the UI)**, whether a state that waits for a saccade to the target counts any saccade
+whose eye stops there, wherever its onset fell: "Yes, count where it lands (Recommended)". So an intrasaccadic
 displacement, at once or delayed, is scored where the eye lands ("Yes, that one saccade carries";
 "Yes, carry it too"), so is the saccade that takes the eye out of a window (2026-11-04, "Carry it
 over"; 2026-11-06, "Yes, count it"), and so is an anticipation begun just before the go cue when
@@ -126,8 +127,9 @@ def _untold(state: str, told: "str | None") -> NoReturn:
     asks."""
     raise RuntimeError(
         f"state {state!r} was asked about a saccade, and this world was told only that "
-        f"{told!r} began: a saccade counts for a state only if it began in it (XC-410), so the "
-        f"loop tells the world each state's first frame (`run.World.began`)"
+        f"{told!r} began: a `SaccadeTo` counts a saccade whose eye stops in its state and a "
+        f"`SaccadeOnset` one that begins in it (XC-410), so the loop tells the world each "
+        f"state's first frame (`run.World.began`)"
     )
 
 
@@ -404,8 +406,8 @@ class Tracked:
         # is the stereoscope calibration task's to settle (XC-005).
         return separation_deg(x, y, cx, cy) <= radius
 
-    def began(self, state: str, frame: int, by: "Guard | None") -> None:
-        """State `state` began, `frame` its first, entered by `by` (`run.World.began`): from now on
+    def began(self, state: str, frame: int) -> None:
+        """State `state` began, `frame` its first (`run.World.began`): from now on
         a saccade counts for a `SaccadeOnset` only if its onset is on `frame` or after (XC-410),
         and for a `SaccadeTo` if it began here **or was in flight as the state began**, for its
         landing alone (the PI, 2026-11-06, asked whether a state that itself waits for the go
@@ -414,9 +416,9 @@ class Tracked:
         same whichever way the task is written: a saccade already under way at the go cue counts
         where it lands. The rule that a saccade counts only in the state it began in gets one
         exception: a saccade in flight when the go cue's state begins."). Which state is the go
-        cue's this world cannot know, so it is any state, **whatever edge `by` entered it** -- a
+        cue's this world cannot know, so it is any state, **whatever edge entered it** -- a
         saccade's onset or a timer from one, an `Exited`, an `Entered`, a timer from the state's
-        entry, any other -- and `by` is not read.
+        entry, any other -- and it is not told which.
 
         **For a `SaccadeTo` that is the whole rule** (review 9 of the saccade rules, its I1,
         2026-11-07): a stop always follows its onset, so a saccade begun here comes to rest on
@@ -424,9 +426,10 @@ class Tracked:
         `frame` or after, wherever its onset fell. XC-410's "it must start in the state" now
         governs only a `SaccadeOnset`. XC-410's own case, a saccade begun the frame before a plain
         timer's state and landing in it, scored no response until that answer and is scored where
-        it lands since (`tests/test_gaze.py`, the straddle test's `[SaccadeTo]` case). **The PI is
-        asked (2026-11-07) whether a `SaccadeTo` should count so**; until he answers it is built
-        so.
+        it lands since (`tests/test_gaze.py`, the straddle test's `[SaccadeTo]` case). The PI
+        answered on 2026-11-07, asked in the UI whether a state that waits for a saccade to the
+        target counts any saccade whose eye stops there, wherever its onset fell: "Yes, count where
+        it lands (Recommended)".
 
         **In flight as it began**, by this world's own record of the saccade, as the exit carry read
         it (2026-11-06): its onset (`_onset`, the detector's `Saccade.start`) on the transition's

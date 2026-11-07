@@ -336,7 +336,7 @@ def _saccade_source(dwell: int, steps: int, to: tuple[float, float], tail: int =
 def _drive(world, frames: int, frame_period: float = 0.002):
     """Pump the world's own per-frame hook, which is where gaze is polled, through one state, "s",
     begun on the first frame as the loop tells the world (`run.World.began`, XC-410)."""
-    world.began("s", 0, None)
+    world.began("s", 0)
     for frame in range(frames):
         world.display({}, frame)
         yield frame
@@ -1465,7 +1465,8 @@ def test_judging_a_saccade_builds_nothing_in_its_frame():
 
 
 # ---------------------------------------------------------------------------
-# A saccade counts for a state only if it began in it, judged where it landed (XC-410)
+# A saccade counts for a `SaccadeOnset` only if it began in the state, for a `SaccadeTo` where it
+# landed (XC-410; the second since 2026-11-07)
 # ---------------------------------------------------------------------------
 #
 # The PI, 2026-10-30, asked in the UI: "Only during the state" -- only a saccade made while the
@@ -1480,7 +1481,11 @@ def test_judging_a_saccade_builds_nothing_in_its_frame():
 # landing alone (below, after the exit carry); a stop following its onset, that makes a `SaccadeTo`
 # count any saccade whose eye stops on the state's first frame or after, wherever its onset fell,
 # and leaves "it must start in the state" to `SaccadeOnset` alone (review 9 of the saccade rules,
-# its I1, 2026-11-07; the PI is asked that day whether a `SaccadeTo` should count so).
+# its I1, 2026-11-07; the PI answered that day, asked in the UI whether a state that waits for a
+# saccade to the target counts any saccade whose eye stops there, wherever its onset fell: "Yes,
+# count where it lands (Recommended)"). A `SaccadeOnset` counts a saccade that begins in its state
+# (his principle, 2026-11-07: "if it is still in the fix window when the fix dims (go cue), then it
+# is fine"), and the loop tells the world each state's first frame.
 
 #: The array the probes show: four objects 8° out, the target at 90° (`search.1`), each object's
 #: window 1.5° in radius.
@@ -1659,7 +1664,7 @@ def test_a_world_not_told_its_state_began_refuses_to_judge_a_saccade():
 
     with pytest.raises(RuntimeError, match="'s' was asked about a saccade"):
         world.happened(SaccadeOnset(), "s", 1)
-    world.began("s", 2, None)
+    world.began("s", 2)
     world.display({}, 2)
     assert not world.happened(SaccadeTo("cal"), "s", 2)
     with pytest.raises(RuntimeError, match="'t' was asked about a saccade"):

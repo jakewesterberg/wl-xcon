@@ -212,7 +212,7 @@ class _Membership:
     def happened(self, guard, state: str, frame: int) -> bool:
         return False
 
-    def began(self, state: str, frame: int, by) -> None:
+    def began(self, state: str, frame: int) -> None:
         pass
 
     def signal(self, frame: int) -> str:
@@ -481,7 +481,8 @@ def test_each_frame_runs_on_a_frame_the_gaze_signal_was_lost_too():
     assert frames == list(range(1, 21))
 
 
-# --- XC-410: a saccade counts for a state only if it began in it -------------------------------
+# --- XC-410: the world is told each state's first frame (a `SaccadeTo` counts a saccade whose eye
+# stops in its state, a `SaccadeOnset` one that begins in it) ------------------------------------
 
 
 class _Told(Quiet):
@@ -490,18 +491,19 @@ class _Told(Quiet):
     def __init__(self, log: list) -> None:
         object.__setattr__(self, "log", log)
 
-    def began(self, state: str, frame: int, by) -> None:
-        self.log.append((state, frame, by))
+    def began(self, state: str, frame: int) -> None:
+        self.log.append((state, frame))
 
 
 def test_the_world_is_told_the_first_frame_of_every_state_the_trial_enters():
-    """A saccade counts for a state only if it began in that state (the PI, 2026-10-30), so a
-    world that remembers saccades (`gaze.Tracked`) has to know each state's first frame: the frame
-    its guards are first asked on and its entry actions first drawn. The start state's is frame 1;
-    every other's is the frame after the transition that enters it, **a state entered again
-    included**, whose earlier saccades are no more its own than another state's. **And by which
-    guard**, `None` for the start state: the saccade whose onset ends a state carries into the next
-    (the PI, 2026-10-30), so a world must know when a `SaccadeOnset` took the transition."""
+    """A `SaccadeOnset` counts a saccade that began in its state (the PI, 2026-10-30) and a
+    `SaccadeTo` one whose eye stops in its state, wherever its onset fell (the PI, 2026-11-07), so
+    a world that remembers saccades (`gaze.Tracked`) has to know each state's first frame: the
+    frame its guards are first asked on and its entry actions first drawn. The start state's is
+    frame 1; every other's is the frame after the transition that enters it, **a state entered
+    again included**, whose earlier saccades are no more its own than another state's. The edge
+    that entered it is not told (it had been, as `by`, until nothing read it): this test asserted
+    that guard, and now asserts the state and its first frame alone."""
     trial = Trial(
         start="a",
         states=[
@@ -515,5 +517,4 @@ def test_the_world_is_told_the_first_frame_of_every_state_the_trial_enters():
     result = run_trial(trial, world=_Told(log), frame_period=0.01, max_frames=12)
 
     assert result.outcome is None and result.frames == 12
-    assert log == [("a", 1, None), ("b", 4, After(0.03)), ("b2", 6, After(0.02)),
-                   ("b2", 8, After(0.02)), ("b2", 10, After(0.02)), ("b2", 12, After(0.02))]
+    assert log == [("a", 1), ("b", 4), ("b2", 6), ("b2", 8), ("b2", 10), ("b2", 12)]

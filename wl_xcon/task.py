@@ -374,8 +374,9 @@ class SaccadeTo(Guard):
     scored where the eye lands, so is the saccade that leaves fixation, so is one begun just before
     the go cue, whether the cue's own state asks for it or a state the eye leaving fixation enters,
     and so, past the go cue, is one begun just before any state that asks for it, one a plain timer
-    began included: XC-410's own case. **The PI is asked (2026-11-07) whether this guard should
-    count so**; until he answers it is built so."""
+    began included: XC-410's own case. **The PI answered (2026-11-07, asked in the UI)**, whether a
+    state that waits for a saccade to the target counts any saccade whose eye stops there,
+    wherever its onset fell: "Yes, count where it lands (Recommended)"."""
 
     window: str
 
@@ -393,8 +394,15 @@ class SaccadeOnset(Guard):
     before this state, even when the detector confirms it only here. So a state left on a
     `SaccadeOnset` for one that asks where the eye lands waits, through a saccade begun before it,
     for the next. Whether a saccade in flight as a go cue's state began should satisfy that state's
-    `SaccadeOnset` is asked of the PI (2026-11-07, the onset relay); until he answers it does
-    not."""
+    `SaccadeOnset` the PI answered on 2026-11-07 with a principle: "if a saccade starts during a
+    cue, before the go period, that would be an early saccade error"; of a saccade that starts a
+    little before the fixation point goes off, still in the window then: "if it is still in the
+    fix window when the fix dims (go cue), then it is fine". So it does not, as built: a timer
+    that opens a response window after the cue would otherwise count a response already moving as
+    that window's start, an early error where the window calls one. The one way of writing a task
+    where such a saccade does not count, a state a timer or a completed hold begins whose
+    `SaccadeOnset` edge goes on to another state, gets a warning at load (XC-455, not built yet;
+    waits on that item)."""
 
 
 @dataclass(frozen=True, slots=True)

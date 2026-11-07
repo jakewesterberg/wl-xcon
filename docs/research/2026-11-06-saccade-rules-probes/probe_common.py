@@ -95,7 +95,7 @@ def timeline(path, noise=0.02, seed=5, frame_period=FP):
     trial = probe([State("x", enter=[Show(ARRAY)], go=[On(After(10.0), Outcome.ABORT)])])
     world = Tracked(Tracker(), tg._fitted_mapping(), trial, frame_period, {},
                     source=replay(path, noise, seed))
-    world.began("x", 1, None)
+    world.began("x", 1)
     out, cur = [], None
     for frame in range(1, len(path) + 1):
         world.display({}, frame)

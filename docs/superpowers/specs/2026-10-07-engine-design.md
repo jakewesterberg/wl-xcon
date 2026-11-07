@@ -460,9 +460,17 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    or after the state's first frame, wherever its onset fell, and XC-410's "it must start in the
    state" now governs only a `SaccadeOnset`, which a carried saccade never satisfies; XC-410's own
    case, a saccade begun the frame before a plain timer's state and landing in it, scored no
-   response and now scores where it lands. The PI is asked (2026-11-07) whether a `SaccadeTo`
-   should count so, and whether a saccade in flight as a go cue's state begins should satisfy that
-   state's `SaccadeOnset` (the onset relay); until he answers, it is built as this note says.
+   response and now scores where it lands. **The PI answered both on 2026-11-07, asked in the UI**
+   (EYE-19's revision of that day). Whether a state that waits for a saccade to the target counts
+   any saccade whose eye stops there, wherever its onset fell: "Yes, count where it lands
+   (Recommended)". Whether a saccade in flight as a go cue's state begins should satisfy that
+   state's `SaccadeOnset` (the onset relay): he gave a principle, "if a saccade starts during a
+   cue, before the go period, that would be an early saccade error", and of a saccade that starts
+   a little before the fixation point goes off, still in the window then: "if it is still in the
+   fix window when the fix dims (go cue), then it is fine". It is built so, a `SaccadeOnset`
+   keeping to a saccade that begins in its state; a state a timer or a completed hold begins whose
+   `SaccadeOnset` edge goes on to another state gets a warning at load (XC-455, not built yet).
+   The world is told each state's first frame and no longer the edge that entered it.
 8. **Off the field**: only when declared; check 8 grows to test extents (XC-143, XC-144).
 9. **Head-free chaired sessions**: nominal head position, recorded and listed; a task may require a
    fixed head.

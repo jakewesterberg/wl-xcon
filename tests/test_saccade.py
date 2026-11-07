@@ -833,7 +833,7 @@ def test_a_position_that_is_no_number_is_a_lost_sample_in_the_batch_form(at_samp
     world = Tracked(Tracker(staleness=_FRAME / 2),
                     Mapping(version=1, targets=(), left=_IDENTITY, right=_IDENTITY), _RESPOND,
                     _FRAME, {}, source=Replay(payloads=payloads), detector=detector)
-    world.began("respond", 1, None)
+    world.began("respond", 1)
     starts = []
     for frame in range(1, len(gaze) + 1):
         world.display({}, frame)
@@ -869,7 +869,7 @@ def _stopped_in_the_gaze_world(gaze, lost) -> int:
     world = Tracked(Tracker(staleness=_FRAME / 2),
                     Mapping(version=1, targets=(), left=_IDENTITY, right=_IDENTITY), _RESPOND,
                     _FRAME, {}, source=Replay(payloads=payloads))
-    world.began("respond", 1, None)
+    world.began("respond", 1)
     for frame in range(1, len(gaze) + 1):
         world.display({}, frame)
     return world._stopped
