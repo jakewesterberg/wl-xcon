@@ -58,7 +58,10 @@ it, as `tests/conftest.py` looks:
 - C13: every strobed change row has `sequence`, 1, 2, ... in order, and no other row (a clear's, a
   drum or training switch's) has one; its
   code is `PARAM_CHANGED`, strobed once per row; wl-preproc reads the log with no problem and its
-  join times the n-th such row at the n-th code, in the gap before its first trial; the session
+  join times the n-th such row at the n-th code, in the gap before its first trial; since
+  wl-preproc's main 295f9c9 (2026-11-07) a row that strobed nothing is timed through its fit of
+  the rig's clock (each run's rows and the coded rows against a recording that runs with the
+  session's wall, `Recording`), in the same gap to within the fit's own limit; the session
   is resumable (`resume.read`, numbering on from the log) and `stranded.find` lists it resumable.
 
 `control` is a negative control, each of which must report findings in the invariant named:
@@ -120,7 +123,10 @@ from _rig import DIRECT  # noqa: E402
 from wl_preproc.contracts.events import decode_stream  # noqa: E402
 from wl_preproc.events.assemble import assemble  # noqa: E402
 from wl_preproc.events.rigrecords import CHANGES_NAME, read_rig_records  # noqa: E402
-from wl_preproc.events.rigtiming import code_times, time_records  # noqa: E402
+from wl_preproc.events.rigruns import read_rig_runs  # noqa: E402
+from wl_preproc.events.rigtiming import (  # noqa: E402
+    RIG_CLOCK_LIMIT_S, code_times, run_instants, time_records,
+)
 from wl_xcon import record as Rec  # noqa: E402
 from wl_xcon import resume as Resume_  # noqa: E402
 from wl_xcon import scheduler as S  # noqa: E402
@@ -210,6 +216,30 @@ class Wall:
 
     def __call__(self):
         return WALL_NOW + self.follow() + self.extra
+
+
+#: How far after the code before it a code sent at the same instant is placed in the recording.
+WORD_S = 1e-6
+
+
+@dataclasses.dataclass
+class Recording(Card):
+    """The simulated card, each code timed as it is sent, on the session's wall less `WALL_NOW`:
+    the recording C13 reads. A real rig's acquisition records on a clock that runs with the rig's,
+    and since wl-preproc's main 295f9c9 (2026-11-07) a change row that strobed nothing is timed
+    through a fit of the rig's instants to the recording; so the simulated recording runs with the
+    simulated wall, which follows the session's frames and a pause's waits. A code sent at the
+    same instant as the one before is placed `WORD_S` after it, so the recording reads in order."""
+
+    wall: object = None
+    times: list = dataclasses.field(default_factory=list)
+
+    def emit(self, code):
+        super().emit(code)
+        at = self.wall() - WALL_NOW
+        if self.times and at <= self.times[-1]:
+            at = self.times[-1] + WORD_S
+        self.times.append(at)
 
 
 class Link(Simulated):
@@ -1032,18 +1062,33 @@ def log_checks(session, changes, card, d, root):
     records = read_rig_records(d.parent)
     if records.problems:
         findings.append(f"C13 wl-preproc read problems {records.problems[:2]}")
-    events = decode_stream([(float(i), w) for i, w in enumerate(card.codes)])
-    timing = time_records(records, code_times(events), ())
+    if len(card.times) != len(card.codes):
+        findings.append(f"C13 {len(card.codes)} codes sent, {len(card.times)} timed")
+    events = decode_stream(list(zip(card.times, card.codes)))
+    # The rig's clock is fitted as wl-preproc's pipeline fits it (`schema/events.py`): each run's
+    # start and end rows against its measured start and its `RUN_END`, with the coded rows.
+    rig_runs = read_rig_runs(d.parent, session.spec.subject)
+    measured = {}
+    for run in assemble(events).runs:
+        measured.setdefault(run.run_number, (run.start_s, run.end_s))
+    timing = time_records(records, code_times(events),
+                          run_instants(rig_runs.runs if rig_runs is not None else (), measured))
     problems = [p for p in timing.problems if p.startswith(CHANGES_NAME)]
     if problems:
         findings.append(f"C13 wl-preproc timing problems {problems[:2]}")
     starts = {t.trial_id: t for t in assemble(events).trials}
     for row, at in zip(changes, timing.changes):
-        if row["kind"] not in Rec.STROBED:
-            if at is not None:
-                findings.append(f"C13 unstrobed change {row['change']} timed {at}")
-            continue
         before, after = starts.get(row["trial_number"] - 1), starts.get(row["trial_number"])
+        if row["kind"] not in Rec.STROBED:
+            EXERCISED["C13 rows that strobed nothing, timed by the rig's clock"] += at is not None
+            # Since wl-preproc's 295f9c9 a row that strobed nothing (a clear, a drum or training
+            # switch) is timed through its fit of the rig's clock: in the gap before its trial,
+            # to within the fit's own limit.
+            if at is None or (before is not None and at < before.end_s - RIG_CLOCK_LIMIT_S) or (
+                    after is not None and not at < after.start_s + RIG_CLOCK_LIMIT_S):
+                findings.append(f"C13 unstrobed change {row['change']} ({row['kind']}) timed {at} "
+                                f"outside the gap before trial {row['trial_number']}")
+            continue
         if at is None or (before is not None and not before.end_s < at) or (
                 after is not None and not at < after.start_s):
             findings.append(f"C13 change {row['change']} ({row['kind']}) timed {at} outside the "
@@ -1086,7 +1131,7 @@ def session_for(seed, rng, path, family, ceiling, world=None, live=True):
     link = Link(rng, wall, p_move=rng.choice([0.0, 0.0, 0.02, 0.08]),
                 p_pause=rng.choice([0.0, 0.01, 0.03]), p_stop=rng.choice([0.0, 0.0, 0.002]),
                 p_live=rng.choice([0.0, 0.1, 0.25, 0.4]) if live else 0.0, family=family)
-    card = Card()
+    card = Recording(wall=wall)
     session = Session(spec, card=card, pump=Pump(), link=link, wall_clock=wall)
     link.session = session
     if world is not None:
