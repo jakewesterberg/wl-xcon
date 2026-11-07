@@ -451,9 +451,12 @@ entry's commit, on top of `3c9c0dd`, which the PI pushed himself earlier that da
 this order: `test-debt-2026-10-31` `c7715bb` (4835 passed), `isolated-fixes-2026-10-31` `935ab74` (4841) and
 `records-sync-2026-10-31` `941d8eb` (4841). Suite **4841 passed** on this entry's commit, none skipped
 (`WLX_REQUIRE_PREPROC=1 WLX_REQUIRE_BROWSER=1`). The merges were made in the detached worktree
-`.claude/worktrees/finalize-1106` by `.superpowers/merge-tools/run.sh`, their messages in
-`.superpowers/merge-tools/msgs-2026-11-06/*.final`. CI on this entry's commit: `⟦TO FILL: CI⟧`; pushed:
-`⟦TO FILL: pushed⟧`. No welfare-listed function changed (`welfare_cmp.py 3c9c0dd HEAD`: SAME everywhere, `1 1`).
+`.claude/worktrees/finalize-1106`, by hand (the redo the Learned note below tells), their messages in
+`.superpowers/merge-tools/msgs-2026-11-06-redo/*.new`. CI on this entry's commit, branch `finalize-2026-11-06`, run
+`42300219787`: 12 of 12 shards end with the gate's line, 196 caught (cli, link, signin, taskd), none survived, 1 inert
+by design (`redirect_request`), 4841 passed on 3.11, 3.12 and 3.13; `46ed86f`'s, run `42295687775`: 12 of 12, none
+selected, 4828 on each. Pushed: `main` moved from `3c9c0dd` to this entry's commit on 2026-11-07, push run
+`42322844815`, then to the commit that filled these slots. No welfare-listed function changed (`welfare_cmp.py 3c9c0dd HEAD`: SAME everywhere, `1 1`).
 **Next free XC-451** (engine build C3, branch `engine-c3`, not merged, holds XC-441 to XC-447). Read in this order:
 this entry, the backlog, then the 2026-10-31 entry's C3 plan.
 
