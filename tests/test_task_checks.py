@@ -266,8 +266,11 @@ def test_the_framework_events_are_the_names_the_package_strobes_by():
     """XC-382: `codes.FRAMEWORK_EVENTS` is the one list of them, so it must hold every name the
     package looks a code up by (`Allocation.code_for`, `Session._code`) and nothing else: read
     from the source by the parser, so a framework event added beside it without joining it
-    fails here. `service.FRAMEWORK_CODES`, the ones every `wlx taskd` session strobes, is among
-    them."""
+    fails here. A name looked up through a loop or a comprehension over names written out is read
+    from them; **only `Session._code`'s own body passes a name on unread**, so a lookup of any other
+    name that is no literal -- a helper's argument, a loop over a variable -- fails here too (the
+    review's I3: any `name` in `taskd.py` was let through, and a `for` loop was never read).
+    `service.FRAMEWORK_CODES`, the ones every `wlx taskd` session strobes, is among them."""
     import ast
     from pathlib import Path
 
@@ -278,19 +281,29 @@ def test_the_framework_events_are_the_names_the_package_strobes_by():
         return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                 and node.func.attr in ("code_for", "_code") and len(node.args) == 1)
 
-    looked_up, unread = set(), []
+    looked_up, unread, passed_on = set(), [], 0
     for path in sorted((Path(__file__).parents[1] / "wl_xcon").glob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        # A name looked up through a comprehension over written names (`Session._pause`'s
+        # A name looked up through a loop or a comprehension over written names (`Session._pause`'s
         # `{name: self._code(name) for name in ("PAUSE", "RESUME")}`) is read from the names.
         over = {}
         for node in ast.walk(tree):
-            if isinstance(node, (ast.DictComp, ast.ListComp, ast.SetComp, ast.GeneratorExp)):
-                for loop in node.generators:
-                    if isinstance(loop.target, ast.Name) and isinstance(
-                            loop.iter, (ast.Tuple, ast.List)):
-                        for call in ast.walk(node):
-                            over[id(call)] = (loop.target.id, loop.iter.elts)
+            comprehension = (ast.DictComp, ast.ListComp, ast.SetComp, ast.GeneratorExp)
+            loops = (node.generators if isinstance(node, comprehension)
+                     else [node] if isinstance(node, ast.For) else [])
+            for loop in loops:
+                if isinstance(loop.target, ast.Name) and isinstance(
+                        loop.iter, (ast.Tuple, ast.List)):
+                    for call in ast.walk(node):
+                        over[id(call)] = (loop.target.id, loop.iter.elts)
+        # `Session._code(self, name)` passes its argument on to `Allocation.code_for`, and is the
+        # one place that may.
+        exempt = {id(inner)
+                  for cls in tree.body if path.name == "taskd.py" and isinstance(cls, ast.ClassDef)
+                  and cls.name == "Session"
+                  for method in cls.body
+                  if isinstance(method, ast.FunctionDef) and method.name == "_code"
+                  for inner in ast.walk(method)}
         for node in ast.walk(tree):
             if not lookup(node):
                 continue
@@ -299,10 +312,12 @@ def test_the_framework_events_are_the_names_the_package_strobes_by():
                 looked_up.add(arg.value)
             elif isinstance(arg, ast.Name) and over.get(id(node), ("",))[0] == arg.id:
                 looked_up |= {e.value for e in over[id(node)][1]}
-            elif not (path.name == "taskd.py" and isinstance(arg, ast.Name) and arg.id == "name"):
+            elif id(node) in exempt:
+                passed_on += 1
+            else:
                 unread.append(f"{path.name}:{node.lineno}")
 
-    # `Session._code(name)` itself passes its argument on; any other lookup is a name written out.
+    assert passed_on == 1, "Session._code is where a name is passed on, once"
     assert unread == []
     assert looked_up == set(FRAMEWORK_EVENTS)
     assert len(FRAMEWORK_EVENTS) == len(set(FRAMEWORK_EVENTS))
