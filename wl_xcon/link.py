@@ -3550,7 +3550,8 @@ WAIT_MS_MAX = 2**31 - 1
 
 def _wait_ms(seconds: object, name: str, least_ms: int = 0) -> int:
     """`seconds`, a wait one of this file's `Zmq*` constructors takes, or `ZmqLink.idle`
-    (XC-432, before its poller is built), as the whole milliseconds ZeroMQ is given, or a `ValueError` naming `name` (XC-046).
+    (XC-432, before its poller is built), as the whole
+    milliseconds ZeroMQ is given, or a `ValueError` naming `name` (XC-046).
 
     A number that is not a `bool`, from `least_ms` to `WAIT_MS_MAX` once in
     milliseconds, compared before `int()`: a NaN, an infinity, and a float that
@@ -3570,7 +3571,7 @@ def _wait_ms(seconds: object, name: str, least_ms: int = 0) -> int:
     **A negative is refused because ZeroMQ would not refuse it**: an `RCVTIMEO` of -1
     is wait forever, `-0.001` s truncates to it, and pyzmq's `poll` reads every
     negative as forever. Checked at the top of each constructor, before a context is
-    made."""
+    made, and in `ZmqLink.idle`, before its poller is."""
     ms = None
     if not isinstance(seconds, bool) and isinstance(seconds, (int, float)):
         ms = seconds * 1000
