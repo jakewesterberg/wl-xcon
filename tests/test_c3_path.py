@@ -187,14 +187,32 @@ class _Page(Simulated):
         return super().drain()
 
 
+class _Recording:
+    """The simulated rig's wall, advancing with the recording `_timed` reads: `start`,
+    and a millisecond for each word the cards it makes have sent."""
+
+    def __init__(self, start: float) -> None:
+        self.start, self.cards = start, []
+
+    def card(self) -> Card:
+        card = Card()
+        self.cards.append(card)
+        return card
+
+    def __call__(self) -> float:
+        return self.start + 0.001 * sum(len(card.codes) for card in self.cards)
+
+
 def _service(folders, script: dict, wall: float = WALL) -> Service:
-    """A `wlx taskd` service on the simulators, its link the page's, its wall `wall`, and every
-    run's seed `SEED`."""
+    """A `wlx taskd` service on the simulators, its link the page's, its wall `wall` advancing a
+    millisecond a word (`_Recording`), and every run's seed `SEED`."""
     subjects, tasks, root = folders
+    recording = _Recording(wall)
     return Service(
         rig=RIG, rig_path=RIG_FILE, subjects=subjects, tasks=tasks,
         allocation=_load_allocation(Path(ALLOCATION)), allocation_path=ALLOCATION,
-        root=root, link=_Page(script), seed=lambda: SEED, wall_clock=lambda: wall,
+        root=root, link=_Page(script), seed=lambda: SEED, wall_clock=recording,
+        card=recording.card,
     )
 
 
@@ -241,11 +259,14 @@ def _rows(xcon: Path, name: str) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
 
-def _timed(records, codes: list[int]) -> tuple:
+def _timed(records, codes: list[int], resumed: tuple = ()) -> tuple:
     """wl-preproc's reading of `codes` as one recording, a word a millisecond: its assembly, and
     each change row's time by its code (`time_records`'s rule: the n-th row carrying
     `PARAM_CHANGED` takes the n-th such code's time)."""
-    events = their_events.decode_stream([(i * 0.001, word) for i, word in enumerate(codes)])
+    stream = [(i * 0.001, word) for i, word in enumerate(codes)]
+    for start, more in resumed:
+        stream += [(start + i * 0.001, word) for i, word in enumerate(more)]
+    events = their_events.decode_stream(stream)
     return their_assemble(events), time_records(records, code_times(events), ())
 
 
@@ -444,11 +465,12 @@ def test_a_session_driven_through_the_consoles_commands_reads_back_whole(tmp_pat
     assert [trial.trial_id for trial in assembly.trials] == list(range(1, 19))
     assert [problem for problem in timing.problems if problem.startswith(CHANGES_NAME)] == []
     trials = {trial.trial_id: trial for trial in assembly.trials}
+    assert timing.clock is not None and timing.problems == (), timing.problems
     for row, at in zip(changes, timing.changes, strict=True):
-        if "sequence" not in row:
-            assert at is None, "a switch strobes nothing"
-            continue
-        assert trials[row["trial_number"] - 1].end_s < at < trials[row["trial_number"]].start_s
+        # To the word: a switch, which sends none, is timed at the last word before it.
+        at = round(at, 6)
+        before, after = trials[row["trial_number"] - 1].end_s, trials[row["trial_number"]].start_s
+        assert (before < at if "sequence" in row else before == at) and at < after, (row, at)
 
     # Resumable, as `stranded.find` reads it, numbering on from the log.
     restoration = resume.read(xcon, session.welfare.left_cage_wall_at)
@@ -542,10 +564,11 @@ def test_a_crashed_c3_session_is_listed_resumable_by_stranded_find(tmp_path, mon
     assert [change.sequence for change in records.changes] == [None, *range(1, 9)]
     codes = first.session.card.codes + second.session.card.codes
     assert codes.count(PARAM_CHANGED) == 8
-    assembly, timing = _timed(records, codes)
+    assembly, timing = _timed(records, first.session.card.codes,
+                              resumed=((600.0, second.session.card.codes),))
     assert assembly.errors == []
-    assert [problem for problem in timing.problems if problem.startswith(CHANGES_NAME)] == []
-    assert [at is None for at in timing.changes] == [True] + [False] * 8
+    assert timing.clock is not None and timing.problems == (), timing.problems
+    assert [at is None for at in timing.changes] == [False] * 9
 
 
 def _session(tmp_path, script: dict, plans: str = OWN, plan: str = "own") -> Session:
