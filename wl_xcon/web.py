@@ -126,6 +126,7 @@ FRAGMENT_IDS = (
     "controls",
     "rt-trials",
     "rt-work",
+    "rt-train",
     "rt-need",
     "rt-wrong",
     "rt-health",
@@ -1358,6 +1359,235 @@ def _need(frame: Telemetry | None, view: View) -> str:
     return "".join(rows)
 
 
+#: Each outcome's place for the trainer's panel's counts by kind (`_by_kind`): `Outcome`'s order,
+#: then a hang.
+_OUTCOME_ORDER = {outcome.value: at for at, outcome in enumerate(Outcome)} | {"hang": len(Outcome)}
+
+
+def _by_kind(counts: dict) -> str:
+    """Counts by outcome, `wrong_target 7 · no_response 4`: each outcome's wire string, as the
+    *This run* pane names them, in `Outcome`'s order, a hang after them and any other sorted;
+    `none` where there are none."""
+    if not counts:
+        return "none"
+    order = sorted(counts, key=lambda said: (_OUTCOME_ORDER.get(said, len(_OUTCOME_ORDER)),
+                                             str(said)))
+    return " · ".join(f"{_e(said)} {_e(counts[said])}" for said in order)
+
+
+def _percent(part: int, whole: int) -> str:
+    """Display arithmetic on two published counts (plan ruling 5), to a whole percent."""
+    return f"{100.0 * part / whole:.0f}%"
+
+
+def _whole(value: object) -> int | None:
+    """A pool's value as the whole number it is (`task.Pool`), or `None` for any other."""
+    if (isinstance(value, bool) or not isinstance(value, (int, float))
+            or not math.isfinite(value) or not float(value).is_integer()):
+        return None
+    return int(value)
+
+
+def _ladder(frame: Telemetry, view: View) -> str:
+    """The trainer's panel's staircase row (`Telemetry.staircase`): its setting at the level the
+    next trial takes, which level of how many, its rule, and **its lock** (TSK-32: "a live value on
+    its parameter holds it"): *lock at* sends that level as a person's value, the hold the setting's
+    card gives; held, the person's value (its card's), where the staircase waits, and *hand back*,
+    engine build C3's, which resumes it at the level nearest the value held."""
+    ladder = frame.staircase
+    card = next((row for row in frame.params if row.name == ladder.setting), None)
+    unit = "" if card is None or not card.unit else f" {_e(card.unit)}"
+    name = _e(ladder.setting)
+    known = (isinstance(ladder.level, int) and not isinstance(ladder.level, bool)
+             and 0 <= ladder.level < len(ladder.levels))
+    at = _e(_rung(ladder.levels[ladder.level])) if known else None
+    where = (f"level {ladder.level + 1} of {len(ladder.levels)}" if known
+             else "at a level its staircase does not have")
+    if ladder.held:
+        value = "unset" if card is None or card.value is None else _e(_rung(card.value))
+        waits = f"its staircase waits at {at}, {where}" if known else f"its staircase waits {where}"
+        return (f'<div class="kv"><span>{name} <b>{value}</b>{unit}, held by a person</span>'
+                f'<span class="nm">{waits}; a hand-back resumes it at the level nearest the value '
+                f'held</span><button type="button" class="btn small" data-cmd="hand_back" '
+                f'data-name="{name}"{_gate(view)}>hand back</button></div>')
+    rule = f"set by its staircase ({_e(ladder.down)} right harder, {_e(ladder.up)} wrong easier)"
+    if not known:
+        return (f'<div class="kv"><span>{name}</span><span class="nm">{where}, {rule}</span>'
+                "</div>")
+    return (f'<div class="kv"><span>{name} <b>{at}</b>{unit}</span>'
+            f'<span class="nm">{where}, {rule}</span><button type="button" class="btn small" '
+            f'data-cmd="lock" data-name="{name}" data-value="{at}"{_gate(view)}>lock at {at}'
+            "</button></div>")
+
+
+def _answers(bars) -> list[str]:
+    """The trainer's panel's last answers (`Telemetry.bars`; the design's §3.4 and §3.5): the last
+    ones toward moving back, right with their percent, the wrong ones by kind beside them, and the
+    trials left out of them beneath; then the bar to move up as it reads, at the stage's hardest
+    step, with its proportion and window. A window not yet full says how many it reads; an empty
+    one says so, never a percent of nothing."""
+    rows = []
+    if bars.of:
+        plural = "" if bars.of == 1 else "s"
+        reads = f" of the {_e(bars.window)} its bar reads" if bars.of < bars.window else ""
+        rows.append(f'<div class="kv"><span>last {_e(bars.of)} answer{plural}{reads} '
+                    f"<b>{_e(bars.correct)} right ({_percent(bars.correct, bars.of)})</b></span>"
+                    f'<span class="nm">wrong: {_by_kind(bars.wrong)}</span></div>'
+                    f'<div class="kv"><span class="nm">left out of them: '
+                    f"{_by_kind(bars.left_out)}</span></div>")
+    elif bars.window:
+        rows.append(f'<div class="kv"><span>no answers yet</span><span class="nm">its bar reads '
+                    f"the last {_e(bars.window)}</span></div>")
+        if bars.left_out:
+            rows.append(f'<div class="kv"><span class="nm">left out so far: '
+                        f"{_by_kind(bars.left_out)}</span></div>")
+    if bars.up_at is None:
+        rows.append('<div class="kv"><span class="nm">this stage has no bar to move up</span></div>')
+    else:
+        judged = (f"{_e(bars.up_correct)} of the last {_e(bars.up_of)} answers at its hardest step "
+                  "right" if bars.up_of else "no answers at its hardest step yet")
+        rows.append(f'<div class="kv"><span class="nm">toward moving up: {judged}; the rig '
+                    f"suggests it at {bars.up_at:.0%} of {_e(bars.up_window)}</span></div>")
+    return rows
+
+
+def _pairings_on(frame: Telemetry) -> str:
+    """The trainer's panel's pool (`Telemetry.pool`): the pairings on, in the pool's order, how many
+    of how many, and the bar the rig suggests adding more at; a value that names no pool, said."""
+    pool, bars = frame.pool, frame.bars
+    whole, total = _whole(pool.value), len(pool.pairings)
+    if whole is None or not 1 <= whole < 1 << total:
+        return (f'<div class="kv"><span>{_e(pool.setting)} <b>{_e(_rung(pool.value))}</b></span>'
+                f'<span class="nm">names no pool of its {total} pairings</span></div>')
+    on = [name for at, name in enumerate(pool.pairings) if whole >> at & 1]
+    note = f"all {total}" if len(on) == total else f"{len(on)} of {total}"
+    if len(on) < total and bars is not None and bars.up_at is not None:
+        note += f"; the rig suggests adding more at {bars.up_at:.0%} of {bars.up_window}"
+    return (f'<div class="kv"><span>pairings on <b>{_e(", ".join(map(str, on)))}</b></span>'
+            f'<span class="nm">{_e(note)}</span></div>')
+
+
+def _picker(frame: Telemetry, widen, view: View) -> str:
+    """**The widening's picker** ("Trainer picks at the prompt"; Task 5): a box for each pairing
+    the pool does not hold yet, in its declared order, each with its number, and *add*, which sends
+    the pool's value now plus the numbers ticked -- Task 5's whole number, the `set` that answers
+    the widening. None where the frame's pool names none to add to."""
+    pool = frame.pool
+    whole = None if pool is None else _whole(pool.value)
+    if whole is None or not 1 <= whole < 1 << len(pool.pairings):
+        return '<span class="nm">the frame names no pool to add to</span>'
+    boxes = "".join(
+        f'<label class="chk"><input type="checkbox" data-widen="{1 << at}" '
+        f'data-suggestion="{_e(widen.change)}" aria-label="add pairing {_e(name)}"{_gate(view)}> '
+        f"{_e(name)}</label>"
+        for at, name in enumerate(pool.pairings) if not whole >> at & 1)
+    return boxes + (f'<button type="button" class="btn" data-cmd="widen" '
+                    f'data-suggestion="{_e(widen.change)}" data-name="{_e(pool.setting)}" '
+                    f'data-value="{whole}"{_gate(view)}>add the pairings ticked</button>')
+
+
+def _held_at(change: int, label: str, view: View) -> str:
+    """*Hold*: `decline`, naming the suggestion -- one hold holds the whole prompt (Task 5)."""
+    return (f'<button type="button" class="btn" data-cmd="decline" data-suggestion="{_e(change)}"'
+            f"{_gate(view)}>{_e(label)}</button>")
+
+
+def _moved(suggestion, move: str, label: str, view: View) -> str:
+    """*Move up* or *Move back*: `next_block` or `back_block`, naming the suggestion it confirms."""
+    return (f'<button type="button" class="btn primary" data-cmd="confirm" data-move="{move}" '
+            f'data-suggestion="{_e(suggestion.change)}"{_gate(view)}>{_e(label)}</button>')
+
+
+_AFRESH = "Tick those to add; adding any starts both bars afresh."
+_ACTS = '<div class="acts">'
+
+
+def _prompts(frame: Telemetry, view: View) -> list[str]:
+    """**The rig's suggestions, each a prompt naming why** (the design's §3.5; the PI's sketch):
+    to move up, the setting at its stage's hardest step and the answers right there, with *Move up*
+    and *Hold*; to move back, the answers right and the bar they fell under, with *Move back* and
+    *Hold*; to widen the pool, the answers at the hardest step and the pairings on, with the picker
+    and *Hold*. **One window meeting both bars, one prompt offers both, the stage's first** (§3.4),
+    whose one *Hold* holds both (Task 5); at the top stage a widening may stand beside a move back,
+    which read different windows, as a prompt of its own after it."""
+    stage, widen = frame.suggestion, frame.widen
+    prompts = []
+    if stage is not None and stage.move == "up":
+        ladder = frame.staircase
+        pct = _percent(stage.correct, stage.of) if stage.of else "—"
+        if ladder is not None and ladder.levels and frame.block == stage.block:
+            why = (f"{ladder.setting} is at its hardest step, {_rung(ladder.levels[-1])}, and "
+                   f"{stage.correct} of the last {stage.of} answers there were right ({pct}).")
+        else:
+            why = f"{stage.correct} of the last {stage.of} answers were right ({pct})."
+        body = (f'<div class="prompt" data-prompt="{_e(stage.change)}"><div><b>Ready for '
+                f"{_e(stage.to)}.</b> {_e(why)}</div>" + _ACTS
+                + _moved(stage, "next_block", f"Move up to {stage.to}", view)
+                + _held_at(stage.change, f"Hold at {stage.block}", view) + "</div>")
+        if widen is not None:
+            body += (f"<div><b>And ready for more pairings.</b> {_AFRESH}</div>" + _ACTS
+                     + _picker(frame, widen, view) + "</div>")
+        prompts.append(body + "</div>")
+        return prompts
+    if stage is not None:
+        pct = _percent(stage.correct, stage.of) if stage.of else "—"
+        bars = frame.bars
+        under = ("" if bars is None or bars.back_at is None
+                 else f", under {bars.back_at:.0%}")
+        prompts.append(
+            f'<div class="prompt back" data-prompt="{_e(stage.change)}"><div><b>Back to '
+            f"{_e(stage.to)}?</b> {_e(stage.correct)} of the last {_e(stage.of)} answers were "
+            f"right ({pct}){under}.</div>" + _ACTS
+            + _moved(stage, "back_block", f"Move back to {stage.to}", view)
+            + _held_at(stage.change, f"Hold at {stage.block}", view) + "</div></div>")
+    if widen is not None:
+        pool = frame.pool
+        whole = None if pool is None else _whole(pool.value)
+        over = ""
+        if whole is not None and 1 <= whole < 1 << len(pool.pairings):
+            count = bin(whole).count("1")
+            over = f", over the {count} pairing{'' if count == 1 else 's'} on"
+        pct = _percent(widen.correct, widen.of) if widen.of else "—"
+        prompts.append(
+            f'<div class="prompt" data-prompt="{_e(widen.change)}"><div><b>Ready for more '
+            f"pairings.</b> {_e(widen.correct)} of the last {_e(widen.of)} answers at its hardest "
+            f"step were right ({pct}){over}. {_AFRESH}</div>" + _ACTS
+            + _picker(frame, widen, view) + _held_at(widen.change, "Hold", view) + "</div></div>")
+    return prompts
+
+
+def _trainer(frame: Telemetry | None, view: View) -> str:
+    """**The trainer's panel** (the pop-out search build's Task 7; its design §3.5, the PI's sketch
+    of the trainer's screen, accepted with short stage names on 2026-11-07): while a run runs, the
+    stage by name, with its plan and the stage it goes on to; the open block's staircase at its
+    level, with its lock (`_ladder`); the last answers as the rig's bars judge them, the wrong ones
+    and those left out by kind (`_answers`); the pairings on (`_pairings_on`); and each suggestion
+    the rig makes, a prompt naming why with its buttons (`_prompts`). **Empty** -- the section then
+    hidden (`#rt-train:empty`) -- for a run with no staircase, no confirmed progression, no pool
+    and no suggestion, for a run being stopped, and between runs. Each from the frame, never
+    computed here but the percentages (plan ruling 5's display arithmetic)."""
+    if frame is None or frame.phase != "running" or frame.stop_kind is not None:
+        return ""
+    if all(part is None for part in (frame.staircase, frame.bars, frame.pool, frame.suggestion,
+                                     frame.widen)):
+        return ""
+    said = []
+    if frame.plan is not None:
+        said = [f"plan {frame.plan}", f"next: {frame.next_block}" if frame.next_block is not None
+                else "the plan's last stage"]
+    rows = ['<div class="top"><h2>Training</h2></div>',
+            f'<div class="kv"><span>stage <b>{_e(frame.block)}</b></span>'
+            + (f'<span class="nm">{_e(" · ".join(said))}</span>' if said else "") + "</div>"]
+    if frame.staircase is not None:
+        rows.append(_ladder(frame, view))
+    if frame.bars is not None:
+        rows.extend(_answers(frame.bars))
+    if frame.pool is not None:
+        rows.append(_pairings_on(frame))
+    rows.extend(_prompts(frame, view))
+    return "".join(rows)
+
+
 def _wrong(frame: Telemetry | None) -> str:
     """Hangs, which are counted, and the three measurements nothing takes yet."""
     hangs = _NONE if frame is None else f'<span class="num">{_e(frame.hangs)}</span>'
@@ -2049,6 +2279,7 @@ def fragments(frame: Telemetry | Idle | None, view: View) -> dict[str, str]:
         "controls": _controls(frame, view),
         "rt-trials": _trials(frame),
         "rt-work": _work(frame),
+        "rt-train": _trainer(frame, view),
         "rt-need": _need(frame, view),
         "rt-wrong": _wrong(frame),
         "rt-health": _health_pane(frame, view),
@@ -2339,6 +2570,10 @@ button.pill { border: 0; cursor: pointer; }
 .st { width: 10px; height: 10px; border-radius: 50%; }
 .st.pass { background: var(--ok); } .st.warn { background: var(--warn); } .st.fail { background: var(--crit); } .st.untested { box-shadow: inset 0 0 0 1.5px var(--muted); }
 .chk { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+#rt-train:empty { display: none; }
+.prompt { border-radius: 6px; padding: 8px 12px; background: var(--ok-soft); border-left: 4px solid var(--ok); display: grid; gap: 6px; font-size: 13.5px; }
+.prompt.back { background: var(--warn-soft); border-left-color: var(--warn); }
+.prompt .acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .dialog .grid { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; align-items: center; }
 .dialog .end { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 .dialog .field, .dialog select { width: 100%; border-radius: 3px; font: inherit; }
@@ -2918,6 +3153,10 @@ _SCRIPT = """
   // staircase's level and each pairing, kept across the frames that redraw the pre-flight, and
   // cleared as the ticks are: whenever a pre-flight is asked for or a run started.
   var picked = {};
+  // The pairings a person ticked in the trainer's panel's widening (the pop-out search build's
+  // Task 7), by the suggestion they were ticked for and each pairing's number, kept across the
+  // frames that redraw the panel.
+  var widened = {};
   var returnFor = null;
   function el(id) { return document.getElementById(id); }
   function say(text, tone) {
@@ -3004,6 +3243,7 @@ _SCRIPT = """
     applySignIn();
     if (id === "controls") { holdReward(); }
     if (id === "preflight") { restoreAcks(); restoreStarts(); }
+    if (id === "rt-train") { restoreWidening(); }
     if (id === "plan-sel") { preselect(); }
     if (id === "end-actions") { settleOpen(); }
   }
@@ -3090,6 +3330,12 @@ _SCRIPT = """
       }
     }
     return { block: stage && stage.selectedIndex > 0 ? stage.value : null, values: values };
+  }
+  function restoreWidening() {
+    Array.prototype.forEach.call(el("rt-train").querySelectorAll("input[data-widen]"), function (box) {
+      var value = widened[box.getAttribute("data-suggestion") + ":" + box.getAttribute("data-widen")];
+      if (value !== undefined) { box.checked = value; }
+    });
   }
   function restoreAcks() {
     Array.prototype.forEach.call(document.querySelectorAll("input[data-ack]"), function (box) {
@@ -3363,16 +3609,29 @@ _SCRIPT = """
     // The pre-flight pill is a button only between runs (`_pf_pill`).
     return Boolean(el("pf-pill").querySelector('[data-cmd="check"]'));
   }
+  // The stage picked in the pre-flight shown, while it is the one for the task and plan chosen: its
+  // name, or null for the plan's first; undefined where the pre-flight shown is another's (the
+  // pop-out search build's Task 7: the check sends it, as the start does).
+  function pickedStage() {
+    var button = el("controls").querySelector('[data-cmd="start"]');
+    if (!button || button.getAttribute("data-task") !== chosenTask() ||
+        (button.getAttribute("data-plan") || null) !== chosenPlan()) { return undefined; }
+    var stage = el("start-block");
+    return stage && stage.selectedIndex > 0 ? stage.value : null;
+  }
   function takePreflight(showPanel) {
     var task = chosenTask();
+    // Taken again for the task and plan it shows, the pre-flight keeps the stage and the picks; a
+    // task or plan chosen anew forgets them.
+    var stage = pickedStage();
     acked = {};
-    picked = {};
+    if (stage === undefined) { picked = {}; }
     if (!task) { tell("not sent: no task is offered to check", "crit"); return; }
     // A plain run's pre-flight is how the page learns the task's plans: arm the preselection.
     // Armed only where this page can send: the sign-in page signed in, the rig PC's own page
     // (no sign-in) able to write.
     awaiting = chosenPlan() === null && (signinPage ? signedIn() : canWrite) ? task : null;
-    post({ kind: "check", task: task, values: {}, plan: chosenPlan() });
+    post({ kind: "check", task: task, values: {}, plan: chosenPlan(), start_block: stage || null });
     if (showPanel) { el("t-setup").checked = true; }
   }
   function startRun() {
@@ -3566,6 +3825,34 @@ _SCRIPT = """
         return;
       }
       if (cmd === "range") { sendRange(button, e.detail); return; }
+      // The trainer's panel (the pop-out search build's Task 7): *Move up* or *Move back* confirms
+      // the rig's suggestion, naming it, and *Hold* declines it, the whole prompt; *lock at* holds
+      // the staircase's setting at its level, as a person's value does; *add* widens the pool by
+      // the pairings ticked. Each held against a double click, as a clear is.
+      if (cmd === "confirm" || cmd === "decline") {
+        var answered = Number(button.getAttribute("data-suggestion"));
+        if (!clearAllowed(e.detail, cmd + "/" + answered)) { return; }
+        post(cmd === "decline" ? { kind: "decline", suggestion: answered }
+                               : { kind: button.getAttribute("data-move"), suggestion: answered });
+        return;
+      }
+      if (cmd === "lock") {
+        var locked = button.getAttribute("data-name");
+        if (!clearAllowed(e.detail, "lock/" + locked)) { return; }
+        post({ kind: "set", name: locked, value: Number(button.getAttribute("data-value")) });
+        return;
+      }
+      if (cmd === "widen") {
+        var adding = 0;
+        Array.prototype.forEach.call(el("rt-train").querySelectorAll("input[data-widen]"), function (box) {
+          if (box.checked) { adding += Number(box.getAttribute("data-widen")); }
+        });
+        if (!adding) { tell("not sent: tick a pairing to add first", "crit"); return; }
+        if (!clearAllowed(e.detail, "widen/" + button.getAttribute("data-suggestion"))) { return; }
+        post({ kind: "set", name: button.getAttribute("data-name"),
+               value: Number(button.getAttribute("data-value")) + adding });
+        return;
+      }
       if (cmd === "revert") {
         var moment = Number(button.getAttribute("data-change"));
         if (!clearAllowed(e.detail, "revert/" + moment)) { return; }
@@ -3585,12 +3872,21 @@ _SCRIPT = """
     if (!e.target.matches) { return; }
     if (e.target.matches("input[data-param]")) { schedule(e.target); }
     else if (e.target.matches("input[data-ack]")) { acked[e.target.getAttribute("data-ack")] = e.target.checked; }
-    else if (e.target.id === "start-block") { picked.block = e.target.value; showStage(); }
+    else if (e.target.id === "start-block") {
+      picked.block = e.target.value;
+      showStage();
+      // Taken again at the stage picked, so its task checks judge a start there (Task 7).
+      if (betweenRuns()) { takePreflight(false); }
+    }
     else if (e.target.matches("select[data-start-setting]")) {
       picked["level:" + e.target.getAttribute("data-start-setting")] = e.target.value;
     }
     else if (e.target.matches("input[data-pairing]")) {
       picked["pairing:" + e.target.getAttribute("data-pairing")] = e.target.checked;
+    }
+    else if (e.target.matches("input[data-widen]")) {
+      widened[e.target.getAttribute("data-suggestion") + ":" + e.target.getAttribute("data-widen")] =
+        e.target.checked;
     }
     else if (e.target.id === "task-sel") {
       if (betweenRuns()) { el("plan-sel").value = ""; takePreflight(false); }
@@ -3875,6 +4171,7 @@ def page(
         <div class="tabpanel" id="tp-runtime">
           <section class="panel glass"><div class="top"><h2>Trials</h2></div><div id="rt-trials">{p['rt-trials']}</div></section>
           <section class="panel glass"><div class="top"><h2>This run</h2></div><div id="rt-work">{p['rt-work']}</div></section>
+          <section class="panel glass train" id="rt-train" aria-label="training">{p['rt-train']}</section>
           <div class="cols c3">
             <div class="stack">
               <section class="panel glass"><div class="top"><h2>Still needed</h2></div><div id="rt-need">{p['rt-need']}</div></section>

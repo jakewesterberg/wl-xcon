@@ -2363,6 +2363,48 @@ class Session:
         `None` where none stands, and between runs. The public face of `_widening`."""
         return self._standing(self._widening)
 
+    @property
+    def staircase(self) -> tuple | None:
+        """**The open block's staircase, for the trainer's panel** (`task.Staircase`; the pop-out
+        search build's Task 7; telemetry schema 20; its design §3.5: "the staircase's level and its
+        lock"), as `link.StaircaseRow`'s fields: its setting, its levels, the level it is at --
+        **before the block's first trial, the one it will start at** (`_first_level`), never where
+        the block before left its own -- whether a person holds the setting (`_edited`), and its
+        `down` and `up`. `None` in a block with none, and between runs. Read between trials, never
+        in a frame; it starts nothing (`_climbing` does, as the block's first trial is drawn)."""
+        if self.phase != "running" or self._scheduler is None:
+            return None
+        staircase = self._scheduler.block.staircase
+        if staircase is None:
+            return None
+        climb = self._climb if self._climb_block == len(self._scheduler.ended) else None
+        level = self._first_level(staircase) if climb is None else climb.level
+        return (staircase.setting, tuple(staircase.levels), level,
+                staircase.setting in self._edited, staircase.down, staircase.up)
+
+    @property
+    def bars(self) -> tuple | None:
+        """**The open stage's last answers as the rig's bars judge them, for the trainer's panel**
+        (`scheduler.Scheduler.answers`; the pop-out search build's Task 7; telemetry schema 20; its
+        design §3.4 and §3.5), as `link.Bars`' fields, under a confirmed progression
+        (`task.ByCriterion.confirm`). `None` for any other run, and between runs."""
+        if self.phase != "running" or self._scheduler is None:
+            return None
+        answers = self._scheduler.answers
+        return None if answers is None else tuple(answers)
+
+    @property
+    def pooled(self) -> tuple | None:
+        """**The task's pool of pairings now, for the trainer's panel** (`task.Pool`; the pop-out
+        search build's Task 7; telemetry schema 20), as `link.Pooled`'s fields: the setting that
+        holds it, each pairing in words in the pool's declared order (`Pool.named`), the n-th worth
+        2 ** n, and the setting's value now. `None` for a task with no pool, and between runs."""
+        pool = self._task.pool if self._task is not None else None
+        if pool is None or self.phase != "running":
+            return None
+        return (pool.setting, tuple(pool.named(at) for at in range(len(pool.choices))),
+                self.spec.values.get(pool.setting))
+
     def _standing(self, offered: "_Suggested | None") -> tuple | None:
         """A suggestion standing as `link.Suggestion`'s fields, its bar read now, or `None`."""
         if offered is None or self.phase != "running" or self._scheduler is None:
@@ -4329,11 +4371,17 @@ class Session:
             staircase = self._scheduler.block.staircase
             self._climb_block, self._climb = occurrence, None
             if staircase is not None:
-                start = staircase.start
-                if start is None:
-                    start = staircase.nearest(self._run_values.get(staircase.setting))
-                self._climb = _Climb(staircase, 0 if start is None else start)
+                self._climb = _Climb(staircase, self._first_level(staircase))
         return self._climb
+
+    def _first_level(self, staircase: Staircase) -> int:
+        """**Where a block's staircase starts** (`_climbing`): at its `start`, else at the level
+        nearest the run's own value of its setting (`_run_values`, the task's start under the
+        run's; `Staircase.nearest`), else at its easiest."""
+        start = staircase.start
+        if start is None:
+            start = staircase.nearest(self._run_values.get(staircase.setting))
+        return 0 if start is None else start
 
     def _steps(self, name: str, block=None) -> bool:
         """Whether `block`'s staircase steps `name` (`Block.staircase`), the open block's where

@@ -229,6 +229,11 @@ def _session_with(
         # `Session.suggestion` and `Session.widening` (schema 20): the rig suggests nothing.
         suggestion=None,
         widening=None,
+        # `Session.staircase`, `.bars` and `.pooled` (schema 20, the trainer's panel): no
+        # staircase, no confirmed progression and no pool.
+        staircase=None,
+        bars=None,
+        pooled=None,
     )
 
 

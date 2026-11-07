@@ -26,22 +26,31 @@ from wl_xcon.cli import _clock, _local
 from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.link import (
     NOTE_LIMIT,
+    BackBlock,
+    Bars,
     ConditionRow,
     Control,
     Counts,
+    Decline,
     MomentRow,
+    NextBlock,
     ParamRow,
     Performance,
+    Pooled,
     Preflight,
     PreflightItem,
     Question,
     Refused,
     ScheduledStop,
+    SetParameter,
     ShortfallRow,
+    StaircaseRow,
     Staged,
     Stranded,
+    Suggestion,
     WarningRow,
 )
+from wl_xcon.serve import parse_command
 from wl_xcon.task import Polar
 from wl_xcon.warnlist import HEAD_FREE, UNLISTED
 from wl_xcon.web import (
@@ -2359,8 +2368,17 @@ def test_start_sends_the_task_whose_preflight_is_shown_and_only_while_it_is_chos
         '           acknowledged: acknowledged, plan: plan, start_block: start.block });'
     ) in start
     assert start.index("var start = runStart();") < start.index("post(")
-    assert 'post({ kind: "check", task: task, values: {}, plan: chosenPlan() });' in _function(
-        "takePreflight")
+    # The check sends the stage picked too (the pop-out search build's Task 7), its task checks
+    # judging a start there; a pre-flight for another task or plan forgets it.
+    take = _function("takePreflight")
+    assert ('post({ kind: "check", task: task, values: {}, plan: chosenPlan(), '
+            "start_block: stage || null });") in take
+    assert "var stage = pickedStage();" in take and "if (stage === undefined) { picked = {}; }" in take
+    picked = _function("pickedStage")
+    assert ("if (!button || button.getAttribute(\"data-task\") !== chosenTask() ||\n"
+            "        (button.getAttribute(\"data-plan\") || null) !== chosenPlan()) "
+            "{ return undefined; }") in picked
+    assert "return stage && stage.selectedIndex > 0 ? stage.value : null;" in picked
 
 
 def test_a_new_session_is_sent_with_every_field_the_dialog_asks_as_typed():
@@ -3621,3 +3639,251 @@ def test_each_moment_says_what_a_revert_to_it_would_change():
     assert pane.endswith(
         '<div class="rv">would change: target_y handed back; the task&#x27;s draw of '
         '&#x27;fix_hold&#x27; → as declared; target_x → 12.00</div>')
+
+
+# --- the trainer's panel (the pop-out search build's Task 7) ------------------------------------
+#
+# The design's §3.5 (approved by the PI on 2026-11-07, who accepted the sketch of the trainer's
+# screen with short stage names): during the session, "the stage by name, the staircase's level
+# and its lock, the last 50 trials' percent correct and errors by kind, the pairings on, and, when
+# the bar is met, a prompt naming why ... with Move up and Hold"; back down the same way, Move back
+# and Hold; and at a widening, "Trainer picks at the prompt". Each from the frame, never computed
+# here but the percentages (plan ruling 5's display arithmetic).
+
+_LADDER = StaircaseRow("distractor_luminance", (0.25, 0.5, 0.75, 1.0), 2, False, 3, 1)
+_BARS = Bars(39, 50, 50, {"no_response": 4, "wrong_target": 7},
+             {"no_fixation": 2, "fixation_break": 4}, 30, 34, 50, 0.8, 0.5)
+#: Pairings 1 and 3 on, of four.
+_POOLED = Pooled("pairings", ("blue>red", "red>blue", "purple>red", "red>purple"), 5)
+
+
+def _training(**over) -> object:
+    """A confirmed progression's run in Fade-in, its staircase on the distractors' luminance."""
+    fields = dict(plan="train", block="Fade-in", next_block="Crowd", staircase=_LADDER,
+                  bars=_BARS, pool=_POOLED, params=(
+                      ParamRow("distractor_luminance", "of full", 0.0, 1.0, 0.5, False,
+                               source="staircase"),
+                      ParamRow("pairings", "pairings", 1, 15, 5, False, source="run")))
+    fields.update(over)
+    return frame(**fields)
+
+
+def _up(change: int = 7) -> Suggestion:
+    return Suggestion(change, "up", "Fade-in", "Crowd", 41, 50, True)
+
+
+def _widening(change: int = 8) -> Suggestion:
+    return Suggestion(change, "widen", "Fade-in", None, 41, 50, True)
+
+
+def _back(change: int = 9) -> Suggestion:
+    return Suggestion(change, "back", "Fade-in", "Alone", 22, 50, False)
+
+
+def _train(frame_, can_write: bool = True) -> str:
+    return fragments(frame_, view(can_write=can_write))["rt-train"]
+
+
+def test_the_pane_names_the_stage_and_its_level():
+    """The stage by name, with its plan and the stage it goes on to; the staircase's setting at the
+    level the next trial takes, which level of how many, its rule, and its lock: *lock at* holds the
+    setting where it is, as a person's value does (TSK-32). Held, the person's value, where the
+    staircase waits, and *hand back* (engine build C3's), which resumes it nearest the value
+    held."""
+    pane = _train(_training())
+    held = _train(_training(staircase=replace(_LADDER, held=True), params=(
+        ParamRow("distractor_luminance", "of full", 0.0, 1.0, 0.5, False, source="person"),)))
+
+    assert pane.startswith('<div class="top"><h2>Training</h2></div>')
+    assert ('<div class="kv"><span>stage <b>Fade-in</b></span>'
+            '<span class="nm">plan train · next: Crowd</span></div>') in pane
+    assert ('<div class="kv"><span>distractor_luminance <b>0.75</b> of full</span>'
+            '<span class="nm">level 3 of 4, set by its staircase (3 right harder, 1 wrong easier)'
+            '</span><button type="button" class="btn small" data-cmd="lock" '
+            'data-name="distractor_luminance" data-value="0.75">lock at 0.75</button></div>'
+            ) in pane
+    assert 'data-cmd="hand_back"' not in pane
+    assert ('<div class="kv"><span>distractor_luminance <b>0.5</b> of full, held by a person'
+            '</span><span class="nm">its staircase waits at 0.75, level 3 of 4; a hand-back '
+            'resumes it at the level nearest the value held</span><button type="button" '
+            'class="btn small" data-cmd="hand_back" data-name="distractor_luminance">hand back'
+            '</button></div>') in held
+    assert 'data-cmd="lock"' not in held
+    # The last stage says so; a plain run names no plan.
+    assert ('<span class="nm">plan train · the plan&#x27;s last stage</span>'
+            in _train(_training(next_block=None)))
+    assert "<span>stage <b>Fade-in</b></span></div>" in _train(_training(plan=None))
+
+
+def test_the_pane_shows_the_last_answers_their_errors_by_kind_and_those_left_out():
+    """"The last 50 trials' percent correct and errors by kind", the trials left out of them
+    "shown beside it" (§3.4), each by its outcome in `Outcome`'s order; and the bar to move up as it
+    reads, at the stage's hardest step, with its proportion. A window not yet full says how many it
+    reads; an empty one says so, never 0%."""
+    pane = _train(_training())
+    filling = _train(_training(bars=replace(_BARS, correct=9, of=12, wrong={}, left_out={})))
+    empty = _train(_training(bars=replace(_BARS, correct=0, of=0, wrong={}, left_out={},
+                                          up_correct=0, up_of=0, up_at=None)))
+
+    assert ('<div class="kv"><span>last 50 answers <b>39 right (78%)</b></span>'
+            '<span class="nm">wrong: wrong_target 7 · no_response 4</span></div>'
+            '<div class="kv"><span class="nm">left out of them: no_fixation 2 · fixation_break 4'
+            '</span></div>'
+            '<div class="kv"><span class="nm">toward moving up: 30 of the last 34 answers at its '
+            'hardest step right; the rig suggests it at 80% of 50</span></div>') in pane
+    assert ('<span>last 12 answers of the 50 its bar reads <b>9 right (75%)</b></span>'
+            '<span class="nm">wrong: none</span></div><div class="kv"><span class="nm">left out '
+            'of them: none</span></div>') in filling
+    assert ('<div class="kv"><span>no answers yet</span><span class="nm">its bar reads the '
+            'last 50</span></div>') in empty
+    assert "this stage has no bar to move up" in empty and "0%" not in empty
+
+
+def test_a_suggestion_shows_why_and_its_two_buttons():
+    """When the bar is met, a prompt naming why -- the setting at its hardest step and the answers
+    right there -- with *Move up* and *Hold* (the PI's sketch); back down the same way, *Move back*
+    and *Hold*, naming the bar it fell under. Each button names the suggestion it answers."""
+    up = _train(_training(suggestion=_up()))
+    back = _train(_training(suggestion=_back(), staircase=None))
+
+    assert ('<div class="prompt" data-prompt="7"><div><b>Ready for Crowd.</b> '
+            'distractor_luminance is at its hardest step, 1, and 41 of the last 50 answers there '
+            'were right (82%).</div><div class="acts"><button type="button" class="btn primary" '
+            'data-cmd="confirm" data-move="next_block" data-suggestion="7">Move up to Crowd'
+            '</button><button type="button" class="btn" data-cmd="decline" data-suggestion="7">'
+            'Hold at Fade-in</button></div></div>') in up
+    assert ('<div class="prompt back" data-prompt="9"><div><b>Back to Alone?</b> 22 of the last '
+            '50 answers were right (44%), under 50%.</div><div class="acts"><button '
+            'type="button" class="btn primary" data-cmd="confirm" data-move="back_block" '
+            'data-suggestion="9">Move back to Alone</button><button type="button" class="btn" '
+            'data-cmd="decline" data-suggestion="9">Hold at Fade-in</button></div></div>') in back
+    # A stage with no staircase is always at its hardest: the answers alone.
+    assert ("<b>Ready for Crowd.</b> 41 of the last 50 answers were right (82%).</div>"
+            in _train(_training(suggestion=_up(), staircase=None)))
+    # Nothing suggested, no prompt.
+    assert "prompt" not in _train(_training())
+
+
+def test_move_up_sends_next_block_and_hold_sends_decline():
+    """*Move up* (*Move back*) sends `next_block` (`back_block`) naming the suggestion it confirms,
+    and *Hold* sends `decline` naming it (Task 4's wire): the buttons carry the move and the id, the
+    script builds the body from them, held against a double click as a clear is, and `wlx serve`
+    reads those bodies as the commands that answer it. The existing *next block* and *back one*
+    send none, moves by hand."""
+    handler = re.search(
+        r'document\.addEventListener\("click", function \(e\) \{(.*?)\n  \}\);', _SCRIPT, re.S
+    ).group(1)
+    pane = _train(_training(suggestion=_up(12)))
+
+    assert ('data-cmd="confirm" data-move="next_block" data-suggestion="12">Move up to Crowd'
+            in pane)
+    assert 'data-cmd="decline" data-suggestion="12">Hold at Fade-in' in pane
+    for line in (
+        'if (cmd === "confirm" || cmd === "decline") {',
+        'var answered = Number(button.getAttribute("data-suggestion"));',
+        'if (!clearAllowed(e.detail, cmd + "/" + answered)) { return; }',
+        'post(cmd === "decline" ? { kind: "decline", suggestion: answered }',
+        ': { kind: button.getAttribute("data-move"), suggestion: answered });',
+    ):
+        assert line in handler, line
+    assert handler.index('cmd === "confirm"') < handler.index("command(cmd);")
+    assert parse_command({"kind": "next_block", "suggestion": 12, "by": "jake"}) == NextBlock(
+        by=Box("jake"), suggestion=12)
+    assert parse_command({"kind": "back_block", "suggestion": 12, "by": "jake"}) == BackBlock(
+        by=Box("jake"), suggestion=12)
+    assert parse_command({"kind": "decline", "suggestion": 12, "by": "jake"}) == Decline(
+        suggestion=12, by=Box("jake"))
+    # The plan row's moves by hand name no suggestion.
+    assert "post({ kind: cmd });" in handler
+
+
+def test_widen_shows_a_picker_of_unused_pairings():
+    """"Trainer picks at the prompt": a widening offers the pairings the pool does not hold yet, in
+    its declared order, each with its number; *add* sends the pool's value now with them (Task 5's
+    whole number, the `set` that answers it), and *Hold* declines it. Met on the window that moves
+    the stage up, it shares that prompt, the stage's first, whose one *Hold* holds both (Task 5); at
+    the top stage a widening stands beside a move back as a prompt of its own."""
+    alone = _train(_training(widen=_widening()))
+    both = _train(_training(suggestion=_up(), widen=_widening()))
+    top = _train(_training(suggestion=_back(), widen=_widening(), next_block=None))
+    handler = re.search(
+        r'document\.addEventListener\("click", function \(e\) \{(.*?)\n  \}\);', _SCRIPT, re.S
+    ).group(1)
+
+    picker = ('<label class="chk"><input type="checkbox" data-widen="2" data-suggestion="8" '
+              'aria-label="add pairing red&gt;blue"> red&gt;blue</label><label class="chk"><input '
+              'type="checkbox" data-widen="8" data-suggestion="8" aria-label="add pairing '
+              'red&gt;purple"> red&gt;purple</label><button type="button" class="btn" '
+              'data-cmd="widen" data-suggestion="8" data-name="pairings" data-value="5">add the '
+              'pairings ticked</button>')
+    assert ('<div class="prompt" data-prompt="8"><div><b>Ready for more pairings.</b> 41 of the '
+            'last 50 answers at its hardest step were right (82%), over the 2 pairings on. Tick '
+            'those to add; adding any starts both bars afresh.</div><div class="acts">' + picker
+            + '<button type="button" class="btn" data-cmd="decline" data-suggestion="8">Hold'
+            '</button></div></div>') in alone
+    assert "blue&gt;red</label>" not in alone and "purple&gt;red</label>" not in alone
+    assert both.count('class="prompt') == 1 and both.count('data-cmd="decline"') == 1
+    assert ('Hold at Fade-in</button></div><div><b>And ready for more pairings.</b> Tick those to '
+            'add; adding any starts both bars afresh.</div><div class="acts">' + picker
+            + "</div></div>") in both
+    assert top.count('class="prompt') == 2 and top.count('data-cmd="decline"') == 2
+    assert top.index('data-prompt="9"') < top.index('data-prompt="8"')
+    # *add* sends the value now plus each pairing ticked, refusing none ticked; the ticks a frame
+    # would redraw are kept, by the suggestion they were ticked for.
+    for line in (
+        'if (cmd === "widen") {',
+        "var adding = 0;",
+        "if (box.checked) { adding += Number(box.getAttribute(\"data-widen\")); }",
+        'if (!adding) { tell("not sent: tick a pairing to add first", "crit"); return; }',
+        'post({ kind: "set", name: button.getAttribute("data-name"),',
+        'value: Number(button.getAttribute("data-value")) + adding });',
+    ):
+        assert line in handler, line
+    assert 'if (id === "rt-train") { restoreWidening(); }' in _function("swap")
+    assert parse_command({"kind": "set", "name": "pairings", "value": 15, "by": "jake"}) == (
+        SetParameter("pairings", 15, Box("jake")))
+
+
+def test_the_lock_sends_the_staircases_value_as_a_persons():
+    """*lock at* is the existing hold (TSK-32: "a live value on its parameter holds it"): a `set`
+    of the staircase's setting at the level it is at, which a person's *hand back* undoes."""
+    handler = re.search(
+        r'document\.addEventListener\("click", function \(e\) \{(.*?)\n  \}\);', _SCRIPT, re.S
+    ).group(1)
+
+    for line in (
+        'if (cmd === "lock") {',
+        'var locked = button.getAttribute("data-name");',
+        'if (!clearAllowed(e.detail, "lock/" + locked)) { return; }',
+        'post({ kind: "set", name: locked, value: Number(button.getAttribute("data-value")) });',
+    ):
+        assert line in handler, line
+
+
+def test_the_pane_is_empty_with_nothing_to_train_and_between_runs():
+    """A run with no staircase, no confirmed progression and no pool has no panel, nor a run being
+    stopped, nor anything between runs: the section is empty and the page hides it (`:empty`).
+    The controls grey away from where they work, as every control does."""
+    assert _train(frame()) == ""
+    assert _train(_training(phase="between_runs", suggestion=_up())) == ""
+    assert _train(_training(stop_kind="operator", suggestion=_up())) == ""
+    assert _train(None) == ""
+    assert "#rt-train:empty { display: none; }" in _CSS
+    lan = _train(_training(suggestion=_up(), widen=_widening()), can_write=False)
+    assert lan.count(" disabled ") == lan.count("<button") + lan.count("<input")
+    assert lan.count("<button") == 4 and lan.count("<input") == 2
+
+
+def test_every_string_the_panel_draws_is_escaped():
+    """The stage, the setting, the unit, the outcomes and the pairings are telemetry strings: text,
+    in an element or an attribute, never markup."""
+    pane = _train(_training(
+        block=EVIL, next_block=EVIL, plan=EVIL,
+        staircase=replace(_LADDER, setting=EVIL),
+        params=(ParamRow(EVIL, EVIL, 0.0, 1.0, 0.5, False, source="staircase"),),
+        bars=replace(_BARS, wrong={EVIL: 1}, left_out={EVIL: 2}),
+        pool=Pooled(EVIL, (EVIL, EVIL + "2", "a", "b"), 5),
+        suggestion=Suggestion(7, "up", EVIL, EVIL, 41, 50, True), widen=_widening()))
+
+    assert "<script" not in pane and EVIL not in pane
+    assert html.escape(EVIL, quote=True) in pane

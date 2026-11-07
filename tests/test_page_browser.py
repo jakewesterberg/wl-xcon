@@ -38,8 +38,9 @@ from _tls import client_context, material  # noqa: E402
 from wl_xcon import serve, signin, warnlist, web  # noqa: E402
 from wl_xcon.findings import SESSION_KINDS  # noqa: E402
 from wl_xcon.link import (  # noqa: E402
-    BackBlock, CheckRun, ClearOwed, Drum, ManualReward, NextBlock, OpenSession, Pause, PoolRow,
-    Preflight, PreflightItem, StageRow, StartRun, Training, WarningRow,
+    BackBlock, CheckRun, ClearOwed, Decline, Drum, ManualReward, NextBlock, OpenSession, Pause,
+    Pooled, PoolRow, Preflight, PreflightItem, SetParameter, StageRow, StaircaseRow, StartRun,
+    Suggestion, Training, WarningRow,
 )
 from wl_xcon.photometry import SRGB  # noqa: E402
 from wl_xcon.warnlist import HEAD_FREE  # noqa: E402
@@ -1675,6 +1676,108 @@ def test_the_run_start_shows_yesterdays_end_and_sends_the_stage_level_and_pairin
     assert (staged.start_block, staged.values) == ("Crowd", {})
     assert (picked.plan, picked.start_block, picked.values) == (
         "train", "Crowd", {"set_size": 8, "pairings": 3})
+
+
+def test_the_preflight_check_sends_the_stage_picked_and_keeps_the_picks(rig):
+    """The pop-out search build's Task 7: the stage picked is sent with the pre-flight's check, not
+    only with the start, so its task checks judge a start there before the trainer starts: picking a
+    stage takes the pre-flight again at it, and so does the pill, for the task and plan it shows;
+    the picks outlive it, the rig's answer redrawing the pre-flight included, and the first stage
+    sends none."""
+    rig.hub.offer(_between_runs(offered_tasks=ONE_TASK))
+    page = rig.browser_page()
+    _sign_in(page)
+    _preselected(rig, page)
+    starting = Preflight(
+        "planned.py", PASSING, plan="train", plans=("train", "test"),
+        stages=(StageRow("Alone"), StageRow("Crowd", "set_size", (4, 6, 8, 10), 1, False)),
+        pool=PoolRow("pairings", ("blue>red", "purple>red", "red>blue"), 1))
+    rig.hub.offer(_between_runs(offered_tasks=ONE_TASK, preflight=starting))
+    page.click('label[for="t-setup"]')
+    page.wait_for_selector("#start-block")
+    before = len(_checks(rig))
+
+    page.check('input[data-pairing="2"]')
+    page.select_option("#start-block", "Crowd")
+    rig.wait_for(lambda: len(_checks(rig)) == before + 1)
+    # The rig answers with the pre-flight taken at Crowd, which redraws the pane.
+    again = (PreflightItem("task checks", "pass", "planned.py starts at Crowd"),)
+    rig.hub.offer(_between_runs(offered_tasks=ONE_TASK, stopped_because=FRAME_MARKER,
+                                preflight=dataclasses.replace(starting, items=again,
+                                                              start_block="Crowd")))
+    _marker_shown(page)
+    page.locator("#preflight", has_text="planned.py starts at Crowd").wait_for()
+    kept = page.is_checked('input[data-pairing="2"]')
+    page.click('[data-cmd="check"]')
+    rig.wait_for(lambda: len(_checks(rig)) == before + 2)
+    page.select_option("#start-block", "Alone")
+    rig.wait_for(lambda: len(_checks(rig)) == before + 3)
+    page.click('[data-cmd="start"]')
+    rig.wait_for(lambda: any(isinstance(seen, StartRun) for seen in rig.dispatch.seen))
+
+    picked, again, first = _checks(rig)[before:]
+    (start,) = [seen for seen in rig.dispatch.seen if isinstance(seen, StartRun)]
+    assert (picked.task, picked.plan, picked.start_block) == ("planned.py", "train", "Crowd")
+    assert (again.plan, again.start_block) == ("train", "Crowd")
+    assert (first.plan, first.start_block) == ("train", None)
+    assert kept is True
+    assert (start.start_block, start.values) == (None, {"pairings": 3})
+
+
+#: The trainer's panel's run (the pop-out search build's Task 7): a confirmed progression in
+#: Fade-in, its staircase on the distractors' luminance, two of four pairings pooled, the bar to
+#: move up met and the pool's widening with it, one prompt.
+_UP = Suggestion(7, "up", "Fade-in", "Crowd", 41, 50, True)
+_WIDEN = Suggestion(8, "widen", "Fade-in", None, 41, 50, True)
+_TRAINING = dict(
+    plan="train", block="Fade-in", next_block="Crowd",
+    staircase=StaircaseRow("distractor_luminance", (0.25, 0.5, 0.75, 1.0), 2, False, 3, 1),
+    pool=Pooled("pairings", ("blue>red", "red>blue", "purple>red", "red>purple"), 5),
+    suggestion=_UP, widen=_WIDEN)
+
+
+def test_a_suggestion_is_answered_from_the_trainers_panel(rig):
+    """The pop-out search build's Task 7 (its design §3.5; the PI's sketch of the trainer's screen):
+    *Move up* sends `next_block` naming the suggestion it confirms and *Hold* `decline` naming it;
+    *lock at* holds the staircase's setting at its level, a person's `set`; the widening's picker
+    keeps a tick across a frame that redraws the panel, sends nothing with none ticked, and *add*
+    sends the pool's value now plus the pairings ticked; *Move back* sends `back_block` naming its
+    suggestion. Each as the member signed in. Run in Chromium, and in WebKit (`WLX_BROWSER=webkit`),
+    the engine of the PI's Safari."""
+    rig.hub.offer(frame(**_TRAINING))
+    page = rig.browser_page()
+    _sign_in(page)
+
+    page.click('#rt-train [data-cmd="confirm"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 1)
+    page.click('#rt-train [data-cmd="decline"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
+    page.click('#rt-train [data-cmd="lock"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 3)
+    page.click('#rt-train [data-cmd="widen"]')
+    page.locator("#sent", has_text="tick a pairing to add first").wait_for()
+    page.check('#rt-train input[data-widen="8"]')
+    # A frame redrawing the panel, as the next boundary's does with its bar's numbers moved.
+    rig.hub.offer(frame(**{**_TRAINING, "suggestion": dataclasses.replace(_UP, correct=42)},
+                        duration_warning=FRAME_MARKER))
+    page.locator("#banners", has_text=FRAME_MARKER).wait_for(state="attached")
+    page.locator("#rt-train", has_text="42 of the last 50").wait_for()
+    kept = page.is_checked('#rt-train input[data-widen="8"]')
+    page.click('#rt-train [data-cmd="widen"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 4)
+    rig.hub.offer(frame(**{**_TRAINING, "widen": None, "suggestion": Suggestion(
+        9, "back", "Fade-in", "Alone", 22, 50, False)}))
+    page.locator('#rt-train [data-cmd="confirm"][data-move="back_block"]').wait_for()
+    page.click('#rt-train [data-cmd="confirm"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 5)
+
+    up, hold, lock, widened, back = rig.dispatch.seen
+    assert (type(up), up.suggestion, up.by.name) == (NextBlock, 7, "Jake Westerberg")
+    assert (type(hold), hold.suggestion, hold.by.name) == (Decline, 7, "Jake Westerberg")
+    assert (type(lock), lock.name, lock.value) == (SetParameter, "distractor_luminance", 0.75)
+    assert kept is True
+    assert (type(widened), widened.name, widened.value) == (SetParameter, "pairings", 13)
+    assert (type(back), back.suggestion) == (BackBlock, 9)
 
 
 class _BoxRig:

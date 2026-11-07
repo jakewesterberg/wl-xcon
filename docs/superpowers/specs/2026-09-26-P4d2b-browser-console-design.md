@@ -256,6 +256,19 @@ welfare number and bounds nothing.
   - *Wrong?*: hangs, with drops, tracker staleness and RHX margin shown as *not measured*;
   - *wl-works sees*: the `/health` readings, as they would be sent;
   - changes: staged and refused, with `refusals_dropped` when it is not zero.
+
+  *(Added 2026-11-07 by the pop-out search build's Task 7, its design §3.5, the PI's sketch of the
+  trainer's screen accepted with short stage names: a **Training** panel after *This run*, shown
+  while a run runs with a staircase, a confirmed progression, a pool or a suggestion, and hidden
+  otherwise. It shows the stage by name; the staircase's setting at its level, which level of how
+  many, and its lock (*lock at*, a person's `set`; held, *hand back*); the last answers as the
+  rig's bars judge them, right with their percent, the wrong ones and the trials left out of them
+  by outcome, and the bar to move up as it reads at the stage's hardest step; the pairings on; and
+  each suggestion as a prompt naming why, with *Move up* or *Move back* and *Hold*, each naming the
+  suggestion it answers, and for a widening a picker of the pairings not yet pooled, whose *add*
+  sends the pool's value plus those ticked. One window meeting both bars, one prompt, whose one
+  *Hold* holds both. Telemetry schema 20 carries what it reads: `staircase`, `bars` and `pool`.
+  The run start's pre-flight check sends the stage picked, as the start does.)*
 - **Task parameters, read-only:** one card per entry in `params`: value, unit, range, the
   ceiling flag, and a staged marker.
 - **Setup, read-only:** session, subject, deployment, bounds config, allocation.

@@ -220,7 +220,12 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: the same build's Task 6, also before 20 was released: `Preflight.start_block`, `stages` (each a
 #: `StageRow`), `pool` (a `PoolRow`), `previous` and `continues`, where the run would start, the
 #: stages and pairings a page's start offers, the previous session's end and what a resumed run
-#: goes on from. A reader of 19 refuses 20 and 20 refuses 19, by name.
+#: goes on from. And the same build's Task 7, also before 20 was released, for the trainer's
+#: panel: `Telemetry.staircase` (a `StaircaseRow`: the open block's staircase, its level and
+#: whether a person holds its setting), `Telemetry.bars` (a `Bars`: the stage's last answers as the
+#: rig's bars judge them, the wrong ones and the trials left out by outcome) and `Telemetry.pool` (a
+#: `Pooled`: the pool's pairings in its declared order, and its value now). A reader of 19 refuses
+#: 20 and 20 refuses 19, by name.
 SCHEMA = 20
 
 #: How many refusals a session keeps, per source, and therefore how many one
@@ -603,6 +608,67 @@ class PoolRow:
     setting: str
     pairings: tuple
     start: object = None
+
+
+@dataclass(frozen=True, slots=True)
+class StaircaseRow:
+    """**The open stage's staircase, for the trainer's panel** (schema 20; the pop-out search
+    build's Task 7; its design §3.5: "the staircase's level and its lock"), from
+    `taskd.Session.staircase`: the setting it steps (`task.Staircase`), its levels easiest first,
+    the level it is at as an index into them -- before the block's first trial, the one it will
+    start at -- whether a person holds the setting (`held`), whose value then gives each trial
+    while the staircase waits where it stopped, and its rule: `down` right answers in a row step it
+    a level harder, `up` wrong ones in a row a level easier."""
+
+    setting: str
+    levels: tuple
+    level: int
+    held: bool
+    down: int
+    up: int
+
+
+@dataclass(frozen=True, slots=True)
+class Bars:
+    """**The open stage's last answers as the rig's bars judge them, for the trainer's panel**
+    (schema 20; the pop-out search build's Task 7; its design §3.4, "the last 50", and §3.5, "the
+    last 50 trials' percent correct and errors by kind"), from `taskd.Session.bars`, under a
+    confirmed progression (`task.ByCriterion.confirm`). **Toward moving back**, the stage's last
+    answers, each trial's first (the PI, "First answer only"), eased ones included: `correct` of the
+    last `of` right, in a window `window` long (the fall-back's, 0 where it has none); the wrong
+    ones among them by outcome (`wrong`); and the trials **left out** of them, which moved no
+    staircase -- no fixation, an early saccade, any whose stimulus never appeared -- by outcome, a
+    hang as `"hang"`, since the answer before the first of them (`left_out`; the design's §3.4:
+    "left out of the 50 and shown beside it"). **Toward moving up** (and widening the pool), the
+    answers given at the stage's hardest step, none a person's change eased: `up_correct` of
+    `up_of`, in a window `up_window` long (the stage's criterion's, 0 where it has none). And the
+    proportion each bar is met at, the criterion's (`up_at`) and the fall-back's, under which the rig
+    suggests moving back (`back_at`), each `None` where there is none. Each window starts afresh as
+    its stage opens, as the pool changes, and as a person holds its move."""
+
+    correct: int
+    of: int
+    window: int
+    wrong: dict
+    left_out: dict
+    up_correct: int
+    up_of: int
+    up_window: int
+    up_at: float | None
+    back_at: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class Pooled:
+    """**The task's pool of pairings now, for the trainer's panel** (`task.Pool`; schema 20; the
+    pop-out search build's Task 7), from `taskd.Session.pooled`: the setting that holds it, each
+    pairing in words in the pool's declared order -- the n-th, counted from 0, worth 2 ** n in the
+    setting's value, so a console widening it sends the value now plus the numbers of the pairings
+    added -- and the setting's value now."""
+
+    setting: str
+    pairings: tuple
+    value: object = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1085,6 +1151,18 @@ class Telemetry:
     #: `to`, beside the stage's -- one window meeting both bars, one prompt offers both, the
     #: stage's first -- or `None`. `None` by default, a frame with none.
     widen: "Suggestion | None" = None
+    #: `session.staircase` (schema 20; the pop-out search build's Task 7): the open block's
+    #: staircase, its level and whether a person holds its setting, a `StaircaseRow`, or `None` --
+    #: a block with none, and between runs. `None` by default.
+    staircase: "StaircaseRow | None" = None
+    #: `session.bars` (schema 20; the same build's Task 7): the open stage's last answers as the
+    #: rig's bars judge them, a `Bars`, under a confirmed progression, or `None` -- any other run,
+    #: and between runs. `None` by default.
+    bars: "Bars | None" = None
+    #: `session.pooled` (schema 20; the same build's Task 7): the task's pool of pairings, each in
+    #: words in its declared order, and its setting's value now, a `Pooled`, or `None` -- a task with
+    #: no pool, and between runs. `None` by default.
+    pool: "Pooled | None" = None
 
     @classmethod
     def of(cls, session, tally, scheduler, index: int) -> "Telemetry":
@@ -1316,6 +1394,11 @@ class Telemetry:
             # which offers none between runs.
             suggestion=None if session.suggestion is None else Suggestion(*session.suggestion),
             widen=None if session.widening is None else Suggestion(*session.widening),
+            # The same build's Task 7 (schema 20): what the trainer's panel shows beside them, read
+            # from the session, which has none of the three between runs.
+            staircase=None if session.staircase is None else StaircaseRow(*session.staircase),
+            bars=None if session.bars is None else Bars(*session.bars),
+            pool=None if session.pooled is None else Pooled(*session.pooled),
         )
 
 
@@ -1484,6 +1567,8 @@ def encode(telemetry: Telemetry | Idle) -> bytes:
 
 #: A `Suggestion`'s fields, in order, as a frame carries them (schema 20).
 _SUGGESTION_FIELDS = ("change", "move", "block", "to", "correct", "of", "at_hardest")
+_STAIRCASE_FIELDS = tuple(f.name for f in fields(StaircaseRow))
+_BARS_FIELDS = tuple(f.name for f in fields(Bars))
 
 
 def _telemetry_out(telemetry: Telemetry) -> dict:
@@ -1616,6 +1701,24 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
             None
             if telemetry.widen is None
             else {name: getattr(telemetry.widen, name) for name in _SUGGESTION_FIELDS}
+        ),
+        # The trainer's panel (the pop-out search build's Task 7; schema 20).
+        "staircase": (
+            None
+            if telemetry.staircase is None
+            else {**{name: getattr(telemetry.staircase, name) for name in _STAIRCASE_FIELDS},
+                  "levels": list(telemetry.staircase.levels)}
+        ),
+        "bars": (
+            None
+            if telemetry.bars is None
+            else {name: getattr(telemetry.bars, name) for name in _BARS_FIELDS}
+        ),
+        "pool": (
+            None
+            if telemetry.pool is None
+            else {"setting": telemetry.pool.setting, "pairings": list(telemetry.pool.pairings),
+                  "value": telemetry.pool.value}
         ),
     }
 
@@ -1763,6 +1866,38 @@ def _destination(value: object) -> str:
     return value
 
 
+def _counted(value: object) -> dict:
+    """A count by outcome on the wire (`Bars.wrong`, `Bars.left_out`): a mapping, or a malformed
+    frame (`TypeError`, which `decode` makes a `FrameError`)."""
+    if not isinstance(value, dict):
+        raise TypeError(f"a count by outcome is a mapping, not {value!r}")
+    return dict(value)
+
+
+def _staircase_in(data: dict | None) -> StaircaseRow | None:
+    """The trainer's panel's staircase off the wire (schema 20), each field read by name."""
+    if data is None:
+        return None
+    return StaircaseRow(setting=data["setting"], levels=tuple(data["levels"]),
+                        level=data["level"], held=_flag(data["held"]), down=data["down"],
+                        up=data["up"])
+
+
+def _bars_in(data: dict | None) -> Bars | None:
+    """The trainer's panel's last answers off the wire (schema 20), each field read by name."""
+    if data is None:
+        return None
+    return Bars(**{**{name: data[name] for name in _BARS_FIELDS},
+                   "wrong": _counted(data["wrong"]), "left_out": _counted(data["left_out"])})
+
+
+def _pooled_in(data: dict | None) -> Pooled | None:
+    """The trainer's panel's pool off the wire (schema 20), each field read by name."""
+    if data is None:
+        return None
+    return Pooled(setting=data["setting"], pairings=tuple(data["pairings"]), value=data["value"])
+
+
 def _telemetry_from(data: dict) -> Telemetry:
     """The field-by-field rebuild `decode` used to do inline. Split out so `decode`
     can wrap only this part's `KeyError`/`TypeError` in `FrameError` -- the schema
@@ -1873,6 +2008,9 @@ def _telemetry_from(data: dict) -> Telemetry:
         suggestion=(None if data["suggestion"] is None
                     else Suggestion(**data["suggestion"])),
         widen=None if data["widen"] is None else Suggestion(**data["widen"]),
+        staircase=_staircase_in(data["staircase"]),
+        bars=_bars_in(data["bars"]),
+        pool=_pooled_in(data["pool"]),
     )
 
 
