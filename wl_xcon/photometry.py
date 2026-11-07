@@ -738,7 +738,8 @@ COLORSET_OPTIONAL = ("luminance_cd_m2", "held", "source")
 class ColorSet:
     """**Colors held equal in macaque luminance** (the pop-out search plan, Task 2; its spec, §3.2):
     each named color's CIE 1931 chromaticity, the `apex` they lose chroma toward together where a
-    panel cannot show them all (`realize`), and how bright each is, `luminance_cd_m2`, **read as the
+    panel cannot show them all (`realize`), and how bright each is, `luminance_cd_m2` -- the set's own,
+    which a light may replace with its own (`ColorSetLight.luminance`) -- **read as the
     macaque luminance of a D65 light at that many cd/m²** -- the controller's reading of the PI's
     "15 cd/m² on every rig" (2026-11-07): a color's own CIE luminance differs from it, wl-style's
     blue's by 7% on the sRGB standard. Only `MACAQUE_2DEG_LM1` is held. Plain data, read from its
@@ -827,12 +828,19 @@ class ColorSetLight(Color):
     runs on the default black background, where no cone color does. Its chromaticity is the set's
     color -- moved toward the set's apex with all the others where the panel needs it -- and its
     macaque luminance `fraction` times the set's, that of a D65 light at `fraction` times
-    `luminance_cd_m2` cd/m² (`realize`). `fraction` may be a parameter (Fade-in's distractors):
-    `screen.resolve` binds it, and `check` reads each value it can take."""
+    `luminance` cd/m² (`realize`). `fraction` may be a parameter (Fade-in's distractors):
+    `screen.resolve` binds it, and `check` reads each value it can take.
+
+    **`luminance`, the set's brightness at full** (the PI, 2026-11-07: "15 cd/m² on every rig",
+    and "everything should be adjustable in the console"; the pop-out search build's fix round):
+    cd/m² of macaque luminance, a number or a setting (`P`) a trainer changes live; `None`, the
+    set's own `luminance_cd_m2`. The set is realized once for each value a run draws it at, on
+    each panel (`realized`), between trials; `check` reads the whole range it can take."""
 
     colorset: ColorSet
     color: str
     fraction: object = 1.0
+    luminance: object = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.colorset, ColorSet):
@@ -844,12 +852,26 @@ class ColorSetLight(Color):
             )
 
     def __repr__(self) -> str:
-        return f"ColorSetLight({self.colorset.name!r}, {self.color!r}, fraction={self.fraction!r})"
+        at = "" if self.luminance is None else f", luminance={self.luminance!r}"
+        return (f"ColorSetLight({self.colorset.name!r}, {self.color!r}, "
+                f"fraction={self.fraction!r}{at})")
+
+    def at(self) -> float:
+        """The cd/m² of macaque luminance its set is realized at, bound to a number
+        (`screen.resolve`; `check` reads each value it can take): its own `luminance`, or its
+        set's. Raises `ValueError` for one that is no number above 0."""
+        luminance = self.colorset.luminance_cd_m2 if self.luminance is None else self.luminance
+        if not (_finite_number(luminance) and luminance > 0.0):
+            raise ValueError(
+                f"{self}'s luminance is {luminance!r}: a parameter is bound, or read at each value "
+                f"it can take, and a color set's luminance is a number of cd/m² above 0"
+            )
+        return float(luminance)
 
 
 @dataclass(frozen=True, slots=True)
 class Realized:
-    """A color set on one panel (`realize`), at the set's full luminance."""
+    """A color set on one panel (`realize`), at one full luminance (`luminance`)."""
 
     #: Each color's output levels, red, green and blue, each 0 to 1: the primary weights that make
     #: its light, read back through the panel's measured transfer (`exact.inverse_transfer`).
@@ -861,13 +883,17 @@ class Realized:
     xy: Mapping[str, tuple[float, float]]
     #: Each color's light, CIE XYZ in cd/m².
     xyz: Mapping[str, tuple[float, float, float]]
+    #: The cd/m² of macaque luminance it is realized at: the set's own, or a light's
+    #: (`ColorSetLight.at`).
+    luminance: float = 15.0
 
 
 #: How finely `realize` finds the shared share: the last width of each color's bisection.
 DESATURATION_STEP = 1e-9
 
 
-def realize(colorset: ColorSet, calibration: Calibration) -> Realized:
+def realize(colorset: ColorSet, calibration: Calibration,
+            luminance: float | None = None) -> Realized:
     """**A color set on a panel** (the pop-out search spec, §3.2): each color at its chromaticity
     and at the set's macaque luminance on this panel (`macaque_row`). **A panel that cannot show
     them all there** has every color give up the same share of its distance from the apex in xy
@@ -877,11 +903,12 @@ def realize(colorset: ColorSet, calibration: Calibration) -> Realized:
     its own share to the apex; each share is found by bisection and the largest taken (the plan's
     call). **Raises `ValueError` when the panel cannot show even the apex at that luminance**: no
     loss of chroma helps, and a dimmer set is a person's choice. At load or between trials, never in
-    a frame: `colorset_xyz` keeps what it returns."""
+    a frame: `colorset_xyz` keeps what it returns. **`luminance`**, the cd/m² of macaque luminance
+    to realize it at; `None`, the set's own `luminance_cd_m2`."""
     from wl_xcon import exact
 
     row = macaque_row(calibration)
-    target = colorset.luminance_cd_m2
+    target = colorset.luminance_cd_m2 if luminance is None else float(luminance)
     panel = calibration.id or calibration.measured_on
 
     def light(xy) -> tuple[float, float, float]:
@@ -908,7 +935,7 @@ def realize(colorset: ColorSet, calibration: Calibration) -> Realized:
             f"calibration {panel} cannot show color set {colorset.name!r}'s apex "
             f"({colorset.apex[0]:g}, {colorset.apex[1]:g}) at {target:g} cd/m² of macaque "
             f"luminance, so no loss of chroma brings the set inside its gamut; a lower "
-            f"luminance_cd_m2 would"
+            f"luminance would"
         )
     shares = {}
     for color, xy in colorset.colors.items():
@@ -929,23 +956,28 @@ def realize(colorset: ColorSet, calibration: Calibration) -> Realized:
             float(exact.inverse_transfer(transfer, min(max(w, 0.0), 1.0)))
             for transfer, w in zip(calibration.transfer, weights))
     return Realized(drive=MappingProxyType(drive), desaturation=share,
-                    xy=MappingProxyType(xys), xyz=MappingProxyType(xyzs))
+                    xy=MappingProxyType(xys), xyz=MappingProxyType(xyzs), luminance=target)
 
 
-#: Each color set realized on each calibration, by the two objects' identities and holding both,
-#: so a frame's `screen.resolve` reads a set's lights rather than realizing it again: at most
-#: `_REALIZED_KEPT`, the oldest forgotten first.
+#: Each color set realized on each calibration at each luminance, by the two objects' identities
+#: and the luminance, holding both objects, so a frame's `screen.resolve` reads a set's lights
+#: rather than realizing it again (the pop-out search build's fix round: "realize the set once per
+#: distinct value, cached per panel"): at most `_REALIZED_KEPT`, the oldest forgotten first. A run
+#: realizes each value it draws a set at between trials, before the trial's first frame
+#: (`taskd.Session._realize`).
 _REALIZED: dict = {}
-_REALIZED_KEPT = 8
+_REALIZED_KEPT = 64
 
 
-def realized(colorset: ColorSet, calibration: Calibration) -> Realized:
-    """`realize`, once per color set and calibration (`_REALIZED`)."""
-    key = (id(colorset), id(calibration))
+def realized(colorset: ColorSet, calibration: Calibration,
+             luminance: float | None = None) -> Realized:
+    """`realize`, once per color set, calibration and luminance (`_REALIZED`)."""
+    at = colorset.luminance_cd_m2 if luminance is None else float(luminance)
+    key = (id(colorset), id(calibration), at)
     kept = _REALIZED.get(key)
     if kept is not None and kept[0] is colorset and kept[1] is calibration:
         return kept[2]
-    made = realize(colorset, calibration)
+    made = realize(colorset, calibration, at)
     if len(_REALIZED) >= _REALIZED_KEPT:
         _REALIZED.pop(next(iter(_REALIZED)))
     _REALIZED[key] = (colorset, calibration, made)
@@ -954,15 +986,15 @@ def realized(colorset: ColorSet, calibration: Calibration) -> Realized:
 
 def colorset_xyz(light: ColorSetLight, calibration: Calibration) -> tuple[float, float, float]:
     """CIE XYZ, Y in cd/m², of a color-set light on `calibration`: its color as the set is realized
-    there (`realized`), times its `fraction`, which is bound to a number first (`screen.resolve`;
-    `check` reads each value it can take)."""
+    there at its luminance (`realized`, `ColorSetLight.at`), times its `fraction`, each bound to a
+    number first (`screen.resolve`; `check` reads each value they can take)."""
     fraction = light.fraction
     if not _finite_number(fraction) or fraction < 0.0:
         raise ValueError(
             f"{light}'s fraction is {fraction!r}: a parameter is bound, or read at each value it "
             f"can take, and a fraction of the set's luminance is a number, 0 or above"
         )
-    X, Y, Z = realized(light.colorset, calibration).xyz[light.color]
+    X, Y, Z = realized(light.colorset, calibration, light.at()).xyz[light.color]
     return (fraction * X, fraction * Y, fraction * Z)
 
 

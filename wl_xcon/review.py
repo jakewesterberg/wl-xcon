@@ -34,6 +34,7 @@ from wl_xcon.task import (
     Random,
     SequenceBalanced,
     Staircase,
+    Steps,
     WithReplacement,
     SPENT,
     UNPAID,
@@ -564,10 +565,27 @@ def _counting(task: Task) -> list[str]:
     return lines
 
 
-def _rule(rule: tuple, answers: str = "answers") -> str:
+def _setting(part: object, params: dict | None, shown) -> str:
+    """A rule's or a staircase's number in words: as written, or a setting by its name and what it
+    starts at (the pop-out search build's fix round: "everything should be adjustable in the
+    console")."""
+    if not isinstance(part, P):
+        return shown(part)
+    param = (params or {}).get(part.name)
+    start = getattr(param, "start", None)
+    at = "" if not isinstance(start, (int, float)) else f", {shown(start)} to start"
+    return f"`{part.name}` (a setting{at})"
+
+
+def _rule(rule: tuple, answers: str = "answers", params: dict | None = None) -> str:
     """A criterion or a fall-back rule in words: a proportion of 1.0 is a streak. A fall-back
-    judges each trial's first answer only (the PI, 2026-10-19, "First answer only")."""
+    judges each trial's first answer only (the PI, 2026-10-19, "First answer only"). **A number a
+    setting gives** is named with what it starts at (`_setting`), read live at each judgment."""
     proportion, window = rule
+    if isinstance(proportion, P) or isinstance(window, P):
+        share = _setting(proportion, params, lambda v: f"{100 * v:g}%")
+        count = _setting(window, params, lambda v: f"{v:g}")
+        return f"{share} right over the last {count} {answers}"
     if proportion >= 1.0:
         return f"{window} right in a row"
     return f"{100 * proportion:g}% right over the last {window} {answers}"
@@ -582,7 +600,7 @@ def _seconds(seconds: float) -> str:
     return f"{minutes} minute{'' if minutes == 1 else 's'}" + (f" {rest} s" if rest else "")
 
 
-def _order(order) -> str:
+def _order(order, params: dict | None = None) -> str:
     """How a plan's blocks follow one another, in words (engine spec §13.5)."""
     if isinstance(order, Cyclic):
         times = ("until a time limit, a stop or the out-of-cage limit" if order.cycles is None
@@ -599,7 +617,8 @@ def _order(order) -> str:
         return f"Each block a type drawn at random from the run's seed: {count}."
     if isinstance(order, ByCriterion):
         back = ("no fall-back" if order.fall_back is None
-                else f"back one, started fresh, under {_rule(order.fall_back, 'first answers')}")
+                else f"back one, started fresh, under "
+                     f"{_rule(order.fall_back, 'first answers', params)}")
         if order.confirm:
             # The pop-out search build (the PI, 2026-11-07, "Rig suggests, trainer confirms"): no
             # stage moves of itself on its rules; a stage's time still moves it up.
@@ -741,7 +760,7 @@ def _plans(task: Task) -> list[str]:
         limit = ("No run time limit." if plan.time_limit_s is None
                  else f"The run ends at the first pause between trials after "
                       f"{_seconds(plan.time_limit_s)} of trials.")
-        lines += [f"#### Plan `{name}`", "", f"{_order(plan.order)} {limit}", "",
+        lines += [f"#### Plan `{name}`", "", f"{_order(plan.order, params)} {limit}", "",
                   "| Block | Ends once | Conditions drawn | Counts by | Drums |",
                   "|---|---|---|---|---|"]
         for block in plan.blocks:
@@ -749,7 +768,7 @@ def _plans(task: Task) -> list[str]:
                       else "each condition's structure's table")
             # Every name through `_cell`, so a bar in one is never a new column (the final review
             # of engine build C2b, T11).
-            lines.append(f"| {_cell(f'{block.name}')} | {_cell(_ends(block))} | "
+            lines.append(f"| {_cell(f'{block.name}')} | {_cell(_ends(block, params))} | "
                          f"{_cell(_block_order(block.order))} | {counts} | "
                          f"{'yes' if block.drum else 'no'} |")
         lines += ["", "| Block | Condition | Structure | Target | Values |",
@@ -786,12 +805,22 @@ def _staircases(plan, params: dict) -> list[str]:
             rows.append(f"| {named} | | **not a staircase**: {_cell(repr(staircase))} | | | |")
             continue
         unit = _unit(staircase.setting, params)
-        levels = ", ".join(f"{level:g}" for level in staircase.levels)
+        if isinstance(staircase.levels, Steps):
+            # Levels by a step a setting may give (the pop-out search build's fix round).
+            steps = staircase.levels
+            levels = (f"{steps.start:g} to {steps.end:g} by "
+                      f"{_setting(steps.by, params, lambda v: f'{v:g}')}")
+            first = None if staircase.start is None else f"level {staircase.start + 1}"
+        else:
+            levels = ", ".join(f"{level:g}" for level in staircase.levels)
+            first = (None if staircase.start is None
+                     else f"{staircase.levels[staircase.start]:g}")
         levels += f" {unit}" if unit else ""
-        start = ("the level nearest the run's value, else the easiest" if staircase.start is None
-                 else f"{staircase.levels[staircase.start]:g}")
+        start = "the level nearest the run's value, else the easiest" if first is None else first
+        down = _setting(staircase.down, params, lambda v: f"{v:g}")
+        up = _setting(staircase.up, params, lambda v: f"{v:g}")
         rows.append(f"| {named} | {_cell(f'{staircase.setting}')} | {_cell(levels)} | "
-                    f"{staircase.down} right in a row | {staircase.up} failed in a row | "
+                    f"{down} right in a row | {up} failed in a row | "
                     f"{_cell(start)} |")
     if not rows:
         return []
@@ -844,7 +873,7 @@ def _unit(name: str, params: dict) -> str:
     return params[name].unit if name in params else ""
 
 
-def _ends(block) -> str:
+def _ends(block, params: dict | None = None) -> str:
     """**What ends a block, in words**: every target used up, with its criterion, its number of
     trials and its time limit (engine build C2b). **A designed block** (engine build C3's calls 15
     and 16): a sequence-balanced block ends once its sequence is played out, `(n**depth + depth -
@@ -861,7 +890,7 @@ def _ends(block) -> str:
     else:
         ends = ["every target used up"]
     if block.criterion is not None:
-        ends.append(_rule(block.criterion))
+        ends.append(_rule(block.criterion, params=params))
     if block.trials is not None:
         cut = "or " if isinstance(order, SequenceBalanced) else ""
         ends.append(f"{cut}{block.trials} trials run")

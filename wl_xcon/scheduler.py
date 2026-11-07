@@ -33,8 +33,8 @@ from wl_xcon.declarations import canonical
 from wl_xcon.task import (
     ANSWERS, COUNTED, HANG_COUNTS_AS, NO_LIMIT, OWED, REPEATED, RIGHT, SPENT, UNPAID, Balanced,
     Block, BlockOrder, ByCriterion, Condition, Constrained, Counting, Cyclic, Family, Fixed, Order,
-    Listed, Outcome, Priming, Random, SequenceBalanced, Shuffled, WithReplacement,
-    staircase_verdict,
+    Listed, Outcome, P, Priming, Random, SequenceBalanced, Shuffled, WithReplacement,
+    rule_at, staircase_verdict,
 )
 from wl_xcon.variation import balanced_sequence, run_length
 
@@ -354,6 +354,15 @@ class Scheduler:
     #: whose order plays its blocks by their places -- in order, over and over, or stage by stage
     #: (`start_at`) -- the blocks before it still there to move or fall back to.
     start: int = 0
+    #: **The run's live values, read at each judgment** (the pop-out search build's fix round; the
+    #: PI, 2026-11-07: "everything should be adjustable in the console"): where a stage's criterion
+    #: or the plan's fall-back names a setting (`P`), its value now (`task.rule_at`), so a person's
+    #: change takes effect at the next judgment and restarts nothing. `None` for a run whose rules
+    #: name none.
+    values: "object | None" = None
+    #: The task's settings, by name: how long a window named by a setting can be, its declared
+    #: highest (`_most`), so a window kept that long rolls on whatever value it is set to.
+    params: dict = field(default_factory=dict)
     _rng: random.Random = field(init=False, repr=False)
     _order_rng: random.Random = field(init=False, repr=False)
     #: The open block's place in the run's sequence of blocks, from 0, and the block types that
@@ -607,9 +616,76 @@ class Scheduler:
             return self._position - 1 if self._position > 0 else None
         return self._position + 1
 
+    def _live(self) -> dict:
+        """The run's live values (`values`), or none."""
+        return {} if self.values is None else self.values()
+
+    @property
+    def _criterion(self) -> tuple[float, int] | None:
+        """The open block's criterion as the run's live values make it now (`task.rule_at`)."""
+        return rule_at(self.block.criterion, self._live())
+
+    @property
+    def _fall_back(self) -> tuple[float, int] | None:
+        """The plan's fall-back as the run's live values make it now (`task.rule_at`), or `None`."""
+        return rule_at(self.order.fall_back if isinstance(self.order, ByCriterion) else None,
+                       self._live())
+
+    @property
+    def criterion_now(self) -> tuple[float, int] | None:
+        """The open block's criterion now, `(proportion, window)` (`_criterion`), for the changes
+        feed's sentences."""
+        return self._criterion
+
+    @property
+    def fall_back_now(self) -> tuple[float, int] | None:
+        """The plan's fall-back now (`_fall_back`), for the changes feed's sentences."""
+        return self._fall_back
+
+    def _most(self, rule) -> int:
+        """**The longest a rule's window can be**, which its window is kept as long as: as
+        written, or for a window a setting names, its declared highest -- or its value now where
+        a person set it higher (`_fit`). 0 for no rule."""
+        if rule is None:
+            return 0
+        window = rule[1]
+        if not isinstance(window, P):
+            return window if isinstance(window, int) and window >= 1 else 0
+        param = self.params.get(window.name)
+        high = getattr(param, "high", None)
+        most = (int(high) if isinstance(high, (int, float)) and not isinstance(high, bool)
+                and high == high and high not in (float("inf"),) else 0)
+        try:
+            now = rule_at(rule, self._live())[1]
+        except ValueError:
+            now = 0
+        return max(most, now, 1)
+
+    @staticmethod
+    def _last(answers, n: int) -> list:
+        """The last `n` of a window's answers, in order."""
+        kept = list(answers)
+        return kept[-n:] if 0 < n < len(kept) else kept
+
+    def _fit(self) -> None:
+        """**A window a person set longer than it is kept** (the pop-out search build's fix
+        round): kept that long from now, its answers so far kept, so the bar judges it once that
+        many are in. Between trials, before a trial is judged."""
+        fall_back = self._fall_back
+        if fall_back is not None and self._back.maxlen and fall_back[1] > self._back.maxlen:
+            self._back = deque(self._back, maxlen=fall_back[1])
+        if not self._confirming:
+            return
+        criterion = self._criterion
+        if criterion is not None and self._up.maxlen and criterion[1] > self._up.maxlen:
+            self._up = deque(self._up, maxlen=criterion[1])
+        if fall_back is not None and self._down.maxlen and fall_back[1] > self._down.maxlen:
+            self._down = deque(self._down, maxlen=fall_back[1])
+            self._shown = deque(self._shown, maxlen=fall_back[1])
+
     def _fall_back_window(self) -> deque:
         rule = self.order.fall_back if isinstance(self.order, ByCriterion) else None
-        return deque(maxlen=rule[1] if rule is not None and rule[1] >= 1 else 0)
+        return deque(maxlen=self._most(rule))
 
     @property
     def _confirming(self) -> bool:
@@ -630,8 +706,7 @@ class Scheduler:
         length where there is no such rule, or the plan is no confirmed progression."""
 
         def window(rule) -> deque:
-            return deque(maxlen=rule[1] if self._confirming and rule is not None
-                         and rule[1] >= 1 else 0)
+            return deque(maxlen=self._most(rule) if self._confirming else 0)
 
         return window(self.block.criterion), window(getattr(self.order, "fall_back", None))
 
@@ -646,7 +721,9 @@ class Scheduler:
         answers in its window were right, how many answers are in it, and whether every one was at
         the stage's hardest step -- toward moving up (`MOVE_UP`) or widening the pool
         (`MOVE_WIDEN`), one window, or back (`MOVE_BACK`)."""
+        rule = self._fall_back if move == MOVE_BACK else self._criterion
         answers = self._answers_for(move)
+        answers = self._last(answers, len(answers) if rule is None else rule[1])
         return (sum(answer[0] for answer in answers), len(answers),
                 all(answer[1] for answer in answers))
 
@@ -662,30 +739,33 @@ class Scheduler:
             return None
         wrong: dict = {}
         left: dict = {}
-        for right, outcome, aside in self._shown:
+        criterion, fall_back = self._criterion, self._fall_back
+        window = len(self._shown) if fall_back is None else fall_back[1]
+        shown = self._last(self._shown, window)
+        for right, outcome, aside in shown:
             if not right:
                 wrong[outcome] = wrong.get(outcome, 0) + 1
             for said, count in aside:
                 left[said] = left.get(said, 0) + count
         for said, count in self._aside.items():
             left[said] = left.get(said, 0) + count
-        correct = sum(answer[0] for answer in self._shown)
+        correct = sum(answer[0] for answer in shown)
         up_correct, up_of, _ = self.bar(MOVE_UP)
-        criterion, fall_back = self.block.criterion, self.order.fall_back
-        return Answers(correct, len(self._shown), self._shown.maxlen, wrong, left, up_correct,
-                       up_of,
-                       self._up.maxlen, None if criterion is None else criterion[0],
+        return Answers(correct, len(shown), fall_back[1] if fall_back else self._shown.maxlen,
+                       wrong, left, up_correct, up_of,
+                       criterion[1] if criterion and self._up.maxlen else self._up.maxlen,
+                       None if criterion is None else criterion[0],
                        None if fall_back is None else fall_back[0])
 
     def _met_up(self) -> tuple[int, int, bool] | None:
         """The bar to move up's numbers (`bar`) where it is met -- its window full and at least
         the stage's criterion's proportion right -- else `None`, as under no confirmed
         progression, or in a stage with no criterion."""
-        criterion = self.block.criterion
-        if not self._confirming or criterion is None or not self._up.maxlen:
+        if not self._confirming or self.block.criterion is None or not self._up.maxlen:
             return None
+        criterion = self._criterion
         right, of, hardest = self.bar(MOVE_UP)
-        met = of >= self._up.maxlen and right / of >= criterion[0]
+        met = of >= criterion[1] and right / of >= criterion[0]
         return (right, of, hardest) if met else None
 
     @property
@@ -724,7 +804,8 @@ class Scheduler:
         below = self._type_at(self._position - 1)
         if below is not None and self._down.maxlen:
             right, of, hardest = self.bar(MOVE_BACK)
-            if of >= self._down.maxlen and right / of < self.order.fall_back[0]:
+            proportion, window = self._fall_back
+            if of >= window and right / of < proportion:
                 return Suggestion(MOVE_BACK, self.block.name, self.blocks[below].name, right, of,
                                   hardest)
         return None
@@ -752,6 +833,7 @@ class Scheduler:
         they were -- judged by `_bar`, as `record` judges a trial now, and nothing else about the
         block counted."""
         if self._confirming:
+            self._fit()
             self._bar(outcome, shown, first_try, eased, hardest)
 
     def decline(self, move: str) -> None:
@@ -812,9 +894,10 @@ class Scheduler:
         if (not isinstance(self.order, ByCriterion) or self.order.fall_back is None
                 or self._confirming):
             return False
-        proportion, window = self.order.fall_back
-        return (self._position > 0 and window >= 1 and len(self._back) >= window
-                and sum(self._back) / len(self._back) < proportion)
+        proportion, window = self._fall_back
+        recent = self._last(self._back, window)
+        return (self._position > 0 and window >= 1 and len(recent) >= window
+                and sum(recent) / len(recent) < proportion)
 
     @property
     def ends(self) -> str | None:
@@ -912,15 +995,17 @@ class Scheduler:
         if reason == RULE:
             met = []
             if self.block.criterion is not None:
-                right = sum(self._window)
+                recent = self._last(self._window, self._criterion[1])
+                right = sum(recent)
                 met.append(f"{right} right in a row" if self.streak
-                           else f"{right} of its last {len(self._window)} answers right")
+                           else f"{right} of its last {len(recent)} answers right")
             if self.block.trials is not None:
                 met.append(f"{self.block_trials} trials run")
             return "its rule met: " + ", ".join(met + ["every target used up"])
         if reason == FALL_BACK:
-            proportion = self.order.fall_back[0]
-            return (f"fell back: {sum(self._back)} of its last {len(self._back)} first answers "
+            proportion, window = self._fall_back
+            recent = self._last(self._back, window)
+            return (f"fell back: {sum(recent)} of its last {len(recent)} first answers "
                     f"right, under {proportion:.0%}")
         if reason == TIME:
             return "its time ran out" + ("" if self.finished else ", its rule not met")
@@ -1253,14 +1338,13 @@ class Scheduler:
         `first_answers` is on and the block's rule is a percentage. **A rule of proportion 1.0 is a
         streak**, "N correct in a row", which judges every answer in order whatever the setting
         (the PI, 2026-10-18: "Every answer counts in order")."""
-        criterion = self.block.criterion
-        return self.first_answers and criterion is not None and not self.streak
+        return self.first_answers and self.block.criterion is not None and not self.streak
 
     @property
     def streak(self) -> bool:
         """Whether the open block's rule is a streak, "N correct in a row": a criterion of
         proportion 1.0, which the training setting `first_answers` leaves judging every answer."""
-        criterion = self.block.criterion
+        criterion = self._criterion
         return criterion is not None and criterion[0] >= 1.0
 
     def _class(self, outcome: Outcome | None, shown: bool, condition: str) -> str:
@@ -1566,8 +1650,9 @@ class Scheduler:
                 return True
             return isinstance(self.block.order, SequenceBalanced) and self._place >= len(self._plan)
         if self.block.criterion is not None:
-            proportion, window = self.block.criterion
-            if len(self._window) < window or sum(self._window) / len(self._window) < proportion:
+            proportion, window = self._criterion
+            recent = self._last(self._window, window)
+            if len(recent) < window or sum(recent) / len(recent) < proportion:
                 return False
         if self.block.trials is not None and self.block_trials < self.block.trials:
             # **A number of trials** (engine spec §13.5; engine build C2b): run that many, and
@@ -1666,6 +1751,7 @@ class Scheduler:
         level, true for a block with none. Read only under a confirmed progression, by the bars
         of what the rig suggests (`_bar`, `suggestion`)."""
         counts = self._counts[condition]
+        self._fit()
         kind = self._class(outcome, shown, condition)
         first_try = self.drawn is None or not self.drawn.drummed
         judged = self._answer(outcome, condition) or self._scored(outcome)
@@ -1709,7 +1795,8 @@ class Scheduler:
             # 2026-10-18, "Judge its first answer"). **An eased trial never** (engine build C3).
             self._window.append(1 if outcome in RIGHT else 0)
             if self.block.criterion is not None:
-                while len(self._window) > self.block.criterion[1]:
+                # Kept as long as the window can be (`_most`), read by its last answers now.
+                while len(self._window) > self._most(self.block.criterion):
                     self._window.popleft()
         if judged and not self._answered:
             # **The fall-back rule judges each trial's first answer only** (the PI, 2026-10-19,

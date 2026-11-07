@@ -37,7 +37,8 @@ from wl_xcon.review import render_task
 from wl_xcon.run import Scripted
 from wl_xcon.scheduler import EVERY_TRIAL
 from wl_xcon.task import (
-    STAIRCASE_FAILURES, Block, Condition, Outcome, SaccadeTo, Staircase, staircase_verdict,
+    STAIRCASE_FAILURES, Block, ByCriterion, Condition, Outcome, P, SaccadeTo, Staircase, Steps,
+    rule_at, staircase_verdict,
 )
 from wl_xcon.taskd import Session, SessionSpec
 from wl_xcon.web import fragments
@@ -352,7 +353,8 @@ def _planned(folder: Path, base: str, plans: str, name: str, *edits: tuple[str, 
     path = folder / f"{name}.py"
     path.write_text(text + (
         "\n\nimport dataclasses as _dataclasses\n"
-        "from wl_xcon.task import FRESH, Block, Condition, Plan, Staircase, Uniform\n"
+        "from wl_xcon.task import (FRESH, Block, ByCriterion, Condition, P, Plan, Staircase, "
+        "Steps, Uniform)\n"
         f"TASK = _dataclasses.replace(TASK, plans={plans})\n"))
     return path
 
@@ -487,3 +489,134 @@ def test_the_review_report_shows_each_blocks_staircase(tmp_path):
     assert ("| held | set_size | 4, 8, 12 objects | 2 right in a row | 1 failed in a row | 8 |"
             in report)
     assert "| plain | set_size" not in report
+
+
+# --- Every number a setting (the pop-out search build's fix round; the PI, 2026-11-07) ----------
+
+
+def test_steps_make_a_staircases_levels_by_a_step_a_setting_gives():
+    """"i mean, everything should be adjustable in the console, no?" (the PI, 2026-11-07): a
+    staircase's levels by a step (`Steps`), from its start, the easiest, toward its end, the
+    hardest, which is always the last level whether or not a step lands on it; rising or falling;
+    tenths as written; whole numbers from a whole start, end and step, and on a setting an array
+    reads as one (`whole`) each the nearest, repeats dropped. Its counts may be settings too, each
+    read as the nearest whole number from 1 (`Staircase.at`)."""
+    tenths = Steps(0.1, 1.0, P("step"))
+    assert tenths.levels(0.1) == (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
+    assert tenths.levels(0.3) == (0.1, 0.4, 0.7, 1.0)
+    assert tenths.levels(0.25) == (0.1, 0.35, 0.6, 0.85, 1.0)
+    assert Steps(1.0, 0.2, 0.4).levels(0.4) == (1.0, 0.6, 0.2)
+    crowd = Steps(4, 12, P("step"))
+    assert crowd.levels(1.0) == (4, 5, 6, 7, 8, 9, 10, 11, 12)
+    assert all(isinstance(level, int) for level in crowd.levels(1.0))
+    assert crowd.levels(1.5, whole=True) == (4, 6, 7, 9, 10, 12)
+    for bad in (0, -1.0, float("nan"), "1"):
+        with pytest.raises(ValueError, match="positive number"):
+            crowd.levels(bad)
+    with pytest.raises(ValueError, match="more than the 1000"):
+        tenths.levels(1e-6)
+    with pytest.raises(ValueError, match="positive number or a setting"):
+        Steps(0.1, 1.0, 0)
+
+    declared = Staircase("fix_hold", tenths, down=P("down"), up=P("up"))
+    assert declared.settings == ("down", "up", "step")
+    now = declared.at({"step": 0.3, "down": 2.4, "up": 0.0})
+    assert (now.levels, now.down, now.up) == ((0.1, 0.4, 0.7, 1.0), 2, 1)
+    assert Staircase("fix_hold", (0.1, 0.2)).at({}) == Staircase("fix_hold", (0.1, 0.2))
+    with pytest.raises(ValueError, match="setting 'step', which has no number here"):
+        declared.at({"down": 3, "up": 1})
+
+
+def test_a_step_changed_live_puts_the_staircase_at_the_level_nearest_its_value():
+    """`taskd._Climb.restep`, between trials: a count changed takes effect at the next step, the
+    count so far kept; a step changed re-derives the levels and puts the staircase at the level
+    nearest the value it was at, its count kept; a value that makes no staircase leaves it as it
+    was."""
+    from wl_xcon.taskd import _Climb
+
+    climb = _Climb.started(Staircase("fix_hold", Steps(0.1, 1.0, P("step")), down=P("down")),
+                           {"step": 0.1, "down": 3}, lambda staircase: staircase.nearest(0.5))
+    assert (climb.value, climb.level) == (0.5, 4)
+    climb.right = 2
+    climb.restep({"step": 0.3, "down": 3})
+    assert (climb.staircase.levels, climb.value, climb.right) == ((0.1, 0.4, 0.7, 1.0), 0.4, 2)
+    climb.restep({"step": 0.3, "down": 2})
+    assert (climb.staircase.down, climb.value, climb.right) == (2, 0.4, 2)
+    climb.restep({"step": 0.0, "down": 2})
+    assert climb.staircase.levels == (0.1, 0.4, 0.7, 1.0)
+    fixed = _Climb.started(Staircase("fix_hold", (0.1, 0.2)), {}, lambda staircase: 0)
+    assert fixed.declared is None
+
+
+#: Two settings a staircase's counts and steps and a rule's numbers can come from, for the load
+#: checks below: a count from 1 to 5, a step from 0.05 to 0.5, a share and a window of answers.
+_NAMED = (('        Param("fix_hold", unit="s", low=0.05, high=2.0, start=0.3),',
+           '        Param("fix_hold", unit="s", low=0.05, high=2.0, start=0.3),\n'
+           '        Param("count", unit="answers", low=1, high=5, start=3),\n'
+           '        Param("step", unit="s", low=0.05, high=0.5, start=0.1),\n'
+           '        Param("share", unit="fraction", low=0.5, high=1.0, start=0.8),\n'
+           '        Param("window", unit="answers", low=5, high=50, start=10),'),)
+
+
+def test_a_staircases_settings_are_checked_at_load(tmp_path):
+    """A staircase whose counts or step a setting gives (the fix round) is refused at load,
+    `bad-staircase`, where that setting is none of the task's own with a range of numbers, a
+    bounded one, or the setting it steps; where a count's range reaches below 1 or a step's to 0;
+    and where any level its steps can make falls outside its setting's range. One the task can run
+    is not refused."""
+    block = 'Block("b", [Condition("c", {}, target=5)], staircase=Staircase('
+    plans = "{" + ", ".join([
+        f'"fine": Plan([{block}"fix_hold", Steps(0.1, 1.0, P("step")), down=P("count"), '
+        f'up=P("count")))])',
+        f'"undeclared": Plan([{block}"fix_hold", (0.1, 0.2), down=P("nope")))])',
+        f'"own": Plan([{block}"fix_hold", Steps(0.1, 1.0, P("fix_hold"))))])',
+        f'"bounded": Plan([{block}"fix_hold", (0.1, 0.2), up=P("reward_correct")))])',
+        f'"zero": Plan([{block}"fix_hold", Steps(0.1, 1.0, P("target_luminance"))))])',
+        f'"below": Plan([{block}"fix_hold", (0.1, 0.2), down=P("fix_window")))])',
+        f'"outside": Plan([{block}"fix_hold", Steps(0.1, 2.5, P("step"))))])',
+    ]) + "}"
+
+    found = _refused(_planned(tmp_path, DETECTION, plans, "detection", *_NAMED))
+
+    assert set(found) == {"undeclared", "own", "bounded", "zero", "below", "outside"}
+    assert "takes its down from 'nope', which is no setting of numbers with a range" in (
+        found["undeclared"])
+    assert "takes its step from 'fix_hold', which is the setting it steps" in found["own"]
+    assert "takes its up from 'reward_correct', which is a bounded setting" in found["bounded"]
+    assert "takes its step from 'target_luminance', whose range reaches 0" in found["zero"]
+    assert "takes its down from 'fix_window', whose range reaches 0.5" in found["below"]
+    assert "outside the range the setting declares, 0.05 to 2.0 s" in found["outside"]
+
+
+def test_a_rules_numbers_may_be_settings_checked_at_load_and_read_live(tmp_path):
+    """A stage's criterion and a plan's fall-back may each name settings (the fix round: "Let
+    `Block(criterion=...)` and `ByCriterion(fall_back=...)` take `P(...)` references, read at each
+    judgment from the run's live values"): refused at load, `bad-plan`, where a setting named is
+    none of the task's own with a range of numbers, a proportion's range leaves (0, 1] or a
+    window's reaches below 1. `task.rule_at` reads one at the run's values, a window the nearest
+    whole number from 1."""
+    rule = lambda criterion: ('Plan([Block("b", [Condition("c", {}, target=5)], '
+                              f'criterion={criterion})])')
+    plans = "{" + ", ".join([
+        f'"fine": {rule("(P(\'share\'), P(\'window\'))")}',
+        f'"undeclared": {rule("(P(\'nope\'), 10)")}',
+        f'"brighter": {rule("(P(\'target_luminance\'), 10)")}',
+        f'"narrow": {rule("(0.8, P(\'fix_window\'))")}',
+        '"back": Plan([Block("b", [Condition("c", {}, target=5)]), '
+        'Block("d", [Condition("c", {}, target=5)])], '
+        'order=ByCriterion(fall_back=(P("share"), P("nope"))))',
+    ]) + "}"
+    path = _planned(tmp_path, DETECTION, plans, "detection", *_NAMED)
+
+    refused = {f.detail.split("'")[1]: f.detail for f in check_task(_load_task(path))
+               if f.code == "bad-plan"}
+
+    assert set(refused) == {"undeclared", "brighter", "narrow", "back"}
+    assert all("each a number or a setting the task declares whose range holds only such "
+               "values" in detail for detail in refused.values())
+    assert rule_at((P("share"), P("window")), {"share": 0.7, "window": 19.6}) == (0.7, 20)
+    assert rule_at((0.8, P("window")), {"window": 0.2}) == (0.8, 1)
+    assert rule_at((0.8, 50), {}) == (0.8, 50) and rule_at(None, {}) is None
+    with pytest.raises(ValueError, match="setting 'share', which has no number here"):
+        rule_at((P("share"), 50), {})
+

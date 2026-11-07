@@ -50,12 +50,12 @@ from wl_xcon import variation
 from wl_xcon.actor import Actor, to_map_or_none
 from wl_xcon.bounds import Bounds, Exceeded, _finite
 from wl_xcon.check import (
-    IMPOSSIBLE, _outside, beyond_range, check_task, impossible, start_at, undrawable, unplaced,
-    unpooled, unstarted,
+    IMPOSSIBLE, _outside, _whole_numbers, beyond_range, check_task, impossible, start_at,
+    undrawable, unplaced, unpooled, unstarted,
 )
 from wl_xcon.cli import _clock, _load_allocation, _load_task, _printable, _shown
 from wl_xcon.codes import BLOCK_END, RUN_END_MARKER, TRIAL_END, TRIAL_START, Allocation
-from wl_xcon.declarations import canonical, color_sets, content_hash, resolved
+from wl_xcon.declarations import canonical, color_set_lights, color_sets, content_hash, resolved
 from wl_xcon.dio import Absent as NoCard
 from wl_xcon.encode import (
     TRIAL_NUMBER,
@@ -92,7 +92,7 @@ from wl_xcon.simeye import Eye
 from wl_xcon.simulate import Census, Subject, Tally, agent
 from wl_xcon.run import LONGEST_TRIAL_S, run_trial
 from wl_xcon.task import (
-    COUNTED, OWED, SPENT, UNPAID, Entered, Exited, Outcome, Param, Plan, SaccadeTo, Staircase,
+    COUNTED, OWED, SPENT, UNPAID, Entered, Exited, Outcome, P, Param, Plan, SaccadeTo, Staircase,
     Task, Trial, staircase_verdict,
 )
 from wl_xcon.task import (
@@ -212,22 +212,56 @@ def _kept_missing(number: int, repeat_of: int) -> str:
             f"its settings that should stay the same were drawn anew")
 
 
-def _color_sets(task: Task, calibration: Calibration) -> dict | None:
+def _luminances(lights: list, values: dict) -> dict[str, list[float]]:
+    """**The luminances a trial draws each color set at** (`photometry.ColorSetLight.at`; the
+    pop-out search build's fix round), by set name, each once, in order: each color-set light's
+    own (a setting's value in `values`) or its set's. A light whose setting has no number here is
+    left out: the trial's own drawing of it says why."""
+    found: dict[str, list[float]] = {}
+    for light in lights:
+        luminance = light.luminance
+        if isinstance(luminance, P):
+            luminance = values.get(luminance.name)
+        try:
+            at = dataclasses.replace(light, luminance=luminance).at()
+        except ValueError:
+            continue
+        kept = found.setdefault(light.colorset.name, [])
+        if at not in kept:
+            kept.append(at)
+    return found
+
+
+def _realization(shown) -> dict:
+    """One realization of a color set (`photometry.Realized`) as the record writes it: the
+    luminance it is at, each color's chromaticity as shown, the share of chroma every color gave
+    up together (`desaturation`) and its output levels, red, green and blue (`drive`)."""
+    return {
+        "luminance_cd_m2": shown.luminance,
+        "desaturation": shown.desaturation,
+        "xy": {color: list(xy) for color, xy in shown.xy.items()},
+        "drive": {color: list(levels) for color, levels in shown.drive.items()},
+    }
+
+
+def _color_sets(task: Task, calibration: Calibration, values: dict) -> dict | None:
     """**Each color set the task declares, defined once for its run** (the pop-out search build's
     final fixes, 2026-11-07, told to wl-preproc before it was written): by name, as the run's start
     row writes it (`color_sets`) -- since every line names a color-set light's set by its name
     alone (`record._written`) -- each set as its file reads it (`photometry.ColorSet.load`'s
     fields) and `realized` as this rig draws it on the run's calibration (`photometry.realized`,
-    the screen's own): each color's chromaticity as shown, the share of chroma every color gave up
-    together (`desaturation`) and its output levels, red, green and blue (`drive`). `None` for a
-    task with none. A set the calibration cannot show at all is refused at load
+    the screen's own), **a list, one realization for each luminance the run's starting values
+    draw the set at** (`_luminances`; the pop-out search build's fix round, the luminance a
+    setting): each `_realization`. A luminance a later trial draws it at first is realized as that
+    trial is drawn and written on its line (`realized`; `Session._realize`). `None` for a task
+    with none. A set the calibration cannot show at all is refused at load
     (`unrealizable-color`), before any run."""
     sets = color_sets(task)
     if not sets:
         return None
+    at = _luminances(color_set_lights(task), values)
     defined = {}
     for name, colorset in sets.items():
-        shown = realized(colorset, calibration)
         defined[name] = {
             "name": colorset.name,
             "colors": {color: list(xy) for color, xy in colorset.colors.items()},
@@ -235,11 +269,8 @@ def _color_sets(task: Task, calibration: Calibration) -> dict | None:
             "luminance_cd_m2": colorset.luminance_cd_m2,
             "held": colorset.held,
             "source": colorset.source,
-            "realized": {
-                "desaturation": shown.desaturation,
-                "xy": {color: list(xy) for color, xy in shown.xy.items()},
-                "drive": {color: list(levels) for color, levels in shown.drive.items()},
-            },
+            "realized": [_realization(realized(colorset, calibration, luminance))
+                         for luminance in at.get(name, [colorset.luminance_cd_m2])],
         }
     return defined
 
@@ -669,6 +700,40 @@ class _Climb:
     level: int
     right: int = 0
     wrong: int = 0
+    #: **The staircase as the task declares it**, where a setting gives its counts or its step
+    #: (`task.Staircase.at`; the pop-out search build's fix round), and whether its setting is one
+    #: an array reads as a whole number; `staircase` is it as the run's values made it last
+    #: (`restep`). `None` for one that reads no setting.
+    declared: "Staircase | None" = None
+    whole: bool = False
+
+    @classmethod
+    def started(cls, staircase: Staircase, values: dict, level_of, *,
+                whole: bool = False) -> "_Climb":
+        """A block's staircase started as `values` make it (`task.Staircase.at`), at the level
+        `level_of` gives that staircase."""
+        now = staircase.at(values, whole=whole)
+        return cls(now, level_of(now), declared=None if now is staircase else staircase,
+                   whole=whole)
+
+    def restep(self, values: dict) -> None:
+        """**The staircase as the run's live values make it now** (the pop-out search build's fix
+        round; the PI, 2026-11-07, "everything should be adjustable in the console"), between
+        trials, before its value is given: a count changed takes effect at the next step, the
+        count so far kept; **a step changed re-derives the levels and puts the staircase at the
+        level nearest the value it was at**, its count kept too. Recorded as the setting's own
+        change row, nothing else. A value that makes no staircase -- no number, or a step that
+        makes too many levels -- leaves it as it was."""
+        if self.declared is None:
+            return
+        try:
+            now = self.declared.at(values, whole=self.whole)
+        except ValueError:
+            return
+        if now.levels != self.staircase.levels:
+            nearest = now.nearest(self.value)
+            self.level = 0 if nearest is None else nearest
+        self.staircase = now
 
     @property
     def value(self) -> object:
@@ -769,6 +834,9 @@ class _WentOn:
     offered: dict | None
     widen: dict | None
     held: tuple
+    #: The run's values as its last rows left them: what a scheduler judges the stage's bars
+    #: with again where a criterion or a fall-back names a setting (`Scheduler.values`).
+    values: dict = field(default_factory=dict)
 
 
 def went_on(task: Task, last) -> _WentOn | None:
@@ -818,21 +886,31 @@ def went_on(task: Task, last) -> _WentOn | None:
     events.sort(key=lambda event: event[0])
     state: dict = {"held": ()}
 
+    whole = _whole_numbers(task)
+
+    def first(staircase: Staircase) -> int:
+        start = staircase.start
+        if start is None:
+            start = staircase.nearest(resolved.get(staircase.setting))
+        return 0 if start is None else start
+
     def enter(name: str) -> None:
         block = next((block for block in blocks if block.name == name), None)
         staircase = None if block is None else block.staircase
         climb = None
         if staircase is not None:
-            start = staircase.start
-            if start is None:
-                start = staircase.nearest(resolved.get(staircase.setting))
-            climb = _Climb(staircase, 0 if start is None else start)
+            climb = _Climb.started(staircase, {**live, **resolved, **current}, first,
+                                   whole=staircase.setting in whole)
         state.update(stage=name, climb=climb, bars=[], offered={}, answered=set())
 
     def changed_pool() -> None:
         state["bars"].append(("afresh",))
         state["answered"] |= set(state["offered"])
 
+    # The run's values as its rows set them, for its staircase's counts and steps (`_Climb`) and
+    # what a scheduler judges the stage's bars with again (`_WentOn.values`).
+    live: dict = {param.name: param.start for param in task.params if param.start is not None}
+    current: dict = {}
     enter(last.start.get("start_block") or names[0])
     value = resolved.get(pool.setting) if pool is not None else None
     seen = None
@@ -857,11 +935,19 @@ def went_on(task: Task, last) -> _WentOn | None:
             if (pool is not None and name == pool.setting and kind in ("set", "hand_back", "revert")
                     and row.get("now") is not None):
                 value = row["now"]
+            if kind in ("set", "hand_back", "revert") and isinstance(name, str):
+                if row.get("now") is not None:
+                    current[name] = row["now"]
+                elif kind != "set":
+                    current.pop(name, None)
             continue
         if row["block"] != state["stage"]:
             enter(row["block"])
             climb = state["climb"]
         params = row.get("params") or {}
+        if climb is not None:
+            # The staircase as the line's own values made it: its counts and its step.
+            climb.restep({**live, **resolved, **current, **params})
         if pool is not None:
             now = params.get(pool.setting)
             if seen is not None and now != seen:
@@ -897,7 +983,7 @@ def went_on(task: Task, last) -> _WentOn | None:
         climb=state["climb"], pool=value, bars=state["bars"],
         offered=next((row for row in reversed(standing) if row.get("move") != MOVE_WIDEN), None),
         widen=next((row for row in reversed(standing) if row.get("move") == MOVE_WIDEN), None),
-        held=state["held"],
+        held=state["held"], values={**live, **resolved, **current},
     )
 
 
@@ -975,11 +1061,17 @@ def start_rows(task: Task, plan: str | None, values: dict) -> tuple:
     task's pool as a `link.PoolRow`, or `None`."""
     run = {**{param.name: param.start for param in task.params if param.start is not None},
            **values}
+    whole = _whole_numbers(task)
     stages = []
     if plan is not None and plan in task.plans:
         for block in task.plans[plan].blocks:
             staircase = block.staircase
             if staircase is None:
+                stages.append(_link.StageRow(block.name))
+                continue
+            try:
+                staircase = staircase.at(run, whole=staircase.setting in whole)
+            except ValueError:
                 stages.append(_link.StageRow(block.name))
                 continue
             start = staircase.start
@@ -2441,7 +2533,15 @@ class Session:
         if staircase is None:
             return None
         climb = self._climb if self._climb_block == len(self._scheduler.ended) else None
-        level = self._first_level(staircase) if climb is None else climb.level
+        if climb is None:
+            try:
+                staircase = staircase.at(self.spec.values,
+                                         whole=staircase.setting in _whole_numbers(self._task))
+            except ValueError:
+                return None
+            level = self._first_level(staircase)
+        else:
+            staircase, level = climb.staircase, climb.level
         return (staircase.setting, tuple(staircase.levels), level,
                 staircase.setting in self._edited, staircase.down, staircase.up)
 
@@ -3055,10 +3155,10 @@ class Session:
             correct, of, hardest = scheduler.bar(standing.move)
             if standing.move == MOVE_UP:
                 why = (f"{correct} of the last {of} answers at its hardest step right, under its "
-                       f"{scheduler.block.criterion[0]:.0%}")
+                       f"{scheduler.criterion_now[0]:.0%}")
             else:
                 why = (f"{correct} of the last {of} first answers right, no longer under its "
-                       f"{scheduler.order.fall_back[0]:.0%}")
+                       f"{scheduler.fall_back_now[0]:.0%}")
             self._feed("suggestion", None, self.wall_now(),
                        f"the rig's suggestion {standing.change}, to move {standing.move} from "
                        f"{standing.block} to {standing.to}, is withdrawn: {why}")
@@ -3075,7 +3175,7 @@ class Session:
             answer = "next block"
         else:
             bar = (f"{now.correct} of the last {now.of} first answers right, under its "
-                   f"{scheduler.order.fall_back[0]:.0%}")
+                   f"{scheduler.fall_back_now[0]:.0%}")
             answer = "back one"
         self._feed("suggestion", None, at,
                    f"the rig suggests moving {now.move} from {now.block} to {now.to}: {bar}; "
@@ -3120,7 +3220,7 @@ class Session:
             self._feed("suggestion", None, self.wall_now(),
                        f"the rig's suggestion {standing.change}, to widen the pool in "
                        f"{standing.block}, is withdrawn: {correct} of the last {of} answers at its "
-                       f"hardest step right, under its {scheduler.block.criterion[0]:.0%}")
+                       f"hardest step right, under its {scheduler.criterion_now[0]:.0%}")
         if now is None or self._widening is not None:
             return
         at = self.wall_now()
@@ -4356,6 +4456,11 @@ class Session:
     #: `_varied` is: started afresh as each block's first trial is drawn (`_climbing`). `None` as
     #: each run starts.
     _climb: _Climb | None = field(init=False, default=None, repr=False)
+    #: **The run's color-set lights and each set's luminances it has realized and written**, as
+    #: `(set name, cd/m²)` (`_realize`; the pop-out search build's fix round): the start row's,
+    #: then each a line writes first.
+    _lights: list = field(init=False, default_factory=list, repr=False)
+    _realized_at: frozenset = field(init=False, default=frozenset(), repr=False)
     _climb_block: int | None = field(init=False, default=None, repr=False)
     #: **The rig's suggestion standing** under a confirmed progression (`_Suggested`;
     #: `task.ByCriterion.confirm`; the pop-out search build, 2026-11-07), `None` where none
@@ -4416,7 +4521,8 @@ class Session:
             blocks=[variation.expanded(block) for block in played.blocks], seed=0,
             counting=task.trial.counting,
             countings={name: structure.counting for name, structure in task.structures.items()},
-            order=played.order, start=went.position)
+            order=played.order, start=went.position, values=lambda: went.values,
+            params={param.name: param for param in task.params})
         standing = [offered for offered in _carried(task, went, scheduler) if offered is not None]
         return (f"it goes on from run {self._last_run.run + 1}, which stopped with its process: "
                 + _went_said(task, went, standing=standing))
@@ -4434,8 +4540,44 @@ class Session:
             staircase = self._scheduler.block.staircase
             self._climb_block, self._climb = occurrence, None
             if staircase is not None:
-                self._climb = _Climb(staircase, self._first_level(staircase))
+                self._climb = _Climb.started(
+                    staircase, self.spec.values, self._first_level,
+                    whole=staircase.setting in _whole_numbers(self._task))
+        # Its counts and its step as the run's values make them now (`_Climb.restep`).
+        if self._climb is not None:
+            self._climb.restep(self.spec.values)
         return self._climb
+
+    def _color_sets_at_start(self, task: Task) -> dict | None:
+        """The run's start row's `color_sets` (`_color_sets`), at the run's values, each set's
+        luminances it realizes noted as written (`_realized_at`)."""
+        defined = _color_sets(task, self.spec.calibration, self.spec.values)
+        for name, entry in (defined or {}).items():
+            self._realized_at |= {(name, each["luminance_cd_m2"]) for each in entry["realized"]}
+        return defined
+
+    def _realize(self, values: dict) -> dict | None:
+        """**Each color set realized at the luminances this trial draws it at**, between trials,
+        before its first frame (the pop-out search build's fix round; the PI, 2026-11-07,
+        "everything should be adjustable in the console"): realized once for each value, on the
+        run's panel (`photometry.realized`, which keeps it), so no frame realizes one; **a value
+        the run has not written yet is the trial line's `realized`** -- by set name, a list of
+        `_color_sets`' realizations -- once a run, never again on a later line. `None` where every
+        one is written. A set that cannot be realized at a value is left to the trial's own
+        drawing, which says why."""
+        new: dict = {}
+        for name, luminances in _luminances(self._lights, values).items():
+            colorset = next(light.colorset for light in self._lights
+                            if light.colorset.name == name)
+            for luminance in luminances:
+                try:
+                    shown = realized(colorset, self.spec.calibration, luminance)
+                except ValueError:
+                    continue
+                if (name, luminance) not in self._realized_at:
+                    self._realized_at.add((name, luminance))
+                    new.setdefault(name, []).append(_realization(shown))
+        return new or None
 
     def _first_level(self, staircase: Staircase) -> int:
         """**Where a block's staircase starts** (`_climbing`): at its `start`, else at the level
@@ -5213,6 +5355,8 @@ class Session:
         self._suggested, self._suggestions = None, {}
         # Nor offered to widen its pool, which it has not looked at yet, nor paired a trial.
         self._widening, self._pool_was, self._paired = None, None, {}
+        # Each color set's luminances realized and written in this run (`_realize`).
+        self._lights, self._realized_at = color_set_lights(task), set()
         # Only a resumed session's first run may go on from the run its process stopped in.
         went_from, self._last_run = self._last_run, None
         # Nothing has varied in a block of this run yet, and no line is counted (engine build C3).
@@ -5240,6 +5384,8 @@ class Session:
             blocks=plan.blocks, seed=run.seed, counting=task.trial.counting,
             countings={name: structure.counting for name, structure in task.structures.items()},
             order=plan.order, start=start,
+            # A criterion or a fall-back naming a setting reads it live (`task.rule_at`).
+            values=lambda: self.spec.values, params=self._params(),
         )
         if going is not None:
             # The stage's staircase as that run's last step left it, the block it is open in this
@@ -5295,7 +5441,7 @@ class Session:
                 self._declared, turned),
             # **Each color set it declares, defined once** (the pop-out search build's final
             # fixes; told to wl-preproc first): every line names a color-set light's set by name.
-            color_sets=_color_sets(task, self.spec.calibration),
+            color_sets=self._color_sets_at_start(task),
             # **Which settings are directions** (the plan's science review, M-4): each is an
             # angle written from 0 to 360, so a reader takes circular statistics of it -- a draw
             # from -45 to 45 sits near 0 and near 360, and a plain mean of it reads 180.
@@ -5589,6 +5735,9 @@ class Session:
                 # confirmed progression's bar to move up counts only such answers
                 # (`Scheduler.suggestion`).
                 hardest = _at_hardest(climb, None if stepping else values)
+                # **Its color sets at the luminances it draws them at**, realized here, between
+                # trials; a luminance new to the run is written on its line (`_realize`).
+                realized_now = self._realize(values) if self._lights else None
                 # Said on the console as long as it lasts (`eased`; the C3 plan's engineering
                 # review, I-2), where the block's rule moves the animal on.
                 self._eased_now = eased if scheduler.moves_up else ()
@@ -5743,6 +5892,8 @@ class Session:
                     # Its place in a designed block's plan, which a drum's try and a trial again
                     # at once share with the trial they show again (engine build C3's spec §5).
                     planned=drawn.planned,
+                    # Each color set at a luminance the run had not written yet (`_realize`).
+                    realized=realized_now,
                     # Where each stimulus it showed was (XC-399), turned into positions as the
                     # line is written, between trials.
                     placed=result.placed,

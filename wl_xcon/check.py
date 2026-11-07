@@ -95,6 +95,7 @@ from wl_xcon.task import (
     Show,
     Shuffled,
     Staircase,
+    Steps,
     Stimulus,
     Task,
     Touched,
@@ -109,6 +110,7 @@ from wl_xcon.task import (
     actions_of,
     array_actions,
     is_point,
+    rule_at,
 )
 from wl_xcon.variation import (
     bounds_of, directions, expanded, generated, in_force, level_name, own_ranges, values_of,
@@ -821,11 +823,46 @@ def _plan_faults(task: Task) -> list[Finding]:
         findings.append(Finding(code, f"plan {quoted(plan)}: {said}", blocking=False,
                                 accepted_in=SESSION_KINDS))
 
+    def ranged(part: object) -> "Param | None":
+        """The setting a rule's part names (`P`), where the task declares it with a range of
+        finite numbers; else `None`."""
+        param = declared.get(part.name) if isinstance(part, P) else None
+        if param is None or param.choices or not (_finite(param.low) and _finite(param.high)):
+            return None
+        return param
+
     def rule(value: object) -> bool:
-        """Whether `value` is `(proportion, window)`, a proportion in (0, 1] and a whole window."""
-        return (isinstance(value, tuple) and len(value) == 2 and _finite(value[0])
-                and 0 < value[0] <= 1 and _is_number(value[1]) and isinstance(value[1], int)
-                and value[1] >= 1)
+        """Whether `value` is `(proportion, window)`, a proportion in (0, 1] and a whole window
+        from 1 -- **each as written, or a setting the task declares** (`P`; the pop-out search
+        build's fix round: read at each judgment, `task.rule_at`) **whose whole range is such a
+        proportion, or windows from 1** (the brief's "a proportion must lie in (0, 1] and a
+        window must be at least 1")."""
+        if not (isinstance(value, tuple) and len(value) == 2):
+            return False
+        proportion, window = value
+        if isinstance(proportion, P):
+            param = ranged(proportion)
+            if param is None or not 0 < min(param.low, param.high) <= max(
+                    param.low, param.high) <= 1:
+                return False
+        elif not (_finite(proportion) and 0 < proportion <= 1):
+            return False
+        if isinstance(window, P):
+            param = ranged(window)
+            return param is not None and min(param.low, param.high) >= 1
+        return _is_number(window) and isinstance(window, int) and window >= 1
+
+    #: The task's starting values, which a rule naming a setting is warned about at
+    #: (`started`): what a run starts with; a person who changes one live sees the bars as set.
+    starts = {param.name: param.start for param in task.params if param.start is not None}
+
+    def started(value: object) -> "tuple[float, int] | None":
+        """A rule `rule` accepts, at the task's starting values (`task.rule_at`), or `None` where
+        a setting it names starts nowhere."""
+        try:
+            return rule_at(value, starts)
+        except ValueError:
+            return None
 
     def count(value: object) -> bool:
         return value is None or (isinstance(value, int) and not isinstance(value, bool)
@@ -1100,7 +1137,8 @@ def _plan_faults(task: Task) -> list[Finding]:
         if fall_back is not None and not rule(fall_back):
             refuse(name, f"its fall-back rule is {fall_back!r}, and a rule is (proportion, "
                          f"window): a proportion above 0 and at most 1, over a window of 1 or "
-                         f"more answers")
+                         f"more answers, each a number or a setting the task declares whose "
+                         f"range holds only such values")
         untimed = [block.name for block in plan.blocks if block.time_limit_s is None]
         if isinstance(order, ByCriterion):
             # **A training progression ends of itself only where every stage has a time limit and
@@ -1127,8 +1165,8 @@ def _plan_faults(task: Task) -> list[Finding]:
                 "it has no end of its own and no time limit, so a run of it goes on until a "
                 f"person stops it, a scheduled stop or the out-of-cage limit ends it ({why}); give "
                 "the plan time_limit_s= to end it sooner"))
-        if fall_back is not None and rule(fall_back):
-            proportion, window = fall_back
+        if fall_back is not None and rule(fall_back) and started(fall_back) is not None:
+            proportion, window = started(fall_back)
             if len(plan.blocks) == 1:
                 warn("fall-back-unjudged", name, (
                     "it has one stage and a fall-back rule, and the first stage has no stage below "
@@ -1143,9 +1181,10 @@ def _plan_faults(task: Task) -> list[Finding]:
                         f"and the fall-back rule, judged once {window} first answers are in, is "
                         f"never judged there"))
             for at, block in enumerate(plan.blocks[:-1]):
-                if block.criterion is None or not rule(block.criterion):
+                if (block.criterion is None or not rule(block.criterion)
+                        or started(block.criterion) is None):
                     continue
-                bar, judged = block.criterion
+                bar, judged = started(block.criterion)
                 if proportion >= bar:
                     warn("fall-back-bounce", name, (
                         f"its fall-back rule, under {proportion:.0%} of the last {window} first "
@@ -1204,7 +1243,8 @@ def _plan_faults(task: Task) -> list[Finding]:
             if block.criterion is not None and not rule(block.criterion):
                 refuse(name, f"{where}'s criterion is {block.criterion!r}, and a criterion is "
                              f"(proportion, window): a proportion above 0 and at most 1, over a "
-                             f"window of 1 or more answers")
+                             f"window of 1 or more answers, each a number or a setting the task "
+                             f"declares whose range holds only such values")
             if not count(block.trials):
                 refuse(name, f"{where}'s number of trials is {block.trials!r}; a number of "
                              f"trials is a whole number from 1, or None")
@@ -1696,6 +1736,36 @@ def _staircase_faults(task: Task) -> list[Finding]:
     return findings
 
 
+def _staircase_levels(staircase: Staircase, declared: dict[str, Param],
+                      whole: bool = False) -> tuple:
+    """**Every level a staircase can give its setting** (`task.Staircase`; the pop-out search
+    build's fix round): its levels as written, or for `Steps` those at each step its setting can
+    be -- its least, its start and its highest -- with the steps' start and end, each once, in
+    order. A step that makes no levels gives only the start and the end."""
+    levels = staircase.levels
+    if not isinstance(levels, Steps):
+        return tuple(levels)
+    by = levels.by
+    if isinstance(by, P):
+        param = declared.get(by.name)
+        bys = [v for v in (getattr(param, "low", None), getattr(param, "start", None),
+                           getattr(param, "high", None))
+               if _finite(v) and v > 0]
+    else:
+        bys = [by]
+    found: list = []
+    for step in bys:
+        try:
+            made = levels.levels(step, whole=whole)
+        except ValueError:
+            continue
+        found += [level for level in made if level not in found]
+    for end in (levels.start, levels.end):
+        if end not in found:
+            found.append(end)
+    return tuple(found)
+
+
 def _staircase_said(task: Task, block: Block, staircase: object, declared: dict[str, Param],
                     whole: frozenset[str]) -> list[str]:
     """What `_staircase_faults` refuses of one block's `staircase`, each sentence following the
@@ -1714,14 +1784,38 @@ def _staircase_said(task: Task, block: Block, staircase: object, declared: dict[
         return [f" has a staircase on {setting!r}, a setting of choices, and a staircase steps "
                 f"among numbers; declare it with a range, or vary it by conditions"]
     said = []
-    outside = [level for level in staircase.levels if _outside(param, level)]
+    # **The settings it reads a number from** (the pop-out search build's fix round): each the
+    # task's own, of numbers, its declared range a count from 1 for `down` and `up`, and a step
+    # above 0 for `Steps`' `by`; never a bounded one, nor the setting it steps.
+    for part, what in ((staircase.down, "down"), (staircase.up, "up"),
+                       (getattr(staircase.levels, "by", None), "step")):
+        if not isinstance(part, P):
+            continue
+        named = declared.get(part.name)
+        if part.name in BOUNDED or part.name == setting:
+            said.append(f"'s staircase takes its {what} from {part.name!r}, which is "
+                        f"{'a bounded setting' if part.name in BOUNDED else 'the setting it steps'}"
+                        f"; name a setting of the task's own for it")
+        elif named is None or named.choices or not (_finite(named.low) and _finite(named.high)):
+            said.append(f"'s staircase takes its {what} from {part.name!r}, which is no setting of "
+                        f"numbers with a range the task declares; declare it with low= and high=")
+        elif what == "step" and min(named.low, named.high) <= 0:
+            said.append(f"'s staircase takes its step from {part.name!r}, whose range reaches "
+                        f"{_said(min(named.low, named.high))}, and a step is above 0; give it a "
+                        f"low above 0")
+        elif what != "step" and min(named.low, named.high) < 1:
+            said.append(f"'s staircase takes its {what} from {part.name!r}, whose range reaches "
+                        f"{_said(min(named.low, named.high))}, and a count is a whole number from "
+                        f"1; give it a low of 1 or more")
+    levels = _staircase_levels(staircase, declared, setting in whole)
+    outside = [level for level in levels if _outside(param, level)]
     if outside:
         said.append(
             f"'s staircase on {setting!r} has the level{'s' if len(outside) > 1 else ''} "
             f"{', '.join(_said(level) for level in outside)} outside the range the setting "
             f"declares, {_said(param.low)} to {_said(param.high)} {param.unit}; give it levels "
             f"inside it")
-    halves = [level for level in staircase.levels
+    halves = [level for level in levels
               if setting in whole and not float(level).is_integer()]
     if halves:
         shown = ", ".join(_said(level) for level in halves)
@@ -2259,7 +2353,7 @@ def _sources(task: Task, block: Block, condition: Condition, values: dict, held:
     if isinstance(staircase, Staircase) and isinstance(staircase.setting, str):
         # **Each level of the block's staircase** (the pop-out search build, 2026-11-07), which
         # gives its setting each trial over the rest, a person's value aside.
-        found[staircase.setting] = tuple(staircase.levels)
+        found[staircase.setting] = _staircase_levels(staircase, declared)
     for name in held:
         if name in values:
             found[name] = (values[name],)
@@ -4161,24 +4255,36 @@ def _color_set_faults(trial: Trial, params: dict[str, Param], panel: Calibration
     for what, color in _colors(trial, params):
         if not isinstance(color, ColorSetLight):
             continue
-        for colorset, whats in sets:
+        try:
+            at = ([color.colorset.luminance_cd_m2] if color.luminance is None
+                  else _reach(color.luminance, params))
+        except (_Unbounded, _Unreal):
+            at = []  # refused where its fields are checked (`_block_faults`)
+        named = ([color.luminance.name] if isinstance(color.luminance, P) else [])
+        for colorset, whats, values, names in sets:
             if colorset == color.colorset:
                 if what not in whats:
                     whats.append(what)
+                values += [v for v in at if v not in values]
+                names += [n for n in named if n not in names]
                 break
         else:
-            sets.append((color.colorset, [what]))
+            sets.append((color.colorset, [what], list(at), named))
     findings: list[Finding] = []
     name = panel.id or panel.measured_on
-    for colorset, whats in sets:
+    for colorset, whats, values, names in sets:
+        ranged = [float(v) for v in values if _is_number(v) and v > 0.0]
+        if names and ranged and len(set(ranged)) > 1:
+            findings += _desaturated_range(colorset, panel, sorted(set(ranged)), names, whats)
+            continue
         try:
-            shown = realized(colorset, panel)
+            shown = realized(colorset, panel, ranged[0] if ranged else None)
         except ValueError:
             continue  # refused where its lights are checked (`_one_color`)
         if shown.desaturation > 0.0:
             findings.append(Finding("color-set-desaturated", (
                 f"calibration {name} cannot show color set {colorset.name!r} as written at "
-                f"{colorset.luminance_cd_m2:g} cd/m² of macaque luminance, so every color in it "
+                f"{shown.luminance:g} cd/m² of macaque luminance, so every color in it "
                 f"gives up {100 * shown.desaturation:.1f}% of its distance from the apex "
                 f"({colorset.apex[0]:.4f}, {colorset.apex[1]:.4f}) in CIE 1931 xy, together: their "
                 f"luminance holds and none is clipped, but each is less saturated than asked "
@@ -4192,9 +4298,72 @@ def _color_set_faults(trial: Trial, params: dict[str, Param], panel: Calibration
             f"hold their macaque luminance (L + M at L:M 1, CIE 2006 2°) through "
             f"{MACAQUE_WITHOUT_SPECTRA}, whose fit to this panel is unknown: they are equal in "
             f"macaque luminance only nominally; the lights it names: "
-            f"{'; '.join(what for _, whats in sets for what in whats)}"),
+            f"{'; '.join(what for _, whats, _, _ in sets for what in whats)}"),
             blocking=False, accepted_in=SESSION_KINDS))
     return findings
+
+
+#: How finely `_desaturated_range` finds where a color set starts to lose chroma, in cd/m².
+DESATURATED_STEP = 0.05
+
+
+def _desaturated_range(colorset, panel: Calibration, values: list[float], names: list[str],
+                       whats: list[str]) -> list[Finding]:
+    """**`color-set-desaturated` over the luminances a setting lets a color set be at** (the
+    pop-out search build's fix round; the PI's "warnings over refusals", 2026-10-11): a warning,
+    never a refusal, in every session kind, **saying which part of the range desaturates** -- from
+    about the least luminance where the panel cannot show the set as written, found by bisection to
+    `DESATURATED_STEP`, to the highest it can be -- and how much chroma every color gives up
+    together at the highest it can still show. A panel can show a set at a lower luminance wherever
+    it can at a higher one (its gamut at one luminance holds every dimmer one's), so the share only
+    grows with luminance. Nothing where the panel shows the set as written over the whole range.
+    A luminance at which it cannot show even the apex is refused where the lights are checked
+    (`_one_color`, `unrealizable-color`). At load, never in a frame."""
+
+    def share(luminance: float) -> float | None:
+        try:
+            return realized(colorset, panel, luminance).desaturation
+        except ValueError:
+            return None
+
+    low, high = values[0], values[-1]
+    shown_high = share(high)
+    top = high
+    if shown_high is None:
+        # The apex unshowable at the top (refused below): the highest it shows, by bisection.
+        lo, hi = low, high
+        if share(lo) is None:
+            return []
+        while hi - lo > DESATURATED_STEP:
+            middle = (lo + hi) / 2.0
+            lo, hi = (middle, hi) if share(middle) is not None else (lo, middle)
+        top, shown_high = lo, share(lo)
+    if not shown_high:
+        return []
+    by = ", ".join(repr(n) for n in names)
+    if share(low):
+        start = low
+        where = f"at any luminance setting {by} allows, {low:g} to {high:g} cd/m²"
+    else:
+        lo, hi = low, top
+        while hi - lo > DESATURATED_STEP:
+            middle = (lo + hi) / 2.0
+            lo, hi = (lo, middle) if share(middle) else (middle, hi)
+        start = hi
+        where = (f"above about {start:.3g} cd/m², of the {low:g} to {high:g} cd/m² setting {by} "
+                 f"allows")
+    shown = realized(colorset, panel, top)
+    name = panel.id or panel.measured_on
+    return [Finding("color-set-desaturated", (
+        f"calibration {name} cannot show color set {colorset.name!r} as written {where}: there "
+        f"every color in it gives up a shared share of its distance from the "
+        f"apex ({colorset.apex[0]:.4f}, {colorset.apex[1]:.4f}) in CIE 1931 xy, together -- "
+        f"{100 * shown_high:.1f}% at {top:g} cd/m² -- so their luminance holds and none is "
+        f"clipped, but each is less saturated than asked (the pop-out search spec §3.2); shown "
+        f"at {top:g} as "
+        f"{', '.join(f'{c} x={x:.4f}, y={y:.4f}' for c, (x, y) in shown.xy.items())}; asked for "
+        f"by {'; '.join(whats)}"),
+        blocking=False, accepted_in=SESSION_KINDS)]
 
 
 def _spectra_faults(trial: Trial, params: dict[str, Param], panel: Calibration) -> list[Finding]:
@@ -4447,8 +4616,11 @@ def _lights(color, params: dict[str, Param]) -> list:
         return [ConeContrast(L, M, S) for L, M, S in itertools.product(
             *(_reach(v, params) for v in (color.L, color.M, color.S)))]
     if isinstance(color, ColorSetLight):
-        return [ColorSetLight(color.colorset, color.color, fraction)
-                for fraction in _reach(color.fraction, params)]
+        # Its luminance as each value it can take, as its fraction (the pop-out search build's
+        # fix round): the panel's gamut is convex, so both ends of each range are enough.
+        luminances = [None] if color.luminance is None else _reach(color.luminance, params)
+        return [ColorSetLight(color.colorset, color.color, fraction, luminance)
+                for fraction in _reach(color.fraction, params) for luminance in luminances]
     return [color]
 
 
@@ -5224,6 +5396,12 @@ def _block_faults(trial: Trial) -> list[Finding]:
             kind(f"{name}.fraction", part.fraction, _is_number, "a number")
             first([(v, f"{said}: negative light") for v, said in values(part, "fraction")],
                   lambda v: v < 0.0)
+            # Its set's luminance at full, where it names one: a number of cd/m² above 0, or a
+            # setting of them (the pop-out search build's fix round).
+            if part.luminance is not None:
+                kind(f"{name}.luminance", part.luminance, _is_number, "a number")
+                first([(v, f"{said}: a color set's luminance is a number of cd/m² above 0")
+                       for v, said in values(part, "luminance")], lambda v: v <= 0.0)
         if isinstance(part, xyY):
             for attr in ("x", "y", "Y"):
                 # Bounded here; whether the panel makes each value is `_color_faults`' test.

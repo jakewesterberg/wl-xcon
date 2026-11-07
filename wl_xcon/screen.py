@@ -181,8 +181,9 @@ class _Lights:
         if isinstance(color, ColorSetLight):
             if self.calibration is None:
                 raise ValueError(f"{color} is realized on a calibration, and none was given")
-            return colorset_xyz(replace(color, fraction=_num(color.fraction, values)),
-                                self.calibration)
+            luminance = None if color.luminance is None else _num(color.luminance, values)
+            return colorset_xyz(replace(color, fraction=_num(color.fraction, values),
+                                        luminance=luminance), self.calibration)
         raise ValueError(f"{color!r} is not a color; `check` refuses it at load (bad-block)")
 
 

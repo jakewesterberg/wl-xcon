@@ -565,7 +565,13 @@ build, 2026-11-07): between trials, as the trial loop draws (`taskd.Session._cli
 harder after `down` right answers in a row and a level easier after `up` failures, by TSK-33's
 classes (`task.staircase_verdict`), never past either end, started afresh as each block opens; a
 person's value on the setting holds it and a hand-back resumes it at the level nearest that value,
-and each trial's line marks the value it gave `drawn` `"staircase"`. **A run may start at a named
+and each trial's line marks the value it gave `drawn` `"staircase"`. **Every number in a staircase
+or a bar may be a setting** (the fix round, 2026-11-07; the PI, "everything should be adjustable in
+the console"; TSK-75): a staircase's `down` and `up` and its levels by a step (`task.Steps`), read
+from the run's live values between trials, a step changed re-deriving the levels at the level
+nearest the value (`taskd._Climb.restep`); a criterion's and a fall-back's proportion and window,
+read at each judgment (`task.rule_at`), their windows kept as long as their settings' highest so a
+change restarts nothing. **A run may start at a named
 block of its plan** (`start_block`; the pop-out search build's Task 6; its design §3.6, "the
 trainer picks"), the blocks before it still there to move or fall back to: `wlx run
 --start-block`, and `CheckRun` and `StartRun`'s `start_block`; one the run cannot start at (no
@@ -813,16 +819,22 @@ so it runs on the black background, where no cone color does. `photometry.realiz
 the session's calibration with each color's **macaque luminance**, L + M at L:M 1 on the
 Stockman-Sharpe 2° fundamentals (`cones.macaque_luminance`; the CIE's own 2006 2° table, bundled
 unmodified and read only when its sha256 is the CIE's, ADR-0012 amended 2026-11-07), equal to a D65
-light's at the set's cd/m², 15 on every rig (the PI, 2026-11-07; COL-37): through the primaries'
+light's at the set's cd/m², 15 on every rig (the PI, 2026-11-07; COL-37) -- or a light's own, a
+number or a setting (`ColorSetLight.luminance`; the pop-out's `color_luminance`, 15 to start, which
+the trainer may change, TSK-75): through the primaries'
 spectra on a measured record, through wl-style's model of the sRGB primaries on the default and on
 a record without spectra, with a warning there (`color-set-without-spectra`). A panel that cannot
 show the whole set moves every color toward the apex by one shared share, never dimming or
 clipping one, and `check` warns by how much (`color-set-desaturated`); one that cannot show even the
-apex refuses it. The set is realized at load, once per calibration, never in a frame. **The record
+apex refuses it; over a luminance setting's range, `color-set-desaturated` says which part of the
+range desaturates. The set is realized between trials, once for each luminance a run draws it at on
+each calibration (`photometry.realized`), never in a frame. **The record
 names a color-set light's set by its name alone** (`record._written`; REC-27, revised 2026-11-07 by
 the build's final fixes), and each run's start row defines every set its task declares once
-(`color_sets`): as its file reads, and as the run's calibration drew it, each color as shown, the
-share of chroma given up together and each color's output levels; a task declaring two different
+(`color_sets`): as its file reads, and as the run's calibration drew it at each luminance its
+starting values give, each color as shown, the share of chroma given up together and each color's
+output levels; a luminance a later trial draws it at first is that trial line's `realized`, once a
+run (`taskd.Session._realize`); a task declaring two different
 sets of one name is refused at load (`color-set-named-twice`). Cone colors
 still convert through the lab observer and hold V_F,10.
 

@@ -66,6 +66,7 @@ from wl_xcon.task import (
     P,
     Reward,
     Show,
+    Steps,
     Window,
     actions_of,
     staircase_verdict,
@@ -265,8 +266,12 @@ def _start(task, name: str):
 def test_popout_loads_clean_but_the_expected_warnings(task):
     """Against this repository's allocation, in direct view, head-fixed: nothing refused in any
     session kind. On the default calibration, its colors and lights are nominal (`color-on-default`,
-    `contrast-on-default`); on the measured test calibration, which carries its primaries' spectra,
-    they are not. In both, its plan has no end of its own (`endless-plan`): the trainer ends a run."""
+    `contrast-on-default`), and the sRGB standard cannot show the four as written at the top of the
+    range `color_luminance` allows (`color-set-desaturated`, a warning saying which part of the
+    range); on the measured test calibration, which carries its primaries' spectra, it shows them
+    over the whole range. In both, its plan has no end of its own (`endless-plan`): the trainer ends
+    a run; and the windows can overlap at the settings' extremes, twelve discs on the smallest ring
+    (`crowded-array`, XC-156's check over the ranges), which the trainer keeps apart."""
     allocation = _load_allocation(Path(ALLOCATION))
 
     on_default = check_task(task, allocation, geometry=DIRECT, calibration=SRGB,
@@ -278,14 +283,24 @@ def test_popout_loads_clean_but_the_expected_warnings(task):
         assert [f for f in found if any(f.refuses(kind) for kind in SESSION_KINDS)] == []
         assert all(f.is_warning for f in found), found
     assert {f.code for f in on_default} == {"color-on-default", "contrast-on-default",
+                                             "color-set-desaturated", "crowded-array",
                                              "endless-plan"}
-    assert {f.code for f in on_measured} == {"endless-plan"}
+    assert {f.code for f in on_measured} == {"crowded-array", "endless-plan"}
+    (pale,) = [f for f in on_default if f.code == "color-set-desaturated"]
+    assert "above about 26 cd/m², of the 1 to 30 cd/m² setting 'color_luminance' allows" in (
+        pale.detail)
+    (crowded,) = [f for f in on_measured if f.code == "crowded-array"]
+    assert "12 objects on a 4° ring, 2.07° apart" in crowded.detail
 
 
 def test_it_holds_the_pis_values(task):
     """§3, every number the PI's: the trial's times and sizes as each setting's start, the stages
     and their bars, the colors, black, one reward, a fixed head; and every setting of numbers starts
-    somewhere (the two looks the pool gives each trial are appearances, which take none)."""
+    somewhere (the two looks the pool gives each trial are appearances, which take none). **Every
+    number is a setting** (the PI, 2026-11-07: "everything should be adjustable in the console,
+    no?"): the sizes, the colors' brightness, the bars and their windows, the staircases' counts and
+    steps, each starting at the PI's value, and none of them a difficulty but the sizes and the
+    brightness."""
     trial = task.trial
     assert list(task.structures) == ["search"] and task.default == "search"
     starts = {param.name: param.start for param in task.params}
@@ -294,6 +309,16 @@ def test_it_holds_the_pis_values(task):
         "timeout", "fix_window", "object_window")} == {
         "inter_trial": 1.0, "fix_acquisition": 2.0, "fix_hold": 0.5, "response_deadline": 1.0,
         "target_hold": 0.3, "timeout": 2.0, "fix_window": 2.0, "object_window": 1.5}
+    assert {name: starts.get(name) for name in (
+        "disc_size", "ring_radius", "fix_size", "color_luminance", "move_up_bar",
+        "move_up_window", "move_back_bar", "move_back_window", "staircase_down", "staircase_up",
+        "fade_in_step", "crowd_step")} == {
+        "disc_size": 1.0, "ring_radius": 8.0, "fix_size": 0.3, "color_luminance": 15.0,
+        "move_up_bar": 0.8, "move_up_window": 50, "move_back_bar": 0.5, "move_back_window": 50,
+        "staircase_down": 3, "staircase_up": 1, "fade_in_step": 0.1, "crowd_step": 1}
+    for name in ("move_up_bar", "move_up_window", "move_back_bar", "move_back_window",
+                 "staircase_down", "staircase_up", "fade_in_step", "crowd_step", "ring_radius"):
+        assert task.meanings[name].kind == NOT_DIFFICULTY, name
     assert [param.name for param in task.params if param.start is None] == [
         "odd_color", "distractor_color"]
     assert all(param.choices for param in task.params if param.start is None)
@@ -305,9 +330,9 @@ def test_it_holds_the_pis_values(task):
     shows = {action.stimulus.name: action.stimulus
              for _, action in actions_of(trial) if isinstance(action, Show)}
     assert set(shows) == {"fix", "search"}
-    assert isinstance(shows["fix"].looks, Disc) and shows["fix"].looks.size == 0.3
+    assert isinstance(shows["fix"].looks, Disc) and shows["fix"].looks.size == P("fix_size")
     ring = shows["search"].looks
-    assert isinstance(ring, Array) and ring.radius == 8.0 and ring.n == P("set_size")
+    assert isinstance(ring, Array) and ring.radius == P("ring_radius") and ring.n == P("set_size")
     assert (ring.looks, ring.among) == (P("odd_color"), P("distractor_color"))
     windows = {window.name if isinstance(window, Window) else window.of: window.radius
                for window in trial.windows}
@@ -320,19 +345,24 @@ def test_it_holds_the_pis_values(task):
 
     (plan,) = task.plans.values()
     assert list(task.plans) == ["training"]
-    assert plan.order == ByCriterion(fall_back=(0.5, 50), confirm=True)
+    assert plan.order == ByCriterion(fall_back=(P("move_back_bar"), P("move_back_window")),
+                                     confirm=True)
     assert [block.name for block in plan.blocks] == ["Alone", "Fade-in", "Crowd"]
-    assert all(block.criterion == (0.8, 50) for block in plan.blocks)
+    assert all(block.criterion == (P("move_up_bar"), P("move_up_window")) for block in plan.blocks)
     alone, fade_in, crowd = plan.blocks
     assert [c.values for c in alone.conditions] == [{"set_size": 1}] and alone.staircase is None
     assert [c.values for c in fade_in.conditions] == [{"set_size": 4}]
     assert [c.values for c in crowd.conditions] == [{"distractor_fraction": 1.0}]
-    faint = fade_in.staircase
+    counts = (P("staircase_down"), P("staircase_up"))
+    assert (fade_in.staircase.levels, (fade_in.staircase.down, fade_in.staircase.up)) == (
+        Steps(0.1, 1.0, P("fade_in_step")), counts)
+    assert (crowd.staircase.levels, (crowd.staircase.down, crowd.staircase.up)) == (
+        Steps(4, 12, P("crowd_step")), counts)
+    faint = fade_in.staircase.at(starts)
     assert (faint.setting, faint.down, faint.up, faint.start) == ("distractor_fraction", 3, 1, None)
-    assert faint.levels[-1] == 1.0 and 0.0 < faint.levels[0] < 1.0
-    assert list(faint.levels) == sorted(set(faint.levels)), "faint to full, easiest first"
+    assert faint.levels == (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
     assert faint.nearest(starts["distractor_fraction"]) == 0, "Fade-in starts faint"
-    more = crowd.staircase
+    more = crowd.staircase.at(starts, whole=True)
     assert (more.setting, more.levels, more.down, more.up, more.start) == (
         "set_size", (4, 5, 6, 7, 8, 9, 10, 11, 12), 3, 1, None)
     assert more.nearest(starts["set_size"]) == 0, "Crowd starts at 4"
@@ -347,8 +377,9 @@ def test_it_holds_the_pis_values(task):
         (odd, among) for odd in COLORS for among in COLORS if odd != among)
     for odd, among in pool.choices:
         assert isinstance(odd, Disc) and isinstance(among, Disc)
-        assert (odd.size, among.size) == (1.0, 1.0)
+        assert (odd.size, among.size) == (P("disc_size"), P("disc_size"))
         assert _look(odd)[1] == 1.0 and _look(among)[1] == P("distractor_fraction")
+        assert odd.color.luminance == among.color.luminance == P("color_luminance")
     assert pool.unpooled(starts["pairings"]) is None
 
 
@@ -630,10 +661,13 @@ def test_each_line_names_its_colors_and_each_run_defines_the_set_once(task, tmp_
     its set's name and the color's (`"colorset": "isohue"`, `"color": "blue"`), its fraction as the
     line's other values are; the set's definition is in the record once, in the run's start row
     (`color_sets`): as its file reads, and as this rig's calibration drew it -- each color as shown,
-    the chroma given up together, each color's output levels. So each line's whole parameter set
-    of a Fade-in session is under 1 KB (the line's other keys, each stimulus's place among them,
-    are as they were), and the record still reads back: the run's stage and pool, as wl-xcon's own
-    resume finds them."""
+    the chroma given up together, each color's output levels, **at each luminance the run's values
+    draw it at** (the fix round: `color_luminance` a setting), a list. So each line's whole
+    parameter set of a Fade-in session is under 1.25 KB -- under 1 KB before the fix round made
+    twelve more of its numbers settings, each a key of every line, and each look's luminance a
+    reference to one, 0.15 KB in all -- (the line's other keys, each stimulus's place among them,
+    are as they were), no line realizes the set again (`realized` null), and the record still reads
+    back: the run's stage and pool, as wl-xcon's own resume finds them."""
     from wl_xcon import resume
     from wl_xcon.taskd import went_on
 
@@ -645,8 +679,10 @@ def test_each_line_names_its_colors_and_each_run_defines_the_set_once(task, tmp_
     assert len(lines) >= 30
     # Each line's `params` as the record writes it: keys sorted, `json`'s separators.
     weights = [len(json.dumps(line["params"], sort_keys=True).encode()) for line in lines]
-    assert max(weights) < 1024, sorted(weights)[-3:]
+    assert max(weights) < 1280, sorted(weights)[-3:]
+    assert all(line["realized"] is None for line in lines)
     by_reference = {"class": "P", "fields": {"name": "distractor_fraction"}}
+    brightness = {"class": "P", "fields": {"name": "color_luminance"}}
     for line in lines:
         odd, among = (line["params"][name]["fields"]["color"]
                       for name in ("odd_color", "distractor_color"))
@@ -654,6 +690,8 @@ def test_each_line_names_its_colors_and_each_run_defines_the_set_once(task, tmp_
             "ColorSetLight", "isohue", 1.0)
         assert (among["class"], among["fields"]["colorset"], among["fields"]["fraction"]) == (
             "ColorSetLight", "isohue", by_reference)
+        assert odd["fields"]["luminance"] == among["fields"]["luminance"] == brightness
+        assert line["params"]["color_luminance"] == 15.0
         # The pool the run starts with: blue among red and red among blue.
         assert {odd["fields"]["color"], among["fields"]["color"]} == {"blue", "red"}
 
@@ -669,9 +707,9 @@ def test_each_line_names_its_colors_and_each_run_defines_the_set_once(task, tmp_
         "name": "isohue", "colors": {color: list(xy) for color, xy in theirs.colors.items()},
         "apex": list(theirs.apex), "luminance_cd_m2": 15.0, "held": "macaque_2deg_LM1",
         "source": theirs.source,
-        "realized": {"desaturation": shown.desaturation,
-                     "xy": {color: list(xy) for color, xy in shown.xy.items()},
-                     "drive": {color: list(levels) for color, levels in shown.drive.items()}},
+        "realized": [{"luminance_cd_m2": 15.0, "desaturation": shown.desaturation,
+                      "xy": {color: list(xy) for color, xy in shown.xy.items()},
+                      "drive": {color: list(levels) for color, levels in shown.drive.items()}}],
     }}
 
     restored = resume.read(session.directory, departure=1_700_000_000.0)
@@ -695,7 +733,7 @@ def test_the_twelve_pairings_and_the_four_colors_are_equal_in_macaque_luminance(
     def realized(look) -> tuple:
         light = look.color
         assert isinstance(light, ColorSetLight) and light.colorset == theirs
-        X, Y, Z = photometry.colorset_xyz(replace(light, fraction=1.0), panel)
+        X, Y, Z = photometry.colorset_xyz(replace(light, fraction=1.0, luminance=15.0), panel)
         return panel.weights_of((X, Y, Z)), (X / (X + Y + Z), Y / (X + Y + Z))
 
     seen = set()
@@ -804,13 +842,15 @@ def test_a_simulated_session_runs_end_to_end_through_the_simulated_eye(tmp_path,
 class _Locks(Simulated):
     """**A trainer who locks a setting** (a person's `set`, the console's lock; TSK-32): `setting`
     at `value`, sent at the first drain, so it holds from the run's second trial; the run stopped
-    `AFTER` drains once the rig first suggests moving up, or at `BUDGET`."""
+    `AFTER` drains once the rig first suggests moving up, or at `BUDGET` -- or at `stop_at`. Sent at
+    drain `send_at` instead, where one is given."""
 
     AFTER, BUDGET = 3, 240
 
-    def __init__(self, setting: str, value: float, *, stop_at: int | None = None) -> None:
+    def __init__(self, setting: str, value: float, *, stop_at: int | None = None,
+                 send_at: int = 1) -> None:
         super().__init__()
-        self.setting, self.value, self.stop_at = setting, value, stop_at
+        self.setting, self.value, self.stop_at, self.send_at = setting, value, stop_at, send_at
         self.session: Session | None = None
         self.drains = 0
         self.seen: int | None = None
@@ -818,7 +858,7 @@ class _Locks(Simulated):
 
     def drain(self) -> list:
         self.drains += 1
-        if self.drains == 1:
+        if self.drains == self.send_at:
             self.queue(SetParameter(self.setting, self.value, JAKE))
         offered = self.session.suggestion
         if self.seen is None and offered is not None and offered[1] == "up":
@@ -928,3 +968,101 @@ def test_a_trainer_overrides_a_stages_own_value_live(tmp_path, stage, setting, v
     assert lines[0]["params"][setting] == own and setting not in lines[0]["live"]
     assert all(line["params"][setting] == value and setting in line["live"]
                for line in lines[1:])
+
+
+# --- Every number a setting (the fix round; the PI, 2026-11-07) ---------------------------------
+
+
+def test_the_bar_to_move_up_reads_its_window_live(tmp_path):
+    """The PI, 2026-11-07: "everything should be adjustable in the console, no?" The trainer sets
+    `move_up_window` to 20 before Alone's second trial; the bar reads it at its next judgment and
+    restarts nothing (the window rolls): the rig suggests moving up on 80% of the last 20 answers,
+    long before 50 are in, the panel's bar a window of 20, and the change is the setting's own
+    `set` row."""
+    trainer = _Locks("move_up_window", 20.0)
+    session = _opened(replace(_spec(tmp_path, seed=5), accuracy=0.95), trainer)
+    trainer.session = session
+
+    session.run()
+
+    assert trainer.seen is not None and not trainer.ran_out
+    changes = _rows(session, "parameter_changes.jsonl")
+    assert [(row["kind"], row["name"], row["now"]) for row in changes][:1] == [
+        ("set", "move_up_window", 20.0)]
+    (up, *_) = [row for row in changes if row["kind"] == "suggested" and row["move"] == "up"]
+    assert (up["block"], up["bar"]["of"]) == ("Alone", 20) and up["bar"]["correct"] >= 16
+    lines = _rows(session, "trials.jsonl")
+    assert len(lines) < 50 and {line["block"] for line in lines} == {"Alone"}
+    (first, *_) = [frame for frame in session.link.published
+                   if frame.suggestion is not None and frame.suggestion.change == up["change"]]
+    assert (first.bars.up_of, first.bars.up_window, first.bars.up_at) == (20, 20, 0.8)
+
+
+def test_a_staircase_step_changed_live_re_derives_its_levels(tmp_path):
+    """The trainer sets Fade-in's step, `fade_in_step`, from a tenth to 0.3 at its tenth trial:
+    from the next trial the staircase's levels are 0.1, 0.4, 0.7 and 1.0, it goes on at the level
+    nearest the value it was at, and the panel shows the new levels. The change is the setting's
+    own `set` row, nothing else (no new row kind)."""
+    trainer = _Locks("fade_in_step", 0.3, send_at=10, stop_at=40)
+    session = _opened(replace(_spec(tmp_path, seed=5, start_block="Fade-in"), accuracy=0.95),
+                      trainer)
+    trainer.session = session
+
+    session.run()
+
+    lines = _rows(session, "trials.jsonl")
+    changes = _rows(session, "parameter_changes.jsonl")
+    assert [(row["kind"], row["name"], row["now"]) for row in changes
+            if row["kind"] not in ("suggested",)] == [("set", "fade_in_step", 0.3)]
+    applied = changes[0]["trial_number"]
+    before = [line for line in lines if line["trial_number"] < applied]
+    after = [line for line in lines if line["trial_number"] >= applied]
+    assert before and after
+    assert {line["params"]["distractor_fraction"] for line in before} <= {
+        0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0}
+    assert {line["params"]["distractor_fraction"] for line in after} <= {0.1, 0.4, 0.7, 1.0}
+    assert all(line["params"]["fade_in_step"] == 0.3 for line in after)
+    # It goes on at the level nearest the value it was at.
+    last = before[-1]["params"]["distractor_fraction"]
+    first = after[0]["params"]["distractor_fraction"]
+    assert abs(first - last) <= 0.15 + 1e-9, (last, first)
+    shown = [frame.staircase for frame in session.link.published
+             if frame.staircase is not None and frame.trial_index == after[-1]["index"]]
+    assert shown and tuple(shown[-1].levels) == (0.1, 0.4, 0.7, 1.0)
+
+
+def test_the_colors_brightness_changed_live_is_realized_once_and_written_once(tmp_path):
+    """The trainer dims the colors from 15 to 12 cd/m² of macaque luminance (`color_luminance`) at
+    the run's fifth trial. The run's start row realizes the set at 15; the first line drawn at 12
+    carries the set realized at 12 -- each color's chromaticity as shown, the chroma given up
+    together and its output levels -- and no other line does, so a reader knows each trial's drawn
+    light from its line's `color_luminance` and the record alone, without the rig: the realization
+    at that luminance, times the look's fraction."""
+    trainer = _Locks("color_luminance", 12.0, send_at=5, stop_at=14)
+    session = _opened(_spec(tmp_path, seed=5, start_block="Fade-in"), trainer)
+    trainer.session = session
+
+    session.run()
+
+    lines = _rows(session, "trials.jsonl")
+    (start,) = [row for row in _rows(session, "runs.jsonl") if row["event"] == "start"]
+    theirs = photometry.ColorSet.load(STIMULI)
+    at = {luminance: photometry.realize(theirs, SRGB, luminance) for luminance in (15.0, 12.0)}
+    assert [entry["luminance_cd_m2"] for entry in start["color_sets"]["isohue"]["realized"]] == [
+        15.0]
+    written = [(line["index"], line["realized"]) for line in lines if line["realized"] is not None]
+    assert len(written) == 1
+    index, realized = written[0]
+    assert lines[index]["params"]["color_luminance"] == 12.0
+    assert all(line["params"]["color_luminance"] == 15.0 for line in lines[:index])
+    assert all(line["params"]["color_luminance"] == 12.0 for line in lines[index:])
+    assert realized == {"isohue": [{
+        "luminance_cd_m2": 12.0, "desaturation": at[12.0].desaturation,
+        "xy": {color: list(xy) for color, xy in at[12.0].xy.items()},
+        "drive": {color: list(levels) for color, levels in at[12.0].drive.items()}}]}
+    # Each line's light, from the record alone: its luminance's realization times its fraction.
+    found = {entry["luminance_cd_m2"]: entry
+             for entry in [*start["color_sets"]["isohue"]["realized"], *realized["isohue"]]}
+    for line in lines:
+        assert line["params"]["color_luminance"] in found
+

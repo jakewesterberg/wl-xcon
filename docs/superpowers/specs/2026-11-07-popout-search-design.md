@@ -36,6 +36,11 @@ Parts 1 to 3 are one build. Part 4 is the next design conversation.
 
 ## 3. The task, as the PI decided it
 
+**Every number below is a setting the trainer may change in the console, its start the PI's value** (the PI,
+2026-11-07, on the build's review: "i mean, everything should be adjustable in the console, no?"; TSK-75). A number
+stays fixed only with its reason written beside it in the task (the bounds on the engine's own waits). Each setting's
+range is the builder's (the fix round).
+
 ### 3.1 The trial
 "keep this as an RT-search task, meaning there will be no delay between array presentation and fixation dimming/go
 cue": the fixation dot goes off on the frame the items appear, and that is the go.
@@ -57,9 +62,11 @@ the next saccade from fix to the target is an error". A saccade that lands on an
 error, and so (my reading of the same rule) is leaving the target before its 0.3 s hold; each gets the timeout. One reward per correct trial; its size is the
 animal's own limits file's, as for every task.
 
-**Sizes** (degrees of visual angle, forward-calculated at their place, never from a mean pixels-per-degree): discs 1°
-across on a ring 8° from center; fixation dot 0.3°; fixation window radius 2°; target window radius 1.5° (at 8°, twelve
-items stay 4.1° apart, so 1.5° windows never overlap). The background is **black** ("On black, faint to full").
+**Sizes** (degrees of visual angle, forward-calculated at their place, never from a mean pixels-per-degree), each a
+setting: discs 1° across (`disc_size`) on a ring 8° from center (`ring_radius`); fixation dot 0.3° (`fix_size`);
+fixation window radius 2°; target window radius 1.5° (at the starts, twelve items on the 8° ring stay 4.1° apart, so
+1.5° windows never overlap; over the ranges they can, twelve on the smallest ring, 4°, and the load check warns of it,
+`crowded-array`). The background is **black** ("On black, faint to full").
 
 ### 3.2 The colors
 wl-style's isoluminant set ("the isoluminate bluish color and redish color that was desigined in wl-style for
@@ -70,9 +77,11 @@ inside the sRGB gamut, whose limit at that hue is chroma 38). The sRGB previews 
 #ed7474, green #54a947; the rig draws them from their definition on its measured panel (§4).
 
 - **Whose luminance**: L + M at L:M 1 on the **Stockman–Sharpe 2° cone fundamentals**, as wl-style computes it ("wl-style's
-  2-degree set"), not the CIE 2006 10° set the engine uses for its other colors.
-- **How bright at full**: **15 cd/m²** on every rig, a setting the trainer may change ("15 cd/m² on every rig"). Fade-in's
-  distractors run from a fraction of that to it.
+  2-degree set"), not the CIE 2006 10° set the engine uses for its other colors. The rig holds them on the CIE's own 2006
+  2° table, the same fundamentals (bundled 2026-11-07, the PI: "Swap before merge"; ADR-0012, amended).
+- **How bright at full**: **15 cd/m²** on every rig, a setting the trainer may change ("15 cd/m² on every rig"):
+  `color_luminance`, 1 to 30 cd/m², checked over that range at load (a value a panel would desaturate the four at is a
+  warning saying which part of the range). Fade-in's distractors run from a fraction of that to it.
 - **A panel that cannot show them** at that level and chroma (my call): all four lose chroma together, never luminance,
   and the load check warns saying by how much; no color is clipped, since clipping breaks the luminance match.
 
@@ -94,18 +103,23 @@ At the end of Fade-in the distractors match the odd one's luminance, so it diffe
 
 ### 3.4 Moving within and between stages
 - **Within a stage, a staircase** ("Automatic within a stage"): three correct in a row step harder, one error steps
-  easier, holding performance near 79% correct [@levitt1971transformed], close to the bar below. Errors are TSK-33's
-  default: a wrong item and no response count as failures; a trial that ends before the decision (no fixation, an
-  early saccade) moves nothing. The step sizes are the builder's (§7).
+  easier (`staircase_down`, `staircase_up`, shared by both stages), holding performance near 79% correct
+  [@levitt1971transformed], close to the bar below. Errors are TSK-33's default: a wrong item and no response count as
+  failures; a trial that ends before the decision (no fixation, an early saccade) moves nothing. The step sizes are the
+  builder's (§7), each a setting: Fade-in's distractors by a tenth of full (`fade_in_step`), Crowd's discs one at a time
+  (`crowd_step`); a step changed live re-derives the levels at the level nearest the staircase's value.
 - **A lock**: "there should also be a way for the experimenter to lock the parameters". A person's live value on a
   setting holds it, and the staircase leaves it alone until it is handed back (TSK-32: "a live value on its parameter
   holds it"; built in engine build C3 as a held setting and a hand-back).
 - **Between stages, the rig suggests and the trainer confirms** ("Rig suggests, trainer confirms"). The bar: "80%
-  correct, last 50 trials", judged at the stage's hardest step ("Hardest step reached, 80% there"): Fade-in's
-  distractors at full luminance, Crowd at 12 items, Alone as it is.
+  correct, last 50 trials" (`move_up_bar`, `move_up_window`, one pair for every stage, read at each judgment), judged at
+  the stage's hardest step ("Hardest step reached, 80% there"): Fade-in's distractors at full luminance, Crowd at 12
+  items, Alone as it is -- whoever set it there (the PI, 2026-11-07: "Any trial played at the hardest step counts,
+  whoever set it there").
 - **Back down, the same way** ("Rig suggests, trainer confirms"): below 50% of the last 50 ("Below 50% of the last 50",
-  a setting the trainer may change), the rig suggests the previous stage, or a narrower pool, and the trainer confirms or
-  holds; the trainer may also move back by hand.
+  a setting the trainer may change: `move_back_bar`, `move_back_window`), the rig suggests the previous stage, or a
+  narrower pool, and the trainer confirms or holds; the trainer may also move back by hand. **The narrower pool is not
+  built**: the PI, 2026-11-07, "File it; trainer narrows by hand" (XC-463).
 - **Widening the pairing pool** uses the same bar; at the prompt **the trainer picks** which pairings to add ("Trainer
   picks at the prompt"). My calls: the bar is judged over all the current pairings pooled; in Alone, where no distractor
   shows, a pairing is only the odd one's color; when one window of trials meets both bars, one prompt offers both, the

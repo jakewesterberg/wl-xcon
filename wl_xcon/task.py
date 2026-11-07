@@ -2040,6 +2040,87 @@ def staircase_verdict(outcome: "Outcome | None", shown: bool) -> "bool | None":
     return None
 
 
+def _count_now(count: object, values: "dict | None", what: str) -> int:
+    """**A staircase's count as it reads now** (`Staircase.at`): a whole number as written, or a
+    setting's value (`P`) in `values` read as the nearest whole number, **at least 1** -- a live
+    value outside its declared range is the trainer's, with its warnings, and a count below 1
+    would step on every trial or none. Raises `ValueError` where a setting has no number."""
+    if isinstance(count, P):
+        value = None if values is None else values.get(count.name)
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value)):
+            raise ValueError(f"a staircase's {what} is setting {count.name!r}, which has no "
+                             f"number here ({value!r})")
+        return max(1, math.floor(value + 0.5))
+    return count
+
+
+@dataclass(frozen=True, slots=True)
+class Steps:
+    """**A staircase's levels by a step** (the PI, 2026-11-07: "i mean, everything should be
+    adjustable in the console, no?"; the pop-out search build's fix round): from `start`, the
+    easiest, toward `end`, the hardest, `by` apart -- **`end` the last level whether or not a step
+    lands on it**, since the stage's bar is judged there -- rising where `end` is above `start`
+    and falling where it is below. `by` is a positive number or a setting (`P`), so a trainer
+    changes the step live; a change re-derives the levels between trials and puts the staircase
+    at the level nearest its value (`taskd._Climb.restep`). Each level is rounded to 10 decimal
+    places, so steps of a tenth give 0.1, 0.2 ... 1.0 as written; a whole start, end and step give
+    whole levels; and **on a setting an array reads as a whole number** (`whole`) each level is
+    the nearest whole number, repeats dropped. `start` and `end` are finite numbers; refused as
+    it is built otherwise, and a step that is no positive number as its levels are read."""
+
+    start: float
+    end: float
+    by: object
+
+    def __post_init__(self) -> None:
+        for name in ("start", "end"):
+            value = getattr(self, name)
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value)):
+                raise ValueError(f"a staircase's steps have a finite number as their {name}, not "
+                                 f"{value!r}")
+        by = self.by
+        if not isinstance(by, P) and (isinstance(by, bool) or not isinstance(by, (int, float))
+                                      or not math.isfinite(by) or by <= 0):
+            raise ValueError(f"a staircase's step is a positive number or a setting, not {by!r}")
+
+    def levels(self, by: object, *, whole: bool = False) -> tuple:
+        """The levels at step `by`, easiest first (`Steps`). Raises `ValueError` for a step that
+        is no positive finite number, and for one so small it would make more than
+        `STEPS_LIMIT` levels."""
+        if (isinstance(by, bool) or not isinstance(by, (int, float)) or not math.isfinite(by)
+                or by <= 0):
+            raise ValueError(f"a staircase's step is a positive number, not {by!r}")
+        span = abs(self.end - self.start)
+        count = math.floor(span / by + 1e-9)
+        if count + 1 > STEPS_LIMIT:
+            raise ValueError(f"a step of {by!r} from {self.start!r} to {self.end!r} makes "
+                             f"{count + 1} levels, more than the {STEPS_LIMIT} a staircase takes")
+        sign = 1.0 if self.end >= self.start else -1.0
+        exact = all(isinstance(v, int) for v in (self.start, self.end)) and float(by).is_integer()
+        levels: list = []
+        for k in range(count + 1):
+            level = round(self.start + sign * k * by, 10)
+            levels.append(level)
+        if not levels or abs(levels[-1] - self.end) > 1e-9:
+            levels.append(self.end)
+        else:
+            levels[-1] = self.end
+        if whole or exact:
+            levels = [math.floor(level + 0.5) if whole else int(round(level)) for level in levels]
+        found: list = []
+        for level in levels:
+            if level not in found:
+                found.append(level)
+        return tuple(found)
+
+
+#: The most levels a staircase's steps make (`Steps.levels`): a step a person sets far below its
+#: range would otherwise make a table of any length between two trials.
+STEPS_LIMIT = 1000
+
+
 @dataclass(frozen=True, slots=True)
 class Staircase:
     """**A staircase on one setting of a block** (engine spec §15 items 1, 3 and 6; TSK-32, TSK-33;
@@ -2053,6 +2134,14 @@ class Staircase:
     there leaves it where it is, and its count starts again. The step sizes, its floor and its
     ceiling are its levels, the task author's (the design's §7).
 
+    **Every number in it may be a setting** (the PI, 2026-11-07: "everything should be adjustable
+    in the console"; the pop-out search build's fix round): `down` and `up` a whole number or a
+    setting (`P`), and `levels` a tuple or `Steps`, levels by a step that may be one. **`at`**
+    gives the staircase as the run's live values make it, between trials; a declared one with
+    neither is its own. A change to a count takes effect at the next trial's step; a change to a
+    step re-derives the levels and puts the staircase at the level nearest its value
+    (`taskd._Climb.restep`), recorded as the setting's own change row.
+
     **`start`**: the index of the level each block of it starts at; `None`, the level nearest the
     run's own value of the setting (the task's start under the run's; `nearest`), or the easiest
     where the run gives it none. **Each block starts its staircase afresh as it opens**, a stage a
@@ -2065,46 +2154,88 @@ class Staircase:
     marks the value it gave `drawn` `"staircase"` (wl-preproc's answer of 2026-11-07).
 
     **Refused as it is built**, as a setting's declaration is (`Param`): no levels, levels that are
-    not a tuple of finite numbers, a `down` or an `up` that is no whole number from 1, and a
-    `start` that is no index of its levels. What it steps is checked at load with its block
-    (`check.check_task`, `bad-staircase`): a setting the task declares, of numbers, never a
-    reward size, each level inside its declared range, and neither drawn nor given by the block's
-    conditions."""
+    not a tuple of finite numbers nor `Steps`, a `down` or an `up` that is no whole number from 1
+    nor a setting, and a `start` that is no index of its levels (of a tuple's; one of `Steps` is
+    held to the levels a run derives, and read as the last where it is past them). What it steps
+    is checked at load with its block (`check.check_task`, `bad-staircase`): a setting the task
+    declares, of numbers, never a reward size, each level inside its declared range, and neither
+    drawn nor given by the block's conditions; and each setting it reads a number from, declared
+    and of numbers, its range giving a count from 1 and a step above 0."""
 
     setting: str
-    levels: tuple
-    down: int = 3
-    up: int = 1
+    levels: "tuple | Steps"
+    down: "int | P" = 3
+    up: "int | P" = 1
     start: "int | None" = None
 
     def __post_init__(self) -> None:
         def refuse(said: str) -> None:
             raise ValueError(f"setting {self.setting!r}: {said}")
 
-        if not isinstance(self.levels, tuple):
+        if isinstance(self.levels, Steps):
+            pass
+        elif not isinstance(self.levels, tuple):
             refuse(f"a staircase's levels are a tuple, easiest first, not a "
                    f"{type(self.levels).__name__}")
-        if not self.levels:
+        elif not self.levels:
             refuse("a staircase has at least one level, and this one has none")
-        for level in self.levels:
-            if (isinstance(level, bool) or not isinstance(level, (int, float))
-                    or not math.isfinite(level)):
-                refuse(f"a staircase's levels are finite numbers, and {level!r} is not one")
+        else:
+            for level in self.levels:
+                if (isinstance(level, bool) or not isinstance(level, (int, float))
+                        or not math.isfinite(level)):
+                    refuse(f"a staircase's levels are finite numbers, and {level!r} is not one")
         for name in ("down", "up"):
             count = getattr(self, name)
+            if isinstance(count, P):
+                continue
             if isinstance(count, bool) or not isinstance(count, int) or count < 1:
                 refuse(f"a staircase's {name} is a whole number from 1, not {count!r}")
         start = self.start
+        stepped = isinstance(self.levels, Steps)
+        bound = STEPS_LIMIT if stepped else len(self.levels)
         if start is not None and (isinstance(start, bool) or not isinstance(start, int)
-                                  or not 0 <= start < len(self.levels)):
-            refuse(f"a staircase's start is the index of one of its {len(self.levels)} levels, "
-                   f"from 0, or None, not {start!r}")
+                                  or not 0 <= start < bound):
+            levels = "its levels" if stepped else f"its {bound} levels"
+            refuse(f"a staircase's start is the index of one of {levels}, from 0, or None, "
+                   f"not {start!r}")
+
+    @property
+    def settings(self) -> "tuple[str, ...]":
+        """The settings it reads a number from (`P` in `down`, `up` or its steps' `by`), each
+        once, in that order."""
+        found = [part.name for part in (self.down, self.up,
+                                        getattr(self.levels, "by", None)) if isinstance(part, P)]
+        return tuple(dict.fromkeys(found))
+
+    def at(self, values: "dict | None", *, whole: bool = False) -> "Staircase":
+        """**The staircase as `values` make it** (the run's live values), between trials: its
+        levels a tuple and its counts whole numbers -- itself where it reads no setting. A step
+        of `Steps` that is a setting reads its value there; a count, the nearest whole number
+        from 1 (`_count_now`). `whole`: its setting is one an array reads as a whole number, so
+        each level of `Steps` is the nearest one. A start past the levels derived is read as the
+        last. Raises `ValueError` where a setting it reads has no number in `values`, or its
+        step makes no levels (`Steps.levels`)."""
+        if isinstance(self.levels, tuple) and not self.settings:
+            return self
+        levels = self.levels
+        if isinstance(levels, Steps):
+            by = levels.by
+            if isinstance(by, P):
+                named, by = by.name, None if values is None else values.get(by.name)
+                if (isinstance(by, bool) or not isinstance(by, (int, float))
+                        or not math.isfinite(by)):
+                    raise ValueError(f"a staircase's step is setting {named!r}, which has no "
+                                     f"number here ({by!r})")
+            levels = levels.levels(by, whole=whole)
+        start = self.start if self.start is None else min(self.start, len(levels) - 1)
+        return Staircase(self.setting, levels, _count_now(self.down, values, "down"),
+                         _count_now(self.up, values, "up"), start)
 
     def nearest(self, value: object) -> "int | None":
         """**The index of the level nearest `value`**, the easier of two as near; `None` for a
         value that is no finite real number, which no level is near. Where a block of it starts
         with no `start` (the run's own value), and where a hand-back resumes it (the value
-        held)."""
+        held). Of a staircase whose levels are a tuple (`at`)."""
         if (isinstance(value, bool) or not isinstance(value, (int, float))
                 or not math.isfinite(value)):
             return None
@@ -2123,7 +2254,10 @@ class Block:
     name: str
     conditions: "list[Condition]"
     #: `(proportion, window)` -- "80% correct over the last 20 answers", a percentage; a proportion
-    #: of 1.0 is a streak, "N correct in a row" (the engine C2a plan, revised 2026-10-18). Judged on
+    #: of 1.0 is a streak, "N correct in a row" (the engine C2a plan, revised 2026-10-18). **Either
+    #: may be a setting** (`P`; the PI, 2026-11-07: "everything should be adjustable in the
+    #: console"), read at each judgment from the run's live values (`rule_at`), so a change takes
+    #: effect at the next judgment and restarts nothing: the window rolls. Judged on
     #: every answer, and on a broken hold or a failure to acquire fixation where this block's own
     #: table scores it (`scheduler.Scheduler._scored`); a percentage judges only each trial's first
     #: answer under `first_answers`, a streak never. The block ends once every condition is owed
@@ -2237,6 +2371,9 @@ class ByCriterion(BlockOrder):
     working** once its rule is met, until a time limit, a stop or the session's end; the top
     stage's own time limit, with nowhere to move on to, ends the run. `None`, no fall-back.
 
+    **Either number of the fall-back may be a setting** (`P`), read at each judgment from the
+    run's live values (`rule_at`), as a stage's criterion's may.
+
     **`confirm`, the rig suggests and a person confirms** (the PI, 2026-11-07, "Rig suggests,
     trainer confirms"; the pop-out search build): no stage moves up or back on its rules; the rig
     suggests each move, and a person makes it, or holds (`scheduler.Scheduler.suggestion`). Up
@@ -2250,6 +2387,34 @@ class ByCriterion(BlockOrder):
 
     fall_back: "tuple[float, int] | None" = None
     confirm: bool = False
+
+
+def rule_at(rule: "tuple | None", values: "dict | None") -> "tuple[float, int] | None":
+    """**A criterion or a fall-back rule as the run's live `values` make it** (`Block.criterion`,
+    `ByCriterion.fall_back`; the pop-out search build's fix round), at a judgment, between trials:
+    `(proportion, window)`, each as written or a setting's value (`P`), **a window read as the
+    nearest whole number, at least 1** -- a live value outside its declared range is the
+    trainer's, with its warnings, and a window of none would judge nothing. `None` for no rule.
+    Raises `ValueError` where a setting it names has no number in `values`."""
+    if rule is None:
+        return None
+    proportion, window = rule
+
+    def number(part: object, what: str) -> float:
+        if not isinstance(part, P):
+            return part
+        value = None if values is None else values.get(part.name)
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value)):
+            raise ValueError(f"a rule's {what} is setting {part.name!r}, which has no number here "
+                             f"({value!r})")
+        return value
+
+    proportion = number(proportion, "proportion")
+    window = number(window, "window")
+    if isinstance(rule[1], P):
+        window = max(1, math.floor(window + 0.5))
+    return proportion, window
 
 
 @dataclass(frozen=True, slots=True)

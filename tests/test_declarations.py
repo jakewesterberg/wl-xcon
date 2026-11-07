@@ -230,7 +230,7 @@ DEFAULTS = {
     "Color": {},
     "ColorSet": {"name": REQUIRED, "colors": REQUIRED, "apex": REQUIRED, "luminance_cd_m2": 15.0,
                  "held": "macaque_2deg_LM1", "source": ""},
-    "ColorSetLight": {"colorset": REQUIRED, "color": REQUIRED, "fraction": 1.0},
+    "ColorSetLight": {"colorset": REQUIRED, "color": REQUIRED, "fraction": 1.0, "luminance": None},
     "Condition": {"name": REQUIRED, "values": REQUIRED, "target": REQUIRED, "structure": None},
     "ConeContrast": {"L": 0.0, "M": 0.0, "S": 0.0},
     "Constrained": {"max_run": 2, "weights": {}},
@@ -361,6 +361,7 @@ DEFAULTS = {
     "Slant": {"gradient": 0.05, "orientation": 0.0},
     "Square": {"size": 1.0, "contrast": None, "color": None},
     "Staircase": {"setting": REQUIRED, "levels": REQUIRED, "down": 3, "up": 1, "start": None},
+    "Steps": {"start": REQUIRED, "end": REQUIRED, "by": REQUIRED},
     "State": {"name": REQUIRED, "enter": [], "go": [], "unbounded": False},
     "Stimulus": {
         "name": REQUIRED,

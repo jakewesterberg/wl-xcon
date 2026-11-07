@@ -472,6 +472,7 @@ class SessionRecord:
         live: tuple = (),
         eased: tuple = (),
         planned: dict | None = None,
+        realized: dict | None = None,
     ) -> list[dict]:
         """One trial's record, flushed before returning.
 
@@ -568,6 +569,10 @@ class SessionRecord:
                     # not move, `planned` null outside a designed block.
                     "eased": list(eased),
                     "planned": planned,
+                    # The pop-out search build's fix round: each color set this trial drew at a
+                    # luminance its run had not yet written, realized on the run's panel, by set
+                    # name (`taskd.Session._realize`); null on every other line.
+                    "realized": realized,
                     "stimuli": stimuli,
                 },
                 sort_keys=True,

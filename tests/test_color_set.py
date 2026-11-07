@@ -312,9 +312,12 @@ def test_two_color_sets_of_one_name_are_refused_since_the_record_names_a_set_by_
 def test_a_runs_start_row_defines_each_set_as_written_and_as_this_panel_draws_it():
     """**What each run's start row defines once** (`taskd._color_sets`, its `color_sets`; the
     pop-out search build's final fixes, 1): each set the task declares, by name, as its file reads
-    -- the colors as written -- and `realized` as this panel draws it, the screen's own: on a panel
-    that cannot show the set as written, the share of chroma every color gave up, each color as
-    shown, moved toward the apex, and its output levels. `None` for a task with no set."""
+    -- the colors as written -- and `realized` as this panel draws it, the screen's own, **one
+    realization for each luminance the run's values draw the set at** (the fix round: the
+    luminance a setting), each naming its luminance: on a panel that cannot show the set as
+    written, the share of chroma every color gave up, each color as shown, moved toward the apex,
+    and its output levels. A light naming a setting draws the set at the setting's value; one
+    naming none, at the set's own. `None` for a task with no set."""
     from wl_xcon.taskd import _color_sets
 
     panel = measured(green=NARROW_GREEN)
@@ -322,15 +325,80 @@ def test_a_runs_start_row_defines_each_set_as_written_and_as_this_panel_draws_it
     shown = photometry.realize(cs, panel)
     assert shown.desaturation > 0.0
 
-    defined = _color_sets(_task(_four(cs)), panel)
+    def realization(shown) -> dict:
+        return {"luminance_cd_m2": shown.luminance, "desaturation": shown.desaturation,
+                "xy": {name: list(xy) for name, xy in shown.xy.items()},
+                "drive": {name: list(levels) for name, levels in shown.drive.items()}}
+
+    defined = _color_sets(_task(_four(cs)), panel, {})
 
     assert defined == {"isohue": {
         "name": "isohue", "colors": {name: list(xy) for name, xy in cs.colors.items()},
         "apex": list(cs.apex), "luminance_cd_m2": 15.0, "held": "macaque_2deg_LM1",
-        "source": cs.source,
-        "realized": {"desaturation": shown.desaturation,
-                     "xy": {name: list(xy) for name, xy in shown.xy.items()},
-                     "drive": {name: list(levels) for name, levels in shown.drive.items()}},
+        "source": cs.source, "realized": [realization(shown)],
     }}
-    assert defined["isohue"]["realized"]["xy"]["green"] != defined["isohue"]["colors"]["green"]
-    assert _color_sets(_task(_trial({"a": xyY(0.3, 0.3, 10.0)})), panel) is None
+    assert defined["isohue"]["realized"][0]["xy"]["green"] != defined["isohue"]["colors"]["green"]
+    dimmer = _trial({name: photometry.ColorSetLight(cs, name, luminance=P("bright"))
+                     for name in COLORS},
+                    params=[Param("bright", unit="cd/m2", low=1.0, high=30.0, start=15.0)])
+    at_ten = _color_sets(_task(dimmer), panel, {"bright": 10.0})["isohue"]["realized"]
+    assert at_ten == [realization(photometry.realize(cs, panel, 10.0))]
+    assert at_ten[0]["luminance_cd_m2"] == 10.0
+    assert _color_sets(_task(_trial({"a": xyY(0.3, 0.3, 10.0)})), panel, {}) is None
+
+
+def test_a_lights_luminance_may_be_a_setting_realized_once_for_each_value():
+    """The fix round (the PI, 2026-11-07: "everything should be adjustable in the console"): a
+    color-set light's luminance at full may be a setting (`ColorSetLight.luminance`), bound where
+    the screen binds its fraction; the set is realized once for each value on each panel and kept
+    (`photometry.realized`), so no frame realizes it again; through the panel's own spectra each
+    light at 10 cd/m² matches a D65 light's macaque luminance at 10; and one naming none is drawn at
+    its set's own luminance."""
+    from wl_xcon.screen import _Lights
+
+    panel = measured()
+    cs = colorset()
+    named = photometry.ColorSetLight(cs, "blue", luminance=P("bright"))
+    lights = _Lights(values={"bright": 10.0}, calibration=panel, background=None)
+
+    at_ten = photometry.realized(cs, panel, 10.0)
+    assert photometry.realized(cs, panel, 10.0) is at_ten
+    assert photometry.realized(cs, panel, 15.0) is photometry.realized(cs, panel)
+    assert at_ten.luminance == 10.0 and at_ten is not photometry.realized(cs, panel)
+    assert lights.xyz(named) == pytest.approx(at_ten.xyz["blue"], rel=1e-12)
+    assert photometry.macaque_cd_m2(lights.xyz(named), panel) == pytest.approx(10.0)
+    assert _macaque(at_ten.drive["blue"], panel) == pytest.approx(
+        _macaque(panel.weights(xyY(*D65, 10.0)), panel), rel=1e-3)
+    plain = photometry.ColorSetLight(cs, "blue")
+    assert lights.xyz(plain) == pytest.approx(photometry.realized(cs, panel).xyz["blue"])
+    with pytest.raises(ValueError, match="above 0"):
+        photometry.ColorSetLight(cs, "blue", luminance=0.0).at()
+
+
+def test_a_luminance_range_that_desaturates_the_set_is_a_warning_saying_which_part():
+    """The fix round: a luminance a setting gives is checked over its whole range at load. **A
+    value that would desaturate the set is a warning, never a refusal** (the PI's "warnings over
+    refusals", 2026-10-11; `color-set-desaturated`), saying which part of the range does -- here
+    above about 26 cd/m² of 1 to 30 on the sRGB standard, 13.3% of chroma given up at 30 -- and a
+    panel that shows the set over the whole range says nothing."""
+    cs = colorset()
+    bright = Param("bright", unit="cd/m2", low=1.0, high=30.0, start=15.0)
+    trial = _trial({name: photometry.ColorSetLight(cs, name, luminance=P("bright"))
+                    for name in COLORS}, params=[bright])
+
+    on_default = {f.code: f for f in check(trial, calibration=SRGB)}
+    on_measured = {f.code: f for f in check(trial, calibration=measured())}
+
+    pale = on_default["color-set-desaturated"]
+    assert pale.is_warning and pale.accepted_in == SESSION_KINDS
+    assert ("as written above about 26 cd/m², of the 1 to 30 cd/m² setting 'bright' allows"
+            in pale.detail)
+    assert "13.3% at 30 cd/m²" in pale.detail
+    assert not [f for f in on_default.values() if f.blocking]
+    assert "color-set-desaturated" not in on_measured
+    always = _trial({name: photometry.ColorSetLight(cs, name, luminance=P("bright"))
+                     for name in COLORS},
+                    params=[Param("bright", unit="cd/m2", low=40.0, high=50.0, start=45.0)])
+    (every,) = [f for f in check(always, calibration=SRGB) if f.code == "color-set-desaturated"]
+    assert "at any luminance setting 'bright' allows, 40 to 50 cd/m²" in every.detail
+

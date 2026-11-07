@@ -30,7 +30,7 @@ import hashlib
 import json
 from enum import Enum
 
-from wl_xcon.photometry import ColorSet
+from wl_xcon.photometry import ColorSet, ColorSetLight
 from wl_xcon.task import (
     BACKGROUND, CLEAR_CUT, CRITERION, EASIER, EXPECTED, HARDER, NEITHER, NOT_DIFFICULTY, STIMULUS,
     Meaning, Reward, Task, Unchanged, actions_of,
@@ -199,6 +199,37 @@ def canonical(value: object, *, every_field: bool = False, sets_by_name: bool = 
     raise TypeError(
         f"{type(value).__name__!r} is not a declaration the task's content hash can read"
     )
+
+
+def color_set_lights(value: object) -> list:
+    """**Every color-set light `value` declares** (`photometry.ColorSetLight`), each once, in the
+    order first met, walking what `color_sets` walks (the pop-out search build's fix round): what
+    a run reads each trial's luminance of each set from (`taskd._luminances`). At load or as a run
+    starts, never in a frame."""
+    found: list = []
+    walked: set[int] = set()
+
+    def walk(item: object) -> None:
+        if isinstance(item, ColorSetLight):
+            if item not in found:
+                found.append(item)
+            return
+        if (item is None or isinstance(item, (bool, int, float, str, Enum, ColorSet))
+                or id(item) in walked):
+            return
+        walked.add(id(item))
+        if isinstance(item, (list, tuple)):
+            for entry in item:
+                walk(entry)
+        elif isinstance(item, dict):
+            for entry in item.values():
+                walk(entry)
+        elif dataclasses.is_dataclass(item) and not isinstance(item, type):
+            for spec in dataclasses.fields(item):
+                walk(getattr(item, spec.name))
+
+    walk(value)
+    return found
 
 
 def color_sets(value: object) -> dict[str, ColorSet]:

@@ -15,7 +15,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 **Finding one.** Grep the ID, a package (`P9`, `b3`), a repository (`wl-sync`) or a file. The sections: brainstorms the PI asked to have later; features no plan covers yet; defects and review findings deliberately not fixed; debt (cleanup, stale wording, test hygiene); anything that needs the rig or other hardware, measurements included; and asks of, or waits on, other repositories.
 
-**Next free ID: XC-493.**
+**Next free ID: XC-495.**
 
 ## Brainstorms queued for the PI
 
@@ -115,6 +115,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 - **XC-465** A target-hold break rate for the simulated eye, among XC-146's behavioral terms: the eye never leaves a target it landed on, so TARGET_BREAK is gone from simulated gaze sessions (it was 3% of the fuzzer's trials) and the pop-out's leaving-the-target path is exercised only by scripted-eye tests. — 2026-11-07, [`wl_xcon/simeye.py`](../wl_xcon/simeye.py) — waits on: XC-146
 - **XC-466** The census (`simulate.simulate`, `run_session`) takes only a `simulate.Subject`; a census through the simulated eye would need them to accept a `simeye.Eye`. — 2026-11-07, [`wl_xcon/simulate.py`](../wl_xcon/simulate.py) — waits on: XC-146
 - **XC-467** A run that goes on from an earlier one (the pop-out search build's resume) carries the stage, the staircase level, the pool and a standing suggestion, but not a person's held values, any repeat waiting (a drum's try, a trial again at once, a placed repeat), the training settings (first answers, clear; every run starts with them off, XC-379) nor, for a progression that is not confirmed, the stage's own counts and fall-back window, so such a run re-earns its stage's rule from its first trial; the feed says "hold it again". — 2026-11-07, [`wl_xcon/resume.py`](../wl_xcon/resume.py) — waits on: nothing
+- **XC-493** A load check that warns when a task fixes a number in its declarations -- a literal size, time, luminance, bar, window or staircase count or step where a setting (`P`) could stand -- so the PI's rule that every number is a console setting holds for the next task; each literal a task keeps on purpose carries its reason beside it, which the check reads past. — 2026-11-07, [TSK-75](references/decisions.md#tsk-75--every-number-a-task-uses-is-a-setting-the-trainer-may-change-in-the-console-starting-at-the-pis-value-a-number-stays-fixed-only-with-its-reason-written-beside-it) — waits on: nothing
 
 ## Deferred defects
 
@@ -228,6 +229,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 - **XC-482** A loaded allocation can give a task event a Marker value (1 to 255) or an escape value (0x8000 and up), and a task's `Mark` of it passes every check: a Marker breaks wl-preproc's trial framing, an escape makes `encode.words_for_code` raise mid-run; refuse it in `cli._load_allocation` (not welfare-listed; read at `56ccca2`, which checks only that `ALLOCATION` is an `Allocation`). — 2026-11-07, [`wl_xcon/cli.py`](../wl_xcon/cli.py) — waits on: nothing
 - **XC-483** `Array.phase` of inf or NaN still loads clean (probed on `main` at `56ccca2` with the reference visual_search task's phase set to each: no finding). — 2026-11-07, [`wl_xcon/check.py`](../wl_xcon/check.py) — waits on: nothing
 - **XC-484** Check 8 still says "neither a two-sided range" for a ring radius written as a word, beside `bad-block`'s refusal of it (the sentence stands at `check.py` on `main`, `56ccca2`; not re-run for a word radius). — 2026-11-07, [`wl_xcon/check.py`](../wl_xcon/check.py) — waits on: nothing
+- **XC-494** A color-set light's luminance setting whose highest a panel cannot show even the set's apex at refuses the whole task at load (`unrealizable-color`, from `check._lights` reading the range's ends), where the PI's warnings over refusals would warn at load and refuse only that value live: on a panel dimmer than the pop-out's 30 cd/m² top the task would not load at all (the sRGB standard shows the apex to between 78 and 80 cd/m², the test calibration past 80; computed 2026-11-07). — 2026-11-07, [TSK-75](references/decisions.md#tsk-75--every-number-a-task-uses-is-a-setting-the-trainer-may-change-in-the-console-starting-at-the-pis-value-a-number-stays-fixed-only-with-its-reason-written-beside-it) — waits on: nothing
 
 ## Debt
 
