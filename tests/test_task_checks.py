@@ -1681,3 +1681,71 @@ def test_a_drift_direction_that_can_be_no_finite_number_is_refused_and_never_rai
         assert found and found[0].startswith(
             f"SineGrating.direction is parameter 'x', which can be {said}, not a finite number; "
         ), (geometry, found)
+
+
+# --- XC-273's fix round 1: a wait's seconds no trial can time (the review's I2) ---------------
+
+
+def _waiting(guard) -> Trial:
+    """One state whose second exit is `guard`, a window `w` at the center to hold."""
+    return Trial(start="s", windows=[Window("w", at=(0.0, 0.0), radius=1.0, on="s")], states=[State(
+        "s", enter=[Show(Stimulus("s", at=(0.0, 0.0), looks=LIT))],
+        go=[On(After(2.0), Outcome.NO_RESPONSE), On(guard, Outcome.CORRECT)])])
+
+
+@pytest.mark.parametrize(("guard", "said"), [
+    (After("x"), "state 's' times out after 'x', which is not a number of seconds"),
+    (After(None), "state 's' times out after None, which is not a number of seconds"),
+    (After("1.0"), "state 's' times out after '1.0', which is not a number of seconds"),
+    (Hold("w", "x"), "state 's' holds 'w' for 'x', which is not a number of seconds"),
+    (After(True), "state 's' times out after True, which is not a number of seconds"),
+    (After(math.nan), "state 's' times out after nan, which no trial can time"),
+    (Hold("w", math.nan), "state 's' holds 'w' for nan, which no trial can time"),
+], ids=["word", "none", "number-as-text", "hold-word", "bool", "nan", "hold-nan"])
+def test_a_wait_whose_seconds_no_trial_can_time_is_refused_at_load(guard, said):
+    """The review's I2: `After("x")` and `After(None)` made `check()` raise until `_span` read a
+    literal that is no number as bounding nothing (XC-273), and then loaded clean, for the first
+    trial to raise on (`run.run_trial` compares the elapsed time with it, a `TypeError`);
+    `After("1.0")` and `Hold("w", "x")` loaded clean at the base too, and a NaN never fires. Each is
+    refused, `bad-wait`, with the rig's field or without, and the check never raises."""
+    for geometry in (None, GEOMETRY):
+        found = [f for f in check(_waiting(guard), geometry=geometry) if f.code == "bad-wait"]
+        assert len(found) == 1 and found[0].blocking, (geometry, found)
+        assert found[0].detail.startswith(said), found[0]
+
+
+@pytest.mark.parametrize("seconds", [math.inf, 10**400, 0.5, 2, P("t")],
+                         ids=["infinity", "past-float", "float", "int", "setting"])
+def test_a_wait_of_a_number_or_a_setting_is_not_refused_an_infinity_being_one_that_never_ends(
+        seconds):
+    """An infinity, written in, is a wait that never ends, read as one of any length (`_waits`;
+    XC-423's fix round 1), never a `bad-wait`; nor is a number past a float's range, a number or a
+    setting."""
+    params = [Param("t", unit="s", choices=(0.5, 1.0))]
+    for guard in (After(seconds), Hold("w", seconds)):
+        trial = replace(_waiting(guard), params=params)
+        assert "bad-wait" not in {f.code for f in check(trial)}, guard
+        assert "bad-wait" not in {f.code for f in check(trial, geometry=GEOMETRY)}, guard
+
+
+def test_the_preflight_fails_a_task_whose_wait_no_trial_can_time(tmp_path):
+    """The review's I2, at a run's start: the reference detection task with its response timeout
+    written as `After("3.0")` passed the pre-flight's task checks and raised in its first trial
+    that reached the state; its task checks fail now, saying why."""
+    from pathlib import Path
+
+    from tasks.allocation import ALLOCATION
+    from wl_xcon import preflight
+    from wl_xcon.photometry import SRGB
+
+    text = Path("tasks/fixation_detection.py").read_text()
+    old = "                On(After(3.0), Outcome.NO_RESPONSE),"
+    assert text.count(old) == 1
+    path = tmp_path / "texted.py"
+    path.write_text(text.replace(old, old.replace("3.0", '"3.0"')))
+
+    item, loaded, _ = preflight.task(path, ALLOCATION, DIRECT, SRGB)
+
+    assert loaded is not None and item.result == "fail", item
+    assert "bad-wait: state 'verify' times out after '3.0', which is not a number of seconds" in (
+        item.said), item

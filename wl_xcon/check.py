@@ -123,6 +123,7 @@ def check(
     return (
         _unreachable_states(valued)
         + _unbounded_waits(valued)
+        + _wait_kind_faults(valued)
         + _states_with_no_outcome_path(valued)
         + _shadowed_transitions(valued)
         + _unallocated_codes(valued, allocation)
@@ -2514,6 +2515,36 @@ def _unbounded_waits(trial: Trial) -> list[Finding]:
             for edge in state.go
         )
     ]
+
+
+def _wait_kind_faults(trial: Trial) -> list[Finding]:
+    """**A wait's seconds that no trial can time are refused at load**, `bad-wait` (XC-273's fix
+    round 1, the review's I2): an `After`'s or a `Hold`'s seconds are a number or a setting. A
+    word or `None` made `check()` raise until `_span` read a literal that is no number as bounding
+    nothing (XC-273), and then loaded clean, for the first trial to raise on (`run.run_trial`
+    compares the elapsed time with it); one written as text or a `bool` loaded clean before that
+    too; and a NaN compares false with every time, so the wait never ends. **An infinity, or an
+    integer past a float's range, is a wait that never ends**, read as one of any length
+    (`_waits`), and is not refused here. A setting's choices are not read here."""
+    findings: list[Finding] = []
+    for state in trial.states:
+        for edge in state.go:
+            guard = edge.guard
+            if not isinstance(guard, (After, Hold)) or isinstance(guard.seconds, P):
+                continue
+            seconds = guard.seconds
+            what = (f"state {state.name!r} holds {guard.window!r} for" if isinstance(guard, Hold)
+                    else f"state {state.name!r} times out after")
+            if not _is_number(seconds):
+                findings.append(Finding("bad-wait", (
+                    f"{what} {_said(seconds)}, which is not a number of seconds, and a trial "
+                    f"would stop where it is first timed; write a number of seconds, or a "
+                    f"setting")))
+            elif seconds != seconds:  # a NaN; `math.isnan(10**400)` raises
+                findings.append(Finding("bad-wait", (
+                    f"{what} nan, which no trial can time: a NaN compares false with every time, "
+                    f"so the wait never ends; write a number of seconds")))
+    return findings
 
 
 def _states_with_no_outcome_path(trial: Trial) -> list[Finding]:
@@ -5559,7 +5590,8 @@ def _holds_cut_short(trial: Trial) -> list[Finding]:
         return None
 
     def said(value) -> str:
-        return f"`{value.name}`" if isinstance(value, P) else f"{value:g} s"
+        # `_literal`: `f"{10**400:g}"` raised (XC-273's fix round 1).
+        return f"`{value.name}`" if isinstance(value, P) else f"{_literal(value):g} s"
 
     findings: list[Finding] = []
     for state in trial.states:
