@@ -347,6 +347,26 @@ def test_it_holds_the_pis_values(task):
     assert pool.unpooled(starts["pairings"]) is None
 
 
+def test_its_pairings_are_named_by_their_colors_for_the_trainer_and_the_reviewer(task):
+    """Task 9's report: the trainer saw "pairing 1" to "pairing 12" and the review report mapped
+    them to long disc reprs. Each pairing is named by its colors, the odd one's first -- "blue among
+    purple" -- in the pool's order, the n-th worth 2 ** n: on the start form and the trainer's panel
+    (`taskd.start_rows`, the rig's own rows), in the sentence a pool's value is refused with, and
+    in `wlx review`'s table of the pool and where it starts."""
+    from wl_xcon.review import render_task as render_review
+    from wl_xcon.taskd import start_rows
+
+    names = tuple(f"{odd} among {among}" for odd in COLORS for among in COLORS if among != odd)
+    _, row = start_rows(task, "training", {})
+    report = render_review(task, _load_allocation(Path(ALLOCATION)).task_events)
+
+    assert row.pairings == names and row.start == 66
+    assert "1, blue among purple; 2, blue among red; 4, blue among green" in task.pool.unpooled(0)
+    assert "| 1 | blue among purple | Disc(" in report and "| 2048 | green among red | Disc(" in report
+    assert "It starts at 66: blue among red, red among blue." in report
+    assert "pairing 1" not in report
+
+
 # --- The trial ----------------------------------------------------------------------------------
 
 

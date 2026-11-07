@@ -14,7 +14,7 @@ from enum import Enum
 from typing import NamedTuple
 
 from wl_xcon.geometry import on_circle_deg, polar_deg
-from wl_xcon.photometry import Color, Contrast
+from wl_xcon.photometry import Color, ColorSetLight, Contrast
 
 
 class Family(Enum):
@@ -2266,6 +2266,14 @@ class Plan:
 POOL_LIMIT = 52
 
 
+def _set_color(look: object) -> "str | None":
+    """**The name of a look's color in its color set** (`photometry.ColorSetLight.color`): the
+    look's own where it is a color-set light, or its `color`'s where that is one (a `Disc`'s, a
+    `Square`'s); else `None`. For a pool's names (`Pool.named`)."""
+    color = look if isinstance(look, ColorSetLight) else getattr(look, "color", None)
+    return color.color if isinstance(color, ColorSetLight) else None
+
+
 @dataclass(frozen=True, slots=True)
 class Pool:
     """**A pool of pairings** (the pop-out search build, 2026-11-07; its design §3.2 and §3.4; the
@@ -2328,11 +2336,19 @@ class Pool:
                 raise ValueError(f"pool {self.setting!r}: pairing {at} is listed twice")
 
     def named(self, at: int) -> str:
-        """Pairing `at`'s name, from 0: its two looks as `odd>distractors` where both are words,
-        else its place, `pairing 1` for the first."""
+        """**Pairing `at`'s name, from 0**, as the trainer's panel, the run's start, the review
+        report and a refusal's sentence say it: its two looks as `odd>distractors` where both are
+        words; **by their colors' names, `blue among red`, where each look's color is a color-set
+        light** (`_set_color`; the pop-out search build's final fixes, on its Task 9's report, whose
+        trainer saw "pairing 1" to "pairing 12") and no other pairing shares those two colors in
+        another shape, which would read alike; else its place, `pairing 1` for the first."""
         odd, among = self.choices[at]
         if isinstance(odd, str) and isinstance(among, str):
             return f"{odd}>{among}"
+        colors = (_set_color(odd), _set_color(among))
+        if None not in colors and [
+                (_set_color(a), _set_color(b)) for a, b in self.choices].count(colors) == 1:
+            return f"{colors[0]} among {colors[1]}"
         return f"pairing {at + 1}"
 
     def number(self, pairings) -> int:

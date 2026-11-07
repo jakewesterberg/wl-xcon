@@ -3844,6 +3844,63 @@ def test_widen_shows_a_picker_of_unused_pairings():
         SetParameter("pairings", 15, Box("jake")))
 
 
+def _isohue_pool(*pairings, square: str | None = None):
+    """A pool of the pop-out's kind (Task 9's report): each pairing two 1° discs whose colors are
+    color-set lights of the isohue set (the tests' fixture), the odd one's at full and the
+    distractors' at a setting's fraction; with `square`, that color's odd one is also offered as a
+    square among the same distractors' color, its first pairing again in another shape."""
+    from wl_xcon.photometry import ColorSet, ColorSetLight
+    from wl_xcon.task import Disc, P, Pool, Square
+
+    isohue = ColorSet.load(Path(__file__).parent / "fixtures" / "isohue.json")
+
+    def light(color: str, fraction=1.0):
+        return ColorSetLight(isohue, color, fraction)
+
+    choices = [(Disc(size=1.0, color=light(odd)),
+                Disc(size=1.0, color=light(among, P("distractor_fraction"))))
+               for odd, among in pairings]
+    if square is not None:
+        among = next(among for odd, among in pairings if odd == square)
+        choices.append((Square(size=1.0, color=light(square)),
+                        Disc(size=1.0, color=light(among, P("distractor_fraction")))))
+    return Pool("pairings", tuple(choices), odd="target_appearance",
+                distractor="distractor_appearance")
+
+
+def test_a_color_set_pool_names_each_pairing_by_its_colors():
+    """Task 9's report: the pop-out's looks are discs whose colors are color-set lights, so the
+    panel, the widening's picker and the start form named its pairings "pairing 1" to "pairing
+    12". **Each is named by its colors' names, the odd one's first** -- "blue among red" -- where
+    both looks' colors are color-set lights, by the rig's own words (`task.Pool.named`, which the
+    start form's row takes through `taskd.start_rows` and the panel's through `Session.pooled`);
+    a pairing whose colors another pairing shares, in another shape, keeps its place's name, so no
+    two read alike."""
+    from wl_xcon.cli import _load_task
+    from wl_xcon.taskd import start_rows
+
+    pool = _isohue_pool(("blue", "red"), ("red", "blue"), ("purple", "red"))
+    task = replace(_load_task(Path("tasks/visual_search.py")), pool=pool)
+    _, row = start_rows(task, None, {"pairings": 5})
+    names = ("blue among red", "red among blue", "purple among red")
+    assert row.pairings == names and row.start == 5
+    shapes = _isohue_pool(("blue", "red"), ("red", "blue"), square="blue")
+    assert tuple(shapes.named(at) for at in range(3)) == ("pairing 1", "red among blue", "pairing 3")
+
+    form = fragments(_between(preflight=replace(PREFLIGHT, pool=row)), view())["preflight"]
+    pane = _train(_training(pool=Pooled("pairings", row.pairings, 5), widen=_widening()))
+
+    assert ('<input type="checkbox" data-pairing="1" checked aria-label="pairing blue among red">'
+            ' blue among red</label>') in form
+    assert ('<input type="checkbox" data-pairing="2" aria-label="pairing red among blue"> red '
+            'among blue</label>') in form
+    assert ('<span>pairings on <b>blue among red, purple among red</b></span>'
+            '<span class="nm">2 of 3; the rig suggests adding more at 80% of 50</span>') in pane
+    assert ('<input type="checkbox" data-widen="2" data-suggestion="8" aria-label="add pairing '
+            'red among blue"> red among blue</label>') in pane
+    assert "pairing 1" not in form + pane and "Disc(" not in form + pane
+
+
 def test_the_lock_sends_the_staircases_value_as_a_persons():
     """*lock at* is the existing hold (TSK-32: "a live value on its parameter holds it"): a `set`
     of the staircase's setting at the level it is at, which a person's *hand back* undoes."""

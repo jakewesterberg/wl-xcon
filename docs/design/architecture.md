@@ -547,7 +547,10 @@ a pool of pairings** (`task.Pool`, `Task.pool`; the pop-out search build's Task 
 of four", "Start with fewer, add more", "Trainer picks at the prompt"): the pool's setting is a
 whole number, the sum of the numbers 1, 2, 4 ... of the pairings it holds, so the existing `set`,
 a run's start and the wire carry it unchanged, and one naming no pairing is refused with a
-sentence at load, at a run's start and live (`check.unpooled`); each trial draws one of the
+sentence at load, at a run's start and live (`check.unpooled`); each pairing is named, on the
+console, in the review report and in those sentences, by its two looks' words, or by its colors'
+names, `blue among red`, where each look's color is a color-set light, else by its place
+(`Pool.named`; the build's final fixes); each trial draws one of the
 pairings it holds, each as likely, into the odd one's look and the distractors', each line marking
 both `drawn` `"pool"`, a repeat keeping its pairing and a person's value on either look holding
 it; under a confirmed progression the stage's bar to move up, judged over every pairing pooled,

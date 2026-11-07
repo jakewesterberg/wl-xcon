@@ -268,7 +268,10 @@ welfare number and bounds nothing.
   suggestion it answers, and for a widening a picker of the pairings not yet pooled, whose *add*
   sends the pool's value plus those ticked. One window meeting both bars, one prompt, whose one
   *Hold* holds both. Telemetry schema 20 carries what it reads: `staircase`, `bars` and `pool`.
-  The run start's pre-flight check sends the stage picked, as the start does.)*
+  The run start's pre-flight check sends the stage picked, as the start does. Revised the same day
+  by the build's final fixes: a pool whose looks are color-set lights names each pairing by its
+  colors, the odd one's first, `blue among red`, on the panel, the widening's picker and the run
+  start's pairings, where they read `pairing 1` to `pairing 12`.)*
 - **Task parameters, read-only:** one card per entry in `params`: value, unit, range, the
   ceiling flag, and a staged marker.
 - **Setup, read-only:** session, subject, deployment, bounds config, allocation.

@@ -1780,6 +1780,53 @@ def test_a_suggestion_is_answered_from_the_trainers_panel(rig):
     assert (type(back), back.suggestion) == (BackBlock, 9)
 
 
+def test_the_pairings_are_picked_by_their_colors_names_at_the_start_and_on_the_panel(rig):
+    """The pop-out search build's final fixes, 2 (Task 9's report: the trainer saw "pairing 1" to
+    "pairing 12"): a pool whose looks are color-set lights names each pairing by its colors, the
+    odd one's first, in the rig's own words (`task.Pool.named`). The trainer finds a pairing by
+    those words -- each box's label, as a screen reader reads it -- ticks it at the run's start,
+    which sends it among the run's values, and adds another at the panel's widening, which sends
+    the pool's value now plus it. Run in Chromium, and in WebKit (`WLX_BROWSER=webkit`)."""
+    from pathlib import Path
+
+    from wl_xcon.photometry import ColorSet, ColorSetLight
+    from wl_xcon.task import Disc, P, Pool
+
+    isohue = ColorSet.load(Path(__file__).parent / "fixtures" / "isohue.json")
+    disc = {(color, fraction): Disc(size=1.0, color=ColorSetLight(isohue, color, fraction))
+            for color in isohue.colors for fraction in (1.0, P("distractor_fraction"))}
+    pool = Pool("pairings", tuple(
+        (disc[odd, 1.0], disc[among, P("distractor_fraction")])
+        for odd, among in (("blue", "red"), ("red", "blue"), ("purple", "red"))),
+        odd="odd_color", distractor="distractor_color")
+    names = tuple(pool.named(at) for at in range(len(pool.choices)))
+    rig.hub.offer(_between_runs(offered_tasks=ONE_TASK))
+    page = rig.browser_page()
+    _sign_in(page)
+    _preselected(rig, page)
+    rig.hub.offer(_between_runs(offered_tasks=ONE_TASK, preflight=Preflight(
+        "planned.py", PASSING, plan="train", plans=("train", "test"),
+        stages=(StageRow("Alone"), StageRow("Crowd")), pool=PoolRow("pairings", names, 1))))
+    page.click('label[for="t-setup"]')
+
+    page.get_by_label("pairing red among blue", exact=True).check()
+    page.click('[data-cmd="start"]')
+    rig.wait_for(lambda: any(isinstance(seen, StartRun) for seen in rig.dispatch.seen))
+    rig.hub.offer(frame(**{**_TRAINING, "suggestion": None,
+                           "pool": Pooled("pairings", names, 3)}))
+    page.click('label[for="t-runtime"]')
+    page.locator("#rt-train", has_text="pairings on blue among red, red among blue").wait_for()
+    page.get_by_label("add pairing purple among red", exact=True).check()
+    page.click('#rt-train [data-cmd="widen"]')
+    rig.wait_for(lambda: any(isinstance(seen, SetParameter) for seen in rig.dispatch.seen))
+
+    assert names == ("blue among red", "red among blue", "purple among red")
+    (start,) = [seen for seen in rig.dispatch.seen if isinstance(seen, StartRun)]
+    (widened,) = [seen for seen in rig.dispatch.seen if isinstance(seen, SetParameter)]
+    assert start.values == {"pairings": 3}
+    assert (widened.name, widened.value) == ("pairings", 7)
+
+
 class _BoxRig:
     """The rig PC's own page: http on loopback, no wl.works sign-in, the operator named in the
     page's own storage (b3a-2)."""
