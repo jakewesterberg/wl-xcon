@@ -5858,3 +5858,70 @@ def test_a_body_declared_over_the_drain_limit_is_answered_and_the_connection_clo
         )
         assert status == 403 and body["status"] == "refused"
         assert got.get("Connection", "").lower() == "close"
+
+
+# --- a 405 names what is allowed, a 401 the scheme, and HEAD gets no body (XC-044) ---------------
+
+
+@pytest.mark.parametrize(
+    "method, path, allow",
+    [
+        ("GET", "/commands", "POST"),
+        ("POST", "/", "GET"),
+        ("POST", "/events", "GET"),
+        ("PUT", "/health", "GET"),
+        ("DELETE", "/", "GET"),
+        ("OPTIONS", "/commands", "POST"),
+        ("HEAD", "/", "GET"),
+        ("HEAD", "/commands", "POST"),
+        ("BREW", "/events", "GET"),  # an unknown method, the stdlib's 501 turned into a 405
+        ("POST", f"/fonts/{FONTS[0].file}", "GET"),
+    ],
+)
+def test_a_405_names_the_methods_the_path_allows(method, path, allow):
+    with _served(_hub()) as port:
+        status, headers, _body = _request(port, method, path)
+    assert status == 405
+    assert headers["Allow"] == allow
+
+
+def test_a_404_names_no_allow():
+    with _served(_hub()) as port:
+        status, headers, _body = _request(port, "GET", "/nowhere")
+    assert status == 404
+    assert "Allow" not in headers
+
+
+def test_a_401_names_the_bearer_scheme():
+    with _served(_hub()) as port:
+        for credentials in ({}, {"Authorization": "Bearer wrong"}, {"Authorization": f"Basic {TOKEN}"}):
+            status, headers, _body = _request(port, "GET", "/health", credentials)
+            assert status == 401
+            assert headers["WWW-Authenticate"] == "Bearer"
+        status, headers, _body = _request(port, "GET", "/health", {"Authorization": f"Bearer {TOKEN}"})
+    assert status == 200
+    assert "WWW-Authenticate" not in headers
+
+
+def test_a_401_on_the_https_page_names_the_bearer_scheme_too(tmp_path):
+    hub = _hub()
+    server, thread, port, page, _issuer, context = _page_served(tmp_path, hub)
+    try:
+        status, headers, _body = _https(
+            port, context, "POST", "/whoami", {"Origin": page.origin, "Content-Type": "application/json"}, b"{}"
+        )
+    finally:
+        _stop_page(server, thread, hub)
+    assert status == 401
+    assert headers["WWW-Authenticate"] == "Bearer"
+
+
+@pytest.mark.parametrize("path", ["/", "/events", "/commands", "/health", "/nowhere"])
+def test_head_is_answered_with_headers_and_no_body(path):
+    """Whatever status it gets, a `HEAD` response ends with its blank line (RFC 9110 §9.3.2)."""
+    with _served(_hub()) as port:
+        raw = _raw(port, f"HEAD {path} HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\n\r\n".encode("ascii"))
+    head, separator, body = raw.partition(b"\r\n\r\n")
+    assert separator and body == b""
+    assert head.startswith(b"HTTP/1.0 405") or path == "/nowhere"
+    assert b"Content-Length" in head

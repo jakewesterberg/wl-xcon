@@ -1072,10 +1072,19 @@ def make_handler(
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self._security_headers(cache=cache)
+            if status == 401:
+                # RFC 9110 §15.5.2: a 401 names the scheme. Both tokens here are bearer
+                # tokens: `/health`'s, and a member's sign-in on the https page.
+                self.send_header("WWW-Authenticate", "Bearer")
+            elif status == 405:
+                # RFC 9110 §15.5.6: a 405 names the methods the path does answer. `HEAD`
+                # is refused (`do_HEAD`), so it is not among them.
+                self.send_header("Allow", "POST" if self._path() == "/commands" else "GET")
             for name, value in headers:
                 self.send_header(name, value)
             self.end_headers()
-            self.wfile.write(body)
+            if self.command != "HEAD":  # RFC 9110 §9.3.2: a HEAD response has no body
+                self.wfile.write(body)
 
         def _send_json(self, status: int, payload: dict) -> None:
             self._write(status, json.dumps(payload).encode("utf-8"), "application/json")
