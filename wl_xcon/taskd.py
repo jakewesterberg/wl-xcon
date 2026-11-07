@@ -55,7 +55,7 @@ from wl_xcon.check import (
 )
 from wl_xcon.cli import _clock, _load_allocation, _load_task, _printable, _shown
 from wl_xcon.codes import BLOCK_END, RUN_END_MARKER, TRIAL_END, TRIAL_START, Allocation
-from wl_xcon.declarations import canonical, content_hash, resolved
+from wl_xcon.declarations import canonical, color_sets, content_hash, resolved
 from wl_xcon.dio import Absent as NoCard
 from wl_xcon.encode import (
     TRIAL_NUMBER,
@@ -67,7 +67,7 @@ from wl_xcon.encode import (
 from wl_xcon.findings import SESSION_KINDS, kind_named
 from wl_xcon.geometry import DISPARITY_CONVENTION, Geometry, shown_direction
 from wl_xcon.levels import Levels
-from wl_xcon.photometry import Calibration, cone_record
+from wl_xcon.photometry import Calibration, cone_record, realized
 from wl_xcon.record import XCON_DIRNAME, SessionRecord, _local, welfare_note
 from wl_xcon.record import unwritable as record_unwritable
 from wl_xcon.scheduler import (
@@ -210,6 +210,38 @@ def _kept_missing(number: int, repeat_of: int) -> str:
     anew, so what the animal saw may differ from what the repeat should show."""
     return (f"trial {number} shows trial {repeat_of} again, but its drawn values were not kept; "
             f"its settings that should stay the same were drawn anew")
+
+
+def _color_sets(task: Task, calibration: Calibration) -> dict | None:
+    """**Each color set the task declares, defined once for its run** (the pop-out search build's
+    final fixes, 2026-11-07, told to wl-preproc before it was written): by name, as the run's start
+    row writes it (`color_sets`) -- since every line names a color-set light's set by its name
+    alone (`record._written`) -- each set as its file reads it (`photometry.ColorSet.load`'s
+    fields) and `realized` as this rig draws it on the run's calibration (`photometry.realized`,
+    the screen's own): each color's chromaticity as shown, the share of chroma every color gave up
+    together (`desaturation`) and its output levels, red, green and blue (`drive`). `None` for a
+    task with none. A set the calibration cannot show at all is refused at load
+    (`unrealizable-color`), before any run."""
+    sets = color_sets(task)
+    if not sets:
+        return None
+    defined = {}
+    for name, colorset in sets.items():
+        shown = realized(colorset, calibration)
+        defined[name] = {
+            "name": colorset.name,
+            "colors": {color: list(xy) for color, xy in colorset.colors.items()},
+            "apex": list(colorset.apex),
+            "luminance_cd_m2": colorset.luminance_cd_m2,
+            "held": colorset.held,
+            "source": colorset.source,
+            "realized": {
+                "desaturation": shown.desaturation,
+                "xy": {color: list(xy) for color, xy in shown.xy.items()},
+                "drive": {color: list(levels) for color, levels in shown.drive.items()},
+            },
+        }
+    return defined
 
 
 def _generated(blocks, declared: dict[str, Param], turned: frozenset) -> list[dict]:
@@ -5235,6 +5267,9 @@ class Session:
             generated=_generated(
                 task.plans[run.plan].blocks if run.plan is not None else run.blocks or [],
                 self._declared, turned),
+            # **Each color set it declares, defined once** (the pop-out search build's final
+            # fixes; told to wl-preproc first): every line names a color-set light's set by name.
+            color_sets=_color_sets(task, self.spec.calibration),
             # **Which settings are directions** (the plan's science review, M-4): each is an
             # angle written from 0 to 360, so a reader takes circular statistics of it -- a draw
             # from -45 to 45 sits near 0 and near 360, and a plain mean of it reads 180.

@@ -580,6 +580,62 @@ def test_the_record_reads_back_whole_through_wl_preproc(confirmed):
     assert errors > 0 and codes.count(TIMEOUT_ON) == errors
 
 
+def test_each_line_names_its_colors_and_each_run_defines_the_set_once(task, tmp_path):
+    """**The record's weight** (the build's final fixes, 1): written whole, each look's color set
+    -- four colors, an apex, a held luminance and a sentence of its source -- rode every trial line
+    twice, 1.6 KB of a 3.9 KB line, whose `params` were 2.3 KB. A line names each look's color by
+    its set's name and the color's (`"colorset": "isohue"`, `"color": "blue"`), its fraction as the
+    line's other values are; the set's definition is in the record once, in the run's start row
+    (`color_sets`): as its file reads, and as this rig's calibration drew it -- each color as shown,
+    the chroma given up together, each color's output levels. So each line's whole parameter set
+    of a Fade-in session is under 1 KB (the line's other keys, each stimulus's place among them,
+    are as they were), and the record still reads back: the run's stage and pool, as wl-xcon's own
+    resume finds them."""
+    from wl_xcon import resume
+    from wl_xcon.taskd import went_on
+
+    session = _opened(_spec(tmp_path, seed=5, start_block="Fade-in"), _Stops(40))
+
+    session.run()
+
+    lines = _rows(session, "trials.jsonl")
+    assert len(lines) >= 30
+    # Each line's `params` as the record writes it: keys sorted, `json`'s separators.
+    weights = [len(json.dumps(line["params"], sort_keys=True).encode()) for line in lines]
+    assert max(weights) < 1024, sorted(weights)[-3:]
+    by_reference = {"class": "P", "fields": {"name": "distractor_fraction"}}
+    for line in lines:
+        odd, among = (line["params"][name]["fields"]["color"]
+                      for name in ("odd_color", "distractor_color"))
+        assert (odd["class"], odd["fields"]["colorset"], odd["fields"]["fraction"]) == (
+            "ColorSetLight", "isohue", 1.0)
+        assert (among["class"], among["fields"]["colorset"], among["fields"]["fraction"]) == (
+            "ColorSetLight", "isohue", by_reference)
+        # The pool the run starts with: blue among red and red among blue.
+        assert {odd["fields"]["color"], among["fields"]["color"]} == {"blue", "red"}
+
+    theirs = photometry.ColorSet.load(STIMULI)
+    source = json.dumps(theirs.source)[1:-1]
+    written = {path.name: path.read_text() for path in session.directory.iterdir()}
+    assert {name: text.count(source) for name, text in written.items() if source in text} == {
+        "runs.jsonl": 1}, "the set's definition is in the record once"
+    (start,) = [row for row in _rows(session, "runs.jsonl") if row["event"] == "start"]
+    shown = photometry.realize(theirs, SRGB)
+    assert start["calibration"] == SRGB.id
+    assert start["color_sets"] == {"isohue": {
+        "name": "isohue", "colors": {color: list(xy) for color, xy in theirs.colors.items()},
+        "apex": list(theirs.apex), "luminance_cd_m2": 15.0, "held": "macaque_2deg_LM1",
+        "source": theirs.source,
+        "realized": {"desaturation": shown.desaturation,
+                     "xy": {color: list(xy) for color, xy in shown.xy.items()},
+                     "drive": {color: list(levels) for color, levels in shown.drive.items()}},
+    }}
+
+    restored = resume.read(session.directory, departure=1_700_000_000.0)
+    went = went_on(task, restored.last_run)
+    assert (went.stage, went.pool) == ("Fade-in", 66)
+
+
 def test_the_twelve_pairings_and_the_four_colors_are_equal_in_macaque_luminance(task):
     """§3.2: the task's colors are `stimuli/isohue.json`'s, the numbers this repository's tests
     derived; on the test calibration, through its primaries' own spectra, each of the four colors

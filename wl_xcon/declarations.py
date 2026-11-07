@@ -30,6 +30,7 @@ import hashlib
 import json
 from enum import Enum
 
+from wl_xcon.photometry import ColorSet
 from wl_xcon.task import (
     BACKGROUND, CLEAR_CUT, CRITERION, EASIER, EXPECTED, HARDER, NEITHER, NOT_DIFFICULTY, STIMULUS,
     Meaning, Reward, Task, Unchanged, actions_of,
@@ -151,7 +152,7 @@ def _at_default(spec: dataclasses.Field, value: object) -> bool:
     return False
 
 
-def canonical(value: object, *, every_field: bool = False) -> object:
+def canonical(value: object, *, every_field: bool = False, sets_by_name: bool = False) -> object:
     """`value` as plain data for the content hash (the engine C1 plan's call 11): each declaration
     by its class's name and the fields it sets away from their defaults -- so a field a later build
     adds, at its default, leaves every task's hash as it was, and a default that changes raises
@@ -162,34 +163,80 @@ def canonical(value: object, *, every_field: bool = False) -> object:
 
     **`every_field` writes the fields at their defaults too, at every depth**: the form the session
     record writes a setting's value in when it is a declaration -- an appearance, or a piece of
-    one (`record._written`; REC-27). The record differs from the hash there alone, and for the
+    one (`record._written`; REC-27). The record differs from the hash there, and for the
     opposite reason: a hash must not move when a later build adds a field at its default, while a
-    record read years later must not need the defaults of the build that wrote it."""
+    record read years later must not need the defaults of the build that wrote it.
+
+    **`sets_by_name` writes a `photometry.ColorSet` as its name alone**, at every depth: the record's
+    form too (`record._written`; the pop-out search build's final fixes, 2026-11-07), where a
+    color-set light names its set and each run's start row defines the set once (`color_sets`), so
+    a trial line does not carry four colors, an apex and a source sentence for each of its looks.
+    The hash never takes it: a set's numbers are part of what a task declares."""
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
+    if sets_by_name and isinstance(value, ColorSet):
+        return value.name
+    again = {"every_field": every_field, "sets_by_name": sets_by_name}
     if isinstance(value, Enum):
-        return {"enum": type(value).__name__,
-                "value": canonical(value.value, every_field=every_field)}
+        return {"enum": type(value).__name__, "value": canonical(value.value, **again)}
     if isinstance(value, (list, tuple)):
-        return [canonical(item, every_field=every_field) for item in value]
+        return [canonical(item, **again) for item in value]
     if isinstance(value, dict):
         for key in value:
             if not isinstance(key, str):
                 raise TypeError(f"a declaration's keys are text, and {key!r} is not")
-        return {key: canonical(item, every_field=every_field) for key, item in value.items()}
+        return {key: canonical(item, **again) for key, item in value.items()}
     if isinstance(value, Reward):
-        return {"class": "Reward", "fields": {"ref": canonical(value.ref, every_field=every_field)}}
+        return {"class": "Reward", "fields": {"ref": canonical(value.ref, **again)}}
     if isinstance(value, Unchanged):
         return {"class": "Unchanged", "fields": {}}
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return {"class": type(value).__name__, "fields": {
-            spec.name: canonical(getattr(value, spec.name), every_field=every_field)
+            spec.name: canonical(getattr(value, spec.name), **again)
             for spec in dataclasses.fields(value)
             if every_field or not _at_default(spec, getattr(value, spec.name))
         }}
     raise TypeError(
         f"{type(value).__name__!r} is not a declaration the task's content hash can read"
     )
+
+
+def color_sets(value: object) -> dict[str, ColorSet]:
+    """**Every color set `value` declares, by its name** -- a task, or any declaration in it --
+    each once, in the order first met, walking what `canonical` walks (the pop-out search build's
+    final fixes, 2026-11-07): what each run's start row defines once (`taskd.Session.run`'s
+    `color_sets`), since the record names a color-set light's set by its name alone (`canonical`'s
+    `sets_by_name`). **Raises `ValueError` where two different sets share a name**, which no
+    reader of a line could tell apart; the load check refuses such a task
+    (`check`'s `color-set-named-twice`). At load or as a run starts, never in a frame."""
+    found: dict[str, ColorSet] = {}
+    walked: set[int] = set()
+
+    def walk(item: object) -> None:
+        if isinstance(item, ColorSet):
+            kept = found.setdefault(item.name, item)
+            if kept != item:
+                raise ValueError(
+                    f"two different color sets are named {item.name!r}, and the record names a "
+                    f"color-set light's set by its name alone, so its lines could not say which "
+                    f"was shown: give each set its own name in its file"
+                )
+            return
+        if item is None or isinstance(item, (bool, int, float, str, Enum)) or id(item) in walked:
+            return
+        walked.add(id(item))
+        if isinstance(item, (list, tuple)):
+            for entry in item:
+                walk(entry)
+        elif isinstance(item, dict):
+            for entry in item.values():
+                walk(entry)
+        elif dataclasses.is_dataclass(item) and not isinstance(item, type):
+            for spec in dataclasses.fields(item):
+                walk(getattr(item, spec.name))
+
+    walk(value)
+    return found
 
 
 def content(task: Task) -> dict:

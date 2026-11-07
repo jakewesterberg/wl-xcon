@@ -255,3 +255,61 @@ def test_the_screen_draws_a_color_set_light_at_its_fraction_of_the_realized_ligh
 
     assert drawn.items[0].fill.xyz == pytest.approx(
         tuple(0.4 * v for v in photometry.realize(cs, SRGB).xyz["red"]), rel=1e-12)
+
+
+
+def _task(trial: Trial):
+    """A task of the one structure `trial`, its reaction time and choice declared."""
+    from wl_xcon.task import NO_CHOICE, ReactionTime, Task
+
+    return Task(structures={"t": trial}, default="t", choice=NO_CHOICE,
+                reaction_time=ReactionTime(state="on", to=(Outcome.ABORT,), note="n"))
+
+
+def test_two_color_sets_of_one_name_are_refused_since_the_record_names_a_set_by_name():
+    """**The record names a color-set light's set by its name** (`record._written`; the pop-out
+    search build's final fixes, 1), each run's start row defining each set once (`color_sets`), so a
+    task declaring two different sets of one name -- here the set and a dimmer copy -- writes lines
+    no reader could tell apart: the load check refuses it, `color-set-named-twice`, naming the
+    set. One set read twice from its file is one set."""
+    from dataclasses import replace
+
+    from wl_xcon.check import check_task
+
+    def task(first, second):
+        return _task(_trial({"a": photometry.ColorSetLight(first, "blue"),
+                             "b": photometry.ColorSetLight(second, "red")}))
+
+    twice = [f for f in check_task(task(colorset(), replace(colorset(), luminance_cd_m2=10.0)))
+             if f.code == "color-set-named-twice"]
+    assert len(twice) == 1 and twice[0].blocking, twice
+    assert "'isohue'" in twice[0].detail
+    assert "color-set-named-twice" not in {
+        f.code for f in check_task(task(colorset(), colorset()))}
+
+
+def test_a_runs_start_row_defines_each_set_as_written_and_as_this_panel_draws_it():
+    """**What each run's start row defines once** (`taskd._color_sets`, its `color_sets`; the
+    pop-out search build's final fixes, 1): each set the task declares, by name, as its file reads
+    -- the colors as written -- and `realized` as this panel draws it, the screen's own: on a panel
+    that cannot show the set as written, the share of chroma every color gave up, each color as
+    shown, moved toward the apex, and its output levels. `None` for a task with no set."""
+    from wl_xcon.taskd import _color_sets
+
+    panel = measured(green=NARROW_GREEN)
+    cs = colorset()
+    shown = photometry.realize(cs, panel)
+    assert shown.desaturation > 0.0
+
+    defined = _color_sets(_task(_four(cs)), panel)
+
+    assert defined == {"isohue": {
+        "name": "isohue", "colors": {name: list(xy) for name, xy in cs.colors.items()},
+        "apex": list(cs.apex), "luminance_cd_m2": 15.0, "held": "macaque_2deg_LM1",
+        "source": cs.source,
+        "realized": {"desaturation": shown.desaturation,
+                     "xy": {name: list(xy) for name, xy in shown.xy.items()},
+                     "drive": {name: list(levels) for name, levels in shown.drive.items()}},
+    }}
+    assert defined["isohue"]["realized"]["xy"]["green"] != defined["isohue"]["colors"]["green"]
+    assert _color_sets(_task(_trial({"a": xyY(0.3, 0.3, 10.0)})), panel) is None

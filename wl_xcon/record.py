@@ -243,7 +243,13 @@ def _written(value: object) -> object:
     reader never needs the defaults of the build that wrote the line; a setting the appearance
     refers to stays a reference by name, its value where that setting's is written (a trial line's
     own `params`, a start row's `resolved`; for a change row, the lines of the trials it applies
-    to). Never a choice's index, which a reader would take for a number.
+    to). Never a choice's index, which a reader would take for a number. **A color-set light**
+    (`photometry.ColorSetLight`, the pop-out search's colors) **names its set by the set's name
+    alone** (`canonical`'s `sets_by_name`; the pop-out search build's final fixes, 2026-11-07, told
+    to wl-preproc before it was written): `{"class": "ColorSetLight", "fields": {"color": "blue",
+    "colorset": "isohue", "fraction": 1.0}}`, the set itself -- its colors, apex, held luminance and
+    source, and how the rig drew it -- defined once in each run's start row (`color_sets`), where
+    written whole it rode every trial line once per look, about 3.9 KB a line.
 
     **A draw** (`task.Distribution`: a task's, a block's or a condition's own range) **is written
     the same way, every field** (engine build C3's call 12; the controller's ruling 2 of
@@ -271,7 +277,7 @@ def _written(value: object) -> object:
         return {"eccentricity": value.eccentricity + 0, "direction": direction, "x": x + 0.0,
                 "y": y + 0.0}
     if isinstance(value, (Appearance, Color, Contrast, Shape, Fill, Edge, Outline, Distribution)):
-        return canonical(value, every_field=True)
+        return canonical(value, every_field=True, sets_by_name=True)
     raise TypeError(f"the record writes no {type(value).__name__} value ({value!r})")
 
 

@@ -211,6 +211,7 @@ def check_task(
         + _reaction_time_faults(task)
         + _choice_faults(task)
         + _hash_faults(task)
+        + _color_set_names(task)
         + _head_faults(task, deployment)
         + _counting_faults(task)
         + _plan_faults(task)
@@ -666,6 +667,21 @@ def _computed_positions(source: Path) -> list[Finding]:
                     f"the rig converts exactly (the PI, 2026-10-19)"),
                     blocking=False, accepted_in=SESSION_KINDS)
     return [found[key] for key in sorted(found)]
+
+
+def _color_set_names(task: Task) -> list[Finding]:
+    """**One color set to a name** (the pop-out search build's final fixes, 2026-11-07): the record
+    names a color-set light's set by its name alone, each run's start row defining each set once
+    (`declarations.color_sets`), so a task declaring two different sets of one name is refused
+    before any run: its lines could not say which set a look was drawn from, and only one could be
+    defined."""
+    from wl_xcon.declarations import color_sets
+
+    try:
+        color_sets(task)
+    except ValueError as twice:
+        return [Finding("color-set-named-twice", f"{twice} (its record could not be read)")]
+    return []
 
 
 def _hash_faults(task: Task) -> list[Finding]:

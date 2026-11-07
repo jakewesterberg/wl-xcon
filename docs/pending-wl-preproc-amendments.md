@@ -1012,3 +1012,38 @@ always the line's existing `block`); the pairing and the set size travel in `par
 key is written. Its reader of the two change kinds comes after its current minors; until then such a row is published as
 written and noted as a kind it does not yet know.
 
+**OPEN — added 2026-11-07, told before it is written: a color-set light names its set, which each run's start row
+defines once.** The pop-out's two looks, `odd_color` and `distractor_color`, are discs whose color is a `ColorSetLight`,
+one color of a color set (wl-xtasks' `stimuli/isohue.json`: four named CIE 1931 chromaticities, an apex, a luminance held
+in macaque cone luminance, and a sentence naming the numbers' source). Written in the appearance form above (REC-27),
+each trial line would carry the whole set twice, 1.6 KB of a 3.9 KB line (measured on a simulated session of the
+task, 2026-11-07). So, before any such line is written: **a `ColorSetLight` is written wherever a setting's value is written** (a
+trial line's `params`, a start row's `layers` and `resolved`, a change row's `was` and `now`) **in that form, every
+field, but its set by name alone**:
+
+```json
+"odd_color": {"class": "Disc", "fields": {"color": {"class": "ColorSetLight", "fields": {"color": "blue", "colorset": "isohue", "fraction": 1.0}}, "contrast": null, "size": 1.0}},
+"distractor_color": {"class": "Disc", "fields": {"color": {"class": "ColorSetLight", "fields": {"color": "red", "colorset": "isohue", "fraction": {"class": "P", "fields": {"name": "distractor_fraction"}}}}, "contrast": null, "size": 1.0}}
+```
+
+`colorset` is the set's name, a word where the appearance form would have had the set's object; `color` is the color's
+name in it; `fraction` the share of the set's luminance it is drawn at, a number or a setting by reference whose value is
+the line's own `params` entry, as for any reference. **Each run's start row gains `color_sets`**, every color set its
+task declares, by name, each as its file reads plus how this rig drew it on the run's calibration (the row's existing
+`calibration`):
+
+```json
+"color_sets": {"isohue": {"name": "isohue", "colors": {"blue": [0.19104, 0.18939], "purple": [...], "red": [...], "green": [...]}, "apex": [0.31272, 0.329], "luminance_cd_m2": 15.0, "held": "macaque_2deg_LM1", "source": "<its sentence>", "realized": {"desaturation": 0.0, "xy": {"blue": [x, y], ...}, "drive": {"blue": [r, g, b], ...}}}}
+```
+
+`realized.xy` is each color's chromaticity as shown, `desaturation` the share of its distance from the apex in xy that
+every color gave up together so the panel could show them all (0 when it shows the set as written), and `drive` each
+color's output levels, red, green and blue, each 0 to 1, at the set's full luminance. `color_sets` is `null` for a task
+with none. **The start row, not `config.json`**: `config.json` is written once as the session opens, before any task
+is chosen, and a `wlx taskd` session may run several tasks; the start row is where a run names its task, its values and
+its calibration. A task's color sets have one definition per name: wl-xcon's load check refuses a task declaring two
+different sets of one name, which no reader of a line could tell apart. Nothing on your side has to change to read
+either: `rigtrials` takes any `params` object, `rigruns` passes over a start row's keys it does not read (read at `wl_preproc/events/rigruns.py`, 2026-11-07), and
+`conditions.py` publishes the disc as the JSON text of its object, now naming its color in a few words. Yours to
+accept or rename; until your answer we build to these names.
+

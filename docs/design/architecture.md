@@ -813,7 +813,12 @@ spectra on a measured record, through wl-style's model of the sRGB primaries on 
 a record without spectra, with a warning there (`color-set-without-spectra`). A panel that cannot
 show the whole set moves every color toward the apex by one shared share, never dimming or
 clipping one, and `check` warns by how much (`color-set-desaturated`); one that cannot show even the
-apex refuses it. The set is realized at load, once per calibration, never in a frame. Cone colors
+apex refuses it. The set is realized at load, once per calibration, never in a frame. **The record
+names a color-set light's set by its name alone** (`record._written`; REC-27, revised 2026-11-07 by
+the build's final fixes), and each run's start row defines every set its task declares once
+(`color_sets`): as its file reads, and as the run's calibration drew it, each color as shown, the
+share of chroma given up together and each color's output levels; a task declaring two different
+sets of one name is refused at load (`color-set-named-twice`). Cone colors
 still convert through the lab observer and hold V_F,10.
 
 ## Neural plane and stimulation
