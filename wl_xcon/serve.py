@@ -57,7 +57,7 @@ stops `wlx serve`: the https page is off, saying why (§3.1).
 
 **No timing claim is made here.** `DEFAULT_STALE_AFTER_S` is a display choice (spec
 §3); `QUEUE_DEPTH`, `RATE_SAMPLE_S`, `KEEPALIVE_S`, `REQUEST_TIMEOUT_S`, `RETRY_MS`,
-`COMMAND_QUEUE_DEPTH`, `MARK_QUEUE_DEPTH`, `BODY_LIMIT`, `MARKS_REMEMBERED`,
+`COMMAND_QUEUE_DEPTH`, `MARK_QUEUE_DEPTH`, `BODY_LIMIT`, `MAX_EVENT_STREAMS`, `MARKS_REMEMBERED`,
 `OUTBOX_POLL_S` and the link's `REPLY_TIMEOUT_S` and `CONNECT_TIMEOUT_S` are
 housekeeping, not a measurement of this system.
 """
@@ -124,6 +124,10 @@ def _put_dropping_oldest(subscriber: queue.Queue, item: object) -> None:
                 subscriber.get_nowait()
             except queue.Empty:
                 pass
+
+
+class StreamsFull(Exception):
+    """`Hub.subscribe` was asked for a stream past its `limit` (`MAX_EVENT_STREAMS`)."""
 
 
 class Hub:
@@ -250,6 +254,7 @@ class Hub:
         can_write: bool = False,
         signin: bool = False,
         https_page: bool = False,
+        streams_max: int | None = None,
     ) -> tuple[_link.Telemetry | _link.Idle | None, _web.View]:
         """The latest frame and the `View` a render of it needs, read together. The
         frame's age is on `steady` alone (ledger Ruling 1). `can_write` is the
@@ -261,6 +266,7 @@ class Hub:
             age = None if self._received is None else now - self._received
             rate = self._rate()
             lan = sum(1 for box in self._subscribers.values() if not box)
+            streams = len(self._subscribers)
             rejected = self._rejected
         return latest, _web.View(
             frame_age_s=age,
@@ -274,15 +280,21 @@ class Hub:
             can_mark=self._marks,
             signin=signin,
             https_page=https_page,
+            streams=None if streams_max is None else (streams, streams_max),
         )
 
-    def subscribe(self, *, on_box: bool) -> queue.Queue:
-        """A new stream's bounded queue. After `close`, one that is already closed."""
+    def subscribe(self, *, on_box: bool, limit: int | None = None) -> queue.Queue:
+        """A new stream's bounded queue. After `close`, one that is already closed.
+        Raises `StreamsFull` when `limit` streams are already open: counted under the
+        lock that adds one, so two connections at the limit cannot both get in. The
+        count changes only here and in `unsubscribe`, on a connect and a close."""
         subscriber: queue.Queue = queue.Queue(maxsize=QUEUE_DEPTH)
         with self._lock:
             if self._closed:
                 subscriber.put_nowait(CLOSED)
                 return subscriber
+            if limit is not None and len(self._subscribers) >= limit:
+                raise StreamsFull(limit)
             self._subscribers[subscriber] = on_box
         return subscriber
 
@@ -336,6 +348,15 @@ RETRY_MS = 3000
 #: reason: a request that never finishes must not park a thread for good.
 #: Housekeeping, not a measurement of this system.
 REQUEST_TIMEOUT_S = 30.0
+#: The most `/events` streams open at once, on both listeners together; one past it is
+#: answered 503 (XC-043). **An engineering default, not a measurement and not in the spec
+#: (b1's spec and plan state no count of consoles):** the lab opens about four pages of
+#: one rig's console at once (the rig PC's own, a lab member's, wl-works', one spare), and
+#: a reload leaves its old stream open until this process next writes to it and finds the
+#: browser gone, up to `KEEPALIVE_S` later, so four times that, 16. A stream is a thread
+#: and a socket; this keeps a runaway page from taking the process, never a page from
+#: the lab. Awaiting the controller's ruling.
+MAX_EVENT_STREAMS = 16
 
 #: Each bundled font by the exact path the page asks for it at (`web.FONTS`). A request
 #: is looked up here, never joined onto a directory, so there is no path to traverse.
@@ -372,6 +393,13 @@ _ERRORS = {
     505: {"error": "http version not supported"},
 }
 _FALLBACK = {"error": "request rejected"}
+#: What a stream past `MAX_EVENT_STREAMS` is answered. An `EventSource` cannot read it: the
+#: page sees its stream fail, says *stream lost* and asks again after `RETRY_MS`, by which
+#: time a closed page's slot may be free.
+_STREAMS_FULL = {
+    "error": "too many streams open",
+    "said": "this console already has as many pages open as it serves; close one and reload",
+}
 
 
 def on_box(host: str) -> bool:
@@ -505,6 +533,12 @@ BODY_LIMIT = 4096
 #: The most a refusal on the https page reads and discards of a body it will not use.
 #: Housekeeping, not a measurement.
 REFUSAL_DRAIN_LIMIT = 65536
+#: The longest a refusal spends reading that body, in seconds, however slowly it arrives.
+#: `REQUEST_TIMEOUT_S` bounds one `recv`, so a client dripping a byte every few seconds
+#: could otherwise hold its thread for as long as it keeps dripping; past this the refusal
+#: is sent anyway and the connection closed. An engineering default, not a measurement:
+#: a page's few hundred bytes on a LAN take far less.
+REFUSAL_DRAIN_S = 5.0
 #: The longest name a person may give at the box's prompt (spec §5.2).
 NAME_LIMIT = 64
 #: The largest mark number `wlx serve` hands a browser: 2**53 - 1, JavaScript's
@@ -969,6 +1003,7 @@ def make_handler(
     remote: Remote | None = None,
     https_page: bool = False,
     https_off: str | None = None,
+    max_streams: int = MAX_EVENT_STREAMS,
 ) -> type[BaseHTTPRequestHandler]:
     """A handler class closing over `hub` and the token, built the way wl-preproc's
     `make_handler` is and for its reason: `BaseHTTPRequestHandler` handles the whole
@@ -1002,6 +1037,8 @@ def make_handler(
         _https_page = https_page
         #: Why the rig's https page is off, for the box's own page (b2b-ready §3.1).
         _https_off = https_off
+        #: The most `/events` streams the hub may hold (`MAX_EVENT_STREAMS`, XC-043).
+        _max_streams = max_streams
         # A function stored on a class becomes a method; `staticmethod` keeps it the
         # plain callable it was given.
         _dispatch = None if dispatch is None else staticmethod(dispatch)
@@ -1051,22 +1088,52 @@ def make_handler(
             self.log_message('"%s %s" %s', self.command, self._path(), str(code))
 
         def _refuse_after_reading(self, status: int, payload: dict) -> None:
-            """Answer a refusal on the https page after reading the request's body, so
+            """Answer a refusal after reading the request's body, on either listener, so
             closing the connection on unread bytes does not reset the answer away (the
-            client would see a reset, never the sentence). Reads and discards at most
-            `REFUSAL_DRAIN_LIMIT` bytes; a body longer than that gets its answer and
-            then a closed connection.
+            client would see a reset, never the sentence: XC-120). Reads and discards at
+            most `REFUSAL_DRAIN_LIMIT` bytes and for at most `REFUSAL_DRAIN_S` seconds.
 
-            A body over the limit is answered and closed unread, and the client may see a
-            reset instead of the answer; the page never sends one, so only a misbehaving
-            client does."""
+            **The refusal is always sent**: a client that stalls, drips, or leaves
+            mid-body costs its own thread that long and is then answered with the
+            refusal it was owed (never a 500), the connection closed. A body declared
+            longer than the limit, and a body with no `Content-Length` (chunked), cannot
+            be read to its end: the answer carries `Connection: close`, which tells the
+            client the connection ends. **A client that keeps sending past the close may
+            still see a reset in place of the answer**; the page never does."""
             length = self.headers.get("Content-Length") or ""
+            close = False
             if length.isascii() and length.isdecimal():
                 wanted = int(length)
-                self.rfile.read(min(wanted, REFUSAL_DRAIN_LIMIT))
-                if wanted > REFUSAL_DRAIN_LIMIT:
-                    self.close_connection = True
-            self._send_json(status, payload)
+                close = wanted > REFUSAL_DRAIN_LIMIT
+                try:
+                    self._drain(min(wanted, REFUSAL_DRAIN_LIMIT))
+                except OSError:  # `TimeoutError` too: the client stalled, dripped or left
+                    close = True
+            elif self.headers.get("Transfer-Encoding") is not None:
+                close = True  # chunks nobody will read must not become the next request
+            headers: tuple = ()
+            if close:
+                self.close_connection = True
+                headers = (("Connection", "close"),)
+            try:
+                self.connection.settimeout(self.timeout)
+            except OSError:
+                pass
+            self._write(status, json.dumps(payload).encode("utf-8"), "application/json", headers)
+
+        def _drain(self, count: int) -> None:
+            """Read and drop `count` bytes within `REFUSAL_DRAIN_S`: raises `TimeoutError`
+            when that passes first and `ConnectionError` if the client closes first."""
+            end = time.monotonic() + REFUSAL_DRAIN_S
+            while count > 0:
+                left = end - time.monotonic()
+                if left <= 0:
+                    raise TimeoutError("the refused request's body did not arrive in time")
+                self.connection.settimeout(left)
+                chunk = self.rfile.read1(min(count, 8192))
+                if not chunk:
+                    raise ConnectionError("the client closed before its body was complete")
+                count -= len(chunk)
 
         def _write(
             self,
@@ -1080,10 +1147,19 @@ def make_handler(
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self._security_headers(cache=cache)
+            if status == 401:
+                # RFC 9110 §15.5.2: a 401 names the scheme. Both tokens here are bearer
+                # tokens: `/health`'s, and a member's sign-in on the https page.
+                self.send_header("WWW-Authenticate", "Bearer")
+            elif status == 405:
+                # RFC 9110 §15.5.6: a 405 names the methods the path does answer. `HEAD`
+                # is refused (`do_HEAD`), so it is not among them.
+                self.send_header("Allow", "POST" if self._path() == "/commands" else "GET")
             for name, value in headers:
                 self.send_header(name, value)
             self.end_headers()
-            self.wfile.write(body)
+            if self.command != "HEAD":  # RFC 9110 §9.3.2: a HEAD response has no body
+                self.wfile.write(body)
 
         def _send_json(self, status: int, payload: dict) -> None:
             self._write(status, json.dumps(payload).encode("utf-8"), "application/json")
@@ -1167,9 +1243,9 @@ def make_handler(
         do_TRACE = _refuse_method
 
         def do_POST(self) -> None:
-            # On the https page a refusal reads the request's body first, so the client
-            # reads the answer and not a reset (`_refuse_after_reading`).
-            refuse = self._send_json if self._remote is None else self._refuse_after_reading
+            # A refusal reads the request's body first, so the client reads the answer
+            # and not a reset (`_refuse_after_reading`, XC-120).
+            refuse = self._refuse_after_reading
             if not self._host_ok():
                 refuse(421, _MISDIRECTED)
                 return
@@ -1249,15 +1325,14 @@ def make_handler(
             **A token never reaches the box's checks** (b2b spec §3): on the plain-http
             listener a request carrying `Authorization` is refused first of all. On the
             https listener the command is the signed-in member's: the page's `Origin` and
-            `Content-Type`, then the token, then the body, which takes no `by`. Every https
+            `Content-Type`, then the token, then the body, which takes no `by`. Every
             refusal before the body is read reads it first (`_refuse_after_reading`)."""
             if self._remote is None and self.headers.get("Authorization") is not None:
-                self._send_json(403, {"status": "refused", "said": TOKEN_OVER_HTTP})
+                self._refuse_after_reading(403, {"status": "refused", "said": TOKEN_OVER_HTTP})
                 return
             member = None
-            early = self._send_json
+            early = self._refuse_after_reading
             if self._remote is not None:
-                early = self._refuse_after_reading
                 if not self._from_the_page():
                     early(403, {"status": "refused", "said": FROM_THE_PAGE})
                     return
@@ -1267,7 +1342,7 @@ def make_handler(
                 member = accepted.member
             if self._remote is None and not self._from_the_box():
                 said = _web.CONTROLS_ELSEWHERE if self._https_page else _web.CONTROLS_AT_THE_BOX
-                self._send_json(403, {"status": "refused", "said": said})
+                self._refuse_after_reading(403, {"status": "refused", "said": said})
                 return
             length = self.headers.get("Content-Length") or ""
             if not length.isascii() or not length.isdecimal():
@@ -1365,6 +1440,7 @@ def make_handler(
                 can_write=can_write,
                 signin=self._remote is not None,
                 https_page=self._https_page,
+                streams_max=self._max_streams,
             )
             nonce = secrets.token_urlsafe(16)
             body = _web.page(
@@ -1391,18 +1467,17 @@ def make_handler(
             """`health.response` from one snapshot, the refusal included (Ruling 11,
             2026-09-27): a console refusing every frame is `degraded`, never `ok`."""
             latest, view = self._hub.snapshot(
-                on_box=False, stale_after_s=self._stale_after_s
+                on_box=False, stale_after_s=self._stale_after_s, streams_max=self._max_streams
             )
-            self._send_json(
-                200,
-                _health.response(
-                    latest,
-                    frame_age_s=view.frame_age_s,
-                    stale_after_s=view.stale_after_s,
-                    rejected=view.rejected,
-                    endpoint=view.endpoint,
-                ),
+            body = _health.response(
+                latest,
+                frame_age_s=view.frame_age_s,
+                stale_after_s=view.stale_after_s,
+                rejected=view.rejected,
+                endpoint=view.endpoint,
+                streams=view.streams,
             )
+            self._send_json(200, body)
 
         def _events(self) -> None:
             """One browser's stream (spec §4.3): a full render on connect, then an
@@ -1422,7 +1497,11 @@ def make_handler(
             the frame that gets rendered (F2, below `_send_frame`)."""
             box = on_box(self.client_address[0])
             can_write = self.may_write()
-            subscriber = self._hub.subscribe(on_box=box)
+            try:
+                subscriber = self._hub.subscribe(on_box=box, limit=self._max_streams)
+            except StreamsFull:
+                self._send_json(503, _STREAMS_FULL)
+                return
             try:
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
@@ -1473,6 +1552,7 @@ def make_handler(
                 can_write=can_write,
                 signin=self._remote is not None,
                 https_page=self._https_page,
+                streams_max=self._max_streams,
             )
             parts = _web.fragments(latest, view)
             changed = {key: html for key, html in parts.items() if sent.get(key) != html}

@@ -360,16 +360,29 @@ def response(
     stale_after_s: float,
     rejected: str | None,
     endpoint: str,
+    streams: tuple[int, int] | None = None,
 ) -> dict:
     """The whole `/health` body: `HealthResponse`'s three fields, `actions` always
-    empty."""
+    empty. `streams` is `(open `/events` streams, the cap)`: one more reading, never
+    featured, so an operator can tell a full cap from a dead link (XC-043); the body's
+    fields are wl-preproc's and gain none."""
     seen = {
         "frame_age_s": frame_age_s,
         "stale_after_s": stale_after_s,
         "rejected": rejected,
     }
+    rows = readings(frame, **seen, endpoint=endpoint)
+    if streams is not None:
+        rows.append(
+            {
+                "key": "streams",
+                "label": "Streams",
+                "value": f"{streams[0]} open of at most {streams[1]}",
+                "featured": False,
+            }
+        )
     return {
         "verdict": verdict(frame, **seen),
-        "readings": readings(frame, **seen, endpoint=endpoint),
+        "readings": rows,
         "actions": [],
     }

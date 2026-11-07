@@ -500,6 +500,7 @@ def _served(
     stale_after_s: float = 30.0,
     hosts: frozenset = LOOPBACK_NAMES,
     dispatch=None,
+    max_streams: int = serve.MAX_EVENT_STREAMS,
 ):
     """The handler on a real loopback socket, with no ZMQ anywhere."""
     server = ThreadingHTTPServer(
@@ -511,6 +512,7 @@ def _served(
             keepalive_s=keepalive_s,
             hosts=hosts,
             dispatch=dispatch,
+            max_streams=max_streams,
         ),
     )
     # A short poll, so `shutdown()` returns in a twentieth of a second rather than
@@ -5791,3 +5793,415 @@ def test_a_client_that_left_is_not_logged_as_a_server_fault_nor_answered(monkeyp
             _request(port, "GET", "/health")
 
     assert " raised " not in capfd.readouterr().err
+
+
+# --- a refusal reaches a client that sent its whole body (XC-120) --------------------------------
+
+
+def _post_whole_body(port: int, size: int, headers: dict, *, declare: int | None = None) -> tuple:
+    """`POST /commands` over a bare socket: `size` bytes of body sent in full (`declare`,
+    when given, is the length the headers claim instead), then everything the server says.
+    Returns the status, the headers and the JSON body, or raises `ConnectionResetError`
+    where the client was given a reset in place of the answer."""
+    head = [f"POST /commands HTTP/1.1", f"Host: 127.0.0.1:{port}"]
+    head += [f"{name}: {value}" for name, value in headers.items()]
+    head.append(f"Content-Length: {size if declare is None else declare}")
+    with socket.create_connection(("127.0.0.1", port), timeout=10) as sock:
+        sock.sendall(("\r\n".join(head) + "\r\n\r\n").encode("ascii") + b"x" * size)
+        chunks = []
+        while chunk := sock.recv(65536):
+            chunks.append(chunk)
+    raw = b"".join(chunks)
+    top, _, body = raw.partition(b"\r\n\r\n")
+    lines = top.decode("iso-8859-1").split("\r\n")
+    got = dict(line.split(": ", 1) for line in lines[1:])
+    return int(lines[0].split()[1]), got, json.loads(body)
+
+
+@pytest.mark.parametrize(
+    "size, origin, status",
+    [
+        (60000, "http://evil.example", 403),  # not from this page: refused before the body
+        (60000, None, 413),  # from the page, a body over BODY_LIMIT
+        (serve.BODY_LIMIT + 1, None, 413),
+    ],
+)
+def test_a_refusal_on_the_plain_listener_reaches_a_client_that_sent_its_body(size, origin, status):
+    with _served(_hub(), dispatch=_Dispatch()) as port:
+        headers = {
+            "Origin": origin or f"http://127.0.0.1:{port}",
+            "Content-Type": "application/json",
+        }
+        for _ in range(5):  # a reset is a race; five tries make a pass mean something
+            got_status, _headers, body = _post_whole_body(port, size, headers)
+            assert got_status == status
+            assert body["status"] == "refused"
+
+
+def test_a_token_over_plain_http_is_refused_with_the_body_read_too():
+    with _served(_hub(), dispatch=_Dispatch()) as port:
+        headers = {
+            "Origin": f"http://127.0.0.1:{port}",
+            "Content-Type": "application/json",
+            "Authorization": "Bearer something",
+        }
+        for _ in range(5):
+            status, _headers, body = _post_whole_body(port, 60000, headers)
+            assert (status, body["said"]) == (403, serve.TOKEN_OVER_HTTP)
+
+
+def test_a_body_declared_over_the_drain_limit_is_answered_and_the_connection_closed():
+    """The server reads no more than `REFUSAL_DRAIN_LIMIT` of what was declared, so the
+    client is told the connection ends (`Connection: close`) rather than left to a reset."""
+    with _served(_hub(), dispatch=_Dispatch()) as port:
+        headers = {"Origin": "http://evil.example", "Content-Type": "application/json"}
+        status, got, body = _post_whole_body(
+            port, serve.REFUSAL_DRAIN_LIMIT, headers, declare=serve.REFUSAL_DRAIN_LIMIT * 4
+        )
+        assert status == 403 and body["status"] == "refused"
+        assert got.get("Connection", "").lower() == "close"
+
+
+# --- a 405 names what is allowed, a 401 the scheme, and HEAD gets no body (XC-044) ---------------
+
+
+@pytest.mark.parametrize(
+    "method, path, allow",
+    [
+        ("GET", "/commands", "POST"),
+        ("POST", "/", "GET"),
+        ("POST", "/events", "GET"),
+        ("PUT", "/health", "GET"),
+        ("DELETE", "/", "GET"),
+        ("OPTIONS", "/commands", "POST"),
+        ("HEAD", "/", "GET"),
+        ("HEAD", "/commands", "POST"),
+        ("BREW", "/events", "GET"),  # an unknown method, the stdlib's 501 turned into a 405
+        ("POST", f"/fonts/{FONTS[0].file}", "GET"),
+    ],
+)
+def test_a_405_names_the_methods_the_path_allows(method, path, allow):
+    with _served(_hub()) as port:
+        status, headers, _body = _request(port, method, path)
+    assert status == 405
+    assert headers["Allow"] == allow
+
+
+def test_a_404_names_no_allow():
+    with _served(_hub()) as port:
+        status, headers, _body = _request(port, "GET", "/nowhere")
+    assert status == 404
+    assert "Allow" not in headers
+
+
+def test_a_401_names_the_bearer_scheme():
+    with _served(_hub()) as port:
+        for credentials in ({}, {"Authorization": "Bearer wrong"}, {"Authorization": f"Basic {TOKEN}"}):
+            status, headers, _body = _request(port, "GET", "/health", credentials)
+            assert status == 401
+            assert headers["WWW-Authenticate"] == "Bearer"
+        status, headers, _body = _request(port, "GET", "/health", {"Authorization": f"Bearer {TOKEN}"})
+    assert status == 200
+    assert "WWW-Authenticate" not in headers
+
+
+def test_a_401_on_the_https_page_names_the_bearer_scheme_too(tmp_path):
+    hub = _hub()
+    server, thread, port, page, _issuer, context = _page_served(tmp_path, hub)
+    try:
+        status, headers, _body = _https(
+            port, context, "POST", "/whoami", {"Origin": page.origin, "Content-Type": "application/json"}, b"{}"
+        )
+    finally:
+        _stop_page(server, thread, hub)
+    assert status == 401
+    assert headers["WWW-Authenticate"] == "Bearer"
+
+
+@pytest.mark.parametrize("path", ["/", "/events", "/commands", "/health", "/nowhere"])
+def test_head_is_answered_with_headers_and_no_body(path):
+    """Whatever status it gets, a `HEAD` response ends with its blank line (RFC 9110 §9.3.2)."""
+    with _served(_hub()) as port:
+        raw = _raw(port, f"HEAD {path} HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\n\r\n".encode("ascii"))
+    head, separator, body = raw.partition(b"\r\n\r\n")
+    assert separator and body == b""
+    assert head.startswith(b"HTTP/1.0 404" if path == "/nowhere" else b"HTTP/1.0 405")
+    assert b"Content-Length" in head
+
+
+# --- the number of open /events streams is capped (XC-043) ---------------------------------------
+
+
+def _open_stream(port: int):
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    connection.request("GET", "/events")
+    return connection, connection.getresponse()
+
+
+def test_a_stream_past_the_cap_is_refused_in_json_and_a_closed_one_frees_its_slot():
+    hub = _hub()
+    with _served(hub, keepalive_s=0.05, max_streams=2) as port:
+        first, first_response = _open_stream(port)
+        second, second_response = _open_stream(port)
+        try:
+            assert (first_response.status, second_response.status) == (200, 200)
+            next(_events(first_response))
+            next(_events(second_response))
+            assert hub.viewers() == (2, 0)
+
+            refused, refused_response = _open_stream(port)
+            try:
+                # The status first and alone: a stream that was let in never ends, so
+                # its body is not read.
+                assert refused_response.status == 503
+                assert refused_response.getheader("Content-Type") == "application/json"
+                assert json.loads(refused_response.read())["error"] == "too many streams open"
+            finally:
+                refused_response.close()
+                refused.close()
+            assert hub.viewers() == (2, 0)  # the refused one took no slot
+
+            first_response.close()
+            first.close()
+            for _ in range(250):  # the closed stream is found at the next keepalive write
+                if hub.viewers() == (1, 0):
+                    break
+                time.sleep(0.02)
+            assert hub.viewers() == (1, 0)
+
+            third, third_response = _open_stream(port)
+            try:
+                assert third_response.status == 200
+                assert next(_events(third_response))
+            finally:
+                third_response.close()
+                third.close()
+        finally:
+            second_response.close()
+            second.close()
+
+
+def test_the_cap_does_not_touch_other_requests():
+    hub = _hub()
+    with _served(hub, max_streams=1) as port:
+        held, response = _open_stream(port)
+        try:
+            assert response.status == 200
+            assert _request(port, "GET", "/")[0] == 200
+            assert _request(port, "GET", "/health", {"Authorization": f"Bearer {TOKEN}"})[0] == 200
+        finally:
+            response.close()
+            held.close()
+
+
+
+# --- a refusal is sent even when the body never finishes (review 1, finding 1) -------------------
+
+
+def _refused_unfinished(port: int, send, *, extra: tuple = (), declare: int = 60000):
+    """Declare a body to a request that will be refused, let `send(sock)` deliver what it
+    will, then read until the server closes. Returns the status, headers, JSON body and the
+    seconds the whole took."""
+    head = [
+        "POST /commands HTTP/1.1",
+        f"Host: 127.0.0.1:{port}",
+        "Origin: http://evil.example",
+        "Content-Type: application/json",
+        *extra,
+    ]
+    if declare:
+        head.append(f"Content-Length: {declare}")
+    started = time.monotonic()
+    with socket.create_connection(("127.0.0.1", port), timeout=10) as sock:
+        sock.sendall(("\r\n".join(head) + "\r\n\r\n").encode("ascii"))
+        sender = threading.Thread(target=send, args=(sock,), daemon=True)
+        sender.start()
+        chunks = []
+        while chunk := sock.recv(65536):
+            chunks.append(chunk)
+    took = time.monotonic() - started
+    top, _, body = b"".join(chunks).partition(b"\r\n\r\n")
+    lines = top.decode("iso-8859-1").split("\r\n")
+    got = dict(line.split(": ", 1) for line in lines[1:])
+    return int(lines[0].split()[1]), got, json.loads(body), took
+
+
+def test_a_client_that_stalls_mid_body_still_gets_its_refusal_and_the_connection_closes(monkeypatch):
+    monkeypatch.setattr(serve, "REQUEST_TIMEOUT_S", 1.0)
+    monkeypatch.setattr(serve, "REFUSAL_DRAIN_S", 0.4)
+    with _served(_hub(), dispatch=_Dispatch()) as port:
+        status, got, body, took = _refused_unfinished(port, lambda sock: sock.sendall(b"x" * 10))
+        # Another client was answered the whole time: the stall costs only its own thread.
+        assert _request(port, "GET", "/")[0] == 200
+    assert (status, body["status"]) == (403, "refused")
+    assert got.get("Connection", "").lower() == "close"
+    assert took < 3.0
+
+
+def test_a_client_dripping_its_body_is_cut_off_at_the_deadline_with_its_refusal(monkeypatch):
+    monkeypatch.setattr(serve, "REQUEST_TIMEOUT_S", 2.0)  # each drip lands inside this
+    monkeypatch.setattr(serve, "REFUSAL_DRAIN_S", 0.5)
+
+    def drip(sock):
+        for _ in range(40):
+            try:
+                sock.sendall(b"x")
+            except OSError:
+                return
+            time.sleep(0.15)
+
+    with _served(_hub(), dispatch=_Dispatch()) as port:
+        status, got, body, took = _refused_unfinished(port, drip)
+    assert (status, body["status"]) == (403, "refused")
+    assert got.get("Connection", "").lower() == "close"
+    assert took < 3.0  # 40 drips would take 6 s; the deadline cut it at about 0.5
+
+
+def test_a_refused_chunked_post_closes_the_connection():
+    with _served(_hub(), dispatch=_Dispatch()) as port:
+        status, got, body, _took = _refused_unfinished(
+            port,
+            # No chunks are sent: a client sending past the close may see a reset (the
+            # documented residual), and this asks only that the server says it closes.
+            lambda sock: None,
+            extra=("Transfer-Encoding: chunked",),
+            declare=0,
+        )
+    assert (status, body["status"]) == (403, "refused")
+    assert got.get("Connection", "").lower() == "close"
+
+
+# --- /health says how many streams are open, so a full cap can be seen (review 1, finding 2) -----
+
+
+def test_health_reports_the_streams_open_against_the_cap():
+    hub = _hub()
+    with _served(hub, max_streams=3) as port:
+        before = {r["key"]: r for r in _health_body(port)["readings"]}["streams"]
+        held, response = _open_stream(port)
+        try:
+            next(_events(response))
+            after = {r["key"]: r for r in _health_body(port)["readings"]}["streams"]
+        finally:
+            response.close()
+            held.close()
+    assert before["value"] == "0 open of at most 3"
+    assert after["value"] == "1 open of at most 3"
+    assert after["featured"] is False
+
+
+# --- a stream's slot is freed however its stream ends (review 1, finding 5) ----------------------
+
+
+def _until_viewers(hub: Hub, expected: tuple) -> bool:
+    for _ in range(250):
+        if hub.viewers() == expected:
+            return True
+        time.sleep(0.02)
+    return False
+
+
+class _RaisingTakeHub(Hub):
+    """A hub whose `take` fails with something that is not an `OSError`."""
+
+    def __init__(self) -> None:
+        super().__init__(steady=_Clock(0.0), endpoint=ENDPOINT)
+
+    def take(self, subscriber, timeout):
+        raise RuntimeError("the stream loop failed")
+
+
+def test_a_stream_that_fails_with_a_non_os_error_frees_its_slot():
+    hub = _RaisingTakeHub()
+    with _served(hub, max_streams=1) as port:
+        for _ in range(2):  # the second gets in only if the first gave its slot back
+            held, response = _open_stream(port)
+            try:
+                assert response.status == 200
+            finally:
+                response.close()
+                held.close()
+            assert _until_viewers(hub, (0, 0))
+
+
+def test_closing_the_hub_ends_every_open_stream_and_leaves_no_slot_held():
+    hub = _hub()
+    with _served(hub, max_streams=2) as port:
+        first, first_response = _open_stream(port)
+        second, second_response = _open_stream(port)
+        try:
+            next(_events(first_response))
+            next(_events(second_response))
+            assert hub.viewers() == (2, 0)
+            hub.close()
+            assert _read_to_eof(first_response, within_s=5)
+            assert _read_to_eof(second_response, within_s=5)
+            assert _until_viewers(hub, (0, 0))
+        finally:
+            first_response.close()
+            first.close()
+            second_response.close()
+            second.close()
+
+
+# --- re-review 1: the drain's socket timeout is given back; the pane shows /health's readings ----
+
+
+def test_the_socket_timeout_is_restored_after_a_refusals_drain(monkeypatch):
+    """A keep-alive connection's next request gets `REQUEST_TIMEOUT_S`, not the little of
+    the drain's deadline that was left when the body was read."""
+    monkeypatch.setattr(serve, "REQUEST_TIMEOUT_S", 7.0)
+    monkeypatch.setattr(serve, "REFUSAL_DRAIN_S", 2.0)
+    seen: list = []
+    real = serve.make_handler
+
+    def recording(*args, **kwargs):
+        handler = real(*args, **kwargs)
+        original = handler._write
+
+        def write(self, status, body, content_type, headers=(), cache="no-store"):
+            seen.append(self.connection.gettimeout())
+            return original(self, status, body, content_type, headers, cache)
+
+        handler._write = write
+        return handler
+
+    # `_served` builds its handler from this module's own name for `make_handler`.
+    monkeypatch.setattr(sys.modules[__name__], "make_handler", recording)
+    with _served(_hub(), dispatch=_Dispatch()) as port:
+        body = b"x" * 20
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
+            sock.sendall(
+                (
+                    f"POST /commands HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
+                    f"Origin: http://evil.example\r\nContent-Type: application/json\r\n"
+                    f"Content-Length: {len(body)}\r\n\r\n"
+                ).encode("ascii")
+                + body
+            )
+            sock.recv(65536)
+    assert seen == [7.0]
+
+
+def _pane_rows(fragment: str) -> list[tuple[str, str]]:
+    return [
+        (html.unescape(label), html.unescape(value))
+        for label, value in re.findall(
+            r'<span class="l">(.*?)</span><span class="v">(.*?)</span>', fragment
+        )
+    ]
+
+
+def test_the_wl_works_sees_pane_shows_the_readings_health_sends_streams_included():
+    hub = _hub()
+    with _served(hub, max_streams=3) as port:
+        held, response = _open_stream(port)
+        try:
+            first = next(_events(response))
+            sent = _health_body(port)["readings"]
+        finally:
+            response.close()
+            held.close()
+    pane = _pane_rows(first["frags"]["rt-health"])
+    assert pane == [(r["label"], r["value"]) for r in sent]
+    assert ("Streams", "1 open of at most 3") in pane

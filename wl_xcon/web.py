@@ -93,6 +93,9 @@ class View:
     #: Whether this is the plain-http page of a rig that also has an https page (b2b
     #: spec §3): a LAN viewer's greyed controls then say where else controls work.
     https_page: bool = False
+    #: `(streams open, the cap)` for `/health`'s *streams* reading, which the *wl-works
+    #: sees* pane shows too; `None` where the caller does not say (no such reading).
+    streams: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1297,13 +1300,15 @@ def _wrong(frame: Telemetry | None) -> str:
 def _health_pane(frame: Telemetry | Idle | None, view: View) -> str:
     """*wl-works sees*: `/health`'s verdict and readings, as they would be sent --
     `health.response` itself, from the same `View` fields `serve`'s `/health` hands
-    it, so the two cannot disagree about a refusal (Ruling 11)."""
+    it (the streams reading included), so the two cannot disagree about a refusal
+    (Ruling 11) or the streams open."""
     body = _health.response(
         frame,
         frame_age_s=view.frame_age_s,
         stale_after_s=view.stale_after_s,
         rejected=view.rejected,
         endpoint=view.endpoint,
+        streams=view.streams,
     )
     verdict = body["verdict"]
     rows = "".join(
