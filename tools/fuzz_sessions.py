@@ -1673,8 +1673,21 @@ def apply_control(control):
         raise SystemExit(f"no control {control!r}")
 
 
+#: The CPU-seconds each fuzzing process may use, when set (`tests/test_fuzz_sessions.py` sets it):
+#: a mutant that makes a session spin is killed rather than left running after the suite that
+#: started it was killed. A process's limit is inherited by the replay children it starts.
+CPU_LIMIT_ENV = "WLX_FUZZ_CPU_S"
+
+
 def main(argv):
     global FUZZDIR
+    if os.environ.get(CPU_LIMIT_ENV):
+        import resource
+        seconds = int(os.environ[CPU_LIMIT_ENV])
+        _, hard = resource.getrlimit(resource.RLIMIT_CPU)
+        if hard != resource.RLIM_INFINITY:
+            seconds = min(seconds, hard)
+        resource.setrlimit(resource.RLIMIT_CPU, (seconds, seconds))
     if argv[1] in ("replay", "replay-child"):
         mode, argv = argv[1], argv[1:]
     else:
