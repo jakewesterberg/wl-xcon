@@ -4343,6 +4343,10 @@ _SIZES = ("size", "width", "height", "length", "thickness", "outer", "sigma", "a
 _NUMBERS = (*_SIZES, "inner", "sides", "sf", "phase", "tf", "direction", "orientation", "value",
             "cd_m2", "x", "y", "Y", "lum", "l_m", "s_lm", "L", "M", "S")
 
+#: What a refusal of an infinite size adds (`_block_faults`; the review's m4): the shape for a
+#: light over the whole screen.
+_WHOLE_SCREEN = "; a light over the whole screen is the shape look.WholeScreen()"
+
 #: Block fields that hold a light: a `Color`, `None`, or a parameter offering those (XC-264).
 _LIGHTS = ("color", "mean")
 
@@ -4746,18 +4750,22 @@ def _block_faults(trial: Trial) -> list[Finding]:
         if finding not in findings:  # one parameter, or one block, met twice
             findings.append(finding)
 
-    def values(part, attr: str) -> list[tuple[float, str]]:
+    def values(part, attr: str, size: bool = False) -> list[tuple[float, str]]:
         """Each number `part.attr` can be, with how to say it ("Disc.size is 0", "Disc.size
-        can be -1 (parameter 's')"); a parameter that cannot be bounded is refused here."""
+        can be -1 (parameter 's')"); a parameter that cannot be bounded is refused here. **An
+        infinite size** (`size`) names the whole screen's shape (the review's m4; the PI's item 2
+        of 2026-11-07, kept a refusal): a disc of infinite size drew as a light over the whole
+        screen, which `look.WholeScreen()` says."""
         raw = getattr(part, attr)
         name = f"{type(part).__name__}.{attr}"
         try:
             reached = _reach(raw, params)
         except _Unreal as unreal:
             _, value = unreal.args
+            whole = (_WHOLE_SCREEN if size and _literal(value) == math.inf else "")
             bad(f"{name} can be {_said(value)} (parameter {raw.name!r}), which is not a finite "
-                f"number" if isinstance(raw, P) else
-                f"{name} is {_said(value)}, which is not a finite number")
+                f"number{whole}" if isinstance(raw, P) else
+                f"{name} is {_said(value)}, which is not a finite number{whole}")
             return []
         except _Unbounded as unbounded:
             bad(f"{name} is parameter {unbounded.args[0]!r}, which has neither a two-sided "
@@ -4823,7 +4831,7 @@ def _block_faults(trial: Trial) -> list[Finding]:
                 kind(f"{name}.{f.name}", raw, light, "a color")
             if f.name in _SIZES:
                 first([(v, f"{said}; a size is a positive full width in degrees")
-                       for v, said in values(part, f.name)], lambda v: v <= 0.0)
+                       for v, said in values(part, f.name, size=True)], lambda v: v <= 0.0)
         if isinstance(part, Array):
             for attr in ("looks", "among"):
                 shown(f"Array.{attr}", getattr(part, attr))
@@ -4852,7 +4860,7 @@ def _block_faults(trial: Trial) -> list[Finding]:
                 # Bounded here, as an `xyY`'s are; whether the panel makes each is `_color_faults`'.
                 values(part, field.name)
         if isinstance(part, (look.Ring, Annulus)):
-            inner, outer = values(part, "inner"), values(part, "outer")
+            inner, outer = values(part, "inner"), values(part, "outer", size=True)
             first(inner, lambda v: v < 0.0)
             if inner and outer and max(inner)[0] >= min(outer)[0]:
                 bad(f"{name}'s inner diameter is not inside its outer: {max(inner)[1]}, "

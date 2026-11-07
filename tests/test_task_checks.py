@@ -4,6 +4,8 @@ A task that fails any of these is refused at load, not at run. The point is that
 generated task is caught before an animal sees it -- pitfalls P15.
 """
 
+import math
+
 import pytest
 
 from wl_xcon.task import (
@@ -1606,15 +1608,18 @@ def test_a_block_number_or_light_that_can_be_no_finite_number_is_refused_and_nev
     can be `10**400` raised `OverflowError` out of `check()`, and one of an infinity or a NaN
     loaded clean. Refused `bad-block`, naming the field, the value and the setting."""
     chosen = [Param("x", unit="", choices=(1.0, bad))]
+    # An infinite size names the whole screen's own shape (the review's m4; the PI's item 2, kept
+    # a refusal): a NaN is no size at all.
+    whole = "" if bad != bad else _WHOLE_SCREEN
     for trial, refusal in (
             (_showing((0.0, 0.0), chosen, looks=Disc(size=P("x"), color=Gray(40.0))),
-             f"Disc.size can be {said} (parameter 'x'), which is not a finite number"),
+             f"Disc.size can be {said} (parameter 'x'), which is not a finite number{whole}"),
             (_showing((0.0, 0.0), chosen, looks=Disc(color=Gray(P("x")))),
              f"Gray.cd_m2 can be {said} (parameter 'x'), which is not a finite number"),
             (replace(_showing((0.0, 0.0), chosen), background=Gray(P("x"))),
              f"Gray.cd_m2 can be {said} (parameter 'x'), which is not a finite number"),
             (_showing((0.0, 0.0), looks=Disc(size=bad, color=Gray(40.0))),
-             f"Disc.size is {said}, which is not a finite number")):
+             f"Disc.size is {said}, which is not a finite number{whole}")):
         for geometry in (None, GEOMETRY):
             found = [f.detail for f in check(trial, geometry=geometry) if f.code == "bad-block"]
             assert found == [refusal], (refusal, geometry, found)
@@ -1629,6 +1634,35 @@ def test_a_block_number_or_light_that_can_be_no_finite_number_is_refused_and_nev
     written = replace(_showing((0.0, 0.0), looks=Disc(contrast=Weber(0.5))), background=Gray(bad))
     (black,) = [f.detail for f in check(written) if f.code == "weber-on-black"]
     assert f"write the background's light as a finite number above 0: it holds {said}" in black
+
+
+#: What a refusal of an infinite size adds: the shape that covers the whole screen.
+_WHOLE_SCREEN = "; a light over the whole screen is the shape look.WholeScreen()"
+
+
+@pytest.mark.parametrize("infinite", [math.inf, 10**400], ids=["infinity", "past-float"])
+def test_an_infinite_size_or_envelope_is_refused_naming_the_whole_screen_shape(infinite):
+    """The review's m4 and the PI's item 2 (the controller, 2026-11-07: keep the refusal): a disc
+    of infinite size drew as a light over the whole screen, and a Gabor of infinite envelope as a
+    grating with none; both are refused, and the sentence says how to write a light over the
+    whole screen, `look.WholeScreen()`. A size below it, or a NaN, says nothing of it."""
+    from wl_xcon import look
+    from wl_xcon.photometry import Michelson
+    from wl_xcon.task import Gabor
+
+    said = "inf" if isinstance(infinite, float) else "1.00000e+400"
+    for looks, field in ((Disc(size=infinite, color=Gray(40.0)), "Disc.size"),
+                         (Gabor(sigma=infinite, contrast=Michelson(0.5)), "Gabor.sigma"),
+                         (look.Look(shape=look.Circle(size=infinite),
+                                    fill=look.Flat(color=Gray(40.0))), "Circle.size"),
+                         (look.Look(shape=look.Ring(inner=0.5, outer=infinite),
+                                    fill=look.Flat(color=Gray(40.0))), "Ring.outer")):
+        trial = replace(_showing((0.0, 0.0), looks=looks), background=Gray(20.0))
+        found = [f.detail for f in check(trial) if f.code == "bad-block"]
+        assert found == [f"{field} is {said}, which is not a finite number{_WHOLE_SCREEN}"], found
+    trial = _showing((0.0, 0.0), looks=Disc(size=-math.inf, color=Gray(40.0)))
+    assert [f.detail for f in check(trial) if f.code == "bad-block"] == [
+        "Disc.size is -inf, which is not a finite number"]
 
 
 @pytest.mark.parametrize(("bad", "said"), _NO_FLOAT, ids=_NO_FLOAT_IDS)
