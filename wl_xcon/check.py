@@ -82,9 +82,11 @@ from wl_xcon.task import (
     NonAging,
     ObjectWindows,
     Outcome,
+    NOT_DIFFICULTY,
     P,
     Param,
     Polar,
+    Pool,
     Priming,
     Random,
     Remembered,
@@ -214,6 +216,7 @@ def check_task(
         + _plan_faults(task)
         + _draw_faults(task)
         + _staircase_faults(task)
+        + _pool_faults(task)
         + _impossible_faults(task)
         + _found_by_faults(task)
         + _condition_spellings(task)
@@ -1712,6 +1715,132 @@ def _staircase_said(task: Task, block: Block, staircase: object, declared: dict[
             f"steps it: a setting is given by conditions or stepped by a staircase, never both; "
             f"take it out of those conditions, or the staircase off it")
     return said
+
+
+def _pool_faults(task: Task) -> list[Finding]:
+    """**The load-time checks of a task's pool of pairings** (`task.Pool`, `Task.pool`; the pop-out
+    search build, 2026-11-07), each refused, `bad-pool`, saying what to write, under the PI's rule
+    of warnings over refusals (2026-10-11): only what the rig cannot draw, or a record its readers
+    could not read. Its own shape is refused as it is built (`Pool.__post_init__`); here:
+
+    - **its setting**: a bounded setting (`declarations.BOUNDED`, a reward size; welfare: a task
+      names how reward is configured, never how much), one the task does not declare, or one of
+      choices, since its value is a whole number; **with no start, or one naming no pool**
+      (`unpooled`), since a run starts with a pool; and **declared a difficulty setting**: a
+      pool's number has no order a change could be judged easier or harder by, so a person's
+      change would keep every trial after it out of moving up (`Session._eased`), where a change
+      to the pool starts the bars afresh instead;
+    - **its two looks' settings**: each a setting of choices the task declares, and each
+      pairing's look one of them;
+    - **"never both"**, as for a staircase's setting (Q1b): either look's setting, or the pool's
+      own, drawn by the task's or a block's draw, or given by a block's conditions, a value or
+      their own range, a factorial's made conditions among them; and the pool's setting stepped
+      by a block's staircase. A pool is held by its own value, which carries through the run's
+      stages."""
+    pool = task.pool
+    if not isinstance(pool, Pool):
+        return []
+    declared = {param.name: param for param in task.params}
+    said: list[str] = []
+    setting = pool.setting
+    full = (1 << len(pool.choices)) - 1
+    param = declared.get(setting)
+    if setting in BOUNDED:
+        said.append(f"the pool's setting {setting!r} is a bounded setting, which the subject's "
+                    f"bounded config sets and no pool holds (welfare); put the pool on a setting "
+                    f"of its own")
+    elif param is None:
+        said.append(f"the pool's setting {setting!r} is no setting the task declares; declare it, "
+                    f"a whole number from 1 to {full}, with a start")
+    elif param.choices:
+        said.append(f"the pool's setting {setting!r} is a setting of choices, and a pool's value "
+                    f"is a whole number, the sum of its pairings' numbers; declare it with a "
+                    f"range, 1 to {full}")
+    else:
+        if param.start is None:
+            said.append(f"the pool's setting {setting!r} declares no start, and every run starts "
+                        f"with a pool; give it one, the sum of the numbers of the pairings it "
+                        f"starts with")
+        else:
+            said += [sentence for _, sentence in unpooled(task, {setting: param.start})]
+        meaning = resolved(task).get(setting)
+        if meaning is not None and meaning[0].kind != NOT_DIFFICULTY:
+            said.append(
+                f"the pool's setting {setting!r} is declared a difficulty setting, and a pool's "
+                f"number has no order a change could be judged easier or harder by, so every "
+                f"trial after a person's change would be kept out of moving up; declare it not a "
+                f"difficulty setting (NOT_DIFFICULTY): a change to the pool starts the bars "
+                f"afresh instead")
+    for role, name, at in (("odd", pool.odd, 0), ("distractor", pool.distractor, 1)):
+        looks = declared.get(name)
+        if looks is None:
+            said.append(f"the pool's {role} setting {name!r} is no setting the task declares; "
+                        f"declare it with its looks as its choices")
+        elif not looks.choices:
+            said.append(f"the pool's {role} setting {name!r} is no setting of choices, and a pool "
+                        f"gives it one of its looks; declare its looks as its choices")
+        else:
+            said += [f"the pool {setting!r}: pairing {place}'s {role} look is no choice of "
+                     f"{name!r}, so no trial could show it; give it one of the setting's choices"
+                     for place, pairing in enumerate(pool.choices, 1)
+                     if pairing[at] not in looks.choices]
+    def both(name: str, by: str) -> str:
+        """The sentence's start for `name`, given by the pool and also `by` something else."""
+        if name == setting:
+            return f"the pool's setting {name!r} is {by}"
+        return f"{name!r} is given by the pool and {by.removeprefix('given ')}"
+
+    held = (pool.odd, pool.distractor, setting)
+    for name, drawn in task.draws.items():
+        if name in held and isinstance(drawn, Distribution):
+            said.append(f"{both(name, 'drawn by the task')}: a setting is drawn or given by a "
+                        f"pool, never both; take it out of the task's draws")
+    for plan_name, plan in task.plans.items():
+        for block in plan.blocks if isinstance(plan.blocks, list) else ():
+            if not isinstance(block, Block):
+                continue
+            where = f"plan {plan_name!r}: block {block.name!r}"
+            for name, drawn in block.draws.items() if isinstance(block.draws, dict) else ():
+                if name in held and isinstance(drawn, Distribution):
+                    said.append(f"{where}: {both(name, 'drawn by the block')}: a setting is drawn "
+                                f"or given by a pool, never both; take it out of the block's "
+                                f"draws")
+            conditions = expanded(block).conditions
+            for name in held:
+                if isinstance(conditions, list) and any(
+                        isinstance(condition, Condition) and isinstance(condition.values, dict)
+                        and name in condition.values for condition in conditions):
+                    by = f"given by the conditions of block {block.name!r}"
+                    said.append(f"{where}: {both(name, by)}: a setting is given by conditions or "
+                                f"by a pool, never both; take it out of those conditions")
+            if isinstance(block.staircase, Staircase) and block.staircase.setting == setting:
+                said.append(f"{where}: the pool's setting {setting!r} is stepped by its "
+                            f"staircase, and a pool's number has no order to step; take the "
+                            f"staircase off it")
+    return [Finding("bad-pool", sentence) for sentence in said]
+
+
+def unpooled(task: Task, values: dict) -> "list[tuple[str, str]]":
+    """**A pool that names no pairing at `values`** (`task.Pool`; the pop-out search build,
+    2026-11-07; the plan's Review Focus 5: "an empty pool is refused with a sentence before the
+    next trial"): `(setting, sentence)` where the value `values` give the task's pool's setting
+    names no pool -- none, no whole number, no pairing, a pairing beyond those it declares
+    (`Pool.unpooled`) -- else empty, as for a task with no pool. One function for the load (the
+    setting's start, `_pool_faults`), a run's start -- `Session.run`'s backstop, `wlx taskd`'s
+    pre-flight (`preflight.values`) and `wlx run` before its session opens -- as a live change
+    is refused for the same reason (`Session._impossible`, by `Pool.unpooled`), so each says
+    alike. A number is shown as written, 0 and 0.0 alike."""
+    pool = getattr(task, "pool", None)
+    if not isinstance(pool, Pool):
+        return []
+    value = values.get(pool.setting)
+    why = pool.unpooled(value)
+    if why is None:
+        return []
+    shown = (f"{value:g}" if isinstance(value, (int, float)) and not isinstance(value, bool)
+             and _real(value) and math.isfinite(value) else _said(value))
+    at = "" if value is None else f" at {shown}"
+    return [(pool.setting, f"the pool {pool.setting!r}{at}: {why}")]
 
 
 def _repeat_warnings(task: Task) -> list[Finding]:

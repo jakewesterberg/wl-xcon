@@ -875,6 +875,19 @@ move's window started afresh), and an answer to one no longer standing is refuse
 on until a person moves the run; a stage's time running out still moves it up. The design's second dimension, the
 pairing pool, is that build's next task.
 
+*The pop-out search build, 2026-11-07, its Task 5* (its design §3.2 and §3.4; the PI's answers of that day, "A pool of
+four", "Start with fewer, add more" and "Trainer picks at the prompt"): **a task may draw each trial's two looks from a
+pool of pairings** (`task.Pool`, `Task.pool`; TSK-73), a second dimension of item 5's progression beside its stages.
+The pool's setting is a whole number, the sum of the numbers 1, 2, 4 ... of the pairings it holds in the order the
+pool declares them, so a person's `set`, a run's start and the wire carry it unchanged; one naming no pairing is
+refused with a sentence at load, at a run's start and live. Each trial draws one of the pairings it holds, each as
+likely, into the odd one's look and the distractors', each line marking both `drawn` `"pool"`; a repeat keeps its
+pairing, and a person's value on either look holds it. Under a confirmed progression the stage's bar to move up,
+judged over every pairing pooled, also suggests widening the pool (a `suggested` row of move `"widen"`, naming no
+pairings), the stage's move first in one prompt that one hold answers whole; the trainer widens with a `set`, and any
+change to the pool starts both bars afresh and leaves the staircase (§15) where it is. The pool carries into the next
+stage.
+
 ## 14. Variation (N§11, N§R1, N§R2)
 
 1. **Named conditions plus drawn values.** [@asaad2008flexible] A parameter is set by a condition or

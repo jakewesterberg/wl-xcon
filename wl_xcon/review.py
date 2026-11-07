@@ -469,6 +469,7 @@ def render_task(task: Task, allocation_names: dict[int, str] | None = None) -> s
     lines += ["### Head", "", head, ""]
     lines += _counting(task)
     lines += _draws(task)
+    lines += _pool(task)
     lines += _plans(task)
     for name in (task.default, *(other for other in task.structures if other != task.default)):
         heading = f"## Structure `{name}`"
@@ -477,6 +478,42 @@ def render_task(task: Task, allocation_names: dict[int, str] | None = None) -> s
                         "structure")
         lines += [heading, "", _demoted(render(task.structures[name], allocation_names)), ""]
     return "\n".join(lines)
+
+
+def _pool(task: Task) -> list[str]:
+    """**The task's pool of pairings** (`task.Pool`; the pop-out search build's Task 5; the PI,
+    2026-11-07, "A pool of four"): what its setting's number means -- each pairing's number, in
+    the pool's order, and its two looks -- the two settings each trial's pairing gives, how a
+    trial draws it, where it starts and how it widens, so a reader of a record's value of the
+    pool, or a reviewer of the task file, reads here which pairings it holds. Nothing where the
+    task has no pool."""
+    pool = task.pool
+    if pool is None:
+        return []
+    declared = next((param for param in task.params if param.name == pool.setting), None)
+    start = None if declared is None else declared.start
+    if start is None or pool.unpooled(start) is not None:
+        starts = "It declares no start that names a pool, which the load-time check refuses."
+    else:
+        held = ", ".join(pool.named(pool.choices.index(pairing))
+                         for pairing in pool.pairings(start))
+        starts = f"It starts at {start:g}: {held}."
+
+    def look(value: object) -> str:
+        return _cell(value if isinstance(value, str) else repr(value))
+
+    rows = [f"| {1 << at} | {_cell(pool.named(at))} | {look(odd)} | {look(among)} |"
+            for at, (odd, among) in enumerate(pool.choices)]
+    return ["### The pool of pairings", "",
+            f"Each trial draws one pairing of those `{pool.setting}` holds, each as likely, into "
+            f"`{pool.odd}` and `{pool.distractor}`; a repeat shows the pairing of the trial it "
+            f"repeats, and a person's value on either look holds it. `{pool.setting}` is the sum "
+            f"of the numbers of the pairings it holds. A person widens the pool with a value "
+            f"holding more; under a confirmed progression the rig suggests widening it by the "
+            f"stage's bar to move up, judged over every pairing pooled, and a change to it starts "
+            f"the bars afresh, the staircase staying where it is. {starts}", "",
+            "| Number | Pairing | The odd one's look | The distractors' look |",
+            "|---|---|---|---|", *rows, ""]
 
 
 #: A counting class in the words the PI confirms it in (the engine C2a plan's Appendix B).

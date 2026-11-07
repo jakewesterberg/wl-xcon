@@ -37,7 +37,7 @@ from wl_xcon.actor import Actor, Box, Member
 from wl_xcon.bounds import Exceeded
 from wl_xcon.check import (
     IMPOSSIBLE, _outside, beyond_range, check_task, impossible, parameters_used, undrawable,
-    unplaced,
+    unplaced, unpooled,
 )
 from wl_xcon.cli import _load_bounds, _load_subject_settings, _load_task, _setup_words
 from wl_xcon.findings import Finding
@@ -353,7 +353,8 @@ def values(task: Task | None, given: dict, refused=(), plan: str | None = None) 
     or sizes a window, that nothing gives a value** (`check.unplaced`; XC-415; the PI,
     2026-10-30: "Refuse to start", "A stimulus that cannot be drawn is a case where the run cannot
     proceed"), naming it and where: a whole position is given by a plan's condition or not at
-    all, since no starting value and nothing over the wire is one. A stimulus's appearance left
+    all, since no starting value and nothing over the wire is one. **And for a task's pool naming
+    no pairing** (`check.unpooled`; the pop-out search build's Task 5). A stimulus's appearance left
     unset is not refused: nothing in this build draws a trial's screen before the display process
     (engine build E), and the record writes `drawn` null for it (`record._stimuli`). Checked as
     `Session.set` checks a live value, non-finite numbers included. **Nothing a task's
@@ -446,6 +447,12 @@ def values(task: Task | None, given: dict, refused=(), plan: str | None = None) 
             # them, failed above, as `Session.set` refuses it; one with `None` among its choices
             # fails the task checks (`bad-placement`).
             wrong.append(unset[name])
+    # **A pool naming no pairing** (`check.unpooled`; the pop-out search build's Task 5): its
+    # trials would have nothing to draw, so the run is refused here, as `Session.run` refuses it.
+    try:
+        wrong += [said for _, said in unpooled(task, merged)]
+    except Exception as broken:  # noqa: BLE001 -- a task's declarations are code's output
+        wrong.append(f"the task's pool could not be checked: {type(broken).__name__}: {broken}")
     wrong += [f"{f.code}: {f.detail}" for f in refused]
     if wrong:
         return PreflightItem(STARTING_VALUES, FAIL, "; ".join(wrong))

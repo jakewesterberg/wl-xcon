@@ -331,6 +331,8 @@ DEFAULTS = {
     },
     "Polar": {"eccentricity": REQUIRED, "direction": REQUIRED},
     "Polygon": {"sides": 3, "size": 1.0, "orientation": 0.0, "contrast": None, "color": None},
+    "Pool": {"setting": REQUIRED, "choices": REQUIRED, "odd": "odd_color",
+             "distractor": "distractor_color"},
     "Pressed": {"device": REQUIRED},
     "Priming": {"feature": REQUIRED, "chance": None, "runs": None, "again_at_once": False},
     "RDS": {
@@ -379,6 +381,7 @@ DEFAULTS = {
         "choice": None,
         "meanings": {},
         "needs_fixed_head": False,
+        "pool": None,
         "plans": {},
         "draws": {},
     },

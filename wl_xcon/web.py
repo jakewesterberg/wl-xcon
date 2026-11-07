@@ -1518,6 +1518,9 @@ _PER_TRIAL = {
     # A block's staircase (`task.Staircase`; the pop-out search build, 2026-11-07): its level moves
     # between trials, and a value set over it holds it, the lock, until handed back.
     "staircase": ("set each trial by its staircase", "a value over its staircase"),
+    # A task's pool of pairings (`task.Pool`; the pop-out search build's Task 5): each trial draws
+    # a pairing into the odd one's look and the distractors', and a value set over either holds it.
+    "pool": ("drawn each trial from its pool", "a value over its pool"),
 }
 
 

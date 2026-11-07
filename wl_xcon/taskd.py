@@ -50,7 +50,7 @@ from wl_xcon import variation
 from wl_xcon.actor import Actor, to_map_or_none
 from wl_xcon.bounds import Bounds, Exceeded, _finite
 from wl_xcon.check import (
-    IMPOSSIBLE, _outside, beyond_range, check_task, impossible, undrawable, unplaced,
+    IMPOSSIBLE, _outside, beyond_range, check_task, impossible, undrawable, unplaced, unpooled,
 )
 from wl_xcon.cli import _clock, _load_allocation, _load_task, _printable, _shown
 from wl_xcon.codes import BLOCK_END, RUN_END_MARKER, TRIAL_END, TRIAL_START, Allocation
@@ -76,6 +76,7 @@ from wl_xcon.scheduler import (
     EVERY_TRIAL,
     MOVE_BACK,
     MOVE_UP,
+    MOVE_WIDEN,
     NEXT,
     RULE,
     RUN,
@@ -596,6 +597,12 @@ class Moment:
 #: answer of 2026-11-07 to the pop-out search's ask, `docs/pending-wl-preproc-amendments.md`), and
 #: what a setting's card says gives it (`Session._source`; telemetry schema 19's `source`).
 STAIRCASE = "staircase"
+
+#: **The source a trial's line names for a look its task's pool gave** (`drawn`; `task.Pool`;
+#: wl-preproc's answer of 2026-11-07, `docs/pending-wl-preproc-amendments.md`: the pairing travels
+#: in `params` as two settings, each marked `drawn: "pool"`), and what each look's card says gives
+#: it (`Session._source`).
+POOL = "pool"
 
 
 @dataclass
@@ -1705,6 +1712,13 @@ class Session:
         elif (isinstance(value, bool) or not isinstance(value, (int, float))
               or not math.isfinite(value)):
             return
+        pool = self._task.pool if self._task is not None else None
+        if pool is not None and name == pool.setting and pool.unpooled(value) is not None:
+            # **A pool naming no pairing** (`task.Pool`; the pop-out search build's Task 5; the
+            # plan's Review Focus 5: "an empty pool is refused with a sentence before the next
+            # trial"), as the load and a run's start refuse it (`check.unpooled`).
+            raise Exceeded(f"{name!r} at {value:g} is refused, and the previous pool stands: "
+                           f"{pool.unpooled(value)}")
         why = self._possible({name: value})
         if why is not None:
             said = _shown(value, declared.choices) if declared.choices else f"{value:g}"
@@ -1977,6 +1991,8 @@ class Session:
             return "person"
         if self._steps(name):
             return STAIRCASE
+        if self._pools(name):
+            return POOL
         if self._own_range(name):
             return "conditions"
         if name in in_force:
@@ -2077,7 +2093,18 @@ class Session:
         judged in and the stage it suggests, and its bar as it reads now
         (`scheduler.Scheduler.bar`). `None` where none stands -- none made, one withdrawn or
         answered -- and between runs. The public face of `_suggested`."""
-        offered = self._suggested
+        return self._standing(self._suggested)
+
+    @property
+    def widening(self) -> tuple | None:
+        """**The rig's suggestion to widen the pool now** (`task.Pool`; the pop-out search build,
+        2026-11-07; telemetry schema 20's `widen`), as `suggestion` gives the stage's: its move
+        `"widen"`, no stage to go to, and the bar to move up as it reads now, which it shares.
+        `None` where none stands, and between runs. The public face of `_widening`."""
+        return self._standing(self._widening)
+
+    def _standing(self, offered: "_Suggested | None") -> tuple | None:
+        """A suggestion standing as `link.Suggestion`'s fields, its bar read now, or `None`."""
         if offered is None or self.phase != "running" or self._scheduler is None:
             return None
         correct, of, hardest = self._scheduler.bar(offered.move)
@@ -2558,23 +2585,54 @@ class Session:
         records a `declined` row with who held and the suggestion it answers (as wl-preproc
         accepted), and the rig suggests that move again only once a fresh window of answers
         meets its bar (`scheduler.Scheduler.decline`; an engineering call: a hold is not asked
-        again on the answers it was given on). **Refused with the sentence**, nothing recorded,
-        unless that suggestion stands (`_unanswerable`). Touches no reward, bounded setting,
-        clock or pump."""
+        again on the answers it was given on; the PI, the same day, "After 50 new tries").
+        **Refused with the sentence**, nothing recorded, unless that suggestion stands
+        (`_unanswerable`). Touches no reward, bounded setting, clock or pump.
+
+        **One hold holds the whole prompt** (the pop-out search build's Task 5; the design's
+        §3.4: "when one window of trials meets both bars, one prompt offers both, the stage
+        first"): a move up and a widening of the pool stand on one window (`Scheduler.widening`),
+        so a hold naming either holds both, a `declined` row each, the stage's first, each naming
+        the suggestion it answers -- the stage's naming the block, the widening's the pool's
+        setting at its value."""
         said = self._unanswerable(command.KIND, command.suggestion, None,
                                   "there is nothing to hold")
         if said is not None:
             self._refuse(command.KIND, command.by, said)
             return
-        offered, held = self._suggested, self._scheduler.block.name
-        offered.fate, self._suggested = DECLINED, None
-        self._scheduler.decline(offered.move)
+        named, held = self._suggestions[command.suggestion], self._scheduler.block.name
+        prompt = [named] + [other for other in (self._suggested, self._widening)
+                            if other is not None and other is not named
+                            and MOVE_BACK not in (other.move, named.move)]
         at = self.wall_now()
-        self._feed("decline", command.by, at,
-                   f"held in block {held}: the rig's suggestion {offered.change}, to move "
-                   f"{offered.move} to {offered.to}, declined; it is suggested again once a fresh "
-                   f"window of answers meets its bar")
-        self._logged("declined", "block", held, held, command.by, at, suggestion=offered.change)
+        for offered in sorted(prompt, key=lambda offered: offered.change):
+            offered.fate = DECLINED
+            if offered is self._suggested:
+                self._suggested = None
+            if offered is self._widening:
+                self._widening = None
+            self._scheduler.decline(offered.move)
+            self._feed("decline", command.by, at,
+                       f"held in block {held}: the rig's suggestion {offered.change}, "
+                       f"{self._offer_said(offered, stage=False)}, declined; it is suggested again "
+                       f"once a fresh window of answers meets its bar")
+            if offered.move == MOVE_WIDEN:
+                pool = self._task.pool.setting
+                value = self.spec.values.get(pool)
+                self._logged("declined", pool, value, value, command.by, at,
+                             suggestion=offered.change)
+            else:
+                self._logged("declined", "block", held, held, command.by, at,
+                             suggestion=offered.change)
+
+    @staticmethod
+    def _offer_said(offered: "_Suggested", *, stage: bool = True) -> str:
+        """What a suggestion offers, in words: `to move up from Alone to Crowd` (`to move up to
+        Crowd` without its `stage`), or `to widen the pool in Alone` (`to widen the pool`)."""
+        if offered.move == MOVE_WIDEN:
+            return "to widen the pool" + (f" in {offered.block}" if stage else "")
+        return (f"to move {offered.move}" + (f" from {offered.block}" if stage else "")
+                + f" to {offered.to}")
 
     def _unanswerable(self, kind: str, answered: object, move: str | None,
                       tail: str) -> str | None:
@@ -2590,7 +2648,7 @@ class Session:
         offered = self._suggestions.get(answered)
         if offered is None:
             return f"the rig made no suggestion {answered} in this run; {tail}"
-        which = f"to move {offered.move} from {offered.block} to {offered.to}"
+        which = self._offer_said(offered)
         if offered.fate == WITHDRAWN:
             return (f"the rig's suggestion {answered}, {which}, was withdrawn when its bar stopped "
                     f"being met, before this answer arrived; {tail}")
@@ -2615,7 +2673,15 @@ class Session:
         window was at the stage's hardest step (always, to move up, whose window holds only
         those), strobing nothing (as wl-preproc accepted), and a line on the changes feed; a
         person answers it by its row's id (`Session.suggestion`). One stands at a time, made once
-        however long its bar stays met."""
+        however long its bar stays met.
+
+        **Then the pool's widening** (`_suggest_widening`; the pop-out search build's Task 5): one
+        window meeting both bars, one prompt offers both, the stage's first (the design's §3.4)."""
+        self._suggest_stage()
+        self._suggest_widening()
+
+    def _suggest_stage(self) -> None:
+        """`_suggest`'s move between stages (`scheduler.Scheduler.suggestion`)."""
         scheduler = self._scheduler
         now = scheduler.suggestion
         standing = self._suggested
@@ -2654,9 +2720,94 @@ class Session:
         """**A suggestion standing lapses as the run leaves its stage otherwise** -- a person's
         move naming none, or the stage's time (the pop-out search build): an answer naming it is
         refused, saying so (`_unanswerable`). Nothing is said or recorded: the move's own line
-        and row say where the run went."""
-        if self._suggested is not None:
-            self._suggested.fate, self._suggested = LAPSED, None
+        and row say where the run went. **So does a widening of the pool offered in that stage**
+        (the pop-out search build's Task 5): the pool carries into the next stage, where the bar
+        is judged afresh."""
+        for offered in (self._suggested, self._widening):
+            if offered is not None:
+                offered.fate = LAPSED
+        self._suggested = self._widening = None
+
+    def _suggest_widening(self) -> None:
+        """**The rig's suggestion to widen the pool, kept in step with its bar** (`task.Pool`;
+        `scheduler.Scheduler.widening`; the pop-out search build, 2026-11-07, its design §3.2 and
+        §3.4; the PI, "Start with fewer, add more", "Same rule: rig suggests"), between trials,
+        after the stage's (`_suggest`), never in a frame: **the bar to move up, judged over every
+        pairing pooled**, met while the pool has a pairing left to add. A new one is a `suggested`
+        change row of `move` `"widen"`, from no one, naming the pool's setting, its value as
+        `was` and no `now` -- it names no pairings: the trainer picks them ("Trainer picks at the
+        prompt") -- the stage it was judged in, the bar's numbers and `at_hardest`, strobing
+        nothing (as wl-preproc accepted), and a line on the changes feed. **The trainer widens
+        with a `set` of the pool's setting** (`_repooled` confirms it as the value applies), or
+        holds (`_decline`). A widening whose bar stops being met withdraws itself, as the stage's
+        does. One stands at a time."""
+        pool = self._task.pool if self._task is not None else None
+        if pool is None:
+            return
+        scheduler = self._scheduler
+        value = self.spec.values.get(pool.setting)
+        pooled = pool.pairings(value) if pool.unpooled(value) is None else pool.choices
+        now = scheduler.widening if len(pooled) < len(pool.choices) else None
+        standing = self._widening
+        if standing is not None and now is None:
+            standing.fate, self._widening = WITHDRAWN, None
+            correct, of, _ = scheduler.bar(MOVE_WIDEN)
+            self._feed("suggestion", None, self.wall_now(),
+                       f"the rig's suggestion {standing.change}, to widen the pool in "
+                       f"{standing.block}, is withdrawn: {correct} of the last {of} answers at its "
+                       f"hardest step right, under its {scheduler.block.criterion[0]:.0%}")
+        if now is None or self._widening is not None:
+            return
+        at = self.wall_now()
+        self._logged("suggested", pool.setting, value, None, None, at, move=now.move,
+                     block=now.block, bar={"correct": now.correct, "of": now.of},
+                     at_hardest=now.at_hardest)
+        self._widening = _Suggested(self._change, now.move, now.block, None)
+        self._suggestions[self._change] = self._widening
+        held = f"{len(pooled)} pairing{'' if len(pooled) == 1 else 's'} of {len(pool.choices)}"
+        self._feed("suggestion", None, at,
+                   f"the rig suggests widening the pool in {now.block}: {now.correct} of the last "
+                   f"{now.of} answers at its hardest step right, over the {held} it holds; widen "
+                   f"it with a value of {pool.setting} holding more, or hold")
+
+    def _repooled(self) -> None:
+        """**The pool changed** (`task.Pool`; the pop-out search build's Task 5), seen at the
+        boundary its new value applies at (`_apply_staged`), between trials, never in a frame,
+        however it changed: a person's `set` -- the trainer's widening -- a hand-back or a revert.
+        **Both bars start afresh** (`scheduler.Scheduler.afresh`): they judge the pairings pooled
+        now (the design's §3.4). **The staircase stays where it is** ("a widening leaves the
+        staircase where it is"). **The prompt standing is answered**: a widening offered is
+        confirmed where the pool gained a pairing, else withdrawn, and a move offered is
+        withdrawn, its bar started afresh; under a confirmed progression the changes feed says
+        so in one line, beside the `set` row the change log has with who. The run's first look
+        at its pool says nothing; nor does a value naming no pool, which the trial loop's
+        backstop ends the run on before its next trial (`check.unpooled`)."""
+        pool = self._task.pool if self._task is not None else None
+        if pool is None:
+            return
+        now = self.spec.values.get(pool.setting)
+        was, self._pool_was = self._pool_was, now
+        if was is None or now == was or pool.unpooled(now) is not None:
+            return
+        scheduler = self._scheduler
+        scheduler.afresh()
+        added = (pool.unpooled(was) is not None
+                 or bool(set(pool.pairings(now)) - set(pool.pairings(was))))
+        said = []
+        widening, stage = self._widening, self._suggested
+        if widening is not None:
+            widening.fate = CONFIRMED if added else WITHDRAWN
+            said.append(f"the rig's suggestion {widening.change}, to widen the pool, is "
+                        f"{widening.fate}")
+        if stage is not None:
+            stage.fate = WITHDRAWN
+            said.append(f"the rig's suggestion {stage.change}, {self._offer_said(stage)}, is "
+                        f"withdrawn")
+        self._widening = self._suggested = None
+        if scheduler.confirming:
+            self._feed("suggestion", None, self.wall_now(),
+                       f"the pool changed in {scheduler.block.name}, so the bars start afresh on "
+                       f"the pairings pooled now" + "".join(f"; {each}" for each in said))
 
     def _hand_back(self, command, index: int) -> None:
         """**A person hands a setting back** (`link.HandBack`; engine build C3's spec §6; the PI,
@@ -2837,7 +2988,7 @@ class Session:
         the change log's table) and the wire carries (`link._destination`), each trial's line
         naming the staircase (`STAIRCASE`)."""
         block = self._scheduler.block
-        return ("draw" if self._steps(name)
+        return ("draw" if self._steps(name) or self._pools(name)
                 else "conditions" if self._own_range(name)
                 else "draw" if name in variation.in_force(self._task, block)
                 else "conditions" if any(name in condition.values
@@ -2893,6 +3044,8 @@ class Session:
             return None
         if self._steps(name, block):
             return STAIRCASE
+        if self._pools(name):
+            return POOL
         conditions = block.conditions
         if conditions and all(name in variation.own_ranges(c) for c in conditions):
             return "conditions"
@@ -3846,6 +3999,15 @@ class Session:
     #: in step with the bar between trials (`_suggest`); empty as each run starts.
     _suggested: _Suggested | None = field(init=False, default=None, repr=False)
     _suggestions: dict[int, _Suggested] = field(init=False, default_factory=dict, repr=False)
+    #: **The rig's suggestion to widen the pool standing** (`_Suggested`, `move` `"widen"`;
+    #: `task.Pool`; the pop-out search build's Task 5), beside the stage's, `None` where none
+    #: stands (`_suggest_widening`); **the pool's value at the run's last boundary**, which a
+    #: change to it is seen against (`_repooled`), `None` before the run's first; and **each
+    #: trial's pairing**, by its number, kept while a repeat of it waits, as `_kept` is
+    #: (`_pairing`). Each empty as each run starts.
+    _widening: _Suggested | None = field(init=False, default=None, repr=False)
+    _pool_was: object = field(init=False, default=None, repr=False)
+    _paired: dict[int, tuple] = field(init=False, default_factory=dict, repr=False)
 
     def _climbing(self) -> _Climb | None:
         """**The open block's staircase, started afresh as the block opens** (`task.Staircase`;
@@ -3872,6 +4034,35 @@ class Session:
         (`_source`), a hand-back (`_to`) and a change row's `was` (`_given_by`) say it."""
         staircase = (self._scheduler.block if block is None else block).staircase
         return staircase is not None and staircase.setting == name
+
+    def _pools(self, name: str) -> bool:
+        """Whether the run's task's pool gives `name` (`task.Pool`; the pop-out search build's
+        Task 5), the odd one's look or the distractors', in every block: what gives the setting
+        each trial while no person holds it, as a card (`_source`), a hand-back (`_to`) and a
+        change row's `was` (`_given_by`) say it."""
+        pool = self._task.pool if self._task is not None else None
+        return pool is not None and name in (pool.odd, pool.distractor)
+
+    def _pairing(self, task: Task, draw: Draw) -> tuple | None:
+        """**One trial's pairing** (`task.Pool`; the pop-out search build's Task 5), between
+        trials, never in a frame: **one of the pairings the pool's setting holds now, each as
+        likely** -- the place its run's seed, the trial's number in the run and the setting give
+        (`variation.unit`), apart from the scheduler's generators, as a draw's is -- or, **on a
+        repeat, the pairing of the trial it repeats** (a drum's try or a trial again at once: the
+        trial again, "so the drum teaches the problem"; the PI's "Follow same/fresh"), kept while
+        a repeat of it waits (`_paired`). `None` for a task with no pool. The pool names a pairing
+        here: the run's start, every live change and the loop's backstop see to it
+        (`check.unpooled`)."""
+        pool = task.pool
+        if pool is None:
+            return None
+        kept = None if draw.repeat_of is None else self._paired.get(draw.repeat_of)
+        if kept is None:
+            pooled = pool.pairings(self.spec.values.get(pool.setting))
+            share = variation.unit(self._run.seed, draw.number, pool.setting, 0)
+            kept = pooled[min(int(share * len(pooled)), len(pooled) - 1)]
+        self._paired[draw.number] = kept
+        return kept
 
     def _unwritable(self, task: Task, run: RunSpec, values: dict) -> str | None:
         """**What the record would refuse of a run, said before the run starts** (REC-27; the
@@ -3991,6 +4182,10 @@ class Session:
                 # where it stopped, which the trial would otherwise have had (`_climbing`, called
                 # for this trial first; the pop-out search build, 2026-11-07).
                 otherwise = climb.value
+            elif self._pools(name) and number in self._paired:
+                # **A look held over the pool is judged against the trial's pairing** (`_pairing`,
+                # drawn for this trial first; the pop-out search build's Task 5).
+                otherwise = self._paired[number][0 if name == task.pool.odd else 1]
             elif name in draws:
                 declaration, key = draws[name]
                 entry = mine.get(name) if declaration.repeat == SAME else None
@@ -4486,6 +4681,9 @@ class Session:
         # session opens; this is the backstop for any other caller.
         plain = run.plan is None and not run.blocks
         unset = unplaced(task, {**starts, **given}, None if plain else self._plan(run, task).blocks)
+        # **And a pool naming no pairing** (`check.unpooled`; the pop-out search build's Task 5):
+        # its trials would have nothing to draw.
+        unset += unpooled(task, {**starts, **given})
         if unset:
             raise SystemExit("task refused, run not started: "
                              + "; ".join(_printable(said) for _, said in unset))
@@ -4567,6 +4765,8 @@ class Session:
         # opens (`_climbing`). And the rig has suggested nothing in this run.
         self._climb = self._climb_block = None
         self._suggested, self._suggestions = None, {}
+        # Nor offered to widen its pool, which it has not looked at yet, nor paired a trial.
+        self._widening, self._pool_was, self._paired = None, None, {}
         # Nothing has varied in a block of this run yet, and no line is counted (engine build C3).
         self._varied = {}
         self._tallies = {}
@@ -4722,6 +4922,10 @@ class Session:
 
             while True:
                 self._apply_staged(index)
+                # **A change to the task's pool, seen as it applies** (`_repooled`; the pop-out
+                # search build's Task 5): the bars start afresh and the prompt standing is
+                # answered, before this boundary's frame.
+                self._repooled()
                 # Between trials the frame's mark check runs once here, before the
                 # drain, so a mark's stamp is written ahead of a note that arrived
                 # with it (P4d-2b spec §5.1).
@@ -4834,6 +5038,17 @@ class Session:
                     self.stop_kind, end_reason = "completed", "cannot_draw"
                     publish()
                     break
+                # **A pool naming no pairing** (`task.Pool`; the pop-out search build's Task 5): the
+                # load, the run's start and every live change refuse one (`check.unpooled`), so
+                # this is the backstop for any other way to one: the run ends here saying why, as a
+                # block that cannot draw does, never faulting at its draw.
+                unpaired = unpooled(task, self.spec.values)
+                if unpaired:
+                    scheduler.close(RUN)
+                    self.stopped_because = f"{unpaired[0][1]}; so the run ends here"
+                    self.stop_kind, end_reason = "completed", "cannot_draw"
+                    publish()
+                    break
 
                 condition = scheduler.next_trial()
                 drawn = scheduler.drawn
@@ -4863,6 +5078,16 @@ class Session:
                 if stepping:
                     taken[climb.staircase.setting] = climb.value
                     sources[climb.staircase.setting] = STAIRCASE
+                # **Its pairing** (`task.Pool`; the pop-out search build's Task 5; the PI, "A pool
+                # of four"), here between trials: one of the pairings the pool holds now, each as
+                # likely, a repeat the pairing of the trial it repeats, into the odd one's look
+                # and the distractors', each marked on its line (`POOL`) -- **but a look a person
+                # holds**, whose value plays instead, as over any draw.
+                paired = self._pairing(task, drawn)
+                if paired is not None:
+                    for name, look in zip((task.pool.odd, task.pool.distractor), paired):
+                        if name not in self._edited:
+                            taken[name], sources[name] = look, POOL
                 # **What varied in its block** (engine build C3's spec §10; XC-344): what its
                 # conditions set apart, as the block's first trial is drawn, and this trial's
                 # draws and a person's holds, for the block's end row (`_vary`).
@@ -4980,6 +5205,8 @@ class Session:
                 waiting = scheduler.waiting
                 for number in [number for number in self._kept if number not in waiting]:
                     del self._kept[number]
+                for number in [number for number in self._paired if number not in waiting]:
+                    del self._paired[number]
                 if result.outcome is None:
                     # **A warning on the changes feed** (the engine C2a plan, its science review's
                     # D4): five minutes with no outcome is a loop that failed or an animal that

@@ -2261,6 +2261,111 @@ class Plan:
             )
 
 
+#: **The most pairings a pool declares**: its value is the sum of its pairings' numbers, 1, 2, 4
+#: ..., which a setting's value carries as a float, exact to 2 ** 53 (`Pool`).
+POOL_LIMIT = 52
+
+
+@dataclass(frozen=True, slots=True)
+class Pool:
+    """**A pool of pairings** (the pop-out search build, 2026-11-07; its design §3.2 and §3.4; the
+    PI, "A pool of four": on each trial one color is the odd one and another fills the
+    distractors, so the animal learns the odd one, not the blue one). `choices` are its pairings,
+    each two looks, the odd one's first and then the distractors', in a fixed order; each trial
+    draws one pairing, each as likely, from those **the setting `setting` holds now**, into the
+    two settings `odd` and `distractor`, each marked `drawn` `"pool"` on its line (wl-preproc's
+    answer of 2026-11-07). A person's value on either of the two holds it, as over any draw; a
+    repeat shows the pairing of the trial it repeats.
+
+    **The setting's value is a whole number, the sum of its pairings' numbers** -- 1, 2, 4, 8 ...
+    in the order `choices` declares them (`number`, `pairings`): the console's `set`, a run's
+    start and the wire carry a setting's value as a number or as one of its declared choices, and
+    twelve pairings make 4,095 pools, too many to declare as choices a frame would carry. The
+    trainer picks the first pairings at the run's start ("The trainer picks") and adds more with a
+    `set` of it ("Start with fewer, add more"; "Trainer picks at the prompt"); a value naming no
+    pool -- none, no whole number, a pairing beyond `choices` -- is refused with a sentence
+    (`unpooled`) at load, at a run's start and live, before the next trial (the plan's Review
+    Focus 5). Under a confirmed progression (`ByCriterion.confirm`) the rig suggests widening it
+    by the stage's own bar, judged over every pairing pooled ("Same rule: rig suggests"); a change
+    to it starts the bars afresh and leaves the staircase where it is; it carries into the next
+    stage, as every value of the run does.
+
+    **Refused as it is built**: settings that are not three different names; pairings that are not
+    a tuple of at least one and at most `POOL_LIMIT`, each a tuple of two different looks, none
+    listed twice. What it draws is checked at load (`check.check_task`, `bad-pool`)."""
+
+    setting: str
+    choices: tuple
+    odd: str = "odd_color"
+    distractor: str = "distractor_color"
+
+    def __post_init__(self) -> None:
+        for role in ("setting", "odd", "distractor"):
+            name = getattr(self, role)
+            if not isinstance(name, str) or not name:
+                raise ValueError(f"a pool names its {role} by text, not {name!r}")
+        if len({self.setting, self.odd, self.distractor}) < 3:
+            raise ValueError(
+                f"a pool's setting, its odd look's and its distractors' are three different "
+                f"settings, not {self.setting!r}, {self.odd!r} and {self.distractor!r}")
+        if not isinstance(self.choices, tuple):
+            raise ValueError(f"pool {self.setting!r}: a pool's pairings are a tuple, not a "
+                             f"{type(self.choices).__name__}")
+        if not self.choices:
+            raise ValueError(f"pool {self.setting!r}: a pool has at least one pairing")
+        if len(self.choices) > POOL_LIMIT:
+            raise ValueError(
+                f"pool {self.setting!r}: a pool has at most {POOL_LIMIT} pairings, so its number "
+                f"stays exact as a setting's value; this one has {len(self.choices)}")
+        for at, pairing in enumerate(self.choices, 1):
+            if not isinstance(pairing, tuple) or len(pairing) != 2:
+                raise ValueError(f"pool {self.setting!r}: pairing {at} is two looks, the odd one's "
+                                 f"first, as a tuple, not {pairing!r}")
+            if pairing[0] == pairing[1]:
+                raise ValueError(f"pool {self.setting!r}: pairing {at} names the same look twice, "
+                                 f"so no odd one would stand out")
+            if pairing in self.choices[:at - 1]:
+                raise ValueError(f"pool {self.setting!r}: pairing {at} is listed twice")
+
+    def named(self, at: int) -> str:
+        """Pairing `at`'s name, from 0: its two looks as `odd>distractors` where both are words,
+        else its place, `pairing 1` for the first."""
+        odd, among = self.choices[at]
+        if isinstance(odd, str) and isinstance(among, str):
+            return f"{odd}>{among}"
+        return f"pairing {at + 1}"
+
+    def number(self, pairings) -> int:
+        """**The value of the pool holding `pairings`**: the sum of their numbers, 2 ** their place
+        in `choices`. Raises `ValueError` for a pairing it does not declare."""
+        return sum(1 << self.choices.index(pairing) for pairing in set(pairings))
+
+    def pairings(self, value: object) -> tuple:
+        """**The pairings the pool at `value` holds**, in its order; the value is one `unpooled`
+        passes."""
+        whole = int(value)
+        return tuple(pairing for at, pairing in enumerate(self.choices) if whole >> at & 1)
+
+    def unpooled(self, value: object) -> "str | None":
+        """**Why `value` names no pool**, or `None` where it names one: a whole number from 1 to
+        the sum of every pairing's number. Said with what a pool's number is."""
+        guide = ("a pool is the sum of the numbers of the pairings it holds: "
+                 + "; ".join(f"{1 << at}, {self.named(at)}" for at in range(len(self.choices))))
+        if value is None:
+            return f"it has no value; {guide}"
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value)):
+            return f"it is no number; {guide}"
+        if not float(value).is_integer():
+            return f"it is no whole number; {guide}"
+        if value < 1:
+            return f"it holds no pairing, so no trial could be drawn; {guide}"
+        if value >= 1 << len(self.choices):
+            return (f"it holds a pairing beyond the {len(self.choices)} the pool declares; "
+                    f"{guide}")
+        return None
+
+
 @dataclass(frozen=True, slots=True)
 class Task:
     """One task (engine spec §3.5): its trial structures by name (§13.3), `default` the one the
@@ -2281,6 +2386,10 @@ class Task:
     #: a refusal (the PI, 2026-10-11), in any session not declared head-fixed (`RIG_FIXED`), where
     #: a free head would position every stimulus against a nominal head.
     needs_fixed_head: bool = False
+    #: **Its pool of pairings** (`Pool`; the pop-out search build, 2026-11-07; the PI, "A pool of
+    #: four"): each trial draws one pairing of those its setting holds now into its two looks'
+    #: settings; the rig suggests widening it under a confirmed progression. `None`, no pool.
+    pool: "Pool | None" = None
     #: **Its plans, by name** (engine spec §13.1; engine build C2b): what the operator chooses among
     #: at run start, the first preselected on the page (the PI, 2026-10-19, "Preselect first, keep
     #: plain"). Empty, the plain run only: one block of the default structure, every trial paying.
@@ -2319,6 +2428,8 @@ class Task:
                 )
         if not isinstance(self.needs_fixed_head, bool):
             raise ValueError("a task's needs_fixed_head is True or False")
+        if self.pool is not None and not isinstance(self.pool, Pool):
+            raise ValueError(f"a task's pool is a Pool, or None, not {type(self.pool).__name__}")
         if not isinstance(self.plans, dict):
             raise ValueError("a task's plans are a dict of plan names to Plans")
         for name, plan in self.plans.items():

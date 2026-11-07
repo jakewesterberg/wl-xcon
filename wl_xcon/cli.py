@@ -27,7 +27,7 @@ from wl_xcon.marks import TIME_FORMATS as _TIME_FORMATS
 from wl_xcon.marks import clock_or_now as _clock_or_now
 from wl_xcon.marks import clock_time as _wall_clock_time
 from wl_xcon.bounds import Bounds, Exceeded, _finite
-from wl_xcon.check import check_task, impossible, unplaced
+from wl_xcon.check import check_task, impossible, unplaced, unpooled
 from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.review import position_words
 from wl_xcon.review import render_task as render_review
@@ -1841,6 +1841,10 @@ def main(argv: list[str] | None = None) -> int:
             {**{p.name: p.start for p in task.params if p.start is not None}, **values},
             None if args.plan is None else [expanded(b) for b in task.plans[args.plan].blocks],
         )
+        # And a pool naming no pairing (`check.unpooled`; the pop-out search build's Task 5),
+        # whose trials would have nothing to draw, refused here for the same reason.
+        unset += unpooled(
+            task, {**{p.name: p.start for p in task.params if p.start is not None}, **values})
         if unset:
             raise SystemExit(
                 "task refused, session not started, nothing recorded: "

@@ -214,7 +214,10 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: (`task.ByCriterion.confirm`), a `Suggestion` -- the `suggested` change row's id, which a
 #: console's answer names, the move, the stage it was judged in and the stage it suggests, and the
 #: bar's numbers now -- or `None`: no suggestion, one withdrawn as its bar stopped being met, one
-#: answered, and between runs. A reader of 19 refuses 20 and 20 refuses 19, by name.
+#: answered, and between runs. And `Telemetry.widen` (the same build's Task 5), the rig's
+#: suggestion to widen the task's pool of pairings, a `Suggestion` of move `"widen"` and no stage
+#: to go to, or `None` (added within the build, before 20 was released, so 20 carries both). A
+#: reader of 19 refuses 20 and 20 refuses 19, by name.
 SCHEMA = 20
 
 #: How many refusals a session keeps, per source, and therefore how many one
@@ -388,7 +391,9 @@ class ParamRow:
     #: **Where the value comes from in the open block** (schema 19), in the order a trial's values
     #: are built (engine spec §17.1): `"person"` where a person holds it, over all the rest;
     #: `"staircase"` where the open block's staircase steps it (`task.Staircase`; the pop-out
-    #: search build, 2026-11-07), over the rest but a person's value; `"conditions"` first where
+    #: search build, 2026-11-07), over the rest but a person's value; `"pool"` where the task's
+    #: pool of pairings gives it, one of its two looks (`task.Pool`; the same build), likewise;
+    #: `"conditions"` first where
     #: every condition of the open block draws it from its own range,
     #: which wins over the block's and the task's draw; `"draw"` where the open block draws it, by
     #: its own draw or the task's, as written, or `"range"` where a person changed that draw's
@@ -521,7 +526,10 @@ class Suggestion:
     judged in (`block`) and the stage it suggests (`to`); and its bar as it reads at this
     boundary, `correct` of the last `of` answers right, and whether every one was at the stage's
     hardest step (`at_hardest`). The row records the numbers it was made on; these move with each
-    answer while it stands."""
+    answer while it stands. **Or to widen the task's pool of pairings** (`Telemetry.widen`; the
+    pop-out search build's Task 5): `move` `"widen"`, in the stage `block`, `to` `None`, by the
+    bar to move up, which it shares; the trainer answers it with a `SetParameter` of the pool's
+    setting holding more pairings, which names no suggestion, or holds with `Decline`."""
 
     change: int
     move: str
@@ -1031,6 +1039,11 @@ class Telemetry:
     #: suggests under a confirmed progression, a `Suggestion`, or `None` -- none made, one withdrawn
     #: or answered, and between runs. `None` by default, a frame with no suggestion.
     suggestion: "Suggestion | None" = None
+    #: `session.widening` (schema 20; the pop-out search build's Task 5): the rig's suggestion to
+    #: widen the task's pool of pairings (`task.Pool`), a `Suggestion` of `move` `"widen"` and no
+    #: `to`, beside the stage's -- one window meeting both bars, one prompt offers both, the
+    #: stage's first -- or `None`. `None` by default, a frame with none.
+    widen: "Suggestion | None" = None
 
     @classmethod
     def of(cls, session, tally, scheduler, index: int) -> "Telemetry":
@@ -1261,6 +1274,7 @@ class Telemetry:
             # The pop-out search build (schema 20): the rig's suggestion, read from the session,
             # which offers none between runs.
             suggestion=None if session.suggestion is None else Suggestion(*session.suggestion),
+            widen=None if session.widening is None else Suggestion(*session.widening),
         )
 
 
@@ -1548,6 +1562,11 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
             if telemetry.suggestion is None
             else {name: getattr(telemetry.suggestion, name) for name in _SUGGESTION_FIELDS}
         ),
+        "widen": (
+            None
+            if telemetry.widen is None
+            else {name: getattr(telemetry.widen, name) for name in _SUGGESTION_FIELDS}
+        ),
     }
 
 
@@ -1795,6 +1814,7 @@ def _telemetry_from(data: dict) -> Telemetry:
         eased=tuple(data["eased"]),
         suggestion=(None if data["suggestion"] is None
                     else Suggestion(**data["suggestion"])),
+        widen=None if data["widen"] is None else Suggestion(**data["widen"]),
     )
 
 

@@ -226,8 +226,9 @@ def _session_with(
         # setting keeps trials out of moving up (`Session.eased`).
         moments=((0, 0.0, "the run's start"),),
         eased=(),
-        # `Session.suggestion` (schema 20): the rig suggests nothing.
+        # `Session.suggestion` and `Session.widening` (schema 20): the rig suggests nothing.
         suggestion=None,
+        widening=None,
     )
 
 

@@ -107,10 +107,12 @@ RUN = "run"
 
 #: **What the rig suggests** under a confirmed progression (`ByCriterion.confirm`; the pop-out
 #: search build, 2026-11-07; the PI, "Rig suggests, trainer confirms"): moving up a stage
-#: (`MOVE_UP`) or back one (`MOVE_BACK`), the words a `suggested` change row's `move` writes, as
+#: (`MOVE_UP`) or back one (`MOVE_BACK`), or widening the task's pool of pairings (`MOVE_WIDEN`;
+#: `task.Pool`; "Same rule: rig suggests"), the words a `suggested` change row's `move` writes, as
 #: wl-preproc accepted them (`docs/pending-wl-preproc-amendments.md`).
 MOVE_UP = "up"
 MOVE_BACK = "back"
+MOVE_WIDEN = "widen"
 
 #: What a trainer may switch drumming to (`Scheduler.drum`): on for the rest of the block, on for
 #: the rest of the run, or off for the rest of the block.
@@ -190,11 +192,12 @@ class Suggestion:
     (`ByCriterion.confirm`; `Scheduler.suggestion`): to `move` (`MOVE_UP` or `MOVE_BACK`) from the
     open stage, `block`, to the stage `to`, because `correct` of the last `of` answers its bar
     judges were right, and whether every one of them was at the stage's hardest step
-    (`at_hardest`; always true of a move up, whose bar counts only those)."""
+    (`at_hardest`; always true of a move up, whose bar counts only those). **Or to widen the pool**
+    in the open stage (`MOVE_WIDEN`; `Scheduler.widening`), by the bar to move up, `to` `None`."""
 
     move: str
     block: str
-    to: str
+    to: str | None
     correct: int
     of: int
     at_hardest: bool
@@ -569,6 +572,12 @@ class Scheduler:
         suggests instead (`suggestion`), a person confirming each move (`move`)."""
         return isinstance(self.order, ByCriterion) and self.order.confirm
 
+    @property
+    def confirming(self) -> bool:
+        """Whether the plan is a confirmed progression (`_confirming`), for the session's changes
+        feed (the pop-out search build)."""
+        return self._confirming
+
     def _bar_windows(self) -> tuple[deque, deque]:
         """The open stage's two windows for its suggestion's bars, empty: as long as its criterion's
         window toward moving up, and as long as the fall-back's toward moving back -- each of no
@@ -580,13 +589,31 @@ class Scheduler:
 
         return window(self.block.criterion), window(getattr(self.order, "fall_back", None))
 
+    def _answers_for(self, move: str) -> deque:
+        """The window `move`'s bar reads: the one toward moving up for a move up and for widening
+        the pool (`MOVE_WIDEN`; "Same rule: rig suggests"), the one toward moving back for a move
+        back."""
+        return self._down if move == MOVE_BACK else self._up
+
     def bar(self, move: str) -> tuple[int, int, bool]:
         """**The numbers a suggestion's bar reads now** (`suggestion`): how many of the last
         answers in its window were right, how many answers are in it, and whether every one was at
-        the stage's hardest step -- toward moving up (`MOVE_UP`), or back (`MOVE_BACK`)."""
-        answers = self._up if move == MOVE_UP else self._down
+        the stage's hardest step -- toward moving up (`MOVE_UP`) or widening the pool
+        (`MOVE_WIDEN`), one window, or back (`MOVE_BACK`)."""
+        answers = self._answers_for(move)
         return (sum(right for right, _ in answers), len(answers),
                 all(hardest for _, hardest in answers))
+
+    def _met_up(self) -> tuple[int, int, bool] | None:
+        """The bar to move up's numbers (`bar`) where it is met -- its window full and at least
+        the stage's criterion's proportion right -- else `None`, as under no confirmed
+        progression, or in a stage with no criterion."""
+        criterion = self.block.criterion
+        if not self._confirming or criterion is None or not self._up.maxlen:
+            return None
+        right, of, hardest = self.bar(MOVE_UP)
+        met = of >= self._up.maxlen and right / of >= criterion[0]
+        return (right, of, hardest) if met else None
 
     @property
     def suggestion(self) -> Suggestion | None:
@@ -617,13 +644,10 @@ class Scheduler:
         afresh (`advance`, `decline`)."""
         if not self._confirming:
             return None
-        criterion = self.block.criterion
         above = self._type_at(self._position + 1)
-        if criterion is not None and above is not None and self._up.maxlen:
-            right, of, hardest = self.bar(MOVE_UP)
-            if of >= self._up.maxlen and right / of >= criterion[0]:
-                return Suggestion(MOVE_UP, self.block.name, self.blocks[above].name, right, of,
-                                  hardest)
+        met = self._met_up()
+        if above is not None and met is not None:
+            return Suggestion(MOVE_UP, self.block.name, self.blocks[above].name, *met)
         below = self._type_at(self._position - 1)
         if below is not None and self._down.maxlen:
             right, of, hardest = self.bar(MOVE_BACK)
@@ -632,12 +656,37 @@ class Scheduler:
                                   hardest)
         return None
 
+    @property
+    def widening(self) -> Suggestion | None:
+        """**Whether the bar to widen the pool is met**, under a confirmed progression (`task.Pool`;
+        the pop-out search build's design §3.2 and §3.4; the PI, 2026-11-07, "Same rule: rig
+        suggests"): **the bar to move up, on its own window** -- the stage's criterion met on its
+        last answers at its hardest step -- **judged over every pairing pooled**, at any stage,
+        the top one included, which has none above it. A `Suggestion` to widen (`MOVE_WIDEN`), `to`
+        `None`, or `None`; whether the pool has a pairing left to add is the session's to say
+        (`taskd.Session._suggest`). One window meeting both bars, the move up and the widening are
+        one prompt, the stage's first (the design's §3.4). Read between trials, never in a
+        frame."""
+        met = self._met_up()
+        return None if met is None else Suggestion(MOVE_WIDEN, self.block.name, None, *met)
+
     def decline(self, move: str) -> None:
         """**A person holds instead of moving** (`link.Decline`; the PI, 2026-11-07, "Rig suggests,
         trainer confirms"): the window of the declined move starts afresh, so the rig suggests
         that move again only once a fresh window of answers meets its bar, never on the answers a
-        person has already held on. The other window goes on."""
-        (self._up if move == MOVE_UP else self._down).clear()
+        person has already held on ("After 50 new tries", the PI, the same day). The other window
+        goes on. A widening shares the window to move up (`_answers_for`), so a hold of either
+        starts both afresh."""
+        self._answers_for(move).clear()
+
+    def afresh(self) -> None:
+        """**The open stage's bars start afresh** (the pop-out search build, 2026-11-07): its pool
+        of pairings changed (`task.Pool`), and the bars judge the pairings pooled now (the
+        design's §3.4: "the bar is judged over all the current pairings pooled"), so neither
+        window keeps the answers given on the pool before. The staircase stays where it is
+        ("a widening leaves the staircase where it is")."""
+        self._up.clear()
+        self._down.clear()
 
     @property
     def _top(self) -> bool:
