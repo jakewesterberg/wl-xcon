@@ -645,3 +645,27 @@ def test_wlx_run_runs_with_a_value_that_is_one_of_a_settings_choices(tmp_path, c
     main(_wlx_run(tmp_path, str(task), "mode=2.0"))
 
     assert "out of cage" in capsys.readouterr().out
+
+
+def test_a_live_value_outside_its_range_beside_a_wait_of_any_length_is_staged_with_a_warning(
+        tmp_path):
+    """XC-423's fix round 1 (the review's I1 and m3), driven through a session: a task whose
+    fixation wait declares a highest of infinity, a wait of any length, refused every live value
+    outside its range, a fixation hold of 2.5 s past its 2 s among them ("a wait the task declares,
+    can be inf s ... cannot be judged"). `Session._beyond_range` stages it, its `outside-range`
+    warning accepted by the person who set it, as beside a wait declared with no highest."""
+    text = Path("tasks/fixation_detection.py").read_text()
+    old = '        Param("fix_acquisition", unit="s", low=0.5, high=10.0, start=4.0),'
+    assert text.count(old) == 1
+    task = tmp_path / "endless.py"
+    task.write_text(text.replace(old, old.replace("high=10.0", 'high=float("inf")')))
+    link = _Drained({2: [SetParameter(name="fix_hold", value=2.5, by=JAKE)]})
+    session = _session(_spec(tmp_path, task), link)
+
+    session.run()
+
+    assert session.stop_kind == "completed"
+    assert session.refusals == []
+    assert session.spec.values["fix_hold"] == 2.5
+    assert [(row["code"], row["by"]["name"]) for row in _rows(session, "warnings.jsonl")
+            if "'fix_hold'" in row["detail"]][:1] == [("outside-range", "jake")]

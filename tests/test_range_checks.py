@@ -817,27 +817,54 @@ def test_a_wait_declared_by_choices_counts_its_longest_choice():
     assert "a wait longer than any the task declares (its longest, 30 s)" in longer[1].detail
 
 
-@pytest.mark.parametrize(("bad", "said"), [
-    (10**400, "1.00000e+400"), (math.inf, "inf"), (math.nan, "nan")],
-    ids=["past-float", "infinity", "nan"])
-def test_a_wait_setting_that_can_be_no_finite_number_refuses_a_value_with_a_sentence(bad, said):
-    """XC-423: `_waits` read a wait setting's choices with `float`, so one of `10**400` raised
-    `OverflowError` out of `beyond_range`, which a run's pre-flight (`preflight.beyond`) and a live
-    edit (`Session._beyond_range`) both run: each caught it and refused, saying only that the
-    checks could not run, with the exception's words. An infinity or a NaN made the longest wait
-    without end or unread, and no wait was judged. Each is refused, `outside-range`, with a
-    sentence saying which setting and why, through `beyond_range` and the pre-flight both."""
+def _window_set(timeout: Param, written=None) -> Task:
+    """`_timing_out(timeout)` with the fixation window's radius a setting, `fix_window`, from 0.5°
+    to 5°, and, given `written`, one more wait written in as `After(written)`."""
+    trial = _timing_out(timeout).structures["waiting"]
+    state = trial.states[0]
+    go = state.go if written is None else [*state.go, On(After(written), Outcome.ABORT)]
+    return Task({"waiting": replace(
+        trial,
+        params=[*trial.params, Param("fix_window", unit="deg", low=0.5, high=5.0, start=2.0)],
+        windows=[replace(trial.windows[0], radius=P("fix_window"))],
+        states=[replace(state, go=go)])}, default="waiting")
+
+
+#: A wait that can be no finite number, each way a task can write one (the review's I1).
+_ENDLESS = {
+    "choice inf": lambda: _window_set(Param("timeout", unit="s", choices=(1.0, math.inf))),
+    "choice nan": lambda: _window_set(Param("timeout", unit="s", choices=(1.0, math.nan))),
+    "choice past-float": lambda: _window_set(Param("timeout", unit="s", choices=(1.0, 10**400))),
+    "highest inf": lambda: _window_set(Param("timeout", unit="s", low=1.0, high=math.inf)),
+    "written inf": lambda: _window_set(Param("timeout", unit="s", choices=(1.0, 30.0)), math.inf),
+    "written past-float": lambda: _window_set(Param("timeout", unit="s", choices=(1.0, 30.0)),
+                                              10**400),
+}
+
+
+@pytest.mark.parametrize("endless", list(_ENDLESS), ids=list(_ENDLESS))
+def test_a_wait_that_can_be_no_finite_number_is_any_length_and_refuses_nothing(endless):
+    """XC-423's fix round 1 (the review's I1; the controller's ruling): `_waits` raised on a wait
+    setting's choice of `10**400`, and the first fix refused, at a run's pre-flight and on every
+    live edit, every value outside its range, of any setting, wait or not, because the task's
+    longest wait "cannot be judged". A wait no float holds finitely is read as one with no highest:
+    any length (`math.inf`), so no value is a wait longer than one the task declares, and a value
+    outside its range is warned exactly as beside a wait declared with no highest (the PI's
+    warnings over refusals, XC-352's D2; "Allow, with a warning", 2026-10-12): through
+    `beyond_range`, which a live edit runs (`Session._beyond_range`), and the pre-flight."""
     from wl_xcon import preflight
 
-    task = _timing_out(Param("timeout", unit="s", choices=(1.0, bad)))
-    refusal = Finding("outside-range", (
-        f"'timeout', a wait the task declares, can be {said} s, which is not a finite number of "
-        f"seconds, so whether 'fix_acquisition' at 20 makes a wait longer than any the task "
-        f"declares cannot be judged; give 'timeout' finite numbers"))
-
-    assert [f for f in beyond_range(task, {"fix_acquisition": 20.0}) if f.blocking] == [refusal]
-    found = preflight.beyond(task, {"fix_acquisition": 20.0}, ALLOCATION, DIRECT, SRGB, None)
-    assert [f for f in found if f.blocking] == [refusal], found
+    task, highest_none = _ENDLESS[endless](), _window_set(Param("timeout", unit="s", low=1.0))
+    for values in ({"fix_window": 6.0}, {"fix_acquisition": 600.0}):
+        found, expected = beyond_range(task, values), beyond_range(highest_none, values)
+        assert [(f.code, f.blocking) for f in found] == [
+            (f.code, f.blocking) for f in expected], (values, found)
+        assert not any(f.blocking for f in found), (values, found)
+        assert "longer-than-declared" not in {f.code for f in found}
+        given = preflight.beyond(task, values, ALLOCATION, DIRECT, SRGB, None)
+        assert not any(f.blocking for f in given), (values, given)
+        assert [f.code for f in given] == [
+            f.code for f in preflight.beyond(highest_none, values, ALLOCATION, DIRECT, SRGB, None)]
 
 
 def test_a_value_no_float_holds_is_not_judged_outside_its_range_and_never_raises():

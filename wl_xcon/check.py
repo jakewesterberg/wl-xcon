@@ -267,10 +267,12 @@ def _waits(task: Task) -> tuple[set[str], float]:
     the task declares: the highest bound any of them declares, the largest number a choice
     setting among them offers, or its longest literal wait. **A wait setting with no highest
     that is a number can be any length** (Task 10's review, M1), so the longest is unbounded
-    (`math.inf`) and no value of any wait is longer than one the task declares. **A number it
-    reads that is no finite number is `_Unreal`** (`_floats`; XC-423): `float(10**400)` raised out
-    of `beyond_range`, and an infinity or a NaN makes no longest that a wait can be compared
-    with, so `beyond_range` refuses, saying so."""
+    (`math.inf`) and no value of any wait is longer than one the task declares. **So is a wait it
+    reads that is no finite number** -- an infinity, a NaN, an integer past a float's range, a
+    choice, a highest or a wait written in (XC-423): `float(10**400)` raised out of
+    `beyond_range`, and refusing because the longest "cannot be judged" turned every value
+    outside its range, of any setting, from a warning into a refusal (its fix round 1, the
+    review's I1), where the PI's rulings make one a warning (XC-352's D2; 2026-10-12)."""
     declared = {param.name: param for param in task.params}
     names: set[str] = set()
     longest = 0.0
@@ -286,15 +288,21 @@ def _waits(task: Task) -> tuple[set[str], float]:
                     if param is None:
                         continue  # refused at load (`_undeclared_parameters`)
                     if param.choices:
-                        offered = _floats([c for c in param.choices if _is_number(c)], param.name)
+                        offered = [_seconds(c) for c in param.choices if _is_number(c)]
                         longest = max([longest, *offered])
                     elif _is_number(param.high):
-                        longest = max([longest, *_floats([param.high], param.name)])
+                        longest = max(longest, _seconds(param.high))
                     else:
                         longest = math.inf
                 elif _is_number(seconds):
-                    longest = max([longest, *_floats([seconds], None)])
+                    longest = max(longest, _seconds(seconds))
     return names, longest
+
+
+def _seconds(number: object) -> float:
+    """A wait's number as `_waits` reads it: itself, or without end (`math.inf`) for one that is no
+    finite number, as a wait with no highest is (XC-423's fix round 1)."""
+    return float(number) if _real(number) else math.inf
 
 
 def widened(task: Task, values) -> Task:
@@ -338,9 +346,7 @@ def beyond_range(
     the declared task's findings are not (`Finding.subjects`); otherwise a warning, among them a
     value that only enlarges an overlap or a clip the task was accepted with at load. **And a
     set size above its highest whose objects would be drawn on one another is refused**,
-    whatever the task was accepted with (`_overlapping_objects`; the final review's I1). **And a
-    wait the task declares that can be no finite number refuses them**, `outside-range`, saying
-    which (`_waits`; XC-423): no longest wait can be found to judge them by. Nothing
+    whatever the task was accepted with (`_overlapping_objects`; the final review's I1). Nothing
     when every value is inside its range. The declared ranges are what every load-time proof is
     made over (the checks "Reasoning over the whole parameter space" below), which proves a value
     inside them cannot break the task from the console and says nothing of one outside them, so
@@ -356,21 +362,9 @@ def beyond_range(
     # heard between trials, never inside one, until they are checked about once a second inside
     # a trial (WEL-11; engine spec §6.8; XC-373), when this sentence changes; the trial cap it
     # names is the longest trial, five minutes since engine build C2a (`TRIAL_CAP`).
+    waits, longest = _waits(task)
     findings: list[Finding] = []
     said = ", ".join(f"{name!r} at {value:g}" for name, value in outside.items())
-    try:
-        waits, longest = _waits(task)
-    except _Unreal as unreal:
-        # **A wait no float holds is refused, saying so** (XC-423): it raised out of here, and the
-        # pre-flight and a live edit said only that the checks could not run.
-        name, value = unreal.args
-        whose = (f"{name!r}, a wait the task declares, can be" if name is not None
-                 else "a wait the task declares is")
-        findings.append(Finding("outside-range", (
-            f"{whose} {_said(value)} s, which is not a finite number of seconds, so whether "
-            f"{said} makes a wait longer than any the task declares cannot be judged; give "
-            + (f"{name!r} finite numbers" if name is not None else "it a finite number"))))
-        waits, longest = set(), math.inf
     for name, value in outside.items():
         param = declared[name]
         # The bounds it declares, and only those (Task 10's review, M2): a setting with one bound
@@ -2799,7 +2793,8 @@ class _Unreal(_Unbounded):
 def _floats(values, name: str | None) -> list[float]:
     """**Finite or refused** (XC-423): `values`, each a number, as floats, or `_Unreal` naming
     `name` and the first that is no finite number (`_real`). The one reading of a number every
-    check that computes with one shares: `float(10**400)` raises `OverflowError`, an infinite ring
+    check that computes with one shares, but `_waits`, which reads one as a wait of any length
+    (`_seconds`) and refuses nothing: `float(10**400)` raises `OverflowError`, an infinite ring
     has no extent (`geometry.circle_extent_deg` raises), and a NaN compares false with everything,
     so passes every rule it meets; none is computed with."""
     for value in values:
