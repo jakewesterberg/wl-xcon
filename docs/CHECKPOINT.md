@@ -68,3 +68,7 @@ clean CI.
 - **The neighbours** are read weekly, by their handover files (the PI, 2026-11-07): wl-preproc, wl-sync, wl-works,
   wl-xtasks. Last read: 2026-11-07, by the audit (wl-sync's answer of 2026-10-18 was found unread
   that day: its session endpoint is XC-460). Open asks of each: `docs/pending-*-amendments.md`.
+- **The welfare diff**: `tools/welfare_diff.py BASE HEAD` lists the welfare-listed code between two revisions item by item
+  (`SAME`/`DIFFERS`); run it at every merge (architecture.md, "Welfare-critical modules").
+- **The session fuzzer**: `tools/fuzz_sessions.py`, random tasks through `taskd.Session.run`, read back by wl-preproc and
+  checked against the C2b and C3 invariants; `tests/test_fuzz_sessions.py` runs a small budget on every push.
