@@ -5192,12 +5192,12 @@ def _approach(
     of the other; **except two windows placed by one setting**, which hold one choice at a time and are
     compared choice by choice. **Every pairing that comes within the radii is named** (`overlapping`, as words in
     the review report's: eccentricity and direction first), the window placed by a literal left out
-    of it. Choices that are no position, and a window with none left, a literal that is no position
-    and a literal radius that is no number, are left out (`bad-placement` refuses each,
-    `_position_kind_faults`); a radius setting with a choice that is no finite number reads as
-    having no highest (`_radius`, `_span`), which nothing refuses yet (XC-426): this check never
-    raises on them. `places` holds each window's places already made, by name, so that a check
-    making many comparisons builds them once."""
+    of it. Choices that are no position, and a window with none left, a literal that is no position,
+    a literal radius that is no finite number, and a radius setting's choice that is none, and a
+    window whose radius setting offers no other, are left out (`bad-placement` refuses each,
+    `_position_kind_faults`; `_radius`, XC-426): this check never raises on them. `places` holds
+    each window's places already made, by name, so that a check making many comparisons builds
+    them once."""
     def built(window: Window) -> "list[_Place]":
         if places is None:
             return _places(window, params)
@@ -5228,10 +5228,19 @@ def _approach(
 
 
 def _radius(radius: object, params: dict[str, Param]) -> float | None:
-    """The greatest a window's radius can be (`_span`; without end where a setting has no highest),
-    or `None` for a literal that is no finite number, which `_position_kind_faults` refuses."""
-    if not isinstance(radius, P) and not _finite(radius):
-        return None
+    """The greatest a window's radius can be: a literal itself, the greatest choice of a setting
+    that is a finite number, or the highest of a setting's range (`_span`; without end where it
+    declares none). **A choice that is no finite number is left out** (XC-426), as `_places`
+    leaves out a choice that is no position: `_position_kind_faults` refuses it, and read through
+    `_span` it made the overlap sentence say a setting that declares its choices "has no declared
+    highest". `None` for a literal that is no finite number and a setting none of whose choices
+    is one, both refused there too: nothing to compare."""
+    if not isinstance(radius, P):
+        return float(radius) if _finite(radius) else None
+    param = params.get(radius.name)
+    if param is not None and param.choices:
+        offered = [float(choice) for choice in param.choices if _finite(choice)]
+        return max(offered) if offered else None
     return _span(radius, params, 0.0)[1]
 
 
@@ -5502,10 +5511,14 @@ def _crowded_arrays(trial: Trial) -> list[Finding]:
 
 
 def _crowded(declared: ObjectWindows, array: Array, params: dict[str, Param]) -> list[Finding]:
-    """`crowded-array` for one array of a family, or nothing (`_crowded_arrays`)."""
+    """`crowded-array` for one array of a family, or nothing (`_crowded_arrays`). The windows'
+    radius is read as a window's (`_radius`): a choice that is no finite number left out, and
+    nothing said where there is none to read, each refused at load (XC-426)."""
+    widest = _radius(declared.radius, params)
+    if widest is None:
+        return []
     most = _whole(_span(array.n, params, 0.0)[1])
     tightest = _span(array.radius, params, 0.0)[0]
-    widest = _span(declared.radius, params, 0.0)[1]
     if most < 2:
         return []
     spacing = ring_spacing_deg(tightest, most)
@@ -6049,7 +6062,9 @@ def _position_kind_faults(trial: Trial) -> list[Finding]:
     otherwise. **So does one that sizes a window or places an array's objects** (`_sized`; the
     review of XC-415's fix, M2): a window's radius, an array's set size, ring radius, phase and
     target index. A run that would start with such a setting unset is refused as it starts
-    (`unplaced`). **A setting
+    (`unplaced`). **A window's radius, or an array's object windows', that can be no finite
+    number** -- a word, a position, an infinity, an integer past a float's range, as written or
+    among a setting's choices -- is refused too (XC-426). **A setting
     with no choices (a free value) is refused where a whole position goes**, since no path outside
     code gives one a position (XC-422); where a number goes it is unchanged."""
     params = {p.name: p for p in trial.params}
@@ -6124,17 +6139,40 @@ def _position_kind_faults(trial: Trial) -> list[Finding]:
                 f"a finite number of degrees")))
     for its in written[len(windows):]:
         place(its.subject, its.what, its.at, its.cannot)
+    # An array's object windows' literal radius, as a window's is above (XC-426): `_crowded`
+    # raised on a word.
+    for window in trial.windows:
+        if (isinstance(window, ObjectWindows) and not isinstance(window.radius, P)
+                and not _finite(window.radius)):
+            findings.append(Finding("bad-placement", (
+                f"the object windows of {window.of!r}: their radius is {_said(window.radius)}, "
+                f"which is not a finite number of degrees")))
     # A window's radius and an array's set size, ring radius, phase and target index: `None` among
-    # a setting's choices (the review of XC-415's fix, M2). Any other value that is no number is
-    # refused where each is read (check 8, `_block_faults`, the array checks).
+    # a setting's choices (the review of XC-415's fix, M2). **A window's radius, or its object
+    # windows', placed by a setting with a choice that is no finite number** (XC-426), as a literal
+    # of that kind is: a word or a position stopped the session where the window was first judged
+    # (`gaze.Tracked.in_window` compares the gaze's separation with it), an infinity or `10**400`
+    # held every gaze. Any other value that is no number is refused where each is read (check 8,
+    # `_block_faults`, the array checks).
     for sized in _sized(trial):
         value = sized.value
-        if isinstance(value, P) and value.name in params and any(
-                choice is None for choice in params[value.name].choices):
+        if not (isinstance(value, P) and value.name in params):
+            continue
+        offered = params[value.name].choices
+        if any(choice is None for choice in offered):
             findings.append(Finding("bad-placement", (
                 f"{sized.subject}: {sized.its} {sized.what} is parameter {value.name!r}, which can "
                 f"be None, and {sized.cannot}, so the run cannot proceed; remove None from "
                 f"{value.name!r}'s choices")))
+        unreal = [c for c in offered if c is not None and not _finite(c)]
+        if sized.what == "radius" and unreal:
+            choice = unreal[0]
+            why = ("That is a whole position, not a number of degrees" if is_point(choice)
+                   else "That is not a number of degrees" if not _is_number(choice)
+                   else "That is not a finite number")
+            findings.append(Finding("bad-placement", (
+                f"{sized.subject}: {sized.its} radius is parameter {value.name!r}, which can be "
+                f"{_said(choice)}. {why}; give {value.name!r} finite numbers of degrees")))
     return findings
 
 
