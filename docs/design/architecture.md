@@ -832,8 +832,11 @@ spectra on a measured record, through wl-style's model of the sRGB primaries on 
 a record without spectra, with a warning there (`color-set-without-spectra`). A panel that cannot
 show the whole set moves every color toward the apex by one shared share, never dimming or
 clipping one, and `check` warns by how much (`color-set-desaturated`); one that cannot show even the
-apex refuses it; over a luminance setting's range, `color-set-desaturated` says which part of the
-range desaturates. The set is realized between trials, once for each luminance a run draws it at on
+apex refuses it -- **but where a setting gives the luminance, the part of its range the panel cannot
+show at all is a warning naming the reachable top** (`color-set-unreachable`, `check.reachable_top`;
+the PI's warnings over refusals), and only a value above it is refused, as a person sets it live
+(`taskd.Session._impossible`, ahead of the listed `Session.set`) or a run starts with it
+(`check.unshowable`); over the range, `color-set-desaturated` says which part desaturates. The set is realized between trials, once for each luminance a run draws it at on
 each calibration (`photometry.realized`), never in a frame. **The record
 names a color-set light's set by its name alone** (`record._written`; REC-27, revised 2026-11-07 by
 the build's final fixes), and each run's start row defines every set its task declares once

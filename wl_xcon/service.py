@@ -1154,7 +1154,7 @@ class Service:
                 *_contained(
                     (_preflight.STARTING_VALUES,),
                     lambda: _preflight.values(loaded, values, [f for f in beyond if f.blocking],
-                                              plan),
+                                              plan, calibration=session.spec.calibration),
                 ),
                 *_contained(
                     (_preflight.BOUNDED_CONFIG,)

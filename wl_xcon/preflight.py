@@ -37,7 +37,7 @@ from wl_xcon.actor import Actor, Box, Member
 from wl_xcon.bounds import Exceeded
 from wl_xcon.check import (
     IMPOSSIBLE, _outside, beyond_range, check_task, impossible, parameters_used, undrawable,
-    unplaced, unpooled, unstarted,
+    unplaced, unpooled, unshowable, unstarted,
 )
 from wl_xcon.cli import _load_bounds, _load_subject_settings, _load_task, _setup_words
 from wl_xcon.findings import Finding
@@ -343,7 +343,8 @@ def _impossible(task: Task, given: dict, plan: str | None) -> list:
             if finding not in own]
 
 
-def values(task: Task | None, given: dict, refused=(), plan: str | None = None) -> PreflightItem:
+def values(task: Task | None, given: dict, refused=(), plan: str | None = None,
+           calibration=None) -> PreflightItem:
     """A run's starting values -- its task's own (`Param.start`), with what a console
     sent over them (P4d-2b spec §6.2; S8 §3.4) -- against the task's declarations, the union of
     its trial structures' (engine spec §3.5):
@@ -459,6 +460,14 @@ def values(task: Task | None, given: dict, refused=(), plan: str | None = None) 
         wrong += [said for _, said in unpooled(task, merged)]
     except Exception as broken:  # noqa: BLE001 -- a task's declarations are code's output
         wrong.append(f"the task's pool could not be checked: {type(broken).__name__}: {broken}")
+    # **A luminance the session's panel (`calibration`) cannot show a color set at, not even its
+    # apex** (`check.unshowable`; XC-494): the load only warns of the range's unreachable part,
+    # and a run starting at such a value is refused here, naming the reachable top.
+    try:
+        wrong += [said for _, said in unshowable(task, merged, calibration)]
+    except Exception as broken:  # noqa: BLE001 -- as above
+        wrong.append(f"the task's color sets could not be checked: {type(broken).__name__}: "
+                     f"{broken}")
     wrong += [f"{f.code}: {f.detail}" for f in refused]
     if wrong:
         return PreflightItem(STARTING_VALUES, FAIL, "; ".join(wrong))

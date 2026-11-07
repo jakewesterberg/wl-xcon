@@ -51,7 +51,7 @@ from wl_xcon.actor import Actor, to_map_or_none
 from wl_xcon.bounds import Bounds, Exceeded, _finite
 from wl_xcon.check import (
     IMPOSSIBLE, _outside, _whole_numbers, beyond_range, check_task, impossible, start_at,
-    undrawable, unplaced, unpooled, unstarted,
+    undrawable, unplaced, unpooled, unshowable, unstarted,
 )
 from wl_xcon.cli import _clock, _load_allocation, _load_task, _printable, _shown
 from wl_xcon.codes import BLOCK_END, RUN_END_MARKER, TRIAL_END, TRIAL_START, Allocation
@@ -2165,6 +2165,14 @@ class Session:
             # trial"), as the load and a run's start refuse it (`check.unpooled`).
             raise Exceeded(f"{name!r} at {value:g} is refused, and the previous pool stands: "
                            f"{pool.unpooled(value)}")
+        if self._task is not None:
+            # **A luminance the panel cannot show the color set at, not even its apex** (XC-494;
+            # the PI's "warnings over refusals": the load only warns of it), refused as the value
+            # it is, naming the panel's reachable top (`check.unshowable`).
+            dark = unshowable(self._task, {name: value}, self.spec.calibration)
+            if dark:
+                raise Exceeded(f"{name!r} at {value:g} is refused, and the previous value stands: "
+                               f"{dark[0][1]}")
         why = self._possible({name: value})
         if why is not None:
             said = _shown(value, declared.choices) if declared.choices else f"{value:g}"
@@ -5402,8 +5410,10 @@ class Session:
         plain = run.plan is None and not run.blocks
         unset = unplaced(task, {**starts, **given}, None if plain else self._plan(run, task).blocks)
         # **And a pool naming no pairing** (`check.unpooled`; the pop-out search build's Task 5):
-        # its trials would have nothing to draw.
+        # its trials would have nothing to draw. **And a luminance the panel cannot show its color
+        # set at** (`check.unshowable`; XC-494): its first trial could not be drawn.
         unset += unpooled(task, {**starts, **given})
+        unset += unshowable(task, {**starts, **given}, self.spec.calibration)
         if unset:
             raise SystemExit("task refused, run not started: "
                              + "; ".join(_printable(said) for _, said in unset))

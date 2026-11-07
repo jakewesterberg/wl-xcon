@@ -43,6 +43,7 @@ from wl_xcon.photometry import (
     Gray,
     background_cones,
     luminance_contrast,
+    realize,
     realized,
     unrealizable,
     xyY,
@@ -4211,6 +4212,12 @@ def _color_faults(trial: Trial, panel: Calibration | None) -> list[Finding]:
             lights = [color] if panel is None else _lights(color, params)
         except _Unbounded:
             continue  # refused as a bad block: it cannot be bounded
+        if panel is not None and isinstance(color, ColorSetLight) and isinstance(
+                color.luminance, P):
+            # **A luminance setting's values the panel cannot show at all are no refusal of the
+            # task** (XC-494): checked up to its reachable top, and the rest warned of
+            # (`_desaturated_range`'s `color-set-unreachable`), refused only as a value.
+            lights = _within_reach(lights, panel)
         # What a clip of these lights is about (`Finding.subjects`): what asks for them and the
         # color as the task wrote it, before `_lights` reads each value it can take. Two things
         # asking for one written color clip alike; two written colors of one appearance type
@@ -4317,30 +4324,40 @@ def _desaturated_range(colorset, panel: Calibration, values: list[float], names:
     together at the highest it can still show. A panel can show a set at a lower luminance wherever
     it can at a higher one (its gamut at one luminance holds every dimmer one's), so the share only
     grows with luminance. Nothing where the panel shows the set as written over the whole range.
-    A luminance at which it cannot show even the apex is refused where the lights are checked
-    (`_one_color`, `unrealizable-color`). At load, never in a frame."""
+
+    **A range whose upper part the panel cannot show at all, not even the apex** (XC-494; the PI's
+    "warnings over refusals"), is a warning too, `color-set-unreachable`, naming the reachable top
+    (`reachable_top`): a value above it is refused only where a person sets it live
+    (`taskd.Session._impossible`) or a run starts with it (`unshowable`), never the task. One the
+    panel cannot show at any luminance of the range is refused where the lights are checked
+    (`_one_color`, `unrealizable-color`). At load, never in a frame; each luminance probed is
+    realized uncached (`photometry.realize`)."""
 
     def share(luminance: float) -> float | None:
         try:
-            return realized(colorset, panel, luminance).desaturation
+            return realize(colorset, panel, luminance).desaturation
         except ValueError:
             return None
 
     low, high = values[0], values[-1]
-    shown_high = share(high)
-    top = high
-    if shown_high is None:
-        # The apex unshowable at the top (refused below): the highest it shows, by bisection.
-        lo, hi = low, high
-        if share(lo) is None:
-            return []
-        while hi - lo > DESATURATED_STEP:
-            middle = (lo + hi) / 2.0
-            lo, hi = (middle, hi) if share(middle) is not None else (lo, middle)
-        top, shown_high = lo, share(lo)
-    if not shown_high:
-        return []
     by = ", ".join(repr(n) for n in names)
+    name = panel.id or panel.measured_on
+    top = reachable_top(colorset, panel, low, high)
+    if top is None:
+        return []  # refused where its lights are checked (`_one_color`)
+    findings: list[Finding] = []
+    if top < high:
+        findings.append(Finding("color-set-unreachable", (
+            f"calibration {name} cannot show color set {colorset.name!r} at all above about "
+            f"{top:.3g} cd/m² of macaque luminance, of the {low:g} to {high:g} cd/m² setting {by} "
+            f"allows, not even its apex ({colorset.apex[0]:.4f}, {colorset.apex[1]:.4f}): this "
+            f"panel's reachable top for it is about {top:.3g} cd/m², and a value above that is "
+            f"refused when a trainer sets it live or a run starts with it; the task runs at any "
+            f"value up to it; asked for by {'; '.join(whats)}"),
+            blocking=False, accepted_in=SESSION_KINDS))
+    shown_high = share(top)
+    if not shown_high:
+        return findings
     if share(low):
         start = low
         where = f"at any luminance setting {by} allows, {low:g} to {high:g} cd/m²"
@@ -4352,18 +4369,91 @@ def _desaturated_range(colorset, panel: Calibration, values: list[float], names:
         start = hi
         where = (f"above about {start:.3g} cd/m², of the {low:g} to {high:g} cd/m² setting {by} "
                  f"allows")
-    shown = realized(colorset, panel, top)
-    name = panel.id or panel.measured_on
-    return [Finding("color-set-desaturated", (
+    shown = realize(colorset, panel, top)
+    at = f"{top:g}" if top == high else f"about {top:.3g}"
+    return findings + [Finding("color-set-desaturated", (
         f"calibration {name} cannot show color set {colorset.name!r} as written {where}: there "
         f"every color in it gives up a shared share of its distance from the "
         f"apex ({colorset.apex[0]:.4f}, {colorset.apex[1]:.4f}) in CIE 1931 xy, together -- "
-        f"{100 * shown_high:.1f}% at {top:g} cd/m² -- so their luminance holds and none is "
+        f"{100 * shown_high:.1f}% at {at} cd/m² -- so their luminance holds and none is "
         f"clipped, but each is less saturated than asked (the pop-out search spec §3.2); shown "
-        f"at {top:g} as "
+        f"at {at} as "
         f"{', '.join(f'{c} x={x:.4f}, y={y:.4f}' for c, (x, y) in shown.xy.items())}; asked for "
         f"by {'; '.join(whats)}"),
         blocking=False, accepted_in=SESSION_KINDS)]
+
+
+def reachable_top(colorset, panel: Calibration, low: float, high: float) -> float | None:
+    """**The highest luminance from `low` to `high` at which `panel` can show color set
+    `colorset` at all**, even its apex alone (`photometry.realize` raises above it): `high` where
+    it shows it there, else the highest multiple of `DESATURATED_STEP` it shows it at, found by
+    bisection over those multiples -- so the load's warning and a refusal of a value name the same
+    top, whatever range each searched -- or `low` where none above it does; `None` where it cannot
+    show it even at `low`. A panel that shows a set at a luminance shows it at every dimmer one.
+    Between trials or at load, never in a frame; each luminance probed is realized uncached, so no
+    probe fills `photometry.realized`'s store."""
+
+    def shows(luminance: float) -> bool:
+        try:
+            realize(colorset, panel, luminance)
+        except ValueError:
+            return False
+        return True
+
+    if shows(high):
+        return high
+    if not shows(low):
+        return None
+    step = DESATURATED_STEP
+    below = math.ceil(low / step - 1e-9)
+    if below * step > high or not shows(below * step):
+        return low
+    above = math.floor(high / step + 1e-9)
+    if shows(above * step):
+        return round(above * step, 10)
+    while above - below > 1:
+        middle = (below + above) // 2
+        below, above = (middle, above) if shows(middle * step) else (below, middle)
+    return round(below * step, 10)
+
+
+def unshowable(task: Task, values: dict, calibration: Calibration | None) -> list[tuple[str, str]]:
+    """**Each luminance setting whose value in `values` `calibration` cannot show its color set at,
+    not even the apex** (XC-494; the PI's "warnings over refusals": the load warns of a range's
+    unreachable part, `color-set-unreachable`, and only such a value is refused), as `(setting,
+    sentence)`, the sentence naming the panel's reachable top for the set (`reachable_top`); empty
+    where every one shows, for a task with no color-set light whose luminance is a setting, and
+    with no calibration. One function for a person's live value (`taskd.Session._impossible`,
+    ahead of welfare-listed `Session.set`) and a run's starting values (`preflight.values`,
+    `Session.run`, `wlx run`), as `unpooled` is. Between trials or before a run, never in a
+    frame."""
+    from wl_xcon.declarations import color_set_lights
+
+    if calibration is None:
+        return []
+    found: list[tuple[str, str]] = []
+    seen: set = set()
+    panel = calibration.id or calibration.measured_on
+    for light in color_set_lights(task):
+        if not isinstance(light.luminance, P) or light.luminance.name not in values:
+            continue
+        setting, value = light.luminance.name, values[light.luminance.name]
+        if not (_is_number(value) and math.isfinite(value) and value > 0.0):
+            continue  # no luminance: refused as a value of the wrong kind elsewhere
+        key = (setting, light.colorset.name)
+        if key in seen:
+            continue
+        seen.add(key)
+        top = reachable_top(light.colorset, calibration, DESATURATED_STEP, float(value))
+        if top is not None and top >= value:
+            continue
+        reach = ("at no luminance from 0.05 cd/m²" if top is None
+                 else f"up to about {top:.3g} cd/m² of macaque luminance")
+        found.append((setting, (
+            f"calibration {panel} cannot show color set {light.colorset.name!r} at {value:g} "
+            f"cd/m² of macaque luminance, not even its apex: this panel shows it {reach}, its "
+            f"reachable top")))
+    return found
 
 
 def _spectra_faults(trial: Trial, params: dict[str, Param], panel: Calibration) -> list[Finding]:
@@ -4593,6 +4683,26 @@ def _can_be(value, params: dict[str, Param], holds, spans) -> bool:
             return spans(*sorted((float(param.low), float(param.high))))
         return True
     return not _is_number(value) or holds(float(value))
+
+
+def _within_reach(lights: list, panel: Calibration) -> list:
+    """Color-set lights `_lights` read at each luminance a setting can take, each above the set's
+    reachable top on `panel` (`reachable_top`) read at that top instead, each once; all as given
+    where the panel cannot show the set at the least of them either (refused as a light,
+    `_one_color`)."""
+    luminances = [light.luminance for light in lights if _is_number(light.luminance)]
+    if not luminances:
+        return lights
+    top = reachable_top(lights[0].colorset, panel, min(luminances), max(luminances))
+    if top is None:
+        return lights
+    capped: list = []
+    for light in lights:
+        if _is_number(light.luminance) and light.luminance > top:
+            light = dataclasses.replace(light, luminance=top)
+        if light not in capped:
+            capped.append(light)
+    return capped
 
 
 def _lights(color, params: dict[str, Param]) -> list:

@@ -37,7 +37,7 @@ from pathlib import Path
 
 import pytest
 
-from _calibrations import measured
+from _calibrations import PRIMARIES, measured
 from _rig import DIRECT
 from wl_xcon import cones, photometry, simeye
 from wl_xcon.actor import Box
@@ -1098,4 +1098,60 @@ def test_the_prompt_names_the_hardest_step_in_plain_words_and_a_pool_stays_whole
     assert all(type(line["params"]["pairings"]) is int for line in lines)
     (row,) = [row for row in _rows(pooled, "parameter_changes.jsonl") if row["kind"] == "set"]
     assert row["now"] == 67 and type(row["now"]) is int
+
+
+#: **A panel a tenth as bright as the test one** (XC-494): white about 20 cd/m², so it shows the
+#: four colors only up to about 18.85 cd/m² of macaque luminance, below the top of
+#: `color_luminance`'s range, 30 (computed 2026-11-08 with `check.reachable_top`).
+DIM = measured(**{name: xyY(x, y, Y * 0.1) for name, (x, y, Y) in PRIMARIES.items()},
+               id="dim@2027-01-20")
+
+
+def test_a_panel_too_dim_for_the_colors_range_top_warns_and_refuses_only_the_value(tmp_path):
+    """XC-494, by the PI's "warnings over refusals" (2026-10-11): on a panel that cannot show the
+    colors at all at the top of `color_luminance`'s range, not even the set's apex, **the task
+    loads with a warning** naming the reachable top (`color-set-unreachable`), its start, 15, being
+    shown; **a trainer's live value above that top is refused**, the previous value standing, with
+    a sentence naming it, while one below it is taken; **and a run starting above it is refused**
+    -- by the pre-flight and by `Session.run` -- naming it too."""
+    from wl_xcon.preflight import FAIL, values as starting_values
+
+    found = check_task(_load_task(TASK_FILE), _load_allocation(Path(ALLOCATION)), geometry=DIRECT,
+                       calibration=DIM, deployment=Deployment.RIG_FIXED, source=TASK_FILE)
+    assert not [f for f in found if f.blocking], [f.detail for f in found if f.blocking]
+    (unreachable,) = [f for f in found if f.code == "color-set-unreachable"]
+    assert unreachable.accepted_in == SESSION_KINDS
+    assert ("cannot show color set 'isohue' at all above about 18.9 cd/m² of macaque luminance, "
+            "of the 1 to 30 cd/m² setting 'color_luminance' allows") in unreachable.detail
+    assert "color-set-desaturated" in {f.code for f in found}
+
+    refused = _Locks("color_luminance", 25.0, stop_at=5)
+    session = _opened(replace(_spec(tmp_path / "live", seed=5, start_block="Fade-in"),
+                              calibration=DIM), refused)
+    refused.session = session
+    session.run()
+    assert session.refusals == [("color_luminance", JAKE, (
+        "'color_luminance' at 25 is refused, and the previous value stands: calibration "
+        "dim@2027-01-20 cannot show color set 'isohue' at 25 cd/m² of macaque luminance, not even "
+        "its apex: this panel shows it up to about 18.9 cd/m² of macaque luminance, its reachable "
+        "top"))]
+    assert {line["params"]["color_luminance"] for line in _rows(session, "trials.jsonl")} == {15.0}
+
+    taken = _Locks("color_luminance", 18.0, stop_at=5)
+    within = _opened(replace(_spec(tmp_path / "within", seed=5, start_block="Fade-in"),
+                             calibration=DIM), taken)
+    taken.session = within
+    within.run()
+    assert within.refusals == []
+    assert [line["params"]["color_luminance"] for line in _rows(within, "trials.jsonl")][1:] == (
+        [18.0] * (len(_rows(within, "trials.jsonl")) - 1))
+
+    item = starting_values(_load_task(TASK_FILE), {"color_luminance": 25.0}, (), "training",
+                           calibration=DIM)
+    assert item.result == FAIL and "its reachable top" in item.said
+    assert "about 18.9 cd/m²" in item.said
+    started = _opened(replace(_spec(tmp_path / "start", seed=5, start_block="Fade-in"),
+                              calibration=DIM, values={"color_luminance": 25.0}), Simulated())
+    with pytest.raises(SystemExit, match="task refused, run not started: .*about 18.9 cd/m²"):
+        started.run()
 
