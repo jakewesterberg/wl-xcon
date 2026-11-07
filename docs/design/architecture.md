@@ -197,7 +197,11 @@ unknown (since engine build B, the name of whoever acknowledged it at an earlier
 session when it is carried, below), writing nothing itself; a mistake in it starts a run that
 should not start. Since engine build C2b it hands the run the plan its start names, its pre-flight
 taken for that plan -- a plan the task lacks fails that pre-flight's task checks, which the gate
-refuses -- three lines (the engine C2b plan's Appendix A, item 1).
+refuses -- three lines (the engine C2b plan's Appendix A, item 1). **Since the pop-out search
+build's Task 6 it hands the run the block of that plan its start names** (`start_block`), its
+pre-flight taken for that block too -- a block the run cannot start at fails the task checks, which
+the gate refuses -- two lines and a docstring sentence (the PI, 2026-11-07, asked in the UI:
+"Approve").
 
 **`Service._open` and `Service._start` and the warnings list** (engine build B: approved by the
 PI as planned on 2026-10-08, and as built on the day he approves its welfare summary): an open is
@@ -563,9 +567,9 @@ trainer picks"), the blocks before it still there to move or fall back to: `wlx 
 block of that name, no plan, an order that draws its blocks at random; `check.unstarted`) fails
 the pre-flight's task checks, is refused by `wlx run` before its session opens and by
 `Session.run` as their backstop; its start row records `start_block`, null for the first.
-**The console's start does not carry it yet**: `Service._start`, welfare-listed, builds the run
-without it, so the service refuses a start naming one with a sentence until the PI reviews that
-change. The pre-flight offers the plan's stages, each staircase's levels and the level it would
+**The console's start carries it** through `Service._start`, welfare-listed, its pre-flight taken
+for that block (the PI approved the change on 2026-11-07, asked in the UI; see that function's
+paragraph above). The pre-flight offers the plan's stages, each staircase's levels and the level it would
 start at, and the pool's pairings (`Preflight.stages`, `pool`), which the page's Setup tab draws
 and its start sends as values only where a person changed them, and shows the animal's previous
 session's end of the plan as its record left it (`Preflight.previous`; `resume.previous`,

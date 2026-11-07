@@ -585,19 +585,7 @@ class Service:
         elif isinstance(command, _link.CheckRun):
             self._check(command)
         elif isinstance(command, _link.StartRun):
-            if command.start_block is not None:
-                # **Not yet carried to the run** (the pop-out search build's Task 6): `_start`,
-                # welfare-listed, builds the run from the start without its `start_block`, so a run
-                # started from it would quietly start at the plan's first block. Refused instead,
-                # until the PI's welfare review of that change (the Task 6 report's welfare item);
-                # `wlx run --start-block` and a resumed run's own stage are carried today.
-                self._refuse("start", command.by, (
-                    f"a start at a named block ({_link._quoted(command.start_block)}) is not "
-                    f"carried to the run yet: Service._start, welfare-listed, waits on the PI's "
-                    f"review to carry it, so nothing was started; start at the plan's first "
-                    f"block, and move on with next block"))
-            else:
-                self._start(command)
+            self._start(command)
         elif isinstance(command, _link.ResumeSession):
             idle = self.session is None
             self._resume(command)
@@ -1230,6 +1218,8 @@ class Service:
         pre-flight as its start row records it -- who acknowledged each unknown
         (`preflight.rows`). It plays the plan the start names among its task's (XC-207;
         engine build C2b), which its pre-flight is taken for, or with none the plain run.
+        **And at the block of it the start names** (the pop-out search build's Task 6), which its
+        pre-flight's task checks fail where the run cannot start there.
 
         **A run past the out-of-cage limit is refused here, before `RUN_START`**
         (carried from Task 3): `Session.run` refuses none -- `welfare.preflight` checks no
@@ -1249,7 +1239,8 @@ class Service:
         task = self._task(command.task, "start", command.by)
         if task is None:
             return
-        checked, owed = self._preflight(session, task, command.values, command.plan)
+        checked, owed = self._preflight(session, task, command.values, command.plan,
+                                        command.start_block)
         session.preflight = checked
         # **Accepted once per session** (engine spec §19.3, §20.1): an unknown item accepted at
         # an earlier run, with the same sentence, counts as acknowledged here, under the name of
@@ -1280,6 +1271,7 @@ class Service:
                 seed=self._seed(),
                 values=dict(command.values),
                 plan=command.plan,
+                start_block=command.start_block,
             ),
             _preflight.rows(checked, command.by, command.acknowledged, carried),
             command.by,

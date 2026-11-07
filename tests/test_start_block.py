@@ -12,10 +12,9 @@ wl-preproc accepted the record's one new field on 2026-11-07
 (`docs/pending-wl-preproc-amendments.md`): the run's start row gains `start_block`, the name of the
 block the run started at, "absent or null means the first".
 
-**The console's start does not carry a start block yet**: `Service._start` is welfare-listed and
-builds the run from the start without it, so until the PI reviews that change a start naming one
-is refused with a sentence (the build's rule: a safety component's missing wiring refuses), and the
-pre-flight, `wlx run --start-block` and `Session.run` carry it today.
+**The console's start carries a start block through `Service._start`**, welfare-listed: the PI
+approved its passing the block to the start's pre-flight and to the run on 2026-11-07, asked in
+the UI (the build's welfare item); until then a start naming one was refused with a sentence.
 
 Engine test material, run only in the simulator: the reference search task with a pool of three
 pairings of its own looks (as `test_pairing_pool.py` builds it) and a plan of two stages, `Alone`
@@ -655,28 +654,32 @@ def test_a_resumed_run_starts_afresh_after_a_run_a_person_ended_or_on_another_pl
     assert [control.kind for control in _running(second, 1)[-1].controls].count("resumed") == 0
 
 
-def test_the_service_refuses_a_start_at_a_named_block_until_service_start_carries_it(tmp_path):
-    """`Service._start` is welfare-listed and builds the run without a start block, so a console's
-    start naming one would quietly start at the first: refused with a sentence instead, nothing
-    started, until the PI reviews that change (the build's rule: the missing wiring refuses). A
-    start naming none starts at the first, as before."""
+def test_a_console_start_at_a_named_block_starts_there(tmp_path):
+    """The PI approved `Service._start` carrying the start's block (2026-11-07, asked in the UI;
+    the build's welfare item): a console's start naming `Crowd` starts the run there, its start row
+    saying so. One naming a block the plan lacks fails the pre-flight `_start` takes again for that
+    block -- its task checks, as a check naming it says first -- so the gate refuses it and nothing
+    starts, before `Session.run`'s backstop is reached."""
     folders = _folders(tmp_path, [ALONE, CROWD])
     service = _service(folders)
     _step(service, _open())
-    _plays(service, ["right"])
-
-    frame = _step(service, _start(start_block="Crowd"))
-
-    assert frame.phase == "between_runs" and _jsonl(_xcon(folders) / "runs.jsonl") == []
     checked = _step(service, CheckRun(by=JAKE, task="search.py", values=dict(VALUES),
                                       plan="train", start_block="Nope"))
+    _plays(service, ["right"])
+    refused = _step(service, _start(start_block="Nope"))
+    _plays(service, ["right"])
+
+    _step(service, _start(start_block="Crowd"))
+
+    said = "plan 'train' has no block 'Nope'; its blocks are 'Alone', 'Crowd'"
     assert (checked.preflight.start_block, checked.preflight.items[0].result,
-            checked.preflight.items[0].said) == (
-        "Nope", FAIL, "plan 'train' has no block 'Nope'; its blocks are 'Alone', 'Crowd'")
-    assert [(r.name, r.why) for r in frame.refusals][-1] == ("start", (
-        "a start at a named block ('Crowd') is not carried to the run yet: Service._start, "
-        "welfare-listed, waits on the PI's review to carry it, so nothing was started; start at "
-        "the plan's first block, and move on with next block"))
+            checked.preflight.items[0].said) == ("Nope", FAIL, said)
+    assert [(r.name, r.why) for r in refused.refusals][-1] == (
+        "start", f"pre-flight failed, so the run does not start: task checks: {said}")
+    (start,) = [row for row in _jsonl(_xcon(folders) / "runs.jsonl") if row["event"] == "start"]
+    assert (start["plan"], start["start_block"]) == ("train", "Crowd")
+    assert [(line["block"], line["params"]["set_size"]) for line in _run_lines(folders, 0)] == [
+        ("Crowd", 6)]
 
 
 def test_the_start_form_shows_yesterdays_end(tmp_path):

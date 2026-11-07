@@ -892,8 +892,7 @@ stage.
 Review Focus 4): **a run may start at a named block of its plan** (`start_block`, recorded in its start row, null for
 the first, as wl-preproc accepted), the blocks before it there to move or fall back to; a block it cannot start at --
 none of that name, no plan, an order that draws its blocks at random -- is refused before the run opens. The console's
-start does not carry it yet: `Service._start` is welfare-listed and waits on the PI's review, and the service refuses a
-start naming one with a sentence until then. The pre-flight offers the plan's stages, each staircase's levels and the
+start carries it through `Service._start`, welfare-listed, whose change the PI approved the same day. The pre-flight offers the plan's stages, each staircase's levels and the
 pool's pairings to pick, the start sending only what a person changed, and shows the animal's previous session's end of
 the plan, read from its record and never carried. **A resumed session's first run goes on from the run its process
 stopped in** (no end row, or Ctrl-C): same task and plan, no start block named, it starts at that run's stage, the

@@ -93,8 +93,8 @@
       "path": "wl_xcon/service.py",
       "qualname": "Service._start",
       "doc": "`Service._start`",
-      "sha256": "247fb0c3148e5d293ccf7dbf7d672fa49860f84b789da711b6eb4eb25ebf516d",
-      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+      "sha256": "433fd29bcb9c875bf5b69b95dbdcce5cabe218e3e10b7f956031a16622ae04bf",
+      "approved": "the PI, 2026-11-07, asked in the UI, approved Service._start passing the run's start block to its pre-flight and its run (the pop-out build's welfare item 2)"
     },
     {
       "name": "service._unasked",
