@@ -528,6 +528,12 @@ BODY_LIMIT = 4096
 #: The most a refusal on the https page reads and discards of a body it will not use.
 #: Housekeeping, not a measurement.
 REFUSAL_DRAIN_LIMIT = 65536
+#: The longest a refusal spends reading that body, in seconds, however slowly it arrives.
+#: `REQUEST_TIMEOUT_S` bounds one `recv`, so a client dripping a byte every few seconds
+#: could otherwise hold its thread for as long as it keeps dripping; past this the refusal
+#: is sent anyway and the connection closed. An engineering default, not a measurement:
+#: a page's few hundred bytes on a LAN take far less.
+REFUSAL_DRAIN_S = 5.0
 #: The longest name a person may give at the box's prompt (spec §5.2).
 NAME_LIMIT = 64
 #: The largest mark number `wlx serve` hands a browser: 2**53 - 1, JavaScript's
@@ -1074,19 +1080,49 @@ def make_handler(
             """Answer a refusal after reading the request's body, on either listener, so
             closing the connection on unread bytes does not reset the answer away (the
             client would see a reset, never the sentence: XC-120). Reads and discards at
-            most `REFUSAL_DRAIN_LIMIT` bytes; a body declared longer than that gets its
-            answer with `Connection: close` and is never read past the limit, so the
-            client is told the connection ends. A client that sends more than it declared
-            is not waited for: the answer is written once the declared length is read."""
+            most `REFUSAL_DRAIN_LIMIT` bytes and for at most `REFUSAL_DRAIN_S` seconds.
+
+            **The refusal is always sent**: a client that stalls, drips, or leaves
+            mid-body costs its own thread that long and is then answered with the
+            refusal it was owed (never a 500), the connection closed. A body declared
+            longer than the limit, and a body with no `Content-Length` (chunked), cannot
+            be read to its end: the answer carries `Connection: close`, which tells the
+            client the connection ends. **A client that keeps sending past the close may
+            still see a reset in place of the answer**; the page never does."""
             length = self.headers.get("Content-Length") or ""
-            headers: tuple = ()
+            close = False
             if length.isascii() and length.isdecimal():
                 wanted = int(length)
-                self.rfile.read(min(wanted, REFUSAL_DRAIN_LIMIT))
-                if wanted > REFUSAL_DRAIN_LIMIT:
-                    self.close_connection = True
-                    headers = (("Connection", "close"),)
+                close = wanted > REFUSAL_DRAIN_LIMIT
+                try:
+                    self._drain(min(wanted, REFUSAL_DRAIN_LIMIT))
+                except OSError:  # `TimeoutError` too: the client stalled, dripped or left
+                    close = True
+            elif self.headers.get("Transfer-Encoding") is not None:
+                close = True  # chunks nobody will read must not become the next request
+            headers: tuple = ()
+            if close:
+                self.close_connection = True
+                headers = (("Connection", "close"),)
+            try:
+                self.connection.settimeout(self.timeout)
+            except OSError:
+                pass
             self._write(status, json.dumps(payload).encode("utf-8"), "application/json", headers)
+
+        def _drain(self, count: int) -> None:
+            """Read and drop `count` bytes within `REFUSAL_DRAIN_S`: raises `TimeoutError`
+            when that passes first and `ConnectionError` if the client closes first."""
+            end = time.monotonic() + REFUSAL_DRAIN_S
+            while count > 0:
+                left = end - time.monotonic()
+                if left <= 0:
+                    raise TimeoutError("the refused request's body did not arrive in time")
+                self.connection.settimeout(left)
+                chunk = self.rfile.read1(min(count, 8192))
+                if not chunk:
+                    raise ConnectionError("the client closed before its body was complete")
+                count -= len(chunk)
 
         def _write(
             self,

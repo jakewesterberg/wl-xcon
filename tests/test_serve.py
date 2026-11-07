@@ -5993,3 +5993,77 @@ def test_the_cap_does_not_touch_other_requests():
             response.close()
             held.close()
 
+
+
+# --- a refusal is sent even when the body never finishes (review 1, finding 1) -------------------
+
+
+def _refused_unfinished(port: int, send, *, extra: tuple = (), declare: int = 60000):
+    """Declare a body to a request that will be refused, let `send(sock)` deliver what it
+    will, then read until the server closes. Returns the status, headers, JSON body and the
+    seconds the whole took."""
+    head = [
+        "POST /commands HTTP/1.1",
+        f"Host: 127.0.0.1:{port}",
+        "Origin: http://evil.example",
+        "Content-Type: application/json",
+        *extra,
+    ]
+    if declare:
+        head.append(f"Content-Length: {declare}")
+    started = time.monotonic()
+    with socket.create_connection(("127.0.0.1", port), timeout=10) as sock:
+        sock.sendall(("\r\n".join(head) + "\r\n\r\n").encode("ascii"))
+        sender = threading.Thread(target=send, args=(sock,), daemon=True)
+        sender.start()
+        chunks = []
+        while chunk := sock.recv(65536):
+            chunks.append(chunk)
+    took = time.monotonic() - started
+    top, _, body = b"".join(chunks).partition(b"\r\n\r\n")
+    lines = top.decode("iso-8859-1").split("\r\n")
+    got = dict(line.split(": ", 1) for line in lines[1:])
+    return int(lines[0].split()[1]), got, json.loads(body), took
+
+
+def test_a_client_that_stalls_mid_body_still_gets_its_refusal_and_the_connection_closes(monkeypatch):
+    monkeypatch.setattr(serve, "REQUEST_TIMEOUT_S", 1.0)
+    monkeypatch.setattr(serve, "REFUSAL_DRAIN_S", 0.4)
+    with _served(_hub(), dispatch=_Dispatch()) as port:
+        status, got, body, took = _refused_unfinished(port, lambda sock: sock.sendall(b"x" * 10))
+        # Another client was answered the whole time: the stall costs only its own thread.
+        assert _request(port, "GET", "/")[0] == 200
+    assert (status, body["status"]) == (403, "refused")
+    assert got.get("Connection", "").lower() == "close"
+    assert took < 3.0
+
+
+def test_a_client_dripping_its_body_is_cut_off_at_the_deadline_with_its_refusal(monkeypatch):
+    monkeypatch.setattr(serve, "REQUEST_TIMEOUT_S", 2.0)  # each drip lands inside this
+    monkeypatch.setattr(serve, "REFUSAL_DRAIN_S", 0.5)
+
+    def drip(sock):
+        for _ in range(40):
+            try:
+                sock.sendall(b"x")
+            except OSError:
+                return
+            time.sleep(0.15)
+
+    with _served(_hub(), dispatch=_Dispatch()) as port:
+        status, got, body, took = _refused_unfinished(port, drip)
+    assert (status, body["status"]) == (403, "refused")
+    assert got.get("Connection", "").lower() == "close"
+    assert took < 3.0  # 40 drips would take 6 s; the deadline cut it at about 0.5
+
+
+def test_a_refused_chunked_post_closes_the_connection():
+    with _served(_hub(), dispatch=_Dispatch()) as port:
+        status, got, body, _took = _refused_unfinished(
+            port,
+            lambda sock: sock.sendall(b"5\r\nhello\r\n0\r\n\r\n"),
+            extra=("Transfer-Encoding: chunked",),
+            declare=0,
+        )
+    assert (status, body["status"]) == (403, "refused")
+    assert got.get("Connection", "").lower() == "close"
