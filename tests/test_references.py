@@ -424,9 +424,9 @@ def citations(text: str) -> list[tuple[int, str]]:
     """`(line, key)` for every key cited in `text`'s prose.
 
     Inside brackets, at any depth (`[@key]`, `[@key, p. 3]`, `[see @a; @b]`, `[-@key]`,
-    `[@a, p. 3 [sic]]`), every Pandoc key whose `@` starts a word, after a space, `[`, `;`,
-    `,` or `(`, braced or bare (`[see,@Doe99]`, `[see (@{Roe99})]`; XC-448), so
-    `[mail a@b.org]` is not one. Outside brackets, Pandoc's author-in-text form (`@key says`) and
+    `[@a, p. 3 [sic]]`), every Pandoc key whose `@` is not inside a word, as outside them
+    (`[see,@Doe99]`, `[see (@{Roe99})]`, `[see:@Doe99]`; XC-448), so `[mail a@b.org]` is not
+    one. Outside brackets, Pandoc's author-in-text form (`@key says`) and
     anything else shaped like this library's keys, `@` not inside a word: failing
     closed on a form the bracket scan would otherwise skip."""
     text = prose(text)
@@ -443,7 +443,7 @@ def citations(text: str) -> list[tuple[int, str]]:
             start = at - 1 if depth and at and text[at - 1] == "-" else at
             before = text[start - 1] if start else " "
             if depth:
-                starts_word = before.isspace() or before in "[;,("
+                starts_word = not (before.isalnum() or before in "_.@")
                 bare = starts_word and PANDOC_KEY.match(text, at + 1) or None
             else:
                 inside_word = before.isalnum() or before in "_.@"
@@ -515,6 +515,24 @@ def test_a_key_after_a_comma_or_a_parenthesis_in_brackets_is_read(text, key):
     scan took an `@` in brackets to start a key only after a space, `[` or `;`, so a missing
     paper cited that way passed the check."""
     assert citations(text) == [(1, key)]
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["[see:@Doe99]", "[see/@Doe99]", '[see"@Doe99]', "[see{@Doe99}]", "[see)@Doe99]",
+     "[see*@Doe99]", "[see\u2014@Doe99]", "[see:@{Doe99}]", "[see*@{Doe99}]"],
+)
+def test_a_key_after_any_character_that_is_not_part_of_a_word_in_brackets_is_read(text):
+    """The review's M8: pandoc 3.8 cites `Doe99` after `:`, `/`, `"`, `{`, `)`, `*` and an em
+    dash too, so inside brackets an `@` starts a key wherever it is not inside a word, the rule
+    outside them, rather than after a short list of characters."""
+    assert citations(text) == [(1, "Doe99")]
+
+
+def test_a_key_after_a_period_in_brackets_stays_unread():
+    """A period is inside a word for pandoc (`[see.@Doe99]` cites nothing, as pandoc 3.8
+    reads it), and for the check outside brackets."""
+    assert citations("[see.@Doe99]") == []
 
 
 @pytest.mark.parametrize(
