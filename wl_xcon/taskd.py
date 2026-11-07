@@ -704,6 +704,24 @@ class _Climb:
         self.right = self.wrong = 0
 
 
+def _at_hardest(climb: "_Climb | None", held: "dict | None") -> bool:
+    """**Whether a trial is at its stage's hardest step** (the PI, 2026-11-07, "Hardest step
+    reached, 80% there"), between trials: always in a block with no staircase (`climb` `None`);
+    the staircase at its last level where it gives the trial its setting (`held` `None`); **and
+    where a person holds the setting, whether the value held, in `held`, is nearest that level**
+    (`task.Staircase.nearest`; the PI, 2026-11-07, on the build's review, I2: "Any trial played at
+    the hardest step counts, whoever set it there") -- an easier held value is not, and one that
+    is no number, which no level is near, is not either. A confirmed progression's bar to move up
+    counts only such answers (`scheduler.Scheduler.suggestion`); the run (`Session.run`) and a
+    replay of its record (`went_on`) both judge it here."""
+    if climb is None:
+        return True
+    top = len(climb.staircase.levels) - 1
+    if held is None:
+        return climb.level == top
+    return climb.staircase.nearest(held.get(climb.staircase.setting)) == top
+
+
 #: **What became of a suggestion the rig made** (`_Suggested.fate`; the pop-out search build,
 #: 2026-11-07): `None` while it stands; withdrawn as its bar stopped being met (the plan's Review
 #: Focus 2), declined by a person, confirmed by a person's move, or lapsed as the run left its
@@ -849,15 +867,17 @@ def went_on(task: Task, last) -> _WentOn | None:
             if seen is not None and now != seen:
                 changed_pool()
             seen = value = now
-        top = None if climb is None else len(climb.staircase.levels) - 1
-        if climb is not None and (row.get("drawn") or {}).get(climb.staircase.setting) == STAIRCASE:
+        stepped = (climb is not None
+                   and (row.get("drawn") or {}).get(climb.staircase.setting) == STAIRCASE)
+        if stepped:
             level = climb.staircase.nearest(params.get(climb.staircase.setting))
             if level is not None and level != climb.level:
                 climb.level, climb.right, climb.wrong = level, 0, 0
-        hardest = climb is None or climb.level == top
+        # As the run judged it (`_at_hardest`): a line whose setting a person held, by its value.
+        hardest = _at_hardest(climb, None if stepped or climb is None else params)
         outcome = None if row["outcome"] == "hang" else Outcome(row["outcome"])
         shown = bool(row.get("shown"))
-        if climb is not None and (row.get("drawn") or {}).get(climb.staircase.setting) == STAIRCASE:
+        if stepped:
             climb.step(outcome, shown)
         state["bars"].append(("trial", outcome, shown, not row.get("drummed"),
                               bool(row.get("eased")), hardest))
@@ -4576,6 +4596,12 @@ class Session:
                 continue
             climb = self._climb
             if climb is not None and climb.staircase.setting == name:
+                if _at_hardest(climb, values):
+                    # **A value held at the staircase's hardest step eases nothing** (the PI,
+                    # 2026-11-07, on the build's review, I2: "Any trial played at the hardest
+                    # step counts, whoever set it there"): it is the stage's hardest step, no
+                    # easier than any level the staircase gives.
+                    continue
                 # **A value held over the open block's staircase is judged against its level**,
                 # where it stopped, which the trial would otherwise have had (`_climbing`, called
                 # for this trial first; the pop-out search build, 2026-11-07).
@@ -5522,11 +5548,6 @@ class Session:
                 # ends; a hand-back resumes it (`_apply_pending`).
                 climb = self._climbing()
                 stepping = climb is not None and climb.staircase.setting not in self._edited
-                # **At its stage's hardest step** (the PI, 2026-11-07, "Hardest step reached, 80%
-                # there"): the block's staircase at its last level as the trial is drawn, given or
-                # stopped there under a person's value; a block with none always is. A confirmed
-                # progression's bar to move up counts only such answers (`Scheduler.suggestion`).
-                hardest = climb is None or climb.level == len(climb.staircase.levels) - 1
                 if stepping:
                     taken[climb.staircase.setting] = climb.value
                     sources[climb.staircase.setting] = STAIRCASE
@@ -5560,6 +5581,14 @@ class Session:
                 # it runs (`_eased`). An eased trial is left out of moving up and still counts
                 # toward moving back and toward its condition (`Scheduler.record`).
                 eased = self._eased(condition, values, sources, drawn.number)
+                # **At its stage's hardest step** (the PI, 2026-11-07, "Hardest step reached, 80%
+                # there"): the block's staircase at its last level as the trial is drawn -- **or,
+                # while a person holds its setting, the value held nearest that level** (the PI,
+                # 2026-11-07, on the build's review, I2: "Any trial played at the hardest step
+                # counts, whoever set it there"; `_at_hardest`); a block with none always is. A
+                # confirmed progression's bar to move up counts only such answers
+                # (`Scheduler.suggestion`).
+                hardest = _at_hardest(climb, None if stepping else values)
                 # Said on the console as long as it lasts (`eased`; the C3 plan's engineering
                 # review, I-2), where the block's rule moves the animal on.
                 self._eased_now = eased if scheduler.moves_up else ()

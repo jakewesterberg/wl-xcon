@@ -49,15 +49,17 @@ from wl_xcon.eye import EyeReading, Sample, Tracker
 from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.gaze import Tracked
 from wl_xcon.geometry import on_circle_deg, separation_deg
-from wl_xcon.link import Decline, NextBlock, Simulated, Stop
+from wl_xcon.link import Decline, NextBlock, SetParameter, Simulated, Stop
 from wl_xcon.photometry import D65, SRGB, ColorSetLight, xyY
 from wl_xcon.run import Recorded, run_trial
 from wl_xcon.task import (
     EXPECTED,
     HARDER,
     NOT_DIFFICULTY,
+    SPENT,
     Array,
     ByCriterion,
+    Counting,
     Disc,
     ObjectWindows,
     Outcome,
@@ -68,7 +70,7 @@ from wl_xcon.task import (
     actions_of,
     staircase_verdict,
 )
-from wl_xcon.taskd import Session, SessionSpec
+from wl_xcon.taskd import Session, SessionSpec, _appeared
 from wl_xcon.welfare import Deployment, Simulated as Pump
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -296,6 +298,9 @@ def test_it_holds_the_pis_values(task):
         "odd_color", "distractor_color"]
     assert all(param.choices for param in task.params if param.start is None)
     assert trial.background is None, "black, the default bottom layer"
+    # The array appears with the go, so a trial that reaches it and ends unanswered is a failure:
+    # "a wrong item and no response count as failures" (§3.4; the build's review, I1).
+    assert trial.counting == Counting(after_stimulus=SPENT, appears="go")
 
     shows = {action.stimulus.name: action.stimulus
              for _, action in actions_of(trial) if isinstance(action, Show)}
@@ -431,6 +436,24 @@ def test_a_target_break_is_an_error(task):
     assert staircase_verdict(Outcome.TARGET_BREAK, shown=True) is False
     assert late.outcome is Outcome.CORRECT
     assert [entry for entry in late_log if entry[0] == "reward"] == [("reward", "reward_correct")]
+
+
+def test_no_response_after_the_go_is_a_failure_with_no_timeout_and_no_reward(task):
+    """§3.1 and §3.4 (the build's review, I1): an eye that holds the fixation point through the go
+    and makes no saccade ends the trial `NO_RESPONSE` once the response deadline passes; the array
+    had appeared, so the staircase counts it a failure ("a wrong item and no response count as
+    failures"), and it is no error of §3.1's: no timeout, no reward. The task's counting table
+    (`appears="go"`) is what makes it shown."""
+    result, eye, log = _play(task, [LOOK])
+
+    assert result.outcome is Outcome.NO_RESPONSE, result.visited
+    assert result.visited[-1] == "go" and "flight" not in result.visited
+    shown = _appeared(task.trial, result)
+    assert shown is True
+    assert staircase_verdict(result.outcome, shown) is False
+    assert result.frames == eye.begun["go"] + round(_start(task, "response_deadline") * HZ) - 1
+    assert ("mark", TIMEOUT_ON) not in log
+    assert not [entry for entry in log if entry[0] == "reward"], log
 
 
 # --- Sessions -----------------------------------------------------------------------------------
@@ -776,3 +799,132 @@ def test_a_simulated_session_runs_end_to_end_through_the_simulated_eye(tmp_path,
     for line in went:
         stimuli = {entry["name"]: entry for entry in line["stimuli"]}
         assert stimuli["fix"]["off"] == stimuli["search"]["frame"], line["stimuli"]
+
+
+class _Locks(Simulated):
+    """**A trainer who locks a setting** (a person's `set`, the console's lock; TSK-32): `setting`
+    at `value`, sent at the first drain, so it holds from the run's second trial; the run stopped
+    `AFTER` drains once the rig first suggests moving up, or at `BUDGET`."""
+
+    AFTER, BUDGET = 3, 240
+
+    def __init__(self, setting: str, value: float, *, stop_at: int | None = None) -> None:
+        super().__init__()
+        self.setting, self.value, self.stop_at = setting, value, stop_at
+        self.session: Session | None = None
+        self.drains = 0
+        self.seen: int | None = None
+        self.ran_out = False
+
+    def drain(self) -> list:
+        self.drains += 1
+        if self.drains == 1:
+            self.queue(SetParameter(self.setting, self.value, JAKE))
+        offered = self.session.suggestion
+        if self.seen is None and offered is not None and offered[1] == "up":
+            self.seen = self.drains
+        if self.drains == self.BUDGET:
+            self.ran_out = True
+        if (self.drains in (self.BUDGET, self.stop_at)
+                or (self.seen is not None and self.drains == self.seen + self.AFTER)):
+            self.queue(Stop(by=JAKE))
+        return super().drain()
+
+
+def test_a_trial_locked_at_the_hardest_step_counts_toward_moving_up(tmp_path):
+    """The PI, 2026-11-07, on the build's review (I2): "Any trial played at the hardest step
+    counts, whoever set it there." The trainer locks `distractor_fraction` at full in Fade-in, its
+    staircase's hardest step, from the run's second trial: every trial plays at full and leaves
+    the staircase where it was, and each one answered counts toward moving up -- none is eased by
+    the lock, the panel's bar counts them, and with 80% of the last 50 right the rig suggests
+    moving up to Crowd, every answer of its window at the hardest step."""
+    trainer = _Locks("distractor_fraction", 1.0)
+    session = _opened(replace(_spec(tmp_path, seed=5, start_block="Fade-in"), accuracy=0.95),
+                      trainer)
+    trainer.session = session
+
+    session.run()
+
+    assert trainer.seen is not None and not trainer.ran_out, "no suggestion to move up was made"
+    lines = _rows(session, "trials.jsonl")
+    assert lines[0]["params"]["distractor_fraction"] == 0.1
+    assert all(line["params"]["distractor_fraction"] == 1.0 for line in lines[1:])
+    assert all("distractor_fraction" in line["live"] for line in lines[1:])
+    assert not [line for line in lines if "distractor_fraction" in (line.get("eased") or ())]
+    (up, *_) = [row for row in _rows(session, "parameter_changes.jsonl")
+                if row["kind"] == "suggested" and row["move"] == "up"]
+    assert (up["block"], up["now"], up["at_hardest"]) == ("Fade-in", "Crowd", True)
+    assert up["bar"]["of"] == 50 and up["bar"]["correct"] >= 40
+    # The panel's count: the frame the suggestion first stood on carries the bar it was made on.
+    (first, *_) = [frame for frame in session.link.published
+                   if frame.suggestion is not None and frame.suggestion.change == up["change"]]
+    assert (first.bars.up_correct, first.bars.up_of, first.bars.up_window) == (
+        up["bar"]["correct"], 50, 50)
+    assert (first.suggestion.correct, first.suggestion.of) == (up["bar"]["correct"], 50)
+
+
+def test_went_on_replays_only_answers_at_the_hardest_step_as_at_it(task, tmp_path):
+    """The build's review, M1 (H10): a run that stops with its process is gone on from by
+    replaying its record (`taskd.went_on`), and each line goes toward the stage's bar to move up
+    only where it was at the stage's hardest step -- the staircase at its top level, or a value a
+    person held there (I2) -- never an answer at an easier level. A Fade-in run started one level
+    below full, so its staircase moves to full and back, and the trainer locks the distractors at
+    full for its last trials: each line replays as at the hardest step exactly where its
+    distractors were at full."""
+    from wl_xcon import resume
+    from wl_xcon.taskd import went_on
+
+    spec = replace(_spec(tmp_path, seed=5, start_block="Fade-in"),
+                   values={"distractor_fraction": 0.9})
+
+    class _Late(_Locks):
+        """The lock sent at the 30th drain, not the first; the run stopped at the 45th."""
+
+        def drain(self) -> list:
+            self.drains += 1
+            if self.drains == 30:
+                self.queue(SetParameter(self.setting, self.value, JAKE))
+            if self.drains == 45:
+                self.queue(Stop(by=JAKE))
+            return Simulated.drain(self)
+
+    late = _Late("distractor_fraction", 1.0)
+    session = _opened(spec, late)
+    late.session = session
+
+    session.run()
+
+    lines = _rows(session, "trials.jsonl")
+    restored = resume.read(session.directory, departure=1_700_000_000.0)
+    went = went_on(task, restored.last_run)
+    replayed = [event[-1] for event in went.bars if event[0] == "trial"]
+    at_full = [line["params"]["distractor_fraction"] == 1.0 for line in lines]
+    assert replayed == at_full
+    assert any(at_full) and not all(at_full)
+    held = [line for line in lines if "distractor_fraction" in line["live"]]
+    assert held and all(line["params"]["distractor_fraction"] == 1.0 for line in held)
+    stepped = [line for line in lines if "distractor_fraction" not in line["live"]]
+    assert {line["params"]["distractor_fraction"] for line in stepped} >= {0.9, 1.0}
+
+
+@pytest.mark.parametrize(("stage", "setting", "value", "own"), [
+    ("Alone", "set_size", 3, 1),
+    ("Fade-in", "set_size", 6, 4),
+    ("Crowd", "distractor_fraction", 0.5, 1.0),
+])
+def test_a_trainer_overrides_a_stages_own_value_live(tmp_path, stage, setting, value, own):
+    """Each stage's own fixed value -- Alone's one disc, Fade-in's four, Crowd's distractors at full
+    -- is a condition's value, and a person's live value wins over it (engine spec §14.7; TSK-32's
+    lock, the brief's fix 1): from the trial after the trainer's `set`, every trial of the stage
+    plays at the person's value, its line saying a person holds it, and the stage is the same."""
+    trainer = _Locks(setting, float(value), stop_at=8)
+    session = _opened(_spec(tmp_path, seed=5, start_block=stage), trainer)
+    trainer.session = session
+
+    session.run()
+
+    lines = _rows(session, "trials.jsonl")
+    assert len(lines) >= 6 and {line["block"] for line in lines} == {stage}
+    assert lines[0]["params"][setting] == own and setting not in lines[0]["live"]
+    assert all(line["params"][setting] == value and setting in line["live"]
+               for line in lines[1:])

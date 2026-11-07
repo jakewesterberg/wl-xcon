@@ -171,18 +171,19 @@ class _Drained(Simulated):
 
 def _session(folder: Path, stages: list[str], script: list[str], commands=None, *,
              order: str = CONFIRMED, values: dict | None = None, world=None,
-             **source) -> Session:
+             start_block: str | None = None, **source) -> Session:
     """A run of plan `train` of `stages` on the simulators, its animal playing `script`, the run
     stopped by a person once the script is played, its wall following its frames from
-    `WALL_NOW`, the animal out of its cage and its head fixed. `world`, called with the session
-    and the trial's index before each trial is built, may reach into it."""
+    `WALL_NOW`, the animal out of its cage and its head fixed, at `start_block` where one is
+    given. `world`, called with the session and the trial's index before each trial is built,
+    may reach into it."""
     path = _task(folder, stages, order, **source)
     spec = SessionSpec(
         task=str(path), allocation="tasks/allocation.py", root=folder,
         session_id="2027-01-14_01", subject="A", trials=len(script), frame_period=1 / FRAMES,
         seed=SEED, values={**VALUES, **(values or {})}, bounds=_sessions.bounds(),
         already_delivered_today=0.0, deployment=Deployment.RIG_FIXED, geometry=DIRECT,
-        session_kind="training", calibration=SRGB, plan="train",
+        session_kind="training", calibration=SRGB, plan="train", start_block=start_block,
     )
     session = Session(spec, card=Card(), pump=Pump(), link=_Drained(commands or {}))
     session.wall_clock = lambda: WALL_NOW + session.now()
@@ -480,6 +481,34 @@ def test_one_hold_holds_the_whole_prompt_and_the_count_starts_again(tmp_path):
         "held in block Alone: the rig's suggestion 1, to move up to Crowd, declined; it is "
         "suggested again once a fresh window of answers meets its bar",
         "held in block Alone: the rig's suggestion 2, to widen the pool, declined; it is "
+        "suggested again once a fresh window of answers meets its bar"]
+
+
+def test_a_hold_of_a_move_back_leaves_the_widening_standing(tmp_path):
+    """The build's review, M1 (H3): one hold holds the whole prompt only where the prompt is a move
+    up and a widening on one window. **A move back stands on another window** (the first answers,
+    toward the fall-back), so at the top stage, where a widening and a move back can stand
+    together, a hold of the move back declines it alone: one `declined` row, naming it, and the
+    widening still stands, offered on every frame after. Crowd's staircase at its hardest step
+    meets the bar to widen on five right; four failures step it down and meet the fall-back."""
+    script = ["right"] * 5 + ["wrong"] * 4 + ["right"] * 2
+    session = _session(tmp_path, [_stage("Alone", set_size=1),
+                                  _stage("Crowd", staircase="Staircase('set_size', (4, 6, 8), "
+                                                            "start=2)")],
+                       script, {9: [Decline(suggestion=2, by=JAKE)]}, start_block="Crowd")
+
+    session.run()
+
+    assert session.refusals == []
+    assert [line["block"] for line in _lines(session)] == ["Crowd"] * 11
+    assert [(row["change"], row["kind"], row["name"], row.get("move"), row.get("suggestion"))
+            for row in _changes(session)] == [
+        (1, "suggested", "pairings", "widen", None), (2, "suggested", "block", "back", None),
+        (3, "declined", "block", None, 2)]
+    offered = _offered(session)
+    assert [offered[index] for index in (8, 9, 10)] == [(None, _widen(1, "Crowd", 4, 5))] * 3
+    assert _fed(session, "decline") == [
+        "held in block Crowd: the rig's suggestion 2, to move back to Alone, declined; it is "
         "suggested again once a fresh window of answers meets its bar"]
 
 
