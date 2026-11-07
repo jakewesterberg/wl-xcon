@@ -104,6 +104,11 @@ line is `main`'s `_marks.depart(session, departure)`**, which marks the departur
 its caller on. A change to any of these, or to the two `preflight` functions, the seven
 `service` functions, the `taskd` and `link` functions and the two parts of
 `Session._command` below, is a change requiring review; a change elsewhere is not.
+Since 2026-11-07 the list is also data, and enforced (the PI: "turn the welfare check ... into
+tests in the repository"): `tests/welfare_manifest.json` holds each item with the SHA-256 of its
+source as last approved, and `tests/test_welfare_manifest.py` fails when an item changes or
+cannot be found, and when this section and the manifest name different items, until the manifest
+is updated in a commit naming the PI's approval.
 
 **`preflight.out_of_cage` and `preflight.gate`** (P4d-2b b3a): the first is what refuses
 a new run once the out-of-cage limit is reached between runs, and the second is S9a
