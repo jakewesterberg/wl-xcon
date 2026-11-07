@@ -143,9 +143,9 @@ def _spread(values: list[float]) -> dict:
 
 
 def measure(frames: int = 1000, trials: int = 300, calls: int = 200_000) -> dict:
-    """Run the three measurements and return what they found, as numbers. `calls`
-    is refused before anything is measured unless it is a positive multiple of
-    `BATCHES` (`_per_batch`)."""
+    """Run the three measurements and return what they found, as numbers. `frames`
+    and `trials` below 1 (`_at_least_one`, XC-433) and a `calls` that is not a positive
+    multiple of `BATCHES` (`_per_batch`) are refused before anything is measured."""
     _at_least_one("frames", frames)
     _at_least_one("trials", trials)
     per_batch = _per_batch(calls)
