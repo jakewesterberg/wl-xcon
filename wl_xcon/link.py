@@ -3417,8 +3417,9 @@ class ZmqLink:
 
         `timeout` is refused, with a sentence, unless ZeroMQ can take it (`_wait_ms`,
         XC-432): a negative would poll forever, and NaN or infinity would raise from
-        `int()`. 0 is legal and returns at once. The check is a comparison or two, once
-        per housekeeping wait."""
+        `int()`. 0 is legal and returns at once, and a timeout over 0 and under 1 ms waits
+        1 ms (it used to return at once, truncated to 0). The check is a comparison or two,
+        once per housekeeping wait."""
         import zmq
 
         wait_ms = _wait_ms(timeout, "timeout")
@@ -3548,8 +3549,8 @@ WAIT_MS_MAX = 2**31 - 1
 
 
 def _wait_ms(seconds: object, name: str, least_ms: int = 0) -> int:
-    """`seconds`, a wait one of this file's `Zmq*` constructors takes, as the whole
-    milliseconds ZeroMQ is given, or a `ValueError` naming `name` (XC-046).
+    """`seconds`, a wait one of this file's `Zmq*` constructors takes, or `ZmqLink.idle`
+    (XC-432, before its poller is built), as the whole milliseconds ZeroMQ is given, or a `ValueError` naming `name` (XC-046).
 
     A number that is not a `bool`, from `least_ms` to `WAIT_MS_MAX` once in
     milliseconds, compared before `int()`: a NaN, an infinity, and a float that

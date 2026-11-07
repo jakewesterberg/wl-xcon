@@ -596,7 +596,7 @@ holds no ELN notes; it holds the rig name and not the id) and is rebuilt when it
 3. Whether a control box may register as an OAuth2 client of wl.works for operator
    attribution (above), and whether that is one client per box or one for the fleet.
 4. Whether `planned_task` and `session_intent` are worth adding to a bundle that is already
-   load-bearing on their side — their Plan 18b tests run against a fake, so the payload
+   load-bearing on their side — their Plan 18b tests run against a fake *(corrected 2026-11-07: wl.works wrote on 2026-08-31, in its handover `HANDOVER-wl-expcontroller.md` lines 53-59, read at wl-works commit `b090176`, that this is "not true of this repository — there are no such tests", as the correction under "Why this and not a new protocol" above says)*, so the payload
    shape matters there before either machine exists. **Withdrawn 2026-10-01** (wl-works
    `6a57b1cc`, its montage-plan spec §1): both are plan fields, and nothing of a plan is sent.
    What stands of wl.works' answers of 2026-08-31: `prepare-session` (with no plan fields),
