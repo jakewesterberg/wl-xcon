@@ -1,4 +1,4 @@
-"""Saccade versions 9 and 10: each stretch of unknown velocities judged whole. The review of version
+"""Saccade versions 9 to 11: each stretch of unknown velocities judged whole. The review of version
 8 (its check 1, `q1_rule.py`) wrote the rule as an oracle from its text alone; this is that oracle
 with its loss rule replaced by wl-preproc's code on its branch `replay2/eye-lost` at `bb6180e`
 (`validity._uncarried`, as `contract_fixtures.detector_input` applies it), and its run rule by the
@@ -17,7 +17,9 @@ rule wl-preproc's session sent on 2026-11-06 (`preproc_edge_rule.py`):
   carried stretch whose next velocity is known, one past that one (the landing); it is dropped with
   fewer than `min_duration_samples` velocities outside the threshold;
 - flagged when a velocity in a carried stretch lies in `[start - 2, stop)`; its size is the true
-  angle between its first and last present samples; the thresholds are over complete windows of
+  angle between its first present sample, or, where a carried stretch adjoins its start, the sample
+  before that stretch, where the eye took off (since version 11; until then always its first), and
+  its last; the thresholds are over complete windows of
   known velocities, a trace's first and last two apart.
 
 It shares only `velocity` and `median_scale` with the detector, which the contract tests pin to
@@ -151,7 +153,11 @@ def oracle(gaze, at):
         if stop < e < n and known[e]:
             stop = e + 1
         flagged = any(carried[i] for i in range(max(start - 2, 0), min(stop, n)))
-        a = next(g[i] for i in range(start, stop) if g[i] is not None)
+        took_off = start
+        while carried[took_off - 1]:
+            took_off -= 1
+        a = (g[took_off - 1] if took_off < start
+             else next(g[i] for i in range(start, stop) if g[i] is not None))
         b = next(g[i] for i in range(stop - 1, start - 1, -1) if g[i] is not None)
         confirm = events[P.min_duration_samples - 1]
         runs.append(dict(start=start, stop=stop, flagged=flagged, size=separation_deg(a[0], a[1], b[0], b[1]),

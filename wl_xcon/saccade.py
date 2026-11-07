@@ -23,7 +23,8 @@ are taken between *directions*: a position `(x, y)` is the direction `normalize(
 window are read in the local frame at the centre sample's direction (azimuthal-equidistant,
 `viewport.local_true_angle`'s formula: rightward and upward about that direction, so the
 elliptic test keeps its two thresholds). A run's size is the true angle between its first and
-last samples' directions (`geometry.separation_deg`). At the centre each is what it was per
+last samples' directions (`geometry.separation_deg`), its first, since version 11, the sample
+before a carried loss that hides its take-off (`_took_off`). At the centre each is what it was per
 axis, to the small-angle approximation; at 20° out it is not.
 
 **What online costs, stated rather than discovered later.** Their five-point estimator
@@ -62,7 +63,10 @@ stretch of unknown velocities is judged whole** (version 9, `_carried`), as wl-p
 for its detector: carried only between two samples with known velocities (version 10; between two
 samples of the trace in 9) and while no two measured samples in it, taken in turn, are more than
 `max_gap_s` apart; otherwise withheld whole, ending a run at its last measured velocity and flagging
-none.
+none. **And a run whose take-off a carried loss hides is measured from where the eye took off**
+(version 11, `_took_off`), the last sample with a known velocity before that loss, as one whose
+landing it hides is measured to the landing: detected as before, from its first measured velocity
+outside the threshold, it is sized from there.
 """
 
 from __future__ import annotations
@@ -224,7 +228,22 @@ _ROUNDING_S = 1e-9
 #: Which runs there are, and where they start and stop, are 9's: only flags change. 9 and 10 detect
 #: the same thing wherever a trace's first five samples are present, none more than `max_gap_s`
 #: after the one before.
-VERSION = 10
+#:
+#: **11 since 2026-11-07** (wl-preproc's final review of that day, its I2, the mirror of version 8's
+#: landing, agreed by both sessions; engineering under the PI's "Agree: bridge lost data", which he
+#: confirmed on 2026-11-06): **a run whose take-off a carried loss hides is measured from where the
+#: eye took off** (`_took_off`). Where the stretch of unknown velocities a short loss leaves ends on
+#: the sample before a run's start, the run's size is the true angle from the last sample with a known
+#: velocity before that stretch to its last sample, in `detect` and in each confirmation `Detector`
+#: reports, as version 8 measures a run whose landing such a loss hides to the landing. An unknown
+#: velocity still never opens a run, so the run still starts at its first measured velocity outside
+#: the threshold, the onset the gaze world times states by, and is flagged, the stretch inside its
+#: flag's window: only sizes change, and a withheld stretch changes none. v1's 8° step with one sample
+#: lost where it takes off measured 6.551° and measures 7.997°, as whole; a 1.5° saccade with one lost
+#: measured 0.982°, under wl-preproc's 1° microsaccade cut, and measures 1.500°. 10 and 11 detect the
+#: same runs, starts, stops and flags everywhere, and the same sizes wherever no carried stretch ends
+#: on the sample before a run's start.
+VERSION = 11
 
 
 @dataclass(frozen=True, slots=True)
@@ -255,7 +274,9 @@ class Saccade:
     start: int
     stop: int
     #: Degrees of true visual angle, start point to end point (version 4; per axis until
-    #: then) -- not path length.
+    #: then) -- not path length. Its start point is where the eye took off: the run's first sample,
+    #: or the last sample with a known velocity before a carried loss that hides its take-off
+    #: (version 11, `_took_off`).
     amplitude_deg: float
     #: True when a velocity in `[start - 2, stop)` is unknown because data was lost inside the run
     #: or just before it (`detect`). **Never dropped, never unmarked**: the velocity that triggered
@@ -523,7 +544,13 @@ def detect(
     loss at the trace's second or third sample, were carried, and flagged a run starting just after
     them. **And within four samples of the edge** (version 10): the samples either side of a stretch
     carried must have known velocities, so a loss at the trace's fourth or fifth sample no longer
-    flags a run starting just after it."""
+    flags a run starting just after it.
+
+    **A run whose take-off a carried loss hides is measured from where the eye took off** (version
+    11, `_took_off`): the run still starts at its first measured velocity outside the threshold,
+    since an unknown velocity never opens one, but its size runs from the last sample with a known
+    velocity before the stretch that ends just before it, as a run carried to its landing is
+    measured to the landing (version 8)."""
     gaze_deg = [None if position is None or not (math.isfinite(position[0])
                                                   and math.isfinite(position[1]))
                 else position for position in gaze_deg]
@@ -653,9 +680,28 @@ def _saccade(gaze_deg, carried, start: int, stop: int) -> Saccade:
     it, never flag a run (wl-preproc's answer of 2026-11-06), where until then they flagged one
     from sample 0 or reaching the end. **Nor is a withheld stretch one a run is carried across**
     (versions 8 to 10): only a velocity in a carried stretch flags a run (`_carried`), as
-    wl-preproc's flag reads only a carried stretch's samples."""
+    wl-preproc's flag reads only a carried stretch's samples. **Sized from where it took off**
+    (version 11, `_took_off`) to its last sample."""
     touched_gap = any(carried[i] for i in range(max(start - HALF_WINDOW, 0), min(stop, len(carried))))
-    return Saccade(start, stop, _amplitude(gaze_deg, start, stop), flagged=touched_gap)
+    return Saccade(start, stop, _amplitude(gaze_deg, _took_off(carried, start), stop),
+                   flagged=touched_gap)
+
+
+def _took_off(carried, start: int) -> int:
+    """**The sample a run is measured from** (version 11): its first, `start`, or, where a carried
+    stretch adjoins its start -- the stretch's unknown velocities ending on the sample before it --
+    the last sample with a known velocity before that stretch, where the eye took off (wl-preproc's
+    final review of 2026-11-07, its I2, agreed by both sessions that day; the mirror of version 8's
+    landing). An unknown velocity never opens a run, so a run whose take-off a short loss hides
+    opens on its first measured velocity outside the threshold, mid-flight, and version 10 measured
+    it from there: v1's 8° step, one sample lost where it takes off, 6.551°. A withheld stretch
+    moves nothing: no run is carried across it. The sample found has a known velocity, so it is
+    present; and a carried stretch begins at the trace's fourth sample or later (`_carried`), so
+    the walk back stops inside the trace."""
+    first = start
+    while carried[first - 1]:
+        first -= 1
+    return first - 1 if first < start else start
 
 
 @dataclass
@@ -694,11 +740,13 @@ class Detector:
     in the run, flags the batch form's saccade and not this one. **A run's stop is kept in
     `last_stop` as it closes, as `detect` reports it**: one past its last measured velocity
     (version 7), or, the run carried through a short loss to the velocity inside the threshold
-    that ends it, one past that velocity's own sample, the landing (version 8). **A withheld
-    stretch flags no run** (version 8), as in `detect`, **judged whole** (version 9): a stretch of
-    unknown velocities is withheld once a sample arrives more than `max_gap_s` after the last
-    measured one before it (`_withheld`), and its velocities are kept to flag a run starting just
-    after it only if it was not, when the first known velocity after it ends it (`_last_unknown`).
+    that ends it, one past that velocity's own sample, the landing (version 8); **and its size is
+    measured from where the eye took off** (version 11, `_amplitude`), as `detect` measures it.
+    **A withheld stretch flags no run** (version 8), as in `detect`, **judged whole** (version
+    9): a stretch of unknown velocities is withheld once a sample arrives more than `max_gap_s`
+    after the last measured one before it (`_withheld`), and its velocities are kept to flag a run
+    starting just after it only if it was not, when the first known velocity after it ends it
+    (`_last_unknown`).
     That is `detect`'s judgement (`_carried`) wherever a run can start online: a stretch that is
     withheld for lying beside the trace's first two velocities, which have no window (version 10;
     for reaching the first in version 9), is online one from the first velocity the detector
@@ -781,9 +829,16 @@ class Detector:
     _run_measured: int = field(default=0, init=False, repr=False)
     #: **The open run's first sample, kept as it starts** (version 2): a run with unknown
     #: velocities in it can outgrow any ring before it is confirmed, and its size is measured
-    #: from here (`_amplitude`).
+    #: from here (`_amplitude`). Since version 11 the sample where it took off instead, when a
+    #: carried stretch ends just before it (`_took_off_x`).
     _run_x: float = field(default=0.0, init=False, repr=False)
     _run_y: float = field(default=0.0, init=False, repr=False)
+    #: **The sample before the last stretch of unknown velocities, kept as it began** (version 11):
+    #: its velocity known, it is where a run opening just after that stretch took off, and the run
+    #: is measured from it (`_run_x`) when the stretch was carried (`_last_unknown`). A stretch can
+    #: outlast any ring, so it is kept apart, as the run's first sample is.
+    _took_off_x: float = field(default=0.0, init=False, repr=False)
+    _took_off_y: float = field(default=0.0, init=False, repr=False)
     #: The last sample with no velocity, by absolute index; until there is one, none, far enough
     #: back to flag nothing, `-(HALF_WINDOW + 1)`. A run whose first velocity is within `HALF_WINDOW`
     #: samples of it is flagged, as `_saccade` flags it (version 2). **A trace's first two
@@ -873,6 +928,8 @@ class Detector:
         self._run_had_gap = False
         self._run_confirmed = False
         self._run_measured = 0
+        self._took_off_x = 0.0
+        self._took_off_y = 0.0
         self._last_unknown = -(HALF_WINDOW + 1)
         self._run_last = 0
         self.last_stop = 0
@@ -1016,6 +1073,13 @@ class Detector:
             # `velocity`'s `None`: the two velocities before it withdrawn from the scale and the
             # two after it not taken, their windows holding it (version 8); and part of a stretch
             # judged whole when it ends (version 9).
+            if not self._stretch:
+                # **The stretch begins: where a run opening just after it took off** (version 11),
+                # the sample before it, in the ring now, present since its velocity was known; at
+                # the trial's first velocity there is none, and no run opens just after a stretch
+                # from there, the detector not ready (the class docstring).
+                self._took_off_x = xs[w1]
+                self._took_off_y = ys[w1]
             self._stretch = True
             self._skip_to = centre + HALF_WINDOW
             if self._provisional:
@@ -1063,8 +1127,14 @@ class Detector:
         start = self._run_start
         if start is None:
             start = self._run_start = centre
-            self._run_x = xs[w2]
-            self._run_y = ys[w2]
+            if self._last_unknown == centre - 1:
+                # **A carried stretch adjoins its start: measured from where it took off**
+                # (version 11, `_took_off`), the sample before that stretch, kept as it began.
+                self._run_x = self._took_off_x
+                self._run_y = self._took_off_y
+            else:
+                self._run_x = xs[w2]
+                self._run_y = ys[w2]
             self._run_confirmed = False
             self._run_measured = 0
             self._run_had_gap = centre - self._last_unknown <= HALF_WINDOW
@@ -1089,7 +1159,11 @@ class Detector:
         run's first sample, kept as it started (`_run_x`, `_run_y`), to sample `stop - 1` in the
         ring. **Both are the first and last present samples `_amplitude` would find**: a run
         starts, and is confirmed, only on a sample with a velocity, whose window holds it and the
-        two each side of it, and `stop - 1` is the confirming velocity's own sample."""
+        two each side of it, and `stop - 1` is the confirming velocity's own sample. **Its start
+        point is where the eye took off** (version 11): the sample before a carried stretch that
+        ends just before the run, as `detect` measures from it (`_took_off`), kept as the stretch
+        began (`_took_off_x`); a stretch is judged as it ends, before a run can start after it, so
+        which it is is known as the run opens."""
         last = (stop - 1) % len(self._t)
         return separation_deg(self._run_x, self._run_y, self._x[last], self._y[last])
 

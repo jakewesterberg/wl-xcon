@@ -1316,7 +1316,100 @@ def test_every_run_is_confirmed_while_it_is_open(seed):
     assert confirmed > 100
 
 
-def test_the_detector_that_carries_a_stretch_only_between_known_velocities_is_version_10():
+# ---------------------------------------------------------------------------
+# A saccade measured from before a short loss at its take-off (version 11)
+# ---------------------------------------------------------------------------
+#
+# The mirror of version 8's landing rule (wl-preproc's final review of 2026-11-07, its I2, agreed by
+# both sessions that day; engineering under the PI's "Agree: bridge lost data"): an unknown velocity
+# never opens a run, so a run whose take-off a short loss hides opens on its first measured velocity
+# outside the threshold, mid-flight. Detection is unchanged; its size is measured from the last
+# sample with a known velocity before the carried stretch, where the eye took off, to its last.
+
+
+def _took_off(trace, at, start: int) -> int:
+    """The sample before the carried stretch that ends on the sample before `start`: the last
+    sample with a known velocity before it, where the eye took off."""
+    carried = _carried(trace, at, velocity(trace, at, Params()), Params())
+    first = start
+    while carried[first - 1]:
+        first -= 1
+    assert first < start, "a carried stretch must end on the sample before the run's start"
+    return first - 1
+
+
+@pytest.mark.parametrize("lose, start", [((199,), 202), ((199, 200), 203),
+                                         (tuple(range(180, 202)), 204)],
+                         ids=["one sample lost", "two samples lost",
+                              "twenty-two lost, 46 ms, longer than the online ring"])
+def test_a_saccade_whose_take_off_a_short_loss_hides_is_measured_from_before_the_loss(lose, start):
+    """**Version 11.** v1's centre-horizontal step (v2's trace, `(199, 213)`, 7.997°) with samples
+    lost where it takes off: the run still opens on its first measured velocity outside the
+    threshold, `start` as version 10 gives it, and is flagged, the carried stretch's last unknown
+    velocity just before it; its size is the true angle from the last sample with a known velocity
+    before that stretch (196 for one or two lost, 177 for twenty-two) to its last, the whole step's
+    to 0.05°, as a run carried to its landing is measured (version 8). Version 10 measured it from
+    its first sample, mid-flight: 6.551° for one sample lost, 5.802° for two, 5.082° for twenty-two.
+    Online the confirmation is measured from the same sample, kept as the stretch began, which no
+    five-sample ring still holds when the run opens after twenty-two."""
+    gaze, at = _ours_on(_TRACES["centre-horizontal"])
+    [whole] = detect(gaze, at)
+    assert (whole.start, whole.stop, whole.flagged) == (199, 213, False)
+    trace = _lost(gaze, *lose)
+    took_off = _took_off(trace, at, start)
+
+    [run] = detect(trace, at)
+
+    assert (run.start, run.stop, run.flagged) == (start, 213, True)
+    assert run.amplitude_deg == _amplitude(trace, took_off, run.stop) \
+        == pytest.approx(whole.amplitude_deg, abs=0.05)
+    [(_, confirmed, _)] = _confirmations(trace, at)
+    assert (confirmed.start, confirmed.flagged) == (start, True)
+    assert confirmed.amplitude_deg == _amplitude(trace, took_off, confirmed.stop)
+
+
+def test_a_1_5_degree_saccade_whose_take_off_a_lost_sample_hides_stays_a_saccade():
+    """**What version 11 changes on the cut**: a 1.5° minimum-jerk saccade over 12 samples, `(201,
+    212)` whole, its sample 202 lost. Its run opens at 205, after the stretch of unknown velocities
+    the loss leaves (200 to 204), and version 10 measured it from there, 0.982°, under wl-preproc's
+    1° microsaccade cut (`microsaccade_max_deg`): a microsaccade by its label. Measured from 199, the
+    last sample with a known velocity before the stretch, it is 1.500°, a saccade, as the whole
+    trace's 1.489° is."""
+    gaze, at = _minimum_jerk(duration=12, amplitude=1.5)
+    cut = _V2["defaults"]["microsaccade_max_deg"]
+    [whole] = detect(gaze, at)
+    assert (whole.start, whole.stop) == (201, 212) and whole.amplitude_deg >= cut
+    trace = _lost(gaze, 202)
+
+    [run] = detect(trace, at)
+
+    assert (run.start, run.stop, run.flagged) == (205, 212, True)
+    assert ("saccade" if run.amplitude_deg >= cut else "microsaccade") == "saccade"
+    assert run.amplitude_deg == _amplitude(trace, 199, 212) \
+        == pytest.approx(whole.amplitude_deg, abs=0.05)
+
+
+def test_a_run_after_a_withheld_loss_is_measured_from_its_own_first_sample():
+    """**Only a carried stretch moves the take-off**: v1's centre-horizontal step with 176 to 201
+    lost, 54 ms from the last measured sample to the next, longer than `max_gap_s`, so the stretch
+    of unknown velocities before the run is withheld whole. Nothing before it is measured: the run
+    opens at 204, unflagged, and is measured from its own first sample, 5.082°, batch and online,
+    as in version 10; measured from 175, before the loss, it would be the whole step, a size for
+    which the record holds no evidence."""
+    gaze, at = _ours_on(_TRACES["centre-horizontal"])
+    trace = _lost(gaze, *range(176, 202))
+    assert at[202] - at[175] > Params().max_gap_s and _carried_at(trace, at) == []
+
+    [run] = detect(trace, at)
+
+    assert (run.start, run.stop, run.flagged) == (204, 213, False)
+    assert run.amplitude_deg == _amplitude(trace, 204, 213) == pytest.approx(5.082, abs=1e-3)
+    [(_, confirmed, _)] = _confirmations(trace, at)
+    assert (confirmed.start, confirmed.flagged) == (204, False)
+    assert confirmed.amplitude_deg == _amplitude(trace, 204, confirmed.stop)
+
+
+def test_the_detector_that_measures_a_run_from_before_a_loss_at_its_take_off_is_version_11():
     """`VERSION` is bumped whenever a session would detect something else: version 2 reports what
     version 1 never did, version 3 no longer reports a run whose minimum duration only unknown
     velocities met, version 4 detects and sizes in true visual angle (XC-398), version 5 ends a
@@ -1328,10 +1421,11 @@ def test_the_detector_that_carries_a_stretch_only_between_known_velocities_is_ve
     whole, withholding one within two samples of a trace's edge, and keeps the thresholds a
     withdrawal would leave at zero, and version 10 carries a stretch only when the samples either
     side of it have known velocities, withholding a loss within four samples of a trace's edge, so
-    a run from a trace's start with sample 3 or 4 lost is no longer flagged. **Not wl-preproc's
-    fixture set "v2"**, which version 4 is pinned to: that is their file's version, and this
-    constant is ours."""
-    assert VERSION == 10
+    a run from a trace's start with sample 3 or 4 lost is no longer flagged, and version 11 measures
+    a run whose take-off a carried loss hides from the last sample with a known velocity before
+    that loss. **Not wl-preproc's fixture set "v2"**, which version 4 is pinned to: that is their
+    file's version, and this constant is ours."""
+    assert VERSION == 11
 
 
 # ---------------------------------------------------------------------------
