@@ -27,7 +27,9 @@ These conventions bind every session (human- or AI-driven) working in this repo.
 - **Welfare-critical code requires human review.** Anything touching reward delivery
   amounts/limits, session duration or fluid tracking, or stimulation triggering must
   be reviewed by a human lab member before merge. Keep these modules small and listed
-  in `docs/design/architecture.md`.
+  in `docs/design/architecture.md`. `tests/test_welfare_manifest.py` holds the listed
+  code to the hashes in `tests/welfare_manifest.json`, so a change to it fails the suite
+  until the manifest is updated in a commit that names the PI's approval.
 - **ADRs for irreversible choices.** Engine, transport, file-format, and license
   decisions go through `docs/design/decisions/` using the template.
 - **Dependency policy.** New dependencies need a one-line justification and a license
