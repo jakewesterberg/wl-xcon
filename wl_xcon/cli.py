@@ -1510,7 +1510,7 @@ def main(argv: list[str] | None = None) -> int:
         "authentication yet, so `--as WHO` is whatever the sender typed, and any "
         "host that can reach the REP port can, under an invented name, send every "
         "command the link accepts: `set` (change a setting, a reward volume among "
-        "them), `stop`, `pause` (in `wlx taskd`, the run's), `resume`, `reward` (a manual reward, "
+        "them), `stop`, `pause`, `resume`, `reward` (a manual reward, "
         "while paused), `schedule` and `cancel` (a scheduled stop), `mark` (a mark's "
         "note), `clear`, `drum`, `training`, `next_block`, `back_block`, `hand_back`, "
         "`range`, and `revert` (the run's counts, blocks, settings and draws), and the "
