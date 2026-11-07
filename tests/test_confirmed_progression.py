@@ -9,9 +9,10 @@ back down the same way, "Below 50% of the last 50". The last 50 are answers only
 never one that moves nothing (no fixation, an early saccade). "At the hardest step": the bar to
 move up counts the last answers given with the block's staircase at its last level, an answer at
 an easier level neither counting nor breaking the window; a block with no staircase is always at
-its hardest (the builder's reading of "80% there", not yet confirmed by the PI: a failure at the
-top steps a one-up staircase down, so a window every answer had to share would ask for an
-unbroken run of right answers there).
+its hardest (the builder's reading of "80% there", confirmed by the PI on 2026-11-07, asked in the
+UI: "Yes: count tries at the top"; a failure at the top steps a one-up staircase down, so a window
+every answer had to share would ask for an unbroken run of right answers there). After a hold the
+count starts again ("After 50 new tries", the same day).
 
 wl-preproc accepted the record's shapes on 2026-11-07 (`docs/pending-wl-preproc-amendments.md`):
 a `suggested` and a `declined` change row, and a confirmation the existing `next_block` or
