@@ -381,7 +381,8 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    the frame it lands, against the windows drawn then, and never after. So
    an object shown or moved onto where an earlier saccade landed does not take it, where it had on
    the frame it was drawn there, and a saccade landing beside a window is not taken when gaze drifts
-   in. **One saccade carries** (the PI, the same day: "Yes, that one saccade carries": "Only the
+   in. **One saccade carries** (widened 2026-11-07 to any saccade in flight when a state begins: the
+   note of 2026-11-07 below; the PI, the same day: "Yes, that one saccade carries": "Only the
    saccade whose start ended the previous state carries over. Intrasaccadic-displacement designs can
    then score where it lands. Every other earlier saccade still never counts."; and "Yes, carry it
    too": "A state ended by a timer counted from a saccade's start passes that same saccade to the
@@ -434,8 +435,9 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    that same saccade alone, still in flight; never a `SaccadeOnset`'s; ended at the next
    transition, this last superseded on 2026-11-07 by the PI's answer of 2026-11-06, "Count it both
    ways": the note of 2026-11-07 below; EYE-19, its revision of 2026-11-07). A state that asks for a
-   saccade itself still counts only one begun in it. A transition taken on `Entered` carries
-   nothing (EYE-19, its revision quoting the PI).
+   saccade itself still counts only one begun in it (superseded 2026-11-07: the note below). A
+   transition taken on `Entered` carries nothing (EYE-19, its revision quoting the PI; superseded
+   2026-11-07: the note below).
    *Note, 2026-11-07 (the PI's answer of 2026-11-06, asked in the UI whether a go state that
    itself waits for the go saccade should count one begun just before the go cue: "Count it both
    ways": "The same eye movement scores the same whichever way the task is written: a saccade

@@ -369,8 +369,8 @@ class SaccadeTo(Guard):
     which counts here, whatever edge began the state (the PI, 2026-11-06, "Count it both ways": "a
     saccade already under way at the go cue counts where it lands"). So for this guard XC-410's "it
     must start in the state" decides nothing, and governs only a `SaccadeOnset` (review 9 of the
-    saccade rules, its I1, 2026-11-07); a saccade counts for nothing here only if its eye stopped
-    before the state's first frame, having landed in the state before. So an intrasaccadic jump is
+    saccade rules, its I1, 2026-11-07); a saccade whose eye stopped before the state's first frame
+    landed in the state before and counts for nothing here, wherever its onset fell. So an intrasaccadic jump is
     scored where the eye lands, so is the saccade that leaves fixation, so is one begun just before
     the go cue, whether the cue's own state asks for it or a state the eye leaving fixation enters,
     and so, past the go cue, is one begun just before any state that asks for it, one a plain timer
