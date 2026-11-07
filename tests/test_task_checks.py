@@ -224,9 +224,10 @@ def _framework_warnings(trial: Trial) -> list:
 
 def test_a_task_strobing_a_framework_code_is_warned_never_refused():
     """XC-382: `_unallocated_codes` accepts any code the allocation holds, so a task's
-    `Mark(4131)` loaded clean and strobed `PAUSE`, which no controls or change row explains, and
-    which leaves every pause row of the session untimed in wl-preproc (it times each row by the
-    strobes of the code the row carries, `event_code`). A warning in every kind, never a refusal
+    `Mark(4131)` loaded clean and strobed `PAUSE`, which the recording reads as the framework's
+    and no controls or change row explains, and which leaves every pause row of the session
+    untimed in wl-preproc (it times each row by the strobes of the code the row carries,
+    `event_code`). A warning in every kind, never a refusal
     (the PI's warnings over refusals), once for each place the task strobes it."""
     from tasks.allocation import ALLOCATION
     from wl_xcon import warnlist
@@ -236,10 +237,12 @@ def test_a_task_strobing_a_framework_code_is_warned_never_refused():
 
     assert len(found) == 2, found
     assert all(f.is_warning and f.accepted_in == SESSION_KINDS for f in found)
-    assert f"emits code {pause}, which the allocation gives 'PAUSE'" in found[0].detail
-    assert "controls and changes rows do not explain" in found[0].detail
-    assert "(`event_code`)" in found[0].detail and f"every row carrying {pause} untimed" in (
-        found[0].detail)
+    assert found[0].detail == (
+        f"state 'show' emits code {pause}, which the allocation gives 'PAUSE', an event the "
+        f"framework strobes itself: the recording would read the task's strobe as the framework's "
+        f"own PAUSE, which no controls or changes row explains, and wl-preproc times each of those "
+        f"rows by the strobes of the code it carries (`event_code`), so one too many would leave "
+        f"any row carrying {pause} untimed; give the task's event a code of its own")
     assert [entry.code for entry in warnlist.of_findings(check(_marking(pause), ALLOCATION))] == [
         "framework-code", "framework-code"]
 
@@ -258,8 +261,13 @@ def test_every_code_the_framework_strobes_itself_is_warned():
 
     assert FRAMEWORK_EVENTS and set(FRAMEWORK_EVENTS) <= set(ALLOCATION.task_events.values())
     for name in FRAMEWORK_EVENTS:
-        found = _framework_warnings(_marking(ALLOCATION.code_for(name)))
+        code = ALLOCATION.code_for(name)
+        found = _framework_warnings(_marking(code))
         assert len(found) == 2 and f"gives {name!r}" in found[0].detail, name
+        # True of each of the ten (the review's m2): no row carries RUN_START, RUN_END,
+        # HEAD_FIXED or SESSION_RESUMED today, so the sentence claims no row it leaves untimed.
+        assert f"read the task's strobe as the framework's own {name}," in found[0].detail
+        assert f"would leave any row carrying {code} untimed" in found[0].detail
 
 
 def test_the_framework_events_are_the_names_the_package_strobes_by():

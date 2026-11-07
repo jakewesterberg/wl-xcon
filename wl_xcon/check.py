@@ -2611,22 +2611,26 @@ def _framework_codes(trial: Trial, allocation: Allocation) -> list[Finding]:
     """**A task's `Mark` of a code the framework strobes itself** (XC-382): one the allocation
     gives an event of `codes.FRAMEWORK_EVENTS` -- a pause, a resume, an operator's mark, a manual
     reward, a setting applied, the head fixed or released, a run's start or end, a session
-    resumed. `_unallocated_codes` accepts it, as it is in the allocation, but no controls or
-    change row explains it, and wl-preproc times each of those rows by the strobes of the code
-    the row carries (its `event_code`), the n-th row by the n-th strobe, so a count one too many
-    leaves every row carrying it untimed. **A warning in every kind, never a refusal** (the PI's
-    warnings over refusals, 2026-10-11), once for each place the task strobes it."""
+    resumed. `_unallocated_codes` accepts it, as it is in the allocation, but the recording reads
+    it as the framework's own event, which no controls or change row explains, and wl-preproc
+    times each of those rows by the strobes of the code the row carries (its `event_code`), the
+    n-th row by the n-th strobe, so a count one too many leaves every row carrying it untimed: a
+    pause's, a resume's, a mark's, a manual reward's, a change's or the release's. **No row
+    carries a run's start or end, the head's fixing or a resume of the session today**, so the
+    sentence says "any row" (the review's m2), true of all ten. **A warning in every kind, never a
+    refusal** (the PI's warnings over refusals, 2026-10-11), once for each place the task strobes
+    it."""
     framework = {code: name for code, name in allocation.task_events.items()
                  if name in FRAMEWORK_EVENTS}
     return [
         Finding(
             "framework-code",
             f"state {name!r} emits code {action.code}, which the allocation gives "
-            f"{framework[action.code]!r}, an event the framework strobes itself: the session's "
-            f"controls and changes rows do not explain a task's strobe of it, and wl-preproc times "
-            f"each of those rows by the strobes of the code it carries (`event_code`), so one too "
-            f"many leaves every row carrying {action.code} untimed; give the task's event a code "
-            f"of its own",
+            f"{framework[action.code]!r}, an event the framework strobes itself: the recording "
+            f"would read the task's strobe as the framework's own {framework[action.code]}, which "
+            f"no controls or changes row explains, and wl-preproc times each of those rows by the "
+            f"strobes of the code it carries (`event_code`), so one too many would leave any row "
+            f"carrying {action.code} untimed; give the task's event a code of its own",
             blocking=False,
             accepted_in=SESSION_KINDS,
         )
