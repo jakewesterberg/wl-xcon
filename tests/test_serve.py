@@ -500,6 +500,7 @@ def _served(
     stale_after_s: float = 30.0,
     hosts: frozenset = LOOPBACK_NAMES,
     dispatch=None,
+    max_streams: int = serve.MAX_EVENT_STREAMS,
 ):
     """The handler on a real loopback socket, with no ZMQ anywhere."""
     server = ThreadingHTTPServer(
@@ -511,6 +512,7 @@ def _served(
             keepalive_s=keepalive_s,
             hosts=hosts,
             dispatch=dispatch,
+            max_streams=max_streams,
         ),
     )
     # A short poll, so `shutdown()` returns in a twentieth of a second rather than
@@ -5925,3 +5927,69 @@ def test_head_is_answered_with_headers_and_no_body(path):
     assert separator and body == b""
     assert head.startswith(b"HTTP/1.0 405") or path == "/nowhere"
     assert b"Content-Length" in head
+
+
+# --- the number of open /events streams is capped (XC-043) ---------------------------------------
+
+
+def _open_stream(port: int):
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    connection.request("GET", "/events")
+    return connection, connection.getresponse()
+
+
+def test_a_stream_past_the_cap_is_refused_in_json_and_a_closed_one_frees_its_slot():
+    hub = _hub()
+    with _served(hub, keepalive_s=0.05, max_streams=2) as port:
+        first, first_response = _open_stream(port)
+        second, second_response = _open_stream(port)
+        try:
+            assert (first_response.status, second_response.status) == (200, 200)
+            next(_events(first_response))
+            next(_events(second_response))
+            assert hub.viewers() == (2, 0)
+
+            refused, refused_response = _open_stream(port)
+            try:
+                # The status first and alone: a stream that was let in never ends, so
+                # its body is not read.
+                assert refused_response.status == 503
+                assert refused_response.getheader("Content-Type") == "application/json"
+                assert json.loads(refused_response.read())["error"] == "too many streams open"
+            finally:
+                refused_response.close()
+                refused.close()
+            assert hub.viewers() == (2, 0)  # the refused one took no slot
+
+            first_response.close()
+            first.close()
+            for _ in range(250):  # the closed stream is found at the next keepalive write
+                if hub.viewers() == (1, 0):
+                    break
+                time.sleep(0.02)
+            assert hub.viewers() == (1, 0)
+
+            third, third_response = _open_stream(port)
+            try:
+                assert third_response.status == 200
+                assert next(_events(third_response))
+            finally:
+                third_response.close()
+                third.close()
+        finally:
+            second_response.close()
+            second.close()
+
+
+def test_the_cap_does_not_touch_other_requests():
+    hub = _hub()
+    with _served(hub, max_streams=1) as port:
+        held, response = _open_stream(port)
+        try:
+            assert response.status == 200
+            assert _request(port, "GET", "/")[0] == 200
+            assert _request(port, "GET", "/health", {"Authorization": f"Bearer {TOKEN}"})[0] == 200
+        finally:
+            response.close()
+            held.close()
+

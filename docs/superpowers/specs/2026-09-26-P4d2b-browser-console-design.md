@@ -31,6 +31,9 @@
   connections per host, and each event stream holds one, so a seventh console tab on the
   same box in one browser would stall (MDN's server-sent events guide; not re-verified
   2026-09-26). S9a §7 is amended from "HTTP/WS" when this slice lands.
+  Since XC-043 (2026-11-07) `wlx serve` also holds at most `serve.MAX_EVENT_STREAMS` streams open
+  across both listeners and answers one past it a JSON 503; the page shows its stream lost and
+  asks again after three seconds.
 
 ## 2. Process and security (decided; the write rules apply from slice b2)
 

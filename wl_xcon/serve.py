@@ -55,7 +55,7 @@ stops `wlx serve`: the https page is off, saying why (§3.1).
 
 **No timing claim is made here.** `DEFAULT_STALE_AFTER_S` is a display choice (spec
 §3); `QUEUE_DEPTH`, `RATE_SAMPLE_S`, `KEEPALIVE_S`, `REQUEST_TIMEOUT_S`, `RETRY_MS`,
-`COMMAND_QUEUE_DEPTH`, `MARK_QUEUE_DEPTH`, `BODY_LIMIT`, `MARKS_REMEMBERED`,
+`COMMAND_QUEUE_DEPTH`, `MARK_QUEUE_DEPTH`, `BODY_LIMIT`, `MAX_EVENT_STREAMS`, `MARKS_REMEMBERED`,
 `OUTBOX_POLL_S` and the link's `REPLY_TIMEOUT_S` and `CONNECT_TIMEOUT_S` are
 housekeeping, not a measurement of this system.
 """
@@ -122,6 +122,10 @@ def _put_dropping_oldest(subscriber: queue.Queue, item: object) -> None:
                 subscriber.get_nowait()
             except queue.Empty:
                 pass
+
+
+class StreamsFull(Exception):
+    """`Hub.subscribe` was asked for a stream past its `limit` (`MAX_EVENT_STREAMS`)."""
 
 
 class Hub:
@@ -274,13 +278,18 @@ class Hub:
             https_page=https_page,
         )
 
-    def subscribe(self, *, on_box: bool) -> queue.Queue:
-        """A new stream's bounded queue. After `close`, one that is already closed."""
+    def subscribe(self, *, on_box: bool, limit: int | None = None) -> queue.Queue:
+        """A new stream's bounded queue. After `close`, one that is already closed.
+        Raises `StreamsFull` when `limit` streams are already open: counted under the
+        lock that adds one, so two connections at the limit cannot both get in. The
+        count changes only here and in `unsubscribe`, on a connect and a close."""
         subscriber: queue.Queue = queue.Queue(maxsize=QUEUE_DEPTH)
         with self._lock:
             if self._closed:
                 subscriber.put_nowait(CLOSED)
                 return subscriber
+            if limit is not None and len(self._subscribers) >= limit:
+                raise StreamsFull(limit)
             self._subscribers[subscriber] = on_box
         return subscriber
 
@@ -334,6 +343,15 @@ RETRY_MS = 3000
 #: reason: a request that never finishes must not park a thread for good.
 #: Housekeeping, not a measurement of this system.
 REQUEST_TIMEOUT_S = 30.0
+#: The most `/events` streams open at once, on both listeners together; one past it is
+#: answered 503 (XC-043). **An engineering default, not a measurement and not in the spec
+#: (b1's spec and plan state no count of consoles):** the lab opens about four pages of
+#: one rig's console at once (the rig PC's own, a lab member's, wl-works', one spare), and
+#: a reload leaves its old stream open until this process next writes to it and finds the
+#: browser gone, up to `KEEPALIVE_S` later, so four times that, 16. A stream is a thread
+#: and a socket; this keeps a runaway page from taking the process, never a page from
+#: the lab. Awaiting the controller's ruling.
+MAX_EVENT_STREAMS = 16
 
 #: Each bundled font by the exact path the page asks for it at (`web.FONTS`). A request
 #: is looked up here, never joined onto a directory, so there is no path to traverse.
@@ -370,6 +388,13 @@ _ERRORS = {
     505: {"error": "http version not supported"},
 }
 _FALLBACK = {"error": "request rejected"}
+#: What a stream past `MAX_EVENT_STREAMS` is answered. An `EventSource` cannot read it: the
+#: page sees its stream fail, says *stream lost* and asks again after `RETRY_MS`, by which
+#: time a closed page's slot may be free.
+_STREAMS_FULL = {
+    "error": "too many streams open",
+    "said": "this console already has as many pages open as it serves; close one and reload",
+}
 
 
 def on_box(host: str) -> bool:
@@ -961,6 +986,7 @@ def make_handler(
     remote: Remote | None = None,
     https_page: bool = False,
     https_off: str | None = None,
+    max_streams: int = MAX_EVENT_STREAMS,
 ) -> type[BaseHTTPRequestHandler]:
     """A handler class closing over `hub` and the token, built the way wl-preproc's
     `make_handler` is and for its reason: `BaseHTTPRequestHandler` handles the whole
@@ -994,6 +1020,8 @@ def make_handler(
         _https_page = https_page
         #: Why the rig's https page is off, for the box's own page (b2b-ready §3.1).
         _https_off = https_off
+        #: The most `/events` streams the hub may hold (`MAX_EVENT_STREAMS`, XC-043).
+        _max_streams = max_streams
         # A function stored on a class becomes a method; `staticmethod` keeps it the
         # plain callable it was given.
         _dispatch = None if dispatch is None else staticmethod(dispatch)
@@ -1422,7 +1450,11 @@ def make_handler(
             the frame that gets rendered (F2, below `_send_frame`)."""
             box = on_box(self.client_address[0])
             can_write = self.may_write()
-            subscriber = self._hub.subscribe(on_box=box)
+            try:
+                subscriber = self._hub.subscribe(on_box=box, limit=self._max_streams)
+            except StreamsFull:
+                self._send_json(503, _STREAMS_FULL)
+                return
             try:
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
