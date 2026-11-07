@@ -677,3 +677,104 @@ def test_an_object_of_an_array_a_setting_gives_is_declared_as_far_as_its_choices
 
     assert [f.code for f in check(held("search.5")) if f.blocking] == []
     assert "undeclared-window" in {f.code for f in check(held("search.6"))}
+
+
+# --- XC-273's array half: an array's count, index and ring of the wrong kind -----------------
+
+
+def _searched(params=(), windows=True, **fields) -> Trial:
+    """An array of lit discs, its target a brighter one, with object windows (`windows`) or none,
+    `fields` giving its `n`, `radius` or `target`."""
+    from wl_xcon.photometry import Gray
+
+    looks = Array(looks=Disc(size=0.5, color=Gray(40.0)), among=Disc(size=0.5, color=Gray(20.0)),
+                  **fields)
+    return Trial(
+        start="on", params=list(params),
+        windows=[ObjectWindows(of="search", radius=0.5)] if windows else [],
+        states=[State("on", enter=[Show(Stimulus("search", at=(0.0, 0.0), looks=looks))], go=[
+            *([On(SaccadeTo("search.target"), Outcome.CORRECT)] if windows else []),
+            On(After(1.0), Outcome.NO_RESPONSE)])])
+
+
+#: (field, a value of the wrong kind, what the refusal says it is not)
+_WRONG = [
+    ("n", "x", "a whole number"), ("n", 3.5, "a whole number"), ("n", None, "a whole number"),
+    ("n", math.inf, "a whole number"), ("n", math.nan, "a whole number"),
+    ("n", 10**400, "a whole number"),
+    ("target", "x", "a whole number"), ("target", 1.5, "a whole number"),
+    ("target", math.nan, "a whole number"), ("target", 10**400, "a whole number"),
+    ("radius", "far", "a finite number of degrees"),
+    ("radius", math.nan, "a finite number of degrees"),
+    ("radius", math.inf, "a finite number of degrees"),
+    ("radius", 10**400, "a finite number of degrees"),
+]
+_WRONG_IDS = [f"{field}-{'past-float' if v == 10**400 else v}" for field, v, _ in _WRONG]
+
+
+@pytest.mark.parametrize(("field", "value", "noun"), _WRONG, ids=_WRONG_IDS)
+def test_an_array_count_index_or_ring_of_the_wrong_kind_is_refused_and_never_raised(
+        field, value, noun):
+    """XC-273: the kinds of an array's `n`, `radius` and `target` were not checked at load. A word
+    for `n` or `target` made `check()` itself raise (`_array_faults`, `_span`), with a geometry or
+    without, as `None`, a NaN or `10**400` did; a word for `radius` raised in `_crowded`, and one
+    with no object windows loaded, for `resolve` to raise on; `n=3.5` loaded and drew 3 objects
+    (`Array.positions` reads it through `int`). Each is refused, `bad-block`, as written and as a
+    setting's choice; written, no other check reads it, so nothing beside the refusal says the
+    array has "as few as 0 objects" or crowds on a ring of NaN."""
+    from _rig import STEREOSCOPE
+
+    from wl_xcon.check import _said
+
+    good = {"n": 4, "target": 0, "radius": 5.0}[field]
+    for windows in (True, False):
+        for geometry in (None, STEREOSCOPE):
+            found = check(_searched(windows=windows, **{field: value}), geometry=geometry)
+            refused = [f.detail for f in found if f.code == "bad-block"]
+            assert refused == [f"Array.{field} is {_said(value)}, not {noun}"], (
+                windows, geometry, found)
+            assert not {f.code for f in found} & {
+                "target-outside-array", "crowded-array", "unbounded-set-size"}, found
+            if value is None:
+                continue  # a setting that can be None is refused `bad-placement` (XC-415)
+            # Among a setting's choices, read as every array check reads such a setting, failing
+            # closed (`_span`): refused by its kind too.
+            chosen = _searched([Param("v", unit="", choices=(good, value))], windows=windows,
+                               **{field: P("v")})
+            refused = [f.detail for f in check(chosen, geometry=geometry) if f.code == "bad-block"]
+            said = f"Array.{field} can be {_said(value)} (parameter 'v'), not {noun}"
+            assert refused == [said], (windows, geometry, refused)
+
+
+def test_an_array_of_whole_counts_and_finite_rings_still_loads():
+    for fields in ({"n": 4, "target": 3, "radius": 5.0}, {"n": 6.0, "target": 2.0, "radius": 5}):
+        found = check(_searched(**fields))
+        assert [f for f in found if f.blocking] == [], (fields, found)
+    chosen = [Param("n", unit="objects", choices=(2, 4.0)),
+              Param("r", unit="deg", choices=(4, 5.5))]
+    assert [f for f in check(_searched(chosen, n=P("n"), radius=P("r"))) if f.blocking] == []
+
+
+def test_a_literal_wait_past_a_float_is_not_raised_on():
+    """The same reading of a literal (`check._span`): `After(10**400)` made `check()` raise
+    `OverflowError` out of `_unreachable_timeouts`, as a word for `n` did out of `_array_faults`.
+    It is read as the infinity it is past, and the bound beside it is dead code, a review note."""
+    trial = Trial(start="a", states=[State("a", go=[On(After(1.0), Outcome.CORRECT),
+                                                   On(After(10**400), Outcome.ABORT)])])
+    assert [(f.code, f.blocking) for f in check(trial)] == [("unreachable-timeout", False)]
+
+
+def test_a_set_size_sent_past_its_range_is_not_judged_on_a_ring_of_the_wrong_kind():
+    """XC-273: `_overlapping_objects` read a ring radius that is no number as 0° (`_span`, failing
+    closed) and refused a set size sent past its highest for drawing its objects on one another
+    "on its 0° ring". The ring is refused at load by its kind; nothing else is said of it."""
+    from wl_xcon.check import beyond_range
+    from wl_xcon.task import Task
+
+    task = Task({"search": _searched([Param("n", unit="objects", low=2, high=6)], n=P("n"),
+                                     radius="far")}, default="search")
+
+    found = beyond_range(task, {"n": 40})
+
+    assert "overlapping-objects" not in {f.code for f in found}, found
+    assert [f.code for f in found] == ["outside-range"], found

@@ -30,6 +30,7 @@ from wl_xcon.task import (
     Outcome,
     P,
     Param,
+    Polygon,
     Show,
     State,
     Stimulus,
@@ -850,6 +851,27 @@ def _says(trial: Trial, said: str) -> bool:
 ])
 def test_a_number_field_that_holds_no_number_is_refused(looks, said):
     assert _says(_one(looks, background=GRAY_BG), said)
+
+
+@pytest.mark.parametrize("shape", ["RegularPolygon", "Polygon"])
+def test_a_polygon_has_a_whole_number_of_sides(shape):
+    """XC-273: `RegularPolygon(sides=3.5)` loaded and drew a triangle (`exact` reads its sides
+    through `int`). Its sides are a whole number of at least 3, as written and among a setting's
+    choices; a whole number written as a float is one."""
+    def drawn(sides) -> object:
+        return (look.Look(shape=look.RegularPolygon(sides=sides, size=1.0),
+                          fill=look.Flat(color=Gray(40.0))) if shape == "RegularPolygon"
+                else Polygon(sides=sides, color=Gray(40.0)))
+
+    assert _says(_one(drawn(3.5), background=GRAY_BG),
+                 f"{shape}.sides is 3.5; a polygon has a whole number of sides, at least 3")
+    chosen = [Param("s", unit="sides", choices=(4, 4.5))]
+    assert _says(_one(drawn(P("s")), params=chosen, background=GRAY_BG),
+                 f"{shape}.sides can be 4.5 (parameter 's'); a polygon has a whole number of "
+                 f"sides, at least 3")
+    assert _says(_one(drawn(2), background=GRAY_BG), f"{shape}.sides is 2; a polygon has a whole")
+    for whole in (3, 4.0, 6):
+        assert _refused(_one(drawn(whole), background=GRAY_BG)) == set(), whole
 
 
 @pytest.mark.parametrize("looks, choices, said", [
