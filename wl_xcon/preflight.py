@@ -37,7 +37,7 @@ from wl_xcon.actor import Actor, Box, Member
 from wl_xcon.bounds import Exceeded
 from wl_xcon.check import (
     IMPOSSIBLE, _outside, beyond_range, check_task, impossible, parameters_used, undrawable,
-    unplaced, unpooled,
+    unplaced, unpooled, unstarted,
 )
 from wl_xcon.cli import _load_bounds, _load_subject_settings, _load_task, _setup_words
 from wl_xcon.findings import Finding
@@ -69,7 +69,8 @@ def _said(refused: SystemExit, path: Path) -> str:
 
 
 def task(path: Path, allocation, geometry, calibration, deployment=None,
-         plan: str | None = None) -> tuple[PreflightItem, Task | None, list]:
+         plan: str | None = None,
+         start_block: str | None = None) -> tuple[PreflightItem, Task | None, list]:
     """The task's load-time checks in the session's setup: **fail** if it will not load -- a file
     with trials and no task object among them (engine build C1) --, if its checks do not finish,
     or if any finding blocks (`check.check_task`: each structure's and the task object's own).
@@ -83,7 +84,9 @@ def task(path: Path, allocation, geometry, calibration, deployment=None,
     the place of a record that will not load, since XC-352's E1). **The session's deployment**
     makes a task that needs a fixed head a warning in any but a head-fixed session, never this
     item's fail (engine spec §20.1; XC-277; the PI, 2026-10-11). **A plan the task does not
-    declare fails it too** (engine build C2b), so `gate` refuses a start naming one unchanged."""
+    declare fails it too** (engine build C2b), so `gate` refuses a start naming one unchanged;
+    **and a block of it the run cannot start at** (`start_block`; `check.unstarted`; the pop-out
+    search build's Task 6)."""
     try:
         loaded = _load_task(path)
     except SystemExit as refused:
@@ -119,6 +122,9 @@ def task(path: Path, allocation, geometry, calibration, deployment=None,
         f"the task declares no plan {plan!r}; its plans are "
         + (", ".join(map(repr, loaded.plans)) or "none")
     ]
+    started = unstarted(loaded, plan, start_block)
+    if started is not None:
+        unknown.append(started)
     if blocking or unknown:
         return (
             PreflightItem(

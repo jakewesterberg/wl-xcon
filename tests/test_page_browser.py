@@ -12,6 +12,7 @@ pytest prints both operands of a failing `==`.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import threading
 import time
@@ -37,8 +38,8 @@ from _tls import client_context, material  # noqa: E402
 from wl_xcon import serve, signin, warnlist, web  # noqa: E402
 from wl_xcon.findings import SESSION_KINDS  # noqa: E402
 from wl_xcon.link import (  # noqa: E402
-    BackBlock, CheckRun, ClearOwed, Drum, ManualReward, NextBlock, OpenSession, Pause, Preflight,
-    PreflightItem, StartRun, Training, WarningRow,
+    BackBlock, CheckRun, ClearOwed, Drum, ManualReward, NextBlock, OpenSession, Pause, PoolRow,
+    Preflight, PreflightItem, StageRow, StartRun, Training, WarningRow,
 )
 from wl_xcon.photometry import SRGB  # noqa: E402
 from wl_xcon.warnlist import HEAD_FREE  # noqa: E402
@@ -1620,6 +1621,60 @@ def test_a_plan_start_ignores_the_hidden_trials_box(rig):
 
     started = next(seen for seen in rig.dispatch.seen if isinstance(seen, StartRun))
     assert (started.task, started.plan) == ("planned.py", "train")
+
+
+def test_the_run_start_shows_yesterdays_end_and_sends_the_stage_level_and_pairings_picked(rig):
+    """The pop-out search build's Task 6 (its design §3.5, the PI's sketch: "at the day's start,
+    the stage, the staircase's starting level and the pairings to pick, with yesterday's end
+    shown"): the Setup tab shows the previous session's end and offers the plan's stages, the
+    picked stage's staircase level and the pool's pairings; picks survive a frame redrawing the
+    pre-flight, and *start run* sends the stage picked and, as the start's values, only what the
+    person changed from where the run would start."""
+    rig.hub.offer(_between_runs(offered_tasks=ONE_TASK))
+    page = rig.browser_page()
+    _sign_in(page)
+    _preselected(rig, page)
+    previous = ("session 2027-01-13_01's last run of plan train ended in Crowd; set_size at 8, by "
+                "its staircase; pairings 5 (blue>red, red>blue)")
+    starting = Preflight(
+        "planned.py", PASSING, plan="train", plans=("train", "test"),
+        stages=(StageRow("Alone"), StageRow("Crowd", "set_size", (4, 6, 8, 10), 1, False)),
+        pool=PoolRow("pairings", ("blue>red", "purple>red", "red>blue"), 1), previous=previous)
+    rig.hub.offer(_between_runs(offered_tasks=ONE_TASK, preflight=starting))
+    page.click('label[for="t-setup"]')
+    page.wait_for_selector("#start-block")
+
+    shown = page.inner_text("#previous-end")
+    crowd_hidden = page.evaluate(
+        'document.querySelector(\'#run-start [data-stage="Crowd"]\').hidden')
+    def starts() -> list:
+        return [seen for seen in rig.dispatch.seen if isinstance(seen, StartRun)]
+
+    # A start with nothing picked sends nothing: the run starts where it would.
+    page.click('[data-cmd="start"]')
+    rig.wait_for(lambda: len(starts()) == 1)
+    # A stage picked, its level and the pairings left as they would start: only the stage.
+    page.select_option("#start-block", "Crowd")
+    page.click('[data-cmd="start"]')
+    rig.wait_for(lambda: len(starts()) == 2)
+    page.select_option("#start-block", "Crowd")
+    page.select_option('select[data-start-setting="set_size"]', "8")
+    page.check('input[data-pairing="2"]')
+    # A frame redrawing the pre-flight, as a pre-flight taken again does: the page swaps only a
+    # pane that changed.
+    again = (PreflightItem("task checks", "pass", "planned.py passes its load-time checks again"),)
+    rig.hub.offer(_between_runs(offered_tasks=ONE_TASK, preflight=dataclasses.replace(
+        starting, items=again), stopped_because=FRAME_MARKER))
+    _marker_shown(page)
+    page.click('[data-cmd="start"]')
+    rig.wait_for(lambda: len(starts()) == 3)
+
+    plain, staged, picked = starts()
+    assert previous in shown and crowd_hidden is True
+    assert (plain.plan, plain.start_block, plain.values) == ("train", None, {})
+    assert (staged.start_block, staged.values) == ("Crowd", {})
+    assert (picked.plan, picked.start_block, picked.values) == (
+        "train", "Crowd", {"set_size": 8, "pairings": 3})
 
 
 class _BoxRig:

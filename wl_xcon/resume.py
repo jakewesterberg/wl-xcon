@@ -23,7 +23,9 @@ from wl_xcon import actor as actors
 from wl_xcon import link as _link
 from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.levels import Levels, task_name
-from wl_xcon.record import ACCEPTED_WARNINGS, CONTROLS, KINDS, RUNS, STROBED, TRIAL_STARTS
+from wl_xcon.record import (
+    ACCEPTED_WARNINGS, CONTROLS, KINDS, RUNS, STROBED, TRIAL_STARTS, XCON_DIRNAME,
+)
 from wl_xcon.simulate import Tally
 from wl_xcon.task import RIGHT, Outcome
 from wl_xcon.warnlist import Entry
@@ -61,6 +63,25 @@ def _cut(error: Exception) -> str:
     parser's message can quote what it could not read -- `float()`'s quotes all of it, and
     an `OSError`'s the whole path (XC-299)."""
     return _link.cut(str(error), _link.TEXT_LIMIT)
+
+
+@dataclass(frozen=True)
+class LastRun:
+    """**A session's last run, as its record left it** (the pop-out search build's Task 6), for a
+    resumed session's next run to go on from (`taskd.Session.run`) and for the start of a later
+    session's run to show (`Service._preflight`): its session, its index, its `runs.jsonl` start
+    row and its end row (`None` where its record holds none: its process was killed), and its own
+    rows of `trials.jsonl`, `parameter_changes.jsonl` and `controls.jsonl`, each in the order
+    written. **Read, never judged here**: what they mean is the task's (`taskd.went_on`), which
+    this module never loads."""
+
+    session_id: str
+    run: int
+    start: dict
+    end: dict | None
+    lines: tuple
+    changes: tuple
+    controls: tuple
 
 
 @dataclass(frozen=True)
@@ -107,6 +128,9 @@ class Restoration:
     #: The largest `change` id in its change log (engine build C3's spec §8), 0 for none: the
     #: resumed session's next act takes the one after it, so no id names two acts.
     change: int = 0
+    #: **Its last run, as its record left it** (`LastRun`; the pop-out search build's Task 6), or
+    #: `None` for a session that ran none.
+    last_run: LastRun | None = None
 
 
 def _rows(directory: Path, name: str) -> list[dict]:
@@ -158,6 +182,55 @@ def _changes(directory: Path) -> list[dict]:
         ):
             raise damaged("holds no change id, a whole number from 1")
     return rows
+
+
+def _last(session_id: str, runs: list, lines: list, changes: list, controls: list,
+          task: str | None = None, plan: str | None = None) -> LastRun | None:
+    """**A session's last run, from its record's rows** (`LastRun`; the pop-out search build's
+    Task 6) -- its last run of the task file named `task` playing `plan`, where `task` is given --
+    or `None` for none."""
+    starts = [row for row in runs if row.get("event") == "start" and (
+        task is None or (Path(str(row.get("task"))).name == task and row.get("plan") == plan))]
+    if not starts:
+        return None
+    start = starts[-1]
+    run = start["run"]
+    end = next((row for row in runs if row.get("event") == "end" and row.get("run") == run), None)
+    return LastRun(
+        session_id=session_id, run=run, start=start, end=end,
+        lines=tuple(line for line in lines if line.get("run") == run),
+        changes=tuple(row for row in changes if row.get("run") == run),
+        controls=tuple(row for row in controls if row.get("run") == run),
+    )
+
+
+def previous(root: Path, subject: str, other_than: str, task: str,
+             plan: str | None) -> LastRun | None:
+    """**The animal's previous session's last run of `task`'s `plan`** (the pop-out search build's
+    Task 6; its design §3.5, "with yesterday's end shown"), as its record left it, or `None` for
+    none: the session folders under `root`, newest name first, but `other_than` -- the session the
+    run is for -- whose `config.json` names `subject`, the first with a run of the task file named
+    `task` playing `plan`. **A folder it cannot read is passed over**, never a refusal: what it
+    finds is shown, and decides nothing."""
+    try:
+        folders = sorted((path for path in Path(root).iterdir()
+                          if path.is_dir() and path.name != other_than),
+                         key=lambda path: path.name, reverse=True)
+    except OSError:
+        return None
+    for folder in folders:
+        directory = folder / XCON_DIRNAME
+        try:
+            config = json.loads((directory / "config.json").read_text(encoding="utf-8"))
+            if not isinstance(config, dict) or config.get("subject") != subject:
+                continue
+            found = _last(folder.name, _rows(directory, RUNS), _rows(directory, "trials.jsonl"),
+                          _changes(directory), _rows(directory, CONTROLS), task, plan)
+        except (OSError, ValueError, KeyError, TypeError, AttributeError, Unresumable):
+            continue
+        if found is not None:
+            return found
+    return None
 
 
 def _accepted(row: dict, number: int, session_kind: str) -> tuple:
@@ -429,4 +502,5 @@ def _read(directory: Path, departure: float) -> Restoration:
             else (False if isinstance(config["setup"].get("half_ipd_cm"), (int, float))
                   and not isinstance(config["setup"]["half_ipd_cm"], bool) else None)),
         change=max((c["change"] for c in changes if "change" in c), default=0),
+        last_run=_last(directory.parent.name, runs, lines, changes, controls),
     )

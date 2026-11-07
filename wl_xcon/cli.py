@@ -27,7 +27,7 @@ from wl_xcon.marks import TIME_FORMATS as _TIME_FORMATS
 from wl_xcon.marks import clock_or_now as _clock_or_now
 from wl_xcon.marks import clock_time as _wall_clock_time
 from wl_xcon.bounds import Bounds, Exceeded, _finite
-from wl_xcon.check import check_task, impossible, unplaced, unpooled
+from wl_xcon.check import check_task, impossible, unplaced, unpooled, unstarted
 from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.review import position_words
 from wl_xcon.review import render_task as render_review
@@ -1334,6 +1334,12 @@ def main(argv: list[str] | None = None) -> int:
         "run of --trials trials",
     )
     runner.add_argument(
+        "--start-block",
+        default=None,
+        metavar="NAME",
+        help="start the plan (--plan) at its block of this name; without it at its first",
+    )
+    runner.add_argument(
         "--seed",
         type=int,
         default=None,
@@ -1777,6 +1783,12 @@ def main(argv: list[str] | None = None) -> int:
                 f"{_printable(args.plan)}; its plans are "
                 + (", ".join(_printable(name) for name in task.plans) or "none")
             )
+        # **And the block it starts at** (`--start-block`; the pop-out search build's Task 6),
+        # refused here, before the session opens and its departure is marked, as the plan is.
+        started = unstarted(task, args.plan, args.start_block)
+        if started is not None:
+            raise SystemExit(
+                f"task refused, session not started, nothing recorded: {_printable(started)}")
 
         values: dict[str, object] = {}
         for assignment in args.set:
@@ -1996,6 +2008,7 @@ def main(argv: list[str] | None = None) -> int:
                         subject=args.subject,
                         trials=args.trials,
                         plan=args.plan,
+                        start_block=args.start_block,
                         frame_period=1 / 240,
                         seed=seed,
                         values=values,

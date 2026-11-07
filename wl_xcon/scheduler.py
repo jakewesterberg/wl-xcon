@@ -318,6 +318,11 @@ class Scheduler:
     #: C2b): `Fixed`, each once in order, by default. A random order draws from a generator of its
     #: own, seeded from `seed`, so it replays and leaves every condition's draw as it was.
     order: BlockOrder = field(default_factory=Fixed)
+    #: **The place in the run's sequence of blocks it starts at**, from 0 (the pop-out search
+    #: build's Task 6; its design §3.6, "the trainer picks" the stage): a later block of a plan
+    #: whose order plays its blocks by their places -- in order, over and over, or stage by stage
+    #: (`start_at`) -- the blocks before it still there to move or fall back to.
+    start: int = 0
     _rng: random.Random = field(init=False, repr=False)
     _order_rng: random.Random = field(init=False, repr=False)
     #: The open block's place in the run's sequence of blocks, from 0, and the block types that
@@ -420,9 +425,10 @@ class Scheduler:
     def __post_init__(self) -> None:
         self._rng = random.Random(self.seed)
         self._order_rng = random.Random(f"blocks:{self.seed}")
-        first = self._type_at(0)
+        first = self._type_at(self.start)
         if first is None:
             raise IndexError("a plan with no block to start has nothing to run")
+        self._position = self.start
         self._index = first
         self._opened = {first}
         self._back = self._fall_back_window()
@@ -669,6 +675,17 @@ class Scheduler:
         frame."""
         met = self._met_up()
         return None if met is None else Suggestion(MOVE_WIDEN, self.block.name, None, *met)
+
+    def judged(self, outcome: Outcome | None, shown: bool, first_try: bool, eased: bool,
+               hardest: bool) -> None:
+        """**One trial of a run that stopped with its process, toward the open stage's bars**
+        (the pop-out search build's Task 6; the plan's Review Focus 4): a resumed session's run
+        going on from it gives each of that stage's trials here, between runs, in order, as its
+        line and the run's record read (`taskd.went_on`), so its suggestion's windows are what
+        they were -- judged by `_bar`, as `record` judges a trial now, and nothing else about the
+        block counted."""
+        if self._confirming:
+            self._bar(outcome, shown, first_try, eased, hardest)
 
     def decline(self, move: str) -> None:
         """**A person holds instead of moving** (`link.Decline`; the PI, 2026-11-07, "Rig suggests,

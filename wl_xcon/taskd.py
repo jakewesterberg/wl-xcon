@@ -50,7 +50,8 @@ from wl_xcon import variation
 from wl_xcon.actor import Actor, to_map_or_none
 from wl_xcon.bounds import Bounds, Exceeded, _finite
 from wl_xcon.check import (
-    IMPOSSIBLE, _outside, beyond_range, check_task, impossible, undrawable, unplaced, unpooled,
+    IMPOSSIBLE, _outside, beyond_range, check_task, impossible, start_at, undrawable, unplaced,
+    unpooled, unstarted,
 )
 from wl_xcon.cli import _clock, _load_allocation, _load_task, _printable, _shown
 from wl_xcon.codes import BLOCK_END, RUN_END_MARKER, TRIAL_END, TRIAL_START, Allocation
@@ -454,6 +455,10 @@ class SessionSpec:
     #: **The plan the run plays, by its name in the task** (`task.Task.plans`; engine spec §13.1;
     #: engine build C2b), `wlx run --plan`'s; `None` for the plain run of `trials` trials.
     plan: str | None = None
+    #: **The block of `plan` the run starts at, by its name** (`wlx run --start-block`; the pop-out
+    #: search build's Task 6; its design §3.6, "the trainer picks" where the animal starts), or
+    #: `None` for the plan's first.
+    start_block: str | None = None
     #: How close to the out-of-cage ceiling the session starts warning, in seconds
     #: (PI, 2026-09-20). Defaulted rather than required, unlike the fields above,
     #: because it bounds nothing: the session ends at the same instant whatever it
@@ -512,6 +517,9 @@ class RunSpec:
     values: dict
     blocks: list[Block] | None = None
     plan: str | None = None
+    #: **The block of its plan it starts at, by its name** (the pop-out search build's Task 6), or
+    #: `None` for the first.
+    start_block: str | None = None
 
     @classmethod
     def of(cls, spec: SessionSpec) -> RunSpec:
@@ -531,6 +539,7 @@ class RunSpec:
             values=spec.values,
             blocks=spec.blocks,
             plan=spec.plan,
+            start_block=spec.start_block,
         )
 
 
@@ -672,6 +681,254 @@ class _Suggested:
     block: str
     to: str
     fate: str | None = None
+
+
+#: **How a run's stop reads when Ctrl-C at the terminal ended it** (P4d-2a final review I4): its
+#: end row's `stopped_because`, and, with no end row at all, one of the two ways a run stops with
+#: its process, which a resumed session's next run goes on from (`went_on`; the pop-out search
+#: build's Task 6).
+INTERRUPTED = "interrupted at the terminal"
+
+
+@dataclass
+class _WentOn:
+    """**Where a run left its plan** (`went_on`; the pop-out search build's Task 6): the stage it
+    was in and its place in the plan (`None` where the plan has no block of that name now); that
+    stage's staircase as its last step left it, its count toward the next step with it; the
+    pool's value; what its stage's bars judged, in order, for a scheduler to take again
+    (`_carried`); the suggestion of a move and the widening the record leaves standing there,
+    each its `suggested` row, which only the bars judged again can confirm still stood; and the
+    settings a person held at its last trial."""
+
+    stage: str
+    position: int | None
+    climb: "_Climb | None"
+    pool: object
+    bars: list
+    offered: dict | None
+    widen: dict | None
+    held: tuple
+
+
+def went_on(task: Task, last) -> _WentOn | None:
+    """**Where a run left its plan, read from its record** (`resume.LastRun`; the pop-out search
+    build's Task 6; the plan's Review Focus 4), between runs, never in a frame, by the engine's
+    own rules played again over its rows in the order they happened -- its lines by their place in
+    the run, each change and move before the trial it came ahead of:
+
+    - **its stage**: its end row's last block, or the block of its last line, moved on by a
+      person's move after it; each stage entered -- by a move, or by a line in another block, the
+      plan's own advance -- starts afresh, as a block opened does;
+    - **the stage's staircase** (`_Climb`), started as `Session._climbing` starts it, on the run's
+      values as its start row has them, **set to the level each line it gave says** (a hand-back,
+      or a run that itself went on from another, put it there) and stepped by the line's outcome;
+      a line whose setting a person held steps nothing; a hand-back starts its count again;
+    - **the pool's value**: its last line's, or a change applied after it;
+    - **what the stage's bars judged** (`Scheduler.judged`): each line, a hold of a suggestion
+      (`decline`) and a change of the pool (`afresh`, which answers every suggestion standing) --
+      judged with the training setting "first answers" off, as every run starts with it (XC-379),
+      so a run that had switched it on under drumming may come back with its bar's window a
+      drummed answer or two apart;
+    - **the suggestions standing**: the last `suggested` row of a move, and of a widening, in the
+      stage, that no hold, move or pool change answered;
+    - **what a person held at its last trial**, but the pool, which is not carried: a person's
+      value is a live edit of its run.
+
+    `None` for a run of no plan, or of one its task no longer declares."""
+    plan = task.plans.get(last.start.get("plan")) if last.start.get("plan") else None
+    if plan is None:
+        return None
+    blocks = [variation.expanded(block) for block in plan.blocks]
+    names = [block.name for block in blocks]
+    resolved = dict(last.start.get("resolved") or {})
+    pool = task.pool
+    lines = list(last.lines)
+    offset = lines[0]["trial_number"] - lines[0]["index"] if lines else None
+    events = [((line["index"], 1, 0.0, n), "line", line) for n, line in enumerate(lines)]
+    if offset is not None:
+        events += [((row["trial_number"] - offset, 0, float(row.get("at") or 0.0), n), "change",
+                    row)
+                   for n, row in enumerate(last.changes)
+                   if isinstance(row.get("trial_number"), int)]
+    events += [((row["trial_index"], 0, float(row.get("at") or 0.0), len(last.changes) + n), "move",
+                row)
+               for n, row in enumerate(last.controls)
+               if row.get("kind") in ("next_block", "back_block") and row.get("to") is not None]
+    events.sort(key=lambda event: event[0])
+    state: dict = {"held": ()}
+
+    def enter(name: str) -> None:
+        block = next((block for block in blocks if block.name == name), None)
+        staircase = None if block is None else block.staircase
+        climb = None
+        if staircase is not None:
+            start = staircase.start
+            if start is None:
+                start = staircase.nearest(resolved.get(staircase.setting))
+            climb = _Climb(staircase, 0 if start is None else start)
+        state.update(stage=name, climb=climb, bars=[], offered={}, answered=set())
+
+    def changed_pool() -> None:
+        state["bars"].append(("afresh",))
+        state["answered"] |= set(state["offered"])
+
+    enter(last.start.get("start_block") or names[0])
+    value = resolved.get(pool.setting) if pool is not None else None
+    seen = None
+    for _, what, row in events:
+        if what == "move":
+            enter(row["to"])
+            continue
+        climb = state["climb"]
+        if what == "change":
+            kind, name = row.get("kind", "set"), row.get("name")
+            if kind == "suggested":
+                state["offered"][row["change"]] = row
+            elif kind == "declined":
+                # A hold starts the held move's window afresh, so its bar no longer offers it.
+                held = state["offered"].get(row.get("suggestion"))
+                if held is not None:
+                    state["bars"].append(("decline", held.get("move")))
+            elif (kind in ("hand_back", "revert") and climb is not None
+                  and name == climb.staircase.setting and row.get("now") is None
+                  and "from" not in row):
+                climb.resume(row.get("was"))
+            if (pool is not None and name == pool.setting and kind in ("set", "hand_back", "revert")
+                    and row.get("now") is not None):
+                value = row["now"]
+            continue
+        if row["block"] != state["stage"]:
+            enter(row["block"])
+            climb = state["climb"]
+        params = row.get("params") or {}
+        if pool is not None:
+            now = params.get(pool.setting)
+            if seen is not None and now != seen:
+                changed_pool()
+            seen = value = now
+        top = None if climb is None else len(climb.staircase.levels) - 1
+        if climb is not None and (row.get("drawn") or {}).get(climb.staircase.setting) == STAIRCASE:
+            level = climb.staircase.nearest(params.get(climb.staircase.setting))
+            if level is not None and level != climb.level:
+                climb.level, climb.right, climb.wrong = level, 0, 0
+        hardest = climb is None or climb.level == top
+        outcome = None if row["outcome"] == "hang" else Outcome(row["outcome"])
+        shown = bool(row.get("shown"))
+        if climb is not None and (row.get("drawn") or {}).get(climb.staircase.setting) == STAIRCASE:
+            climb.step(outcome, shown)
+        state["bars"].append(("trial", outcome, shown, not row.get("drummed"),
+                              bool(row.get("eased")), hardest))
+        # What a person held, but the pool, whose value the run carries (a widening is a `set`).
+        state["held"] = tuple(name for name in row.get("live") or ()
+                              if pool is None or name != pool.setting)
+    ended = (last.end or {}).get("blocks_run") or []
+    if ended and ended[-1] != state["stage"]:
+        enter(ended[-1])
+    if pool is not None and seen is not None and value != seen:
+        changed_pool()
+    standing = [row for change, row in state["offered"].items()
+                if change not in state["answered"]]
+    return _WentOn(
+        stage=state["stage"],
+        position=names.index(state["stage"]) if state["stage"] in names else None,
+        climb=state["climb"], pool=value, bars=state["bars"],
+        offered=next((row for row in reversed(standing) if row.get("move") != MOVE_WIDEN), None),
+        widen=next((row for row in reversed(standing) if row.get("move") == MOVE_WIDEN), None),
+        held=state["held"],
+    )
+
+
+def _carried(task: Task, went: _WentOn, scheduler: Scheduler) -> tuple:
+    """**The stage's bars taken again, and what of the record's suggestions still stands**
+    (`went_on`; the pop-out search build's Task 6): `scheduler`, open at the stage, judges what
+    the stage judged, in order, and a suggestion stands where its bar, read now, still offers its
+    move -- a widening where the pool still lacks a pairing, too -- as a run's `_suggest` would
+    have kept it. Returns the stage's and the widening's, each a `_Suggested` or `None`."""
+    for event in went.bars:
+        if event[0] == "trial":
+            scheduler.judged(*event[1:])
+        elif event[0] == "decline":
+            scheduler.decline(event[1])
+        else:
+            scheduler.afresh()
+    offered = widen = None
+    now = scheduler.suggestion
+    if went.offered is not None and now is not None and now.move == went.offered.get("move"):
+        offered = _Suggested(went.offered["change"], now.move, now.block, now.to)
+    pool = task.pool
+    if (went.widen is not None and pool is not None and pool.unpooled(went.pool) is None
+            and len(pool.pairings(went.pool)) < len(pool.choices)
+            and scheduler.widening is not None):
+        widen = _Suggested(went.widen["change"], MOVE_WIDEN, scheduler.block.name, None)
+    return offered, widen
+
+
+def _went_said(task: Task, went: _WentOn, *, counted: bool = True, standing=()) -> str:
+    """Where a run left its plan, in words (`went_on`): its stage; its staircase's level and, with
+    `counted`, its count toward a step; its pool; and each suggestion `standing`."""
+    said = [f"in {went.stage}"]
+    climb = went.climb
+    if climb is not None:
+        part = f"{climb.staircase.setting} at {climb.value:g}, by its staircase"
+        if counted and climb.right:
+            part += f", {climb.right} right toward a step harder"
+        if counted and climb.wrong:
+            part += f", {climb.wrong} wrong toward a step easier"
+        said.append(part)
+    pool = task.pool
+    if pool is not None:
+        if pool.unpooled(went.pool) is None:
+            places = [at for at in range(len(pool.choices)) if int(went.pool) >> at & 1]
+            said.append(f"{pool.setting} {went.pool:g} ("
+                        + ", ".join(pool.named(at) for at in places) + ")")
+        else:
+            said.append(f"{pool.setting} {_link._quoted(went.pool)}")
+    for offered in standing:
+        said.append(f"the rig's suggestion {offered.change}, {Session._offer_said(offered)}, "
+                    f"standing")
+    if counted and went.held:
+        said.append(f"{', '.join(went.held)} held by a person at its last trial, not carried: hold "
+                    f"it again to keep it")
+    return "; ".join(said)
+
+
+def ended_said(task: Task, last) -> str | None:
+    """**A previous session's end, in words, for a run's start** (the pop-out search build's Task
+    6; its design §3.5, "with yesterday's end shown"): the stage its last run of the plan was in,
+    its staircase's level as its last step left it and its pool -- shown, never carried (§3.6:
+    "nothing carries the stage across sessions on its own"). `None` where its plan is gone."""
+    went = went_on(task, last)
+    if went is None:
+        return None
+    return (f"session {last.session_id}'s last run of plan {last.start.get('plan')} ended "
+            + _went_said(task, went, counted=False))
+
+
+def start_rows(task: Task, plan: str | None, values: dict) -> tuple:
+    """**What a run's start offers to pick** (the pop-out search build's Task 6; its design §3.5:
+    "the stage, the staircase's starting level and the pairings to pick"): each block of `plan`
+    as a `link.StageRow` -- its staircase's setting and levels, and the level it would start at
+    with `values` over the task's starting values, as `Session._climbing` starts it -- and the
+    task's pool as a `link.PoolRow`, or `None`."""
+    run = {**{param.name: param.start for param in task.params if param.start is not None},
+           **values}
+    stages = []
+    if plan is not None and plan in task.plans:
+        for block in task.plans[plan].blocks:
+            staircase = block.staircase
+            if staircase is None:
+                stages.append(_link.StageRow(block.name))
+                continue
+            start = staircase.start
+            if start is None:
+                start = staircase.nearest(run.get(staircase.setting))
+            stages.append(_link.StageRow(
+                block.name, staircase.setting, tuple(staircase.levels),
+                0 if start is None else start, staircase.start is not None))
+    pool = task.pool
+    return tuple(stages), (None if pool is None else _link.PoolRow(
+        pool.setting, tuple(pool.named(at) for at in range(len(pool.choices))),
+        run.get(pool.setting)))
 
 
 @dataclass
@@ -1112,6 +1369,9 @@ class Session:
             self._warnings[entry.key] = (entry, accepted_by, accepted_at)
         self.run_index = restoration.run_index
         self._sequence = restoration.sequence
+        # Its last run as its record left it (the pop-out search build's Task 6), which the next
+        # run goes on from where that run stopped with its process (`_going_on`).
+        self._last_run = getattr(restoration, "last_run", None)
         # And the change log's ids (engine build C3's spec §8), so its next act takes a new one.
         self._change = restoration.change
         # How its last run ended (the final review's M1), so `end_runs` never says "before
@@ -4008,6 +4268,53 @@ class Session:
     _widening: _Suggested | None = field(init=False, default=None, repr=False)
     _pool_was: object = field(init=False, default=None, repr=False)
     _paired: dict[int, tuple] = field(init=False, default_factory=dict, repr=False)
+    #: **A resumed session's last run, as its record left it** (`resume.LastRun`; the pop-out
+    #: search build's Task 6), which its first run may go on from (`_going_on`), `None` once that
+    #: run has started and for a session never resumed.
+    _last_run: object = field(init=False, default=None, repr=False)
+
+    def _going_on(self, task: Task, plan: str | None, start_block: str | None) -> _WentOn | None:
+        """**Where this run goes on from the run a resumed session's process stopped in**, or
+        `None` (the pop-out search build's Task 6; the plan's Review Focus 4: "the stage, the
+        staircase's level, the pool and any pending suggestion come back as they were"): the
+        resumed session's first run, of the same task, by its content, and the same plan, naming
+        no block to start at -- a start that names one is the trainer's own pick -- when that run
+        **stopped with its process**: its record holds no end for it (killed), or Ctrl-C at `wlx
+        taskd`'s terminal ended it (`INTERRUPTED`). Never one a person or its plan ended, which
+        had ended, as in a session never stranded, nor a run of a task file since changed. **A
+        record it cannot read back is no refusal**: the run starts at its plan's first block, as
+        any run does, and its pre-flight says nothing goes on."""
+        last = self._last_run
+        if last is None or plan is None or start_block is not None:
+            return None
+        if last.end is not None and last.end.get("stopped_because") != INTERRUPTED:
+            return None
+        if last.start.get("plan") != plan:
+            return None
+        if (last.start.get("versions") or {}).get("task") != content_hash(task):
+            return None
+        try:
+            went = went_on(task, last)
+        except (KeyError, TypeError, ValueError, IndexError, AttributeError):
+            return None
+        return went if went is not None and went.position is not None else None
+
+    def continues(self, task: Task, plan: str | None, start_block: str | None) -> str | None:
+        """**What a run started now would go on from, in words, for its pre-flight**
+        (`_going_on`; the pop-out search build's Task 6), or `None`: so the trainer sees, before
+        the start, the stage, the staircase, the pool and the suggestion it comes back with."""
+        went = self._going_on(task, plan, start_block)
+        if went is None:
+            return None
+        played = task.plans[plan]
+        scheduler = Scheduler(
+            blocks=[variation.expanded(block) for block in played.blocks], seed=0,
+            counting=task.trial.counting,
+            countings={name: structure.counting for name, structure in task.structures.items()},
+            order=played.order, start=went.position)
+        standing = [offered for offered in _carried(task, went, scheduler) if offered is not None]
+        return (f"it goes on from run {self._last_run.run + 1}, which stopped with its process: "
+                + _went_said(task, went, standing=standing))
 
     def _climbing(self) -> _Climb | None:
         """**The open block's staircase, started afresh as the block opens** (`task.Staircase`;
@@ -4666,12 +4973,29 @@ class Session:
                 f"{_printable(run.plan)}; its plans are "
                 + (", ".join(_printable(name) for name in task.plans) or "none")
             )
+        if run.start_block is not None:
+            # **And the block it starts at** (the pop-out search build's Task 6): the backstop for a
+            # caller that took no pre-flight, as above -- blocks given in code (a test's) by their
+            # own names.
+            found = None if run.plan is not None or not run.blocks else start_at(
+                run.blocks, None, run.start_block)
+            why = (unstarted(task, run.plan, run.start_block) if found is None
+                   else f"its blocks {found}" if isinstance(found, str) else None)
+            if why is not None:
+                raise SystemExit(f"task refused, session not started: {_printable(why)}")
+        # **A resumed session's first run goes on from the run its process stopped in** (the
+        # pop-out search build's Task 6; the plan's Review Focus 4), where it plays the same task
+        # and plan (`_going_on`): at that run's stage, its staircase where its last step left it,
+        # its pool, and a suggestion standing still standing. Its pool is the run's own value.
+        going = self._going_on(task, run.plan, run.start_block)
         self.welfare.preflight(self.wall_now())
         # **The task's own starting values, under the run's** (P4d-2b spec §6.2:
         # "Starting values are the task's own"; S8 §3.4's task layer; the b3a-2 plan,
         # decision 1): each declared `Param.start` that the run was not given, merged below.
         starts = {param.name: param.start for param in task.params if param.start is not None}
         given = dict(run.values)
+        if going is not None and task.pool is not None:
+            given[task.pool.setting] = going.pool
         # **A place with no value refuses the run before it starts** (XC-415; the PI, 2026-10-30,
         # "Refuse to start": "A stimulus that cannot be drawn is a case where the run cannot
         # proceed"): a setting placing a window, a stimulus, an update or an array's objects, or
@@ -4767,6 +5091,8 @@ class Session:
         self._suggested, self._suggestions = None, {}
         # Nor offered to widen its pool, which it has not looked at yet, nor paired a trial.
         self._widening, self._pool_was, self._paired = None, None, {}
+        # Only a resumed session's first run may go on from the run its process stopped in.
+        went_from, self._last_run = self._last_run, None
         # Nothing has varied in a block of this run yet, and no line is counted (engine build C3).
         self._varied = {}
         self._tallies = {}
@@ -4781,11 +5107,26 @@ class Session:
         # Counted by each condition's structure's table (engine spec §16.1; engine build C2a; each
         # condition naming its structure since C2b), which a block's own replaces.
         plan = self._played = self._plan(run, task)
+        # **At the block its start names** (the pop-out search build's Task 6; its design §3.6,
+        # "the trainer picks"), else where the run it goes on from stopped, else at the first.
+        start = 0
+        if run.start_block is not None:
+            start = start_at(plan.blocks, plan.order, run.start_block)
+        elif going is not None:
+            start = going.position
         scheduler = Scheduler(
             blocks=plan.blocks, seed=run.seed, counting=task.trial.counting,
             countings={name: structure.counting for name, structure in task.structures.items()},
-            order=plan.order,
+            order=plan.order, start=start,
         )
+        if going is not None:
+            # The stage's staircase as that run's last step left it, the block it is open in this
+            # run's first (`_climbing`); its bars judged again; the suggestions still standing.
+            self._climb_block, self._climb = 0, going.climb
+            self._suggested, self._widening = _carried(task, going, scheduler)
+            for offered in (self._suggested, self._widening):
+                if offered is not None:
+                    self._suggestions[offered.change] = offered
         self._run_from = self._block_from = self._elapsed
         make_world = self.world if self.world is not None else self._agent(run)
         tally = Tally()
@@ -4808,6 +5149,11 @@ class Session:
             # **The plan it plays, by its name in the task** (engine build C2b), whose content hash
             # is above; a planned run's lengths are its plan's, so it records no trial count.
             plan=run.plan,
+            # **The block it started at** (the pop-out search build's Task 6; wl-preproc accepted
+            # it, "absent or null means the first"): the one its start named, or the stage the run
+            # it goes on from stopped in.
+            start_block=(run.start_block if run.start_block is not None
+                         else None if going is None else going.stage),
             # **And as declared** (the plan's science review, I4), in the form the content hash
             # reads it, so the record tells a balanced plan from a random one by itself: the
             # task's plan, its factorials unexpanded (engine build C3), never the plan played.
@@ -4855,6 +5201,13 @@ class Session:
         self._scheduler = scheduler
         self._index = 0
         self.phase = "running"
+        if going is not None:
+            # Said on the changes feed, as the run starts, with what it comes back with.
+            standing = [offered for offered in (self._suggested, self._widening)
+                        if offered is not None]
+            self._feed("resumed", None, self.wall_now(),
+                       f"this run goes on from run {went_from.run + 1}, which stopped with its "
+                       f"process: " + _went_said(task, going, standing=standing))
         #: Whether the allocation's own `RUN_END` code (4136) went out: only on an
         #: ending by design, and only when the allocation has one. wl-preproc's
         #: `RUN_END` marker (4, XC-205) goes out on every ending by design and is not
@@ -5331,7 +5684,7 @@ class Session:
             # as for a console's `Stop`, and the interrupt goes on to the caller,
             # which still owes the animal its return (`cli.main`). The head is left
             # as it was, as a fault leaves it: `await_return` releases it on entry.
-            self.stopped_because = "interrupted at the terminal"
+            self.stopped_because = INTERRUPTED
             self.stop_kind = "operator"
             publish()
             raise

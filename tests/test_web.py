@@ -2324,7 +2324,7 @@ def test_a_frame_keeps_the_option_chosen_in_a_select():
     assert swap.index("var chosen") < swap.index("node.innerHTML = html;") < swap.index(
         "choose(node, chosen);"
     )
-    assert 'if (id === "preflight") { restoreAcks(); }' in swap
+    assert 'if (id === "preflight") { restoreAcks(); restoreStarts(); }' in swap
     assert "if (option.value === value) { select.value = value; }" in _function("choose")
 
 
@@ -2344,7 +2344,9 @@ def test_no_acknowledgement_outlives_the_run_or_the_task_it_was_ticked_for():
 
 
 def test_start_sends_the_task_whose_preflight_is_shown_and_only_while_it_is_chosen():
-    """The b3a-2 plan, decision 8; the page's values are none, the task's own (decision 1)."""
+    """The b3a-2 plan, decision 8; the page's values are none, the task's own (decision 1), but
+    what a person picked in the run's start, with the stage it starts at (the pop-out search
+    build's Task 6: `runStart`)."""
     start = _function("startRun")
 
     assert "var button = el(\"controls\").querySelector('[data-cmd=\"start\"]');" in start
@@ -2353,9 +2355,10 @@ def test_start_sends_the_task_whose_preflight_is_shown_and_only_while_it_is_chos
     assert "if (!task || task !== chosenTask() || plan !== chosenPlan()) {" in start
     assert "if (!Number.isInteger(trials) || trials < 1) {" in start
     assert (
-        'post({ kind: "start", task: task, values: {}, trials: trials, '
-        'acknowledged: acknowledged,\n           plan: plan });'
+        'post({ kind: "start", task: task, values: start.values, trials: trials,\n'
+        '           acknowledged: acknowledged, plan: plan, start_block: start.block });'
     ) in start
+    assert start.index("var start = runStart();") < start.index("post(")
     assert 'post({ kind: "check", task: task, values: {}, plan: chosenPlan() });' in _function(
         "takePreflight")
 

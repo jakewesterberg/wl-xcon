@@ -1843,6 +1843,39 @@ def unpooled(task: Task, values: dict) -> "list[tuple[str, str]]":
     return [(pool.setting, f"the pool {pool.setting!r}{at}: {why}")]
 
 
+def start_at(blocks, order, name: str) -> "int | str":
+    """**The place in its sequence of blocks a run starts at, at its block named `name`** (the
+    pop-out search build's Task 6; its design §3.6, "the trainer picks" the stage), or why none
+    is, a sentence's end for its plan: an order that plays its blocks by their places -- in order,
+    over and over, stage by stage -- starts at the first block of that name, the blocks before it
+    still there to move or fall back to; one that draws them at random (`Balanced`, `Random`) has
+    no place a name gives."""
+    if isinstance(order, (Balanced, Random)):
+        return "plays its blocks in a random order, so no run starts at one of them by its name"
+    names = [block.name for block in blocks]
+    if name not in names:
+        return f"has no block {name!r}; its blocks are " + ", ".join(map(repr, names))
+    return names.index(name)
+
+
+def unstarted(task: Task, plan: "str | None", start_block: "str | None") -> "str | None":
+    """**Why a run of `task`'s `plan` cannot start at its block `start_block`**, a sentence, or
+    `None` where it can or none is named (the pop-out search build's Task 6): no plan -- the plain
+    run is one block -- no block of that name, or an order with no place a name gives
+    (`start_at`). A plan the task lacks is its own refusal, said where the plan is checked. One
+    function for `wlx run` before its session opens, `wlx taskd`'s pre-flight (`preflight.task`)
+    and `Session.run`'s backstop, so each says alike."""
+    if start_block is None:
+        return None
+    if plan is None:
+        return (f"block {start_block!r} names a block of a plan to start at, and this run plays "
+                f"no plan")
+    if plan not in task.plans:
+        return None
+    found = start_at(task.plans[plan].blocks, task.plans[plan].order, start_block)
+    return f"plan {plan!r} {found}" if isinstance(found, str) else None
+
+
 def _repeat_warnings(task: Task) -> list[Finding]:
     """**Two `same` draws a repeat turns against its block's design**, warned and accepted in every
     kind (the C3 plan's science review, I-5; warnings over refusals, TSK-51):

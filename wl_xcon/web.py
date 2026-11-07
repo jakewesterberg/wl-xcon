@@ -841,7 +841,79 @@ def _preflight_pane(frame: Telemetry | Idle | None, view: View) -> str:
         f'<div class="sub">for {task} · {plan} · a fail blocks the run; each unknown starts it '
         "only on your acknowledgement, by name, written into runs.jsonl</div>"
         f'<div class="pf" data-task="{task}">{rows}</div>'
+        + _run_start(frame.preflight, view)
     )
+
+
+def _run_start(preflight, view: View) -> str:
+    """**Where the run starts, picked at its start** (the pop-out search build's Task 6; its
+    design §3.5, the PI's sketch of the trainer's screen: "at the day's start, the stage, the
+    staircase's starting level and the pairings to pick, with yesterday's end shown"): the plan's
+    stage to start at (`start-block`; the first sends none), each stage's staircase level where its
+    task declares none -- shown only for the stage picked -- and the pool's pairings, ticked as the
+    run would start; the page's script sends only what a person changed from that, as the start's
+    values (`startRun`). Then the animal's previous session's end of this plan, as its record left
+    it: shown, never carried (§3.6). **A resumed session's run that goes on from the run its
+    process stopped in** (`Preflight.continues`) shows what it comes back with in their place,
+    since it starts there."""
+    parts = []
+    if preflight.continues is not None:
+        parts.append('<div class="row" id="continues"><span>goes on</span>'
+                     f'<span class="val">{_e(preflight.continues)}</span></div>')
+    else:
+        stages = preflight.stages
+        if len(stages) > 1:
+            picked = preflight.start_block or stages[0].name
+            options = "".join(
+                f'<option value="{_e(stage.name)}"{" selected" if stage.name == picked else ""}>'
+                f"{_e(stage.name)}</option>" for stage in stages)
+            parts.append('<label class="row"><span>stage</span><select id="start-block" '
+                         f'aria-label="the stage the run starts at"{_gate(view)}>{options}'
+                         "</select></label>")
+        for stage in stages:
+            if stage.setting is None or not stage.levels:
+                continue
+            at = stage.levels[stage.start or 0]
+            if stage.declared:
+                parts.append(f'<div class="row" data-stage="{_e(stage.name)}">'
+                             f"<span>{_e(stage.setting)} in {_e(stage.name)}</span>"
+                             f'<span class="val">starts at {_rung(at)}, as its task declares'
+                             "</span></div>")
+                continue
+            options = "".join(
+                f'<option value="{_rung(level)}"{" selected" if level == at else ""}>'
+                f"{_rung(level)}</option>" for level in stage.levels)
+            parts.append(f'<label class="row" data-stage="{_e(stage.name)}">'
+                         f"<span>{_e(stage.setting)} in {_e(stage.name)}</span>"
+                         f'<select data-start-setting="{_e(stage.setting)}" '
+                         f'data-default="{_rung(at)}" aria-label="{_e(stage.setting)} at the start"'
+                         f"{_gate(view)}>{options}</select></label>")
+        pool = preflight.pool
+        if pool is not None:
+            # The pool the run would start with, ticked; none where it has no whole number.
+            start = (int(pool.start) if isinstance(pool.start, (int, float))
+                     and not isinstance(pool.start, bool) and math.isfinite(pool.start)
+                     and float(pool.start).is_integer() and pool.start >= 0 else 0)
+            boxes = "".join(
+                f'<label class="chk"><input type="checkbox" data-pairing="{1 << at}"'
+                f'{" checked" if start >> at & 1 else ""} aria-label="pairing {_e(name)}"'
+                f"{_gate(view)}> {_e(name)}</label>" for at, name in enumerate(pool.pairings))
+            parts.append(f'<div class="row" data-pool-row="{_e(pool.setting)}" '
+                         f'data-default="{start}"><span>pairings</span>{boxes}</div>')
+        if stages or pool is not None:
+            parts.append('<div class="sub" id="previous-end">'
+                         + ("the previous session: " + _e(preflight.previous)
+                            if preflight.previous is not None
+                            else "no previous session of this animal ran this plan")
+                         + "</div>")
+    if not parts:
+        return ""
+    return '<div class="pf" id="run-start">' + "".join(parts) + "</div>"
+
+
+def _rung(value: object) -> str:
+    """A staircase's level as the start form shows and sends it: a number as Python's `g`."""
+    return f"{value:g}" if isinstance(value, (int, float)) else str(value)
 
 
 def _warning_row(row) -> str:
@@ -2842,6 +2914,10 @@ _SCRIPT = """
   // The session id of an open this page sent and has not yet seen open (`settleOpen`).
   var pendingOpen = null;
   var acked = {};
+  // What a person picked in the run's start (the pop-out search build's Task 6): the stage, each
+  // staircase's level and each pairing, kept across the frames that redraw the pre-flight, and
+  // cleared as the ticks are: whenever a pre-flight is asked for or a run started.
+  var picked = {};
   var returnFor = null;
   function el(id) { return document.getElementById(id); }
   function say(text, tone) {
@@ -2927,7 +3003,7 @@ _SCRIPT = """
     // Before the hooks: `holdReward` must see a button as the sign-in leaves it.
     applySignIn();
     if (id === "controls") { holdReward(); }
-    if (id === "preflight") { restoreAcks(); }
+    if (id === "preflight") { restoreAcks(); restoreStarts(); }
     if (id === "plan-sel") { preselect(); }
     if (id === "end-actions") { settleOpen(); }
   }
@@ -2967,6 +3043,53 @@ _SCRIPT = """
     if (el("dn-accept")) { el("dn-accept").checked = false; }
     el("dn-msg").textContent = "";
     pendingOpen = null;
+  }
+  function restoreStarts() {
+    var stage = el("start-block");
+    if (stage && picked.block !== undefined) { choose(stage, picked.block); }
+    Array.prototype.forEach.call(document.querySelectorAll("select[data-start-setting]"),
+      function (select) {
+        var value = picked["level:" + select.getAttribute("data-start-setting")];
+        if (value !== undefined) { choose(select, value); }
+      });
+    Array.prototype.forEach.call(document.querySelectorAll("input[data-pairing]"), function (box) {
+      var value = picked["pairing:" + box.getAttribute("data-pairing")];
+      if (value !== undefined) { box.checked = value; }
+    });
+    showStage();
+  }
+  // Each staircase's level is shown for the stage picked only: the others start where they would.
+  function showStage() {
+    var stage = el("start-block");
+    var name = stage ? stage.value : null;
+    Array.prototype.forEach.call(document.querySelectorAll("#run-start [data-stage]"),
+      function (row) { row.hidden = name !== null && row.getAttribute("data-stage") !== name; });
+  }
+  // The start's block and values from the run's start: the stage picked, or none for the first;
+  // the picked stage's staircase level and the pool, each only where a person changed it from
+  // where the run would start.
+  function runStart() {
+    var stage = el("start-block");
+    var values = {};
+    Array.prototype.forEach.call(document.querySelectorAll("select[data-start-setting]"),
+      function (select) {
+        var row = select.closest("[data-stage]");
+        if (row && row.hidden) { return; }
+        if (select.value !== select.getAttribute("data-default")) {
+          values[select.getAttribute("data-start-setting")] = Number(select.value);
+        }
+      });
+    var pool = document.querySelector("#run-start [data-pool-row]");
+    if (pool) {
+      var sum = 0;
+      Array.prototype.forEach.call(pool.querySelectorAll("input[data-pairing]"), function (box) {
+        if (box.checked) { sum += Number(box.getAttribute("data-pairing")); }
+      });
+      if (String(sum) !== pool.getAttribute("data-default")) {
+        values[pool.getAttribute("data-pool-row")] = sum;
+      }
+    }
+    return { block: stage && stage.selectedIndex > 0 ? stage.value : null, values: values };
   }
   function restoreAcks() {
     Array.prototype.forEach.call(document.querySelectorAll("input[data-ack]"), function (box) {
@@ -3243,6 +3366,7 @@ _SCRIPT = """
   function takePreflight(showPanel) {
     var task = chosenTask();
     acked = {};
+    picked = {};
     if (!task) { tell("not sent: no task is offered to check", "crit"); return; }
     // A plain run's pre-flight is how the page learns the task's plans: arm the preselection.
     // Armed only where this page can send: the sign-in page signed in, the rig PC's own page
@@ -3271,10 +3395,13 @@ _SCRIPT = """
     Array.prototype.forEach.call(document.querySelectorAll("input[data-ack]"), function (box) {
       if (box.checked) { acknowledged.push(box.getAttribute("data-ack")); }
     });
+    // Where it starts, as picked (the pop-out search build's Task 6).
+    var start = runStart();
     acked = {};
     restoreAcks();
-    post({ kind: "start", task: task, values: {}, trials: trials, acknowledged: acknowledged,
-           plan: plan });
+    picked = {};
+    post({ kind: "start", task: task, values: start.values, trials: trials,
+           acknowledged: acknowledged, plan: plan, start_block: start.block });
   }
   function openNew() {
     el("dn-msg").textContent = "";
@@ -3458,6 +3585,13 @@ _SCRIPT = """
     if (!e.target.matches) { return; }
     if (e.target.matches("input[data-param]")) { schedule(e.target); }
     else if (e.target.matches("input[data-ack]")) { acked[e.target.getAttribute("data-ack")] = e.target.checked; }
+    else if (e.target.id === "start-block") { picked.block = e.target.value; showStage(); }
+    else if (e.target.matches("select[data-start-setting]")) {
+      picked["level:" + e.target.getAttribute("data-start-setting")] = e.target.value;
+    }
+    else if (e.target.matches("input[data-pairing]")) {
+      picked["pairing:" + e.target.getAttribute("data-pairing")] = e.target.checked;
+    }
     else if (e.target.id === "task-sel") {
       if (betweenRuns()) { el("plan-sel").value = ""; takePreflight(false); }
     }

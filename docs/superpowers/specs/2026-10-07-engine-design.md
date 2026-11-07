@@ -888,6 +888,19 @@ pairings), the stage's move first in one prompt that one hold answers whole; the
 change to the pool starts both bars afresh and leaves the staircase (§15) where it is. The pool carries into the next
 stage.
 
+*The pop-out search build, 2026-11-07, its Task 6* (its design §3.5 and §3.6, "the trainer picks"; the build plan's
+Review Focus 4): **a run may start at a named block of its plan** (`start_block`, recorded in its start row, null for
+the first, as wl-preproc accepted), the blocks before it there to move or fall back to; a block it cannot start at --
+none of that name, no plan, an order that draws its blocks at random -- is refused before the run opens. The console's
+start does not carry it yet: `Service._start` is welfare-listed and waits on the PI's review, and the service refuses a
+start naming one with a sentence until then. The pre-flight offers the plan's stages, each staircase's levels and the
+pool's pairings to pick, the start sending only what a person changed, and shows the animal's previous session's end of
+the plan, read from its record and never carried. **A resumed session's first run goes on from the run its process
+stopped in** (no end row, or Ctrl-C): same task and plan, no start block named, it starts at that run's stage, the
+staircase (§15) where its last step left it with its count, the pool, and a suggestion or widening still standing under
+its own id, read back from the record by the engine's own rules; a person's held value and a repeat waiting are not
+carried.
+
 ## 14. Variation (N§11, N§R1, N§R2)
 
 1. **Named conditions plus drawn values.** [@asaad2008flexible] A parameter is set by a condition or

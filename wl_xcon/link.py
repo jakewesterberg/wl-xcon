@@ -216,8 +216,11 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: bar's numbers now -- or `None`: no suggestion, one withdrawn as its bar stopped being met, one
 #: answered, and between runs. And `Telemetry.widen` (the same build's Task 5), the rig's
 #: suggestion to widen the task's pool of pairings, a `Suggestion` of move `"widen"` and no stage
-#: to go to, or `None` (added within the build, before 20 was released, so 20 carries both). A
-#: reader of 19 refuses 20 and 20 refuses 19, by name.
+#: to go to, or `None` (added within the build, before 20 was released, so 20 carries both). And
+#: the same build's Task 6, also before 20 was released: `Preflight.start_block`, `stages` (each a
+#: `StageRow`), `pool` (a `PoolRow`), `previous` and `continues`, where the run would start, the
+#: stages and pairings a page's start offers, the previous session's end and what a resumed run
+#: goes on from. A reader of 19 refuses 20 and 20 refuses 19, by name.
 SCHEMA = 20
 
 #: How many refusals a session keeps, per source, and therefore how many one
@@ -562,6 +565,44 @@ class Preflight:
     items: tuple
     plan: str | None = None
     plans: tuple = ()
+    #: **Where the run would start** (the pop-out search build's Task 6; its design §3.5 and §3.6:
+    #: "the trainer picks" the stage, the staircase's level and the pairings at the run's start,
+    #: "with yesterday's end shown"): the block of `plan` it was taken for, `None` for the first;
+    #: the plan's blocks, each a `StageRow`, in order, for the page's stage picker; the task's pool
+    #: of pairings (`PoolRow`), or `None`; the previous session's end, in words, or `None`; and,
+    #: for a resumed session's first run, what the run would go on from, in words, or `None`.
+    start_block: str | None = None
+    stages: tuple = ()
+    pool: "PoolRow | None" = None
+    previous: str | None = None
+    continues: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class StageRow:
+    """**One block a run may start at** (the pop-out search build's Task 6): its name, and its
+    staircase (`task.Staircase`), where it has one -- the setting it steps, its levels easiest
+    first, the level it would start at as an index into them, and whether its task declares that
+    level (`Staircase.start`), which a run's value then does not move; otherwise the run's value
+    of the setting picks it, nearest."""
+
+    name: str
+    setting: str | None = None
+    levels: tuple = ()
+    start: int | None = None
+    declared: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class PoolRow:
+    """**The task's pool of pairings, for the run's start** (`task.Pool`; the pop-out search
+    build's Task 6): the setting that holds it, each pairing in words in the pool's declared order
+    -- the n-th, counted from 0, worth 2 ** n in the setting's value -- and the value the run would
+    start with."""
+
+    setting: str
+    pairings: tuple
+    start: object = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1301,6 +1342,15 @@ def _preflight_out(preflight: Preflight | None) -> dict | None:
         "items": [{"name": i.name, "result": i.result, "said": i.said} for i in preflight.items],
         "plan": preflight.plan,
         "plans": list(preflight.plans),
+        # Where the run would start (the pop-out search build's Task 6; schema 20).
+        "start_block": preflight.start_block,
+        "stages": [{"name": s.name, "setting": s.setting, "levels": list(s.levels),
+                    "start": s.start, "declared": s.declared} for s in preflight.stages],
+        "pool": None if preflight.pool is None else {
+            "setting": preflight.pool.setting, "pairings": list(preflight.pool.pairings),
+            "start": preflight.pool.start},
+        "previous": preflight.previous,
+        "continues": preflight.continues,
     }
 
 
@@ -1779,6 +1829,14 @@ def _telemetry_from(data: dict) -> Telemetry:
                 items=tuple(PreflightItem(**i) for i in data["preflight"]["items"]),
                 plan=data["preflight"]["plan"],
                 plans=tuple(data["preflight"]["plans"]),
+                start_block=data["preflight"]["start_block"],
+                stages=tuple(StageRow(**{**s, "levels": tuple(s["levels"])})
+                             for s in data["preflight"]["stages"]),
+                pool=(None if data["preflight"]["pool"] is None else PoolRow(
+                    **{**data["preflight"]["pool"],
+                       "pairings": tuple(data["preflight"]["pool"]["pairings"])})),
+                previous=data["preflight"]["previous"],
+                continues=data["preflight"]["continues"],
             )
         ),
         question=_question_in(data["question"]),
@@ -1991,6 +2049,9 @@ class CheckRun:
     task: str
     values: dict
     plan: str | None = None
+    #: The block of `plan` the run would start at, by its name, or `None` for the first (the
+    #: pop-out search build's Task 6).
+    start_block: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -2009,6 +2070,9 @@ class StartRun:
     trials: int
     acknowledged: tuple
     plan: str | None = None
+    #: The block of `plan` the run starts at, by its name, or `None` for the first (the pop-out
+    #: search build's Task 6; its design §3.6, "the trainer picks").
+    start_block: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -2329,6 +2393,7 @@ def _encode_command(command: Command) -> bytes:
         payload = {
             "kind": command.KIND, "by": actors.to_map(command.by), "task": command.task,
             "values": dict(command.values), "plan": command.plan,
+            "start_block": command.start_block,
         }
         if isinstance(command, StartRun):
             payload["trials"] = command.trials
@@ -2726,8 +2791,11 @@ def _command_from(data: dict) -> Command:
         values = _values(data, kind, by)
         # The plan, by its name in the task, or none for the plain run (engine build C2b).
         plan = _word(data, "plan", kind, by, optional=True)
+        # And the block of it the run starts at, or none for its first (the pop-out search
+        # build's Task 6).
+        start_block = _word(data, "start_block", kind, by, optional=True)
         if kind == "check":
-            return CheckRun(by=by, task=task, values=values, plan=plan)
+            return CheckRun(by=by, task=task, values=values, plan=plan, start_block=start_block)
         trials = data.get("trials")
         if isinstance(trials, bool) or not isinstance(trials, int) or not 1 <= trials <= TRIALS_LIMIT:
             raise CommandRefused(
@@ -2747,7 +2815,7 @@ def _command_from(data: dict) -> Command:
                 f"{_quoted(acknowledged)} is not that, so it is refused",
             )
         return StartRun(by=by, task=task, values=values, trials=trials,
-                        acknowledged=tuple(acknowledged), plan=plan)
+                        acknowledged=tuple(acknowledged), plan=plan, start_block=start_block)
     if kind == "end":
         by = _actor(data.get("by"), "end")
         confirm = data.get("confirm", False)

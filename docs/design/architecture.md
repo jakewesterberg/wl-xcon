@@ -125,7 +125,10 @@ then `Session.resume`) — between runs, or waiting for its return when its runs
 before its process stopped (the PI, 2026-10-01: "Bring it back waiting"), its departure
 restored by `restore_departure` and
 never re-taken, its fluid so far by `Welfare.restore_fluid`, its next run numbered on and
-every block and trial number continuing, its out-of-cage limit the one the session last had.
+every block and trial number continuing, its out-of-cage limit the one the session last had,
+and its last run as its record left it (`Restoration.last_run`), which its next run of the same
+task and plan goes on from where that run stopped with its process (the pop-out search build's
+Task 6; "Plans and blocks" below).
 It is refused, before anything is written: while a session is open; for an id that is not
 stranded, or one marked not resumable; when its record cannot carry it (written before XC-026,
 or before engine build B, so what the session is for is unknown; unreadable; a start row without
@@ -535,7 +538,29 @@ build, 2026-11-07): between trials, as the trial loop draws (`taskd.Session._cli
 harder after `down` right answers in a row and a level easier after `up` failures, by TSK-33's
 classes (`task.staircase_verdict`), never past either end, started afresh as each block opens; a
 person's value on the setting holds it and a hand-back resumes it at the level nearest that value,
-and each trial's line marks the value it gave `drawn` `"staircase"`. A block is one
+and each trial's line marks the value it gave `drawn` `"staircase"`. **A run may start at a named
+block of its plan** (`start_block`; the pop-out search build's Task 6; its design §3.6, "the
+trainer picks"), the blocks before it still there to move or fall back to: `wlx run
+--start-block`, and `CheckRun` and `StartRun`'s `start_block`; one the run cannot start at (no
+block of that name, no plan, an order that draws its blocks at random; `check.unstarted`) fails
+the pre-flight's task checks, is refused by `wlx run` before its session opens and by
+`Session.run` as their backstop; its start row records `start_block`, null for the first.
+**The console's start does not carry it yet**: `Service._start`, welfare-listed, builds the run
+without it, so the service refuses a start naming one with a sentence until the PI reviews that
+change. The pre-flight offers the plan's stages, each staircase's levels and the level it would
+start at, and the pool's pairings (`Preflight.stages`, `pool`), which the page's Setup tab draws
+and its start sends as values only where a person changed them, and shows the animal's previous
+session's end of the plan as its record left it (`Preflight.previous`; `resume.previous`,
+`taskd.ended_said`), never carried (the design's §3.6: "nothing carries the stage across sessions on its
+own"). **A resumed session's first run goes on from the run its process stopped in** (the
+pop-out search plan's Review Focus 4): where it plays the same task, by its content, and plan,
+names no block to start at, and that run's record holds no end for it or Ctrl-C ended it, it
+starts at that run's stage, its staircase where the last step left it, count and all, its pool,
+and a suggestion of a move or a widening still standing under its own id -- read back from the
+record by the engine's own rules (`resume.LastRun`, `taskd.went_on`, `Scheduler.judged`), said in
+its pre-flight (`Preflight.continues`) and on its changes feed; a person's value held is not
+carried, nor a repeat waiting, and a record it cannot read back starts the run at its first
+block. A block is one
 stretch of trials under one type inside one run, opened by `BLOCK_START` before its first trial
 and closed by `BLOCK_END` after its last. **Time limits are read between trials, in the run loop,
 never in `Session._ends`**: on the time trials ran, pauses not counting; a drummed trial waiting

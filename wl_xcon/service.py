@@ -90,7 +90,7 @@ from wl_xcon.dio import Simulated as SimulatedCard
 from wl_xcon.geometry import NOMINAL_HALF_IPD_CM, Rig
 from wl_xcon.photometry import SRGB, Calibration
 from wl_xcon.record import XCON_DIRNAME
-from wl_xcon.taskd import RunSpec, Session, SessionSpec, bounds_record
+from wl_xcon.taskd import RunSpec, Session, SessionSpec, bounds_record, ended_said, start_rows
 from wl_xcon.welfare import OUT_OF_CAGE, Deployment, SessionClock
 from wl_xcon.welfare import Simulated as SimulatedPump
 
@@ -585,7 +585,19 @@ class Service:
         elif isinstance(command, _link.CheckRun):
             self._check(command)
         elif isinstance(command, _link.StartRun):
-            self._start(command)
+            if command.start_block is not None:
+                # **Not yet carried to the run** (the pop-out search build's Task 6): `_start`,
+                # welfare-listed, builds the run from the start without its `start_block`, so a run
+                # started from it would quietly start at the plan's first block. Refused instead,
+                # until the PI's welfare review of that change (the Task 6 report's welfare item);
+                # `wlx run --start-block` and a resumed run's own stage are carried today.
+                self._refuse("start", command.by, (
+                    f"a start at a named block ({_link._quoted(command.start_block)}) is not "
+                    f"carried to the run yet: Service._start, welfare-listed, waits on the PI's "
+                    f"review to carry it, so nothing was started; start at the plan's first "
+                    f"block, and move on with next block"))
+            else:
+                self._start(command)
         elif isinstance(command, _link.ResumeSession):
             idle = self.session is None
             self._resume(command)
@@ -1086,7 +1098,7 @@ class Service:
         return path
 
     def _preflight(self, session: Session, task: Path, values: dict,
-                   plan: str | None = None) -> tuple:
+                   plan: str | None = None, start_block: str | None = None) -> tuple:
         """Spec §6.2's items, taken now, in order -- the out-of-cage item always among
         them, since `preflight.gate` refuses a pre-flight without it.
 
@@ -1099,13 +1111,17 @@ class Service:
         **It returns the run's warnings not yet accepted too**, for `_start` to hand to the
         run. **Taken for `plan`**, by its name in the task, or the plain run (engine build C2b):
         a plan the task lacks fails the task checks item, and the starting values cover the
-        structures the plan's conditions play, each condition's values held to their ranges."""
+        structures the plan's conditions play, each condition's values held to their ranges.
+        **And for the block of it the run starts at** (`start_block`; the pop-out search build's
+        Task 6), which fails the task checks item where the run cannot start there; it carries
+        what the run's start offers to pick, the animal's previous session's end and what a
+        resumed session's run goes on from (`_start_offers`)."""
         settings = Path(session.spec.subject_settings) if session.spec.subject_settings else None
         owed: list = []
         try:
             item, loaded, findings = _preflight.task(
                 task, self.allocation, session.spec.geometry, session.spec.calibration,
-                deployment=session.spec.deployment, plan=plan,
+                deployment=session.spec.deployment, plan=plan, start_block=start_block,
             )
             checked = (item,)
         except Exception as broken:  # noqa: BLE001 -- see the docstring
@@ -1169,7 +1185,32 @@ class Service:
             ),
             plan=plan,
             plans=() if loaded is None else tuple(loaded.plans),
+            start_block=start_block,
+            **self._start_offers(session, task, loaded, values, plan, start_block),
         ), owed
+
+    def _start_offers(self, session: Session, path: Path, loaded, values: dict,
+                      plan: str | None, start_block: str | None) -> dict:
+        """**What a run's start offers to pick, and what the trainer is shown beside it** (the
+        pop-out search build's Task 6; its design §3.5: "the stage, the staircase's starting level
+        and the pairings to pick, with yesterday's end shown"), as the pre-flight's fields: the
+        plan's stages and the task's pool (`taskd.start_rows`), the animal's previous session's
+        end of this plan (`resume.previous`, `taskd.ended_said`) -- shown, never carried (§3.6) --
+        and what a resumed session's first run goes on from (`Session.continues`). **None of it is
+        an item, so none of it fails a run**: a record that cannot be read is said so in
+        `previous`, a task that did not load offers nothing."""
+        if loaded is None:
+            return {}
+        stages, pool = start_rows(loaded, plan, values)
+        try:
+            last = _resume_mod.previous(self.root, session.spec.subject, session.spec.session_id,
+                                        path.name, plan)
+            previous = None if last is None else ended_said(loaded, last)
+        except Exception as broken:  # noqa: BLE001 -- shown, never a check: see the docstring
+            previous = _link.cut(f"the previous session's end could not be read: {_fault(broken)}",
+                                 _link.NOTE_LIMIT)
+        return {"stages": stages, "pool": pool, "previous": previous,
+                "continues": session.continues(loaded, plan, start_block)}
 
     def _check(self, command: _link.CheckRun) -> None:
         """Take a run's pre-flight and put it on the frame, starting nothing."""
@@ -1178,7 +1219,8 @@ class Service:
             return
         task = self._task(command.task, "check", command.by)
         if task is not None:
-            session.preflight, _ = self._preflight(session, task, command.values, command.plan)
+            session.preflight, _ = self._preflight(session, task, command.values, command.plan,
+                                                   command.start_block)
 
     def _start(self, command: _link.StartRun) -> None:
         """**Welfare-critical.** Accept a run (spec §6.2): the pre-flight **taken now**,
