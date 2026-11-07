@@ -2736,8 +2736,9 @@ def _span(
     every range check shares** (`_widest`, which read a setting with one bound as 0 to 0, is
     gone since Task 10's review, fix round 2).
 
-    A literal is itself; a parameter is **its declared range**, because every value in it is
-    one an experimenter can dial in live, or the least and greatest of its choices. Checking
+    A literal is itself (one that is no number bounds nothing, failing closed; XC-273); a
+    parameter is **its declared range**, because every value in it is one an experimenter can
+    dial in live, or the least and greatest of its choices. Checking
     the range rather than a value proves a task cannot be broken from the console, instead of
     proving it happens not to be today.
 
@@ -2751,7 +2752,11 @@ def _span(
     unbounded.
     """
     if not isinstance(value, P):
-        return (float(value), float(value))
+        # A literal that is no number bounds nothing, failing closed (XC-273: `float("x")` raised
+        # out of `check()`), and is refused where its kind is checked; one past a float's range is
+        # the infinity it is past (`_literal`; `float(10**400)` raised too).
+        number = _literal(value)
+        return (least, math.inf) if number is None else (number, number)
     param = params.get(value.name)
     if param is None:
         return (least, math.inf)
@@ -4725,8 +4730,10 @@ def _block_faults(trial: Trial) -> list[Finding]:
     **And every value is of its field's kind** (XC-245, XC-264, XC-265): a number where a
     number belongs, a color where a light does, an appearance where a stimulus's looks do,
     and a shape, a fill, an edge or an outline where a `Look`'s are, each choice of a
-    parameter included. A value of another kind passed every rule above unread, and
-    `resolve` met it first. A parameter whose choices name it is refused too (XC-263)."""
+    parameter included; an array's set size and target index a whole number, its ring radius
+    a finite number, and a polygon's sides a whole number (XC-273). A value of another kind
+    passed every rule above unread, and `resolve` met it first. A parameter whose choices name
+    it is refused too (XC-263)."""
     from wl_xcon import look
     from wl_xcon.photometry import Michelson, Weber
     from wl_xcon.screen import LIGHTLESS
@@ -4768,14 +4775,15 @@ def _block_faults(trial: Trial) -> list[Finding]:
                 bad(said)
                 return
 
-    def kind(what: str, raw, fits, noun: str) -> None:
+    def kind(what: str, raw, fits, noun: str, say=repr) -> None:
         """Refuse the first value `raw` can hold that is not `noun`: a literal, or each
-        choice of a parameter (one offering none is refused where the field is read)."""
+        choice of a parameter (one offering none is refused where the field is read), each said
+        by `say`."""
         if isinstance(raw, P):
             offered = params[raw.name].choices if raw.name in params else ()
-            pairs = [(c, f"{what} can be {c!r} (parameter {raw.name!r})") for c in offered]
+            pairs = [(c, f"{what} can be {say(c)} (parameter {raw.name!r})") for c in offered]
         else:
-            pairs = [(raw, f"{what} is {raw!r}")]
+            pairs = [(raw, f"{what} is {say(raw)}")]
         first([(v, f"{said}, not {noun}") for v, said in pairs], lambda v: not fits(v))
 
     def light(v) -> bool:
@@ -4820,6 +4828,13 @@ def _block_faults(trial: Trial) -> list[Finding]:
         if isinstance(part, Array):
             for attr in ("looks", "among"):
                 shown(f"Array.{attr}", getattr(part, attr))
+            # **Its set size and target index are whole numbers, its ring radius a finite number
+            # of degrees** (XC-273), as written and among a setting's choices: a word made
+            # `check()` raise, `n=3.5` drew 3 objects (`Array.positions` reads it through `int`),
+            # and the array checks read none of these (`_counted`).
+            for attr in ("n", "target"):
+                kind(f"Array.{attr}", getattr(part, attr), _whole_number, "a whole number", _said)
+            kind("Array.radius", part.radius, _finite, "a finite number of degrees", _said)
         if isinstance(part, Michelson):
             first([(v, f"{said}, outside [0, 1]") for v, said in values(part, "value")],
                   lambda v: not 0.0 <= v <= 1.0)
@@ -4844,8 +4859,9 @@ def _block_faults(trial: Trial) -> list[Finding]:
                 bad(f"{name}'s inner diameter is not inside its outer: {max(inner)[1]}, "
                     f"{min(outer)[1]}")
         if isinstance(part, (look.RegularPolygon, Polygon)):
-            first([(v, f"{said}; a polygon has at least 3 sides")
-                   for v, said in values(part, "sides")], lambda v: v < 3)
+            # A whole number (XC-273): `sides=3.5` drew a triangle (`exact` reads it through `int`).
+            first([(v, f"{said}; a polygon has a whole number of sides, at least 3")
+                   for v, said in values(part, "sides")], lambda v: v < 3 or not v.is_integer())
         if isinstance(part, look.Vertices):
             if len(part.points) < 3:
                 bad(f"Vertices has {len(part.points)} points; a polygon has at least 3")
@@ -4949,6 +4965,22 @@ def _whole(value: float) -> float:
     return value if math.isinf(value) else int(value)
 
 
+def _whole_number(value: object) -> bool:
+    """Whether `value` is a finite whole number, never a `bool`: 4 or 4.0, never 4.5, an infinity
+    or a word. What an array's set size and target index are (`_block_faults`; XC-273)."""
+    return _finite(value) and float(value).is_integer()
+
+
+def _counted(value: object) -> bool:
+    """**Whether the array checks read an array's set size, target index or ring radius**: a
+    setting, read over its declared range or its choices (`_span`, failing closed), or a literal
+    finite number. Any other literal -- a word, `None`, an infinity, a NaN, an integer past a
+    float's range -- is refused by its kind (`_block_faults`; XC-273) and read by none of them, so
+    none says of it what it is not (an array of "as few as 0 objects", a ring of 0° or of NaN),
+    and none raises on it (`_whole` of a NaN does)."""
+    return isinstance(value, P) or _finite(value)
+
+
 def _declared_window_names(trial: Trial) -> set[str]:
     """Window names a task has, including every one an array generates.
 
@@ -4968,7 +5000,7 @@ def _declared_window_names(trial: Trial) -> set[str]:
     params = {p.name: p for p in trial.params}
     most: dict[str, float] = {}
     for _, name, _, array in array_actions(trial):
-        reach = _whole(_span(array.n, params, 0.0)[1])
+        reach = _whole(_span(array.n, params, 0.0)[1]) if _counted(array.n) else math.inf
         most[name] = max(most.get(name, reach), reach)
     named = set(_window_refs(trial.states))
     names: set[str] = set()
@@ -5034,6 +5066,8 @@ def _array_faults(trial: Trial) -> list[Finding]:
     params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
     for state, name, updated, looks in array_actions(trial):
+        if not (_counted(looks.n) and _counted(looks.target)):
+            continue  # refused by its kind (`_block_faults`; XC-273)
         lowest_n = _whole(_span(looks.n, params, 0.0)[0])
         lowest_t, highest_t = (_whole(v) for v in _span(looks.target, params))
         if lowest_t < 0 or highest_t >= lowest_n:
@@ -5596,8 +5630,8 @@ def _crowded(declared: ObjectWindows, array: Array, params: dict[str, Param]) ->
     radius is read as a window's (`_radius`): a choice that is no finite number left out, and
     nothing said where there is none to read, each refused at load (XC-426)."""
     widest = _radius(declared.radius, params)
-    if widest is None:
-        return []
+    if widest is None or not (_counted(array.n) and _counted(array.radius)):
+        return []  # refused at load (XC-426; `_block_faults`, XC-273)
     most = _whole(_span(array.n, params, 0.0)[1])
     tightest = _span(array.radius, params, 0.0)[0]
     if most < 2:
@@ -5647,8 +5681,8 @@ def _overlapping_objects(trial: Trial, raised: dict[str, float]) -> list[Finding
     params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
     for name, array in _shown_arrays(trial):
-        if not (isinstance(array.n, P) and array.n.name in raised):
-            continue
+        if not (isinstance(array.n, P) and array.n.name in raised) or not _counted(array.radius):
+            continue  # a ring radius of the wrong kind is refused at load (XC-273)
         n = _whole(raised[array.n.name])
         if n < 2:
             continue
