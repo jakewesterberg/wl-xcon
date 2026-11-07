@@ -4,6 +4,12 @@ Delivered 2026-10-11 as a dated section of wl-sync's `HANDOVER-wl-expcontroller.
 
 **Reply read 2026-10-18 (wl-sync `9e60ed6`): see "ANSWERED 2026-10-18" below.** Six of the eight are
 answered (XC-089 to XC-092, XC-327, XC-328); **XC-087 and XC-088, the two full sections below, stay open**.
+*(Dated note, 2026-11-07: **wl-sync answered XC-087 and XC-088 later on 2026-10-18** (`2dac10b`, merged there
+2026-10-19, its handover's "2026-10-18, later: XC-087 and XC-088 answered"), which this file did not read until
+2026-11-07: a session endpoint on the box, `GET /session`, `POST /session/open`, `POST /session/close`. Its design §3.6
+is accepted, and the PI decided, asked in the UI on 2026-11-07, that if the box cannot be reached the rig refuses to
+open the session and says why ("Refuse to open, say why"). Both are closed; the client is backlog XC-460. XC-384's
+read of the delivered line is not served by it, as wl-sync's answer says.)*
 XC-327 kept a remainder (its PFI line and the line-out's grounding); **wl-sync drew both later on 2026-10-18 and
 XC-327 is closed**: see "ANSWERED 2026-10-18, later" below.
 
