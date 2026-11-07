@@ -1856,6 +1856,39 @@ def test_idle_with_nothing_arriving_waits_its_timeout_and_answers_zero(zmq_clean
     assert time.monotonic() - started >= 0.04
 
 
+@pytest.mark.parametrize(
+    "seconds",
+    [float("nan"), float("inf"), float("-inf"), -1.0, -0.001, 2_147_483.648, 1e306, True, "5", None],
+)
+def test_idle_refuses_a_timeout_zeromq_cannot_take_before_it_polls(
+    zmq_cleanup, monkeypatch, seconds
+):
+    """XC-432: `idle` gave `int(timeout * 1000)` to the poll unchecked, so -0.001 s or
+    less was a poll of -1 ms or less, which pyzmq reads as wait forever, and NaN or
+    infinity raised `ValueError` or `OverflowError` from `int()` rather than a sentence.
+    XC-046's check (`_wait_ms`) now covers it, raised before a poller is built."""
+    import zmq
+
+    link = _marked_link(zmq_cleanup)
+
+    def _polled(*args, **kwargs):
+        raise AssertionError("a poller was built, so idle began to wait, before the timeout was checked")
+
+    monkeypatch.setattr(zmq, "Poller", _polled)
+
+    with pytest.raises(ValueError, match="^timeout must be a number of seconds from 0 "):
+        link.idle(seconds)
+
+
+def test_idle_of_zero_returns_at_once(zmq_cleanup):
+    link = _marked_link(zmq_cleanup)
+
+    started = time.monotonic()
+    assert link.idle(0) == 0
+    assert link.idle(0.0) == 0
+    assert time.monotonic() - started < 1.0
+
+
 def test_the_mark_endpoint_is_refused_where_other_hosts_can_reach_it():
     """The mark socket is a third door into the session, and gets the first two's
     rule: loopback unless `allow_remote` says otherwise."""

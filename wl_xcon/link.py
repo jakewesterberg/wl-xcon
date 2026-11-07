@@ -3365,14 +3365,20 @@ class ZmqLink:
         """Wait up to `timeout` seconds for a mark signal or a command, whichever
         comes first (the `Link` protocol). A `zmq.Poller` over the REP socket and,
         when there is one, the mark socket: built per call, which is allowed here --
-        this runs while paused, never inside a frame."""
+        this runs while paused, never inside a frame.
+
+        `timeout` is refused, with a sentence, unless ZeroMQ can take it (`_wait_ms`,
+        XC-432): a negative would poll forever, and NaN or infinity would raise from
+        `int()`. 0 is legal and returns at once. The check is a comparison or two, once
+        per housekeeping wait."""
         import zmq
 
+        wait_ms = _wait_ms(timeout, "timeout")
         poller = zmq.Poller()
         poller.register(self._rep, zmq.POLLIN)
         if self._mark is not None:
             poller.register(self._mark, zmq.POLLIN)
-        ready = dict(poller.poll(int(timeout * 1000)))
+        ready = dict(poller.poll(wait_ms))
         if self._mark is not None and ready.get(self._mark):
             return self._take_mark()
         return 0
