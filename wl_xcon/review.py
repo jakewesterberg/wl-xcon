@@ -268,6 +268,17 @@ def _timeline(trial: Trial) -> list[str]:
     return lines
 
 
+def _printable_lines(text: str) -> str:
+    """`text` with every control character but its line breaks made safe for a terminal, by
+    `cli._printable`, the helper `cli.render` uses for every wire string (XC-119). **Once, at the output
+    edge**, line by line, rather than at each name: a report names states, windows, settings,
+    blocks, conditions and notes, every one text a task file wrote, and an edge catches one
+    added later. Imported here, not at the top: `cli` imports this module."""
+    from wl_xcon.cli import _printable
+
+    return "\n".join(_printable(line) for line in text.split("\n"))
+
+
 def render(trial: Trial, allocation_names: dict[int, str] | None = None) -> str:
     names = allocation_names or {}
     lines: list[str] = ["## Trial structure", "", "```mermaid", "stateDiagram-v2"]
@@ -387,7 +398,7 @@ def render(trial: Trial, allocation_names: dict[int, str] | None = None) -> str:
             )
         lines.append("")
 
-    return "\n".join(lines)
+    return _printable_lines("\n".join(lines))
 
 
 def render_task(task: Task, allocation_names: dict[int, str] | None = None) -> str:
@@ -475,7 +486,7 @@ def render_task(task: Task, allocation_names: dict[int, str] | None = None) -> s
             heading += (", the default: the plain run plays it, and a condition that names no "
                         "structure")
         lines += [heading, "", _demoted(render(task.structures[name], allocation_names)), ""]
-    return "\n".join(lines)
+    return _printable_lines("\n".join(lines))
 
 
 #: A counting class in the words the PI confirms it in (the engine C2a plan's Appendix B).
