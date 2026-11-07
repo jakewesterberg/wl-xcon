@@ -10,6 +10,15 @@ traces** (M0 §4). A per-guard hazard rate gives geometric latencies, which is a
 reaction-time model and is enough to answer the questions simulation is asked.
 Anything more faithful is what replayed recordings are for, and a synthetic animal
 that looked convincing would invite exactly the confusion between the two.
+
+**A simulated session of a task with gaze guards plays it with the simulated eye instead**
+(`agent`; XC-456, the pop-out search build, 2026-11-07): `simeye.Eye` makes gaze samples from what
+the display draws, and `gaze.Tracked`, the rig's own gaze world, scores them, so a session's
+outcomes are what the rig's eye rules (EYE-19) make of where the eye went. The hazard `Subject`
+had no gaze: its saccade "to the target" landed wherever the guard asking named, at a rate, so the
+XC-410 review's probe L scored 115 CORRECT / 85 WRONG_TARGET by the rates where the rig scored where
+the eye landed. The `Subject` stays for a trial with no gaze guard, or with a guard no gaze world
+answers (`gazes`), and for a census given one (`simulate`), as before.
 """
 
 from __future__ import annotations
@@ -22,14 +31,19 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from wl_xcon.run import Result, run_trial
+from wl_xcon.simeye import Eye
 from wl_xcon.task import (
+    After,
     Entered,
     expand_windows,
     Exited,
     Guard,
+    Hold,
     Outcome,
     RIGHT,
     Remembered,
+    SaccadeOnset,
+    SaccadeTo,
     Task,
     Trial,
     placements,
@@ -335,6 +349,47 @@ def prepare(subject: Subject, trial: Trial, frame_period: float, values: dict) -
             for name, window in placement.windows.items():
                 if window is not None:
                     subject._scores.setdefault(name, window.on)
+
+
+#: **The guards a gaze world answers or the trial loop derives from its windows** (`gaze.Tracked`,
+#: `run.run_trial`): gaze entering, leaving and held in a window, and a saccade.
+_GAZE = (Entered, Exited, Hold, SaccadeTo, SaccadeOnset)
+
+
+def gazes(trial: Trial) -> bool:
+    """**Whether a simulated session plays `trial` with the simulated eye** (`agent`; XC-456): it
+    asks about gaze, an edge's guard or a timer's `since` one of `_GAZE`, and asks nothing a gaze
+    world never answers -- a lever, a touch, the photodiode -- which the hazard `Subject` answers by
+    its rates. A timer from a window's edge
+    (`After(t, since=Exited(...))`) is a gaze guard here: the rig's gaze world never starts it
+    (XC-454), and the eye's world, being that world, does not either."""
+    asked = False
+    for state in trial.states:
+        for edge in state.go:
+            for guard in (edge.guard, getattr(edge.guard, "since", None)):
+                if guard is None or isinstance(guard, After):
+                    continue
+                if not isinstance(guard, _GAZE):
+                    return False
+                asked = True
+    return asked
+
+
+def agent(subject: Subject, eye: Eye, frame_period: float):
+    """**A simulated session's worlds**, one a trial, as `taskd.Session.world` takes them,
+    `(trial, values, index) -> World`: a trial with gaze guards (`gazes`) through the simulated eye
+    and `gaze.Tracked` (`simeye.Eye.world`), any other through the hazard `Subject`, told the
+    trial's windows (`prepare`). One of each for the session, since each generator carries the
+    session's randomness and the eye looks next trial from where it looked last."""
+
+    def make(trial: Trial, values: dict, index: int):
+        if gazes(trial):
+            return eye.world(trial, values, frame_period)
+        subject.new_trial()
+        prepare(subject, trial, frame_period, values)
+        return subject
+
+    return make
 
 
 def run_session(

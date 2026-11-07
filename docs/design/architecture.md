@@ -601,6 +601,29 @@ such as calibration that the session enters and leaves without ending; engine bu
 economies require session-scoped state and a persistent display layer that per-trial scenes do
 not reset.
 
+**The simulated animal plays a gaze task through the rig's gaze world, since the pop-out search
+build** (XC-456, 2026-11-07). A simulated session (`wlx run`, `wlx taskd`, any `taskd.Session` whose
+`world` is unset) plays each trial with gaze guards through `gaze.Tracked`, its gaze a simulated
+eye's (`wl_xcon/simeye.py`: `Eye`, the sample source, and `Seeing`, `Tracked` showing it the
+display; chosen per trial by `simulate.agent`), so the trial is scored by the rig's own map,
+staleness, saccade detector and saccade rules (EYE-19), never by a rate. The eye is shown what the
+display draws each frame and told each state's first frame, and plays the task's rules as a trained
+animal knows them, read from the trial between trials: it fixates the fixation point when it is
+shown; it answers once at the go, landing on the target at its `accuracy`, otherwise on a
+distractor if one is drawn, else on empty space, after a log-normal latency about its
+`rt_median_s`; on `early_rate` of trials it leaves fixation before the go; on `1 - engagement` it
+looks away. Its saccades have a minimum-jerk profile with Gaussian noise on every sample, ones the
+detector confirms at the session's 240 Hz; its map is the identity (`simeye.MAPPING`). Its numbers
+are engineering defaults with no published source sought, but the 85% correct of the engine spec's
+"normal" animal (TSK-40), and are `taskd.SessionSpec`'s (`accuracy`, `rt_median_s`, `early_rate`,
+`engagement`), set in code (XC-146). A trial with no gaze guard, or one asking a guard no gaze
+world answers (a lever, a touch, the photodiode; `simulate.gazes`), stays with the hazard
+`simulate.Subject`, as does a census given one (`simulate.simulate`). Until then every simulated
+trial was the `Subject`'s, which fires a guard by a hazard rate and has no gaze: the XC-410
+review's probe L scored 115 CORRECT / 85 WRONG_TARGET by its rates where the rig scored where the
+eye landed. The simulator is not the rig, but `gaze.Tracked` is: a frame through the eye builds
+only what a rig's frame builds and the eye's sample (`tests/test_simeye.py`).
+
 ## Message contracts (draft v0)
 
 - **Eye samples** (openiris -> taskd): OpenIris-native UDP poll on 9003

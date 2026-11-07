@@ -4806,7 +4806,10 @@ def test_a_timed_plans_frames_count_the_run_time_left_down_to_nothing(tmp_path):
 def test_a_blocks_time_limit_counts_from_the_block_not_the_run(tmp_path):
     """`Session.left("block")` reads the open block's limit against the time its trials began
     from, not the run's: the second block's 3 s begin at 3 s whatever the first took."""
-    service = _service(tmp_path)
+    # A seed whose simulated animal does not engage on its first trial, which so runs to its 4 s
+    # acquisition limit and, with the gap after it, uses up block `a`'s 4 s (since XC-456 the
+    # simulated eye's; until then the hazard animal's, with the service's default seed, 7).
+    service = _made(_folders(tmp_path), seed=lambda: 2)
     planned_task(service.tasks, (
         '{"t": Plan([Block("a", [Condition("n", {"target_x": 5.0}, target=500)], '
         'time_limit_s=4.0), Block("b", [Condition("f", {"target_x": 12.0}, target=500)], '

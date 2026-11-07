@@ -8319,9 +8319,13 @@ def test_a_move_back_before_a_blocks_first_trial_does_not_end_its_run_as_stalled
     the first ends on its rule again, and the second plays its three -- where the run ended with
     "the plan can draw no further trial", false for the second."""
     link = _Drained({2: [BackBlock(by=Box("kim"))]})
+    # A seed whose simulated animal answers each of `b`'s three, so none is owed and shown again
+    # (since XC-456 the simulated eye's, whose seed 1 breaks fixation in its second and does not
+    # engage in its third).
     session = _planned(tmp_path, (
         '{"two": Plan([Block("a", [Condition("x", {"target_x": 5.0}, target=0)]), '
-        'Block("b", [Condition("y", {"target_x": 12.0}, target=3)])])}'), plan="two", link=link)
+        'Block("b", [Condition("y", {"target_x": 12.0}, target=3)])])}'), plan="two", link=link,
+        seed=4)
 
     session.run()
 

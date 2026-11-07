@@ -1090,6 +1090,14 @@ drummed repeats one, and its `presentations` the lines written.
 3. **The simulated animal** follows declared functions [@wichmann2001psychometric; @carpenter1995neural]
    with named profiles: perfect, chance, an incorrect strategy, normal (85% correct), trying to break the
    task, trying to exploit the reward schedule.
+   *The pop-out search build, 2026-11-07* (XC-456): a simulated session plays a trial with gaze guards
+   with a simulated eye through `gaze.Tracked`, the rig's gaze world (`simeye.Eye`, chosen per trial by
+   `simulate.agent`), so its outcomes are what the rig's eye rules make of the eye's samples, never a
+   rate's. The eye reads the display each frame and the task's rules between trials, and is set in an
+   animal's terms, `taskd.SessionSpec`'s: accuracy (85% by default, the normal profile's), median
+   latency, early rate and engagement. The other profiles, the declared functions, and setting the
+   animal at a session's start are not built (XC-146); a trial with no gaze guard still plays against
+   the hazard animal.
 
 ## 19. Warnings, and what a session is for (N§4, N§R6)
 

@@ -34,7 +34,8 @@ from then). **Hardware verified: none.**
   conditions from factors, designed orders, live edits and the change log). Five reference tasks in `tasks/` are
   engine fixtures; **no real task exists yet** (they come from wl-xtasks, written with the PI).
 - **Running**: the trial loop (`run.py`), the session daemon and CLI (`taskd.py`, `cli.py`: `wlx run`, `wlx taskd`),
-  the simulated animal (`simulate.py`; it does not yet follow the rig's eye logic: XC-456).
+  the simulated animal (`simulate.py`; since XC-456 a gaze task's trials are played by the simulated eye, `simeye.py`,
+  through the rig's gaze world, `gaze.Tracked`).
 - **The console**: a browser page on the LAN (`serve.py`, `web.py`, `link.py`); writes from the box only; sign-in from
   wl.works designed, waiting on the rig's https page (XC-151, XC-152).
 - **Welfare** (`bounds.py`, `welfare.py`, `marks.py`, `stranded.py` and the functions architecture.md lists; to be

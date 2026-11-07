@@ -66,6 +66,7 @@ RETURNS: dict[str, str] = {
     "saccade": "None",
     "run": "None",
     "simulate": "None",
+    "simeye": "None",
     "review": "None",
     "record": "None",
     "geometry": "None",

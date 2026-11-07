@@ -88,7 +88,8 @@ from wl_xcon.scheduler import (
     Draw,
     Scheduler,
 )
-from wl_xcon.simulate import Census, Subject, Tally, prepare
+from wl_xcon.simeye import Eye
+from wl_xcon.simulate import Census, Subject, Tally, agent
 from wl_xcon.run import LONGEST_TRIAL_S, run_trial
 from wl_xcon.task import (
     COUNTED, OWED, SPENT, UNPAID, Entered, Exited, Outcome, Param, Plan, SaccadeTo, Staircase,
@@ -493,9 +494,19 @@ class SessionSpec:
             Exited: 0.05,
         }
     )
+    #: The share of trials the simulated animal works at all, the hazard `Subject`'s and the
+    #: simulated eye's alike.
     engagement: float = 0.85
     #: Per second, so a trial of a few seconds lapses occasionally.
     lapse: float = 0.15
+    #: **The simulated eye's behavior** (`simeye.Eye`; XC-456), which plays a trial with gaze guards
+    #: through `gaze.Tracked` (`simulate.agent`): how often its answer lands on the target, its
+    #: median latency in seconds, and how often it leaves fixation before the go. 85% correct is
+    #: the engine spec's "normal" simulated animal (§18.3, TSK-40, the PI's); the latency and the
+    #: early rate are engineering defaults. The hazard knobs above, but `engagement`, play the rest.
+    accuracy: float = 0.85
+    rt_median_s: float = 0.2
+    early_rate: float = 0.05
     #: The gap between trials, in seconds, added to the frame clock (`Session.now()`)
     #: after each trial. The animal is out of its cage and in the chair for it, and
     #: the welfare clocks count it as they count everything: on the wall (P4d-2a
@@ -4735,11 +4746,15 @@ class Session:
                 ways.append({"by": "person"})
 
     def _agent(self, run: RunSpec):
-        """The default world: one behaviour agent, told about each trial.
+        """The default world: the simulated animal, told about each trial (`simulate.agent`). **A
+        trial with gaze guards is played by the simulated eye through `gaze.Tracked`**, the rig's
+        gaze world, so it is scored by the rig's eye rules (XC-456; until the pop-out search build,
+        2026-11-07, every trial by the hazard `Subject`, which has no gaze); any other trial by the
+        `Subject`.
 
-        One `Subject` for the session rather than one per trial, because its
-        generator carries the session's randomness -- a fresh subject per trial would
-        reseed to the same animal every time, and every trial would be identical.
+        One `Subject` and one eye for the session rather than one per trial, because each one's
+        generator carries the session's randomness -- a fresh one per trial would reseed to the
+        same animal every time, and every trial would be identical.
         """
         subject = Subject(
             seed=run.seed,
@@ -4747,13 +4762,14 @@ class Session:
             engagement=self.spec.engagement,
             lapse=self.spec.lapse,
         )
-
-        def make(trial: Trial, values: dict, index: int) -> Subject:
-            subject.new_trial()
-            prepare(subject, trial, self.spec.frame_period, values)
-            return subject
-
-        return make
+        eye = Eye(
+            accuracy=self.spec.accuracy,
+            rt_median_s=self.spec.rt_median_s,
+            early_rate=self.spec.early_rate,
+            seed=run.seed,
+            engagement=self.spec.engagement,
+        )
+        return agent(subject, eye, self.spec.frame_period)
 
     def end_runs(self, by: Actor) -> None:
         """No further run in this session (P4d-2b spec §6.2, *End session*; the b3a-1
