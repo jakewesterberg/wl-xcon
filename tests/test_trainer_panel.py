@@ -12,11 +12,12 @@ per frame and never recomputed by a console:
 - **the open block's staircase** (`Telemetry.staircase`): its setting, levels, the level it is at
   -- before the block's first trial, the one it will start at -- whether a person holds the setting
   (the lock, TSK-32), and its rule;
-- **the stage's last answers as the bars judge them** (`Telemetry.bars`), under a confirmed
-  progression: toward moving back each trial's first answer, the wrong ones by outcome, and the
-  trials left out of them beside it (the design's §3.4: no fixation and early saccades "left out of
-  the 50 and shown beside it, so the trainer sees them"); toward moving up the answers at the
-  stage's hardest step; each bar's proportion;
+- **the stage's last answers, and the bar to move up** (`Telemetry.bars`), under a confirmed
+  progression: each trial's first answer, the wrong ones by outcome, and the trials left out of
+  them beside it (the design's §3.4: no fixation and early saccades "left out of the 50 and shown
+  beside it, so the trainer sees them"), in a window only a stage change starts afresh (the build's
+  final fixes); toward moving up the bar's own window of the answers at the stage's hardest step;
+  each bar's proportion;
 - **the pool's pairings in its declared order, with its value** (`Telemetry.pool`): a console
   draws the widening's picker from them and sends the value now plus the numbers of the pairings
   ticked (`task.Pool`, Task 5's whole number).
@@ -229,11 +230,12 @@ def test_a_stage_opened_shows_its_own_staircase_where_it_will_start(tmp_path):
 def test_the_frame_carries_the_last_answers_their_errors_by_kind_and_the_trials_left_out(tmp_path):
     """"The last 50 trials' percent correct and errors by kind" (§3.5), the last 50 being answers
     only, "no-fixation trials and early saccades ... left out of the 50 and shown beside it" (§3.4):
-    each frame carries the stage's last answers toward moving back (here the last 4), right and
-    wrong by outcome, the trials left out of them since the answer before the first of them, and,
-    toward moving up, the answers at the stage's hardest step (here 6, no staircase: every answer),
-    with each bar's proportion. An early saccade and a trial never fixated wait beside the window
-    until an answer comes; they leave it with the answer after them."""
+    each frame carries the stage's last answers shown, each trial's first, as many as the bar to
+    move back reads (here the last 4), right and wrong by outcome, the trials left out of them
+    since the answer before the first of them, and, toward moving up, the answers at the stage's
+    hardest step (here 6, no staircase: every answer), with each bar's proportion. An early saccade
+    and a trial never fixated wait beside the window until an answer comes; they leave it with the
+    answer after them."""
     script = ["right", "wrong", "early", "away", "right", "wrong", "right", "right", "right"]
     session = _session(tmp_path, [_stage("Easy", (0.8, 6)), _stage("Hard")], script)
 
@@ -249,10 +251,12 @@ def test_the_frame_carries_the_last_answers_their_errors_by_kind_and_the_trials_
     assert frames[9].bars == Bars(3, 4, 4, {"wrong_target": 1}, {}, 4, 6, 6, 0.8, 0.5)
 
 
-def test_the_trials_left_out_start_afresh_with_their_window(tmp_path):
-    """The trials left out beside the window go with it whenever it starts afresh: as the trainer
-    moves the run up a stage (two waiting in Easy are not Hard's), as the pool changes (the bars
-    judge the pairings pooled now), and as the trainer holds a move back ("After 50 new tries")."""
+def test_the_last_answers_shown_start_afresh_only_at_a_stage_change(tmp_path):
+    """**The last answers shown are the stage's** (the build's final fixes, 3; Task 7's report):
+    they and the trials left out beside them start afresh as the trainer moves the run up a stage
+    (two waiting in Easy are not Hard's), and only then -- not as the pool changes, nor as the
+    trainer holds a move back, which start the bars' own windows afresh ("After 50 new tries"), the
+    bar to move up's line and the prompts reading those."""
     script = ["right", "right", "right", "early", "away", "early", "early",
               "wrong", "wrong", "wrong", "wrong", "early", "right"]
     session = _session(tmp_path, [_stage("Easy", (0.8, 3)), _stage("Hard")], script, {
@@ -266,10 +270,48 @@ def test_the_trials_left_out_start_afresh_with_their_window(tmp_path):
     assert frames[4].bars.left_out == {"fixation_break": 1}
     assert frames[5].bars == Bars(0, 0, 4, {}, {}, 0, 0, 5, 0.8, 0.5)
     assert frames[6].bars == Bars(0, 0, 4, {}, {"fixation_break": 1}, 0, 0, 5, 0.8, 0.5)
-    assert frames[7].bars == Bars(0, 0, 4, {}, {}, 0, 0, 5, 0.8, 0.5)
-    assert frames[11].bars == Bars(0, 4, 4, {"wrong_target": 4}, {}, 0, 4, 5, 0.8, 0.5)
+    assert frames[7].bars == Bars(0, 0, 4, {}, {"fixation_break": 2}, 0, 0, 5, 0.8, 0.5)
+    four = {"wrong_target": 4}
+    assert frames[11].bars == Bars(0, 4, 4, four, {"fixation_break": 2}, 0, 4, 5, 0.8, 0.5)
     assert (frames[11].suggestion.change, frames[11].suggestion.move) == (3, "back")
-    assert frames[12].bars == Bars(0, 0, 4, {}, {}, 0, 4, 5, 0.8, 0.5)
+    assert frames[12].bars == Bars(0, 4, 4, four, {"fixation_break": 3}, 0, 4, 5, 0.8, 0.5)
+    assert frames[12].suggestion is None
+
+
+def test_a_hold_leaves_the_last_answers_shown_as_they_were(tmp_path):
+    """**A hold clears nothing the trainer reads** (the build's final fixes, 3; Task 7's report:
+    "the last 50" was the bar to move back's own window, which a hold of a move back starts afresh,
+    so after a hold the panel read "no answers yet"). The same animal, twice: the trainer holds the
+    rig's suggestion to move back from Hard in one run and leaves it standing in the other. Every
+    frame of the two shows the same last answers -- after the hold, its count as it was, rolling on
+    with the next answers -- while in the held run the bar to move back counts afresh from the
+    hold: its prompt waits for four new answers and reads them, its own."""
+    script = ["right", "wrong", "wrong", "wrong", "wrong", "early", "right", "wrong", "wrong",
+              "wrong"]
+    stages = [_stage("Easy", (0.8, 3)), _stage("Hard")]
+    held = _session(tmp_path / "held", stages, script,
+                    {1: [NextBlock(by=JAKE)], 6: [Decline(suggestion=1, by=JAKE)]})
+    kept = _session(tmp_path / "kept", stages, script, {1: [NextBlock(by=JAKE)]})
+
+    held.run()
+    kept.run()
+
+    assert held.refusals == [] and kept.refusals == []
+    frames, standing = _frames(held), _frames(kept)
+
+    def shown(bars: Bars) -> tuple:
+        return bars.correct, bars.of, bars.window, bars.wrong, bars.left_out
+
+    assert sorted(frames) == sorted(standing) == list(range(len(script) + 1))
+    assert [shown(frames[at].bars) for at in frames] == [shown(standing[at].bars) for at in frames]
+    assert frames[4].suggestion.change == 1 and frames[4].bars.of == 4
+    assert frames[5].suggestion is None and standing[5].suggestion.change == 1
+    assert frames[5].bars == Bars(0, 4, 4, {"wrong_target": 4}, {}, 1, 5, 5, 0.8, 0.5)
+    assert frames[7].bars == Bars(1, 4, 4, {"wrong_target": 3}, {"fixation_break": 1}, 1, 5, 5,
+                                  0.8, 0.5)
+    assert [frames[at].suggestion for at in (5, 6, 7, 8, 9)] == [None] * 5
+    again = frames[10].suggestion
+    assert (again.change, again.move, again.correct, again.of) == (3, "back", 1, 4)
 
 
 def test_no_bars_outside_a_confirmed_progression_and_nothing_between_runs(tmp_path):

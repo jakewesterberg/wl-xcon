@@ -1425,23 +1425,25 @@ def _ladder(frame: Telemetry, view: View) -> str:
 
 
 def _answers(bars) -> list[str]:
-    """The trainer's panel's last answers (`Telemetry.bars`; the design's §3.4 and §3.5): the last
-    ones toward moving back, right with their percent, the wrong ones by kind beside them, and the
-    trials left out of them beneath; then the bar to move up as it reads, at the stage's hardest
-    step, with its proportion and window. A window not yet full says how many it reads; an empty
-    one says so, never a percent of nothing."""
+    """The trainer's panel's last answers (`Telemetry.bars`; the design's §3.4 and §3.5): the
+    stage's last ones, each trial's first, which no hold or change of the pool clears (the build's
+    final fixes, on Task 7's report), right with their percent, the wrong ones by kind beside them,
+    and the trials left out of them beneath; then the bar to move up as it reads, at the stage's
+    hardest step, with its proportion and window. A stage that has given fewer than the window
+    shows them all, as the stage's; an empty one says so, never a percent of nothing."""
     rows = []
     if bars.of:
         plural = "" if bars.of == 1 else "s"
-        reads = f" of the {_e(bars.window)} its bar reads" if bars.of < bars.window else ""
-        rows.append(f'<div class="kv"><span>last {_e(bars.of)} answer{plural}{reads} '
+        which = (f"last {_e(bars.of)}" if bars.of >= bars.window
+                 else _e(f"this stage's {bars.of}"))
+        rows.append(f'<div class="kv"><span>{which} answer{plural} '
                     f"<b>{_e(bars.correct)} right ({_percent(bars.correct, bars.of)})</b></span>"
                     f'<span class="nm">wrong: {_by_kind(bars.wrong)}</span></div>'
                     f'<div class="kv"><span class="nm">left out of them: '
                     f"{_by_kind(bars.left_out)}</span></div>")
     elif bars.window:
-        rows.append(f'<div class="kv"><span>no answers yet</span><span class="nm">its bar reads '
-                    f"the last {_e(bars.window)}</span></div>")
+        rows.append(f'<div class="kv"><span>no answers yet in this stage</span><span class="nm">'
+                    f"it shows its last {_e(bars.window)}</span></div>")
         if bars.left_out:
             rows.append(f'<div class="kv"><span class="nm">left out so far: '
                         f"{_by_kind(bars.left_out)}</span></div>")
@@ -1564,12 +1566,12 @@ def _trainer(frame: Telemetry | None, view: View) -> str:
     """**The trainer's panel** (the pop-out search build's Task 7; its design §3.5, the PI's sketch
     of the trainer's screen, accepted with short stage names on 2026-11-07): while a run runs, the
     stage by name, with its plan and the stage it goes on to; the open block's staircase at its
-    level, with its lock (`_ladder`); the last answers as the rig's bars judge them, the wrong ones
-    and those left out by kind (`_answers`); the pairings on (`_pairings_on`); and each suggestion
-    the rig makes, a prompt naming why with its buttons (`_prompts`). **Empty** -- the section then
-    hidden (`#rt-train:empty`) -- for a run with no staircase, no confirmed progression, no pool
-    and no suggestion, for a run being stopped, and between runs. Each from the frame, never
-    computed here but the percentages (plan ruling 5's display arithmetic)."""
+    level, with its lock (`_ladder`); the stage's last answers, the wrong ones and those left out
+    by kind, and the bar to move up (`_answers`); the pairings on (`_pairings_on`); and each
+    suggestion the rig makes, a prompt naming why with its buttons (`_prompts`). **Empty** -- the
+    section then hidden (`#rt-train:empty`) -- for a run with no staircase, no confirmed
+    progression, no pool and no suggestion, for a run being stopped, and between runs. Each from
+    the frame, never computed here but the percentages (plan ruling 5's display arithmetic)."""
     if frame is None or frame.phase != "running" or frame.stop_kind is not None:
         return ""
     if all(part is None for part in (frame.staircase, frame.bars, frame.pool, frame.suggestion,

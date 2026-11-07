@@ -3718,8 +3718,10 @@ def test_the_pane_names_the_stage_and_its_level():
 def test_the_pane_shows_the_last_answers_their_errors_by_kind_and_those_left_out():
     """"The last 50 trials' percent correct and errors by kind", the trials left out of them
     "shown beside it" (§3.4), each by its outcome in `Outcome`'s order; and the bar to move up as it
-    reads, at the stage's hardest step, with its proportion. A window not yet full says how many it
-    reads; an empty one says so, never 0%."""
+    reads, at the stage's hardest step, with its proportion. **The last answers are the stage's**
+    (the build's final fixes, 3: no hold or change of the pool clears them): a stage that has given
+    fewer than the window shows them all, saying they are the stage's; an empty one says so, never
+    0%."""
     pane = _train(_training())
     filling = _train(_training(bars=replace(_BARS, correct=9, of=12, wrong={}, left_out={})))
     empty = _train(_training(bars=replace(_BARS, correct=0, of=0, wrong={}, left_out={},
@@ -3731,11 +3733,11 @@ def test_the_pane_shows_the_last_answers_their_errors_by_kind_and_those_left_out
             '</span></div>'
             '<div class="kv"><span class="nm">toward moving up: 30 of the last 34 answers at its '
             'hardest step right; the rig suggests it at 80% of 50</span></div>') in pane
-    assert ('<span>last 12 answers of the 50 its bar reads <b>9 right (75%)</b></span>'
+    assert ('<span>this stage&#x27;s 12 answers <b>9 right (75%)</b></span>'
             '<span class="nm">wrong: none</span></div><div class="kv"><span class="nm">left out '
             'of them: none</span></div>') in filling
-    assert ('<div class="kv"><span>no answers yet</span><span class="nm">its bar reads the '
-            'last 50</span></div>') in empty
+    assert ('<div class="kv"><span>no answers yet in this stage</span><span class="nm">it shows '
+            'its last 50</span></div>') in empty
     assert "this stage has no bar to move up" in empty and "0%" not in empty
 
 

@@ -2427,7 +2427,7 @@ class Session:
 
     @property
     def bars(self) -> tuple | None:
-        """**The open stage's last answers as the rig's bars judge them, for the trainer's panel**
+        """**The open stage's last answers and its bar to move up, for the trainer's panel**
         (`scheduler.Scheduler.answers`; the pop-out search build's Task 7; telemetry schema 20; its
         design §3.4 and §3.5), as `link.Bars`' fields, under a confirmed progression
         (`task.ByCriterion.confirm`). `None` for any other run, and between runs."""

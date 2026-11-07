@@ -222,8 +222,8 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: stages and pairings a page's start offers, the previous session's end and what a resumed run
 #: goes on from. And the same build's Task 7, also before 20 was released, for the trainer's
 #: panel: `Telemetry.staircase` (a `StaircaseRow`: the open block's staircase, its level and
-#: whether a person holds its setting), `Telemetry.bars` (a `Bars`: the stage's last answers as the
-#: rig's bars judge them, the wrong ones and the trials left out by outcome) and `Telemetry.pool` (a
+#: whether a person holds its setting), `Telemetry.bars` (a `Bars`: the stage's last answers, the
+#: wrong ones and the trials left out by outcome, and the bar to move up) and `Telemetry.pool` (a
 #: `Pooled`: the pool's pairings in its declared order, and its value now). A reader of 19 refuses
 #: 20 and 20 refuses 19, by name.
 SCHEMA = 20
@@ -630,21 +630,24 @@ class StaircaseRow:
 
 @dataclass(frozen=True, slots=True)
 class Bars:
-    """**The open stage's last answers as the rig's bars judge them, for the trainer's panel**
-    (schema 20; the pop-out search build's Task 7; its design §3.4, "the last 50", and §3.5, "the
-    last 50 trials' percent correct and errors by kind"), from `taskd.Session.bars`, under a
-    confirmed progression (`task.ByCriterion.confirm`). **Toward moving back**, the stage's last
-    answers, each trial's first (the PI, "First answer only"), eased ones included: `correct` of the
-    last `of` right, in a window `window` long (the fall-back's, 0 where it has none); the wrong
+    """**The open stage's last answers, and its bar to move up, for the trainer's panel** (schema
+    20; the pop-out search build's Task 7; its design §3.4, "the last 50", and §3.5, "the last 50
+    trials' percent correct and errors by kind"), from `taskd.Session.bars`, under a confirmed
+    progression (`task.ByCriterion.confirm`). **The last answers shown**, the stage's, each trial's
+    first (the PI, "First answer only"), eased ones included: `correct` of the last `of` right, in
+    a window `window` long (as long as the bar to move back's, 0 where there is none); the wrong
     ones among them by outcome (`wrong`); and the trials **left out** of them, which moved no
     staircase -- no fixation, an early saccade, any whose stimulus never appeared -- by outcome, a
     hang as `"hang"`, since the answer before the first of them (`left_out`; the design's §3.4:
-    "left out of the 50 and shown beside it"). **Toward moving up** (and widening the pool), the
-    answers given at the stage's hardest step, none a person's change eased: `up_correct` of
-    `up_of`, in a window `up_window` long (the stage's criterion's, 0 where it has none). And the
-    proportion each bar is met at, the criterion's (`up_at`) and the fall-back's, under which the rig
-    suggests moving back (`back_at`), each `None` where there is none. Each window starts afresh as
-    its stage opens, as the pool changes, and as a person holds its move."""
+    "left out of the 50 and shown beside it"). **They start afresh only as the stage opens** (the
+    build's final fixes, on Task 7's report): a hold and a change of the pool start the bars' own
+    windows afresh, whose numbers a suggestion carries, never these. **Toward moving up** (and
+    widening the pool), the bar's own window of the answers given at the stage's hardest step,
+    none a person's change eased: `up_correct` of `up_of`, in a window `up_window` long (the
+    stage's criterion's, 0 where it has none), afresh as its stage opens, as the pool changes and as
+    a person holds a move up or a widening. And the proportion each bar is met at, the criterion's
+    (`up_at`) and the fall-back's, under which the rig suggests moving back (`back_at`), each `None`
+    where there is none."""
 
     correct: int
     of: int
@@ -1155,9 +1158,9 @@ class Telemetry:
     #: staircase, its level and whether a person holds its setting, a `StaircaseRow`, or `None` --
     #: a block with none, and between runs. `None` by default.
     staircase: "StaircaseRow | None" = None
-    #: `session.bars` (schema 20; the same build's Task 7): the open stage's last answers as the
-    #: rig's bars judge them, a `Bars`, under a confirmed progression, or `None` -- any other run,
-    #: and between runs. `None` by default.
+    #: `session.bars` (schema 20; the same build's Task 7): the open stage's last answers and its
+    #: bar to move up, a `Bars`, under a confirmed progression, or `None` -- any other run, and
+    #: between runs. `None` by default.
     bars: "Bars | None" = None
     #: `session.pooled` (schema 20; the same build's Task 7): the task's pool of pairings, each in
     #: words in its declared order, and its setting's value now, a `Pooled`, or `None` -- a task with

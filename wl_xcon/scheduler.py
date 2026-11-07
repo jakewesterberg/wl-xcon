@@ -205,16 +205,18 @@ class Suggestion:
 
 @dataclass(frozen=True, slots=True)
 class Answers:
-    """**The open stage's last answers as the bars of what the rig suggests judge them**
+    """**The open stage's last answers, and the bars of what the rig suggests**
     (`Scheduler.answers`; the pop-out search build's Task 7, for the trainer's panel; its design
-    §3.4, "the last 50", and §3.5), read between trials. **Toward moving back** (`_down`), each
-    trial's first answer: `correct` of the last `of` right, in a window `window` long; the wrong
-    ones among them by outcome (`wrong`, each its wire string); and the trials left out of them,
-    which moved no staircase, by outcome, a hang as `"hang"` (`left_out`), since the answer before
-    the first of them or since the window began. **Toward moving up** (`_up`), the answers at the
-    stage's hardest step: `up_correct` of `up_of`, in a window `up_window` long. And the proportion
-    each bar is met at, the stage's criterion's (`up_at`) and the fall-back's (`back_at`), each
-    `None` where there is none. Its fields are `link.Bars`', in order."""
+    §3.4, "the last 50", and §3.5), read between trials. **The last answers shown** (`_shown`),
+    each trial's first answer, as many as the bar to move back reads, **in a window only a stage
+    change starts afresh** (the build's final fixes, on Task 7's report): `correct` of the last
+    `of` right, in a window `window` long; the wrong ones among them by outcome (`wrong`, each its
+    wire string); and the trials left out of them, which moved no staircase, by outcome, a hang as
+    `"hang"` (`left_out`), since the answer before the first of them or since the stage opened.
+    **Toward moving up** (`_up`), the bar's own window of the answers at the stage's hardest step:
+    `up_correct` of `up_of`, in a window `up_window` long. And the proportion each bar is met at,
+    the stage's criterion's (`up_at`) and the fall-back's (`back_at`), each `None` where there is
+    none. Its fields are `link.Bars`', in order."""
 
     correct: int
     of: int
@@ -368,13 +370,16 @@ class Scheduler:
     #: each `(right, at its hardest step)`: toward moving up, as long as its criterion's window
     #: (`_up`), and toward moving back, as long as the fall-back's (`_down`); and whether the trial
     #: being drummed has had such an answer yet (`_bar_answered`). Empty otherwise. **For the
-    #: trainer's panel** (`answers`; the pop-out search build's Task 7), each answer toward moving
-    #: back also keeps its outcome's wire string and the trials left out of the bars just before it,
-    #: by outcome (`(right, hardest, outcome, aside)`), and `_aside` counts those left out since the
-    #: last such answer, by outcome; each starts afresh with `_down`.
+    #: trainer's panel** (`answers`; the pop-out search build's Task 7), the stage's last answers
+    #: shown (`_shown`), each trial's first, as long as `_down`, each with its outcome's wire string
+    #: and the trials left out of the bars just before it, by outcome (`(right, outcome, aside)`),
+    #: and `_aside` counting those left out since the last such answer, by outcome: **both start
+    #: afresh only as a stage opens** (the build's final fixes, on Task 7's report), never as a
+    #: person holds a move or changes the pool, which start the bars' own windows afresh.
     _up: deque = field(init=False, default_factory=deque, repr=False)
     _down: deque = field(init=False, default_factory=deque, repr=False)
     _bar_answered: bool = field(init=False, default=False, repr=False)
+    _shown: deque = field(init=False, default_factory=deque, repr=False)
     _aside: dict = field(init=False, default_factory=dict, repr=False)
     #: How each block left behind ended, in order, and whether the open one's end is recorded
     #: (`close`): the run's end row's.
@@ -467,6 +472,7 @@ class Scheduler:
         self._opened = {first}
         self._back = self._fall_back_window()
         self._up, self._down = self._bar_windows()
+        self._shown = deque(maxlen=self._down.maxlen)
         self._counts = {c.name: Counts() for c in self.block.conditions}
         self._begin()
         self._refill()
@@ -646,26 +652,28 @@ class Scheduler:
 
     @property
     def answers(self) -> Answers | None:
-        """**The open stage's last answers as its bars judge them, for the trainer's panel**
+        """**The open stage's last answers, and its bar to move up, for the trainer's panel**
         (`Answers`; the pop-out search build's Task 7; its design §3.5: "the last 50 trials'
         percent correct and errors by kind", the trials left out "shown beside it", §3.4), under a
-        confirmed progression, else `None`. Read between trials, never in a frame: at most the two
-        windows' answers, counted."""
+        confirmed progression, else `None`: the last answers shown (`_shown`), which no hold and
+        no change of the pool clears (the build's final fixes), and the bar to move up's own
+        window. Read between trials, never in a frame: at most the two windows' answers, counted."""
         if not self._confirming:
             return None
         wrong: dict = {}
         left: dict = {}
-        for right, _, outcome, aside in self._down:
+        for right, outcome, aside in self._shown:
             if not right:
                 wrong[outcome] = wrong.get(outcome, 0) + 1
             for said, count in aside:
                 left[said] = left.get(said, 0) + count
         for said, count in self._aside.items():
             left[said] = left.get(said, 0) + count
-        correct, of, _ = self.bar(MOVE_BACK)
+        correct = sum(answer[0] for answer in self._shown)
         up_correct, up_of, _ = self.bar(MOVE_UP)
         criterion, fall_back = self.block.criterion, self.order.fall_back
-        return Answers(correct, of, self._down.maxlen, wrong, left, up_correct, up_of,
+        return Answers(correct, len(self._shown), self._shown.maxlen, wrong, left, up_correct,
+                       up_of,
                        self._up.maxlen, None if criterion is None else criterion[0],
                        None if fall_back is None else fall_back[0])
 
@@ -752,20 +760,20 @@ class Scheduler:
         that move again only once a fresh window of answers meets its bar, never on the answers a
         person has already held on ("After 50 new tries", the PI, the same day). The other window
         goes on. A widening shares the window to move up (`_answers_for`), so a hold of either
-        starts both afresh. The trials left out beside the window to move back go with it."""
+        starts both afresh. **The last answers shown stay**, and the trials left out beside them
+        (`_shown`; the build's final fixes, on Task 7's report, whose panel read "no answers yet"
+        after a hold)."""
         self._answers_for(move).clear()
-        if move == MOVE_BACK:
-            self._aside = {}
 
     def afresh(self) -> None:
         """**The open stage's bars start afresh** (the pop-out search build, 2026-11-07): its pool
         of pairings changed (`task.Pool`), and the bars judge the pairings pooled now (the
         design's §3.4: "the bar is judged over all the current pairings pooled"), so neither
         window keeps the answers given on the pool before. The staircase stays where it is
-        ("a widening leaves the staircase where it is")."""
+        ("a widening leaves the staircase where it is"), and so do the last answers shown
+        (`_shown`), which are the stage's."""
         self._up.clear()
         self._down.clear()
-        self._aside = {}
 
     @property
     def _top(self) -> bool:
@@ -1343,6 +1351,7 @@ class Scheduler:
         self._window.clear()
         self._back = self._fall_back_window()
         self._up, self._down = self._bar_windows()
+        self._shown = deque(maxlen=self._down.maxlen)
         self._aside = {}
         self._drawn.clear()
         self._due.clear()
@@ -1775,8 +1784,9 @@ class Scheduler:
         **never one a person's change eased** (engine build C3; the PI, Q8);
         **toward moving back each trial's first answer only** (the PI, 2026-10-19, "First answer
         only"), an eased one included, as `_back` judges them. **A trial that is no answer** is
-        counted beside them by its outcome (`_aside`), and the next answer toward moving back takes
-        those counted before it (`answers`; the pop-out search build's Task 7)."""
+        counted beside them by its outcome (`_aside`), and the next first answer, among the last
+        answers shown (`_shown`), takes those counted before it (`answers`; the pop-out search
+        build's Task 7)."""
         if first_try:
             self._bar_answered = False
         verdict = staircase_verdict(outcome, shown)
@@ -1787,7 +1797,8 @@ class Scheduler:
         if hardest and not eased and not (self._bar_answered and self._first_answers):
             self._up.append((verdict, hardest))
         if not self._bar_answered:
-            self._down.append((verdict, hardest, said, tuple(self._aside.items())))
+            self._down.append((verdict, hardest))
+            self._shown.append((verdict, said, tuple(self._aside.items())))
             self._aside = {}
         self._bar_answered = True
 

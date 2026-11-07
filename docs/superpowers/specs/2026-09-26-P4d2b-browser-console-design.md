@@ -271,7 +271,11 @@ welfare number and bounds nothing.
   The run start's pre-flight check sends the stage picked, as the start does. Revised the same day
   by the build's final fixes: a pool whose looks are color-set lights names each pairing by its
   colors, the odd one's first, `blue among red`, on the panel, the widening's picker and the run
-  start's pairings, where they read `pairing 1` to `pairing 12`.)*
+  start's pairings, where they read `pairing 1` to `pairing 12`; and the last answers are the
+  stage's, a rolling window that only a stage change starts afresh, where they were the bar to
+  move back's own window, which a hold of a move back and a change of the pool emptied, so the
+  panel read "no answers yet" after a hold. The bars' own windows still start afresh there, and
+  each prompt and the line toward moving up read them.)*
 - **Task parameters, read-only:** one card per entry in `params`: value, unit, range, the
   ceiling flag, and a staged marker.
 - **Setup, read-only:** session, subject, deployment, bounds config, allocation.
