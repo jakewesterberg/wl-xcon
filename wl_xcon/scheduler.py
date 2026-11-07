@@ -13,6 +13,11 @@ the quarantine. **Since engine build C2b a task declares its plans** (`task.Plan
 plan's blocks in its order (`task.BlockOrder`) and never invents one, and a run with no
 plan chosen is one block (`taskd.Session._plan`). Changing condition weights or geometry
 is free; changing task is a new run.
+
+**Since engine build C3 a block may play a designed order** (`task.SequenceBalanced`,
+`task.Priming`; the PI, 2026-10-30, Q5a, Q5b and Q6): its trials come from a plan drawn as the
+block opens, from a generator of its own keyed by the run's seed and the block's occurrence, never
+the one ordinary draws and repeats share, so a designed block moves no other block's draws.
 """
 
 from __future__ import annotations
@@ -21,13 +26,16 @@ import random
 from collections import deque
 from dataclasses import dataclass, field, replace
 
+from wl_xcon.declarations import canonical
+
 # The block vocabulary is the task's (engine build C2b): a plan's blocks are declared in its task
 # object, and imported here, where they are played, under the names they always had here.
 from wl_xcon.task import (
     ANSWERS, COUNTED, HANG_COUNTS_AS, NO_LIMIT, OWED, REPEATED, RIGHT, SPENT, UNPAID, Balanced,
     Block, BlockOrder, ByCriterion, Condition, Constrained, Counting, Cyclic, Family, Fixed, Order,
-    Outcome, Random, Shuffled, WithReplacement,
+    Listed, Outcome, Priming, Random, SequenceBalanced, Shuffled, WithReplacement,
 )
+from wl_xcon.variation import balanced_sequence, run_length
 
 # --- What pays a condition's debt (engine spec §16.1-16.2; engine build C2a) -------------------
 #
@@ -78,6 +86,11 @@ TIME = "time"
 #: C2b plan's science review, I3), recorded apart from a block's own, so the record and the console
 #: say whose time it was; forgiving nothing too.
 RUN_TIME = "run_time"
+#: ... or it was a sequence-balanced block's trial that broke and is not shown again (engine build
+#: C3; the PI, 2026-10-30, Q5b: no repeat by default, TSK-31): one trial, its place lost, never
+#: flagged as possible avoidance, and the sequence goes on. A priming block writes none: a break
+#: before its stimulus loses no place, and one after it is a shown trial of its run.
+DESIGNED = "designed"
 
 #: Why a block ended (`BlockEnd.ended`; engine build C2b): its own end rule was met (`RULE`: every
 #: target used up, and its criterion and number of trials where it declares them), its time ran
@@ -116,7 +129,14 @@ class Draw:
     trial before it in its block, an aborted one included, or `None` for a block's first.
     `drummed`, whether it is a drum's repeat, and `drumming`, whether drumming was on as it was
     drawn -- `"block"` or `"run"` -- or `None` (`Scheduler.drumming`); `aids`, the training aids on
-    as it was drawn (`Scheduler.aids`)."""
+    as it was drawn (`Scheduler.aids`). **`planned`, in a designed block, the trial's planned
+    place** (engine build C3): `{"cycle": c, "position": p, "lead_in": l}` in a sequence-balanced
+    block, each from 0, `lead_in` true on the first `depth - 1` places of each cycle, which only
+    precede what follows (the PI, 2026-10-31), or `{"run": r, "switch": s, "value": v}` in a
+    priming block -- its run from 0, `switch` true for each try at the run's first place until one
+    shows its stimulus, and the feature's value planned, as the block's conditions give
+    it; a drum's try and a trial shown again at once carry the place of the trial they show again.
+    `None` in any other block."""
 
     condition: Condition
     number: int
@@ -126,6 +146,7 @@ class Draw:
     drummed: bool = False
     drumming: str | None = None
     aids: tuple = ()
+    planned: dict | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,7 +160,11 @@ class BlockEnd:
     the one its `BLOCK_START` carried, or `None` for a block that ran no trial, which the stream
     neither opens nor closes. **And `passed_at`**, at a training progression's top stage, the
     trial after which its rule was first met, its animal working on past it, or `None` (the
-    science review, I1)."""
+    science review, I1). **And `planned`, a designed block's plan** (engine build C3): a
+    sequence-balanced block's condition names in the order planned, played or not, so a place no
+    trial's `Draw.planned` names was never played; a priming block's runs as far as it played,
+    `(value, length)` each, a run's length drawn from its `runs`, or under a `chance` the trials of
+    it whose stimulus appeared; `None` for any other block."""
 
     block: str
     ended: str
@@ -148,6 +173,7 @@ class BlockEnd:
     position: int = 0
     block_in_session: int | None = None
     passed_at: int | None = None
+    planned: tuple | None = None
 
 
 @dataclass
@@ -162,7 +188,13 @@ class Counts:
     (`flagged`). **And for the console and the run's end row** (the PI, 2026-10-18): its `trials`,
     a trial and its drummed repeats one, and the tries recorded, every presentation (`presented`;
     `attempted` counts every draw, a trial that faulted included); every answer, any try's, `right`
-    or `wrong`; and the trials whose first try was right (`right_first`)."""
+    or `wrong`; and the trials whose first try was right (`right_first`). **And in a training
+    progression, the trials a live change eased**, on their first try or on the try that paid
+    them (`eased`; engine build C3, the PI, 2026-10-30, Q8, "Merge; fix eased trials in C3"; the
+    controller's ruling on the engine C3 plan's Task 15), **and the eased tries that paid**
+    (`eased_paid`, answers counted and trials spent): its stage's number of trials and its targets
+    leave them out
+    (`block_trials`, `owed`; the engine C3 plan's review, I-7), and every other count keeps them."""
 
     attempted: int = 0
     completed: int = 0
@@ -178,6 +210,8 @@ class Counts:
     right: int = 0
     wrong: int = 0
     right_first: int = 0
+    eased: int = 0
+    eased_paid: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -310,12 +344,43 @@ class Scheduler:
     #: Whether this drum chain (a trial's first try and its drummed repeats) has had a judged
     #: trial: an answer, or what the block's own table scores (`_scored`).
     _answered: bool = field(init=False, default=False, repr=False)
+    #: Whether this drum chain's trial is counted eased toward its stage's number of trials
+    #: (`Counts.eased`, a training progression's only): its first try was eased, or the try that
+    #: paid it (the controller's ruling on the engine C3 plan's Task 15).
+    _eased_chain: bool = field(init=False, default=False, repr=False)
     #: The blocks left behind's `ConditionReport`s, in order (`report`).
     _reports: list = field(init=False, default_factory=list, repr=False)
     #: The run's trials so far, a trial and its drummed repeats one (the PI, 2026-10-18: "200
     #: trials; drummed repeats inside them"): each try recorded that is no drum's repeat. What the
     #: console and the run's end row count as trials (the controller's rulings I1 and M5).
     trials: int = field(init=False, default=0)
+    #: **The open block's designed order** (engine build C3), when it plays one: its own generator,
+    #: `random.Random(f"design:{seed}:{occurrence}")`, the occurrence the number of blocks the run
+    #: has ended as it opens, so each opening -- a person's *back one* included -- plays a plan of
+    #: its own, replayed by the seed (the engine C3 plan's Appendix B item 7), and no draw of it
+    #: moves `_rng`'s.
+    _design: random.Random | None = field(init=False, default=None, repr=False)
+    #: A sequence-balanced block's plan, its condition names in the order planned; the next place
+    #: to play in it; and the places in one cycle.
+    _plan: tuple = field(init=False, default=(), repr=False)
+    _place: int = field(init=False, default=0, repr=False)
+    _cycle: int = field(init=False, default=1, repr=False)
+    #: A priming block's values of its feature, `(form, value, names)` each, grouped by
+    #: `declarations.canonical`; each value's pass of its conditions, shuffled; its runs so far,
+    #: `[value's index, length]` each; the next run, decided as the last one ended and taken with
+    #: its first trial; the shown trials of the run playing now; and whether a try at its place
+    #: has been shown.
+    _groups: list = field(init=False, default_factory=list, repr=False)
+    _passes: dict = field(init=False, default_factory=dict, repr=False)
+    _runs: list = field(init=False, default_factory=list, repr=False)
+    #: A priming block's run lengths still to come from a prepared list's pass (`_run_length`).
+    _lengths: deque = field(init=False, default_factory=deque, repr=False)
+    _coming: tuple | None = field(init=False, default=None, repr=False)
+    _at: int = field(init=False, default=0, repr=False)
+    _seen: bool = field(init=False, default=False, repr=False)
+    #: A designed block's trial to show again at once (`again_at_once`): `(condition, repeat_of,
+    #: planned)`, or `None`.
+    _again: tuple | None = field(init=False, default=None, repr=False)
 
     def __post_init__(self) -> None:
         self._rng = random.Random(self.seed)
@@ -327,7 +392,89 @@ class Scheduler:
         self._opened = {first}
         self._back = self._fall_back_window()
         self._counts = {c.name: Counts() for c in self.block.conditions}
+        self._begin()
         self._refill()
+
+    def _begin(self) -> None:
+        """**Set out the open block's designed order as it opens** (engine build C3), or clear the
+        last block's: a sequence-balanced block's plan (`variation.balanced_sequence`; the PI,
+        2026-10-30, Q5a), or a priming block's values and its first run (Q6), each drawn from the
+        block's own generator (`_design`)."""
+        order = self.block.order
+        self._again, self._plan, self._place = None, (), 0
+        self._groups, self._passes, self._runs = [], {}, []
+        self._lengths.clear()
+        self._coming, self._at, self._seen = None, 0, False
+        if not isinstance(order, (SequenceBalanced, Priming)):
+            self._design = None
+            return
+        self._design = random.Random(f"design:{self.seed}:{len(self.ended)}")
+        names = [condition.name for condition in self.block.conditions]
+        if isinstance(order, SequenceBalanced):
+            self._plan = balanced_sequence(names, order.depth, order.cycles, self._design)
+            # Each cycle the linear sequence, its first `depth - 1` places a lead-in (the PI,
+            # 2026-10-31, on the engine C3 plan's Appendix B, item 1).
+            self._cycle = len(names) ** order.depth + order.depth - 1
+            return
+        for condition in self.block.conditions:
+            value = condition.values.get(order.feature)
+            form = canonical(value)
+            group = next((group for group in self._groups if group[0] == form), None)
+            if group is None:
+                self._groups.append((form, value, [condition.name]))
+            else:
+                group[2].append(condition.name)
+        if self._groups:
+            self._coming = self._new_run(None)
+        for index in range(len(self._groups)):
+            self._passes[index] = deque()
+            self._refill_pass(index)
+
+    def _refill_pass(self, group: int) -> None:
+        """A priming value's conditions in a new shuffled pass. Drawn as the block opens and as a
+        pass is used up (`_take`), never as the next trial is looked at, so reading `drawable`
+        moves nothing in the seeded plan."""
+        shuffled = list(self._groups[group][2])
+        self._design.shuffle(shuffled)
+        self._passes[group].extend(shuffled)
+
+    @property
+    def _designed(self) -> bool:
+        """Whether the open block plays a designed order (engine build C3): its plan, not its
+        targets, gives its trials, and a break is not shown again unless it comes back at once."""
+        return isinstance(self.block.order, (SequenceBalanced, Priming))
+
+    @property
+    def planned(self) -> tuple | None:
+        """**The open block's plan** (engine build C3): a sequence-balanced block's condition names
+        in the order planned, played or not; a priming block's runs as far as it has played,
+        `(value, length)` each; `None` for any other block. What its `BlockEnd` records."""
+        order = self.block.order
+        if isinstance(order, SequenceBalanced):
+            return self._plan
+        if isinstance(order, Priming):
+            return tuple((self._groups[group][1], length) for group, length in self._runs)
+        return None
+
+    @property
+    def waiting(self) -> frozenset[int]:
+        """**The trials that will be shown again**, by number (engine build C3): a repeat waiting
+        for its slot, a drum's trial, a designed block's trial again at once. What the trial loop
+        keeps a trial's drawn values for, so a repeat that keeps them finds them."""
+        return frozenset(self.waiting_conditions)
+
+    @property
+    def waiting_conditions(self) -> dict[int, str]:
+        """**Each trial that will be shown again, by number, with its condition's name** (engine
+        build C3): `waiting`'s trials, each of the open block. What the live check of trials no
+        animal can get right judges with the `same` values each keeps (`taskd.Session.
+        _kept_trials`; the controller's ruling of 2026-10-30 on the engine C3 plan's fuzz)."""
+        named = {number: condition for _, number, condition in self._due}
+        if self._drum is not None:
+            named[self._drum[1]] = self._drum[0]
+        if self._again is not None:
+            named[self._again[1]] = self._again[0]
+        return named
 
     @property
     def block(self) -> Block:
@@ -390,6 +537,25 @@ class Scheduler:
         return isinstance(self.order, ByCriterion) and self._position == len(self.blocks) - 1
 
     @property
+    def moves_up(self) -> bool:
+        """Whether the open block has a rule that moves the animal on, which a trial a live change
+        eased is kept out of (`record`): its criterion, or a training progression's stage
+        (`ByCriterion`), whose number of trials and targets leave eased trials out. Where the
+        changes feed says a trial is kept out (`taskd._kept_out`; the engine C3 plan's engineering
+        review, I-2)."""
+        return self.block.criterion is not None or isinstance(self.order, ByCriterion)
+
+    @property
+    def plays_out(self) -> bool:
+        """Whether the open block is a sequence-balanced one, which ends on its plan, never a
+        criterion, so where `moves_up` is true it is a training progression's stage below the
+        top (the load refuses one at the top), which moves up when its sequence is played out,
+        eased trials or not (the PI, 2026-10-31, on the engine C3 plan's Appendix B, item 10,
+        "Only warn at load"; `check`'s `sequence-stage-moves-up`): the changes feed says that of
+        it, not that its trials are kept out (`taskd._kept_out`)."""
+        return isinstance(self.block.order, SequenceBalanced)
+
+    @property
     def _falls_back(self) -> bool:
         """Whether a training progression's fall-back rule is met (`ByCriterion.fall_back`): fewer
         than its proportion of the last window's answers right, judged once that many answers are
@@ -444,6 +610,19 @@ class Scheduler:
         index = None if position is None else self._type_at(position)
         return None if index is None else self.blocks[index]
 
+    def following_if_expired(self, expired: bool) -> Block | None:
+        """`following`, asked as if the open block's time had run out (`expire`) where `expired` is
+        true, **without setting it**: the end is still decided where the loop decides it. What
+        `taskd.Session._playing` asks at a boundary, so a value applied as a block ends by its
+        time is judged by the block that follows, with no side effect on the boundary (a drum
+        switch, `owed`)."""
+        held = self._expired
+        self._expired = held or expired
+        try:
+            return self.following
+        finally:
+            self._expired = held
+
     @property
     def next_block(self) -> Block | None:
         """The block the plan goes on to when the open one ends on its own rule or its time -- the
@@ -473,7 +652,12 @@ class Scheduler:
         """Why the open block ends for `reason`, in words and with its numbers, for the console's
         changes feed (the engine C2b plan's science review, I2: "S2 -> S1: 8 of last 20 right"):
         its rule and what met it, the fall-back and the first answers that met it, or whose time
-        ran out."""
+        ran out. **A designed block's rule is its plan** (engine build C3): a sequence-balanced
+        block's played out or cut by its number of trials, a priming block's number of trials."""
+        if reason == RULE and self._designed:
+            if isinstance(self.block.order, SequenceBalanced) and self._place >= len(self._plan):
+                return "its rule met: its planned sequence played out"
+            return f"its rule met: {self.block_trials} trials run"
         if reason == RULE:
             met = []
             if self.block.criterion is not None:
@@ -496,8 +680,13 @@ class Scheduler:
     @property
     def block_trials(self) -> int:
         """The open block's trials so far, a trial and its drummed repeats one: what its number of
-        trials counts (`Block.trials`)."""
-        return sum(counts.trials for counts in self._counts.values())
+        trials counts (`Block.trials`). **In a training progression a trial a live change eased is
+        left out** (engine build C3; the PI, 2026-10-30, Q8, "Merge; fix eased trials in C3": eased
+        trials do not count toward moving up; the engine C3 plan's review, I-7): a stage ending on
+        its number of trials is not passed on eased trials (`Counts.eased`), a drummed trial whose
+        paying try was eased among them (the controller's ruling on the engine C3 plan's Task
+        15)."""
+        return sum(counts.trials - counts.eased for counts in self._counts.values())
 
     @property
     def stalled(self) -> bool:
@@ -513,16 +702,21 @@ class Scheduler:
     def drawable(self) -> bool:
         """Whether the open block can draw a trial now: a drummed trial waits, a repeat waits, or a
         condition can be drawn by its order (`_peek`). A block that cannot, and does not end, has
-        nothing to show (the PI, 2026-10-19: the run ends, saying why)."""
-        return self._drum is not None or bool(self._due) or self._peek() is not None
+        nothing to show (the PI, 2026-10-19: the run ends, saying why). **A designed block's trial
+        again at once waits too** (engine build C3), and its next is its plan's (`_peek`)."""
+        return (self._drum is not None or self._again is not None or bool(self._due)
+                or self._peek() is not None)
 
     def _refill(self) -> None:
         """Queue the next draw, however this block declares its order.
 
         Always from the seeded generator, so a session's condition order is
         reconstructable -- a randomisation nobody can reproduce is one nobody can
-        rule out as an explanation.
+        rule out as an explanation. **A designed block queues none** (engine build C3):
+        its plan gives its trials (`_planned_next`), from a generator of its own.
         """
+        if self._designed:
+            return
         pending = [c.name for c in self.block.conditions if self._drawable(c.name)]
         if not pending:
             return
@@ -562,13 +756,18 @@ class Scheduler:
         keep coming until both hold"), the number of trials is run (engine build C2b), or -- at the
         top stage -- until a time limit, a stop or the session's end (the PI, 2026-10-19, "Same, but
         top keeps going"). Nothing is owed then, so a break is not shown again and nothing is
-        forgiven, but a drummed trial still comes back until it is right (`record`)."""
+        forgiven, but a drummed trial still comes back until it is right (`record`). **Never in
+        a designed block** (engine build C3): its plan gives its trials, and nothing is drawn past
+        it."""
+        if self._designed:
+            return False
         if self.block.criterion is None and self.block.trials is None and not self._top:
             return False
         # The terms of `owed`, read from the counts: `owed` finds its condition by name.
         counts = self._counts
         return all(
             c.target <= counts[c.name].completed + counts[c.name].spent + counts[c.name].forgiven
+            - counts[c.name].eased_paid
             for c in self.block.conditions)
 
     def _runs_long(self, condition: str) -> bool:
@@ -583,7 +782,10 @@ class Scheduler:
     def _peek(self) -> str | None:
         """The next ordinary draw, left in the queue: entries that stopped being drawable since
         they were queued are dropped (an entry goes stale when Task 8's `clear` forgives a condition
-        still queued), and the queue refilled once when empty; `None` when nothing is drawable."""
+        still queued), and the queue refilled once when empty; `None` when nothing is drawable.
+        **A designed block's is its plan's** (`_planned_next`; engine build C3)."""
+        if self._designed:
+            return self._planned_next()
         for _ in range(2):
             while self._queue and not self._drawable(self._queue[0]):
                 self._queue.popleft()
@@ -591,6 +793,93 @@ class Scheduler:
                 return self._queue[0]
             self._refill()
         return None
+
+    def _planned_next(self) -> str | None:
+        """A designed block's next trial's condition, its place left unplayed (engine build C3): a
+        sequence-balanced block's next place, `None` once its plan is played out; a priming
+        block's next condition of the value its place plans, from that value's shuffled pass (the
+        PI, 2026-10-30, Q6). **A priming block's place moves on first past a trial whose stimulus
+        appeared** (`_move_on`); a trial that ended before it leaves its place to the next, so a
+        break before the stimulus loses no place."""
+        if isinstance(self.block.order, SequenceBalanced):
+            return self._plan[self._place] if self._place < len(self._plan) else None
+        if self._seen:
+            self._move_on()
+        run = self._coming if self._coming is not None else (self._runs[-1] if self._runs else None)
+        if run is None:
+            return None
+        return self._passes[run[0]][0]
+
+    def _move_on(self) -> None:
+        """**A priming block's place moves on** past a trial whose stimulus appeared, its last try
+        over (engine build C3; the PI, 2026-10-30, Q6, "Both of the last two"): under a `chance`,
+        the next trial repeats this run's value with that chance, else a switch; under `runs`, the
+        run goes on until it has shown its drawn length, then a switch. "Last" is the last trial
+        whose stimulus appeared, and a run counts only those (the engine C3 plan's Appendix B,
+        item 6)."""
+        order = self.block.order
+        self._seen = False
+        self._at += 1
+        if order.runs is None:
+            if self._design.random() < order.chance:
+                return
+        elif self._at < self._runs[-1][1]:
+            return
+        self._coming = self._new_run(self._runs[-1][0])
+        self._at = 0
+
+    def _new_run(self, previous: int | None) -> tuple[int, int]:
+        """A priming block's next run, `(value's index, length)`: **a switch picks another value at
+        random** (engine build C3, the spec's §5), any value for the block's first; its length is
+        drawn from `runs` -- `(low, high)`, whole numbers from the lowest to the highest, or a
+        distribution (`_run_length`) -- or under a `chance` counts its shown trials from 0."""
+        order = self.block.order
+        others = [group for group in range(len(self._groups)) if group != previous] or [previous]
+        group = others[self._design.randrange(len(others))]
+        if order.runs is None:
+            return group, 0
+        if isinstance(order.runs, tuple):
+            return group, self._design.randint(*order.runs)
+        return group, self._run_length(order.runs)
+
+    def _run_length(self, runs) -> int:
+        """**A priming run's length drawn from a distribution** (the C3 plan's science review, I-8:
+        lengths drawn evenly make a switch ever more expected along a run; a non-aging draw keeps
+        it nearly as likely after every trial): a prepared list's items in passes, each once a
+        pass, shuffled by the block's design generator unless it plays in order; any other kind's
+        value at a unit that generator draws, rounded down, at least 1
+        (`variation.run_length`)."""
+        if isinstance(runs, Listed):
+            if not self._lengths:
+                items = list(runs.values)
+                if not runs.in_order:
+                    self._design.shuffle(items)
+                self._lengths.extend(items)
+            return max(1, int(self._lengths.popleft() // 1))
+        return run_length(runs, self._design.random())
+
+    def _take(self) -> dict:
+        """Play a designed block's next place (engine build C3), its condition `_planned_next`
+        gave, and return the place for its `Draw.planned`: a sequence-balanced block's cycle and
+        position, each from 0, and whether the place is its cycle's lead-in, one of its first
+        `depth - 1`, which only precede what follows (the PI, 2026-10-31); a priming block's run
+        from 0, `switch` true for each try at the run's first place until one has shown its
+        stimulus, and the value it plans."""
+        if isinstance(self.block.order, SequenceBalanced):
+            place = self._place
+            self._place += 1
+            position = place % self._cycle
+            return {"cycle": place // self._cycle, "position": position,
+                    "lead_in": position < self.block.order.depth - 1}
+        if self._coming is not None:
+            self._runs.append(list(self._coming))
+            self._coming = None
+        group = self._runs[-1][0]
+        self._passes[group].popleft()
+        if not self._passes[group]:
+            self._refill_pass(group)
+        return {"run": len(self._runs) - 1, "switch": self._at == 0,
+                "value": self._groups[group][1]}
 
     def _report(self, condition: str) -> ConditionReport:
         counts = self._counts[condition]
@@ -624,10 +913,23 @@ class Scheduler:
     def owed(self, condition: str) -> int:
         """Target minus what paid -- the answers counted and the trials spent -- and what was
         forgiven (§16.6), **never minus attempted**: an owed trial produced no datum, so it left
-        the condition owing exactly what it owed before."""
+        the condition owing exactly what it owed before. **In a training progression an eased
+        trial pays nothing toward its stage's targets** (`Counts.eased_paid`; engine build C3, the
+        engine C3 plan's review, I-7), so its condition is drawn on. **A sequence-balanced block
+        owes its plan's places** of the condition not yet played, and one shown again at once,
+        until it is cut by its number of trials or a time limit, then **nothing** (the plan's
+        review, I-3), its places unplayed in its `planned` and in no shortfall."""
+        if isinstance(self.block.order, SequenceBalanced):
+            if self._expired or (self.closed and self.ended[-1].ended in (TIME, RUN_TIME)):
+                return 0
+            again = int(self._again is not None and self._again[0] == condition)
+            if self.block.trials is not None and self.block_trials >= self.block.trials:
+                return again
+            return self._plan[self._place:].count(condition) + again
         target = next(c.target for c in self.block.conditions if c.name == condition)
         counts = self._counts[condition]
-        return max(0, target - counts.completed - counts.spent - counts.forgiven)
+        return max(0, target - counts.completed - counts.spent - counts.forgiven
+                   + counts.eased_paid)
 
     def _structure(self, condition: str) -> Counting | None:
         """The counting table of the structure `condition` plays (engine build C2b): the one it
@@ -802,6 +1104,7 @@ class Scheduler:
         if self._switched != "run" and not self._carried:
             self._switched = None
         self._carried = False
+        self._begin()
         self._refill()
         return self.block
 
@@ -810,17 +1113,19 @@ class Scheduler:
         ends with the block open. **A block its time ended writes what it still owed as not run**
         (the PI, 2026-10-19: "Trials it still owed are recorded as not run, 'time ran out'"): a
         `Shortfall` per condition owing, `because` `TIME` -- or `RUN_TIME`, the run's time --
-        forgiving nothing."""
+        forgiving nothing. **A sequence-balanced block a time limit cuts owes nothing** (engine
+        build C3; the engine C3 plan's review, I-3): the places it did not play are in its plan
+        (`planned`, which the end records), never a shortfall."""
         if self.closed:
             return
         after = self._number - 1 if self._number else None
-        if reason in (TIME, RUN_TIME):
+        if reason in (TIME, RUN_TIME) and not isinstance(self.block.order, SequenceBalanced):
             for c in self.block.conditions:
                 owed = self.owed(c.name)
                 if owed:
                     self.shortfalls.append(Shortfall(self.block.name, c.name, owed, reason, after))
         self.ended.append(BlockEnd(self.block.name, reason, by, after, self._position,
-                                   self.in_session, self.passed_at))
+                                   self.in_session, self.passed_at, self.planned))
         self.closed = True
 
     def move(self, step: str, by: object = None) -> str | None:
@@ -924,7 +1229,9 @@ class Scheduler:
         repeat of it waiting, or a drum's trial, is dropped, its failed tries in a row start over
         (the PI, 2026-10-18), and the clearing is a `Shortfall` naming `by`. Returns why nothing was
         cleared -- *clear* is off (`clearing`: a control not switched on, never a refusal of a
-        task), the block has no such condition, or it owes nothing -- or `None`."""
+        task), the block has no such condition, or it owes nothing -- or `None`. **In a designed
+        block only a trial waiting to come back is cleared** (engine build C3), a drum's or one
+        again at once, one trial: its plan gives its trials, so there is no other debt to clear."""
         if not self.clearing:
             return (
                 "clear is a training aid, and it is off in this run; a trainer switches it on to "
@@ -934,12 +1241,22 @@ class Scheduler:
             return (
                 f"block {self.block.name!r} has no condition {condition!r}, so nothing is cleared"
             )
-        owed = self.owed(condition)
-        if owed == 0:
-            return (
-                f"{condition!r} owes nothing in block {self.block.name!r}, so nothing is cleared"
-            )
-        self._forgive(condition, owed if rest else 1, CLEARED, by)
+        if self._designed:
+            if not ((self._drum is not None and self._drum[0] == condition)
+                    or (self._again is not None and self._again[0] == condition)):
+                return (
+                    f"block {self.block.name!r} plays a designed order, so only a trial waiting "
+                    f"to come back is cleared, and no trial of {condition!r} waits"
+                )
+            self._forgive(condition, 1, CLEARED, by)
+        else:
+            owed = self.owed(condition)
+            if owed == 0:
+                return (
+                    f"{condition!r} owes nothing in block {self.block.name!r}, so nothing is "
+                    f"cleared"
+                )
+            self._forgive(condition, owed if rest else 1, CLEARED, by)
         # **The trial moved past is over, so its count starts over** (the PI, 2026-10-18, "End that
         # waiting trial; count starts over"), as an answer ends a trial.
         counts = self._counts[condition]
@@ -979,9 +1296,19 @@ class Scheduler:
         once the criterion is met and every target is used up; conditions keep coming until both
         hold") -- **and no drum waits** ("Finish the drum first": "The block ends only after the
         drummed trial is answered right. If the extra tries drop the percentage below the bar, the
-        block carries on. Training ends on a success.")."""
+        block carries on. Training ends on a success."). **A designed block's rule is its plan**
+        (engine build C3): a sequence-balanced block is finished at whichever comes first, its
+        plan played out or its number of trials run (the engine C3 plan's review, I-3), a priming
+        block once its number of trials is run -- and neither while a trial waits to come back at
+        once."""
         if self._drum is not None:
             return False
+        if self._designed:
+            if self._again is not None:
+                return False
+            if self.block.trials is not None and self.block_trials >= self.block.trials:
+                return True
+            return isinstance(self.block.order, SequenceBalanced) and self._place >= len(self._plan)
         if self.block.criterion is not None:
             proportion, window = self.block.criterion
             if len(self._window) < window or sum(self._window) / len(self._window) < proportion:
@@ -1001,27 +1328,38 @@ class Scheduler:
         one** when there is another: only the last condition owed repeats at once. A repeat taken
         at its slot or early can make a run of two of its condition, at once or not; a
         `Constrained` block's limit counts it as a draw. **A drum's trial goes before all of
-        them**, at once."""
+        them**, at once. **In a designed block** (engine build C3) a trial again at once comes
+        next, and otherwise the plan's next place (`_take`); a drum's try and a trial again at
+        once carry the place of the trial they show again, so neither moves the plan."""
         self._note_passed()
         number = self._number
         waiting = sorted(self._due)
         drummed = self._drum is not None
-        name, repeat_of = self._drum if drummed else (self._peek(), None)
+        planned = None
         if drummed:
+            name, repeat_of = self._drum
             self._drum = None
-        elif waiting and (waiting[0][0] <= number or name is None or self._runs_long(name)):
-            due = waiting[0]
-            if due[1] == number - 1 and len(waiting) > 1:
-                due = waiting[1]
-            self._due.remove(due)
-            _, repeat_of, name = due
-        elif name is None:
-            raise IndexError(
-                f"block {self.block.name!r} has no condition left to draw and its end rule is not "
-                f"met"
-            )
+            planned = None if self.drawn is None else self.drawn.planned
+        elif self._again is not None:
+            name, repeat_of, planned = self._again
+            self._again = None
         else:
-            self._queue.popleft()
+            name, repeat_of = self._peek(), None
+            if waiting and (waiting[0][0] <= number or name is None or self._runs_long(name)):
+                due = waiting[0]
+                if due[1] == number - 1 and len(waiting) > 1:
+                    due = waiting[1]
+                self._due.remove(due)
+                _, repeat_of, name = due
+            elif name is None:
+                raise IndexError(
+                    f"block {self.block.name!r} has no condition left to draw and its end rule is "
+                    f"not met"
+                )
+            elif self._designed:
+                planned = self._take()
+            else:
+                self._queue.popleft()
         condition = next(c for c in self.block.conditions if c.name == name)
         self.drawn = Draw(
             condition,
@@ -1032,6 +1370,7 @@ class Scheduler:
             drummed=drummed,
             drumming=self.drumming,
             aids=self.aids,
+            planned=planned,
         )
         self._drawn.append(name)
         self._counts[name].attempted += 1
@@ -1039,7 +1378,8 @@ class Scheduler:
         self._opened = set()
         return condition
 
-    def record(self, condition: str, outcome: Outcome | None, shown: bool = True) -> str:
+    def record(self, condition: str, outcome: Outcome | None, shown: bool = True,
+               eased: bool = False) -> str:
         """Count one trial of `condition` by its table (engine spec §16.1-16.2), and return what it
         did to the count: `COUNTED`, `SPENT`, `OWED` or `UNPAID`. `outcome` `None` is a trial that
         reached the longest trial (`task.HANG_COUNTS_AS`); `shown`, whether its stimulus had
@@ -1051,18 +1391,41 @@ class Scheduler:
         table says; a streak judges each of its answers, and so does a percentage unless
         `first_answers` is on. An owed trial of a condition whose trial has failed as many tries in
         a row as its limit allows (`task.Counting.cap`: the block's table's, else the structure's)
-        is not repeated again: its remaining debt is forgiven, a `Shortfall` (§16.6)."""
+        is not repeated again: its remaining debt is forgiven, a `Shortfall` (§16.6). **A designed
+        block's break** is not shown again unless it comes back at once (`_break`; engine build
+        C3).
+
+        **`eased`, a trial a live change made easier** (engine build C3; the PI, 2026-10-30, Q8,
+        "Merge; fix eased trials in C3": eased trials do not count toward moving up, and do count
+        toward moving back): it is left out of the window the block's criterion and a stage's
+        rule read, and still judged toward the fall-back and counted toward its condition. **In a
+        training progression** (`ByCriterion`) it counts toward neither its stage's number of
+        trials nor its targets either (`Counts.eased`; the engine C3 plan's review, I-7), so an
+        animal is never moved up on eased trials. **A trial whose paying try was eased is eased**
+        toward its stage's number of trials, whatever its first try was (the controller's ruling on
+        the engine C3 plan's Task 15): a drum's try that pays it answered an easier task."""
         counts = self._counts[condition]
         kind = self._class(outcome, shown, condition)
         first_try = self.drawn is None or not self.drawn.drummed
         judged = self._answer(outcome, condition) or self._scored(outcome)
+        kept = eased and isinstance(self.order, ByCriterion)
         # A try recorded: a presentation, and a trial unless a drum brought it back (the PI,
         # 2026-10-18, "200 trials; drummed repeats inside them"); an ordinary repeat, shown again a
         # few trials later, is a trial of its own. Counted as each try ends, so a trial that
         # faulted, which has no line, is in neither (the controller's ruling M5).
         counts.presented += 1
         counts.trials += first_try
+        if first_try:
+            self._eased_chain = kept
+        counts.eased += kept and first_try
         self.trials += first_try
+        if isinstance(self.block.order, Priming) and shown and self._runs and not self._seen:
+            # **A priming run counts only trials whose stimulus appeared** (engine build C3; the
+            # engine C3 plan's Appendix B, item 6): this place is shown, and moves on once its
+            # last try is over (`_move_on`); under a `chance` its run is one trial longer.
+            self._seen = True
+            if self.block.order.runs is None:
+                self._runs[-1][1] += 1
         if judged:
             # Every answer, any try's, right or wrong -- and a break the block's own table scores,
             # wrong -- for the console and the end row.
@@ -1071,7 +1434,7 @@ class Scheduler:
         counts.right_first += first_try and outcome in RIGHT
         if first_try:
             self._answered = False
-        if judged and not (self._answered and self._first_answers):
+        if judged and not eased and not (self._answered and self._first_answers):
             # **Every answer is judged** (the PI, 2026-10-18: a rule judges answers,
             # "whatever the counting says about paying", "until N correct" included): a trial with
             # no answer -- a break, no fixation, a lost tracker, a hang -- neither adds to nor
@@ -1082,7 +1445,7 @@ class Scheduler:
             # percentage by default ("Every answer"); with the training setting `first_answers`,
             # a percentage judges only each trial's first answer -- after a try that ended before
             # any answer, the first try that answers (2026-10-12, "Leave drummed repeats out";
-            # 2026-10-18, "Judge its first answer").
+            # 2026-10-18, "Judge its first answer"). **An eased trial never** (engine build C3).
             self._window.append(1 if outcome in RIGHT else 0)
             if self.block.criterion is not None:
                 while len(self._window) > self.block.criterion[1]:
@@ -1104,11 +1467,13 @@ class Scheduler:
             # before the drum branch, which returns (the controller's ruling I3).
             counts.in_a_row = counts.rig = 0
         if (self.drumming and outcome not in RIGHT
-                and (self.owed(condition) > 0 or self.past_targets)):
+                and (self._designed or self.owed(condition) > 0 or self.past_targets)):
             # **Drumming** (`Block.drum`): repeated until right -- a correct answer or a correct
             # rejection (`task.RIGHT`) -- at once, paying nothing, its failed tries in a row
             # counted for the console's warning (`drum_tries`); past a criterion block's targets
-            # too, where its conditions keep coming (`past_targets`).
+            # too, where its conditions keep coming (`past_targets`); and in a designed block,
+            # whose plan waits for it, the drum's tries keeping the place they show again (engine
+            # build C3; the engine C3 plan's call 17).
             self.requeued.append(condition)
             self._drum = (condition, self._number - 1)
             self._tries = 1 if first_try else self._tries + 1
@@ -1118,6 +1483,17 @@ class Scheduler:
             counts.correct += outcome in RIGHT
         elif kind == SPENT:
             counts.spent += 1
+        counts.eased_paid += kept and kind in (COUNTED, SPENT)
+        if kept and kind in (COUNTED, SPENT) and not self._eased_chain:
+            # **A trial whose paying try was eased is eased** toward its stage's number of trials
+            # (the controller's ruling on the engine C3 plan's Task 15): its first try was not, and
+            # the drum's try that pays it answered an easier task. Counted once a trial.
+            self._eased_chain = True
+            counts.eased += 1
+        if self._designed:
+            if kind == OWED:
+                self._break(condition, outcome)
+            return kind
         if kind == OWED and self.owed(condition) > 0:
             counts.rig += outcome is not None and outcome.family is Family.RIG
             cap = self._cap(condition)
@@ -1133,14 +1509,44 @@ class Scheduler:
                 self._repeat(condition)
         return kind
 
+    def _break(self, condition: str, outcome: Outcome | None) -> None:
+        """**A break in a designed block** (engine build C3; the PI, 2026-10-30, Q5b, "'Again at
+        once' as an option"): by default the trial is not shown again and the sequence goes on, a
+        sequence-balanced block's lost place a shortfall, `DESIGNED`, one trial, never flagged; a
+        priming block's place is not lost, so it writes none (the engine C3 plan's review, M-9).
+        **With `again_at_once`** the trial comes straight back with its place, a repeat counted as
+        any is, **under the repeat limit** (review I-4; §16.6, the PI, 2026-10-12: "moved past
+        after 3 failed repeats in a row"): past its failed tries in a row it is moved past, `CAP`
+        or `RIG`, flagged as possible avoidance as any is, and the sequence goes on."""
+        counts = self._counts[condition]
+        if self.block.order.again_at_once:
+            counts.rig += outcome is not None and outcome.family is Family.RIG
+            cap = self._cap(condition)
+            if cap is None or counts.in_a_row < cap:
+                counts.repeats += 1
+                counts.in_a_row += 1
+                self.requeued.append(condition)
+                planned = None if self.drawn is None else self.drawn.planned
+                self._again = (condition, self._number - 1, planned)
+                return
+            self._forgive(condition, 1, RIG if counts.rig else CAP)
+            # The trial moved past is over, so its count starts over: the plan shows its
+            # condition again.
+            counts.in_a_row = counts.rig = 0
+        elif isinstance(self.block.order, SequenceBalanced):
+            self._forgive(condition, 1, DESIGNED)
+
     def _forgive(self, condition: str, trials: int, because: str, by: object = None) -> None:
         """Forgive `trials` of `condition`'s debt in this block (§16.6): no repeat of it waits any
-        longer, nor a drum's trial, and the shortfall is the run's record."""
+        longer, nor a drum's trial, nor one again at once, and the shortfall is the run's
+        record."""
         self._counts[condition].forgiven += trials
         self._counts[condition].flagged |= because == CAP
         self._due = [due for due in self._due if due[2] != condition]
         if self._drum is not None and self._drum[0] == condition:
             self._drum = None
+        if self._again is not None and self._again[0] == condition:
+            self._again = None
         # A person's clear can come before the run's first trial, after none.
         after = self._number - 1 if self._number else None
         self.shortfalls.append(Shortfall(self.block.name, condition, trials, because, after, by))

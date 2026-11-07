@@ -16,15 +16,23 @@ import math
 from dataclasses import fields, is_dataclass
 from decimal import Context, Decimal
 
+from wl_xcon import variation
 from wl_xcon.task import (
+    BY_CONDITIONS,
     COUNTED,
     NO_LIMIT,
     OWED,
+    REPEATS,
     Balanced,
     ByCriterion,
     Constrained,
     Cyclic,
+    Distribution,
+    Factorial,
+    NonAging,
+    Priming,
     Random,
+    SequenceBalanced,
     WithReplacement,
     SPENT,
     UNPAID,
@@ -389,10 +397,11 @@ def render_task(task: Task, allocation_names: dict[int, str] | None = None) -> s
     the task's own, or the task's override of the shared list with why (the PI, 2026-10-11) -- the
     bounded settings it rewards through, how its reaction time is defined, what it offers to
     choose, whether it needs a fixed head, what each trial does to its condition's count (engine
-    build C2a), and its plans in tables (engine spec §18.1: "the plan in tables"; engine build
-    C2b). **Then each trial structure**, the default first,
-    as `render` draws one, a heading level down. Nothing is checked first, as `wlx review` checks
-    nothing: an undeclared meaning is shown as one, and a content that cannot be hashed says so."""
+    build C2a), what each trial draws (engine build C3), and its plans in tables (engine spec
+    §18.1: "the plan in tables"; engine build C2b). **Then each trial structure**, the default
+    first, as `render` draws one, a heading level down. Nothing is checked first, as `wlx review`
+    checks nothing: an undeclared meaning is shown as one, and a content that cannot be hashed
+    says so."""
     from wl_xcon.declarations import BOUNDED, OVERRIDE, content_hash, resolved, rewarded_through
 
     try:
@@ -458,6 +467,7 @@ def render_task(task: Task, allocation_names: dict[int, str] | None = None) -> s
     )
     lines += ["### Head", "", head, ""]
     lines += _counting(task)
+    lines += _draws(task)
     lines += _plans(task)
     for name in (task.default, *(other for other in task.structures if other != task.default)):
         heading = f"## Structure `{name}`"
@@ -545,13 +555,63 @@ def _order(order) -> str:
 
 
 def _block_order(order) -> str:
-    """How a block orders its conditions, in words."""
+    """How a block orders its conditions, in words: shuffled passes or drawn with replacement, or
+    since engine build C3 a designed order (`_balanced_words`, `_priming_words`), which read
+    "shuffled passes" before it."""
     if isinstance(order, Constrained):
         weights = f", weighted {order.weights}" if order.weights else ""
         return f"drawn with replacement, runs of at most {order.max_run}{weights}"
     if isinstance(order, WithReplacement):
         return "drawn with replacement" + (f", weighted {order.weights}" if order.weights else "")
+    if isinstance(order, SequenceBalanced):
+        return _balanced_words(order)
+    if isinstance(order, Priming):
+        return _priming_words(order)
     return "shuffled passes"
+
+
+def _balanced_words(order: SequenceBalanced) -> str:
+    """**A sequence-balanced order in words** (TSK-23; the PI, 2026-10-30, Q5a, "Block picks; pairs
+    default", and Q5b, "'Again at once' as an option"): each cycle a linear de Bruijn sequence from
+    the run's seed, how far back its balance reaches, every pair or triple once a cycle, its first
+    `depth - 1` trials a lead-in that only precedes what follows (the PI, 2026-10-31, on the engine
+    C3 plan's Appendix B, item 1; engine build C3's call 15), its cycles, and what a broken trial
+    does."""
+    reach = ("pair of" if order.depth == 2 else "triple of" if order.depth == 3
+             else f"run of {order.depth}")
+    cycles = f"{order.cycles} cycle{'' if order.cycles == 1 else 's'}"
+    broken = ("a broken trial comes back at once, under the repeat limit" if order.again_at_once
+              else "a broken trial is not repeated, its place a designed shortfall")
+    lead = ("its first trial" if order.depth == 2
+            else f"its first {order.depth - 1} trials")
+    return (f"sequence-balanced from the run's seed: each cycle a linear de Bruijn sequence, each "
+            f"ordered {reach} conditions, a condition after itself included, once a cycle, {lead} "
+            f"a lead-in that only precedes what follows; {cycles}; {broken}")
+
+
+def _priming_words(order: Priming) -> str:
+    """**A priming order in words** (the PI, 2026-10-30, Q6, "Both of the last two"): its feature;
+    its chance that the next trial repeats the last shown trial's value, or its runs of one value
+    with drawn lengths, exactly one of them, said where it declares both or neither (refused at
+    load); within a value, shuffled passes; and what a broken trial does (engine build C3's calls
+    16 and 17). Runs whose lengths a distribution draws are said in the rig's words (the C3 plan's
+    science review, I-8)."""
+    if order.runs is None and order.chance is not None:
+        how = (f"the next trial repeats the last shown trial's value with a chance of "
+               f"{_value_label(order.chance)}, else another value at random")
+    elif order.chance is None and isinstance(order.runs, tuple) and len(order.runs) == 2:
+        how = (f"runs of one value, each {order.runs[0]} to {order.runs[1]} shown trials long, "
+               f"drawn, then another value at random")
+    elif order.chance is None and isinstance(order.runs, Distribution):
+        how = (f"runs of one value, each its length drawn "
+               f"{variation.words(order.runs, 'shown trials')}, rounded down, then another value "
+               f"at random")
+    else:
+        how = "**a chance or runs, exactly one**, which the load-time check refuses otherwise"
+    broken = ("a broken trial comes back at once, under the repeat limit" if order.again_at_once
+              else "a broken trial is not repeated")
+    return (f"priming on `{order.feature}`: {how}; within a value, its conditions in shuffled "
+            f"passes; {broken}")
 
 
 def declares_position(choices) -> bool:
@@ -584,10 +644,16 @@ def position_words(value: object, choices=()) -> str | None:
     return None
 
 
-def _set_label(value: object, choices=()) -> str:
+def _set_label(value: object, choices=(), unit: str = "", direction: bool = False) -> str:
     """A value a condition sets, as the plan's table shows it: **a position eccentricity and
     direction first, its (x, y) beside them** (`position_words`), whether the setting takes a
-    `Polar` or a pair, its `choices` declaring which; anything else as written."""
+    `Polar` or a pair, its `choices` declaring which; **a range of its own** (the PI, 2026-10-30,
+    Q1b: "a condition may draw its own setting from its own range") in the rig's words in its
+    setting's `unit`, a `direction` setting's from 0 to 360 (`variation.words`), with what a
+    repeat takes; anything else as written, a direction as given."""
+    if isinstance(value, Distribution):
+        return (f"{variation.words(value, unit, direction=direction)} "
+                f"({_repeat(value)} on a repeat)")
     words = position_words(value, choices)
     return f"{value}" if words is None else words
 
@@ -596,11 +662,20 @@ def _plans(task: Task) -> list[str]:
     """**The plan in tables** (engine spec §18.1; engine build C2b): each plan's order and run time
     limit, then a row for each block -- what ends it, how it orders its conditions, what it counts
     by, whether it drums -- and a row for each condition: the structure it plays, its target and
-    the values it sets. A task with none says the plain run is its only run."""
+    the values it sets. A task with none says the plain run is its only run.
+
+    **What varies, since engine build C3** (its spec §3-§5): a designed order in words, and what
+    ends its block (`_ends`); the conditions a block makes from factors, listed after its
+    hand-listed ones (`variation.generated`), then its factors, exclusions and each level's share
+    (`_factorial`); a condition's own range in words (`_set_label`); the draws in force in each
+    block, its own or the task's, and a setting it leaves to its conditions (`_block_draws`); and
+    each wait the block or its conditions draw of their own, with its hazard (`_block_waits`)."""
     lines = ["### Plans", ""]
     if not task.plans:
         return lines + ["None: the plain run only -- one block of the default structure, every "
                         "trial paying.", ""]
+    params = {param.name: param for param in task.params}
+    turned = variation.directions(task)
     for name, plan in task.plans.items():
         limit = ("No run time limit." if plan.time_limit_s is None
                  else f"The run ends at the first pause between trials after "
@@ -609,32 +684,306 @@ def _plans(task: Task) -> list[str]:
                   "| Block | Ends once | Conditions drawn | Counts by | Drums |",
                   "|---|---|---|---|---|"]
         for block in plan.blocks:
-            ends = ["every target used up"]
-            if block.criterion is not None:
-                ends.append(_rule(block.criterion))
-            if block.trials is not None:
-                ends.append(f"{block.trials} trials run")
-            if block.time_limit_s is not None:
-                ends.append(f"or its time runs out at {_seconds(block.time_limit_s)}")
             counts = ("its own table" if block.counting is not None
                       else "each condition's structure's table")
             # Every name through `_cell`, so a bar in one is never a new column (the final review
             # of engine build C2b, T11).
-            lines.append(f"| {_cell(f'{block.name}')} | {_cell('; '.join(ends))} | "
+            lines.append(f"| {_cell(f'{block.name}')} | {_cell(_ends(block))} | "
                          f"{_cell(_block_order(block.order))} | {counts} | "
                          f"{'yes' if block.drum else 'no'} |")
         lines += ["", "| Block | Condition | Structure | Target | Values |",
                   "|---|---|---|---|---|"]
-        choices = {param.name: param.choices for param in task.params}
         for block in plan.blocks:
-            for condition in block.conditions:
-                values = ", ".join(f"{k} = {_set_label(v, choices.get(k, ()))}"
-                                   for k, v in condition.values.items()) or "none"
+            for condition in _conditions(block):
+                values = ", ".join(
+                    f"{k} = {_set_label(v, _choices(k, params), _unit(k, params), k in turned)}"
+                    for k, v in condition.values.items()) or "none"
                 lines.append(f"| {_cell(f'{block.name}')} | {_cell(f'{condition.name}')} | "
                              f"{_cell(f'{condition.structure or task.default}')} | "
                              f"{condition.target} | {_cell(values)} |")
         lines.append("")
+        lines += _block_draws(task, plan, params, turned)
+        for block in plan.blocks:
+            lines += _factorial(block) + _block_waits(task, block, params) + _switches(block)
     return lines
+
+
+def _switches(block) -> list[str]:
+    """**A priming block's chance of a switch after each trial of a run**, given the run lasted that
+    long (the C3 plan's science review, I-8: run position is what priming studies, so a switch that
+    grows more expected along a run confounds it, as an aging wait does time): for a block whose
+    runs have drawn lengths, `(low, high)` or a distribution, each length's chance from
+    `variation.switch_chances`, to two decimal places. Lengths drawn evenly make the chance climb
+    to certain at the longest; a non-aging draw keeps it near one value until the cut. A block
+    whose runs are refused at load says so, never raising. Arithmetic of the declaration, no
+    timing claim."""
+    order = block.order
+    if not isinstance(order, Priming) or order.runs is None:
+        return []
+    try:
+        chances = variation.switch_chances(order.runs)
+    except (ArithmeticError, LookupError, TypeError, ValueError, AttributeError):
+        return [f"Block `{block.name}`'s runs give no switch chances: the load-time check refuses "
+                f"runs that are not (low, high), whole numbers from 1, or a distribution of "
+                f"lengths from 1.", ""]
+    return [f"Block `{block.name}`: the chance its run switches after each shown trial, given the "
+            f"run lasted that long -- arithmetic of its declared lengths, not a measurement.", "",
+            "| Shown trials in the run | Chance it switches next |", "|---|---|",
+            *(f"| {length} | {chance:.2f} |" for length, chance in chances), ""]
+
+
+def _conditions(block) -> list:
+    """A block's conditions as a run plays them: its hand-listed ones, then those its factorial
+    makes (`variation.generated`; engine build C3's call 14)."""
+    return [*block.conditions, *variation.generated(block)]
+
+
+def _choices(name: str, params: dict) -> tuple:
+    """The choices the setting `name` declares, `()` for none or a setting nothing declares."""
+    return params[name].choices if name in params else ()
+
+
+def _unit(name: str, params: dict) -> str:
+    """The unit of the setting `name`, `""` for a setting nothing declares."""
+    return params[name].unit if name in params else ""
+
+
+def _ends(block) -> str:
+    """**What ends a block, in words**: every target used up, with its criterion, its number of
+    trials and its time limit (engine build C2b). **A designed block** (engine build C3's calls 15
+    and 16): a sequence-balanced block ends once its sequence is played out, `(n**depth + depth -
+    1) * cycles` trials of its `n` conditions, each cycle the linear sequence (the PI, 2026-10-31),
+    or at its own number of trials first, owing nothing then; a
+    priming block on its trials or its time alone, said where it declares neither (refused at
+    load)."""
+    order = block.order
+    if isinstance(order, SequenceBalanced):
+        cycle = len(_conditions(block)) ** order.depth + order.depth - 1
+        ends = [f"its sequence is played out, {cycle * order.cycles} trials"]
+    elif isinstance(order, Priming):
+        ends = []
+    else:
+        ends = ["every target used up"]
+    if block.criterion is not None:
+        ends.append(_rule(block.criterion))
+    if block.trials is not None:
+        cut = "or " if isinstance(order, SequenceBalanced) else ""
+        ends.append(f"{cut}{block.trials} trials run")
+    if block.time_limit_s is not None:
+        cut = "or " if ends else ""
+        ends.append(f"{cut}its time runs out at {_seconds(block.time_limit_s)}")
+    return "; ".join(ends) or "**nothing declared**, which the load-time check refuses"
+
+
+def _block_draws(task: Task, plan, params: dict, turned: frozenset) -> list[str]:
+    """**What each block of `plan` draws** (the PI, 2026-10-30, Q1a, "Task default, block may
+    replace"): the draws in force in it (`variation.in_force`), its own and the task's it does not
+    replace, each in the rig's words with what a repeat takes; a setting it leaves to its
+    conditions (`BY_CONDITIONS`), whose values or own ranges the conditions' table shows; and
+    anything else its draws hold, said not to be a draw (refused at load). Nothing where no block
+    draws."""
+    rows = []
+    for block in plan.blocks:
+        named = _cell(f"{block.name}")
+        for setting, (drawn, key) in variation.in_force(task, block).items():
+            whose = "the block's own" if key[0] == "block" else "the task's"
+            rows.append(f"| {named} | {_cell(setting)} | "
+                        f"{_cell(_words(drawn, setting, params, turned))} | {whose} | "
+                        f"{_repeat(drawn)} |")
+        own = block.draws if isinstance(block.draws, dict) else {}
+        for setting, drawn in own.items():
+            if drawn == BY_CONDITIONS:
+                rows.append(f"| {named} | {_cell(setting)} | each condition's value or own range "
+                            f"(above) | by its conditions | |")
+            elif not isinstance(drawn, Distribution):
+                rows.append(f"| {named} | {_cell(setting)} | **not a draw**: "
+                            f"{_cell(repr(drawn))} | | |")
+    if not rows:
+        return []
+    return ["| Block | Setting | Drawn from | Whose | On a repeat |", "|---|---|---|---|---|",
+            *rows, ""]
+
+
+def _factorial(block) -> list[str]:
+    """**A block's conditions made from factors, for review** (the C3 spec §4: "nobody writes
+    generated conditions, so nobody reads them unless shown"; TSK-22; the PI, 2026-10-30, Q4, "Yes,
+    each cell equal": "the review report shows each level's overall share"): how many it makes,
+    listed in the conditions' table after its hand-listed ones; its factors and their levels
+    (`variation.level_name`); the trials each is owed and each hand-written number; the exclusions
+    applied; and each level's share of the trials its generated conditions owe, which exclusions
+    and hand-written numbers make unequal. A factorial whose factors are not a dict of levels says
+    so (refused at load)."""
+    factorial = block.factorial
+    if not isinstance(factorial, Factorial):
+        return []
+    made = variation.generated(block)
+    factors = factorial.factors if isinstance(factorial.factors, dict) else {}
+    declared = "; ".join(
+        f"{factor} ({', '.join(variation.level_name(level) for level in _levels(levels))})"
+        for factor, levels in factors.items()) or "**no factors**"
+    targets = factorial.targets if isinstance(factorial.targets, dict) else {}
+    owed = f"Each is owed {factorial.target} trials"
+    if targets:
+        owed += ", but " + ", ".join(f"`{name}` {number}" for name, number in targets.items())
+    excluded = "; ".join(
+        "`" + ", ".join(f"{factor}={variation.level_name(level)}"
+                        for factor, level in exclusion.items()) + "`"
+        for exclusion in _levels(factorial.exclude) if isinstance(exclusion, dict)) or "none"
+    lines = [f"Block `{block.name}` makes {len(made)} conditions from its factors, its last "
+             f"{len(made)} rows in the table of conditions above: {declared}. {owed}. Excluded: "
+             f"{excluded}.", ""]
+    rows = []
+    total = sum(_owed(condition) for condition in made)
+    for factor, levels in factors.items():
+        for level in _levels(levels):
+            having = [condition for condition in made
+                      if factor in condition.values and condition.values[factor] == level]
+            trials = sum(_owed(condition) for condition in having)
+            share = f"{100 * trials / total:.1f}%" if total else "none owed"
+            rows.append(f"| {_cell(factor)} | {_cell(variation.level_name(level))} | "
+                        f"{len(having)} | {trials} | {share} |")
+    if rows:
+        lines += ["| Factor | Level | Conditions | Trials owed | Share of trials owed |",
+                  "|---|---|---|---|---|", *rows, ""]
+    return lines
+
+
+def _levels(levels: object) -> tuple:
+    """A factor's levels as `variation.generated` reads them: `()` for anything not a tuple or a
+    list."""
+    return tuple(levels) if isinstance(levels, (tuple, list)) else ()
+
+
+def _owed(condition) -> int:
+    """The trials a condition is owed, 0 where its target is not a whole number."""
+    target = condition.target
+    return target if isinstance(target, int) and not isinstance(target, bool) else 0
+
+
+def _block_waits(task: Task, block, params: dict) -> list[str]:
+    """**Each non-aging wait a block draws of its own, with its hazard** (`_wait`; the C3 spec §3:
+    "the review report's plan tables give, from the declared numbers, the hazard"): the block's
+    own draw (`variation.in_force`), and each condition's own range (`variation.own_ranges`), a
+    range several conditions share -- a factorial's level -- once, naming them all. The task's own
+    waits are under its draws (`_draws`)."""
+    found = [(setting, drawn, "its own draw")
+             for setting, (drawn, key) in variation.in_force(task, block).items()
+             if key[0] == "block" and isinstance(drawn, NonAging)]
+    ranges: list[tuple[str, NonAging, list[str]]] = []
+    for condition in _conditions(block):
+        for setting, (drawn, _key) in variation.own_ranges(condition).items():
+            if not isinstance(drawn, NonAging):
+                continue
+            shared = [entry for entry in ranges if entry[:2] == (setting, drawn)]
+            if shared:
+                shared[0][2].append(condition.name)
+            else:
+                ranges.append((setting, drawn, [condition.name]))
+    found += [(setting, drawn, "the own range of " + ", ".join(f"`{name}`" for name in names))
+              for setting, drawn, names in ranges]
+    lines: list[str] = []
+    for setting, wait, whose in found:
+        unit = _unit(setting, params)
+        lines += [f"`{setting}` in block `{block.name}`, {whose}: "
+                  f"{variation.words(wait, unit)}.", "", *_wait(wait, unit)]
+    return lines
+
+
+def _draws(task: Task) -> list[str]:
+    """**What each trial draws, the plain run included** (engine build C3; the PI, 2026-10-30, Q1a,
+    "Task default, block may replace"): each of the task's draws in the rig's words, a direction
+    from 0 to 360 (`variation.words`; call 11), with what a repeat of its trial takes (Q3, "Per
+    drawn setting, required"), a setting nothing declares said so; then each non-aging wait's
+    hazard (`_wait`). A block type's own draws, and what each block draws, are in its plan's
+    tables (`_plans`)."""
+    lines = ["### Draws", ""]
+    if not task.draws:
+        return lines + ["None of the task's own: the plain run draws nothing. A block type's own "
+                        "draws are in its plan's tables.", ""]
+    params = {param.name: param for param in task.params}
+    turned = variation.directions(task)
+    lines += ["Each trial draws these, in the plain run and in every block that neither draws the "
+              "setting its own way nor leaves it to its conditions, from the run's seed, the "
+              "trial's number in the run and the setting, so a run replays from its seed. A "
+              "repeat of a trial takes the value it drew (same) or a new draw (fresh), as each "
+              "says.", "", "| Setting | Drawn from | On a repeat |", "|---|---|---|"]
+    for name, drawn in task.draws.items():
+        setting = name if name in params else f"{name} **UNDECLARED**"
+        lines.append(f"| {_cell(setting)} | {_cell(_words(drawn, name, params, turned))} | "
+                     f"{_repeat(drawn)} |")
+    lines.append("")
+    for name, drawn in task.draws.items():
+        if isinstance(drawn, NonAging):
+            lines += [f"`{name}`, the task's draw: {_words(drawn, name, params, turned)}.", "",
+                      *_wait(drawn, _unit(name, params))]
+    return lines
+
+
+def _words(drawn: Distribution, name: str, params: dict, turned: frozenset) -> str:
+    """A draw of the setting `name` in the rig's words (`variation.words`): in its unit, a
+    direction setting's places from 0 to 360 (`variation.directions`)."""
+    return variation.words(drawn, _unit(name, params), direction=name in turned)
+
+
+def _repeat(drawn: object) -> str:
+    """What a repeat of a trial takes of a drawn setting (the PI, 2026-10-30, Q3, "Per drawn
+    setting, required"): `same` or `fresh`, or said not declared, which the load refuses."""
+    repeat = getattr(drawn, "repeat", None)
+    return repeat if repeat in REPEATS else "**not declared**"
+
+
+#: **Where the hazard table reads a wait besides its shortest and its mean**: four fifths and
+#: nineteen twentieths of the way to its longest -- 1150 and 1225 ms of the PI's 750 to 1250 ms,
+#: the C3 spec §3's example -- where the rise shows.
+_NEARING = (0.8, 0.95)
+
+
+def _amount(value: float, unit: str) -> str:
+    """A number as the hazard table writes it, to six significant figures, with its unit."""
+    return f"{value:g} {unit}" if unit else f"{value:g}"
+
+
+def _wait(wait: NonAging, unit: str) -> list[str]:
+    """**How much the non-aging wait's chance of ending rises near its longest** (the PI,
+    2026-10-30, Q2, "Draw again": "every wait falls between the shortest and the longest; the
+    review report shows how much the target's chance rises near the longest"; the C3 spec §3):
+    the chance of the wait ending at each moment against the flat rate, the uncut wait's, which
+    is the same at every moment (`variation.hazard_ratio`), at the shortest, the mean and two
+    points nearing the longest (`_NEARING`), in order, each to two decimal places; then what its
+    waits average once a wait past the longest is drawn again (`variation.realized_mean`), to
+    three significant figures, below the declared mean, the wait's own (engine build C3's call 6).
+    750 to 1250 ms with a mean of 1000 reads 1.16, 1.58, 3.03 and 10.51 times at 750, 1000, 1150
+    and 1225 ms, which the spec's §3 rounds to 1.2, 1.6, 3 and 10, and averages 922 ms.
+
+    **Arithmetic of the declared distribution, not a measurement of the rig**, and said so: no
+    timing claim (CLAUDE.md). A wait whose numbers give no hazard -- its mean not past its
+    shortest, or past its longest, or a number not finite -- says so (refused at load), never
+    raising."""
+    numbers = (wait.minimum, wait.mean, wait.maximum)
+    if not (all(isinstance(number, (int, float)) and not isinstance(number, bool)
+                and math.isfinite(number) for number in numbers)
+            and wait.minimum < wait.mean <= wait.maximum):
+        return ["**Its hazard cannot be computed**: a non-aging wait's mean must be past its "
+                "shortest and at most its longest, each a finite number, which the load-time "
+                "check refuses otherwise.", ""]
+    span = wait.maximum - wait.minimum
+    points = [(wait.minimum, ", the shortest"), (wait.mean, ", the mean"),
+              *((wait.minimum + share * span, "") for share in _NEARING)]
+    lines = ["| At | Chance per moment, against the flat rate |", "|---|---|"]
+    for at, said in sorted(points, key=lambda point: point[0]):
+        ratio = variation.hazard_ratio(wait, at)
+        times = ("every wait not ended before ends here" if math.isinf(ratio)
+                 else f"{ratio:.2f} times")
+        lines.append(f"| {_amount(at, unit)}{said} | {times} |")
+    realized = float(format(variation.realized_mean(wait), ".3g"))
+    return lines + [
+        "",
+        f"A wait drawn past the longest, {_amount(wait.maximum, unit)}, is drawn again, so the "
+        f"chance rises toward it. Its waits average {_amount(realized, unit)}, below the declared "
+        f"mean of {_amount(wait.mean, unit)}, which is the wait's own before its tail is drawn "
+        f"again. These describe the declared distribution, not the rig.",
+        "",
+    ]
 
 
 def _demoted(text: str) -> str:

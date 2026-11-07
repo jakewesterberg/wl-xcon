@@ -18,7 +18,9 @@ Schema 13's `resumed_at` is `None` too: a session opened in this process, never 
 Schema 16's `shortfalls` are none and `drumming` is `None`: an ordinary run, nothing forgiven and
 nothing drummed; `clearable` is true, a block whose trials can be owed; the training aid *clear*
 is off and a percentage counts every answer, as a run starts; no condition's counts are carried;
-as many trials as presentations, no aid on, no rule, and no block past its targets.
+as many trials as presentations, no aid on, no rule, and no block past its targets. Schema 19's
+`moments` are none, no setting keeps trials out of moving up (`eased`), and the `ParamRow`s name
+no source, conditions, draw or numbers: a test that wants them asks for them by name.
 """
 
 from __future__ import annotations
@@ -122,6 +124,8 @@ def frame(**overrides) -> Telemetry:
         trials_to_run=None,
         passed_at=None,
         fell_back=0,
+        moments=(),
+        eased=(),
     )
     return replace(base, **overrides) if overrides else base
 

@@ -35,11 +35,15 @@ from wl_xcon import link as _link
 from wl_xcon import warnlist
 from wl_xcon.actor import Actor, Box, Member
 from wl_xcon.bounds import Exceeded
-from wl_xcon.check import beyond_range, check_task, parameters_used, unplaced
+from wl_xcon.check import (
+    IMPOSSIBLE, _outside, beyond_range, check_task, impossible, parameters_used, undrawable,
+    unplaced,
+)
 from wl_xcon.cli import _load_bounds, _load_subject_settings, _load_task, _setup_words
 from wl_xcon.findings import Finding
 from wl_xcon.link import Preflight, PreflightItem
-from wl_xcon.task import Task
+from wl_xcon.task import Block, Condition, Distribution, Param, Task
+from wl_xcon.variation import directions, expanded, extremes, in_force, own_ranges
 from wl_xcon.welfare import OUT_OF_CAGE, Absent, Simulated
 
 PASS, UNKNOWN, FAIL = "pass", "unknown", "fail"
@@ -198,31 +202,139 @@ def beyond(task: Task | None, given: dict, allocation, geometry, calibration, de
     the checks could not run, and why -- since what raised can be a bound that cannot be compared
     with any value, and no value need be outside its range (Task 10's review, M3). **And each
     condition of the run's plan**, its values over the starting ones (engine build C2b): a value
-    a condition sets is held to its range as a starting value is, each finding naming it."""
+    a condition sets is held to its range as a starting value is, each finding naming it, its
+    factorial expanded (engine build C3).
+
+    **And what the run draws** (engine build C3's spec §11): each draw in force where a condition
+    of the run plays -- the task's, a block's own, a condition's own range -- that can reach past
+    its setting's declared range is checked widened to each end it reaches, as a starting value
+    is: a warning, refused where it breaks the run, each finding naming the plan, block,
+    condition and draw (`_widened`). **And the trials no animal can get right** (the spec's §9;
+    the PI, 2026-10-30, Q10, "Refuse in file and live"; the C3 plan's review, I-5): judged at the
+    run's starting values, each refused, so the starting values item fails (`_impossible`). A
+    check that does not finish refuses, saying which could not run."""
     if task is None:
         return []
     try:
-        start = starting(task, given)
-        found = beyond_range(task, start, allocation, geometry=geometry,
-                             calibration=calibration, deployment=deployment)
-        if plan is None or plan not in task.plans:
-            return found
-        for block in task.plans[plan].blocks:
-            for condition in block.conditions:
-                for finding in beyond_range(task, {**start, **condition.values}, allocation,
-                                            geometry=geometry, calibration=calibration,
-                                            deployment=deployment):
-                    if finding in found:
-                        continue
-                    found.append(dataclasses.replace(finding, detail=(
-                        f"in plan {plan!r}, block {block.name!r}, condition "
-                        f"{condition.name!r}: {finding.detail}")))
-        return found
+        found = _widened(task, starting(task, given), allocation, geometry, calibration,
+                         deployment, plan)
     except Exception as broken:  # noqa: BLE001 -- the checks run on code; their fault refuses
-        return [Finding("outside-range", (
+        found = [Finding("outside-range", (
             f"the load-time checks could not be run again with each range widened to its "
             f"starting value ({type(broken).__name__}: {broken}), so what the starting values "
             f"would break is unknown"))]
+    try:
+        found += _impossible(task, given, plan)
+    except Exception as broken:  # noqa: BLE001 -- the check runs on code; its fault refuses
+        found.append(Finding(IMPOSSIBLE, (
+            f"the check for a trial no animal can get right could not be run at the starting "
+            f"values ({type(broken).__name__}: {broken}), so whether they make one is unknown")))
+    return found
+
+
+def _played(task: Task, plan: str | None) -> list[Block]:
+    """The blocks a run plays, as `Session._plan` plays them: a plan's, each with its factorial
+    expanded (`variation.expanded`), or the plain run's one block, under the task's draws (engine
+    build C3). No block for a plan the task does not declare, which fails the task checks item."""
+    if plan is None:
+        return [Block("session", [Condition("session", {}, target=1)])]
+    if plan not in task.plans:
+        return []
+    return [expanded(block) for block in task.plans[plan].blocks]
+
+
+def _widened(task: Task, start: dict, allocation, geometry, calibration, deployment,
+             plan: str | None) -> list:
+    """`beyond`'s widened checks (`check.beyond_range`): the starting values'; in a run of a
+    plan, each condition's values over them; and each draw that can reach past its setting's
+    declared range, at each extreme past it alone (`_ends`), with the starting values and its
+    condition's. **Asked once per distinct set of values outside their ranges**, which is all
+    `beyond_range`'s answer depends on (the C3 plan's call 27), so a factorial's cells under one
+    draw cost one check. **A draw's finding is said once**, where the run first reaches it, and
+    never one the starting values or a condition's values gave already."""
+    declared = {param.name: param for param in task.params}
+    turned = directions(task)
+    asked: dict[tuple, list] = {}
+
+    def wide(values: dict) -> list:
+        past = tuple(sorted((name, repr(value)) for name, value in values.items()
+                            if name in declared and _outside(declared[name], value)))
+        if past not in asked:
+            asked[past] = beyond_range(task, values, allocation, geometry=geometry,
+                                       calibration=calibration, deployment=deployment)
+        return asked[past]
+
+    found = list(wide(start))
+    said = list(found)
+    blocks = _played(task, plan)
+    for block in blocks:
+        for condition in block.conditions:
+            for finding in wide({**start, **condition.values}):
+                if finding in found:
+                    continue
+                said.append(finding)
+                found.append(dataclasses.replace(finding, detail=(
+                    f"in plan {plan!r}, block {block.name!r}, condition "
+                    f"{condition.name!r}: {finding.detail}")))
+    for block in blocks:
+        drawn = in_force(task, block)
+        for condition in block.conditions:
+            for name, (draw, key) in {**drawn, **own_ranges(condition)}.items():
+                for reach in _ends(draw, declared.get(name), name in turned):
+                    for finding in wide({**start, **condition.values, name: reach}):
+                        if finding in said:
+                            continue
+                        said.append(finding)
+                        found.append(dataclasses.replace(finding, detail=(
+                            f"{_drawn_where(plan, block, condition, key, reach)}: "
+                            f"{finding.detail}")))
+    return found
+
+
+def _ends(draw: Distribution, declared: Param | None, direction: bool = False) -> list[float]:
+    """**Each extreme of a draw past its setting's declared range** (engine build C3's spec §11):
+    the least and the most it can give (`variation.extremes`: a value of weight 0 left out, a set
+    of no numbers none), each one outside the declared range (`check._outside`). None for a
+    setting the task does not declare, nor for a draw the load refuses (`check.undrawable`),
+    which no run takes. **A direction setting** (`direction`; `variation.directions`) is asked of
+    `undrawable` as the load asks, and its draw is judged on the circle by arc containment
+    (`variation.extremes`; the final whole-branch review's Minor 1), so a draw across 0 inside a
+    range declared [0, 360], or in signed terms [-180, 180], is no warning, and an end past it is
+    given as far past as the draw reaches, the range widened to it then holding the draw."""
+    if declared is None or undrawable(draw, declared, direction=direction) is not None:
+        return []
+    return [end for end in extremes(draw, declared, direction=direction)
+            if _outside(declared, end)]
+
+
+def _drawn_where(plan: str | None, block: Block, condition: Condition, key: tuple,
+                 reach: float) -> str:
+    """Where a draw's widened finding arose, and which draw: the plain run, or the plan's block
+    and condition; the draw by its key's first part (the C3 plan's call 7), at the extreme
+    reached."""
+    whose = {"task": "the task's draw", "block": "the block's draw"}.get(key[0], "its own range")
+    said = f"{whose} of {key[-1]!r} at {reach:g}"
+    if plan is None:
+        return f"in the plain run, {said}"
+    return f"in plan {plan!r}, block {block.name!r}, condition {condition.name!r}, {said}"
+
+
+def _impossible(task: Task, given: dict, plan: str | None) -> list:
+    """**The trials no animal can get right at a run's start** (engine build C3's spec §9; the
+    PI, 2026-10-30, Q10, "Refuse in file and live"; the C3 plan's review, I-5): `check.impossible`
+    over the blocks the run plays at its starting values (`starting`), each finding named by the
+    plain run or the plan, as the load names it (`check._impossible_faults`). **But one the task's
+    own starts give**: the load refused it, so the task checks item fails for it already, and the
+    starting values item says only what the run's own values add. **A cued array is warned, never
+    refused** (`cued`; the PI, 2026-10-31, on the engine C3 plan's Appendix B, item 17): what the
+    two look checks find where a cue names the target is `cued-target`, a warning the run's
+    warnings item lists, said only where the run's own values add it, as a refusal is."""
+    blocks = _played(task, plan)
+    run = "the plain run" if plan is None else f"plan {plan!r}"
+    own = impossible(task, blocks, starting(task, {}), cued=True)
+    return [dataclasses.replace(finding, detail=f"{run}: {finding.detail}")
+            for finding in impossible(task, blocks, starting(task, given), cued=True)
+            if finding not in own]
 
 
 def values(task: Task | None, given: dict, refused=(), plan: str | None = None) -> PreflightItem:
@@ -250,7 +362,11 @@ def values(task: Task | None, given: dict, refused=(), plan: str | None = None) 
     structure that uses it sets is given; so is a place. **A plain run's numbers are read over
     every structure, failing closed (the engine C1 plan's call 15), and its places over the default
     structure alone**, the one it plays (`Session._plan`; the review of XC-415's fix, I1), since a
-    whole position can be given by nothing but a condition."""
+    whole position can be given by nothing but a condition. **A number a draw gives is given**
+    (engine build C3's spec §11 and call 24: no run is refused for a number "nothing gives"): in
+    the plain run, one the task draws; in a plan's, one the block's own draw or the task's gives
+    there (`variation.in_force`) or the condition draws from its own range, its factorials
+    expanded, so the structure a factor's conditions play needs its numbers too."""
     if task is None:
         return PreflightItem(
             STARTING_VALUES, FAIL, "the task did not load, so its values cannot be checked"
@@ -261,18 +377,25 @@ def values(task: Task | None, given: dict, refused=(), plan: str | None = None) 
             name: param.start for name, param in declared.items() if param.start is not None
         }
         # The numbers of every structure the run can play: a plain run's, every structure's,
-        # failing closed (the engine C1 plan's call 15); a plan's, the structures its conditions
-        # play (engine build C2b), less what each condition playing it sets.
-        blocks = task.plans[plan].blocks if plan is not None and plan in task.plans else None
-        conditions = None if blocks is None else [c for block in blocks for c in block.conditions]
-        if conditions is None:
-            used = frozenset().union(*(parameters_used(s) for s in task.structures.values()))
+        # failing closed (the engine C1 plan's call 15), less what the task draws; a plan's, the
+        # structures its conditions play (engine build C2b), its factorials expanded, less what
+        # each condition playing it sets or draws from its own range and what its block draws
+        # (engine build C3's call 24: a drawn setting is given). Its places are read over the plan
+        # as it plays, each factorial expanded, as `Session.run`'s backstop reads them (the ruling
+        # on the plan's prospect run).
+        blocks = _played(task, plan) if plan is not None and plan in task.plans else None
+        if plan is None or plan not in task.plans:
+            used = frozenset().union(
+                *(parameters_used(s) for s in task.structures.values())) - frozenset(task.draws)
         else:
-            used = frozenset(
-                name for c in conditions
-                for name in parameters_used(task.structures[c.structure or task.default])
-                if name not in c.values
-            )
+            used = frozenset()
+            for block in blocks:
+                drawn = in_force(task, block)
+                used |= {
+                    name for c in block.conditions
+                    for name in parameters_used(task.structures[c.structure or task.default])
+                    if name not in c.values and name not in drawn
+                }
         merged = {**starts, **given}
         # Each place nothing gives a value, by its setting's name (XC-415).
         unset = dict(unplaced(task, merged, blocks))

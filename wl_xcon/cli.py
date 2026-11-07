@@ -26,8 +26,8 @@ from wl_xcon import warnlist
 from wl_xcon.marks import TIME_FORMATS as _TIME_FORMATS
 from wl_xcon.marks import clock_or_now as _clock_or_now
 from wl_xcon.marks import clock_time as _wall_clock_time
-from wl_xcon.bounds import Bounds, Exceeded
-from wl_xcon.check import check_task, unplaced
+from wl_xcon.bounds import Bounds, Exceeded, _finite
+from wl_xcon.check import check_task, impossible, unplaced
 from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.review import position_words
 from wl_xcon.review import render_task as render_review
@@ -35,7 +35,8 @@ from wl_xcon.codes import PROVISIONAL, Allocation
 from wl_xcon.geometry import NOMINAL_HALF_IPD_CM, VIEWS, Geometry, Rig, SubjectSettings
 from wl_xcon.photometry import SRGB, Calibration, read_calibration
 from wl_xcon.actor import Actor, Box
-from wl_xcon.task import Task, Trial
+from wl_xcon.task import Block, Condition, Task, Trial
+from wl_xcon.variation import expanded
 from wl_xcon.welfare import Deployment
 
 
@@ -1184,7 +1185,7 @@ def render(frame: _link.Telemetry | _link.Idle) -> str:
         value = _printable(row.value) if isinstance(row.value, str) else row.value
         # A whole position in the rig's words, eccentricity and direction first, its unit in
         # them (`ParamRow.position`, schema 18; XC-401): the line `wlx console` already has,
-        # though it shows none of schema 16's and 17's additions (XC-387).
+        # though it shows none of schema 16's, 17's and 19's additions (XC-387).
         shown = (
             _printable(row.position) if row.position is not None
             else _with_unit(_shown(value), unit)
@@ -1230,9 +1231,15 @@ def render(frame: _link.Telemetry | _link.Idle) -> str:
                 if change.bounded
                 else "task parameter, applies at the next trial"
             )
+            # A hand-back (a button's or a revert's, schema 19) has no value to become: it is
+            # handed back, to the run's own where the run takes the setting back.
+            becomes = (
+                ("handed back" if change.now is None else f"handed back to {_value(change.now)}")
+                if change.hands_back else f"-> {_value(change.now)}"
+            )
             lines.append(
-                f"  staged: {_printable(change.name)} {_value(change.was)} -> "
-                f"{_value(change.now)} by {_printable(actors.shown(change.by))} ({kind})"
+                f"  staged: {_printable(change.name)} {_value(change.was)} {becomes} "
+                f"by {_printable(actors.shown(change.by))} ({kind})"
             )
     else:
         lines.append("  staged: none")
@@ -1326,7 +1333,13 @@ def main(argv: list[str] | None = None) -> int:
         help="run one of the task's plans by its name (engine spec §13.1); without it the plain "
         "run of --trials trials",
     )
-    runner.add_argument("--seed", type=int, default=1)
+    runner.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="the run's seed, which decides its draws, its order and the simulated animal; "
+        "omitted, a fresh one is drawn, said and recorded (TSK-06)",
+    )
     runner.add_argument("--set", action="append", default=[], metavar="NAME=VALUE")
     runner.add_argument(
         "--bounds",
@@ -1784,22 +1797,74 @@ def main(argv: list[str] | None = None) -> int:
             except ValueError:
                 values[name] = raw
 
+        # **A value its setting cannot hold, refused before the session opens** (the re-review of
+        # the C3 plan's Task 19, out-of-scope 2): a word for a number died with a `TypeError` in the
+        # first trial, after the departure was marked, a `nan` or an infinity ran with a timeout
+        # that never elapses, and a word or number outside a setting's choices was recorded as
+        # given. Judged as `Session.set` judges a live value -- a choice of the setting's, else a
+        # number, not a `bool`, and `bounds._finite` -- so the two paths say alike.
+        for name, value in values.items():
+            declared = next((p for p in task.params if p.name == name), None)
+            if declared is None:
+                continue
+            if declared.choices:
+                # A setting of choices takes one of them, as `Session.set` holds a live value: a
+                # word or a number outside them was recorded as given, and faulted a renderer
+                # after the departure (`NotYetDrawable`).
+                if value not in declared.choices:
+                    raise SystemExit(
+                        f"task refused, session not started, nothing recorded: --set "
+                        f"{_printable(repr(name))} may only be one of "
+                        f"{_printable(str(declared.choices))}; {_printable(repr(value))} is not")
+                continue
+            try:
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    raise Exceeded(f"{name!r} takes a number ({declared.unit}); {value!r} is not "
+                                   f"one")
+                _finite(f"{name!r}", value)
+            except Exceeded as refused:
+                raise SystemExit(
+                    f"task refused, session not started, nothing recorded: --set "
+                    f"{_printable(str(refused))}"
+                ) from refused
+
         # **A place with no value, refused before the session opens** (XC-415; the PI,
         # 2026-10-30, "Refuse to start"; the review of its fix, I2): a setting placing a window, a
         # stimulus, an update or an array's objects, or sizing a window, that neither the task's
         # starting values, `--set` nor the plan's condition playing it gives a value
-        # (`check.unplaced`). Refused by `Session.run` instead, it came after the departure was
-        # marked, and the session was left stranded, `wlx taskd` opening none under this root
+        # (`check.unplaced`), over the blocks the plan plays, each factorial expanded, as
+        # `Session.run` reads them. Refused by `Session.run` instead, it came after the departure
+        # was marked, and the session was left stranded, `wlx taskd` opening none under this root
         # until it was ended. `Session.run` refuses it too, as the backstop for its other callers.
         unset = unplaced(
             task,
             {**{p.name: p.start for p in task.params if p.start is not None}, **values},
-            None if args.plan is None else task.plans[args.plan].blocks,
+            None if args.plan is None else [expanded(b) for b in task.plans[args.plan].blocks],
         )
         if unset:
             raise SystemExit(
                 "task refused, session not started, nothing recorded: "
                 + "; ".join(_printable(said) for _, said in unset)
+            )
+
+        # **No trial no animal can get right, at the run's own values, refused before the session
+        # opens** (engine build C3's spec §9; the C3 plan's Task 19 review, Important 2), as the
+        # place with no value above and for the same reason: `Session.run`'s backstop refuses it
+        # too, but after the departure was marked, which left the session stranded. Judged as the
+        # pre-flight judges it (`cued=True`), over the blocks the run plays, each factorial
+        # expanded, or the plain run's one block; the cued array's warning is no refusal.
+        no_answer = [finding for finding in impossible(
+            task,
+            [Block("session", [Condition("session", {}, target=1)])] if args.plan is None
+            else [expanded(b) for b in task.plans[args.plan].blocks],
+            {**{p.name: p.start for p in task.params if p.start is not None}, **values},
+            cued=True)
+            if finding.refuses(args.session_kind)]
+        if no_answer:
+            raise SystemExit(
+                "task refused, session not started: its starting values leave trials no animal "
+                "can get right:\n"
+                + "\n".join(f"  {_printable(f.code)}: {_printable(f.detail)}" for f in no_answer)
             )
 
         # **The warnings this session runs with** (engine spec §19.2-19.3): the calibration's,
@@ -1840,6 +1905,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  calibration: {_printable(_calibration_words(calibration))}")
         for entry in warnings:
             print(f"  warning accepted: {_printable(entry.code)}: {_printable(entry.detail)}")
+        # **A fresh seed when none is given** (TSK-06, the PI, 2026-10-07: "a fresh seed per run,
+        # recorded"; engine build C3's call 23): drawn as `wlx taskd`'s service draws one,
+        # recorded on the run's start row and said here, once. Every run given none had seed 1.
+        seed = _service._fresh_seed() if args.seed is None else args.seed
+        print(f"  seed: {seed} ({'given' if args.seed is not None else 'drawn fresh'})")
 
         # **A session id is used once** (XC-201). `SessionRecord.open` makes the
         # folder with `exist_ok`, so running into an existing one appended to its
@@ -1923,7 +1993,7 @@ def main(argv: list[str] | None = None) -> int:
                         trials=args.trials,
                         plan=args.plan,
                         frame_period=1 / 240,
-                        seed=args.seed,
+                        seed=seed,
                         values=values,
                         bounds=_load_bounds(args.bounds),
                         already_delivered_today=args.delivered_today,

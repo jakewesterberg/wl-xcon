@@ -29,6 +29,7 @@ from wl_xcon.link import (
     ConditionRow,
     Control,
     Counts,
+    MomentRow,
     ParamRow,
     Performance,
     Preflight,
@@ -41,6 +42,7 @@ from wl_xcon.link import (
     Stranded,
     WarningRow,
 )
+from wl_xcon.task import Polar
 from wl_xcon.warnlist import HEAD_FREE, UNLISTED
 from wl_xcon.web import (
     _CSS,
@@ -1105,7 +1107,8 @@ def test_the_script_does_only_what_spec_4_3_and_5_2_ask():
     # right-hand side, not just the identifier -- `node.innerHTML = "<b>" + name`
     # would have slipped past a pin that only read the trailing word -- and allow
     # only the fragment renderer's own two forms. No other way to write markup.
-    assert re.findall(r"\.innerHTML\s*\+?=\s*([^;]+);", _SCRIPT) == ["html", "heldParams"]
+    assert re.findall(r"\.innerHTML\s*\+?=\s*([^;]+);", _SCRIPT) == [
+        "html", "heldParams", "heldMoments"]
     assert "outerHTML" not in _SCRIPT
     assert "insertAdjacentHTML" not in _SCRIPT
     assert "document.write" not in _SCRIPT
@@ -3220,3 +3223,398 @@ def test_the_moves_between_blocks_are_held_against_a_double_click_and_a_plan_sta
     assert "if (!clearAllowed(e.detail, cmd)) { return; }" in click
     assert "if (plan) { trials = Number.isInteger(trials) && trials >= 1 ? trials : 1; }" in start
     assert "else if (!Number.isInteger(trials) || trials < 1) {" in start
+
+
+# --- engine build C3: where each value comes from, hand back, a range, revert (XC-418) ----------
+#
+# Telemetry schema 19 carries each card's source, conditions, draw and live numbers, each staged
+# change's kind and what it will override, and the moments a revert can go back to; the page shows
+# them (the C3 spec §6 and §8; the PI, 2026-10-30, Q7a and Q7b; TSK-19, TSK-43).
+
+_SINCE = 1_700_000_000.0
+
+
+def _cards(params: str) -> dict[str, str]:
+    """Each card of the parameters pane, by its setting's name."""
+    cards = {}
+    for card in params.split('<div class="param')[1:]:
+        cards[re.search(r'<div class="pn"><span>(.*?)</span>', card).group(1)] = card
+    return cards
+
+
+def test_a_card_shows_where_its_value_comes_from_and_its_conditions():
+    """The C3 spec §6: "each setting's card says where its value comes from (task, run,
+    conditions, a draw and its range, or a person) and which conditions set or draw it" (engine
+    spec §14.7; telemetry schema 19). The task's start, the run and a person beneath the value
+    they give; conditions and a draw in the value's place, since each trial takes its own; the
+    run's plan's conditions, one or several; the open block's draw in the rig's words, on a card a
+    person holds too, since a hand-back gives it back to it. Nothing where the rig sends none."""
+    params = fragments(frame(params=(
+        ParamRow("fix_hold", "s", 0.1, 1.0, 0.3, False, None, "task"),
+        ParamRow("fix_window", "deg", None, 5.0, 2.0, False, None, "run", ("wide",)),
+        ParamRow("target_x", "deg", None, None, 4.0, False, None, "conditions", ("near", "far")),
+        ParamRow("wait", "s", 0.5, 2.0, None, False, None, "draw", (),
+                 "uniform from 0.75 s to 1.25 s", {"low": 0.75, "high": 1.25}),
+        ParamRow("gain", "", None, None, 2.0, False, None, "person", ("near",),
+                 "uniform from 1.0 to 3.0", None),
+        ParamRow("reward_correct", "mL", 0.0, 0.4, 0.15, True),
+    )), view())["params"]
+    cards = _cards(params)
+
+    assert '<span class="src">from the task\'s start</span>' in cards["fix_hold"]
+    assert '<span class="src">given by this run</span>' in cards["fix_window"]
+    assert '<span class="src">set or drawn by condition wide</span>' in cards["fix_window"]
+    assert '<span class="pv">set or drawn by its conditions</span>' in cards["target_x"]
+    assert '<span class="src">set or drawn by conditions near, far</span>' in cards["target_x"]
+    assert "4.00" not in cards["target_x"]
+    assert '<span class="pv">drawn each trial</span>' in cards["wait"]
+    assert '<span class="src">its draw: uniform from 0.75 s to 1.25 s</span>' in cards["wait"]
+    assert "set or drawn by" not in cards["wait"]
+    assert '<span class="src">held by a person</span>' in cards["gain"]
+    assert '<span class="pv">2.00 ' in cards["gain"]
+    assert '<span class="src">set or drawn by condition near</span>' in cards["gain"]
+    assert '<span class="src">its draw: uniform from 1.0 to 3.0</span>' in cards["gain"]
+    assert 'class="src"' not in cards["reward_correct"]
+
+
+def test_a_setting_its_conditions_set_shows_no_spinner():
+    """XC-418: an unset setting whose choices are `Polar`s, a position a plan's conditions set,
+    showed a number spinner on its card, the run's values holding nothing for it. A card whose
+    conditions, or whose draw, give each trial a value of its own says so in the value's place,
+    never a spinner: no arrows stepping from a number no trial uses, and no value of the run's
+    shown as though trials took it. A person may still set one value over them (TSK-19, the PI,
+    2026-10-07: it wins and the trial counts; the C3 spec §6: it replaces a draw), in an empty
+    field, a word where the run's value is one; a card holding a whole position offers none, as
+    a position's card never does (STE-30)."""
+    choices = (Polar(8.0, 0.0), Polar(8.0, 45.0))
+    rows = (
+        ParamRow.of("target_pos", "deg", None, None, None, False, choices, "conditions",
+                    ("near", "far")),
+        ParamRow("target_x", "deg", -16.0, 16.0, 10.0, False, None, "conditions", ("near",)),
+        ParamRow("shape", "", None, None, "penguin", False, None, "conditions", ("near",)),
+        ParamRow("wait", "s", 0.5, 2.0, 1.0, False, None, "draw", (),
+                 "uniform from 0.75 s to 1.25 s", None),
+        ParamRow.of("start_pos", "deg", None, None, Polar(8.0, 0.0), False, choices,
+                    "conditions", ("near",)),
+    )
+    params = fragments(frame(params=rows), view())["params"]
+    lan = fragments(frame(params=rows), view(can_write=False))["params"]
+    cards = _cards(params)
+
+    for name in ("target_pos", "target_x", "shape", "wait", "start_pos"):
+        assert 'class="spin"' not in cards[name] and "data-dir" not in cards[name], name
+    assert "unset" not in cards["target_pos"] and "10.00" not in cards["target_x"]
+    assert "penguin" not in cards["shape"] and "1.00" not in cards["wait"]
+    assert ('<input class="field mono over" data-param="target_x" inputmode="decimal" value="" '
+            'placeholder="a value over its conditions" aria-label="target_x: a value over its '
+            'conditions">') in cards["target_x"]
+    assert 'data-param="shape" data-kind="word" value=""' in cards["shape"]
+    assert 'data-param="wait" inputmode="decimal" value="" placeholder="a value over its draw"' in (
+        cards["wait"])
+    assert "<input" not in cards["start_pos"] and "8° at 0°" not in cards["start_pos"]
+    assert lan.count(f'its conditions" disabled title="{CONTROLS_AT_THE_BOX}">') == 3
+
+
+def test_a_setting_without_live_numbers_shows_no_range_editor():
+    """Review M-4 and Call 22: a card whose draw has numbers a person may change live
+    (`ParamRow.numbers`: a uniform's ends, a normal's mean, spread and cut, a wait's three) has a
+    field for each, holding it as the wire carried it, and *change the range*; no other card has
+    either -- not one declared not live, a direction (XC-445), a weighted set or a list (XC-443),
+    each sent with `numbers` `None`, nor one with no draw. Greyed away from the box."""
+    rows = (
+        ParamRow("wait", "s", 0.5, 2.0, None, False, None, "draw", (),
+                 "uniform from 0.75 s to 1.25 s", {"low": 0.75, "high": 1.25}),
+        ParamRow("gap", "s", None, None, None, False, None, "draw", (),
+                 "normal of mean 1 s and sd 0.1 s, cut to the setting's range",
+                 {"mean": 1, "sd": 0.1}),
+        ParamRow("angle", "deg", None, None, None, False, None, "draw", (),
+                 "uniform from 315 deg to 45 deg", None),
+        ParamRow("fix_hold", "s", 0.1, 1.0, 0.3, False, None, "task"),
+    )
+    params = fragments(frame(params=rows), view())["params"]
+    lan = fragments(frame(params=rows), view(can_write=False))["params"]
+    cards = _cards(params)
+
+    assert params.count('data-cmd="range"') == 2
+    assert ('<div class="rng"><label class="rn">low<input class="field mono" data-number="low" '
+            'inputmode="decimal" value="0.75" aria-label="wait: low"></label>') in cards["wait"]
+    assert 'data-number="high" inputmode="decimal" value="1.25"' in cards["wait"]
+    assert ('<button type="button" class="btn small" data-cmd="range" data-name="wait">'
+            "change the range</button></div>") in cards["wait"]
+    assert 'data-number="mean" inputmode="decimal" value="1"' in cards["gap"]
+    assert 'data-number="sd" inputmode="decimal" value="0.1"' in cards["gap"]
+    for name in ("angle", "fix_hold"):
+        assert "data-number" not in cards[name] and 'data-cmd="range"' not in cards[name], name
+    assert lan.count(f'data-name="wait" disabled title="{CONTROLS_AT_THE_BOX}">') == 1
+    assert lan.count(f'aria-label="wait: low" disabled title="{CONTROLS_AT_THE_BOX}">') == 1
+
+
+def test_a_card_a_person_holds_has_hand_back_and_no_other_does():
+    """The PI, 2026-10-30, Q7a: "Yes, a 'hand back' button" on each setting a person holds: from
+    the next trial its conditions' values, or its draw, apply again, trials no longer marked,
+    recorded as a change. Only a card a person holds has it; greyed away from the box."""
+    rows = (
+        ParamRow("fix_hold", "s", 0.1, 1.0, 0.4, False, None, "person", ("near",)),
+        ParamRow("fix_window", "deg", None, 5.0, 2.0, False, None, "run"),
+        ParamRow("target_x", "deg", None, None, None, False, None, "conditions", ("near",)),
+        ParamRow("reward_correct", "mL", 0.0, 0.4, 0.15, True),
+    )
+    params = fragments(frame(params=rows), view())["params"]
+    lan = fragments(frame(params=rows), view(can_write=False))["params"]
+
+    assert params.count('data-cmd="hand_back"') == 1
+    assert ('<button type="button" class="btn small" data-cmd="hand_back" data-name="fix_hold">'
+            "hand back</button>") in _cards(params)["fix_hold"]
+    assert (f'data-cmd="hand_back" data-name="fix_hold" disabled title="{CONTROLS_AT_THE_BOX}">'
+            in lan)
+
+
+def test_a_staged_row_names_what_it_will_override():
+    """The C3 spec §6: "A staged change names the conditions it will override **before** it
+    applies; today only the applied line on the feed does" (TSK-19; `Staged.overrides`). One
+    condition and several, each worded as the applied line words them; a ceiling's change names
+    none. The card says it is staged, as before."""
+    jake = Box("jake")
+    who = _who(jake)
+    parts = fragments(frame(
+        params=(ParamRow("target_x", "deg", None, None, None, False, None, "conditions",
+                         ("near", "far")),
+                ParamRow("fix_hold", "s", 0.1, 1.0, 0.3, False, None, "task", ("slow",)),
+                ParamRow("reward_correct", "mL", 0.0, 0.4, 0.15, True)),
+        staged=(Staged("target_x", 4.0, 5.0, jake, False, "set", ("near", "far")),
+                Staged("fix_hold", 0.3, 0.4, jake, False, "set", ("slow",)),
+                Staged("reward_correct", 0.15, 0.2, jake, True)),
+    ), view())
+    feed = parts["rt-changes"]
+
+    assert (f"target_x 4.00 → 5.00 by {who} (task parameter, applies at the next trial); it will "
+            "override what conditions near, far set or draw</span>") in feed
+    assert (f"fix_hold 0.30 → 0.40 by {who} (task parameter, applies at the next trial); it will "
+            "override what condition slow sets or draws</span>") in feed
+    assert (f"reward_correct 0.15 → 0.20 by {who} (welfare-bounded ceiling, applies at the next "
+            "trial)</span>") in feed
+    assert f'<span class="stg">staged → 5.00 by {who}</span>' in _cards(parts["params"])["target_x"]
+
+
+def test_a_staged_hand_back_a_range_and_a_revert_are_said_in_words():
+    """Review M-15, Call 30 and the controller's ruling for Task 18: a staged hand-back says what
+    takes the setting back in the open block -- the run's own value (its `now`), else its draw,
+    else its conditions -- never "unset", which it is not; a staged range says the draw before
+    and after in the rig's words; a revert's changes say they are a revert, one handing a setting
+    back saying so. Each led by its kind, in the feed and on the card."""
+    jake = Box("jake")
+    who = _who(jake)
+    params = (
+        ParamRow("fix_hold", "s", 0.1, 1.0, 0.4, False, None, "person"),
+        ParamRow("wait", "s", 0.5, 2.0, 1.0, False, None, "person", (),
+                 "uniform from 0.75 s to 1.25 s", {"low": 0.75, "high": 1.25}),
+        ParamRow("target_x", "deg", None, None, 6.0, False, None, "person", ("near",)),
+        ParamRow("gap", "s", None, None, None, False, None, "draw", (),
+                 "uniform from 0.2 s to 0.4 s", {"low": 0.2, "high": 0.4}),
+    )
+    parts = fragments(frame(params=params, staged=(
+        Staged("fix_hold", 0.4, 0.3, jake, False, "hand_back", (), True, "run"),
+        Staged("wait", 1.0, None, jake, False, "hand_back", (), True, "draw"),
+        Staged("target_x", 6.0, None, jake, False, "hand_back", (), True, "conditions"),
+        Staged("gap", "uniform from 0.2 s to 0.4 s", "uniform from 0.2 s to 0.5 s", jake, False,
+               "range"),
+    )), view())
+    feed, cards = parts["rt-changes"], _cards(parts["params"])
+
+    assert f"hand back: fix_hold 0.40 → the run's 0.30 by {who} (task parameter, " in feed
+    assert f"hand back: wait 1.00 → its draw by {who}" in feed
+    assert f"hand back: target_x 6.00 → its conditions by {who}" in feed
+    assert (f"range: gap uniform from 0.2 s to 0.4 s → uniform from 0.2 s to 0.5 s by {who} "
+            "(task parameter, applies at the next trial)</span>") in feed
+    assert "unset" not in feed
+    assert f"staged hand back → the run's 0.30 by {who}" in cards["fix_hold"]
+    assert f"staged hand back → its draw by {who}" in cards["wait"]
+    assert f"staged hand back → its conditions by {who}" in cards["target_x"]
+    assert f"staged range → uniform from 0.2 s to 0.5 s by {who}" in cards["gap"]
+
+
+def test_a_staged_revert_is_said_in_words_and_a_hand_back_is_said_where_it_goes():
+    """The revert case of the words test above, a test of its own (fix round 1 of the C3 plan's
+    Task 18): a revert's changes say they are a revert, one handing a setting back saying so and
+    where it goes; and a hand-back to a run that gives the setting no value says that, as the
+    rig's applied line does (`Staged.to`, review minor 1), not "its conditions"."""
+    jake = Box("jake")
+    who = _who(jake)
+    params = (
+        ParamRow("fix_hold", "s", 0.1, 1.0, 0.4, False, None, "person"),
+        ParamRow("target_x", "deg", None, None, 6.0, False, None, "person", ("near",)),
+        ParamRow("gap", "s", None, None, None, False, None, "draw", (),
+                 "uniform from 0.2 s to 0.4 s", {"low": 0.2, "high": 0.4}),
+    )
+    reverted = fragments(frame(params=params, staged=(
+        Staged("target_x", 6.0, 5.0, jake, False, "revert", ("near",)),
+        Staged("fix_hold", 0.4, None, jake, False, "revert", (), True, "conditions"),
+        Staged("gap", "uniform from 0.2 s to 0.4 s", "uniform from 0.2 s to 0.3 s", jake, False,
+               "revert"),
+    )), view())
+    feed, cards = reverted["rt-changes"], _cards(reverted["params"])
+
+    assert (f"revert: target_x 6.00 → 5.00 by {who} (task parameter, applies at the next trial); "
+            "it will override what condition near sets or draws</span>") in feed
+    assert f"revert: fix_hold 0.40 → handed back to its conditions by {who}" in feed
+    assert (f"revert: gap uniform from 0.2 s to 0.4 s → uniform from 0.2 s to 0.3 s by {who}"
+            in feed)
+    assert "unset" not in feed
+    assert f"staged revert → handed back to its conditions by {who}" in cards["fix_hold"]
+    assert f"staged revert → 5.00 by {who}" in cards["target_x"]
+
+    nothing = fragments(frame(params=params, staged=(
+        Staged("fix_hold", 0.4, None, jake, False, "hand_back", (), True, "run"),
+        Staged("target_x", 6.0, None, jake, False, "revert", (), True, "run"),
+    )), view())
+    feed, cards = nothing["rt-changes"], _cards(nothing["params"])
+
+    assert f"hand back: fix_hold 0.40 → the run, which gives it no value by {who}" in feed
+    assert (f"revert: target_x 6.00 → handed back to the run, which gives it no value by {who}"
+            in feed)
+    assert "its conditions" not in feed
+    assert f"staged hand back → the run, which gives it no value by {who}" in cards["fix_hold"]
+
+    held = (ParamRow("target_y", "deg", None, None, 2.0, False, None, "person"),
+            ParamRow("target_z", "deg", None, None, 2.0, False, None, "person"))
+    same = fragments(frame(params=held, staged=(
+        Staged("target_y", 2.0, 0.0, jake, False, "revert", (), True, "run"),
+        Staged("target_z", 2.0, 0.0, jake, False, "revert", ()),
+    )), view())
+    feed, cards = same["rt-changes"], _cards(same["params"])
+
+    assert f"revert: target_y 2.00 → handed back to the run's 0.00 by {who}" in feed
+    assert f"revert: target_z 2.00 → 0.00 by {who}" in feed
+    assert f"staged revert → handed back to the run's 0.00 by {who}" in cards["target_y"]
+    assert f"staged revert → 0.00 by {who}" in cards["target_z"]
+
+
+def test_the_moments_pane_offers_a_revert_to_each_newest_first_and_the_runs_start_last():
+    """TSK-43 (the PI, 2026-10-07, "Yes, with revert": "any earlier state restored in one action,
+    itself recorded"); the C3 spec §8; review M-15: each moment the rig sends, newest first and
+    the run's start last, with when it was kept, what was done then, and *revert to this*,
+    sending its change id. Between runs nothing is offered, and before any frame the pane says
+    so; greyed away from the box."""
+    moments = (MomentRow(7, _SINCE + 90, "target_x 4.00 → 5.00", ("target_x → 5.00",)),
+               MomentRow(3, _SINCE + 30, "fix_hold handed back to its conditions",
+                         ("fix_hold handed back",)),
+               MomentRow(0, _SINCE, "the run's start", ("target_x → 4.00",)))
+    pane = fragments(frame(moments=moments), view())["moments"]
+    lan = fragments(frame(moments=moments), view(can_write=False))["moments"]
+    between = fragments(frame(moments=()), view())["moments"]
+
+    assert re.findall(r'data-change="(\d+)"', pane) == ["7", "3", "0"]
+    assert (f'<div class="kv"><span>{_clock_time(_SINCE + 90)} · target_x 4.00 → 5.00</span>'
+            '<button type="button" class="btn small" data-cmd="revert" data-change="7">'
+            "revert to this</button></div>") in pane
+    assert pane.index("the run&#x27;s start") > pane.index("fix_hold handed back")
+    assert lan.count(f'data-change="0" disabled title="{CONTROLS_AT_THE_BOX}">') == 1
+    assert between == '<span class="nm">no run in progress: no moment to go back to</span>'
+    assert fragments(None, view())["moments"] == '<span class="nm">no session</span>'
+
+
+def test_where_a_value_comes_from_its_draw_its_numbers_and_the_moments_are_escaped():
+    """Every telemetry string reaches the page through `_e` (the module's rule), schema 19's too:
+    a condition's name, a draw's words, a live number's name, a staged change's overrides and a
+    range's words, and a moment's words."""
+    jake = Box("jake")
+    parts = fragments(frame(
+        params=(ParamRow("fix_hold", "s", None, None, 0.4, False, None, "person", (EVIL,), EVIL,
+                         {EVIL: 1.0}),
+                ParamRow("gap", "s", None, None, None, False, None, "conditions", (EVIL, "near"))),
+        staged=(Staged("fix_hold", 0.3, 0.4, jake, False, "set", (EVIL,)),
+                Staged("fix_hold", 0.4, 0.5, jake, False, "set", (EVIL, "near")),
+                Staged("gap", EVIL, EVIL, jake, False, "range", (EVIL,)),
+                Staged("gap", 0.2, EVIL, jake, False, "hand_back", (), True, "run")),
+        moments=(MomentRow(1, _SINCE, EVIL, (EVIL,)),),
+        eased=(EVIL,),
+    ), view())
+    text = parts["params"] + parts["rt-changes"] + parts["moments"] + parts["banners"]
+
+    assert "<script" not in text
+    assert EVIL not in text
+    # Five on the held card (its condition, its draw, a number's name thrice), the other card's
+    # conditions and its staged hand-back, seven in the feed (a range's block among them), the
+    # moment's words and what a revert to it changes, and the setting the eased line names.
+    assert text.count(html.escape(EVIL, quote=True)) == 16
+
+
+def test_the_page_says_while_a_persons_change_keeps_trials_out_of_moving_up():
+    """The C3 plan's engineering review, I-2, and its science review, I-4: a trainer who widened a
+    window sees a perfect streak and a block that will not end. While the rig says a person's
+    change keeps trials out of moving up (`Telemetry.eased`), a standing line says which settings
+    do and how to count trials again, beside the changes feed's warning said once a block; none
+    otherwise."""
+    banners = fragments(frame(eased=("fix_window", "target_luminance")), view())["banners"]
+
+    assert ('<span class="tag">Not counting</span><span>trials are not counting toward moving up: '
+            'a person changed fix_window, target_luminance; hand each back, or send its range as '
+            'the task writes it, or revert, to count them again</span>') in banners
+    assert "Not counting" not in fragments(frame(), view())["banners"]
+
+
+def test_a_card_whose_range_was_changed_live_says_so_and_a_staged_range_names_its_blocks():
+    """The C3 plan's science review, I-4 and M-2: a card whose draw's range a person changed live
+    says so in the value's place (`source` `range`), with the field over its draw a drawn card
+    has; a staged range names the blocks of the run's plan it reaches for the rest of the run, one
+    or several (`Staged.overrides`), never as conditions it overrides."""
+    jake = Box("jake")
+    parts = fragments(frame(
+        params=(ParamRow("gap", "s", 0.1, 1.0, 0.3, False, None, "range", (),
+                         "uniform from 0.2 s to 0.5 s", {"low": 0.2, "high": 0.5}),
+                ParamRow("wait", "s", 0.5, 2.0, 1.0, False, None, "draw", (),
+                         "uniform from 0.75 s to 1.25 s", {"low": 0.75, "high": 1.25})),
+        staged=(Staged("gap", "uniform from 0.2 s to 0.5 s", "uniform from 0.2 s to 0.6 s", jake,
+                       False, "range", ("train", "test")),
+                Staged("wait", "uniform from 0.75 s to 1.25 s", "uniform from 0.75 s to 1.5 s",
+                       jake, False, "range", ("own",))),
+    ), view())
+    feed, cards = parts["rt-changes"], _cards(parts["params"])
+
+    assert ('<span class="pv">drawn each trial, from a range a person changed live</span>'
+            in cards["gap"])
+    assert 'placeholder="a value over its draw"' in cards["gap"]
+    assert '<span class="pv">drawn each trial</span>' in cards["wait"]
+    assert ("uniform from 0.2 s to 0.6 s by " + _who(jake) + " (task parameter, applies at the "
+            "next trial); it reaches blocks train, test for the rest of the run</span>") in feed
+    assert ("uniform from 0.75 s to 1.5 s by " + _who(jake) + " (task parameter, applies at the "
+            "next trial); it reaches block own for the rest of the run</span>") in feed
+    assert "override" not in feed
+
+
+def test_a_card_names_the_conditions_the_rig_sends_and_counts_the_rest():
+    """The C3 plan's engineering review, M-5: the rig names at most twenty conditions on a card
+    and counts the rest (`ParamRow.more`), so a factorial of thousands cannot grow every frame;
+    the card says how many more."""
+    cards = _cards(fragments(frame(params=(
+        ParamRow("target_x", "deg", None, None, 4.0, False, None, "conditions", ("c0", "c1"),
+                 None, None, 23),
+        ParamRow("fix_hold", "s", 0.1, 1.0, 0.3, False, None, "task", ("slow",), None, None, 1),
+    )), view())["params"])
+
+    assert ('<span class="src">set or drawn by conditions c0, c1 and 23 more</span>'
+            in cards["target_x"])
+    assert ('<span class="src">set or drawn by conditions slow and 1 more</span>'
+            in cards["fix_hold"])
+
+
+def test_each_moment_says_what_a_revert_to_it_would_change():
+    """The C3 plan's science review, M-1: one tap on *revert to this* restores many settings, so
+    each moment says beneath it what a revert to it would change, in the changes feed's words, as
+    the rig sends them (`MomentRow.changes`), or that it would change nothing now, which the rig
+    would refuse, so its *revert to this* is greyed (fix round 1 of the C3 plan's Task 18, review
+    minor 7)."""
+    pane = fragments(frame(moments=(
+        MomentRow(4, _SINCE + 60, "target_y 0.00 → 2.00"),
+        MomentRow(1, _SINCE + 10, "target_x 10.00 → 12.00",
+                  ("target_y handed back", "the task's draw of 'fix_hold' → as declared",
+                   "target_x → 12.00")),
+    )), view())["moments"]
+
+    assert ('data-change="4" disabled title="a revert to this would change nothing now">'
+            'revert to this</button></div><div class="rv">would change nothing now</div>'
+            '<div class="kv">') in pane
+    assert 'data-change="1">revert to this</button>' in pane
+    assert pane.endswith(
+        '<div class="rv">would change: target_y handed back; the task&#x27;s draw of '
+        '&#x27;fix_hold&#x27; → as declared; target_x → 12.00</div>')

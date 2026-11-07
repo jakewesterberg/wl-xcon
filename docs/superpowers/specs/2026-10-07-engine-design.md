@@ -302,6 +302,16 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    twice; STE-29's revision). The math keeps its own form, `polar_of_deg`'s (−180°, 180°]
    and every interval as written, so no window, overlap or interval result moves; a task may write
    any direction (REC-26's and STE-29's revisions).
+   *Engine build C3, 2026-10-30* (the C3 plan's call 39): a direction setting the rig alone
+   writes is not warned `direction-outside-0-360` for the range it is declared in -- one drawn in
+   every block every run of the task can play (the task's draw, a block's own, or each
+   condition's own range), given a value by no condition, with no choices and a start of none or
+   from 0 to 360 (`check._drawn_directions`). Each value the rig draws for it is written from 0 to
+   360 (`geometry.shown_direction`), so nothing writes it two ways. A person's live value of it
+   is written as given, as anywhere. A draw's own numbers, declared in the task's terms (-45 to
+   45, say), are never judged by that warning: a direction's draw spans at most 360°, and one of
+   a single value is refused as no draw, since written from 0 to 360 equal ends mean the whole
+   turn (`check.undrawable`).
    *Note, 2026-10-30 (XC-415, the PI's "Refuse to start": "A stimulus that cannot be drawn is a case
    where the run cannot proceed"):* a position placed by a setting that can hold no value (`None`
    among its choices) is refused at load wherever it is written, a window's, a stimulus's or an
@@ -457,6 +467,8 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
     generator wait) and its realized interval before the stimulus; a block may declare what it does on
     resuming after one (e.g. rerun an initial adaptation)
     [@patterson2013distinct; @janssen2005representation].
+
+*Engine build C3, 2026-10-30* (the C3 spec §3; the PI, Q2, "Draw again (Recommended)"): **item 11 revised** -- there is one tail rule, not one each task declares: a non-aging wait drawn past the maximum is drawn again, so every wait falls between the shortest and the longest. The review report's plan tables give the hazard the declared numbers produce across the range against the flat rate, and the declared and realized averages ("mean" being the constant-hazard wait's own, before redrawing); its timing diagram stays build C8's (§18.1). These describe the declared distribution, not the rig, and carry no timing claim.
 
 ## 7. Color and luminance (N§4, N§R4, N§R5)
 
@@ -770,6 +782,14 @@ states; that it steps back is UNVERIFIED (TSK-57). A person moves a run on a blo
 ("'Next' and 'back one'"), recorded with who. Interludes (item 4) are build C6's; the
 operator's edits (item 2), C3's.
 
+*Engine build C3, 2026-10-30* (the C3 spec §1; the PI, Q0, "A build right after C3
+(Recommended)"): **the operator's edits (item 2) are not C3's.** Adding and removing conditions
+and block types at the rig, and plans made there, are a build of their own right after C3, whose
+brainstorm takes the questions C3 deferred (Q9a, Q9b). Two committed sources disagreed -- the C2b
+plan's decision 38 ("Operator edits at the rig ... C3's") and the PI's split of 2026-10-11
+(CHECKPOINT: "C6 programs, rig edits and interludes") -- and his answer is followed; C6 keeps
+interludes and session programs.
+
 ## 14. Variation (N§11, N§R1, N§R2)
 
 1. **Named conditions plus drawn values.** [@asaad2008flexible] A parameter is set by a condition or
@@ -793,6 +813,8 @@ operator's edits (item 2), C3's.
    values overridden (`overridden`); until C3, the edit's line on the changes feed names the
    conditions it overrides. Condition numbers (item 5) wait for the registry, build C5 (the PI, 2026-10-19: "Wait for the
    registry").
+
+*Engine build C3, 2026-10-30* (the C3 spec, `docs/superpowers/specs/2026-10-30-engine-c3-design.md` §2; the PI's answers of that day): **item 1 revised** -- "a parameter is set by a condition or drawn, never both (refused at load)" now reads block by block, because a condition may draw a setting from its own range ("Yes"; TSK-21): a setting is drawn by the block (its own draw, or the task's one it does not replace) or given by its conditions (each a value or its own range), not both; a block whose conditions give a setting the task draws must say so in its draws, or it is refused at load, naming the setting. The draw is written once for the task and a block may replace it ("Task default, block may replace"). **Item 7 revised** (the PI, 2026-10-30, Q7a, "Yes, a 'hand back' button (Recommended)"): a *hand back* button on each setting a person holds returns it, from the next trial, to the conditions' values (or the draw), trials no longer marked, recorded as a change; the C2b note's "setting it back not undoing that" still holds for typing the old value back. A person's value also replaces a draw, and a drawn range may be changed live ("Yes, range changes live (Recommended)": trials stay drawn, not overridden, each recording the range it was drawn from), but not a condition's own range ("Not in C3"). The console shows each setting's source and the conditions a staged change will override before it applies (narrows XC-418, whose spinner on a setting holding no value of its own (no start, none given for the run) and field over a position remain; TSK-19).
 
 ## 15. Adaptivity (N§12)
 
@@ -895,6 +917,8 @@ starts over"); all are each run's end row's `shortfalls` and the page's Still-ne
 each condition's counts (the PI, 2026-10-18); the end row's `trials` counts trials, a trial and its
 drummed repeats one, and its `presentations` the lines written.
 
+*Engine build C3, 2026-10-30* (the C3 spec §2 and §5; the PI's answers of that day): **item 5 revised** -- a repeat's drawn values are declared per drawn setting, `same` or `fresh`, and required: a task that draws a setting and does not say is refused at load ("Per drawn setting, required (Recommended)"; this replaces "declared per task"); a drummed repeat follows each setting's `same` or `fresh` too ("Follow same/fresh (Recommended)"), which closes XC-362 and revises its "a drum's repeat keeping its values". **Item 4's repeat rule** is built (XC-361): none by default; a block may choose "again at once" (TSK-31).
+
 ## 17. Parameters and live control (N§14, N§R7)
 
 1. **The order of values**: task start < run value < condition or drawn value < procedure < live edit,
@@ -913,6 +937,10 @@ drummed repeats one, and its `presentations` the lines written.
    the PI's b3a rule that a reward size changed in a run lasts only for that session. On the welfare
    summary for his confirmation.
 
+*Engine build C3, 2026-10-30* (the C3 spec §8, call 8): **item 1's "not merged into the run's values" is met in the record, not in the run.** The live layer stays merged in the run's values, because `Session.set` (welfare-listed) stays byte-identical; the names a person set, the settings handed back and the drawn ranges changed are kept apart and recorded beside the values (each trial's `live`, `overridden` and `drawn`, and the change log), so a reader can always tell a person's value from the run's. Change ids are assigned where changes apply (`_apply_staged`, off the welfare list).
+
+*Engine build C3, 2026-10-30* (the C3 spec §8 and §14 item 3; TSK-70): **item 5's revert is built for the run in progress, and item 6 holds of it.** A person may take the run back to any earlier moment of it -- a change the change log names, or its start -- in one act recorded as one change: each task setting a person held then held again at its value then, through `Session.set` unchanged; each held since handed back; each drawn range put back as it was. The revert is refused whole if any value is. It never carries a bounded setting: a reward size is no task setting a person holds and is never drawn, so no moment of a run holds one (the PI, "Approve all four", 2026-10-30, welfare item 3). An edit history across sessions, presets and carried values stay build C5's.
+
 ## 18. Recording and review (N§15)
 
 1. **A task's review report**: the state diagrams and codes; example frames per state (exact drawer,
@@ -927,6 +955,13 @@ drummed repeats one, and its `presentations` the lines written.
    *Engine build C2b, 2026-10-22*: the plan in tables built -- each plan's order and time limit,
    each block's end rules, draw, table and drumming, each condition's structure, target and
    values.
+   *Engine build C3, 2026-10-30* (the C3 spec §3-§5): the plan tables show what varies -- the
+   task's draws and each block's, its own or the task's, with what a repeat takes, a direction
+   from 0 to 360; a condition's own range; the conditions a block makes from factors, with the
+   exclusions applied and each level's share of the trials they owe; a designed order in words;
+   and each non-aging wait's chance of ending against the flat rate, with its declared and
+   realized averages (§6.11). The census per condition and per factorial cell, and the timing
+   diagram, stay build C8's.
 2. **Simulation is advised, not enforced.**
 3. **The simulated animal** follows declared functions [@wichmann2001psychometric; @carpenter1995neural]
    with named profiles: perfect, chance, an incorrect strategy, normal (85% correct), trying to break the
@@ -970,8 +1005,26 @@ drummed repeats one, and its `presentations` the lines written.
    can be outside 0 to 360, shown and recorded as its number while a stimulus's entry, a window's
    placing or a drift's sentences say it from 0° to 360°) and
    `negative-eccentricity` (a position at an eccentricity below 0, the position at the opposite
-   direction; both STE-29), and `color-on-default` and `contrast-on-default` are accepted in
-   recording. No warning the rig lists refuses any kind.
+   direction; both STE-29), and, in engine build C3, `cut-sequence` (a sequence-balanced block
+   whose number of trials or time limit, or its plan's, can end it before its sequence is played
+   out, unbalanced) and `long-condition-name` (a condition's name, a generated one most likely,
+   longer than the 200 characters a person can clear from the console, which wl-preproc's
+   main-sequence table drops past 255), and, from the C3 plan's science review, `same-in-drum` (a
+   block that drums drawing a clear-cut setting `same`, so a hard value drawn once is held try
+   after try), `same-wait-at-once` (a block that brings a broken trial straight back drawing a
+   non-aging wait `same`, a cue in the very time the wait keeps unforeseeable) and
+   `little-time-to-answer` (a hold whose state's timeout leaves less than a saccade's latency
+   after it, about 200 ms [@fischer1983saccadic], so only an anticipation answers in time), and,
+   from the PI's answers of 2026-10-31 on the C3 plan, `sequence-stage-moves-up` (a
+   sequence-balanced stage below a training progression's top, which moves up when its sequence is
+   played out, eased trials or not) and `cued-target` (an array a cue names the target of whose
+   target can look like its distractors, or whose two looks swap, warned where an array found by
+   its look is refused), and `color-on-default` and `contrast-on-default` are accepted in
+   recording. No warning the rig lists refuses any kind. *Engine build C3, 2026-10-30* (the C3
+   plan's call 39): `direction-outside-0-360` is not given for a direction setting drawn in every
+   block every run of the task can play, given a value by no condition, with no choices and a
+   start of none or from 0 to 360: every number the record writes for it is drawn, and written
+   from 0 to 360 (§5 item 1's note of engine build C3).
 3. **Accepted once per session**, at open, recorded. **A warning appearing during a run that its kinds do
    not accept pauses the run at the next trial**, for the operator to accept (recorded) or stop (N§R6).
    Today's unknowns keep the 2026-09-19 rule: proceed on a recorded acknowledgment.

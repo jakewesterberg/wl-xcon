@@ -180,6 +180,31 @@ on the wire.
 `sequence` and fails closed, so a row without one would leave its session unresumable. It learns to read
 every kind (§8).
 
+*Amended 2026-10-30 (engine build C3, [its spec](2026-10-30-engine-c3-design.md#8-the-change-log-and-revert)
+§8; XC-363)*: C3 writes the log's first kinds (`record.KINDS`): `set` (a person's value), `hand_back` (a
+setting handed back), `range` (a draw's numbers changed live), `revert` (one row for each setting a revert
+restores), and `clear`, `drum` and `training`, the clears and switches build C2a writes as control rows,
+which stay in `controls.jsonl` too until wl-preproc reads and times the log's rows (XC-442). Each row's keys:
+`change` (from 1, one per act, a revert's rows sharing one), `kind`, `name` (never empty: `"owed"` for a
+clear, `"drumming"` for a drum switch, the training setting for a training switch), `was` and `now` (as
+given: a person's value as typed, a direction's included; `was` null, with `meaning`'s `went` and `step`,
+where a person's or a revert's value lands on a setting drawn or given by its conditions at that moment,
+no person holding it, which no trial held at one value), `by`, `at` and `at_local`, `trial_number` (the
+first trial it applies to, as that trial's line numbers it), `run`, `meaning` (the setting's resolved
+meaning, `relative_to` as written, with `went` and `step`, a range row's `went` its new range judged as a
+whole against the range the task writes, the PI's answer of 2026-10-31; null on a row naming no task
+setting), `offered`
+(empty), `odds` (null until D), `event_code`, and a kind's own: a hand-back's `to`, a range's `from` and
+`block`, a revert's `moment`, a clear's or switch's control-row fields. **`sequence` is on the four kinds
+that strobe `PARAM_CHANGED`** (`record.STROBED`): a person's value, a hand-back, a range change and each row
+of a revert. **A hand-back and a range change strobe it without passing through `Session.set`**: a
+hand-back puts back the run's own value, and a range is no `SetParameter`. Change ids are assigned where
+changes apply (`_apply_staged`), so `Session.set` stays as it was. `resume._read` reads every kind: it
+continues `sequence` and `change` from the largest in the log, takes a reward size from `set` rows (and
+rows with no `kind`, written before C3, the only kind there was) alone, and fails closed on a row of an
+unknown kind, a strobed or kindless row without a whole-number `sequence`, or a `change` that is not a whole
+number from 1. Reasons stay build C4's (TRN-04).
+
 ### 3.5 Reasons
 
 - **A change applies at once and never waits for its reason.** The console then offers one tap from a short

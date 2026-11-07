@@ -68,9 +68,13 @@ class _Dispatch:
         self.raises = False
         #: The (status, body) the rig answers every command with, when set.
         self.answers: tuple[int, dict] | None = None
+        #: Seconds the rig takes to answer, as it does until its next trial boundary.
+        self.delay = 0.0
 
     def __call__(self, request):
         self.seen.append(request)
+        if self.delay:
+            time.sleep(self.delay)
         if isinstance(request, ManualReward) and self.gate is not None:
             self.entered.set()
             self.gate.wait(timeout=20.0)  # bounded: a failing test must not hang its teardown
@@ -1801,3 +1805,475 @@ def test_a_next_block_the_rig_may_still_apply_says_so(rig):
     page.wait_for_selector("#sent:has-text('may still be applied')")
 
     assert page.inner_text("#sent") == answer[1]["said"]
+
+
+def test_hand_back_a_range_and_revert_send_their_bodies(rig):
+    """Engine build C3 (the PI, 2026-10-30, Q7a: "Yes, a 'hand back' button"; Q7b: "Yes, range
+    changes live"; TSK-43, "Yes, with revert"): *hand back* on a card a person holds sends its
+    setting's name, *change the range* the numbers of the card's draw a person changed, by name,
+    and *revert to this* its moment's change id, each reaching the rig as the signed-in member's.
+    Through the wire, in a real browser."""
+    from wl_xcon.link import HandBack, MomentRow, ParamRow, Revert, SetRange, decode, encode
+
+    rows = (
+        ParamRow("fix_hold", "s", 0.1, 1.0, 0.4, False, None, "person", ("near", "far")),
+        ParamRow("wait", "s", 0.5, 2.0, None, False, None, "draw", (),
+                 "uniform from 0.75 s to 1.25 s", {"low": 0.75, "high": 1.25}),
+    )
+    moments = (MomentRow(3, 1_700_000_030.0, "fix_hold 0.30 → 0.40", ("fix_hold → 0.30",)),
+               MomentRow(0, 1_700_000_000.0, "the run's start", ("fix_hold → 0.30",)))
+    rig.hub.offer(decode(encode(frame(params=rows, moments=moments))))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+
+    page.click('[data-cmd="hand_back"][data-name="fix_hold"]')
+    rig.wait_for(lambda: rig.dispatch.seen)
+    page.fill('#params input[data-number="high"]', "1.5")
+    page.click('[data-cmd="range"][data-name="wait"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
+    page.click('#moments [data-cmd="revert"][data-change="3"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 3)
+
+    handed, ranged, reverted = rig.dispatch.seen
+    member = "Jake Westerberg"
+    assert (type(handed), handed.name, handed.by.name) == (HandBack, "fix_hold", member)
+    assert (type(ranged), ranged.name, ranged.numbers, ranged.by.name) == (
+        SetRange, "wait", {"high": 1.5}, member)
+    assert (type(reverted), reverted.change, reverted.by.name) == (Revert, 3, member)
+
+
+def test_a_range_with_nothing_changed_or_a_word_for_a_number_is_not_sent(rig):
+    """The page's own refusals of a range, each said and nothing sent, as a setting's are: a
+    range none of whose numbers was changed -- `0.750` is the 0.75 shown -- which would record a
+    change that changed nothing, and a number that is not one."""
+    from wl_xcon.link import ParamRow, decode, encode
+
+    row = ParamRow("wait", "s", 0.5, 2.0, None, False, None, "draw", (),
+                   "uniform from 0.75 s to 1.25 s", {"low": 0.75, "high": 1.25})
+    rig.hub.offer(decode(encode(frame(params=(row,)))))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+
+    page.fill('#params input[data-number="low"]', "0.750")
+    page.click('[data-cmd="range"][data-name="wait"]')
+    page.wait_for_selector("#sent:has-text(\"not sent: no number of wait's range was changed\")")
+    page.fill('#params input[data-number="high"]', "soon")
+    page.click('[data-cmd="range"][data-name="wait"]')
+    page.wait_for_selector("#sent:has-text(\"not sent: wait's high needs a number\")")
+
+    assert rig.dispatch.seen == []
+
+
+def test_a_double_click_on_hand_back_change_the_range_or_revert_is_one_act(rig):
+    """Each of the three is held as *clear one* is (the engine C2a plan's Task 9 fix round,
+    Important 1): a double click, or two quick clicks, sends one command, never two -- a second
+    hand-back the rig would refuse, a second range or revert it would record again."""
+    from wl_xcon.link import HandBack, MomentRow, ParamRow, Revert, SetRange, decode, encode
+
+    rows = (
+        ParamRow("fix_hold", "s", 0.1, 1.0, 0.4, False, None, "person", ("near",)),
+        ParamRow("wait", "s", 0.5, 2.0, None, False, None, "draw", (),
+                 "uniform from 0.75 s to 1.25 s", {"low": 0.75, "high": 1.25}),
+    )
+    rig.hub.offer(decode(encode(frame(params=rows, moments=(
+        MomentRow(0, 1_700_000_000.0, "the run's start", ("fix_hold → 0.30",)),)))))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+
+    page.dblclick('[data-cmd="hand_back"][data-name="fix_hold"]')
+    rig.wait_for(lambda: rig.dispatch.seen)
+    page.fill('#params input[data-number="high"]', "1.5")
+    page.dblclick('[data-cmd="range"][data-name="wait"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) >= 2)
+    page.dblclick('#moments [data-cmd="revert"][data-change="0"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) >= 3)
+    time.sleep(0.5)  # housekeeping: room for a wrong second send to arrive
+
+    assert [type(seen) for seen in rig.dispatch.seen] == [HandBack, SetRange, Revert]
+
+
+def test_a_range_typed_while_a_frame_arrives_is_still_sent_after_the_field_is_left(rig):
+    """Fix round 1 of the C3 plan's Task 18 (review, Important 1): a person types a range's number,
+    a frame that changes the cards arrives, and the field is left before *change the range* is
+    pressed -- in WebKit, Safari's engine, pressing a button does not focus it, so the press
+    itself leaves the field. The frame was held while the field had focus; leaving it must not
+    swap the held frame in over the typed number and the button (the click would then land on
+    nothing: nothing sent, nothing said). The range is sent, with the number typed, and said."""
+    from wl_xcon.link import ParamRow, SetRange, decode, encode
+
+    def rows(hold):
+        return (
+            ParamRow("fix_hold", "s", 0.1, 1.0, hold, False, None, "run"),
+            ParamRow("wait", "s", 0.5, 2.0, None, False, None, "draw", (),
+                     "uniform from 0.75 s to 1.25 s", {"low": 0.75, "high": 1.25}),
+        )
+
+    rig.hub.offer(decode(encode(frame(params=rows(0.3)))))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+
+    page.fill('#params input[data-number="high"]', "1.5")
+    _offer(rig, 41, params=rows(0.4))
+    _arrived(page, 41)
+    assert "0.30" in page.inner_text("#params")  # held while the field has focus
+    page.evaluate("document.activeElement.blur()")
+    time.sleep(0.3)  # housekeeping: the focus-out's release runs on a timer
+    page.click('[data-cmd="range"][data-name="wait"]')
+    rig.wait_for(lambda: rig.dispatch.seen)
+
+    (sent,) = rig.dispatch.seen
+    assert (type(sent), sent.name, sent.numbers) == (SetRange, "wait", {"high": 1.5})
+    assert not page.inner_text("#sent").startswith("not sent")
+    assert page.inner_text("#sent") != ""
+
+
+def test_a_card_updates_once_a_hand_back_or_a_range_has_applied(rig):
+    """Fix round 1 of the C3 plan's Task 18 (review, Important 2): Chromium focuses a button it
+    clicks, and the page held every parameter frame while anything inside the cards had focus, so
+    after *hand back* or *change the range* the card went on saying a person held the setting,
+    with a live *hand back*, after the rig had applied it. Only a field being typed in holds the
+    cards; the card shows the applied hand-back and the applied range."""
+    from wl_xcon.link import HandBack, ParamRow, SetRange, decode, encode
+
+    held = (ParamRow("fix_hold", "s", 0.1, 1.0, 0.4, False, None, "person", ("near",)),
+            ParamRow("wait", "s", 0.5, 2.0, None, False, None, "draw", (),
+                     "uniform from 0.75 s to 1.25 s", {"low": 0.75, "high": 1.25}))
+    rig.hub.offer(decode(encode(frame(params=held))))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+
+    page.click('[data-cmd="hand_back"][data-name="fix_hold"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 1)
+    page.fill('#params input[data-number="high"]', "1.5")
+    page.click('[data-cmd="range"][data-name="wait"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
+    applied = (ParamRow("fix_hold", "s", 0.1, 1.0, 0.3, False, None, "conditions", ("near",)),
+               ParamRow("wait", "s", 0.5, 2.0, None, False, None, "range", (),
+                        "uniform from 0.75 s to 1.5 s", {"low": 0.75, "high": 1.5}))
+    rig.hub.offer(decode(encode(frame(params=applied))))
+
+    rig.wait_for(lambda: "set or drawn by its conditions" in page.inner_text("#params")
+                 and page.input_value('#params input[data-number="high"]') == "1.5")
+    assert [type(seen) for seen in rig.dispatch.seen] == [HandBack, SetRange]
+    assert 'data-cmd="hand_back"' not in page.inner_html("#params")
+
+
+def _offer(rig, trial, **fields) -> None:
+    """Offer the page a frame of `fields` marked as trial `trial`. The header's trial number is a
+    pane no press and no typed number holds, so `_arrived` can wait on it (the final whole-branch
+    review of engine build C3, Minor 2): a test that only slept before saying a frame was held
+    passed, under load, on a frame that had not yet come."""
+    from wl_xcon.link import decode, encode
+
+    rig.hub.offer(decode(encode(frame(trial_index=trial, **fields))))
+
+
+def _arrived(page, trial) -> None:
+    """Wait until the frame marked `trial` (`_offer`) has reached the page. One frame's panes are
+    all swapped in, or held, by one handler, so the held panes have had it too."""
+    page.wait_for_selector(f'#head-id [data-trial="{trial}"]', state="attached")
+
+
+def _range_rows(hold=0.3):
+    from wl_xcon.link import ParamRow
+
+    return (
+        ParamRow("fix_hold", "s", 0.1, 1.0, hold, False, None, "run"),
+        ParamRow("wait", "s", 0.5, 2.0, None, False, None, "draw", (),
+                 "uniform from 0.75 s to 1.25 s", {"low": 0.75, "high": 1.25}),
+    )
+
+
+def test_a_range_typed_and_left_unsent_says_the_cards_wait_for_it(rig):
+    """Fix round 2 of the C3 plan's Task 18 (re-review, New Breakage 1): a number typed into a
+    range and walked away from holds the parameter cards, and the page says so, under that card's
+    range editor, with the field marked pending -- never a silent freeze. Put back, or sent, the
+    line goes and the held frame is shown."""
+    from wl_xcon.link import decode, encode
+
+    rig.hub.offer(decode(encode(frame(params=_range_rows(0.3)))))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+    page.fill('#params input[data-number="high"]', "1.5")
+    page.mouse.click(2, 2)  # a neutral spot: the field loses focus
+    rig.hub.offer(decode(encode(frame(params=_range_rows(0.4)))))
+
+    page.wait_for_selector("#params .rhold", state="visible", timeout=5000)
+    assert "not sent: press change the range, or put its numbers back" in (
+        page.inner_text("#params .rhold"))
+    assert "pending" in page.get_attribute('#params input[data-number="high"]', "class")
+    assert "0.30" in page.inner_text("#params")
+
+    page.fill('#params input[data-number="high"]', "1.25")
+    page.mouse.click(2, 2)
+    rig.wait_for(lambda: "0.40" in page.inner_text("#params"))
+
+
+def test_a_range_typed_as_the_same_number_does_not_hold_the_cards(rig):
+    """Fix round 2 (New Breakage 1): "1.250" over 1.25 is the number in force, as *change the
+    range* reads it ("no number was changed"), so it holds nothing: the cards follow the next
+    frame."""
+    from wl_xcon.link import decode, encode
+
+    rig.hub.offer(decode(encode(frame(params=_range_rows(0.3)))))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+    page.fill('#params input[data-number="high"]', "1.250")
+    page.mouse.click(2, 2)
+    rig.hub.offer(decode(encode(frame(params=_range_rows(0.4)))))
+
+    rig.wait_for(lambda: "0.40" in page.inner_text("#params"))
+    assert not page.is_visible("#params .rhold")
+
+
+def test_a_range_press_the_rig_did_not_take_can_be_sent_again(rig):
+    """Fix round 2 (New Breakage 2): the typed numbers count as sent only when the answer says
+    "sent". After "not delivered" the same press is sent again, not refused as "no number was
+    changed"."""
+    from wl_xcon.link import SetRange, decode, encode
+    from wl_xcon import serve
+
+    rig.hub.offer(decode(encode(frame(params=_range_rows()))))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+    rig.dispatch.answers = serve.not_delivered("the rig is not connected")
+    page.fill('#params input[data-number="high"]', "1.5")
+    page.click('[data-cmd="range"][data-name="wait"]')
+    page.wait_for_selector("#sent:has-text('not delivered')")
+    rig.dispatch.answers = None
+    time.sleep(1.2)  # housekeeping: past the double-click hold
+    page.click('[data-cmd="range"][data-name="wait"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
+
+    assert [type(seen) for seen in rig.dispatch.seen] == [SetRange, SetRange]
+    assert "no number" not in page.inner_text("#sent")
+
+
+def test_a_press_is_not_lost_when_a_frame_lands_between_the_mouse_down_and_up(rig):
+    """Fix round 2 (New Breakage 3): the cards and the moments pane are held while a pointer is
+    down inside them, so a frame that changes them mid-press does not replace the button under the
+    mouse (WebKit never focused it; Chromium's focus no longer holds the cards). Both presses
+    arrive."""
+    from wl_xcon.link import HandBack, MomentRow, ParamRow, Revert
+
+    def offer(trial, hold, moments):
+        rows = (ParamRow("fix_hold", "s", 0.1, 1.0, 0.4, False, None, "person", ("near",)),
+                ParamRow("gain", "", None, None, hold, False, None, "run"))
+        _offer(rig, trial, params=rows, moments=moments)
+
+    first = (MomentRow(3, 1_700_000_030.0, "fix_hold 0.30 → 0.40", ("fix_hold → 0.30",)),)
+    offer(40, 2.0, first)
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+
+    page.hover('[data-cmd="hand_back"][data-name="fix_hold"]')
+    page.mouse.down()
+    offer(41, 3.0, first)
+    _arrived(page, 41)
+    assert "2.00" in page.inner_text("#params")  # held under the press
+    page.mouse.up()
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 1)
+
+    page.hover('#moments [data-cmd="revert"][data-change="3"]')
+    page.mouse.down()
+    offer(42, 3.0, (MomentRow(5, 1_700_000_090.0, "gain 3.00 → 4.00", ("gain → 4.00",)),) + first)
+    _arrived(page, 42)
+    assert "gain 3.00 → 4.00" not in page.inner_text("#moments")  # held under the press
+    page.mouse.up()
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
+
+    assert [type(seen) for seen in rig.dispatch.seen] == [HandBack, Revert]
+    assert rig.dispatch.seen[1].change == 3
+
+
+def _gain_rows(gain):
+    from wl_xcon.link import ParamRow
+
+    return (ParamRow("fix_hold", "s", 0.1, 1.0, 0.4, False, None, "person", ("near",)),
+            ParamRow("gain", "", None, None, gain, False, None, "run"))
+
+
+def _moment(change, said):
+    from wl_xcon.link import MomentRow
+
+    return MomentRow(change, 1_700_000_000.0 + change, said, (said + " back",))
+
+
+def test_an_older_held_frame_never_replaces_a_newer_one_after_a_press_expires(rig):
+    """Fix round 3 of the C3 plan's Task 18 (re-review 2, New Breakage 1): a press that expired
+    without a release held a frame (gain 3.00, a moment); the next frame (4.00, a newer moment)
+    was shown, yet the older stayed in the held copy and the next release wrote it back over the
+    newer, in the cards and the moments pane alike. A frame shown clears the held copy. The page's
+    clock is set by hand here so that the press has expired and no timer has run."""
+    from wl_xcon.link import decode, encode
+
+    first, second = _moment(3, "fix_hold 0.30 to 0.40"), _moment(5, "gain 3.00 to 4.00")
+    rig.hub.offer(decode(encode(frame(params=_gain_rows(2.0), moments=(first,)))))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+    page.evaluate("window.__t = performance.now(); performance.now = function () { return window.__t; };")
+
+    page.hover('[data-cmd="hand_back"][data-name="fix_hold"]')
+    page.mouse.down()
+    _offer(rig, 41, params=_gain_rows(3.0), moments=(_moment(4, "gain 2.00 to 3.00"), first))
+    _arrived(page, 41)
+    assert "2.00" in page.inner_text("#params") and "gain 2.00" not in page.inner_text("#moments")
+    page.evaluate("window.__t += 10001")
+    _offer(rig, 42, params=_gain_rows(4.0), moments=(second, first))
+    rig.wait_for(lambda: "4.00" in page.inner_text("#params"))
+    # The focus-out's release runs on a timer of 0 ms; this returns once a later one has run.
+    page.evaluate("() => { document.dispatchEvent(new Event('focusout'));"
+                  " return new Promise(function (done) { setTimeout(done, 50); }); }")
+
+    assert "4.00" in page.inner_text("#params") and "3.00" not in page.inner_text("#params")
+    assert "gain 3.00 to 4.00" in page.inner_text("#moments")
+
+
+def test_a_press_the_page_never_sees_end_shows_the_held_frame(rig):
+    """Fix round 3 (New Breakage 1): a press ended by the window losing focus shows the held frame
+    at once, and one whose release the page never sees (outside the window) shows it when the
+    ten seconds it may hold the cards are up -- the cards are not left stale."""
+    from wl_xcon.link import decode, encode
+
+    rig.hub.offer(decode(encode(frame(params=_gain_rows(2.0)))))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+
+    page.hover('[data-cmd="hand_back"][data-name="fix_hold"]')
+    page.mouse.down()
+    _offer(rig, 41, params=_gain_rows(3.0))
+    _arrived(page, 41)
+    assert "2.00" in page.inner_text("#params")
+    page.evaluate("window.dispatchEvent(new Event('blur'))")
+    rig.wait_for(lambda: "3.00" in page.inner_text("#params"), seconds=4)
+    page.mouse.up()
+
+    page.hover('[data-cmd="hand_back"][data-name="fix_hold"]')
+    page.mouse.down()
+    _offer(rig, 42, params=_gain_rows(4.0))
+    _arrived(page, 42)
+    assert "3.00" in page.inner_text("#params")
+    rig.wait_for(lambda: "4.00" in page.inner_text("#params"), seconds=14)
+
+
+def test_a_correction_typed_while_a_range_press_is_out_stays_to_be_sent(rig):
+    """Fix round 3 (New Breakage 2): the rig answers a range at its next trial boundary. A number
+    typed meanwhile (1.6 after 1.5 was sent) is not what was sent, so when the answer comes it is
+    still pending, and sends."""
+    from wl_xcon.link import SetRange, decode, encode
+
+    rig.hub.offer(decode(encode(frame(params=_range_rows()))))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+    rig.dispatch.delay = 3.0
+    page.fill('#params input[data-number="high"]', "1.5")
+    page.click('[data-cmd="range"][data-name="wait"]')
+    rig.wait_for(lambda: rig.dispatch.seen)
+    page.fill('#params input[data-number="high"]', "1.6")
+    page.wait_for_selector("#sent:has-text('sent: test')", timeout=10000)
+    rig.dispatch.delay = 0.0
+
+    assert "pending" in page.get_attribute('#params input[data-number="high"]', "class")
+    time.sleep(1.2)  # housekeeping: past the double-click hold
+    page.click('[data-cmd="range"][data-name="wait"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
+    assert [seen.numbers for seen in rig.dispatch.seen if isinstance(seen, SetRange)] == [
+        {"high": 1.5}, {"high": 1.6}]
+
+
+def test_a_second_range_press_while_the_first_is_out_is_refused_and_said(rig):
+    """Fix round 3 (New Breakage 3): while a card's range is out and unanswered, a second press
+    (past the double-click hold) is not sent again, and the page says why."""
+    from wl_xcon.link import decode, encode
+
+    rig.hub.offer(decode(encode(frame(params=_range_rows()))))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+    rig.dispatch.delay = 3.0
+    page.fill('#params input[data-number="high"]', "1.5")
+    page.click('[data-cmd="range"][data-name="wait"]')
+    rig.wait_for(lambda: rig.dispatch.seen)
+    time.sleep(1.3)  # housekeeping: past the double-click hold
+    page.click('[data-cmd="range"][data-name="wait"]')
+    page.wait_for_selector("#sent:has-text('still being sent')", timeout=5000)
+    page.wait_for_selector("#sent:has-text('sent: test')", timeout=10000)
+
+    assert len(rig.dispatch.seen) == 1
+
+
+@pytest.mark.parametrize("ending", ["contextmenu", "dragstart", "middle"])
+def test_a_press_a_menu_or_a_drag_takes_over_or_no_primary_press_leaves_the_cards_live(
+        rig, ending):
+    """The C3 plan's Task 18, its deferred minor (re-review 3, New Breakage 1; probes h1 to h3): a
+    press on *hand back* holds the cards, and a card-changing frame that arrives under it is shown
+    as soon as the press ends some way other than its pointer going up -- a context menu (on
+    macOS a Control-click is button 0 and then `contextmenu`) or a drag taking it over -- and a
+    press of any button but the primary holds nothing. Each frame shows within 4 s, where the
+    hold would otherwise leave the cards stale until its 10 s expiry. The events are synthetic:
+    a Control-click fires `contextmenu` only on macOS, and Playwright fires no `dragstart`."""
+    _offer(rig, 40, params=_gain_rows(2.0))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+    button = '[data-cmd="hand_back"][data-name="fix_hold"]'
+
+    page.hover(button)
+    page.mouse.down(button="middle" if ending == "middle" else "left")
+    _offer(rig, 41, params=_gain_rows(3.0))
+    _arrived(page, 41)
+    if ending == "contextmenu":
+        assert "2.00" in page.inner_text("#params")  # held under the press
+        page.evaluate("(b) => document.querySelector(b).dispatchEvent(new MouseEvent("
+                      "'contextmenu', {bubbles: true, cancelable: true}))", button)
+    elif ending == "dragstart":
+        assert "2.00" in page.inner_text("#params")  # held under the press
+        page.evaluate("(b) => document.querySelector(b).dispatchEvent(new Event("
+                      "'dragstart', {bubbles: true}))", button)
+
+    rig.wait_for(lambda: "3.00" in page.inner_text("#params"), seconds=4)
+    page.mouse.up(button="middle" if ending == "middle" else "left")
+
+
+def test_a_double_click_on_change_the_range_never_says_not_sent_while_the_rig_answers(rig):
+    """The C3 plan's Task 18, its deferred minor (re-review 3, minor 2): the rig answers a range at
+    its next trial boundary, and a double click's second press reached the refusal of a range
+    still out, so the page said in red "not sent: the range of wait is still being sent" until the
+    answer came, up to a trial, though the range was sent. The second press of a double click is
+    dropped first, as a clear's is: the line never reads "not sent" -- each text it shows is kept
+    as it is shown -- and one range is sent."""
+    from wl_xcon.link import SetRange, decode, encode
+
+    rig.hub.offer(decode(encode(frame(params=_range_rows()))))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+    page.evaluate("""() => {
+      window.__said = [];
+      new MutationObserver(function () {
+        window.__said.push(document.getElementById('sent').textContent);
+      }).observe(document.getElementById('sent'),
+                 {childList: true, characterData: true, subtree: true});
+    }""")
+    rig.dispatch.delay = 3.0
+    page.fill('#params input[data-number="high"]', "1.5")
+    page.dblclick('[data-cmd="range"][data-name="wait"]')
+    page.wait_for_selector("#sent:has-text('sent: test')", timeout=10000)
+    rig.dispatch.delay = 0.0
+
+    said = page.evaluate("window.__said")
+    assert [line for line in said if line.startswith("not sent")] == []
+    assert said[-1] == "sent: test"
+    assert [type(seen) for seen in rig.dispatch.seen] == [SetRange]

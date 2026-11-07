@@ -1234,6 +1234,8 @@ def _telemetry(**overrides) -> Telemetry:
         trials_to_run=None,
         passed_at=None,
         fell_back=0,
+        moments=(),
+        eased=(),
     )
     return replace(base, **overrides) if overrides else base
 
@@ -1311,6 +1313,26 @@ def test_console_shows_staged_changes_with_who_staged_them():
     # Fix round 1, minor: a bare "(task)" tag named the internal field
     # (`Staged.bounded`), not what it means to a reader.
     assert "task parameter" in rendered
+
+
+def test_console_says_a_staged_hand_back_is_handed_back_never_unset():
+    """Schema 19's staged hand-back (a button's or a revert's) has no value to become: the
+    console prints it as handed back, to the run's own value where the run takes the setting back,
+    never "-> unset"; a revert's value that looks the same by `kind` and `now` stays a value."""
+    who = Box("jake")
+    rendered = render(_telemetry(staged=(
+        Staged("target_x", 12.0, None, who, False, "hand_back", (), True),
+        Staged("target_y", 2.0, 0.0, who, False, "revert", (), True),
+        Staged("target_z", 2.0, 0.0, who, False, "revert", ()),
+    )))
+
+    lines = [text.strip() for text in rendered.splitlines() if "staged:" in text]
+    assert [text.split(" by ")[0] for text in lines] == [
+        "staged: target_x 12.00 handed back",
+        "staged: target_y 2.00 handed back to 0.00",
+        "staged: target_z 2.00 -> 0.00",
+    ]
+    assert "unset" not in rendered
 
 
 def test_console_labels_a_staged_welfare_ceiling_change_distinctly():

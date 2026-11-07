@@ -623,13 +623,15 @@ def test_the_refusal_cap_is_the_sessions_and_each_run_says_what_it_dropped(tmp_p
     assert [(n["kept"], n["dropped"]) for n in notices] == [(REFUSAL_LOG_LIMIT, 3)]
 
 
-def test_a_parameter_change_is_recorded_against_the_sequence_number_it_strobed(tmp_path):
+def test_a_change_row_is_recorded_against_the_sequence_number_it_strobed(tmp_path):
     """The PARAM_CHANGE escape carries a sequence number and nothing else -- the
     values live here (S2 §5.2). If the two disagree the change cannot be placed on
-    the recording clock at all, so the join is the whole point."""
+    the recording clock at all, so the join is the whole point. A change row since engine
+    build C3 (`SessionRecord.change`; `tests/test_change_log.py` holds the rest of it)."""
     record = SessionRecord.open(tmp_path, session_id="2027-01-14_01", subject="A")
-    record.parameter_change(sequence=7, name="fix_hold", was=0.3, now=0.5, by=Box("console"),
-                              event_code=4130)
+    record.change(change=1, kind="set", name="fix_hold", was=0.3, now=0.5, by=Box("console"),
+                  at=1_700_000_000.0, trial_number=1, run=0, meaning=None, event_code=4130,
+                  sequence=7)
 
     row = json.loads(
         (tmp_path / "2027-01-14_01" / "xcon" / "parameter_changes.jsonl")

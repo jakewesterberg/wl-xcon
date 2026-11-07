@@ -128,6 +128,7 @@ FRAGMENT_IDS = (
     "rt-health",
     "rt-changes",
     "params",
+    "moments",
     "pf-sum",
     "preflight",
     "setup",
@@ -615,6 +616,21 @@ def _aids_banner(frame: Telemetry) -> str:
         f"training sessions: the record marks every trial"))
 
 
+def _eased_banner(frame: Telemetry) -> str:
+    """**The standing line while a person's change keeps trials out of moving up** (the engine C3
+    plan's engineering review, I-2, and its science review, I-4: a trainer who widened a window
+    sees a perfect streak and a block that will not end, and is left guessing why): the settings
+    the rig names (`Telemetry.eased`, never recomputed here), and the ways back -- *hand back* on
+    a card, the range as the task writes it, or *revert*. The changes feed said it once a block;
+    this stands while it lasts."""
+    if not frame.eased:
+        return ""
+    return _banner("warn", "Not counting", _e(
+        f"trials are not counting toward moving up: a person changed {', '.join(frame.eased)}; "
+        f"hand each back, or send its range as the task writes it, or revert, to count them "
+        f"again"))
+
+
 def _banners(frame: Telemetry | None, view: View) -> str:
     """A refused frame first, then the duration warning and the stop reason -- where
     a person looks when something is wrong. The stream's own banner (stale, lost) is
@@ -645,6 +661,7 @@ def _banners(frame: Telemetry | None, view: View) -> str:
     if frame.resumed_at is not None:
         out.append(_banner("info", "Resumed", _e(_resumed_sentence(frame.resumed_at))))
     out.append(_aids_banner(frame))
+    out.append(_eased_banner(frame))
     if frame.stopped_because:
         tone = "crit" if frame.stop_kind in ("fault", "limit") else "info"
         tag = (
@@ -1298,20 +1315,87 @@ def _health_pane(frame: Telemetry | Idle | None, view: View) -> str:
     return f'<div><span class="pill {_VERDICT_TONE[verdict]}">{verdict}</span></div>{rows}'
 
 
+#: How the changes feed and a card lead a staged change of each kind but a person's value
+#: (`Staged.kind`, telemetry schema 19; the C3 spec §6 and §8).
+_STAGED_KINDS = {"hand_back": "hand back", "range": "range", "revert": "revert"}
+
+
+def _becomes(change) -> str:
+    """**What a staged change leaves its setting with**, in words (the C3 plan's calls 23 and 30;
+    its review, M-15). A hand-back's is where the rig says it goes (`Staged.to`, as it is offered,
+    read from the open block as the hand-back is): its conditions, its draw, or the run -- the
+    run's own value where it has one (`now`), else the run, which gives it no value, as the applied
+    line says -- never "unset", which it is not. A revert's change that hands a setting back
+    (`Staged.hands_back`, whatever its `now`) says so the same way, "handed back to ...". Any other
+    change's is its new value, a range's its new draw in the rig's words, as `_num` shows a
+    value. Escaped (`_e`), ready for the page."""
+    if change.hands_back:
+        back = ("its draw" if change.to == "draw"
+                else "the run's " + _e(_num(change.now)) if change.to == "run" and
+                change.now is not None
+                else "the run, which gives it no value" if change.to == "run"
+                else "its conditions")
+        return back if change.kind == "hand_back" else "handed back to " + back
+    return _e(_num(change.now))
+
+
+def _will_override(named: tuple) -> str:
+    """**What a staged value will override from the next trial, named before it applies** (the
+    C3 spec §6: "today only the applied line on the feed does"; TSK-19): the conditions of the
+    run's plan that set or draw the setting (`Staged.overrides`), worded as the applied line
+    words them; nothing where none does."""
+    if not named:
+        return ""
+    if len(named) == 1:
+        return f"; it will override what condition {_e(named[0])} sets or draws"
+    return f"; it will override what conditions {', '.join(map(_e, named))} set or draw"
+
+
+def _reaches(named: tuple) -> str:
+    """**The blocks a staged range reaches, named before it applies** (a person's range's
+    `Staged.overrides`; the engine C3 plan's science review, M-2: "the staged row names the blocks
+    it reaches, as it names the conditions a value overrides"): a range on the task's draw reaches
+    every block of the run's plan that uses it, for the rest of the run, a later test block among
+    them; nothing where the rig names none."""
+    if not named:
+        return ""
+    return (f"; it reaches block{'s' if len(named) > 1 else ''} {', '.join(map(_e, named))} "
+            f"for the rest of the run")
+
+
+def _said_reach(change) -> str:
+    """What a staged change reaches beyond its card, as the feed ends its row: a person's range
+    the blocks it reaches (`_reaches`), any other change the conditions it will override
+    (`_will_override`), each from its `Staged.overrides`."""
+    if change.kind == "range":
+        return _reaches(change.overrides)
+    return _will_override(change.overrides)
+
+
 def _changes(frame: Telemetry | None) -> str:
     """The changes feed (spec §5.2): staged changes first, then the control events --
     applied settings, pauses, resumes, marks and their notes, schedules -- newest
     first with when and who, then the refusals with the dropped-refusal count before
-    them, as `cli.render` does."""
+    them, as `cli.render` does.
+
+    **Each staged change says its kind and what it will override** (telemetry schema 19; the C3
+    spec §6): a person's value as before, naming the conditions it will override before it
+    applies (`_will_override`); a hand-back, a live range and a revert's changes each led by
+    their kind (`_STAGED_KINDS`), a hand-back saying what takes the setting back and a revert's
+    one handing a setting back saying so (`_becomes`), a range saying its draw before and after
+    in the rig's words and the blocks it reaches (`_reaches`; the C3 plan's science review,
+    M-2)."""
     if frame is None:
         return _NONE
     rows = []
     for change in frame.staged:
-        kind = "welfare-bounded ceiling" if change.bounded else "task parameter"
+        what = "welfare-bounded ceiling" if change.bounded else "task parameter"
+        lead = _STAGED_KINDS.get(change.kind)
         rows.append(
             f'<div class="ev staged"><span class="kind">staged</span><span>'
-            f"{_e(change.name)} {_e(_num(change.was))} → {_e(_num(change.now))} "
-            f"by {_who(change.by)} ({kind}, applies at the next trial)</span></div>"
+            f"{'' if lead is None else lead + ': '}{_e(change.name)} {_e(_num(change.was))} → "
+            f"{_becomes(change)} by {_who(change.by)} ({what}, applies at the next "
+            f"trial){_said_reach(change)}</span></div>"
         )
     for control in reversed(frame.controls):
         who = f" · {_who(control.by)}" if control.by is not None else ""
@@ -1407,6 +1491,100 @@ def _field(row, view: View) -> str:
     )
 
 
+#: Where a card's value comes from in the open block, for the sources whose value the card shows
+#: (`ParamRow.source`, telemetry schema 19; the C3 spec §6: "task, run, conditions, a draw and its
+#: range, or a person").
+_SOURCES = {
+    "task": "from the task's start",
+    "run": "given by this run",
+    "person": "held by a person",
+}
+#: The sources that give each trial a value of its own -- its conditions, or its draw -- whose
+#: words stand in the value's place on the card, the run's value being one no trial of the open
+#: block takes (XC-418); each with what its field to set one value over them is for.
+_PER_TRIAL = {
+    # Said of both a condition's value and a condition's own range, which the rig sends alike
+    # (source `conditions`, no draw): "set or drawn", true of each (review, minor 3).
+    "conditions": ("set or drawn by its conditions", "a value over its conditions"),
+    "draw": ("drawn each trial", "a value over its draw"),
+    # A draw whose range a person changed live says so where its value would stand (the C3
+    # plan's science review, I-4: "a card whose range was changed live says so").
+    "range": ("drawn each trial, from a range a person changed live", "a value over its draw"),
+}
+
+
+def _over(row, place: str, view: View) -> str:
+    """**The field that sets one value over what gives each trial its own** -- the card's
+    conditions or its draw -- from the next trial, where it wins (TSK-19: a trial its conditions
+    set still counts toward its condition, marked overridden; the C3 spec §6: "a person's value
+    replaces a draw"): empty, since no one number is in force for it to show, and **never a
+    spinner** (XC-418), no arrows stepping from a number no trial takes. A word where the run's
+    value is one, else a number, as `_field` reads it; greyed away from the box."""
+    word = ' data-kind="word"' if isinstance(row.value, str) else ' inputmode="decimal"'
+    name = _e(row.name)
+    return (f'<input class="field mono over" data-param="{name}"{word} value="" '
+            f'placeholder="{place}" aria-label="{name}: {place}"{_gate(view)}>')
+
+
+def _range_editor(row, view: View) -> str:
+    """**The numbers of the card's draw a person may change live** (`ParamRow.numbers`; the PI,
+    2026-10-30, Q7b: "Yes, range changes live"), each in a field of its own as the wire carried
+    it, every digit (a float's `str` is the shortest that reads back the same), and *change the
+    range*, which sends those a person changed (`SetRange`), laid by the rig over the numbers in
+    force. On a
+    card whose `numbers` is not `None` alone: none for a setting declared not live, a
+    direction, a weighted set or a list (review M-4; XC-443, XC-445). Greyed away from the
+    box."""
+    off, name = _gate(view), _e(row.name)
+    fields = "".join(
+        f'<label class="rn">{_e(number)}<input class="field mono" data-number="{_e(number)}" '
+        f'inputmode="decimal" value="{_e(value)}" aria-label="{name}: {_e(number)}"{off}>'
+        f"</label>"
+        for number, value in row.numbers.items()
+    )
+    return (f'<div class="rng">{fields}<button type="button" class="btn small" data-cmd="range" '
+            f'data-name="{name}"{off}>change the range</button></div>'
+            f'<span class="src rhold" hidden>not sent: press change the range, or put its '
+            f'numbers back; the cards wait for it</span>')
+
+
+def _whence(row, view: View) -> str:
+    """**Where a card's value comes from, and what a person may do about it** (telemetry schema
+    19; the C3 spec §6: "each setting's card says where its value comes from (task, run,
+    conditions, a draw and its range, or a person) and which conditions set or draw it"),
+    beneath its range:
+    - the task's start, the run, or a person, where the card shows the value they give (its
+      conditions and its draw say so in the value's place, `_PER_TRIAL`);
+    - every condition of the run's plan that sets or draws it, whose value a person's replaces
+      until handed back (TSK-19), the rest counted where the rig names only the first;
+    - the open block's draw of it in the rig's words: what gives each trial its value, or, while
+      a person holds it, what a hand-back gives it back to;
+    - the numbers of that draw a person may change live (`_range_editor`);
+    - on a card a person holds, *hand back* (the PI, 2026-10-30, Q7a: "Yes, a 'hand back'
+      button"): from the next trial its conditions, its draw or the run's own value give it
+      again, recorded as a change. Typing the old value back does not hand it back; this does.
+
+    Nothing between runs, nor for a ceiling, when the rig sends none."""
+    parts = []
+    if row.source in _SOURCES:
+        parts.append(f'<span class="src">{_SOURCES[row.source]}</span>')
+    if row.conditions:
+        # The rig names at most twenty and counts the rest (`ParamRow.more`; the C3 plan's
+        # engineering review, M-5).
+        plural = "s" if len(row.conditions) + row.more > 1 else ""
+        more = f" and {row.more} more" if row.more else ""
+        parts.append(f'<span class="src">set or drawn by condition{plural} '
+                     f'{", ".join(map(_e, row.conditions))}{more}</span>')
+    if row.draw is not None:
+        parts.append(f'<span class="src">its draw: {_e(row.draw)}</span>')
+    if row.numbers is not None:
+        parts.append(_range_editor(row, view))
+    if row.source == "person":
+        parts.append(f'<button type="button" class="btn small" data-cmd="hand_back" '
+                     f'data-name="{_e(row.name)}"{_gate(view)}>hand back</button>')
+    return "".join(parts)
+
+
 def _params(frame: Telemetry | None, view: View) -> str:
     """One card per `ParamRow`: value, unit, range, the ceiling flag, a staged
     marker, and -- P4d-2b b2a -- the input and arrows that set it and the last
@@ -1421,7 +1599,15 @@ def _params(frame: Telemetry | None, view: View) -> str:
     neither a number nor a word** -- a pair a setting not declared a position holds, arriving as a
     list, or a `bool` -- is shown as written, with no input either (XC-401's second fix round):
     formatted as a number it raised, and `serve` builds the page and its event stream from these
-    cards unguarded, so the page went blank and took the controls with it."""
+    cards unguarded, so the page went blank and took the controls with it.
+
+    **Where each value comes from** (telemetry schema 19; engine build C3's spec §6; narrows
+    XC-418, whose spinner stays on a setting holding no value of its own): a card whose conditions
+    or whose draw give each trial a value of its own says so in the value's place, never a
+    spinner, with a field to set one value over them (`_over`); then, beneath its range, where
+    its value comes from, the conditions that set or draw it, its draw, the numbers of that draw
+    a person may change live, and *hand back* (`_whence`). A staged change on the card is led by
+    its kind and says what it leaves the setting with (`_becomes`)."""
     if frame is None:
         return _NONE
     if not frame.params:
@@ -1432,10 +1618,12 @@ def _params(frame: Telemetry | None, view: View) -> str:
     for row in frame.params:
         change = staged.get(row.name)
         flag = '<span class="ceil">ceiling</span>' if row.bounded else ""
+        lead = None if change is None else _STAGED_KINDS.get(change.kind)
         mark = (
             ""
             if change is None
-            else f'<span class="stg">staged → {_e(_num(change.now))} by {_who(change.by)}</span>'
+            else f'<span class="stg">staged{"" if lead is None else " " + lead} → '
+            f"{_becomes(change)} by {_who(change.by)}</span>"
         )
         refusal = refused.get(row.name)
         said = (
@@ -1446,19 +1634,61 @@ def _params(frame: Telemetry | None, view: View) -> str:
         cls = "param staged" if change is not None else "param"
         settable = row.value is None or isinstance(row.value, str) or (
             isinstance(row.value, (int, float)) and not isinstance(row.value, bool))
-        shown = (
-            f'<span class="pv">{_e(row.position)}</span>'
-            if row.position is not None
-            else f'<span class="pv">{_e(_num(row.value))} '
-            f'<span class="unit">{_e(row.unit)}</span></span>'
-            + (_field(row, view) if settable else "")
-        )
+        per_trial = _PER_TRIAL.get(row.source)
+        if per_trial is not None:
+            shown = f'<span class="pv">{per_trial[0]}</span>' + (
+                _over(row, per_trial[1], view) if settable and row.position is None else "")
+        elif row.position is not None:
+            shown = f'<span class="pv">{_e(row.position)}</span>'
+        else:
+            shown = (f'<span class="pv">{_e(_num(row.value))} '
+                     f'<span class="unit">{_e(row.unit)}</span></span>'
+                     + (_field(row, view) if settable else ""))
         cards.append(
             f'<div class="{cls}"><div class="pn"><span>{_e(row.name)}</span>{flag}</div>'
             f"{shown}"
-            f'<span class="range">{_range(row)}</span>{mark}{said}</div>'
+            f'<span class="range">{_range(row)}</span>{_whence(row, view)}{mark}{said}</div>'
         )
     return "".join(cards)
+
+
+def _reverting(changes: tuple) -> str:
+    """**What a revert to a moment would change**, as the rig previews it (`MomentRow.changes`; the
+    engine C3 plan's science review, M-1: "a one-step preview listing each setting and the value
+    it will take"), in the changes feed's words, escaped; or that it would change nothing now,
+    which the rig refuses."""
+    if not changes:
+        return "would change nothing now"
+    return "would change: " + "; ".join(map(_e, changes))
+
+
+#: A moment's *revert to this* where a revert to it would change nothing now, which the rig
+#: refuses: greyed, saying so (fix round 1 of the C3 plan's Task 18, review minor 7).
+_NOTHING = ' disabled title="a revert to this would change nothing now"'
+
+
+def _moments(frame: Telemetry | None, view: View) -> str:
+    """**The moments of the run in progress a revert can go back to** (`Telemetry.moments`,
+    telemetry schema 19; the C3 spec §8; TSK-43, the PI, 2026-10-07, "Yes, with revert": "any
+    earlier state restored in one action, itself recorded"), newest first as the rig sends them
+    and the run's start last, kept however many came after (review M-15): each with when it was
+    kept, what was done then in the changes feed's words, and *revert to this*, which sends its
+    change id (`Revert`), then what a revert to it would change (`_reverting`). The rig takes
+    every task setting and drawn range back to that moment at the next trial, refusing it whole if
+    any value is, and never a reward size. Greyed away from the box, and on a moment a revert to
+    which would change nothing now. None between runs, when no revert reaches back."""
+    if frame is None:
+        return _NONE
+    if not frame.moments:
+        return '<span class="nm">no run in progress: no moment to go back to</span>'
+    return "".join(
+        f'<div class="kv"><span>{_clock_time(moment.at)} · {_e(moment.said)}</span>'
+        f'<button type="button" class="btn small" data-cmd="revert" '
+        f'data-change="{_e(moment.change)}"{_gate(view, "" if moment.changes else _NOTHING)}'
+        f'>revert to this</button></div>'
+        f'<div class="rv">{_reverting(moment.changes)}</div>'
+        for moment in frame.moments
+    )
 
 
 def _setup(frame: Telemetry | None) -> str:
@@ -1741,6 +1971,7 @@ def fragments(frame: Telemetry | Idle | None, view: View) -> dict[str, str]:
         "rt-health": _health_pane(frame, view),
         "rt-changes": _changes(frame),
         "params": _params(frame, view),
+        "moments": _moments(frame, view),
         "pf-sum": _pf_sum(frame),
         "preflight": _preflight_pane(frame, view),
         "setup": _setup(frame),
@@ -1999,6 +2230,15 @@ body:not([data-signed-in="1"]) .si{display:none} body[data-signed-in="1"] .so{di
 .arrows button { flex: 1; width: 18px; border: 0; padding: 0; background: var(--surface-2); color: var(--muted); cursor: pointer; font-size: 8px; line-height: 1; }
 .arrows button + button { border-top: 1px solid var(--rule); }
 .param .rfs { font-size: 11.5px; color: var(--crit); }
+.param { align-content: start; }
+.param .src, .param .rn { font-size: 11.5px; color: var(--muted); }
+.param .src { overflow-wrap: anywhere; }
+.param .rng { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.param .rn { display: inline-flex; gap: 3px; align-items: center; }
+.param .rn .field { width: 4.5em; border-radius: 3px; }
+.param > .btn { justify-self: start; }
+.field.over { width: 100%; border-radius: 3px; }
+#moments .rv { font-size: 11.5px; color: var(--muted); margin: -2px 0 6px; overflow-wrap: anywhere; }
 .ev.ctl .kind { color: var(--accent); }
 .controlbar .sep { width: 1px; align-self: stretch; background: var(--rule); margin: 0 4px; }
 .tsel { display: inline-flex; align-items: center; gap: 6px; }
@@ -2564,6 +2804,10 @@ _SCRIPT = """
   var closed = false;
   var timers = {};
   var heldParams = null;
+  var heldMoments = null;
+  var pressedAt = null;
+  var PRESS_MS = 10000;
+  var rangeOut = {};
   var markNo = null;
   var rewarding = false;
   var REWARD_LOST = "unknown: this page lost wlx serve's answer, so whether the reward was given is not known, and it was not sent again; check the session's fluid total before pressing again";
@@ -2611,13 +2855,59 @@ _SCRIPT = """
       say("");
     }
   }
+  // A range's number typed and not yet sent (fix round 1 of the C3 plan's Task 18): its field
+  // differs from the number in force, **read as `sendRange` reads it** (fix round 2): a text that
+  // is no finite number, or a different number -- "1.250" over 1.25 is the same number, which
+  // *change the range* would refuse as unchanged, so it holds nothing. It keeps the cards held
+  // as a field with focus does, since WebKit (Safari) takes focus off the field as the mouse
+  // goes down on *change the range*, and a frame swapped in then would put the old number back
+  // and the clicked button out from under the click.
+  function rangeChanged(input) {
+    var raw = input.value.trim();
+    var value = Number(raw);
+    return raw === "" || !isFinite(value) || value !== Number(input.defaultValue);
+  }
+  function rangeEdited() {
+    var fields = document.querySelectorAll("#params input[data-number]");
+    return Array.prototype.some.call(fields, rangeChanged);
+  }
+  // A number typed and not sent is marked pending, and, while a frame is held because of it,
+  // its card says so under the editor: never a silent freeze of the cards (fix round 2).
+  function markRanges() {
+    Array.prototype.forEach.call(document.querySelectorAll("#params .param"), function (card) {
+      var fields = card.querySelectorAll("input[data-number]");
+      var edited = false;
+      Array.prototype.forEach.call(fields, function (input) {
+        var changed = rangeChanged(input);
+        input.classList.toggle("pending", changed);
+        edited = edited || changed;
+      });
+      var line = card.querySelector(".rhold");
+      if (line) { line.hidden = !(edited && heldParams !== null); }
+    });
+  }
+  // A pointer down inside the cards or the moments pane holds them until it is up (fix round 2:
+  // a frame landing between the mouse going down and up replaced the button under it, so the
+  // press was lost -- in WebKit, which never focuses a clicked button, and now in Chromium). A
+  // release the page never sees ends the hold after ten seconds.
+  function pressing() {
+    return pressedAt !== null && performance.now() - pressedAt < PRESS_MS;
+  }
+  // Only a field being typed in holds the cards, not a button clicked: Chromium focuses the
+  // button a person pressed (*hand back*, *change the range*), and the cards then never showed
+  // what the press did.
   function busy() {
     var focused = document.activeElement;
-    return Boolean(focused && focused.closest && focused.closest("#params")) ||
-      Object.keys(timers).length > 0;
+    return Boolean(focused && focused.matches && focused.matches("#params input")) ||
+      rangeEdited() || pressing() || Object.keys(timers).length > 0;
   }
   function swap(id, html) {
     if (id === "params" && busy()) { heldParams = html; return; }
+    if (id === "moments" && pressing()) { heldMoments = html; return; }
+    // A frame shown is the newest: an older one held meanwhile must never be written back over
+    // it by a later release (fix round 3 of the C3 plan's Task 18).
+    if (id === "params") { heldParams = null; }
+    if (id === "moments") { heldMoments = null; }
     var node = el(id);
     // The plan picker shows the plan its pre-flight was taken for, so a frame's choice stands.
     var chosen = node && node.tagName === "SELECT" && id !== "plan-sel" ? node.value : null;
@@ -2634,6 +2924,11 @@ _SCRIPT = """
     if (heldParams !== null && !busy()) {
       el("params").innerHTML = heldParams;
       heldParams = null;
+      applySignIn();
+    }
+    if (heldMoments !== null && !pressing()) {
+      el("moments").innerHTML = heldMoments;
+      heldMoments = null;
       applySignIn();
     }
   }
@@ -2670,6 +2965,7 @@ _SCRIPT = """
   function onFrame(event) {
     var payload = JSON.parse(event.data);
     Object.keys(payload.frags).forEach(function (id) { swap(id, payload.frags[id]); });
+    markRanges();
     live = payload.live;
     baseline = payload.age === null ? null : performance.now() - payload.age * 1000;
     lost = false;
@@ -2802,6 +3098,55 @@ _SCRIPT = """
     else if (v >= hi) { input.value = input.getAttribute("data-max"); }
     else { input.value = v.toFixed(decimals(step)); }
     schedule(input);
+  }
+  // A drawn range changed live (engine build C3; the PI, 2026-10-30, Q7b, "Yes, range changes
+  // live"): the numbers of the card's editor a person changed, by name, which the rig lays over
+  // those in force. A number that is not one, or none changed, is not sent, said as a setting's
+  // is; once sent, a second press is held as a clear's is.
+  function sendRange(button, detail) {
+    var key = button.getAttribute("data-name");
+    var numbers = {};
+    var bad = null;
+    var fields = button.closest(".param").querySelectorAll("input[data-number]");
+    Array.prototype.forEach.call(fields, function (input) {
+      var raw = input.value.trim();
+      var value = Number(raw);
+      if (raw === "" || !isFinite(value)) { bad = bad || input.getAttribute("data-number"); }
+      else if (value !== Number(input.defaultValue)) {
+        numbers[input.getAttribute("data-number")] = value;
+      }
+    });
+    if (bad !== null) {
+      tell("not sent: " + key + "'s " + bad + " needs a number", "crit");
+      return;
+    }
+    if (!Object.keys(numbers).length) {
+      tell("not sent: no number of " + key + "'s range was changed", "crit");
+      return;
+    }
+    // A double click's second press, or a second within the hold, is dropped first, as a clear's
+    // is: it reached the refusal below and said "not sent" in red until the rig answered, though
+    // the range was sent (the C3 plan's Task 18, its deferred minor).
+    if (!clearAllowed(detail, "range/" + key)) { return; }
+    // The rig answers a range at its next trial boundary: while one is out, a second press of
+    // the same card would send the same range again (fix round 3).
+    if (rangeOut[key]) {
+      tell("not sent: the range of " + key + " is still being sent; wait for its answer", "crit");
+      return;
+    }
+    // The text of each field as it is sent: a number typed while the press is out is not.
+    var sentText = Array.prototype.map.call(fields, function (input) { return input.value; });
+    rangeOut[key] = true;
+    post({ kind: "range", name: key, numbers: numbers }, function (answer) {
+      // Sent -- and only then (fix round 2): the numbers sent no longer hold the cards, and any
+      // frame held meanwhile is shown. A press the rig did not take can be sent again.
+      if (answer.status !== "sent") { return; }
+      Array.prototype.forEach.call(fields, function (input, i) {
+        input.defaultValue = sentText[i];
+      });
+      markRanges();
+      release();
+    }, function () { delete rangeOut[key]; });
   }
   function closeNote(note) {
     if (markNo === null) { return; }
@@ -3073,6 +3418,22 @@ _SCRIPT = """
                on: button.getAttribute("data-on") === "1" });
         return;
       }
+      // Engine build C3 (the PI, 2026-10-30, Q7a and Q7b; TSK-43): a setting handed back, a drawn
+      // range changed live, and the run taken back to a moment, each naming what it is for; a
+      // double click is one act, as a clear's is.
+      if (cmd === "hand_back") {
+        var named = button.getAttribute("data-name");
+        if (!clearAllowed(e.detail, "hand_back/" + named)) { return; }
+        post({ kind: "hand_back", name: named });
+        return;
+      }
+      if (cmd === "range") { sendRange(button, e.detail); return; }
+      if (cmd === "revert") {
+        var moment = Number(button.getAttribute("data-change"));
+        if (!clearAllowed(e.detail, "revert/" + moment)) { return; }
+        post({ kind: "revert", change: moment });
+        return;
+      }
       command(cmd);
       return;
     }
@@ -3097,6 +3458,29 @@ _SCRIPT = """
     }
   });
   document.addEventListener("focusout", function () { setTimeout(release, 0); });
+  document.addEventListener("input", function (e) {
+    if (e.target && e.target.matches && e.target.matches("#params input[data-number]")) {
+      markRanges();
+      release();
+    }
+  });
+  // The primary button only; the hold ends with the press -- its pointer going up, cancelled,
+  // a context menu or a drag taking it over, the window losing focus -- or, a release the page
+  // never sees, when the ten seconds are up, when the held frame is shown (fix round 3).
+  document.addEventListener("pointerdown", function (e) {
+    if (e.button === 0 && e.target && e.target.closest &&
+        e.target.closest("#params, #moments")) {
+      pressedAt = performance.now();
+      setTimeout(release, PRESS_MS + 50);
+    }
+  });
+  // After the click that follows the pointer going up has been handled.
+  function unpress() { pressedAt = null; setTimeout(release, 0); }
+  document.addEventListener("pointerup", function () { setTimeout(unpress, 0); });
+  document.addEventListener("pointercancel", unpress);
+  document.addEventListener("contextmenu", unpress);
+  document.addEventListener("dragstart", unpress);
+  window.addEventListener("blur", unpress);
   document.addEventListener("keydown", function (e) {
     if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) { return; }
     var t = e.target;
@@ -3355,7 +3739,10 @@ def page(
             <div class="stack"><section class="panel glass"><div class="top"><h2>Changes</h2></div><div class="feed" id="rt-changes">{p['rt-changes']}</div></section></div>
           </div>
         </div>
-        <div class="tabpanel" id="tp-task"><section class="panel glass"><div class="top"><h2>Task parameters</h2><span class="sub">staged until the next trial</span></div><div class="params" id="params">{p['params']}</div></section></div>
+        <div class="tabpanel" id="tp-task"><section class="panel glass"><div class="top"><h2>Task parameters</h2><span class="sub">staged until the next trial</span></div><div class="params" id="params">{p['params']}</div></section>
+          <section class="panel glass"><div class="top"><h2>Moments of this run</h2>
+            <span class="sub">a revert takes the task's settings and drawn ranges back to one</span>
+            </div><div id="moments">{p['moments']}</div></section></div>
         <div class="tabpanel" id="tp-setup">
           <section class="panel glass" id="pf-panel"><div class="top"><h2>Pre-flight</h2><span id="pf-sum">{p['pf-sum']}</span></div><div id="preflight">{p['preflight']}</div></section>
           <section class="panel glass"><div class="top"><h2>Session</h2></div><div id="setup">{p['setup']}</div></section>

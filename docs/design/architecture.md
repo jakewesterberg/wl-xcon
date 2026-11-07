@@ -69,7 +69,7 @@ are detected at the display surface.
 | Component | Runs on | Language | Job | Simulator |
 |---|---|---|---|---|
 | `taskd` | Task PC (Linux) | Python | Trial execution, display, gaze logic, DIO, session record; since P4d-2b b3a also `wlx taskd`, the rig service that holds one animal's session across runs, opened, run and ended from a console (`service.py`); and since engine build B, what a session is for and its warnings list: the imperfections it runs with, each acceptable in some session kinds, accepted once a session and recorded in `warnings.jsonl` (`warnlist.py`) | Full headless run against replayed/synthetic inputs |
-| `console` | The control box, in a browser on the LAN | Python server + web client | Experimenter UI, live plots, parameter writes, preflight, test screens. **The box authenticates and records the actor** — anybody attached has full access, with visibility rather than a lock (S9a §8); `wl-works` lists devices and links to them, and carries no welfare-affecting action (ADR-0008). **The link exists** (`wl_xcon/link.py`, P4d-1, 2026-09-19): `taskd` holds a `Link` port, drained and published once per trial boundary and never per frame, whose live implementation (`ZmqLink`) binds a ZMQ PUB socket for `Telemetry`, a REP socket for its commands — `SetParameter` and `Stop`, and since P4d-2b b2a `Pause`, `Resume`, `Mark` (a mark's note), `ScheduleStop`, `CancelScheduledStop` and `ManualReward` (a manual reward: while paused and, in a `wlx taskd` session, between runs and while the return is awaited), and since P4d-2b b3a `OpenSession`, `CheckRun`, `StartRun` and `EndSession`, and since XC-026 (2026-10-01) `ResumeSession` (wire kind `resume_session`: a stranded session resumed from its record), which `wlx taskd` acts on and a `wlx run` session refuses — which the page sends since b3a-2 — from its forms, and since XC-026 from the stranded banner's *resume session* button, and since engine build C2a, from its Still-needed pane, `ClearOwed` (`clear`: one trial, or the rest, cleared from a condition's count), `Drum` (`drum`: drumming switched for a block or a run) and `Training` (`training`: the training aid *clear*, or the setting that judges only each drummed trial's first answer for a percentage, switched on or off), and since engine build C2b `NextBlock` (`next_block`) and `BackBlock` (`back_block`: the run moved on a block, or back one, by hand) — through `POST /commands`, built by the wire's own rules (`link._command_from`), and whose closed session's summary `wlx taskd`'s idle frame carries until the next session opens (telemetry schema 18, `link.SCHEMA`; the summary since 11; since 18 a setting whose value is a whole position, a `task.Polar`, or an (x, y) pair where the setting's choices declare one, travels as the rig's words for it, eccentricity and direction first with its (x, y) beside them, `27.236° at 45° · (x, y) (20, 20)`, the review report's (`review.position_words`; since 2026-10-30 every direction from 0° to 360° and none at eccentricity 0, `0° · (x, y) (0, 0)`, the PI's "0 to 360 everywhere" and "Empty at center", in the same words and schema; a setting whose value is a number is shown as the number it holds, even one a task uses as a direction, which the load check warns of outside 0 to 360, `direction-outside-0-360`), on its parameter card with no input, on a staged change and on the changes feed (any other value that is neither a number nor a word is shown as written with no input, so the page and its controls always render), and on the parameter and staged lines `wlx console` already had, which still shows none of schema 16's and 17's additions (XC-387); the PI, 2026-10-19, "Polar first, x-y allowed", STE-30; each stimulus's and window's position is XC-401, after XC-399) — each checked where it is decoded — and, given a third endpoint, a PULL socket for an operator's mark signal, which the trial loop checks once per frame (ADR-0003's transport, untouched: a third socket on the same link). `ZmqConsole` is the other end. Reached today by `wlx run --link PUB,REP` or `wlx taskd --link PUB,REP` and a terminal client, `wlx console --sub PUB --req REP --as WHO`. **The browser console exists** (P4d-2b slice b1, 2026-09-26, read-only then; the box's writes since b2a and its session forms since b3a-2, below): `wlx serve --link PUB,REP --http HOST:PORT --health-token-file PATH` is its own process — a stdlib `ThreadingHTTPServer`, one `ZmqConsole` on a telemetry thread, server-sent events to each browser from a bounded queue, and every pane rendered in Python (`web.py`) so the page's script only swaps fragments. The wl-works fonts are bundled and served by the box, so the page never reaches the internet (PI, 2026-09-26). Reads are open to the LAN. **Writes come from the box** (P4d-2b slice b2a, 2026-09-28): `POST /commands` is accepted only from a loopback peer, with a `Host` naming loopback, the page's own `Origin` and `Content-Type: application/json` (spec §2), and recorded as the box's actor map (`{"kind": "box", "name": …}`) and shown as `NAME (box, unverified)`; every request is answered only when its `Host` names this console (`--allow-host` adds names). `wlx serve` owns each socket on one thread — a read-only telemetry thread, a command thread whose REQ socket waits for `taskd`'s acknowledgment (*sent*, *not delivered*, *busy*), and a mark thread that sends the signal ahead of every command. Writes from people signed in to wl-works are b2b slice 2, below | Runs against a fake `taskd` (`link.Simulated`), or a real one over loopback sockets |
+| `console` | The control box, in a browser on the LAN | Python server + web client | Experimenter UI, live plots, parameter writes, preflight, test screens. **The box authenticates and records the actor** — anybody attached has full access, with visibility rather than a lock (S9a §8); `wl-works` lists devices and links to them, and carries no welfare-affecting action (ADR-0008). **The link exists** (`wl_xcon/link.py`, P4d-1, 2026-09-19): `taskd` holds a `Link` port, drained and published once per trial boundary and never per frame, whose live implementation (`ZmqLink`) binds a ZMQ PUB socket for `Telemetry`, a REP socket for its commands — `SetParameter` and `Stop`, and since P4d-2b b2a `Pause`, `Resume`, `Mark` (a mark's note), `ScheduleStop`, `CancelScheduledStop` and `ManualReward` (a manual reward: while paused and, in a `wlx taskd` session, between runs and while the return is awaited), and since P4d-2b b3a `OpenSession`, `CheckRun`, `StartRun` and `EndSession`, and since XC-026 (2026-10-01) `ResumeSession` (wire kind `resume_session`: a stranded session resumed from its record), which `wlx taskd` acts on and a `wlx run` session refuses — which the page sends since b3a-2 — from its forms, and since XC-026 from the stranded banner's *resume session* button, and since engine build C2a, from its Still-needed pane, `ClearOwed` (`clear`: one trial, or the rest, cleared from a condition's count), `Drum` (`drum`: drumming switched for a block or a run) and `Training` (`training`: the training aid *clear*, or the setting that judges only each drummed trial's first answer for a percentage, switched on or off), and since engine build C2b `NextBlock` (`next_block`) and `BackBlock` (`back_block`: the run moved on a block, or back one, by hand), and since engine build C3 `HandBack` (`hand_back`: a setting a person holds handed back to what gives it in the open block), `SetRange` (`range`: new numbers for the draw the open block uses) and `Revert` (`revert`: the run's task settings and drawn ranges taken back to an earlier change of the run, or to its start) — through `POST /commands`, built by the wire's own rules (`link._command_from`), and whose closed session's summary `wlx taskd`'s idle frame carries until the next session opens (telemetry schema 19, `link.SCHEMA`; the summary since 11; since 19 each setting's card says where its value comes from in the open block (the task, the run, its conditions, a draw, in the rig's words with the numbers a person may change live, or a person) and names the conditions of the run's plan that set or draw it, each staged change, a hand-back, a live range and a revert's among them, says its kind and names the conditions it will override, or a range the blocks it reaches, before it applies, the frame lists the moments of the run a revert can go back to, the run's start always among them, each with what a revert to it changes, and it says which settings a person's change keeps trials out of moving up by (engine build C3's spec §6; XC-418); since 18 a setting whose value is a whole position, a `task.Polar`, or an (x, y) pair where the setting's choices declare one, travels as the rig's words for it, eccentricity and direction first with its (x, y) beside them, `27.236° at 45° · (x, y) (20, 20)`, the review report's (`review.position_words`; since 2026-10-30 every direction from 0° to 360° and none at eccentricity 0, `0° · (x, y) (0, 0)`, the PI's "0 to 360 everywhere" and "Empty at center", in the same words and schema; a setting whose value is a number is shown as the number it holds, even one a task uses as a direction, which the load check warns of outside 0 to 360, `direction-outside-0-360`), on its parameter card with no input, on a staged change and on the changes feed (any other value that is neither a number nor a word is shown as written with no input, so the page and its controls always render), and on the parameter and staged lines `wlx console` already had, which still shows none of schema 16's, 17's and 19's additions (XC-387); the PI, 2026-10-19, "Polar first, x-y allowed", STE-30; each stimulus's and window's position is XC-401, after XC-399) — each checked where it is decoded — and, given a third endpoint, a PULL socket for an operator's mark signal, which the trial loop checks once per frame (ADR-0003's transport, untouched: a third socket on the same link). `ZmqConsole` is the other end. Reached today by `wlx run --link PUB,REP` or `wlx taskd --link PUB,REP` and a terminal client, `wlx console --sub PUB --req REP --as WHO`. **The browser console exists** (P4d-2b slice b1, 2026-09-26, read-only then; the box's writes since b2a and its session forms since b3a-2, below): `wlx serve --link PUB,REP --http HOST:PORT --health-token-file PATH` is its own process — a stdlib `ThreadingHTTPServer`, one `ZmqConsole` on a telemetry thread, server-sent events to each browser from a bounded queue, and every pane rendered in Python (`web.py`) so the page's script only swaps fragments. The wl-works fonts are bundled and served by the box, so the page never reaches the internet (PI, 2026-09-26). Reads are open to the LAN. **Writes come from the box** (P4d-2b slice b2a, 2026-09-28): `POST /commands` is accepted only from a loopback peer, with a `Host` naming loopback, the page's own `Origin` and `Content-Type: application/json` (spec §2), and recorded as the box's actor map (`{"kind": "box", "name": …}`) and shown as `NAME (box, unverified)`; every request is answered only when its `Host` names this console (`--allow-host` adds names). `wlx serve` owns each socket on one thread — a read-only telemetry thread, a command thread whose REQ socket waits for `taskd`'s acknowledgment (*sent*, *not delivered*, *busy*), and a mark thread that sends the signal ahead of every command. Writes from people signed in to wl-works are b2b slice 2, below | Runs against a fake `taskd` (`link.Simulated`), or a real one over loopback sockets |
 | `neurofeatd` | Acquisition PC | C++ | SpikeGLX `fetchLatest` on the filtered AP stream -> MUA features -> ZMQ PUB | Synthetic feature publisher |
 | `rhxfeatd` | Intan host | C++/Rust | RHX Spike Output socket -> features -> ZMQ PUB; bounded reader | Synthetic spike-raster publisher |
 | `labhost` | Task PC | Python | The pull-only endpoint wl-works polls — **a surface of `console` since 2026-09-19, not its own process** (S9a §7): same server, separate path, separate auth. Served as `GET /health` by `wlx serve` (`health.py`, P4d-2b b1): `HealthResponse` schema 1, contract-tested against wl-preproc's own model; a bearer token read from a file outside the repository, compared with `hmac.compare_digest`, one `401` for every credential failure — the rules of wl-preproc's `responder/handler.py`. Exactly one reading is featured, the most urgent (PI, 2026-09-26), because wl-works shows only the first | Contract tests |
@@ -233,8 +233,10 @@ and `link._setting` are what the PI's items 3 and 4 rest on, and `_schedule` is 
 guards refuse a value that is not a number, for a welfare ceiling and for a numeric
 parameter alike (M8, item 4), and it sends a ceiling's name to `bounds.validate`, which
 is what keeps a reward size set from the page under its approved ceiling (item 3). **A task's own
-setting outside its declared range** is checked again with the range widened to it
-(`Session._beyond_range`, not on this list), refused only for what breaks the run and otherwise
+setting outside its declared range** is checked again with the range widened to it, and since engine
+build C3 with each condition of the run's plan and each extreme of a draw in force, once per
+distinct set of values outside their ranges (`Session._beyond_range`, not on this list), refused
+only for what breaks the run and otherwise
 staged with its warnings, which are written to `warnings.jsonl` (the PI, 2026-10-11, XC-352's
 D2); the ceiling's branch is unchanged, byte for byte.
 `link._setting` is M8 where bytes become a command — in `_command_from` for the wire's
@@ -253,6 +255,42 @@ the third on 2026-10-18: the engine C2a plan's Appendix A, items 1 and 4).
 Since engine build C2b two more hand `NextBlock` and `BackBlock` to `Session._move`, likewise off
 this list, touching no reward, bounded setting, welfare clock or pump (the engine C2b plan's
 Appendix A, item 2, approved by the PI, 2026-10-19).
+Since engine build C3 one line of that rest, ahead of `set` in the setting path, runs the live
+refusal of settings no animal can get right (`Session._impossible`, off this list; TSK-69): it raises
+only `Exceeded`, or what `set` raises on the same value, which the listed `except` line turns into a
+refusal on the feed; a check that cannot run refuses the change, never the session; and it leaves to
+`set`, unjudged, a ceiling's name, so no reward size passes through it, and every value `set`
+refuses (the C3 spec's §14 item 2, approved by the PI for the design, "Approve all four",
+2026-10-30). A run's start is refused for the same combinations by `wlx taskd`'s pre-flight
+(`preflight.beyond`, failing its starting-values item) and, for a run that takes none, by
+`Session.run` before its first trial; neither is on this list.
+Since engine build C3 two more branches beside the pause hand `HandBack` and `SetRange` to
+`Session._hand_back` and `_range`, off this list (the C3 spec's §14 item 1, approved by the PI for
+the design, "Approve all four", 2026-10-30): each refuses what it cannot accept with its sentence,
+a check that raises among them, and never raises; what it accepts applies at the next boundary in
+`_apply_staged`, with the values staged. **Neither passes through `set`** (an amendment to the C3
+spec's item 3, approved by the PI on 2026-10-31, "Approve (Recommended)": the engine C3 plan's
+Appendix A, item 5). A
+hand-back carries no new value: it puts back the run's own starting value, judged at the run's
+start for trials no animal can get right and, in a `wlx taskd` session, checked by its pre-flight
+(`wlx run --set`'s are not range-checked, XC-371). A range changes a draw's numbers, never its
+kind, each a finite number from `link._setting`, refused where they cannot be drawn
+(`check.undrawable`) and where an extreme outside the setting's declared range breaks the run
+(`_beyond_range`, as a typed value). Both are refused where they would leave trials no animal can
+get right, and both refuse a ceiling's name: a reward size is never held as a task setting nor
+drawn.
+Since engine build C3 a third branch beside the pause hands `Revert` to `Session._revert`, off this
+list (the C3 spec's §14 items 1 and 3, approved by the PI for the design, "Approve all four",
+2026-10-30). **Revert is on the welfare summary**: it takes the run back to an earlier moment of
+it, restoring task settings and drawn ranges only. Each value it puts back goes through `set`,
+unchanged; its hand-backs and ranges go as the two buttons' do, without the buttons' widened
+re-checks of ranges widened since (each layer it restores was checked as it was made), as approved
+by the PI on 2026-10-31 (the engine C3 plan's Appendix A, item 5); and all of it is judged at once for trials no animal can get
+right. If `set` refuses any one value, or that judgment refuses the whole, or a check raises, none
+of it applies and no change row is written, though a warning `set` accepted for one of its values
+ahead of the refused one stays accepted. **It never reaches a bounded setting**: a reward size is
+staged and applied by `set`'s and `bounds`' own branch, never held as a task setting and never
+drawn, so no moment a revert goes back to holds one.
 `_schedule` fixes the target `_ends` compares against — a
 trial count from the trial about to run, an instant on the session's clock, or mL this
 session, refused when already reached — so a wrong target ends a session early or late
@@ -373,7 +411,9 @@ an unregistered code at load time.
 
 **The task object, since engine build C1.** A task file defines one `Task` (`wl_xcon/task.py`;
 engine spec §3.5): its trial structures by name, the default one -- the plain run's, and a
-condition's that names none -- its plans (since engine build C2b, below), what each of its
+condition's that names none -- its plans (since engine build C2b, below), the settings it draws
+at random each trial and from what (`Task.draws`, which a block type may replace with its own,
+`Block.draws`; since engine build C3), what each of its
 settings means (XC-288 §4.1: clear-cut with a direction, expected with
 a direction and a note, or not a difficulty setting; and whether the setting is a criterion or a
 stimulus), what it offers to choose (or `NO_CHOICE`) and how its reaction time is defined (§4.3),
@@ -418,6 +458,33 @@ trial, five minutes at the session's rate (`run.LONGEST_TRIAL_S`), is a missed a
 in a plain "run N trials" run, whose table (`scheduler.EVERY_TRIAL`)
 spends every non-answer, and said on the console. A hold runs its own time: the load-time check warns where a timeout on its
 state can cut it short, a timeout listed before the hold that ties it included (`hold-cut-short`).
+**What a trial draws, since engine build C3,** is arithmetic in one pure module,
+`wl_xcon/variation.py`, shared by the code that checks, plays, records and reviews it: each value
+from a hash of the run's seed, the trial's number in the run and the setting, never from the
+scheduler's generators, so adding a draw moves no condition or repeat; a prepared list in shuffled
+passes; the non-aging wait's tail drawn again; a factorial's conditions and their names; and a
+sequence-balanced block's de Bruijn sequence, each cycle played as the linear one, its first
+trials a lead-in. **The trial loop draws between trials**
+(`taskd.Session._draw`): each setting from the open block's own draw, else the task's, or from its
+condition's own range, but one a person holds; a repeat, ordinary or a drum's, keeps a `same`
+setting's value and source and draws a `fresh` one anew; a factorial's conditions play as
+hand-listed ones (`Session._plan`). Each trial's line says what it drew and from where (`drawn`)
+and what a person held (`live`), a drawn direction written from 0 to 360, which of a person's
+changes kept it out of moving up (`eased`) and its place in a designed block's plan (`planned`);
+each run's start row records the task's draws, every field, and what each factorial made
+(`generated`), and its end row, for each block, what varied in it -- by its conditions, by a draw
+and from which range, or by a person (`varied`) -- and a designed block's plan (`planned`). The
+change log (`parameter_changes.jsonl`) holds every change by its kind, each act with a change id:
+a value set, a hand-back, a range, a revert, and the clears and switches also written to
+`controls.jsonl`; those that strobe `PARAM_CHANGED` carry `sequence`, and resume reads every kind,
+failing closed on a row it cannot (REC-28; XC-288 §3.4). **A designed
+block** (`task.SequenceBalanced`,
+`task.Priming`) plays a plan the scheduler draws as it opens, from a generator of its own: a break
+in it is never placed as a repeat, a sequence-balanced block's lost place recorded as a `designed`
+shortfall, unless the block brings the trial back at once, under the repeat limit. **A trial a
+live change eased** (`Scheduler.record`'s `eased`) is left out of a block's criterion and, in a
+training progression, of a stage's number of trials and targets, and still judged toward the
+fall-back.
 
 **Plans and blocks, since engine build C2b.** A task declares its plans (`Task.plans`; engine spec
 §13.1), and the operator chooses one at run start -- from the page, its pre-flight taken for
@@ -591,7 +658,7 @@ direct view part 2, 2026-09-29): a task that does not pass in the chosen setup i
 the session opens. *Since the PI's rulings on XC-352 (2026-10-11, A12)* a task written for the
 other setup is a warning saying what that setup changes, not a refusal, unless it shows each eye
 its own image in direct view, which an unmirrored screen cannot show; its field still holds it.
-The setup is in the session record and in telemetry (schema 18; the setup since 9).
+The setup is in the session record and in telemetry (schema 19; the setup since 9).
 
 Through the stereoscope each eye views one half of the panel through redirection mirrors
 [@wheatstone1838contributions; @cox2019temporal; @dougherty2021binocular]. Therefore one

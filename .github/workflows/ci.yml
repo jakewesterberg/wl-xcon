@@ -40,6 +40,15 @@ on:
 # not allowed to skip, so `WLX_REQUIRE_PREPROC=1` turns a skip into a failure: a
 # contract test that is allowed to not run is not a contract test.
 #
+# **wl-sync too, since 2026-11-06.** wl-preproc's readers have imported `wl_sync`
+# at module level since 2026-08 (`contracts.paths`, `contracts.manifest`,
+# `events.extract`), and these jobs install none of wl-preproc's own dependencies.
+# What changed is ours: engine build C3's tests are the first of ours to import a
+# reader that reaches `contracts.paths` (`events.rigrecords`), and
+# `tests/test_c3_path.py` imports it at collection, so every job failed there with
+# `No module named 'wl_sync'`. Each job now installs wl-sync alone, at the commit
+# wl-preproc's own pyproject pins (ADR-0004's inventory).
+#
 # Every job installs `console` (pyzmq, msgpack) as well as `dev,contract` -- on
 # every Python `test` runs, and on the single Python (3.13) the mutation jobs pin.
 # Added 2026-09-19 with the console link, and the reason is the same one that makes
@@ -78,6 +87,29 @@ jobs:
         with:
           repository: jakewesterberg/wl-preproc
           path: wl-preproc
+      - name: Install wl-sync at wl-preproc's own pin
+        # wl-preproc's contract readers import wl_sync at module level (since
+        # 2026-08), and we deliberately do not install wl-preproc's own
+        # dependencies. So install that one at the commit wl-preproc's pyproject
+        # declares, read here at run time so the pin follows theirs. No pin found
+        # fails the step: an unpinned wl-sync would be a moving contract.
+        run: |
+          req="$(python - <<'PY'
+          import re, sys, tomllib
+          with open("wl-preproc/pyproject.toml", "rb") as f:
+              project = tomllib.load(f)["project"]
+          deps = list(project.get("dependencies", []))
+          for extra in project.get("optional-dependencies", {}).values():
+              deps += extra
+          for dep in deps:
+              if re.fullmatch(r"wl-sync\s*@\s*git\+\S+@[0-9a-f]{40}", dep.strip()):
+                  print(dep.strip())
+                  break
+          else:
+              sys.exit("wl-preproc/pyproject.toml declares no wl-sync pinned to a commit; refusing to install an unpinned wl-sync")
+          PY
+          )"
+          pip install "$req"
       - run: pip install -e ".[dev,contract,console,signin,browser]"
       - run: python -m playwright install --with-deps chromium
       - run: pytest -q
@@ -145,6 +177,29 @@ jobs:
         with:
           repository: jakewesterberg/wl-preproc
           path: wl-preproc
+      - name: Install wl-sync at wl-preproc's own pin
+        # wl-preproc's contract readers import wl_sync at module level (since
+        # 2026-08), and we deliberately do not install wl-preproc's own
+        # dependencies. So install that one at the commit wl-preproc's pyproject
+        # declares, read here at run time so the pin follows theirs. No pin found
+        # fails the step: an unpinned wl-sync would be a moving contract.
+        run: |
+          req="$(python - <<'PY'
+          import re, sys, tomllib
+          with open("wl-preproc/pyproject.toml", "rb") as f:
+              project = tomllib.load(f)["project"]
+          deps = list(project.get("dependencies", []))
+          for extra in project.get("optional-dependencies", {}).values():
+              deps += extra
+          for dep in deps:
+              if re.fullmatch(r"wl-sync\s*@\s*git\+\S+@[0-9a-f]{40}", dep.strip()):
+                  print(dep.strip())
+                  break
+          else:
+              sys.exit("wl-preproc/pyproject.toml declares no wl-sync pinned to a commit; refusing to install an unpinned wl-sync")
+          PY
+          )"
+          pip install "$req"
       - run: pip install -e ".[dev,contract,console,signin]"
       - name: Mutation gate (changed modules only, function shard ${{ matrix.shard }}/12)
         # WLX_REQUIRE_PREPROC applies to every sweep now, not just the two that named
@@ -220,6 +275,29 @@ jobs:
         with:
           repository: jakewesterberg/wl-preproc
           path: wl-preproc
+      - name: Install wl-sync at wl-preproc's own pin
+        # wl-preproc's contract readers import wl_sync at module level (since
+        # 2026-08), and we deliberately do not install wl-preproc's own
+        # dependencies. So install that one at the commit wl-preproc's pyproject
+        # declares, read here at run time so the pin follows theirs. No pin found
+        # fails the step: an unpinned wl-sync would be a moving contract.
+        run: |
+          req="$(python - <<'PY'
+          import re, sys, tomllib
+          with open("wl-preproc/pyproject.toml", "rb") as f:
+              project = tomllib.load(f)["project"]
+          deps = list(project.get("dependencies", []))
+          for extra in project.get("optional-dependencies", {}).values():
+              deps += extra
+          for dep in deps:
+              if re.fullmatch(r"wl-sync\s*@\s*git\+\S+@[0-9a-f]{40}", dep.strip()):
+                  print(dep.strip())
+                  break
+          else:
+              sys.exit("wl-preproc/pyproject.toml declares no wl-sync pinned to a commit; refusing to install an unpinned wl-sync")
+          PY
+          )"
+          pip install "$req"
       - run: pip install -e ".[dev,contract,console,signin]"
       - name: Mutation gate (function shard ${{ matrix.shard }}/24)
         env:

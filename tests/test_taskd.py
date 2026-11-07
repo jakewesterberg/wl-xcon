@@ -1776,9 +1776,11 @@ def test_setting_a_value_back_to_the_conditions_does_not_hand_control_back(tmp_p
 
 
 def test_a_live_edits_feed_line_names_the_conditions_it_now_overrides(tmp_path):
-    """The engine C2b plan's science review, I5: until the console shows which conditions an edit
-    overrides (build C3), the edit's line on the changes feed names them -- every condition of the
-    run's blocks that sets the value -- and an edit of a value no condition sets names none."""
+    """The engine C2b plan's science review, I5: the edit's line on the changes feed names the
+    conditions it overrides -- every condition of the run's blocks that sets the value -- and an
+    edit of a value no condition sets names none. Since engine build C3 the console's cards and
+    staged rows name them too (telemetry schema 19), and the line stays (TSK-19), saying the edit
+    overrides them until it is handed back (the PI, 2026-10-30, Q7a)."""
     link = _Drained({1: [SetParameter(name="target_x", value=12.0, by=Box("jake")),
                          SetParameter(name="target_y", value=2.0, by=Box("jake"))]})
     spec = _spec(tmp_path, trials=400, blocks=[
@@ -1789,8 +1791,8 @@ def test_a_live_edits_feed_line_names_the_conditions_it_now_overrides(tmp_path):
     session.run()
 
     assert [said for kind, _, _, said in session.controls if kind == "set"] == [
-        "target_x 10.00 → 12.00, from trial 1; for the rest of the run it overrides the value "
-        "conditions near, far set",
+        "target_x its conditions → 12.00, from trial 1; until handed back it overrides what conditions "
+        "near, far set or draw",
         "target_y 0.00 → 2.00, from trial 1",
     ]
 
@@ -2147,7 +2149,10 @@ def test_a_live_write_is_staged_and_applied_at_a_trial_boundary(tmp_path):
 
 def test_a_live_write_is_recorded_with_its_origin(tmp_path):
     """One validated write path whatever the origin, and the actor recorded -- half
-    a guarantee otherwise (S8 §3.3)."""
+    a guarantee otherwise (S8 §3.3). The row as the change log writes it since engine build C3
+    (XC-288 §3.4): its change id, kind, instant, first trial and meaning beside them."""
+    from wl_xcon.record import _local
+
     session = _session(_spec(tmp_path, trials=4))
     session.set("fix_hold", 0.5, by=Box("console"))
 
@@ -2161,8 +2166,12 @@ def test_a_live_write_is_recorded_with_its_origin(tmp_path):
     ]
     assert changes == [
         {
-            "sequence": 1, "name": "fix_hold", "was": 0.3, "now": 0.5,
-            "by": {"kind": "box", "name": "console"}, "run": 0, "event_code": 4130,
+            "change": 1, "kind": "set", "sequence": 1, "name": "fix_hold", "was": 0.3,
+            "now": 0.5, "by": {"kind": "box", "name": "console"}, "at": WALL_NOW,
+            "at_local": _local(WALL_NOW), "trial_number": 1, "run": 0,
+            "meaning": {"kind": "clear-cut", "role": "criterion", "raising": "harder",
+                        "relative_to": None, "went": "harder", "step": 0.2},
+            "offered": [], "odds": None, "event_code": 4130,
         }
     ]
 
@@ -2225,7 +2234,8 @@ def test_a_live_write_to_a_welfare_bounded_value_goes_through_its_ceiling(tmp_pa
     assert session.spec.bounds.value("reward_correct") == 0.15, (
         "the value moved as the command was offered rather than at the boundary"
     )
-    assert session.staged[-1] == ("reward_correct", 0.15, 0.30, Box("console"), True)
+    assert session.staged[-1] == (
+        "reward_correct", 0.15, 0.30, Box("console"), True, "set", (), False, "")
 
     with pytest.raises(Exceeded, match="reward_correct"):
         session.set("reward_correct", 0.90, by=Box("console"))
@@ -3687,6 +3697,8 @@ def test_the_parameters_a_console_shows_are_the_declarations_then_the_ceilings(
 
     assert [row[0] for row in rows[: len(declared)]] == [p.name for p in declared]
     fix_hold = next(p for p in declared if p.name == "fix_hold")
+    # Before a run, no card says where its value comes from (schema 19): `None`, `()`, `None`,
+    # `None`, as a ceiling's never does.
     assert by_name["fix_hold"] == (
         "fix_hold",
         fix_hold.unit,
@@ -3695,12 +3707,17 @@ def test_the_parameters_a_console_shows_are_the_declarations_then_the_ceilings(
         0.3,
         False,
         fix_hold.choices,
+        None,
+        (),
+        None,
+        None,
     )
-    assert by_name["reward_correct"] == ("reward_correct", "mL", 0.0, 0.40, 0.15, True, ())
-    # Each setting's choices, last (schema 18, XC-401's fix round, M2): a pair is shown as a
+    assert by_name["reward_correct"] == (
+        "reward_correct", "mL", 0.0, 0.40, 0.15, True, (), None, (), None, None)
+    # Each setting's choices, seventh (schema 18, XC-401's fix round, M2): a pair is shown as a
     # position only for a setting whose choices declare one.
     looks = next(p for p in declared if p.name == "target_appearance")
-    assert by_name["target_appearance"][-1] == looks.choices != ()
+    assert by_name["target_appearance"][6] == looks.choices != ()
     assert "out_of_cage" not in by_name
 
 
@@ -7969,7 +7986,9 @@ def test_a_plain_run_records_no_plan_and_its_trial_count(tmp_path):
         None, None, 3, None)
     assert end["block_ends"] == [{"block": "session", "ended": "rule", "by": None,
                                   "after_trial": 2, "block_in_session": 1, "position": 0,
-                                  "passed_at": None}]
+                                  "passed_at": None, "varied": {}, "planned": None,
+                                  "counts": {"session": {"trials": 3, "overridden": 0,
+                                                         "eased": 0}}}]
     assert end["end_reason"] == "plan_done"
 
 

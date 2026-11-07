@@ -38,6 +38,7 @@ which absence it is looking at. `welfare.Deployment` has the table.
 from __future__ import annotations
 
 import dataclasses
+import math
 import threading
 import time
 from collections import deque
@@ -45,12 +46,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from wl_xcon import link as _link
+from wl_xcon import variation
 from wl_xcon.actor import Actor, to_map_or_none
 from wl_xcon.bounds import Bounds, Exceeded, _finite
-from wl_xcon.check import beyond_range, check_task, unplaced
+from wl_xcon.check import (
+    IMPOSSIBLE, _outside, beyond_range, check_task, impossible, undrawable, unplaced,
+)
 from wl_xcon.cli import _clock, _load_allocation, _load_task, _printable, _shown
 from wl_xcon.codes import BLOCK_END, RUN_END_MARKER, TRIAL_END, TRIAL_START, Allocation
-from wl_xcon.declarations import canonical, content_hash
+from wl_xcon.declarations import canonical, content_hash, resolved
 from wl_xcon.dio import Absent as NoCard
 from wl_xcon.encode import (
     TRIAL_NUMBER,
@@ -60,7 +64,7 @@ from wl_xcon.encode import (
     words_for_run,
 )
 from wl_xcon.findings import SESSION_KINDS, kind_named
-from wl_xcon.geometry import DISPARITY_CONVENTION, Geometry
+from wl_xcon.geometry import DISPARITY_CONVENTION, Geometry, shown_direction
 from wl_xcon.levels import Levels
 from wl_xcon.photometry import Calibration, cone_record
 from wl_xcon.record import XCON_DIRNAME, SessionRecord, _local, welfare_note
@@ -77,6 +81,7 @@ from wl_xcon.scheduler import (
     TRAINING,
     Block,
     Condition,
+    Draw,
     Scheduler,
 )
 from wl_xcon.simulate import Census, Subject, Tally, prepare
@@ -84,6 +89,10 @@ from wl_xcon.run import LONGEST_TRIAL_S, run_trial
 from wl_xcon.task import (
     COUNTED, OWED, SPENT, UNPAID, Entered, Exited, Param, Plan, SaccadeTo, Task, Trial,
 )
+from wl_xcon.task import (
+    EASIER, EXPECTED, HARDER, NOT_DIFFICULTY, SAME, Background, Distribution, Factorial, Listed,
+)
+from wl_xcon.variation import easier
 from wl_xcon.warnlist import PAUSE_UNMARKED, Entry, of_findings, sentence
 from wl_xcon.welfare import (
     OUT_OF_CAGE,
@@ -160,18 +169,95 @@ def _next_occurrence(hhmm: str, wall: float) -> float:
     raise ValueError(f"no occurrence of {hhmm} after {wall} within a day")
 
 
-def _overriding(blocks, name: str) -> str:
-    """What a live edit of `name` now overrides, for its line on the changes feed (engine spec
-    §14.7; the engine C2b plan's science review, I5): the conditions of the run's blocks that set
-    it, whose value the edit replaces for the rest of the run -- setting it back does not undo
-    that -- since the console's own showing of them is build C3's. Empty when none sets it."""
-    named = list(dict.fromkeys(
-        condition.name for block in blocks for condition in block.conditions
-        if name in condition.values))
+def _overrides_said(named: tuple[str, ...]) -> str:
+    """**What a live edit overrides, as its line on the changes feed says it** (engine spec §14.7;
+    the engine C2b plan's science review, I5; TSK-19): the conditions of the run's plan that set or
+    draw the setting (`Session._overrides`), whose value the edit replaces until it is handed back
+    (engine build C3's spec §6; typing the old value back does not hand it back). The card and the
+    staged change name them too since telemetry schema 19, and this line stays. Empty where none
+    does."""
     if not named:
         return ""
-    return (f"; for the rest of the run it overrides the value condition"
-            f"{'s' if len(named) > 1 else ''} {', '.join(named)} set")
+    if len(named) == 1:
+        return f"; until handed back it overrides what condition {named[0]} sets or draws"
+    return f"; until handed back it overrides what conditions {', '.join(named)} set or draw"
+
+
+def _draw_said(key: tuple) -> str:
+    """A draw named by its key (`variation.in_force`'s, `own_ranges`'), as a sentence says it."""
+    if key[0] == "task":
+        return f"the task's draw of {key[1]!r}"
+    if key[0] == "block":
+        return f"block {key[1]!r}'s draw of {key[2]!r}"
+    return f"condition {key[1]!r}'s own range for {key[2]!r}"
+
+
+def _back_to(change: int) -> str:
+    """The moment a revert goes back to, as a sentence names it (`Session._revert`): a change by
+    its id, or the run's start, 0."""
+    return "the run's start" if change == 0 else f"change {change}"
+
+
+def _kept_missing(number: int, repeat_of: int) -> str:
+    """The changes feed's warning when a trial repeats one whose draws were not kept (the
+    scheduler's `waiting` and `Session._kept`'s pruning disagree): its `same` settings are drawn
+    anew, so what the animal saw may differ from what the repeat should show."""
+    return (f"trial {number} shows trial {repeat_of} again, but its drawn values were not kept; "
+            f"its settings that should stay the same were drawn anew")
+
+
+def _generated(blocks, declared: dict[str, Param], turned: frozenset) -> list[dict]:
+    """**What each block's factorial made**, as a run's start row lists it (engine build C3's spec
+    §4: "each run's start row lists them too, so the record needs no task file"; pitfall P20):
+    for each block of `blocks`, as declared, that makes conditions from factors, its name, each
+    condition made with its values and its target, and the exclusions applied. A range of its own
+    is written as a draw is, every field (`variation.recorded`), its setting's declared range
+    filling a normal's cut (`declared`) and a direction's places from 0 to 360 (`turned`); every
+    other value as the record writes a value, as given. `[]` where no block makes any."""
+
+    def written(name: str, value: object) -> object:
+        if isinstance(value, Distribution):
+            return variation.recorded(value, declared.get(name), direction=name in turned)
+        return value
+
+    return [
+        {
+            "block": block.name,
+            "conditions": [
+                {"name": condition.name,
+                 "values": {name: written(name, value) for name, value in condition.values.items()},
+                 "target": condition.target}
+                for condition in variation.generated(block)
+            ],
+            "excluded": [{name: written(name, value) for name, value in exclusion.items()}
+                         for exclusion in block.factorial.exclude],
+        }
+        for block in blocks if isinstance(block.factorial, Factorial)
+    ]
+
+
+def _varied_written(varied: dict) -> dict:
+    """**What varied in one block, as its end row writes it** (`block_ends`' `varied`; engine build
+    C3's spec §10; XC-344): each setting's ways in one order whatever order its trials met them,
+    its conditions' first, then its draws in the order its trials first named them, then a
+    person's (`Session._vary`)."""
+    order = ("condition", "draw", "person")
+    return {name: sorted(ways, key=lambda way: order.index(way["by"]))
+            for name, ways in varied.items()}
+
+
+def _plan_written(planned: tuple | None) -> list | None:
+    """**A designed block's plan, as its end row writes it** (`block_ends`' `planned`; engine build
+    C3's spec §5 and §10; `scheduler.BlockEnd.planned`): a sequence-balanced block's condition
+    names in the order planned, played or not, so a place no trial line's `planned` names was never
+    played; a priming block's runs as far as it played, `{"value": v, "length": n}` each (the
+    controller's ruling on the engine C3 plan's Task 6), the value written as a setting's is;
+    `None` for any other block."""
+    if planned is None:
+        return None
+    return [entry if isinstance(entry, str) else {"value": entry[0], "length": entry[1]}
+            for entry in planned]
+
 
 
 def _hung(index: int, condition: str, counted: str, owed: int, drummed: bool = False,
@@ -218,6 +304,28 @@ def _drum_warned(condition: str, index: int, owed: int, clearing: bool = False) 
            else "stop drumming ends it")
     return (f"{condition} has failed {DRUM_WARNING} tries in a row under drumming, the last trial "
             f"{index}; drumming goes on: {way}")
+
+
+def _kept_out(index: int, held: list[str], ranged: list[str], *, plays_out: bool = False) -> str:
+    """The changes feed's warning the first time in a block a live change keeps a trial out of
+    moving up (engine build C3's spec §7; the C3 plan's engineering review, I-2, and its science
+    review, I-4): the trial, the settings, and the way back from each -- *hand back* for one a
+    person holds, the range as the task writes it or *revert* for one drawn from a range changed
+    live. Said once a block for each setting (`Session._eased_said`), and only where the block has
+    a rule that moves the animal on (`Scheduler.moves_up`): each trial's line names its own
+    (`eased`), and a flood would bury the feed. **A sequence-balanced stage below a training
+    progression's top** (`plays_out`) moves up when its sequence is played out, eased trials or
+    not (the PI, 2026-10-31, item 10, "Only warn at load"), so it is told that, and how to take
+    the change off, never that its trials are kept out."""
+    ways = [f"hand {name} back" for name in held] + [
+        f"send {name}'s range as the task writes it or revert that change" for name in ranged]
+    if plays_out:
+        return (f"trial {index} was eased by a live change to {' and '.join(held + ranged)}; "
+                f"this stage moves up when its sequence is played out, eased trials or not; "
+                f"{', and '.join(ways)}, to take the change off")
+    return (f"trial {index} is kept out of moving up: a live change eased "
+            f"{' and '.join(held + ranged)}; {', and '.join(ways)}, to count trials toward moving "
+            f"up again")
 
 
 def _unresolved(index: int, entries: list[dict]) -> str:
@@ -422,6 +530,65 @@ class RunSpec:
         )
 
 
+@dataclass(frozen=True)
+class Pending:
+    """**A hand-back or a live range, offered and not yet applied** (engine build C3's spec §6;
+    the engine C3 plan's call 19, the applier's second step): what `Session._hand_back` and
+    `Session._range` accept, waiting in `Session._pending` for the next trial boundary, where
+    `Session._apply_staged` applies it among the values staged, in the order offered.
+
+    - `kind` is `"hand_back"` or `"range"`, as its change row writes it (`record.KINDS`); `name`
+      the setting.
+    - `was` and `now` are its row's: for a hand-back, the person's value, then the run's own
+      where the run takes the setting back (`to` `"run"`), else `None`; for a range, the draw
+      before and after, every field (`variation.recorded`).
+    - `by` is who offered it, an `Actor`; `after`, how many values were staged as it was offered
+      (`len(Session._staged)`), so it applies after those and ahead of any staged later.
+    - `to`, a hand-back's: what takes the setting back in the open block, `"conditions"`,
+      `"draw"` or `"run"`.
+    - `key`, a range's: its draw's key (`variation.in_force`'s, `("task", name)` or `("block",
+      block, name)`); `draw`, the distribution it puts in force there, or `None` to restore the
+      one declared.
+    - `act`, a revert's (`Session._revert`): the act it belongs to, so that it and the revert's
+      other changes take one change id and are written as `revert` rows naming the moment
+      (`Session._apply_staged`); `None` for a hand-back or a range offered on its own."""
+
+    kind: str
+    name: str
+    was: object
+    now: object
+    by: Actor
+    after: int
+    to: str | None = None
+    key: tuple | None = None
+    draw: Distribution | None = None
+    act: int | None = None
+
+
+@dataclass(frozen=True)
+class Moment:
+    """**A moment of the run a revert can go back to** (engine build C3's spec §8; the PI,
+    2026-10-07, TSK-43, "Yes, with revert": "any earlier state restored in one action"): what the
+    run's live layer held just after an act applied (`Session._apply_staged`), or as the run
+    started. Kept in `Session._moments`, the run's start first.
+
+    - `change` is the act's change id, or 0 for the run's start. A revert to any change id of the
+      run goes back to the latest moment at or before it (`Session._revert`), so a clear's or a
+      switch's, which keep none, goes back to what was in force then.
+    - `at` is when it was kept, on the session's anchored clock; `said`, the act in the changes
+      feed's words, or "the run's start".
+    - `held` is each task setting a person held then, by name, with its value; `ranges`, each draw
+      changed live then, by its key (`variation.in_force`'s), with the distribution in force.
+      **Never a bounded setting**: a reward size is no task setting a person holds
+      (`Session._edited`) and no draw, so no moment holds one, and no revert reaches one."""
+
+    change: int
+    at: float
+    said: str
+    held: dict
+    ranges: dict
+
+
 @dataclass
 class Session:
     """One subject's run: blocks, ceilings, a record, and the trial loop.
@@ -517,10 +684,40 @@ class Session:
     _block_from: float = field(init=False, default=0.0, repr=False)
     #: The plan the run in progress plays, or the last one's (`_plan`).
     _played: Plan | None = field(init=False, default=None, repr=False)
-    #: Accepted changes not yet applied: `(name, was, now, by, bounded)`, `by` an
-    #: `Actor` -- see `staged`.
+    #: Values accepted and not yet applied: `(name, was, now, by, bounded)`, `by` an
+    #: `Actor` -- see `staged`. A hand-back and a live range wait beside them (`_pending`).
     _staged: list = field(init=False, default_factory=list, repr=False)
+    #: **Hand-backs and live ranges offered and not yet applied** (`Pending`; engine build C3),
+    #: applied with `_staged` at the next boundary in the order offered (`_offered`), and dropped,
+    #: each said, as a service session's run ends (`_after_service_run`).
+    _pending: list = field(init=False, default_factory=list, repr=False)
+    #: **Which revert each value staged belongs to** (engine build C3's spec §8; `_revert`): the
+    #: place in `_staged` of each value a revert staged through `set`, to its act; a value staged
+    #: on its own is an act of its own and is not here. A revert's hand-backs and ranges carry
+    #: theirs (`Pending.act`). Cleared with `_staged`, as they apply (`_apply_staged`) or as a
+    #: service session's run ends (`_after_service_run`).
+    _acts: dict[int, int] = field(init=False, default_factory=dict, repr=False)
+    #: Each revert offered and not yet applied, by its act, to the change id it goes back to (its
+    #: rows' `moment`; 0 for the run's start). Cleared with `_acts`.
+    _act_moments: dict[int, int] = field(init=False, default_factory=dict, repr=False)
+    #: The last act `_revert` numbered, counted for the session: an act is only ever told apart
+    #: from another offered with it.
+    _act: int = field(init=False, default=0, repr=False)
+    #: **The moments a revert can go back to in the run in progress** (`Moment`; engine build C3's
+    #: spec §8): the run's start, then one kept after each act that moved a task setting or a
+    #: range (`_apply_staged`), in the order applied. As each run starts, its start alone. **Never
+    #: capped**, so a revert reaches any change of the run; the console's list of them is the
+    #: capped one, keeping the run's start (`moments`, telemetry schema 19).
+    _moments: list = field(init=False, default_factory=list, repr=False)
+    #: The session's last change id as the run in progress started (`_change`): the run's own
+    #: change ids are those above it, the only ones a revert goes back to (`_revert`).
+    _change_at_start: int = field(init=False, default=0, repr=False)
     _sequence: int = field(init=False, default=0, repr=False)
+    #: **The last change id the session gave** (XC-288 §3.4; engine build C3's spec §8): one for
+    #: each act in the change log -- a person's value, a clear, a switch -- from 1, never 0. Kept
+    #: for the session beside `_sequence`, which a run's reset leaves alone, and restored by
+    #: `resume` from the largest in the log, so no id names two acts.
+    _change: int = field(init=False, default=0, repr=False)
     #: **Where each trial sits in the session at every level** (session-levels spec
     #: §3): its ten position numbers, `trial_number` (XC-155) among them, and the
     #: outcome counts the strip shows at the session, task and block levels. Kept for
@@ -830,6 +1027,8 @@ class Session:
             self._warnings[entry.key] = (entry, accepted_by, accepted_at)
         self.run_index = restoration.run_index
         self._sequence = restoration.sequence
+        # And the change log's ids (engine build C3's spec §8), so its next act takes a new one.
+        self._change = restoration.change
         # How its last run ended (the final review's M1), so `end_runs` never says "before
         # any run" of a session that ran one before its process stopped.
         self.stopped_because, self.stop_kind = restoration.stopped_because, restoration.stop_kind
@@ -1210,23 +1409,36 @@ class Session:
         warning that the task was not designed for it if nothing breaks; refuse only what would
         break the run (off screen, windows colliding, colors unmakeable), saying what"). The run's
         task, checked again with each range widened to the values outside it -- the session's,
-        those staged and this one (`check.beyond_range`) -- in the session's setup, calibration
-        and deployment. **Refused**, as `Exceeded` saying what breaks, when a finding refuses this
-        session's kind; otherwise its warnings are accepted by `by` (`warnings.jsonl`, once each)
-        and said on the changes feed, and `set` stages the value. **Nothing but `Exceeded` leaves
-        here** (`_command` catches it alone): a check that raises, a finding no warning can be
-        made of, or a warning that cannot be written, refuses the value. A write that fails part
-        way leaves the warnings written before it accepted (`accept`), in `warnings.jsonl` though
-        the value was refused: each says what was asked, and is not asked again this session.
-        Run between trials, as the command is drained, never in a frame. Not welfare-critical:
-        `set` calls it only for a task's own setting, never a ceiling."""
-        values = {**self.spec.values,
-                  **{n: now for n, _, now, _, bounded in self._staged if not bounded},
-                  name: value}
+        those offered ahead of this one (`_ahead`: staged, or handed back) and this one
+        (`check.beyond_range`) -- in the session's setup, calibration and deployment. **And with
+        each condition of the run's plan and each draw in force**
+        (engine build C3's spec §11: "Live, `Session._beyond_range` learns conditions and draws"):
+        a trial holds its condition's values and its draws over the session's, so each set of
+        values outside their ranges a trial can hold with this one is checked too, once
+        (`_outside_sets`), each finding it adds naming where it is met. **Refused**, as `Exceeded`
+        saying what breaks, when a finding refuses this session's kind; otherwise its warnings are
+        accepted by `by` (`warnings.jsonl`, once each) and said on the changes feed, and `set`
+        stages the value. **Nothing but `Exceeded` leaves here** (`_command` catches it alone): a
+        check that raises, a finding no warning can be made of, or a warning that cannot be
+        written, refuses the value. A write that fails part way leaves the warnings written before
+        it accepted (`accept`), in `warnings.jsonl` though the value was refused: each says what
+        was asked, and is not asked again this session. Run between trials, as the command is
+        drained, never in a frame. Not welfare-critical: `set` calls it only for a task's own
+        setting, never a ceiling."""
+        values = {**self._ahead()[0], name: value}
         try:
-            found = beyond_range(self._task, values, self.allocation,
-                                 geometry=self.spec.geometry, calibration=self.spec.calibration,
-                                 deployment=self.spec.deployment)
+            seen: list = []
+            found: list = []
+            for these, places in self._outside_sets(name, values):
+                for finding in beyond_range(self._task, these, self.allocation,
+                                            geometry=self.spec.geometry,
+                                            calibration=self.spec.calibration,
+                                            deployment=self.spec.deployment):
+                    if finding in seen:
+                        continue
+                    seen.append(finding)
+                    found.append(finding if not places else dataclasses.replace(
+                        finding, detail=f"{finding.detail} (on the trials of {'; '.join(places)})"))
         except Exception as broken:  # noqa: BLE001 -- see the docstring
             raise Exceeded(
                 f"{name!r} at {value:g} is outside its declared range, and the load-time checks "
@@ -1254,6 +1466,249 @@ class Session:
         at = self.wall_now()
         for entry in new:
             self._feed("warning", by, at, f"{entry.code}: {entry.detail}")
+
+    def _outside_sets(self, name: str, values: dict) -> list[tuple[dict, list[str]]]:
+        """**Each distinct set of values outside their ranges a trial of the run can hold, with
+        `name` at its value in `values`** (`_beyond_range`; engine build C3's spec §11 and call 27),
+        with the places it is met. First `values`, the session's own, with none. Then, for each
+        condition of each block of the run's plan (`_played`), its values over them -- but where a
+        person holds the setting (`name`, and those held once what is offered applies: `_ahead`),
+        whose value stands; a condition's own range is no number, so it is never outside a range
+        itself -- and that with each extreme of each draw in force there (`variation.extremes`, as
+        a run's start widens it): the block's own or the task's (`variation.in_force`), or the
+        condition's own range, each as a live range changed it, applied or offered (`_ahead`), but
+        one a person holds. A place reads "block 'b', condition 'c'", and for a draw's extreme ",
+        <the draw> at <its extreme>". **Once per
+        distinct set** (the outline review's M-11): `check.beyond_range`'s result depends only on
+        the values outside their ranges, so a set met in several places is listed once, naming
+        each, and one the session's own values already hold names none. Before a run has a plan,
+        the session's own alone."""
+        declared = self._declared
+        _, ahead, ranges = self._ahead()
+        held = {name, *ahead}
+
+        def outside(these: dict) -> frozenset:
+            return frozenset((n, v) for n, v in these.items()
+                             if n in declared and _outside(declared[n], v))
+
+        own = outside(values)
+        sets: dict[frozenset, tuple[dict, list[str]]] = {own: (values, [])}
+        if self._played is None:
+            return list(sets.values())
+        turned = variation.directions(self._task)
+        for block in self._played.blocks:
+            draws = variation.in_force(self._task, block)
+            for condition in block.conditions:
+                given = {**values, **{n: v for n, v in condition.values.items() if n not in held}}
+                where = f"block {block.name!r}, condition {condition.name!r}"
+                met = [(given, where)]
+                for n, (drawn, key) in {**draws, **variation.own_ranges(condition)}.items():
+                    if n in held:
+                        continue
+                    changed = ranges.get(key)
+                    drawn = drawn if changed is None else changed
+                    met += [({**given, n: end}, f"{where}, {_draw_said(key)} at {end:g}")
+                            for end in variation.extremes(drawn, declared.get(n),
+                                                          direction=n in turned)]
+                for these, place in met:
+                    which = outside(these)
+                    if which != own:
+                        sets.setdefault(which, (these, []))[1].append(place)
+        return list(sets.values())
+
+    def _possible(self, changed: dict | None = None, *, handed: frozenset = frozenset(),
+                  ranges: dict | None = None) -> str | None:
+        """**Whether the run would still hold only trials an animal can get right after a change**
+        (engine build C3's spec §9: live, "each change as offered (a value, range, hand-back or
+        revert) against every condition of the run's blocks and the draws in force, refused at
+        once, naming the conditions it would make impossible"): `check.impossible` over every block
+        of the run's plan (`_played`), with the change over what the run will hold once all offered
+        ahead of it applies (`_ahead`) -- its values with those staged over them (a ceiling's left
+        out) and each setting handed back at the run's own, the names a person holds beating
+        conditions and draws, and the draws changed live, applied or offered. The change:
+        - `changed`, values a person would hold, `{name: value}`;
+        - `handed`, names handed back, each to the run's own value (`_run_values`; absent where
+          the run has none) and no longer held;
+        - `ranges`, draws changed, keyed as `variation.in_force` keys them, a `Distribution`
+          replacing the one in force and `None` restoring the one declared.
+
+        **And the trials that keep a `same` value** (the controller's ruling of 2026-10-30 on the
+        engine C3 plan's fuzz, seed 810, under the PI's Q10): a repeat takes the value its original
+        drew for a setting declared `same`, whatever range is in force since (`_kept`), so each
+        trial waiting to be shown again is judged with the values it keeps (`_kept_trials`); and
+        while trials run, the next trial is drawn before what is offered applies, from the draws
+        applied now, and a repeat of it would keep those, so the change is judged with each `same`
+        draw it changes as applied now too. Paused, the session applies what is offered before it
+        draws again, so it is not. A finding met twice is said once; one met only in such a trial
+        says how to proceed -- clear the waiting trial, switch drumming off or pause, then make the
+        change (the C3 plan's science review, M-3).
+
+        Called once per change (`_impossible`, `_hand_back`, `_range`, and `_revert` for the whole
+        of a revert at once): `check.impossible` judges each distinct combination once.
+        Returns the reason a change is refused -- the conditions it would make impossible, as
+        `"block: condition"`, then for each the values and the fix -- or `None`. **It never raises**
+        (the C3 plan's call 26, "the live refusal fails closed"): a check that raises, or no run's
+        plan to judge, is the reason, saying the check could not run, so the change is refused,
+        never the session. Run between trials, never in a frame."""
+        try:
+            values, held, drawn = self._ahead()
+            for name in handed:
+                held.discard(name)
+                if name in self._run_values:
+                    values[name] = self._run_values[name]
+                else:
+                    values.pop(name, None)
+            for name, value in (changed or {}).items():
+                values[name] = value
+                held.add(name)
+            drawn.update(ranges or {})
+            kept = self._kept_trials()
+            blocks = [*self._played.blocks, *kept]
+            found = impossible(self._task, self._played.blocks, values, held=frozenset(held),
+                               ranges=drawn)
+            waiting = impossible(self._task, kept, values, held=frozenset(held), ranges=drawn)
+            if self.paused_at is None:
+                # The next trial is drawn before what is offered applies, from the draws applied
+                # now, and a repeat of it keeps its `same` values under the change: judged so too.
+                applied = {key: draw for key, (draw, _) in self._ranges.items()}
+                before = {key: applied.get(key) for key, draw in drawn.items()
+                          if draw != applied.get(key)
+                          and (draw if draw is not None else applied[key]).repeat == SAME}
+                if before:
+                    waiting += impossible(self._task, blocks, values, held=frozenset(held),
+                                          ranges={**drawn, **before})
+            waiting = [finding for at, finding in enumerate(waiting)
+                       if finding not in found and finding not in waiting[:at]]
+            if not found and not waiting:
+                return None
+            named = ", ".join(dict.fromkeys(subject for finding in found + waiting
+                                            for subject in finding.subjects))
+            said = "; ".join(finding.detail for finding in found + waiting)
+            if waiting:
+                # How to proceed (the C3 plan's science review, M-3).
+                said += ("; a trial waiting to be shown again, or the next one drawn before the "
+                         "change applies, keeps the value it drew for a setting declared same: "
+                         "clear the waiting trial, switch drumming off or pause, then make the "
+                         "change")
+            return (f"it would leave trials no animal can get right, in {named} ({IMPOSSIBLE}): "
+                    f"{said}")
+        except Exception as broken:  # noqa: BLE001 -- see the docstring
+            return (f"the check for trials no animal can get right could not be run "
+                    f"({type(broken).__name__}: {broken})")
+
+    def _impossible(self, name: str, value: object) -> None:
+        """**The live refusal of a value no animal can get right with** (engine build C3's spec §9;
+        the PI, 2026-10-30, Q10, "Refuse in file and live"). `_command`'s one line ahead of `set`
+        calls it with the value a console offers (the C3 spec's §14 item 2, approved for the
+        design, "Approve all four", 2026-10-30), and it raises `Exceeded` with `_possible`'s
+        reason, which the listed `except` line turns into a refusal on the feed, as it does
+        `set`'s. `set` is then never reached: nothing is staged, and a value outside its range
+        refused here writes no warning (`_beyond_range`; the outline review's I-1).
+
+        **It leaves to `set` all that `set` refuses**, so each is refused by `set`'s own sentence,
+        as it always was: a ceiling's name, never judged here, so a reward size never passes
+        through this check, even where a task declares a setting of its name; a name the task does
+        not declare, or declares not live-editable; a choice the setting does not offer; and for a
+        setting of numbers, a value that is no finite number. **Nothing but `Exceeded` leaves
+        here, but what `set` raises on the same value**: it asks what `set` asks first, in the same
+        order, so an int too large for a float, handed to `set` in this process, raises
+        `OverflowError` here as it does in `set`, and ends the session as a fault, as it did
+        before this line. A check that raises refuses the value (`_possible`). Run between trials,
+        as the command is drained, never in a frame. Not welfare-critical: the line calling it
+        is."""
+        if name in self.spec.bounds.ceilings:
+            return
+        declared = self._params().get(name)
+        if declared is None or not declared.live:
+            return
+        if declared.choices:
+            if value not in declared.choices:
+                return
+        elif (isinstance(value, bool) or not isinstance(value, (int, float))
+              or not math.isfinite(value)):
+            return
+        why = self._possible({name: value})
+        if why is not None:
+            said = _shown(value, declared.choices) if declared.choices else f"{value:g}"
+            raise Exceeded(f"{name!r} at {said} is refused, and the previous value stands: {why}")
+
+    def _offered(self) -> list:
+        """**Every change offered and not yet applied, in the order offered**: each value staged
+        (`_staged`'s `(name, was, now, by, bounded)`, as `set` stages it) and each hand-back and
+        live range pending (`_pending`), each pending act after the values staged before it was
+        offered (`Pending.after`) and ahead of those staged after it. What `_apply_staged` applies
+        and `_after_service_run` drops, and what a change offered now is judged over (`_ahead`)."""
+        return [offer for offer, _ in self._offered_acts()]
+
+    def _offered_acts(self) -> list[tuple[object, int | None]]:
+        """**`_offered`'s changes, each with the act it belongs to** (engine build C3's spec §8):
+        a revert's (`_revert`) -- for a value it staged, from `_acts` by the value's place in
+        `_staged`; for a hand-back or a range it offered, its `Pending.act` -- or `None` for a
+        change offered on its own, an act of its own. A revert offers all its changes at once,
+        its hand-backs and ranges ahead of its values, so they stand together here. What
+        `_apply_staged` gives change ids by, and `_after_service_run` says a dropped revert by."""
+        offered: list = []
+        waiting = list(self._pending)
+        for at, row in enumerate(self._staged):
+            offered += [(pending, pending.act) for pending in waiting if pending.after <= at]
+            waiting = [pending for pending in waiting if pending.after > at]
+            offered.append((row, self._acts.get(at)))
+        return offered + [(pending, pending.act) for pending in waiting]
+
+    def _ahead(self) -> tuple[dict, set, dict]:
+        """**What the run will hold once every change offered applies** (`_offered`, in its
+        order), which a change offered now is judged over (`_possible`, `_beyond_range`,
+        `_outside_sets`), so one offered after another in the same drain meets it: its values
+        (`spec.values`) with each staged over them (a ceiling's left out: no task setting holds
+        it) and each setting handed back at the run's own (`_run_values`, absent where the run has
+        none); the names a person will hold (`_edited` and those staged, less those handed back);
+        and the draws changed live, by key (`variation.in_force`'s), each to its distribution, or
+        to `None` where a pending range restores the one declared (`_ranges`, their change ids
+        left out). Between trials, never in a frame."""
+        values = dict(self.spec.values)
+        held = set(self._edited)
+        ranges: dict = {key: draw for key, (draw, _) in self._ranges.items()}
+        for act in self._offered():
+            if not isinstance(act, Pending):
+                name, _, now, _, bounded = act
+                if not bounded:
+                    values[name] = now
+                    held.add(name)
+            elif act.kind == "hand_back":
+                held.discard(act.name)
+                if act.name in self._run_values:
+                    values[act.name] = self._run_values[act.name]
+                else:
+                    values.pop(act.name, None)
+            else:
+                ranges[act.key] = act.draw
+        return values, held, ranges
+
+    def _kept_trials(self) -> list[Block]:
+        """**Each trial waiting to be shown again, with the `same` values it keeps**
+        (`Scheduler.waiting_conditions`, `_kept`), as `_possible` judges it (the controller's
+        ruling of 2026-10-30 on the engine C3 plan's fuzz, seed 810, under the PI's Q10): a
+        repeat, a drum's try or a trial again at once takes the value its original drew for each
+        setting declared `same` (`_draw`), whatever range is in force since, so a change judged
+        against the draws in force alone could leave it with no answer an animal can give. Each as
+        a block of the open block's type holding the trial's condition with those values given,
+        which `check.impossible` judges as it judges a condition's -- a value a person holds
+        beating them -- and names by the condition; one that keeps none is judged as its
+        condition is. `[]` where none waits, or before a run."""
+        scheduler = self._scheduler
+        if scheduler is None:
+            return []
+        block = scheduler.block
+        conditions = {condition.name: condition for condition in block.conditions}
+        found: list = []
+        for number, name in sorted(scheduler.waiting_conditions.items()):
+            condition = conditions[name]
+            draws = {**variation.in_force(self._task, block), **variation.own_ranges(condition)}
+            kept = {setting: value for setting, (value, _, _) in self._kept.get(number, {}).items()
+                    if setting in draws and draws[setting][0].repeat == SAME}
+            found.append(dataclasses.replace(block, factorial=None, conditions=[
+                dataclasses.replace(condition, values={**condition.values, **kept})]))
+        return found
 
     @property
     def task(self) -> str | None:
@@ -1287,8 +1742,31 @@ class Session:
 
     @property
     def staged(self) -> tuple:
-        """Every accepted change not yet applied: `(name, was, now, by, bounded)`,
-        the exact shape `link.Telemetry.of` reads to build its `Staged` rows.
+        """Every change accepted and not yet applied, in the order offered (`_offered_acts`):
+        `(name, was, now, by, bounded, kind, overrides, hands_back, to)`, the exact shape
+        `link.Telemetry.of` reads
+        to build its `Staged` rows (telemetry schema 19; engine build C3's spec §6).
+
+        - **A value staged** (`_staged`, as `set` stages it): its `was` and `now`; `kind` `set`, or
+          `revert` where a revert staged it (`_acts`).
+        - **`hands_back`**: true for every hand-back offered, a button's or a revert's, which
+          `kind` alone cannot say of a revert's (telemetry schema 19, fix round 1). Beside it, `to`,
+          where it goes (`Pending.to`: `conditions`, `draw` or `run`), empty for any other row.
+        - **A hand-back offered** (`_pending`): the person's value, then the run's own where the
+          run takes the setting back, else `None`, the open block's conditions or its draw giving
+          it again; `kind` `hand_back`, or `revert`.
+        - **A live range offered** (`_pending`): the draw before and after it, in the rig's words
+          (`variation.words`), a range offered ahead of it on the same draw counted; `kind`
+          `range`, or `revert`. No direction's range is ever offered (XC-445), so none is said
+          from 0 to 360 here.
+        - **`overrides`**, what a value will override from the next trial, named **before it
+          applies** (TSK-19; the C3 spec §6: "today only the applied line on the feed does"):
+          every condition of the run's plan that sets or draws the setting (`_overrides`); none
+          for a ceiling (a reward size, though a task setting and a condition share its name) or
+          a hand-back, which override no condition, and none before a run, when no plan is
+          played. **For a person's range**, the blocks of the run's plan it reaches
+          (`_reaches`; the C3 plan's science review, M-2); none for a revert's, which puts back a
+          range the run held.
 
         **"Not yet applied" is true of every row, bounded or not** (PI, 2026-09-19).
         It was true of only the ordinary ones until then: a bounded row's value had
@@ -1298,11 +1776,32 @@ class Session:
         belongs to -- a welfare ceiling or the task's own `Param` -- and no longer
         says anything about when it lands.
 
-        The public face of `_staged`. `link.py` reaches `Session` only through its
+        The public face of `_staged` and `_pending`. `link.py` reaches `Session` only through its
         declared surface, never a private attribute -- this is what makes that true
         rather than merely stated.
         """
-        return tuple(self._staged)
+        ranges = {key: draw for key, (draw, _) in self._ranges.items()}
+        rows = []
+        for offer, act in self._offered_acts():
+            if not isinstance(offer, Pending):
+                name, was, now, by, bounded = offer
+                rows.append((name, was, now, by, bounded, "set" if act is None else "revert",
+                             () if bounded else self._overrides(name), False, ""))
+                continue
+            kind = offer.kind if act is None else "revert"
+            if offer.kind == "hand_back":
+                rows.append((offer.name, offer.was, offer.now, offer.by, False, kind, (), True,
+                             offer.to))
+                continue
+            declared, unit = self._declared_draw(offer.key), self._declared[offer.name].unit
+            before = ranges.get(offer.key)
+            ranges[offer.key] = offer.draw
+            rows.append((
+                offer.name, variation.words(declared if before is None else before, unit),
+                variation.words(declared if offer.draw is None else offer.draw, unit),
+                offer.by, False, kind, () if act is not None else self._reaches(offer.key),
+                False, ""))
+        return tuple(rows)
 
     @property
     def recent_outcomes(self) -> tuple:
@@ -1313,21 +1812,35 @@ class Session:
     @property
     def controls(self) -> tuple:
         """The recent control events a console's changes feed lists, as `(kind, by,
-        at, said)`, oldest first (P4d-2b spec §5.1): `stop`, `pause`, `resume`, and
-        -- from the tasks that add them -- `mark`, `note`, `schedule`, `cancel`,
-        `scheduled_stop`, `set` (a staged setting applied) and `reward` (a manual
-        reward given while paused). `at` is the session's anchored clock; `said` is the
-        sentence a console shows after the kind. The public face of `_controls`,
-        for the reason `staged` is public; the session record keeps every one."""
+        at, said)`, oldest first (P4d-2b spec §5.1), each of a kind `link.Control` lists --
+        `stop`, `pause`, `resume`, `mark`, `note`, `set` (a staged setting applied), a hand-back,
+        a live range or a revert's change applied (engine build C3), and the rest. `at` is the
+        session's anchored clock; `said` is the sentence a console shows after the kind. The
+        public face of `_controls`, for the reason `staged` is public; the session record keeps
+        every one."""
         return tuple(self._controls)
 
     @property
     def parameters(self) -> tuple:
-        """Every settable value a console shows, as `(name, unit, low, high, value,
-        bounded, choices)` -- the shape `link.Telemetry.of` builds its `ParamRow`s from (P4d-2b
-        spec §3: "the parameter row is generated from it"). `choices` is the setting's own,
-        empty for a ceiling: they say whether a pair it holds is a position (schema 18, XC-401's
-        fix round, M2; `review.declares_position`).
+        """Every settable value a console shows, as `(name, unit, low, high, value, bounded,
+        choices, source, conditions, draw, numbers)` -- the shape `link.Telemetry.of` builds its
+        `ParamRow`s from (P4d-2b spec §3: "the parameter row is generated from it"). `choices` is
+        the setting's own, empty for a ceiling: they say whether a pair it holds is a position
+        (schema 18, XC-401's fix round, M2; `review.declares_position`).
+
+        **Where each value comes from** (telemetry schema 19; engine build C3's spec §6: "each
+        setting's card says where its value comes from (task, run, conditions, a draw and its
+        range, or a person) and which conditions set or draw it"), read while a run goes, as its
+        open block plays: `source` (`_source`); `conditions`, every condition of the run's plan
+        that sets or draws it (`_overrides`); `draw`, the open block's draw of it, its own or the
+        task's (`variation.in_force`) -- none where every condition of the block draws it from
+        its own range, which wins (`_own_range`) -- a range changed live in force (`_ranges`), in
+        the rig's words (`variation.words`, a direction's from 0 to 360), said while a person holds
+        it too, since a hand-back gives it back to that draw; and `numbers`, that draw's numbers a
+        person may change live (`variation.numbers`), `None` for a setting declared not live and for
+        one placing a direction (`variation.directions`), whose ranges `_range` refuses. Between
+        runs, and before the first, none of them, as for a ceiling: `None`, `()`, `None`, `None`.
+        Read between trials, never in a frame.
 
         The task's own `Param` declarations first, in declaration order, each with
         its value in `spec.values` (`None` when nobody set it); then every welfare
@@ -1339,16 +1852,150 @@ class Session:
         card for it would set the duration limit beside a fixation hold as though it
         were a task setting.
         """
-        declared = tuple(
-            (p.name, p.unit, p.low, p.high, self.spec.values.get(p.name), False, p.choices)
-            for p in self._params().values()
-        )
+        running = self.phase == "running"
+        in_force: dict = {}
+        turned: frozenset = frozenset()
+        if running:
+            in_force = variation.in_force(self._task, self._scheduler.block)
+            turned = variation.directions(self._task)
+        declared = []
+        for p in self._params().values():
+            source, conditions, draw, numbers = None, (), None, None
+            if running:
+                source, conditions = self._source(p.name, in_force), self._overrides(p.name)
+                if p.name in in_force and not self._own_range(p.name):
+                    drawn, key = in_force[p.name]
+                    drawn = self._ranges.get(key, (drawn,))[0]
+                    draw = variation.words(drawn, p.unit, direction=p.name in turned)
+                    if p.live and p.name not in turned:
+                        numbers = variation.numbers(drawn)
+            declared.append((p.name, p.unit, p.low, p.high, self.spec.values.get(p.name), False,
+                             p.choices, source, conditions, draw, numbers))
         ceilings = tuple(
-            (name, ceiling.unit, 0.0, ceiling.maximum, ceiling.value, True, ())
+            (name, ceiling.unit, 0.0, ceiling.maximum, ceiling.value, True, (), None, (), None,
+             None)
             for name, ceiling in self.spec.bounds.ceilings.items()
             if name != OUT_OF_CAGE
         )
-        return declared + ceilings
+        return tuple(declared) + ceilings
+
+    def _source(self, name: str, in_force: dict) -> str | None:
+        """**Where `name`'s value comes from in the open block** (telemetry schema 19; engine build
+        C3's spec §6), read from the layer a trial's values take last (engine spec §17.1), which
+        wins, down: `"person"` where a person holds it (`_edited`); `"conditions"` where a
+        condition of the open block draws it from its own range, which `_draw` lets win over the
+        block's and the task's draw (`_own_range`), every condition of the block doing so;
+        `"draw"` where the open block
+        draws it (`in_force`, its `variation.in_force`), as written, or `"range"` where that
+        draw's range was changed live (`_ranges`; the C3 plan's science review, I-4);
+        `"conditions"` where a condition of the
+        open block sets it, a value or its own range; `"run"` where the run was given it
+        (`_given`); `"task"` where only the task's start gives it (`_run_values`); else `None`. A
+        hand-back's `to` reads the open block the same way (`_to`)."""
+        if name in self._edited:
+            return "person"
+        if self._own_range(name):
+            return "conditions"
+        if name in in_force:
+            return "range" if in_force[name][1] in self._ranges else "draw"
+        if any(name in condition.values for condition in self._scheduler.block.conditions):
+            return "conditions"
+        if name in self._given:
+            return "run"
+        if name in self._run_values:
+            return "task"
+        return None
+
+    def _overrides(self, name: str) -> tuple[str, ...]:
+        """**The conditions a person's value of `name` overrides**: every condition of the run's
+        plan (`_played`, its factorials expanded) that sets it or draws it from its own range, by
+        name, each once, in the plan's order (engine spec §14.7; TSK-19, "a live edit to a value a
+        condition sets wins"; engine build C3's spec §6). What a card names (`parameters`), what a
+        staged change names before it applies (`staged`), and what the changes feed's line says
+        as it applies (`_apply_staged`). Empty before any run, and where no condition gives it."""
+        if self._played is None:
+            return ()
+        return tuple(dict.fromkeys(
+            condition.name for block in self._played.blocks for condition in block.conditions
+            if name in condition.values))
+
+    @property
+    def moments(self) -> tuple:
+        """**The moments of the run in progress a revert can go back to**, as `(change, at, said,
+        changes)`, newest first -- the shape `link.Telemetry.of` builds its `MomentRow`s from
+        (telemetry schema 19; engine build C3's spec §8; the outline review's M-15): from
+        `_moments`, at most `link.CONTROL_HISTORY`, since a frame is re-encoded at every boundary,
+        and **the run's start always kept**, last, so a revert to it is offered however many acts
+        came after. The session keeps every moment, so a revert sent by its change id reaches one
+        not listed here.
+        None between runs, when no revert reaches back. **Each with what a revert to it would
+        change** (`_preview`; the C3 plan's science review, M-1). The public face of `_moments`,
+        for the reason `staged` is public."""
+        if self.phase != "running":
+            return ()
+        start, *since = self._moments
+        kept = since[::-1][:_link.CONTROL_HISTORY - 1]
+        ahead = self._ahead()
+        return tuple((moment.change, moment.at, moment.said, self._preview(moment, *ahead))
+                     for moment in (*kept, start))
+
+    def _reaches(self, key: tuple) -> tuple[str, ...]:
+        """**The blocks of the run's plan a range of the draw `key` reaches** (the C3 plan's
+        science review, M-2: "the staged row names the blocks it reaches, as it names the
+        conditions a value overrides"), by name, each once, in the plan's order: each that draws
+        its setting from that draw (`variation.in_force`), so the task's draw reaches every block
+        with no draw of its own of the setting, and a block's own draw that block alone. Read
+        between trials; a range is offered only while a run goes (`_range`)."""
+        name = key[-1]
+        return tuple(dict.fromkeys(
+            block.name for block in self._played.blocks
+            if variation.in_force(self._task, block).get(name, (None, None))[1] == key))
+
+    def _undone(self, then: Moment, values: dict, held: set,
+                ranges: dict) -> tuple[dict, list, dict]:
+        """**What going back to the moment `then` changes**, from what the run will hold once all
+        offered applies (`_ahead`'s `values`, `held` and `ranges`): each setting a person held
+        then, at another value now or not held now, with its value then; each setting held now
+        and not then, sorted, handed back; and each draw changed live then or since, by key,
+        sorted, to its range then (`None`, the declared one). `_revert` applies it, and each
+        moment previews it (`_preview`), so the two cannot disagree (the C3 plan's science
+        review, M-1)."""
+        restored = {name: value for name, value in then.held.items()
+                    if name not in held or values.get(name) != value}
+        handed = sorted(held - then.held.keys())
+        drawn = {key: then.ranges.get(key) for key in sorted({*ranges, *then.ranges})
+                 if ranges.get(key) != then.ranges.get(key)}
+        return restored, handed, drawn
+
+    def _preview(self, then: Moment, values: dict, held: set, ranges: dict) -> tuple[str, ...]:
+        """**What a revert to `then` would change, in the changes feed's words** (`MomentRow`'s
+        `changes`; the C3 plan's science review, M-1: "a one-step preview listing each setting and
+        the value it will take"), in the order the revert offers them (`_revert`): each setting
+        handed back, each draw put back to its range then (`_draw_said`, "as declared" for the
+        written one), then each value set back, by name. Empty where it would change nothing,
+        which a revert refuses."""
+        restored, handed, drawn = self._undone(then, values, held, ranges)
+        said = [f"{name} handed back" for name in handed]
+        for key, draw in drawn.items():
+            declared = self._declared.get(key[-1])
+            unit = "" if declared is None else declared.unit
+            said.append(f"{_draw_said(key)} → "
+                        f"{'as declared' if draw is None else variation.words(draw, unit)}")
+        for name in sorted(restored):
+            choices = self._declared[name].choices if name in self._declared else ()
+            said.append(f"{name} → {_shown(restored[name], choices)}")
+        return tuple(said)
+
+    @property
+    def eased(self) -> tuple:
+        """**The settings a person's live change kept the latest trial out of moving up by**,
+        sorted -- the shape `link.Telemetry.of` carries as `eased` (telemetry schema 19; the
+        C3 plan's engineering review, I-2, and its science review, I-4): the loop's latest verdict
+        (`_eased`), where its block has a rule that moves the animal on (`Scheduler.moves_up`), so
+        a console says it for as long as it lasts, beside the changes feed's warning said once a
+        block. Empty where nothing is kept out, and between runs. The public face of
+        `_eased_now`."""
+        return self._eased_now if self.phase == "running" else ()
 
     def _control(
         self,
@@ -1640,11 +2287,12 @@ class Session:
         2026-10-11: "manually advance beyond or clear a specific trial in the count"), between
         trials or while paused: the open block's scheduler forgives it (`Scheduler.clear`), the
         run's end row records the shortfall with who cleared it, and `controls.jsonl` the control,
-        how many it cleared and what the condition still owes. **Refused with the sentence**, and
-        nothing changed, where the block owes the condition nothing or has no such condition. A
-        clear starts the condition's failed tries in a row over (the PI, 2026-10-18). **The wire's
-        rule again**, so a command that reached the session another way meets it: a `rest` that is
-        not true or false is refused with its sentence, as `_schedule` does."""
+        how many it cleared and what the condition still owes; since engine build C3 the change
+        log too, what it owed before and after (`_logged`; XC-363). **Refused with the
+        sentence**, and nothing changed, where the block owes the condition nothing or has no such
+        condition. A clear starts the condition's failed tries in a row over (the PI, 2026-10-18).
+        **The wire's rule again**, so a command that reached the session another way meets it: a
+        `rest` that is not true or false is refused with its sentence, as `_schedule` does."""
         if not isinstance(command.rest, bool):
             self._refuse(
                 "clear", command.by,
@@ -1653,6 +2301,11 @@ class Session:
             )
             return
         scheduler = self._scheduler
+        # What the condition owed before the clear, read before it (`was` of the change row). A
+        # name the block lacks is one `clear` refuses with its sentence, and nothing here raises.
+        owed_before = (scheduler.owed(command.condition)
+                       if command.condition in [c.name for c in scheduler.block.conditions]
+                       else None)
         said = scheduler.clear(command.condition, by=command.by, rest=command.rest)
         if said is not None:
             self._refuse("clear", command.by, said)
@@ -1662,21 +2315,27 @@ class Session:
             f"the rest, {cleared} trial{'' if cleared == 1 else 's'}," if command.rest
             else "one trial"
         )
-        self._control(
+        at = self._control(
             "clear", command.by,
             f"cleared {what} of {command.condition} in block {scheduler.block.name}; it owes "
             f"{owed}",
             index, condition=command.condition, block=scheduler.block.name, rest=command.rest,
             cleared=cleared, owed=owed,
         )
+        # `was` is what it owed before, read above: not what it owes now plus what was cleared,
+        # since a designed block's waiting trial is not among its owed places (priming owes none).
+        self._logged("clear", "owed", owed_before, owed, command.by, at,
+                     condition=command.condition, block=scheduler.block.name, rest=command.rest,
+                     cleared=cleared)
 
     def _drum(self, command, index: int) -> None:
         """**Switch drumming** (`link.Drum`; the PI, 2026-10-11: "switched on per block or run by
         the trainer", and recorded): the scheduler drums from the next trial (`Scheduler.drum`),
         `controls.jsonl` records the switch with who made it, and every trial row says whether
-        drumming was on as it was drawn. Engine build C3's change log takes it over, with its
-        reason. **The wire's rule again**, so a command that reached the session another way meets
-        it: a `scope` that is none of `DRUM_SCOPES` is refused with its sentence. `was` is what
+        drumming was on as it was drawn. Since engine build C3 the change log records it too
+        (`_logged`; XC-363), its reason build C4's (TRN-04). **The wire's rule again**, so a
+        command that reached the session another way meets it: a `scope` that is none of
+        `DRUM_SCOPES` is refused with its sentence. `was` is what
         drumming read for the block the switch is for before it (`Scheduler.drumming_switched`),
         which is the next block's when the switch is carried to it."""
         if command.scope not in DRUM_SCOPES:
@@ -1690,16 +2349,19 @@ class Session:
         was = scheduler.drumming_switched
         # The block it is for: this one, or the next when this one's end rule is already met.
         block = scheduler.drum(command.scope)
-        self._control(
+        at = self._control(
             "drum", command.by, f"drumming {command.scope} in block {block}",
             index, scope=command.scope, block=block, was=was, now=scheduler.drumming,
         )
+        self._logged("drum", "drumming", was, scheduler.drumming, command.by, at,
+                     scope=command.scope, block=block)
 
     def _train(self, command, index: int) -> None:
         """**Switch a training setting** (`link.Training`; the PI, 2026-10-18): the training aid
         *clear*, off by default, or the setting "first answers only" for a percentage rule under
         drumming, on or off for the rest of the run (`Scheduler.train`); `controls.jsonl` records
-        it with who switched it. In every kind of session ("Allow it, with a warning": a training
+        it with who switched it, and since engine build C3 the change log too (`_logged`; XC-363).
+        In every kind of session ("Allow it, with a warning": a training
         aid is meant for training sessions and works in the others, the console warning while one
         is on and every trial's row marking it). **A switch to the value already set is refused**,
         with its sentence, as a pause of a paused session is."""
@@ -1726,11 +2388,13 @@ class Session:
             self._refuse("training", command.by, f"{name} is already {state}, so nothing changed")
             return
         scheduler.train(command.setting, command.on)
-        self._control(
+        at = self._control(
             "training", command.by,
             f"{name} {'on' if command.on else 'off'} for the rest of the run",
             index, setting=command.setting, was=was, now=command.on,
         )
+        self._logged("training", command.setting, was, command.on, command.by, at,
+                     setting=command.setting)
 
     def _move(self, command, index: int, step: str) -> None:
         """**A person moves the run on to its next block, or back one** (`link.NextBlock`,
@@ -1767,6 +2431,376 @@ class Session:
             + ("" if dropped is None else f"; the drummed trial of {dropped} waiting was dropped"),
             index, block=was, to=scheduler.block.name, dropped=dropped,
         )
+
+    def _hand_back(self, command, index: int) -> None:
+        """**A person hands a setting back** (`link.HandBack`; engine build C3's spec §6; the PI,
+        2026-10-30, Q7a, "Yes, a 'hand back' button": "from the next trial the conditions' values
+        apply again, trials no longer marked; recorded as a change"), offered between trials or
+        while paused and applied at the next boundary among the values staged (`Pending`,
+        `_apply_staged`): the person's hold ends (`_edited`), and the setting goes back to the
+        run's own value (`_run_values`, the task's start under the run's; the C3 plan's call 23),
+        over which the open block's conditions or its draw give it again. Its row says what takes
+        it back (`_to`): `"draw"` where a draw of it is in force, `"conditions"` where a condition
+        gives it, else `"run"`, with the run's value as `now` -- read as it applies, in the block
+        its next trial plays (the C3 plan's engineering review, M-1). Typing the old value back
+        still does not hand it back; this does. `index`, the trial about to run, is every branch's.
+
+        **Refused, with the sentence and nothing changed**: a ceiling's name -- a reward size is
+        never held as a task setting, so a hand-back never reaches one -- a name the task does not
+        declare, one no person holds nor will once what is offered applies (`_ahead`), and one
+        whose hand-back would leave trials no animal can get right (`_possible`; the C3 spec §9),
+        or whose run value, outside its declared range, the load-time checks refuse widened with
+        the ranges and values in force now, as a typed value's (`_beyond_range`; the C3 plan's
+        engineering review, I-3).
+        **It never raises** (the C3 plan's call 20; its review, I-1): it runs beside the pause,
+        outside `_command`'s listed `try`, so a check that raises refuses the hand-back, saying it
+        could not be checked, and the session runs on. **It does not pass through `set`**: it
+        carries no new value, only the run's own, as the run started (judged then for trials no
+        animal can get right, and in a `wlx taskd` session checked by its pre-flight); the C3
+        plan's Appendix A, item 5, approved by the PI, 2026-10-31. Run between trials, never in a
+        frame. Not welfare-critical: the branch handing to it is `_command`'s."""
+        name = command.name
+        try:
+            if name in self.spec.bounds.ceilings:
+                raise Exceeded("it is a welfare ceiling, never a task setting a person holds")
+            if name not in self._declared:
+                raise Exceeded("it is not a setting this task declares")
+            values, held, _ = self._ahead()
+            if name not in held:
+                raise Exceeded("no person holds it in this run, so there is nothing to hand back")
+            to = self._to(name)
+            why = self._possible(handed=frozenset({name}))
+            if why is not None:
+                raise Exceeded(why)
+            restored = self._run_values.get(name)
+            if restored is not None and _outside(self._declared[name], restored):
+                # The run's own value, outside its declared range, meets the ranges widened since
+                # and the values held now, as a typed value would (the C3 plan's engineering
+                # review, I-3): it was checked widened only as the run started.
+                self._beyond_range(name, restored, command.by)
+            self._pending.append(Pending(
+                "hand_back", name, was=values.get(name),
+                now=self._run_values.get(name) if to == "run" else None, by=command.by,
+                after=len(self._staged), to=to,
+            ))
+        except Exceeded as refused:
+            why = f"{name!r} is not handed back: {refused}"
+            self._ceiling_refused(name, None, command.by, why, index)
+            self._refuse(name, command.by, why)
+        except Exception as broken:  # noqa: BLE001 -- see the docstring
+            self._refuse(name, command.by, (
+                f"the hand-back of {name!r} could not be checked ({type(broken).__name__}: "
+                f"{broken}), so it is refused and the session runs on"))
+
+    def _range(self, command, index: int) -> None:
+        """**A person changes the numbers of a drawn range live** (`link.SetRange`; engine build
+        C3's spec §6; the PI, 2026-10-30, Q7b, "Yes, range changes live": "recorded as a change;
+        trials stay drawn, not overridden; the record says which range each trial was drawn
+        from"), offered between trials or while paused and applied at the next boundary among the
+        values staged (`Pending`, `_apply_staged`): the draw the open block uses -- its own, else
+        the task's (`variation.in_force`) -- takes the numbers given, laid over those in force, a
+        range applied or offered before included (`variation.with_numbers`, the kind kept), for
+        the rest of the run wherever that draw applies (the C3 plan's call 22). Its trials are
+        drawn from it and name its change (`_draw`). `index`, the trial about to run, is every
+        branch's.
+
+        **Refused, with the sentence and nothing changed**, in this order:
+        - a ceiling's name (a reward size is never drawn), and a name the task does not declare;
+        - a setting the open block does not draw by its own draw or the task's -- and, said as
+          such, a condition's own range (the PI, 2026-10-30, "Not in C3": set one value over it,
+          or hand it back);
+        - a setting declared not live-editable (as `set` refuses a value of it), and one placing a
+          direction (`variation.directions`), declared in the task's terms and shown from 0 to 360
+          (XC-445);
+        - a weighted set or a prepared list (XC-443), and a number its kind does not change live
+          (`variation.LIVE_NUMBERS`);
+        - numbers that cannot be drawn (`check.undrawable`), that would leave trials no animal can
+          get right (`_possible`; the C3 spec §9), or whose extreme outside the setting's declared
+          range the load-time checks refuse widened to it, as a typed value's (`_beyond_range`),
+          whose warnings are otherwise accepted by who sent it and said. §9 is asked first, so a
+          range it refuses writes no warning; one refused at its second extreme keeps the first's
+          warning accepted, by `_beyond_range`'s rule.
+
+        **It never raises** (the C3 plan's call 20; its review, I-1): it runs beside the pause,
+        outside `_command`'s listed `try`, so a check that raises refuses the range, saying it
+        could not be checked, and the session runs on. **It does not pass through `set`**: a range
+        is a draw's numbers, never one value, each a finite number decoded by `link._setting` on
+        the wire; the C3 plan's Appendix A, item 5, approved by the PI, 2026-10-31. Run between
+        trials, never in a frame. Not welfare-critical: the branch handing to it is
+        `_command`'s."""
+        name = command.name
+        try:
+            if name in self.spec.bounds.ceilings:
+                raise Exceeded("it is a welfare ceiling, which is never drawn")
+            declared = self._declared.get(name)
+            if declared is None:
+                raise Exceeded("it is not a setting this task declares")
+            block = self._scheduler.block
+            in_force = variation.in_force(self._task, block)
+            if name not in in_force:
+                own = [condition.name for condition in block.conditions
+                       if name in variation.own_ranges(condition)]
+                if own:
+                    raise Exceeded(
+                        f"in block {block.name!r} it is drawn from condition {own[0]!r}'s own "
+                        f"range, and a condition's own range is not changed live in engine build "
+                        f"C3 (the PI, 2026-10-30, \"Not in C3\"): set one value over it, or hand "
+                        f"it back; editing it is a condition edit, the rig-edit build's")
+                raise Exceeded(f"block {block.name!r} does not draw it, by its own draw or the "
+                               f"task's")
+            if not declared.live:
+                raise Exceeded("it is declared not live-editable by this task")
+            if name in variation.directions(self._task):
+                raise Exceeded(
+                    "it places a direction, whose range is not changed live in engine build C3 "
+                    "(XC-445): the task declares it in its own terms, and the console shows it "
+                    "from 0 to 360")
+            drawn, key = in_force[name]
+            _, _, ranges = self._ahead()
+            if ranges.get(key) is not None:
+                drawn = ranges[key]
+            kind = type(drawn).__name__
+            fields = variation.LIVE_NUMBERS.get(type(drawn))
+            if fields is None:
+                raise Exceeded(
+                    f"it is drawn from a {kind}, which is not changed live in engine build C3 "
+                    f"(XC-443): only a Uniform's, a TruncatedNormal's and a NonAging's numbers "
+                    f"are")
+            unknown = [number for number in command.numbers if number not in fields]
+            if unknown:
+                raise Exceeded(f"{', '.join(map(repr, unknown))} is no number of a {kind} changed "
+                               f"live; its live numbers are {', '.join(fields)}")
+            new = variation.with_numbers(drawn, dict(command.numbers))
+            cannot = undrawable(new, declared)
+            if cannot is not None:
+                raise Exceeded(f"{variation.words(new, declared.unit)} cannot be drawn: {cannot}")
+            why = self._possible(ranges={key: new})
+            if why is not None:
+                raise Exceeded(why)
+            for end in variation.extremes(new, declared):
+                if _outside(declared, end):
+                    self._beyond_range(name, end, command.by)
+            self._pending.append(Pending(
+                "range", name, was=variation.recorded(drawn, declared),
+                now=variation.recorded(new, declared), by=command.by, after=len(self._staged),
+                key=key, draw=new,
+            ))
+        except Exceeded as refused:
+            why = f"the range of {name!r} is not changed: {refused}"
+            self._ceiling_refused(name, dict(command.numbers), command.by, why, index)
+            self._refuse(name, command.by, why)
+        except Exception as broken:  # noqa: BLE001 -- see the docstring
+            self._refuse(name, command.by, (
+                f"the range of {name!r} could not be checked ({type(broken).__name__}: "
+                f"{broken}), so it is refused and the session runs on"))
+
+    def _to(self, name: str) -> str:
+        """**What takes `name` back in the open block once a person's hold of it ends** (the C3
+        plan's call 23; its review, M-16): `"conditions"` first where every condition of the block
+        draws it from its own range (`_own_range`), which wins over any draw of it in the trial
+        loop; else `"draw"` where a draw of it is in force there (`variation.in_force`),
+        `"conditions"` where a condition gives it, else `"run"`, the run's own value. Said as a
+        hand-back is offered (`_hand_back`), and read again as it applies, in the block its next
+        trial plays (`_apply_pending`; the C3 plan's engineering review, M-1); each one a revert
+        makes too (`_revert`)."""
+        block = self._scheduler.block
+        return ("conditions" if self._own_range(name)
+                else "draw" if name in variation.in_force(self._task, block)
+                else "conditions" if any(name in condition.values
+                                         for condition in block.conditions)
+                else "run")
+
+    def _own_range(self, name: str) -> bool:
+        """Whether every condition of the open block draws `name` from its own range, which then
+        wins over the block's and the task's draw of it in the trial loop (`_draw`; Q1b), so a
+        card, a hand-back's `to` and `_source` read it first. Plans refuse a setting both drawn
+        and given a range of a condition's own (`check`); blocks given in code do not, and one
+        that mixes conditions with and without their own range plays the latter's trials from the
+        block's or the task's draw, which the card keeps showing (fix round 1 of the C3 plan's
+        Task 18; Task 17's re-review). None for a block with no conditions."""
+        conditions = self._scheduler.block.conditions
+        return bool(conditions) and all(name in variation.own_ranges(condition)
+                                        for condition in conditions)
+
+    def _playing(self):
+        """**The block the next trial plays**: the one that follows the open block where it ends at
+        this boundary by its rule (`Scheduler.following`), else the open one. A value applied as a
+        block ends is judged, worded and recorded by the block its row's `trial_number` plays
+        (the brief of Task 19; its review, Minor 1). **An end by the block's time limit is decided
+        here too** (`_elapsed - _block_from >= time_limit_s`, which no pause moves), **asked and
+        not set** (`Scheduler.following_if_expired`): the loop decides the end a few lines on, and
+        setting it here moved a drum switch drained at the boundary into the next block and read a
+        sequence-balanced block's `owed` as 0. **The known case left out**:
+        a person's `next_block` drained in the same drain as a value at the boundary moves the
+        plan after the row is applied, so that row is judged by the block that was open."""
+        scheduler = self._scheduler
+        held = scheduler.block.time_limit_s
+        timed = (held is not None and not scheduler.expired
+                 and self._elapsed - self._block_from >= held)
+        return scheduler.following_if_expired(timed) or scheduler.block
+
+    def _given_by(self, name: str, block) -> str | None:
+        """What gives `name` in `block` while no person holds it: `"conditions"` where every
+        condition draws it from its own range (`_own_range`'s rule) or any gives it a value,
+        `"draw"` where a draw of it is in force (`variation.in_force`), else None.
+
+        **The rule for a change row's `was`** (XC-288 §3.4; the controller's rulings of 2026-10-30
+        on the engine C3 plan's path test): a record must not claim a value no trial held. Where
+        this gives a name, a value a person or a revert gives it writes `was` null, and the
+        meaning's `went` and `step` null -- no single value was held before it: the run's own value
+        `set` reads lies under the draw or the conditions, and what the animal saw is each trial
+        line's `params` and `drawn`. Where it gives None (a setting a person holds, one nothing
+        gives, a reward size) the row keeps `was` and the way it went. Judged in the block the
+        row's trial plays (`_playing`); for a `set` row by the state before the pass, when its
+        `was` was read."""
+        if name in self._edited:
+            return None
+        conditions = block.conditions
+        if conditions and all(name in variation.own_ranges(c) for c in conditions):
+            return "conditions"
+        if name in variation.in_force(self._task, block):
+            return "draw"
+        if any(name in condition.values for condition in conditions):
+            return "conditions"
+        return None
+
+    def _revert(self, command, index: int) -> None:
+        """**A person takes the run back to an earlier moment** (`link.Revert`; engine build C3's
+        spec §8; the PI, 2026-10-07, TSK-43, "Yes, with revert": "any earlier state restored in
+        one action, itself recorded"), offered between trials or while paused and applied at the
+        next boundary as one act (`_apply_staged`): one change id for all its rows, of kind
+        `revert`, each naming the moment. `command.change` names it: 0, the run's start, or a
+        change id of the run in progress, which goes back to the latest moment kept at or before
+        it (`_moments`), so a clear's or a switch's goes back to what was in force then (the C3
+        plan's call 24). It goes back from what the run will hold once all offered ahead of it
+        applies (`_ahead`), so that it reaches the moment exactly:
+        - each setting a person held then, at another value now or not held now, is set to its
+          value then **through `set`, unchanged** (the C3 spec's welfare item 3), and held again;
+        - each setting held now and not then is handed back to what gives it in the open block
+          (`_to`), as the *hand back* button does;
+        - each draw changed live then or since goes back to its range then, or to the one the
+          task declares, as a live range is put in force.
+
+        **Never a bounded setting**: a reward size is no task setting a person holds and no draw,
+        so no moment holds one, and a revert neither sets nor hands back one (engine spec §17.6).
+        Counts and training aids are not reverted. `index`, the trial about to run, is every
+        branch's.
+
+        **Refused whole, with the sentence, none of it applying**: a `change` that is no whole
+        number from 0 (the wire's rule again, as `_clear` meets its own); one made before the run
+        started; one not made yet; a moment the run already holds, leaving nothing to revert; a
+        revert that would leave trials no animal can get right (`_possible`, judging all of it at
+        once, before any value is set, so a revert refused for it writes no warning); and one any
+        of whose values `set` refuses. What it staged and offered is cut back to what was there
+        before it (`_staged`, `_pending`; `_acts` is written only once all of it is accepted), and
+        no change row is written. A warning `set` accepted (`_beyond_range`) for one of its values
+        ahead of the refused one stays accepted, by that function's rule. **Its hand-backs and
+        ranges are offered ahead of its values**, which are set in the order of their names, so
+        `set` judges each value over the settings handed back and the ranges put back, not over
+        what the revert is about to undo.
+
+        **It never raises** (the C3 plan's call 20; its review, I-1): it runs beside the pause,
+        outside `_command`'s listed `try`, so a check that raises refuses the revert, saying it
+        could not be checked, and the session runs on. Its hand-backs and ranges do not pass
+        through `set`, as the buttons' do not (the C3 plan's Appendix A, item 5, approved by the PI,
+        2026-10-31): a hand-back puts back the run's own value, and a range puts back one in
+        force before, accepted when it was offered, or the declared one. Run between trials, never
+        in a frame. Not welfare-critical: the branch handing to it is `_command`'s."""
+        change = command.change
+        if isinstance(change, bool) or not isinstance(change, int) or change < 0:
+            self._refuse(command.KIND, command.by, (
+                f"a 'revert' command's change is a whole number from 0, and {change!r} is not "
+                f"one, so it is refused"))
+            return
+        where = _back_to(change)
+        staged, pending = len(self._staged), len(self._pending)
+        try:
+            if 0 < change <= self._change_at_start:
+                raise Exceeded(
+                    f"change {change} was made before run {self.run_index + 1} started, and a "
+                    f"revert goes back within the run in progress, to one of its changes or to "
+                    f"its start (0)")
+            if change > self._change:
+                raise Exceeded(f"no change {change} has been made yet")
+            then = next(moment for moment in reversed(self._moments) if moment.change <= change)
+            values, held, ranges = self._ahead()
+            restored, handed, drawn = self._undone(then, values, held, ranges)
+            if not (restored or handed or drawn):
+                raise Exceeded(
+                    "the run holds now what it held then, so there is nothing to revert")
+            why = self._possible(restored, handed=frozenset(handed), ranges=drawn)
+            if why is not None:
+                raise Exceeded(why)
+            self._act += 1
+            act = self._act
+            for name in handed:
+                to = self._to(name)
+                self._pending.append(Pending(
+                    "hand_back", name, was=values.get(name),
+                    # `now` is read as it applies today (`_apply_pending`); `Session.staged`
+                    # reads this one, for the console's list of what is staged.
+                    now=self._run_values.get(name) if to == "run" else None, by=command.by,
+                    after=staged, to=to, act=act,
+                ))
+            for key, draw in drawn.items():
+                declared, before = self._declared.get(key[-1]), ranges.get(key)
+                self._pending.append(Pending(
+                    "range", key[-1], by=command.by, after=staged, key=key, draw=draw, act=act,
+                    was=variation.recorded(
+                        self._declared_draw(key) if before is None else before, declared),
+                    now=variation.recorded(
+                        self._declared_draw(key) if draw is None else draw, declared),
+                ))
+            for name in sorted(restored):
+                self.set(name, restored[name], by=command.by)
+            self._acts.update(dict.fromkeys(range(staged, len(self._staged)), act))
+            self._act_moments[act] = change
+        except Exceeded as refused:
+            del self._staged[staged:]
+            del self._pending[pending:]
+            self._refuse(command.KIND, command.by,
+                         f"the revert to {where} is refused, and none of it applies: {refused}")
+        except Exception as broken:  # noqa: BLE001 -- see the docstring
+            del self._staged[staged:]
+            del self._pending[pending:]
+            self._refuse(command.KIND, command.by, (
+                f"the revert to {where} could not be checked ({type(broken).__name__}: "
+                f"{broken}), so it is refused, none of it applies, and the session runs on"))
+
+    def _declared_draw(self, key: tuple) -> Distribution:
+        """The draw `key` names as the task declares it (`variation.in_force`'s keys): the task's,
+        or a block's own, of the run's plan. What a range changed live is judged against
+        (`_range_went`; the trials drawn from it, `_eased`), and what a revert puts back where it
+        removes one, its row writing it (`_revert`)."""
+        if key[0] == "task":
+            return self._task.draws[key[1]]
+        return next(block for block in self._played.blocks if block.name == key[1]).draws[key[2]]
+
+    def _range_went(self, act: Pending) -> str | None:
+        """**Which way a range changed live went**, as its row's `meaning` says it, judged as a
+        whole against the range the task writes (`_declared_draw`; the PI, 2026-10-31, on the
+        engine C3 plan's Appendix B, item 18, "Judge the range as a whole (Recommended)": "The
+        change's row in the change log says which way it went"): `"easier"` where it counts as
+        easier than the written range (`variation.easier_range`: a number placing its values moved
+        the easier way, a mixed change among them), `"harder"` where it moved only the harder way,
+        `None` where it is the written range again -- by its numbers or a revert to the declaration
+        -- where which way cannot be read, or for a name no setting of the task. A meaning relative
+        to another setting reads that setting's value in the run's values as the row applies, as
+        `_meaning` does."""
+        found = None if self._task is None else resolved(self._task).get(act.name)
+        if found is None:
+            return None
+        meaning = found[0]
+        written = self._declared_draw(act.key)
+        drawn = written if act.draw is None else act.draw
+        declared = self._declared.get(act.name)
+        relative = meaning.relative_to
+        reference = self.spec.values.get(relative) if isinstance(relative, str) else None
+        if variation.easier_range(meaning, drawn, written, declared, reference):
+            return EASIER
+        if variation.easier_range(meaning, written, drawn, declared, reference):
+            return HARDER
+        return None
 
     def _ends(self, index: int) -> bool:
         """Whether the session must end at this boundary, with its reason and kind
@@ -1988,6 +3022,20 @@ class Session:
             self.refusals_dropped += len(self.refusals) - _link.REFUSAL_HISTORY
             del self.refusals[: -_link.REFUSAL_HISTORY]
 
+    def _ceiling_refused(self, name: str, asked, by: Actor | None, why: str, index: int) -> None:
+        """**A hand-back or a range that named a ceiling, refused, into the session record too**
+        (the PI, 2026-09-19, `record.SessionRecord.refusal`: telemetry is lossy, and an attempt on
+        a dose is asked months later): the row `_command`'s setting path writes, with `asked` the
+        range's numbers, or `None` for a hand-back. Nothing for any other name. Never raises."""
+        if name not in self.spec.bounds.ceilings or self._record is None:
+            return
+        try:
+            self._record.refusal(name=name, asked=asked, by=by, why=why, trial_index=index,
+                                 session_seconds=self.now())
+        except Exception as broken:  # noqa: BLE001 -- the refusal itself still stands
+            self._refuse(name, by, f"the refusal of {name!r} could not be recorded "
+                                   f"({type(broken).__name__}: {broken})")
+
     def _command(self, command, index: int, held: bool = False) -> None:
         """A console's request, routed to the one write path.
 
@@ -2099,6 +3147,15 @@ class Session:
         if isinstance(command, _link.BackBlock):
             self._move(command, index, BACK)
             return
+        if isinstance(command, _link.HandBack):
+            self._hand_back(command, index)
+            return
+        if isinstance(command, _link.SetRange):
+            self._range(command, index)
+            return
+        if isinstance(command, _link.Revert):
+            self._revert(command, index)
+            return
         if not isinstance(command, _link.SetParameter):
             # A command this session has no branch for -- a newer console's -- is
             # refused under its kind, as `drain` refuses an unknown kind on the
@@ -2111,6 +3168,7 @@ class Session:
             )
             return
         try:
+            self._impossible(command.name, command.value)
             self.set(command.name, command.value, by=command.by)
         # **Welfare-critical, this one line** (`docs/design/architecture.md`, like
         # `cli.main`'s `confirmed=` line): it makes a malformed setting a refusal
@@ -2197,15 +3255,77 @@ class Session:
         lists every setting change, with who made it), as `set`, naming `index`,
         the first trial it applies to: its staged row leaves `Telemetry.staged`
         here, and the feed is where a console still sees it.
+
+        **Each row is an act of its own in the change log** (XC-288 §3.4; engine build C3's
+        spec §8): a change id of its own, assigned here where it applies and never in `set`,
+        which stays as it was; one `PARAM_CHANGED` strobe with its `sequence`; then its row,
+        kind `set` (`record.SessionRecord.change`), at the instant it applied, naming the next
+        trial to start as the first it applies to, with the setting's meaning (`_meaning`; none
+        for a ceiling's), the value written as given, and `was` written null, with the meaning's
+        `went` and `step`, where no person held the setting and the block its trial plays gave
+        it, by its draw or its conditions (`_given_by`; judged, for a `set` row, by the state
+        before the pass, when its `was` was read; a revert row's, live); then its line on the
+        feed, at that instant, saying what gave the setting where the row writes `was` null ("its
+        draw", "its conditions"), else what `set` read.
+        A bounded row still goes through `bounds.set`, in the same pass as its strobe and row.
+
+        **A hand-back and a live range offered are applied here too** (`_pending`; engine build
+        C3's spec §6; the engine C3 plan's call 19), each in its place among the values staged, in
+        the order offered (`_offered`), each an act of its own with a change id, a strobe and a
+        row, of kind `hand_back` or `range` (`_apply_pending`). **Neither passes through `set` or
+        `bounds`**: a hand-back carries no new value, and a range is no value.
+
+        **A revert is one act** (`_revert`; engine build C3's spec §8; the engine C3 plan's call
+        19, the applier's third step): every change it offered -- values staged through `set`,
+        hand-backs and ranges (`_offered_acts`) -- takes one change id, each still with its own
+        strobe, `sequence`, row and line on the feed, of kind `revert`, naming the moment it goes
+        back to (`moment`). A revert's row says what the setting held just before it applied.
+        **After each act that moves a task setting or a range a moment is kept** (`_keep_moment`),
+        which a revert can go back to; a reward size's act moves neither, and keeps none.
         """
-        if not self._staged:
+        if not self._staged and not self._pending:
             return
         # Looked up once, before anything is applied or written: an allocation without it
         # raises here, not after the first value is applied and its row written (XC-321
         # ask 1; the orphan row a `wlx run` session used to leave).
         code = self.allocation.code_for("PARAM_CHANGED")
-        for name, was, now, by, bounded in self._staged:
+        # The next trial to start (`Levels.start_trial`), numbered as its line will be.
+        trial_number = self._levels.trials + 1
+        offered = self._offered_acts()
+        # What gave each value's setting before this pass, in the block its trial plays: a `set`
+        # row's `was` was read then (`set`), so two values of one setting in one drain both write
+        # none; a revert row reads its `was` at its own place, so it is judged live (`_apply_staged`).
+        playing = self._playing()
+        # A reward size is no task setting a draw or a condition gives (Call 2): it keeps its `was`.
+        before = {offer[0]: None if offer[4] else self._given_by(offer[0], playing)
+                  for offer, _ in offered if not isinstance(offer, Pending)}
+        for place, (offer, act) in enumerate(offered):
             self._sequence += 1
+            # One change id for each act: a change offered on its own, or all of one revert's,
+            # which stand together (`_offered_acts`); a moment kept as each act closes.
+            if act is None or place == 0 or offered[place - 1][1] != act:
+                self._change += 1
+            closes = act is None or place + 1 == len(offered) or offered[place + 1][1] != act
+            moment = None if act is None else self._act_moments[act]
+            if isinstance(offer, Pending):
+                applied = self._apply_pending(offer, code, trial_number, index)
+                if closes:
+                    self._keep_moment(self._pending_said(applied) if moment is None
+                                      else f"reverted to {_back_to(moment)}")
+                continue
+            name, was, now, by, bounded = offer
+            kind = "set" if moment is None else "revert"
+            if moment is not None:
+                # A revert's row says what the setting held just before it, which all offered
+                # ahead of it has made by now: `set`'s `was` is the value before this
+                # inter-trial interval (its docstring), not before this row.
+                was = self.spec.values.get(name)
+            # No single value is "before" on a setting the block this row's trial plays draws or
+            # its conditions give: its row says none, and no way it went (`_given_by`); the feed
+            # says what gave it.
+            given = (before[name] if moment is None
+                     else None if bounded else self._given_by(name, playing))
+            written = None if given else was
             if bounded:
                 self.spec.bounds.set(name, now, by=by)
             else:
@@ -2216,21 +3336,195 @@ class Session:
             # Strobed before its row is written, as every other writer does: a card that
             # faults here leaves no row naming a code that never went out (XC-321 ask 1).
             self.card.emit(code)
+            at = self.wall_now()
             if self._record is not None:
-                self._record.parameter_change(
-                    self._sequence, name, was, now, by, run=self.run_index, event_code=code
+                self._record.change(
+                    change=self._change, kind=kind, name=name, was=written, now=now, by=by,
+                    at=at, trial_number=trial_number, run=self.run_index,
+                    meaning=None if bounded else self._meaning(name, written, now),
+                    event_code=code, sequence=self._sequence,
+                    **({} if moment is None else {"moment": moment}),
                 )
             # A pair as a position only for a setting whose choices declare one (XC-401's fix
             # round, M2): a ceiling's name is no setting the task declares.
             choices = () if bounded or name not in self._declared else self._declared[name].choices
+            # Where the record writes no `was`, the feed says what gave the setting, not a value no
+            # trial held (the controller's ruling on Task 19's review, Minor 4).
+            held = f"its {given}" if given else _shown(was, choices)
+            said = f"{name} {held} → {_shown(now, choices)}"
+            back = "" if moment is None else f", reverting to {_back_to(moment)}"
             self._feed(
-                "set",
+                kind,
                 by,
-                self.wall_now(),
-                f"{name} {_shown(was, choices)} → {_shown(now, choices)}, from trial {index}"
-                + ("" if bounded else _overriding(self._scheduler.blocks, name)),
+                at,
+                f"{said}{back}, from trial {index}"
+                + ("" if bounded else _overrides_said(self._overrides(name))),
             )
+            # A reward size's act moves no task setting and no range: it keeps no moment, and no
+            # revert reaches it.
+            if closes and not bounded:
+                self._keep_moment(said if moment is None else f"reverted to {_back_to(moment)}")
         self._staged.clear()
+        self._pending.clear()
+        self._acts.clear()
+        self._act_moments.clear()
+
+    def _apply_pending(self, act: Pending, code: int, trial_number: int, index: int) -> Pending:
+        """**One hand-back or live range applied** (`_apply_staged`, whose change id, `sequence`,
+        code and first trial it is given; engine build C3's spec §6 and §8). A hand-back ends the
+        person's hold (`_edited`), so the open block's conditions or its draw give the setting
+        again and its trials are no longer marked, and puts it back to the run's own value
+        (`_run_values`; absent where the run has none). A range puts its draw in force for the
+        rest of the run wherever that draw applies, with this change id, which the trials drawn
+        from it name (`_ranges`, `_draw`); with no draw, the one declared is in force again. Then,
+        as a value's row is: one `PARAM_CHANGED` strobe, its row (`record.SessionRecord.change`)
+        with the kind's own fields -- a hand-back's `to`, a range's `from` and `block` -- and its
+        line on the changes feed. **A range's meaning says which way it went, judged as a whole**
+        against the range the task writes (`_range_went`; the PI, 2026-10-31, on the engine C3
+        plan's Appendix B, item 18), its `step` null: a range is no single value. **A hand-back's
+        `to` and `now` are read as it applies** (`_to`), in the block its next trial plays, not as
+        offered. **A revert's** (`Pending.act`) is written as a `revert` row naming the moment it
+        goes back to, and one it hands back reads `now` null with no `to`, as the change log's
+        `revert` row is told to wl-preproc. **Returns the change as it applied** (a hand-back with
+        the `to` and `now` it was read with), which is what the moment `_apply_staged` keeps says."""
+        name = act.name
+        moment = None if act.act is None else self._act_moments[act.act]
+        if act.kind == "hand_back":
+            # What takes it back, and the run's value, read now, in the block the next trial
+            # plays: one offered as a block ends applies in the next (the C3 plan's engineering
+            # review, M-1; a record claims no value no trial held).
+            to = self._to(name)
+            act = dataclasses.replace(act, to=to,
+                                      now=self._run_values.get(name) if to == "run" else None)
+            self._edited -= {name}
+            if name in self._run_values:
+                self.spec.values[name] = self._run_values[name]
+            else:
+                self.spec.values.pop(name, None)
+            detail = {"to": act.to}
+        else:
+            if act.draw is None:
+                self._ranges.pop(act.key, None)
+            else:
+                self._ranges[act.key] = (act.draw, self._change)
+            detail = {"from": act.key[0], "block": act.key[1] if act.key[0] == "block" else None}
+        kind, now = act.kind, act.now
+        if moment is not None:
+            # One of a revert's rows (the C3 spec §8): naming the moment it goes back to, a
+            # range's `from` and `block` kept, a setting handed back with `now` null, no `to`.
+            kind = "revert"
+            detail = {"moment": moment, **({} if act.kind == "hand_back" else detail)}
+            now = None if act.kind == "hand_back" else now
+        meaning = self._meaning(name, act.was, now)
+        if act.kind == "range" and meaning is not None:
+            # Which way the new range went, judged as a whole against the range the task writes
+            # (the PI, 2026-10-31, on the engine C3 plan's Appendix B, item 18).
+            meaning = {**meaning, "went": self._range_went(act)}
+        # Strobed before its row is written, as every other writer does: a card that faults here
+        # leaves no row naming a code that never went out (XC-321 ask 1).
+        self.card.emit(code)
+        at = self.wall_now()
+        if self._record is not None:
+            self._record.change(
+                change=self._change, kind=kind, name=name, was=act.was, now=now,
+                by=act.by, at=at, trial_number=trial_number, run=self.run_index, meaning=meaning,
+                event_code=code, sequence=self._sequence, **detail,
+            )
+        back = "" if moment is None else f", reverting to {_back_to(moment)}"
+        self._feed(kind, act.by, at, f"{self._pending_said(act)}{back}, from trial {index}")
+        return act
+
+    def _pending_said(self, act: Pending) -> str:
+        """A hand-back or a live range as the changes feed says it, applied (`_apply_pending`) or
+        dropped (`_after_service_run`): the setting and the person's value, handed back to what
+        takes it back in the open block; or which draw takes which numbers, in the rig's words
+        (`variation.words`), or "as declared" where it goes back to the declared one."""
+        declared = self._declared.get(act.name)
+        if act.kind == "hand_back":
+            choices = () if declared is None else declared.choices
+            if act.to != "run":
+                to = f"its {act.to}"
+            elif act.now is None:
+                to = "the run, which gives it no value"
+            else:
+                to = f"the run's {_shown(act.now, choices)}"
+            return f"{act.name} {_shown(act.was, choices)} handed back to {to}"
+        unit = "" if declared is None else declared.unit
+        drawn = "as declared" if act.draw is None else variation.words(act.draw, unit)
+        return f"{_draw_said(act.key)} → {drawn}"
+
+    def _keep_moment(self, said: str) -> None:
+        """**A moment a revert can go back to, kept as an act applies** (`Moment`; engine build C3's
+        spec §8; `_apply_staged`): the act's change id, now, `said`, and what the live layer holds
+        once it applied -- each setting a person holds, with its value (`_edited`), and each draw
+        changed live (`_ranges`, its change id left out) -- each in sorted order, so a revert's
+        rows come out in one order in every process. Between trials, never in a frame."""
+        self._moments.append(Moment(
+            self._change, self.wall_now(), said,
+            {name: self.spec.values.get(name) for name in sorted(self._edited)},
+            {key: self._ranges[key][0] for key in sorted(self._ranges)},
+        ))
+
+    def _meaning(self, name: str, was: object, now: object) -> dict | None:
+        """**What a change of `name` from `was` to `now` means**, as its change row writes it
+        (XC-288 §3.4 and §4.1; TRN-03): the setting's resolved meaning (`declarations.resolved`),
+        its `kind`, `role`, `raising` and `relative_to` as written (`"background"` for the trial's
+        background), with `went`, the way this change went by that meaning, `"easier"` or
+        `"harder"` (for an expected setting the expected way, never a fact), and `step`, `now`
+        minus `was` in the setting's unit. **`None` for a name that is no setting of the run's
+        task**, whose row writes no meaning.
+
+        **`went`** is `variation.easier` read both ways round: easier one way is `"easier"`, the
+        other way `"harder"`. **A choice, or a value that is not a number, has no order** (TRN-11:
+        a task's own meaning for one "reads on changing it"), so a change goes the way its
+        `raising` says, as `easier` reads a choice, where it can read one at all. Null where it
+        cannot be read (relative to the background, or to a setting holding no number), for a
+        setting that is not a difficulty setting, for a value set to itself, and for two numbers
+        as far from what the meaning reads relative to. A meaning relative to another setting
+        reads that setting's value in the run's values as this row applies. **`step`** is null
+        where either value is not a number."""
+        found = None if self._task is None else resolved(self._task).get(name)
+        if found is None:
+            return None
+        meaning = found[0]
+        relative = meaning.relative_to
+        reference = self.spec.values.get(relative) if isinstance(relative, str) else None
+        choices = bool(self._declared[name].choices)
+        numbers = all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (was, now))
+        went = None
+        if meaning.kind != NOT_DIFFICULTY and was != now:
+            if choices or not numbers:
+                if easier(meaning, now, was, reference, choices=choices) is not None:
+                    went = meaning.raising
+            elif easier(meaning, now, was, reference):
+                went = EASIER
+            elif easier(meaning, was, now, reference):
+                went = HARDER
+        return {
+            "kind": meaning.kind,
+            "role": meaning.role,
+            "raising": meaning.raising,
+            "relative_to": "background" if isinstance(relative, Background) else relative,
+            "went": went,
+            "step": now - was if numbers else None,
+        }
+
+    def _logged(self, kind: str, name: str, was: object, now: object, by: Actor | None,
+                at: float, **detail: object) -> None:
+        """**A clear or a switch in the change log too** (XC-363; engine build C3's spec §8): its
+        control row is in `controls.jsonl` as engine build C2a writes it (`_control`), and this
+        row beside it, of `kind`, with a change id of its own, `name` what it moved, the control
+        row's instant, the next trial to start as the first it applies to, and no meaning, since
+        it names no task setting. **No `sequence`**: it strobes nothing. Both rows until
+        wl-preproc reads and times the change log's (XC-442; the C3 ask in
+        `docs/pending-wl-preproc-amendments.md`)."""
+        self._change += 1
+        if self._record is not None:
+            self._record.change(
+                change=self._change, kind=kind, name=name, was=was, now=now, by=by, at=at,
+                trial_number=self._levels.trials + 1, run=self.run_index, meaning=None,
+                event_code=None, **detail,
+            )
 
     # --- running ----------------------------------------------------------
 
@@ -2241,16 +3535,68 @@ class Session:
     #: The (stimulus name, reason) pairs the run in progress has said on the changes feed a trial's
     #: line could not resolve (`_unresolved`; XC-399): each once a run.
     _unresolved_said: frozenset = field(init=False, default=frozenset(), repr=False)
+    #: The (run, block, setting) a changes feed's warning has said a live change keeps trials out
+    #: of moving up in (`_kept_out`; the C3 plan's engineering review, I-2): each once a block.
+    _eased_said: frozenset = field(init=False, default=frozenset(), repr=False)
     #: `_task`'s settings by name, built once as it is taken (`_take`).
     _declared: dict[str, Param] = field(init=False, default_factory=dict, repr=False)
+    #: **The run's own values** (engine build C3): the task's starting values under the run's
+    #: given ones, as the run in progress started, before any live edit: what a hand-back puts a
+    #: setting back to, and what an eased trial is judged against where no condition gives it
+    #: (`Session._hand_back`, `_eased`: the engine C3 plan's Tasks 13 and 15).
+    _run_values: dict = field(init=False, default_factory=dict, repr=False)
+    #: **The names the run in progress was given a value for** (its start row's `run` layer), the
+    #: rest of `_run_values` the task's starts: a card says which its value comes from
+    #: (`_source`; telemetry schema 19).
+    _given: frozenset = field(init=False, default=frozenset(), repr=False)
+    #: **The settings a person's change kept the latest trial out of moving up by**, where
+    #: its block's rule moves the animal on (`eased`; the C3 plan's engineering review, I-2).
+    _eased_now: tuple = field(init=False, default=(), repr=False)
+    #: **The draws a person changed live in the run in progress** (engine build C3's spec §6, Q7b):
+    #: each draw's key (`variation.in_force`'s) to the distribution in force and the change id that
+    #: put it there. Empty as each run starts; filled only by a live range as it applies
+    #: (`Session._range` offers it, `_apply_pending` applies it).
+    _ranges: dict[tuple, tuple[Distribution, int]] = field(
+        init=False, default_factory=dict, repr=False)
+    #: **What each trial of the run in progress drew, kept for a repeat of it** (engine build C3's
+    #: call 13; the PI, 2026-10-30, Q3 and "Follow same/fresh"): by the trial's number in the run
+    #: (`Draw.number`), each setting it drew as `(value, source, original)` -- the value in the
+    #: task's own terms, where it came from as its line's `drawn` writes it, and the number of the
+    #: trial whose key drew it. Kept only while a repeat, a drum's try or a trial again at once
+    #: names that trial (`Scheduler.waiting`), pruned between trials (`run`); empty as each run
+    #: starts. A `SAME` setting's repeat takes its value and source from here, never drawing it
+    #: again, so a range changed live meanwhile does not move it (`_draw`).
+    _kept: dict[int, dict[str, tuple[object, object, int]]] = field(
+        init=False, default_factory=dict, repr=False)
+    #: **How many fresh draws each prepared list has given in the run in progress** (engine build
+    #: C3's call 7), by its draw's key: the place in its shuffled passes its next fresh draw takes
+    #: (`variation.draw`'s `ordinal`). A `SAME` repeat does not advance it. Empty as each run
+    #: starts.
+    _listed: dict[tuple, int] = field(init=False, default_factory=dict, repr=False)
+    #: **What varied in each block of the run in progress** (engine build C3's spec §10; XC-344),
+    #: by the block's occurrence in the run -- `len(Scheduler.ended)` while it is open, so its
+    #: place among the end row's `block_ends` -- each setting that varied in it to the ways it
+    #: varied (`_vary`). Filled between trials, as each trial is drawn, so a block that ran no
+    #: trial has no entry; empty as each run starts.
+    _varied: dict[int, dict[str, list[dict]]] = field(
+        init=False, default_factory=dict, repr=False)
+    #: **Each condition's trial lines in each block of the run in progress** (the C3 plan's
+    #: science review, M-4), keyed as `_varied` is: its lines, those a person's value overrode
+    #: and those kept out of moving up, for the block's end row (`counts`). Empty as each run
+    #: starts.
+    _tallies: dict[int, dict[str, dict[str, int]]] = field(
+        init=False, default_factory=dict, repr=False)
 
     def _unwritable(self, task: Task, run: RunSpec, values: dict) -> str | None:
         """**What the record would refuse of a run, said before the run starts** (REC-27; the
         appearance-record review's M2): every value the run can record, written as the record's
         writers write it (`record.unwritable`) -- its own values (`values`, the task's starting
         values under the run's), a change staged before it, which its first boundary records,
-        each value a condition of its plan sets, and each choice each setting offers, which a
-        console may set live. The sentence for the first the record refuses, or `None`.
+        each value a condition of its plan sets, its factorials' made among them, **each value a
+        draw in force can give** -- a weighted set's or a prepared list's, the task's, a block's
+        or a condition's own range (engine build C3; a value drawn from a range is a number,
+        which the record always writes) -- and each choice each setting offers, which a console
+        may set live. The sentence for the first the record refuses, or `None`.
 
         A value the record refuses otherwise faults the run at the first row that holds it: the
         start row, once the run is numbered; a change row, ending the run; or a condition's trial
@@ -2258,20 +3604,30 @@ class Session:
         resume counts it short. `check` refuses every such value the review of REC-27 found (a
         condition's value is one of its setting's choices, and a bare setting, or a `Polar` holding
         one, among an appearance's or a position's choices is refused), so this is the backstop for
-        one a later build admits. **Values drawn per trial (engine build C3) must join this list
-        when they exist**: a drawn value is recorded on its trial's line like a condition's. Not
-        welfare-critical: it reads, and faults a run before anything of it happens. Run once, as a
-        run starts, never in a trial."""
+        one a later build admits. A drawn value is recorded on its trial's line like a
+        condition's, so each a draw can give is tried here too. Not welfare-critical: it reads,
+        and faults a run before anything of it happens. Run once, as a run starts, never in a
+        trial."""
+        blocks = self._plan(run, task).blocks
         offered = [(f"the run's value of {name!r}", value) for name, value in values.items()]
         offered += [(f"the change to {name!r} staged before the run", value)
                     for name, was, now, _, _ in self._staged for value in (was, now)]
         offered += [
             (f"the value condition {condition.name!r} of block {block.name!r} sets for {name!r}",
              value)
-            for block in self._plan(run, task).blocks
+            for block in blocks
             for condition in block.conditions
             for name, value in condition.values.items()
         ]
+        draws: dict[tuple, Distribution] = {}
+        for block in blocks:
+            draws.update({key: drawn for drawn, key in variation.in_force(task, block).values()})
+            for condition in block.conditions:
+                draws.update({key: drawn
+                              for drawn, key in variation.own_ranges(condition).values()})
+        offered += [(f"value {at} of {_draw_said(key)}", value)
+                    for key, drawn in draws.items()
+                    for at, value in enumerate(variation.values_of(drawn), 1)]
         offered += [(f"choice {at} of setting {param.name!r}", choice)
                     for param in task.params for at, choice in enumerate(param.choices, 1)]
         for said, value in offered:
@@ -2280,6 +3636,122 @@ class Session:
                 return (f"the record cannot write {said}, {value!r} ({why}), and a row holding it "
                         f"would fault the run, so it does not start")
         return None
+
+    def _eased(self, condition: Condition, values: dict, drawn: dict,
+               number: int) -> tuple[str, ...]:
+        """**The settings whose live change keeps this trial out of moving up**, sorted (engine
+        build C3's spec §7; the PI: with the C2b merge, Q8, "Merge; fix eased trials in C3" -- a
+        trial a person's change made easier does not count toward moving up, a training stage's
+        pass rule or the criterion that ends a block, and does count toward moving back -- and on
+        an expected setting, "No, after any change"; TRN-14). The trial's line names them
+        (`eased`), and `Scheduler.record` keeps a trial with any out of moving up. Judged between
+        trials, before the trial runs, never in a frame.
+
+        **The settings a live change reaches on the trial:** each a person holds (`_edited`), and
+        each drawn from a range changed live (`drawn`, the line's sources, naming the change that
+        put the range in force). **A range changed live is judged as a whole**, never by the value
+        the trial drew (`_range_eases`; the PI, 2026-10-31, on the engine C3 plan's Appendix B,
+        item 18): every trial drawn from it is kept out while it counts as easier than the range
+        the task writes, or which way it went cannot be read, until it is put back. **A value a
+        person holds** is read by its declared meaning (`declarations.resolved`; TRN-03), its
+        value in `values` against what the trial would otherwise have had:
+        - **where a draw gives the setting in the open block** -- its own or the task's
+          (`variation.in_force`), or the condition's own range (`own_ranges`) -- the value the
+          seed draws for the trial **from the range as written**, never from one changed live: on
+          a `SAME` setting's repeat, for the trial whose key drew it (`_kept`'s `original`; the
+          engine C3 plan's call 13), else for this one (`number`), a prepared list at the place
+          its next fresh draw takes; where the trial a repeat shows again drew the value from the
+          declaration, that value;
+        - **else** the value the trial's condition gives;
+        - **else** the run's own (`_run_values`), `None` where the run gives it none.
+
+        An **expected** setting keeps the trial out at any value but that one, either way (the PI,
+        "No, after any change"; TRN-06: "each expected setting at that value"). A **clear-cut**
+        one does where its value is easier (`variation.easier`; a choice, or an appearance, read
+        by its `raising`, TRN-11) **and where which way it went cannot be read** -- relative to the
+        trial's background or to a setting holding no number, or against no value: an animal is
+        never moved up on doubt (the engine C3 plan's Appendix B, item 2). One declared **not a
+        difficulty setting** never does (`easier` reads it as moving the task neither way). A
+        meaning relative to another setting reads that setting as the trial has it. A name that
+        is no setting of the run's task (a value staged before the run under the task the session
+        last named) nothing of the trial reads, and it keeps nothing out. A hand-back ends a
+        hold, so from the next trial its setting is judged no more."""
+        task, scheduler = self._task, self._scheduler
+        draws = {**variation.in_force(task, scheduler.block), **variation.own_ranges(condition)}
+        # `_draw` keeps under a repeat's own number the entry of the trial it repeats for each
+        # setting it takes (a `same` one) or a person holds (any), with the number whose key
+        # drew it; only a `same` setting's is what the repeat would have had, a `fresh` one being
+        # drawn on the repeat's own number.
+        mine = self._kept.get(number, {})
+        meanings = resolved(task)
+        reached = self._edited | {name for name, source in drawn.items()
+                                  if not isinstance(source, str)}
+        eased = []
+        for name in sorted(name for name in reached if name in meanings):
+            meaning = meanings[name][0]
+            source = drawn.get(name)
+            if source is not None and not isinstance(source, str) and name in draws:
+                # **Drawn from a range changed live: the range judged as a whole** against the
+                # range as written, never the value it drew (the PI, 2026-10-31, on the engine C3
+                # plan's Appendix B, item 18, "Judge the range as a whole").
+                if self._range_eases(meaning, name, *draws[name], source, values):
+                    eased.append(name)
+                continue
+            if name in draws:
+                declaration, key = draws[name]
+                entry = mine.get(name) if declaration.repeat == SAME else None
+                if entry is not None and isinstance(entry[1], str):
+                    otherwise = entry[0]
+                else:
+                    otherwise = variation.draw(
+                        declaration, self._run.seed, number if entry is None else entry[2], key,
+                        declared=self._declared.get(name),
+                        ordinal=self._listed.get(key, 0) if isinstance(declaration, Listed) else 0)
+            elif name in condition.values:
+                otherwise = condition.values[name]
+            else:
+                otherwise = self._run_values.get(name)
+            now = values.get(name)
+            if meaning.kind == EXPECTED:
+                if now != otherwise:
+                    eased.append(name)
+                continue
+            relative = meaning.relative_to
+            reference = values.get(relative) if isinstance(relative, str) else None
+            if easier(meaning, now, otherwise, reference,
+                      choices=bool(self._declared[name].choices)) is not False:
+                eased.append(name)
+        return tuple(eased)
+
+    def _range_eases(self, meaning, name: str, declaration: Distribution, key: tuple,
+                     change: int, values: dict) -> bool:
+        """**Whether a trial drawn from a range changed live is kept out of moving up**, the range
+        judged as a whole against the one the task writes (`declaration`; the PI, 2026-10-31, on
+        the engine C3 plan's Appendix B, item 18, "Judge the range as a whole (Recommended)": "if
+        it reaches any value easier than the written range allows ..., none of its trials count
+        toward moving up until the range is put back"): an expected setting's wherever it differs
+        from the one written ("No, after any change"); a clear-cut one's where it counts as
+        easier, or which way cannot be read (`variation.easier_range`; never moved up on doubt,
+        Appendix B item 2), a meaning relative to another setting reading that setting as the
+        trial has it. **The range is the one the trial's value was drawn from**, named by the
+        change that put it in force (`change`, the line's `drawn`): in force now, or kept with that
+        change's moment (`_moments`) where a later act replaced it, as a `same` repeat keeps a
+        value drawn before; where neither holds it, none, which no reading takes for the range
+        written, so the trial is kept out. Between trials, never in a frame."""
+        if self._ranges.get(key, (None, None))[1] == change:
+            ranged = self._ranges[key][0]
+        else:
+            ranged = next((moment.ranges.get(key) for moment in self._moments
+                           if moment.change == change), None)
+        if meaning.kind == EXPECTED:
+            # By the numbers that place the draws, as the change row's `went` reads them, so a
+            # range typed back to the written numbers is put back.
+            return ranged is None or not variation.same_range(
+                ranged, declaration, self._declared.get(name))
+        relative = meaning.relative_to
+        reference = values.get(relative) if isinstance(relative, str) else None
+        return variation.easier_range(meaning, ranged, declaration, self._declared.get(name),
+                                      reference) is not False
 
     def _plan(self, run: RunSpec, task: Task) -> Plan:
         """The plan the run plays: the task's plan the run names, blocks given in code (a test's),
@@ -2290,11 +3762,17 @@ class Session:
         rig no day's plan): a task declares its plans in its task object (engine spec §13.1;
         engine build C2b), and the operator chooses one as the run starts. **With none chosen
         a run is the plain run**: one block of `run.trials` trials under one condition, of the
-        task's default structure, every trial paying."""
-        if run.plan is not None:
-            return task.plans[run.plan]
-        if run.blocks:
-            return Plan(blocks=list(run.blocks))
+        task's default structure, every trial paying.
+
+        **Each block with its factorial expanded** (engine build C3's call 14;
+        `variation.expanded`): its hand-listed conditions, then those its factors make, so a
+        made condition is drawn, counted, repeated and overridden as a hand-listed one is. The
+        run's start row records the plan as declared (`plan_form`) and what each factorial made
+        (`generated`)."""
+        if run.plan is not None or run.blocks:
+            plan = task.plans[run.plan] if run.plan is not None else Plan(blocks=list(run.blocks))
+            return dataclasses.replace(
+                plan, blocks=[variation.expanded(block) for block in plan.blocks])
         return Plan(blocks=[
             Block(
                 name="session",
@@ -2307,6 +3785,110 @@ class Session:
                 counting=EVERY_TRIAL,
             )
         ])
+
+    def _draw(self, task: Task, block: Block, condition: Condition,
+              draw: Draw) -> tuple[dict, dict]:
+        """**What one trial draws, and from where** (engine build C3's spec §2 and §6; its calls
+        7, 10 and 13), between trials, never in a frame: each setting a draw gives in `block` --
+        its own, else the task's (`variation.in_force`; the PI, 2026-10-30, Q1a, "Task default,
+        block may replace") -- or `condition`'s own range gives (`own_ranges`; Q1b), **but one a
+        person holds** (`_edited`), whose value replaces the draw and is not drawn (§6). Returns
+        the values, in the task's own terms, and where each came from, as the trial's line writes
+        it (`drawn`): the draw key's first part -- `"task"`, `"block"` or `"condition"` -- or the
+        change id of the live range in force for that key (`_ranges`). Each value is drawn from
+        the run's seed, the trial's number in the run and the setting (`variation.draw`), apart
+        from the scheduler's generators, so adding a draw moves no condition or repeat; a normal
+        is cut to its setting's declared range where it declares no cut of its own (`declared`);
+        a prepared list's fresh draw takes the next place in its run's passes (`_listed`).
+
+        **On a repeat**, ordinary, a drum's try or a trial again at once (the PI, 2026-10-30, Q3,
+        "Per drawn setting, required", and "Follow same/fresh"), a setting declared `SAME` takes
+        the value and the source the trial it repeats drew (`_kept`), never drawn again, so a
+        range changed live meanwhile does not move it, and a prepared list's place does not
+        advance; one declared `FRESH`, or one that trial did not draw (a person held it then), is
+        drawn on the repeat's own number. What this trial drew is kept under its number, with the
+        number whose key drew each value, for a repeat of it to find."""
+        kept = {} if draw.repeat_of is None else self._kept.get(draw.repeat_of, {})
+        if draw.repeat_of is not None and draw.repeat_of not in self._kept:
+            # `Scheduler.waiting` and the pruning have drifted apart: say so on the feed, since
+            # the `same` settings below are then drawn fresh and the line alone would not show it.
+            self._feed("warning", None, self.wall_now(), _kept_missing(draw.number, draw.repeat_of))
+        taken: dict = {}
+        sources: dict = {}
+        mine: dict = {}
+        for name, (drawn, key) in {**variation.in_force(task, block),
+                                   **variation.own_ranges(condition)}.items():
+            if name in self._edited:
+                # Held on this try: not drawn, but what the trial it repeats drew is carried on,
+                # so a later try, once the person hands the setting back, still finds it (the
+                # controller's ruling on Call 13: the chain's `original` stays the first try's).
+                if name in kept:
+                    mine[name] = kept[name]
+                continue
+            if drawn.repeat == SAME and name in kept:
+                value, source, original = kept[name]
+            else:
+                drawn, source = self._ranges.get(key, (drawn, key[0]))
+                ordinal = 0
+                if isinstance(drawn, Listed):
+                    ordinal = self._listed.get(key, 0)
+                    self._listed[key] = ordinal + 1
+                value = variation.draw(drawn, self._run.seed, draw.number, key,
+                                       declared=self._declared.get(name), ordinal=ordinal)
+                original = draw.number
+            taken[name], sources[name] = value, source
+            mine[name] = (value, source, original)
+        self._kept[draw.number] = mine
+        return taken, sources
+
+    def _vary(self, condition: Condition, number: int, turned: frozenset) -> None:
+        """**What one trial adds to what varied in its block** (engine build C3's spec §10;
+        XC-344: how much a setting varies is recorded beside its values), as the trial is drawn,
+        between trials, for its block's end row (`_varied`, `block_ends`' `varied`). Read from
+        what the block declared and did, never from the values its trials happened to get:
+        - **as the block's first trial is drawn**, each setting its conditions give different
+          values or ranges of their own, `{"by": "condition"}`: compared as the load compares
+          them (`declarations.canonical`), a condition giving it nothing differing from one that
+          gives it something;
+        - **each setting the trial drew** (`_draw`, its `_kept` entry), `{"by": "draw", "from":
+          source, "distribution": draw}`: `source` as the trial's line names it (`drawn`), and the
+          draw it was drawn from, the declaration or the range a person put in force
+          (`_ranges`), every field (`variation.recorded`; the engine C3 plan's call 12). One way
+          for each the block's trials name, so one for each different range of their own its
+          conditions draw from. **A value a repeat keeps from the trial it shows again adds
+          nothing** (a `SAME` setting; call 13): that trial, in the same block, since no repeat
+          outlives its block, named its draw already, so a range changed since never stands for
+          it;
+        - **each setting a person holds on it** (its line's `live`, `_edited`), `{"by":
+          "person"}`.
+
+        A block that ran no trial has no entry, and its end writes `{}`."""
+        scheduler = self._scheduler
+        varied = self._varied.get(len(scheduler.ended))
+        if varied is None:
+            conditions = scheduler.block.conditions
+            varied = self._varied[len(scheduler.ended)] = {
+                name: [{"by": "condition"}]
+                for name in sorted({name for each in conditions for name in each.values})
+                if len({repr(canonical(each.values[name])) if name in each.values else None
+                        for each in conditions}) > 1
+            }
+        draws = {**variation.in_force(self._task, scheduler.block),
+                 **variation.own_ranges(condition)}
+        for name, (_, source, original) in self._kept[number].items():
+            if original != number:
+                continue
+            declaration, key = draws[name]
+            way = {"by": "draw", "from": source, "distribution": variation.recorded(
+                self._ranges.get(key, (declaration,))[0], self._declared.get(name),
+                direction=name in turned)}
+            ways = varied.setdefault(name, [])
+            if way not in ways:
+                ways.append(way)
+        for name in self._edited:
+            ways = varied.setdefault(name, [])
+            if {"by": "person"} not in ways:
+                ways.append({"by": "person"})
 
     def _agent(self, run: RunSpec):
         """The default world: one behaviour agent, told about each trial.
@@ -2479,14 +4061,31 @@ class Session:
 
     def _after_service_run(self) -> None:
         """A service session's run is over (the b3a-1 plan, decisions 1 and 2): back
-        between runs, where nothing applies a staged change, so any left is dropped and
-        said on the feed -- a row kept would read "applies at the next trial" of a run
+        between runs, where nothing applies a staged change, a hand-back, a live range or a revert
+        (`_pending`, `_acts`; engine build C3), so any left is dropped and said on the feed in the
+        order offered, a revert once -- a row kept would read "applies at the next trial" of a run
         that may never come. **And nothing is paused**: a run stopped while paused
         published its last frame paused, as the truth of how it ended, and a between-runs
         frame saying "paused" would read as a run held and waiting. The feed names the
         run from 1, as a person reads it beside the page's header and pill
         (session-levels spec §6); `run_index` counts from 0, as the record's `run` does."""
-        for name, was, now, by, bounded in self._staged:
+        reverts: set = set()
+        for offer, act in self._offered_acts():
+            if act is not None:
+                # A revert is said once, as the one act it is.
+                if act not in reverts:
+                    reverts.add(act)
+                    self._feed("revert", offer.by if isinstance(offer, Pending) else offer[3],
+                               self.wall_now(),
+                               f"the revert to {_back_to(self._act_moments[act])} was not "
+                               f"applied: run {self.run_index + 1} ended first")
+                continue
+            if isinstance(offer, Pending):
+                self._feed(offer.kind, offer.by, self.wall_now(),
+                           f"{self._pending_said(offer)} was not applied: run "
+                           f"{self.run_index + 1} ended first")
+                continue
+            name, was, now, by, bounded = offer
             choices = () if bounded or name not in self._declared else self._declared[name].choices
             self._feed(
                 "set",
@@ -2496,6 +4095,9 @@ class Session:
                 f"{self.run_index + 1} ended first",
             )
         self._staged.clear()
+        self._pending.clear()
+        self._acts.clear()
+        self._act_moments.clear()
         self.paused_at = None
         self.phase = "between_runs"
 
@@ -2600,6 +4202,24 @@ class Session:
         refused = self._unwritable(task, run, {**starts, **given})
         if refused is not None:
             raise TypeError(refused)
+        # **No trial no animal can get right, at the run's own values** (engine build C3's spec §9;
+        # the PI, 2026-10-30, Q10, "Refuse in file and live"; the outline review's I-5): the load
+        # judged the task's starting values (`check._impossible_faults`), and the run's own -- a
+        # console's start, `wlx run --set` -- are judged here, over every block the run plays,
+        # as the backstop for a caller that took no pre-flight, refusing as the blocking findings
+        # above do, before anything of the run is numbered, strobed or written. `wlx run` judges
+        # the same first, before its session opens and its departure is marked (`cli.main`); this
+        # is the backstop for its other callers.
+        impossible_now = [f for f in impossible(task, self._plan(run, task).blocks,
+                                                {**starts, **given})
+                          if f.refuses(self.spec.session_kind)]
+        if impossible_now:
+            raise SystemExit(
+                "task refused, session not started: its starting values leave trials no animal "
+                "can get right:\n"
+                + "\n".join(f"  {_printable(f.code)}: {_printable(f.detail)}"
+                            for f in impossible_now)
+            )
         # **What the start accepted, written as the run starts** (engine spec §19.3; the
         # engine B plan, call 23): after both refusals above, so a refused run leaves no row of
         # a warning accepted for it, and before the run's numbers are taken, so a fault here is
@@ -2639,6 +4259,26 @@ class Session:
         # The settings edited live in this run, which win over a condition's (engine spec §14.7).
         self._edited = frozenset()
         self._unresolved_said = frozenset()
+        # The run's own values, before any live edit, which of them the run was given, and no draw
+        # changed live (engine build C3).
+        self._run_values = {**starts, **given}
+        self._given = frozenset(given)
+        self._eased_now = ()
+        self._ranges = {}
+        # No trial's draws kept for a repeat, and every prepared list at its first place (engine
+        # build C3).
+        self._kept = {}
+        self._listed = {}
+        # Nothing has varied in a block of this run yet, and no line is counted (engine build C3).
+        self._varied = {}
+        self._tallies = {}
+        # The moments a revert can go back to, the run's start first, and the change ids that are
+        # this run's own: those given from here (engine build C3's spec §8).
+        self._moments = [Moment(0, self.wall_now(), "the run's start", {}, {})]
+        self._change_at_start = self._change
+        # The settings the task places a direction by: a value drawn for one is written from 0
+        # to 360 (the PI, 2026-10-30, "0 to 360 in both repos"; engine build C3's call 11).
+        turned = variation.directions(task)
 
         # Counted by each condition's structure's table (engine spec §16.1; engine build C2a; each
         # condition naming its structure since C2b), which a block's own replaces.
@@ -2671,8 +4311,26 @@ class Session:
             # is above; a planned run's lengths are its plan's, so it records no trial count.
             plan=run.plan,
             # **And as declared** (the plan's science review, I4), in the form the content hash
-            # reads it, so the record tells a balanced plan from a random one by itself.
-            plan_form=None if run.plan is None else canonical(plan),
+            # reads it, so the record tells a balanced plan from a random one by itself: the
+            # task's plan, its factorials unexpanded (engine build C3), never the plan played.
+            plan_form=None if run.plan is None else canonical(task.plans[run.plan]),
+            # **What the task draws, as declared, every field** (engine build C3's spec §10; its
+            # call 12, which revises the spec's "in the hash's form"): a normal's cut filled from
+            # its setting's range, a direction's places from 0 to 360; `None` where it draws
+            # nothing. A block's draws and a condition's own ranges are in `plan_form`.
+            draws=None if not task.draws else {
+                name: variation.recorded(drawn, self._declared.get(name), direction=name in turned)
+                for name, drawn in task.draws.items()
+            },
+            # **And the conditions each block's factors made** (the spec's §4; pitfall P20), so
+            # the record needs no task file to name them.
+            generated=_generated(
+                task.plans[run.plan].blocks if run.plan is not None else run.blocks or [],
+                self._declared, turned),
+            # **Which settings are directions** (the plan's science review, M-4): each is an
+            # angle written from 0 to 360, so a reader takes circular statistics of it -- a draw
+            # from -45 to 45 sits near 0 and near 360, and a plain mean of it reads 180.
+            directions=sorted(turned),
             trials=None if run.plan is not None else run.trials,
             seed=run.seed,
             blocks=(None if run.plan is None and not run.blocks
@@ -2884,15 +4542,45 @@ class Session:
                 # is ordinary"); `check_task` refuses a condition naming one the task lacks.
                 structure = condition.structure or task.default
                 trial = task.structures[structure]
+                # **What it draws**, here between trials (engine build C3's spec §2; its call 10):
+                # each setting its block's draws or its condition's own range give, but one a
+                # person holds, on a repeat a `SAME` setting's value kept from the trial it shows
+                # again (`_draw`).
+                taken, sources = self._draw(task, scheduler.block, condition, drawn)
+                # **What varied in its block** (engine build C3's spec §10; XC-344): what its
+                # conditions set apart, as the block's first trial is drawn, and this trial's
+                # draws and a person's holds, for the block's end row (`_vary`).
+                self._vary(condition, drawn.number, turned)
                 # **A live edit to a value a condition sets wins** (engine spec §14.7; §17.1's
-                # order: the task's start, the run's value, the condition's, a live edit), and the
-                # trial still counts toward its condition; its row names each value overridden.
+                # order: the task's start, the run's value, the condition's or a drawn value, a
+                # live edit), and the trial still counts toward its condition; its row names each
+                # value overridden, a condition's own range among them (engine build C3's §6).
                 overridden = sorted(name for name in condition.values if name in self._edited)
                 values = {
                     **self.spec.values,
                     **{name: value for name, value in condition.values.items()
                        if name not in self._edited},
+                    **taken,
                 }
+                # **Whether a live change eased it** (engine build C3's spec §7; the PI, Q8,
+                # "Merge; fix eased trials in C3", and "No, after any change"): judged here, before
+                # it runs (`_eased`). An eased trial is left out of moving up and still counts
+                # toward moving back and toward its condition (`Scheduler.record`).
+                eased = self._eased(condition, values, sources, drawn.number)
+                # Said on the console as long as it lasts (`eased`; the C3 plan's engineering
+                # review, I-2), where the block's rule moves the animal on.
+                self._eased_now = eased if scheduler.moves_up else ()
+                # **A drawn direction is written from 0 to 360** (the PI, 2026-10-30; engine build
+                # C3's call 11): the rig chose the number, so the rig spells it; the trial runs on
+                # the value as drawn, in the task's own terms, at the same place. A value a person
+                # or the task gives is written as given.
+                params = values
+                spelled = [name for name in sources if name in turned
+                           and isinstance(values[name], (int, float))
+                           and not isinstance(values[name], bool)]
+                if spelled:
+                    params = {**values,
+                              **{name: shown_direction(values[name]) for name in spelled}}
                 world = make_world(trial, values, index)
                 # **The trial opens in the stream at the boundary, never in a frame**
                 # (XC-155; S1 §4's between-trial surface): `TRIAL_START`, then its number
@@ -2962,7 +4650,13 @@ class Session:
                 levels.end_trial(result, drummed=drawn.drummed)
                 shown = _appeared(trial, result)
                 written = len(scheduler.shortfalls)
-                counted = scheduler.record(condition.name, result.outcome, shown=shown)
+                counted = scheduler.record(condition.name, result.outcome, shown=shown,
+                                           eased=bool(eased))
+                # **A trial's draws are kept only while a repeat of it waits** (engine build C3's
+                # call 13): a repeat placed, a drum's try or a trial again at once.
+                waiting = scheduler.waiting
+                for number in [number for number in self._kept if number not in waiting]:
+                    del self._kept[number]
                 if result.outcome is None:
                     # **A warning on the changes feed** (the engine C2a plan, its science review's
                     # D4): five minutes with no outcome is a loop that failed or an animal that
@@ -2978,6 +4672,26 @@ class Session:
                     self._feed("warning", None, self.wall_now(), _drum_warned(
                         condition.name, index, scheduler.owed(condition.name),
                         scheduler.clearing))
+                # **A warning on the changes feed, once a block for each setting** (the C3 plan's
+                # engineering review, I-2, and its science review, I-4): a person who eased a
+                # block that ends on a criterion, or a training stage, sees a perfect streak and a
+                # block that will not end unless told why, and how to undo it (`_kept_out`).
+                opened = (self.run_index, len(scheduler.ended))
+                told = [name for name in eased if (*opened, name) not in self._eased_said]
+                if told and scheduler.moves_up:
+                    self._eased_said |= {(*opened, name) for name in told}
+                    self._feed("warning", None, self.wall_now(), _kept_out(
+                        index, [name for name in told if name in self._edited],
+                        [name for name in told if name not in self._edited],
+                        plays_out=scheduler.plays_out))
+                # **Its line counted toward its condition in its block's end** (the C3 plan's
+                # science review, M-4): the lines, those a person's value overrode and those kept
+                # out of moving up, as the line written next says (`counts`).
+                line_counts = self._tallies.setdefault(len(scheduler.ended), {}).setdefault(
+                    condition.name, {"trials": 0, "overridden": 0, "eased": 0})
+                line_counts["trials"] += 1
+                line_counts["overridden"] += bool(overridden)
+                line_counts["eased"] += bool(eased)
                 # One string for the record and for a console's recent outcomes, so
                 # the two cannot disagree (P4d-2b spec §4.1).
                 recorded = result.outcome.value if result.outcome else "hang"
@@ -2985,11 +4699,19 @@ class Session:
                 stimuli = record.trial(
                     index=index,
                     outcome=recorded,
-                    params=values,
+                    params=params,
                     block=scheduler.block.name,
                     condition=condition.name,
                     structure=structure,
                     overridden=tuple(overridden),
+                    # What it drew and from where, what a person held, and what of that kept
+                    # it out of moving up (engine build C3).
+                    drawn=sources,
+                    live=tuple(sorted(self._edited)),
+                    eased=eased,
+                    # Its place in a designed block's plan, which a drum's try and a trial again
+                    # at once share with the trial they show again (engine build C3's spec §5).
+                    planned=drawn.planned,
                     # Where each stimulus it showed was (XC-399), turned into positions as the
                     # line is written, between trials.
                     placed=result.placed,
@@ -3128,8 +4850,18 @@ class Session:
                                 "block_in_session": end.block_in_session,
                                 "position": end.position,
                                 "passed_at": end.passed_at,
+                                # **What varied in it, and a designed block's plan** (engine build
+                                # C3's spec §10; XC-344): each setting its conditions set apart,
+                                # drew or a person held, read from what it declared and did, `{}`
+                                # for a block that ran no trial; its places, or its runs, played or
+                                # not.
+                                "varied": _varied_written(self._varied.get(occurrence, {})),
+                                "planned": _plan_written(end.planned),
+                                # Each condition's lines, those overridden and those eased (the
+                                # C3 plan's science review, M-4), `{}` for a block that ran none.
+                                "counts": self._tallies.get(occurrence, {}),
                             }
-                            for end in scheduler.ended
+                            for occurrence, end in enumerate(scheduler.ended)
                         ],
                         # Why a completed run ended, for a reader (`END_REASONS`).
                         end_reason=end_reason,

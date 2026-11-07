@@ -23,7 +23,7 @@ from wl_xcon import actor as actors
 from wl_xcon import link as _link
 from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.levels import Levels, task_name
-from wl_xcon.record import ACCEPTED_WARNINGS, CONTROLS, RUNS, TRIAL_STARTS
+from wl_xcon.record import ACCEPTED_WARNINGS, CONTROLS, KINDS, RUNS, STROBED, TRIAL_STARTS
 from wl_xcon.simulate import Tally
 from wl_xcon.task import RIGHT, Outcome
 from wl_xcon.warnlist import Entry
@@ -104,6 +104,9 @@ class Restoration:
     #: review, I1).
     half_ipd_cm: float | None = None
     half_ipd_nominal: bool | None = None
+    #: The largest `change` id in its change log (engine build C3's spec §8), 0 for none: the
+    #: resumed session's next act takes the one after it, so no id names two acts.
+    change: int = 0
 
 
 def _rows(directory: Path, name: str) -> list[dict]:
@@ -115,6 +118,46 @@ def _rows(directory: Path, name: str) -> list[dict]:
                 if line.strip()]
     except (OSError, ValueError) as error:
         raise Unresumable(f"its {name} cannot be read ({_cut(error)}); end it instead") from error
+
+
+def _whole(value: object) -> bool:
+    """Whether `value` is a whole number as the record writes one: an `int`, never a `bool`."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _changes(directory: Path) -> list[dict]:
+    """**The change log's rows, each as `SessionRecord.change` writes it, or `Unresumable`**
+    (engine build C3's spec §8: resume "fails closed on a row without `sequence`; it learns every
+    kind in the commit writing the first such row"). A resume continues the session's `sequence`
+    and `change` numbers from these rows and its bounded values from its `set` rows, so **a row
+    it cannot read fails closed, naming it**, never a guess, as the rest of the record does. A row
+    written before engine build C3 has no `kind` and no `change`, and is a `set`, the only kind
+    there was. Refused: a row that is not an object; a `kind` that is not one of `record.KINDS`;
+    a row of a kind that strobes `PARAM_CHANGED` (`record.STROBED`), or with no kind, without a
+    whole-number `sequence`, which joins it to its code; and a `change` that is not a whole
+    number from 1, on a row with a kind or any row holding one."""
+    rows = _rows(directory, "parameter_changes.jsonl")
+    for number, row in enumerate(rows, start=1):
+
+        def damaged(what: str) -> Unresumable:
+            return Unresumable(
+                f"its parameter_changes.jsonl row {number} {what}, so the changes it records "
+                f"cannot be read back; end it instead"
+            )
+
+        if not isinstance(row, dict):
+            raise damaged("is not a row")
+        if "kind" in row and row["kind"] not in KINDS:
+            raise damaged(f"is of the kind {_link._quoted(row['kind'])}, which the rig never "
+                          f"writes")
+        if row.get("kind", "set") in STROBED and not _whole(row.get("sequence")):
+            raise damaged("strobed PARAM_CHANGED and holds no whole-number sequence joining it "
+                          "to its code")
+        if ("kind" in row or "change" in row) and not (
+            _whole(row.get("change")) and row["change"] >= 1
+        ):
+            raise damaged("holds no change id, a whole number from 1")
+    return rows
 
 
 def _accepted(row: dict, number: int, session_kind: str) -> tuple:
@@ -258,7 +301,10 @@ def _read(directory: Path, departure: float) -> Restoration:
     run_rows = [row for row in runs if row["event"] == "start"]
     controls = _rows(directory, CONTROLS)
     ends = [row for row in controls if row["kind"] == "end"]
-    changes = _rows(directory, "parameter_changes.jsonl")
+    changes = _changes(directory)
+    # Only the kinds that strobed `PARAM_CHANGED` carry `sequence` (engine build C3's spec §8): a
+    # clear and a switch strobe nothing.
+    strobed = [row for row in changes if row.get("kind", "set") in STROBED]
 
     hand = [row for row in controls if row["kind"] == "reward"]
     commanded = sum(float(line["fluid_ml"]) for line in lines)
@@ -318,9 +364,13 @@ def _read(directory: Path, departure: float) -> Restoration:
     # (the final review's I2): a limit the session lowered is never reverted to the file's.
     run_index = int(run_rows[-1]["run"]) if run_rows else None
     bounded = dict(run_rows[-1]["bounded"]) if run_rows else {}
-    for change in sorted(changes, key=lambda c: int(c["sequence"])):
-        if change["name"] == OUT_OF_CAGE or (
-            change["run"] == run_index and change["name"] in bounded
+    # **From `set` rows only** (engine build C3's spec §8): a person's value is the one kind that
+    # moves a bounded setting; a hand-back and a range name a task's own setting, and a revert
+    # never names a bounded one (engine spec §17.6).
+    for change in sorted(strobed, key=lambda c: c["sequence"]):
+        if change.get("kind", "set") == "set" and (
+            change["name"] == OUT_OF_CAGE
+            or (change["run"] == run_index and change["name"] in bounded)
         ):
             bounded[change["name"]] = float(change["now"])
     # How the last run ended, for the frames and the summary (the final review's M1): its
@@ -358,7 +408,7 @@ def _read(directory: Path, departure: float) -> Restoration:
         last_reward_at=max(instants) if instants else None,
         levels=levels,
         run_index=run_index,
-        sequence=max((int(c["sequence"]) for c in changes), default=0),
+        sequence=max((c["sequence"] for c in strobed), default=0),
         bounded=bounded,
         last_written_at=max(path.stat().st_mtime for path in directory.iterdir()),
         ended=bool(ends),
@@ -378,4 +428,5 @@ def _read(directory: Path, departure: float) -> Restoration:
             if isinstance(config["setup"].get("half_ipd_nominal"), bool)
             else (False if isinstance(config["setup"].get("half_ipd_cm"), (int, float))
                   and not isinstance(config["setup"]["half_ipd_cm"], bool) else None)),
+        change=max((c["change"] for c in changes if "change" in c), default=0),
     )
