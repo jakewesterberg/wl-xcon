@@ -809,8 +809,8 @@ is plain data, named CIE 1931 chromaticities with an apex and a luminance, read 
 its task (wl-xtasks' `stimuli/`), and a `ColorSetLight` is one of its colors as an absolute light,
 so it runs on the black background, where no cone color does. `photometry.realize` puts the set on
 the session's calibration with each color's **macaque luminance**, L + M at L:M 1 on the
-Stockman-Sharpe 2° fundamentals (`cones.macaque_luminance`; the table exported from colour-science
-and read only when its sha256 is the export's, ADR-0012 amended 2026-11-07), equal to a D65
+Stockman-Sharpe 2° fundamentals (`cones.macaque_luminance`; the CIE's own 2006 2° table, bundled
+unmodified and read only when its sha256 is the CIE's, ADR-0012 amended 2026-11-07), equal to a D65
 light's at the set's cd/m², 15 on every rig (the PI, 2026-11-07; COL-37): through the primaries'
 spectra on a measured record, through wl-style's model of the sRGB primaries on the default and on
 a record without spectra, with a warning there (`color-set-without-spectra`). A panel that cannot

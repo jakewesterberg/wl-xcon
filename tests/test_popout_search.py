@@ -660,7 +660,7 @@ def test_the_twelve_pairings_and_the_four_colors_are_equal_in_macaque_luminance(
     """§3.2: the task's colors are `stimuli/isohue.json`'s, the numbers this repository's tests
     derived; on the test calibration, through its primaries' own spectra, each of the four colors
     the pool draws -- the odd one's, and a distractor's at full, Crowd's -- realizes at the macaque
-    luminance (L + M at L:M 1, Stockman-Sharpe 2°) of a D65 light at 15 cd/m², to 0.1%, at its own
+    luminance (L + M at L:M 1, CIE 2006 2°) of a D65 light at 15 cd/m², to 0.1%, at its own
     chromaticity, so every one of the twelve pairings is equal in it and differs by color alone."""
     theirs, ours = photometry.ColorSet.load(STIMULI), photometry.ColorSet.load(FIXTURE)
     assert (theirs.colors, theirs.apex, theirs.luminance_cd_m2, theirs.held) == (

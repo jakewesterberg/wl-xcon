@@ -16,7 +16,7 @@ measured calibration (`check`; engine spec §7.3).
 
 **A color set** (`ColorSet`, `ColorSetLight`; the pop-out search plan, Task 2) is the other way
 to hold colors equal: absolute lights at given chromaticities, each at the **macaque luminance**
-(L + M at L:M 1 on the Stockman-Sharpe 2° fundamentals, `cones.macaque_luminance`) of a D65 light
+(L + M at L:M 1 on the CIE 2006 2° fundamentals, `cones.macaque_luminance`) of a D65 light
 at the set's cd/m² on the rig's own panel (`realize`), so it runs on black. A panel that cannot
 show them all moves every one toward the set's apex by one shared share, never dimming or
 clipping one, and `check` warns by how much.
@@ -657,8 +657,9 @@ def unrealizable(color: Color, panel: Calibration, background: xyY | None = None
 
 
 #: **The one luminance a color set holds** (the pop-out search plan, Task 2; the PI, 2026-11-07:
-#: "wl-style's 2-degree set"): macaque luminance, L + M at L:M 1 on the Stockman-Sharpe 2° cone
-#: fundamentals (`cones.macaque_luminance`), beside the lab observer's V_F,10, which cone colors keep.
+#: "wl-style's 2-degree set"): macaque luminance, L + M at L:M 1 on the CIE 2006 2° cone
+#: fundamentals, Stockman and Sharpe's (`cones.macaque_luminance`), beside the lab observer's
+#: V_F,10, which cone colors keep.
 MACAQUE_2DEG_LM1 = "macaque_2deg_LM1"
 
 #: **Macaque luminance where a calibration has no spectra** (the sRGB standard; one measured
@@ -773,7 +774,7 @@ class ColorSet:
         if self.held != MACAQUE_2DEG_LM1:
             raise ValueError(
                 f"color set {self.name!r} holds {self.held!r}; the luminance a color set holds is "
-                f"{MACAQUE_2DEG_LM1!r}, L + M at L:M 1 on the Stockman-Sharpe 2° fundamentals"
+                f"{MACAQUE_2DEG_LM1!r}, L + M at L:M 1 on the CIE 2006 2° fundamentals"
             )
         if not isinstance(self.source, str):
             raise ValueError(f"color set {self.name!r}'s source is text")

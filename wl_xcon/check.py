@@ -4189,7 +4189,7 @@ def _color_set_faults(trial: Trial, params: dict[str, Param], panel: Calibration
     if sets and not panel.standard and panel.spectra is None:
         findings.append(Finding("color-set-without-spectra", (
             f"calibration {name} was measured without spectra, so this task's color-set lights "
-            f"hold their macaque luminance (L + M at L:M 1, Stockman-Sharpe 2°) through "
+            f"hold their macaque luminance (L + M at L:M 1, CIE 2006 2°) through "
             f"{MACAQUE_WITHOUT_SPECTRA}, whose fit to this panel is unknown: they are equal in "
             f"macaque luminance only nominally; the lights it names: "
             f"{'; '.join(what for _, whats in sets for what in whats)}"),

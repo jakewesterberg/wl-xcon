@@ -18,7 +18,8 @@ CIE = resources.files("wl_xcon").joinpath("cie")
 
 def _metadata(name: str) -> dict:
     metadata = {"CIE_lms_cf_10deg.csv": "CIE_lms_cf_10deg.csv_metadata_v2.json",
-                "CIE_cfb_stv_10deg.csv": "CIE_cfb_stv_10deg.csv_metadata.json"}[name]
+                "CIE_cfb_stv_10deg.csv": "CIE_cfb_stv_10deg.csv_metadata.json",
+                "CIE_lms_cf_2deg.csv": "CIE_lms_cf_2deg.csv_metadata.json"}[name]
     return json.loads(CIE.joinpath(metadata).read_text(encoding="utf-8"))
 
 
@@ -130,7 +131,8 @@ def test_the_cie_files_and_their_notice_are_found_through_the_package_and_ship_w
     """Read through `importlib.resources`, as an installed package reads them,
     and every one covered by `pyproject.toml`'s package data; git keeps them byte for byte."""
     names = [*cones.CIE_FILES, "CIE_lms_cf_10deg.csv_metadata_v2.json",
-             "CIE_cfb_stv_10deg.csv_metadata.json", "NOTICE.md"]
+             "CIE_cfb_stv_10deg.csv_metadata.json", "CIE_lms_cf_2deg.csv_metadata.json",
+             "NOTICE.md"]
     root = Path(__file__).resolve().parents[1]
     data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
     patterns = data["tool"]["setuptools"]["package-data"]["wl_xcon"]

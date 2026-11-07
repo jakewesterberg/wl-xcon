@@ -14,10 +14,12 @@ fundamentals to XYZ_F,10 (`LMS_TO_XYZ_F10`), which `tests/test_cones.py` holds t
 tabulated XYZ_F,10. cd/m² stays on CIE V(λ): nothing here names an absolute luminance.
 
 **Beside it, one luminance a color set holds** (the pop-out search plan, Task 2; the PI, 2026-11-07:
-"wl-style's 2-degree set"): **macaque luminance, L + M at L:M 1 on the Stockman-Sharpe 2° cone
-fundamentals** (`macaque_luminance`), as wl-style's isohue set computes it. Its table is
-colour-science 0.4.7's, exported unchanged and checked by its sha256 (`TABLE_2DEG`; ADR-0012,
-amended 2026-11-07). It is not the lab observer: no cone color converts through it.
+"wl-style's 2-degree set"): **macaque luminance, L + M at L:M 1 on the 2° cone fundamentals**
+(`macaque_luminance`), as wl-style's isohue set computes it. Its table is the CIE's own 2006 2° data
+set, bundled unmodified beside the 10° one and read only after its sha256 matches the CIE's
+metadata (`TABLE_2DEG`; ADR-0012, amended 2026-11-07). wl-style computed the colors on
+colour-science 0.4.7's 1 nm Stockman-Sharpe 2° table, the same fundamentals (see `TABLE_2DEG`).
+It is not the lab observer: no cone color converts through it.
 
 Read when a calibration is converted, at load; never inside a frame.
 """
@@ -34,10 +36,13 @@ import numpy as np
 #: (`checksums`, read 2026-10-09; the data set page's MD5 for the LMS table is stale, the
 #: metadata's is not). `CIE_lms_cf_10deg.csv` is DOI 10.25039/CIE.DS.nxsqeri8 (CIE 170-1:2006,
 #: Table 6.2); `CIE_cfb_stv_10deg.csv`, the XYZ_F,10 functions, is DOI 10.25039/CIE.DS.dm6qiig7
-#: (CIE 170-2:2015, Table 10.8), carried so a test can hold `LMS_TO_XYZ_F10` to it.
+#: (CIE 170-2:2015, Table 10.8), carried so a test can hold `LMS_TO_XYZ_F10` to it;
+#: `CIE_lms_cf_2deg.csv`, the 2° cone fundamentals macaque luminance is computed on, is DOI
+#: 10.25039/CIE.DS.tijidesg (CIE 170-1:2006, Table 6.7; its metadata read 2026-11-07).
 CIE_FILES = {
     "CIE_lms_cf_10deg.csv": "bd64f1f688a4b319c6d3fa6b31770a32eaaaaea0eed532befd0424f96304db18",
     "CIE_cfb_stv_10deg.csv": "9019a35f8f51215e245f818e87d4251147d1925a8fbe9a49944fe7f011f16e38",
+    "CIE_lms_cf_2deg.csv": "f48160edf11c1a121aaaf41d4c3b7513385bfc9c60d726b88e735519f6d37b1f",
 }
 
 #: The cone fundamentals' table.
@@ -176,19 +181,22 @@ def excitations(nm, radiance) -> tuple[float, float, float]:
     return (float(totals[0]), float(totals[1]), float(totals[2]))
 
 
-#: **The Stockman-Sharpe 2° cone fundamentals**, the table macaque luminance is computed on
-#: (`macaque_luminance`): colour-science 0.4.7's `DATA_CMFS_LMS["Stockman & Sharpe 2 Degree Cone
-#: Fundamentals"]` (`colour/colorimetry/datasets/cmfs.py`), the data set wl-style's isohue set was
-#: computed with, which colour cites to CVRL's "Cone Fundamentals" page [@stockman2000spectral].
-#: **Exported, not downloaded** (2026-11-07): one row per nanometre from 390 to 830, `nm,l,m,s`,
-#: each number's text as colour's source writes it, in energy units peaking at 1; the S cone is 0
-#: beyond 615 nm in colour's data. Its licence is UNVERIFIED (ADR-0012, amended 2026-11-07): colour
-#: is BSD-3-Clause, and its source states none. The CIE's 2015 2° matrix applied to it reproduces
-#: colour's tabulated CIE 2015 2° observer within 1.9e-6 (computed 2026-11-07), as the CIE 2006 2°
-#: fundamentals would; it was not compared with the CIE's own 2° file, which is not bundled.
-TABLE_2DEG = "stockman_sharpe_2deg.csv"
-#: Its sha256 as exported (ADR-0012, amended 2026-11-07). No metadata gives one: the export's own.
-TABLE_2DEG_SHA256 = "81ae6f81ce67e6b291638738cb404c3d79a0092c89a62329e45e99329ce8c228"
+#: **The 2° cone fundamentals**, the table macaque luminance is computed on (`macaque_luminance`):
+#: the CIE's own data set, CIE 2006 LMS cone fundamentals for 2° field size in terms of energy (DOI
+#: 10.25039/CIE.DS.tijidesg; CIE 170-1:2006, Table 6.7), 390 to 830 nm by 5 nm, the S cone NaN
+#: beyond 615 nm, CC BY-SA 4.0 as its metadata states (ADR-0012, amended 2026-11-07), and read as
+#: the 10° table is (`cie_file`, `parse`). These are Stockman and Sharpe's 2° fundamentals
+#: [@stockman2000spectral]. **wl-style computed the isohue colors on colour-science 0.4.7's 1 nm
+#: table of the same fundamentals** (its `DATA_CMFS_LMS["Stockman & Sharpe 2 Degree Cone
+#: Fundamentals"]`, which cites CVRL), bundled here until 2026-11-07. **Computed 2026-11-07**, the
+#: two compared: at this table's 89 rows they agree within 1.4e-5 relative in L, M and S (1.37e-5
+#: at most, L at 755 nm); on the tests' panel spectra as sampled, every 5 nm
+#: (`_calibrations.SPECTRA`), macaque luminance moves by under 1e-6 relative (8.4e-7 at most, the
+#: red) and the isohue set's realized drive values on that panel are unchanged to 5 decimals; on
+#: those spectra resampled to 1 nm, as wl-style integrates, narrow bands move by up to 0.31% (red
+#: +0.16%, green -0.12%, blue +0.31%), the straight lines between 5 nm rows no longer matching
+#: colour's 1 nm rows there.
+TABLE_2DEG = "CIE_lms_cf_2deg.csv"
 
 #: Macaque luminance's weights on the 2° L and M fundamentals: equal (wl-style's
 #: `macaque_equal`, its METHODS.md citing Gelfand and Horwitz 2018 and Munds et al. 2022, neither in
@@ -196,35 +204,23 @@ TABLE_2DEG_SHA256 = "81ae6f81ce67e6b291638738cb404c3d79a0092c89a62329e45e99329ce
 MACAQUE_LM = (1.0, 1.0)
 
 
-def file_2deg() -> bytes:
-    """The bundled 2° table, **refused unless its sha256 is the one ADR-0012 records**, as
-    `cie_file` refuses a CIE table: a changed table would weigh every color set's lights wrongly,
-    and nothing downstream could tell."""
-    raw = resources.files("wl_xcon").joinpath("cie", TABLE_2DEG).read_bytes()
-    found = hashlib.sha256(raw).hexdigest()
-    if found != TABLE_2DEG_SHA256:
-        raise ValueError(
-            f"wl_xcon/cie/{TABLE_2DEG} is not the table ADR-0012 records: its sha256 is {found}, "
-            f"and the export's is {TABLE_2DEG_SHA256}; restore it from the package"
-        )
-    return raw
-
-
 _TABLE_2DEG: list = []
 
 
 def table_2deg() -> np.ndarray:
-    """The Stockman-Sharpe 2° cone fundamentals, (441, 4): wavelength in nm, 390 to 830 by 1, then
-    l̄2, m̄2 and s̄2, each in energy units peaking at 1. Read once, on first use."""
+    """The 2° cone fundamentals, (89, 4): wavelength in nm, 390 to 830 by 5, then l̄2, m̄2 and s̄2,
+    each in energy units peaking at 1, the S cone's NaN beyond 615 nm read as zero (`parse`). Read
+    once, on first use, **refused unless its sha256 is the CIE's** (`cie_file`)."""
     if not _TABLE_2DEG:
-        _TABLE_2DEG.append(parse(file_2deg()))
+        _TABLE_2DEG.append(parse(cie_file(TABLE_2DEG)))
     return _TABLE_2DEG[0]
 
 
 def macaque_luminance(spectrum) -> float:
     """**Macaque luminance** of a light, `spectrum` its wavelengths in nm and its spectral radiance at
-    each, as a pair: L + M at L:M 1 (`MACAQUE_LM`) on the Stockman-Sharpe 2° fundamentals
-    (`table_2deg`), each read between its 1 nm rows by straight lines and zero outside 390-830 nm,
+    each, as a pair: L + M at L:M 1 (`MACAQUE_LM`) on the CIE 2006 2° fundamentals (`table_2deg`),
+    each read between its 5 nm rows by straight lines, the interpolation its metadata declares,
+    and zero outside 390-830 nm, its declared extrapolation,
     integrated by the trapezoid rule over the light's own wavelengths, as `excitations` integrates
     the lab observer's. In the radiance's units times nm; only ratios are read
     (`photometry.macaque_cd_m2`)."""

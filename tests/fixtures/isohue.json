@@ -9,5 +9,5 @@
   "apex": [0.31272, 0.32900],
   "luminance_cd_m2": 15.0,
   "held": "macaque_2deg_LM1",
-  "source": "A test fixture in the shape of wl-xtasks' stimuli/isohue.json (pop-out plan, Task 9), not that file. wl-style 02-color/isohue_spectrum: blue (hue 260), purple (320) and red (20) are isohue_levels.csv's cone_macaque_equal rows at saturation 1; green (140) was computed with its isohue.py at the sector's chroma 29.49 under colour-science 0.4.7 on 2026-11-07 (sRGB preview #54a947); the apex is its reference gray #969696."
+  "source": "A test fixture in the shape of wl-xtasks' stimuli/isohue.json (pop-out plan, Task 9), not that file. wl-style 02-color/isohue_spectrum: blue (hue 260), purple (320) and red (20) are isohue_levels.csv's cone_macaque_equal rows at saturation 1; green (140) was computed with its isohue.py at the sector's chroma 29.49 under colour-science 0.4.7 on 2026-11-07 (sRGB preview #54a947); the apex is its reference gray #969696. wl-style matched them in macaque cone luminance on colour-science 0.4.7's 1 nm Stockman-Sharpe 2-degree table; the rig holds them on the CIE's own 2006 2-degree cone fundamentals (DOI 10.25039/CIE.DS.tijidesg, CIE 170-1:2006 table 6.7), the same fundamentals at 5 nm."
 }

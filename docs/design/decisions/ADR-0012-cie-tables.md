@@ -62,46 +62,41 @@ files keep CC BY-SA 4.0.
   so the build never resamples, renormalizes or zero-fills a file on disk. Whether an unmodified
   CSV beside Apache-2.0 code is "separately licensed material" is the research note's reading
   (§1.3), not legal advice: UNVERIFIED, and the PI's to settle if it ever matters.
-- A later build that bundles another CIE table (the 2° set, XC-302; the CIE
-  1931 color-matching functions, XC-308) amends ADR-0004 again for
-  its files, with their own rows.
+- A later build that bundles another CIE table (the CIE 1931 color-matching functions, XC-308)
+  amends ADR-0004 again for its files, with their own rows; the 2° cone fundamentals came with
+  the amendment below (2026-11-07).
 - Every session that converts a cone color records the observer and the table's DOI
   (`config.json`'s `calibration.cones`, engine build A2).
 
-## Amended 2026-11-07: the Stockman-Sharpe 2° table that macaque luminance is computed on
+## Amended 2026-11-07: the CIE's 2° table, which macaque luminance is computed on
 
 The pop-out search (its spec §3.2 and §5 item 4; its plan's Task 2) holds a color set's lights
-equal in **macaque luminance**, L + M at L:M 1 on the Stockman-Sharpe 2° cone fundamentals, as
-wl-style computes it (the PI, 2026-11-07, asked in the UI: "wl-style's 2-degree set"; COL-37), so
-the package needs a 2° table beside the CIE's 10° one.
+equal in **macaque luminance**, L + M at L:M 1 on the 2° cone fundamentals, as wl-style computes it
+(the PI, 2026-11-07, asked in the UI: "wl-style's 2-degree set"; COL-37), so the package needs a 2°
+table beside the CIE's 10° one.
 
-- **What is bundled**: `wl_xcon/cie/stockman_sharpe_2deg.csv`, the data set wl-style's isohue set
-  was computed with, colour-science 0.4.7's `DATA_CMFS_LMS["Stockman & Sharpe 2 Degree Cone
-  Fundamentals"]` (`colour/colorimetry/datasets/cmfs.py`), **exported** on 2026-11-07 from the
-  installed package, with no network: one row per nanometre from 390 to 830, `nm,l,m,s`, each
-  number's text as colour's source writes it, LF line ends; every value parses to the double
-  colour's own dictionary holds (checked as it was written). Energy units, each function peaking
-  at 1; colour sets the S cone to 0 beyond 615 nm, where it was not measured. **Its sha256,
-  `81ae6f81ce67e6b291638738cb404c3d79a0092c89a62329e45e99329ce8c228`, is the export's own** (no
-  metadata gives one): pinned in `cones.TABLE_2DEG_SHA256`, held by `tests/test_color_set.py`, and
-  `cones.file_2deg` refuses a changed file as `cie_file` refuses a CIE one.
-- **Its source**: colour cites it to CVRL, "Stockman, A., & Sharpe, L. T. (2000). Cone
-  Fundamentals. Retrieved June 23, 2014, from http://www.cvrl.org/cones.htm"
-  [@stockman2000spectral]. The CIE 170-2:2015 2° LMS-to-XYZ_F matrix, as colour prints it
-  (`colour/colorimetry/transformations.py`), applied to it reproduces colour's tabulated CIE 2015
-  2° observer within 1.9e-6 at all 441 wavelengths (computed 2026-11-07), as the CIE 2006 2°
-  fundamentals would. It was not compared with the CIE's own 2° data set, which this build did not
-  download.
-- **Its licence is UNVERIFIED.** colour-science is BSD-3-Clause (its wheel's `LICENSE`,
-  "Copyright 2013 Colour Developers", and `cmfs.py`'s `__license__`, read 2026-11-07), whose notice
-  `NOTICE.md` keeps, as BSD-3 asks of a redistribution. Whether colour's licence reaches CVRL's
-  numbers is not established: CVRL states no licence grant (Q3-B above; the research note §1.3,
-  2026-10-09, not re-read). It is not CC BY-SA as far as is known, so it is not admitted under the
-  rule above for the CIE's files; it has its own row in ADR-0004's inventory, and the PI may prefer
-  the CIE's own 2° data set (CC BY-SA 4.0), which would replace this file and its pin.
-- **Written, not only interpolated**: the export changes the data's format, which BSD-3 permits.
-  It is not one of the CIE's files, so "nothing derived from them is written" does not reach it;
-  nothing derived from it is written either.
+- **What is bundled**: the CIE's own data set, **unmodified**, under the rule above for its files:
+  `wl_xcon/cie/CIE_lms_cf_2deg.csv` and its metadata `CIE_lms_cf_2deg.csv_metadata.json`, "CIE 2006
+  LMS cone fundamentals for 2° field size in terms of energy", DOI 10.25039/CIE.DS.tijidesg, from
+  CIE 170-1:2006, Table 6.7, downloaded 2026-11-07 from
+  https://files.cie.co.at/Publications-datasets/. 390 to 830 nm by 5 nm, the S cone NaN beyond
+  615 nm. **Its license is verified**: CC BY-SA 4.0, its metadata's `rightsList` (read
+  2026-11-07), as the 10° files' are. Its sha256,
+  `f48160edf11c1a121aaaf41d4c3b7513385bfc9c60d726b88e735519f6d37b1f`, is its metadata's: pinned in
+  `cones.CIE_FILES`, held by `tests/test_color_set.py`, and `cones.cie_file` refuses a changed
+  file. Read as the 10° table is: NaN as zero, and between its 5 nm rows by straight lines, zero
+  outside 390-830 nm, the `interpolationMethod: linear` and `extrapolationMethod: zero` its
+  metadata declares. Nothing derived from it is written.
+- **Why the CIE's and not the export it replaced the same day** (the PI, 2026-11-07, asked in the
+  UI after the build's review, I7: "Swap before merge"): the build first bundled colour-science
+  0.4.7's 1 nm Stockman-Sharpe 2° table, exported from the installed package, the table wl-style's
+  isohue set was computed with; its own license, from CVRL, could not be verified (CVRL states no
+  grant, Q3-B above), which this ADR's own reasoning rejected bundling for. The two are the same
+  fundamentals [@stockman2000spectral], **computed 2026-11-07**: at the CIE table's 89 rows they
+  agree within 1.4e-5 relative in L, M and S; on the tests' 5 nm panel spectra macaque luminance
+  moves by under 1e-6 relative, and the isohue set's realized drive values are unchanged to 5
+  decimals; on spectra resampled to 1 nm, narrow bands move by up to 0.31% (red +0.16%, green
+  -0.12%, blue +0.31%), which is what the test against wl-style's own 1 nm numbers allows for.
 - **What reads it**: `cones.macaque_luminance` alone, for color sets (`photometry.ColorSet`). No
   cone color converts through it; the lab observer stays the CIE's 10° set, and a task naming the
   2° fundamentals for its cone colors (XC-302) is still not built.
