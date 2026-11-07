@@ -384,7 +384,7 @@ def test_a_state_name_and_an_allocation_name_cannot_move_the_terminal():
     """XC-119: `wlx review` printed a trial's state names and the allocation's names as the
     task file wrote them, with none of the control-character stripping `cli.render` gives
     every wire string. A state named `s<ESC>[2J` cleared the reviewer's screen, and an
-    allocation name ending `<ESC>[31m` coloured everything after it."""
+    allocation name ending `<ESC>[31m` colored everything after it."""
     trial = Trial(
         start="s\x1b[2J",
         states=[State("s\x1b[2J", enter=[Mark(4096)], go=[On(After(0.3), Outcome.CORRECT)])],
@@ -419,3 +419,26 @@ def test_a_task_reports_other_file_sourced_text_without_control_characters_too()
 
     _no_terminal_control(out)
     assert "loud�[2Jly" in out and "EVIL�[31m" in out
+
+
+def test_a_line_feed_in_a_name_forges_no_line_of_the_report():
+    """XC-119, the review's I1: a bare line feed in a name is a line break in the report, so an
+    allocation name could print a heading of its own in the Event codes section, and a structure
+    name a second section under `render_task`, in a report a task is approved from without its
+    source (ADR-0006). Each line of the report is stripped before the lines are joined, so a
+    break inside a name is the replacement character and never a line."""
+    forged = "go\n\n## Forged heading: reviewed and approved\n"
+
+    artifact = render(TRIAL, {4096: forged})
+
+    assert "go\ufffd\ufffd## Forged heading: reviewed and approved\ufffd" in artifact
+    assert not [line for line in artifact.split("\n") if line.startswith("## Forged")]
+
+    named = "holding\n\n### Head\n\nRuns with the head fixed or free (forged)"
+    task = _reviewed(structures={"other": OTHER, named: HOLDING}, default=named)
+    out = render_task(task, {4096: forged})
+
+    heads = lambda text: [line for line in text.split("\n") if line == "### Head"]
+    assert len(heads(out)) == len(heads(render_task(_reviewed()))), "no second section"
+    assert not [line for line in out.split("\n") if line.startswith("Runs with the head fixed or free (forged)")]
+    assert not [line for line in out.split("\n") if line.startswith("## Forged")]
