@@ -3213,6 +3213,56 @@ class RemoteBindRefused(Exception):
     told to. See `ZmqLink.__init__`'s `allow_remote`."""
 
 
+#: What every command kind the REP socket accepts lets a sender do, for the sentence that
+#: refuses a remote bind (XC-172), keyed by the kind on the wire and grouped by
+#: service, `Command`'s order within each: `(service, words)`, `service` being `"both"` for a kind `wlx run` and
+#: `wlx taskd` act on (in a run, or between runs where the words say so) and `"taskd"`
+#: for a kind only `wlx taskd` acts on and a `wlx run` session refuses
+#: (`taskd.Session._command`, `service._SERVICE_COMMANDS`). **A kind missing here is
+#: left out of the refusal**, and `test_link.py` fails on one: it derives the kinds from
+#: `Command`'s own members.
+_COMMAND_EXPOSURE = {
+    "set": ("both", "change a setting, a reward volume among them"),
+    "stop": ("both", "stop the session, or in `wlx taskd` its run"),
+    "pause": ("both", "pause the session, or in `wlx taskd` its run"),
+    "resume": ("both", "resume it"),
+    "mark": ("both", "put a mark's note on the record"),
+    "schedule": ("both", "schedule a stop"),
+    "cancel": ("both", "cancel a scheduled stop"),
+    "reward": ("both", "give a manual reward, while paused or, in `wlx taskd`, between runs or while its return is awaited"),
+    "clear": ("both", "clear trials from a condition's count"),
+    "drum": ("both", "switch drumming"),
+    "training": ("both", "switch a training setting"),
+    "next_block": ("both", "move the run on a block"),
+    "back_block": ("both", "move the run back a block"),
+    "decline": ("both", "hold a stage move or a widening the rig suggests"),
+    "hand_back": ("both", "hand a held setting back"),
+    "range": ("both", "change a drawn range"),
+    "revert": ("both", "take the run's settings and ranges back to an earlier change"),
+    "open": ("taskd", "open a session, recording the animal's departure time and the fluid it has already had today, and accepting warnings"),
+    "check": ("taskd", "take a run's pre-flight"),
+    "start": ("taskd", "start a run, acknowledging its unknown pre-flight items"),
+    "end": ("taskd", "end a session, recording the animal's return time"),
+    "resume_session": ("taskd", "resume a stranded session"),
+}
+
+
+def _what_a_command_port_exposes() -> str:
+    """The commands the REP socket accepts, each kind by its wire name with what it does
+    and which service acts on it, as one sentence's worth of words (XC-172): what
+    `ZmqLink.__init__`'s refusal of a remote bind says an unauthenticated host could send.
+    A cold path, built only when a bind is refused."""
+    def listed(who: str) -> str:
+        items = [f"`{kind}` ({words})" for kind, (service, words) in _COMMAND_EXPOSURE.items() if service == who]
+        return ", ".join(items[:-1]) + f", and {items[-1]}"
+
+    return (
+        f"send any command the link accepts: to a `wlx run` session or a `wlx taskd` run, "
+        f"{listed('both')}; and to `wlx taskd` alone, which a `wlx run` session refuses, "
+        f"{listed('taskd')}"
+    )
+
+
 #: Transports that cannot leave this machine whatever follows them, so binding on one
 #: is never a remote bind. `inproc` is in-process; `ipc` is a Unix socket on the local
 #: filesystem.
@@ -3450,13 +3500,12 @@ class ZmqLink:
                         f"reachable from other hosts, and a console link has no "
                         f"authentication yet -- `by` is whatever the sender typed, so "
                         f"any host that can reach the REP port can, under an invented "
-                        f"name, change a setting (a reward volume among them), pause "
-                        f"and resume the session, give manual rewards while it is "
-                        f"paused, schedule or cancel a stop, or stop it, and any host "
+                        f"name, {_what_a_command_port_exposes()}, and any host "
                         f"that can reach the mark port can put marks on the record "
                         f"(S9a §6 designs the real thing; it is "
                         f"P4d-3's). Bind on loopback (tcp://127.0.0.1:PORT), or pass "
-                        f"--link-allow-remote / allow_remote=True to say you meant it."
+                        f"--link-allow-remote to `wlx run` or to `wlx taskd` "
+                        f"(allow_remote=True in code) to say you meant it."
                     )
 
         self._ctx = zmq.Context()
@@ -3697,14 +3746,21 @@ class ZmqLink:
         """Wait up to `timeout` seconds for a mark signal or a command, whichever
         comes first (the `Link` protocol). A `zmq.Poller` over the REP socket and,
         when there is one, the mark socket: built per call, which is allowed here --
-        this runs while paused, never inside a frame."""
+        this runs while paused, never inside a frame.
+
+        `timeout` is refused, with a sentence, unless ZeroMQ can take it (`_wait_ms`,
+        XC-432): a negative would poll forever, and NaN or infinity would raise from
+        `int()`. 0 is legal and returns at once, and a timeout over 0 and under 1 ms waits
+        1 ms (it used to return at once, truncated to 0). The check is a comparison or two,
+        once per housekeeping wait."""
         import zmq
 
+        wait_ms = _wait_ms(timeout, "timeout")
         poller = zmq.Poller()
         poller.register(self._rep, zmq.POLLIN)
         if self._mark is not None:
             poller.register(self._mark, zmq.POLLIN)
-        ready = dict(poller.poll(int(timeout * 1000)))
+        ready = dict(poller.poll(wait_ms))
         if self._mark is not None and ready.get(self._mark):
             return self._take_mark()
         return 0
@@ -3826,7 +3882,8 @@ WAIT_MS_MAX = 2**31 - 1
 
 
 def _wait_ms(seconds: object, name: str, least_ms: int = 0) -> int:
-    """`seconds`, a wait one of this file's `Zmq*` constructors takes, as the whole
+    """`seconds`, a wait one of this file's `Zmq*` constructors takes, or `ZmqLink.idle`
+    (XC-432, before its poller is built), as the whole
     milliseconds ZeroMQ is given, or a `ValueError` naming `name` (XC-046).
 
     A number that is not a `bool`, from `least_ms` to `WAIT_MS_MAX` once in
@@ -3847,7 +3904,7 @@ def _wait_ms(seconds: object, name: str, least_ms: int = 0) -> int:
     **A negative is refused because ZeroMQ would not refuse it**: an `RCVTIMEO` of -1
     is wait forever, `-0.001` s truncates to it, and pyzmq's `poll` reads every
     negative as forever. Checked at the top of each constructor, before a context is
-    made."""
+    made, and in `ZmqLink.idle`, before its poller is."""
     ms = None
     if not isinstance(seconds, bool) and isinstance(seconds, (int, float)):
         ms = seconds * 1000

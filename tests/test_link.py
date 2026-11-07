@@ -653,6 +653,74 @@ def test_a_link_refuses_to_bind_where_other_hosts_can_reach_it():
         raise AssertionError("a remote REP endpoint was bound without being asked for")
 
 
+def _command_kinds() -> list[str]:
+    """Every command kind the link accepts, read from `Command`'s own members, so a kind
+    added later is in it without anyone editing this list."""
+    import typing
+
+    import wl_xcon.link as link_module
+
+    return [member.KIND for member in typing.get_args(link_module.Command)]
+
+
+def test_a_remote_bind_refusal_names_every_command_the_link_accepts_and_both_flags():
+    """XC-172: the refusal listed a few commands and named `wlx run --link-allow-remote`
+    alone, though the REP socket also takes (read from `Command`, not from a list here)
+    open and end sessions, start runs, and engine build C3's `hand_back`, `range` and
+    `revert`, and `wlx taskd` takes the same flag. A host that could reach the port could
+    send any of them under an invented name, so the sentence an operator reads before
+    passing the flag says all of them: each kind by its wire name, and which service
+    acts on it."""
+    with pytest.raises(RemoteBindRefused) as refused:
+        ZmqLink(pub_endpoint="tcp://127.0.0.1:0", rep_endpoint="tcp://0.0.0.0:0")
+    said = " ".join(str(refused.value).split())
+
+    kinds = _command_kinds()
+    assert len(kinds) >= 21, "the kinds were read from the code, and there are at least these"
+    for kind in kinds:
+        assert f"`{kind}`" in said, f"the refusal does not name the {kind!r} command"
+    assert "`wlx run`" in said and "`wlx taskd`" in said, "it says which service takes which"
+    assert "--link-allow-remote to `wlx run` or to `wlx taskd`" in said, "both flags are named"
+    assert "reward volume" in said
+
+
+def test_every_command_the_refusal_describes_is_one_the_link_accepts():
+    """The table the sentence is built from has no kind `Command` lacks: a command taken
+    out leaves no description of one the link no longer accepts."""
+    import wl_xcon.link as link_module
+
+    assert set(link_module._COMMAND_EXPOSURE) == set(_command_kinds())
+
+
+def test_the_commands_said_to_be_wlx_taskds_alone_are_the_services_own():
+    """The review's M3: the sentence says which service acts on each kind, and nothing held
+    the half that says `wlx taskd` alone. The kinds the table gives to `taskd` are the ones
+    the service takes between runs and a `wlx run` session refuses
+    (`service._SERVICE_COMMANDS`), read from there and never copied."""
+    import wl_xcon.link as link_module
+    from wl_xcon import service
+
+    said = {
+        kind for kind, (who, _) in link_module._COMMAND_EXPOSURE.items() if who == "taskd"
+    }
+    assert said == {command.KIND for command in service._SERVICE_COMMANDS}
+
+
+def test_the_refusal_says_what_a_command_does_in_each_service_and_reads_as_two_lists():
+    """The review's M4: in `wlx taskd` `stop` and `pause` act on the run, a manual reward is
+    also given while the animal's return is awaited, and `open` carries the fluid the animal
+    has had today and the warnings accepted; each list says `and` before its last item."""
+    with pytest.raises(RemoteBindRefused) as refused:
+        ZmqLink(pub_endpoint="tcp://127.0.0.1:0", rep_endpoint="tcp://0.0.0.0:0")
+    said = " ".join(str(refused.value).split())
+
+    assert "stop the session, or in `wlx taskd` its run" in said
+    assert "pause the session, or in `wlx taskd` its run" in said
+    assert "between runs or while its return is awaited" in said
+    assert "the fluid it has already had today" in said and "accepting warnings" in said
+    assert ", and `revert` (" in said and ", and `resume_session` (" in said
+
+
 def test_which_endpoints_count_as_leaving_this_machine():
     """The classification on its own, with no socket involved, because some of the
     cases cannot be bound on every machine and binding is not what is being checked.
@@ -1862,6 +1930,39 @@ def test_idle_with_nothing_arriving_waits_its_timeout_and_answers_zero(zmq_clean
     started = time.monotonic()
     assert link.idle(0.05) == 0
     assert time.monotonic() - started >= 0.04
+
+
+@pytest.mark.parametrize(
+    "seconds",
+    [float("nan"), float("inf"), float("-inf"), -1.0, -0.001, 2_147_483.648, 1e306, True, "5", None],
+)
+def test_idle_refuses_a_timeout_zeromq_cannot_take_before_it_polls(
+    zmq_cleanup, monkeypatch, seconds
+):
+    """XC-432: `idle` gave `int(timeout * 1000)` to the poll unchecked, so -0.001 s or
+    less was a poll of -1 ms or less, which pyzmq reads as wait forever, and NaN or
+    infinity raised `ValueError` or `OverflowError` from `int()` rather than a sentence.
+    XC-046's check (`_wait_ms`) now covers it, raised before a poller is built."""
+    import zmq
+
+    link = _marked_link(zmq_cleanup)
+
+    def _polled(*args, **kwargs):
+        raise AssertionError("a poller was built, so idle began to wait, before the timeout was checked")
+
+    monkeypatch.setattr(zmq, "Poller", _polled)
+
+    with pytest.raises(ValueError, match="^timeout must be a number of seconds from 0 "):
+        link.idle(seconds)
+
+
+def test_idle_of_zero_returns_at_once(zmq_cleanup):
+    link = _marked_link(zmq_cleanup)
+
+    started = time.monotonic()
+    assert link.idle(0) == 0
+    assert link.idle(0.0) == 0
+    assert time.monotonic() - started < 1.0
 
 
 def test_the_mark_endpoint_is_refused_where_other_hosts_can_reach_it():

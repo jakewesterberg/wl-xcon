@@ -4,6 +4,8 @@ A task that fails any of these is refused at load, not at run. The point is that
 generated task is caught before an animal sees it -- pitfalls P15.
 """
 
+import math
+
 import pytest
 
 from wl_xcon.task import (
@@ -208,6 +210,128 @@ def test_a_task_emitting_an_allocated_code_is_accepted():
     )
 
     assert check(trial, allocation) == []
+
+
+def _marking(code: int) -> Trial:
+    """One state strobing `code` as it starts, and another strobing it on its way out."""
+    return Trial(start="show", states=[State(
+        "show", enter=[Mark(code)], go=[On(After(1.0), Outcome.CORRECT, do=[Mark(code)])])])
+
+
+def _framework_warnings(trial: Trial) -> list:
+    from tasks.allocation import ALLOCATION
+
+    return [f for f in check(trial, ALLOCATION) if f.code == "framework-code"]
+
+
+def test_a_task_strobing_a_framework_code_is_warned_never_refused():
+    """XC-382: `_unallocated_codes` accepts any code the allocation holds, so a task's
+    `Mark(4131)` loaded clean and strobed `PAUSE`, which the recording reads as the framework's
+    and no controls or change row explains, and which leaves every pause row of the session
+    untimed in wl-preproc (it times each row by the strobes of the code the row carries,
+    `event_code`). A warning in every kind, never a refusal
+    (the PI's warnings over refusals), once for each place the task strobes it."""
+    from tasks.allocation import ALLOCATION
+    from wl_xcon import warnlist
+
+    pause = ALLOCATION.code_for("PAUSE")
+    found = _framework_warnings(_marking(pause))
+
+    assert len(found) == 2, found
+    assert all(f.is_warning and f.accepted_in == SESSION_KINDS for f in found)
+    assert found[0].detail == (
+        f"state 'show' emits code {pause}, which the allocation gives 'PAUSE', an event the "
+        f"framework strobes itself: the recording would read the task's strobe as the framework's "
+        f"own PAUSE, which no controls or changes row explains, and wl-preproc times each of those "
+        f"rows by the strobes of the code it carries (`event_code`), so one too many would leave "
+        f"any row carrying {pause} untimed; give the task's event a code of its own")
+    assert [entry.code for entry in warnlist.of_findings(check(_marking(pause), ALLOCATION))] == [
+        "framework-code", "framework-code"]
+
+
+def test_a_task_strobing_its_own_allocated_code_is_not_warned():
+    from tasks.allocation import ALLOCATION
+
+    assert check(_marking(ALLOCATION.code_for("FIX_ON")), ALLOCATION) == []
+
+
+def test_every_code_the_framework_strobes_itself_is_warned():
+    """XC-382: the framework's codes are read from one list, `codes.FRAMEWORK_EVENTS`, and every
+    one the reference allocation gives is warned."""
+    from tasks.allocation import ALLOCATION
+    from wl_xcon.codes import FRAMEWORK_EVENTS
+
+    assert FRAMEWORK_EVENTS and set(FRAMEWORK_EVENTS) <= set(ALLOCATION.task_events.values())
+    for name in FRAMEWORK_EVENTS:
+        code = ALLOCATION.code_for(name)
+        found = _framework_warnings(_marking(code))
+        assert len(found) == 2 and f"gives {name!r}" in found[0].detail, name
+        # True of each of the ten (the review's m2): no row carries RUN_START, RUN_END,
+        # HEAD_FIXED or SESSION_RESUMED today, so the sentence claims no row it leaves untimed.
+        assert f"read the task's strobe as the framework's own {name}," in found[0].detail
+        assert f"would leave any row carrying {code} untimed" in found[0].detail
+
+
+def test_the_framework_events_are_the_names_the_package_strobes_by():
+    """XC-382: `codes.FRAMEWORK_EVENTS` is the one list of them, so it must hold every name the
+    package looks a code up by (`Allocation.code_for`, `Session._code`) and nothing else: read
+    from the source by the parser, so a framework event added beside it without joining it
+    fails here. A name looked up through a loop or a comprehension over names written out is read
+    from them; **only `Session._code`'s own body passes a name on unread**, so a lookup of any other
+    name that is no literal -- a helper's argument, a loop over a variable -- fails here too (the
+    review's I3: any `name` in `taskd.py` was let through, and a `for` loop was never read).
+    `service.FRAMEWORK_CODES`, the ones every `wlx taskd` session strobes, is among them."""
+    import ast
+    from pathlib import Path
+
+    from wl_xcon import service
+    from wl_xcon.codes import FRAMEWORK_EVENTS
+
+    def lookup(node) -> bool:
+        return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr in ("code_for", "_code") and len(node.args) == 1)
+
+    looked_up, unread, passed_on = set(), [], 0
+    for path in sorted((Path(__file__).parents[1] / "wl_xcon").glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        # A name looked up through a loop or a comprehension over written names (`Session._pause`'s
+        # `{name: self._code(name) for name in ("PAUSE", "RESUME")}`) is read from the names.
+        over = {}
+        for node in ast.walk(tree):
+            comprehension = (ast.DictComp, ast.ListComp, ast.SetComp, ast.GeneratorExp)
+            loops = (node.generators if isinstance(node, comprehension)
+                     else [node] if isinstance(node, ast.For) else [])
+            for loop in loops:
+                if isinstance(loop.target, ast.Name) and isinstance(
+                        loop.iter, (ast.Tuple, ast.List)):
+                    for call in ast.walk(node):
+                        over[id(call)] = (loop.target.id, loop.iter.elts)
+        # `Session._code(self, name)` passes its argument on to `Allocation.code_for`, and is the
+        # one place that may.
+        exempt = {id(inner)
+                  for cls in tree.body if path.name == "taskd.py" and isinstance(cls, ast.ClassDef)
+                  and cls.name == "Session"
+                  for method in cls.body
+                  if isinstance(method, ast.FunctionDef) and method.name == "_code"
+                  for inner in ast.walk(method)}
+        for node in ast.walk(tree):
+            if not lookup(node):
+                continue
+            (arg,) = node.args
+            if isinstance(arg, ast.Constant):
+                looked_up.add(arg.value)
+            elif isinstance(arg, ast.Name) and over.get(id(node), ("",))[0] == arg.id:
+                looked_up |= {e.value for e in over[id(node)][1]}
+            elif id(node) in exempt:
+                passed_on += 1
+            else:
+                unread.append(f"{path.name}:{node.lineno}")
+
+    assert passed_on == 1, "Session._code is where a name is passed on, once"
+    assert unread == []
+    assert looked_up == set(FRAMEWORK_EVENTS)
+    assert len(FRAMEWORK_EVENTS) == len(set(FRAMEWORK_EVENTS))
+    assert set(service.FRAMEWORK_CODES) <= set(FRAMEWORK_EVENTS)
 
 
 def test_a_task_referencing_an_undeclared_parameter_is_refused():
@@ -1413,3 +1537,215 @@ def test_an_after_time_past_a_float_is_not_raised_on_at_load():
     trial = Trial(start="a", params=[Param("t", unit="s", choices=(1.0, 10**400))],
                   states=[State("a", go=[On(After(P("t")), Outcome.CORRECT)])])
     assert isinstance(check(trial), list) and isinstance(check(trial, geometry=GEOMETRY), list)
+
+
+# --- XC-423: a number no float holds finitely is refused where it is read, never raised on ------
+
+#: An integer past a float's range, an infinity and a NaN, as a sentence names each (`_said`).
+_NO_FLOAT = [(10**400, "1.00000e+400"), (float("inf"), "inf"), (float("nan"), "nan")]
+_NO_FLOAT_IDS = ["past-float", "infinity", "nan"]
+
+
+def _read_by_check_8(site: str, bad) -> Trial:
+    """A stimulus whose disparity, or its array's ring radius, is setting `x`, offering `bad`; or
+    placed by a coordinate setting whose highest is `bad`."""
+    chosen = [Param("x", unit="deg", choices=(1.0, bad))]
+    return {
+        "disparity": lambda: _showing((0.0, 0.0), chosen, disparity=P("x")),
+        "disparity written": lambda: _showing((0.0, 0.0), disparity=bad),
+        "array radius": lambda: _showing((0.0, 0.0), chosen, looks=Array(
+            radius=P("x"), looks=LIT, among=Disc(color=Gray(20.0)))),
+        "coordinate highest": lambda: _showing(
+            (P("x"), 0.0), [Param("x", unit="deg", low=0.0, high=bad)]),
+    }[site]()
+
+
+@pytest.mark.parametrize(("bad", "said"), _NO_FLOAT, ids=_NO_FLOAT_IDS)
+@pytest.mark.parametrize("site", ["disparity", "disparity written", "array radius",
+                                  "coordinate highest"])
+def test_check_8_refuses_a_setting_that_can_be_no_finite_number_and_never_raises(site, bad, said):
+    """XC-423: with the rig's field, check 8 raised `OverflowError` on a disparity or a ring radius
+    choice of `10**400` (`_numbers`), and a math domain error on a ring of `inf`
+    (`geometry.circle_extent_deg`); a NaN measured as nothing and passed. Each is refused,
+    `stimulus-off-screen`, naming the setting and the value (`check._floats`); one written in,
+    which raised out of `_disparity_is_zero` too (`_literal`), is said as the value it holds. A
+    highest of `10**400` is refused as the setting is built (`Param`), so the coordinate's is an
+    infinity or a NaN here."""
+    if site == "coordinate highest" and isinstance(bad, int):
+        with pytest.raises(ValueError, match="'x': its highest, 1.00000e[+]400, is past a float"):
+            _read_by_check_8(site, bad)
+        return
+    trial = _read_by_check_8(site, bad)
+    what = f"it holds {said}" if site == "disparity written" else f"'x' can be {said}"
+    for geometry in (GEOMETRY, DIRECT):
+        found = _off(trial, geometry)
+        assert len(found) == 1, (geometry, found)
+        assert (f"whose extent cannot be bounded: {what}, which is not a finite number, so it "
+                f"cannot be proved inside") in found[0].detail, found[0]
+
+
+@pytest.mark.parametrize(("bad", "said"), _NO_FLOAT, ids=_NO_FLOAT_IDS)
+def test_an_opacity_that_can_be_no_finite_number_is_refused_and_never_raised(bad, said):
+    """XC-423: an opacity choice of `10**400` raised `OverflowError` out of `check()`, with the
+    rig's field or without (`_reach`, `_numbers`); an infinity was "outside [0, 1]" and a NaN too.
+    Each is refused as no finite number, as written or among a setting's choices."""
+    chosen = _showing((0.0, 0.0), [Param("x", unit="", choices=(1.0, bad))], opacity=P("x"))
+    written = _showing((0.0, 0.0), opacity=bad)
+    for trial, refusal in (
+            (chosen, f"'s''s opacity can be {said} (parameter 'x'), which is not a finite number "
+                     f"in [0, 1]"),
+            (written, f"'s''s opacity is {said}, which is not a finite number in [0, 1]")):
+        for geometry in (None, GEOMETRY):
+            found = [f.detail for f in check(trial, geometry=geometry)
+                     if f.code == "bad-placement"]
+            assert found == [refusal], (geometry, found)
+
+
+@pytest.mark.parametrize(("bad", "said"), _NO_FLOAT, ids=_NO_FLOAT_IDS)
+def test_a_block_number_or_light_that_can_be_no_finite_number_is_refused_and_never_raised(
+        bad, said):
+    """XC-423, through the same reading (`_reach`): a size, a light and a background's light that
+    can be `10**400` raised `OverflowError` out of `check()`, and one of an infinity or a NaN
+    loaded clean. Refused `bad-block`, naming the field, the value and the setting."""
+    chosen = [Param("x", unit="", choices=(1.0, bad))]
+    # An infinite size names the whole screen's own shape (the review's m4; the PI's item 2, kept
+    # a refusal): a NaN is no size at all.
+    whole = "" if bad != bad else _WHOLE_SCREEN
+    for trial, refusal in (
+            (_showing((0.0, 0.0), chosen, looks=Disc(size=P("x"), color=Gray(40.0))),
+             f"Disc.size can be {said} (parameter 'x'), which is not a finite number{whole}"),
+            (_showing((0.0, 0.0), chosen, looks=Disc(color=Gray(P("x")))),
+             f"Gray.cd_m2 can be {said} (parameter 'x'), which is not a finite number"),
+            (replace(_showing((0.0, 0.0), chosen), background=Gray(P("x"))),
+             f"Gray.cd_m2 can be {said} (parameter 'x'), which is not a finite number"),
+            (_showing((0.0, 0.0), looks=Disc(size=bad, color=Gray(40.0))),
+             f"Disc.size is {said}, which is not a finite number{whole}")):
+        for geometry in (None, GEOMETRY):
+            found = [f.detail for f in check(trial, geometry=geometry) if f.code == "bad-block"]
+            assert found == [refusal], (refusal, geometry, found)
+    # A Weber contrast on that background is refused as on black (`_black` fails closed), and the
+    # fix it names says why, not that the setting has no range (`_background_fix`).
+    from wl_xcon.photometry import Weber
+
+    on = replace(_showing((0.0, 0.0), chosen, looks=Disc(contrast=Weber(0.5))),
+                 background=Gray(P("x")))
+    (black,) = [f.detail for f in check(on) if f.code == "weber-on-black"]
+    assert f"give parameter 'x' finite numbers above 0: 'x' can be {said}" in black, black
+    written = replace(_showing((0.0, 0.0), looks=Disc(contrast=Weber(0.5))), background=Gray(bad))
+    (black,) = [f.detail for f in check(written) if f.code == "weber-on-black"]
+    assert f"write the background's light as a finite number above 0: it holds {said}" in black
+
+
+#: What a refusal of an infinite size adds: the shape that covers the whole screen.
+_WHOLE_SCREEN = "; a light over the whole screen is the shape look.WholeScreen()"
+
+
+@pytest.mark.parametrize("infinite", [math.inf, 10**400], ids=["infinity", "past-float"])
+def test_an_infinite_size_or_envelope_is_refused_naming_the_whole_screen_shape(infinite):
+    """The review's m4 and the PI's item 2 (the controller, 2026-11-07: keep the refusal): a disc
+    of infinite size drew as a light over the whole screen, and a Gabor of infinite envelope as a
+    grating with none; both are refused, and the sentence says how to write a light over the
+    whole screen, `look.WholeScreen()`. A size below it, or a NaN, says nothing of it."""
+    from wl_xcon import look
+    from wl_xcon.photometry import Michelson
+    from wl_xcon.task import Gabor
+
+    said = "inf" if isinstance(infinite, float) else "1.00000e+400"
+    for looks, field in ((Disc(size=infinite, color=Gray(40.0)), "Disc.size"),
+                         (Gabor(sigma=infinite, contrast=Michelson(0.5)), "Gabor.sigma"),
+                         (look.Look(shape=look.Circle(size=infinite),
+                                    fill=look.Flat(color=Gray(40.0))), "Circle.size"),
+                         (look.Look(shape=look.Ring(inner=0.5, outer=infinite),
+                                    fill=look.Flat(color=Gray(40.0))), "Ring.outer")):
+        trial = replace(_showing((0.0, 0.0), looks=looks), background=Gray(20.0))
+        found = [f.detail for f in check(trial) if f.code == "bad-block"]
+        assert found == [f"{field} is {said}, which is not a finite number{_WHOLE_SCREEN}"], found
+    trial = _showing((0.0, 0.0), looks=Disc(size=-math.inf, color=Gray(40.0)))
+    assert [f.detail for f in check(trial) if f.code == "bad-block"] == [
+        "Disc.size is -inf, which is not a finite number"]
+
+
+@pytest.mark.parametrize(("bad", "said"), _NO_FLOAT, ids=_NO_FLOAT_IDS)
+def test_a_drift_direction_that_can_be_no_finite_number_is_refused_and_never_raised(bad, said):
+    """XC-423: a grating's drift direction choice of `10**400` raised `OverflowError` out of
+    `check()` (`_direction_faults`, which read the choices as floats itself); it is read through
+    the one helper and refused, `bad-block`, saying so."""
+    from wl_xcon import look
+    from wl_xcon.photometry import Michelson
+
+    trial = _showing((0.0, 0.0), [Param("x", unit="deg", choices=(90.0, bad))], looks=look.Look(
+        shape=look.Circle(size=1.0),
+        fill=look.SineGrating(sf=1.0, direction=P("x"), contrast=Michelson(0.5))))
+    for geometry in (None, GEOMETRY):
+        found = [f.detail for f in check(trial, geometry=geometry) if f.code == "bad-block"]
+        assert found and found[0].startswith(
+            f"SineGrating.direction is parameter 'x', which can be {said}, not a finite number; "
+        ), (geometry, found)
+
+
+# --- XC-273's fix round 1: a wait's seconds no trial can time (the review's I2) ---------------
+
+
+def _waiting(guard) -> Trial:
+    """One state whose second exit is `guard`, a window `w` at the center to hold."""
+    return Trial(start="s", windows=[Window("w", at=(0.0, 0.0), radius=1.0, on="s")], states=[State(
+        "s", enter=[Show(Stimulus("s", at=(0.0, 0.0), looks=LIT))],
+        go=[On(After(2.0), Outcome.NO_RESPONSE), On(guard, Outcome.CORRECT)])])
+
+
+@pytest.mark.parametrize(("guard", "said"), [
+    (After("x"), "state 's' times out after 'x', which is not a number of seconds"),
+    (After(None), "state 's' times out after None, which is not a number of seconds"),
+    (After("1.0"), "state 's' times out after '1.0', which is not a number of seconds"),
+    (Hold("w", "x"), "state 's' holds 'w' for 'x', which is not a number of seconds"),
+    (After(True), "state 's' times out after True, which is not a number of seconds"),
+    (After(math.nan), "state 's' times out after nan, which no trial can time"),
+    (Hold("w", math.nan), "state 's' holds 'w' for nan, which no trial can time"),
+], ids=["word", "none", "number-as-text", "hold-word", "bool", "nan", "hold-nan"])
+def test_a_wait_whose_seconds_no_trial_can_time_is_refused_at_load(guard, said):
+    """The review's I2: `After("x")` and `After(None)` made `check()` raise until `_span` read a
+    literal that is no number as bounding nothing (XC-273), and then loaded clean, for the first
+    trial to raise on (`run.run_trial` compares the elapsed time with it, a `TypeError`);
+    `After("1.0")` and `Hold("w", "x")` loaded clean at the base too, and a NaN never fires. Each is
+    refused, `bad-wait`, with the rig's field or without, and the check never raises."""
+    for geometry in (None, GEOMETRY):
+        found = [f for f in check(_waiting(guard), geometry=geometry) if f.code == "bad-wait"]
+        assert len(found) == 1 and found[0].blocking, (geometry, found)
+        assert found[0].detail.startswith(said), found[0]
+
+
+@pytest.mark.parametrize("seconds", [math.inf, 10**400, 0.5, 2, P("t")],
+                         ids=["infinity", "past-float", "float", "int", "setting"])
+def test_a_wait_of_a_number_or_a_setting_is_not_refused_an_infinity_being_one_that_never_ends(
+        seconds):
+    """An infinity, written in, is a wait that never ends, read as one of any length (`_waits`;
+    XC-423's fix round 1), never a `bad-wait`; nor is a number past a float's range, a number or a
+    setting."""
+    params = [Param("t", unit="s", choices=(0.5, 1.0))]
+    for guard in (After(seconds), Hold("w", seconds)):
+        trial = replace(_waiting(guard), params=params)
+        assert "bad-wait" not in {f.code for f in check(trial)}, guard
+        assert "bad-wait" not in {f.code for f in check(trial, geometry=GEOMETRY)}, guard
+
+
+def test_the_preflight_fails_a_task_whose_wait_no_trial_can_time(tmp_path):
+    """The review's I2, at a run's start: the reference detection task with its response timeout
+    written as `After("3.0")` passed the pre-flight's task checks and raised in its first trial
+    that reached the state; its task checks fail now, saying why."""
+    from pathlib import Path
+
+    from tasks.allocation import ALLOCATION
+    from wl_xcon import preflight
+    from wl_xcon.photometry import SRGB
+
+    text = Path("tasks/fixation_detection.py").read_text()
+    old = "                On(After(3.0), Outcome.NO_RESPONSE),"
+    assert text.count(old) == 1
+    path = tmp_path / "texted.py"
+    path.write_text(text.replace(old, old.replace("3.0", '"3.0"')))
+
+    item, loaded, _ = preflight.task(path, ALLOCATION, DIRECT, SRGB)
+
+    assert loaded is not None and item.result == "fail", item
+    assert "bad-wait: state 'verify' times out after '3.0', which is not a number of seconds" in (
+        item.said), item

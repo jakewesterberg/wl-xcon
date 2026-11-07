@@ -366,3 +366,79 @@ def test_each_structure_is_drawn_under_its_own_heading_the_default_first():
     assert default < out.index("## Structure `other`")
     assert render(OTHER).replace("## ", "### ") in out
     assert "\n## Trial structure" not in out and "### Trial structure" in out
+
+
+# --- Control characters in file-sourced names (XC-119) --------------------------------
+
+
+def _no_terminal_control(text: str) -> None:
+    """Nothing in `text` a terminal would act on: no C0 or C1 control character but the
+    line breaks the report is made of."""
+    import unicodedata
+
+    bad = [ch for ch in text if unicodedata.category(ch) == "Cc" and ch != "\n"]
+    assert not bad, f"control characters survived: {bad!r}"
+
+
+def test_a_state_name_and_an_allocation_name_cannot_move_the_terminal():
+    """XC-119: `wlx review` printed a trial's state names and the allocation's names as the
+    task file wrote them, with none of the control-character stripping `cli.render` gives
+    every wire string. A state named `s<ESC>[2J` cleared the reviewer's screen, and an
+    allocation name ending `<ESC>[31m` colored everything after it."""
+    trial = Trial(
+        start="s\x1b[2J",
+        states=[State("s\x1b[2J", enter=[Mark(4096)], go=[On(After(0.3), Outcome.CORRECT)])],
+    )
+
+    artifact = render(trial, {4096: "EVIL\x1b[31m"})
+
+    _no_terminal_control(artifact)
+    assert "s�[2J" in artifact and "EVIL�[31m" in artifact, "the text is kept, marked"
+
+
+def test_a_task_reports_other_file_sourced_text_without_control_characters_too():
+    """The same edge for `render_task`: a meaning's note and a setting's name are file text
+    too, and the report ends in one place that strips them all."""
+    ruled = _reviewed(
+        meanings={
+            "contrast": Meaning(CLEAR_CUT, STIMULUS, raising=EASIER, note="loud\x1b[2Jly"),
+            "target_appearance": LOOKS,
+        },
+        structures={
+            "other": OTHER,
+            "holding": dataclasses.replace(
+                HOLDING,
+                states=[State("hold\x07", enter=[Mark(4096)],
+                              go=[On(After(0.3), Outcome.CORRECT)])],
+                start="hold\x07",
+            ),
+        },
+    )
+
+    out = render_task(ruled, {4096: "EVIL\x1b[31m"})
+
+    _no_terminal_control(out)
+    assert "loud�[2Jly" in out and "EVIL�[31m" in out
+
+
+def test_a_line_feed_in_a_name_forges_no_line_of_the_report():
+    """XC-119, the review's I1: a bare line feed in a name is a line break in the report, so an
+    allocation name could print a heading of its own in the Event codes section, and a structure
+    name a second section under `render_task`, in a report a task is approved from without its
+    source (ADR-0006). Each line of the report is stripped before the lines are joined, so a
+    break inside a name is the replacement character and never a line."""
+    forged = "go\n\n## Forged heading: reviewed and approved\n"
+
+    artifact = render(TRIAL, {4096: forged})
+
+    assert "go\ufffd\ufffd## Forged heading: reviewed and approved\ufffd" in artifact
+    assert not [line for line in artifact.split("\n") if line.startswith("## Forged")]
+
+    named = "holding\n\n### Head\n\nRuns with the head fixed or free (forged)"
+    task = _reviewed(structures={"other": OTHER, named: HOLDING}, default=named)
+    out = render_task(task, {4096: forged})
+
+    heads = lambda text: [line for line in text.split("\n") if line == "### Head"]
+    assert len(heads(out)) == len(heads(render_task(_reviewed()))), "no second section"
+    assert not [line for line in out.split("\n") if line.startswith("Runs with the head fixed or free (forged)")]
+    assert not [line for line in out.split("\n") if line.startswith("## Forged")]

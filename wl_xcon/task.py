@@ -9,6 +9,7 @@ type checking -- and so a model authoring one is writing the language it writes 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from decimal import Decimal
 import math
 from enum import Enum
 from typing import NamedTuple
@@ -148,7 +149,9 @@ class Param:
     #: `__post_init__` refuses any other as the task is built: a starting appearance is
     #: not carried until telemetry publishes one (XC-420; the record writes one since REC-27),
     #: and a start outside `[low, high]` would run under `wlx run`, which takes no
-    #: pre-flight (XC-159; the b3a-2 final review, m2). A bound that is not a real number is left to
+    #: pre-flight (XC-159; the b3a-2 final review, m2). A bound past a float's range is refused
+    #: as the setting is built, with a start or without (XC-423); any other bound that is not a
+    #: real number is left to
     #: `preflight.values`, which holds the merged values to `[low, high]` again -- one outside
     #: it a warning since XC-352's D2 (2026-10-11), unless the checks widened to it refuse it
     #: (`preflight.beyond`) -- and fails closed on a bound it cannot compare. `None`, the
@@ -158,6 +161,16 @@ class Param:
     start: object = None
 
     def __post_init__(self) -> None:
+        # **A bound past a float's range is refused as the setting is built** (XC-423): no float
+        # holds it, so every check that reads a bound as one raised on it (`_real` below did, as
+        # the task file loaded), and only code can write one.
+        for which, bound in (("lowest", self.low), ("highest", self.high)):
+            if isinstance(bound, int) and not isinstance(bound, bool) and _past_float(bound):
+                raise ValueError(
+                    f"parameter {self.name!r}: its {which}, {Decimal(bound):.6g}, is past a "
+                    f"float's range, so no check can read it; a bound is a finite number, or None "
+                    f"for none"
+                )
         start = self.start
         if start is not None and (
             isinstance(start, bool)
@@ -192,10 +205,20 @@ class Param:
 def _real(bound: object) -> float | None:
     """A declared bound a start is held to: a finite real number that is not a `bool`,
     or `None` -- for no bound, and for one `Param` cannot compare, which the pre-flight
-    fails closed on instead (`preflight.values`)."""
+    fails closed on instead (`preflight.values`). One past a float's range is refused before
+    this reads it (`Param.__post_init__`; XC-423)."""
     if isinstance(bound, bool) or not isinstance(bound, (int, float)):
         return None
     return bound if math.isfinite(bound) else None
+
+
+def _past_float(number: int) -> bool:
+    """Whether an integer is past a float's range: `float(10**400)` raises `OverflowError`."""
+    try:
+        float(number)
+    except OverflowError:
+        return True
+    return False
 
 
 @dataclass(frozen=True, slots=True)

@@ -817,6 +817,64 @@ def test_a_wait_declared_by_choices_counts_its_longest_choice():
     assert "a wait longer than any the task declares (its longest, 30 s)" in longer[1].detail
 
 
+def _window_set(timeout: Param, written=None) -> Task:
+    """`_timing_out(timeout)` with the fixation window's radius a setting, `fix_window`, from 0.5°
+    to 5°, and, given `written`, one more wait written in as `After(written)`."""
+    trial = _timing_out(timeout).structures["waiting"]
+    state = trial.states[0]
+    go = state.go if written is None else [*state.go, On(After(written), Outcome.ABORT)]
+    return Task({"waiting": replace(
+        trial,
+        params=[*trial.params, Param("fix_window", unit="deg", low=0.5, high=5.0, start=2.0)],
+        windows=[replace(trial.windows[0], radius=P("fix_window"))],
+        states=[replace(state, go=go)])}, default="waiting")
+
+
+#: A wait that can be no finite number, each way a task can write one (the review's I1).
+_ENDLESS = {
+    "choice inf": lambda: _window_set(Param("timeout", unit="s", choices=(1.0, math.inf))),
+    "choice nan": lambda: _window_set(Param("timeout", unit="s", choices=(1.0, math.nan))),
+    "choice past-float": lambda: _window_set(Param("timeout", unit="s", choices=(1.0, 10**400))),
+    "highest inf": lambda: _window_set(Param("timeout", unit="s", low=1.0, high=math.inf)),
+    "written inf": lambda: _window_set(Param("timeout", unit="s", choices=(1.0, 30.0)), math.inf),
+    "written past-float": lambda: _window_set(Param("timeout", unit="s", choices=(1.0, 30.0)),
+                                              10**400),
+}
+
+
+@pytest.mark.parametrize("endless", list(_ENDLESS), ids=list(_ENDLESS))
+def test_a_wait_that_can_be_no_finite_number_is_any_length_and_refuses_nothing(endless):
+    """XC-423's fix round 1 (the review's I1; the controller's ruling): `_waits` raised on a wait
+    setting's choice of `10**400`, and the first fix refused, at a run's pre-flight and on every
+    live edit, every value outside its range, of any setting, wait or not, because the task's
+    longest wait "cannot be judged". A wait no float holds finitely is read as one with no highest:
+    any length (`math.inf`), so no value is a wait longer than one the task declares, and a value
+    outside its range is warned exactly as beside a wait declared with no highest (the PI's
+    warnings over refusals, XC-352's D2; "Allow, with a warning", 2026-10-12): through
+    `beyond_range`, which a live edit runs (`Session._beyond_range`), and the pre-flight."""
+    from wl_xcon import preflight
+
+    task, highest_none = _ENDLESS[endless](), _window_set(Param("timeout", unit="s", low=1.0))
+    for values in ({"fix_window": 6.0}, {"fix_acquisition": 600.0}):
+        found, expected = beyond_range(task, values), beyond_range(highest_none, values)
+        assert [(f.code, f.blocking) for f in found] == [
+            (f.code, f.blocking) for f in expected], (values, found)
+        assert not any(f.blocking for f in found), (values, found)
+        assert "longer-than-declared" not in {f.code for f in found}
+        given = preflight.beyond(task, values, ALLOCATION, DIRECT, SRGB, None)
+        assert not any(f.blocking for f in given), (values, given)
+        assert [f.code for f in given] == [
+            f.code for f in preflight.beyond(highest_none, values, ALLOCATION, DIRECT, SRGB, None)]
+
+
+def test_a_value_no_float_holds_is_not_judged_outside_its_range_and_never_raises():
+    """XC-423: `_outside` read a value with `math.isfinite`, which raises on `10**400`. A value
+    that is no finite number is not judged here, as an infinity is not: the pre-flight's values
+    item refuses it as no real number (`preflight.values`)."""
+    assert beyond_range(_waiting_task(), {"fix_acquisition": 10**400}) == []
+    assert beyond_range(_waiting_task(), {"fix_acquisition": math.inf}) == []
+
+
 def test_a_finding_the_declared_ranges_already_give_is_not_refused_again():
     """What the declared task's checks already find was accepted with it; only what the
     widening adds is judged."""

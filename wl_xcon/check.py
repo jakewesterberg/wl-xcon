@@ -22,7 +22,7 @@ from statistics import NormalDist
 from typing import NamedTuple
 
 from wl_xcon.actor import TEXT_LIMIT
-from wl_xcon.codes import PROVISIONAL, Allocation
+from wl_xcon.codes import FRAMEWORK_EVENTS, PROVISIONAL, Allocation
 from wl_xcon.components import Registry
 from wl_xcon.declarations import BOUNDED, canonical, resolved
 from wl_xcon.findings import SESSION_KINDS, Finding
@@ -129,9 +129,11 @@ def check(
     return (
         _unreachable_states(valued)
         + _unbounded_waits(valued)
+        + _wait_kind_faults(valued)
         + _states_with_no_outcome_path(valued)
         + _shadowed_transitions(valued)
         + _unallocated_codes(valued, allocation)
+        + _framework_codes(valued, allocation)
         + _undeclared_parameters(valued)
         + _custom_components(valued, components or Registry())
         + _offscreen_stimuli(valued, geometry)
@@ -264,7 +266,7 @@ def _outside(param: Param, value: object) -> bool:
     choices has none)."""
     if param.choices or isinstance(value, bool) or not isinstance(value, (int, float)):
         return False
-    if not math.isfinite(value):
+    if not _real(value):  # `math.isfinite(10**400)` raises (XC-423)
         return False
     return ((param.low is not None and value < param.low)
             or (param.high is not None and value > param.high))
@@ -275,7 +277,12 @@ def _waits(task: Task) -> tuple[set[str], float]:
     the task declares: the highest bound any of them declares, the largest number a choice
     setting among them offers, or its longest literal wait. **A wait setting with no highest
     that is a number can be any length** (Task 10's review, M1), so the longest is unbounded
-    (`math.inf`) and no value of any wait is longer than one the task declares."""
+    (`math.inf`) and no value of any wait is longer than one the task declares. **So is a wait it
+    reads that is no finite number** -- an infinity, a NaN, an integer past a float's range, a
+    choice, a highest or a wait written in (XC-423): `float(10**400)` raised out of
+    `beyond_range`, and refusing because the longest "cannot be judged" turned every value
+    outside its range, of any setting, from a warning into a refusal (its fix round 1, the
+    review's I1), where the PI's rulings make one a warning (XC-352's D2; 2026-10-12)."""
     declared = {param.name: param for param in task.params}
     names: set[str] = set()
     longest = 0.0
@@ -291,15 +298,21 @@ def _waits(task: Task) -> tuple[set[str], float]:
                     if param is None:
                         continue  # refused at load (`_undeclared_parameters`)
                     if param.choices:
-                        offered = [float(c) for c in param.choices if _is_number(c)]
+                        offered = [_seconds(c) for c in param.choices if _is_number(c)]
                         longest = max([longest, *offered])
                     elif _is_number(param.high):
-                        longest = max(longest, float(param.high))
+                        longest = max(longest, _seconds(param.high))
                     else:
                         longest = math.inf
                 elif _is_number(seconds):
-                    longest = max(longest, float(seconds))
+                    longest = max(longest, _seconds(seconds))
     return names, longest
+
+
+def _seconds(number: object) -> float:
+    """A wait's number as `_waits` reads it: itself, or without end (`math.inf`) for one that is no
+    finite number, as a wait with no highest is (XC-423's fix round 1)."""
+    return float(number) if _real(number) else math.inf
 
 
 def widened(task: Task, values) -> Task:
@@ -361,6 +374,7 @@ def beyond_range(
     # names is the longest trial, five minutes since engine build C2a (`TRIAL_CAP`).
     waits, longest = _waits(task)
     findings: list[Finding] = []
+    said = ", ".join(f"{name!r} at {value:g}" for name, value in outside.items())
     for name, value in outside.items():
         param = declared[name]
         # The bounds it declares, and only those (Task 10's review, M2): a setting with one bound
@@ -380,7 +394,6 @@ def beyond_range(
                 f"only between trials: while a trial waits on {name!r} they go unheard until that "
                 f"trial ends, and {TRIAL_CAP} ends any trial still running then, with no outcome "
                 f"(a hang)"), blocking=False, accepted_in=SESSION_KINDS))
-    said = ", ".join(f"{name!r} at {value:g}" for name, value in outside.items())
     before = check_task(task, allocation, components, geometry, calibration, deployment)
     # What the declared task's findings are about (the warnings-over-refusals review's I5): a
     # finding of `BREAKS_A_RUN` about the same thing, only larger, was accepted with the task.
@@ -2778,6 +2791,36 @@ def _unbounded_waits(trial: Trial) -> list[Finding]:
     ]
 
 
+def _wait_kind_faults(trial: Trial) -> list[Finding]:
+    """**A wait's seconds that no trial can time are refused at load**, `bad-wait` (XC-273's fix
+    round 1, the review's I2): an `After`'s or a `Hold`'s seconds are a number or a setting. A
+    word or `None` made `check()` raise until `_span` read a literal that is no number as bounding
+    nothing (XC-273), and then loaded clean, for the first trial to raise on (`run.run_trial`
+    compares the elapsed time with it); one written as text or a `bool` loaded clean before that
+    too; and a NaN compares false with every time, so the wait never ends. **An infinity, or an
+    integer past a float's range, is a wait that never ends**, read as one of any length
+    (`_waits`), and is not refused here. A setting's choices are not read here."""
+    findings: list[Finding] = []
+    for state in trial.states:
+        for edge in state.go:
+            guard = edge.guard
+            if not isinstance(guard, (After, Hold)) or isinstance(guard.seconds, P):
+                continue
+            seconds = guard.seconds
+            what = (f"state {state.name!r} holds {guard.window!r} for" if isinstance(guard, Hold)
+                    else f"state {state.name!r} times out after")
+            if not _is_number(seconds):
+                findings.append(Finding("bad-wait", (
+                    f"{what} {_said(seconds)}, which is not a number of seconds, and a trial "
+                    f"would stop where it is first timed; write a number of seconds, or a "
+                    f"setting")))
+            elif seconds != seconds:  # a NaN; `math.isnan(10**400)` raises
+                findings.append(Finding("bad-wait", (
+                    f"{what} nan, which no trial can time: a NaN compares false with every time, "
+                    f"so the wait never ends; write a number of seconds")))
+    return findings
+
+
 def _states_with_no_outcome_path(trial: Trial) -> list[Finding]:
     """S1 §9 check 3: from every state, some path reaches a terminal outcome.
 
@@ -2860,6 +2903,38 @@ def _unallocated_codes(trial: Trial, allocation: Allocation) -> list[Finding]:
         )
         for name, action in actions_of(trial)
         if isinstance(action, Mark) and action.code not in allocation
+    ]
+
+
+def _framework_codes(trial: Trial, allocation: Allocation) -> list[Finding]:
+    """**A task's `Mark` of a code the framework strobes itself** (XC-382): one the allocation
+    gives an event of `codes.FRAMEWORK_EVENTS` -- a pause, a resume, an operator's mark, a manual
+    reward, a setting applied, the head fixed or released, a run's start or end, a session
+    resumed. `_unallocated_codes` accepts it, as it is in the allocation, but the recording reads
+    it as the framework's own event, which no controls or change row explains, and wl-preproc
+    times each of those rows by the strobes of the code the row carries (its `event_code`), the
+    n-th row by the n-th strobe, so a count one too many leaves every row carrying it untimed: a
+    pause's, a resume's, a mark's, a manual reward's, a change's or the release's. **No row
+    carries a run's start or end, the head's fixing or a resume of the session today**, so the
+    sentence says "any row" (the review's m2), true of all ten. **A warning in every kind, never a
+    refusal** (the PI's warnings over refusals, 2026-10-11), once for each place the task strobes
+    it."""
+    framework = {code: name for code, name in allocation.task_events.items()
+                 if name in FRAMEWORK_EVENTS}
+    return [
+        Finding(
+            "framework-code",
+            f"state {name!r} emits code {action.code}, which the allocation gives "
+            f"{framework[action.code]!r}, an event the framework strobes itself: the recording "
+            f"would read the task's strobe as the framework's own {framework[action.code]}, which "
+            f"no controls or changes row explains, and wl-preproc times each of those rows by the "
+            f"strobes of the code it carries (`event_code`), so one too many would leave any row "
+            f"carrying {action.code} untimed; give the task's event a code of its own",
+            blocking=False,
+            accepted_in=SESSION_KINDS,
+        )
+        for name, action in actions_of(trial)
+        if isinstance(action, Mark) and action.code in framework
     ]
 
 
@@ -2964,8 +3039,9 @@ def _span(
     every range check shares** (`_widest`, which read a setting with one bound as 0 to 0, is
     gone since Task 10's review, fix round 2).
 
-    A literal is itself; a parameter is **its declared range**, because every value in it is
-    one an experimenter can dial in live, or the least and greatest of its choices. Checking
+    A literal is itself (one that is no number bounds nothing, failing closed; XC-273); a
+    parameter is **its declared range**, because every value in it is one an experimenter can
+    dial in live, or the least and greatest of its choices. Checking
     the range rather than a value proves a task cannot be broken from the console, instead of
     proving it happens not to be today.
 
@@ -2979,7 +3055,11 @@ def _span(
     unbounded.
     """
     if not isinstance(value, P):
-        return (float(value), float(value))
+        # A literal that is no number bounds nothing, failing closed (XC-273: `float("x")` raised
+        # out of `check()`), and is refused where its kind is checked; one past a float's range is
+        # the infinity it is past (`_literal`; `float(10**400)` raised too).
+        number = _literal(value)
+        return (least, math.inf) if number is None else (number, number)
     param = params.get(value.name)
     if param is None:
         return (least, math.inf)
@@ -3008,6 +3088,33 @@ class _Unmeasurable(_Unbounded):
     literal) and the value; `_offscreen_stimuli` names both."""
 
 
+class _Unreal(_Unbounded):
+    """**A number no float holds finitely** -- an infinity, a NaN, an integer past a float's range
+    -- where a check reads a number (`_floats`; XC-423), named: the setting's name (`None` for a
+    literal) and the value. Every check that catches `_Unbounded` refuses or passes over it, so
+    none raises on one; each that says why says this (`_unreal_said`)."""
+
+
+def _floats(values, name: str | None) -> list[float]:
+    """**Finite or refused** (XC-423): `values`, each a number, as floats, or `_Unreal` naming
+    `name` and the first that is no finite number (`_real`). The one reading of a number every
+    check that computes with one shares, but `_waits`, which reads one as a wait of any length
+    (`_seconds`) and refuses nothing: `float(10**400)` raises `OverflowError`, an infinite ring
+    has no extent (`geometry.circle_extent_deg` raises), and a NaN compares false with everything,
+    so passes every rule it meets; none is computed with."""
+    for value in values:
+        if not _real(value):
+            raise _Unreal(name, value)
+    return [float(value) for value in values]
+
+
+def _unreal_said(unreal: _Unreal) -> str:
+    """What an `_Unreal` is, as a refusal says it: "'x' can be inf", or "it holds inf" for a
+    literal."""
+    name, value = unreal.args
+    return f"{name!r} can be {_said(value)}" if name is not None else f"it holds {_said(value)}"
+
+
 def _domain(value: object, params: dict[str, Param]) -> list:
     """Every value that matters for a property check 8 measures.
 
@@ -3031,11 +3138,12 @@ def _domain(value: object, params: dict[str, Param]) -> list:
 
 def _numbers(value: object, params: dict[str, Param]) -> list[float]:
     """`_domain`, for a property that is a number: a choice that is not one is not
-    something the field can be tested at."""
+    something the field can be tested at, and one that is no finite number is `_Unreal`
+    (`_floats`; XC-423)."""
     found = _domain(value, params)
     if not all(_is_number(v) for v in found):
         raise _Unbounded(value.name if isinstance(value, P) else repr(value))
-    return [float(v) for v in found]
+    return _floats(found, value.name if isinstance(value, P) else None)
 
 
 def _is_number(value: object) -> bool:
@@ -3058,11 +3166,11 @@ def _options(value: object, params: dict[str, Param]) -> list:
 def _reach(value: object, params: dict[str, Param]) -> list[float]:
     """Every number a field can hold, for a rule a literal is held to: a literal number is
     itself, a parameter each choice or both ends of its range (`_numbers`, `_Unbounded`
-    when it offers neither), and anything else no number this rule reads."""
+    when it offers neither), and anything else no number this rule reads. One that is no finite
+    number, written or chosen, is `_Unreal` (`_floats`; XC-423)."""
     if isinstance(value, P):
         return _numbers(value, params)
-    literal = _literal(value)
-    return [] if literal is None else [literal]
+    return _floats([value], None) if _is_number(value) else []
 
 
 #: Why a position with an infinity, a NaN or an integer past a float's range in it is none.
@@ -3382,6 +3490,17 @@ def _offscreen_stimuli(trial: Trial, geometry: Geometry | None) -> list[Finding]
                     + (f"{setting!r} can be" if setting else "its position holds")
                     + f" {_said(choice)}, which no position can be, so it cannot be proved "
                     f"inside {field}",
+                )
+            )
+            continue
+        except _Unreal as unreal:
+            # A disparity, a ring radius or a coordinate's bound no float holds (XC-423).
+            findings.append(
+                Finding(
+                    "stimulus-off-screen",
+                    f"state {name!r} {what} whose extent cannot be bounded: "
+                    f"{_unreal_said(unreal)}, which is not a finite number, so it cannot be "
+                    f"proved inside {field}",
                 )
             )
             continue
@@ -3894,10 +4013,17 @@ def _combined(trial: Trial, params: dict[str, Param]) -> list[tuple[object, obje
 
 
 def _literal(value) -> float | None:
-    """A literal number, or None for a parameter, a missing value or anything else."""
+    """A literal number, or None for a parameter, a missing value or anything else. **An integer
+    past a float's range is its sign's infinity** (XC-423): `float(10**400)` raised out of
+    `check()` here (a disparity's `_disparity_is_zero`); every question this answers -- zero,
+    black, nonzero -- it answers as the integer would, and where it is computed with it is
+    refused (`_floats`)."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return float(value)
+    try:
+        return float(value)
+    except OverflowError:
+        return math.inf if value > 0 else -math.inf
 
 
 def _colors(trial: Trial, params: dict[str, Param]):
@@ -4584,6 +4710,10 @@ _SIZES = ("size", "width", "height", "length", "thickness", "outer", "sigma", "a
 _NUMBERS = (*_SIZES, "inner", "sides", "sf", "phase", "tf", "direction", "orientation", "value",
             "cd_m2", "x", "y", "Y", "lum", "l_m", "s_lm", "L", "M", "S")
 
+#: What a refusal of an infinite size adds (`_block_faults`; the review's m4): the shape for a
+#: light over the whole screen.
+_WHOLE_SCREEN = "; a light over the whole screen is the shape look.WholeScreen()"
+
 #: Block fields that hold a light: a `Color`, `None`, or a parameter offering those (XC-264).
 _LIGHTS = ("color", "mean")
 
@@ -4684,6 +4814,12 @@ def _background_fix(backgrounds: list, params: dict[str, Param]) -> str:
         light = _luminance(color)
         try:
             reached = [v for v in _reach(light, params) if v <= 0.0]
+        except _Unreal as unreal:  # XC-423
+            fix(f"give parameter {light.name!r} finite numbers above 0: {_unreal_said(unreal)}"
+                if isinstance(light, P) else
+                f"write the background's light as a finite number above 0: "
+                f"{_unreal_said(unreal)}")
+            return
         except _Unbounded:
             fix(f"bound parameter {light.name!r} above 0: it has neither a two-sided range nor "
                 f"numeric choices, so it can be anything")
@@ -4964,8 +5100,10 @@ def _block_faults(trial: Trial) -> list[Finding]:
     **And every value is of its field's kind** (XC-245, XC-264, XC-265): a number where a
     number belongs, a color where a light does, an appearance where a stimulus's looks do,
     and a shape, a fill, an edge or an outline where a `Look`'s are, each choice of a
-    parameter included. A value of another kind passed every rule above unread, and
-    `resolve` met it first. A parameter whose choices name it is refused too (XC-263)."""
+    parameter included; an array's set size and target index a whole number, its ring radius
+    a finite number, and a polygon's sides a whole number (XC-273). A value of another kind
+    passed every rule above unread, and `resolve` met it first. A parameter whose choices name
+    it is refused too (XC-263)."""
     from wl_xcon import look
     from wl_xcon.photometry import Michelson, Weber
     from wl_xcon.screen import LIGHTLESS
@@ -4979,13 +5117,23 @@ def _block_faults(trial: Trial) -> list[Finding]:
         if finding not in findings:  # one parameter, or one block, met twice
             findings.append(finding)
 
-    def values(part, attr: str) -> list[tuple[float, str]]:
+    def values(part, attr: str, size: bool = False) -> list[tuple[float, str]]:
         """Each number `part.attr` can be, with how to say it ("Disc.size is 0", "Disc.size
-        can be -1 (parameter 's')"); a parameter that cannot be bounded is refused here."""
+        can be -1 (parameter 's')"); a parameter that cannot be bounded is refused here. **An
+        infinite size** (`size`) names the whole screen's shape (the review's m4; the PI's item 2
+        of 2026-11-07, kept a refusal): a disc of infinite size drew as a light over the whole
+        screen, which `look.WholeScreen()` says."""
         raw = getattr(part, attr)
         name = f"{type(part).__name__}.{attr}"
         try:
             reached = _reach(raw, params)
+        except _Unreal as unreal:
+            _, value = unreal.args
+            whole = (_WHOLE_SCREEN if size and _literal(value) == math.inf else "")
+            bad(f"{name} can be {_said(value)} (parameter {raw.name!r}), which is not a finite "
+                f"number{whole}" if isinstance(raw, P) else
+                f"{name} is {_said(value)}, which is not a finite number{whole}")
+            return []
         except _Unbounded as unbounded:
             bad(f"{name} is parameter {unbounded.args[0]!r}, which has neither a two-sided "
                 f"range nor numeric choices, so it cannot be bounded")
@@ -5001,14 +5149,15 @@ def _block_faults(trial: Trial) -> list[Finding]:
                 bad(said)
                 return
 
-    def kind(what: str, raw, fits, noun: str) -> None:
+    def kind(what: str, raw, fits, noun: str, say=repr) -> None:
         """Refuse the first value `raw` can hold that is not `noun`: a literal, or each
-        choice of a parameter (one offering none is refused where the field is read)."""
+        choice of a parameter (one offering none is refused where the field is read), each said
+        by `say`."""
         if isinstance(raw, P):
             offered = params[raw.name].choices if raw.name in params else ()
-            pairs = [(c, f"{what} can be {c!r} (parameter {raw.name!r})") for c in offered]
+            pairs = [(c, f"{what} can be {say(c)} (parameter {raw.name!r})") for c in offered]
         else:
-            pairs = [(raw, f"{what} is {raw!r}")]
+            pairs = [(raw, f"{what} is {say(raw)}")]
         first([(v, f"{said}, not {noun}") for v, said in pairs], lambda v: not fits(v))
 
     def light(v) -> bool:
@@ -5049,10 +5198,17 @@ def _block_faults(trial: Trial) -> list[Finding]:
                 kind(f"{name}.{f.name}", raw, light, "a color")
             if f.name in _SIZES:
                 first([(v, f"{said}; a size is a positive full width in degrees")
-                       for v, said in values(part, f.name)], lambda v: v <= 0.0)
+                       for v, said in values(part, f.name, size=True)], lambda v: v <= 0.0)
         if isinstance(part, Array):
             for attr in ("looks", "among"):
                 shown(f"Array.{attr}", getattr(part, attr))
+            # **Its set size and target index are whole numbers, its ring radius a finite number
+            # of degrees** (XC-273), as written and among a setting's choices: a word made
+            # `check()` raise, `n=3.5` drew 3 objects (`Array.positions` reads it through `int`),
+            # and the array checks read none of these (`_counted`).
+            for attr in ("n", "target"):
+                kind(f"Array.{attr}", getattr(part, attr), _whole_number, "a whole number", _said)
+            kind("Array.radius", part.radius, _finite, "a finite number of degrees", _said)
         if isinstance(part, Michelson):
             first([(v, f"{said}, outside [0, 1]") for v, said in values(part, "value")],
                   lambda v: not 0.0 <= v <= 1.0)
@@ -5077,14 +5233,15 @@ def _block_faults(trial: Trial) -> list[Finding]:
                 # Bounded here, as an `xyY`'s are; whether the panel makes each is `_color_faults`'.
                 values(part, field.name)
         if isinstance(part, (look.Ring, Annulus)):
-            inner, outer = values(part, "inner"), values(part, "outer")
+            inner, outer = values(part, "inner"), values(part, "outer", size=True)
             first(inner, lambda v: v < 0.0)
             if inner and outer and max(inner)[0] >= min(outer)[0]:
                 bad(f"{name}'s inner diameter is not inside its outer: {max(inner)[1]}, "
                     f"{min(outer)[1]}")
         if isinstance(part, (look.RegularPolygon, Polygon)):
-            first([(v, f"{said}; a polygon has at least 3 sides")
-                   for v, said in values(part, "sides")], lambda v: v < 3)
+            # A whole number (XC-273): `sides=3.5` drew a triangle (`exact` reads it through `int`).
+            first([(v, f"{said}; a polygon has a whole number of sides, at least 3")
+                   for v, said in values(part, "sides")], lambda v: v < 3 or not v.is_integer())
         if isinstance(part, look.Vertices):
             if len(part.points) < 3:
                 bad(f"Vertices has {len(part.points)} points; a polygon has at least 3")
@@ -5144,13 +5301,20 @@ def _direction_faults(looks, grating, params: dict[str, Param], bad) -> None:
     direction, orientation = grating.direction, looks.orientation
 
     def choices(value, what: str, why: str) -> list[float] | None:
-        if not isinstance(value, P):
-            return _reach(value, params)
-        offered = params[value.name].choices if value.name in params else ()
-        if not offered or not all(_is_number(c) for c in offered):
-            bad(f"{what} is parameter {value.name!r}, which offers no numeric choices; {why}")
+        try:
+            if not isinstance(value, P):
+                return _reach(value, params)
+            offered = params[value.name].choices if value.name in params else ()
+            if not offered or not all(_is_number(c) for c in offered):
+                bad(f"{what} is parameter {value.name!r}, which offers no numeric choices; {why}")
+                return None
+            return _floats(offered, value.name)
+        except _Unreal as unreal:  # XC-423: `float(10**400)` raised out of `check()`
+            name, number = unreal.args
+            bad(f"{what} is parameter {name!r}, which can be {_said(number)}, not a finite number; "
+                f"give {name!r} finite numbers" if name is not None
+                else f"{what} is {_said(number)}, not a finite number")
             return None
-        return [float(c) for c in offered]
 
     directions = choices(direction, "SineGrating.direction", (
         "a range names directions that are not across the bars, so offer choices such as "
@@ -5181,6 +5345,22 @@ def _whole(value: float) -> float:
     return value if math.isinf(value) else int(value)
 
 
+def _whole_number(value: object) -> bool:
+    """Whether `value` is a finite whole number, never a `bool`: 4 or 4.0, never 4.5, an infinity
+    or a word. What an array's set size and target index are (`_block_faults`; XC-273)."""
+    return _finite(value) and float(value).is_integer()
+
+
+def _counted(value: object) -> bool:
+    """**Whether the array checks read an array's set size, target index or ring radius**: a
+    setting, read over its declared range or its choices (`_span`, failing closed), or a literal
+    finite number. Any other literal -- a word, `None`, an infinity, a NaN, an integer past a
+    float's range -- is refused by its kind (`_block_faults`; XC-273) and read by none of them, so
+    none says of it what it is not (an array of "as few as 0 objects", a ring of 0° or of NaN),
+    and none raises on it (`_whole` of a NaN does)."""
+    return isinstance(value, P) or _finite(value)
+
+
 def _declared_window_names(trial: Trial) -> set[str]:
     """Window names a task has, including every one an array generates.
 
@@ -5200,7 +5380,7 @@ def _declared_window_names(trial: Trial) -> set[str]:
     params = {p.name: p for p in trial.params}
     most: dict[str, float] = {}
     for _, name, _, array in array_actions(trial):
-        reach = _whole(_span(array.n, params, 0.0)[1])
+        reach = _whole(_span(array.n, params, 0.0)[1]) if _counted(array.n) else math.inf
         most[name] = max(most.get(name, reach), reach)
     named = set(_window_refs(trial.states))
     names: set[str] = set()
@@ -5266,6 +5446,8 @@ def _array_faults(trial: Trial) -> list[Finding]:
     params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
     for state, name, updated, looks in array_actions(trial):
+        if not (_counted(looks.n) and _counted(looks.target)):
+            continue  # refused by its kind (`_block_faults`; XC-273)
         lowest_n = _whole(_span(looks.n, params, 0.0)[0])
         lowest_t, highest_t = (_whole(v) for v in _span(looks.target, params))
         if lowest_t < 0 or highest_t >= lowest_n:
@@ -5505,12 +5687,12 @@ def _approach(
     of the other; **except two windows placed by one setting**, which hold one choice at a time and are
     compared choice by choice. **Every pairing that comes within the radii is named** (`overlapping`, as words in
     the review report's: eccentricity and direction first), the window placed by a literal left out
-    of it. Choices that are no position, and a window with none left, a literal that is no position
-    and a literal radius that is no number, are left out (`bad-placement` refuses each,
-    `_position_kind_faults`); a radius setting with a choice that is no finite number reads as
-    having no highest (`_radius`, `_span`), which nothing refuses yet (XC-426): this check never
-    raises on them. `places` holds each window's places already made, by name, so that a check
-    making many comparisons builds them once."""
+    of it. Choices that are no position, and a window with none left, a literal that is no position,
+    a literal radius that is no finite number, and a radius setting's choice that is none, and a
+    window whose radius setting offers no other, are left out (`bad-placement` refuses each,
+    `_position_kind_faults`; `_radius`, XC-426): this check never raises on them. `places` holds
+    each window's places already made, by name, so that a check making many comparisons builds
+    them once."""
     def built(window: Window) -> "list[_Place]":
         if places is None:
             return _places(window, params)
@@ -5541,10 +5723,19 @@ def _approach(
 
 
 def _radius(radius: object, params: dict[str, Param]) -> float | None:
-    """The greatest a window's radius can be (`_span`; without end where a setting has no highest),
-    or `None` for a literal that is no finite number, which `_position_kind_faults` refuses."""
-    if not isinstance(radius, P) and not _finite(radius):
-        return None
+    """The greatest a window's radius can be: a literal itself, the greatest choice of a setting
+    that is a finite number, or the highest of a setting's range (`_span`; without end where it
+    declares none). **A choice that is no finite number is left out** (XC-426), as `_places`
+    leaves out a choice that is no position: `_position_kind_faults` refuses it, and read through
+    `_span` it made the overlap sentence say a setting that declares its choices "has no declared
+    highest". `None` for a literal that is no finite number and a setting none of whose choices
+    is one, both refused there too: nothing to compare."""
+    if not isinstance(radius, P):
+        return float(radius) if _finite(radius) else None
+    param = params.get(radius.name)
+    if param is not None and param.choices:
+        offered = [float(choice) for choice in param.choices if _finite(choice)]
+        return max(offered) if offered else None
     return _span(radius, params, 0.0)[1]
 
 
@@ -5741,7 +5932,8 @@ def _holds_cut_short(trial: Trial) -> list[Finding]:
         return None
 
     def said(value) -> str:
-        return f"`{value.name}`" if isinstance(value, P) else f"{value:g} s"
+        # `_literal`: `f"{10**400:g}"` raised (XC-273's fix round 1).
+        return f"`{value.name}`" if isinstance(value, P) else f"{_literal(value):g} s"
 
     findings: list[Finding] = []
     for state in trial.states:
@@ -5815,10 +6007,14 @@ def _crowded_arrays(trial: Trial) -> list[Finding]:
 
 
 def _crowded(declared: ObjectWindows, array: Array, params: dict[str, Param]) -> list[Finding]:
-    """`crowded-array` for one array of a family, or nothing (`_crowded_arrays`)."""
+    """`crowded-array` for one array of a family, or nothing (`_crowded_arrays`). The windows'
+    radius is read as a window's (`_radius`): a choice that is no finite number left out, and
+    nothing said where there is none to read, each refused at load (XC-426)."""
+    widest = _radius(declared.radius, params)
+    if widest is None or not (_counted(array.n) and _counted(array.radius)):
+        return []  # refused at load (XC-426; `_block_faults`, XC-273)
     most = _whole(_span(array.n, params, 0.0)[1])
     tightest = _span(array.radius, params, 0.0)[0]
-    widest = _span(declared.radius, params, 0.0)[1]
     if most < 2:
         return []
     spacing = ring_spacing_deg(tightest, most)
@@ -5866,8 +6062,8 @@ def _overlapping_objects(trial: Trial, raised: dict[str, float]) -> list[Finding
     params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
     for name, array in _shown_arrays(trial):
-        if not (isinstance(array.n, P) and array.n.name in raised):
-            continue
+        if not (isinstance(array.n, P) and array.n.name in raised) or not _counted(array.radius):
+            continue  # a ring radius of the wrong kind is refused at load (XC-273)
         n = _whole(raised[array.n.name])
         if n < 2:
             continue
@@ -6112,6 +6308,13 @@ def _placement_faults(trial: Trial) -> list[Finding]:
             refuse("bad-placement", f"{name!r}'s opacity is {opacity!r}, not a number")
         try:
             outside = [v for v in _reach(opacity, params) if not 0.0 <= v <= 1.0]
+        except _Unreal as unreal:  # XC-423: `10**400` raised out of `check()`
+            _, value = unreal.args
+            refuse("bad-placement", (
+                f"{name!r}'s opacity can be {_said(value)} (parameter {opacity.name!r}), which is "
+                f"not a finite number in [0, 1]" if isinstance(opacity, P) else
+                f"{name!r}'s opacity is {_said(value)}, which is not a finite number in [0, 1]"))
+            outside = []
         except _Unbounded as unbounded:
             refuse("bad-placement", (
                 f"{name!r}'s opacity is parameter {unbounded.args[0]!r}, which has neither a "
@@ -6369,7 +6572,9 @@ def _position_kind_faults(trial: Trial) -> list[Finding]:
     otherwise. **So does one that sizes a window or places an array's objects** (`_sized`; the
     review of XC-415's fix, M2): a window's radius, an array's set size, ring radius, phase and
     target index. A run that would start with such a setting unset is refused as it starts
-    (`unplaced`). **A setting
+    (`unplaced`). **A window's radius, or an array's object windows', that can be no finite
+    number** -- a word, a position, an infinity, an integer past a float's range, as written or
+    among a setting's choices -- is refused too (XC-426). **A setting
     with no choices (a free value) is refused where a whole position goes**, since no path outside
     code gives one a position (XC-422); where a number goes it is unchanged."""
     params = {p.name: p for p in trial.params}
@@ -6444,17 +6649,40 @@ def _position_kind_faults(trial: Trial) -> list[Finding]:
                 f"a finite number of degrees")))
     for its in written[len(windows):]:
         place(its.subject, its.what, its.at, its.cannot)
+    # An array's object windows' literal radius, as a window's is above (XC-426): `_crowded`
+    # raised on a word.
+    for window in trial.windows:
+        if (isinstance(window, ObjectWindows) and not isinstance(window.radius, P)
+                and not _finite(window.radius)):
+            findings.append(Finding("bad-placement", (
+                f"the object windows of {window.of!r}: their radius is {_said(window.radius)}, "
+                f"which is not a finite number of degrees")))
     # A window's radius and an array's set size, ring radius, phase and target index: `None` among
-    # a setting's choices (the review of XC-415's fix, M2). Any other value that is no number is
-    # refused where each is read (check 8, `_block_faults`, the array checks).
+    # a setting's choices (the review of XC-415's fix, M2). **A window's radius, or its object
+    # windows', placed by a setting with a choice that is no finite number** (XC-426), as a literal
+    # of that kind is: a word or a position stopped the session where the window was first judged
+    # (`gaze.Tracked.in_window` compares the gaze's separation with it), an infinity or `10**400`
+    # held every gaze. Any other value that is no number is refused where each is read (check 8,
+    # `_block_faults`, the array checks).
     for sized in _sized(trial):
         value = sized.value
-        if isinstance(value, P) and value.name in params and any(
-                choice is None for choice in params[value.name].choices):
+        if not (isinstance(value, P) and value.name in params):
+            continue
+        offered = params[value.name].choices
+        if any(choice is None for choice in offered):
             findings.append(Finding("bad-placement", (
                 f"{sized.subject}: {sized.its} {sized.what} is parameter {value.name!r}, which can "
                 f"be None, and {sized.cannot}, so the run cannot proceed; remove None from "
                 f"{value.name!r}'s choices")))
+        unreal = [c for c in offered if c is not None and not _finite(c)]
+        if sized.what == "radius" and unreal:
+            choice = unreal[0]
+            why = ("That is a whole position, not a number of degrees" if is_point(choice)
+                   else "That is not a number of degrees" if not _is_number(choice)
+                   else "That is not a finite number")
+            findings.append(Finding("bad-placement", (
+                f"{sized.subject}: {sized.its} radius is parameter {value.name!r}, which can be "
+                f"{_said(choice)}. {why}; give {value.name!r} finite numbers of degrees")))
     return findings
 
 

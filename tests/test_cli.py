@@ -913,6 +913,44 @@ def test_wlx_run_refuses_a_link_bound_where_the_lab_network_can_reach_it(tmp_pat
     assert "reward volume" in str(refused.value), "it must say what is at stake"
 
 
+def _help_of(capsys, *argv: str) -> str:
+    """What `wlx ARGV --help` prints, its whitespace and line breaks collapsed."""
+    with pytest.raises(SystemExit) as shown:
+        main([*argv, "--help"])
+    assert shown.value.code == 0
+    return " ".join(capsys.readouterr().out.split())
+
+
+def _link_commands() -> dict[str, str]:
+    """Every command kind the link accepts, each with the service that acts on it
+    (`_COMMAND_EXPOSURE`), whose keys a test in `test_link.py` holds equal to `Command`'s
+    own members."""
+    import typing
+
+    kinds = [member.KIND for member in typing.get_args(_link.Command)]
+    return {kind: _link._COMMAND_EXPOSURE[kind][0] for kind in kinds}
+
+
+def test_the_link_allow_remote_help_says_every_command_a_host_could_send(capsys):
+    """XC-172: `wlx run`'s help listed some of the commands and `wlx taskd`'s named
+    opening and ending sessions but not starting runs or acknowledging. Each now names
+    every kind the link accepts (read from `Command`, so one added later fails here) --
+    `wlx run`'s all of them with the five only `wlx taskd` acts on said to be refused by
+    a `wlx run` session, and `wlx taskd`'s the same list."""
+    run_help = _help_of(capsys, "run")
+    taskd_help = _help_of(capsys, "taskd")
+    commands = _link_commands()
+
+    assert len(commands) >= 21
+    for kind in commands:
+        assert f"`{kind}`" in run_help, f"`wlx run --link-allow-remote` does not name {kind!r}"
+        assert f"`{kind}`" in taskd_help, f"`wlx taskd --link-allow-remote` does not name {kind!r}"
+    assert "a `wlx run` session refuses" in run_help
+    assert "the fluid the animal has already had today" in run_help
+    assert "the fluid the animal has already had today" in taskd_help
+    assert "reward volume" in run_help
+
+
 def test_wlx_run_with_link_lets_a_real_console_attach(tmp_path, zmq_cleanup):
     """The wiring this task exists for (CLAUDE.md: "a safety component ships with
     its consumer, or its absence fails"). `test_link.py` already proves

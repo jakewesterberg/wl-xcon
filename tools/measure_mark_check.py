@@ -76,6 +76,18 @@ def _per_batch(calls: int) -> int:
     return calls // BATCHES
 
 
+def _at_least_one(name: str, count) -> int:
+    """`count`, or a `ValueError` unless it is an integer of 1 or more (XC-433). A trial
+    cannot end on frame 0 or before, and no trials leave an empty spread; either ended
+    in a traceback from deep inside the measurement."""
+    if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+        raise ValueError(
+            f"--{name} must be an integer of at least 1, so that a trial can end and a spread "
+            f"can be taken; got {count!r}"
+        )
+    return count
+
+
 def _trial(frames: int) -> Trial:
     """A trial that ends on its own on frame `frames`: `After` fires on the first
     frame whose elapsed time reaches it, and half a period short of `frames * PERIOD`
@@ -131,9 +143,11 @@ def _spread(values: list[float]) -> dict:
 
 
 def measure(frames: int = 1000, trials: int = 300, calls: int = 200_000) -> dict:
-    """Run the three measurements and return what they found, as numbers. `calls`
-    is refused before anything is measured unless it is a positive multiple of
-    `BATCHES` (`_per_batch`)."""
+    """Run the three measurements and return what they found, as numbers. `frames`
+    and `trials` below 1 (`_at_least_one`, XC-433) and a `calls` that is not a positive
+    multiple of `BATCHES` (`_per_batch`) are refused before anything is measured."""
+    _at_least_one("frames", frames)
+    _at_least_one("trials", trials)
     per_batch = _per_batch(calls)
     link = _link.ZmqLink(
         "tcp://127.0.0.1:0", "tcp://127.0.0.1:0", mark_endpoint="tcp://127.0.0.1:0"
@@ -259,6 +273,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args(argv)
     try:
+        _at_least_one("frames", args.frames)
+        _at_least_one("trials", args.trials)
         _per_batch(args.calls)
     except ValueError as refused:
         parser.error(str(refused))

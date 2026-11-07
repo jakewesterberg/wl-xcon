@@ -77,7 +77,7 @@ whichever way it goes. What we will not do is assume.
 
 We implement `wl-preproc`'s existing lab-host protocol rather than inventing a second one: same
 transport, bearer token, `GET /health`, `POST /jobs`, same status codes and timing constants.
-**wl-works' contract tests already run against a fake implementation of it.**
+**wl-works' contract tests already run against a fake implementation of it.** *(Corrected 2026-11-07: wl.works wrote on 2026-08-31, in its handover `HANDOVER-wl-expcontroller.md` lines 53-59 (read at wl-works commit `b090176`, `origin/main`), that this is "not true of this repository — there are no such tests": its lab-host client does not exist, only two seeded capability rows with no code behind them, and "nothing here is frozen by an implementation, so the shape is still free". The sentence above is kept as it was written.)*
 
 | Direction | Carries | Mechanism |
 |---|---|---|
