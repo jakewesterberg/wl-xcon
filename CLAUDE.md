@@ -59,10 +59,12 @@ These conventions bind every session (human- or AI-driven) working in this repo.
   moment it is deferred, by whoever defers it; closing one removes its line in the
   commit that does the work ("closes XC-017"). A PI decision is asked, never filed there.
 
-- **Leave the repo resumable.** A session ends by updating `docs/CHECKPOINT.md`:
-  what moved, what is next, and anything learned that would cost the next session
-  something to rediscover. A checkpoint that has gone stale is worse than none,
-  because it is believed.
+- **Leave the repo resumable.** A session ends by updating `docs/CHECKPOINT.md`, one
+  page of the current state: where the build is, what is next, and what is open with the
+  PI. It is rewritten in place, never appended to: what moved is in `git log`, and a
+  lesson that would cost the next session something to rediscover goes in
+  `docs/pitfalls.md` or the document it concerns. A checkpoint that has gone stale is
+  worse than none, because it is believed.
 - **Prove a test can fail.** `python3 tools/mutate.py --all <module>` before trusting
   a new check. CI gates on it. A test that cannot fail reports safety it does not
   provide, and for a checker whose whole job is refusing bad tasks that is worse than

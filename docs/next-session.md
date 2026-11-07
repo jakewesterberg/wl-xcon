@@ -1,3 +1,6 @@
+> **Superseded (2026-11-07).** This handoff describes the state of 2026-09-26 and is kept as a dated record; the
+> current state is `docs/CHECKPOINT.md`, one page.
+
 # Next session — wl-expcontroller
 
 > **Naming note (2026-09-29):** this document predates the rename and keeps the names it was

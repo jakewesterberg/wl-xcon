@@ -349,7 +349,7 @@ SQLite file in the session folder, nor that engine build B's output is "already 
 | XC-326 | Align stimulus onsets through the screen log's frame record and the flip count | build F | engine spec §8, §21 |
 | XC-093 | Amend the `bcam` sidecar contract for primary-triggered cameras (`digital_line`, `frame_rate_hz` required; a trigger source for "the primary triggered") | P9 | [P9 spec §7](superpowers/specs/2026-09-27-P9-camera-system-design.md#7-outside-this-repository-asks-not-assumptions) |
 | XC-094 | Say whether a `pupil − CR1` fallback is carried (a second `raw_definition`, which `eye/xcon.py:73` refuses by design) or kept out | XC-006 | [S5 §1](superpowers/specs/2026-08-31-S5-eye-tracking-design.md#1-most-of-the-calibration-is-already-decided-and-not-by-us) |
-| XC-095 | Correct the eye spec's `DataQuality` description (OpenIrisDPI writes 100 on every row) | nothing | [CHECKPOINT, 2026-09-27 afternoon](CHECKPOINT.md#what-moved-on-2026-09-27-afternoon-b1-merged-b2-designed-the-camera-ci) |
+| XC-095 | Correct the eye spec's `DataQuality` description (OpenIrisDPI writes 100 on every row) | nothing | [CHECKPOINT, 2026-09-27 afternoon](CHECKPOINT-history-2026-08-31-to-2026-11-07.md#what-moved-on-2026-09-27-afternoon-b1-merged-b2-designed-the-camera-ci) |
 | XC-096 | Per-trial gaze staleness into `EyeQuality` (the offer above; "yes, in `EyeQuality`" or "no, leave it in the behavioral table") | XC-007 | [S5 §10 item 3](superpowers/specs/2026-08-31-S5-eye-tracking-design.md#10-open-items) |
 | XC-098 | Who writes `session_manifest.yaml`; wl-xcon supplies `started_at_source` and `stimulus_calibration_id` by whichever route | nothing | [S10 §6 item 1](superpowers/specs/2026-08-31-S10-data-and-lab-integration-design.md#6-open-items) |
 

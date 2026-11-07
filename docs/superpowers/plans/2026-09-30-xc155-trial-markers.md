@@ -1268,13 +1268,13 @@ In `docs/backlog.md`, **delete** the XC-155 line (under "Deferred defects"), whi
 Find the XC-173 line:
 
 ```markdown
-- **XC-173** Rows written outside a run (a mark stamped between runs, the `end` control row, a mark after End) carry the last run's index and trial index, the shape of a row at that run's last boundary; decide what a row's `run` means with XC-155's join key. — 2026-09-30, [CHECKPOINT 2026-09-30, b3a-1](CHECKPOINT.md#what-moved-on-2026-09-30-p4d-2b-slice-b3a-1-the-session-service) — waits on: XC-155
+- **XC-173** Rows written outside a run (a mark stamped between runs, the `end` control row, a mark after End) carry the last run's index and trial index, the shape of a row at that run's last boundary; decide what a row's `run` means with XC-155's join key. — 2026-09-30, [CHECKPOINT 2026-09-30, b3a-1](CHECKPOINT-history-2026-08-31-to-2026-11-07.md#what-moved-on-2026-09-30-p4d-2b-slice-b3a-1-the-session-service) — waits on: XC-155
 ```
 
 Replace it with (it waits on nothing now, and names the key):
 
 ```markdown
-- **XC-173** Rows written outside a run (a mark stamped between runs, the `end` control row, a mark after End) carry the last run's index and trial index, the shape of a row at that run's last boundary; decide what a row's `run` means beside XC-155's join key, each trial's `trial_number`. — 2026-09-30, [CHECKPOINT 2026-09-30, b3a-1](CHECKPOINT.md#what-moved-on-2026-09-30-p4d-2b-slice-b3a-1-the-session-service) — waits on: nothing
+- **XC-173** Rows written outside a run (a mark stamped between runs, the `end` control row, a mark after End) carry the last run's index and trial index, the shape of a row at that run's last boundary; decide what a row's `run` means beside XC-155's join key, each trial's `trial_number`. — 2026-09-30, [CHECKPOINT 2026-09-30, b3a-1](CHECKPOINT-history-2026-08-31-to-2026-11-07.md#what-moved-on-2026-09-30-p4d-2b-slice-b3a-1-the-session-service) — waits on: nothing
 ```
 
 Under "Features not yet planned", find the XC-150 line:
