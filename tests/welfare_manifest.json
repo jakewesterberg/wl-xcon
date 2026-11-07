@@ -1,0 +1,228 @@
+{
+  "about": "The welfare-listed items of docs/design/architecture.md's 'Welfare-critical modules' section, each with the SHA-256 of its source as last approved (a line: its count). tests/test_welfare_manifest.py holds the tree and the section to it. An item changes here only in a commit that names the PI's welfare approval of the change, its `approved` saying which.",
+  "items": [
+    {
+      "name": "bounds.py",
+      "kind": "module",
+      "path": "wl_xcon/bounds.py",
+      "doc": "`wl_xcon/bounds.py`",
+      "sha256": "342ee3457d4a96a4f1c927c8d24ebd18a8fb467c25431ec43cbdcd1176789f86",
+      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+    },
+    {
+      "name": "welfare.py",
+      "kind": "module",
+      "path": "wl_xcon/welfare.py",
+      "doc": "`wl_xcon/welfare.py`",
+      "sha256": "796f46a0036fa294d28fbe976de10ee49978b100530293e17d0d9a366200330d",
+      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+    },
+    {
+      "name": "marks.py",
+      "kind": "module",
+      "path": "wl_xcon/marks.py",
+      "doc": "`wl_xcon/marks.py`",
+      "sha256": "6022edc96c37d377b159ed370c406c4b60644372d9d2bfcec292ed6baee6a706",
+      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+    },
+    {
+      "name": "stranded.py",
+      "kind": "module",
+      "path": "wl_xcon/stranded.py",
+      "doc": "`wl_xcon/stranded.py`",
+      "sha256": "d13faf3d221c262619e1b7fb1325d569ceaf6ecc28fe18adbcfb78ed2b091778",
+      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+    },
+    {
+      "name": "preflight.out_of_cage",
+      "kind": "function",
+      "path": "wl_xcon/preflight.py",
+      "qualname": "out_of_cage",
+      "doc": "`preflight.out_of_cage`",
+      "sha256": "f8507df901ce7007903d5be7d91a9609668c22ce6c2bd632f269bc87ad993b9a",
+      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+    },
+    {
+      "name": "preflight.gate",
+      "kind": "function",
+      "path": "wl_xcon/preflight.py",
+      "qualname": "gate",
+      "doc": "`preflight.gate`",
+      "sha256": "72f7cac7c726fef67d41494dcd2bbda1afc095e59df005aa0121678d7eb715be",
+      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+    },
+    {
+      "name": "service.Service._open",
+      "kind": "function",
+      "path": "wl_xcon/service.py",
+      "qualname": "Service._open",
+      "doc": "`Service._open`",
+      "sha256": "2d0dc320fba54f729315de4057ea866d17efd7aaafd08cf85e806ca92cd451a6",
+      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+    },
+    {
+      "name": "service.Service._end",
+      "kind": "function",
+      "path": "wl_xcon/service.py",
+      "qualname": "Service._end",
+      "doc": "`Service._end`",
+      "sha256": "916c10c09e3e6ce939d73459e99f1bdebe8d2c106c408aa0f4e0c6b9d10e434f",
+      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+    },
+    {
+      "name": "service.Service._unended",
+      "kind": "function",
+      "path": "wl_xcon/service.py",
+      "qualname": "Service._unended",
+      "doc": "`Service._unended`",
+      "sha256": "70de7317754400cbf442f3da68a6b11239d44b99a26845e2ee52b99653a6b076",
+      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+    },
+    {
+      "name": "service.Service._close_stranded",
+      "kind": "function",
+      "path": "wl_xcon/service.py",
+      "qualname": "Service._close_stranded",
+      "doc": "`Service._close_stranded`",
+      "sha256": "5e5ef4400f7886763390e4dc2c3c89a289edcdbdaeb3c0cc640f89beaacad37e",
+      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+    },
+    {
+      "name": "service.Service._start",
+      "kind": "function",
+      "path": "wl_xcon/service.py",
+      "qualname": "Service._start",
+      "doc": "`Service._start`",
+      "sha256": "247fb0c3148e5d293ccf7dbf7d672fa49860f84b789da711b6eb4eb25ebf516d",
+      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+    },
+    {
+      "name": "service._unasked",
+      "kind": "function",
+      "path": "wl_xcon/service.py",
+      "qualname": "_unasked",
+      "doc": "`service._unasked`",
+      "sha256": "1de47cff4f8dddd6b437940e6abb065c36febfb3071a450942f157f513a03c27",
+      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+    },
+    {
+      "name": "service._folder_name",
+      "kind": "function",
+      "path": "wl_xcon/service.py",
+      "qualname": "_folder_name",
+      "doc": "`service._folder_name`",
+      "sha256": "73af6387e5bef30245c7d8ecebce195dda5519dddcc6194fbea8e7fa31db5cf2",
+      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+    },
+    {
+      "name": "cli._settle_departure",
+      "kind": "function",
+      "path": "wl_xcon/cli.py",
+      "qualname": "_settle_departure",
+      "doc": "`_settle_departure`",
+      "sha256": "3ac7b98947b0f65153e287a1011180ed24fadc4d06f795dd3c1b431b9286cd1d",
+      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+    },
+    {
+      "name": "cli._settle_return",
+      "kind": "function",
+      "path": "wl_xcon/cli.py",
+      "qualname": "_settle_return",
+      "doc": "`_settle_return`",
+      "sha256": "fb5b38aa5810a249d80212445a1957821f4466868098d5b2ec7aa8ca45610292",
+      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+    },
+    {
+      "name": "cli.main: _marks.depart(session, departure)",
+      "kind": "line",
+      "path": "wl_xcon/cli.py",
+      "within": "main",
+      "line": "_marks.depart(session, departure)",
+      "doc": "the line is `main`'s `_marks.depart(session, departure)`",
+      "count": 1,
+      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+    },
+    {
+      "name": "taskd.Session._ends",
+      "kind": "function",
+      "path": "wl_xcon/taskd.py",
+      "qualname": "Session._ends",
+      "doc": "`Session._ends`",
+      "sha256": "e51fe3cbb3b31b3569105940992978eef5fa10974d9fbb761b1d2f3f25f8d2ef",
+      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+    },
+    {
+      "name": "taskd.Session._hold",
+      "kind": "function",
+      "path": "wl_xcon/taskd.py",
+      "qualname": "Session._hold",
+      "doc": "`Session._hold`",
+      "sha256": "2fb40151d45066872573fa2d12264cf6fcb2ca923978e37b01854c26f2036e58",
+      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+    },
+    {
+      "name": "taskd.Session._manual_reward",
+      "kind": "function",
+      "path": "wl_xcon/taskd.py",
+      "qualname": "Session._manual_reward",
+      "doc": "`Session._manual_reward`",
+      "sha256": "6095cecd0cf01cd2a90942d42a1e231dda91da641d9534bbb42a437d10c745b9",
+      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+    },
+    {
+      "name": "taskd.OUTSIDE_A_RUN",
+      "kind": "constant",
+      "path": "wl_xcon/taskd.py",
+      "qualname": "OUTSIDE_A_RUN",
+      "doc": "`taskd.OUTSIDE_A_RUN`",
+      "sha256": "3fbc9800f5780f740707f97ee2e046b8836894212e090289f9b37ae33fb8602c",
+      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+    },
+    {
+      "name": "taskd.Session.set",
+      "kind": "function",
+      "path": "wl_xcon/taskd.py",
+      "qualname": "Session.set",
+      "doc": "`Session.set`",
+      "sha256": "43e6eb342c30149d1a68cd7723a89a482e01557ba26806e832e912c3997daba5",
+      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+    },
+    {
+      "name": "taskd.Session._schedule",
+      "kind": "function",
+      "path": "wl_xcon/taskd.py",
+      "qualname": "Session._schedule",
+      "doc": "`Session._schedule`",
+      "sha256": "b9e7850302d18ba90af4f13170a55ffca555a36bd3cab719408ea24dc820b4ab",
+      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+    },
+    {
+      "name": "taskd.Session._command: the held pass-through",
+      "kind": "first_statement",
+      "path": "wl_xcon/taskd.py",
+      "within": "Session._command",
+      "doc": "`Session._command`'s `held` pass-through",
+      "sha256": "b21fa28de95658c9e64a2278ba74d1822bdcfef95b36e807b29fff0ab6494226",
+      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+    },
+    {
+      "name": "taskd.Session._command: except (Exceeded, TypeError) as refused:",
+      "kind": "line",
+      "path": "wl_xcon/taskd.py",
+      "within": "Session._command",
+      "line": "except (Exceeded, TypeError) as refused:",
+      "doc": "the line is `Session._command`'s `except (Exceeded, TypeError) as refused:`",
+      "count": 1,
+      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+    },
+    {
+      "name": "link._setting",
+      "kind": "function",
+      "path": "wl_xcon/link.py",
+      "qualname": "_setting",
+      "doc": "`link._setting`",
+      "sha256": "cc83cae583cfc1ae1a0ef2e9eead2b20ed65c4ed9d5f6587d37d9d3138d6331c",
+      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+    }
+  ]
+}
