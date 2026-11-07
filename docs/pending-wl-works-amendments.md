@@ -70,6 +70,8 @@ host that answers the same shapes inherits them. A second protocol would need it
 client, its own tests, and its own maintenance, in exchange for nothing the first one
 cannot express.
 
+*(Corrected 2026-11-07: wl.works wrote on 2026-08-31, in its handover `HANDOVER-wl-expcontroller.md` lines 53-59 (read at wl-works commit `b090176`, `origin/main`), that the sentence above, that the 18b contract tests already run against a fake wl-preproc, is "not true of this repository — there are no such tests": its lab-host client does not exist, only two seeded capability rows with no code behind them, and "nothing here is frozen by an implementation, so the shape is still free". The paragraph above is kept as it was written.)*
+
 It also settles a question this controller would otherwise have to answer badly. The rig
 **cannot push to the ELN** — `lab-host-protocol.md` §11.2 states the topology, *"the app
 binds only to the WireGuard interface and we are on the lab LAN with no route in"*, and
