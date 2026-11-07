@@ -5791,3 +5791,70 @@ def test_a_client_that_left_is_not_logged_as_a_server_fault_nor_answered(monkeyp
             _request(port, "GET", "/health")
 
     assert " raised " not in capfd.readouterr().err
+
+
+# --- a refusal reaches a client that sent its whole body (XC-120) --------------------------------
+
+
+def _post_whole_body(port: int, size: int, headers: dict, *, declare: int | None = None) -> tuple:
+    """`POST /commands` over a bare socket: `size` bytes of body sent in full (`declare`,
+    when given, is the length the headers claim instead), then everything the server says.
+    Returns the status, the headers and the JSON body, or raises `ConnectionResetError`
+    where the client was given a reset in place of the answer."""
+    head = [f"POST /commands HTTP/1.1", f"Host: 127.0.0.1:{port}"]
+    head += [f"{name}: {value}" for name, value in headers.items()]
+    head.append(f"Content-Length: {size if declare is None else declare}")
+    with socket.create_connection(("127.0.0.1", port), timeout=10) as sock:
+        sock.sendall(("\r\n".join(head) + "\r\n\r\n").encode("ascii") + b"x" * size)
+        chunks = []
+        while chunk := sock.recv(65536):
+            chunks.append(chunk)
+    raw = b"".join(chunks)
+    top, _, body = raw.partition(b"\r\n\r\n")
+    lines = top.decode("iso-8859-1").split("\r\n")
+    got = dict(line.split(": ", 1) for line in lines[1:])
+    return int(lines[0].split()[1]), got, json.loads(body)
+
+
+@pytest.mark.parametrize(
+    "size, origin, status",
+    [
+        (60000, "http://evil.example", 403),  # not from this page: refused before the body
+        (60000, None, 413),  # from the page, a body over BODY_LIMIT
+        (serve.BODY_LIMIT + 1, None, 413),
+    ],
+)
+def test_a_refusal_on_the_plain_listener_reaches_a_client_that_sent_its_body(size, origin, status):
+    with _served(_hub(), dispatch=_Dispatch()) as port:
+        headers = {
+            "Origin": origin or f"http://127.0.0.1:{port}",
+            "Content-Type": "application/json",
+        }
+        for _ in range(5):  # a reset is a race; five tries make a pass mean something
+            got_status, _headers, body = _post_whole_body(port, size, headers)
+            assert got_status == status
+            assert body["status"] == "refused"
+
+
+def test_a_token_over_plain_http_is_refused_with_the_body_read_too():
+    with _served(_hub(), dispatch=_Dispatch()) as port:
+        headers = {
+            "Origin": f"http://127.0.0.1:{port}",
+            "Content-Type": "application/json",
+            "Authorization": "Bearer something",
+        }
+        for _ in range(5):
+            status, _headers, body = _post_whole_body(port, 60000, headers)
+            assert (status, body["said"]) == (403, serve.TOKEN_OVER_HTTP)
+
+
+def test_a_body_declared_over_the_drain_limit_is_answered_and_the_connection_closed():
+    """The server reads no more than `REFUSAL_DRAIN_LIMIT` of what was declared, so the
+    client is told the connection ends (`Connection: close`) rather than left to a reset."""
+    with _served(_hub(), dispatch=_Dispatch()) as port:
+        headers = {"Origin": "http://evil.example", "Content-Type": "application/json"}
+        status, got, body = _post_whole_body(
+            port, serve.REFUSAL_DRAIN_LIMIT, headers, declare=serve.REFUSAL_DRAIN_LIMIT * 4
+        )
+        assert status == 403 and body["status"] == "refused"
+        assert got.get("Connection", "").lower() == "close"

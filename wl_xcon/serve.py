@@ -1043,22 +1043,22 @@ def make_handler(
             self.log_message('"%s %s" %s', self.command, self._path(), str(code))
 
         def _refuse_after_reading(self, status: int, payload: dict) -> None:
-            """Answer a refusal on the https page after reading the request's body, so
+            """Answer a refusal after reading the request's body, on either listener, so
             closing the connection on unread bytes does not reset the answer away (the
-            client would see a reset, never the sentence). Reads and discards at most
-            `REFUSAL_DRAIN_LIMIT` bytes; a body longer than that gets its answer and
-            then a closed connection.
-
-            A body over the limit is answered and closed unread, and the client may see a
-            reset instead of the answer; the page never sends one, so only a misbehaving
-            client does."""
+            client would see a reset, never the sentence: XC-120). Reads and discards at
+            most `REFUSAL_DRAIN_LIMIT` bytes; a body declared longer than that gets its
+            answer with `Connection: close` and is never read past the limit, so the
+            client is told the connection ends. A client that sends more than it declared
+            is not waited for: the answer is written once the declared length is read."""
             length = self.headers.get("Content-Length") or ""
+            headers: tuple = ()
             if length.isascii() and length.isdecimal():
                 wanted = int(length)
                 self.rfile.read(min(wanted, REFUSAL_DRAIN_LIMIT))
                 if wanted > REFUSAL_DRAIN_LIMIT:
                     self.close_connection = True
-            self._send_json(status, payload)
+                    headers = (("Connection", "close"),)
+            self._write(status, json.dumps(payload).encode("utf-8"), "application/json", headers)
 
         def _write(
             self,
@@ -1159,9 +1159,9 @@ def make_handler(
         do_TRACE = _refuse_method
 
         def do_POST(self) -> None:
-            # On the https page a refusal reads the request's body first, so the client
-            # reads the answer and not a reset (`_refuse_after_reading`).
-            refuse = self._send_json if self._remote is None else self._refuse_after_reading
+            # A refusal reads the request's body first, so the client reads the answer
+            # and not a reset (`_refuse_after_reading`, XC-120).
+            refuse = self._refuse_after_reading
             if not self._host_ok():
                 refuse(421, _MISDIRECTED)
                 return
@@ -1241,15 +1241,14 @@ def make_handler(
             **A token never reaches the box's checks** (b2b spec §3): on the plain-http
             listener a request carrying `Authorization` is refused first of all. On the
             https listener the command is the signed-in member's: the page's `Origin` and
-            `Content-Type`, then the token, then the body, which takes no `by`. Every https
+            `Content-Type`, then the token, then the body, which takes no `by`. Every
             refusal before the body is read reads it first (`_refuse_after_reading`)."""
             if self._remote is None and self.headers.get("Authorization") is not None:
-                self._send_json(403, {"status": "refused", "said": TOKEN_OVER_HTTP})
+                self._refuse_after_reading(403, {"status": "refused", "said": TOKEN_OVER_HTTP})
                 return
             member = None
-            early = self._send_json
+            early = self._refuse_after_reading
             if self._remote is not None:
-                early = self._refuse_after_reading
                 if not self._from_the_page():
                     early(403, {"status": "refused", "said": FROM_THE_PAGE})
                     return
@@ -1259,7 +1258,7 @@ def make_handler(
                 member = accepted.member
             if self._remote is None and not self._from_the_box():
                 said = _web.CONTROLS_ELSEWHERE if self._https_page else _web.CONTROLS_AT_THE_BOX
-                self._send_json(403, {"status": "refused", "said": said})
+                self._refuse_after_reading(403, {"status": "refused", "said": said})
                 return
             length = self.headers.get("Content-Length") or ""
             if not length.isascii() or not length.isdecimal():
