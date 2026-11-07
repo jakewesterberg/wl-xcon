@@ -116,3 +116,33 @@ def test_the_command_line_refuses_such_a_count_with_a_sentence(_nothing_measured
     captured = capsys.readouterr()
     assert "--calls must be a positive multiple of 20" in captured.err
     assert captured.out == "", "a refused count measured nothing and wrote nothing"
+
+
+@pytest.mark.parametrize("name", ["frames", "trials"])
+@pytest.mark.parametrize("value", [0, -1, -300])
+def test_a_frame_or_trial_count_below_one_is_refused_before_anything_is_measured(
+    _nothing_measured, name, value
+):
+    """XC-433: a trial cannot end on frame 0 or before (`RuntimeError: the trial ran 1
+    frames, not 0`), and no trials leave an empty spread (`StatisticsError`). A count
+    below one is refused with a sentence, as `calls` is, before a link is opened."""
+    counts = {"frames": 5, "trials": 1, "calls": 2000}
+    counts[name] = value
+    with pytest.raises(ValueError, match=f"--{name} must be an integer of at least 1"):
+        tool.measure(**counts)
+
+
+@pytest.mark.parametrize("name", ["frames", "trials"])
+@pytest.mark.parametrize("value", ["0", "-1"])
+def test_the_command_line_refuses_such_a_count_with_a_sentence_not_a_traceback(
+    _nothing_measured, capsys, name, value
+):
+    argv = ["--frames", "5", "--trials", "1", "--calls", "2000"]
+    argv[argv.index(f"--{name}") + 1] = value
+    with pytest.raises(SystemExit) as refused:
+        tool.main(argv)
+
+    assert refused.value.code == 2
+    captured = capsys.readouterr()
+    assert f"--{name} must be an integer of at least 1" in captured.err
+    assert captured.out == "", "a refused count measured nothing and wrote nothing"
