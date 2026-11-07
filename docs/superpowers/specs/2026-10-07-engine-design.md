@@ -426,6 +426,21 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    that same saccade alone, still in flight; never a `SaccadeOnset`'s; ended at the next
    transition). A state that asks for a saccade itself still counts only one begun in it. A
    transition taken on `Entered` carries nothing (EYE-19, its revision quoting the PI).
+   *Note, 2026-11-07 (the PI's answer of 2026-11-06, asked in the UI whether a go state that
+   itself waits for the go saccade should count one begun just before the go cue: "Count it both
+   ways": "The same eye movement scores the same whichever way the task is written: a saccade
+   already under way at the go cue counts where it lands. The rule that a saccade counts only in
+   the state it began in gets one exception: a saccade in flight when the go cue's state
+   begins."):* **a saccade in flight when a state begins counts in that state**, for its landing
+   alone. The engine cannot know which state is the go cue's, so it is any state, whatever edge
+   entered it, a timer from the state's entry and `Entered` included: the onset, timer and exit
+   carries above are one rule, and the two sentences before this note no longer hold. "In flight"
+   is the exit carry's (the detector's onset on or before the transition's frame, its eye not at
+   rest until the new state's first frame or after, judged when it lands); the rest stands (its eye
+   at rest in that state; never a `SaccadeOnset`'s there; carried on by a further transition while
+   still in flight, ended by one after its eye stopped). So a state left on a `SaccadeOnset` for
+   one that asks where the eye lands still waits, through a saccade begun before it, for the next
+   (EYE-19, its revision of 2026-11-07; `wl_xcon/gaze.py`, `Tracked.began`).
 8. **Off the field**: only when declared; check 8 grows to test extents (XC-143, XC-144).
 9. **Head-free chaired sessions**: nominal head position, recorded and listed; a task may require a
    fixed head.

@@ -29,25 +29,23 @@ controller's rulings, 2026-10-30).
 
 **A saccade counts for a state only if it began in that state, and `SaccadeTo` judges
 it where it landed** (XC-410; the PI, 2026-10-30). By its onset: one begun before the
-state is anticipatory, as an early response would be, however long it is in flight
-after. And on the frame it lands, against the windows drawn then: "A saccade to X lands
-in X's window at the moment it lands." **One saccade carries, at most**: the one whose onset
-ended the state before -- a transition taken on `SaccadeOnset`, or on a timer counted
-from it, `After(since=SaccadeOnset())` -- into the very next state and no further, for
-its landing alone, so an intrasaccadic displacement, at once or delayed, is scored
-where the eye lands ("Yes, that one saccade carries"; "Yes, carry it too"); and only if
-the detector puts the eye at rest (its stop field, `Saccade.stop`, as `saccade.detect`
-reports it) on that state's first frame or after. One whose eye stopped before the transition landed in the state before
-(the controller's ruling on the review's I1). **Or the one under way as the eye left a
-window** (the PI, 2026-11-04: "A saccade already under way when the eye leaves a window
-counts in the next state, as an onset already does: the movement that ended the state is the
-response"): a transition taken on `Exited` carries the saccade the detector puts in flight on
-its frame, for its landing alone, on the same condition of where its eye stopped, so a state
-entered as gaze leaves the fixation window scores the saccade that left it -- **whatever state
-its onset fell in** (the PI, 2026-11-06: "Yes, count it", "Widen the carry so a saccade already
-under way before the cue counts where it lands"), so an anticipation relayed by an exit counts
-where it lands, where one asked for by the state the cue begins does not. `Entered` carries
-nothing. Until then the last
+state is anticipatory, as an early response would be. And on the frame it lands, against the
+windows drawn then: "A saccade to X lands in X's window at the moment it lands." **One
+exception: a saccade in flight as a state begins counts there, for its landing alone** (the PI,
+2026-11-06: "Count it both ways": "The same eye movement scores the same whichever way the task
+is written: a saccade already under way at the go cue counts where it lands. The rule that a
+saccade counts only in the state it began in gets one exception: a saccade in flight when the go
+cue's state begins"). Which state is the go cue's the world cannot know, so it is any state,
+whatever edge entered it; only if the detector puts the eye at rest (its stop field,
+`Saccade.stop`, as `saccade.detect` reports it) on that state's first frame or after, one whose
+eye stopped before the transition having landed in the state before (the controller's ruling on
+the review's I1); carried on by a further transition while still in flight; and never a
+`SaccadeOnset`'s there. So an intrasaccadic displacement, at once or delayed, is scored where the
+eye lands ("Yes, that one saccade carries"; "Yes, carry it too"), so is the saccade that takes
+the eye out of a window (2026-11-04, "Carry it over"; 2026-11-06, "Yes, count it"), and so is an
+anticipation begun just before the go cue, however the cue's state asks for it: what were the
+onset's, the timer's and the exit's carries is one rule, and a timer from a state's entry and
+`Entered` carry as any edge does, where until then they carried nothing. Until XC-410 the last
 saccade no guard had taken waited for the rest of the trial, so an object shown or moved onto
 where it had landed took it on the frame the object was drawn there.
 
@@ -67,8 +65,6 @@ from wl_xcon.eye import Replay, Tracker
 from wl_xcon.geometry import separation_deg
 from wl_xcon.saccade import Detector
 from wl_xcon.task import (
-    After,
-    Exited,
     Guard,
     Outcome,
     P,
@@ -181,27 +177,18 @@ class Tracked:
         #: of its onset, its first sample (`Saccade.start`); the frame it was confirmed on, the one
         #: frame `SaccadeOnset` sees it; whether it is still in flight; the frame it landed on, the
         #: one frame `SaccadeTo` judges it on (`None` while in flight); the frame the detector puts
-        #: the eye at rest on (its stop field, `Saccade.stop`, as `saccade.detect` reports it);
-        #: whether a `SaccadeOnset` has seen
-        #: it, a clock's or an edge's; and whether a `SaccadeTo` has taken it, as one has before
-        #: any saccade is confirmed. A saccade in flight cannot have landed in anything.
+        #: the eye at rest on (its stop field, `Saccade.stop`, as `saccade.detect` reports it), by
+        #: which a state it was in flight as it began takes it (`began`); and whether a `SaccadeTo`
+        #: has taken it, as one has before any saccade is confirmed. A saccade in flight cannot
+        #: have landed in anything. **Nothing is kept of the edge that began a state** (the PI,
+        #: 2026-11-06, "Count it both ways"): until then whether the saccade's onset or a timer from
+        #: it had ended the state before, a `SaccadeOnset` having seen it, or an `Exited` had.
         self._onset = 0
         self._confirmed_on: int | None = None
         self._in_flight = False
         self._landed_on: int | None = None
         self._stopped = 0
-        self._onset_seen = False
         self._taken = True
-        #: **The one saccade that carries** (the PI, 2026-10-30): whether the last saccade is the
-        #: one whose onset ended the state before, at once or by a timer from it, and may still be
-        #: taken by this state's `SaccadeTo` if its eye stopped in this state (`began`).
-        self._carried = False
-        #: **Or the one under way as the eye left a window** (the PI, 2026-11-04): whether this
-        #: state was entered by an `Exited` edge, so the saccade the detector puts in flight on its
-        #: frame -- onset before this state's first frame, eye at rest on it or after -- may be
-        #: taken by this state's `SaccadeTo` (`began`), **whatever state its onset fell in** (the
-        #: PI, 2026-11-06: "Yes, count it").
-        self._exited = False
         #: How many samples this world has fed the detector, one each `display`: the next one's
         #: index in the detector's numbering, which `Saccade.start` counts in.
         self._fed = 0
@@ -406,79 +393,64 @@ class Tracked:
 
     def began(self, state: str, frame: int, by: "Guard | None") -> None:
         """State `state` began, `frame` its first, entered by `by` (`run.World.began`): from now on
-        a saccade counts for a guard only if its onset is on `frame` or after (XC-410), **or it is
-        the saccade whose onset ended the state before**, which carries for its landing alone, and
-        into this state alone (the PI, 2026-10-30: "Only the saccade whose start ended the previous
-        state carries over"). Ended at its onset, `by` a `SaccadeOnset`; or by a timer counted from
-        it, `by` an `After` whose `since` is a `SaccadeOnset` ("Yes, carry it too"). Either way the
-        last saccade is that one only if a `SaccadeOnset` saw its onset: a state's `SaccadeOnset`
-        clock is started once, so a saccade confirmed after the one that started it was never
-        seen. **It counts only if its eye stopped in this state** (`happened`): one the detector
-        puts at rest before `frame` landed in the state before, whatever ended it (the review's
-        I1). Any later state ends the carry, whether or not it has landed.
+        a saccade counts for a guard only if its onset is on `frame` or after (XC-410), **or it was
+        in flight as the state began, for its landing alone** (the PI, 2026-11-06, asked whether a
+        state that itself waits for the go saccade should count one begun just before the go cue,
+        as a state relayed by the eye leaving the fixation window already did: "Count it both
+        ways": "The same eye movement scores the same whichever way the task is written: a saccade
+        already under way at the go cue counts where it lands. The rule that a saccade counts only
+        in the state it began in gets one exception: a saccade in flight when the go cue's state
+        begins."). Which state is the go cue's this world cannot know, so it is any state,
+        **whatever edge `by` entered it** -- a saccade's onset or a timer from one, an `Exited`, an
+        `Entered`, a timer from the state's entry, any other -- and `by` is not read.
 
-        **And a saccade under way as the eye left a window** carries (the PI, 2026-11-04: "A saccade
-        already under way when the eye leaves a window counts in the next state, as an onset
-        already does: the movement that ended the state is the response"): entered `by` an
-        `Exited`, the state takes for its landing alone the saccade the detector puts in flight on
-        the frame that edge fired, the one whose movement took the eye out of the window, **whatever
-        state its onset fell in** (the PI, 2026-11-06, asked whether a saccade begun before the go
-        cue should count: "Yes, count it", "Widen the carry so a saccade already under way before
-        the cue counts where it lands"), so one begun before the cue, an anticipation, counts where
-        it lands when an exit relays the state that asks for it, however many states back it began.
+        **In flight as it began**, by this world's own record of the saccade, as the exit carry read
+        it (2026-11-06): its onset (`_onset`, the detector's `Saccade.start`) on the transition's
+        frame, `frame - 1`, or before, so before `frame`, and its eye not at rest until `frame` or
+        after (`_stopped`, `Saccade.stop`, the first sample at rest): the detector's run holds the
+        transition's frame. Judged when it lands (`happened`), never by the detector's state at the
+        transition, which may hold it as an open run not yet confirmed, as one confirmed and not yet
+        landed, or, its velocities trailing the eye by `HALF_WINDOW` samples, not as a run at all,
+        so nothing is chosen here. **One saccade**, runs not overlapping. **Only if its eye stops in
+        this state**: one the detector puts at rest on the transition's frame or before landed in
+        the state before and counts for nothing here (the review of XC-410, its I1). **A further
+        transition while it is still in flight carries it on**, by the same rule, and one after its
+        eye stopped ends it. **It never satisfies a `SaccadeOnset` here** (`happened`): its onset
+        was before this state.
 
-        **In flight on the exit's frame** (`frame - 1`), by this world's own record of the saccade:
-        its onset (`_onset`, the detector's `Saccade.start`, as the begun-in-state rule reads it) on
-        that frame or before, so before `frame`, and its eye not at rest until after it (`_stopped`,
-        `Saccade.stop`, the first sample at rest), so on `frame` or after (`happened`): the
-        detector's run holds the exit's frame, under the onset carry's own condition on the stop. On
-        that frame the detector may hold the saccade as an open run not yet confirmed, as one
-        confirmed and not yet landed, or, its velocities trailing the eye by `HALF_WINDOW` samples,
-        not have opened its run at all; which saccade it is, is known only once it is confirmed,
-        often after the exit, so nothing is chosen here, and it is judged when it lands, by its
-        onset and stop, never by the detector's state on the exit's frame. One the detector puts at
-        rest on the exit's frame or before carries nothing: it did not take the eye out, as gaze
-        that drifts out of a window after its saccade has stopped does not. Left before it lands,
-        the carry ends as the onset's does, unless the edge that leaves is another `Exited` with the
-        saccade still in flight on that edge's frame, which carries it on by the same rule: that
-        same saccade alone, since runs do not overlap. Until the PI's answer (from the controller's
-        ruling of that morning, the narrow reading of "as an onset already does") an exit carried
-        only a saccade begun in the state it ended, or carried into it."""
+        **One rule for what were three carries.** The onset carry (the PI, 2026-10-30: "Only the
+        saccade whose start ended the previous state carries over"), the timer carry ("Yes, carry
+        it too") and the exit carry (2026-11-04, "Carry it over"; widened 2026-11-06, "Yes, count
+        it") each took the saccade in flight as its edge began the next state; now every edge does.
+        Until that evening a timer from the state's entry carried nothing, even while a saccade a
+        clock was timing was in flight, nor did `Entered`, nor an onset's or a timer's edge for a
+        saccade no `SaccadeOnset` had seen, nor, but for another `Exited`, an edge taken after an
+        exit carried a saccade on."""
         self._state = state
         self._began = frame
-        self._carried = (
-            (isinstance(by, SaccadeOnset)
-             or (isinstance(by, After) and isinstance(by.since, SaccadeOnset)))
-            and self._onset_seen
-        )
-        self._exited = isinstance(by, Exited)
 
     def happened(self, guard: Guard, state: str, frame: int) -> bool:
         """`SaccadeOnset` on the frame the last saccade is confirmed, and `SaccadeTo` on the frame
-        it lands, if it landed in the window: in either case only a saccade begun in `state`.
+        it lands, if it landed in the window: in either case a saccade begun in `state`.
         **`SaccadeOnset` observes the onset and takes nothing** (the controller's ruling on the
         review's M1): every one of the state's asking on that frame sees it, a clock's and an
         edge's alike, and it is seen once, on that frame. **`SaccadeTo` takes the landing**, so
-        one saccade is one response; **and the carried saccade's** (`began`), whose onset ended
-        the state before, or which was under way as the eye left a window into this state, wherever
-        its onset fell (the PI, 2026-11-06), if the detector puts its eye at rest on the state's
-        first frame or after (the review's I1). The carried saccade is never a `SaccadeOnset`'s: its
-        onset was before this state, whether the detector confirmed it there or, after an exit,
-        here.
+        one saccade is one response; **and that of the saccade in flight as the state began**
+        (`began`; the PI, 2026-11-06, "Count it both ways"), whatever edge began it and wherever
+        its onset fell, if the detector puts its eye at rest on the state's first frame or after
+        (the review's I1). That saccade is never a `SaccadeOnset`'s: its onset was before this
+        state, whether the detector confirmed it before or here.
 
         **On the trial loop's path**, every frame a state asks for a saccade, so nothing is built
         here: an alias's objects are `_members`' own tuple, and a window is judged as it is."""
         if isinstance(guard, SaccadeOnset):
-            if not self._began_in(state) or self._confirmed_on != frame:
-                return False
-            self._onset_seen = True
-            return True
+            return self._began_in(state) and self._confirmed_on == frame
         if isinstance(guard, SaccadeTo):
             # Judged on the frame it landed, against the windows drawn then, and never after: a
             # saccade that landed on empty space is not one to an object drawn there later, or to a
-            # window gaze drifts into (the PI, 2026-10-30).
-            if (not (self._began_in(state)
-                     or ((self._carried or self._exited) and self._stopped >= self._began))
+            # window gaze drifts into (the PI, 2026-10-30). Begun in this state, or in flight as it
+            # began, its eye at rest on its first frame or after (`began`).
+            if (not (self._began_in(state) or self._stopped >= self._began)
                     or self._taken or self._landed_on != frame):
                 return False
             members = self._members.get(guard.window)
@@ -491,7 +463,6 @@ class Tracked:
             if not landed:
                 return False
             self._taken = True
-            self._carried = False
             return True
         return False
 
@@ -577,9 +548,7 @@ class Tracked:
             # one is fed a frame, so its first, `start`, was fed `fed - start` frames ago.
             self._onset = frame - (fed - confirmed.start)
             self._confirmed_on = frame
-            self._onset_seen = False
             self._taken = False
-            self._carried = False
             # **Confirmed while its run is open, always**: since version 3 of the detector
             # (2026-11-04) a run is confirmed on the velocity outside the threshold that gives it
             # `min_duration_samples` measured ones, never on the sample that ends it, as version 2

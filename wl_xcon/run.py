@@ -75,17 +75,15 @@ class World(Protocol):
 
         **A saccade counts for a state only if it began in that state** (XC-410; the PI,
         2026-10-30: "one that began before the state is anticipatory, as an early response would
-        be"), **except the one whose onset ended the state before** -- a transition taken on a
-        `SaccadeOnset`, or on a timer counted from one, `After(since=SaccadeOnset())` -- which
-        carries into this state, and no further, for its landing if its eye stopped in this state
-        ("Yes, that one saccade carries"; "Yes, carry it too"), **and the one under way as the eye
-        left a window**, a transition taken on `Exited`, on the same terms (the PI, 2026-11-04:
-        "the movement that ended the state is the response"), wherever its onset fell, so an
-        anticipation begun before the cue counts where it lands (the PI, 2026-11-06: "Yes, count
-        it"). So a world that remembers a saccade across frames (`gaze.Tracked`) is told here when
-        each state begins and by which guard, and refuses to judge a saccade for a state it was not
-        told of. A world that draws each event as a guard asks for it has nothing to forget, and
-        does nothing.
+        be"), **except one in flight as the state began**, which counts there for its landing if its
+        eye stopped in this state, whatever edge `by` is (the PI, 2026-11-06, "Count it both ways":
+        "a saccade already under way at the go cue counts where it lands"), so an anticipation begun
+        just before the cue counts where it lands however the cue's state asks for it; the
+        onset's, the timer's and the exit's carries of 2026-10-30 to 2026-11-06 are that one rule.
+        So a world that remembers a saccade across frames (`gaze.Tracked`) is told here when each
+        state begins, and refuses to judge a saccade for a state it was not told of; the guard is
+        told too, and since that answer `gaze.Tracked` reads nothing of it. A world that draws each
+        event as a guard asks for it has nothing to forget, and does nothing.
         """
 
     def signal(self, frame: int) -> str:
