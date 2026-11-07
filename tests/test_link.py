@@ -684,6 +684,35 @@ def test_every_command_the_refusal_describes_is_one_the_link_accepts():
     assert set(link_module._COMMAND_EXPOSURE) == set(_command_kinds())
 
 
+def test_the_commands_said_to_be_wlx_taskds_alone_are_the_services_own():
+    """The review's M3: the sentence says which service acts on each kind, and nothing held
+    the half that says `wlx taskd` alone. The kinds the table gives to `taskd` are the ones
+    the service takes between runs and a `wlx run` session refuses
+    (`service._SERVICE_COMMANDS`), read from there and never copied."""
+    import wl_xcon.link as link_module
+    from wl_xcon import service
+
+    said = {
+        kind for kind, (who, _) in link_module._COMMAND_EXPOSURE.items() if who == "taskd"
+    }
+    assert said == {command.KIND for command in service._SERVICE_COMMANDS}
+
+
+def test_the_refusal_says_what_a_command_does_in_each_service_and_reads_as_two_lists():
+    """The review's M4: in `wlx taskd` `stop` and `pause` act on the run, a manual reward is
+    also given while the animal's return is awaited, and `open` carries the fluid the animal
+    has had today and the warnings accepted; each list says `and` before its last item."""
+    with pytest.raises(RemoteBindRefused) as refused:
+        ZmqLink(pub_endpoint="tcp://127.0.0.1:0", rep_endpoint="tcp://0.0.0.0:0")
+    said = " ".join(str(refused.value).split())
+
+    assert "stop the session, or in `wlx taskd` its run" in said
+    assert "pause the session, or in `wlx taskd` its run" in said
+    assert "between runs or while its return is awaited" in said
+    assert "the fluid it has already had today" in said and "accepting warnings" in said
+    assert ", and `revert` (" in said and ", and `resume_session` (" in said
+
+
 def test_which_endpoints_count_as_leaving_this_machine():
     """The classification on its own, with no socket involved, because some of the
     cases cannot be bound on every machine and binding is not what is being checked.

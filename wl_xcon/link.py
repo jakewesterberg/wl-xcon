@@ -2882,8 +2882,8 @@ class RemoteBindRefused(Exception):
 
 
 #: What every command kind the REP socket accepts lets a sender do, for the sentence that
-#: refuses a remote bind (XC-172), keyed by the kind on the wire and in `Command`'s
-#: order: `(service, words)`, `service` being `"both"` for a kind `wlx run` and
+#: refuses a remote bind (XC-172), keyed by the kind on the wire and grouped by
+#: service, `Command`'s order within each: `(service, words)`, `service` being `"both"` for a kind `wlx run` and
 #: `wlx taskd` act on (in a run, or between runs where the words say so) and `"taskd"`
 #: for a kind only `wlx taskd` acts on and a `wlx run` session refuses
 #: (`taskd.Session._command`, `service._SERVICE_COMMANDS`). **A kind missing here is
@@ -2891,13 +2891,13 @@ class RemoteBindRefused(Exception):
 #: `Command`'s own members.
 _COMMAND_EXPOSURE = {
     "set": ("both", "change a setting, a reward volume among them"),
-    "stop": ("both", "stop the session"),
-    "pause": ("both", "pause the session"),
+    "stop": ("both", "stop the session, or in `wlx taskd` its run"),
+    "pause": ("both", "pause the session, or in `wlx taskd` its run"),
     "resume": ("both", "resume it"),
     "mark": ("both", "put a mark's note on the record"),
     "schedule": ("both", "schedule a stop"),
     "cancel": ("both", "cancel a scheduled stop"),
-    "reward": ("both", "give a manual reward, while paused or, in `wlx taskd`, between runs"),
+    "reward": ("both", "give a manual reward, while paused or, in `wlx taskd`, between runs or while its return is awaited"),
     "clear": ("both", "clear trials from a condition's count"),
     "drum": ("both", "switch drumming"),
     "training": ("both", "switch a training setting"),
@@ -2906,7 +2906,7 @@ _COMMAND_EXPOSURE = {
     "hand_back": ("both", "hand a held setting back"),
     "range": ("both", "change a drawn range"),
     "revert": ("both", "take the run's settings and ranges back to an earlier change"),
-    "open": ("taskd", "open a session, recording the animal's departure time"),
+    "open": ("taskd", "open a session, recording the animal's departure time and the fluid it has already had today, and accepting warnings"),
     "check": ("taskd", "take a run's pre-flight"),
     "start": ("taskd", "start a run, acknowledging its unknown pre-flight items"),
     "end": ("taskd", "end a session, recording the animal's return time"),
@@ -2919,12 +2919,14 @@ def _what_a_command_port_exposes() -> str:
     and which service acts on it, as one sentence's worth of words (XC-172): what
     `ZmqLink.__init__`'s refusal of a remote bind says an unauthenticated host could send.
     A cold path, built only when a bind is refused."""
-    both = [f"`{kind}` ({words})" for kind, (service, words) in _COMMAND_EXPOSURE.items() if service == "both"]
-    taskd = [f"`{kind}` ({words})" for kind, (service, words) in _COMMAND_EXPOSURE.items() if service == "taskd"]
+    def listed(who: str) -> str:
+        items = [f"`{kind}` ({words})" for kind, (service, words) in _COMMAND_EXPOSURE.items() if service == who]
+        return ", ".join(items[:-1]) + f", and {items[-1]}"
+
     return (
         f"send any command the link accepts: to a `wlx run` session or a `wlx taskd` run, "
-        f"{', '.join(both)}; and to `wlx taskd` alone, which a `wlx run` session refuses, "
-        f"{', '.join(taskd)}"
+        f"{listed('both')}; and to `wlx taskd` alone, which a `wlx run` session refuses, "
+        f"{listed('taskd')}"
     )
 
 

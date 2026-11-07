@@ -946,6 +946,8 @@ def test_the_link_allow_remote_help_says_every_command_a_host_could_send(capsys)
         assert f"`{kind}`" in run_help, f"`wlx run --link-allow-remote` does not name {kind!r}"
         assert f"`{kind}`" in taskd_help, f"`wlx taskd --link-allow-remote` does not name {kind!r}"
     assert "a `wlx run` session refuses" in run_help
+    assert "the fluid the animal has already had today" in run_help
+    assert "the fluid the animal has already had today" in taskd_help
     assert "reward volume" in run_help
 
 
