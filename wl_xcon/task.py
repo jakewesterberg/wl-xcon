@@ -2055,6 +2055,23 @@ def _count_now(count: object, values: "dict | None", what: str) -> int:
     return count
 
 
+def at_hardest(levels: tuple, value: object) -> bool:
+    """**Whether `value` is at a staircase's hardest step** (`levels` easiest first): equal to its
+    last level, to within 1e-9, or beyond it in the harder direction -- above it where the levels
+    rise, below where they fall (the controller's ruling of 2026-11-08 on the PI's "Any trial
+    played at the hardest step counts, whoever set it there": a value merely nearest the last
+    level is not at it). `False` for a value that is no finite number."""
+    if (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+            or not levels):
+        return False
+    last = levels[-1]
+    if abs(value - last) <= 1e-9:
+        return True
+    if len(levels) < 2 or levels[-1] == levels[0]:
+        return False
+    return value > last if levels[-1] > levels[0] else value < last
+
+
 @dataclass(frozen=True, slots=True)
 class Steps:
     """**A staircase's levels by a step** (the PI, 2026-11-07: "i mean, everything should be

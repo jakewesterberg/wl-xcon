@@ -93,7 +93,7 @@ from wl_xcon.simulate import Census, Subject, Tally, agent
 from wl_xcon.run import LONGEST_TRIAL_S, run_trial
 from wl_xcon.task import (
     COUNTED, OWED, SPENT, UNPAID, Entered, Exited, Outcome, P, Param, Plan, SaccadeTo, Staircase,
-    Task, Trial, staircase_verdict,
+    Task, Trial, at_hardest, staircase_verdict,
 )
 from wl_xcon.task import (
     EASIER, EXPECTED, HARDER, NOT_DIFFICULTY, SAME, Background, Distribution, Factorial, Listed,
@@ -773,18 +773,19 @@ def _at_hardest(climb: "_Climb | None", held: "dict | None") -> bool:
     """**Whether a trial is at its stage's hardest step** (the PI, 2026-11-07, "Hardest step
     reached, 80% there"), between trials: always in a block with no staircase (`climb` `None`);
     the staircase at its last level where it gives the trial its setting (`held` `None`); **and
-    where a person holds the setting, whether the value held, in `held`, is nearest that level**
-    (`task.Staircase.nearest`; the PI, 2026-11-07, on the build's review, I2: "Any trial played at
-    the hardest step counts, whoever set it there") -- an easier held value is not, and one that
-    is no number, which no level is near, is not either. A confirmed progression's bar to move up
-    counts only such answers (`scheduler.Scheduler.suggestion`); the run (`Session.run`) and a
-    replay of its record (`went_on`) both judge it here."""
+    where a person holds the setting, whether the value held, in `held`, is at that level or
+    beyond it in the harder direction** (`task.at_hardest`; the PI, 2026-11-07, on the build's
+    review, I2: "Any trial played at the hardest step counts, whoever set it there"; the
+    controller's ruling of 2026-11-08 on the re-review, I-1: a value merely nearest the last level
+    is not at it) -- an easier held value is not, and one that is no number is not either. A
+    confirmed progression's bar to move up counts only such answers
+    (`scheduler.Scheduler.suggestion`), and `Session._eased` eases no such hold; the run
+    (`Session.run`) and a replay of its record (`went_on`) both judge it here."""
     if climb is None:
         return True
-    top = len(climb.staircase.levels) - 1
     if held is None:
-        return climb.level == top
-    return climb.staircase.nearest(held.get(climb.staircase.setting)) == top
+        return climb.level == len(climb.staircase.levels) - 1
+    return at_hardest(climb.staircase.levels, held.get(climb.staircase.setting))
 
 
 #: **What became of a suggestion the rig made** (`_Suggested.fate`; the pop-out search build,

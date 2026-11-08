@@ -848,9 +848,11 @@ class _Locks(Simulated):
     AFTER, BUDGET = 3, 240
 
     def __init__(self, setting: str, value: float, *, stop_at: int | None = None,
-                 send_at: int = 1) -> None:
+                 send_at: int = 1, more: tuple = ()) -> None:
         super().__init__()
         self.setting, self.value, self.stop_at, self.send_at = setting, value, stop_at, send_at
+        #: More `(setting, value)` sent at the same drain, before it.
+        self.more = more
         self.session: Session | None = None
         self.drains = 0
         self.seen: int | None = None
@@ -859,6 +861,8 @@ class _Locks(Simulated):
     def drain(self) -> list:
         self.drains += 1
         if self.drains == self.send_at:
+            for setting, value in self.more:
+                self.queue(SetParameter(setting, value, JAKE))
             self.queue(SetParameter(self.setting, self.value, JAKE))
         offered = self.session.suggestion
         if self.seen is None and offered is not None and offered[1] == "up":
@@ -903,26 +907,58 @@ def test_a_trial_locked_at_the_hardest_step_counts_toward_moving_up(tmp_path):
     assert (first.suggestion.correct, first.suggestion.of) == (up["bar"]["correct"], 50)
 
 
-def test_went_on_replays_only_answers_at_the_hardest_step_as_at_it(task, tmp_path):
+@pytest.mark.parametrize("more, value", [((), 0.951), ((("fade_in_step", 0.5),), 0.81)])
+def test_a_trial_held_merely_near_the_hardest_step_stays_eased(tmp_path, more, value):
+    """The controller's ruling of 2026-11-08 on the re-review, I-1: a held value counts as at the
+    hardest step only at the top level or beyond it in the harder direction -- the PI said "at the
+    hardest step" -- so one merely nearest it stays eased, "as now": distractors locked at 0.951 of
+    full, or at 0.81 with Fade-in's step at 0.5 (levels 0.1, 0.6 and 1.0), are dimmer than the odd
+    one, every trial of theirs is eased by the lock and none goes toward moving up, so no move up
+    is suggested however right the animal is."""
+    trainer = _Locks("distractor_fraction", value, stop_at=80, more=more)
+    session = _opened(replace(_spec(tmp_path, seed=5, start_block="Fade-in"), accuracy=0.95),
+                      trainer)
+    trainer.session = session
+
+    session.run()
+
+    lines = _rows(session, "trials.jsonl")
+    assert len(lines) >= 70 and trainer.seen is None
+    assert all(line["params"]["distractor_fraction"] == value for line in lines[1:])
+    assert all("distractor_fraction" in line["eased"] for line in lines[1:])
+    assert not [row for row in _rows(session, "parameter_changes.jsonl")
+                if row["kind"] == "suggested" and row["move"] == "up"]
+    last = session.link.published[-1]
+    assert last.bars is None or last.bars.up_of == 0
+
+
+@pytest.mark.parametrize(("start", "locked", "stepped_at"), [
+    (0.9, 30, {0.9, 1.0}),
+    (0.1, 3, {0.1}),
+])
+def test_went_on_replays_only_answers_at_the_hardest_step_as_at_it(task, tmp_path, start, locked,
+                                                                   stepped_at):
     """The build's review, M1 (H10): a run that stops with its process is gone on from by
     replaying its record (`taskd.went_on`), and each line goes toward the stage's bar to move up
     only where it was at the stage's hardest step -- the staircase at its top level, or a value a
     person held there (I2) -- never an answer at an easier level. A Fade-in run started one level
     below full, so its staircase moves to full and back, and the trainer locks the distractors at
-    full for its last trials: each line replays as at the hardest step exactly where its
+    full for its last trials; **and one started faint, locked at full from its third trial while
+    its staircase waits at the bottom** (the re-review, M-2: a held line is judged by its value,
+    not the staircase's level): each line replays as at the hardest step exactly where its
     distractors were at full."""
     from wl_xcon import resume
     from wl_xcon.taskd import went_on
 
     spec = replace(_spec(tmp_path, seed=5, start_block="Fade-in"),
-                   values={"distractor_fraction": 0.9})
+                   values={"distractor_fraction": start})
 
     class _Late(_Locks):
-        """The lock sent at the 30th drain, not the first; the run stopped at the 45th."""
+        """The lock sent at drain `locked`, not the first; the run stopped at the 45th."""
 
         def drain(self) -> list:
             self.drains += 1
-            if self.drains == 30:
+            if self.drains == locked:
                 self.queue(SetParameter(self.setting, self.value, JAKE))
             if self.drains == 45:
                 self.queue(Stop(by=JAKE))
@@ -944,7 +980,7 @@ def test_went_on_replays_only_answers_at_the_hardest_step_as_at_it(task, tmp_pat
     held = [line for line in lines if "distractor_fraction" in line["live"]]
     assert held and all(line["params"]["distractor_fraction"] == 1.0 for line in held)
     stepped = [line for line in lines if "distractor_fraction" not in line["live"]]
-    assert {line["params"]["distractor_fraction"] for line in stepped} >= {0.9, 1.0}
+    assert {line["params"]["distractor_fraction"] for line in stepped} >= stepped_at
 
 
 @pytest.mark.parametrize(("stage", "setting", "value", "own"), [

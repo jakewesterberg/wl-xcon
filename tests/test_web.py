@@ -3745,7 +3745,7 @@ def test_a_suggestion_shows_why_and_its_two_buttons():
     """When the bar is met, a prompt naming why -- the setting at its hardest step and the answers
     right there -- with *Move up* and *Hold* (the PI's sketch); back down the same way, *Move back*
     and *Hold*, naming the bar it fell under. Each button names the suggestion it answers."""
-    up = _train(_training(suggestion=_up()))
+    up = _train(_training(suggestion=_up(), staircase=replace(_LADDER, level=3)))
     back = _train(_training(suggestion=_back(), staircase=None))
 
     assert ('<div class="prompt" data-prompt="7"><div><b>Ready for Crowd.</b> '
@@ -3764,13 +3764,25 @@ def test_a_suggestion_shows_why_and_its_two_buttons():
             in _train(_training(suggestion=_up(), staircase=None)))
     # **The task's own words for its hardest step** (the build's review, M7; the PI's sketch: "the
     # distractors are at full brightness and 41 of the last 50 were correct").
-    worded = replace(_LADDER, hardest="the distractors are at full brightness")
-    # The words ride the frame's staircase (ADR-0003's round trip), absent from an older frame.
+    worded = replace(_LADDER, hardest="the distractors are at full brightness", level=3)
+    # The words ride the frame's staircase (ADR-0003's round trip).
     from wl_xcon.link import decode, encode
     assert decode(encode(_training(staircase=worded))).staircase == worded
-    assert ("<b>Ready for Crowd.</b> The distractors are at full brightness and 41 of the last "
-            "50 were correct (82%).</div>") in _train(_training(suggestion=_up(),
-                                                              staircase=worded))
+    full = ("<b>Ready for Crowd.</b> The distractors are at full brightness and 41 of the last "
+            "50 were correct (82%).</div>")
+    assert full in _train(_training(suggestion=_up(), staircase=worded))
+    # **Said only while the trial's value is at the hardest step** (the re-review, I-1): the
+    # staircase a level below it, or a person's value held merely near it, gets the plain bar; a
+    # person's value held at it gets the words.
+    def held(value: float) -> object:
+        return _training(suggestion=_up(), staircase=replace(worded, held=True), params=(
+            ParamRow("distractor_luminance", "of full", 0.0, 1.0, value, False, source="person"),))
+    for below in (_training(suggestion=_up(), staircase=replace(worded, level=2)), held(0.951)):
+        pane = _train(below)
+        assert "full brightness" not in pane and "is at its hardest step" not in pane
+        assert ("<b>Ready for Crowd.</b> 41 of the last 50 answers at its hardest step, 1, were "
+                "right (82%).</div>") in pane
+    assert full in _train(held(1.0))
     # Nothing suggested, no prompt.
     assert "prompt" not in _train(_training())
 

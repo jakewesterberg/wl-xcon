@@ -534,8 +534,9 @@ back one on a fall-back rule, and keeps its top stage going) and a run time limi
 progression may be confirmed** (`ByCriterion(confirm=True)`; the pop-out search build, 2026-11-07;
 the PI, "Rig suggests, trainer confirms"): no stage moves on its rules; between trials the rig
 suggests moving up where a stage's criterion is met on its last answers given at the stage's
-hardest step (its staircase at its last level, or a value a person holds nearest that level --
-"Any trial played at the hardest step counts, whoever set it there", the PI, 2026-11-07 -- or any
+hardest step (its staircase at its last level, or a value a person holds at that level or beyond it
+in the harder direction, `task.at_hardest` -- "Any trial played at the hardest step counts, whoever
+set it there", the PI, 2026-11-07; a value merely near it stays eased -- or any
 for a stage with none; an answer at an easier level neither counts nor breaks the window), and
 back where the fall-back's is on its last
 first answers, each judged on answers as a staircase classes them, never on a trial a person's

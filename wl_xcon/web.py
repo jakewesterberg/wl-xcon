@@ -45,7 +45,7 @@ from wl_xcon import health as _health
 from wl_xcon.actor import Actor, Member
 from wl_xcon.cli import _clock, _moment, _setup_words
 from wl_xcon.link import RECENT_OUTCOMES, ConditionRow, Counts, Idle, Question, Telemetry
-from wl_xcon.task import Family, Outcome
+from wl_xcon.task import Family, Outcome, at_hardest
 from wl_xcon.warnlist import HEAD_FREE, UNLISTED
 
 
@@ -1508,6 +1508,17 @@ _AFRESH = "Tick those to add; adding any starts both bars afresh."
 _ACTS = '<div class="acts">'
 
 
+def _ladder_at_top(frame: Telemetry, ladder) -> bool:
+    """Whether the open stage's staircase gives its hardest step now: at its last level, or, held
+    by a person, at a value at that level or beyond it in the harder direction (`task.at_hardest`;
+    the controller's ruling on the re-review, I-1), the value the frame's card of the setting
+    shows."""
+    if not ladder.held:
+        return 0 <= ladder.level == len(ladder.levels) - 1
+    card = next((row for row in frame.params if row.name == ladder.setting), None)
+    return card is not None and at_hardest(tuple(ladder.levels), card.value)
+
+
 def _prompts(frame: Telemetry, view: View) -> list[str]:
     """**The rig's suggestions, each a prompt naming why** (the design's §3.5; the PI's sketch):
     to move up, the setting at its stage's hardest step and the answers right there, with *Move up*
@@ -1521,13 +1532,20 @@ def _prompts(frame: Telemetry, view: View) -> list[str]:
     if stage is not None and stage.move == "up":
         ladder = frame.staircase
         pct = _percent(stage.correct, stage.of) if stage.of else "—"
-        if ladder is not None and ladder.hardest and frame.block == stage.block:
-            # The task's own words for its hardest step (the build's review, M7; the PI's sketch).
+        top = (ladder is not None and bool(ladder.levels) and frame.block == stage.block
+               and _ladder_at_top(frame, ladder))
+        if top and ladder.hardest:
+            # The task's own words for its hardest step (the build's review, M7; the PI's sketch),
+            # said only while the trial's value is at it (`task.at_hardest`; the re-review, I-1).
             why = (f"{ladder.hardest[:1].upper()}{ladder.hardest[1:]} and {stage.correct} of the "
                    f"last {stage.of} were correct ({pct}).")
-        elif ladder is not None and ladder.levels and frame.block == stage.block:
+        elif top:
             why = (f"{ladder.setting} is at its hardest step, {_rung(ladder.levels[-1])}, and "
                    f"{stage.correct} of the last {stage.of} answers there were right ({pct}).")
+        elif ladder is not None and ladder.levels and frame.block == stage.block:
+            # Not at it now (a level below, or a person's value short of it): the bar as it is.
+            why = (f"{stage.correct} of the last {stage.of} answers at its hardest step, "
+                   f"{_rung(ladder.levels[-1])}, were right ({pct}).")
         else:
             why = f"{stage.correct} of the last {stage.of} answers were right ({pct})."
         body = (f'<div class="prompt" data-prompt="{_e(stage.change)}"><div><b>Ready for '
