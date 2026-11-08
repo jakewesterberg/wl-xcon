@@ -33,41 +33,23 @@ from then). **Hardware verified: none.**
   (reference tasks), C1 (the task object), C2a (how trials count), C2b (plans and blocks), C3 (drawn values,
   conditions from factors, designed orders, live edits and the change log). Five reference tasks in `tasks/` are
   engine fixtures; real tasks come from wl-xtasks, written with the PI.
-- **The first real task: the pop-out search**, wl-xtasks' `tasks/popout_search.py` (on its branch
-  `popout-search-2026-11-07` until the PI merges it there), tested here by path (`tests/test_popout_search.py`). Its
-  choices are TSK-74 and TSK-75; its design is `docs/superpowers/specs/2026-11-07-popout-search-design.md`. Built on
-  branch `popout-build-2026-11-07` (not on `main` until the PI says yes), reviewed whole once, and its fix round done
-  (2026-11-07; the review and the round's report are in the main checkout's git-ignored `.superpowers/side-2026-11-07/`).
-  What it added to the engine:
-  - **every number a setting** (TSK-75, the PI: "everything should be adjustable in the console"): a staircase's counts
-    and its steps (`task.Steps`), a stage's bar and a fall-back's (`task.rule_at`), a color set's brightness, each read
-    live from the run's values and changed with `set`;
-  - **a color set** (`photometry.ColorSet`, `ColorSetLight`): four named colors held at macaque cone luminance (L + M at
-    L:M 1, on the CIE's own 2006 2° fundamentals, ADR-0012 amended) at a luminance that is a setting (15 cd/m² to
-    start), realized on the rig's panel once per value; the record names a color's set by name, each run's start row
-    defines it once, and a trial line carries the set's realization at a luminance first drawn there;
-  - **a staircase** between trials on a named setting (`task.Staircase`), which a person's held value stops and a
-    hand-back restarts; a value held at its hardest level counts toward moving up (the PI: "whoever set it there");
-  - **a confirmed progression** (`ByCriterion(confirm=True)`): the rig suggests each move between stages and the trainer
-    confirms or holds, each recorded (`suggested`, `declined`); taking one half of a prompt re-offers the other at once
-    (`remakes`);
-  - **a pool** of pairings the trainer starts small and widens (`task.Pool`), named by their colors;
-  - **a start at a named stage**, with the animal's previous session's end of the same task and plan *shown* at the
-    start, never carried (§3.6: "Nothing carries the stage across sessions on its own"); **a crashed session's first
-    run goes on from the run its own process stopped in** (`Session._going_on`);
-  - **the trainer's panel**: the stage, the staircase's level and lock, the stage's last answers and the trials left out
-    beside them, the pool, and the standing suggestion with *Move up* and *Hold*, its prompt in the task's own words
-    (telemetry schema 20);
-  - **the simulated eye** (`simeye.py`, XC-456), so a simulated session of a gaze task is scored as the rig would.
+- **The first real task: the pop-out search**, wl-xtasks' `tasks/popout_search.py` (its branch
+  `popout-search-2026-11-07` until the PI merges it there), tested here by path (`tests/test_popout_search.py`); its
+  design is `docs/superpowers/specs/2026-11-07-popout-search-design.md`, its choices TSK-72 to TSK-75 and COL-37.
+  Built on branch `popout-build-2026-11-07`, reviewed whole and its fix round done. What it added to the engine
+  (color sets, staircases, confirmed progressions, the pool, every number a setting, the trainer's panel, the
+  simulated eye) is in architecture.md. Two facts a session would otherwise get wrong: a crashed session's first run
+  goes on from the run its own process stopped in (`Session._going_on`), while the previous session's end is only
+  *shown* at a start (§3.6); and a value held at a staircase's hardest level counts toward moving up.
 - **Running**: the trial loop (`run.py`), the session daemon and CLI (`taskd.py`, `cli.py`: `wlx run`, `wlx taskd`),
   the simulated animal (`simulate.py`; a gaze task's trials are played by the simulated eye through the rig's gaze
   world, `gaze.Tracked`).
 - **The console**: a browser page on the LAN (`serve.py`, `web.py`, `link.py`); writes from the box only; sign-in from
   wl.works designed, waiting on the rig's https page (XC-151, XC-152).
 - **Welfare** (`bounds.py`, `welfare.py`, `marks.py`, `stranded.py` and the functions architecture.md lists, held to
-  `tests/welfare_manifest.json` by `tests/test_welfare_manifest.py`, on `main` since `0b175ea`): one limit, out of the cage to back in, eight hours (the institution's); the
-  day's fluid is a floor and no delivery is refused on volume; each delivery's size is a ceiling; a task names how
-  reward is configured, never how much.
+  `tests/welfare_manifest.json` by `tests/test_welfare_manifest.py`, on `main` since `0b175ea`): one limit, out of
+  the cage to back in, eight hours (the institution's); the day's fluid is a floor and no delivery is refused on
+  volume; each delivery's size is a ceiling; a task names how reward is configured, never how much.
 - **The record**: the session folder `xcon/` that wl-preproc reads (`record.py`).
 
 ## What is next (the PI, 2026-11-07)
@@ -94,8 +76,7 @@ clean CI.
 - **Suite**: `WLX_REQUIRE_PREPROC=1 WLX_REQUIRE_BROWSER=1 WLX_REQUIRE_XTASKS=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p
   no:cacheprovider -n auto` (a `wl-preproc` checkout or link at the root, and a `wl-xtasks` one beside it, git-ignored
   at `/wl-xtasks`, holding `tasks/popout_search.py`; wl-sync installed at the commit `wl-preproc/pyproject.toml` pins).
-  **5603 passed on `main`** (`56ccca2`); the pop-out build's branch has more (**5797 passed** at `19a5fb5`), none
-  skipped.
+  **5603 passed on `main`** (`56ccca2`); the pop-out build's branch has more (**5798 passed**), none skipped.
 - **CI**: each push sweeps the changed modules with mutants (`tools/mutation_gate.py`); the nightly sweeps all, in 24
   shards. Read every shard's log to its closing line; the run's summary can be wrong.
 - **The neighbours** are read weekly, by their handover files (the PI, 2026-11-07): wl-preproc, wl-sync, wl-works,
