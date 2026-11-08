@@ -4672,19 +4672,27 @@ class Session:
             return None
         return went if went is not None and went.position is not None else None
 
-    def continues(self, task: Task, plan: str | None, start_block: str | None) -> str | None:
+    def continues(self, task: Task, plan: str | None, start_block: str | None,
+                  values: dict | None = None) -> str | None:
         """**What a run started now would go on from, in words, for its pre-flight**
         (`_going_on`; the pop-out search build's Task 6), or `None`: so the trainer sees, before
-        the start, the stage, the staircase, the pool and the suggestion it comes back with."""
+        the start, the stage, the staircase, the pool and the suggestion it comes back with --
+        **judged on the values the run would start with** (the re-review, M-1): the task's starts
+        under `values`, the start's, and the pool the run goes on with, as `run` builds its own
+        scheduler, never the stopped run's person-set values, which are not carried (XC-467)."""
         went = self._going_on(task, plan, start_block)
         if went is None:
             return None
         played = task.plans[plan]
+        starting = {**{param.name: param.start for param in task.params if param.start is not None},
+                    **(values or {})}
+        if task.pool is not None:
+            starting[task.pool.setting] = went.pool
         scheduler = Scheduler(
             blocks=[variation.expanded(block) for block in played.blocks], seed=0,
             counting=task.trial.counting,
             countings={name: structure.counting for name, structure in task.structures.items()},
-            order=played.order, start=went.position, values=lambda: went.values,
+            order=played.order, start=went.position, values=lambda: starting,
             params={param.name: param for param in task.params})
         standing = [offered for offered in _carried(task, went, scheduler) if offered is not None]
         return (f"it goes on from run {self._last_run.run + 1}, which stopped with its process: "

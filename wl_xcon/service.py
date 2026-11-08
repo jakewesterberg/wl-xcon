@@ -1198,7 +1198,7 @@ class Service:
             previous = _link.cut(f"the previous session's end could not be read: {_fault(broken)}",
                                  _link.NOTE_LIMIT)
         return {"stages": stages, "pool": pool, "previous": previous,
-                "continues": session.continues(loaded, plan, start_block)}
+                "continues": session.continues(loaded, plan, start_block, values)}
 
     def _check(self, command: _link.CheckRun) -> None:
         """Take a run's pre-flight and put it on the frame, starting nothing."""

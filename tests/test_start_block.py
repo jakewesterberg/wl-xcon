@@ -766,3 +766,44 @@ def test_a_record_the_resumed_run_cannot_read_back_starts_it_at_its_first_block(
     assert checked.preflight.continues is None
     assert [(line["block"], line["params"]["set_size"]) for line in _run_lines(folders, 1)] == [
         ("Alone", 1)]
+
+
+def test_the_pre_flight_says_what_the_resumed_run_comes_back_with_not_the_stopped_runs_values(
+        tmp_path, monkeypatch):
+    """The re-review, M-1: a stopped run's person-set values are not carried (XC-467), so the
+    pre-flight's "goes on from" (`Session.continues`) judges the stage's bars on the values the run
+    would start with -- the task's starts under the start's -- as the run does, never on the stopped
+    run's. Alone's window, a setting `win` (4 to start), set to 2 live, met at 2 of 2, and the
+    process stopped: the resumed run's bar reads 4 again, so neither the pre-flight nor the run's
+    first frame says a suggestion stands."""
+    import sys
+
+    module = sys.modules[__name__]
+    plain = module._source
+
+    def windowed(stages, order=CONFIRMED, plans=""):
+        text = plain(stages, order, plans)
+        old = "Param('pairings', unit='pairings', low=1, high=7, start=1)"
+        assert text.count(old) == 1
+        text = text.replace(old, old + ", Param('win', unit='answers', low=1, high=10, start=4)")
+        text = text.replace(
+            "'pairings': Meaning(NOT_DIFFICULTY, NEITHER, note='which pairings are drawn')",
+            "'pairings': Meaning(NOT_DIFFICULTY, NEITHER, note='which pairings are drawn'), "
+            "'win': Meaning(NOT_DIFFICULTY, NEITHER, note='the bar\\'s window')")
+        return "from wl_xcon.task import P\n" + text
+
+    monkeypatch.setattr(module, "_source", windowed)
+    alone = _stage("Alone", "(0.8, P('win'))", set_size=1)
+    crowd = _stage("Crowd", (0.8, 2), staircase=STAIRS)
+    folders, second = _stranded_in(tmp_path, [alone, crowd], ["right", "right", "right"],
+                                   {0: [SetParameter(name="win", value=2, by=JAKE)]}, killed=True)
+    assert [row["move"] for row in _changes(folders, "suggested")][:1] == ["up"]
+
+    checked = _step(second, CheckRun(by=JAKE, task="search.py", values=dict(VALUES), plan="train"))
+    continues = checked.preflight.continues
+    assert continues is not None and "standing" not in continues, continues
+    _plays(second, ["right"])
+    _step(second, _start())
+    first = _running(second, 1)[0]
+    assert (first.block, first.suggestion) == ("Alone", None)
+

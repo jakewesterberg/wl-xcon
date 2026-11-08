@@ -56,10 +56,13 @@ from then). **Hardware verified: none.**
 1. **Merge the pop-out search build**, behind the PI's yes by name. In this order (the review's I4): merge wl-xtasks'
    branch `popout-search-2026-11-07` in its own repository first (it is inert there, importing only names this branch
    adds); then set `WLX_REQUIRE_XTASKS=1` in CI here (XC-490); then run this branch's CI and read every shard. The
-   wl-preproc ask in the amendments file's pop-out section is still to be sent (XC-491): the color-set shapes, a light's
-   `luminance`, the start row's `realized` list, a line's `realized`, and a `suggested` row's `remakes`. Still the
-   PI's to hear at the merge ask: the suggestion can blink near 80% (the review's M2), and moving back starts a stage's
-   staircase at its easiest (M3).
+   wl-preproc ask in its amendments section is still to be sent (XC-491): the color-set shapes, `luminance`, the
+   `realized` list and line field with `xyz`, and `remakes`. **To tell the PI at the merge ask, a line each**: the
+   suggestion can blink near 80% (the review's M2); moving back starts a stage's staircase at its easiest (M3); the
+   builder's ranges for every new setting (TSK-75); a live change of `disc_size`, `fix_size` or `color_luminance`
+   (expected) keeps trials out of moving up until handed back; a re-made widening stands on the old stage's bar until
+   answered, beside a move back too; bars set live so they bounce are not warned; the fixation window reaching the discs'
+   windows is a warning, the ranges left as they are (the re-review's I-2).
 2. **Demo mode**, with its own plan: its design (`docs/superpowers/specs/2026-10-06-demo-mode-design.md`) and its two
    `Service._open` welfare changes are approved by the PI (2026-11-07; XC-013).
 3. **Then the display (build E)**, designed with the PI; "done" includes a real screen.
@@ -76,10 +79,10 @@ clean CI.
 - **Suite**: `WLX_REQUIRE_PREPROC=1 WLX_REQUIRE_BROWSER=1 WLX_REQUIRE_XTASKS=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p
   no:cacheprovider -n auto` (a `wl-preproc` checkout or link at the root, and a `wl-xtasks` one beside it, git-ignored
   at `/wl-xtasks`, holding `tasks/popout_search.py`; wl-sync installed at the commit `wl-preproc/pyproject.toml` pins).
-  **5603 passed on `main`** (`56ccca2`); the pop-out build's branch has more (**5798 passed**), none skipped.
+  **5603 passed on `main`** (`56ccca2`); the pop-out build's branch has more (**5809 passed**), none skipped.
 - **CI**: each push sweeps the changed modules with mutants (`tools/mutation_gate.py`); the nightly sweeps all, in 24
   shards. Read every shard's log to its closing line; the run's summary can be wrong.
-- **The neighbours** are read weekly, by their handover files (the PI, 2026-11-07): wl-preproc, wl-sync, wl-works,
+- **The neighbors** are read weekly, by their handover files (the PI, 2026-11-07): wl-preproc, wl-sync, wl-works,
   wl-xtasks. Last read: 2026-11-07, by the audit (wl-sync's answer of 2026-10-18 was found unread
   that day: its session endpoint is XC-460). Open asks of each: `docs/pending-*-amendments.md`.
 - **The welfare diff**: `tools/welfare_diff.py BASE HEAD` lists the welfare-listed code between two revisions item by item

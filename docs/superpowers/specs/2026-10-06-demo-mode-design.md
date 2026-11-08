@@ -4,7 +4,8 @@
 2026-10-07 and revised the same day it was approved. Designed 2026-10-06, in
 three parts, each approved by the PI in conversation ("Looks right"); two design reviews then found what §14 lists,
 and the PI chose to build other things first. It is part 3 of the pop-out search build
-([its design, §2](2026-11-07-popout-search-design.md)), built after the PI approves this revision. It builds slice
+([its design, §2](2026-11-07-popout-search-design.md)), built in a plan of its own after that build merges, this
+revision approved by the PI on 2026-11-07 (§15). It builds slice
 **b4** of [the P4d-2b console spec](2026-09-26-P4d2b-browser-console-design.md) ("b4 — simulation with mouse
 gaze") and closes backlog **XC-013**.
 
