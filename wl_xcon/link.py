@@ -224,8 +224,10 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: panel: `Telemetry.staircase` (a `StaircaseRow`: the open block's staircase, its level and
 #: whether a person holds its setting), `Telemetry.bars` (a `Bars`: the stage's last answers, the
 #: wrong ones and the trials left out by outcome, and the bar to move up) and `Telemetry.pool` (a
-#: `Pooled`: the pool's pairings in its declared order, and its value now). A reader of 19 refuses
-#: 20 and 20 refuses 19, by name.
+#: `Pooled`: the pool's pairings in its declared order, and its value now). And the same build's
+#: fix round, also before 20 was released: `StaircaseRow.hardest`, the staircase's hardest step in
+#: the trainer's words (`task.Staircase.hardest`), which the prompt to move up says, empty where the
+#: task gives none. A reader of 19 refuses 20 and 20 refuses 19, by name.
 SCHEMA = 20
 
 #: How many refusals a session keeps, per source, and therefore how many one
@@ -620,7 +622,7 @@ class StaircaseRow:
     while the staircase waits where it stopped, and its rule: `down` right answers in a row step it
     a level harder, `up` wrong ones in a row a level easier; and its hardest step in the
     trainer's words (`task.Staircase.hardest`; the build's review, M7), empty where the task gives
-    none, absent from a frame written before it."""
+    none (schema 20 carries it: it was added before 20 was released)."""
 
     setting: str
     levels: tuple
@@ -1886,7 +1888,7 @@ def _staircase_in(data: dict | None) -> StaircaseRow | None:
         return None
     return StaircaseRow(setting=data["setting"], levels=tuple(data["levels"]),
                         level=data["level"], held=_flag(data["held"]), down=data["down"],
-                        up=data["up"], hardest=str(data.get("hardest") or ""))
+                        up=data["up"], hardest=data["hardest"])
 
 
 def _bars_in(data: dict | None) -> Bars | None:
