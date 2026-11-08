@@ -106,7 +106,9 @@ its caller on. **The third is `cli._load_bounds`**, the bounded-config loader th
 first sentence names (on the list since 2026-11-07; the PI, asked that day: "Add it to the
 list"): it loads a subject's bounded config, the file a `wlx run` or `wlx taskd` session's
 ceilings and floor are read from, and refuses a file that does not define a `Bounds` as
-`BOUNDS`. A change to any of these, or to the two `preflight` functions, the seven
+`BOUNDS`. It reads that file from its source each time, never a bytecode cache that could
+hold the limits as they were before a rewrite of the same size within the same second
+(changed 2026-11-08; the PI, asked that day: "Approve the fix"). A change to any of these, or to the two `preflight` functions, the seven
 `service` functions, the `taskd` and `link` functions and the two parts of
 `Session._command` below, is a change requiring review; a change elsewhere is not.
 Since 2026-11-07 the list is also data, and enforced (the PI: "turn the welfare check ... into

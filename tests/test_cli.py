@@ -147,7 +147,7 @@ def test_a_clean_task_exits_zero(capsys):
             in capsys.readouterr().out)
 
 
-@pytest.mark.parametrize("load", ["task", "settings"])
+@pytest.mark.parametrize("load", ["task", "settings", "bounds"])
 def test_a_file_rewritten_in_the_same_second_at_the_same_size_loads_as_rewritten(
         tmp_path, monkeypatch, load):
     """A task (or settings) file is read from its source each time it is loaded, never from a
@@ -164,12 +164,20 @@ def test_a_file_rewritten_in_the_same_second_at_the_same_size_loads_as_rewritten
         read = lambda: next(p.start for p in cli._load_task(path).structures["search"].params
                             if p.name == "fix_luminance")
         was, now = 40.0, 41.0
-    else:
+    elif load == "settings":
         path = tmp_path / "settings.py"
         path.write_text("VALUE = 40\n")
         before, after = "40", "41"
         read = lambda: cli._load_named(path, "VALUE")
         was, now = 40, 41
+    else:
+        # The animal's limits file, welfare-listed `_load_bounds` (the PI, 2026-11-08: "Approve
+        # the fix"): a correct trial's reward rewritten, as a script might, at the same size.
+        path = tmp_path / "bounds.py"
+        path.write_text(Path(f"{TASKS}/reference_bounds.py").read_text())
+        before, after = "Ceiling(value=0.05,", "Ceiling(value=0.04,"
+        read = lambda: cli._load_bounds(path).ceilings["reward_correct"].value
+        was, now = 0.05, 0.04
     assert read() == was
     held = path.stat()
     path.write_text(path.read_text().replace(before, after))

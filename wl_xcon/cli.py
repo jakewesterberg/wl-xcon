@@ -68,8 +68,8 @@ def _from_source(path: Path):
     second it was last loaded runs as it was (CI's run 42473964496: `test_start_block`'s "task
     edited" resumed the unedited task on Linux). It also writes `__pycache__` into the folder a task
     came from, the task library's included. So the source is read and compiled here each time, with
-    only the file's own `from __future__` lines. (`_load_bounds`, welfare-listed, loads its file the
-    old way until the PI approves the same change there.)"""
+    only the file's own `from __future__` lines. Every file the rig loads is read this way, the
+    animal's limits file included (`_load_bounds`; the PI, 2026-11-08: "Approve the fix")."""
     spec = importlib.util.spec_from_file_location(path.stem, path)
     if spec is None or spec.loader is None:
         raise SystemExit(f"cannot load {path}")
@@ -129,13 +129,13 @@ def _load_bounds(path: Path):
     because a task may name how reward is configured and must never be able to say
     how much it is. A file that does not define `BOUNDS` is refused rather than
     treated as an empty config -- an empty one has no ceilings, and `Welfare` would
-    refuse it a moment later anyway with a message about the wrong thing.
+    refuse it a moment later anyway with a message about the wrong thing. **Read from its
+    source each time** (`_from_source`), never a bytecode cache that could hold the limits
+    as they were before a rewrite of the same size within the same second (the PI,
+    2026-11-08: "Approve the fix").
     """
-    spec = importlib.util.spec_from_file_location(path.stem, path)
-    if spec is None or spec.loader is None:
-        raise SystemExit(f"cannot load {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module, code = _from_source(path)
+    exec(code, vars(module))
     found = vars(module).get("BOUNDS")
     if not isinstance(found, Bounds):
         raise SystemExit(f"{path} must define BOUNDS")
