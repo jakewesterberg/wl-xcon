@@ -223,7 +223,7 @@ DEFAULTS = {
     },
     "BlockOrder": {},
     "Bounded": {"name": REQUIRED},
-    "ByCriterion": {"fall_back": None, "confirm": False},
+    "ByCriterion": {"fall_back": None, "confirm": False, "margin": 0},
     "ChairStill": {},
     "Checkerboard": {"check_size": 1.0, "contrast": None, "aperture": 10.0, "color": None},
     "Choice": {"objects": REQUIRED, "by": REQUIRED},

@@ -2429,6 +2429,14 @@ class ByCriterion(BlockOrder):
 
     fall_back: "tuple[float, int] | None" = None
     confirm: bool = False
+    #: **How far a suggestion's bar may be missed before it is withdrawn**, in answers, under a
+    #: confirmed progression (the PI, 2026-11-08, asked in the UI: "Stay up until 3 below"): a
+    #: suggestion, once made, stands until its bar is missed by more than this many answers -- with
+    #: the bar to move up at 40 of 50 and a margin of 3, it goes only when fewer than 37 are right;
+    #: the bar to move back, fewer than 25 of 50, it goes only once 28 or more are -- the same for a
+    #: widening (`scheduler.Scheduler.holds`). A whole number from 0 or a setting (`P`), read live
+    #: as the bars are; 0, a suggestion withdrawn as soon as its bar is no longer met.
+    margin: "int | P" = 0
 
 
 def rule_at(rule: "tuple | None", values: "dict | None") -> "tuple[float, int] | None":

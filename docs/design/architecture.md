@@ -541,7 +541,9 @@ for a stage with none; an answer at an easier level neither counts nor breaks th
 back where the fall-back's is on its last
 first answers, each judged on answers as a staircase classes them, never on a trial a person's
 change eased toward moving up (`Scheduler.suggestion`); the suggestion is a `suggested`
-change row and the frame's `suggestion`, withdrawn as its bar stops being met, and a person
+change row and the frame's `suggestion`, withdrawn once its bar is missed by more than the plan's
+margin, in answers (`ByCriterion.margin`, `Scheduler.holds`; the PI, 2026-11-08, "Stay up until 3
+below"; 0, as soon as it stops being met), and a person
 confirms it with *next block* or *back one* naming it, their `controls.jsonl` row naming it too,
 or holds with `Decline`, a `declined` row (`Session._suggest`, `_move`, `_decline`); an answer to
 a suggestion no longer standing is refused with a sentence. Every stage works on until a person

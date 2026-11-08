@@ -315,14 +315,14 @@ def test_it_holds_the_pis_values(task):
     assert {name: starts.get(name) for name in (
         "disc_size", "ring_radius", "fix_size", "color_luminance", "move_up_bar",
         "move_up_window", "move_back_bar", "move_back_window", "staircase_down", "staircase_up",
-        "fade_in_step", "crowd_step", "fade_in_floor", "crowd_floor")} == {
+        "fade_in_step", "crowd_step", "fade_in_floor", "crowd_floor", "suggestion_margin")} == {
         "disc_size": 1.0, "ring_radius": 8.0, "fix_size": 0.3, "color_luminance": 15.0,
         "move_up_bar": 0.8, "move_up_window": 50, "move_back_bar": 0.5, "move_back_window": 50,
         "staircase_down": 3, "staircase_up": 1, "fade_in_step": 0.1, "crowd_step": 1,
-        "fade_in_floor": 0.1, "crowd_floor": 4}
+        "fade_in_floor": 0.1, "crowd_floor": 4, "suggestion_margin": 3}
     for name in ("move_up_bar", "move_up_window", "move_back_bar", "move_back_window",
                  "staircase_down", "staircase_up", "fade_in_step", "crowd_step", "ring_radius",
-                 "fade_in_floor", "crowd_floor"):
+                 "fade_in_floor", "crowd_floor", "suggestion_margin"):
         assert task.meanings[name].kind == NOT_DIFFICULTY, name
     assert [param.name for param in task.params if param.start is None] == [
         "odd_color", "distractor_color"]
@@ -351,7 +351,7 @@ def test_it_holds_the_pis_values(task):
     (plan,) = task.plans.values()
     assert list(task.plans) == ["training"]
     assert plan.order == ByCriterion(fall_back=(P("move_back_bar"), P("move_back_window")),
-                                     confirm=True)
+                                     confirm=True, margin=P("suggestion_margin"))
     assert [block.name for block in plan.blocks] == ["Alone", "Fade-in", "Crowd"]
     assert all(block.criterion == (P("move_up_bar"), P("move_up_window")) for block in plan.blocks)
     alone, fade_in, crowd = plan.blocks
@@ -1334,4 +1334,37 @@ def test_a_stages_floor_is_a_setting_and_a_step_that_makes_no_levels_is_warned(t
     assert ("block 'Fade-in''s staircase on 'distractor_fraction' makes no levels at a step of "
             "0.0005 ('fade_in_step')") in found[0].detail
     assert "the staircase keeps the levels it had" in found[0].detail
+
+
+def test_the_pis_margin_holds_a_suggestion_until_37_of_50_and_back_until_27(task):
+    """The PI, 2026-11-08: "Stay up until 3 below" -- "With the 80% bar, it appears at 40 of 50 and
+    goes only below 37. The 3 is itself a console setting." The pop-out's `suggestion_margin`, 3
+    to start, read live (`Scheduler.holds`): the move up met at 40 of 50 holds at 37 and not at
+    36; at a margin of 0 it holds only where met. In mirror, the move back met under 25 of 50 holds
+    while fewer than 28 are right -- missed by no more than 3 answers -- and goes at 28."""
+    from wl_xcon.scheduler import MOVE_BACK, MOVE_UP
+
+    values = {param.name: param.start for param in task.params if param.start is not None}
+    up = _scheduler(task, values)
+    for outcome in [Outcome.CORRECT] * 40 + [Outcome.WRONG_TARGET] * 10:
+        up.judged(outcome, True, True, False, True)
+    assert up.bar(MOVE_UP)[:2] == (40, 50) and up.suggestion.move == "up"
+    for right in (39, 38, 37):
+        up.judged(Outcome.WRONG_TARGET, True, True, False, True)
+        assert up.bar(MOVE_UP)[0] == right and up.holds(MOVE_UP) and up.suggestion is None
+    values["suggestion_margin"] = 0
+    assert not up.holds(MOVE_UP)
+    values["suggestion_margin"] = 3
+    up.judged(Outcome.WRONG_TARGET, True, True, False, True)
+    assert up.bar(MOVE_UP)[0] == 36 and not up.holds(MOVE_UP)
+
+    back = _scheduler(task, values, start=1)
+    for outcome in [Outcome.WRONG_TARGET] * 26 + [Outcome.CORRECT] * 24:
+        back.judged(outcome, True, True, False, True)
+    assert back.bar(MOVE_BACK)[:2] == (24, 50) and back.suggestion.move == "back"
+    for _ in range(3):
+        back.judged(Outcome.CORRECT, True, True, False, True)
+    assert back.bar(MOVE_BACK)[0] == 27 and back.holds(MOVE_BACK)
+    back.judged(Outcome.CORRECT, True, True, False, True)
+    assert back.bar(MOVE_BACK)[0] == 28 and not back.holds(MOVE_BACK)
 

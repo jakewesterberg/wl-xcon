@@ -622,9 +622,13 @@ def _order(order, params: dict | None = None) -> str:
         if order.confirm:
             # The pop-out search build (the PI, 2026-11-07, "Rig suggests, trainer confirms"): no
             # stage moves of itself on its rules; a stage's time still moves it up.
+            margin = order.margin
+            stays = ("" if margin == 0 else
+                     f"; a suggestion stands until its bar is missed by more than "
+                     f"{_setting(margin, params, lambda v: f'{v:g}')} answers")
             return ("A training progression, stage by stage from the first, each move suggested "
                     "by the rig and made only when a person confirms it: up when a stage's rule is "
-                    f"met on its answers at its hardest step; {back}; a stage "
+                    f"met on its answers at its hardest step; {back}{stays}; a stage "
                     "whose time runs out moves up on its own; the top stage keeps working until a "
                     "time limit, a stop or the session's end.")
         return ("A training progression, stage by stage from the first: up one when a stage's "

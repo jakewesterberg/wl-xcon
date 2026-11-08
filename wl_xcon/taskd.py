@@ -923,6 +923,7 @@ def went_on(task: Task, last) -> _WentOn | None:
         for row in [row for row in pending if row.get("block") == name]:
             pending.remove(row)
             state["offered"][row["change"]] = row
+            state["bars"].append(("suggested", row["change"], row.get("move"), True))
 
     def changed_pool() -> None:
         # A widening taken beside a move up keeps the move's window, the move made again on it
@@ -952,6 +953,8 @@ def went_on(task: Task, last) -> _WentOn | None:
                     pending.append(row)
                     continue
                 state["offered"][row["change"]] = row
+                state["bars"].append(("suggested", row["change"], row.get("move"),
+                                      row.get("remakes") is not None))
                 if row.get("remakes") is not None and row.get("move") == MOVE_UP:
                     state["kept_up"] = row["change"]
             elif kind == "declined":
@@ -1023,24 +1026,42 @@ def _carried(task: Task, went: _WentOn, scheduler: Scheduler) -> tuple:
     (`went_on`; the pop-out search build's Task 6): `scheduler`, open at the stage, judges what
     the stage judged, in order, and a suggestion stands where its bar, read now, still offers its
     move -- a widening where the pool still lacks a pairing, too -- as a run's `_suggest` would
-    have kept it. Returns the stage's and the widening's, each a `_Suggested` or `None`."""
+    have kept it -- **held at every boundary since it was made, its bar missed by no more than the
+    margin** (`Scheduler.holds`; the PI, 2026-11-08, "Stay up until 3 below"), a widening made
+    again beside a move up on its own bar. Returns the stage's and the widening's, each a
+    `_Suggested` or `None`."""
+    alive: dict = {}
+
+    def judge() -> None:
+        now = scheduler.suggestion
+        for change, (move, carried) in list(alive.items()):
+            if not carried and (not scheduler.holds(move) or (
+                    move == MOVE_BACK and now is not None and now.move == MOVE_UP)):
+                del alive[change]
+
     for event in went.bars:
         if event[0] == "trial":
             scheduler.judged(*event[1:])
+            judge()
+        elif event[0] == "suggested":
+            alive[event[1]] = (event[2], event[3] and event[2] == MOVE_WIDEN)
         elif event[0] == "decline":
             scheduler.decline(event[1])
         else:
             scheduler.afresh(keep_up=len(event) > 1)
+    # And at the values the run goes on with, as its first boundary would judge it.
+    judge()
     offered = widen = None
-    now = scheduler.suggestion
-    if went.offered is not None and now is not None and now.move == went.offered.get("move"):
-        offered = _Suggested(went.offered["change"], now.move, now.block, now.to)
+    if went.offered is not None and went.offered.get("change") in alive:
+        # Its row's `now` is the stage it suggests.
+        offered = _Suggested(went.offered["change"], went.offered.get("move"),
+                             scheduler.block.name, went.offered.get("now"))
     pool = task.pool
     # A widening made again beside a move up stands on the bar that met it, as the run kept it.
     remade = went.widen is not None and went.widen.get("remakes") is not None
     if (went.widen is not None and pool is not None and pool.unpooled(went.pool) is None
             and len(pool.pairings(went.pool)) < len(pool.choices)
-            and (remade or scheduler.widening is not None)):
+            and (remade or went.widen.get("change") in alive)):
         bar = went.widen.get("bar") or {}
         widen = _Suggested(went.widen["change"], MOVE_WIDEN, scheduler.block.name, None,
                            carried=((bar.get("correct"), bar.get("of"),
@@ -3210,15 +3231,21 @@ class Session:
         scheduler = self._scheduler
         now = scheduler.suggestion
         standing = self._suggested
-        if standing is not None and (now is None or now.move != standing.move):
+        # **A suggestion stands until its bar is missed by more than the margin** (the PI,
+        # 2026-11-08, "Stay up until 3 below"; `Scheduler.holds`), and a move back gives way to a
+        # move up met, which counts first, as it always has.
+        if standing is not None and (not scheduler.holds(standing.move) or (
+                standing.move == MOVE_BACK and now is not None and now.move == MOVE_UP)):
             standing.fate, self._suggested = WITHDRAWN, None
             correct, of, hardest = scheduler.bar(standing.move)
+            margin = scheduler._margin()
+            by = f", by more than its margin of {margin}" if margin else ""
             if standing.move == MOVE_UP:
                 why = (f"{correct} of the last {of} answers at its hardest step right, under its "
-                       f"{scheduler.criterion_now[0]:.0%}")
+                       f"{scheduler.criterion_now[0]:.0%}{by}")
             else:
                 why = (f"{correct} of the last {of} first answers right, no longer under its "
-                       f"{scheduler.fall_back_now[0]:.0%}")
+                       f"{scheduler.fall_back_now[0]:.0%}{by}")
             self._feed("suggestion", None, self.wall_now(),
                        f"the rig's suggestion {standing.change}, to move {standing.move} from "
                        f"{standing.block} to {standing.to}, is withdrawn: {why}")
@@ -3337,7 +3364,10 @@ class Session:
                 and len(pooled) < len(pool.choices)):
             # Made again beside a move up the trainer took: judged on the window that met it.
             return
-        if standing is not None and now is None:
+        if standing is not None and not (len(pooled) < len(pool.choices)
+                                         and scheduler.holds(MOVE_WIDEN)):
+            # Withdrawn once its bar is missed by more than the margin (`Scheduler.holds`), or the
+            # pool has no pairing left to add.
             standing.fate, self._widening = WITHDRAWN, None
             correct, of, _ = scheduler.bar(MOVE_WIDEN)
             self._feed("suggestion", None, self.wall_now(),

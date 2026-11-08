@@ -648,6 +648,42 @@ class Scheduler:
         """The plan's fall-back now (`_fall_back`), for the changes feed's sentences."""
         return self._fall_back
 
+    def _margin(self) -> int:
+        """The plan's margin now (`task.ByCriterion.margin`): as written, or a setting's live value
+        read as the nearest whole number from 0; 0 where it gives none."""
+        margin = getattr(self.order, "margin", 0)
+        if isinstance(margin, P):
+            margin = self._live().get(margin.name)
+        if (isinstance(margin, bool) or not isinstance(margin, (int, float))
+                or margin != margin or margin in (float("inf"), float("-inf"))):
+            return 0
+        return max(0, int(margin + 0.5))
+
+    def holds(self, move: str) -> bool:
+        """**Whether a suggestion of `move` standing still holds** (the PI, 2026-11-08: "Stay up
+        until 3 below"; `task.ByCriterion.margin`), read between trials: its bar missed by no more
+        than the margin, counted in answers -- to move up or widen, its window full and at least
+        the criterion's proportion right with the margin's answers added; to move back, its window
+        full and under the fall-back's proportion with the margin's answers taken away. A margin
+        of 0 holds exactly where the bar is met (`suggestion`, `widening`). `False` under no
+        confirmed progression, and where the move has no stage to go to."""
+        if not self._confirming:
+            return False
+        margin = self._margin()
+        if move == MOVE_BACK:
+            if self._type_at(self._position - 1) is None or not self._down.maxlen:
+                return False
+            proportion, window = self._fall_back
+            right, of, _ = self.bar(MOVE_BACK)
+            return of >= window and (right - margin) / of < proportion
+        if self.block.criterion is None or not self._up.maxlen:
+            return False
+        if move == MOVE_UP and self._type_at(self._position + 1) is None:
+            return False
+        proportion, window = self._criterion
+        right, of, _ = self.bar(move)
+        return of >= window and (right + margin) / of >= proportion
+
     def _most(self, rule) -> int:
         """**The longest a rule's window can be**, which its window is kept as long as: as
         written, or for a window a setting names, its declared highest -- or its value now where

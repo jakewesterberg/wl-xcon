@@ -119,6 +119,9 @@ At the end of Fade-in the distractors match the odd one's luminance, so it diffe
   the stage's hardest step ("Hardest step reached, 80% there"): Fade-in's distractors at full luminance, Crowd at 12
   items, Alone as it is -- whoever set it there (the PI, 2026-11-07: "Any trial played at the hardest step counts,
   whoever set it there").
+- **A suggestion stays up until its bar is missed by more than 3 answers** (the PI, 2026-11-08, asked in the UI: "Stay
+  up until 3 below"): "With the 80% bar, it appears at 40 of 50 and goes only below 37. The 3 is itself a console
+  setting" (`suggestion_margin`); the same in mirror for moving back and for widening the pool.
 - **Back down, the same way** ("Rig suggests, trainer confirms"): below 50% of the last 50 ("Below 50% of the last 50",
   a setting the trainer may change: `move_back_bar`, `move_back_window`), the rig suggests the previous stage, or a
   narrower pool, and the trainer confirms or holds; the trainer may also move back by hand. **The narrower pool is not

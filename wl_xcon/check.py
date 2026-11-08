@@ -1137,6 +1137,18 @@ def _plan_faults(task: Task) -> list[Finding]:
             refuse(name, f"its order's count is {counted!r}, and a count of blocks or cycles is a "
                          f"whole number from 1, or None for no count")
         fall_back = order.fall_back if isinstance(order, ByCriterion) else None
+        margin = order.margin if isinstance(order, ByCriterion) else 0
+        # **A suggestion's margin** (the PI, 2026-11-08, "Stay up until 3 below"): a whole number of
+        # answers from 0, or a setting the task declares whose range starts at 0 or more.
+        if isinstance(margin, P):
+            param = ranged(margin)
+            if param is None or min(param.low, param.high) < 0:
+                refuse(name, f"its suggestions' margin is setting {margin.name!r}, and a margin is "
+                             f"a setting of numbers the task declares with a range from 0 or "
+                             f"more answers")
+        elif isinstance(margin, bool) or not isinstance(margin, int) or margin < 0:
+            refuse(name, f"its suggestions' margin is {margin!r}, and a margin is a whole number "
+                         f"of answers from 0, or a setting")
         if fall_back is not None and not rule(fall_back):
             refuse(name, f"its fall-back rule is {fall_back!r}, and a rule is (proportion, "
                          f"window): a proportion above 0 and at most 1, over a window of 1 or "

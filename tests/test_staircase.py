@@ -620,3 +620,25 @@ def test_a_rules_numbers_may_be_settings_checked_at_load_and_read_live(tmp_path)
     with pytest.raises(ValueError, match="setting 'share', which has no number here"):
         rule_at((P("share"), 50), {})
 
+
+def test_a_suggestions_margin_is_checked_at_load(tmp_path):
+    """The PI's margin (2026-11-08, "Stay up until 3 below"; `ByCriterion.margin`) is a whole
+    number of answers from 0 or a setting the task declares whose range starts at 0 or more:
+    refused at load, `bad-plan`, otherwise."""
+    stages = ('[Block("b", [Condition("c", {}, target=5)]), '
+              'Block("d", [Condition("c", {}, target=5)])]')
+    plans = "{" + ", ".join([
+        f'"fine": Plan({stages}, order=ByCriterion(confirm=True, margin=P("count")))',
+        f'"whole": Plan({stages}, order=ByCriterion(confirm=True, margin=2))',
+        f'"negative": Plan({stages}, order=ByCriterion(confirm=True, margin=-1))',
+        f'"half": Plan({stages}, order=ByCriterion(confirm=True, margin=1.5))',
+        f'"undeclared": Plan({stages}, order=ByCriterion(confirm=True, margin=P("nope")))',
+        f'"below": Plan({stages}, order=ByCriterion(confirm=True, margin=P("target_x")))',
+    ]) + "}"
+    path = _planned(tmp_path, DETECTION, plans, "detection", *_NAMED)
+
+    refused = {f.detail.split("'")[1] for f in check_task(_load_task(path))
+               if f.code == "bad-plan" and "margin" in f.detail}
+
+    assert refused == {"negative", "half", "undeclared", "below"}
+

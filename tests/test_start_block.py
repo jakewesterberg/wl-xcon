@@ -807,3 +807,31 @@ def test_the_pre_flight_says_what_the_resumed_run_comes_back_with_not_the_stoppe
     first = _running(second, 1)[0]
     assert (first.block, first.suggestion) == ("Alone", None)
 
+
+def test_a_suggestion_withdrawn_past_its_margin_is_not_brought_back_by_a_resume(tmp_path,
+                                                                               monkeypatch):
+    """The PI's margin, 2026-11-08 ("Stay up until 3 below"), replayed (`taskd._carried`): a
+    suggestion stands only while its bar has been missed by no more than the margin at every
+    boundary since it was made. Alone's bar, 4 of the last 5 with a margin of 1: five right suggest
+    moving up; three wrong miss it by two and withdraw it; three right bring it back within the
+    margin, 3 of 5, but not met, so the run suggests nothing again. Its process stops: neither the
+    pre-flight nor the resumed run's first frame says a suggestion stands."""
+    import sys
+
+    module = sys.modules[__name__]
+    plain = module._source
+    monkeypatch.setattr(module, "_source", lambda stages, order=CONFIRMED, plans="": plain(
+        stages, "ByCriterion(fall_back=(0.5, 4), confirm=True, margin=1)", plans))
+    alone = _stage("Alone", (0.8, 5), set_size=1)
+    folders, second = _stranded_in(tmp_path, [alone, CROWD],
+                                   ["right"] * 5 + ["wrong"] * 3 + ["right"] * 3, {},
+                                   killed=True)
+    assert [row["move"] for row in _changes(folders, "suggested")] == ["up", "widen"]
+
+    checked = _step(second, CheckRun(by=JAKE, task="search.py", values=dict(VALUES), plan="train"))
+    assert "standing" not in (checked.preflight.continues or ""), checked.preflight.continues
+    _plays(second, ["right"])
+    _step(second, _start())
+    first = _running(second, 1)[0]
+    assert (first.suggestion, first.widen) == (None, None)
+

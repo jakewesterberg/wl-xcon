@@ -942,3 +942,45 @@ def test_the_review_report_names_each_pairings_number(tmp_path):
     assert ("Each trial draws one pairing of those `pairings` holds, each as likely, into "
             "`target_appearance` and `distractor_appearance`") in report
     assert "It starts at 1: pairing 1." in report
+
+
+@pytest.mark.parametrize("margin, ups", [(0, 2), (1, 1)])
+def test_a_suggestion_stands_until_its_bar_is_missed_by_more_than_the_margin(tmp_path, margin,
+                                                                           ups):
+    """The PI, 2026-11-08, asked in the UI: "Stay up until 3 below" -- a suggestion, once made,
+    stands until its bar is missed by more than a margin, counted in answers
+    (`ByCriterion.margin`; `Scheduler.holds`). The bar to move up at 4 of the last 5: five right
+    suggest moving up and widening; two wrong bring it to 3 of 5. **With a margin of 0, as built,
+    both withdraw and come back under new ids once 4 of 5 are right again -- the blink; with a
+    margin of 1 each stands throughout**, one `suggested` row each."""
+    order = f"ByCriterion(fall_back=(0.5, 4), confirm=True, margin={margin})"
+    script = ["right"] * 5 + ["wrong"] * 2 + ["right"] * 4
+    session = _session(tmp_path, [_stage("Alone", set_size=1), _stage("Crowd")], script,
+                       order=order)
+
+    session.run()
+
+    suggested = [row for row in _changes(session) if row["kind"] == "suggested"]
+    assert [row["move"] for row in suggested].count("up") == ups
+    assert [row["move"] for row in suggested].count("widen") == ups
+    withdrawn = [said for said in _fed(session, "suggestion") if "is withdrawn" in said]
+    assert len(withdrawn) == (2 if margin == 0 else 0)
+
+
+@pytest.mark.parametrize("margin, backs", [(0, 2), (1, 1)])
+def test_a_suggestion_to_move_back_stands_until_missed_by_more_than_the_margin(tmp_path, margin,
+                                                                             backs):
+    """The margin in mirror (the PI's "Stay up until 3 below", 2026-11-08): the bar to move back,
+    fewer than 2 of the last 4 first answers right, is met on four wrong; two right bring it to 2
+    of 4, missed by one answer. With a margin of 0 the suggestion withdraws and comes back once 1
+    of 4 is right again; with a margin of 1 it stands throughout."""
+    order = f"ByCriterion(fall_back=(0.5, 4), confirm=True, margin={margin})"
+    script = ["wrong"] * 4 + ["right"] * 2 + ["wrong"] * 3
+    session = _session(tmp_path, [_stage("Alone", set_size=1), _stage("Crowd")], script,
+                       order=order, start_block="Crowd", values={"pairings": 7})
+
+    session.run()
+
+    suggested = [row for row in _changes(session) if row["kind"] == "suggested"]
+    assert [row["move"] for row in suggested] == ["back"] * backs
+
