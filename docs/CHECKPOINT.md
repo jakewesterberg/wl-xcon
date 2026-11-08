@@ -54,8 +54,9 @@ from then). **Hardware verified: none.**
 - **The record**: the session folder `xcon/` that wl-preproc reads (`record.py`).
 
 ## What is next (the PI, 2026-11-07)
-1. **Merge the pop-out search build**, behind the PI's yes by name; wl-xtasks' branch `popout-search-2026-11-08b`
-   merges on his word the same way. Then set `WLX_REQUIRE_XTASKS=1` in CI here (XC-490), run CI and read every shard. The
+1. **Merge the pop-out search build**, behind the PI's yes by name, after its CI is read shard by shard. wl-xtasks'
+   main holds the task (`c1a61e9`, merged on his word 2026-11-08), so CI requires it (`WLX_REQUIRE_XTASKS=1` in every
+   job); its branch `popout-search-2026-11-08b` (a comment) merges on his word the same way. The
    wl-preproc ask in its amendments section is still to be sent (XC-491): the color-set shapes, `luminance`, the
    `realized` list and line field with `xyz`, `remakes`, and the start row's `left`. **Decided 2026-11-08**: a suggestion stays up until its bar
    is missed by more than 3 answers (`suggestion_margin`), and a stage the animal returns to picks up where it left.

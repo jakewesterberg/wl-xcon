@@ -51,13 +51,12 @@ on:
 #
 # **wl-xtasks too, since 2026-11-07**, checked out into `<repo>/wl-xtasks` beside
 # wl-preproc: `tests/test_popout_search.py` reads the lab's first real task, the pop-out
-# search, from its `tasks/popout_search.py`. Its main does not hold that task until the
-# PI merges it there, so `WLX_REQUIRE_XTASKS` is **not set yet** and those tests skip
-# until it does; set it, as `WLX_REQUIRE_PREPROC` is, once they run (XC-490, after
-# wl-xtasks's branch merges). **The repository is public since 2026-11-07, by the PI's
-# choice**, so `GITHUB_TOKEN` checks it out with no `token:` (failure 3 above was a
-# private repository's `Not Found`). The step is still allowed to fail until
-# `WLX_REQUIRE_XTASKS` is set, when it must not: a skipped task would read green.
+# search, from its `tasks/popout_search.py`, on wl-xtasks's main since the PI merged it
+# there (2026-11-08). So `WLX_REQUIRE_XTASKS=1` is set in every job, as
+# `WLX_REQUIRE_PREPROC` is, and the checkout may not fail: a skipped task would read green
+# (XC-490). **The repository is public since 2026-11-07, by the PI's choice**, so
+# `GITHUB_TOKEN` checks it out with no `token:` (failure 3 above was a private
+# repository's `Not Found`).
 #
 # Every job installs `console` (pyzmq, msgpack) as well as `dev,contract` -- on
 # every Python `test` runs, and on the single Python (3.13) the mutation jobs pin.
@@ -98,8 +97,6 @@ jobs:
           repository: jakewesterberg/wl-preproc
           path: wl-preproc
       - name: Check out wl-xtasks's main inside the workspace
-        # Allowed to fail until WLX_REQUIRE_XTASKS is set (XC-490): see the note at the top.
-        continue-on-error: true
         uses: actions/checkout@v7
         with:
           repository: jakewesterberg/wl-xtasks
@@ -133,6 +130,7 @@ jobs:
       - run: pytest -q
         env:
           WLX_REQUIRE_PREPROC: "1"
+          WLX_REQUIRE_XTASKS: "1"
           WLX_REQUIRE_BROWSER: "1"
 
   mutation:
@@ -196,8 +194,6 @@ jobs:
           repository: jakewesterberg/wl-preproc
           path: wl-preproc
       - name: Check out wl-xtasks's main inside the workspace
-        # Allowed to fail until WLX_REQUIRE_XTASKS is set (XC-490): see the note at the top.
-        continue-on-error: true
         uses: actions/checkout@v7
         with:
           repository: jakewesterberg/wl-xtasks
@@ -233,6 +229,7 @@ jobs:
         # contract tests skipped is a baseline that proves less than it appears to.
         env:
           WLX_REQUIRE_PREPROC: "1"
+          WLX_REQUIRE_XTASKS: "1"
         # A new branch's first push carries an all-zero `before`, and a force-push can
         # carry one that is no longer in history. The gate cannot diff against either
         # and, rightly, will not guess: it sweeps everything, in one job, for hours.
@@ -302,8 +299,6 @@ jobs:
           repository: jakewesterberg/wl-preproc
           path: wl-preproc
       - name: Check out wl-xtasks's main inside the workspace
-        # Allowed to fail until WLX_REQUIRE_XTASKS is set (XC-490): see the note at the top.
-        continue-on-error: true
         uses: actions/checkout@v7
         with:
           repository: jakewesterberg/wl-xtasks
@@ -336,4 +331,5 @@ jobs:
       - name: Mutation gate (function shard ${{ matrix.shard }}/24)
         env:
           WLX_REQUIRE_PREPROC: "1"
+          WLX_REQUIRE_XTASKS: "1"
         run: python tools/mutation_gate.py --all --shard ${{ matrix.shard }}/24
