@@ -838,9 +838,10 @@ class Scheduler:
         space or leaving the target before its hold is a failure in both. A trial a person's
         change eased is in the window to move back, never in the one to move up (engine build C3;
         the PI, Q8). A met bar to move up counts before one to move back, as `ends` counts a met
-        rule before a fall-back. Live: a suggestion whose bar stops being met is gone at the next
-        boundary (the plan's Review Focus 2), and a person's move or hold starts its window
-        afresh (`advance`, `decline`)."""
+        rule before a fall-back. Live: a suggestion standing is withdrawn at the next boundary
+        where its bar is missed by more than the plan's margin (`holds`; the plan's Review Focus
+        2; the PI, 2026-11-08, "Stay up until 3 below"), and a person's move or hold starts its
+        window afresh (`advance`, `decline`)."""
         if not self._confirming:
             return None
         above = self._type_at(self._position + 1)

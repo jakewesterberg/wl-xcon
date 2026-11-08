@@ -273,7 +273,9 @@ def test_popout_loads_clean_but_the_expected_warnings(task):
     a run; the windows can overlap at the settings' extremes, twelve discs on the smallest ring
     (`crowded-array`, XC-156's check over the ranges), which the trainer keeps apart; and the
     fixation window, whose exit starts the answer, can reach the discs' windows on the smallest
-    ring (`answer-window-reaches-objects`; the re-review, I-2)."""
+    ring (`answer-window-reaches-objects`; the re-review, I-2); and the suggestions' margin, up to
+    20 answers, can reach a bar's count on the smallest windows (`margin-reaches-bar`; the
+    re-review 2, M-7)."""
     allocation = _load_allocation(Path(ALLOCATION))
 
     on_default = check_task(task, allocation, geometry=DIRECT, calibration=SRGB,
@@ -286,9 +288,10 @@ def test_popout_loads_clean_but_the_expected_warnings(task):
         assert all(f.is_warning for f in found), found
     assert {f.code for f in on_default} == {"color-on-default", "contrast-on-default",
                                              "color-set-desaturated", "crowded-array",
-                                             "answer-window-reaches-objects", "endless-plan"}
-    assert {f.code for f in on_measured} == {"crowded-array", "answer-window-reaches-objects",
+                                             "answer-window-reaches-objects", "margin-reaches-bar",
                                              "endless-plan"}
+    assert {f.code for f in on_measured} == {"crowded-array", "answer-window-reaches-objects",
+                                             "margin-reaches-bar", "endless-plan"}
     (pale,) = [f for f in on_default if f.code == "color-set-desaturated"]
     assert "above about 26 cd/m², of the 1 to 30 cd/m² setting 'color_luminance' allows" in (
         pale.detail)
@@ -979,7 +982,7 @@ def test_went_on_replays_only_answers_at_the_hardest_step_as_at_it(task, tmp_pat
     lines = _rows(session, "trials.jsonl")
     restored = resume.read(session.directory, departure=1_700_000_000.0)
     went = went_on(task, restored.last_run)
-    replayed = [event[-1] for event in went.bars if event[0] == "trial"]
+    replayed = [event[5] for event in went.bars if event[0] == "trial"]
     at_full = [line["params"]["distractor_fraction"] == 1.0 for line in lines]
     assert replayed == at_full
     assert any(at_full) and not all(at_full)
@@ -1423,4 +1426,34 @@ def test_a_stage_the_animal_returns_to_picks_up_where_it_left(task, tmp_path):
     assert up["params"]["set_size"] == crowd_left and up["drawn"]["set_size"] == "staircase"
     # A stage first visited starts as it always has: Crowd at 4.
     assert visits[1][1][0]["params"]["set_size"] == 4
+
+
+def test_a_margin_that_can_reach_a_bars_count_is_warned_at_load_and_live(task, tmp_path):
+    """The re-review 2, M-7 (the controller's ruling: a warning, never a refusal): a margin as large
+    as a bar's count makes a suggestion its bar can never withdraw -- up at 4 of 5 with a margin of
+    5 holds with none right. **At load**, over the ranges, the pop-out's margin of up to 20 can
+    reach every stage's bar on a 5-answer window (`margin-reaches-bar`); **live**, the changes feed
+    warns once as values set make it reach -- a 5-answer window with a margin of 5 -- and nothing at
+    the starts."""
+    from wl_xcon.check import margin_reaches
+
+    found = [f for f in check_task(task, _load_allocation(Path(ALLOCATION)), geometry=DIRECT,
+                                   calibration=SRGB, deployment=Deployment.RIG_FIXED,
+                                   source=TASK_FILE)
+             if f.code == "margin-reaches-bar"]
+    assert len(found) == 2 and all(f.is_warning for f in found)
+    assert ("can reach stages 'Alone', 'Fade-in' and 'Crowd''s bars to move up, as few as 2.5 "
+            "right answers") in found[0].detail
+    starts = {name: (param if param.choices or param.start is None
+                     else replace(param, low=param.start, high=param.start))
+              for name, param in {p.name: p for p in task.params}.items()}
+    assert margin_reaches(task.plans["training"], starts) == []
+
+    trainer = _Locks("suggestion_margin", 5.0, stop_at=6, more=(("move_up_window", 5.0),))
+    session = _opened(_spec(tmp_path, seed=5, start_block="Fade-in"), trainer)
+    trainer.session = session
+    session.run()
+    warned = [said for kind, _, _, said in session.controls if kind == "warning"
+              and said.startswith("margin-reaches-bar")]
+    assert len(warned) == 1 and "as few as 4 right answers" in warned[0]
 

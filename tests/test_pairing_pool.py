@@ -984,3 +984,46 @@ def test_a_suggestion_to_move_back_stands_until_missed_by_more_than_the_margin(t
     suggested = [row for row in _changes(session) if row["kind"] == "suggested"]
     assert [row["move"] for row in suggested] == ["back"] * backs
 
+
+def test_taking_the_widening_re_offers_a_move_up_its_margin_still_holds(tmp_path):
+    """The re-review 2, I-1 (the controller's ruling: the re-offer judges by `Scheduler.holds`, the
+    margin rule, as a standing suggestion is judged): the bar 4 of the last 5, a margin of 1; five
+    right suggest the move up and the widening; two wrong and one right leave 3 of 5, so both stand
+    within the margin. The trainer widens the pool: the move up is made again at once on the window
+    that met it (a `remakes` row, 3 of 5), and **a resume's replay keeps exactly what the run kept**
+    -- the window to move up kept, the move up made again standing, on the same numbers."""
+    from wl_xcon import resume, variation
+    from wl_xcon.scheduler import MOVE_UP, Scheduler
+    from wl_xcon.taskd import _carried, went_on
+
+    order = "ByCriterion(fall_back=(0.5, 4), confirm=True, margin=1)"
+    script = ["right"] * 5 + ["wrong"] * 2 + ["right"]
+    session = _session(tmp_path, [_stage("Alone", set_size=1), _stage("Crowd")], script,
+                       {7: [SetParameter(name="pairings", value=3, by=JAKE)]}, order=order)
+
+    session.run()
+
+    rows = [(row["change"], row["kind"], row.get("move"), row.get("remakes"), row.get("bar"))
+            for row in _changes(session)]
+    assert rows[:4] == [(1, "suggested", "up", None, {"correct": 5, "of": 5}),
+                        (2, "suggested", "widen", None, {"correct": 5, "of": 5}),
+                        (3, "set", None, None, None),
+                        (4, "suggested", "up", 1, {"correct": 3, "of": 5})]
+    assert [said for said in _fed(session, "suggestion") if "suggestion 1" in said
+            and "withdrawn" in said] == []
+    last = [frame for frame in session.link.published if frame.phase == "running"][-1]
+    assert last.suggestion is not None and last.suggestion.change == 4
+
+    task = _load_task(Path(session.spec.task))
+    went = went_on(task, resume.read(session.directory, departure=WALL_NOW).last_run)
+    plan = task.plans["train"]
+    replay = Scheduler(
+        blocks=[variation.expanded(block) for block in plan.blocks], seed=0,
+        counting=task.trial.counting,
+        countings={name: structure.counting for name, structure in task.structures.items()},
+        order=plan.order, start=went.position, values=lambda: went.values,
+        params={param.name: param for param in task.params})
+    offered, _ = _carried(task, went, replay)
+    assert offered is not None and offered.change == 4
+    assert replay.bar(MOVE_UP)[:2] == (last.suggestion.correct, last.suggestion.of)
+

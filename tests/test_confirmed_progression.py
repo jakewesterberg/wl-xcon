@@ -328,7 +328,7 @@ def test_a_confirmation_after_withdrawal_is_refused_with_a_sentence(tmp_path):
     session.run()
 
     withdrawn = ("the rig's suggestion 1, to move up from Alone to Crowd, was withdrawn when its "
-                 "bar stopped being met, before this answer arrived; ")
+                 "bar no longer held, missed by more than its margin, before this answer arrived; ")
     assert session.refusals == [
         ("next_block", JAKE, withdrawn + "nothing moved, and the run stays in block Alone"),
         ("decline", JAKE, withdrawn + "there is nothing to hold")]

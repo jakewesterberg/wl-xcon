@@ -51,7 +51,7 @@ from wl_xcon.actor import Actor, to_map_or_none
 from wl_xcon.bounds import Bounds, Exceeded, _finite
 from wl_xcon.check import (
     IMPOSSIBLE, _outside, _whole_numbers, answer_reaches, beyond_range, check_task, impossible,
-    start_at, undrawable, unplaced, unpooled, unshowable, unstarted,
+    margin_reaches, start_at, undrawable, unplaced, unpooled, unshowable, unstarted,
 )
 from wl_xcon.cli import _clock, _load_allocation, _load_task, _printable, _shown
 from wl_xcon.codes import BLOCK_END, RUN_END_MARKER, TRIAL_END, TRIAL_START, Allocation
@@ -794,8 +794,8 @@ def _at_hardest(climb: "_Climb | None", held: "dict | None") -> bool:
 
 
 #: **What became of a suggestion the rig made** (`_Suggested.fate`; the pop-out search build,
-#: 2026-11-07): `None` while it stands; withdrawn as its bar stopped being met (the plan's Review
-#: Focus 2), declined by a person, confirmed by a person's move, or lapsed as the run left its
+#: 2026-11-07): `None` while it stands; withdrawn as its bar stopped holding, missed by more than
+#: the plan's margin (the plan's Review Focus 2; the PI, 2026-11-08, "Stay up until 3 below"), declined by a person, confirmed by a person's move, or lapsed as the run left its
 #: stage otherwise (a move by hand, or the stage's time). An answer to any but a standing one is
 #: refused with a sentence naming which (`Session._unanswerable`).
 WITHDRAWN, DECLINED, CONFIRMED, LAPSED = "withdrawn", "declined", "confirmed", "lapsed"
@@ -1014,8 +1014,11 @@ def went_on(task: Task, last) -> _WentOn | None:
         shown = bool(row.get("shown"))
         if stepped:
             climb.step(outcome, shown)
+        # With the values the line ran at, so its boundary is judged as the run judged it
+        # (`_carried`; the re-review 2, M-1: a person's margin, say, not carried to the next run).
         state["bars"].append(("trial", outcome, shown, not row.get("drummed"),
-                              bool(row.get("eased")), hardest))
+                              bool(row.get("eased")), hardest,
+                              {**live, **resolved, **current, **params}))
         # What a person held, but the pool, whose value the run carries (a widening is a `set`).
         state["held"] = tuple(name for name in row.get("live") or ()
                               if pool is None or name != pool.setting)
@@ -1046,6 +1049,9 @@ def _carried(task: Task, went: _WentOn, scheduler: Scheduler) -> tuple:
     again beside a move up on its own bar. Returns the stage's and the widening's, each a
     `_Suggested` or `None`."""
     alive: dict = {}
+    # Each replayed boundary is judged at the values its line ran at; the last, at the values the
+    # run goes on with (`scheduler.values` as given).
+    given = scheduler.values
 
     def judge() -> None:
         now = scheduler.suggestion
@@ -1056,7 +1062,9 @@ def _carried(task: Task, went: _WentOn, scheduler: Scheduler) -> tuple:
 
     for event in went.bars:
         if event[0] == "trial":
-            scheduler.judged(*event[1:])
+            ran = event[6] if len(event) > 6 else None
+            scheduler.values = given if ran is None else (lambda ran=ran: ran)
+            scheduler.judged(*event[1:6])
             judge()
         elif event[0] == "suggested":
             alive[event[1]] = (event[2], event[3] and event[2] == MOVE_WIDEN)
@@ -1065,6 +1073,7 @@ def _carried(task: Task, went: _WentOn, scheduler: Scheduler) -> tuple:
         else:
             scheduler.afresh(keep_up=len(event) > 1)
     # And at the values the run goes on with, as its first boundary would judge it.
+    scheduler.values = given
     judge()
     offered = widen = None
     if went.offered is not None and went.offered.get("change") in alive:
@@ -3197,7 +3206,7 @@ class Session:
         `None` where it may be given (the pop-out search build; the plan's Review Focus 2): it
         names a suggestion by its id, a whole number from 1 (the wire's rule again, so a command
         that reached the session another way meets it); one the rig made in this run; one still
-        standing -- not withdrawn as its bar stopped being met, nor already declined or confirmed,
+        standing -- not withdrawn as its bar stopped holding, nor already declined or confirmed,
         nor lapsed as the run left its stage; and, for a move (`move`), that move."""
         if isinstance(answered, bool) or not isinstance(answered, int) or answered < 1:
             return (f"a {kind!r} command names the rig's suggestion by its id, a whole number "
@@ -3207,8 +3216,8 @@ class Session:
             return f"the rig made no suggestion {answered} in this run; {tail}"
         which = self._offer_said(offered)
         if offered.fate == WITHDRAWN:
-            return (f"the rig's suggestion {answered}, {which}, was withdrawn when its bar stopped "
-                    f"being met, before this answer arrived; {tail}")
+            return (f"the rig's suggestion {answered}, {which}, was withdrawn when its bar no longer "
+                    f"held, missed by more than its margin, before this answer arrived; {tail}")
         if offered.fate == LAPSED:
             return (f"the rig's suggestion {answered}, {which}, lapsed when the run left block "
                     f"{offered.block}; {tail}")
@@ -3225,8 +3234,9 @@ class Session:
     def _suggest(self) -> None:
         """**What the rig suggests, kept in step with its bar** (`scheduler.Scheduler.suggestion`;
         the pop-out search build, 2026-11-07; the PI, "Rig suggests, trainer confirms"), between
-        trials, after each trial is recorded, never in a frame. **A suggestion whose bar stops
-        being met withdraws itself** (the plan's Review Focus 2): the changes feed says so with
+        trials, after each trial is recorded, never in a frame. **A suggestion whose bar is missed
+        by more than the plan's margin withdraws itself** (the plan's Review Focus 2; the PI,
+        2026-11-08, "Stay up until 3 below"; `Scheduler.holds`): the changes feed says so with
         the numbers, and an answer arriving after is refused (`_unanswerable`); no row records
         a withdrawal (wl-preproc was told of no such kind), the trial lines holding what withdrew
         it. **A new one** is a `suggested` change row, from no one, naming the move, the stage it
@@ -3334,25 +3344,25 @@ class Session:
         suggestion, its own `suggested` row naming the one it makes again (`remakes`), judged on
         the window that met it, which the widening did not empty (`Scheduler.afresh`'s
         `keep_up`), and kept in step with it from then on, as any (`_suggest_stage`). The one it
-        makes again is answered (`REMADE`)."""
+        makes again is answered (`REMADE`). **Its bar holds where the margin says** (the
+        re-review 2, I-1; `Scheduler.holds`), as a standing suggestion is judged: `_repooled` calls
+        this only where it does, so the window kept and the `remakes` row go together, and a
+        crash-resume replays what the run kept."""
         scheduler = self._scheduler
-        now = scheduler.suggestion
-        if now is None or now.move != MOVE_UP:
-            stage.fate = WITHDRAWN
-            return
+        correct, of, hardest = scheduler.bar(MOVE_UP)
         at = self.wall_now()
-        self._logged("suggested", "block", now.block, now.to, None, at, move=now.move,
-                     block=now.block, bar={"correct": now.correct, "of": now.of},
-                     at_hardest=now.at_hardest, remakes=stage.change)
-        made = _Suggested(self._change, now.move, now.block, now.to)
+        self._logged("suggested", "block", stage.block, stage.to, None, at, move=MOVE_UP,
+                     block=stage.block, bar={"correct": correct, "of": of},
+                     at_hardest=hardest, remakes=stage.change)
+        made = _Suggested(self._change, MOVE_UP, stage.block, stage.to)
         stage.fate, stage.remade_as = REMADE, made.change
         self._suggested = made
         self._suggestions[made.change] = made
         self._feed("suggestion", None, at,
-                   f"the rig suggests moving up from {now.block} to {now.to} again, as suggestion "
-                   f"{made.change} (its suggestion {stage.change} beside the widening): "
-                   f"{now.correct} of the last {now.of} answers at its hardest step right; confirm "
-                   f"with next block, or hold")
+                   f"the rig suggests moving up from {stage.block} to {stage.to} again, as "
+                   f"suggestion {made.change} (its suggestion {stage.change} beside the "
+                   f"widening): {correct} of the last {of} answers at its hardest step right; "
+                   f"confirm with next block, or hold")
 
     def _suggest_widening(self) -> None:
         """**The rig's suggestion to widen the pool, kept in step with its bar** (`task.Pool`;
@@ -3365,8 +3375,8 @@ class Session:
         prompt") -- the stage it was judged in, the bar's numbers and `at_hardest`, strobing
         nothing (as wl-preproc accepted), and a line on the changes feed. **The trainer widens
         with a `set` of the pool's setting** (`_repooled` confirms it as the value applies), or
-        holds (`_decline`). A widening whose bar stops being met withdraws itself, as the stage's
-        does. One stands at a time."""
+        holds (`_decline`). A widening whose bar is missed by more than the margin withdraws
+        itself, as the stage's does. One stands at a time."""
         pool = self._task.pool if self._task is not None else None
         if pool is None:
             return
@@ -3385,10 +3395,12 @@ class Session:
             # pool has no pairing left to add.
             standing.fate, self._widening = WITHDRAWN, None
             correct, of, _ = scheduler.bar(MOVE_WIDEN)
+            margin = scheduler._margin()
+            by = f", by more than its margin of {margin}" if margin else ""
             self._feed("suggestion", None, self.wall_now(),
                        f"the rig's suggestion {standing.change}, to widen the pool in "
                        f"{standing.block}, is withdrawn: {correct} of the last {of} answers at its "
-                       f"hardest step right, under its {scheduler.criterion_now[0]:.0%}")
+                       f"hardest step right, under its {scheduler.criterion_now[0]:.0%}{by}")
         if now is None or self._widening is not None:
             return
         at = self.wall_now()
@@ -3431,7 +3443,7 @@ class Session:
         # "Re-offer the other at once": "Taking the widening does not first empty the move-up
         # window"): the move up keeps its window and is offered again at once (`_remake_move`).
         again = (added and widening is not None and stage is not None
-                 and stage.move == MOVE_UP)
+                 and stage.move == MOVE_UP and scheduler.holds(MOVE_UP))
         scheduler.afresh(keep_up=again)
         if widening is not None:
             widening.fate = CONFIRMED if added else WITHDRAWN
@@ -4428,10 +4440,16 @@ class Session:
                 params[name] = Param(name, param.unit, low=value, high=value)
         now = set()
         for trial in task.structures.values():
-            now |= {said for _, said in answer_reaches(trial, params)}
+            now |= {f"answer-window-reaches-objects: at the values set now, {said}"
+                    for _, said in answer_reaches(trial, params)}
+        # And a margin that can reach a bar's count at the values set now (`check.margin_reaches`;
+        # the re-review 2, M-7), for the run's plan.
+        plan = getattr(self, "_played", None)
+        if plan is not None and self._run is not None and self._run.plan is not None:
+            now |= {f"margin-reaches-bar: at the values set now, {said}"
+                    for said in margin_reaches(plan, params)}
         for said in sorted(now - self._reaching):
-            self._feed("warning", None, self.wall_now(),
-                       f"answer-window-reaches-objects: at the values set now, {said}")
+            self._feed("warning", None, self.wall_now(), said)
         self._reaching = frozenset(now)
 
     def _apply_pending(self, act: Pending, code: int, trial_number: int, index: int) -> Pending:
@@ -6092,7 +6110,8 @@ class Session:
                     # between trials, for the next: one whose value a person held moves nothing.
                     climb.step(result.outcome, shown)
                 # **What the rig suggests** under a confirmed progression (the pop-out search
-                # build): made, or withdrawn as its bar stops being met, between trials.
+                # build): made, or withdrawn as its bar stops holding (`Scheduler.holds`),
+                # between trials.
                 self._suggest()
                 # **A trial's draws are kept only while a repeat of it waits** (engine build C3's
                 # call 13): a repeat placed, a drum's try or a trial again at once.

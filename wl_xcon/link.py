@@ -213,7 +213,7 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: `Telemetry.suggestion`, what the rig suggests under a confirmed progression
 #: (`task.ByCriterion.confirm`), a `Suggestion` -- the `suggested` change row's id, which a
 #: console's answer names, the move, the stage it was judged in and the stage it suggests, and the
-#: bar's numbers now -- or `None`: no suggestion, one withdrawn as its bar stopped being met, one
+#: bar's numbers now -- or `None`: no suggestion, one withdrawn as its bar stopped holding, one
 #: answered, and between runs. And `Telemetry.widen` (the same build's Task 5), the rig's
 #: suggestion to widen the task's pool of pairings, a `Suggestion` of move `"widen"` and no stage
 #: to go to, or `None` (added within the build, before 20 was released, so 20 carries both). And
@@ -491,7 +491,7 @@ class Control:
     range changed live) and `revert` (each change of a revert; engine build C3) -- each of
     `set`, `hand_back`, `range` and `revert` applied, or said dropped as a run ends before it
     applies -- `suggestion` (the rig's suggestion of a move under a confirmed progression, or its
-    withdrawal as its bar stops being met) and `decline` (a person's hold of one; the pop-out
+    withdrawal as its bar stops holding) and `decline` (a person's hold of one; the pop-out
     search build, 2026-11-07), or `warning` (a warning said as it
     happens, since the PI's rulings on XC-352, 2026-10-11);
     `by` is who sent it, `None` for a mark's stamp, whose sender arrives with its note;

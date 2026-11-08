@@ -1149,6 +1149,9 @@ def _plan_faults(task: Task) -> list[Finding]:
         elif isinstance(margin, bool) or not isinstance(margin, int) or margin < 0:
             refuse(name, f"its suggestions' margin is {margin!r}, and a margin is a whole number "
                          f"of answers from 0, or a setting")
+        if isinstance(order, ByCriterion) and order.confirm:
+            for said in margin_reaches(plan, declared):
+                warn("margin-reaches-bar", name, said)
         if fall_back is not None and not rule(fall_back):
             refuse(name, f"its fall-back rule is {fall_back!r}, and a rule is (proportion, "
                          f"window): a proportion above 0 and at most 1, over a window of 1 or "
@@ -6311,6 +6314,61 @@ def _holds_cut_short(trial: Trial) -> list[Finding]:
 
 def _target_name(target: object) -> str:
     return target.name if isinstance(target, Outcome) else repr(target)
+
+
+def margin_reaches(plan, params: dict[str, Param]) -> list[str]:
+    """**Where a confirmed progression's margin can reach a bar's count** (`ByCriterion.margin`;
+    the PI, 2026-11-08, "Stay up until 3 below"; the re-review 2, M-7, the controller's ruling: a
+    warning, never a refusal), as sentences, over the settings' ranges (`_span`) -- or at one
+    run's values, `params` then holding each setting at its value alone (`taskd.Session
+    ._warn_reach`): a suggestion to move up or widen that holds with **none** right of its window,
+    the margin at least the answers its bar needs, or one to move back that holds with **every**
+    answer right, the margin more than the answers its bar lets be right, is withdrawn by its bar
+    never, only by an answer, a move or the stage's end. Empty where no margin can reach."""
+    order = plan.order
+    if not isinstance(order, ByCriterion):
+        return []
+    margin = order.margin
+    most = (_span(margin, params, 0.0)[1] if isinstance(margin, P)
+            else margin if _is_number(margin) else 0)
+    if not most:
+        return []
+
+    def least(part: object) -> float:
+        return (_span(part, params, 0.0)[0] if isinstance(part, P)
+                else float(part) if _is_number(part) else math.inf)
+
+    def most_of(part: object) -> float:
+        return (_span(part, params, 0.0)[1] if isinstance(part, P)
+                else float(part) if _is_number(part) else 0.0)
+
+    said: list[str] = []
+    reached: dict[float, list[str]] = {}
+    for block in plan.blocks:
+        rule = getattr(block, "criterion", None)
+        if not (isinstance(rule, tuple) and len(rule) == 2):
+            continue
+        need = least(rule[0]) * least(rule[1])
+        if math.isfinite(need) and most >= need:
+            reached.setdefault(need, []).append(repr(block.name))
+    for need, names in reached.items():
+        stages = (f"stage {names[0]}'s bar" if len(names) == 1
+                  else f"stages {', '.join(names[:-1])} and {names[-1]}'s bars")
+        said.append(
+            f"its suggestions' margin, up to {most:g} answers, can reach {stages} to move up, as "
+            f"few as {need:g} right answers: a suggestion to move up or widen there would hold "
+            f"with none right, withdrawn by its bar never, only by an answer, a move or the "
+            f"stage's end")
+    back = order.fall_back
+    if isinstance(back, tuple) and len(back) == 2 and len(plan.blocks) > 1:
+        room = least(back[1]) * (1.0 - most_of(back[0]))
+        if math.isfinite(room) and most > room:
+            said.append(
+                f"its suggestions' margin, up to {most:g} answers, can be more than the answers its "
+                f"bar to move back lets be right of its window, as few as {room:g}: a suggestion to "
+                f"move back would hold with every answer right, withdrawn only by a move up met, a "
+                f"person or the stage's end")
+    return said
 
 
 def answer_reaches(trial: Trial, params: dict[str, Param]) -> list[tuple[str, str]]:

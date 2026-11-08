@@ -876,3 +876,37 @@ def test_a_returned_to_stage_picks_up_where_it_left_after_a_crash(tmp_path, case
         assert frames and all((frame.staircase.held, frame.staircase.levels[frame.staircase.level])
                               == (True, 4) for frame in frames[-2:])
 
+
+def test_a_withdrawal_a_live_margin_caused_is_not_brought_back_by_a_resume(tmp_path, monkeypatch):
+    """The re-review 2, M-1: each replayed boundary is judged at the values its line ran at, a
+    person's among them, and only the last at the values the run goes on with. The margin a
+    setting, 1 to start: five right suggest moving up; a person sets the margin to 0, and at 3 of
+    5 the run withdraws the move up and the widening. Its process stops; the person's 0 is not
+    carried, but the withdrawals stand: the pre-flight says nothing stands."""
+    import sys
+
+    module = sys.modules[__name__]
+    plain = module._source
+
+    def source(stages, order=CONFIRMED, plans=""):
+        text = plain(stages, "ByCriterion(fall_back=(0.5, 4), confirm=True, margin=P('margin'))",
+                     plans)
+        old = "Param('pairings', unit='pairings', low=1, high=7, start=1)"
+        assert text.count(old) == 1
+        text = text.replace(old, old + ", Param('margin', unit='answers', low=0, high=5, start=1)")
+        old = "'pairings': Meaning(NOT_DIFFICULTY, NEITHER, note='which pairings are drawn')"
+        assert text.count(old) == 1
+        text = text.replace(old, old + ", 'margin': Meaning(NOT_DIFFICULTY, NEITHER, note='m')")
+        return "from wl_xcon.task import P\n" + text
+
+    monkeypatch.setattr(module, "_source", source)
+    alone = _stage("Alone", (0.8, 5), set_size=1)
+    folders, second = _stranded_in(tmp_path, [alone, CROWD], ["right"] * 5 + ["wrong"] * 2,
+                                   {4: [SetParameter(name="margin", value=0, by=JAKE)]},
+                                   killed=True)
+    assert [row["move"] for row in _changes(folders, "suggested")] == ["up", "widen"]
+
+    checked = _step(second, CheckRun(by=JAKE, task="search.py", values=dict(VALUES), plan="train"))
+
+    assert "standing" not in (checked.preflight.continues or ""), checked.preflight.continues
+
