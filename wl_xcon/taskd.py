@@ -3114,9 +3114,13 @@ class Session:
             self._refuse(command.KIND, command.by, said)
             return
         named, held = self._suggestions[command.suggestion], self._scheduler.block.name
+        # One prompt is a move up and a widening on one window: never a move back, and never a
+        # widening carried from the stage left (`_remake_widening`), which stands on its own bar
+        # (the re-review, I-3).
         prompt = [named] + [other for other in (self._suggested, self._widening)
                             if other is not None and other is not named
-                            and MOVE_BACK not in (other.move, named.move)]
+                            and MOVE_BACK not in (other.move, named.move)
+                            and other.carried is None and named.carried is None]
         at = self.wall_now()
         for offered in sorted(prompt, key=lambda offered: offered.change):
             offered.fate = DECLINED

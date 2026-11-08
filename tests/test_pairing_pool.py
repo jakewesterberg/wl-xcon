@@ -568,6 +568,57 @@ def test_taking_the_move_up_offers_the_widening_again_in_the_next_stage(tmp_path
     ) in _fed(session, "suggestion")
 
 
+@pytest.mark.parametrize("hold", [False, True])
+def test_a_hold_of_a_carried_widening_leaves_the_stages_own_count(tmp_path, hold):
+    """The re-review, I-3: a widening made again in the stage moved to stands there alone, on the
+    bar it was met on in the stage left, and a hold of it is the decline rule for **its own**
+    window only (`Scheduler.decline(MOVE_WIDEN)`): the stage's own count toward moving up goes
+    on, so its move up comes on the same answer as with no hold. Three stages, each up at 5 of the
+    last 5: Alone's move up taken, the widening is made again in Mid; four answers into Mid the
+    trainer holds it; Mid's move up comes at its fifth answer either way."""
+    stages = [_stage("Alone", set_size=1), _stage("Mid"), _stage("Top")]
+    commands = {8: [NextBlock(by=JAKE, suggestion=1)]}
+    if hold:
+        commands[12] = [Decline(suggestion=3, by=JAKE)]
+    session = _session(tmp_path, stages, ["right"] * 20, commands)
+
+    session.run()
+
+    assert session.refusals == []
+    changes = _changes(session)
+    assert [(row["change"], row["kind"], row.get("move"), row.get("block"), row.get("remakes"))
+            for row in changes[:3]] == [
+        (1, "suggested", "up", "Alone", None), (2, "suggested", "widen", "Alone", None),
+        (3, "suggested", "widen", "Mid", 2)]
+    if hold:
+        assert [(row["kind"], row["suggestion"]) for row in changes
+                if row["kind"] == "declined"] == [("declined", 3)]
+    (up,) = [row for row in changes if row["kind"] == "suggested" and row.get("move") == "up"
+             and row.get("block") == "Mid"]
+    assert (up["trial_number"], up["bar"]) == (13, {"correct": 5, "of": 5})
+
+
+def test_a_hold_of_a_carried_widening_is_no_hold_of_the_stages_move_up(tmp_path):
+    """The re-review, I-3: a widening carried from the stage left stands on its own bar, so it and
+    the new stage's own move up are no one prompt -- a hold of the carried widening declines it
+    alone, one `declined` row, and Mid's move up, standing beside it, still stands."""
+    stages = [_stage("Alone", set_size=1), _stage("Mid"), _stage("Top")]
+    session = _session(tmp_path, stages, ["right"] * 18,
+                       {8: [NextBlock(by=JAKE, suggestion=1)],
+                        15: [Decline(suggestion=3, by=JAKE)]})
+
+    session.run()
+
+    assert session.refusals == []
+    changes = _changes(session)
+    (up,) = [row for row in changes if row["kind"] == "suggested" and row.get("move") == "up"
+             and row.get("block") == "Mid"]
+    assert [row["suggestion"] for row in changes if row["kind"] == "declined"] == [3]
+    offered = _offered(session)
+    assert all(offered[index][0] is not None and offered[index][0].change == up["change"]
+               for index in (14, 15, 16))
+
+
 def test_a_suggestion_made_again_stands_where_a_run_stopped_with_its_process(tmp_path):
     """The record replayed (`taskd.went_on`, `_carried`; the pop-out search build's Task 6), as a
     resumed session's next run goes on from it: **a move up made again beside a widening taken**

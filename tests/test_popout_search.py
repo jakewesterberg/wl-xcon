@@ -1191,3 +1191,58 @@ def test_a_panel_too_dim_for_the_colors_range_top_warns_and_refuses_only_the_val
     with pytest.raises(SystemExit, match="task refused, run not started: .*about 18.9 cd/m²"):
         started.run()
 
+
+def _scheduler(task, values: dict, start: int = 0):
+    """The pop-out plan's scheduler, as a run makes it, reading `values` live."""
+    from wl_xcon import variation
+    from wl_xcon.scheduler import Scheduler
+
+    plan = task.plans["training"]
+    return Scheduler(
+        blocks=[variation.expanded(block) for block in plan.blocks], seed=0,
+        counting=task.trial.counting,
+        countings={name: structure.counting for name, structure in task.structures.items()},
+        order=plan.order, start=start, values=lambda: values,
+        params={param.name: param for param in task.params})
+
+
+def test_the_bars_read_the_last_window_of_more_answers_kept(task):
+    """The re-review, I-4: each bar keeps as many answers as its window setting can be (200), and
+    reads **the last `move_up_window`, or `move_back_window`, of them** -- "80% correct, last 50
+    trials". Sixty wrong then fifty right: the move up is suggested on 50 of the last 50; fifty
+    right then fifty wrong, a stage above the first: the move back on 0 of the last 50. The panel's
+    numbers are the same last 50."""
+    from wl_xcon.scheduler import MOVE_BACK, MOVE_UP
+
+    values = {param.name: param.start for param in task.params if param.start is not None}
+    up = _scheduler(task, values)
+    for outcome in [Outcome.WRONG_TARGET] * 60 + [Outcome.CORRECT] * 50:
+        up.judged(outcome, True, True, False, True)
+    assert up.bar(MOVE_UP) == (50, 50, True)
+    assert (up.suggestion.move, up.suggestion.correct, up.suggestion.of) == ("up", 50, 50)
+    assert (up.answers.correct, up.answers.of, up.answers.up_correct, up.answers.up_of) == (
+        50, 50, 50, 50)
+
+    back = _scheduler(task, values, start=1)
+    for outcome in [Outcome.CORRECT] * 50 + [Outcome.WRONG_TARGET] * 50:
+        back.judged(outcome, True, True, False, True)
+    assert back.bar(MOVE_BACK) == (0, 50, True)
+    assert (back.suggestion.move, back.suggestion.correct, back.suggestion.of) == ("back", 0, 50)
+
+
+def test_a_window_set_above_its_highest_is_kept_that_long(task):
+    """The re-review, M-3 (`Scheduler._fit`): a window a person sets above its declared highest
+    (`move_up_window` 300, above 200), as a live value outside its range may be, is kept that long
+    from then on, so its bar is judged on 300 answers once that many are in, never on the 200 the
+    window was first kept as."""
+    from wl_xcon.scheduler import MOVE_UP
+
+    values = {param.name: param.start for param in task.params if param.start is not None}
+    up = _scheduler(task, values)
+    values["move_up_window"] = 300
+    for _ in range(299):
+        up.judged(Outcome.CORRECT, True, True, False, True)
+    assert up.suggestion is None
+    up.judged(Outcome.CORRECT, True, True, False, True)
+    assert up.bar(MOVE_UP) == (300, 300, True) and up.suggestion.of == 300
+

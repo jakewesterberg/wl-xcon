@@ -850,16 +850,23 @@ class Scheduler:
         """**A person holds instead of moving** (`link.Decline`; the PI, 2026-11-07, "Rig suggests,
         trainer confirms"): the window of the declined move starts afresh, so the rig suggests
         that move again only once a fresh window of answers meets its bar, never on the answers a
-        person has already held on ("After 50 new tries", the PI, the same day). The other window
-        goes on. A widening shares the window to move up (`_answers_for`), so a hold of either
-        starts both afresh. **The last answers shown stay**, and the trials left out beside them
+        person has already held on ("After 50 new tries", the PI, the same day). The other windows
+        go on: a hold of a move up starts the window to move up afresh, a hold of a widening its
+        own twin (`_widen`; the re-review, I-3), a hold of a move back the window to move back. A
+        hold of the whole prompt -- a move up and a widening -- declines each, so both start
+        afresh. **The last answers shown stay**, and the trials left out beside them
         (`_shown`; the build's final fixes, on Task 7's report, whose panel read "no answers yet"
         after a hold)."""
         if move == MOVE_BACK:
             self._down.clear()
+        elif move == MOVE_WIDEN:
+            # **Only the widening's own window** (the re-review, I-3): a widening carried into the
+            # stage moved to (`taskd.Session._remake_widening`) stands alone there, and a hold of
+            # it is no hold of that stage's move up; a hold of a whole prompt clears the move up's
+            # window through the move up's own decline.
+            self._widen.clear()
         else:
             self._up.clear()
-            self._widen.clear()
 
     def afresh(self, keep_up: bool = False) -> None:
         """**The open stage's bars start afresh** (the pop-out search build, 2026-11-07): its pool
