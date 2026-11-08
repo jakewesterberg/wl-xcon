@@ -42,7 +42,8 @@ from wl_xcon.cli import _load_allocation, _load_task, main
 from wl_xcon.dio import Simulated as Card
 from wl_xcon.link import (
     BackBlock, CheckRun, Decline, EndSession, HandBack, NextBlock, OpenSession, PoolRow,
-    Preflight, PreflightItem, ResumeSession, SetParameter, Simulated, StageRow, StartRun, Stop,
+    Preflight, PreflightItem, Resume, ResumeSession, SetParameter, Simulated, StageRow, StartRun,
+    Stop,
     _decode_command, _encode_command, decode, encode,
 )
 from wl_xcon.photometry import SRGB
@@ -841,7 +842,7 @@ def test_a_suggestion_withdrawn_past_its_margin_is_not_brought_back_by_a_resume(
 FADE = _stage("Fade", None, staircase="Staircase('set_size', (2, 3, 5, 7), start=0)")
 
 
-@pytest.mark.parametrize("case", ["back", "up", "up held"])
+@pytest.mark.parametrize("case", ["back", "up", "up held", "resumed stage"])
 def test_a_returned_to_stage_picks_up_where_it_left_after_a_crash(tmp_path, case):
     """The PI, 2026-11-08: "Pick up where it left" and "Pick up there too" -- a stage the run
     returns to resumes where its staircase was when the run left it -- **through a crash-resume**,
@@ -850,22 +851,27 @@ def test_a_returned_to_stage_picks_up_where_it_left_after_a_crash(tmp_path, case
     stops there (`back`), or after a move back to Fade (`up`). The resumed run, moved back, finds
     Fade at 5, not 2; moved up, Crowd at 4, not 6. **A person's hold wins over the remembered
     level** (`up held`): set size held at 10 plays there, the staircase waiting at its remembered
-    level."""
+    level. **The stage the resumed run goes on in is remembered too** (`resumed stage`; the
+    re-review 2, M-3): Crowd, gone on at 4, left for Fade and returned to, comes back at 4, not
+    6."""
     first = {5: [NextBlock(by=JAKE)]}
     script = ["right"] * 6 + ["wrong"] * 2
-    if case != "back":
+    if case in ("up", "up held"):
         first[7] = [BackBlock(by=JAKE)]
         script.append("right")
     folders, second = _stranded_in(tmp_path, [FADE, CROWD], script, first, killed=True)
     then = {"back": {0: [BackBlock(by=JAKE)]}, "up": {0: [NextBlock(by=JAKE)]},
             "up held": {0: [SetParameter(name="set_size", value=10, by=JAKE),
-                            NextBlock(by=JAKE)]}}[case]
+                            NextBlock(by=JAKE)]},
+            "resumed stage": {0: [BackBlock(by=JAKE)], 1: [NextBlock(by=JAKE)]}}[case]
     _plays(second, ["right"] * 4, then)
     _step(second, _start())
 
     lines = [(line["block"], line["params"]["set_size"]) for line in _run_lines(folders, 1)]
     if case == "back":
         assert lines[:2] == [("Crowd", 4), ("Fade", 5)]
+    elif case == "resumed stage":
+        assert lines[:3] == [("Crowd", 4), ("Fade", 5), ("Crowd", 4)]
     elif case == "up":
         assert lines[:2] == [("Fade", 5), ("Crowd", 4)]
     else:
@@ -909,4 +915,125 @@ def test_a_withdrawal_a_live_margin_caused_is_not_brought_back_by_a_resume(tmp_p
     checked = _step(second, CheckRun(by=JAKE, task="search.py", values=dict(VALUES), plan="train"))
 
     assert "standing" not in (checked.preflight.continues or ""), checked.preflight.continues
+
+
+def test_remembered_levels_survive_a_second_crash(tmp_path):
+    """The re-review 2, I-2 (the controller's ruling: remembered levels survive any number of
+    crashes in a session): each run of a training progression writes the stages it starts having
+    left in its start row (`left`), which the next resume seeds from. Run 1: six right in Fade step
+    it from 2 to 5; moved up; two wrong in Crowd; its process dies. Run 2 goes on in Crowd, plays
+    one trial, and dies too. Run 3 goes on and is moved back: Fade comes back at 5, not 2."""
+    folders, second = _stranded_in(tmp_path, [FADE, CROWD], ["right"] * 6 + ["wrong"] * 2,
+                                   {5: [NextBlock(by=JAKE)]}, killed=True)
+    _plays(second, ["right"], dies_at=1)
+    with pytest.raises(KeyboardInterrupt):
+        _step(second, _start())
+    starts = [row for row in _jsonl(_xcon(folders) / "runs.jsonl") if row["event"] == "start"]
+    assert [row["left"] for row in starts] == [{}, {"Fade": 5}]
+    third = _service(folders)
+    _step(third)
+    _step(third, ResumeSession(by=JAKE, session_id="2027-01-14_01"))
+    _plays(third, ["right"] * 3, {0: [BackBlock(by=JAKE)]})
+
+    _step(third, _start())
+
+    lines = [(line["block"], line["params"]["set_size"]) for line in _run_lines(folders, 2)]
+    assert lines[:2] == [("Crowd", 4), ("Fade", 5)]
+
+
+class _Ticking:
+    """A wall clock that moves on at every read, so no two rows share an instant."""
+
+    def __init__(self) -> None:
+        self.at = _sessions.WALL
+
+    def __call__(self) -> float:
+        self.at += 0.25
+        return self.at
+
+
+def _ticking_service(folders, clock: str = "ticking") -> Service:
+    """A service whose wall clock moves on at every read, or (`constant`) never, as `_service`'s."""
+    subjects, tasks, root = folders
+    return Service(
+        rig=RIG, rig_path=RIG_FILE, subjects=subjects, tasks=tasks,
+        allocation=_load_allocation(Path(ALLOCATION)), allocation_path=ALLOCATION, root=root,
+        link=Simulated(), seed=lambda: SEED,
+        wall_clock=_Ticking() if clock == "ticking" else _Wall(),
+    )
+
+
+def _resumes_when_idle(service) -> None:
+    """A person who resumes a paused run at its first idle wait."""
+    link, plain = service.link, service.link.idle
+
+    def idle(timeout):
+        link.queue(Resume(by=JAKE))
+        return plain(timeout)
+
+    link.idle = idle
+
+
+@pytest.mark.parametrize("clock", ["ticking", "constant"])
+@pytest.mark.parametrize("crash", [False, True])
+def test_a_hand_back_between_a_move_and_the_next_trial_leaves_the_stage_left_alone(tmp_path,
+                                                                                  crash, clock):
+    """The re-review 2, I-3 (the controller's ruling: the same level whether or not the run paused,
+    and whether or not it crashed, whatever the clock): in Fade a person holds the set size at 7;
+    then, paused, the trainer moves up, hands the setting back and resumes. The stage left keeps
+    the level its staircase had as the run left it (`Session._leave`), and the hand-back resumes
+    the staircase of the stage the next trial plays in (`Session._climbing`), so the return to
+    Fade plays at 5, its staircase's own level, never 7 -- live, and after a crash, with a clock
+    that moves on at every read and with one that never does, whose rows tie. **While paused the panel shows where the next trial plays** (M-2):
+    after the move up and back with no trial between, Fade at 5."""
+    from wl_xcon.link import Pause
+
+    folders = _folders(tmp_path, [FADE, CROWD])
+    first = _ticking_service(folders, clock)
+    _resumes_when_idle(first)
+    _step(first, _open())
+    script = ["right"] * 10
+    commands = {4: [SetParameter(name="set_size", value=7, by=JAKE)],
+                6: [Pause(by=JAKE), NextBlock(by=JAKE), HandBack(name="set_size", by=JAKE)],
+                7: [BackBlock(by=JAKE)]}
+    if crash:
+        _plays(first, script[:8], {4: commands[4], 6: commands[6]}, dies_at=8)
+        with pytest.raises(KeyboardInterrupt):
+            _step(first, _start())
+        second = _ticking_service(folders, clock)
+        _step(second)
+        _step(second, ResumeSession(by=JAKE, session_id="2027-01-14_01"))
+        _plays(second, ["right"] * 3, {0: [BackBlock(by=JAKE)]})
+        _step(second, _start())
+        lines = [(line["block"], line["params"]["set_size"]) for line in _run_lines(folders, 1)]
+        assert lines[:2] == [("Crowd", 6), ("Fade", 5)]
+        return
+    _plays(first, script, commands)
+    _step(first, _start())
+    lines = [(line["block"], line["params"]["set_size"], line["drawn"].get("set_size"))
+             for line in _run_lines(folders, 0)]
+    fade = [entry for entry in lines if entry[0] == "Fade"]
+    assert fade[-1] == ("Fade", 5, "staircase"), lines
+    assert ("Crowd", 6, "staircase") in lines, lines
+
+
+def test_the_panel_shows_a_returned_stage_at_its_level_before_its_first_trial(tmp_path):
+    """The re-review 2, M-2: paused, the trainer moves up and back with no trial between; the
+    panel's staircase row shows Fade at the level it was left at, 5, where the next trial plays,
+    not its floor."""
+    from wl_xcon.link import Pause
+
+    folders = _folders(tmp_path, [FADE, CROWD])
+    service = _ticking_service(folders)
+    _resumes_when_idle(service)
+    _step(service, _open())
+    _plays(service, ["right"] * 8,
+           {5: [Pause(by=JAKE), NextBlock(by=JAKE), BackBlock(by=JAKE)]})
+    _step(service, _start())
+
+    lines = [(line["block"], line["params"]["set_size"]) for line in _run_lines(folders, 0)]
+    assert lines[6] == ("Fade", 5)
+    shown = [frame.staircase for frame in _running(service, 0)
+             if frame.trial_index == 6 and frame.staircase is not None]
+    assert shown and all(row.levels[row.level] == 5 for row in shown), shown
 

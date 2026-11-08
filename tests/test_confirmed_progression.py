@@ -599,7 +599,8 @@ def test_the_review_report_says_a_person_confirms_each_move(tmp_path):
 
     assert ("A training progression, stage by stage from the first, each move suggested by the rig "
             "and made only when a person confirms it: up when a stage's rule is met on its "
-            "answers at its hardest step; back one, started fresh, under 50% right over the last 4 "
+            "answers at its hardest step; back one, its counts started fresh (its staircase where "
+            "the run left it), under 50% right over the last 4 "
             "first answers; a stage whose time runs out moves up on its own; the top stage keeps "
             "working until a time limit, a stop or the session's end.") in report
 

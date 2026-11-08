@@ -248,7 +248,8 @@ def test_the_report_shows_each_plan_in_tables():
 
     assert "### Plans" in out and "#### Plan `train`" in out and "#### Plan `loop`" in out
     assert ("A training progression, stage by stage from the first: up one when a stage's rule is "
-            "met or its time runs out; back one, started fresh, under 50% right over the last 20 "
+            "met or its time runs out; back one, its counts started fresh (its staircase where the "
+            "run left it), under 50% right over the last 20 "
             "first answers; the top stage keeps working until a time limit, a stop or the "
             "session's end. "
             "The run ends at the first pause between trials after 30 minutes of trials.") in out

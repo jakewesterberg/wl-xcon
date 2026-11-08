@@ -867,7 +867,8 @@ def went_on(task: Task, last) -> _WentOn | None:
 
     - **its stage**: its end row's last block, or the block of its last line, moved on by a
       person's move after it; each stage entered -- by a move, or by a line in another block, the
-      plan's own advance -- starts afresh, as a block opened does;
+      plan's own advance -- starts afresh, as a block opened does, its staircase where the run
+      left it on a return to a stage of a training progression, as the run resumes it;
     - **the stage's staircase** (`_Climb`), started as `Session._climbing` starts it, on the run's
       values as its start row has them, **set to the level each line it gave says** (a hand-back,
       or a run that itself went on from another, put it there) and stepped by the line's outcome;
@@ -951,7 +952,10 @@ def went_on(task: Task, last) -> _WentOn | None:
     live: dict = {param.name: param.start for param in task.params if param.start is not None}
     current: dict = {}
     pending: list = []
-    left: dict = {}
+    # The stages the run had left as it started (its start row's `left`, a run that went on from a
+    # stopped one), so a chain of crashes keeps them (the re-review 2, I-2).
+    left: dict = dict(last.start.get("left") or {})
+    handed: dict = {}
     enter(last.start.get("start_block") or names[0])
     value = resolved.get(pool.setting) if pool is not None else None
     seen = None
@@ -977,10 +981,10 @@ def went_on(task: Task, last) -> _WentOn | None:
                 held = state["offered"].get(row.get("suggestion"))
                 if held is not None:
                     state["bars"].append(("decline", held.get("move")))
-            elif (kind in ("hand_back", "revert") and climb is not None
-                  and name == climb.staircase.setting and row.get("now") is None
-                  and "from" not in row):
-                climb.resume(row.get("was"))
+            elif (kind in ("hand_back", "revert") and row.get("now") is None
+                  and "from" not in row and isinstance(name, str)):
+                # Resumed at the next line's stage, as the run resumes it (`Session._climbing`).
+                handed[name] = row.get("was")
             if (pool is not None and name == pool.setting and kind in ("set", "hand_back", "revert")
                     and row.get("now") is not None):
                 value = row["now"]
@@ -997,6 +1001,9 @@ def went_on(task: Task, last) -> _WentOn | None:
         if climb is not None:
             # The staircase as the line's own values made it: its counts and its step.
             climb.restep({**live, **resolved, **current, **params})
+            if climb.staircase.setting in handed:
+                climb.resume(handed[climb.staircase.setting])
+        handed.clear()
         if pool is not None:
             now = params.get(pool.setting)
             if seen is not None and now != seen:
@@ -1025,6 +1032,11 @@ def went_on(task: Task, last) -> _WentOn | None:
     ended = (last.end or {}).get("blocks_run") or []
     if ended and ended[-1] != state["stage"]:
         enter(ended[-1])
+    # A hand-back after the last line resumes the staircase of the stage the run goes on in, as
+    # the run would at its next trial (`Session._climbing`).
+    climb = state["climb"]
+    if climb is not None and climb.staircase.setting in handed:
+        climb.resume(handed[climb.staircase.setting])
     if pool is not None and seen is not None and value != seen:
         changed_pool()
     standing = [row for change, row in state["offered"].items()
@@ -2631,6 +2643,10 @@ class Session:
             level = self._resumed(self._scheduler.block.name, self._first_level)(staircase)
         else:
             staircase, level = climb.staircase, climb.level
+        if staircase.setting in self._handed:
+            # A hand-back waiting for the next trial (`_climbing`) shows where it resumes.
+            nearest = staircase.nearest(self._handed[staircase.setting])
+            level = level if nearest is None else nearest
         return (staircase.setting, tuple(staircase.levels), level,
                 staircase.setting in self._edited, staircase.down, staircase.up,
                 staircase.hardest)
@@ -3120,6 +3136,7 @@ class Session:
         if said is not None:
             self._refuse(command.KIND, command.by, said)
             return
+        self._leave()
         if answered is not None:
             self._suggested.fate = CONFIRMED
             self._suggested = None
@@ -4480,12 +4497,13 @@ class Session:
             act = dataclasses.replace(act, to=to,
                                       now=self._run_values.get(name) if to == "run" else None)
             self._edited -= {name}
-            climb = self._climb
-            if climb is not None and climb.staircase.setting == name:
-                # **A staircase on it resumes at the level nearest the value held** (the pop-out
-                # search plan's Review Focus 1), read before the run's own value replaces it. A
-                # staircase whose block has ended is dropped as the next one opens (`_climbing`).
-                climb.resume(self.spec.values.get(name))
+            # **A staircase on it resumes at the level nearest the value held** (the pop-out
+            # search plan's Review Focus 1), read before the run's own value replaces it -- **the
+            # staircase of the stage the next trial plays in** (`_climbing`; the re-review 2,
+            # I-3): applied as that trial is drawn, so a hand-back between a move and the new
+            # stage's first trial resumes the same level whether or not the run paused, and its
+            # replay after a crash does too, whatever the clock.
+            self._handed[name] = self.spec.values.get(name)
             if name in self._run_values:
                 self.spec.values[name] = self._run_values[name]
             else:
@@ -4677,8 +4695,9 @@ class Session:
         init=False, default_factory=dict, repr=False)
     #: **The open block's staircase as it runs** (`_Climb`; `task.Staircase`; the pop-out search
     #: build, 2026-11-07), `None` in a block with none, and **the block it belongs to**, keyed as
-    #: `_varied` is: started afresh as each block's first trial is drawn (`_climbing`). `None` as
-    #: each run starts.
+    #: `_varied` is: opened as each block's first trial is drawn (`_climbing`), afresh, or in a
+    #: training progression at the level a stage returned to was left at (`_resumed`); dropped as
+    #: the run leaves the stage (`_leave`). `None` as each run starts.
     _climb: _Climb | None = field(init=False, default=None, repr=False)
     #: **The run's color-set lights and each set's luminances it has realized and written**, as
     #: `(set name, cd/m²)` (`_realize`; the pop-out search build's fix round): the start row's,
@@ -4694,6 +4713,9 @@ class Session:
     #: (`went_on`'s `left`).
     _climb_stage: str | None = field(init=False, default=None, repr=False)
     _left: dict = field(init=False, default_factory=dict, repr=False)
+    #: Each setting handed back since the last trial was drawn, with the value it was held at,
+    #: for the next trial's stage's staircase (`_apply_pending`, `_climbing`).
+    _handed: dict = field(init=False, default_factory=dict, repr=False)
     #: **The rig's suggestion standing** under a confirmed progression (`_Suggested`;
     #: `task.ByCriterion.confirm`; the pop-out search build, 2026-11-07), `None` where none
     #: stands, and **every suggestion it made in the run in progress**, by its row's id, each
@@ -4782,7 +4804,8 @@ class Session:
         if self._climb_block != occurrence:
             staircase = self._scheduler.block.staircase
             if self._climb is not None and self._climb_stage is not None:
-                # The stage left keeps the level its staircase reached, for a return.
+                # The stage left keeps the level its staircase reached, for a return (stored at
+                # the move by `_leave`; here for any way out of a block it does not see).
                 self._left[self._climb_stage] = self._climb.value
             stage = self._scheduler.block.name
             self._climb_block, self._climb, self._climb_stage = occurrence, None, stage
@@ -4793,6 +4816,11 @@ class Session:
         # Its counts and its step as the run's values make them now (`_Climb.restep`).
         if self._climb is not None:
             self._climb.restep(self.spec.values)
+        # A hand-back since the last trial resumes the staircase of this one's stage
+        # (`_apply_pending`), where it steps the setting handed back.
+        handed, self._handed = self._handed, {}
+        if self._climb is not None and self._climb.staircase.setting in handed:
+            self._climb.resume(handed[self._climb.staircase.setting])
         return self._climb
 
     def _whole(self, name: str, value: object) -> object:
@@ -4840,6 +4868,16 @@ class Session:
                     self._realized_at.add((name, luminance))
                     new.setdefault(name, []).append(_realization(shown))
         return new or None
+
+    def _leave(self) -> None:
+        """**The stage left keeps its staircase's value, as the run leaves it** (the PI, 2026-11-08,
+        "Pick up where it left"; the re-review 2, I-3 and M-2): stored at the move or the advance
+        itself, never lazily at the next stage's first trial, so nothing done between the move and
+        that trial -- a hand-back while paused -- can reach it; and its climb is dropped, the next
+        opening at that trial (`_climbing`). Between trials, never in a frame."""
+        if self._climb is not None and self._climb_stage is not None:
+            self._left[self._climb_stage] = self._climb.value
+        self._climb, self._climb_stage = None, None
 
     def _resumed(self, stage: str, otherwise):
         """**Where stage `stage`'s staircase starts** (`_climbing`): in a training progression
@@ -5631,7 +5669,7 @@ class Session:
         # No block's staircase has run yet (the pop-out search build): each starts as its block
         # opens (`_climbing`). And the rig has suggested nothing in this run.
         self._climb = self._climb_block = self._climb_stage = None
-        self._left = {}
+        self._left, self._handed = {}, {}
         self._suggested, self._suggestions = None, {}
         # Nor offered to widen its pool, which it has not looked at yet, nor paired a trial.
         self._widening, self._pool_was, self._paired = None, None, {}
@@ -5728,6 +5766,12 @@ class Session:
             # angle written from 0 to 360, so a reader takes circular statistics of it -- a draw
             # from -45 to 45 sits near 0 and near 360, and a plain mean of it reads 180.
             directions=sorted(turned),
+            # **Each stage's staircase value as the run starts remembering it** (the PI,
+            # 2026-11-08, "Pick up where it left"; the re-review 2, I-2): a training progression's
+            # run that goes on from a stopped one starts with the stages that run had left, so a
+            # second crash keeps them (`went_on` seeds from it); null for a plan of any other order.
+            left=(dict(self._left)
+                  if isinstance(getattr(plan, "order", None), ByCriterion) else None),
             trials=None if run.plan is not None else run.trials,
             seed=run.seed,
             blocks=(None if run.plan is None and not run.blocks
@@ -5929,6 +5973,7 @@ class Session:
                     # A suggestion standing lapses as its stage ends of itself (its time).
                     self._lapse()
                     scheduler.advance(ending)
+                    self._leave()
                     self.blocks_run.append(scheduler.block.name)
                     self._block_from = self._elapsed
                     continue

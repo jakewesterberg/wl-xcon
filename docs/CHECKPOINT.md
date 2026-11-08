@@ -33,9 +33,10 @@ from then). **Hardware verified: none.**
   (reference tasks), C1 (the task object), C2a (how trials count), C2b (plans and blocks), C3 (drawn values,
   conditions from factors, designed orders, live edits and the change log). Five reference tasks in `tasks/` are
   engine fixtures; real tasks come from wl-xtasks, written with the PI.
-- **The first real task: the pop-out search**, wl-xtasks' `tasks/popout_search.py` (its branch
-  `popout-search-2026-11-07` until the PI merges it there), tested here by path (`tests/test_popout_search.py`); its
-  design is `docs/superpowers/specs/2026-11-07-popout-search-design.md`, its choices TSK-72 to TSK-75 and COL-37.
+- **The first real task: the pop-out search**, wl-xtasks' `tasks/popout_search.py`, on wl-xtasks' main since the PI's
+  "Merge it" (2026-11-08, `c1a61e9`; its later edits on branch `popout-search-2026-11-08b`), tested here by path
+  (`tests/test_popout_search.py`); its design is `docs/superpowers/specs/2026-11-07-popout-search-design.md`, its
+  choices TSK-72 to TSK-75 and COL-37.
   Built on branch `popout-build-2026-11-07`, reviewed whole and its fix round done. What it added to the engine
   (color sets, staircases, confirmed progressions, the pool, every number a setting, the trainer's panel, the
   simulated eye) is in architecture.md. Two facts a session would otherwise get wrong: a crashed session's first run
@@ -53,11 +54,10 @@ from then). **Hardware verified: none.**
 - **The record**: the session folder `xcon/` that wl-preproc reads (`record.py`).
 
 ## What is next (the PI, 2026-11-07)
-1. **Merge the pop-out search build**, behind the PI's yes by name. wl-xtasks' `popout-search-2026-11-07` is on its main
-   (`30888d8`, the PI's "Merge it", 2026-11-08); its later edits are on branch `popout-search-2026-11-08`, to merge the
-   same way. Then set `WLX_REQUIRE_XTASKS=1` in CI here (XC-490), run this branch's CI and read every shard. The
+1. **Merge the pop-out search build**, behind the PI's yes by name; wl-xtasks' branch `popout-search-2026-11-08b`
+   merges on his word the same way. Then set `WLX_REQUIRE_XTASKS=1` in CI here (XC-490), run CI and read every shard. The
    wl-preproc ask in its amendments section is still to be sent (XC-491): the color-set shapes, `luminance`, the
-   `realized` list and line field with `xyz`, and `remakes`. **Decided 2026-11-08**: a suggestion stays up until its bar
+   `realized` list and line field with `xyz`, `remakes`, and the start row's `left`. **Decided 2026-11-08**: a suggestion stays up until its bar
    is missed by more than 3 answers (`suggestion_margin`), and a stage the animal returns to picks up where it left.
    **To tell him at the merge ask, a line each**: the builder's ranges for every new setting (TSK-75); a live change of
    `disc_size`, `fix_size` or `color_luminance` (expected) keeps trials out of moving up until handed back; a re-made
@@ -79,7 +79,7 @@ clean CI.
 - **Suite**: `WLX_REQUIRE_PREPROC=1 WLX_REQUIRE_BROWSER=1 WLX_REQUIRE_XTASKS=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p
   no:cacheprovider -n auto` (a `wl-preproc` checkout or link at the root, and a `wl-xtasks` one beside it, git-ignored
   at `/wl-xtasks`, holding `tasks/popout_search.py`; wl-sync installed at the commit `wl-preproc/pyproject.toml` pins).
-  **5603 passed on `main`** (`56ccca2`); the pop-out build's branch has more (**5820 passed**), none skipped.
+  **5603 passed on `main`** (`56ccca2`); the pop-out build's branch has more (**5830 passed**), none skipped.
 - **CI**: each push sweeps the changed modules with mutants (`tools/mutation_gate.py`); the nightly sweeps all, in 24
   shards. Read every shard's log to its closing line; the run's summary can be wrong.
 - **The neighbors** are read weekly, by their handover files (the PI, 2026-11-07): wl-preproc, wl-sync, wl-works,

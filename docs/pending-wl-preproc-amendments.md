@@ -1011,6 +1011,13 @@ offered again at once under a new id -- a move up taken, the widening in the sta
 its `bar` the numbers that met it in the stage left); a widening taken, the move up on its own window. Absent on every
 other `suggested` row. The old suggestion gets no row of its own: the new row naming it is its answer.
 
+**Added 2026-11-08, told before it is written (with the asks below, not yet sent, XC-491): a run's start row may
+carry `"left": {<stage name>: <its staircase's value>, ...}`.** The PI's decision of 2026-11-08 ("Pick up where it
+left"): within a run of a training progression, a stage the run returns to resumes its staircase where the run left
+it. The map is the stages a run starts having left -- `{}` for a run that starts afresh, the stopped run's for a run
+that goes on from one after a crash -- so a second crash keeps them. `null` for a plan of any other order. Each value is
+the staircase's own value then, in the setting's unit; a reader rebuilds the rest from the run's lines.
+
 **Answered the same day** (wl-preproc, in its session, with the requester's answer): accepted `suggested`, `declined`, the
 `suggestion` id and `start_block` as named. The trial-line keys were simplified at its question: `stage` is dropped (it is
 always the line's existing `block`); the pairing and the set size travel in `params` as settings, `odd_color` and

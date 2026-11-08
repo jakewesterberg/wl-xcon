@@ -2312,8 +2312,10 @@ class Block:
     #: **A staircase on one of its settings** (`Staircase`; engine spec §15; the pop-out search
     #: build, 2026-11-07): a level harder after `down` right in a row, three by default, and a
     #: level easier after `up` failures, one, between trials, started afresh as each block of this
-    #: type opens; a person's value on the setting holds it, and a hand-back resumes it at the
-    #: level nearest that value. `None`, no staircase.
+    #: type opens -- but in a training progression a stage the run returns to resumes where its
+    #: staircase was when the run left it (the PI, 2026-11-08, "Pick up where it left"); a
+    #: person's value on the setting holds it, and a hand-back resumes it at the level nearest
+    #: that value. `None`, no staircase.
     staircase: "Staircase | None" = None
     #: The table this block counts by, **replacing its conditions' structures'** (TSK-26: what
     #: counts is declared per block): `scheduler.CORRECT_ONLY`, `PRESENTED`, `EVERY_TRIAL` or any
@@ -2407,7 +2409,8 @@ class ByCriterion(BlockOrder):
     another, as declared"; 2026-10-19, "Same, but top keeps going" and "Move on anyway"): the
     plan's block types are its stages, easiest first, and the run starts at the first. **A stage
     whose own rule is met moves up one**; a stage whose time runs out moves up one whether it
-    passed or not. **`fall_back`, `(proportion, window)`**: back one stage, started fresh, when
+    passed or not. **`fall_back`, `(proportion, window)`**: back one stage, its counts started
+    fresh and its staircase where the run left it (the PI, 2026-11-08, "Pick up where it left"), when
     fewer than `proportion` of the last `window` answers are right, judged once that many answers
     are in and on answers only, as every rule -- **each trial's first answer only**, however the
     stage's own rule counts drummed tries ("First answer only": "so one stubborn trial can't demote

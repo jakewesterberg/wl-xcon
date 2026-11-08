@@ -617,8 +617,8 @@ def _order(order, params: dict | None = None) -> str:
         return f"Each block a type drawn at random from the run's seed: {count}."
     if isinstance(order, ByCriterion):
         back = ("no fall-back" if order.fall_back is None
-                else f"back one, started fresh, under "
-                     f"{_rule(order.fall_back, 'first answers', params)}")
+                else f"back one, its counts started fresh (its staircase where the run left "
+                     f"it), under {_rule(order.fall_back, 'first answers', params)}")
         if order.confirm:
             # The pop-out search build (the PI, 2026-11-07, "Rig suggests, trainer confirms"): no
             # stage moves of itself on its rules; a stage's time still moves it up.
@@ -821,6 +821,8 @@ def _staircases(plan, params: dict) -> list[str]:
                      else f"{staircase.levels[staircase.start]:g}")
         levels += f" {unit}" if unit else ""
         start = "the level nearest the run's value, else the easiest" if first is None else first
+        if isinstance(plan.order, ByCriterion):
+            start += "; on a return, where the run left it"
         down = _setting(staircase.down, params, lambda v: f"{v:g}")
         up = _setting(staircase.up, params, lambda v: f"{v:g}")
         rows.append(f"| {named} | {_cell(f'{staircase.setting}')} | {_cell(levels)} | "
@@ -832,7 +834,11 @@ def _staircases(plan, params: dict) -> list[str]:
             "of right answers, a level easier after its run of failures -- any other answer, no "
             "response, a look to empty space or leaving the target before its hold -- never past "
             "either end, a trial ending before its stimulus appears moving nothing; started afresh "
-            "as each block opens; a person's value on the setting holds it until handed back.", "",
+            "as each block opens" + (
+                ", but in this training progression a stage the run returns to resumes at the level "
+                "its staircase was at when the run left it, its count fresh (TSK-57, the PI, "
+                "2026-11-08)" if isinstance(plan.order, ByCriterion) else "")
+            + "; a person's value on the setting holds it until handed back.", "",
             "| Block | Steps | Levels, easiest first | A level harder after | A level easier after "
             "| Starts at |", "|---|---|---|---|---|---|", *rows, ""]
 
