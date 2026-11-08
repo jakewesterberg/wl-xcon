@@ -28,7 +28,7 @@ from wl_xcon.declarations import BOUNDED, canonical, resolved
 from wl_xcon.findings import SESSION_KINDS, Finding
 from wl_xcon.geometry import (
     VIEWS, Geometry, circle_extent_deg, least_separation_deg, polar_box_deg, polar_deg,
-    ring_spacing_deg, shown_direction,
+    ring_spacing_deg, separation_deg, shown_direction,
 )
 from wl_xcon.photometry import (
     CONE_COLORS,
@@ -156,6 +156,7 @@ def check(
         + _overlapping_windows(valued)
         + _unreachable_timeouts(valued)
         + _crowded_arrays(valued)
+        + _answer_windows_reach(valued)
         + _view_faults(valued, geometry)
         + _placement_faults(valued)
         + _position_kind_faults(trial)
@@ -6254,6 +6255,82 @@ def _holds_cut_short(trial: Trial) -> list[Finding]:
 
 def _target_name(target: object) -> str:
     return target.name if isinstance(target, Outcome) else repr(target)
+
+
+def answer_reaches(trial: Trial, params: dict[str, Param]) -> list[tuple[str, str]]:
+    """**Each window whose exit starts the answer and can reach an object window of the array the
+    answer is scored on** (the re-review, I-2; the controller's ruling of 2026-11-08: a warning, by
+    the PI's "warnings over refusals"), as `(window, sentence)`, over the settings' ranges
+    (`_span`, as every range check reads them) -- or at one run's values, `params` then holding each
+    setting at its value alone (`taskd.Session._apply_staged`). A state that leaves for a state
+    scoring a saccade on an array's objects (`SaccadeTo("<array>.<object>")`) when the eye exits
+    a window (`On(Exited(window), ...)`) starts the answer on that exit; where that window, about
+    its center, and an object window on the array's ring can overlap -- the ring as small as it
+    can be and both radii as large, the window's center the array's own or a fixed place -- a
+    look landing on an object inside the window never leaves it, so a correct look ends as no
+    response, a staircase's failure, with no reward. Empty where no such window can reach."""
+    declared = {window.name: window for window in trial.windows if isinstance(window, Window)}
+    objects = {window.of: window for window in trial.windows if isinstance(window, ObjectWindows)}
+    if not objects:
+        return []
+    arrays: dict[str, tuple] = {}
+    for _, action in actions_of(trial):
+        if (isinstance(action, Show) and action.stimulus.name in objects
+                and isinstance(action.stimulus.looks, Array)):
+            arrays.setdefault(action.stimulus.name, (action.stimulus.at, action.stimulus.looks))
+    states = {state.name: state for state in trial.states}
+    found: list[tuple[str, str]] = []
+    for state in trial.states:
+        for on in state.go:
+            if not (isinstance(on.guard, Exited) and isinstance(on.to, str)):
+                continue
+            after = states.get(on.to)
+            scored = {guard.window.split(".", 1)[0] for guard in
+                      (later.guard for later in (after.go if after is not None else ()))
+                      if isinstance(guard, SaccadeTo) and isinstance(guard.window, str)
+                      and "." in guard.window}
+            window = declared.get(on.guard.window)
+            if window is None:
+                continue
+            for name in sorted(scored & set(arrays)):
+                at, array = arrays[name]
+                if not (is_point(window.at) and is_point(at)
+                        and all(_finite(v) for v in (*window.at, *at))):
+                    continue  # a place a setting gives: not judged here
+                apart = separation_deg(*window.at, *at)
+                widest = _span(window.radius, params, 0.0)[1]
+                ring_low, ring_high = _span(array.radius, params, 0.0)
+                reach = _span(objects[name].radius, params, 0.0)[1]
+                nearest = (0.0 if ring_low <= apart <= ring_high
+                           else min(abs(ring_low - apart), abs(ring_high - apart)))
+                if not nearest < widest + reach:
+                    continue
+                ring = ring_low if apart <= ring_low else apart
+                found.append((window.name, (
+                    f"window {window.name!r}, whose exit starts the answer (state {state.name!r}), "
+                    f"can reach array {name!r}'s object windows: its radius up to {widest:g}° and "
+                    f"theirs up to {reach:g}° overlap on a ring as small as {ring:g}° about it, so "
+                    f"a look that lands on an object inside the window never leaves it, and a "
+                    f"correct look ends as no response, a staircase's failure, with no reward; "
+                    f"keep its radius and the objects' together below the ring's")))
+    return found
+
+
+def _answer_windows_reach(trial: Trial) -> list[Finding]:
+    """`answer-window-reaches-objects`, a warning in every kind, for each window `answer_reaches`
+    finds over the settings' ranges (the re-review, I-2): a value inside them can put an object
+    inside the window whose exit starts the answer, which no other check reads -- the windows of
+    one state are compared with each other (`_overlapping_windows`), and objects with objects
+    (`crowded-array`). A value set live is warned of as it applies (`taskd.Session._apply_staged`)
+    where it reaches."""
+    params = {p.name: p for p in trial.params}
+    findings: list[Finding] = []
+    for window, said in answer_reaches(trial, params):
+        finding = Finding("answer-window-reaches-objects", said, blocking=False,
+                          accepted_in=SESSION_KINDS, subjects=(f"window {window!r}",))
+        if finding not in findings:
+            findings.append(finding)
+    return findings
 
 
 def _crowded_arrays(trial: Trial) -> list[Finding]:

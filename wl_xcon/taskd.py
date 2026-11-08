@@ -50,8 +50,8 @@ from wl_xcon import variation
 from wl_xcon.actor import Actor, to_map_or_none
 from wl_xcon.bounds import Bounds, Exceeded, _finite
 from wl_xcon.check import (
-    IMPOSSIBLE, _outside, _whole_numbers, beyond_range, check_task, impossible, start_at,
-    undrawable, unplaced, unpooled, unshowable, unstarted,
+    IMPOSSIBLE, _outside, _whole_numbers, answer_reaches, beyond_range, check_task, impossible,
+    start_at, undrawable, unplaced, unpooled, unshowable, unstarted,
 )
 from wl_xcon.cli import _clock, _load_allocation, _load_task, _printable, _shown
 from wl_xcon.codes import BLOCK_END, RUN_END_MARKER, TRIAL_END, TRIAL_START, Allocation
@@ -4357,6 +4357,33 @@ class Session:
         self._pending.clear()
         self._acts.clear()
         self._act_moments.clear()
+        self._warn_reach()
+
+    def _warn_reach(self) -> None:
+        """**A value set live that puts an object inside the window whose exit starts the answer**
+        (`check.answer_reaches`; the re-review, I-2, a warning by the PI's "warnings over
+        refusals"), said on the changes feed as the change applies, between trials: judged at the
+        run's values now, each setting at its value alone, once each time it starts to reach --
+        a correct look there would end as no response, with no reward. The load warns of the
+        same over the declared ranges (`answer-window-reaches-objects`)."""
+        task = self._task
+        if task is None:
+            return
+        params = {}
+        for name, param in self._params().items():
+            value = self.spec.values.get(name)
+            if (param.choices or isinstance(value, bool)
+                    or not isinstance(value, (int, float)) or not math.isfinite(value)):
+                params[name] = param
+            else:
+                params[name] = Param(name, param.unit, low=value, high=value)
+        now = set()
+        for trial in task.structures.values():
+            now |= {said for _, said in answer_reaches(trial, params)}
+        for said in sorted(now - self._reaching):
+            self._feed("warning", None, self.wall_now(),
+                       f"answer-window-reaches-objects: at the values set now, {said}")
+        self._reaching = frozenset(now)
 
     def _apply_pending(self, act: Pending, code: int, trial_number: int, index: int) -> Pending:
         """**One hand-back or live range applied** (`_apply_staged`, whose change id, `sequence`,
@@ -4591,6 +4618,8 @@ class Session:
     #: then each a line writes first.
     _lights: list = field(init=False, default_factory=list, repr=False)
     _realized_at: frozenset = field(init=False, default=frozenset(), repr=False)
+    #: The answer-window warnings standing at the run's values (`_warn_reach`), said once each.
+    _reaching: frozenset = field(init=False, default=frozenset(), repr=False)
     _climb_block: int | None = field(init=False, default=None, repr=False)
     #: **The rig's suggestion standing** under a confirmed progression (`_Suggested`;
     #: `task.ByCriterion.confirm`; the pop-out search build, 2026-11-07), `None` where none
@@ -5504,6 +5533,7 @@ class Session:
         self._widening, self._pool_was, self._paired = None, None, {}
         # Each color set's luminances realized and written in this run (`_realize`).
         self._lights, self._realized_at = color_set_lights(task), set()
+        self._reaching = frozenset()
         # Only a resumed session's first run may go on from the run its process stopped in.
         went_from, self._last_run = self._last_run, None
         # Nothing has varied in a block of this run yet, and no line is counted (engine build C3).

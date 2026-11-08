@@ -270,8 +270,10 @@ def test_popout_loads_clean_but_the_expected_warnings(task):
     range `color_luminance` allows (`color-set-desaturated`, a warning saying which part of the
     range); on the measured test calibration, which carries its primaries' spectra, it shows them
     over the whole range. In both, its plan has no end of its own (`endless-plan`): the trainer ends
-    a run; and the windows can overlap at the settings' extremes, twelve discs on the smallest ring
-    (`crowded-array`, XC-156's check over the ranges), which the trainer keeps apart."""
+    a run; the windows can overlap at the settings' extremes, twelve discs on the smallest ring
+    (`crowded-array`, XC-156's check over the ranges), which the trainer keeps apart; and the
+    fixation window, whose exit starts the answer, can reach the discs' windows on the smallest
+    ring (`answer-window-reaches-objects`; the re-review, I-2)."""
     allocation = _load_allocation(Path(ALLOCATION))
 
     on_default = check_task(task, allocation, geometry=DIRECT, calibration=SRGB,
@@ -284,8 +286,9 @@ def test_popout_loads_clean_but_the_expected_warnings(task):
         assert all(f.is_warning for f in found), found
     assert {f.code for f in on_default} == {"color-on-default", "contrast-on-default",
                                              "color-set-desaturated", "crowded-array",
+                                             "answer-window-reaches-objects", "endless-plan"}
+    assert {f.code for f in on_measured} == {"crowded-array", "answer-window-reaches-objects",
                                              "endless-plan"}
-    assert {f.code for f in on_measured} == {"crowded-array", "endless-plan"}
     (pale,) = [f for f in on_default if f.code == "color-set-desaturated"]
     assert "above about 26 cd/m², of the 1 to 30 cd/m² setting 'color_luminance' allows" in (
         pale.detail)
@@ -1245,4 +1248,53 @@ def test_a_window_set_above_its_highest_is_kept_that_long(task):
     assert up.suggestion is None
     up.judged(Outcome.CORRECT, True, True, False, True)
     assert up.bar(MOVE_UP) == (300, 300, True) and up.suggestion.of == 300
+
+
+def test_the_window_whose_exit_starts_the_answer_reaching_the_discs_is_warned(task, tmp_path):
+    """The re-review, I-2 (the controller's ruling of 2026-11-08: a warning, by the PI's "warnings
+    over refusals"): the answer begins as the eye leaves the fixation window, `center`; where that
+    window reaches a disc's window -- a ring of 4° and a fixation window of 4.5°, both inside their
+    ranges -- a look straight to the odd one, held, never leaves it, and ends as no response, a
+    staircase's failure, with no reward. So **the load warns** over the ranges
+    (`answer-window-reaches-objects`, about the smallest ring), and **a value set live that makes
+    it reach is warned on the changes feed** as it applies; at the starts nothing reaches."""
+    from wl_xcon.check import answer_reaches
+
+    right = [LOOK, ("go", 48, on_circle_deg(0.0, 0.0, 4.0, 0.0))]
+    fine = _play_at(task, right, ring_radius=4.0, fix_window=3.0)
+    assert fine.outcome is Outcome.CORRECT
+    reached = _play_at(task, right, ring_radius=4.0, fix_window=4.5)
+    assert reached.outcome is Outcome.NO_RESPONSE and reached.visited[-1] == "go"
+    assert staircase_verdict(reached.outcome, _appeared(task.trial, reached)) is False
+
+    found = [f for f in check_task(task, _load_allocation(Path(ALLOCATION)), geometry=DIRECT,
+                                   calibration=SRGB, deployment=Deployment.RIG_FIXED,
+                                   source=TASK_FILE)
+             if f.code == "answer-window-reaches-objects"]
+    assert len(found) == 1 and found[0].is_warning and found[0].accepted_in == SESSION_KINDS
+    assert ("window 'center', whose exit starts the answer (state 'go'), can reach array "
+            "'search''s object windows: its radius up to 5° and theirs up to 2° overlap on a ring "
+            "as small as 4° about it") in found[0].detail
+    starts = {param.name: param for param in task.params}
+    assert answer_reaches(task.trial, {
+        name: (param if param.choices or param.start is None
+               else replace(param, low=param.start, high=param.start))
+        for name, param in starts.items()}) == []
+
+    trainer = _Locks("ring_radius", 4.0, stop_at=6, more=(("fix_window", 4.5),))
+    session = _opened(_spec(tmp_path, seed=5, start_block="Fade-in"), trainer)
+    trainer.session = session
+    session.run()
+    warned = [said for kind, _, _, said in session.controls if kind == "warning"
+              and said.startswith("answer-window-reaches-objects")]
+    assert len(warned) == 1 and "on a ring as small as 4° about it" in warned[0]
+    assert "its radius up to 4.5° and theirs up to 1.5°" in warned[0]
+
+
+def _play_at(task, moves, **values):
+    """One trial of the task at its starts but `values`, its eye making `moves`: the result."""
+    bound = {**_values(task), **values}
+    eye = _Eye(moves)
+    return run_trial(task.trial, _Seen(eye, task.trial, bound), FRAME, values=dict(bound),
+                     effects=Recorded())
 
