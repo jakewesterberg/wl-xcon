@@ -2083,16 +2083,21 @@ class Steps:
     at the level nearest its value (`taskd._Climb.restep`). Each level is rounded to 10 decimal
     places, so steps of a tenth give 0.1, 0.2 ... 1.0 as written; a whole start, end and step give
     whole levels; and **on a setting an array reads as a whole number** (`whole`) each level is
-    the nearest whole number, repeats dropped. `start` and `end` are finite numbers; refused as
-    it is built otherwise, and a step that is no positive number as its levels are read."""
+    the nearest whole number, repeats dropped. **`start`, the easiest level, may be a setting
+    too** (`P`; the controller's ruling of 2026-11-08 on the re-review: the stages' floors are the
+    trainer's), read as the step is; `end`, the hardest, is a finite number, the stage's own
+    definition of its hardest step. Refused as it is built otherwise, and a step or a start that
+    is no number as its levels are read."""
 
-    start: float
+    start: object
     end: float
     by: object
 
     def __post_init__(self) -> None:
         for name in ("start", "end"):
             value = getattr(self, name)
+            if name == "start" and isinstance(value, P):
+                continue
             if (isinstance(value, bool) or not isinstance(value, (int, float))
                     or not math.isfinite(value)):
                 raise ValueError(f"a staircase's steps have a finite number as their {name}, not "
@@ -2102,23 +2107,29 @@ class Steps:
                                       or not math.isfinite(by) or by <= 0):
             raise ValueError(f"a staircase's step is a positive number or a setting, not {by!r}")
 
-    def levels(self, by: object, *, whole: bool = False) -> tuple:
-        """The levels at step `by`, easiest first (`Steps`). Raises `ValueError` for a step that
-        is no positive finite number, and for one so small it would make more than
+    def levels(self, by: object, *, whole: bool = False, start: object = None) -> tuple:
+        """The levels at step `by`, easiest first (`Steps`), from `start` where given (a setting's
+        value), else the steps' own. Raises `ValueError` for a step that is no positive finite
+        number, a start that is no finite number, and a step so small it would make more than
         `STEPS_LIMIT` levels."""
         if (isinstance(by, bool) or not isinstance(by, (int, float)) or not math.isfinite(by)
                 or by <= 0):
             raise ValueError(f"a staircase's step is a positive number, not {by!r}")
-        span = abs(self.end - self.start)
+        first = self.start if start is None else start
+        if (isinstance(first, bool) or not isinstance(first, (int, float))
+                or not math.isfinite(first)):
+            raise ValueError(f"a staircase's start is a finite number, not {first!r}")
+        span = abs(self.end - first)
         count = math.floor(span / by + 1e-9)
         if count + 1 > STEPS_LIMIT:
             raise ValueError(f"a step of {by!r} from {self.start!r} to {self.end!r} makes "
                              f"{count + 1} levels, more than the {STEPS_LIMIT} a staircase takes")
-        sign = 1.0 if self.end >= self.start else -1.0
-        exact = all(isinstance(v, int) for v in (self.start, self.end)) and float(by).is_integer()
+        sign = 1.0 if self.end >= first else -1.0
+        exact = (all(isinstance(v, int) or float(v).is_integer() for v in (first, self.end))
+                 and isinstance(self.end, int) and float(by).is_integer())
         levels: list = []
         for k in range(count + 1):
-            level = round(self.start + sign * k * by, 10)
+            level = round(first + sign * k * by, 10)
             levels.append(level)
         if not levels or abs(levels[-1] - self.end) > 1e-9:
             levels.append(self.end)
@@ -2229,8 +2240,9 @@ class Staircase:
     def settings(self) -> "tuple[str, ...]":
         """The settings it reads a number from (`P` in `down`, `up` or its steps' `by`), each
         once, in that order."""
-        found = [part.name for part in (self.down, self.up,
-                                        getattr(self.levels, "by", None)) if isinstance(part, P)]
+        found = [part.name for part in (self.down, self.up, getattr(self.levels, "by", None),
+                                        getattr(self.levels, "start", None))
+                 if isinstance(part, P)]
         return tuple(dict.fromkeys(found))
 
     def at(self, values: "dict | None", *, whole: bool = False) -> "Staircase":
@@ -2245,14 +2257,18 @@ class Staircase:
             return self
         levels = self.levels
         if isinstance(levels, Steps):
-            by = levels.by
-            if isinstance(by, P):
-                named, by = by.name, None if values is None else values.get(by.name)
-                if (isinstance(by, bool) or not isinstance(by, (int, float))
-                        or not math.isfinite(by)):
-                    raise ValueError(f"a staircase's step is setting {named!r}, which has no "
-                                     f"number here ({by!r})")
-            levels = levels.levels(by, whole=whole)
+            def number(part: object, what: str) -> object:
+                if not isinstance(part, P):
+                    return part
+                value = None if values is None else values.get(part.name)
+                if (isinstance(value, bool) or not isinstance(value, (int, float))
+                        or not math.isfinite(value)):
+                    raise ValueError(f"a staircase's {what} is setting {part.name!r}, which has "
+                                     f"no number here ({value!r})")
+                return value
+
+            levels = levels.levels(number(levels.by, "step"), whole=whole,
+                                   start=number(levels.start, "start"))
         start = self.start if self.start is None else min(self.start, len(levels) - 1)
         return Staircase(self.setting, levels, _count_now(self.down, values, "down"),
                          _count_now(self.up, values, "up"), start, self.hardest)

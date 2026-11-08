@@ -328,6 +328,7 @@ def test_a_runs_start_row_defines_each_set_as_written_and_as_this_panel_draws_it
     def realization(shown) -> dict:
         return {"luminance_cd_m2": shown.luminance, "desaturation": shown.desaturation,
                 "xy": {name: list(xy) for name, xy in shown.xy.items()},
+                "xyz": {name: list(xyz) for name, xyz in shown.xyz.items()},
                 "drive": {name: list(levels) for name, levels in shown.drive.items()}}
 
     defined = _color_sets(_task(_four(cs)), panel, {})

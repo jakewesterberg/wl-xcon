@@ -223,6 +223,7 @@ def check_task(
         + _plan_faults(task)
         + _draw_faults(task)
         + _staircase_faults(task)
+        + _unmade_steps(task)
         + _pool_faults(task)
         + _impossible_faults(task)
         + _found_by_faults(task)
@@ -1747,25 +1748,65 @@ def _staircase_levels(staircase: Staircase, declared: dict[str, Param],
     levels = staircase.levels
     if not isinstance(levels, Steps):
         return tuple(levels)
-    by = levels.by
-    if isinstance(by, P):
-        param = declared.get(by.name)
-        bys = [v for v in (getattr(param, "low", None), getattr(param, "start", None),
-                           getattr(param, "high", None))
-               if _finite(v) and v > 0]
-    else:
-        bys = [by]
+
+    def values(part: object, positive: bool) -> list:
+        if not isinstance(part, P):
+            return [part]
+        param = declared.get(part.name)
+        return [v for v in (getattr(param, "low", None), getattr(param, "start", None),
+                            getattr(param, "high", None))
+                if _finite(v) and (v > 0 or not positive)]
+
     found: list = []
-    for step in bys:
-        try:
-            made = levels.levels(step, whole=whole)
-        except ValueError:
-            continue
-        found += [level for level in made if level not in found]
-    for end in (levels.start, levels.end):
-        if end not in found:
-            found.append(end)
+    for first in values(levels.start, False):
+        for step in values(levels.by, True):
+            try:
+                made = levels.levels(step, whole=whole, start=first)
+            except ValueError:
+                continue
+            found += [level for level in made if level not in found]
+        if first not in found:
+            found.append(first)
+    if levels.end not in found:
+        found.append(levels.end)
     return tuple(found)
+
+
+def _unmade_steps(task: Task) -> list[Finding]:
+    """**A staircase step a setting can be set to that makes no levels**, warned (the re-review,
+    M-4; the controller's ruling of 2026-11-08): a step so small, across its range, that it would
+    make more than `task.STEPS_LIMIT` levels -- as a value a person sets far below the step's
+    declared range does, which `beyond_range` judges with the range widened to it. Such a value is
+    recorded on every line from then on, while the staircase keeps the levels it had
+    (`taskd._Climb.restep`), so the warning says so. A warning, never a refusal: the run goes on
+    as it was. Nothing for a step inside a declared range that makes its levels."""
+    declared = {param.name: param for param in task.params}
+    found: list[Finding] = []
+    for plan_name, plan in task.plans.items():
+        for block in plan.blocks:
+            staircase = getattr(block, "staircase", None)
+            steps = getattr(staircase, "levels", None)
+            if not isinstance(steps, Steps) or not isinstance(steps.by, P):
+                continue
+            param = declared.get(steps.by.name)
+            least = None if param is None else min(
+                (v for v in (param.low, param.high) if _finite(v) and v > 0), default=None)
+            first = steps.start
+            if isinstance(first, P):
+                named = declared.get(first.name)
+                first = None if named is None else named.start
+            if least is None or not _finite(first):
+                continue
+            try:
+                steps.levels(least, start=first)
+            except ValueError as unmade:
+                found.append(Finding("staircase-steps-unmade", (
+                    f"plan {plan_name!r}: block {block.name!r}'s staircase on "
+                    f"{staircase.setting!r} makes no levels at a step of {least:g} "
+                    f"({steps.by.name!r}): {unmade}; at such a step the staircase keeps the "
+                    f"levels it had, while each trial's line records the step set"),
+                    blocking=False, accepted_in=SESSION_KINDS))
+    return found
 
 
 def _staircase_said(task: Task, block: Block, staircase: object, declared: dict[str, Param],
@@ -1790,7 +1831,8 @@ def _staircase_said(task: Task, block: Block, staircase: object, declared: dict[
     # task's own, of numbers, its declared range a count from 1 for `down` and `up`, and a step
     # above 0 for `Steps`' `by`; never a bounded one, nor the setting it steps.
     for part, what in ((staircase.down, "down"), (staircase.up, "up"),
-                       (getattr(staircase.levels, "by", None), "step")):
+                       (getattr(staircase.levels, "by", None), "step"),
+                       (getattr(staircase.levels, "start", None), "start")):
         if not isinstance(part, P):
             continue
         named = declared.get(part.name)
@@ -1801,6 +1843,8 @@ def _staircase_said(task: Task, block: Block, staircase: object, declared: dict[
         elif named is None or named.choices or not (_finite(named.low) and _finite(named.high)):
             said.append(f"'s staircase takes its {what} from {part.name!r}, which is no setting of "
                         f"numbers with a range the task declares; declare it with low= and high=")
+        elif what == "start":
+            continue  # its levels are held to the setting's range below
         elif what == "step" and min(named.low, named.high) <= 0:
             said.append(f"'s staircase takes its step from {part.name!r}, whose range reaches "
                         f"{_said(min(named.low, named.high))}, and a step is above 0; give it a "

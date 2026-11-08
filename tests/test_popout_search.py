@@ -315,12 +315,14 @@ def test_it_holds_the_pis_values(task):
     assert {name: starts.get(name) for name in (
         "disc_size", "ring_radius", "fix_size", "color_luminance", "move_up_bar",
         "move_up_window", "move_back_bar", "move_back_window", "staircase_down", "staircase_up",
-        "fade_in_step", "crowd_step")} == {
+        "fade_in_step", "crowd_step", "fade_in_floor", "crowd_floor")} == {
         "disc_size": 1.0, "ring_radius": 8.0, "fix_size": 0.3, "color_luminance": 15.0,
         "move_up_bar": 0.8, "move_up_window": 50, "move_back_bar": 0.5, "move_back_window": 50,
-        "staircase_down": 3, "staircase_up": 1, "fade_in_step": 0.1, "crowd_step": 1}
+        "staircase_down": 3, "staircase_up": 1, "fade_in_step": 0.1, "crowd_step": 1,
+        "fade_in_floor": 0.1, "crowd_floor": 4}
     for name in ("move_up_bar", "move_up_window", "move_back_bar", "move_back_window",
-                 "staircase_down", "staircase_up", "fade_in_step", "crowd_step", "ring_radius"):
+                 "staircase_down", "staircase_up", "fade_in_step", "crowd_step", "ring_radius",
+                 "fade_in_floor", "crowd_floor"):
         assert task.meanings[name].kind == NOT_DIFFICULTY, name
     assert [param.name for param in task.params if param.start is None] == [
         "odd_color", "distractor_color"]
@@ -358,9 +360,9 @@ def test_it_holds_the_pis_values(task):
     assert [c.values for c in crowd.conditions] == [{"distractor_fraction": 1.0}]
     counts = (P("staircase_down"), P("staircase_up"))
     assert (fade_in.staircase.levels, (fade_in.staircase.down, fade_in.staircase.up)) == (
-        Steps(0.1, 1.0, P("fade_in_step")), counts)
+        Steps(P("fade_in_floor"), 1.0, P("fade_in_step")), counts)
     assert (crowd.staircase.levels, (crowd.staircase.down, crowd.staircase.up)) == (
-        Steps(4, 12, P("crowd_step")), counts)
+        Steps(P("crowd_floor"), 12, P("crowd_step")), counts)
     faint = fade_in.staircase.at(starts)
     assert (faint.setting, faint.down, faint.up, faint.start) == ("distractor_fraction", 3, 1, None)
     assert faint.levels == (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
@@ -712,6 +714,7 @@ def test_each_line_names_its_colors_and_each_run_defines_the_set_once(task, tmp_
         "source": theirs.source,
         "realized": [{"luminance_cd_m2": 15.0, "desaturation": shown.desaturation,
                       "xy": {color: list(xy) for color, xy in shown.xy.items()},
+                      "xyz": {color: list(xyz) for color, xyz in shown.xyz.items()},
                       "drive": {color: list(levels) for color, levels in shown.drive.items()}}],
     }}
 
@@ -1098,6 +1101,7 @@ def test_the_colors_brightness_changed_live_is_realized_once_and_written_once(tm
     assert realized == {"isohue": [{
         "luminance_cd_m2": 12.0, "desaturation": at[12.0].desaturation,
         "xy": {color: list(xy) for color, xy in at[12.0].xy.items()},
+        "xyz": {color: list(xyz) for color, xyz in at[12.0].xyz.items()},
         "drive": {color: list(levels) for color, levels in at[12.0].drive.items()}}]}
     # Each line's light, from the record alone: its luminance's realization times its fraction.
     found = {entry["luminance_cd_m2"]: entry
@@ -1297,4 +1301,37 @@ def _play_at(task, moves, **values):
     eye = _Eye(moves)
     return run_trial(task.trial, _Seen(eye, task.trial, bound), FRAME, values=dict(bound),
                      effects=Recorded())
+
+
+def test_a_stages_floor_is_a_setting_and_a_step_that_makes_no_levels_is_warned(task, tmp_path):
+    """The controller's rulings of 2026-11-08 on the re-review: **each staircase's easiest end is a
+    setting** (M-6: `fade_in_floor`, `crowd_floor`, the PI's 0.1 and 4 to start), so a trainer who
+    raises Fade-in's floor to 0.4 has it start there and never step below it; and **a step set far
+    below its range, which makes no levels, is warned as it is set** (M-4,
+    `staircase-steps-unmade`: the staircase keeps the levels it had, while the lines record the
+    step set). Nothing is warned inside the declared ranges."""
+    from wl_xcon.check import beyond_range
+
+    trainer = _Locks("fade_in_floor", 0.4, stop_at=30)
+    session = _opened(_spec(tmp_path, seed=5, start_block="Fade-in"), trainer)
+    trainer.session = session
+    session.run()
+    lines = _rows(session, "trials.jsonl")
+    assert lines[0]["params"]["distractor_fraction"] == 0.1
+    assert lines[1]["params"]["distractor_fraction"] == 0.4
+    assert {line["params"]["distractor_fraction"] for line in lines[1:]} <= {
+        0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0}
+    assert all(line["drawn"]["distractor_fraction"] == "staircase" for line in lines)
+
+    allocation = _load_allocation(Path(ALLOCATION))
+    assert "staircase-steps-unmade" not in {
+        f.code for f in check_task(task, allocation, geometry=DIRECT, calibration=SRGB,
+                                   deployment=Deployment.RIG_FIXED)}
+    found = [f for f in beyond_range(task, {"fade_in_step": 0.0005}, allocation, geometry=DIRECT,
+                                     calibration=SRGB, deployment=Deployment.RIG_FIXED)
+             if f.code == "staircase-steps-unmade"]
+    assert len(found) == 1 and found[0].is_warning
+    assert ("block 'Fade-in''s staircase on 'distractor_fraction' makes no levels at a step of "
+            "0.0005 ('fade_in_step')") in found[0].detail
+    assert "the staircase keeps the levels it had" in found[0].detail
 

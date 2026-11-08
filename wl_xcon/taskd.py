@@ -235,11 +235,15 @@ def _luminances(lights: list, values: dict) -> dict[str, list[float]]:
 def _realization(shown) -> dict:
     """One realization of a color set (`photometry.Realized`) as the record writes it: the
     luminance it is at, each color's chromaticity as shown, the share of chroma every color gave
-    up together (`desaturation`) and its output levels, red, green and blue (`drive`)."""
+    up together (`desaturation`), each color's light at full in CIE XYZ, cd/m² (`xyz`), and its
+    output levels, red, green and blue (`drive`)."""
     return {
         "luminance_cd_m2": shown.luminance,
         "desaturation": shown.desaturation,
         "xy": {color: list(xy) for color, xy in shown.xy.items()},
+        # Each color's light at full, CIE XYZ in cd/m², so a reader has each light's CIE Y
+        # without the calibration (the re-review, M-5).
+        "xyz": {color: list(xyz) for color, xyz in shown.xyz.items()},
         "drive": {color: list(levels) for color, levels in shown.drive.items()},
     }
 

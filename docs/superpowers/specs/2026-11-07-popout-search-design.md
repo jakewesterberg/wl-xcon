@@ -38,7 +38,8 @@ Parts 1 to 3 are one build. Part 4 is the next design conversation.
 
 **Every number below is a setting the trainer may change in the console, its start the PI's value** (the PI,
 2026-11-07, on the build's review: "i mean, everything should be adjustable in the console, no?"; TSK-75). A number
-stays fixed only with its reason written beside it in the task (the bounds on the engine's own waits). Each setting's
+stays fixed only with its reason written beside it in the task (the bounds on the engine's own waits, the center, each
+staircase's hardest end, the ring's whole-circle direction and each stage's one condition's target; TSK-75). Each setting's
 range is the builder's (the fix round).
 
 ### 3.1 The trial
@@ -107,7 +108,9 @@ At the end of Fade-in the distractors match the odd one's luminance, so it diffe
   [@levitt1971transformed], close to the bar below. Errors are TSK-33's default: a wrong item and no response count as
   failures; a trial that ends before the decision (no fixation, an early saccade) moves nothing. The step sizes are the
   builder's (§7), each a setting: Fade-in's distractors by a tenth of full (`fade_in_step`), Crowd's discs one at a time
-  (`crowd_step`); a step changed live re-derives the levels at the level nearest the staircase's value.
+  (`crowd_step`); a step changed live re-derives the levels at the level nearest the staircase's value. Each
+  staircase's easiest end is a setting too, a tenth of full (`fade_in_floor`) and four discs (`crowd_floor`); its hardest
+  end, full and twelve, is the stage's own.
 - **A lock**: "there should also be a way for the experimenter to lock the parameters". A person's live value on a
   setting holds it, and the staircase leaves it alone until it is handed back (TSK-32: "a live value on its parameter
   holds it"; built in engine build C3 as a held setting and a hand-back).

@@ -808,7 +808,7 @@ def _staircases(plan, params: dict) -> list[str]:
         if isinstance(staircase.levels, Steps):
             # Levels by a step a setting may give (the pop-out search build's fix round).
             steps = staircase.levels
-            levels = (f"{steps.start:g} to {steps.end:g} by "
+            levels = (f"{_setting(steps.start, params, lambda v: f'{v:g}')} to {steps.end:g} by "
                       f"{_setting(steps.by, params, lambda v: f'{v:g}')}")
             first = None if staircase.start is None else f"level {staircase.start + 1}"
         else:

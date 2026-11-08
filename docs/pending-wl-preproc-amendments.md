@@ -1044,19 +1044,20 @@ the run's calibration (the row's existing `calibration`), **`realized` a list, o
 starting values draw the set at** (one for the pop-out):
 
 ```json
-"color_sets": {"isohue": {"name": "isohue", "colors": {"blue": [0.19104, 0.18939], "purple": [...], "red": [...], "green": [...]}, "apex": [0.31272, 0.329], "luminance_cd_m2": 15.0, "held": "macaque_2deg_LM1", "source": "<its sentence>", "realized": [{"luminance_cd_m2": 15.0, "desaturation": 0.0, "xy": {"blue": [x, y], ...}, "drive": {"blue": [r, g, b], ...}}]}}
+"color_sets": {"isohue": {"name": "isohue", "colors": {"blue": [0.19104, 0.18939], "purple": [...], "red": [...], "green": [...]}, "apex": [0.31272, 0.329], "luminance_cd_m2": 15.0, "held": "macaque_2deg_LM1", "source": "<its sentence>", "realized": [{"luminance_cd_m2": 15.0, "desaturation": 0.0, "xy": {"blue": [x, y], ...}, "xyz": {"blue": [X, Y, Z], ...}, "drive": {"blue": [r, g, b], ...}}]}}
 ```
 
 Each `realized` entry's `luminance_cd_m2` is the luminance it is at; `xy` each color's chromaticity as shown,
 `desaturation` the share of its distance from the apex in xy that every color gave up together so the panel could show
-them all (0 when it shows the set as written), and `drive` each color's output levels, red, green and blue, each 0 to
-1, at that luminance. `color_sets` is `null` for a task with none. **Each `trials.jsonl` line gains `realized`**
+them all (0 when it shows the set as written), `xyz` each color's light at full, CIE 1931 XYZ in cd/m², and `drive`
+each color's output levels, red, green and blue, each 0 to 1, at that luminance (`xyz` added in the fix round's
+re-review, M-5, before this was sent). `color_sets` is `null` for a task with none. **Each `trials.jsonl` line gains `realized`**
 (always written, so the line's shape does not move): `null`, but on the run's first line drawn at a luminance its run
 had not yet written -- a trainer's `set` of `color_luminance` -- where it is that set's realization there, by set name,
-in the same entry form: `"realized": {"isohue": [{"luminance_cd_m2": 12.0, "desaturation": ..., "xy": {...}, "drive":
-{...}}]}`. **So a reader knows each trial's drawn light without the rig**: the line's `params` give the look's
+in the same entry form: `"realized": {"isohue": [{"luminance_cd_m2": 12.0, "desaturation": ..., "xy": {...}, "xyz": {...},
+"drive": {...}}]}`. **So a reader knows each trial's drawn light without the rig**: the line's `params` give the look's
 `luminance` (by reference) and `fraction`, and the run's start row and its earlier lines give the realization at that
-luminance; each look's light is that color's realized XYZ times its fraction. Each luminance is written once a run,
+luminance; each look's light is that color's realized `xyz` times its fraction, CIE 1931 XYZ in cd/m². Each luminance is written once a run,
 never on every line. **The start row, not `config.json`**: `config.json` is written once as the session opens, before any task
 is chosen, and a `wlx taskd` session may run several tasks; the start row is where a run names its task, its values and
 its calibration. A task's color sets have one definition per name: wl-xcon's load check refuses a task declaring two
