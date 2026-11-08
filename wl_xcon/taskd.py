@@ -92,7 +92,8 @@ from wl_xcon.simeye import Eye
 from wl_xcon.simulate import Census, Subject, Tally, agent
 from wl_xcon.run import LONGEST_TRIAL_S, run_trial
 from wl_xcon.task import (
-    COUNTED, OWED, SPENT, UNPAID, Entered, Exited, Outcome, P, Param, Plan, SaccadeTo, Staircase,
+    COUNTED, OWED, SPENT, UNPAID, ByCriterion, Entered, Exited, Outcome, P, Param, Plan, SaccadeTo,
+    Staircase,
     Task, Trial, at_hardest, staircase_verdict,
 )
 from wl_xcon.task import (
@@ -853,6 +854,9 @@ class _WentOn:
     #: The run's values as its last rows left them: what a scheduler judges the stage's bars
     #: with again where a criterion or a fall-back names a setting (`Scheduler.values`).
     values: dict = field(default_factory=dict)
+    #: **Each stage the run left, by name, with its staircase's value then** (the PI, 2026-11-08,
+    #: "Pick up where it left"): what a run that goes on from it resumes a returned-to stage at.
+    left: dict = field(default_factory=dict)
 
 
 def went_on(task: Task, last) -> _WentOn | None:
@@ -910,12 +914,22 @@ def went_on(task: Task, last) -> _WentOn | None:
             start = staircase.nearest(resolved.get(staircase.setting))
         return 0 if start is None else start
 
+    progression = isinstance(plan.order, ByCriterion)
+
     def enter(name: str) -> None:
+        # The stage left keeps its staircase's value for a return (`Session._climbing`).
+        if state.get("climb") is not None and state.get("stage") is not None:
+            left[state["stage"]] = state["climb"].value
         block = next((block for block in blocks if block.name == name), None)
         staircase = None if block is None else block.staircase
         climb = None
         if staircase is not None:
-            climb = _Climb.started(staircase, {**live, **resolved, **current}, first,
+            start = first
+            if progression and name in left:
+                def start(stairs, value=left[name]):
+                    nearest = stairs.nearest(value)
+                    return first(stairs) if nearest is None else nearest
+            climb = _Climb.started(staircase, {**live, **resolved, **current}, start,
                                    whole=staircase.setting in whole)
         state.update(stage=name, climb=climb, bars=[], offered={}, answered=set())
         # A suggestion made again in this stage as the run moved here (`_remake_widening`),
@@ -937,6 +951,7 @@ def went_on(task: Task, last) -> _WentOn | None:
     live: dict = {param.name: param.start for param in task.params if param.start is not None}
     current: dict = {}
     pending: list = []
+    left: dict = {}
     enter(last.start.get("start_block") or names[0])
     value = resolved.get(pool.setting) if pool is not None else None
     seen = None
@@ -1017,7 +1032,7 @@ def went_on(task: Task, last) -> _WentOn | None:
         climb=state["climb"], pool=value, bars=state["bars"],
         offered=next((row for row in reversed(standing) if row.get("move") != MOVE_WIDEN), None),
         widen=next((row for row in reversed(standing) if row.get("move") == MOVE_WIDEN), None),
-        held=state["held"], values={**live, **resolved, **current},
+        held=state["held"], values={**live, **resolved, **current}, left=dict(left),
     )
 
 
@@ -2604,7 +2619,7 @@ class Session:
                                          whole=staircase.setting in _whole_numbers(self._task))
             except ValueError:
                 return None
-            level = self._first_level(staircase)
+            level = self._resumed(self._scheduler.block.name, self._first_level)(staircase)
         else:
             staircase, level = climb.staircase, climb.level
         return (staircase.setting, tuple(staircase.levels), level,
@@ -4655,6 +4670,12 @@ class Session:
     #: The answer-window warnings standing at the run's values (`_warn_reach`), said once each.
     _reaching: frozenset = field(init=False, default=frozenset(), repr=False)
     _climb_block: int | None = field(init=False, default=None, repr=False)
+    #: **The stage the staircase in `_climb` belongs to, and each stage's staircase value as the
+    #: run left it** (the PI, 2026-11-08, "Pick up where it left"; `_climbing`, `_resumed`), by
+    #: stage name, for the run in progress; a resumed run's first takes them from the record
+    #: (`went_on`'s `left`).
+    _climb_stage: str | None = field(init=False, default=None, repr=False)
+    _left: dict = field(init=False, default_factory=dict, repr=False)
     #: **The rig's suggestion standing** under a confirmed progression (`_Suggested`;
     #: `task.ByCriterion.confirm`; the pop-out search build, 2026-11-07), `None` where none
     #: stands, and **every suggestion it made in the run in progress**, by its row's id, each
@@ -4729,20 +4750,27 @@ class Session:
                 + _went_said(task, went, standing=standing))
 
     def _climbing(self) -> _Climb | None:
-        """**The open block's staircase, started afresh as the block opens** (`task.Staircase`;
-        TSK-57's "started fresh"), between trials, as its trials are drawn: at its `start`, else
-        at the level nearest the run's own value of its setting (`_run_values`, the task's start
-        under the run's; `Staircase.nearest`), else at its easiest. A block of the same type
-        opened again, a stage a plan moves back to included, starts afresh too: the block is its
-        occurrence in the run, `len(Scheduler.ended)` while it is open, as `_varied`'s key is.
-        `None` in a block with no staircase."""
+        """**The open block's staircase, started as the block opens** (`task.Staircase`), between
+        trials, as its trials are drawn: at its `start`, else at the level nearest the run's own
+        value of its setting (`_run_values`, the task's start under the run's;
+        `Staircase.nearest`), else at its easiest -- **but in a training progression a stage the
+        run returns to resumes at the level its staircase was at when the run left it** (the PI,
+        2026-11-08, asked in the UI: "Pick up where it left" and "Pick up there too"; TSK-57 as
+        amended; `_resumed`), its count toward the next step started fresh. A stage the run has
+        not visited starts as above. The block is its occurrence in the run,
+        `len(Scheduler.ended)` while it is open, as `_varied`'s key is. `None` in a block with no
+        staircase."""
         occurrence = len(self._scheduler.ended)
         if self._climb_block != occurrence:
             staircase = self._scheduler.block.staircase
-            self._climb_block, self._climb = occurrence, None
+            if self._climb is not None and self._climb_stage is not None:
+                # The stage left keeps the level its staircase reached, for a return.
+                self._left[self._climb_stage] = self._climb.value
+            stage = self._scheduler.block.name
+            self._climb_block, self._climb, self._climb_stage = occurrence, None, stage
             if staircase is not None:
                 self._climb = _Climb.started(
-                    staircase, self.spec.values, self._first_level,
+                    staircase, self.spec.values, self._resumed(stage, self._first_level),
                     whole=staircase.setting in _whole_numbers(self._task))
         # Its counts and its step as the run's values make them now (`_Climb.restep`).
         if self._climb is not None:
@@ -4794,6 +4822,21 @@ class Session:
                     self._realized_at.add((name, luminance))
                     new.setdefault(name, []).append(_realization(shown))
         return new or None
+
+    def _resumed(self, stage: str, otherwise):
+        """**Where stage `stage`'s staircase starts** (`_climbing`): in a training progression
+        (`task.ByCriterion`) one the run left resumes at the level nearest the value its staircase
+        was at then (`_left`; the PI, 2026-11-08, "Pick up where it left", "Pick up there too");
+        else as `otherwise` gives it. A function of the staircase, as `_Climb.started` takes."""
+        left = self._left.get(stage)
+        if left is None or not isinstance(getattr(self._scheduler, "order", None), ByCriterion):
+            return otherwise
+
+        def level(staircase: Staircase) -> int:
+            nearest = staircase.nearest(left)
+            return otherwise(staircase) if nearest is None else nearest
+
+        return level
 
     def _first_level(self, staircase: Staircase) -> int:
         """**Where a block's staircase starts** (`_climbing`): at its `start`, else at the level
@@ -5569,7 +5612,8 @@ class Session:
         self._listed = {}
         # No block's staircase has run yet (the pop-out search build): each starts as its block
         # opens (`_climbing`). And the rig has suggested nothing in this run.
-        self._climb = self._climb_block = None
+        self._climb = self._climb_block = self._climb_stage = None
+        self._left = {}
         self._suggested, self._suggestions = None, {}
         # Nor offered to widen its pool, which it has not looked at yet, nor paired a trial.
         self._widening, self._pool_was, self._paired = None, None, {}
@@ -5610,6 +5654,7 @@ class Session:
             # The stage's staircase as that run's last step left it, the block it is open in this
             # run's first (`_climbing`); its bars judged again; the suggestions still standing.
             self._climb_block, self._climb = 0, going.climb
+            self._climb_stage, self._left = going.stage, dict(going.left)
             self._suggested, self._widening = _carried(task, going, scheduler)
             for offered in (self._suggested, self._widening):
                 if offered is not None:

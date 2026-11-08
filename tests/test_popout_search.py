@@ -49,7 +49,7 @@ from wl_xcon.eye import EyeReading, Sample, Tracker
 from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.gaze import Tracked
 from wl_xcon.geometry import on_circle_deg, separation_deg
-from wl_xcon.link import Decline, NextBlock, SetParameter, Simulated, Stop
+from wl_xcon.link import BackBlock, Decline, NextBlock, SetParameter, Simulated, Stop
 from wl_xcon.photometry import D65, SRGB, ColorSetLight, xyY
 from wl_xcon.run import Recorded, run_trial
 from wl_xcon.task import (
@@ -1367,4 +1367,60 @@ def test_the_pis_margin_holds_a_suggestion_until_37_of_50_and_back_until_27(task
     assert back.bar(MOVE_BACK)[0] == 27 and back.holds(MOVE_BACK)
     back.judged(Outcome.CORRECT, True, True, False, True)
     assert back.bar(MOVE_BACK)[0] == 28 and not back.holds(MOVE_BACK)
+
+
+class _Moves(Simulated):
+    """**A trainer who moves the run by hand**: `moves[n]` sent at drain `n`, noting the open stage
+    and its staircase's value as it is left (`left`); the run stopped at drain `stop_at`."""
+
+    def __init__(self, moves: dict, stop_at: int) -> None:
+        super().__init__()
+        self.moves, self.stop_at, self.drains = moves, stop_at, 0
+        self.session: Session | None = None
+        self.left: list = []
+
+    def drain(self) -> list:
+        self.drains += 1
+        if self.drains in self.moves:
+            climb = self.session._climb
+            self.left.append((self.session._scheduler.block.name,
+                              None if climb is None else climb.value))
+            self.queue(self.moves[self.drains])
+        if self.drains == self.stop_at:
+            self.queue(Stop(by=JAKE))
+        return super().drain()
+
+
+def test_a_stage_the_animal_returns_to_picks_up_where_it_left(task, tmp_path):
+    """The PI, 2026-11-08, asked in the UI: "Pick up where it left" -- "Fade-in resumes at the step
+    the animal reached before moving up; if it struggles there, the staircase eases" -- and "Pick
+    up there too": "Any stage the animal returns to resumes where it left". A run in Fade-in is
+    moved up to Crowd, back to Fade-in, and up to Crowd again: **each return resumes at the level
+    its staircase was at when the run left that stage**, never at its floor or nearest the run's
+    value, as a stage first visited starts (TSK-57 as amended), and its line says the staircase
+    gave it."""
+    trainer = _Moves({26: NextBlock(by=JAKE), 46: BackBlock(by=JAKE), 58: NextBlock(by=JAKE)},
+                     stop_at=64)
+    session = _opened(replace(_spec(tmp_path, seed=5, start_block="Fade-in"), accuracy=0.95),
+                      trainer)
+    trainer.session = session
+
+    session.run()
+
+    lines = _rows(session, "trials.jsonl")
+    visits: list = []
+    for line in lines:
+        if not visits or visits[-1][0] != line["block"]:
+            visits.append((line["block"], []))
+        visits[-1][1].append(line)
+    assert [block for block, _ in visits] == ["Fade-in", "Crowd", "Fade-in", "Crowd"]
+    (_, fade_left), (_, crowd_left), _ = trainer.left
+    assert fade_left > 0.1 and crowd_left > 4, "the stages left above where they start"
+    back = visits[2][1][0]
+    assert back["params"]["distractor_fraction"] == fade_left
+    assert back["drawn"]["distractor_fraction"] == "staircase"
+    up = visits[3][1][0]
+    assert up["params"]["set_size"] == crowd_left and up["drawn"]["set_size"] == "staircase"
+    # A stage first visited starts as it always has: Crowd at 4.
+    assert visits[1][1][0]["params"]["set_size"] == 4
 

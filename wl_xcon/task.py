@@ -2172,8 +2172,11 @@ class Staircase:
 
     **`start`**: the index of the level each block of it starts at; `None`, the level nearest the
     run's own value of the setting (the task's start under the run's; `nearest`), or the easiest
-    where the run gives it none. **Each block starts its staircase afresh as it opens**, a stage a
-    plan moves back to included (TSK-57's "started fresh").
+    where the run gives it none. **Each block starts its staircase afresh as it opens** -- **but in
+    a training progression a stage the run returns to, by a move back or a move up, resumes at the
+    level its staircase was at when the run left it**, its count started fresh (the PI,
+    2026-11-08, asked in the UI: "Pick up where it left", "Pick up there too"; TSK-57 as amended;
+    `taskd.Session._climbing`).
 
     **A person's value on the setting holds it** (TSK-32: "a live value on its parameter holds it";
     engine build C3's held setting): its trials take the person's value and leave the staircase

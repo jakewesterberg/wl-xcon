@@ -572,7 +572,10 @@ makes again (`remakes`), the old one answered "made again". **A block may
 step one of its settings by a staircase** (`task.Staircase`, `Block.staircase`; the pop-out search
 build, 2026-11-07): between trials, as the trial loop draws (`taskd.Session._climbing`), a level
 harder after `down` right answers in a row and a level easier after `up` failures, by TSK-33's
-classes (`task.staircase_verdict`), never past either end, started afresh as each block opens; a
+classes (`task.staircase_verdict`), never past either end, started afresh as each block opens --
+but a stage of a training progression the run returns to resumes at the level its staircase had
+when the run left it, its count fresh (`Session._climbing`, `_left`, rebuilt by `went_on` after a
+crash; the PI, 2026-11-08, "Pick up where it left"); a
 person's value on the setting holds it and a hand-back resumes it at the level nearest that value,
 and each trial's line marks the value it gave `drawn` `"staircase"`. **Every number in a staircase
 or a bar may be a setting** (the fix round, 2026-11-07; the PI, "everything should be adjustable in

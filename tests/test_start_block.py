@@ -835,3 +835,44 @@ def test_a_suggestion_withdrawn_past_its_margin_is_not_brought_back_by_a_resume(
     first = _running(second, 1)[0]
     assert (first.suggestion, first.widen) == (None, None)
 
+
+#: Two stages each stepping the set size (the PI's "Pick up where it left", 2026-11-08): `Fade`
+#: from 2 objects, `Crowd` (`STAIRS`) from the level nearest the run's 6.
+FADE = _stage("Fade", None, staircase="Staircase('set_size', (2, 3, 5, 7), start=0)")
+
+
+@pytest.mark.parametrize("case", ["back", "up", "up held"])
+def test_a_returned_to_stage_picks_up_where_it_left_after_a_crash(tmp_path, case):
+    """The PI, 2026-11-08: "Pick up where it left" and "Pick up there too" -- a stage the run
+    returns to resumes where its staircase was when the run left it -- **through a crash-resume**,
+    the record rebuilding each stage's level (`taskd.went_on`'s `left`). Run 1: six right in Fade
+    step it from 2 to 5; moved up by hand, two wrong in Crowd step it from 6 to 4; its process
+    stops there (`back`), or after a move back to Fade (`up`). The resumed run, moved back, finds
+    Fade at 5, not 2; moved up, Crowd at 4, not 6. **A person's hold wins over the remembered
+    level** (`up held`): set size held at 10 plays there, the staircase waiting at its remembered
+    level."""
+    first = {5: [NextBlock(by=JAKE)]}
+    script = ["right"] * 6 + ["wrong"] * 2
+    if case != "back":
+        first[7] = [BackBlock(by=JAKE)]
+        script.append("right")
+    folders, second = _stranded_in(tmp_path, [FADE, CROWD], script, first, killed=True)
+    then = {"back": {0: [BackBlock(by=JAKE)]}, "up": {0: [NextBlock(by=JAKE)]},
+            "up held": {0: [SetParameter(name="set_size", value=10, by=JAKE),
+                            NextBlock(by=JAKE)]}}[case]
+    _plays(second, ["right"] * 4, then)
+    _step(second, _start())
+
+    lines = [(line["block"], line["params"]["set_size"]) for line in _run_lines(folders, 1)]
+    if case == "back":
+        assert lines[:2] == [("Crowd", 4), ("Fade", 5)]
+    elif case == "up":
+        assert lines[:2] == [("Fade", 5), ("Crowd", 4)]
+    else:
+        assert lines[0] == ("Fade", 5)
+        assert lines[2:] == [("Crowd", 10), ("Crowd", 10)]
+        frames = [frame for frame in _running(second, 1)
+                  if frame.block == "Crowd" and frame.staircase is not None]
+        assert frames and all((frame.staircase.held, frame.staircase.levels[frame.staircase.level])
+                              == (True, 4) for frame in frames[-2:])
+

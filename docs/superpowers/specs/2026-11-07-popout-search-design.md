@@ -111,6 +111,9 @@ At the end of Fade-in the distractors match the odd one's luminance, so it diffe
   (`crowd_step`); a step changed live re-derives the levels at the level nearest the staircase's value. Each
   staircase's easiest end is a setting too, a tenth of full (`fade_in_floor`) and four discs (`crowd_floor`); its hardest
   end, full and twelve, is the stage's own.
+- **A stage the animal returns to picks up where it left** (the PI, 2026-11-08, asked in the UI: "Pick up where it
+  left", "Pick up there too"): its staircase resumes at the step the animal reached before it left, by a move back or a
+  move up; if it struggles there, the staircase eases (one miss, one step easier).
 - **A lock**: "there should also be a way for the experimenter to lock the parameters". A person's live value on a
   setting holds it, and the staircase leaves it alone until it is handed back (TSK-32: "a live value on its parameter
   holds it"; built in engine build C3 as a held setting and a hand-back).

@@ -53,16 +53,16 @@ from then). **Hardware verified: none.**
 - **The record**: the session folder `xcon/` that wl-preproc reads (`record.py`).
 
 ## What is next (the PI, 2026-11-07)
-1. **Merge the pop-out search build**, behind the PI's yes by name. In this order (the review's I4): merge wl-xtasks'
-   branch `popout-search-2026-11-07` in its own repository first (it is inert there, importing only names this branch
-   adds); then set `WLX_REQUIRE_XTASKS=1` in CI here (XC-490); then run this branch's CI and read every shard. The
+1. **Merge the pop-out search build**, behind the PI's yes by name. wl-xtasks' `popout-search-2026-11-07` is on its main
+   (`30888d8`, the PI's "Merge it", 2026-11-08); its later edits are on branch `popout-search-2026-11-08`, to merge the
+   same way. Then set `WLX_REQUIRE_XTASKS=1` in CI here (XC-490), run this branch's CI and read every shard. The
    wl-preproc ask in its amendments section is still to be sent (XC-491): the color-set shapes, `luminance`, the
-   `realized` list and line field with `xyz`, and `remakes`. **To tell the PI at the merge ask, a line each**: the
-   suggestion can blink near 80% (the review's M2); moving back starts a stage's staircase at its easiest (M3); the
-   builder's ranges for every new setting (TSK-75); a live change of `disc_size`, `fix_size` or `color_luminance`
-   (expected) keeps trials out of moving up until handed back; a re-made widening stands on the old stage's bar until
-   answered, beside a move back too; bars set live so they bounce are not warned; the fixation window reaching the discs'
-   windows is a warning, the ranges left as they are (the re-review's I-2).
+   `realized` list and line field with `xyz`, and `remakes`. **Decided 2026-11-08**: a suggestion stays up until its bar
+   is missed by more than 3 answers (`suggestion_margin`), and a stage the animal returns to picks up where it left.
+   **To tell him at the merge ask, a line each**: the builder's ranges for every new setting (TSK-75); a live change of
+   `disc_size`, `fix_size` or `color_luminance` (expected) keeps trials out of moving up until handed back; a re-made
+   widening stands on the old stage's bar until answered, beside a move back too; bars set live so they bounce are not
+   warned; the fixation window reaching the discs' windows is a warning, the ranges as they are (the re-review's I-2).
 2. **Demo mode**, with its own plan: its design (`docs/superpowers/specs/2026-10-06-demo-mode-design.md`) and its two
    `Service._open` welfare changes are approved by the PI (2026-11-07; XC-013).
 3. **Then the display (build E)**, designed with the PI; "done" includes a real screen.
@@ -79,7 +79,7 @@ clean CI.
 - **Suite**: `WLX_REQUIRE_PREPROC=1 WLX_REQUIRE_BROWSER=1 WLX_REQUIRE_XTASKS=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p
   no:cacheprovider -n auto` (a `wl-preproc` checkout or link at the root, and a `wl-xtasks` one beside it, git-ignored
   at `/wl-xtasks`, holding `tasks/popout_search.py`; wl-sync installed at the commit `wl-preproc/pyproject.toml` pins).
-  **5603 passed on `main`** (`56ccca2`); the pop-out build's branch has more (**5809 passed**), none skipped.
+  **5603 passed on `main`** (`56ccca2`); the pop-out build's branch has more (**5820 passed**), none skipped.
 - **CI**: each push sweeps the changed modules with mutants (`tools/mutation_gate.py`); the nightly sweeps all, in 24
   shards. Read every shard's log to its closing line; the run's summary can be wrong.
 - **The neighbors** are read weekly, by their handover files (the PI, 2026-11-07): wl-preproc, wl-sync, wl-works,
