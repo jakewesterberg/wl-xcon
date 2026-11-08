@@ -597,11 +597,15 @@ def test_a_rules_numbers_may_be_settings_checked_at_load_and_read_live(tmp_path)
     whole number from 1."""
     rule = lambda criterion: ('Plan([Block("b", [Condition("c", {}, target=5)], '
                               f'criterion={criterion})])')
+    # Each rule built outside its f-string: Python 3.11 allows no backslash, nor the f-string's own
+    # quote, inside a replacement field (CI's 3.11 job, run 42473964496).
+    fine, undeclared = rule("(P('share'), P('window'))"), rule("(P('nope'), 10)")
+    brighter, narrow = rule("(P('target_luminance'), 10)"), rule("(0.8, P('fix_window'))")
     plans = "{" + ", ".join([
-        f'"fine": {rule("(P(\'share\'), P(\'window\'))")}',
-        f'"undeclared": {rule("(P(\'nope\'), 10)")}',
-        f'"brighter": {rule("(P(\'target_luminance\'), 10)")}',
-        f'"narrow": {rule("(0.8, P(\'fix_window\'))")}',
+        f'"fine": {fine}',
+        f'"undeclared": {undeclared}',
+        f'"brighter": {brighter}',
+        f'"narrow": {narrow}',
         '"back": Plan([Block("b", [Condition("c", {}, target=5)]), '
         'Block("d", [Condition("c", {}, target=5)])], '
         'order=ByCriterion(fall_back=(P("share"), P("nope"))))',

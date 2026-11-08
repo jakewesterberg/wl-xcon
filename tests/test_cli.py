@@ -147,6 +147,39 @@ def test_a_clean_task_exits_zero(capsys):
             in capsys.readouterr().out)
 
 
+@pytest.mark.parametrize("load", ["task", "settings"])
+def test_a_file_rewritten_in_the_same_second_at_the_same_size_loads_as_rewritten(
+        tmp_path, monkeypatch, load):
+    """A task (or settings) file is read from its source each time it is loaded, never from a
+    bytecode cache: Python's cache trusts the source's size and its modification time in whole
+    seconds, so a file rewritten at the same size within the second ran as it was before on Linux
+    (CI's run 42473964496, `test_start_block`'s "task edited"). Bytecode writing is on here, as it
+    is on a rig, and the rewrite keeps the old size and modification time. Nothing is written
+    beside the file either."""
+    monkeypatch.setattr(sys, "dont_write_bytecode", False)
+    if load == "task":
+        path = tmp_path / "search.py"
+        path.write_text(Path(f"{TASKS}/visual_search.py").read_text())
+        before, after = "start=40.0", "start=41.0"
+        read = lambda: next(p.start for p in cli._load_task(path).structures["search"].params
+                            if p.name == "fix_luminance")
+        was, now = 40.0, 41.0
+    else:
+        path = tmp_path / "settings.py"
+        path.write_text("VALUE = 40\n")
+        before, after = "40", "41"
+        read = lambda: cli._load_named(path, "VALUE")
+        was, now = 40, 41
+    assert read() == was
+    held = path.stat()
+    path.write_text(path.read_text().replace(before, after))
+    os.utime(path, ns=(held.st_atime_ns, held.st_mtime_ns))
+    assert path.stat().st_size == held.st_size
+
+    assert read() == now
+    assert not (tmp_path / "__pycache__").exists()
+
+
 def test_the_installed_command_can_load_the_test_rig(tmp_path):
     """The in-process suite gets `tasks/` from pytest's `pythonpath`; the installed
     `wlx` does not ship it and a console script does not put the working directory on

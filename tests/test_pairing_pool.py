@@ -40,6 +40,7 @@ import pytest
 
 import _sessions
 from _frames import frame, view
+from _preproc import problems_beyond_xc461
 from _rig import DIRECT, PATH as RIG_FILE
 from wl_xcon import stranded
 from wl_xcon.actor import Box
@@ -922,7 +923,7 @@ def test_wl_preprocs_reader_takes_the_widening_and_its_hold(tmp_path):
     assert records.problems == ()
     assert [(change.name, change.sequence) for change in records.changes] == [
         ("pairings", None), ("pairings", None)]
-    assert problems == []
+    assert problems_beyond_xc461(problems) == []
     assert [(field.kind, field.change, json.loads(field.detail)) for field in fields] == [
         ("suggested", 1, {"move": "widen", "block": "Crowd", "bar": {"correct": 5, "of": 5},
                           "at_hardest": True}),

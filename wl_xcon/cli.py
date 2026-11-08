@@ -60,6 +60,24 @@ def _require_file(path: Path | None, name: str) -> None:
         raise SystemExit(f"refused: {name} {shown} cannot be read: {why.strerror}") from why
 
 
+def _from_source(path: Path):
+    """A fresh module for a Python file, and the file's code **compiled from its source as it is
+    now**, for the caller to run in it: never through a bytecode cache. `spec.loader.exec_module`
+    reads `__pycache__` whenever its record of the source matches, and that record is the source's
+    size and its modification time in whole seconds: a file rewritten at the same size within the
+    second it was last loaded runs as it was (CI's run 42473964496: `test_start_block`'s "task
+    edited" resumed the unedited task on Linux). It also writes `__pycache__` into the folder a task
+    came from, the task library's included. So the source is read and compiled here each time, with
+    only the file's own `from __future__` lines. (`_load_bounds`, welfare-listed, loads its file the
+    old way until the PI approves the same change there.)"""
+    spec = importlib.util.spec_from_file_location(path.stem, path)
+    if spec is None or spec.loader is None:
+        raise SystemExit(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    code = compile(path.read_bytes(), str(path), "exec", dont_inherit=True)
+    return module, code
+
+
 def _load_task(path: Path) -> Task:
     """Import a task file and return the task object it defines (engine spec §3.5; engine build
     C1): exactly one `Task`, which holds its trial structures and says what its settings mean, what
@@ -71,11 +89,8 @@ def _load_task(path: Path) -> Task:
     the checks run *at load*: by the time this returns, the task is a data structure that can be
     inspected rather than a program to be trusted.
     """
-    spec = importlib.util.spec_from_file_location(path.stem, path)
-    if spec is None or spec.loader is None:
-        raise SystemExit(f"cannot load {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module, code = _from_source(path)
+    exec(code, vars(module))
     found = list(vars(module).values())
     tasks = [value for value in found if isinstance(value, Task)]
     if len(tasks) != 1:
@@ -99,11 +114,8 @@ def _load_allocation(path: Path | None) -> Allocation:  # noqa: C901
     """
     if path is None:
         return PROVISIONAL
-    spec = importlib.util.spec_from_file_location(path.stem, path)
-    if spec is None or spec.loader is None:
-        raise SystemExit(f"cannot load {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module, code = _from_source(path)
+    exec(code, vars(module))
     found = vars(module).get("ALLOCATION")
     if not isinstance(found, Allocation):
         raise SystemExit(f"{path} must define ALLOCATION")
@@ -136,12 +148,9 @@ def _load_named(path: Path, name: str) -> object:
     file, so a `ValueError` from running it is said as a refusal sentence rather than
     left as a traceback. So is a `TypeError`: a file written before a field existed
     fails as a missing argument."""
-    spec = importlib.util.spec_from_file_location(path.stem, path)
-    if spec is None or spec.loader is None:
-        raise SystemExit(f"cannot load {path}")
-    module = importlib.util.module_from_spec(spec)
+    module, code = _from_source(path)
     try:
-        spec.loader.exec_module(module)
+        exec(code, vars(module))
     except (ValueError, TypeError) as refused:
         raise SystemExit(f"refused: {path}: {refused}") from refused
     return vars(module).get(name)
