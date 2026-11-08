@@ -1203,6 +1203,31 @@ def test_a_panel_too_dim_for_the_colors_range_top_warns_and_refuses_only_the_val
         started.run()
 
 
+#: A panel a twenty-fifth as bright as `DIM`: the four colors' reachable top on it, under 1 cd/m²,
+#: is below the least `color_luminance` allows.
+DARK = measured(**{name: xyY(x, y, Y * 0.004) for name, (x, y, Y) in PRIMARIES.items()},
+                id="dark@2027-01-20")
+
+
+def test_a_panel_that_cannot_show_the_colors_at_any_value_their_setting_allows_refuses_the_task():
+    """XC-494's other side: where a panel cannot show the four colors at even the least of
+    `color_luminance`'s range, 1 cd/m², not even the set's apex, no value of the setting can be
+    drawn, so **the task is refused at load**, as a fixed luminance it cannot show is
+    (`unrealizable-color`): every color the task can draw, at both ends of the range, the lights
+    handed on as given (`check._within_reach`; CI's sweep of run 42496196528, where it survived
+    neutering, nothing else refusing them)."""
+    found = check_task(_load_task(TASK_FILE), _load_allocation(Path(ALLOCATION)), geometry=DIRECT,
+                       calibration=DARK, deployment=Deployment.RIG_FIXED, source=TASK_FILE)
+    # The color set's own: the fixation point's gray at its range's top, 80 cd/m², is the
+    # warning it is on any panel too dim for it.
+    unshown = [f for f in found if f.code == "unrealizable-color" and "'isohue'" in f.detail]
+
+    assert unshown and all(f.blocking for f in unshown)
+    for color in ("blue", "purple", "red", "green"):
+        for end in ("luminance=1.0", "luminance=30.0"):
+            assert any(f"'isohue', '{color}'" in f.detail and end in f.detail for f in unshown), (
+                color, end)
+
 def _scheduler(task, values: dict, start: int = 0):
     """The pop-out plan's scheduler, as a run makes it, reading `values` live."""
     from wl_xcon import variation

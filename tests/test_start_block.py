@@ -842,7 +842,7 @@ def test_a_suggestion_withdrawn_past_its_margin_is_not_brought_back_by_a_resume(
 FADE = _stage("Fade", None, staircase="Staircase('set_size', (2, 3, 5, 7), start=0)")
 
 
-@pytest.mark.parametrize("case", ["back", "up", "up held", "resumed stage"])
+@pytest.mark.parametrize("case", ["back", "up", "up held", "resumed stage", "returned, then stopped"])
 def test_a_returned_to_stage_picks_up_where_it_left_after_a_crash(tmp_path, case):
     """The PI, 2026-11-08: "Pick up where it left" and "Pick up there too" -- a stage the run
     returns to resumes where its staircase was when the run left it -- **through a crash-resume**,
@@ -853,23 +853,32 @@ def test_a_returned_to_stage_picks_up_where_it_left_after_a_crash(tmp_path, case
     level** (`up held`): set size held at 10 plays there, the staircase waiting at its remembered
     level. **The stage the resumed run goes on in is remembered too** (`resumed stage`; the
     re-review 2, M-3): Crowd, gone on at 4, left for Fade and returned to, comes back at 4, not
-    6."""
+    6. **And a return the process stopped right after** (`returned, then stopped`; CI's sweep of
+    run 42496196528, where `went_on`'s rule for a returned-to stage survived neutering): moved
+    back to Fade, its process stops before Fade's first trial, and the resumed run goes on in Fade
+    at 5, the level the record says it was left at, not 2."""
     first = {5: [NextBlock(by=JAKE)]}
     script = ["right"] * 6 + ["wrong"] * 2
     if case in ("up", "up held"):
         first[7] = [BackBlock(by=JAKE)]
         script.append("right")
+    if case == "returned, then stopped":
+        first[7] = [BackBlock(by=JAKE)]
     folders, second = _stranded_in(tmp_path, [FADE, CROWD], script, first, killed=True)
     then = {"back": {0: [BackBlock(by=JAKE)]}, "up": {0: [NextBlock(by=JAKE)]},
             "up held": {0: [SetParameter(name="set_size", value=10, by=JAKE),
                             NextBlock(by=JAKE)]},
-            "resumed stage": {0: [BackBlock(by=JAKE)], 1: [NextBlock(by=JAKE)]}}[case]
+            "resumed stage": {0: [BackBlock(by=JAKE)], 1: [NextBlock(by=JAKE)]},
+            "returned, then stopped": {}}[case]
     _plays(second, ["right"] * 4, then)
     _step(second, _start())
 
     lines = [(line["block"], line["params"]["set_size"]) for line in _run_lines(folders, 1)]
     if case == "back":
         assert lines[:2] == [("Crowd", 4), ("Fade", 5)]
+    elif case == "returned, then stopped":
+        assert _run_lines(folders, 0)[-1]["block"] == "Crowd"
+        assert lines[:2] == [("Fade", 5), ("Fade", 5)]
     elif case == "resumed stage":
         assert lines[:3] == [("Crowd", 4), ("Fade", 5), ("Crowd", 4)]
     elif case == "up":
