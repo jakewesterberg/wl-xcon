@@ -4,8 +4,8 @@ on:
   push:
   pull_request:
   schedule:
-    # The full sweep, nightly, sharded twenty-four ways by function (twelve until
-    # 2026-10-22) across the `mutation-full` matrix below. Not decoration: the
+    # The full sweep, nightly, sharded thirty-six ways by function (twelve until
+    # 2026-10-22, twenty-four until 2026-11-09) across the `mutation-full` matrix below. Not decoration: the
     # per-push gate (`mutation`, below) selects on changed files and never
     # escalates on GLOBAL, which cannot see a test deleted from `test_a.py` that
     # was the only thing covering a function in `b.py`. Nothing in a diff makes
@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     # The "run the full sweep now" button: the same sharded full sweep the nightly
     # runs, on demand, for before a big merge -- see docs/CHECKPOINT.md's CI row for
-    # the alternative when twenty-four parallel Actions jobs are not available (a local
+    # the alternative when thirty-six parallel Actions jobs are not available (a local
     # sweep run as parallel lanes in separate `git archive` copies of the tree; the
     # harness mutates files in place, so separate copies are what let the lanes run
     # at once).
@@ -248,7 +248,7 @@ jobs:
 
   mutation-full:
     # The full sweep -- every module in RETURNS, nothing left out by a diff -- split
-    # twenty-four ways so no single job reaches the six-hour default that made this
+    # thirty-six ways so no single job reaches the six-hour default that made this
     # job necessary (see the `mutation` job's comment for the measurement and the
     # GitHub docs citation). Nightly (`schedule`), and on demand
     # (`workflow_dispatch`) before a big merge, so a branch does not have to wait
@@ -259,7 +259,7 @@ jobs:
     #
     # **By function since 2026-09-30, twelve ways then** (PI; six ways by whole
     # module before): `serve` alone held a shard for 2h42m in run 36737681413. Each
-    # shard is `tools/mutation_gate.py --shard K/24`'s K-th of twenty-four
+    # shard is `tools/mutation_gate.py --shard K/36`'s K-th of thirty-six
     # contiguous chunks of every selected function (modules by name, then
     # `mutate.py --all`'s own order), the chunks differing in size by at most one,
     # so a module can be cut between two shards; each runs `mutate.py --all --only
@@ -281,13 +281,20 @@ jobs:
     # estimate; the first twenty-four-shard nightly is its measurement, and whether
     # its 27 jobs queue (XC-407). `tests/test_mutation_gate.py` reads this file and
     # holds each job's matrix to its own `--shard K/N`.
+    #
+    # **Thirty-six ways since 2026-11-09.** The pop-out search build's sweep (run
+    # 42527410991: 1474 functions, 61-62 a shard, each mutant a suite of up to ten
+    # minutes) had 4 of its 24 shards cancelled at six hours, about 23 functions
+    # unjudged, 1443 caught and none surviving. The PI chose "36 jobs, re-run first"
+    # (2026-11-09): about two-thirds the work a shard. Push runs stay at 12.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
-                13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]
+                13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+                25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -328,8 +335,8 @@ jobs:
           )"
           pip install "$req"
       - run: pip install -e ".[dev,contract,console,signin]"
-      - name: Mutation gate (function shard ${{ matrix.shard }}/24)
+      - name: Mutation gate (function shard ${{ matrix.shard }}/36)
         env:
           WLX_REQUIRE_PREPROC: "1"
           WLX_REQUIRE_XTASKS: "1"
-        run: python tools/mutation_gate.py --all --shard ${{ matrix.shard }}/24
+        run: python tools/mutation_gate.py --all --shard ${{ matrix.shard }}/36

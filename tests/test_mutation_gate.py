@@ -167,9 +167,9 @@ def test_the_returns_flag_matches_what_the_module_needs():
 _MODULES = sorted(gate.RETURNS)
 
 #: Every count CI or a person could plausibly ask for -- a push runs 12, the nightly
-#: 24 since 2026-10-22 -- then one past the work itself (the package held 566
-#: functions on 2026-09-30, 964 on 2026-10-22).
-_COUNTS = [*range(1, 13), 24, 100, 1000]
+#: 24 from 2026-10-22 and 36 since 2026-11-09 -- then one past the work itself (the
+#: package held 566 functions on 2026-09-30, 964 on 2026-10-22, 1474 on 2026-11-08).
+_COUNTS = [*range(1, 13), 24, 36, 100, 1000]
 
 
 @functools.cache
@@ -437,8 +437,8 @@ def test_shard_combined_with_changed_only_slices_only_the_smaller_selection():
     partitions the functions of whatever modules were already selected, never
     re-expanding them back to the full `RETURNS` set. The push job pairs
     `--changed-only` with `--shard` (XC-141), so a merge push's selection is cut
-    across twelve machines by function, as the nightly's is across twenty-four
-    (twelve until 2026-10-22)."""
+    across twelve machines by function, as the nightly's is across thirty-six
+    (twelve until 2026-10-22, twenty-four until 2026-11-09)."""
     modules, _ = gate.select(
         ["wl_xcon/dio.py", "wl_xcon/eye.py"], changed_only=True
     )
@@ -532,7 +532,7 @@ def test_a_failing_part_fails_the_shard_and_names_its_module(monkeypatch, capsys
     assert f"MUTATION GATE FAILED: {failing}" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("n", [12, 24], ids=["push", "nightly"])
+@pytest.mark.parametrize("n", [12, 36], ids=["push", "nightly"])
 def test_the_shard_counts_ci_runs_through_mutate_run_every_function_exactly_once(
     monkeypatch, n
 ):
@@ -541,7 +541,7 @@ def test_the_shard_counts_ci_runs_through_mutate_run_every_function_exactly_once
     with only the suite runs and the neutering stubbed. Across the `n`, every
     function the package has is mutated once, in order, and every call brackets
     its part with one baseline and one restored suite. Twelve is a push's count and
-    twenty-four the nightly's since 2026-10-22; `test_each_mutation_job_runs_...`
+    thirty-six the nightly's since 2026-11-09 (twenty-four from 2026-10-22); `test_each_mutation_job_runs_...`
     holds the workflow to both."""
     spec = importlib.util.spec_from_file_location(
         "wlx_mutate_for_gate_test", gate.ROOT / "tools" / "mutate.py"
@@ -582,7 +582,7 @@ def test_the_shard_counts_ci_runs_through_mutate_run_every_function_exactly_once
 
 # ---------------------------------------------------------------------------
 # The workflow's two matrices (PI, 2026-10-22, "Both": the nightly 24 shards, a
-# push still 12). A matrix and its own `--shard K/N` are written apart, so they
+# push still 12; 2026-11-09, "36 jobs, re-run first": the nightly 36). A matrix and its own `--shard K/N` are written apart, so they
 # can disagree, and the cheap way is silent: twelve jobs of `K/24` sweep half the
 # functions in a run that reads green.
 # ---------------------------------------------------------------------------
@@ -614,13 +614,15 @@ def _gate_shards(job: str) -> list[tuple[int, int]]:
 
 
 @pytest.mark.parametrize(
-    ("job", "n"), [("mutation", 12), ("mutation-full", 24)], ids=["push", "nightly"]
+    ("job", "n"), [("mutation", 12), ("mutation-full", 36)], ids=["push", "nightly"]
 )
 def test_each_mutation_job_runs_every_shard_of_its_own_count_once(job, n):
     """Each K from 1 to N once, every job of a matrix naming the same N, and that N
-    the PI's: 24 for the nightly, whose twelve outgrew GitHub's 360-minute job
-    limit (2, 8 and 7 of 12 shards cancelled on 2026-10-20, 21 and 22), and 12 for
-    a push ("Push runs stay at 12")."""
+    the PI's: 36 for the nightly, whose twelve outgrew GitHub's 360-minute job
+    limit (2, 8 and 7 of 12 shards cancelled on 2026-10-20, 21 and 22) and whose
+    twenty-four did too (4 of 24 on the pop-out build's sweep, run 42527410991;
+    the PI, 2026-11-09: "36 jobs, re-run first"), and 12 for a push ("Push runs
+    stay at 12")."""
     assert _gate_shards(job) == [(k, n) for k in range(1, n + 1)]
 
 

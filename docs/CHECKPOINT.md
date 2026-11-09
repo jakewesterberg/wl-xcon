@@ -81,8 +81,8 @@ clean CI.
   no:cacheprovider -n auto` (a `wl-preproc` checkout or link at the root, and a `wl-xtasks` one beside it, git-ignored
   at `/wl-xtasks`, holding `tasks/popout_search.py`; wl-sync installed at the commit `wl-preproc/pyproject.toml` pins).
   **5603 passed on `main`** (`56ccca2`); the pop-out build's branch has more (**5830 passed**), none skipped.
-- **CI**: each push sweeps the changed modules with mutants (`tools/mutation_gate.py`); the nightly sweeps all, in 24
-  shards. Read every shard's log to its closing line; the run's summary can be wrong.
+- **CI**: each push sweeps the changed modules with mutants (`tools/mutation_gate.py`); the nightly sweeps all, in 36
+  shards (the PI, 2026-11-09; a big branch starts the same sweep by hand before its merge). Read every shard's log to its closing line; the run's summary can be wrong.
 - **The neighbors** are read weekly, by their handover files (the PI, 2026-11-07): wl-preproc, wl-sync, wl-works,
   wl-xtasks. Last read: 2026-11-07, by the audit (wl-sync's answer of 2026-10-18 was found unread
   that day: its session endpoint is XC-460). Open asks of each: `docs/pending-*-amendments.md`.
