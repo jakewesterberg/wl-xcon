@@ -62,9 +62,11 @@ own"), never under `--root`, so a demo never sits among the real sessions and a 
 never holds up a real animal's open (`Service._in_demo_root`). Either way a demo needs the
 link's fourth endpoint, where its page's pointer reports arrive; it is never resumed, only
 ended; and its pre-flight names the mouse as its gaze and gives each input a key
-(`Service._preflight`). **A demo opens only through `Service._open`'s demo path**
-(`_session_for`), which no build has until demo mode's Task 5 gives `_open` its two approved
-changes: until then every demo open is refused, never quietly a live session.
+(`Service._preflight`). **A demo opens only through `Service._open`'s demo path**, its two
+changes the PI approved (demo mode §8; 2026-11-07, "Approve both and the design"): a demo for any
+animal but `REFERENCE` is refused before anything is written, and a demo is built on the simulated
+card and pump, and on an unmeasured rig the stand-in field, whatever the service was built with. A
+demo command reaching `_session_for` by any other path is refused, never quietly a live session.
 """
 
 from __future__ import annotations
@@ -861,12 +863,11 @@ class Service:
 
         **A command whose `demo` is set is refused unless `demo` is given** ("a demo opens only
         through Service._open's demo path"): `_open` decides a demo's apparatus and passes it here
-        (demo mode §8), so a demo never becomes a live session by a path that did not. Until demo
-        mode's Task 5 gives `_open` that path, every demo open is refused here. **A demo's session
-        id is free in both of a rig's folders, and on a rig service no demo opens while one in its
-        demo folder is stranded** (the stranded rule within a demo's own folder, demo mode §3.2);
-        a real session's id is free in its demo folder too, so an End naming one names one
-        session."""
+        (demo mode §8, its second change), so a demo never becomes a live session by a path that
+        did not. **A demo's session id is free in both of a rig's folders, and on a rig service no
+        demo opens while one in its demo folder is stranded** (the stranded rule within a demo's
+        own folder, demo mode §3.2); a real session's id is free in its demo folder too, so an End
+        naming one names one session."""
         if command.demo and not demo:
             raise ValueError(
                 "a demo opens only through Service._open's demo path, and this one did not come "
@@ -1094,6 +1095,16 @@ class Service:
                 f"Resume it, or record its return with End session, naming its session",
             )
             return
+        # **A demo is for the test monkey alone** (demo mode §8, change 1; the PI, 2026-11-07,
+        # "Approve both and the design"): refused before anything is written.
+        if command.demo and command.animal != "REFERENCE":
+            self._refuse(
+                "open",
+                command.by,
+                "a demo is for the test monkey, REFERENCE, alone: nothing simulated may enter "
+                "another animal's records. Nothing was recorded",
+            )
+            return
         # What a departure's question is posed for, beside its session and instant (fix
         # round 1 of Task 7): the animal its warning names, the deployment and the setup.
         asked_about = (command.animal, command.deployment, command.view)
@@ -1105,7 +1116,14 @@ class Service:
             if unasked is not None:
                 self._refuse("open", command.by, unasked)
                 return
-        session = self._built("open", command.by, lambda: self._session_for(command))
+        # **A demo on the simulated card and pump, whatever this service was built with** (demo
+        # mode §8, change 2; the same approval), and on an unmeasured rig the stand-in field,
+        # which `demo=True` gives it in `_build`.
+        if command.demo:
+            session = self._built("open", command.by, lambda: self._session_for(
+                command, card=SimulatedCard, pump=SimulatedPump, demo=True))
+        else:
+            session = self._built("open", command.by, lambda: self._session_for(command))
         if session is None:
             return
         # **The warnings this open asks to accept** (engine spec §19.3: "Accepted once per

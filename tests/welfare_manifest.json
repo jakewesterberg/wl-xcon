@@ -57,8 +57,8 @@
       "path": "wl_xcon/service.py",
       "qualname": "Service._open",
       "doc": "`Service._open`",
-      "sha256": "2d0dc320fba54f729315de4057ea866d17efd7aaafd08cf85e806ca92cd451a6",
-      "approved": "the PI's welfare approvals to 2026-11-07, as merged at 47c5271"
+      "sha256": "e8b510c52dd4d71b2683192b90379d8c16377fc7469cbf62b53e5b8f48275274",
+      "approved": "the PI, 2026-11-07, asked in the UI: 'Approve both and the design' (demo mode's two Service._open changes: a demo refused for any animal but REFERENCE before anything is written; a demo session given the simulated card and pump, and on an unmeasured rig the stand-in field, whatever the service was built with)"
     },
     {
       "name": "service.Service._end",

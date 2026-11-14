@@ -3,13 +3,11 @@ its folder and its one animal, the simulators, the stand-in field, the record, `
 a demo never resumed, and a rig's own demo folder (`--demo-root`; the PI, 2026-11-14, "A demo
 folder of its own").
 
-**`_open`'s demo path is demo mode's Task 5** (welfare-listed, its two approved changes). Until it
-lands, every demo open through `Service._open` is refused (`Service._session_for`), which
-`test_a_demo_command_not_built_through_the_demo_path_is_refused` holds; the tests that need a demo
-open stand in for that path with `_DemoPath`, which builds a demo exactly as Task 5's second change
-does, and drive the rest of the service's own path -- open, check, start, end -- through it. The
-unit tests drive `Service.step` over an in-process link with an injected wall and an injected pace
-clock, so nothing sleeps; the `wlx taskd` tests bind a real link on loopback.
+**`_open`'s demo path is demo mode's Task 5** (welfare-listed, its two approved changes, held in
+`tests/test_demo_open.py`): the tests here open each demo through a plain `Service`'s own `_open`,
+and drive the rest of its path -- check, start, end -- through it. The unit tests drive
+`Service.step` over an in-process link with an injected wall and an injected pace clock, so nothing
+sleeps; the `wlx taskd` tests bind a real link on loopback.
 """
 
 from __future__ import annotations
@@ -78,23 +76,6 @@ class _Pace:
         self.t += seconds
 
 
-class _DemoPath(Service):
-    """**Demo mode's Task 5, stood in for, until it lands**: `_open`'s second approved change --
-    a demo built on the simulated card and pump with `demo=True`, whatever the service was built
-    with -- made here, in `_session_for`, which `_open` calls. Its first change, a demo refused for
-    any animal but `REFERENCE`, is not stood in for: these tests open demos for `REFERENCE` alone.
-    `demo_card` and `demo_pump` are the factories it passes, so a test can give its own."""
-
-    demo_card = dio.Simulated
-    demo_pump = SimulatedPump
-
-    def _session_for(self, command, *, card=None, pump=None, demo=False):
-        if command.demo and not demo:
-            return super()._session_for(command, card=type(self).demo_card,
-                                        pump=type(self).demo_pump, demo=True)
-        return super()._session_for(command, card=card, pump=pump, demo=demo)
-
-
 def _folders(tmp_path, animals=("REFERENCE",)):
     """`--subjects`, `--tasks` and `--root` for a rig service, as `tests/test_service.py` makes
     them: each animal the eight-hour file renamed for it, `REFERENCE` with its settings, one task."""
@@ -110,10 +91,10 @@ def _folders(tmp_path, animals=("REFERENCE",)):
     return subjects, tasks, root
 
 
-def _made(folders, *, cls=Service, link=None, rig=RIG, rig_path=RIG_FILE, pace=None, **over):
+def _made(folders, *, link=None, rig=RIG, rig_path=RIG_FILE, pace=None, **over):
     subjects, tasks, root = folders
     pace = pace if pace is not None else _Pace()
-    return cls(
+    return Service(
         rig=rig, rig_path=rig_path, subjects=subjects, tasks=tasks,
         allocation=_load_allocation(Path(ALLOCATION)), allocation_path=ALLOCATION,
         root=root, link=link if link is not None else Simulated(), seed=lambda: 7,
@@ -121,20 +102,20 @@ def _made(folders, *, cls=Service, link=None, rig=RIG, rig_path=RIG_FILE, pace=N
     )
 
 
-def _demo_service(tmp_path, *, cls=_DemoPath, **over) -> Service:
+def _demo_service(tmp_path, **over) -> Service:
     """A demo service, as `wlx taskd --demo` builds one: its folder made by `demo_folder`."""
     subjects, root = demo_folder(tmp_path / "demo")
     tasks = tmp_path / "tasks"
     tasks.mkdir()
     shutil.copy(f"tasks/{TASK}", tasks / TASK)
-    return _made((subjects, tasks, root), cls=cls, demo_service=True, **over)
+    return _made((subjects, tasks, root), demo_service=True, **over)
 
 
-def _rig_service(tmp_path, *, demo_root=True, cls=_DemoPath, **over) -> Service:
+def _rig_service(tmp_path, *, demo_root=True, **over) -> Service:
     """A live rig service that offers demos: a gaze endpoint (`Simulated`'s) and, with
     `demo_root`, a demo folder of its own beside `--root`."""
     root = tmp_path / "demos" if demo_root else None
-    return _made(_folders(tmp_path), cls=cls, demo_root=root, **over)
+    return _made(_folders(tmp_path), demo_root=root, **over)
 
 
 def _open(**over) -> OpenSession:
@@ -380,24 +361,27 @@ def test_a_demo_service_refuses_any_card_or_pump_but_the_simulators(tmp_path):
 
 
 def test_a_demo_command_not_built_through_the_demo_path_is_refused(tmp_path):
-    """Until `_open` has its demo path (demo mode's Task 5), every demo open is refused -- never
-    quietly a live session: in a demo service, whose every open is a demo (`_route`), and on a rig
-    service sent one. Nothing written, the id free, no departure."""
-    demo = _demo_service(tmp_path / "a", cls=Service)
-    refused = _step(demo, _open())
-    assert isinstance(refused, Idle) and demo.session is None
-    assert _refused(refused) == [
+    """A demo command reaching `_session_for` by any path but `_open`'s demo path, which calls it
+    with `demo=True` (demo mode §8, its second change), is refused -- never quietly a live session,
+    on any card or pump: nothing written, the id free. `_open` takes that path for every demo, in a
+    demo service and on a rig service sent one (`tests/test_demo_open.py`)."""
+    rig = _rig_service(tmp_path)
+    refusal = (
         "a demo opens only through Service._open's demo path, and this one did not come through "
-        "it, so nothing was recorded"]
-    assert list(demo.root.iterdir()) == []
-
-    rig = _rig_service(tmp_path / "b", cls=Service)
-    assert _refused(_step(rig, _demo()))[-1].startswith("a demo opens only through")
+        "it, so nothing was recorded")
+    for given in ({}, {"card": dio.Simulated, "pump": SimulatedPump}):
+        with pytest.raises(ValueError) as refused:
+            rig._session_for(_demo(), **given)
+        assert str(refused.value) == refusal
     assert list(rig.root.iterdir()) == [] and not rig.demo_root.exists()
-    with pytest.raises(ValueError, match="demo path"):
-        rig._session_for(_demo())
+    opened = _step(rig, _demo())
+    assert opened.phase == "between_runs" and opened.demo, "through _open, a demo"
+    _step(rig, _end())
     opened = _step(rig, _open())
     assert opened.phase == "between_runs" and not opened.demo, "a live open is today's"
+
+    demo = _demo_service(tmp_path / "demo")
+    assert _step(demo, _open()).demo, "every open in a demo service is a demo"
 
 
 def test_build_with_demo_runs_on_the_factories_it_is_given(tmp_path):
@@ -686,7 +670,7 @@ def test_a_demo_record_is_never_resumed_only_ended(tmp_path):
     _step(first, _open())
     first.shutdown()
     folders = (first.subjects, first.tasks, first.root)
-    service = _made(folders, cls=_DemoPath, demo_service=True)
+    service = _made(folders, demo_service=True)
     (found,) = service.stranded
     assert (found.session_id, found.resumable, found.why) == (SESSION, False, DEMO_UNRESUMED)
     frame = _step(service)
@@ -717,7 +701,7 @@ def test_a_stranded_demo_in_the_demo_root_never_holds_up_a_real_open(tmp_path):
     _step(first, _demo())
     first.shutdown()
     folders = (first.subjects, first.tasks, first.root)
-    service = _made(folders, cls=_DemoPath, demo_root=first.demo_root)
+    service = _made(folders, demo_root=first.demo_root)
     assert service.stranded == []
     (found,) = service.stranded_demos
     assert (found.session_id, found.resumable, found.why) == (DEMO, False, DEMO_UNRESUMED)
@@ -767,8 +751,7 @@ def test_an_end_naming_a_stranded_demo_whose_id_a_real_session_has_is_refused_en
                 if path.is_file()}
 
     real_before, demo_before = files(first.root), files(first.demo_root)
-    service = _made((first.subjects, first.tasks, first.root), cls=_DemoPath,
-                    demo_root=first.demo_root)
+    service = _made((first.subjects, first.tasks, first.root), demo_root=first.demo_root)
     assert [s.session_id for s in service.stranded] == ([] if returned else [DEMO])
     assert [s.session_id for s in service.stranded_demos] == [DEMO]
 
