@@ -30,6 +30,13 @@ beneath it; and correct over trials for the session, its task, this run and this
 block. Fluid session is on Runtime and End of session, and the supplement on both as
 well as the strip, where **both are on the page in every state**: the zero-reward
 ruling (S9a §9) rests on their being visible.
+
+**A demo** (demo mode §4.1-§4.3, §4.6; its plan's Task 9): DEMO in the header on every demo frame
+(`Telemetry.demo`, `Idle.demo`); while the frame says so, the demo screen in place of the replica
+pane, filled by the stream's `drawn` events (`serve`), opened full-window by F, a click or `#demo`
+in the address, under it the last trial's outcome and the key list (`demo_keys`, `DEMO_LIMITS`);
+the pointer turned into degrees from the drawing's own eye group, `atan(x_cm / D)` per axis, and
+posted to `/gaze` by the script; and the New session dialog's demo choice (`_dn_demo`).
 """
 
 from __future__ import annotations
@@ -44,7 +51,10 @@ from pathlib import PurePath
 from wl_xcon import health as _health
 from wl_xcon.actor import Actor, Member
 from wl_xcon.cli import _clock, _moment, _setup_words
+from wl_xcon.demoscreen import GAZE_EVERY_MS
 from wl_xcon.link import RECENT_OUTCOMES, ConditionRow, Counts, Idle, Question, Telemetry
+from wl_xcon.pointer import KEYS as _KEYS
+from wl_xcon.pointer import LIVE_S as _LIVE_S
 from wl_xcon.task import Family, Outcome, at_hardest
 from wl_xcon.warnlist import HEAD_FREE, UNLISTED
 
@@ -119,6 +129,7 @@ class SignIn:
 #: Every fragment `fragments` renders, in page order. Each is the inner HTML of the
 #: element with that id; the page's script swaps them by the same id.
 FRAGMENT_IDS = (
+    "demo-tag",
     "state",
     "head-id",
     "presence",
@@ -143,9 +154,85 @@ FRAGMENT_IDS = (
     "warnings",
     "end-actions",
     "end",
+    "demo-under",
+    "dn-demo",
     "dn-subject",
     "dn-warnings",
 )
+
+# --- a demo (demo mode §4; its plan's Task 9) ---------------------------------------------------
+
+#: **How often the page reports a still pointer, in milliseconds**: `demoscreen.GAZE_EVERY_MS`, the
+#: one definition, which the preview's size was chosen against (demo mode §3.3); imported above. The
+#: page reports at most once an animation frame while the pointer moves, and at least this often
+#: while it is still, one report in flight at a time.
+
+#: **The test monkey's folder**, a demo's one animal: `service.REFERENCE`, which this module does
+#: not import (`tests/test_web.py` holds the two equal).
+REFERENCE = "REFERENCE"
+
+#: **Why the live rig's demo box is greyed** (the PI, 2026-11-14: a demo is offered on a rig only
+#: where its idle frame says `gaze`): no `REFERENCE` to open one for, or nowhere for one to run.
+NO_REFERENCE = "no REFERENCE folder under --subjects"
+NO_GAZE = "this rig names no gaze endpoint or no --demo-root"
+#: And while a demo in the rig's demo folder is stranded: the service opens no other demo (XC-504).
+DEMO_STRANDED = "a demo's return is not recorded: end it from its Stranded banner first"
+#: What the demo screen says before a drawing of this session has come (Task 8's carried (c): the
+#: hub keeps the last drawing after a demo ends, and the page shows only the session's own).
+DEMO_NO_SCREEN = "no screen yet: each trial's first frame draws it"
+#: Why a page steers no demo (demo mode §4.5): a console with no gaze endpoint, or a page that may
+#: not write, which sees the drawing and no dot.
+DEMO_NO_GAZE = (
+    "watching only: this console was started without the demo's gaze endpoint, so no page "
+    "steers the demo from here (wlx serve --link PUB,REP,MARK,GAZE)"
+)
+DEMO_WATCHING = "watching only: the demo's eye is steered where controls work"
+
+#: **What a mouse is not** (demo mode §3.3, §14 item 17; decisions.md TSK-48), under the demo
+#: screen beside its keys, as the design says it, its sources cited as there.
+DEMO_LIMITS = (
+    "A hand is slower than an eye. A mouse is positioned on text in a mean 1.29 s (SD 0.42) after "
+    "0.36 s of homing [@card1977evaluation, Table 2, p. 10], where a monkey's saccadic reaction "
+    "times are about 200 ms with no gap [@fischer1983saccadic]: a demo cannot judge any time "
+    "window. The pop-out's 1.0 s to respond is an eye's; a player raises it to 3.0 s, its "
+    "declared maximum (--set response_deadline=3.0, or Task parameters). Its 0.3 s from leaving "
+    "the fixation window to landing cannot be raised: a hand slower than that, or one that stops "
+    "short and corrects, is scored a look elsewhere (abort).",
+    "The pointer lands where it is put: window sizes and holds cannot be judged.",
+    "Both eyes are the pointer: vergence is always zero, and each stimulus shown to one eye is "
+    "labeled L or R, with its disparity when nonzero.",
+    "The mouse is both the eye and the hand: a task that needs them in different places cannot "
+    "be completed by hand, and one that needs them together always is.",
+    "A stimulus up for less than a drawing may never be drawn, and no duration can be judged from "
+    "the drawing; +y is up.",
+    "The operator's monitor is not the rig's panel: the pop-out's colors are drawn as the exact "
+    "drawer defines them, but whether they are isoluminant, and at 15 cd/m², cannot be judged by "
+    "eye on it.",
+)
+
+#: The key list's rows that stand whatever the task (demo mode §3.3, §3.4, §4.3, §4.5, §4.6), each
+#: `(the key, what it does)`; B's says what the trial loop does with a key pressed while it is held
+#: (demo mode's Task 2), and Escape's what it does mid-trial (Task 8), beside it.
+DEMO_INPUTS = (
+    ("pointer", "the eye, over the drawing; off it the eye looks away, outside every window: no "
+                "fixation, or a break, never tracker loss"),
+    ("button", "the mouse button: a touch where the pointer is, so the mouse is the eye and the "
+               "hand at once"),
+    ("B", "held: tracker loss, as a rig's tracker loses the eye; the trial ends as its "
+          "tracker_lost says. A number key pressed while B is held is not seen, since the trial "
+          "asks no guard while the tracker is lost"),
+    ("Esc", f"closes the full window and lets go of the eye. With no page steering, the eye reads "
+            f"as tracker loss after {_LIVE_S:g} s, so an Escape mid-trial ends that trial as "
+            f"tracker lost, as does every trial after it until a page steers again"),
+    ("F", "the full window; a click on the screen opens it too"),
+    ("P · M", "pause or resume · mark, as everywhere on the page"),
+)
+#: Where the number keys and B act (demo mode §4.6).
+DEMO_KEYS_WHERE = (
+    "The number keys and B act only while the pointer is over the drawing or the full window is "
+    "open, never while typing in a box."
+)
+
 
 #: The ticks' legend: one entry per `Family`, then the two strings that are none.
 LEGEND = tuple((family.name.lower(), family.value) for family in Family) + (
@@ -2151,6 +2238,34 @@ def _new_session_button(view: View, why: str | None = None) -> str:
     return f'<button type="button" class="btn small primary" data-cmd="new"{off}>new session</button>'
 
 
+def _blocking(frame: Idle) -> tuple:
+    """The stranded sessions that keep any session from opening: all but a rig's stranded demos
+    (`Stranded.demo_folder`), which hold up only another demo (XC-504)."""
+    return tuple(found for found in frame.stranded if not found.demo_folder)
+
+
+def _stranded_demo(found, view: View) -> str:
+    """**A stranded demo in a rig's demo folder** (XC-504; the PI, 2026-11-14, "A demo folder of
+    its own"): it holds up only another demo, so the banner says a real animal's session opens
+    beside it, and offers *end session…* alone, a demo being never resumed."""
+    end = (
+        f'<button type="button" class="btn small danger" data-return="{_e(found.session_id)}"'
+        f"{_gate(view)}>end session…</button>"
+    )
+    if found.left_at is None:
+        return (
+            f"demo session {_e(found.session_id)}, in this rig's demo folder: its welfare record "
+            f"cannot be read, so no demo opens until the file is repaired and its return recorded; "
+            f"a real animal's session opens beside it"
+        )
+    return (
+        f"demo session {_e(found.session_id)} ({_e(found.subject)}) left its cage at "
+        f"{_e(_moment(found.left_at))}, in this rig's demo folder, and its return is not recorded; "
+        f"no demo opens until it is, and a real animal's session opens beside it. "
+        f"{_e(found.why)}. {end}"
+    )
+
+
 def _idle_banners(frame: Idle, view: View) -> str:
     """A refused frame, then every stranded animal -- each with *resume session*, when its record can carry one
     (XC-026), and *end session…*, which takes its return naming its session (XC-176) -- then a question owed, then, with no
@@ -2158,11 +2273,15 @@ def _idle_banners(frame: Idle, view: View) -> str:
     departure is given as this host's local date, minute and zone, as the terminal gives
     it (`cli._moment`): an animal out since days ago must not read as since this morning
     (the b3a-1 final review, Minor 1). A record that cannot be read has no button: it is
-    repaired by hand first."""
+    repaired by hand first. **A stranded demo in a rig's demo folder** holds up only another
+    demo, said so in a banner of its own, and *new session* stays beside it (XC-504)."""
     out = []
     if view.rejected:
         out.append(_banner("crit", "Refused", _e(view.rejected)))
     for found in frame.stranded:
+        if found.demo_folder:
+            out.append(_banner("warn", "Stranded demo", _stranded_demo(found, view)))
+            continue
         if found.left_at is None:
             text = (
                 f"session {_e(found.session_id)}: its welfare record cannot be read, so its "
@@ -2188,17 +2307,18 @@ def _idle_banners(frame: Idle, view: View) -> str:
         out.append(_banner("crit", "Stranded", text))
     if frame.question is not None:
         out.append(_question_banner(frame.question, view))
-    if not frame.stranded:
+    if not _blocking(frame):
         out.append(_banner("info", "Idle", f"no session open {_new_session_button(view)}"))
     return "".join(out)
 
 
 def _idle_setup(frame: Idle, view: View) -> str:
     """The Session panel with no session open (the mockup's Setup tab): *new session*,
-    greyed while an animal is stranded, and what `wlx taskd` offers a session."""
+    greyed while an animal is stranded -- not for a rig's stranded demo, which holds up only
+    another demo (XC-504) -- and what `wlx taskd` offers a session."""
     why = (
         "an animal's return is not recorded: end its session from its Stranded banner first"
-        if frame.stranded
+        if _blocking(frame)
         else None
     )
     rows = (
@@ -2263,6 +2383,106 @@ def _closed_actions(frame: Telemetry) -> str:
     )
 
 
+# --- a demo's panes (demo mode §4; its plan's Task 9) ------------------------------------------
+
+
+def _input_words(label: str) -> str:
+    """What a number key does for the input `label` names (`pointer.Input.label`, demo mode §3.4):
+    the chair, a feature source, or a device."""
+    if label == "the chair":
+        return "held: the chair moves; let go: the chair is still"
+    if label.startswith("feature "):
+        return f"held: {label} is above its threshold"
+    return f"down: {label} pressed or answered; up: {label} released"
+
+
+def demo_keys(keys) -> str:
+    """**The demo screen's key list** (demo mode §3.3, §3.4, §4.3, §4.6): each number key and the
+    input it stands for, from the drawing's `Drawn.keys` (key `k`'s at index `k - 1`), or that the
+    task waits on none; then the pointer, the button, B, Escape, F, P and M (`DEMO_INPUTS`); where
+    the keys act; and what a mouse is not (`DEMO_LIMITS`). `wlx serve` sends it beside each drawing
+    (`serve`'s `_send_drawing`), and the page holds `demo_keys(())` before any."""
+    if len(keys) > _KEYS:
+        raise ValueError(f"a demo has {_KEYS} number keys, and {len(keys)} inputs were given")
+    rows = [
+        (str(number), f"{_e(label)} · {_e(_input_words(label))}")
+        for number, label in enumerate(keys, start=1)
+    ] or [(f"1-{_KEYS}", "this task waits on no other input")]
+    rows += [(_e(key), _e(words)) for key, words in DEMO_INPUTS]
+    return (
+        '<dl class="dl demo-keylist">'
+        + "".join(f'<dt><kbd>{key}</kbd></dt><dd>{words}</dd>' for key, words in rows)
+        + f'</dl><p class="sub">{_e(DEMO_KEYS_WHERE)}</p><ul class="demo-limits">'
+        + "".join(f"<li>{_e(limit)}</li>" for limit in DEMO_LIMITS)
+        + "</ul>"
+    )
+
+
+def _demo_tag(frame: Telemetry | Idle | None) -> str:
+    """**DEMO, in the header, on every demo frame** (demo mode §4.2): a demo session's
+    (`Telemetry.demo`), and a demo service's idle frame (`Idle.demo`); nothing on any other. It
+    names the session, for the script to show only that session's drawing (Task 8's carried (c)),
+    and says whether a page may steer: a demo session between runs or in one (`data-steerable`),
+    whose eye a page keeps so the next run's first frame finds it live."""
+    if frame is None or not frame.demo:
+        return ""
+    title = "a demo: the mouse is the eye, and nothing here is an animal's data"
+    if isinstance(frame, Idle):
+        return f'<span class="pill demo" data-demo="service" data-session="" title="{title}">DEMO</span>'
+    steerable = ' data-steerable="1"' if frame.phase in ("between_runs", "running") else ""
+    return (
+        f'<span class="pill demo" data-demo="session" data-session="{_e(frame.session_id)}"'
+        f'{steerable} title="{title}">DEMO</span>'
+    )
+
+
+def _demo_under(frame: Telemetry | Idle | None) -> str:
+    """**Under the demo screen, the last trial's outcome** (demo mode §4.4), from the frame
+    (`Telemetry.recent_outcomes`), or that there is none yet, or no session; nothing off a demo."""
+    if frame is None or not frame.demo:
+        return ""
+    if isinstance(frame, Idle):
+        return '<span class="nm">no session open</span>'
+    if not frame.recent_outcomes:
+        return '<span class="k">last trial</span> <span class="nm">none yet</span>'
+    outcome = frame.recent_outcomes[-1]
+    return (
+        f'<span class="k">last trial</span> <b class="mono" data-outcome="{_e(outcome)}">'
+        f'{_e(str(outcome).replace("_", " "))}</b>'
+    )
+
+
+def _dn_demo(frame: Idle, view: View) -> str:
+    """**The New session dialog's demo choice** (demo mode §4.1, the plan's door on a live rig):
+    on a demo service, a line saying every session here is a demo, for `REFERENCE` alone; on a rig
+    service, a **demo** box, offered where its idle frame says `gaze` and offers `REFERENCE`, which
+    the script ticks to lock the subject to `REFERENCE` and fill the departure and the id, and the
+    open then sends `demo: true`. Greyed, saying why, where it cannot open one: no `REFERENCE`
+    (`NO_REFERENCE`), no gaze endpoint or no demo folder (`NO_GAZE`), or a demo stranded in the
+    demo folder (`DEMO_STRANDED`), which the service would refuse."""
+    if frame.demo:
+        return (
+            '<p class="sub" data-demo-service="1">a demo service: every session here is a demo, '
+            f"for {REFERENCE} alone; the mouse is its eye, the simulated card and pump its "
+            "apparatus</p>"
+        )
+    why = []
+    if not frame.gaze:
+        why.append(NO_GAZE)
+    if REFERENCE not in frame.animals:
+        why.append(NO_REFERENCE)
+    if any(found.demo_folder for found in frame.stranded):
+        why.append(DEMO_STRANDED)
+    said = "; ".join(why)
+    attrs = _gate(view, f' disabled title="{_e(said)}"' if said else "")
+    note = f'<span class="sub" id="dn-demo-why">{_e(said)}</span>' if said else ""
+    return (
+        f'<label class="chk"><input type="checkbox" id="dn-demo-box" data-reference="{REFERENCE}"{attrs}> demo · for '
+        f"{REFERENCE}, the test monkey: the mouse is its eye, the simulated card and pump its "
+        f"apparatus, its record in this rig's demo folder</label>{note}"
+    )
+
+
 def _idle(frame: Idle, view: View) -> dict[str, str]:
     """The page while `wlx taskd` has no session open (P4d-2b spec §6.1: "the page shows
     *no session open* beside the form that opens one"): every pane as before any frame,
@@ -2271,11 +2491,14 @@ def _idle(frame: Idle, view: View) -> dict[str, str]:
     tasks offered, the Session panel, the Warnings tab and the dialog's animals and warnings --
     **and the End tab**, which shows the last closed session's summary, supplement owed first, until the next
     session opens (schema 11; spec §6.2: "The session then closes and the page shows its
-    summary"; the b3a-2 final review, I2), rendered by `_end` as any closed frame is."""
+    summary"; the b3a-2 final review, I2), rendered by `_end` as any closed frame is. **And a
+    demo's** (demo mode §4.1-§4.2): a demo service's DEMO, the line under its demo screen, its
+    dialog's `REFERENCE` alone, and on a rig service the dialog's demo box (`_dn_demo`)."""
     panes = fragments(None, view)
     if frame.closed is not None:
         panes["end-actions"] = _closed_actions(frame.closed)
         panes["end"] = _end(frame.closed)
+    panes["demo-tag"] = _demo_tag(frame)
     panes["state"] = '<span class="pill neutral" data-state="idle">no session open</span>'
     panes["head-id"] = '<span class="nm">no session open</span>'
     panes["banners"] = _idle_banners(frame, view)
@@ -2287,7 +2510,14 @@ def _idle(frame: Idle, view: View) -> dict[str, str]:
     panes["task-sel"] = _options(frame.offered_tasks, "no task offered")
     panes["plan-sel"] = _plans(None)
     panes["setup"] = _idle_setup(frame, view)
-    panes["dn-subject"] = _options(frame.animals, "no animal offered", "choose the animal")
+    panes["demo-under"] = _demo_under(frame)
+    panes["dn-demo"] = _dn_demo(frame, view)
+    # A demo service offers `REFERENCE` alone, chosen (demo mode §4.1); a rig its animals.
+    panes["dn-subject"] = (
+        _options(tuple(name for name in frame.animals if name == REFERENCE), NO_REFERENCE)
+        if frame.demo
+        else _options(frame.animals, "no animal offered", "choose the animal")
+    )
     panes["warnings"] = _warnings_pane(frame)
     panes["dn-warnings"] = _dn_warnings(frame, view)
     return panes
@@ -2300,6 +2530,7 @@ def fragments(frame: Telemetry | Idle | None, view: View) -> dict[str, str]:
     if isinstance(frame, Idle):
         return _idle(frame, view)
     return {
+        "demo-tag": _demo_tag(frame),
         "state": _state(frame),
         "head-id": _head(frame),
         "presence": _presence(view),
@@ -2324,6 +2555,8 @@ def fragments(frame: Telemetry | Idle | None, view: View) -> dict[str, str]:
         "warnings": _warnings_pane(frame),
         "end-actions": _end_actions(frame, view),
         "end": _end(frame),
+        "demo-under": _demo_under(frame),
+        "dn-demo": "",
         "dn-subject": _options((), "no animal offered"),
         "dn-warnings": "",
     }
@@ -2613,6 +2846,27 @@ button.pill { border: 0; cursor: pointer; }
 #end-return { width: 32ch; }
 #amend-why { width: min(28em, 50vw); }
 body.stale .strip, body.stale .panels { filter: grayscale(1); opacity: 0.55; }
+.pill.demo { background: var(--mock); color: var(--bg); }
+.demo-screen { position: relative; border-radius: 5px; background: var(--screen); min-height: 120px; overflow: hidden; cursor: crosshair; }
+.demo-drawing svg { display: block; width: 100%; height: auto; }
+.demo-none { position: absolute; inset: 0; display: grid; place-items: center; padding: 8px; text-align: center; color: var(--screen-ink); font-family: var(--mono); font-size: 12px; }
+.demo-dot { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: #ff3b30; box-shadow: 0 0 0 2px #ffffff; pointer-events: none; }
+.demo-dot.lost { background: transparent; box-shadow: 0 0 0 2px #ff3b30; }
+.demo-bar { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; font-size: 12.5px; }
+.demo-bar .k { color: var(--muted); }
+.demo-esc { display: none; }
+.demo-keylist kbd { font-family: var(--mono); font-size: 11.5px; border: 1px solid var(--rule); border-radius: 3px; padding: 0 4px; background: var(--surface-2); white-space: nowrap; }
+.demo-limits { margin: 0; padding-left: 16px; font-size: 12px; color: var(--muted); display: grid; gap: 3px; }
+.demo-pane.full { position: fixed; inset: 0; z-index: 25; border-radius: 0; padding: 0; gap: 0; background: #000000; color: #e8eaed; grid-template-rows: minmax(0, 1fr) auto; }
+.demo-pane.full > .top, .demo-pane.full > .demo-keys, .demo-pane.full > #demo-who { display: none; }
+.demo-pane.full .demo-screen { border-radius: 0; min-height: 0; background: #000000; }
+.demo-pane.full .demo-drawing { position: absolute; inset: 0; }
+.demo-pane.full .demo-drawing svg { width: 100%; height: 100%; }
+.demo-pane.full .demo-bar { padding: 8px 14px; }
+.demo-pane.full .demo-bar .k, .demo-pane.full .demo-esc { color: #8ea0bc; }
+.demo-pane.full .demo-esc { display: inline; }
+body.demo-full { overflow: hidden; }
+#dn-demo .chk { align-items: baseline; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 """
 
@@ -2781,8 +3035,9 @@ _SCRIPT = """
     if (member) { member.textContent = signedIn() ? signin.shown : ""; }
     var usable = signedIn() && confirmed;
     Array.prototype.forEach.call(document.querySelectorAll("[data-signin]"), function (node) {
-      // A reward button held until its answer stays held, signed in or not.
-      if (node.hasAttribute("data-held")) { return; }
+      // A reward button held until its answer stays held, signed in or not, and the subject a
+      // demo locks to REFERENCE stays locked (demo mode's Task 9).
+      if (node.hasAttribute("data-held") || node.hasAttribute("data-demo-locked")) { return; }
       node.disabled = !usable;
       if (usable) {
         if (node.hasAttribute("title")) {
@@ -3278,6 +3533,8 @@ _SCRIPT = """
     if (id === "rt-train") { restoreWidening(); }
     if (id === "plan-sel") { preselect(); }
     if (id === "end-actions") { settleOpen(); }
+    if (id === "demo-tag") { demoFrame(); }
+    if (id === "dn-demo" || id === "dn-subject") { restoreDemoBox(); }
   }
   function release() {
     if (heldParams !== null && !busy()) {
@@ -3313,6 +3570,9 @@ _SCRIPT = """
     el("dn-deployment").value = "";
     el("dn-kind").value = "";
     if (el("dn-accept")) { el("dn-accept").checked = false; }
+    demoBoxed = false;
+    demoFilled = { left: "", id: "" };
+    restoreDemoBox();
     el("dn-msg").textContent = "";
     pendingOpen = null;
   }
@@ -3374,6 +3634,361 @@ _SCRIPT = """
       box.checked = acked[box.getAttribute("data-ack")] === true;
     });
   }
+  // Demo mode (§4.3-§4.6; its plan's Task 9): the demo screen in place of the replica while the
+  // frame says demo, the pointer as the demo's eye, the number keys and B. Housekeeping, rendered
+  // by Python (`web.GAZE_EVERY_MS`, `demoscreen`'s one definition): a still pointer is reported this
+  // often, a moving one at most once an animation frame, one report in flight at a time.
+  var GAZE_EVERY_MS = Number(body.getAttribute("data-gaze-every-ms")) || 100;
+  var canGaze = body.getAttribute("data-can-gaze") === "1";
+  var demo = {
+    on: false,         // the frame says demo
+    session: "",       // the demo session the frame is; "" for a demo service's idle frame
+    steerable: false,  // a demo session between runs or in one
+    full: false,
+    wantFull: window.location.hash === "#demo",
+    svg: null,         // the latest drawing, whichever session it is of
+    keys: null,
+    steer: ""
+  };
+  var gaze = {
+    id: random(16), seq: 0, inFlight: false, timer: null, framed: false, moved: false,
+    lastAt: -Infinity, engaged: false, hush: false, epoch: 0,
+    x: null, y: null, inside: false,
+    b: false, button: false, held: 0, presses: [0, 0, 0, 0, 0, 0, 0, 0, 0]
+  };
+  // What a page says while the demo reads no reports (`wlx serve`'s 504 and 503): between runs or
+  // paused the rig's queue fills, and that is no fault (Task 8's carried (a)).
+  var DEMO_WAITING = "the demo is not reading the pointer now (between runs or paused); this page keeps its eye for the next run";
+  var DEMO_STEERING = "steering: this page's pointer is the demo's eye";
+  function demoFrame() {
+    var tag = el("demo-tag").querySelector("[data-demo]");
+    demo.on = Boolean(tag);
+    demo.session = tag ? tag.getAttribute("data-session") : "";
+    demo.steerable = Boolean(tag && tag.hasAttribute("data-steerable"));
+    el("replica-pane").hidden = demo.on;
+    el("demo-pane").hidden = !demo.on;
+    if (!demo.steerable) { letGo(false); }
+    if (!demo.on) { closeFull(); }
+    else if (demo.wantFull) { demo.wantFull = false; openFull(); }
+    showDrawing();
+    placeDot();
+    pump(false);
+  }
+  function onDrawn(event) {
+    var payload = JSON.parse(event.data);
+    demo.svg = payload.svg;
+    if (payload.keys !== demo.keys) {
+      demo.keys = payload.keys;
+      el("demo-keys").innerHTML = payload.keys;
+    }
+    el("demo-drawing").innerHTML = payload.svg;
+    showDrawing();
+    placeDot();
+  }
+  // Only the drawing of the session the frame is (Task 8's carried (c)): the hub keeps the last
+  // drawing after a demo ends, and a demo service's idle frame is no session's.
+  function showDrawing() {
+    var svg = el("demo-drawing").querySelector("svg");
+    var mine = Boolean(svg && demo.on && demo.session &&
+                       svg.getAttribute("data-session") === demo.session);
+    el("demo-drawing").hidden = !mine;
+    el("demo-none").hidden = mine;
+  }
+  function openFull() {
+    if (!demo.on) { return; }
+    demo.full = true;
+    el("demo-pane").classList.add("full");
+    body.classList.add("demo-full");
+    placeDot();
+  }
+  function closeFull() {
+    demo.full = false;
+    el("demo-pane").classList.remove("full");
+    body.classList.remove("demo-full");
+    placeDot();
+  }
+  // The drawing under client point (x, y), or null: the drawing shown, its viewBox mapped to the
+  // window by its own transform, so a letterbox around it is off the drawing.
+  function drawingAt(x, y) {
+    if (x === null || !demo.on || el("demo-drawing").hidden) { return null; }
+    var svg = el("demo-drawing").querySelector("svg");
+    var m = svg ? svg.getScreenCTM() : null;
+    if (!m || !svg.viewBox || !svg.viewBox.baseVal) { return null; }
+    var box = svg.viewBox.baseVal;
+    var left = m.a * box.x + m.e, top = m.d * box.y + m.f;
+    if (x < left || y < top || x > left + m.a * box.width || y > top + m.d * box.height) { return null; }
+    return svg;
+  }
+  // **The pointer in degrees** (demo mode §3.3, §4.4; `demoscreen`): each eye of the drawing is a
+  // `g.eye` whose user units are centimeters from that eye's straight-ahead point, +y up; the point
+  // is read into the eye it lies over by the group's own transform, then turned into degrees per
+  // axis, atan(x_cm / D), D its `data-distance-cm`, as `geometry` maps every position -- never an
+  // average pixels per degree (the PI, 2026-10-19).
+  function degreesAt(svg, x, y) {
+    var eyes = svg.querySelectorAll("g.eye");
+    var eye = null;
+    var gap = Infinity;
+    Array.prototype.forEach.call(eyes, function (group) {
+      var shown = (group.querySelector(".frame") || group).getBoundingClientRect();
+      var away = x < shown.left ? shown.left - x : (x > shown.right ? x - shown.right : 0);
+      if (away < gap) { gap = away; eye = group; }
+    });
+    if (!eye) { return null; }
+    var point = svg.createSVGPoint();
+    point.x = x;
+    point.y = y;
+    var cm = point.matrixTransform(eye.getScreenCTM().inverse());
+    var d = Number(eye.getAttribute("data-distance-cm"));
+    var deg = { x: Math.atan(cm.x / d) * 180 / Math.PI, y: Math.atan(cm.y / d) * 180 / Math.PI };
+    return isFinite(deg.x) && isFinite(deg.y) ? deg : null;
+  }
+  function pointerNow() {
+    var svg = gaze.inside ? drawingAt(gaze.x, gaze.y) : null;
+    var deg = svg ? degreesAt(svg, gaze.x, gaze.y) : null;
+    return deg ? { over: true, x: deg.x, y: deg.y } : { over: false, x: 0, y: 0 };
+  }
+  // Whether this page may steer now: a demo session's frame, a console with the gaze endpoint, and
+  // a page that may write -- the box's own, or the https page signed in (§4.5).
+  function maySteer() {
+    if (!canGaze || !demo.on || !demo.steerable) { return false; }
+    return signinPage ? (signedIn() && confirmed) : canWrite;
+  }
+  // The number keys and B act only over the drawing or in the full window (§4.6).
+  function keysLive() {
+    return maySteer() && (demo.full || (gaze.inside && drawingAt(gaze.x, gaze.y) !== null));
+  }
+  // The pointer's dot, drawn where the pointer is over the drawing, for a page that may steer; a
+  // viewer who cannot write sees the drawing and no dot (§4.5). Hollow while B is held.
+  function placeDot() {
+    var dot = el("demo-dot");
+    var show = maySteer() && gaze.inside && drawingAt(gaze.x, gaze.y) !== null;
+    dot.hidden = !show;
+    if (!show) { return; }
+    var screen = el("demo-screen").getBoundingClientRect();
+    dot.style.left = (gaze.x - screen.left) + "px";
+    dot.style.top = (gaze.y - screen.top) + "px";
+    dot.classList.toggle("lost", gaze.b);
+  }
+  function steerSays(state, text, tone) {
+    if (demo.steer !== state) {
+      demo.steer = state;
+      el("demo-pane").setAttribute("data-steer", state);
+    }
+    var line = el("demo-steer");
+    if (line.textContent !== text) { line.textContent = text; }
+    line.className = "sent " + (tone || "");
+  }
+  function changed() {
+    gaze.moved = true;
+    if (demo.on && !gaze.framed) {
+      gaze.framed = true;
+      window.requestAnimationFrame(function () { gaze.framed = false; pump(true); });
+    }
+  }
+  function arm(ms) {
+    clearTimeout(gaze.timer);
+    gaze.timer = setTimeout(function () { pump(false); }, ms);
+  }
+  // A report now, or the timer armed for the next: at most one an animation frame while the
+  // pointer moves (`framed`), at least every GAZE_EVERY_MS while it is still, one in flight. A
+  // page sends nothing while its pointer is off the drawing and it does not steer, nor after an
+  // Escape until its pointer moves again.
+  function pump(framed) {
+    if (gaze.inFlight || !demo.on) { return; }
+    if (!maySteer() || gaze.hush) { gaze.moved = false; arm(GAZE_EVERY_MS); return; }
+    var now = pointerNow();
+    if (!now.over && !gaze.engaged) { gaze.moved = false; arm(GAZE_EVERY_MS); return; }
+    var wait = GAZE_EVERY_MS - (performance.now() - gaze.lastAt);
+    if ((framed && gaze.moved) || wait <= 0) { report(now); return; }
+    arm(wait);
+  }
+  function gazePost(payload, keepalive) {
+    var headers = { "Content-Type": "application/json" };
+    if (signinPage && signin) { headers["Authorization"] = "Bearer " + signin.access; }
+    return fetch("/gaze", {
+      method: "POST",
+      headers: headers,
+      body: JSON.stringify(payload),
+      cache: "no-store",
+      keepalive: keepalive
+    }).then(answerOf);
+  }
+  function report(now) {
+    clearTimeout(gaze.timer);
+    gaze.inFlight = true;
+    gaze.moved = false;
+    gaze.lastAt = performance.now();
+    gaze.seq += 1;
+    var epoch = gaze.epoch;
+    var payload = {
+      page: gaze.id, seq: gaze.seq, x: now.x, y: now.y, over: now.over, b: gaze.b,
+      button: gaze.button, held: gaze.held, presses: gaze.presses.slice()
+    };
+    (signinPage ? fresh() : Promise.resolve(true)).then(function (ok) {
+      if (!ok) {
+        gaze.engaged = false;
+        steerSays("", "not steering: " + (unusableFor || signedOutFor || NO_SIGNIN), "crit");
+        return null;
+      }
+      return gazePost(payload, false).then(function (answer) {
+        if (epoch === gaze.epoch) { steered(answer); }
+      });
+    }).catch(function () {
+      gaze.engaged = false;
+      steerSays("", "not sent: this page could not reach wlx serve", "crit");
+    }).then(function () {
+      gaze.inFlight = false;
+      if (gaze.moved && !gaze.framed) {
+        gaze.framed = true;
+        window.requestAnimationFrame(function () { gaze.framed = false; pump(true); });
+      }
+      pump(false);
+    });
+  }
+  // What `wlx serve` made of a report (`serve.Steering`): sent, the steer this page's; another page
+  // steers, said; no demo running; not delivered or busy, which between runs and while paused is no
+  // fault and is said quietly, the page keeping its eye; a refusal, said.
+  function steered(answer) {
+    var status = answer.status;
+    if (status === "sent") {
+      gaze.engaged = true;
+      steerSays("steering", DEMO_STEERING, "ok");
+    } else if (status === "steered_elsewhere") {
+      gaze.engaged = false;
+      steerSays("elsewhere", answer.said, "warn");
+    } else if (status === "not_delivered" || status === "busy") {
+      steerSays("waiting", DEMO_WAITING, "");
+    } else if (status === "not_a_demo") {
+      gaze.engaged = false;
+      steerSays("", "", "");
+    } else if (status !== "dropped") {
+      gaze.engaged = false;
+      steerSays("", answer.said, "crit");
+      if (answer.reason === "signed_out" || answer.reason === "other_rig" ||
+          answer.reason === "not_accepted" || answer.reason === "no_token") { forget(); }
+    }
+  }
+  // **Letting go of the eye** (§4.5): Escape, the page going away, or the demo session's end. A
+  // release goes even as the page unloads (`keepalive`); an answer to a report sent before it is
+  // not taken as the steer kept (`epoch`). After an Escape (`hush`) nothing is sent until the
+  // pointer moves again.
+  function letGo(hush) {
+    var held = gaze.engaged || gaze.inFlight;
+    gaze.engaged = false;
+    gaze.epoch += 1;
+    if (hush) { gaze.hush = true; }
+    if (held) {
+      gazePost({ page: gaze.id, release: true }, true).then(function (answer) {
+        steerSays("", answer.said, "");
+      }, function () { /* nothing to undo: the steer lapses on its own */ });
+    } else if (demo.steer) {
+      steerSays("", "", "");
+    }
+  }
+  function digitOf(e) {
+    if (/^[1-9]$/.test(e.key)) { return Number(e.key); }
+    var code = /^(?:Digit|Numpad)([1-9])$/.exec(e.code || "");
+    return code ? Number(code[1]) : 0;
+  }
+  document.addEventListener("pointermove", function (e) {
+    gaze.x = e.clientX;
+    gaze.y = e.clientY;
+    gaze.inside = true;
+    gaze.hush = false;
+    placeDot();
+    changed();
+  });
+  document.addEventListener("mouseout", function (e) {
+    if (e.relatedTarget) { return; }
+    gaze.inside = false;  // out of the window: gaze away, as off the drawing
+    placeDot();
+    changed();
+  });
+  document.addEventListener("pointerdown", function (e) {
+    if (e.button === 0) { gaze.button = true; changed(); }
+  });
+  document.addEventListener("pointerup", function (e) {
+    if (e.button === 0) { gaze.button = false; changed(); }
+  });
+  window.addEventListener("blur", function () {
+    // A key or the button let go while the page could not see it.
+    if (gaze.held || gaze.b || gaze.button) {
+      gaze.held = 0;
+      gaze.b = false;
+      gaze.button = false;
+      placeDot();
+      changed();
+    }
+  });
+  document.addEventListener("keyup", function (e) {
+    var digit = digitOf(e);
+    if (digit && (gaze.held & (1 << (digit - 1)))) {
+      gaze.held &= ~(1 << (digit - 1));
+      changed();
+    } else if ((e.key === "b" || e.key === "B" || e.code === "KeyB") && gaze.b) {
+      gaze.b = false;
+      placeDot();
+      changed();
+    }
+  });
+  // Escape closes the full window and lets go of the eye, wherever focus is (§4.3, §4.5).
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape" || e.repeat) { return; }
+    if (demo.full) { closeFull(); }
+    if (gaze.engaged || gaze.inFlight) { letGo(true); }
+  });
+  window.addEventListener("pagehide", function () {
+    if (gaze.engaged || gaze.inFlight) { letGo(false); }
+  });
+  el("demo-screen").addEventListener("click", function () { if (!demo.full) { openFull(); } });
+  // The New session dialog's demo choice (§4.1): on a demo service the departure and the id filled
+  // for it, REFERENCE its one animal; on a rig the demo box, which fills the same and locks the
+  // subject to REFERENCE. Each fill is the clock's now, editable; one left as filled is refilled
+  // when the dialog opens again, one edited kept.
+  var demoFilled = { left: "", id: "" };
+  var demoBoxed = false;
+  function two(n) { return (n < 10 ? "0" : "") + n; }
+  function demoService() { return Boolean(el("dn-demo").querySelector("[data-demo-service]")); }
+  function demoTicked() {
+    var box = el("dn-demo-box");
+    return Boolean(box && box.checked && !box.disabled);
+  }
+  function fillDemo() {
+    var now = new Date();
+    var left = two(now.getHours()) + ":" + two(now.getMinutes());
+    var id = "demo-" + now.getFullYear() + two(now.getMonth() + 1) + two(now.getDate()) + "-" +
+      two(now.getHours()) + two(now.getMinutes()) + two(now.getSeconds());
+    if (el("dn-left").value === "" || el("dn-left").value === demoFilled.left) {
+      el("dn-left").value = left;
+      demoFilled.left = left;
+    }
+    if (el("dn-id").value === "" || el("dn-id").value === demoFilled.id) {
+      el("dn-id").value = id;
+      demoFilled.id = id;
+    }
+  }
+  function unfillDemo() {
+    if (el("dn-left").value === demoFilled.left) { el("dn-left").value = ""; }
+    if (el("dn-id").value === demoFilled.id) { el("dn-id").value = ""; }
+    demoFilled = { left: "", id: "" };
+  }
+  function lockSubject(locked) {
+    var subject = el("dn-subject");
+    var box = el("dn-demo-box");
+    if (locked && box) {
+      choose(subject, box.getAttribute("data-reference"));
+      subject.disabled = true;
+      subject.setAttribute("data-demo-locked", "1");
+    } else if (subject.hasAttribute("data-demo-locked")) {
+      subject.removeAttribute("data-demo-locked");
+      subject.disabled = signinPage ? !(signedIn() && confirmed) : !canWrite;
+    }
+  }
+  function restoreDemoBox() {
+    var box = el("dn-demo-box");
+    if (box) { box.checked = demoBoxed && !box.disabled; }
+    lockSubject(demoTicked());
+  }
   function onFrame(event) {
     var payload = JSON.parse(event.data);
     Object.keys(payload.frags).forEach(function (id) { swap(id, payload.frags[id]); });
@@ -3389,6 +4004,7 @@ _SCRIPT = """
     el("gone").hidden = true;
     source = new EventSource("/events");
     source.addEventListener("frame", onFrame);
+    source.addEventListener("drawn", onDrawn);
     source.onerror = function () {
       if (closed) { return; }
       lost = true;
@@ -3697,6 +4313,9 @@ _SCRIPT = """
   function openNew() {
     el("dn-msg").textContent = "";
     el("dlg-new").hidden = false;
+    // A demo's departure and id, the clock's now (demo mode §4.1): every session on a demo
+    // service, the demo box's on a rig.
+    if (demoService() || demoTicked()) { fillDemo(); }
     el("dn-subject").focus();
   }
   function openSession() {
@@ -3718,7 +4337,9 @@ _SCRIPT = """
       answer: null,
       amend_to: null,
       amend_reason: "",
-      accepted: acceptedWarnings()
+      accepted: acceptedWarnings(),
+      // Whether the session is a demo (demo mode §4.1): a demo service's every one, or the box.
+      demo: demoService() || demoTicked()
     };
     if (!request.animal) { el("dn-msg").textContent = "not sent: choose the animal"; return; }
     if (!request.deployment) { el("dn-msg").textContent = "not sent: a deployment must be chosen"; return; }
@@ -3920,6 +4541,11 @@ _SCRIPT = """
       widened[e.target.getAttribute("data-suggestion") + ":" + e.target.getAttribute("data-widen")] =
         e.target.checked;
     }
+    else if (e.target.id === "dn-demo-box") {
+      demoBoxed = e.target.checked;
+      if (demoBoxed) { fillDemo(); } else { unfillDemo(); }
+      lockSubject(demoBoxed);
+    }
     else if (e.target.id === "task-sel") {
       if (betweenRuns()) { el("plan-sel").value = ""; takePreflight(false); }
     }
@@ -3959,8 +4585,18 @@ _SCRIPT = """
     var t = e.target;
     if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) { return; }
     var k = e.key.toLowerCase();
+    var digit = digitOf(e);
     if (k === "p") { e.preventDefault(); pauseOrResume(); }
     else if (k === "m") { e.preventDefault(); mark(); }
+    // A demo's (§4.6): the number keys and B over the drawing or in the full window, F for it.
+    else if (digit && keysLive()) {
+      e.preventDefault();
+      gaze.held |= 1 << (digit - 1);
+      gaze.presses[digit - 1] += 1;
+      changed();
+    }
+    else if (k === "b" && keysLive()) { e.preventDefault(); gaze.b = true; placeDot(); changed(); }
+    else if (k === "f" && demo.on) { e.preventDefault(); openFull(); }
   });
   el("mark-note").addEventListener("keydown", function (e) {
     if (e.key === "Enter") { e.preventDefault(); closeNote(el("mark-note").value.trim()); }
@@ -4067,6 +4703,7 @@ _SCRIPT = """
     }
   }
   showName();
+  demoFrame();
   open();
 })();
 """
@@ -4081,6 +4718,7 @@ def page(
     signin: SignIn | None = None,
     https_page: bool = False,
     https_off: str | None = None,
+    can_gaze: bool = False,
 ) -> str:
     """The whole document, every pane already rendered into it, so it reads before
     its stream has opened (spec §4.3).
@@ -4108,8 +4746,16 @@ def page(
     page of a rig that has one: a LAN viewer's greyed controls say where else they work.
     `https_off` is why the rig's https page is off (b2b-ready §3.1), shown on the box's own
     page only.
+    **A demo (demo mode §4.3; its plan's Task 9)**: the demo screen is static, so no frame
+    replaces a drawing or the pointer's dot, and it stands in the right column in place of the
+    replica pane, shown while the frame says `demo` (its `demo-tag` fragment says DEMO; the script
+    switches the two as frames arrive). `can_gaze` is `View.can_gaze`: whether this console has a
+    demo's gaze endpoint, without which no page steers here (`data-can-gaze`); a page that may not
+    write steers nothing and draws no dot. `GAZE_EVERY_MS` goes to the script as
+    `data-gaze-every-ms`.
     """
     p = {key: parts[key] for key in FRAGMENT_IDS}
+    demo = bool(p["demo-tag"])
     if can_write:
         off = ""
         attrs = ""
@@ -4149,6 +4795,16 @@ def page(
         if can_write and https_off is not None
         else ""
     )
+    # Who may steer a demo from this page (demo mode §4.5): a page that may write, on a console
+    # with the gaze endpoint; any other sees the drawing and no dot, and says why.
+    if not can_gaze:
+        steers = f'<p class="sub" id="demo-who">{_e(DEMO_NO_GAZE)}</p>'
+    elif not can_write and signin is None:
+        where = CONTROLS_ELSEWHERE if https_page else CONTROLS_AT_THE_BOX
+        steers = f'<p class="sub" id="demo-who">{_e(DEMO_WATCHING)}: {_e(where)}</p>'
+    else:
+        steers = ""
+    replica_hidden, demo_hidden = (" hidden", "") if demo else ("", " hidden")
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -4157,10 +4813,11 @@ def page(
 <title>xcon console</title>
 <style>{_FONT_FACES}{_CSS}</style>
 </head>
-<body data-stale-after="{stale_after_s:g}" data-can-write="{int(can_write)}" data-debounce-ms="{DEBOUNCE_MS}"{attrs}>
+<body data-stale-after="{stale_after_s:g}" data-can-write="{int(can_write)}" data-debounce-ms="{DEBOUNCE_MS}" data-can-gaze="{int(can_gaze)}" data-gaze-every-ms="{GAZE_EVERY_MS}"{attrs}>
 <div class="wrap">
   <header class="head glass">
     <span class="logo">{_LOGO}<span class="app">xcon</span></span>
+    <span id="demo-tag">{p['demo-tag']}</span>
     <span id="state">{p['state']}</span>
     <div class="id" id="head-id">{p['head-id']}</div>
     <span class="spacer"></span>
@@ -4229,7 +4886,17 @@ def page(
       </div>
     </div>
     <aside class="aside" aria-label="always shown">
-      <section class="panel glass"><div class="top"><h2>Replica</h2><span class="later">V11</span></div><div class="screen">replica · V11</div></section>
+      <section class="panel glass" id="replica-pane"{replica_hidden}><div class="top"><h2>Replica</h2><span class="later">V11</span></div><div class="screen">replica · V11</div></section>
+      <section class="panel glass demo-pane" id="demo-pane" aria-label="demo screen" data-steer=""{demo_hidden}>
+        <div class="top"><h2>Demo screen</h2><span class="sub">F or a click: full window · Esc closes</span></div>
+        <div class="demo-screen" id="demo-screen" role="button" tabindex="0" aria-label="the demo's screen: F or a click opens it full-window, Escape closes it">
+          <div class="demo-drawing" id="demo-drawing"></div>
+          <div class="demo-none" id="demo-none">{_e(DEMO_NO_SCREEN)}</div>
+          <span class="demo-dot" id="demo-dot" hidden></span>
+        </div>
+        <div class="demo-bar"><span id="demo-under">{p['demo-under']}</span><span class="sent" id="demo-steer" role="status"></span><span class="sub demo-esc">Esc closes the full window</span></div>
+        {steers}<div class="demo-keys" id="demo-keys">{demo_keys(())}</div>
+      </section>
       <section class="panel glass"><div class="top"><h2>Subject display</h2></div><div class="screen">subject display · no source yet</div></section>
       <div class="duo">
         <section class="panel glass"><h2>Sound</h2><span class="nm">sound · not measured</span></section>
@@ -4241,6 +4908,7 @@ def page(
 <div class="scrim" id="dlg-new" hidden>
   <div class="dialog glass" role="dialog" aria-modal="true" aria-labelledby="dn-h">
     <h2 id="dn-h">New session</h2>
+    <div id="dn-demo">{p['dn-demo']}</div>
     <div class="grid">
       <label class="sub" for="dn-subject">subject</label><select id="dn-subject"{off}>{p['dn-subject']}</select>
       <label class="sub" for="dn-deployment">deployment</label><select id="dn-deployment" required{off}><option value="">choose the deployment</option><option value="rig_fixed">head-fixed</option><option value="rig_chaired">chaired</option></select>

@@ -4393,6 +4393,21 @@ def test_the_terminal_console_says_a_stranded_session_can_be_resumed_or_why_not(
     assert "\x1b" not in shown
 
 
+def test_the_terminal_console_says_a_rigs_stranded_demo_holds_up_only_demos():
+    """XC-504: a stranded demo in a rig's demo folder (`Stranded.demo_folder`) holds up only
+    another demo, and `wlx console` says so, as the page does; one under `--root` still holds up
+    every open."""
+    demo = Stranded("demo-\x1b[2J1", "REFERENCE", 1_700_000_000.0, False, "a demo",
+                    demo_folder=True)
+    shown = render(idle(stranded=(demo,)))
+
+    assert "STRANDED DEMO: session demo-\ufffd[2J1, in this rig's demo folder" in shown
+    assert "no demo opens until it is; a real animal's session opens beside it" in shown
+    assert "no session opens" not in shown and "\x1b" not in shown
+    held = render(idle(stranded=(Stranded("demo-1", "REFERENCE", 1_700_000_000.0),)))
+    assert "no session opens until it is resumed or its return recorded" in held
+
+
 def test_the_terminal_console_says_a_session_was_resumed_and_when():
     at = 1_700_000_000.0
 

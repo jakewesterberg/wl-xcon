@@ -240,8 +240,11 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: demo's world shows, published whole inside a trial -- the `screen.Screen` in its wire form
 #: (`screen.to_wire`), the windows as the trial placed them, an array's target's flagged, what could
 #: not be drawn outlined, the setup's viewports, housings and field edge, each eye's share of the
-#: vergence offset, and the keys -- or blank at a trial's end. Nothing else changed meaning. A reader of 20 refuses 21 and 21 refuses 20, by name,
-#: for all three shapes.
+#: vergence offset, and the keys -- or blank at a trial's end. **And `Stranded.demo_folder`** (XC-504):
+#: a stranded session found in a rig service's demo folder (`--demo-root`), which holds up only another
+#: demo's open, never a real animal's, so a page keeps *new session* live beside it. And an `open`
+#: command's `demo` on the wire (a command, not a frame: no schema of its own). Nothing else changed
+#: meaning. A reader of 20 refuses 21 and 21 refuses 20, by name, for all three shapes.
 SCHEMA = 21
 
 #: How many refusals a session keeps, per source, and therefore how many one
@@ -786,6 +789,12 @@ class Stranded:
     left_at: float | None
     resumable: bool = False
     why: str = ""
+    #: **Found in a rig service's demo folder** (`--demo-root`; schema 21, XC-504): a stranded
+    #: demo there holds up only another demo's open, never a real animal's
+    #: (`service.Service.stranded_demos`), so a page says so and keeps *new session* live beside
+    #: it. `False` for every session under `--root`, a demo service's own included, which holds up
+    #: every open there, as any stranded session does.
+    demo_folder: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -1661,7 +1670,7 @@ def encode(telemetry: Telemetry | Idle | Drawn) -> bytes:
                 "stranded": [
                     {
                         "session_id": s.session_id, "subject": s.subject, "left_at": s.left_at,
-                        "resumable": s.resumable, "why": s.why,
+                        "resumable": s.resumable, "why": s.why, "demo_folder": s.demo_folder,
                     }
                     for s in telemetry.stranded
                 ],
@@ -1985,7 +1994,7 @@ def _idle_from(data: dict) -> Idle:
         stranded=tuple(
             Stranded(
                 session_id=s["session_id"], subject=s["subject"], left_at=s["left_at"],
-                resumable=s["resumable"], why=s["why"],
+                resumable=s["resumable"], why=s["why"], demo_folder=_flag(s["demo_folder"]),
             )
             for s in data["stranded"]
         ),
@@ -2400,9 +2409,9 @@ class OpenSession:
     accepted: tuple
     #: **Whether the session opened is a demo** (demo mode §3.1, §8): the mouse its eye, the
     #: simulated card and pump its apparatus, `REFERENCE` its animal, its folder apart from the real
-    #: sessions. `wlx taskd --demo` makes every open one (`service.Service._route`). Not on the wire
-    #: until demo mode's Task 9 gives `open` the field (`_encode_command`, `_command_from`,
-    #: `serve.parse_command`), so until then only an in-process caller sets it.
+    #: sessions. `wlx taskd --demo` makes every open one (`service.Service._route`). On the wire since
+    #: demo mode's Task 9 (`_encode_command`, `_command_from`, `serve.parse_command`): `open`'s
+    #: `demo`, true or false, false where it is absent; the page's demo box sends it.
     demo: bool = False
 
 
@@ -2757,6 +2766,8 @@ def _encode_command(command: Command) -> bytes:
             "delivered_today": command.delivered_today, "answer": command.answer,
             "amend_to": command.amend_to, "amend_reason": command.amend_reason,
             "accepted": [list(pair) for pair in command.accepted],
+            # Demo mode's Task 9: whether the session opened is a demo (`OpenSession.demo`).
+            "demo": command.demo,
         }
     elif isinstance(command, (CheckRun, StartRun)):
         payload = {
@@ -3122,6 +3133,15 @@ def _command_from(data: dict) -> Command:
                 f"an amend_reason is text of at most {NOTE_LIMIT} characters, so this "
                 f"one is refused",
             )
+        # Demo mode's Task 9: a demo is true or false, and false where it is absent (a sender that
+        # never names one opens a live session, as every open before demo mode did).
+        demo = data.get("demo", False)
+        if not isinstance(demo, bool):
+            raise CommandRefused(
+                "open", by,
+                f"an open's demo is true or false, and {_quoted(demo)} is neither, so it is "
+                f"refused",
+            )
         accepted = data.get("accepted")
         if (
             not isinstance(accepted, (list, tuple))
@@ -3153,6 +3173,7 @@ def _command_from(data: dict) -> Command:
             amend_to=_word(data, "amend_to", "open", by, optional=True),
             amend_reason=reason,
             accepted=tuple((code, detail) for code, detail in accepted),
+            demo=demo,
         )
     if kind in ("check", "start"):
         by = _actor(data.get("by"), kind)

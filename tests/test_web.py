@@ -50,7 +50,8 @@ from wl_xcon.link import (
     Suggestion,
     WarningRow,
 )
-from wl_xcon.serve import parse_command
+from wl_xcon import demoscreen, link, pointer, service, web
+from wl_xcon.serve import BadCommand, parse_command
 from wl_xcon.task import Polar
 from wl_xcon.warnlist import HEAD_FREE, UNLISTED
 from wl_xcon.web import (
@@ -78,6 +79,14 @@ from wl_xcon.web import (
     fragments,
     page,
     _who,
+    DEMO_KEYS_WHERE,
+    DEMO_LIMITS,
+    DEMO_STRANDED,
+    GAZE_EVERY_MS,
+    NO_GAZE,
+    NO_REFERENCE,
+    REFERENCE,
+    demo_keys,
 )
 
 LIMIT = "out_of_cage: subject 'A' has been out of its cage 28801 s against a ceiling of 28800"
@@ -1053,7 +1062,8 @@ def test_the_nonce_is_escaped_into_its_attribute():
 def test_the_page_tells_its_script_when_a_stream_is_stale():
     document = page(fragments(frame(), view()), stale_after_s=45.0, nonce="n0nce")
 
-    assert '<body data-stale-after="45" data-can-write="0" data-debounce-ms="600">' in document
+    assert ('<body data-stale-after="45" data-can-write="0" data-debounce-ms="600" '
+            'data-can-gaze="0" data-gaze-every-ms="100">') in document
 
 
 def test_the_right_column_is_honest_placeholders():
@@ -1073,16 +1083,18 @@ def test_the_page_writes_only_by_posting_json_to_commands():
     """Spec §4.2, as amended by §5.2: the page's writes are the controls, and every
     one goes through the script's one command `fetch` (`deliver`) -- a JSON `POST` to
     `/commands`; the other four are the sign-in's -- and never a form (the Content-Security-Policy's `form-action 'none'` refuses one
-    anyway). Its radio inputs still only choose a tab."""
+    anyway). Its radio inputs still only choose a tab. **And a demo's pointer** (demo mode §4.5,
+    its plan's Task 9): one more `fetch`, a JSON `POST` to `/gaze`, the demo's eye, no command."""
     document = _document()
 
     assert "<form" not in document and "<textarea" not in document
-    # b2b spec §4: the other four are the sign-in's (the token endpoint, `/whoami`,
-    # `/signout`) and the page's recheck, `POST /whoami` with no token (b2b-ready §4.6);
-    # only `/commands` carries a command.
-    assert _SCRIPT.count("fetch(") == 5
+    # b2b spec §4: four are the sign-in's (the token endpoint, `/whoami`, `/signout`) and the
+    # page's recheck, `POST /whoami` with no token (b2b-ready §4.6); one a demo's pointer
+    # reports and its release (`/gaze`); only `/commands` carries a command.
+    assert _SCRIPT.count("fetch(") == 6
     assert _SCRIPT.count('fetch("/whoami", {') == 2
     assert _SCRIPT.count('fetch("/commands", {') == 1
+    assert _SCRIPT.count('fetch("/gaze", {') == 1
     assert 'fetch(body.getAttribute("data-token-endpoint")' in _SCRIPT
     assert 'fetch("/whoami", {' in _SCRIPT and 'fetch("/signout", {' in _SCRIPT
     assert 'method: "POST"' in _SCRIPT
@@ -1115,9 +1127,11 @@ def test_the_script_does_only_what_spec_4_3_and_5_2_ask():
     # R3 (Task 13 rulings, carried from Task 10's review): capture the whole
     # right-hand side, not just the identifier -- `node.innerHTML = "<b>" + name`
     # would have slipped past a pin that only read the trailing word -- and allow
-    # only the fragment renderer's own two forms. No other way to write markup.
+    # only the fragment renderer's own two forms. No other way to write markup -- but a demo's
+    # drawing and its key list (demo mode's Task 9), each rendered by `wlx serve` too
+    # (`demoscreen.render`, `web.demo_keys`) and sent as its own event, `drawn`.
     assert re.findall(r"\.innerHTML\s*\+?=\s*([^;]+);", _SCRIPT) == [
-        "html", "heldParams", "heldMoments"]
+        "html", "heldParams", "heldMoments", "payload.keys", "payload.svg"]
     assert "outerHTML" not in _SCRIPT
     assert "insertAdjacentHTML" not in _SCRIPT
     assert "document.write" not in _SCRIPT
@@ -1421,8 +1435,10 @@ def test_the_page_tells_its_script_whether_it_may_write_and_the_debounce():
     )
 
     assert DEBOUNCE_MS == 600
-    assert '<body data-stale-after="30" data-can-write="1" data-debounce-ms="600">' in box
-    assert '<body data-stale-after="30" data-can-write="0" data-debounce-ms="600">' in lan
+    assert ('<body data-stale-after="30" data-can-write="1" data-debounce-ms="600" '
+            'data-can-gaze="0" data-gaze-every-ms="100">') in box
+    assert ('<body data-stale-after="30" data-can-write="0" data-debounce-ms="600" '
+            'data-can-gaze="0" data-gaze-every-ms="100">') in lan
     for control in ('id="sched-kind"', 'id="sched-value"', 'id="sched-set"'):
         assert re.search(control + r"[^>]* disabled", lan), control
         assert not re.search(control + r"[^>]* disabled", box), control
@@ -2795,7 +2811,8 @@ def test_every_renewal_is_the_one_in_flight_so_a_token_is_never_presented_twice(
 
 def test_a_held_reward_stays_held_through_a_sign_in_state_change():
     applied = _script_between("  function applySignIn() {", "  function startSignIn() {")
-    assert 'if (node.hasAttribute("data-held")) { return; }' in applied
+    assert ('if (node.hasAttribute("data-held") || node.hasAttribute("data-demo-locked")) '
+            '{ return; }') in applied
     assert applied.index("data-held") < applied.index("node.disabled")
     swap = _script_between("  function swap(id, html) {", "  function release() {")
     assert swap.index("applySignIn();") < swap.index("holdReward();")
@@ -3982,3 +3999,263 @@ def test_the_lock_holds_the_level_exactly_not_as_shown():
     assert "<b>0.333333</b>" in pane
     assert parse_command({"kind": "set", "name": "distractor_luminance",
                           "value": float("0.3333333333333333"), "by": "jake"}).value == 1 / 3
+
+
+# --- A demo (demo mode §4.1-§4.3, §4.6; its plan's Task 9) ------------------------------------
+
+#: The demo service's `REFERENCE` alone, and a rig offering it beside a real animal.
+_REF_ONLY = ("REFERENCE",)
+_RIG_ANIMALS = ("A", "REFERENCE")
+
+
+def _tag(frame_) -> str:
+    return fragments(frame_, view())["demo-tag"]
+
+
+def test_the_demo_tag_shows_on_every_demo_frame_and_never_else():
+    """§4.2: DEMO in the header on every frame of a demo, from the frame's own `demo`: a demo
+    session's, in every phase, and a demo service's idle frame; never on a live session's, a live
+    rig's idle frame -- one that offers a demo (`gaze`) included -- or before any frame. The tag
+    names the session, whose drawing alone the page shows, and says whether a page may steer:
+    between runs and in one, never once the session has ended."""
+    phases = {"running": {}, "between_runs": {"phase": "between_runs"},
+              "awaiting_return": {"phase": "awaiting_return", "stop_kind": "operator"},
+              "closed": {"phase": "closed", "stop_kind": "operator"}}
+    for phase, overrides in phases.items():
+        tag = _tag(frame(demo=True, **overrides))
+        assert ">DEMO</span>" in tag and 'data-demo="session"' in tag, phase
+        assert 'data-session="2027-01-14_01"' in tag, phase
+        assert ("data-steerable" in tag) == (phase in ("running", "between_runs")), phase
+        assert _tag(frame(demo=False, **overrides)) == "", phase
+    service = _tag(idle(demo=True, gaze=True, animals=_REF_ONLY))
+    assert ">DEMO</span>" in service and 'data-demo="service"' in service
+    assert 'data-session=""' in service and "data-steerable" not in service
+    for live in (idle(), idle(gaze=True, animals=_RIG_ANIMALS), None):
+        assert _tag(live) == ""
+    document = page(fragments(frame(demo=True), view()), stale_after_s=30.0, nonce="n")
+    assert re.search(r'<span id="demo-tag"><span class="pill demo"[^>]*>DEMO</span></span>',
+                     document)
+    assert '<span id="demo-tag"></span>' in _document()
+
+
+def test_the_demo_screen_replaces_the_replica_only_while_demo():
+    """§4.3: the demo screen stands where *replica · V11* is, only on a demo's page; the replica
+    pane, which a live animal's screen will fill (V11), is hidden then, and shown otherwise. Both
+    are static, so a frame never replaces a drawing; the script switches them as the tag comes and
+    goes, and fills the screen from the stream's `drawn` events, the session's own alone (Task 8's
+    carried (c))."""
+    demo = page(fragments(frame(demo=True), view()), stale_after_s=30.0, nonce="n",
+                can_write=True, can_gaze=True)
+    live = page(fragments(frame(), view()), stale_after_s=30.0, nonce="n", can_write=True,
+                can_gaze=True)
+    service = page(fragments(idle(demo=True, gaze=True, animals=_REF_ONLY), view()),
+                   stale_after_s=30.0, nonce="n", can_write=True, can_gaze=True)
+
+    for document in (demo, service):
+        assert re.search(r'<section class="panel glass" id="replica-pane" hidden>', document)
+        assert re.search(r'<section class="panel glass demo-pane" id="demo-pane"[^>]*'
+                         r'data-steer="">', document)
+    assert re.search(r'<section class="panel glass" id="replica-pane">', live)
+    assert re.search(r'<section class="panel glass demo-pane" id="demo-pane"[^>]*hidden>', live)
+    for document in (demo, live, service):
+        assert "replica · V11" in document
+        assert document.count('id="demo-drawing"') == 1 and 'id="demo-dot" hidden' in document
+        assert f'data-gaze-every-ms="{GAZE_EVERY_MS}"' in document
+    assert '<div class="demo-none" id="demo-none">no screen yet' in demo
+    # The script: the switch on the tag, the drawing on its own event, the session's alone, the
+    # full window by F, a click or `#demo`, and Escape.
+    assert 'source.addEventListener("drawn", onDrawn);' in _SCRIPT
+    frame_switch = _script_between("  function demoFrame() {", "  function onDrawn(event) {")
+    assert 'el("replica-pane").hidden = demo.on;' in frame_switch
+    assert 'el("demo-pane").hidden = !demo.on;' in frame_switch
+    assert 'if (!demo.on) { closeFull(); }' in frame_switch
+    shown = _script_between("  function showDrawing() {", "  function openFull() {")
+    assert 'svg.getAttribute("data-session") === demo.session' in shown
+    assert 'wantFull: window.location.hash === "#demo"' in _SCRIPT
+    assert 'if (id === "demo-tag") { demoFrame(); }' in _SCRIPT
+    # One definition of the report interval (Task 7's carried item): `demoscreen`'s, imported.
+    source = Path(web.__file__).read_text()
+    assert "from wl_xcon.demoscreen import GAZE_EVERY_MS" in source
+    assert not re.search(r"^GAZE_EVERY_MS\s*=", source, re.M)
+    assert GAZE_EVERY_MS == demoscreen.GAZE_EVERY_MS == 100
+    # Under the screen, the last trial's outcome, from the frame.
+    under = fragments(frame(demo=True, recent_outcomes=("no_fixation", "fixation_break")),
+                      view())["demo-under"]
+    assert '<b class="mono" data-outcome="fixation_break">fixation break</b>' in under
+    assert "none yet" in fragments(frame(demo=True, recent_outcomes=()), view())["demo-under"]
+    assert "no session open" in fragments(idle(demo=True), view())["demo-under"]
+    assert fragments(frame(), view())["demo-under"] == ""
+
+
+def test_the_key_list_names_each_input_b_and_the_limits():
+    """§3.3, §3.4, §4.6: each number key and the input it stands for (`Drawn.keys`, key k at
+    k - 1), or that the task waits on none; B, which is tracker loss and hides a key pressed while
+    it is held (Task 2); Escape beside it, which with nobody steering is tracker loss mid-trial
+    (Task 8's carried (b)); where the keys act; and what a mouse is not, word for word, its
+    sources cited by key."""
+    keys = demo_keys(("lever", "feature theta", "the chair"))
+    none = demo_keys(())
+
+    assert "<dt><kbd>1</kbd></dt><dd>lever · down: lever pressed or answered; up: lever " \
+           "released</dd>" in keys
+    assert "<dt><kbd>2</kbd></dt><dd>feature theta · held: feature theta is above its " \
+           "threshold</dd>" in keys
+    assert "<dt><kbd>3</kbd></dt><dd>the chair · held: the chair moves" in keys
+    assert "<kbd>4</kbd>" not in keys
+    assert "<dt><kbd>1-9</kbd></dt><dd>this task waits on no other input</dd>" in none
+    for document in (keys, none):
+        b = document.index("<kbd>B</kbd>")
+        escape = document.index("<kbd>Esc</kbd>")
+        assert b < escape, "Escape's tracker loss sits beside B"
+        assert "A number key pressed while B is held is not seen" in document
+        assert (f"With no page steering, the eye reads as tracker loss after {pointer.LIVE_S:g} "
+                f"s, so an Escape mid-trial ends that trial as tracker lost") in document
+        assert html.escape(DEMO_KEYS_WHERE) in document
+        for limit in DEMO_LIMITS:
+            assert f"<li>{html.escape(limit)}</li>" in document
+    assert len(DEMO_LIMITS) == 6
+    assert "[@card1977evaluation, Table 2, p. 10]" in DEMO_LIMITS[0]
+    assert "[@fischer1983saccadic]" in DEMO_LIMITS[0]
+    assert "1.29 s (SD 0.42)" in DEMO_LIMITS[0] and "0.36 s of homing" in DEMO_LIMITS[0]
+    assert "15 cd/m²" in DEMO_LIMITS[-1]
+    evil = demo_keys((EVIL,))
+    assert EVIL not in evil and html.escape(EVIL, quote=True) in evil
+    with pytest.raises(ValueError):
+        demo_keys(tuple(str(n) for n in range(pointer.KEYS + 1)))
+    # The page holds the list with no keys until a drawing brings the task's.
+    assert none in page(fragments(frame(demo=True), view()), stale_after_s=30.0, nonce="n")
+
+
+def test_the_dialog_on_a_demo_service_offers_reference_alone_with_now_filled():
+    """§4.1: a demo service's New session dialog offers `REFERENCE` alone, chosen -- whatever else
+    its frame lists -- says every session there is a demo, and its script fills *←cage at* with
+    the clock's time and the id with `demo-YYYYMMDD-HHMMSS`, both editable, and sends `demo`
+    (the browser's own test plays it)."""
+    parts = fragments(idle(demo=True, gaze=True, animals=("A", "REFERENCE")), view())
+
+    assert parts["dn-subject"] == '<option value="REFERENCE">REFERENCE</option>'
+    assert 'data-demo-service="1"' in parts["dn-demo"]
+    assert "every session here is a demo, for REFERENCE alone" in parts["dn-demo"]
+    assert 'id="dn-demo-box"' not in parts["dn-demo"]
+    empty = fragments(idle(demo=True, animals=()), view())["dn-subject"]
+    assert empty == f'<option value="">{NO_REFERENCE}</option>'
+    assert REFERENCE == service.REFERENCE
+    fill = _script_between("  function fillDemo() {", "  function unfillDemo() {")
+    assert 'var left = two(now.getHours()) + ":" + two(now.getMinutes());' in fill
+    assert ('var id = "demo-" + now.getFullYear() + two(now.getMonth() + 1) + two(now.getDate()) '
+            '+ "-" +') in fill
+    assert "two(now.getHours()) + two(now.getMinutes()) + two(now.getSeconds());" in fill
+    opened = _script_between("  function openNew() {", "  function openSession() {")
+    assert "if (demoService() || demoTicked()) { fillDemo(); }" in opened
+    assert "demo: demoService() || demoTicked()" in _script_between(
+        "  function openSession() {", "  function acceptedWarnings() {")
+    # The dialog holds the choice above its fields; a session's frame shows none.
+    document = page(parts, stale_after_s=30.0, nonce="n", can_write=True)
+    assert document.index('<div id="dn-demo">') < document.index('id="dn-subject"')
+    assert fragments(frame(), view())["dn-demo"] == ""
+
+
+def test_the_rig_pages_demo_box_is_greyed_without_reference_or_gaze_saying_why():
+    """§4.1 and the PI's folder answer (2026-11-14): a rig service's dialog has a **demo** box,
+    offered only where its idle frame says `gaze` (a gaze endpoint and a `--demo-root`) and offers
+    `REFERENCE`; greyed otherwise, saying why where it is greyed and in its title: no REFERENCE,
+    no gaze, or both. Ticked, the script locks the subject to `REFERENCE` (read from the box) and
+    fills the departure and id as a demo service does. A viewer who cannot write sees it greyed as
+    every control, and the https page's waits for the sign-in."""
+    def box(frame_, view_=None):
+        return fragments(frame_, view_ or view())["dn-demo"]
+
+    offered = box(idle(gaze=True, animals=_RIG_ANIMALS))
+    assert re.search(r'<input type="checkbox" id="dn-demo-box" data-reference="REFERENCE">',
+                     offered)
+    assert "demo-why" not in offered
+    cases = {
+        (False, _RIG_ANIMALS): NO_GAZE,
+        (True, ("A",)): NO_REFERENCE,
+        (False, ("A",)): f"{NO_GAZE}; {NO_REFERENCE}",
+    }
+    for (gaze, animals), why in cases.items():
+        greyed = box(idle(gaze=gaze, animals=animals))
+        assert re.search(r'id="dn-demo-box" data-reference="REFERENCE" disabled title="'
+                         + re.escape(html.escape(why, quote=True)) + '">', greyed), why
+        assert f'<span class="sub" id="dn-demo-why">{html.escape(why)}</span>' in greyed, why
+    assert NO_REFERENCE == "no REFERENCE folder under --subjects"
+    assert NO_GAZE == "this rig names no gaze endpoint or no --demo-root"
+    lan = box(idle(gaze=True, animals=_RIG_ANIMALS), view(can_write=False))
+    assert re.search(r'id="dn-demo-box"[^>]* disabled title="[^"]+">', lan)
+    https = box(idle(gaze=True, animals=_RIG_ANIMALS), view(can_write=False, signin=True))
+    assert re.search(r'id="dn-demo-box"[^>]* disabled data-signin title=', https)
+    # The rig's dialog keeps its animals, none chosen, the demo box beside them.
+    assert fragments(idle(gaze=True, animals=_RIG_ANIMALS), view())["dn-subject"].startswith(
+        '<option value="">choose the animal</option>')
+    changed = _script_between('    else if (e.target.id === "dn-demo-box") {',
+                              '    else if (e.target.id === "task-sel") {')
+    assert "if (demoBoxed) { fillDemo(); } else { unfillDemo(); }" in changed
+    assert "lockSubject(demoBoxed);" in changed
+    lock = _script_between("  function lockSubject(locked) {", "  function restoreDemoBox() {")
+    assert 'choose(subject, box.getAttribute("data-reference"));' in lock
+    assert "subject.disabled = true;" in lock
+
+
+def test_a_stranded_demo_in_the_demo_folder_holds_up_only_demos_and_new_session_stays():
+    """XC-504: a rig's stranded demo (`Stranded.demo_folder`) holds up only another demo, so the
+    page says so in a banner of its own, offers *end session…* and no resume, keeps *new session*
+    live beside it, and greys the demo box saying why. A stranded session under `--root`, a demo
+    service's own demo among them, still holds up every open, as before."""
+    demo = Stranded("demo-20261114-101200", "REFERENCE", 1_700_000_000.0, False,
+                    "a demo is never resumed, only ended: record its return with End session",
+                    demo_folder=True)
+    parts = fragments(idle(gaze=True, animals=_RIG_ANIMALS, stranded=(demo,)), view())
+    button = '<button type="button" class="btn small primary" data-cmd="new">new session</button>'
+
+    assert '<span class="tag">Stranded demo</span>' in parts["banners"]
+    assert "a real animal's session opens beside it" in parts["banners"]
+    assert "no demo opens until it is" in parts["banners"]
+    assert "no session opens" not in parts["banners"]
+    assert 'data-return="demo-20261114-101200"' in parts["banners"]
+    assert "data-resume" not in parts["banners"]
+    assert button in parts["banners"] and button in parts["setup"]
+    assert html.escape(DEMO_STRANDED) in parts["dn-demo"] and "disabled" in parts["dn-demo"]
+    unreadable = fragments(idle(stranded=(Stranded("demo-1", "", None, demo_folder=True),)),
+                           view())
+    assert "cannot be read, so no demo opens" in unreadable["banners"]
+    assert button in unreadable["banners"]
+    real = replace(demo, demo_folder=False)
+    for stranded in ((real,), (real, demo)):
+        blocked = fragments(idle(stranded=stranded), view())
+        assert "no session opens until it is resumed or its return recorded" in blocked["banners"]
+        assert button not in blocked["banners"]
+        assert re.search(r'data-cmd="new" disabled title="[^"]+">new session</button>',
+                         blocked["setup"])
+    service_demo = fragments(idle(demo=True, animals=_REF_ONLY, stranded=(real,)), view())
+    assert button not in service_demo["banners"], "a demo service's own holds up every open"
+
+
+#: An open as the New session dialog sends it, from the box's page.
+_OPEN = {
+    "kind": "open", "by": "jake", "session_id": "demo-20261114-120000", "animal": "REFERENCE",
+    "deployment": "rig_fixed", "view": "direct", "session_kind": "training",
+    "departure": "12:00", "delivered_today": None, "answer": None, "amend_to": None,
+    "amend_reason": "", "accepted": [],
+}
+
+
+def test_an_open_carries_demo_and_a_non_boolean_is_refused():
+    """§4.1: the dialog's open sends `demo`, a boolean; `wlx serve` builds it by the wire's own
+    rules (`link._command_from`), and it crosses to the rig as sent (`_encode_command`,
+    `_decode_command`), where `Service._open`'s demo path reads it. Absent, it is false, an open
+    as every one before demo mode was; anything but a boolean is refused before anything is sent,
+    from the box's page and the signed-in page alike, and on the rig's own decode too."""
+    for demo in (True, False):
+        command = parse_command({**_OPEN, "demo": demo})
+        assert command.demo is demo
+        assert link._decode_command(link._encode_command(command)) == command
+        signed = parse_command({**{k: v for k, v in _OPEN.items() if k != "by"}, "demo": demo},
+                               actor=Member("Jake Westerberg", "acct-1", "https://wl.works", "t-1"))
+        assert signed.demo is demo
+    assert parse_command(_OPEN).demo is False
+    for bad in (1, 0, "true", None, [], {}):
+        with pytest.raises(BadCommand, match="an open's demo is true or false"):
+            parse_command({**_OPEN, "demo": bad})
+        with pytest.raises(link.CommandRefused, match="an open's demo is true or false"):
+            link._command_from({**_OPEN, "by": {"kind": "box", "name": "jake"}, "demo": bad})

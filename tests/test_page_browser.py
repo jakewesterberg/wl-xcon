@@ -14,8 +14,11 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import math
+import re
 import threading
 import time
+import xml.etree.ElementTree as ET
 from types import SimpleNamespace
 from datetime import date
 from http.server import ThreadingHTTPServer
@@ -31,20 +34,26 @@ except ImportError:
         raise
     pytest.skip("PyJWT is not installed (the signin extra)", allow_module_level=True)
 
+from _demo import ANSWERED_STATES, FIX, FIXATED_STATES, REST, Demo, shown_names, target  # noqa: E402
 from _frames import ENDPOINT, frame, idle  # noqa: E402
 from _issuer import Issuer  # noqa: E402
 from _ports import endpoints as free_endpoints  # noqa: E402
+from _rig import DIRECT, RIG, STEREOSCOPE  # noqa: E402
 from _tls import client_context, material  # noqa: E402
-from wl_xcon import serve, signin, warnlist, web  # noqa: E402
+from wl_xcon import demoscreen, pointer, serve, signin, viewport, warnlist, web  # noqa: E402
+from wl_xcon import screen as screens  # noqa: E402
 from wl_xcon.findings import SESSION_KINDS  # noqa: E402
 from wl_xcon.link import (  # noqa: E402
-    BackBlock, CheckRun, ClearOwed, Decline, Drum, ManualReward, NextBlock, OpenSession, Pause,
-    Pooled, PoolRow, Preflight, PreflightItem, SetParameter, StageRow, StaircaseRow, StartRun,
-    Suggestion, Training, WarningRow,
+    SCHEMA, BackBlock, CheckRun, ClearOwed, Decline, Drawn, Drum, ManualReward, NextBlock,
+    OpenSession, Pause, Pooled, PoolRow, Preflight, PreflightItem, SetParameter, StageRow,
+    StaircaseRow, StartRun, Suggestion, Training, WarningRow,
 )
-from wl_xcon.photometry import SRGB  # noqa: E402
+from wl_xcon.photometry import SRGB, Gray  # noqa: E402
 from wl_xcon.warnlist import HEAD_FREE  # noqa: E402
-from wl_xcon.serve import Hub, Remote, _PageServer, make_handler, tls_context  # noqa: E402
+from wl_xcon.serve import (  # noqa: E402
+    GazeRelease, GazeReport, Hub, Remote, Server, _PageServer, make_handler, tls_context,
+)
+from wl_xcon.task import Disc, Outcome, Stimulus, Trial  # noqa: E402
 
 TOKEN = "t0ken-for-tests"
 #: Housekeeping, not measurements: how long a wait may take before the test fails.
@@ -88,13 +97,16 @@ class _Dispatch:
 
 
 class _Rig:
-    def __init__(self, tmp_path, browser, *, keys: bool = True) -> None:
+    def __init__(self, tmp_path, browser, *, keys: bool = True, gaze: bool = False) -> None:
         self._browser = browser
         self._contexts: list = []
         self._thread = None
         self.fake = None
         self.dispatch = _Dispatch()
-        self.hub = Hub(steady=_Clock(), endpoint=ENDPOINT)
+        #: What `Server.steer` would be, for a demo's pointer (`gaze`: a console with the
+        #: demo's gaze endpoint; demo mode's Task 9).
+        self.steer = _Steer()
+        self.hub = Hub(steady=_Clock(), endpoint=ENDPOINT, gaze=gaze)
         try:
             tls = material(tmp_path)
             self.context = client_context(tls["ca"])
@@ -116,7 +128,7 @@ class _Rig:
                 ("127.0.0.1", rig_port),
                 make_handler(
                     self.hub, token=TOKEN, stale_after_s=30.0, dispatch=self.dispatch,
-                    remote=Remote(rig_page, self.checker),
+                    remote=Remote(rig_page, self.checker), steer=self.steer,
                 ),
                 tls_context(tls["cert"], tls["key"]),
             )
@@ -2482,3 +2494,703 @@ def test_a_double_click_on_change_the_range_never_says_not_sent_while_the_rig_an
     assert [line for line in said if line.startswith("not sent")] == []
     assert said[-1] == "sent: test"
     assert [type(seen) for seen in rig.dispatch.seen] == [SetRange]
+
+
+# --- A demo (demo mode §4.1-§4.6; its plan's Task 9) --------------------------------------------
+#
+# Two rigs. **A stand-in** (`_DemoBox`): the rig PC's own page over a real `wlx serve` handler
+# whose steer is `_Steer`, which keeps each report as `parse_gaze` read it, and a hub offered a
+# demo session's frame and a screen drawn by the real `demoscreen.Drawer`: for what the page sends
+# and says. **A live demo** (`_LiveDemo`): a demo service in process over the real link
+# (`tests/_demo.Demo`, its scripted pointer left out), `wlx serve` on its four endpoints, and the
+# page at `#demo`, full-window, the person Playwright's mouse and keyboard: the pop-out played
+# through the rig's own eye rules. Engine test material: the wall-clock pacing makes a trial run
+# as a person's does, and no timing claim rests on it (CLAUDE.md).
+
+#: A demo's session, as `wlx demo` names one.
+DEMO_SESSION = "demo-20261114-120000"
+#: The browser's window, as a person's might be: the full-window view letterboxes the drawing in it.
+WINDOW = {"width": 1280, "height": 720}
+#: How close the page's degrees must be to Python's at the same pixel: far under a pixel (about
+#: 0.05° here), far over float rounding, and far under what an average pixels-per-degree would
+#: be off by at the positions read (each test checks that it would be).
+DEGREES_EXACT = 1e-3
+#: **A hand's glide**: the mouse moved along a straight path for this many seconds, each move to
+#: where the hand would be by then, as often as Playwright moves it (about once an animation frame
+#: in Chromium, faster in WebKit), so every frame of the glide holds a move, as a mouse's events
+#: do; the page reports one each frame, and the rig eases them into one path its saccade detector
+#: sees whole. Found here: moves a fixed 15 ms apart left frames with none, the page sent no report
+#: in them, and the eased path stopped between two, which the detector read as two saccades (a
+#: correct answer scored a second look, an abort); and 24 moves a frame each took 0.4 s, a 20°/s
+#: drift near the detector's threshold. Engine test material, claiming nothing about a hand.
+GLIDE_S = 0.1
+#: Between two moves of a glide, when Playwright returns at once: about a mouse's event interval.
+GLIDE_STEP_S = 0.002
+#: **A flick**, for an answer that must reach the rig as one saccade: the mouse moved at once, this
+#: long after the page's last report, so the one report that carries the whole move is eased by
+#: the rig over the time since the one before (`pointer.Source`), as `tests/_demo.py`'s scripted
+#: pointer flicks. A glide reported a frame at a time is a saccade on a quiet machine but split in
+#: two under the suite's load (XC-508). Engine test material.
+FLICK_AFTER_S = 0.06
+
+
+class _Steer:
+    """What `Server.steer` would be (demo mode §4.5): each report and release, as `parse_gaze`
+    read it, kept in order and answered `answer` (*sent* unless a test says otherwise; a release
+    `RELEASED`), after `delay` seconds; and the most that were ever in flight at once."""
+
+    def __init__(self) -> None:
+        self.seen: list = []
+        self.answer: tuple[int, dict] = (200, {"status": "sent", "said": serve.GAZE_SENT})
+        self.delay = 0.0
+        self.most = 0
+        self._flying = 0
+        self._lock = threading.Lock()
+
+    def __call__(self, report):
+        with self._lock:
+            self._flying += 1
+            self.most = max(self.most, self._flying)
+        try:
+            if self.delay:
+                time.sleep(self.delay)
+            self.seen.append(report)
+            return serve.RELEASED if isinstance(report, GazeRelease) else self.answer
+        finally:
+            with self._lock:
+                self._flying -= 1
+
+    def reports(self) -> list:
+        return [seen for seen in self.seen if isinstance(seen, GazeReport)]
+
+    def releases(self) -> list:
+        return [seen for seen in self.seen if isinstance(seen, GazeRelease)]
+
+
+def _screen(geometry=DIRECT, *, session: str = DEMO_SESSION, keys=()) -> Drawn:
+    """A demo's screen as `pointer.Drawing` publishes one: a fixation disc, on the test rig's
+    direct view (its stand-in housings) or its stereoscope."""
+    shown = {"fix": Stimulus("fix", at=(0.0, 0.0), looks=Disc(size=0.5, color=Gray(40.0)))}
+    return Drawn(
+        schema=SCHEMA, phase="drawn", session_id=session, trial=0, frame=1,
+        screen=screens.resolve(shown, {}, Trial(start="s", states=[]), geometry,
+                               frame_period=1 / 240, frame=1, calibration=SRGB),
+        windows=(), outlines=(), viewports=viewport.viewports(RIG, geometry),
+        housings=tuple(geometry.housings), stand_in=geometry.view == "direct",
+        mask_deg=geometry.mask_deg, keys=keys, vergence_half_deg=geometry.vergence_half_deg,
+    )
+
+
+class _DemoBox:
+    """The rig PC's own page, steering a stand-in (`_Steer`): http on loopback, the operator named
+    in the page's storage, a console with the demo's gaze endpoint."""
+
+    def __init__(self, browser) -> None:
+        self.dispatch = _Dispatch()
+        self.steer = _Steer()
+        self.hub = Hub(steady=_Clock(), endpoint=ENDPOINT, gaze=True)
+        port = int(free_endpoints(1)[0].rsplit(":", 1)[1])
+        self.server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(
+            self.hub, token=TOKEN, stale_after_s=30.0, dispatch=self.dispatch, steer=self.steer))
+        self._thread = threading.Thread(target=self.server.serve_forever,
+                                        kwargs={"poll_interval": 0.05}, daemon=True)
+        self._thread.start()
+        self._context = browser.new_context(viewport=WINDOW)
+        self._context.add_init_script("window.localStorage.setItem('wlx-console-name', 'Box Op')")
+        # What the page's Content-Security-Policy refused, by directive: a demo's drawing needs
+        # its `data:` images.
+        self._context.add_init_script(
+            "window.wlxBlocked = []; document.addEventListener('securitypolicyviolation',"
+            " (e) => window.wlxBlocked.push(e.violatedDirective));")
+        self.page = self._context.new_page()
+        self.page.set_default_timeout(WAIT_S * 1000)
+        self.url = f"http://127.0.0.1:{port}/"
+
+    def demo(self, geometry=DIRECT, *, keys=()) -> Drawn:
+        """A demo session running, and its screen drawn and shown on the page."""
+        shown = _screen(geometry, keys=keys)
+        self.hub.offer(frame(demo=True, service=True, session_id=DEMO_SESSION))
+        self.hub.offer_drawn(shown)
+        return shown
+
+    def wait_for(self, predicate, seconds: float = WAIT_S) -> None:
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            if predicate():
+                return
+            time.sleep(0.05)
+        pytest.fail(f"timed out after {seconds:g} s waiting for a condition")
+
+    def close(self) -> None:
+        for step in (self._context.close, self.server.shutdown, self.server.server_close,
+                     self.hub.close):
+            try:
+                step()
+            except Exception:
+                pass
+
+
+@pytest.fixture
+def demo_box():
+    with browser() as launched:
+        made = _DemoBox(launched)
+        try:
+            yield made
+        finally:
+            made.close()
+
+
+@pytest.fixture
+def gaze_rig(tmp_path):
+    """The https page of a rig whose console has the demo's gaze endpoint."""
+    with browser() as launched:
+        made = _Rig(tmp_path, launched, gaze=True)
+        try:
+            yield made
+        finally:
+            made.close()
+
+
+_DRAWN = "#demo-drawing:not([hidden]) svg g.eye"
+
+
+def _box_of(page, selector: str) -> dict:
+    return page.locator(selector).bounding_box()
+
+
+def _expected(page, svg_text: str):
+    """**The pointer in degrees, computed by Python apart from the page's script**: the drawing's
+    box as the browser laid it out, its viewBox fitted in it (`xMidYMid meet`, SVG's default), each
+    eye's group placed by its own `transform` attribute and its `data-distance-cm`, and `geometry`'s
+    rule, `atan(x_cm / D)` per axis (`demoscreen.degrees_of`). Returns `(to_degrees, to_pixels,
+    linear)`: a client pixel's degrees and which eye, a position's client pixel in an eye, and what
+    an average pixels-per-degree would say at a pixel -- the rule the PI retired, 2026-10-19."""
+    root = ET.fromstring(svg_text)
+    x0, y0, width, height = (float(v) for v in root.get("viewBox").split())
+    eyes = []
+    for group in root.findall("{http://www.w3.org/2000/svg}g[@class='eye']"):
+        tx, ty = (float(v) for v in re.match(r"translate\(([^,]+),([^)]+)\)",
+                                             group.get("transform")).groups())
+        image = group.find("{http://www.w3.org/2000/svg}image[@class='frame']")
+        left = tx + float(image.get("x"))
+        eyes.append((group.get("data-eye"), tx, ty, float(group.get("data-distance-cm")),
+                     left, left + float(image.get("width"))))
+    box = page.evaluate(
+        "(() => { const r = document.querySelector('#demo-drawing svg').getBoundingClientRect();"
+        " return [r.left, r.top, r.width, r.height]; })()")
+    scale = min(box[2] / width, box[3] / height)
+    ox = box[0] + (box[2] - width * scale) / 2 - x0 * scale
+    oy = box[1] + (box[3] - height * scale) / 2 - y0 * scale
+
+    def eye_of(ux):
+        return min(eyes, key=lambda e: 0.0 if e[4] <= ux <= e[5] else min(abs(ux - e[4]),
+                                                                         abs(ux - e[5])))
+
+    def to_degrees(px, py):
+        ux, uy = (px - ox) / scale, (py - oy) / scale
+        name, tx, ty, d, _, _ = eye_of(ux)
+        x_cm, y_cm = ux - tx, ty - uy
+        return name, (math.degrees(math.atan(x_cm / d)), math.degrees(math.atan(y_cm / d)))
+
+    def to_pixels(name, x_deg, y_deg):
+        _, tx, ty, d, _, _ = next(e for e in eyes if e[0] == name)
+        x_cm, y_cm = d * math.tan(math.radians(x_deg)), d * math.tan(math.radians(y_deg))
+        return ox + (x_cm + tx) * scale, oy + (ty - y_cm) * scale
+
+    def linear(px, py):
+        ux, uy = (px - ox) / scale, (py - oy) / scale
+        _, tx, ty, d, _, _ = eye_of(ux)
+        per_cm = math.degrees(1.0 / d)  # degrees per centimeter at the eye's straight-ahead point
+        return (ux - tx) * per_cm, (ty - uy) * per_cm
+
+    return to_degrees, to_pixels, linear
+
+
+def _report_after(box, count: int, seconds: float = WAIT_S) -> GazeReport:
+    """The latest report once two more than `count` have come: the pointer is still, so at least
+    two reports a `GAZE_EVERY_MS` apart carry where it rests."""
+    box.wait_for(lambda: len(box.steer.reports()) >= count + 2, seconds)
+    return box.steer.reports()[-1]
+
+
+@pytest.mark.parametrize("geometry", [DIRECT, STEREOSCOPE], ids=["direct", "stereoscope"])
+def test_the_page_turns_the_pointer_into_degrees_as_python_does(demo_box, geometry):
+    """§3.3, §4.4 (the PI, 2026-10-19: no average ppd): the page reports the pointer in degrees
+    read from the drawing's own eye group, `atan(x_cm / D)` per axis, +y up, in the eye it is over
+    -- the same number Python computes at that pixel from the layout, the transform and `D`, apart
+    from the script, in the pane and in the full window's letterbox; off the drawing it reports
+    `over` false. At each position read off-center, an average pixels-per-degree would be wrong by
+    many times the tolerance, so the test tells the two rules apart."""
+    page = demo_box.page
+    page.goto(demo_box.url)
+    shown = demo_box.demo(geometry)
+    page.wait_for_selector(_DRAWN, state="attached")
+    svg = demoscreen.render(shown)
+    names = [vp.eye for vp in shown.viewports]
+    targets = ([(names[0], 0.0, 0.0), (names[0], 12.0, -6.0), (names[0], -20.0, 8.0)]
+               if len(names) == 1 else
+               [("left", -10.0, 8.0), ("right", 11.0, -9.0), ("right", -9.0, 10.0)])
+    for full in (False, True):
+        if full:
+            page.keyboard.press("f")
+            page.wait_for_selector("#demo-pane.full", state="attached")
+        to_degrees, to_pixels, linear = _expected(page, svg)
+        for name, x_deg, y_deg in targets:
+            px, py = (round(v) for v in to_pixels(name, x_deg, y_deg))
+            count = len(demo_box.steer.reports())
+            page.mouse.move(px, py)
+            said = _report_after(demo_box, count)
+            eye, (want_x, want_y) = to_degrees(px, py)
+            assert eye == name and said.over is True, (full, name, x_deg, y_deg)
+            assert abs(said.x - want_x) < DEGREES_EXACT and abs(said.y - want_y) < DEGREES_EXACT, (
+                full, name, (x_deg, y_deg), (said.x, said.y), (want_x, want_y))
+            assert abs(said.x - x_deg) < 0.2 and abs(said.y - y_deg) < 0.2, "a pixel's worth"
+            if (x_deg, y_deg) != (0.0, 0.0):
+                flat_x, flat_y = linear(px, py)
+                assert max(abs(flat_x - said.x), abs(flat_y - said.y)) > 20 * DEGREES_EXACT
+    # Off the drawing, in the full window's bar: gaze away, never a position; and out of the
+    # window (as the browser says, which Playwright's mouse cannot leave): gaze away too.
+    bar = _box_of(page, ".demo-bar")
+    count = len(demo_box.steer.reports())
+    page.mouse.move(bar["x"] + bar["width"] / 2, bar["y"] + bar["height"] / 2)
+    said = _report_after(demo_box, count)
+    assert (said.over, said.x, said.y) == (False, 0.0, 0.0)
+    page.mouse.move(*(round(v) for v in to_pixels(names[0] if len(names) == 1 else "right",
+                                                   1.0, 1.0)))
+    _report_after(demo_box, len(demo_box.steer.reports()))
+    assert demo_box.steer.reports()[-1].over is True
+    page.evaluate("document.body.dispatchEvent(new MouseEvent('mouseout', {bubbles: true,"
+                  " relatedTarget: null}))")
+    assert _report_after(demo_box, len(demo_box.steer.reports())).over is False
+    # The drawing's frames are images from `data:`, which the page's policy admits.
+    assert page.evaluate("window.wlxBlocked") == []
+
+
+def test_keys_do_nothing_while_typing_in_a_box(demo_box):
+    """§4.6: the number keys and B are the demo's only over the drawing or in the full window, and
+    never while typing in a box -- where P and M are not taken either. Over the drawing, out of a
+    box, a key is held while down and counted once a press; B is held while down."""
+    page = demo_box.page
+    page.goto(demo_box.url)
+    demo_box.demo(keys=("lever",))
+    page.wait_for_selector(_DRAWN, state="attached")
+    page.wait_for_selector("#demo-keys kbd:text-is('1')", state="attached")
+    screen = _box_of(page, "#demo-drawing svg")
+    page.mouse.move(screen["x"] + screen["width"] / 2, screen["y"] + screen["height"] / 2)
+    demo_box.wait_for(lambda: len(demo_box.steer.reports()) >= 2)
+
+    page.fill("#run-trials", "")  # focuses the box, empty
+    for key in ("1", "b", "B", "9", "p", "m"):
+        page.keyboard.press(key)
+    page.keyboard.down("2")
+    page.keyboard.down("b")
+    said = _report_after(demo_box, len(demo_box.steer.reports()))
+    page.keyboard.up("2")
+    page.keyboard.up("b")
+    assert (said.held, said.presses, said.b) == (0, (0,) * 9, False)
+    assert page.input_value("#run-trials") == "1bB9pm2b", "the keys went to the box"
+    assert not [seen for seen in demo_box.dispatch.seen if isinstance(seen, Pause)]
+
+    page.evaluate("document.activeElement.blur()")
+    page.mouse.move(screen["x"] + screen["width"] / 2, screen["y"] + screen["height"] / 2 + 1)
+    page.keyboard.down("1")
+    page.keyboard.down("b")
+    held = _report_after(demo_box, len(demo_box.steer.reports()))
+    page.keyboard.up("1")
+    page.keyboard.up("b")
+    let_go = _report_after(demo_box, len(demo_box.steer.reports()))
+    assert (held.held, held.presses[0], held.b) == (1, 1, True)
+    assert (let_go.held, let_go.presses[0], let_go.b) == (0, 1, False)
+
+    # Off the drawing, the pane not full: a key is no demo's.
+    page.mouse.move(5, 5)
+    page.keyboard.press("1")
+    off = _report_after(demo_box, len(demo_box.steer.reports()))
+    assert off.over is False and off.presses[0] == 1
+
+    # The mouse button, over the drawing: a touch while it is down (the click opens the full
+    # window too).
+    page.mouse.move(screen["x"] + screen["width"] / 2, screen["y"] + screen["height"] / 2)
+    page.mouse.down()
+    pressed = _report_after(demo_box, len(demo_box.steer.reports()))
+    page.mouse.up()
+    released = _report_after(demo_box, len(demo_box.steer.reports()))
+    assert (pressed.button, released.button, released.over) == (True, False, True)
+
+
+def test_a_page_says_steered_from_another_page_and_lets_go_on_escape_and_when_it_goes(demo_box):
+    """§4.5: a report answered 409 *steered from another page* is said so; Escape lets go of the
+    eye (`release`), and nothing more is sent until the pointer moves again; the page going away
+    lets go too (`fetch` with `keepalive`). One report is in flight at a time, at most one an
+    animation frame while the pointer moves."""
+    page = demo_box.page
+    page.goto(demo_box.url)
+    demo_box.demo()
+    page.wait_for_selector(_DRAWN, state="attached")
+    screen = _box_of(page, "#demo-drawing svg")
+    middle = (screen["x"] + screen["width"] / 2, screen["y"] + screen["height"] / 2)
+
+    demo_box.steer.answer = serve.STEERED_ELSEWHERE
+    page.mouse.move(*middle)
+    page.wait_for_selector('#demo-pane[data-steer="elsewhere"]', state="attached")
+    assert page.inner_text("#demo-steer").startswith("steered from another page")
+    assert "warn" in page.get_attribute("#demo-steer", "class")
+
+    demo_box.steer.answer = (200, {"status": "sent", "said": serve.GAZE_SENT})
+    demo_box.steer.delay = 0.05
+    for step in range(30):
+        page.mouse.move(middle[0] + step, middle[1])
+        time.sleep(0.005)
+    page.wait_for_selector('#demo-pane[data-steer="steering"]', state="attached")
+    assert demo_box.steer.most == 1, "one report in flight at a time"
+    seqs = [report.seq for report in demo_box.steer.reports()]
+    assert seqs == sorted(set(seqs)), "each report's seq rises"
+    demo_box.steer.delay = 0.0
+    # At most once an animation frame: moves every 2 ms for 0.3 s, the rig answering at once,
+    # are at most a report a frame (60 a second, and a few for the frames' edges).
+    before = len(demo_box.steer.reports())
+    page.evaluate(
+        "() => new Promise((done) => { const at = performance.now(); const tick = setInterval(() => {"
+        " const t = performance.now() - at; document.dispatchEvent(new PointerEvent('pointermove',"
+        " {clientX: %f + t / 10, clientY: %f, bubbles: true}));"
+        " if (t > 300) { clearInterval(tick); done(); } }, 2); })" % middle)
+    time.sleep(0.15)
+    moved = len(demo_box.steer.reports()) - before
+    assert 3 <= moved <= 0.45 * 60 + 4, moved
+
+    page.keyboard.press("Escape")
+    demo_box.wait_for(lambda: len(demo_box.steer.releases()) == 1)
+    quiet = len(demo_box.steer.reports())
+    time.sleep(0.4)
+    assert len(demo_box.steer.reports()) <= quiet + 1, "nothing after Escape but one in flight"
+    page.mouse.move(middle[0], middle[1] + 3)
+    demo_box.wait_for(lambda: len(demo_box.steer.reports()) > quiet + 1)
+
+    page.goto("about:blank")
+    demo_box.wait_for(lambda: len(demo_box.steer.releases()) == 2)
+    assert {release.page for release in demo_box.steer.releases()} == {
+        demo_box.steer.reports()[0].page}
+
+
+def test_not_delivered_between_runs_is_said_quietly_and_reports_go_on(demo_box):
+    """Task 8's carried (a): between runs and while paused the rig's gaze queue fills, and each
+    report is answered 504 *not delivered*; the page says so quietly, never as an error, keeps
+    sending, and steers again the moment a run takes reports."""
+    page = demo_box.page
+    page.goto(demo_box.url)
+    demo_box.demo()
+    page.wait_for_selector(_DRAWN, state="attached")
+    screen = _box_of(page, "#demo-drawing svg")
+    page.mouse.move(screen["x"] + screen["width"] / 2, screen["y"] + screen["height"] / 2)
+    page.wait_for_selector('#demo-pane[data-steer="steering"]', state="attached")
+
+    demo_box.steer.answer = serve.not_delivered(serve.GAZE_NOT_TAKEN)
+    page.wait_for_selector('#demo-pane[data-steer="waiting"]', state="attached")
+    tone = page.get_attribute("#demo-steer", "class")
+    assert "crit" not in tone and "warn" not in tone
+    assert "not reading the pointer now" in page.inner_text("#demo-steer")
+    count = len(demo_box.steer.reports())
+    demo_box.wait_for(lambda: len(demo_box.steer.reports()) >= count + 3)
+    demo_box.steer.answer = (200, {"status": "sent", "said": serve.GAZE_SENT})
+    page.wait_for_selector('#demo-pane[data-steer="steering"]', state="attached")
+
+
+def test_a_viewer_who_cannot_write_sees_the_drawing_and_no_dot_and_one_signed_in_steers(gaze_rig):
+    """§4.5: the https page not signed in sees the demo's drawing and no dot, and sends nothing;
+    signed in, the dot is drawn where the pointer is and its reports reach the steer, past the
+    token check `/gaze` shares with `/commands`."""
+    page = gaze_rig.browser_page()
+    gaze_rig.hub.offer(frame(demo=True, service=True, session_id=DEMO_SESSION))
+    gaze_rig.hub.offer_drawn(_screen())
+    page.wait_for_selector(_DRAWN, state="attached")
+    screen = _box_of(page, "#demo-drawing svg")
+    page.mouse.move(screen["x"] + screen["width"] / 2, screen["y"] + screen["height"] / 2)
+    time.sleep(0.4)
+    assert page.get_attribute("#demo-dot", "hidden") is not None
+    assert gaze_rig.steer.seen == []
+
+    _sign_in(page)
+    page.wait_for_selector(_DRAWN, state="attached")
+    screen = _box_of(page, "#demo-drawing svg")
+    page.mouse.move(screen["x"] + screen["width"] / 2, screen["y"] + screen["height"] / 2)
+    gaze_rig.wait_for(lambda: len(gaze_rig.steer.reports()) >= 2)
+    page.wait_for_selector("#demo-dot:not([hidden])", state="attached")
+    assert gaze_rig.steer.reports()[-1].over is True
+
+
+def test_the_demo_screen_shows_only_this_sessions_drawing_and_goes_with_the_demo(demo_box):
+    """Task 8's carried (c): the hub keeps the last drawing after a demo ends; the page shows the
+    demo screen only while the frame says demo, and only the drawing of the session the frame is,
+    so a drawing kept from an earlier demo never stands for the next."""
+    page = demo_box.page
+    page.goto(demo_box.url + "#demo")
+    assert page.is_hidden("#demo-pane") and page.is_visible("#replica-pane")
+    demo_box.demo()
+    page.wait_for_selector(_DRAWN, state="attached")
+    assert page.is_visible("#demo-pane.full") and page.is_hidden("#replica-pane")
+    assert page.inner_text("#demo-tag") == "DEMO"
+
+    demo_box.hub.offer(frame(demo=True, service=True, session_id="demo-20261114-130000"))
+    page.wait_for_selector("#demo-none:not([hidden])", state="attached")
+    assert page.is_hidden("#demo-drawing")
+    demo_box.hub.offer(frame())
+    page.wait_for_selector("#demo-pane[hidden]", state="attached")
+    assert page.is_visible("#replica-pane") and page.inner_text("#demo-tag") == ""
+    assert page.evaluate("document.body.classList.contains('demo-full')") is False
+
+
+def test_a_demo_services_dialog_fills_now_offers_reference_and_opens_a_demo(demo_box):
+    """§4.1: on a demo service *New session* offers `REFERENCE` alone, fills *←cage at* with the
+    clock's minute and the id with `demo-YYYYMMDD-HHMMSS`, both editable, and the open sends
+    `demo`."""
+    page = demo_box.page
+    demo_box.hub.offer(idle(demo=True, gaze=True, animals=("REFERENCE",)))
+    page.goto(demo_box.url)
+    before = time.time()
+    page.click('[data-cmd="new"]')
+    left, given = page.input_value("#dn-left"), page.input_value("#dn-id")
+    after = time.time()
+    minutes = {time.strftime("%H:%M", time.localtime(at)) for at in (before, after)}
+    assert left in minutes, (left, minutes)
+    assert re.fullmatch(r"demo-\d{8}-\d{6}", given), given
+    stamps = {time.strftime("demo-%Y%m%d-%H%M%S", time.localtime(at))
+              for at in range(math.floor(before), math.ceil(after) + 1)}
+    assert given in stamps
+    assert page.input_value("#dn-subject") == "REFERENCE"
+    # Edited, a fill is the person's: the dialog reopened keeps it, and refills one cleared.
+    page.fill("#dn-id", given + "b")
+    page.fill("#dn-left", "")
+    page.click("#dn-cancel")
+    page.click('[data-cmd="new"]')
+    assert page.input_value("#dn-id") == given + "b"
+    left = page.input_value("#dn-left")
+    assert left in {time.strftime("%H:%M", time.localtime(at)) for at in (before, time.time())}
+    page.select_option("#dn-deployment", "rig_fixed")
+    page.select_option("#dn-kind", "training")
+    page.click("#dn-ok")
+    demo_box.wait_for(lambda: _opens(demo_box))
+    (opened,) = _opens(demo_box)
+    assert (opened.demo, opened.animal, opened.session_id, opened.departure) == (
+        True, "REFERENCE", given + "b", left)
+
+
+def test_the_rig_pages_demo_box_locks_reference_fills_now_and_opens_a_demo(demo_box):
+    """§4.1 on a live rig: where the idle frame says `gaze` and offers `REFERENCE`, the demo box
+    locks the subject to `REFERENCE` and fills the departure and id; unticked, the subject is the
+    person's again and the fills go; the open sends `demo`. Greyed with its reason where the frame
+    says no gaze."""
+    page = demo_box.page
+    demo_box.hub.offer(idle(gaze=True, animals=("A", "REFERENCE")))
+    page.goto(demo_box.url)
+    page.click('[data-cmd="new"]')
+    assert page.input_value("#dn-subject") == "" and page.input_value("#dn-id") == ""
+    page.check("#dn-demo-box")
+    assert page.input_value("#dn-subject") == "REFERENCE" and page.is_disabled("#dn-subject")
+    assert re.fullmatch(r"demo-\d{8}-\d{6}", page.input_value("#dn-id"))
+    assert re.fullmatch(r"\d{2}:\d{2}", page.input_value("#dn-left"))
+    page.uncheck("#dn-demo-box")
+    assert not page.is_disabled("#dn-subject")
+    assert page.input_value("#dn-id") == "" and page.input_value("#dn-left") == ""
+    page.check("#dn-demo-box")
+    page.select_option("#dn-deployment", "rig_fixed")
+    page.select_option("#dn-kind", "training")
+    page.click("#dn-ok")
+    demo_box.wait_for(lambda: _opens(demo_box))
+    (opened,) = _opens(demo_box)
+    assert (opened.demo, opened.animal) == (True, "REFERENCE")
+
+    demo_box.hub.offer(idle(gaze=False, animals=("A", "REFERENCE")))
+    page.wait_for_selector("#dn-demo-box[disabled]", state="attached")
+    assert page.get_attribute("#dn-demo-box", "title") == web.NO_GAZE
+
+
+# --- the pop-out, played with the mouse --------------------------------------------------------
+
+
+class _LiveDemo:
+    """**A demo, played in a real browser**: a demo service in process over the real link
+    (`_demo.Demo`, its scripted pointer left out), `wlx serve` on its four endpoints, and the rig
+    PC's own page at `#demo`, full-window; `register` is the suite's `zmq_cleanup`."""
+
+    def __init__(self, tmp_path, launched, register) -> None:
+        self.demo = Demo(tmp_path, None, register)
+        link = self.demo.link
+        self.server = Server(sub=link.pub_endpoint, req=link.rep_endpoint, http=("127.0.0.1", 0),
+                             token=TOKEN, mark=link.mark_endpoint, gaze=link.gaze_endpoint)
+        self._context = launched.new_context(viewport=WINDOW)
+        self._context.add_init_script("window.localStorage.setItem('wlx-console-name', 'Box Op')")
+        # When the page last sent a pointer report, for `flick`; the page itself is unchanged.
+        self._context.add_init_script(
+            "(() => { const sent = window.fetch; window.wlxGazeAt = 0;"
+            " window.fetch = function (url) { if (url === '/gaze') {"
+            " window.wlxGazeAt = performance.now(); } return sent.apply(this, arguments); }; })()")
+        self.page = self._context.new_page()
+        self.page.set_default_timeout(WAIT_S * 1000)
+        self.at: tuple[float, float] | None = None
+
+    def __enter__(self) -> "_LiveDemo":
+        self.demo.__enter__()
+        self.server.start()
+        self.page.goto(f"http://127.0.0.1:{self.server.address[1]}/#demo")
+        return self
+
+    def __exit__(self, *exc) -> None:
+        try:
+            self._context.close()
+        finally:
+            try:
+                self.server.close()
+            finally:
+                self.demo.__exit__(*exc)
+
+    def client(self, x_deg: float, y_deg: float) -> tuple[float, float]:
+        """Where a position in degrees is in the window: the drawing's eye group's own transform,
+        `D·tan` per axis, as the page reads a pointer back."""
+        return tuple(self.page.evaluate(
+            "([x, y]) => { const svg = document.querySelector('#demo-drawing svg');"
+            " const eye = svg.querySelector('g.eye');"
+            " const d = Number(eye.getAttribute('data-distance-cm'));"
+            " const p = svg.createSVGPoint(); p.x = d * Math.tan(x * Math.PI / 180);"
+            " p.y = d * Math.tan(y * Math.PI / 180);"
+            " const c = p.matrixTransform(eye.getScreenCTM()); return [c.x, c.y]; }",
+            [x_deg, y_deg]))
+
+    def glide(self, x: float, y: float, seconds: float = GLIDE_S) -> None:
+        """The mouse to client `(x, y)` along a hand's straight path taking `seconds` (`GLIDE_S`);
+        at once with `seconds` 0."""
+        x0, y0 = self.at if self.at is not None else (x, y)
+        start = time.perf_counter()
+        while True:
+            share = 1.0 if seconds <= 0 else min(1.0, (time.perf_counter() - start) / seconds)
+            self.page.mouse.move(x0 + (x - x0) * share, y0 + (y - y0) * share)
+            if share >= 1.0:
+                break
+            time.sleep(GLIDE_STEP_S)
+        self.at = (x, y)
+
+    def look(self, at: tuple[float, float], seconds: float = GLIDE_S) -> None:
+        self.glide(*self.client(*at), seconds=seconds)
+
+    def flick(self, at: tuple[float, float]) -> None:
+        """The mouse to `at`, degrees, in one move `FLICK_AFTER_S` after the page's next report."""
+        x, y = self.client(*at)
+        last = self.page.evaluate("window.wlxGazeAt")
+        end = time.monotonic() + WAIT_S
+        while self.page.evaluate("window.wlxGazeAt") == last:
+            if time.monotonic() > end:
+                pytest.fail("the page sent no pointer report")
+            time.sleep(0.002)
+        time.sleep(FLICK_AFTER_S)
+        self.page.mouse.move(x, y)
+        self.at = (x, y)
+
+    def ready(self) -> None:
+        """The session open, and the page steering its eye at `REST`: first a run of one trial
+        nobody steers, which ends as tracker loss (§3.3: with no page steering, the eye is lost),
+        so the page holds a drawing of this session to put its pointer on; between runs the page
+        keeps the eye, so the next run's first frame finds it live (Task 8's carried (a))."""
+        self.demo.open()
+        self.page.wait_for_selector("#demo-pane.full", state="attached")
+        self.demo.start({}, trials=1)
+        self.demo.ended_run()
+        self.page.wait_for_selector(_DRAWN, state="attached")
+        self.look(REST, seconds=0)
+        self.page.wait_for_selector('#demo-pane[data-steer="steering"]', state="attached")
+
+    def screen_with(self, wanted, what: str) -> Drawn:
+        return self.demo.until(lambda f: isinstance(f, Drawn) and f.screen is not None
+                               and wanted(f), what)
+
+    def outcome(self) -> str:
+        self.demo.ended_run()
+        return self.demo.rows("trials.jsonl")[-1]["outcome"]
+
+
+@pytest.fixture
+def began(monkeypatch) -> list:
+    """Each state the rig's world was told began, `(trial, state, frame)`, as the trial loop tells
+    it (`run.World.began`): what the rig made of the pointer, seen without changing it."""
+    told: list = []
+    real = pointer.Pointing.began
+
+    def spy(world, state, frame_):
+        told.append((world.index, state, frame_))
+        return real(world, state, frame_)
+
+    monkeypatch.setattr(pointer.Pointing, "began", spy)
+    return told
+
+
+@pytest.fixture
+def live(tmp_path, zmq_cleanup):
+    with browser() as launched:
+        with _LiveDemo(tmp_path, launched, zmq_cleanup) as made:
+            yield made
+
+
+def _states(began) -> tuple:
+    return tuple(state for _, state, _ in began)
+
+
+#: Every run here: no blank after an error, so the run ends on its outcome.
+_QUICK = {"timeout": 0.0}
+
+
+def test_the_popout_played_with_the_mouse_is_correct(live, began):
+    """§9, played by hand: hold on the point, the ring appears, move to the odd one and stay. The
+    rig's own eye rules score it correct, through the states a correct answer takes."""
+    live.ready()
+    began.clear()
+    live.demo.start({**_QUICK, "fix_hold": 0.3, "target_hold": 0.2, "response_deadline": 3.0})
+    live.screen_with(lambda f: "fix" in shown_names(f), "the fixation point")
+    live.look(FIX)
+    go = live.screen_with(lambda f: any(n.startswith("search.") for n in shown_names(f)),
+                          "the ring")
+    live.flick(target(go))
+
+    assert live.outcome() == Outcome.CORRECT.value
+    assert _states(began) == (*ANSWERED_STATES, "on_target")
+
+
+def test_leaving_early_is_an_early_saccade(live, began):
+    """§9, played by hand: on the point, then away before the go -- an early saccade, a fixation
+    break."""
+    live.ready()
+    began.clear()
+    live.demo.start({**_QUICK, "fix_hold": 2.0})
+    live.screen_with(lambda f: "fix" in shown_names(f), "the fixation point")
+    live.look(FIX)
+    time.sleep(0.3)
+    live.look(REST)
+
+    assert live.outcome() == Outcome.FIXATION_BREAK.value
+    assert _states(began) == (*FIXATED_STATES, "early")
+
+
+def test_leaving_the_drawing_is_no_fixation(live, began):
+    """§3.3: off the drawing is gaze away, never tracker loss: a page that steers and leaves the
+    drawing keeps the eye, looking nowhere, and the trial ends on no fixation."""
+    live.ready()
+    began.clear()
+    live.demo.start({**_QUICK, "fix_acquisition": 0.5})
+    bar = _box_of(live.page, ".demo-bar")
+    live.glide(bar["x"] + bar["width"] / 2, bar["y"] + bar["height"] / 2)
+
+    assert live.outcome() == Outcome.NO_FIXATION.value
+    assert _states(began) == ("between", "await_fix")
+
+
+def test_holding_b_is_tracker_lost(live, began):
+    """§3.3: B held is tracker loss, which the trial ends on as its `tracker_lost` says."""
+    live.ready()
+    began.clear()
+    live.demo.start({**_QUICK, "fix_hold": 2.0})
+    live.screen_with(lambda f: "fix" in shown_names(f), "the fixation point")
+    live.look(FIX)
+    time.sleep(0.3)
+    live.page.keyboard.down("b")
+    try:
+        assert live.outcome() == Outcome.TRACKER_LOST.value
+    finally:
+        live.page.keyboard.up("b")
+    assert _states(began) == FIXATED_STATES

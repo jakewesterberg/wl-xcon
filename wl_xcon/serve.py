@@ -38,7 +38,9 @@ already runs, so no new dependency:
 reads goes to `Hub.offer_drawn`, never `Hub.offer`; the hub's `demoscreen.Drawer` draws it with
 the exact drawer on a thread of its own, never in the rig service's process, and each drawing
 goes to every stream as its own server-sent event, `event: drawn`, in order, apart from the
-frames; a stream that connects is sent the latest.
+frames, with the key list for that screen's keys (`web.demo_keys`, demo mode's Task 9); a stream
+that connects is sent the latest. The page shows it only while the frame says `demo`, and only a
+drawing of the session the frame is (`web`'s script).
 
 **The rig's https page (b2b, `--https` and its five companion flags).** A second
 listener, TLS, serves the same routes plus `POST /whoami` and `POST /signout`. A command
@@ -234,6 +236,9 @@ class Hub:
         self._drawer: _demoscreen.Drawer | None = None
         #: The latest drawing, `(its number, its SVG)`, counted from 1; `(0, None)` before any.
         self._drawing: tuple[int, str | None] = (0, None)
+        #: The latest drawing's keys, `Drawn.keys` (key `k`'s input at index `k - 1`), which the
+        #: page's key list names beside B (demo mode §3.4, §4.3); `()` before any.
+        self._drawing_keys: tuple = ()
 
     def offer(self, frame: _link.Telemetry | _link.Idle) -> None:
         """Keep `frame` as the latest and hand it to every open stream.
@@ -300,6 +305,7 @@ class Hub:
             if self._closed:
                 return
             self._drawing = (self._drawing[0] + 1, svg)
+            self._drawing_keys = tuple(drawn.keys)
             subscribers = list(self._subscribers)
         for subscriber in subscribers:
             _wake(subscriber)
@@ -309,6 +315,12 @@ class Hub:
         stream sends one only when it is newer than the last it sent; `(0, None)` before any."""
         with self._lock:
             return self._drawing
+
+    def drawing_and_keys(self) -> tuple[int, str | None, tuple]:
+        """`drawing()` and the keys of the screen it drew (`Drawn.keys`), read together, so the
+        key list a stream sends beside a drawing is that drawing's."""
+        with self._lock:
+            return (*self._drawing, self._drawing_keys)
 
     def demo_running(self) -> bool:
         """**Whether the latest frame is a demo session's** (`Telemetry.demo`; demo mode §4.5),
@@ -617,12 +629,14 @@ def _csp(nonce: str, connect: str = "") -> str:
     else. Defense beneath `web._e`, not instead of it. `connect` is one more origin the
     page may `fetch`: on the https page, wl.works' token endpoint (b2b spec §3), the one
     place a request from that page goes besides this rig. From the box's own page, no
-    request leaves the box."""
+    request leaves the box. **Images from `data:` alone** (demo mode §4.4): a demo's drawing
+    carries each eye's frame as a PNG inside its SVG (`demoscreen.render`), and no image is
+    fetched from anywhere."""
     sources = f"'self' {connect}" if connect else "'self'"
     return (
         f"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'unsafe-inline'; "
-        f"font-src 'self'; connect-src {sources}; base-uri 'none'; form-action 'none'; "
-        f"frame-ancestors 'none'"
+        f"font-src 'self'; img-src data:; connect-src {sources}; base-uri 'none'; "
+        f"form-action 'none'; frame-ancestors 'none'"
     )
 
 
@@ -748,9 +762,10 @@ _SHAPES = {
     "mark": frozenset({"pressed_at"}),
     "note": frozenset({"mark", "note"}),
     # P4d-2b b3a-2: `wlx taskd`'s own, by the wire's field names (`link._command_from`).
+    # And since demo mode's Task 9 whether the session is a demo (`link.OpenSession.demo`).
     "open": frozenset({
         "session_id", "animal", "deployment", "view", "session_kind", "departure",
-        "delivered_today", "answer", "amend_to", "amend_reason", "accepted",
+        "delivered_today", "answer", "amend_to", "amend_reason", "accepted", "demo",
     }),
     # The block of the plan a run starts at: the pop-out search build's Task 6.
     "check": frozenset({"task", "values", "plan", "start_block"}),
@@ -1924,6 +1939,7 @@ def make_handler(
                 signin=self._sign_in(),
                 https_page=self._https_page,
                 https_off=self._https_off,
+                can_gaze=view.can_gaze,
             )
             connect = ""
             if self._remote is not None:
@@ -2050,13 +2066,15 @@ def make_handler(
             )
 
         def _send_drawing(self, after: int) -> int:
-            """The hub's latest drawing as its own event, `drawn`, its payload `{"svg": ...}`
-            (`demoscreen.render`'s fragment), if it is newer than drawing `after`, the last
-            this stream sent; the number of the last sent."""
-            number, svg = self._hub.drawing()
+            """The hub's latest drawing as its own event, `drawn`, its payload `{"svg": ...,
+            "keys": ...}` -- `demoscreen.render`'s fragment, and the key list for that screen's
+            keys (`web.demo_keys`; demo mode §4.3, Task 9), rendered here as every word of the
+            page is -- if it is newer than drawing `after`, the last this stream sent; the
+            number of the last sent."""
+            number, svg, keys = self._hub.drawing_and_keys()
             if number <= after:
                 return after
-            self.wfile.write(event({"svg": svg}, name="drawn"))
+            self.wfile.write(event({"svg": svg, "keys": _web.demo_keys(keys)}, name="drawn"))
             return number
 
     def _backstop(handler):

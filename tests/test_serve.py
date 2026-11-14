@@ -38,7 +38,7 @@ from _sessions import OPEN_ACCEPTED
 # Autouse: every `ZmqLink`/`ZmqConsole` built here, `wlx serve`'s telemetry thread's and
 # `wlx run --link`'s included, has its context destroyed at teardown without `close()`.
 from _zmq_release import _every_zmq_context_released  # noqa: F401
-from wl_xcon import demoscreen, marks, pointer, serve, viewport
+from wl_xcon import demoscreen, marks, pointer, serve, viewport, web
 from wl_xcon.actor import Box
 from wl_xcon.cli import _load_allocation, main
 from wl_xcon.service import Service
@@ -624,6 +624,9 @@ def test_the_page_is_served_with_every_pane_and_its_own_nonce():
     assert f'<script nonce="{nonce}">'.encode() in body
     assert "default-src 'none'" in policy and "connect-src 'self'" in policy
     assert "font-src 'self'" in policy
+    # A demo's drawing carries its frames as PNGs inside its SVG (demo mode §4.4): images from
+    # `data:` alone, never fetched from anywhere.
+    assert "img-src data:;" in policy and policy.count("img-src") == 1
     assert b'id="strip"' in body and b"2027-01-14_01" in body
     assert b"http://" not in body and b"https://" not in body
     # The package is wl-xcon since 2026-09-28 (XC-053); the page named it by its old
@@ -6775,8 +6778,8 @@ def _frame_of(svg: str) -> int:
 def test_drawings_reach_the_stream_as_their_own_event_apart_from_frames():
     """§3.9, §4.4 (§14 item 11): each `Drawn` the hub is offered is drawn with the exact drawer
     on a thread of its own (`demoscreen.Drawer`), and the drawing goes to each stream as its own
-    event, `drawn`, carrying only its SVG -- never in a frame event, and never as a frame event
-    of its own. Screens offered faster than drawn arrive in order, the newest last; a frame
+    event, `drawn`, carrying its SVG and the key list for its keys (`web.demo_keys`, Task 9) --
+    never in a frame event, and never as a frame event of its own. Screens offered faster than drawn arrive in order, the newest last; a frame
     after them is a frame event as ever; and a stream that connects is sent the latest drawing
     after its full render."""
     hub = _hub()
@@ -6790,7 +6793,8 @@ def test_drawings_reach_the_stream_as_their_own_event_apart_from_frames():
         assert name == "frame" and "svg" not in payload
 
         hub.offer_drawn(screens[0])
-        assert next(events) == ("drawn", {"svg": demoscreen.render(screens[0])})
+        assert next(events) == ("drawn", {"svg": demoscreen.render(screens[0]),
+                                          "keys": web.demo_keys(screens[0].keys)})
         drawer = hub._drawer
 
         for shown in screens[1:]:
@@ -6813,7 +6817,7 @@ def test_drawings_reach_the_stream_as_their_own_event_apart_from_frames():
         with _stream(port) as second:
             later = _named_events(second)
             assert next(later)[0] == "frame"
-            assert next(later) == ("drawn", {"svg": last})
+            assert next(later) == ("drawn", {"svg": last, "keys": web.demo_keys(())})
     assert not drawer._thread.is_alive(), "the drawing thread ends with the hub"
 
 
@@ -6939,7 +6943,7 @@ def test_a_demos_screen_published_on_the_link_reaches_the_page_drawn(zmq_cleanup
             stop.set()
             publisher.join(timeout=5)
 
-    assert payload == {"svg": demoscreen.render(shown)}
+    assert payload == {"svg": demoscreen.render(shown), "keys": web.demo_keys(shown.keys)}
     assert server.hub.demo_running()
     assert not server._fatal.is_set()
 

@@ -679,7 +679,10 @@ class Service:
         self.link.publish(
             _link.Idle.of(
                 wall_at=self.wall_now(),
-                stranded=(*self.stranded, *self.stranded_demos),
+                # A stranded demo in this rig's demo folder says so (XC-504): it holds up only
+                # another demo's open, and a page keeps *new session* live beside it.
+                stranded=(*self.stranded, *(dataclasses.replace(found, demo_folder=True)
+                                            for found in self.stranded_demos)),
                 question=self.question,
                 refusals=self.refusals,
                 refusals_dropped=self.refusals_dropped,

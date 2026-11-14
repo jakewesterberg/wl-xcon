@@ -75,6 +75,9 @@ REPORT_EVERY_S = 0.1
 #: disc's on the 8° ring.
 REST = (0.0, -5.0)
 FIX = (0.0, 0.0)
+#: The states a pop-out trial passes through to the fixation hold, and on to the answer.
+FIXATED_STATES = ("between", "await_fix", "hold_fix")
+ANSWERED_STATES = (*FIXATED_STATES, "go", "flight")
 #: How long the panel waits for a frame it expects before the test fails: well past any trial the
 #: tests play, so a slow computer is never read as a fault, and a hang is.
 PATIENCE_S = 30.0
@@ -259,10 +262,11 @@ class Demo:
     """**A demo service in process, over the real link** (`wlx taskd --demo DIR`'s, built as
     `service.run` builds one): its folder under `tmp_path`, the pop-out's checkout its `--tasks`,
     `Service.serve` on a thread of its own; the trainer's panel on the test's thread, and the
-    scripted pointer, `person`'s. `register` is the suite's `zmq_cleanup`, so every socket is
-    released when the test returns, pass or fail."""
+    scripted pointer, `person`'s -- none with `person` `None`, where a page in a real browser is
+    the pointer (`tests/test_page_browser.py`, demo mode's Task 9). `register` is the suite's
+    `zmq_cleanup`, so every socket is released when the test returns, pass or fail."""
 
-    def __init__(self, tmp_path: Path, person: Person, register) -> None:
+    def __init__(self, tmp_path: Path, person: Person | None, register) -> None:
         tasks = xtasks_or_skip()
         pub, rep, mark, gaze = endpoints(4)
         self.link = register(ZmqLink(pub, rep, mark, gaze))
@@ -276,7 +280,8 @@ class Demo:
         self._serving = threading.Thread(target=self.service.serve, args=(self._stop,),
                                          name="wlx taskd --demo", daemon=True)
         self.panel = register(ZmqConsole(self.link.pub_endpoint, self.link.rep_endpoint))
-        self.pointer = Pointer(person, self.link.gaze_endpoint, self.link.pub_endpoint, register)
+        self.pointer = None if person is None else Pointer(
+            person, self.link.gaze_endpoint, self.link.pub_endpoint, register)
         #: Every frame the panel has read, in order.
         self.frames: list = []
 
@@ -286,7 +291,8 @@ class Demo:
         gc.collect()
         gc.disable()
         self._serving.start()
-        self.pointer.start()
+        if self.pointer is not None:
+            self.pointer.start()
         return self
 
     def __exit__(self, kind, *_) -> None:
@@ -294,7 +300,8 @@ class Demo:
         the way a test ends, and given a moment where a test failed, a run perhaps still going,
         which the suite's teardown then ends by releasing its sockets."""
         try:
-            self.pointer.close()
+            if self.pointer is not None:
+                self.pointer.close()
             self._stop.set()
             self._serving.join(PATIENCE_S if kind is None else 1.0)
             self.panel.close()

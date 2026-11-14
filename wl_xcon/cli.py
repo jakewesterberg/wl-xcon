@@ -883,6 +883,14 @@ def _render_idle(frame: _link.Idle) -> str:
     service's says DEMO first (schema 21)."""
     lines = [(DEMO_TAG if frame.demo else "") + "no session open  (wlx taskd, idle)"]
     for found in frame.stranded:
+        if found.demo_folder:
+            # A stranded demo in a rig's demo folder holds up only another demo (XC-504).
+            lines.append(
+                f"  STRANDED DEMO: session {_printable(found.session_id)}, in this rig's demo "
+                f"folder: its return is not recorded, and no demo opens until it is; a real "
+                f"animal's session opens beside it; record its return from the page"
+            )
+            continue
         if found.left_at is None:
             lines.append(
                 f"  STRANDED: session {_printable(found.session_id)}: its welfare record "

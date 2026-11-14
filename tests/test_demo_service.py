@@ -674,8 +674,9 @@ def test_a_demo_record_is_never_resumed_only_ended(tmp_path):
     (found,) = service.stranded
     assert (found.session_id, found.resumable, found.why) == (SESSION, False, DEMO_UNRESUMED)
     frame = _step(service)
-    assert [(s.session_id, s.resumable, s.why) for s in frame.stranded] == [
-        (SESSION, False, DEMO_UNRESUMED)]
+    # Under the demo service's own root: it holds up every open there, so not `demo_folder`.
+    assert [(s.session_id, s.resumable, s.why, s.demo_folder) for s in frame.stranded] == [
+        (SESSION, False, DEMO_UNRESUMED, False)]
     before = _kinds(service.root, SESSION)
     refused = _step(service, ResumeSession(by=BY, session_id=SESSION))
     assert _refused(refused)[-1] == DEMO_UNRESUMED and service.session is None
@@ -705,7 +706,8 @@ def test_a_stranded_demo_in_the_demo_root_never_holds_up_a_real_open(tmp_path):
     assert service.stranded == []
     (found,) = service.stranded_demos
     assert (found.session_id, found.resumable, found.why) == (DEMO, False, DEMO_UNRESUMED)
-    assert [s.session_id for s in _step(service).stranded] == [DEMO]
+    # XC-504: the idle frame says it is in the demo folder, so the page keeps *new session* live.
+    assert [(s.session_id, s.demo_folder) for s in _step(service).stranded] == [(DEMO, True)]
     assert _refused(_step(service, ResumeSession(by=BY, session_id=DEMO)))[-1] == DEMO_UNRESUMED
 
     opened = _step(service, _open())

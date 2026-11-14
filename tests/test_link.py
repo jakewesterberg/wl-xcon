@@ -3020,6 +3020,8 @@ def test_a_stranded_sessions_resumability_and_why_survive_the_wire():
             Stranded("2027-01-13_01", "B", 1_699_990_000.0, resumable=True, why=""),
             Stranded("2027-01-13_02", "B", 1_699_991_000.0, resumable=False, why="its record was written before"),
             Stranded("2027-01-13_03", "", None, resumable=False, why="its welfare record cannot be read"),
+            # Schema 21 (XC-504): a stranded demo in a rig's demo folder says so.
+            Stranded("demo-1", "REFERENCE", 1_699_992_000.0, why="a demo", demo_folder=True),
         ),
         question=None, refusals=(), refusals_dropped=0, animals=("B",), offered_tasks=(),
     )
@@ -3027,12 +3029,18 @@ def test_a_stranded_sessions_resumability_and_why_survive_the_wire():
 
     packed = msgpack.unpackb(encode(idle), raw=False)["stranded"]
 
-    assert [(s["resumable"], s["why"]) for s in packed] == [
-        (True, ""), (False, "its record was written before"),
-        (False, "its welfare record cannot be read"),
+    assert [(s["resumable"], s["why"], s["demo_folder"]) for s in packed] == [
+        (True, "", False), (False, "its record was written before", False),
+        (False, "its welfare record cannot be read", False), (False, "a demo", True),
     ]
     assert decode(encode(idle)) == idle
-    assert Stranded("x", "B", 1.0) == Stranded("x", "B", 1.0, resumable=False, why="")
+    assert Stranded("x", "B", 1.0) == Stranded("x", "B", 1.0, resumable=False, why="",
+                                               demo_folder=False)
+    # A flag that is not a bool is a malformed frame, as every wire flag is.
+    bad = msgpack.unpackb(encode(idle), raw=False)
+    bad["stranded"][3]["demo_folder"] = 1
+    with pytest.raises(FrameError):
+        decode(msgpack.packb(bad, use_bin_type=True))
 
 
 def test_the_instant_a_session_was_resumed_survives_the_wire_and_none_stays_none():
