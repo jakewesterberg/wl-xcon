@@ -31,7 +31,6 @@ import pytest
 from _demo import (
     BY, FIX, REST, Demo, Person, distractor, empty_space, target, toward_target,
 )
-from _preproc import problems_beyond_xc461
 from wl_xcon import pointer
 from wl_xcon.link import NextBlock, Stop, Telemetry
 from wl_xcon.saccade import HALF_WINDOW, Params
@@ -324,7 +323,7 @@ def test_a_demo_record_reads_back_through_wl_preproc(answered):
     fields, problems = change_fields([json.dumps(row) for row in changes])
 
     assert (trials.problems, runs.problems, rig.problems, records.problems,
-            problems_beyond_xc461(problems)) == ((), (), (), (), [])
+            problems) == ((), (), (), (), [])
     assert rig.of_this_session and rig.kind == "training"
     assert [(t.number, t.block, t.outcome) for t in trials.trials] == [
         (line["trial_number"], line["block"], line["outcome"]) for line in lines]

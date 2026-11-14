@@ -8,8 +8,9 @@ Delivered 2026-10-11 as a dated section of wl-preproc's `HANDOVER-wl-expcontroll
 engine builds C2a, C2b and C3, XC-399's and the appearance-valued setting's are merged there: every field is read when
 the NWB file is built; a change row that strobed nothing is timed through the rig's clock fit; each change row's own
 fields are published as `parameter_changes.detail`; XC-442 (stop writing clears and switches twice) is unblocked. The
-sections below keep their headings as sent. **And one from the pop-out search, opened 2026-11-07**, and **one from
-demo mode, opened 2026-11-14**, the last two sections.
+sections below keep their headings as sent. **And one from the pop-out search, opened 2026-11-07**,
+**answered 2026-11-14** (wl-preproc's session, by message): accepted, with one rename, the trial line's `realized` now
+`color_realized`. **And one from demo mode, opened and answered 2026-11-14**, the last section.
 
 **Updated 2026-10-11.** Of the four asks opened in August, **all four are done**; each is marked below
 with wl-preproc's evidence, and the headings are left as they were. What is open now is XC-288's ask
@@ -980,7 +981,7 @@ distribution, not the rig.
 
 ---
 
-# ANSWERED 2026-11-07 — the pop-out search: each trial's stage, staircase, pairing and set size, and two change kinds (new, 2026-11-07)
+# ANSWERED 2026-11-07 and 2026-11-14 — the pop-out search: each trial's stage, staircase, pairing and set size, and two change kinds (new, 2026-11-07)
 
 The lab's first real task (`docs/superpowers/specs/2026-11-07-popout-search-design.md`, approved by the PI 2026-11-07) adds
 fields to two files we write, told here before any is written, as our convention is. Shapes are JSON.
@@ -1027,8 +1028,8 @@ always the line's existing `block`); the pairing and the set size travel in `par
 key is written. Its reader of the two change kinds comes after its current minors; until then such a row is published as
 written and noted as a kind it does not yet know.
 
-**OPEN — added 2026-11-07, told before it is written: a color-set light names its set, which each run's start row
-defines once.** The pop-out's two looks, `odd_color` and `distractor_color`, are discs whose color is a `ColorSetLight`,
+**ANSWERED 2026-11-14 (below) — added 2026-11-07, told before it is written: a color-set light names its set, which
+each run's start row defines once.** The pop-out's two looks, `odd_color` and `distractor_color`, are discs whose color is a `ColorSetLight`,
 one color of a color set (wl-xtasks' `stimuli/isohue.json`: four named CIE 1931 chromaticities, an apex, a luminance held
 in macaque cone luminance, and a sentence naming the numbers' source). Written in the appearance form above (REC-27),
 each trial line would carry the whole set twice, 1.6 KB of a 3.9 KB line (measured on a simulated session of the
@@ -1059,10 +1060,11 @@ Each `realized` entry's `luminance_cd_m2` is the luminance it is at; `xy` each c
 `desaturation` the share of its distance from the apex in xy that every color gave up together so the panel could show
 them all (0 when it shows the set as written), `xyz` each color's light at full, CIE 1931 XYZ in cd/m², and `drive`
 each color's output levels, red, green and blue, each 0 to 1, at that luminance (`xyz` added in the fix round's
-re-review, M-5, before this was sent). `color_sets` is `null` for a task with none. **Each `trials.jsonl` line gains `realized`**
-(always written, so the line's shape does not move): `null`, but on the run's first line drawn at a luminance its run
-had not yet written -- a trainer's `set` of `color_luminance` -- where it is that set's realization there, by set name,
-in the same entry form: `"realized": {"isohue": [{"luminance_cd_m2": 12.0, "desaturation": ..., "xy": {...}, "xyz": {...},
+re-review, M-5, before this was sent). `color_sets` is `null` for a task with none. **Each `trials.jsonl` line gains
+`color_realized`** (sent as `realized`, renamed at wl-preproc's ask on 2026-11-14, below; always written, so the line's
+shape does not move): `null`, but on the run's first line drawn at a luminance its run had not yet written -- a
+trainer's `set` of `color_luminance` -- where it is that set's realization there, by set name, in the same entry form:
+`"color_realized": {"isohue": [{"luminance_cd_m2": 12.0, "desaturation": ..., "xy": {...}, "xyz": {...},
 "drive": {...}}]}`. **So a reader knows each trial's drawn light without the rig**: the line's `params` give the look's
 `luminance` (by reference) and `fraction`, and the run's start row and its earlier lines give the realization at that
 luminance; each look's light is that color's realized `xyz` times its fraction, CIE 1931 XYZ in cd/m². Each luminance is written once a run,
@@ -1074,10 +1076,36 @@ either: `rigtrials` takes any `params` object, `rigruns` passes over a start row
 `conditions.py` publishes the disc as the JSON text of its object, now naming its color in a few words. Yours to
 accept or rename; until your answer we build to these names.
 
-# OPEN — demo mode: a `demo` key in a demo session's `config.json` (new, 2026-11-14)
+**Answered 2026-11-14** (wl-preproc's session, by message, with the requester's reply the same day): **accepted as
+named** -- `remakes` on a `suggested` row; the start row's `left`; a `ColorSetLight` written with its set by name
+(`colorset`, `color`, `fraction`, `luminance`); and the start row's `color_sets`, each set's `realized` list
+(`luminance_cd_m2`, `desaturation`, `xy`, `xyz`, `drive`) -- **with one rename: the trial line's `realized` is
+`color_realized`**, its shape unchanged, at its ask: "A bare `realized` beside a trial's other fields reads as if the
+trial itself were realized." The start row's `color_sets[name].realized` keeps its name. Built here on branch
+`xc491-answers-2026-11-14`. **Its two questions, as answered:**
 
-**Not sent yet**: wl-preproc's session has not run since 2026-11-07. Sent with the pop-out search's open asks
-(XC-491) when it does (XC-502).
+- **`start_block`**: `null` when the trainer named none and the run does not go on from a stopped one; otherwise the
+  stage's name -- the one the trainer picked, the first included, or the stage a resumed run goes on from.
+- **A widening's answer names it.** A standing widening is confirmed at the boundary where the pool's new value
+  applies, if that value adds a pairing, whatever changed it (`set`, `hand_back` or `revert`; `taskd.Session._repooled`),
+  and **the change row that applies that value carries `"suggestion": <the widening's change id>`**, the same field a
+  confirming `next_block` or `back_block` control row carries: the last row of the boundary's changes to move the pool,
+  judged by the rule that confirms the widening (`taskd._pool_adds`), so the row and the widening's fate never
+  disagree. Absent on every other change row, a pool change that adds nothing among them (it withdraws the widening and
+  names nothing). Taken beside a move up, which is then made again (the PI's "Re-offer the other at once"), the row names
+  the widening, not the move.
+
+wl-preproc's reader of all of it, `suggested` and `declined` among them, is merged on its main as `d8fe06b`
+(2026-11-14; our start row's `left` published as its runs table's `stages_left`). Our side merged as `1d77392`,
+and wl-preproc was told that commit the same day.
+
+# ANSWERED 2026-11-14 — demo mode: a `demo` key in a demo session's `config.json` (new, 2026-11-14)
+
+**Sent and answered 2026-11-14** (wl-preproc's session, by message, with the requester's answer): **the key is
+accepted as named.** What it does with one: "a demo reaching us means someone is testing end to end", so it
+processes it as asked, not refused, and everything it publishes from it says it is a demo (the NWB file's
+description and the listing, naming what stood in for the eye), in a later branch of its own; until then a demo
+reads as any session of `REFERENCE` would (XC-502). The text below is the ask as sent.
 
 ## What changes on our side
 

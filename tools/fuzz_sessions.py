@@ -1661,8 +1661,8 @@ def apply_control(control):
     elif control == "handback":
         orig_pending = T.Session._apply_pending
 
-        def _apply_pending(self, act, code, trial_number, index):
-            applied = orig_pending(self, act, code, trial_number, index)
+        def _apply_pending(self, act, code, trial_number, index, **named):
+            applied = orig_pending(self, act, code, trial_number, index, **named)
             if act.kind == "hand_back" and act.act is None:
                 self._edited |= {act.name}
             return applied
@@ -1702,13 +1702,13 @@ def apply_control(control):
     elif control == "sequence":
         orig_pending = T.Session._apply_pending
 
-        def _apply_pending(self, act, code, trial_number, index):
+        def _apply_pending(self, act, code, trial_number, index, **named):
             if act.kind != "hand_back":
-                return orig_pending(self, act, code, trial_number, index)
+                return orig_pending(self, act, code, trial_number, index, **named)
             emit = self.card.emit
             self.card.emit = lambda word: None
             try:
-                return orig_pending(self, act, code, trial_number, index)
+                return orig_pending(self, act, code, trial_number, index, **named)
             finally:
                 self.card.emit = emit
         T.Session._apply_pending = _apply_pending
