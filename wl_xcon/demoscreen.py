@@ -8,7 +8,9 @@ drawing, an SVG fragment the page shows and steers on:
 
 - **The image is the exact drawer's** (`exact.draw`, engine spec §4.9: the definition of what each
   eye must see) at a preview of the rig's panel, `viewport.preview`: the same centimeters and
-  degrees at fewer pixels, each eye side by side through the stereoscope. **In sRGB**: the drawer's
+  degrees at fewer pixels, each eye side by side through the stereoscope. **Drawn by `draw`, bit for
+  bit `exact.draw`'s image**: the background once, then each group of stimuli by `exact.draw` over
+  its own box alone, not the whole panel once per stimulus. **In sRGB**: the drawer's
   light through the default calibration, the sRGB standard (`exact.output_levels(image,
   photometry.SRGB)`), clipped where sRGB cannot make it, as the drawer clips, then rounded to
   8 bits, a PNG made with the standard library's `zlib` (`png`).
@@ -37,16 +39,18 @@ anything about timing; the caption says both. How long a drawing takes on the de
 from __future__ import annotations
 
 import base64
+import functools
 import html
 import math
 import struct
 import threading
 import zlib
+from dataclasses import replace
 
 import numpy as np
 
-from wl_xcon import exact, viewport
-from wl_xcon.geometry import on_circle_deg
+from wl_xcon import exact, look, viewport
+from wl_xcon.geometry import circle_extent_deg, on_circle_deg
 from wl_xcon.photometry import SRGB
 from wl_xcon.screen import Screen
 
@@ -133,6 +137,135 @@ def _circle(vp, x_deg: float, y_deg: float, radius_deg: float) -> list[tuple[flo
 
 # --- The image --------------------------------------------------------------------------------
 
+#: **How far past a stimulus's reach its box goes, in pixels**, so that on every sample of the box's
+#: edge its coverage is exactly 0 however the drawer reads the slope there (one-sided at a region's
+#: edge, `exact._slope`): 3 pixels is 6 samples or more, and coverage is 0 wherever the distance to
+#: the shape is over half a sample's slope. `tests/test_demoscreen.py` holds the result to
+#: `exact.draw` bit for bit. (The builder's call.)
+BOX_MARGIN_PX = 3
+#: The combinations whose weight 0 still changes what is below them, bit for bit: a window sets
+#: everything outside it to the background, and a multiply recomputes what is below from it. Each is
+#: drawn over the whole viewport.
+_EVERYWHERE = ("window", "multiply")
+
+
+def _reach_deg(item) -> float | None:
+    """How far from its own direction an item's light can reach, degrees of true angle (its local
+    frame is azimuthal-equidistant, `viewport.local_true_angle`): its shape's bounding radius and
+    half its outline's width; `None` for a shape with no bound (the whole screen) or one this does
+    not know."""
+    shape = item.shape
+    if isinstance(shape, look.Circle):
+        reach = shape.size / 2
+    elif isinstance(shape, look.Ellipse):
+        reach = max(abs(shape.width), abs(shape.height)) / 2
+    elif isinstance(shape, look.Rect):
+        reach = math.hypot(shape.width / 2, shape.height / 2)
+    elif isinstance(shape, look.Cross):
+        reach = math.hypot(shape.size / 2, shape.thickness / 2)
+    elif isinstance(shape, look.Ring):
+        reach = max(abs(shape.inner), abs(shape.outer)) / 2
+    elif isinstance(shape, look.RegularPolygon):
+        reach = shape.size / 2
+    elif isinstance(shape, look.Vertices):
+        reach = max((math.hypot(*point) for point in shape.points), default=0.0)
+    elif isinstance(shape, look.Path):
+        reach = max((math.hypot(*point) for point in shape.points), default=0.0) + shape.width / 2
+    else:
+        return None
+    if item.outline is not None:
+        reach += abs(item.outline.width) / 2
+    return abs(reach)
+
+
+def _box(item, vp) -> tuple[int, int, int, int] | None:
+    """**The pixels of `vp` an item can change**, `(x0, y0, x1, y1)` as `exact.draw`'s `region`
+    takes them: its true circle of `_reach_deg` about its direction in this eye, its extent on each
+    axis (`geometry.circle_extent_deg`) mapped by `D·tan`, widened by `BOX_MARGIN_PX`; the whole
+    viewport for an item whose reach has no bound, which comes within 1° of 90° off the axis, or
+    which changes what is outside it (`_EVERYWHERE`); `None` for one wholly off the panel."""
+    whole = (0, 0, vp.width_px, vp.height_px)
+    reach = _reach_deg(item)
+    if reach is None or item.combine in _EVERYWHERE:
+        return whole
+    x_deg, y_deg = item.at_right if vp.eye == "right" else item.at_left
+    reach_x, reach_y = circle_extent_deg(x_deg, y_deg, reach)
+    left, right = x_deg - reach_x, x_deg + reach_x
+    bottom, top = y_deg - reach_y, y_deg + reach_y
+    if max(abs(left), abs(right), abs(bottom), abs(top)) >= 89.0:
+        return whole
+    d = vp.distance_cm
+    ax, ay = vp.ahead_cm
+    px, py = vp.pitch_cm
+    # Inverting `viewport.sample_cm`: a column from its x in cm, a row from its y.
+    c0 = (d * math.tan(math.radians(left)) + ax) / px + vp.width_px / 2
+    c1 = (d * math.tan(math.radians(right)) + ax) / px + vp.width_px / 2
+    r0 = vp.height_px / 2 - (d * math.tan(math.radians(top)) + ay) / py
+    r1 = vp.height_px / 2 - (d * math.tan(math.radians(bottom)) + ay) / py
+    box = (max(0, math.floor(c0) - BOX_MARGIN_PX), max(0, math.floor(r0) - BOX_MARGIN_PX),
+           min(vp.width_px, math.ceil(c1) + BOX_MARGIN_PX),
+           min(vp.height_px, math.ceil(r1) + BOX_MARGIN_PX))
+    return box if box[0] < box[2] and box[1] < box[3] else None
+
+
+@functools.lru_cache(maxsize=8)
+def _background(vp, supersample: int, setup: str, left: tuple, right: tuple) -> np.ndarray:
+    """The exact drawer's image of the background alone, drawn once for a viewport, a supersample
+    and its two lights, and kept: what every pixel no stimulus reaches is, bit for bit."""
+    image = exact.draw(Screen(setup=setup, periphery="true_angle", background_left=left,
+                              background_right=right, items=(), frame=0, frame_period=0.0),
+                       vp, supersample=supersample)
+    image.flags.writeable = False
+    return image
+
+
+def draw(shown: Screen, vp, *, supersample: int = SUPERSAMPLE) -> np.ndarray:
+    """**`exact.draw(shown, vp, supersample=supersample)`, bit for bit, faster**: the background's
+    image (`_background`), and over it each group of stimuli whose boxes overlap (`_box`) drawn by
+    `exact.draw` itself over that group's box alone (its `region`), every other stimulus left out
+    there. It is the same image because every sample's position and arithmetic are the same in a
+    region as in the whole (a supersample that is a power of two places each exactly), and a
+    stimulus changes nothing outside its box: its weight there is exactly 0, which leaves what is
+    below it as it was (cover, add, scotoma), and the rest are drawn everywhere (`_EVERYWHERE`).
+    Any other supersample is `exact.draw`'s whole. `tests/test_demoscreen.py` holds the two equal
+    over each kind the drawer draws and the pop-out's heaviest screen."""
+    if supersample < 1 or supersample & (supersample - 1):
+        return exact.draw(shown, vp, supersample=supersample)
+    image = _background(vp, supersample, shown.setup, tuple(shown.background_left),
+                        tuple(shown.background_right)).copy()
+    groups = []
+    for index, item in enumerate(shown.items):
+        box = _box(item, vp) if _sees(item.eye, vp) else None
+        if box is not None:
+            groups.append((box, {index}))
+    for (x0, y0, x1, y1), members in _merged(groups):
+        alone = replace(shown, items=tuple(item for index, item in enumerate(shown.items)
+                                           if index in members))
+        image[y0:y1, x0:x1] = exact.draw(alone, vp, region=(x0, y0, x1, y1),
+                                         supersample=supersample)
+    return image
+
+
+def _merged(groups: list) -> list:
+    """Groups of stimuli whose boxes overlap, merged until none do: a merged box can reach a group
+    neither of its parts did."""
+    merging = True
+    while merging:
+        merging = False
+        for i, (box, members) in enumerate(groups):
+            for j in range(i + 1, len(groups)):
+                other, more = groups[j]
+                if (box[0] < other[2] and other[0] < box[2] and box[1] < other[3]
+                        and other[1] < box[3]):
+                    groups[i] = ((min(box[0], other[0]), min(box[1], other[1]),
+                                  max(box[2], other[2]), max(box[3], other[3])), members | more)
+                    del groups[j]
+                    merging = True
+                    break
+            if merging:
+                break
+    return groups
+
 
 def png(levels) -> bytes:
     """**Output levels as an 8-bit RGB PNG**: `(rows, cols, 3)` fractions of full scale, 0 to 1
@@ -177,7 +310,7 @@ def _images(drawn, eyes, background):
     are `ValueError`s), none, and why."""
     shown = _shown(drawn, eyes, background)
     try:
-        return [png(exact.output_levels(exact.draw(shown, vp, supersample=SUPERSAMPLE), SRGB))
+        return [png(exact.output_levels(draw(shown, vp, supersample=SUPERSAMPLE), SRGB))
                 for vp in eyes], None
     except ValueError as refused:
         return [None] * len(eyes), refused

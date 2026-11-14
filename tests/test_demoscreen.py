@@ -17,6 +17,7 @@ from __future__ import annotations
 import base64
 import importlib.util
 import math
+import os
 import re
 import struct
 import threading
@@ -29,13 +30,14 @@ import numpy as np
 import pytest
 
 from _rig import DIRECT, RIG, STEREOSCOPE
-from wl_xcon import demoscreen, exact, pointer, viewport
+from wl_xcon import demoscreen, exact, look, pointer, viewport
+from wl_xcon import screen as screen_module
 from wl_xcon.geometry import separation_deg, stand_in_housings
 from wl_xcon.link import Drawn, DrawnWindow, decode, encode
-from wl_xcon.photometry import SRGB, Gray, to_xyz
+from wl_xcon.photometry import SRGB, Gray, Michelson, Weber, to_xyz
 from wl_xcon.task import (
-    After, Array, Disc, Noise, ObjectWindows, On, Outcome, P, Picture, Show, State, Stimulus, Trial,
-    Window,
+    After, Array, Disc, Gabor, Noise, ObjectWindows, On, Outcome, P, Picture, Show, State, Stimulus,
+    Trial, Window,
 )
 
 _SPEC = importlib.util.spec_from_file_location(
@@ -232,6 +234,177 @@ def test_a_screen_the_drawer_refuses_is_said_with_its_labels_kept():
     names = [g.get("data-name") for g in eye.findall(f"{SVG}g[@class='window']")]
     assert names == [w.name for w in drawn.windows] and "fix" in names
     assert _words(root.find(f"{SVG}text[@class='caption']")) == CAPTION_7
+
+
+# --- The fast path: the exact drawer's image, bit for bit ---------------------------------------
+
+
+def _patch(name, at, shape, *, color=40.0, **kwargs):
+    return Stimulus(name, at=at, looks=look.Look(shape=shape, fill=look.Flat(color=Gray(color))),
+                    **kwargs)
+
+
+#: **Each kind the exact drawer draws, and the ways a stimulus meets what is below it**: every
+#: shape, a grating in a hard aperture drifting and a Gabor (a Gaussian edge on its contrast), a
+#: raised-cosine edge, an outline, a Weber contrast; each combination, a window hiding a stimulus
+#: far from it among them; stimuli whose boxes overlap and chain into one; one partly and one wholly
+#: off the panel, a big one off both axes, where a true circle reaches further on an axis than its
+#: radius, and one far out at (25°, 15°), turned; and through the stereoscope, one eye's stimulus
+#: and a disparity. Each on a gray background, each shape large enough that a box short of its
+#: reach would cut it by more than the box's margin at this width.
+KINDS = {
+    "circle": [_patch("a", (3.0, 2.0), look.Circle(size=2.0))],
+    "ellipse": [_patch("a", (3.0, 2.0), look.Ellipse(width=4.0, height=1.0))],
+    "rect": [_patch("a", (-6.0, 1.0), look.Rect(width=3.0, height=1.0))],
+    "cross": [_patch("a", (0.0, -4.0), look.Cross(size=4.0, thickness=0.3))],
+    "polygon": [_patch("a", (5.0, -3.0), look.RegularPolygon(sides=5, size=6.0))],
+    "vertices": [_patch("a", (-3.0, -3.0), look.Vertices(points=((0.0, 1.5), (-1.0, -1.0),
+                                                                  (1.2, -0.8))))],
+    "ring": [_patch("a", (2.0, 6.0), look.Ring(inner=1.0, outer=3.0))],
+    "path": [_patch("a", (-8.0, 5.0), look.Path(points=((-2.0, 0.0), (0.0, 0.5), (2.0, 0.0)),
+                                                 width=3.0))],
+    "whole-screen": [_patch("a", (0.0, 0.0), look.WholeScreen(), color=25.0),
+                     _patch("b", (4.0, 0.0), look.Circle(size=2.0), layer=1)],
+    "drifting-grating": [Stimulus("g", at=(4.0, 2.0), looks=look.Look(
+        shape=look.Circle(size=4.0),
+        fill=look.SineGrating(sf=1.5, phase=30.0, tf=2.0, contrast=Michelson(0.6))))],
+    "gabor": [Stimulus("g", at=(-5.0, -2.0), looks=Gabor(sf=2.0, sigma=0.6, orientation=30.0,
+                                                          contrast=Michelson(0.8)))],
+    "raised-cosine": [Stimulus("a", at=(6.0, 3.0), looks=look.Look(
+        shape=look.Circle(size=3.0), fill=look.Flat(color=Gray(40.0)),
+        edge=look.RaisedCosine(width=0.8)))],
+    "outline": [Stimulus("a", at=(-2.0, 4.0), looks=look.Look(
+        shape=look.Rect(width=2.0, height=1.5), fill=look.Flat(color=Gray(10.0)),
+        outline=look.Outline(width=4.0, color=Gray(60.0))))],
+    "weber": [Stimulus("w", at=(1.0, 1.0), looks=Disc(size=2.0, contrast=Weber(0.4)))],
+    "add": [_patch("a", (0.0, 0.0), look.Circle(size=4.0)),
+            Stimulus("b", at=(1.0, 0.0), combine="add", looks=Disc(size=2.0, contrast=Weber(0.5)))],
+    "window": [_patch("a", (0.0, 0.0), look.Circle(size=8.0)),
+               _patch("w", (2.0, 0.0), look.Circle(size=2.0), combine="window", layer=1)],
+    "scotoma": [_patch("a", (0.0, 0.0), look.Circle(size=8.0)),
+                _patch("s", (2.0, 0.0), look.Circle(size=2.0), combine="scotoma", layer=1)],
+    "window-hides-elsewhere": [_patch("a", (-8.0, 0.0), look.Circle(size=2.0)),
+                               _patch("w", (5.0, 0.0), look.Circle(size=2.0), combine="window",
+                                      layer=1)],
+    "multiply": [_patch("a", (0.0, 0.0), look.Circle(size=8.0)),
+                 Stimulus("m", at=(2.0, 0.0), combine="multiply", layer=1,
+                          looks=Disc(size=2.0, contrast=Weber(-0.5)))],
+    "overlapping-chain": [_patch("a", (-2.0, 0.0), look.Circle(size=2.5)),
+                          _patch("b", (0.0, 0.0), look.Circle(size=2.5), color=60.0),
+                          _patch("c", (2.0, 0.0), look.Circle(size=2.5), color=20.0),
+                          _patch("d", (12.0, 8.0), look.Circle(size=1.0))],
+    "off-the-edge": [_patch("a", (29.5, 0.0), look.Circle(size=3.0)),
+                     _patch("b", (0.0, 60.0), look.Circle(size=3.0))],
+    "big-off-axis": [_patch("a", (26.0, 12.0), look.Circle(size=20.0))],
+    "far-and-turned": [Stimulus("a", at=(25.0, 15.0), looks=look.Look(
+        shape=look.Rect(width=3.0, height=0.5), fill=look.Flat(color=Gray(60.0)),
+        orientation=40.0))],
+}
+STEREO_KINDS = {
+    "one-eye-and-disparity": [_patch("l", (-4.0, 0.0), look.Circle(size=2.0), eye="left"),
+                              _patch("d", (4.0, 2.0), look.Circle(size=2.0), disparity=0.6)],
+}
+
+
+def _screen_of(stimuli, geometry, frame=5):
+    trial = Trial(start="s", states=[], background=Gray(20.0))
+    return screen_module.resolve({x.name: x for x in stimuli}, {}, trial, geometry,
+                                 frame_period=FRAME, frame=frame, onsets={x.name: 0 for x in stimuli},
+                                 calibration=SRGB)
+
+
+def _same_bit_for_bit(shown, vp, supersample):
+    reference = exact.draw(shown, vp, supersample=supersample)
+    fast = demoscreen.draw(shown, vp, supersample=supersample)
+    assert fast.shape == reference.shape and np.array_equal(fast, reference)
+    assert demoscreen.png(exact.output_levels(fast, SRGB)) == demoscreen.png(
+        exact.output_levels(reference, SRGB))
+
+
+@pytest.mark.parametrize("supersample", [2, 4])
+@pytest.mark.parametrize("kind", list(KINDS) + list(STEREO_KINDS))
+def test_the_fast_path_is_the_exact_drawers_image_bit_for_bit(kind, supersample):
+    """The preview's drawing (`demoscreen.draw`: the background drawn once, each group of
+    stimuli by `exact.draw` over its own box) is `exact.draw`'s image bit for bit, and so its PNG
+    pixel for pixel, for each kind the drawer draws and each way a stimulus meets what is below
+    it, at each supersample the preview may take, through each eye."""
+    geometry = STEREOSCOPE if kind in STEREO_KINDS else DIRECT
+    shown = _screen_of({**KINDS, **STEREO_KINDS}[kind], geometry)
+    for full in viewport.viewports(RIG, geometry):
+        _same_bit_for_bit(shown, viewport.preview(full, 240), supersample)
+
+
+@pytest.mark.parametrize("supersample", [2, 4])
+def test_the_fast_path_draws_the_popouts_heaviest_screen_bit_for_bit(supersample):
+    """The measured screen, the pop-out's ring of twelve and its point, at the preview's own
+    width: the fast path's image is the exact drawer's, bit for bit, and each disc was drawn over
+    its own box, not the whole panel."""
+    task = measured.xtasks()
+    if task is None:
+        if os.environ.get("WLX_REQUIRE_XTASKS") == "1":  # pragma: no cover - CI's
+            pytest.fail("WLX_REQUIRE_XTASKS=1 but no wl-xtasks checkout holding "
+                        "tasks/popout_search.py was found")
+        pytest.skip("no wl-xtasks checkout holding tasks/popout_search.py")
+    from wl_xcon.cli import _load_task
+
+    shown = measured.heaviest(_load_task(task / measured.TASK), DIRECT)
+    vp = viewport.preview(viewport.viewports(RIG, DIRECT)[0], demoscreen.PREVIEW_WIDTH_PX)
+    _same_bit_for_bit(shown, vp, supersample)
+    boxes = [demoscreen._box(item, vp) for item in shown.items]
+    assert all(box is not None for box in boxes)
+    assert sum((x1 - x0) * (y1 - y0) for x0, y0, x1, y1 in boxes) < vp.width_px * vp.height_px / 20
+
+
+def test_the_drawing_takes_the_fast_path(monkeypatch):
+    """`render` draws its image by `demoscreen.draw`: each stimulus by `exact.draw` over its own
+    box, never the whole panel once per stimulus."""
+    regions: list = []
+    draw = exact.draw
+
+    def watched(screen, vp, *, region=None, supersample):
+        regions.append(region)
+        return draw(screen, vp, region=region, supersample=supersample)
+
+    monkeypatch.setattr(exact, "draw", watched)
+    demoscreen._background.cache_clear()
+    demoscreen.render(_drawn({"dot": DOT, "goal": GOAL}), width_px=SMALL)
+    assert regions[0] is None and len(regions) == 3
+    assert all(region is not None for region in regions[1:])
+
+
+def test_the_background_is_drawn_once_and_kept_unchanged():
+    """The background's image is drawn once for a viewport, a supersample and its lights, and
+    never written into: a screen drawn over it leaves it as it was."""
+    demoscreen._background.cache_clear()
+    shown = _screen_of(KINDS["circle"], DIRECT)
+    vp = viewport.preview(viewport.viewports(RIG, DIRECT)[0], 96)
+    first = demoscreen.draw(shown, vp, supersample=2)
+    kept = demoscreen._background(vp, 2, "direct", tuple(shown.background_left),
+                                  tuple(shown.background_right))
+    assert not kept.flags.writeable
+    before = kept.copy()
+    second = demoscreen.draw(shown, vp, supersample=2)
+    assert demoscreen._background.cache_info().misses == 1
+    assert np.array_equal(first, second) and np.array_equal(kept, before)
+    assert not np.array_equal(first, kept)
+
+
+def test_an_odd_supersample_is_the_exact_drawers_whole(monkeypatch):
+    """A supersample that is no power of two would place a region's samples by another rounding
+    than the whole's, so it is drawn whole, by `exact.draw` alone."""
+    shown = _screen_of(KINDS["circle"], DIRECT)
+    vp = viewport.preview(viewport.viewports(RIG, DIRECT)[0], 48)
+    regions: list = []
+    draw = exact.draw
+
+    def watched(screen, vp, *, region=None, supersample):
+        regions.append(region)
+        return draw(screen, vp, region=region, supersample=supersample)
+
+    monkeypatch.setattr(exact, "draw", watched)
+    assert np.array_equal(demoscreen.draw(shown, vp, supersample=3),
+                          draw(shown, vp, supersample=3))
+    assert regions == [None]
 
 
 # --- The labels -------------------------------------------------------------------------------

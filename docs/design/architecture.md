@@ -836,7 +836,9 @@ mode (2026-11-14) a demo's world resolves its screen for the page (`pointer.Draw
 process: at a preview of the panel (`viewport.preview`, its size chosen by
 `tools/measure_demo_drawing.py`'s measurement, `docs/measurements/dev-machine/2026-11-14-demo-drawing.md`),
 through the sRGB standard, as a PNG in an SVG labeled as demo mode §4.4's table says, on a thread of its
-own that draws the newest screen next.
+own that draws the newest screen next. It draws the exact drawer's image bit for bit, faster
+(`demoscreen.draw`): the background once, then each group of stimuli by `exact.draw` over its own
+box alone (its `region`), `exact.py` unchanged.
 
 **Color, since engine build A2.** A cone color (`DKL`, `ConeContrast`) is a contrast about its
 background in the lab's one observer, the CIE 2006 10° cone fundamentals (`wl_xcon/cones.py`; the
