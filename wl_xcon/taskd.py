@@ -88,7 +88,7 @@ from wl_xcon.scheduler import (
     Draw,
     Scheduler,
 )
-from wl_xcon.simeye import Eye
+from wl_xcon.simeye import NOISE_DEG, Eye
 from wl_xcon.simulate import Census, Subject, Tally, agent
 from wl_xcon.run import LONGEST_TRIAL_S, run_trial
 from wl_xcon.task import (
@@ -463,6 +463,27 @@ def bounds_record(bounds) -> dict:
     }
 
 
+@dataclass(frozen=True)
+class Demo:
+    """**A demo session's record of what it is** (demo mode §3.7): its gaze is the mouse on its
+    demo page, read with the simulated eye's noise (`simeye.NOISE_DEG`, the same constant the
+    mouse's `pointer.Source` draws), and whether its field's housings are the stand-ins
+    (`geometry.stand_in_housings`, §3.6). `config.json` carries it as `"demo"`
+    (`Session._fixed_config`), and no other session has the key; every frame of the session says
+    `demo` (`link.Telemetry.of`). The key's name and shape were written for wl-preproc before any
+    session wrote it (`docs/pending-wl-preproc-amendments.md`; XC-502 waits on that session to
+    send them)."""
+
+    stand_in_housings: bool
+    gaze: str = "mouse"
+    noise_deg: float = NOISE_DEG
+
+    def as_record(self) -> dict:
+        """The `"demo"` entry of `config.json`, in the design's order (§3.7)."""
+        return {"gaze": self.gaze, "noise_deg": self.noise_deg,
+                "stand_in_housings": self.stand_in_housings}
+
+
 @dataclass
 class SessionSpec:
     """Everything a session needs before it starts.
@@ -552,6 +573,11 @@ class SessionSpec:
     #: warnings-over-refusals review's I2). A `wlx taskd` run's pre-flight lists them
     #: (`Service._preflight`), accepted once a session.
     setup_warnings: tuple = ()
+    #: **A demo session's record of what it is** (`Demo`; demo mode §3.7), or `None` for every
+    #: other session: `config.json` carries it as `"demo"` only then, and every frame says so.
+    #: Given by `wlx taskd`'s demo path alone (`Service._build`), which also gives the session
+    #: its mouse (`Session.run_world`).
+    demo: Demo | None = None
     #: Rates per second, not per frame (S9/simulate). Roughly: acquires fixation
     #: within a few hundred ms, saccades to a target at a plausible latency, and
     #: breaks fixation about once every twenty seconds of holding.
@@ -1238,6 +1264,13 @@ class Session:
     #: run never applied. `False` -- `wlx run`'s, and every direct caller's -- ends as it
     #: always has: head released at its run's end, then `await_return`.
     service: bool = False
+    #: Optional. `(run) -> (trial, values, index) -> World`, called once a run when `world` is
+    #: not given: **a run's worlds made from the run itself** -- a demo's mouse, whose noise is
+    #: drawn from the run's seed (demo mode §3.3, §14 item 16), since `world` is never told the
+    #: run and a `wlx taskd` session's own seed is 0 in every session. `None`: the behaviour
+    #: agent, as with neither given. A world that has `ended()` is told so at each trial's
+    #: boundary (`run`), where a demo's blanks the screen its page shows (§3.9).
+    run_world: object = None
     welfare: Welfare = field(init=False)
     rig: Rig = field(init=False)
     allocation: Allocation = field(init=False)
@@ -1696,6 +1729,9 @@ class Session:
                 # What a disparity d means in this record (the PI, 2026-10-19; STE-07).
                 "disparity_convention": DISPARITY_CONVENTION,
             },
+            # **A demo's, and no other session's** (demo mode §3.7): what it is, its mouse and
+            # whether its housings are the stand-ins, so a record is never read as a real one.
+            **({} if self.spec.demo is None else {"demo": self.spec.demo.as_record()}),
         }
 
     def end(self, how: str = "terminal") -> None:
@@ -5716,7 +5752,9 @@ class Session:
                 if offered is not None:
                     self._suggestions[offered.change] = offered
         self._run_from = self._block_from = self._elapsed
-        make_world = self.world if self.world is not None else self._agent(run)
+        make_world = (self.world if self.world is not None
+                      else self.run_world(run) if self.run_world is not None
+                      else self._agent(run))
         tally = Tally()
         self.blocks_run = [scheduler.block.name]
         record = self._record
@@ -6128,6 +6166,12 @@ class Session:
                     effects=self.rig,
                     each_frame=each_frame,
                 )
+                # **The trial has ended, at its boundary** (demo mode §3.9): a world that shows its
+                # screen to a page blanks it now, as the animal's screen is until the next trial's
+                # first frame. Asked of the world, once a trial, never in a frame.
+                ended = getattr(world, "ended", None)
+                if ended is not None:
+                    ended()
                 # The marks this trial's frames stamped, written now that it is over.
                 self._settle_stamps(index)
                 self._elapsed += result.frames * self.spec.frame_period + self.spec.iti

@@ -119,6 +119,27 @@ class Housing:
         )
 
 
+#: **The stand-in housings' size and margin, in cm** (demo mode §3.6): 4 cm wide, 3 cm tall, a
+#: 0.5 cm margin, as the tests' own rig has carried them since XC-056. **Nobody measured them**:
+#: they stand in for the real housings, which the direct-view spec §9 item 1 measures at build.
+STAND_IN_CM = (4.0, 3.0, 0.5)
+
+
+def stand_in_housings(panel_width_cm: float) -> tuple[Housing, Housing]:
+    """**Stand-in light-sensor housings** for a panel `panel_width_cm` wide (demo mode §3.6, §14
+    item 15): one in each bottom corner, `STAND_IN_CM`'s 4 × 3 cm with a 0.5 cm margin. **Nobody
+    measured them.** They let direct view exist where the real housings are unmeasured (spec §9
+    item 1, where `Rig.direct` refuses): in the tests (`tests/_rig.py` builds its rig from them)
+    and in a demo, whose field and record say "stand-in". A live session never takes them. Built
+    for the panel given, never fitted to one: the right one ends at the panel's right edge."""
+    width, height, margin = STAND_IN_CM
+    return (
+        Housing(left_cm=0.0, right_cm=width, bottom_cm=0.0, top_cm=height, margin_cm=margin),
+        Housing(left_cm=panel_width_cm - width, right_cm=panel_width_cm, bottom_cm=0.0,
+                top_cm=height, margin_cm=margin),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class Geometry:
     #: The panel's active area. Through the stereoscope each eye's viewport is half its

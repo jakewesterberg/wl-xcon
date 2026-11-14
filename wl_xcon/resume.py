@@ -131,6 +131,9 @@ class Restoration:
     #: **Its last run, as its record left it** (`LastRun`; the pop-out search build's Task 6), or
     #: `None` for a session that ran none.
     last_run: LastRun | None = None
+    #: **Whether it is a demo's** (demo mode §3.7, §8): its `config.json` carries `demo`.
+    #: `Service._resume` refuses one, so a demo is never resumed, only ended (`is_demo`).
+    demo: bool = False
 
 
 def _rows(directory: Path, name: str) -> list[dict]:
@@ -503,4 +506,18 @@ def _read(directory: Path, departure: float) -> Restoration:
                   and not isinstance(config["setup"]["half_ipd_cm"], bool) else None)),
         change=max((c["change"] for c in changes if "change" in c), default=0),
         last_run=_last(directory.parent.name, runs, lines, changes, controls),
+        demo="demo" in config,
     )
+
+
+def is_demo(directory: Path) -> bool:
+    """**Whether the session at `directory`** (its `xcon` folder) **is a demo's** (demo mode
+    §3.7): its `config.json` carries `demo`, as a demo's alone does (`taskd.Demo`). Asked of each
+    stranded session as `wlx taskd` finds it (`service.Service`), which offers a demo's only
+    *end*: a demo is never resumed. A `config.json` that cannot be read says no, since its record
+    can be resumed by nothing anyway (`read`)."""
+    try:
+        config = json.loads((Path(directory) / "config.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(config, dict) and "demo" in config

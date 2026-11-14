@@ -169,6 +169,8 @@ def _session_with(
             # Read by `Telemetry.of` since schema 15: what the session is for, and its calibration.
             session_kind="training",
             calibration=SRGB,
+            # Read by `Telemetry.of` since schema 21 (demo mode's Task 4): a real session's.
+            demo=None,
         ),
         welfare=welfare,
         stopped_because="",

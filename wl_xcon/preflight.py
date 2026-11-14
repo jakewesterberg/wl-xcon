@@ -8,7 +8,8 @@ refuses only on evidence of a problem and records acceptance where evidence is m
 absent. `gate` is the rule; the items are what it is asked about: the task's load-time
 checks in the session's setup, the run's warnings not yet accepted this session (engine
 build B), its starting values, the animal's bounded config and, in the stereoscope, its
-settings, the out-of-cage mark and limit, and the two things nothing measures yet.
+settings, the out-of-cage mark and limit, and the two things nothing measures yet; and, in a
+demo, whether the task's inputs each have a number key (`demo_inputs`; demo mode §3.4).
 
 **Welfare-critical: `out_of_cage` and `gate`** (`docs/design/architecture.md`). The first
 is what refuses a new run once the out-of-cage limit is reached between runs (spec §6.1);
@@ -32,7 +33,7 @@ from pathlib import Path
 
 from wl_xcon import actor as actors
 from wl_xcon import link as _link
-from wl_xcon import warnlist
+from wl_xcon import pointer, warnlist
 from wl_xcon.actor import Actor, Box, Member
 from wl_xcon.bounds import Exceeded
 from wl_xcon.check import (
@@ -57,6 +58,8 @@ SUBJECT_SETTINGS = "subject settings"
 OUT_OF_CAGE_MARK = "out of cage"
 PUMP_CALIBRATION = "pump calibration"
 EYE_TRACKER = "eye tracker"
+#: A demo's alone (demo mode §3.4): whether each input the task waits on has a number key.
+DEMO_INPUTS = "demo inputs"
 
 
 def _said(refused: SystemExit, path: Path) -> str:
@@ -586,7 +589,7 @@ def out_of_cage(session) -> PreflightItem:
     )
 
 
-def unmeasured(pump: object) -> list[PreflightItem]:
+def unmeasured(pump: object, demo: bool = False) -> list[PreflightItem]:
     """The two items spec §6.2 names as **unknown until measured**. Each says what it
     waits for, so the next reader can find it rather than believe it (CLAUDE.md).
 
@@ -595,7 +598,11 @@ def unmeasured(pump: object) -> list[PreflightItem]:
     Any other pump is a driver someone wrote, and a driver with no measured calibration
     is a **fail** here -- the rule this item is an exception to must be revisited when
     a real driver exists, and until it is, the code refuses rather than trusting that
-    someone remembers."""
+    someone remembers.
+
+    **In a demo** (`demo`; demo mode §3.7) the eye tracker's item says the session's gaze is
+    the mouse on its demo page, still an unknown to acknowledge: nothing reports a tracker's
+    health, and whoever starts the run reads, and acknowledges, that the eye is a hand."""
     if isinstance(pump, (Simulated, Absent)):
         pump_item = PreflightItem(
             PUMP_CALIBRATION,
@@ -619,11 +626,42 @@ def unmeasured(pump: object) -> list[PreflightItem]:
         PreflightItem(
             EYE_TRACKER,
             UNKNOWN,
+            "this session's gaze is the mouse on its demo page: no eye tracker is read, so "
+            "none reports its health, and a hand is slower than an eye, so no time window "
+            "can be judged (demo mode §3.3)"
+            if demo else
             "nothing reports the eye tracker's health yet (V3, the eye loop's stall "
             "census, is the measurement it waits on); this rig's gaze is the simulated "
             "animal's",
         ),
     ]
+
+
+def demo_inputs(task: Task | None) -> PreflightItem:
+    """**A demo's keys** (demo mode §3.4): **fail** for a task one of whose trial structures waits
+    on more inputs than a demo has number keys (`pointer.KEYS`), naming those past them
+    (`pointer.TooManyInputs`), since it cannot be played by hand; otherwise **pass**, naming each
+    input's key. Every structure is asked, since a run's plan may play any, and each trial numbers
+    its own (`pointer.worlds`). Each sentence is cut to `link.NOTE_LIMIT`, since a task names its
+    devices. A demo's pre-flight only (`service.Service._preflight`)."""
+    if task is None:
+        return PreflightItem(
+            DEMO_INPUTS, FAIL, "the task did not load, so its inputs cannot be given keys")
+    several = len(task.structures) > 1
+    keyed = []
+    for name, structure in task.structures.items():
+        where = f" (trial structure {name!r})" if several else ""
+        try:
+            found = pointer.inputs(structure)
+        except pointer.TooManyInputs as many:
+            return PreflightItem(DEMO_INPUTS, FAIL, _link.cut(f"{many}{where}", _link.NOTE_LIMIT))
+        if found:
+            keyed.append(", ".join(f"{item.key} {item.label}" for item in found) + where)
+    if not keyed:
+        return PreflightItem(
+            DEMO_INPUTS, PASS, "the task waits on no input but the gaze, so no key is needed")
+    return PreflightItem(DEMO_INPUTS, PASS, _link.cut(
+        "each input the task waits on has a number key: " + "; ".join(keyed), _link.NOTE_LIMIT))
 
 
 def gate(preflight: Preflight, acknowledged: Collection[str]) -> str | None:

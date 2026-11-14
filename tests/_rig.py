@@ -3,7 +3,10 @@
 The real housings are unmeasured (direct-view spec §9 item 1), so `tasks/rig.py`'s
 direct view refuses to exist, deliberately. The tests need one that does: these are
 one per bottom corner, 4 × 3 cm with a 0.5 cm margin, and **nobody measured them**.
-Everything else is `tasks/rig.py`'s own.
+They are `geometry.stand_in_housings`'s, the ones a demo takes on an unmeasured rig (demo
+mode §3.6), so the tests and a demo stand in with the same two; `tests/test_geometry.py`
+holds them to the numbers written here before demo mode. Everything else is
+`tasks/rig.py`'s own.
 
 Also a rig settings file: it defines `RIG`, so `wlx run --rig` and `wlx check --rig`
 can load it by `PATH`. Never collected, since its name does not start with `test_`. It loads `tasks/rig.py`
@@ -15,7 +18,7 @@ import importlib.util
 from dataclasses import replace
 from pathlib import Path
 
-from wl_xcon.geometry import Housing
+from wl_xcon.geometry import stand_in_housings
 
 
 def _load_this_rig():
@@ -28,13 +31,7 @@ def _load_this_rig():
 
 _THIS_RIG = _load_this_rig()
 
-RIG = replace(
-    _THIS_RIG,
-    housings=(
-        Housing(left_cm=0.0, right_cm=4.0, bottom_cm=0.0, top_cm=3.0, margin_cm=0.5),
-        Housing(left_cm=54.997, right_cm=58.997, bottom_cm=0.0, top_cm=3.0, margin_cm=0.5),
-    ),
-)
+RIG = replace(_THIS_RIG, housings=stand_in_housings(_THIS_RIG.panel_width_cm))
 DIRECT = RIG.direct()
 STEREOSCOPE = RIG.stereoscope(half_ipd_cm=1.6)
 #: What `--rig` is given in the tests that run `wlx`.

@@ -51,6 +51,20 @@ becoming a path out of `--subjects` or `--tasks`. The rest is ordinary.
 **The simulators, today**: the card, the pump and the animal are `wlx run`'s, because no
 hardware port exists (docs/CHECKPOINT.md: nothing has touched hardware); a rig's own
 replace them when they do.
+
+**Demo mode** (its design §3.1-§3.7): a session whose eye is the mouse on its page
+(`pointer`), on the simulated card and pump, for the test monkey, `REFERENCE`, kept apart from
+real data by where it is written. **`wlx taskd --demo DIR` is a demo service**: `DIR` made new
+(`demo_folder`), holding `REFERENCE` alone and the folder its sessions go to, every open in it a
+demo (`Service._route`), its card and pump the simulators always. **A rig service opens a demo
+only with a demo folder of its own** (`--demo-root`; the PI, 2026-11-14, "A demo folder of its
+own"), never under `--root`, so a demo never sits among the real sessions and a stranded one
+never holds up a real animal's open (`Service._in_demo_root`). Either way a demo needs the
+link's fourth endpoint, where its page's pointer reports arrive; it is never resumed, only
+ended; and its pre-flight names the mouse as its gaze and gives each input a key
+(`Service._preflight`). **A demo opens only through `Service._open`'s demo path**
+(`_session_for`), which no build has until demo mode's Task 5 gives `_open` its two approved
+changes: until then every demo open is refused, never quietly a live session.
 """
 
 from __future__ import annotations
@@ -60,6 +74,7 @@ import dataclasses
 import gc
 import re
 import secrets
+import shutil
 import sys
 import threading
 import time
@@ -69,8 +84,10 @@ from datetime import date
 from pathlib import Path
 from typing import TypeVar
 
+from wl_xcon import cli as _cli
 from wl_xcon import link as _link
 from wl_xcon import marks as _marks
+from wl_xcon import pointer
 from wl_xcon import preflight as _preflight
 from wl_xcon import resume as _resume_mod
 from wl_xcon import stranded as _stranded
@@ -87,10 +104,12 @@ from wl_xcon.cli import (
 )
 from wl_xcon.codes import Allocation
 from wl_xcon.dio import Simulated as SimulatedCard
-from wl_xcon.geometry import NOMINAL_HALF_IPD_CM, Rig
+from wl_xcon.geometry import NOMINAL_HALF_IPD_CM, Rig, stand_in_housings
 from wl_xcon.photometry import SRGB, Calibration
 from wl_xcon.record import XCON_DIRNAME
-from wl_xcon.taskd import RunSpec, Session, SessionSpec, bounds_record, ended_said, start_rows
+from wl_xcon.taskd import (
+    Demo, RunSpec, Session, SessionSpec, bounds_record, ended_said, start_rows,
+)
 from wl_xcon.welfare import OUT_OF_CAGE, Deployment, SessionClock
 from wl_xcon.welfare import Simulated as SimulatedPump
 
@@ -112,6 +131,74 @@ FRAME_PERIOD = 1 / 240
 #: file, each of which becomes a path. Letters, digits, `_`, `.` and `-`, starting with
 #: a letter or digit -- so never `.`, `..`, or anything with a separator.
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
+
+#: **The test monkey**, a demo's one animal (demo mode §3.1, §3.7): the subject of the checkout's
+#: reference bounded configs, whose files refuse any real animal.
+REFERENCE = "REFERENCE"
+
+#: **Why a stranded demo is offered only *end*** (demo mode §8, Review Focus 7): what its banner
+#: and a resume's refusal say. A crashed demo never comes back as a live session.
+DEMO_UNRESUMED = "a demo is never resumed, only ended: record its return with End session"
+
+
+def demo_folder(path: Path) -> tuple[Path, Path]:
+    """**A demo service's folder** (`wlx taskd --demo DIR`; demo mode §3.1): `path` made new,
+    **refused if it exists**, holding a subjects folder with **`REFERENCE` alone** -- its
+    `bounds.py` and `settings.py` copied from the checkout's `tasks/eight_hour_bounds.py` and
+    `tasks/reference_subject.py` (the PI, 2026-10-07: "The 8-hour file"; `cli.checkout_tasks`,
+    refused with no checkout) -- and an empty folder its sessions go to. Returned as `--subjects`
+    and `--root` would be. **Nothing is made before every refusal has passed**, so a refused
+    `--demo` leaves nothing behind. A demo service reaches no real animal's files and no rig's
+    data: these are the only ones it is given."""
+    path = Path(path)
+    if path.exists():
+        raise SystemExit(
+            f"refused: --demo {_printable(str(path))} exists, and a demo's folder is made new, so "
+            f"it holds nothing of another's. Nothing was made"
+        )
+    tasks = _cli.checkout_tasks()
+    files = {"bounds.py": tasks / "eight_hour_bounds.py",
+             "settings.py": tasks / "reference_subject.py"}
+    for source in files.values():
+        if not source.is_file():
+            raise SystemExit(
+                f"refused: {_printable(str(source))} is not there, and a demo's {REFERENCE} is "
+                f"written from it. Nothing was made"
+            )
+    subjects, root = path / "subjects", path / "sessions"
+    try:
+        (subjects / REFERENCE).mkdir(parents=True)
+    except FileExistsError as made:
+        raise SystemExit(
+            f"refused: --demo {_printable(str(path))} was made by something else as this one made "
+            f"it, and a demo's folder is its own"
+        ) from made
+    for name, source in files.items():
+        shutil.copyfile(source, subjects / REFERENCE / name)
+    root.mkdir()
+    return subjects, root
+
+
+def _within(inner: Path, outer: Path) -> bool:
+    """Whether `inner` is `outer` or inside it, both resolved."""
+    inner, outer = Path(inner).resolve(), Path(outer).resolve()
+    return inner == outer or outer in inner.parents
+
+
+def _demos_marked(found: list, root: Path, *, every: bool) -> list:
+    """`found`, the stranded sessions under `root`, **each demo's marked not resumable**, saying
+    why (`DEMO_UNRESUMED`), so its banner offers only *end* (demo mode §8): one whose
+    `config.json` carries `demo` (`resume.is_demo`), or with `every` -- a rig's demo folder, where
+    nothing else is written and nothing is resumed -- each. **Here, not in `stranded.find`**, which
+    is welfare-listed: as `Service._resume` marks one past its limit. A record whose welfare notes
+    cannot be read keeps its own sentence: it is repaired by hand first."""
+    return [
+        dataclasses.replace(entry, resumable=False, why=DEMO_UNRESUMED)
+        if entry.left_at is not None
+        and (every or _resume_mod.is_demo(Path(root) / entry.session_id / XCON_DIRNAME))
+        else entry
+        for entry in found
+    ]
 
 
 def _folder_name(name: str) -> bool:
@@ -305,7 +392,9 @@ class _Routed:
     is refused here instead, before anything is stopped. Any other service command
     during a run is refused on the session's feed: a run is in progress. **Everything
     else is the real link's**: `mark_signal` and `idle` are the link's own bound
-    methods, so the per-frame mark check is the call V12 measured, with nothing added.
+    methods, so the per-frame mark check is the call V12 measured, with nothing added;
+    and so is `gaze_into`, with `gaze_endpoint`, which a demo's mouse reads its page's
+    pointer reports through, up to `pointer.DRAIN` a frame (demo mode §3.8).
     `publish`, once per trial boundary and never per frame, is the link's too, and also
     keeps the frame a session closes with for the idle frames that follow
     (`Service.closed`); a demo's world also publishes its screen through it inside a trial, a
@@ -316,6 +405,12 @@ class _Routed:
         self._service = service
         self.mark_signal = link.mark_signal
         self.idle = link.idle
+        self.gaze_into = link.gaze_into
+
+    @property
+    def gaze_endpoint(self) -> str | None:
+        """The real link's gaze endpoint, or `None` for one with none (the `Link` protocol)."""
+        return self._link.gaze_endpoint
 
     def publish(self, frame) -> None:
         """The real link's `publish`; and a `closed` frame -- the one `Session.close`
@@ -361,7 +456,13 @@ class _Routed:
 
 class Service:
     """`wlx taskd`'s state and loop: the link, the open session if any, the stranded
-    sessions, and the question and refusals an idle frame carries."""
+    sessions, and the question and refusals an idle frame carries.
+
+    **A demo service** (`demo_service`; `wlx taskd --demo`): every open a demo, on the
+    simulators, which it is refused anything but. **A rig service's demo folder** (`demo_root`;
+    `--demo-root`): where a demo opened here is written, never `root`, neither one holding the
+    other. `pace_clock` and `pace_sleep` are each demo run's `pointer.Pace`'s, the wall clock a
+    demo's frames wait on, so a test injects both and never sleeps (demo mode §3.5)."""
 
     def __init__(
         self,
@@ -378,6 +479,10 @@ class Service:
         pump: Callable[[], object] = SimulatedPump,
         seed: Callable[[], int] = _fresh_seed,
         wall_clock: Callable[[], float] | None = None,
+        demo_service: bool = False,
+        demo_root: Path | None = None,
+        pace_clock: Callable[[], float] = time.perf_counter,
+        pace_sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         missing = [
             name for name in FRAMEWORK_CODES if name not in allocation.task_events.values()
@@ -389,8 +494,34 @@ class Service:
                 f"{', '.join(missing)} event code; every session wlx taskd runs strobes "
                 f"each, so give --allocation with them all"
             )
+        if demo_service and (card is not SimulatedCard or pump is not SimulatedPump):
+            # Demo mode §3.2: "the day it gains a real one, `--demo` refuses it".
+            raise SystemExit(
+                "refused: a demo service's card and pump are the simulators, always (demo mode "
+                "§3.2): its rewards are counted and never delivered, and its event codes go to no "
+                "sync box, and it was given another"
+            )
+        if demo_service and demo_root is not None:
+            raise SystemExit(
+                "refused: --demo-root is a rig service's; a demo service's sessions go to its own "
+                "folder, so it takes none"
+            )
+        if demo_root is not None and (_within(demo_root, root) or _within(root, demo_root)):
+            # The PI, 2026-11-14 ("A demo folder of its own"): a demo is kept apart from the real
+            # sessions by where it is written, so their two folders never share one.
+            raise SystemExit(
+                f"refused: --demo-root {_printable(str(demo_root))} and --root "
+                f"{_printable(str(root))} are one folder, or one holds the other, and a demo is "
+                f"kept apart from the real sessions by where it is written; name a folder of its "
+                f"own"
+            )
         self.rig, self.rig_path = rig, rig_path
         self.subjects, self.tasks, self.root = Path(subjects), Path(tasks), Path(root)
+        #: Whether this is a demo service (`wlx taskd --demo`), and a rig service's demo folder,
+        #: or `None` for a rig that opens no demo.
+        self.demo_service = demo_service
+        self.demo_root = None if demo_root is None else Path(demo_root)
+        self._pace_clock, self._pace_sleep = pace_clock, pace_sleep
         self.allocation, self.allocation_path = allocation, allocation_path
         #: The rig's color calibration (engine spec §7.1, §7.6), loaded once, here -- or **the
         #: default, the sRGB standard, in the place of a calibration the rig names that will not
@@ -417,7 +548,16 @@ class Service:
         self.wall_clock = wall_clock
         self._clock = SessionClock()
         self.session: Session | None = None
-        self.stranded: list = _stranded.find(self.root)
+        #: The stranded sessions under `--root`, each demo's among them offered only *end*.
+        self.stranded: list = _demos_marked(_stranded.find(self.root), self.root, every=False)
+        #: **The stranded demos in this rig's demo folder** (`--demo-root`), each offered only
+        #: *end*: kept apart from `stranded`, which `_open` refuses every open on, so a crashed
+        #: demo never holds up a real animal's open (the PI, 2026-11-14). It holds up another demo
+        #: (`_session_for`), as the stranded rule does within a demo's own folder (demo mode §3.2).
+        self.stranded_demos: list = (
+            [] if self.demo_root is None
+            else _demos_marked(_stranded.find(self.demo_root), self.demo_root, every=True)
+        )
         #: A departure, or a stranded session's return, a console owes an answer on:
         #: kept until it is answered or another replaces it (`_unasked`).
         self.question: _link.Question | None = None
@@ -537,7 +677,7 @@ class Service:
         self.link.publish(
             _link.Idle.of(
                 wall_at=self.wall_now(),
-                stranded=self.stranded,
+                stranded=(*self.stranded, *self.stranded_demos),
                 question=self.question,
                 refusals=self.refusals,
                 refusals_dropped=self.refusals_dropped,
@@ -546,6 +686,11 @@ class Service:
                 offered_tasks=self._tasks(),
                 closed=self.closed,
                 warnings=self._idle_warnings(),
+                # Schema 21 (demo mode §3.7): whether this is a demo service, and whether a demo
+                # can open here -- a gaze endpoint, and on a rig service a demo folder of its own.
+                demo=self.demo_service,
+                gaze=self.link.gaze_endpoint is not None
+                and (self.demo_service or self.demo_root is not None),
             )
         )
 
@@ -569,6 +714,10 @@ class Service:
 
     def _route(self, command) -> None:
         if isinstance(command, _link.OpenSession):
+            if self.demo_service:
+                # **Every open in a demo service is a demo** (demo mode §3.1; the plan's call: one
+                # path), whatever the page sent, so `_open`'s demo path takes each.
+                command = dataclasses.replace(command, demo=True)
             idle = self.session is None
             self._open(command)
             if idle and self.session is not None:
@@ -582,7 +731,10 @@ class Service:
                 self.refusals_dropped = 0
                 self.closed = None
         elif isinstance(command, _link.EndSession):
-            self._end(command)
+            if self.session is None and self._demo_stranded(command.session_id) is not None:
+                self._in_demo_root(lambda: self._end(command))
+            else:
+                self._end(command)
         elif isinstance(command, _link.CheckRun):
             self._check(command)
         elif isinstance(command, _link.StartRun):
@@ -624,6 +776,28 @@ class Service:
             self.refusals_dropped += len(self.refusals) - _link.REFUSAL_HISTORY
             del self.refusals[: -_link.REFUSAL_HISTORY]
 
+    def _demo_stranded(self, session_id: str | None):
+        """The stranded demo in this rig's demo folder that `session_id` names, or `None`: none
+        is, or a stranded session under `--root` has the name too, whose return comes first."""
+        if any(found.session_id == session_id for found in self.stranded):
+            return None
+        return next((found for found in self.stranded_demos if found.session_id == session_id),
+                    None)
+
+    def _in_demo_root(self, act: Callable[[], None]) -> None:
+        """**`act` taken against this rig's demo folder**: `root` and `stranded` are its
+        (`demo_root`, `stranded_demos`) while it runs, then `--root`'s again. So a stranded demo's
+        return is taken by `_end` and `_close_stranded`, welfare-critical and **unchanged**, by
+        the rules and the rows of any stranded session's, written into its own record in the
+        demo folder; the question a far return poses stays the service's, for its session. One
+        thread takes every mark (the module docstring), so nothing else reads either meanwhile."""
+        root, stranded = self.root, self.stranded
+        self.root, self.stranded = self.demo_root, self.stranded_demos
+        try:
+            act()
+        finally:
+            self.root, self.stranded = root, stranded
+
     def _mark(self, mark: int) -> None:
         """A mark signal with no run checking for one: stamped into the open session, or
         refused while idle, since it belongs to no session (the b3a-1 plan, decision 16)."""
@@ -656,28 +830,68 @@ class Service:
 
     # --- opening --------------------------------------------------------------------
 
-    def _session_for(self, command: _link.OpenSession) -> Session:
+    def _session_for(self, command: _link.OpenSession, *, card: Callable[[], object] | None = None,
+                     pump: Callable[[], object] | None = None, demo: bool = False) -> Session:
         """The session an `OpenSession` asks for, built and **not opened**: nothing is
         written. Raises `SystemExit`, `ValueError` or `Exceeded` with the sentence a
-        refusal says."""
+        refusal says. **Built on the card and the pump `card` and `pump` make**, the service's own
+        when `None`; **a demo with `demo`** (demo mode; `_build`).
+
+        **A command whose `demo` is set is refused unless `demo` is given** ("a demo opens only
+        through Service._open's demo path"): `_open` decides a demo's apparatus and passes it here
+        (demo mode §8), so a demo never becomes a live session by a path that did not. Until demo
+        mode's Task 5 gives `_open` that path, every demo open is refused here. **A demo's session
+        id is free in both of a rig's folders, and on a rig service no demo opens while one in its
+        demo folder is stranded** (the stranded rule within a demo's own folder, demo mode §3.2);
+        a real session's id is free in its demo folder too, so an End naming one names one
+        session."""
+        if command.demo and not demo:
+            raise ValueError(
+                "a demo opens only through Service._open's demo path, and this one did not come "
+                "through it, so nothing was recorded"
+            )
         for what, name in (("session id", command.session_id), ("animal", command.animal)):
             if not _folder_name(name):
                 raise ValueError(
                     f"a {what} is one folder name -- letters, digits, '_', '.' and '-', "
                     f"starting with a letter or digit -- and {name!r} is not one"
                 )
-        if (self.root / command.session_id).exists():
+        root = self._session_root(demo)
+        if demo and not self.demo_service and self.stranded_demos:
+            names = "; ".join(f"session {found.session_id}" for found in self.stranded_demos)
             raise ValueError(
-                f"session id {command.session_id!r} is already used under {self.root}; "
-                f"every session has its own"
+                f"no demo opens while a demo's return is not recorded: {names}, in "
+                f"{self.demo_root}. Record its return with End session, naming its session"
             )
+        for folder in (self.root,) if self.demo_root is None else (self.root, self.demo_root):
+            if (folder / command.session_id).exists():
+                raise ValueError(
+                    f"session id {command.session_id!r} is already used under {folder}; "
+                    f"every session has its own"
+                )
         session, _bounds = self._build(
             session_id=command.session_id, animal=command.animal,
             deployment=command.deployment, view=command.view,
             session_kind=command.session_kind,
             delivered_today=command.delivered_today,
+            card=self._card if card is None else card,
+            pump=self._pump if pump is None else pump,
+            demo=demo,
         )
         return session
+
+    def _session_root(self, demo: bool) -> Path:
+        """**Where a session is written**: `--root`; a demo service's demo there too, its own
+        folder's; and **a demo on a rig service in its demo folder** (`--demo-root`), never under
+        `--root` (the PI, 2026-11-14, "A demo folder of its own"), refused with none."""
+        if not demo or self.demo_service:
+            return self.root
+        if self.demo_root is None:
+            raise ValueError(
+                "this rig service names no --demo-root, so a demo has nowhere apart from the real "
+                "sessions to go"
+            )
+        return self.demo_root
 
     def _build(
         self,
@@ -688,11 +902,22 @@ class Service:
         view: str,
         session_kind: str,
         delivered_today: float | None,
+        card: Callable[[], object],
+        pump: Callable[[], object],
+        demo: bool,
     ) -> tuple[Session, Bounds]:
         """A session for `animal`, built from its files under `--subjects` and **not
         opened**: nothing is written. Returned with the bounds it loaded, which a resume
         compares with its record's (`_resume`). Raises `SystemExit`, `ValueError` or
-        `Exceeded` with the sentence a refusal says.
+        `Exceeded` with the sentence a refusal says. **On the card and the pump the factories
+        `card` and `pump` make**, which the caller decides (`_session_for`, `_resume`).
+
+        **A demo** (`demo`; demo mode §3.1-§3.7) is refused with no gaze endpoint, the link's
+        fourth, since no page could steer it, and is written where `_session_root` says. **In
+        direct view on a rig whose housings are unmeasured it takes the stand-ins**
+        (`geometry.stand_in_housings`, §3.6), which its record and its drawing say; a session
+        that is not a demo never does, and `Rig.direct` refuses it. Its spec carries what it is
+        (`taskd.Demo`), and its worlds are the mouse's, made for each run (`_demo_worlds`).
 
         **The animal is held to `_folder_name` before any path is built** (XC-026): an
         open has already checked it (`_session_for`), and a resume's comes from a record
@@ -700,6 +925,12 @@ class Service:
         hand-edited record can still make anything -- so a
         `../outside` or an absolute path never makes a `bounds.py` outside `--subjects`
         the code that runs, as `_close_stranded` refuses one."""
+        if demo and self.link.gaze_endpoint is None:
+            raise ValueError(
+                "this rig service has no gaze endpoint, --link's fourth, so no page could steer a "
+                "demo"
+            )
+        root = self._session_root(demo)
         if not _folder_name(animal):
             raise ValueError(
                 f"an animal is one folder name -- letters, digits, '_', '.' and '-', "
@@ -716,8 +947,12 @@ class Service:
                 f"is {animal!r}'s; ceilings belong to an animal"
             )
         settings_path, setup = None, []
+        rig, stand_in = self.rig, False
         if view == "direct":
-            geometry = self.rig.direct()
+            if demo and not rig.housings:
+                rig, stand_in = dataclasses.replace(
+                    rig, housings=stand_in_housings(rig.panel_width_cm)), True
+            geometry = rig.direct()
         else:
             # The animal's settings, or the nominal half-IPD with none; another animal's, or a
             # half-IPD outside the drawn optics, as given: each a warning its runs' pre-flights
@@ -728,11 +963,13 @@ class Service:
             half = NOMINAL_HALF_IPD_CM if settings is None else settings.half_ipd_cm
             setup = warnlist.of_setup(self.rig, animal, half, settings, found)
             geometry = self.rig.stereoscope(half)
+        record = Demo(stand_in_housings=stand_in) if demo else None
+        routed = _Routed(self.link, self)
         session = Session(
             SessionSpec(
                 task="",
                 allocation=self.allocation_path,
-                root=self.root,
+                root=root,
                 session_id=session_id,
                 subject=animal,
                 trials=0,
@@ -749,14 +986,36 @@ class Service:
                 rig_config=self.rig_path,
                 subject_settings="" if settings_path is None else str(settings_path),
                 setup_warnings=tuple(setup),
+                demo=record,
             ),
-            card=self._card(),
-            pump=self._pump(),
-            link=_Routed(self.link, self),
+            card=card(),
+            pump=pump(),
+            link=routed,
             service=True,
             wall_clock=self.wall_clock,
+            run_world=None if record is None else self._demo_worlds(
+                routed, rig, geometry, session_id, record),
         )
         return session, bounds
+
+    def _demo_worlds(self, routed: _Routed, rig: Rig, geometry, session_id: str,
+                     record: Demo) -> Callable[[RunSpec], Callable]:
+        """**A demo session's worlds, made for each run** (`Session.run_world`; demo mode
+        §3.3-§3.5, §3.9): `pointer.worlds` over the mouse, `pointer.Source` reading the page's
+        pointer reports through the session's link (`routed.gaze_into`), its noise the record's
+        drawn from the run's own seed (§14 item 16); a `pointer.Pace` at the session's frame
+        period on this service's wall clock (`pace_clock`, `pace_sleep`); and a `pointer.Drawing`
+        of the rig, the field (stand-ins and all) and the calibration, published through the
+        session's link, as its frames are."""
+
+        def run_world(run: RunSpec):
+            source = pointer.Source(routed.gaze_into, seed=run.seed, noise_deg=record.noise_deg)
+            pace = pointer.Pace(FRAME_PERIOD, clock=self._pace_clock, sleep=self._pace_sleep)
+            drawing = pointer.Drawing(rig, geometry, self.calibration, session_id=session_id,
+                                      stand_in=record.stand_in_housings)
+            return pointer.worlds(source, pace=pace, drawing=drawing, publish=routed.publish)
+
+        return run_world
 
     def _built(self, kind: str, by: Actor, build: Callable[[], _Built]) -> _Built | None:
         """What `build` returns -- a session built and not opened, for an open or a
@@ -918,13 +1177,19 @@ class Service:
         offers only *end* (spec §5; fix round 1 of Task 7); a stranded session marked
         not resumable, by this or by `stranded.find`, is refused with what it is marked.
         **One resumed on another calibration, or another half-IPD, than its `config.json`
-        names is a warning asked at its first run**, naming both, never a refusal."""
+        names is a warning asked at its first run**, naming both, never a refusal.
+
+        **A demo is never resumed, only ended** (demo mode §8, Review Focus 7): one in this rig's
+        demo folder, or any whose `config.json` carries `demo` (`Restoration.demo`), is refused
+        and marked so (`DEMO_UNRESUMED`), as `Service` marks each as it finds it, so a crashed demo
+        never comes back as a live session."""
         if self.session is not None:
             self._refuse(command.KIND, command.by,
                          f"a session is open ({self.session.spec.session_id}); a stranded "
                          f"session is resumed only while none is")
             return
-        found = next((s for s in self.stranded if s.session_id == command.session_id), None)
+        found = next((s for s in (*self.stranded, *self.stranded_demos)
+                      if s.session_id == command.session_id), None)
         if found is None or found.left_at is None:
             self._refuse(command.KIND, command.by,
                          f"no stranded session {command.session_id!r} can be resumed"
@@ -944,6 +1209,13 @@ class Service:
             # plain `str` it built itself, which says itself without raising.
             self._refuse(command.KIND, command.by, _sentence(refused))
             return
+        if restoration.demo:
+            # Marked as `Service` marks each stranded demo it finds, so its banner offers only end.
+            self.stranded[self.stranded.index(found)] = dataclasses.replace(
+                found, resumable=False, why=DEMO_UNRESUMED
+            )
+            self._refuse(command.KIND, command.by, DEMO_UNRESUMED)
+            return
         if restoration.subject != found.subject:
             # `_build` loads bounds for `config.json`'s animal, and `stranded.restore`
             # holds them to the departure row's: one record, so one animal.
@@ -957,6 +1229,7 @@ class Service:
             deployment=restoration.deployment, view=restoration.view,
             session_kind=restoration.session_kind,
             delivered_today=restoration.already_today,
+            card=self._card, pump=self._pump, demo=False,
         ))
         if built is None:
             return
@@ -1104,8 +1377,14 @@ class Service:
         **And for the block of it the run starts at** (`start_block`; the pop-out search build's
         Task 6), which fails the task checks item where the run cannot start there; it carries
         what the run's start offers to pick, the animal's previous session's end and what a
-        resumed session's run goes on from (`_start_offers`)."""
+        resumed session's run goes on from (`_start_offers`).
+
+        **In a demo** (demo mode §3.4, §3.7): the eye tracker's item names the mouse on its demo
+        page as the session's gaze, still an unknown (`preflight.unmeasured`), and one more item
+        fails a task waiting on more inputs than a demo has keys, naming them
+        (`preflight.demo_inputs`)."""
         settings = Path(session.spec.subject_settings) if session.spec.subject_settings else None
+        demo = session.spec.demo is not None
         owed: list = []
         try:
             item, loaded, findings = _preflight.task(
@@ -1169,8 +1448,10 @@ class Service:
                 ),
                 *_contained(
                     (_preflight.PUMP_CALIBRATION, _preflight.EYE_TRACKER),
-                    lambda: _preflight.unmeasured(session.pump),
+                    lambda: _preflight.unmeasured(session.pump, demo=demo),
                 ),
+                *(_contained((_preflight.DEMO_INPUTS,), lambda: _preflight.demo_inputs(loaded))
+                  if demo else ()),
             ),
             plan=plan,
             plans=() if loaded is None else tuple(loaded.plans),
@@ -1185,15 +1466,18 @@ class Service:
         and the pairings to pick, with yesterday's end shown"), as the pre-flight's fields: the
         plan's stages and the task's pool (`taskd.start_rows`), the animal's previous session's
         end of this plan (`resume.previous`, `taskd.ended_said`) -- shown, never carried (§3.6) --
-        and what a resumed session's first run goes on from (`Session.continues`). **None of it is
-        an item, so none of it fails a run**: a record that cannot be read is said so in
-        `previous`, a task that did not load offers nothing."""
+        and what a resumed session's first run goes on from (`Session.continues`); the previous
+        session is looked for in the folder this one is written to, so a demo's is a demo's and a
+        real session's never one (demo mode). **None of it is an item, so none of it fails a
+        run**: a record that cannot be read is said so in `previous`, a task that did not load
+        offers nothing."""
         if loaded is None:
             return {}
         stages, pool = start_rows(loaded, plan, values)
         try:
-            last = _resume_mod.previous(self.root, session.spec.subject, session.spec.session_id,
-                                        path.name, plan)
+            # The session's own folder (demo mode): a demo's previous session is a demo's.
+            last = _resume_mod.previous(session.spec.root, session.spec.subject,
+                                        session.spec.session_id, path.name, plan)
             previous = None if last is None else ended_said(loaded, last)
         except Exception as broken:  # noqa: BLE001 -- shown, never a check: see the docstring
             previous = _link.cut(f"the previous session's end could not be read: {_fault(broken)}",
@@ -1501,46 +1785,105 @@ class Service:
 
 def run(args) -> int:
     """`wlx taskd`: load the rig and the allocation, bind the link, and serve until
-    interrupted."""
+    interrupted.
+
+    **`--demo DIR`, a demo service** (demo mode §3.1): `--subjects`, `--root` and `--demo-root`
+    refused beside it and `--link`'s four endpoints required, each before anything is made; then
+    `DIR` made (`demo_folder`) and the four bound endpoints printed on one line, `wlx taskd: --link
+    PUB,REP,MARK,GAZE`, flushed, for the process that started it to read (`wlx demo`). Without it,
+    `--subjects` and `--root` are required, and **`--demo-root DIR`** names where a demo opened
+    here goes, made if absent once the service has taken it."""
     rig = _load_rig(args.rig)
     allocation = _load_allocation(args.allocation)
-    for flag, folder in (("--subjects", args.subjects), ("--tasks", args.tasks)):
+    demo = args.demo
+    if demo is not None:
+        beside = [flag for flag, given in (("--subjects", args.subjects), ("--root", args.root),
+                                           ("--demo-root", args.demo_root)) if given is not None]
+        if beside:
+            raise SystemExit(
+                f"refused: --demo makes its own folder, holding the reference animal alone, so "
+                f"{' and '.join(beside)} cannot be given beside it: a demo service reaches no real "
+                f"animal's files and no rig's data. Nothing was made"
+            )
+    else:
+        missing = [flag for flag, given in (("--subjects", args.subjects), ("--root", args.root))
+                   if given is None]
+        if missing:
+            raise SystemExit(
+                f"refused: {' and '.join(missing)} {'is' if len(missing) == 1 else 'are'} "
+                f"required, but beside --demo, which makes its own"
+            )
+    for flag, folder in (() if demo is not None else (("--subjects", args.subjects),)) + (
+            ("--tasks", args.tasks),):
         if not folder.is_dir():
             raise SystemExit(f"refused: {flag} {folder} is not a folder")
     parts = args.link.split(",")
-    if len(parts) not in (2, 3):
+    if len(parts) not in (2, 3, 4):
         raise SystemExit(
-            f"--link expects PUB,REP or PUB,REP,MARK (two or three comma-separated "
-            f"endpoints), got {args.link!r}"
+            f"--link expects PUB,REP, PUB,REP,MARK or PUB,REP,MARK,GAZE (two to four "
+            f"comma-separated endpoints), got {args.link!r}"
         )
-    pub, rep, *mark = parts
+    if demo is not None and len(parts) != 4:
+        raise SystemExit(
+            "refused: --demo needs --link's four endpoints, PUB,REP,MARK,GAZE: the fourth is "
+            "where its page's pointer reports arrive, so with none no page could steer it. "
+            "Nothing was made"
+        )
+    pub, rep, *more = parts
     try:
         link = _link.ZmqLink(
-            pub, rep, mark[0] if mark else None, allow_remote=args.link_allow_remote
+            pub, rep, more[0] if more else None, more[1] if len(more) > 1 else None,
+            allow_remote=args.link_allow_remote,
         )
     except _link.RemoteBindRefused as refused:
         raise SystemExit(str(refused)) from refused
     with link:
+        subjects, root = (args.subjects, args.root) if demo is None else demo_folder(demo)
         service = Service(
             rig=rig,
             rig_path=str(args.rig),
-            subjects=args.subjects,
+            subjects=subjects,
             tasks=args.tasks,
             allocation=allocation,
             allocation_path=str(args.allocation) if args.allocation else "",
-            root=args.root,
+            root=root,
             link=link,
+            demo_service=demo is not None,
+            demo_root=args.demo_root,
         )
-        print(
-            f"wlx taskd: publishing on {link.pub_endpoint}, commands on "
-            f"{link.rep_endpoint}"
-            + (f", marks on {link.mark_endpoint}" if link.mark_endpoint else "")
-        )
+        if args.demo_root is not None:
+            try:
+                args.demo_root.mkdir(parents=True, exist_ok=True)
+            except OSError as why:
+                raise SystemExit(
+                    f"refused: --demo-root {_printable(str(args.demo_root))} cannot be made a "
+                    f"folder: {why.strerror}"
+                ) from why
+        if demo is not None:
+            print(
+                f"wlx taskd: --link {link.pub_endpoint},{link.rep_endpoint},"
+                f"{link.mark_endpoint},{link.gaze_endpoint}",
+                flush=True,
+            )
+        else:
+            print(
+                f"wlx taskd: publishing on {link.pub_endpoint}, commands on "
+                f"{link.rep_endpoint}"
+                + (f", marks on {link.mark_endpoint}" if link.mark_endpoint else "")
+                + (f", pointer reports on {link.gaze_endpoint}" if link.gaze_endpoint else "")
+            )
+            if service.demo_root is not None:
+                print(f"  demos: written under {service.demo_root}, apart from --root")
         for found in service.stranded:
             print(
                 f"  stranded: session {found.session_id} "
                 f"({found.subject or 'record unreadable'}); no session opens until its "
                 f"return is recorded"
+            )
+        for found in service.stranded_demos:
+            print(
+                f"  stranded demo: session {found.session_id} in the demo folder; no demo opens "
+                f"until its return is recorded, and it holds up no other session"
             )
         if service.calibration_refused:
             # Said where the operator started it (the second review's Minor 12), whole: the

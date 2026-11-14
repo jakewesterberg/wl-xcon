@@ -1200,8 +1200,8 @@ class Telemetry:
     pool: "Pooled | None" = None
     #: **Whether this is a demo session's frame** (schema 21; demo mode §3.7): the mouse is its
     #: eye, `REFERENCE` its animal, its folder apart from the real sessions, so every page and `wlx
-    #: console` says DEMO on it. `False` by default, a real session's; `Telemetry.of` leaves it so
-    #: until demo mode's Task 4 gives a session something to read it from (`SessionSpec.demo`).
+    #: console` says DEMO on it. `False` by default, a real session's; `Telemetry.of` reads it from
+    #: the session's spec (`taskd.SessionSpec.demo`).
     demo: bool = False
 
     @classmethod
@@ -1439,6 +1439,9 @@ class Telemetry:
             staircase=None if session.staircase is None else StaircaseRow(*session.staircase),
             bars=None if session.bars is None else Bars(*session.bars),
             pool=None if session.pooled is None else Pooled(*session.pooled),
+            # Schema 21 (demo mode §3.7): a demo session's spec carries what it is (`taskd.Demo`),
+            # and no other's does. Read as a plain attribute, as the spec's other fields are.
+            demo=session.spec.demo is not None,
         )
 
 
@@ -2388,6 +2391,12 @@ class OpenSession:
     amend_to: str | None
     amend_reason: str
     accepted: tuple
+    #: **Whether the session opened is a demo** (demo mode §3.1, §8): the mouse its eye, the
+    #: simulated card and pump its apparatus, `REFERENCE` its animal, its folder apart from the real
+    #: sessions. `wlx taskd --demo` makes every open one (`service.Service._route`). Not on the wire
+    #: until demo mode's Task 9 gives `open` the field (`_encode_command`, `_command_from`,
+    #: `serve.parse_command`), so until then only an in-process caller sets it.
+    demo: bool = False
 
 
 @dataclass(frozen=True, slots=True)

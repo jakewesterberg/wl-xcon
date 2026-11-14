@@ -164,6 +164,26 @@ MASKED = Geometry.stereoscope(
 )
 
 
+def test_stand_in_housings_are_the_tests_rigs_own():
+    """Demo mode §3.6 and §14 item 15: `geometry.stand_in_housings` is what `tests/_rig.py`
+    carried as literals before demo mode, which now builds its rig from it, so the tests and a demo
+    stand in with the same two -- one per bottom corner of the panel given, never fitted to one."""
+    written = (
+        geometry.Housing(left_cm=0.0, right_cm=4.0, bottom_cm=0.0, top_cm=3.0, margin_cm=0.5),
+        geometry.Housing(left_cm=54.997, right_cm=58.997, bottom_cm=0.0, top_cm=3.0, margin_cm=0.5),
+    )
+    made = geometry.stand_in_housings(58.997)
+
+    assert len(made) == 2
+    for housing, literal in zip(made, written):
+        for name in ("left_cm", "right_cm", "bottom_cm", "top_cm", "margin_cm"):
+            assert getattr(housing, name) == pytest.approx(getattr(literal, name), abs=1e-9), name
+    assert HOUSINGS == made, "the tests' rig is built from them"
+    wide = geometry.stand_in_housings(100.0)
+    assert (wide[0].left_cm, wide[0].right_cm) == (0.0, 4.0)
+    assert (wide[1].left_cm, wide[1].right_cm) == (96.0, 100.0), "at the panel given"
+
+
 def test_direct_view_is_the_whole_panel_at_the_screens_own_distance():
     """No periscope, so no lateral run: the path is `Z`, and the viewport is the whole
     panel, seen by both eyes."""

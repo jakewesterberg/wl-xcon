@@ -18,8 +18,11 @@ from wl_xcon.check import parameters_used
 from wl_xcon.cli import _load_allocation, _load_task
 from wl_xcon.findings import NOT_RECORDING, SESSION_KINDS
 from wl_xcon.link import NOTE_LIMIT, Preflight, PreflightItem
-from wl_xcon.photometry import SRGB
-from wl_xcon.task import Block, Condition, P, Param, Plan, Task
+from wl_xcon.photometry import SRGB, Gray
+from wl_xcon.task import (
+    After, Block, Condition, Disc, Entered, On, Outcome, P, Param, Plan, Pressed, Show, State,
+    Stimulus, Task, Trial, Window,
+)
 from wl_xcon.warnlist import Entry
 from wl_xcon.welfare import Absent, Deployment, Simulated
 
@@ -405,6 +408,66 @@ def test_what_nothing_measures_is_unknown_and_says_what_it_waits_for():
         ]
         assert "V10" in items[0].said and "driver" in items[0].said
         assert "V3" in items[1].said
+
+
+def test_in_a_demo_the_eye_tracker_item_names_the_mouse_still_an_unknown():
+    """Demo mode §3.7: a demo's gaze is the mouse on its demo page, an unknown to acknowledge as
+    any session's tracker is; the pump's item is the same as any session's."""
+    plain = preflight.unmeasured(Simulated())
+    items = preflight.unmeasured(Simulated(), demo=True)
+
+    assert [(i.name, i.result) for i in items] == [
+        ("pump calibration", "unknown"), ("eye tracker", "unknown"),
+    ]
+    assert items[1].said.startswith("this session's gaze is the mouse on its demo page")
+    assert items[0] == plain[0] and items[1] != plain[1]
+
+
+def _trial_waiting_on(*devices: str):
+    """A trial that waits for fixation, or a press of any of `devices`."""
+    dot = Stimulus("dot", at=(0.0, 0.0), looks=Disc(size=0.3, color=Gray(40.0)))
+    return Trial(
+        start="wait",
+        windows=[Window("fix", at=(0.0, 0.0), radius=2.0, on="dot")],
+        states=[State("wait", enter=[Show(dot)], go=[
+            On(Entered("fix"), Outcome.CORRECT),
+            *(On(Pressed(device), Outcome.NO_FIXATION) for device in devices),
+            On(After(1.0), Outcome.NO_FIXATION),
+        ])],
+    )
+
+
+def test_a_demos_inputs_each_have_a_key_or_its_preflight_fails_naming_those_past_nine():
+    """Demo mode §3.4: a demo gives each input a task waits on a number key, 1 to 9, numbered
+    for each trial structure; one waiting on more fails, naming those past nine and the structure,
+    and a task that did not load fails saying so."""
+    nine = [f"lever{n}" for n in range(1, 10)]
+
+    def task(**structures):
+        return Task(structures=structures, default=next(iter(structures)))
+
+    gaze_only = preflight.demo_inputs(task(main=_trial_waiting_on()))
+    assert (gaze_only.name, gaze_only.result) == ("demo inputs", "pass")
+    assert gaze_only.said == "the task waits on no input but the gaze, so no key is needed"
+    keyed = preflight.demo_inputs(task(main=_trial_waiting_on("bar", "lever")))
+    assert keyed.result == "pass" and keyed.said.endswith(": 1 bar, 2 lever")
+    assert preflight.demo_inputs(task(main=_trial_waiting_on(*nine))).result == "pass"
+    ten = preflight.demo_inputs(task(main=_trial_waiting_on(*nine, "lever10")))
+    assert ten.result == "fail" and "names 10: lever10 would have none" in ten.said
+    assert "structure" not in ten.said
+    both = preflight.demo_inputs(task(easy=_trial_waiting_on("bar"),
+                                      hard=_trial_waiting_on(*nine, "lever10", "lever11")))
+    assert both.result == "fail"
+    assert "lever10, lever11 would have none" in both.said
+    assert "(trial structure 'hard')" in both.said
+    each = preflight.demo_inputs(task(easy=_trial_waiting_on("bar"),
+                                      hard=_trial_waiting_on("lever")))
+    assert each.said.endswith(": 1 bar (trial structure 'easy'); 1 lever (trial structure 'hard')")
+    long = preflight.demo_inputs(task(main=_trial_waiting_on("x" * NOTE_LIMIT)))
+    assert len(long.said) == NOTE_LIMIT + 1 and long.said.endswith("…")
+    unloaded = preflight.demo_inputs(None)
+    assert (unloaded.result, unloaded.said) == (
+        "fail", "the task did not load, so its inputs cannot be given keys")
 
 
 def test_a_real_pump_makes_the_calibration_a_fail_not_an_acknowledgeable_unknown():

@@ -6,7 +6,7 @@ import pytest
 
 from wl_xcon.actor import Box
 from wl_xcon.link import TEXT_LIMIT, _quoted
-from wl_xcon.resume import PREDATES, PREDATES_KINDS, Unresumable, read
+from wl_xcon.resume import PREDATES, PREDATES_KINDS, Unresumable, is_demo, read
 from wl_xcon.task import Outcome
 
 DEPARTURE = 1_700_000_000.0
@@ -570,3 +570,21 @@ def test_a_warning_accepted_by_nobody_at_a_whole_second_reads_back_as_written(tm
 
     ((*_, by, at),) = read(directory, DEPARTURE).accepted
     assert by is None and at == 1_700_000_005.0 and isinstance(at, float)
+
+
+def test_a_demos_record_says_it_is_one_and_no_other_does(tmp_path):
+    """Demo mode §3.7, §8: a record whose `config.json` carries `demo` is a demo's
+    (`Restoration.demo`, `is_demo`), so `wlx taskd` never resumes it; one without the key, or whose
+    `config.json` cannot be read, is not."""
+    demo = {"gaze": "mouse", "noise_deg": 0.02, "stand_in_housings": False}
+    real = _folder(tmp_path / "real")
+    shown = _folder(tmp_path / "demo", config=_config(demo=demo))
+
+    assert (read(real, DEPARTURE).demo, is_demo(real)) == (False, False)
+    assert (read(shown, DEPARTURE).demo, is_demo(shown)) == (True, True)
+    (shown / "config.json").write_text("{not json")
+    assert is_demo(shown) is False
+    (shown / "config.json").write_text("[1, 2]")
+    assert is_demo(shown) is False
+    (shown / "config.json").unlink()
+    assert is_demo(shown) is False

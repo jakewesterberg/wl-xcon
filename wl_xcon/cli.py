@@ -40,6 +40,21 @@ from wl_xcon.variation import expanded
 from wl_xcon.welfare import Deployment
 
 
+def checkout_tasks() -> Path:
+    """**The checkout's `tasks/` folder**, beside the `wl_xcon` package this `wlx` runs from:
+    where a demo's reference animal's files are copied from (`service.demo_folder`; demo mode
+    §3.1). Refused, saying why, when there is none -- a `wlx` installed without its repository --
+    since the files it holds are not part of the package."""
+    tasks = Path(__file__).resolve().parents[1] / "tasks"
+    if not tasks.is_dir():
+        raise SystemExit(
+            f"refused: this wlx runs from {_printable(str(tasks.parent))}, which has no tasks/ "
+            f"folder: a demo copies its reference animal's files from the repository's own, so it "
+            f"runs from a checkout of wl-xcon"
+        )
+    return tasks
+
+
 def _require_file(path: Path | None, name: str) -> None:
     """Say a file named on the command line that is not there in a refusal sentence, never a
     `FileNotFoundError` traceback (XC-145, in part): `name` is the flag, or `task`. Called by
@@ -1690,10 +1705,10 @@ def main(argv: list[str] | None = None) -> int:
         help="the rig's display settings: a Python file defining RIG, as tasks/rig.py does",
     )
     service_parser.add_argument(
-        "--subjects", type=Path, required=True, metavar="DIR",
+        "--subjects", type=Path, default=None, metavar="DIR",
         help="one folder per animal, named for it, holding bounds.py (defining BOUNDS, "
         "whose subject must be the folder's name) and, for the stereoscope, "
-        "settings.py (defining SETTINGS)",
+        "settings.py (defining SETTINGS). Required, but beside --demo, which refuses it",
     )
     service_parser.add_argument(
         "--tasks", type=Path, required=True, metavar="DIR",
@@ -1706,14 +1721,31 @@ def main(argv: list[str] | None = None) -> int:
         "provisional one used when this is omitted is refused",
     )
     service_parser.add_argument(
-        "--root", type=Path, required=True,
+        "--root", type=Path, default=None,
         help="where session folders go, and where a session left without its animal's "
-        "return is looked for at start",
+        "return is looked for at start. Required, but beside --demo, which refuses it",
     )
     service_parser.add_argument(
-        "--link", required=True, metavar="PUB,REP[,MARK]",
+        "--demo", type=Path, default=None, metavar="DIR",
+        help="a demo service (demo mode): make DIR, refused if it exists, holding the reference "
+        "animal REFERENCE alone, from the checkout's tasks/eight_hour_bounds.py and "
+        "tasks/reference_subject.py, and the folder its sessions go to; every session is a demo, "
+        "the mouse on its page as its eye, on the simulated card and pump. Refuses --subjects, "
+        "--root and --demo-root, needs --link's four endpoints, and prints them on one line, "
+        "`wlx taskd: --link PUB,REP,MARK,GAZE`",
+    )
+    service_parser.add_argument(
+        "--demo-root", type=Path, default=None, metavar="DIR",
+        help="where a demo opened on this rig is written, never under --root, and where one "
+        "left without its return is looked for at start (made if absent; neither inside --root "
+        "nor holding it). A rig service without it opens no demo; a demo also needs --link's "
+        "fourth endpoint. Refused beside --demo",
+    )
+    service_parser.add_argument(
+        "--link", required=True, metavar="PUB,REP[,MARK[,GAZE]]",
         help="the endpoints this service binds, as `wlx run --link` takes them; `wlx "
-        "serve --link` takes the same value. Loopback only unless --link-allow-remote",
+        "serve --link` takes the same value. Loopback only unless --link-allow-remote. The "
+        "fourth, GAZE, is where a demo's page's pointer reports arrive, always loopback",
     )
     service_parser.add_argument(
         "--link-allow-remote", action="store_true",
