@@ -48,7 +48,7 @@ from wl_xcon.check import check_task
 from wl_xcon.cli import _load_allocation, _load_task, main
 from wl_xcon.dio import Simulated as Card
 from wl_xcon.link import (
-    Decline, HandBack, NextBlock, SetParameter, Simulated, Stop, Suggestion, decode, encode,
+    Decline, HandBack, NextBlock, Revert, SetParameter, Simulated, Stop, Suggestion, decode, encode,
 )
 from wl_xcon.photometry import SRGB
 from wl_xcon.preflight import FAIL, values as starting_values
@@ -236,6 +236,16 @@ def _suggested(row: dict) -> tuple:
             row.get("at_hardest"), row.get("suggestion"))
 
 
+#: What `_answering` reads on a change row that carries no `suggestion` key.
+ABSENT = "absent"
+
+
+def _answering(row: dict):
+    """A change row's `suggestion` -- a hold's, or the widening a pool change confirms (XC-491) --
+    or `ABSENT` where it carries none."""
+    return row.get("suggestion", ABSENT)
+
+
 def _offered(session: Session) -> dict[int, tuple]:
     """The stage's suggestion and the widening each running frame carried, by the trial about to
     run, the last frame of each boundary's."""
@@ -409,7 +419,9 @@ def test_taking_the_widening_offers_the_move_up_again_at_once(tmp_path):
     (`remakes`), **on the window that met it**, which the widening did not empty ("Taking the
     widening does not first empty the move-up window"). A confirmation naming the old id is
     refused with a sentence naming the new; one naming the new moves the run up. The widening's
-    own bar starts afresh, so it is not offered again on the answers it was taken on."""
+    own bar starts afresh, so it is not offered again on the answers it was taken on. **The `set`
+    row that took it names the widening it confirms, never the move made again** (`suggestion`;
+    XC-491, wl-preproc's answer of 2026-11-14), and the move's own row names none."""
     script = ["right"] * 13
     session = _session(tmp_path, [_stage("Alone", set_size=1), _stage("Crowd")], script,
                        {7: [SetParameter("pairings", 3, JAKE)],
@@ -425,9 +437,10 @@ def test_taking_the_widening_offers_the_move_up_again_at_once(tmp_path):
     lines = _lines(session)
     assert [line["block"] for line in lines] == ["Alone"] * 9 + ["Crowd"] * 4
     assert [(row["change"], row["kind"], row["name"], row.get("move"), row["trial_number"],
-             row.get("remakes")) for row in _changes(session)] == [
-        (1, "suggested", "block", "up", 6, None), (2, "suggested", "pairings", "widen", 6, None),
-        (3, "set", "pairings", None, 8, None), (4, "suggested", "block", "up", 8, 1)]
+             row.get("remakes"), _answering(row)) for row in _changes(session)] == [
+        (1, "suggested", "block", "up", 6, None, ABSENT),
+        (2, "suggested", "pairings", "widen", 6, None, ABSENT),
+        (3, "set", "pairings", None, 8, None, 2), (4, "suggested", "block", "up", 8, 1, ABSENT)]
     remade = _changes(session)[3]
     assert (remade["block"], remade["now"], remade["bar"], remade["at_hardest"]) == (
         "Alone", "Crowd", {"correct": 5, "of": 5}, True)
@@ -1028,3 +1041,190 @@ def test_taking_the_widening_re_offers_a_move_up_its_margin_still_holds(tmp_path
     assert offered is not None and offered.change == 4
     assert replay.bar(MOVE_UP)[:2] == (last.suggestion.correct, last.suggestion.of)
 
+
+
+#: The two plans the cases below run: the top stage alone, where a met bar suggests widening alone,
+#: and Alone below Crowd, where one prompt offers the move up and the widening.
+TOP = [_stage("Crowd")]
+TWO = [_stage("Alone", set_size=1), _stage("Crowd")]
+
+
+#: **A standing widening confirmed, each way the pool's value can change** (XC-491; wl-preproc's
+#: answer of 2026-11-14): the plan, the pool's starting value, what the trainer sends at which
+#: drain (`_Drained`), the number of trials the animal plays (each right), the change log as
+#: `(change, kind, suggestion)`, and the widening's id. Each stage's bar is 5 of the last 5, and a
+#: pool change starts it afresh, so a widening is suggested on the fifth right answer after the
+#: last.
+CONFIRMING = {
+    # A `set` adding a pairing: the widening (1) at trial 6, the `set` at trial 8.
+    "set": (TOP, 1, {7: [SetParameter("pairings", 3, JAKE)]}, 9,
+            [(1, "suggested", ABSENT), (2, "set", 1)], 1),
+    # Two `set`s in one pass: the pool's value at the boundary is the last one's, which alone
+    # names the widening.
+    "set twice in one pass": (
+        TOP, 1, {7: [SetParameter("pairings", 3, JAKE), SetParameter("pairings", 7, JAKE)]}, 9,
+        [(1, "suggested", ABSENT), (2, "set", ABSENT), (3, "set", 1)], 1),
+    # The PI's "Re-offer the other at once": the widening (2) taken beside the move up (1), which is
+    # made again (4); the `set` names the widening, never the move.
+    "set beside a move up": (TWO, 1, {7: [SetParameter("pairings", 3, JAKE)]}, 9,
+                             [(1, "suggested", ABSENT), (2, "suggested", ABSENT), (3, "set", 2),
+                              (4, "suggested", ABSENT)], 2),
+    # The pool narrowed by a person to one pairing -- adding none, and no widening standing -- the
+    # bar met afresh suggests widening (2), and a hand-back puts the run's two pairings back.
+    "hand_back": (TOP, 3, {1: [SetParameter("pairings", 1, JAKE)],
+                           8: [HandBack("pairings", JAKE)]}, 10,
+                  [(1, "set", ABSENT), (2, "suggested", ABSENT), (3, "hand_back", 2)], 2),
+    # The pool widened by a person before any widening is offered (naming none), narrowed again,
+    # and once the widening (3) stands, reverted to the moment after the first: a value reverted.
+    "revert to a value": (TOP, 1, {1: [SetParameter("pairings", 3, JAKE)],
+                                   2: [SetParameter("pairings", 1, JAKE)],
+                                   9: [Revert(1, JAKE)]}, 11,
+                          [(1, "set", ABSENT), (2, "set", ABSENT), (3, "suggested", ABSENT),
+                           (4, "revert", 3)], 3),
+    # The pool narrowed, and once the widening (2) stands, reverted to the run's start, where no
+    # person held it: the setting handed back, as a revert.
+    "revert to the start": (TOP, 3, {1: [SetParameter("pairings", 1, JAKE)],
+                                     8: [Revert(0, JAKE)]}, 10,
+                            [(1, "set", ABSENT), (2, "suggested", ABSENT), (3, "revert", 2)], 2),
+}
+
+#: **A pool change that answers no widening by name**, as `CONFIRMING`'s, with what became of the
+#: widening: withdrawn, standing still, or never offered.
+NAMING_NONE = {
+    # Narrowed while the widening (1) stands: it adds nothing, so the widening is withdrawn.
+    "narrowed": (TOP, 3, {7: [SetParameter("pairings", 1, JAKE)]}, 9,
+                 [(1, "suggested", ABSENT), (2, "set", ABSENT)], "withdrawn"),
+    # Narrowed to a pairing it held already: nothing added.
+    "narrowed to one it held": (TOP, 3, {7: [SetParameter("pairings", 2, JAKE)]}, 9,
+                                [(1, "suggested", ABSENT), (2, "set", ABSENT)], "withdrawn"),
+    # Narrowed and widened back in one pass: the value at the boundary is the one before, no change
+    # of the pool, so the widening stands, named by neither row.
+    "back where it was in one pass": (
+        TOP, 3, {7: [SetParameter("pairings", 1, JAKE), SetParameter("pairings", 3, JAKE)]}, 9,
+        [(1, "suggested", ABSENT), (2, "set", ABSENT), (3, "set", ABSENT)], "standing"),
+    # Widened before the rig offers any widening: nothing to confirm.
+    "widened before any is offered": (TOP, 1, {1: [SetParameter("pairings", 3, JAKE)]}, 4,
+                                      [(1, "set", ABSENT)], None),
+}
+
+
+def _case(tmp_path, case: str) -> Session:
+    stages, start, commands, trials, *_ = {**CONFIRMING, **NAMING_NONE}[case]
+    return _session(tmp_path, stages, ["right"] * trials, commands, values={"pairings": start})
+
+
+def _their_reader():
+    """wl-preproc's reader of the change log, or the test skipped -- failed where
+    `WLX_REQUIRE_PREPROC=1`, as CI runs it."""
+    try:
+        from wl_preproc.events.rigrecords import change_fields, read_rig_records
+    except ImportError as exc:  # pragma: no cover - exercised by the CI job
+        if os.environ.get("WLX_REQUIRE_PREPROC") == "1":
+            raise AssertionError(
+                f"WLX_REQUIRE_PREPROC=1 but wl-preproc is not importable ({exc})") from exc
+        pytest.skip("wl-preproc checkout not beside this repo")
+    return change_fields, read_rig_records
+
+
+@pytest.mark.parametrize("case", list(CONFIRMING))
+def test_the_change_that_confirms_a_standing_widening_names_it(tmp_path, case):
+    """XC-491, our answer to wl-preproc of 2026-11-14: **a standing widening is confirmed at the
+    boundary where the pool's new value applies, if that value adds a pairing, whatever changed it**
+    -- a `set`, a `hand_back` or a `revert` (`Session._repooled`) -- **and the change row that
+    applies that value carries `"suggestion": <the widening's change id>`**, the field a confirming
+    `next_block` or `back_block` row carries. Written in `_apply_staged`, judged by the rule
+    `_repooled` confirms by (`_pool_adds`), so the row and the widening's fate agree: the changes
+    feed says it is confirmed. The row is the last of its pass to move the pool; no other change row
+    carries the key. Taken beside a move up, the row names the widening, never the move made again
+    (the PI's "Re-offer the other at once"). wl-preproc's reader as on our local export keeps it in
+    the row's `detail`, with no problem but XC-461's note (`tests/_preproc.py`)."""
+    *_, rows, widening = CONFIRMING[case]
+    session = _case(tmp_path, case)
+
+    session.run()
+
+    assert session.refusals == []
+    changes = _changes(session)
+    assert [(row["change"], row["kind"], _answering(row)) for row in changes] == rows
+    assert {row["name"] for row in changes if row["kind"] != "suggested"} == {"pairings"}
+    (confirming,) = [row for row in changes if _answering(row) != ABSENT]
+    # The value it applied, which its first trial ran at: a revert to the start hands it back.
+    applied = _lines(session)[confirming["trial_number"] - 1]["params"]["pairings"]
+    assert confirming["now"] == (None if case == "revert to the start" else applied)
+    assert any(f"the rig's suggestion {widening}, to widen the pool, is confirmed" in said
+               for said in _fed(session, "suggestion"))
+
+    change_fields, read_rig_records = _their_reader()
+    fields, problems = change_fields(
+        (session.directory / "parameter_changes.jsonl").read_text().splitlines())
+    assert read_rig_records(session.directory.parent).problems == ()
+    assert problems_beyond_xc461(problems) == []
+    assert [(field.change, json.loads(field.detail).get("suggestion")) for field in fields
+            if field.kind != "suggested"] == [
+        (change, None if named == ABSENT else named) for change, kind, named in rows
+        if kind != "suggested"]
+
+
+@pytest.mark.parametrize("case", list(NAMING_NONE))
+def test_a_pool_change_that_confirms_no_widening_names_none(tmp_path, case):
+    """XC-491: **a pool change that adds nothing withdraws the widening standing and names
+    nothing** -- narrowed, or narrowed to a pairing it held already -- and a change that leaves the
+    pool where it was at the last boundary, two in one pass, answers nothing, the widening still
+    standing; a pool widened before the rig offers any widening has nothing to confirm. No change
+    row carries `suggestion` (`_confirms`)."""
+    *_, rows, fate = NAMING_NONE[case]
+    session = _case(tmp_path, case)
+
+    session.run()
+
+    assert session.refusals == []
+    assert [(row["change"], row["kind"], _answering(row)) for row in _changes(session)] == rows
+    fed = _fed(session, "suggestion")
+    assert [said for said in fed if "to widen the pool, is" in said] == (
+        ["the pool changed in Crowd, so the bars start afresh on the pairings pooled now; the "
+         "rig's suggestion 1, to widen the pool, is withdrawn"] if fate == "withdrawn" else [])
+    last = [frame for frame in session.link.published if frame.phase == "running"][-1]
+    assert (last.widen is not None and last.widen.change == 1) == (fate == "standing")
+
+
+def _replayed(session: Session) -> tuple:
+    """The run's record replayed as a resumed session's next run goes on from it (`taskd.went_on`,
+    `_carried`, as `Session._going_on` does): its `_WentOn`, and the stage's suggestion and the
+    widening it finds standing."""
+    from wl_xcon import resume, variation
+    from wl_xcon.scheduler import Scheduler
+    from wl_xcon.taskd import _carried, went_on
+
+    task = _load_task(Path(session.spec.task))
+    went = went_on(task, resume.read(session.directory, departure=WALL_NOW).last_run)
+    plan = task.plans["train"]
+    scheduler = Scheduler(
+        blocks=[variation.expanded(block) for block in plan.blocks], seed=0,
+        counting=task.trial.counting,
+        countings={name: structure.counting for name, structure in task.structures.items()},
+        order=plan.order, start=went.position, values=lambda: went.values,
+        params={param.name: param for param in task.params})
+    return (went, *_carried(task, went, scheduler))
+
+
+@pytest.mark.parametrize("case", [*CONFIRMING, *NAMING_NONE])
+def test_a_resume_reads_a_run_back_the_same_after_a_widenings_answer(tmp_path, case):
+    """XC-491: **a crash-resume's replay of the record reads the run back the same** with the
+    widening's `suggestion` on the change row that confirms it (`taskd.went_on`, which reads change
+    rows, and `_carried`): its stage and the pool's value as its last line left them, and the
+    stage's suggestion and the widening standing as its last frame offered them -- a move up made
+    again beside the widening taken among them. The row naming the widening is read as the change
+    it is, never as a hold: only a `declined` row's `suggestion` holds one."""
+    session = _case(tmp_path, case)
+
+    session.run()
+
+    went, offered, widen = _replayed(session)
+    last_line = _lines(session)[-1]
+    last = [frame for frame in session.link.published if frame.phase == "running"][-1]
+    assert (went.stage, went.pool) == (last_line["block"], last_line["params"]["pairings"])
+    assert (None if offered is None else offered.change) == (
+        None if last.suggestion is None else last.suggestion.change)
+    assert (None if widen is None else widen.change) == (
+        None if last.widen is None else last.widen.change)
+    assert [event for event in went.bars if event[0] == "decline"] == []

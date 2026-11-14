@@ -472,7 +472,7 @@ class SessionRecord:
         live: tuple = (),
         eased: tuple = (),
         planned: dict | None = None,
-        realized: dict | None = None,
+        color_realized: dict | None = None,
     ) -> list[dict]:
         """One trial's record, flushed before returning.
 
@@ -571,8 +571,11 @@ class SessionRecord:
                     "planned": planned,
                     # The pop-out search build's fix round: each color set this trial drew at a
                     # luminance its run had not yet written, realized on the run's panel, by set
-                    # name (`taskd.Session._realize`); null on every other line.
-                    "realized": realized,
+                    # name (`taskd.Session._realize`); null on every other line. Named
+                    # `color_realized` at wl-preproc's ask (2026-11-14, XC-491): "a bare
+                    # `realized` beside a trial's other fields reads as if the trial itself were
+                    # realized". The start row's `color_sets[name].realized` keeps its name.
+                    "color_realized": color_realized,
                     "stimuli": stimuli,
                 },
                 sort_keys=True,

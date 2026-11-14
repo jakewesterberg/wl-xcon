@@ -675,8 +675,8 @@ def test_each_line_names_its_colors_and_each_run_defines_the_set_once(task, tmp_
     parameter set of a Fade-in session is under 1.25 KB -- under 1 KB before the fix round made
     twelve more of its numbers settings, each a key of every line, and each look's luminance a
     reference to one, 0.15 KB in all -- (the line's other keys, each stimulus's place among them,
-    are as they were), no line realizes the set again (`realized` null), and the record still reads
-    back: the run's stage and pool, as wl-xcon's own resume finds them."""
+    are as they were), no line realizes the set again (`color_realized` null), and the record still
+    reads back: the run's stage and pool, as wl-xcon's own resume finds them."""
     from wl_xcon import resume
     from wl_xcon.taskd import went_on
 
@@ -689,7 +689,7 @@ def test_each_line_names_its_colors_and_each_run_defines_the_set_once(task, tmp_
     # Each line's `params` as the record writes it: keys sorted, `json`'s separators.
     weights = [len(json.dumps(line["params"], sort_keys=True).encode()) for line in lines]
     assert max(weights) < 1280, sorted(weights)[-3:]
-    assert all(line["realized"] is None for line in lines)
+    assert all(line["color_realized"] is None for line in lines)
     by_reference = {"class": "P", "fields": {"name": "distractor_fraction"}}
     brightness = {"class": "P", "fields": {"name": "color_luminance"}}
     for line in lines:
@@ -1096,7 +1096,8 @@ def test_the_colors_brightness_changed_live_is_realized_once_and_written_once(tm
     at = {luminance: photometry.realize(theirs, SRGB, luminance) for luminance in (15.0, 12.0)}
     assert [entry["luminance_cd_m2"] for entry in start["color_sets"]["isohue"]["realized"]] == [
         15.0]
-    written = [(line["index"], line["realized"]) for line in lines if line["realized"] is not None]
+    written = [(line["index"], line["color_realized"]) for line in lines
+               if line["color_realized"] is not None]
     assert len(written) == 1
     index, realized = written[0]
     assert lines[index]["params"]["color_luminance"] == 12.0
@@ -1112,6 +1113,58 @@ def test_the_colors_brightness_changed_live_is_realized_once_and_written_once(tm
              for entry in [*start["color_sets"]["isohue"]["realized"], *realized["isohue"]]}
     for line in lines:
         assert line["params"]["color_luminance"] in found
+
+
+def test_a_luminance_new_to_its_run_is_the_lines_color_realized_and_wl_preproc_reads_it(tmp_path):
+    """XC-491, wl-preproc's answer of 2026-11-14, accepted with one rename: **the trial line's key
+    is `color_realized`** -- "A bare `realized` beside a trial's other fields reads as if the trial
+    itself were realized" -- its shape as before: null but on the run's first line drawn at a
+    luminance the run has not yet realized, then each set's realization there, by set name, `{set
+    name: [entry]}`. No line carries a bare `realized`, and the start row's
+    `color_sets[name].realized` keeps its name. Read back by wl-xcon's own resume, each line holds
+    it as written; read by wl-preproc's reader as on our local export, the record has no problem but
+    XC-461's note (`tests/_preproc.py`), one trial for each line."""
+    from wl_xcon import resume
+
+    trainer = _Locks("color_luminance", 12.0, send_at=5, stop_at=14)
+    session = _opened(_spec(tmp_path, seed=5, start_block="Fade-in"), trainer)
+    trainer.session = session
+
+    session.run()
+
+    lines = _rows(session, "trials.jsonl")
+    assert all("color_realized" in line and "realized" not in line for line in lines)
+    written = [line["color_realized"] for line in lines if line["color_realized"] is not None]
+    assert [list(each) for each in written] == [["isohue"]]
+    (entry,) = written[0]["isohue"]
+    assert (sorted(entry), entry["luminance_cd_m2"]) == (
+        ["desaturation", "drive", "luminance_cd_m2", "xy", "xyz"], 12.0)
+    (start,) = [row for row in _rows(session, "runs.jsonl") if row["event"] == "start"]
+    defined = start["color_sets"]["isohue"]
+    assert "color_realized" not in defined
+    assert [each["luminance_cd_m2"] for each in defined["realized"]] == [15.0]
+    restored = resume.read(session.directory, departure=1_700_000_000.0)
+    assert [line["color_realized"] for line in restored.last_run.lines] == [
+        line["color_realized"] for line in lines]
+
+    try:
+        from wl_preproc.events.rigrecords import change_fields, read_rig_records
+        from wl_preproc.events.rigruns import read_rig_runs
+        from wl_preproc.events.rigsession import read_rig_session
+        from wl_preproc.events.rigtrials import read_rig_trials
+    except ImportError as exc:  # pragma: no cover - exercised by the CI job
+        if os.environ.get("WLX_REQUIRE_PREPROC") == "1":
+            raise AssertionError(
+                f"WLX_REQUIRE_PREPROC=1 but wl-preproc is not importable ({exc})") from exc
+        pytest.skip("wl-preproc checkout not beside this repo")
+    folder = session.directory.parent
+    trials, runs = read_rig_trials(folder, "A"), read_rig_runs(folder, "A")
+    rig, records = read_rig_session(folder, "A"), read_rig_records(folder)
+    _, problems = change_fields(
+        (session.directory / "parameter_changes.jsonl").read_text().splitlines())
+    assert (trials.problems, runs.problems, rig.problems, records.problems,
+            problems_beyond_xc461(problems)) == ((), (), (), (), [])
+    assert [t.number for t in trials.trials] == [line["trial_number"] for line in lines]
 
 
 def test_the_prompt_names_the_hardest_step_in_plain_words_and_a_pool_stays_whole(tmp_path):

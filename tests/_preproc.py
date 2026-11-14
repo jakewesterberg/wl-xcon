@@ -6,8 +6,9 @@ from __future__ import annotations
 import re
 
 #: The change kinds the pop-out search build writes that wl-preproc's reader does not list yet
-#: (`wl_preproc/events/rigrecords.py::KINDS`, read at its main `bc5df71` on 2026-11-08). wl-preproc
-#: accepted both on 2026-11-07. Until its reader lists them (**XC-461**), it publishes each row as
+#: (`wl_preproc/events/rigrecords.py::KINDS`, read at its main `bc5df71` on 2026-11-08, and at `43755fe`
+#: on 2026-11-14). wl-preproc accepted both on 2026-11-07; its branch `feat/popout-fields` lists them,
+#: not merged on 2026-11-14. Until its main's reader lists them (**XC-461**), it publishes each row as
 #: written, counts it as no person's act on a setting, and says so once per kind, which is what
 #: `problems_beyond_xc461` lets pass. Delete this module once XC-461 closes.
 NOT_YET_LISTED = ("suggested", "declined")

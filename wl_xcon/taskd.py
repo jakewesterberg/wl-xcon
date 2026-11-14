@@ -258,7 +258,7 @@ def _color_sets(task: Task, calibration: Calibration, values: dict) -> dict | No
     the screen's own), **a list, one realization for each luminance the run's starting values
     draw the set at** (`_luminances`; the pop-out search build's fix round, the luminance a
     setting): each `_realization`. A luminance a later trial draws it at first is realized as that
-    trial is drawn and written on its line (`realized`; `Session._realize`). `None` for a task
+    trial is drawn and written on its line (`color_realized`; `Session._realize`). `None` for a task
     with none. A set the calibration cannot show at all is refused at load
     (`unrealizable-color`), before any run."""
     sets = color_sets(task)
@@ -805,6 +805,22 @@ WITHDRAWN, DECLINED, CONFIRMED, LAPSED = "withdrawn", "declined", "confirmed", "
 REMADE = "made again"
 
 
+def _pool_adds(pool, was: object, now: object) -> bool | None:
+    """**Whether the pool's value `now` adds a pairing to `was`**, its value at the boundary before
+    (`task.Pool`; the pop-out search build's Task 5), between trials: `None` where it is no change
+    the prompt standing is answered by -- the run's first look at its pool (`was` `None`), the same
+    value, or one naming no pool, which the trial loop's backstop ends the run on
+    (`check.unpooled`) -- else whether `now` holds a pairing `was` did not, a `was` naming no pool
+    holding none. **The one rule a widening's answer is read by** (XC-491, wl-preproc's answer of
+    2026-11-14): `Session._repooled` confirms the widening standing where it is true and withdraws
+    it where it is false, and the change row applying `now` names the widening it confirms
+    (`Session._confirms`), so the row and the widening's fate never disagree."""
+    if was is None or now == was or pool.unpooled(now) is not None:
+        return None
+    return (pool.unpooled(was) is not None
+            or bool(set(pool.pairings(now)) - set(pool.pairings(was))))
+
+
 @dataclass
 class _Suggested:
     """**A suggestion the rig made in the run in progress** (`scheduler.Suggestion`; the pop-out
@@ -977,7 +993,9 @@ def went_on(task: Task, last) -> _WentOn | None:
                 if row.get("remakes") is not None and row.get("move") == MOVE_UP:
                     state["kept_up"] = row["change"]
             elif kind == "declined":
-                # A hold starts the held move's window afresh, so its bar no longer offers it.
+                # A hold starts the held move's window afresh, so its bar no longer offers it. Only
+                # a hold's `suggestion` is read: a pool change's names the widening it confirmed
+                # (XC-491), which the pool's change itself answers here (`changed_pool`).
                 held = state["offered"].get(row.get("suggestion"))
                 if held is not None:
                     state["bars"].append(("decline", held.get("move")))
@@ -3432,6 +3450,23 @@ class Session:
                    f"{now.of} answers at its hardest step right, over the {held} it holds; widen "
                    f"it with a value of {pool.setting} holding more, or hold")
 
+    def _confirms(self) -> dict:
+        """**The widening the pool's value confirms, as the change row applying it names it**
+        (XC-491; wl-preproc's answer of 2026-11-14), between trials: `{"suggestion": <the
+        widening's change id>}` where a widening stands and the pool's value now, applied at this
+        boundary, adds a pairing to its value at the last (`_pool_adds`, the rule `_repooled`
+        confirms it by as the boundary's changes are seen) -- the field a confirming `next_block`
+        or `back_block` row carries -- whatever applied it, a `set`, a `hand_back` or a `revert`.
+        `{}` with no widening standing, and on a pool change that adds nothing, which withdraws
+        the widening and names nothing. Asked by `_apply_staged` of the last row of its pass that
+        moves the pool's value, once that value is in `spec.values`, so no later row moves it
+        before `_repooled` reads it."""
+        pool = self._task.pool if self._task is not None else None
+        if pool is None or self._widening is None:
+            return {}
+        added = _pool_adds(pool, self._pool_was, self.spec.values.get(pool.setting))
+        return {"suggestion": self._widening.change} if added else {}
+
     def _repooled(self) -> None:
         """**The pool changed** (`task.Pool`; the pop-out search build's Task 5), seen at the
         boundary its new value applies at (`_apply_staged`), between trials, never in a frame,
@@ -3441,19 +3476,22 @@ class Session:
         staircase where it is"). **The prompt standing is answered**: a widening offered is
         confirmed where the pool gained a pairing, else withdrawn, and a move offered is
         withdrawn, its bar started afresh; under a confirmed progression the changes feed says
-        so in one line, beside the `set` row the change log has with who. The run's first look
-        at its pool says nothing; nor does a value naming no pool, which the trial loop's
-        backstop ends the run on before its next trial (`check.unpooled`)."""
+        so in one line, beside the `set` row the change log has with who. **The change row that
+        applied the new value names the widening it confirms** (`"suggestion"`; XC-491,
+        wl-preproc's answer of 2026-11-14; `_confirms`), judged by the same rule as here
+        (`_pool_adds`). The run's first look at its pool says nothing; nor does a value naming
+        no pool, which the trial loop's backstop ends the run on before its next trial
+        (`check.unpooled`)."""
         pool = self._task.pool if self._task is not None else None
         if pool is None:
             return
         now = self.spec.values.get(pool.setting)
         was, self._pool_was = self._pool_was, now
-        if was is None or now == was or pool.unpooled(now) is not None:
+        # The rule the row applying `now` named the widening by (`_pool_adds`, `_confirms`).
+        added = _pool_adds(pool, was, now)
+        if added is None:
             return
         scheduler = self._scheduler
-        added = (pool.unpooled(was) is not None
-                 or bool(set(pool.pairings(now)) - set(pool.pairings(was))))
         said = []
         widening, stage = self._widening, self._suggested
         # **The trainer took the widening while a move up stood beside it** (the PI, 2026-11-07,
@@ -4365,6 +4403,18 @@ class Session:
         # A reward size is no task setting a draw or a condition gives (Call 2): it keeps its `was`.
         before = {offer[0]: None if offer[4] else self._given_by(offer[0], playing)
                   for offer, _ in offered if not isinstance(offer, Pending)}
+        # **The row that applies the pool's value at this boundary** (XC-491): the last of this
+        # pass to move it -- a value set or reverted, or a hand-back, a revert's among them; a
+        # range moves no value -- which names the widening that value confirms (`_confirms`).
+        pool = self._task.pool if self._task is not None else None
+
+        def moves_pool(offer) -> bool:
+            if isinstance(offer, Pending):
+                return offer.kind == "hand_back" and offer.name == pool.setting
+            return not offer[4] and offer[0] == pool.setting
+
+        repooling = None if pool is None else max(
+            (place for place, (offer, _) in enumerate(offered) if moves_pool(offer)), default=None)
         for place, (offer, act) in enumerate(offered):
             self._sequence += 1
             # One change id for each act: a change offered on its own, or all of one revert's,
@@ -4374,7 +4424,8 @@ class Session:
             closes = act is None or place + 1 == len(offered) or offered[place + 1][1] != act
             moment = None if act is None else self._act_moments[act]
             if isinstance(offer, Pending):
-                applied = self._apply_pending(offer, code, trial_number, index)
+                applied = self._apply_pending(offer, code, trial_number, index,
+                                              repools=place == repooling)
                 if closes:
                     self._keep_moment(self._pending_said(applied) if moment is None
                                       else f"reverted to {_back_to(moment)}")
@@ -4411,6 +4462,8 @@ class Session:
                     meaning=None if bounded else self._meaning(name, written, now),
                     event_code=code, sequence=self._sequence,
                     **({} if moment is None else {"moment": moment}),
+                    # The widening this row's value of the pool confirms (XC-491; `_confirms`).
+                    **(self._confirms() if place == repooling else {}),
                 )
             # A pair as a position only for a setting whose choices declare one (XC-401's fix
             # round, M2): a ceiling's name is no setting the task declares.
@@ -4469,7 +4522,8 @@ class Session:
             self._feed("warning", None, self.wall_now(), said)
         self._reaching = frozenset(now)
 
-    def _apply_pending(self, act: Pending, code: int, trial_number: int, index: int) -> Pending:
+    def _apply_pending(self, act: Pending, code: int, trial_number: int, index: int, *,
+                       repools: bool = False) -> Pending:
         """**One hand-back or live range applied** (`_apply_staged`, whose change id, `sequence`,
         code and first trial it is given; engine build C3's spec §6 and §8). A hand-back ends the
         person's hold (`_edited`), so the open block's conditions or its draw give the setting
@@ -4485,8 +4539,11 @@ class Session:
         `to` and `now` are read as it applies** (`_to`), in the block its next trial plays, not as
         offered. **A revert's** (`Pending.act`) is written as a `revert` row naming the moment it
         goes back to, and one it hands back reads `now` null with no `to`, as the change log's
-        `revert` row is told to wl-preproc. **Returns the change as it applied** (a hand-back with
-        the `to` and `now` it was read with), which is what the moment `_apply_staged` keeps says."""
+        `revert` row is told to wl-preproc. **`repools`, the last row of `_apply_staged`'s pass to
+        move the pool's value, names the widening that value confirms** (`_confirms`; XC-491),
+        asked once the hand-back has put the value back. **Returns the change as it applied** (a
+        hand-back with the `to` and `now` it was read with), which is what the moment
+        `_apply_staged` keeps says."""
         name = act.name
         moment = None if act.act is None else self._act_moments[act.act]
         if act.kind == "hand_back":
@@ -4522,6 +4579,9 @@ class Session:
             kind = "revert"
             detail = {"moment": moment, **({} if act.kind == "hand_back" else detail)}
             now = None if act.kind == "hand_back" else now
+        if repools:
+            # The widening the value this hand-back put back confirms (XC-491; `_confirms`).
+            detail = {**detail, **self._confirms()}
         meaning = self._meaning(name, act.was, now)
         if act.kind == "range" and meaning is not None:
             # Which way the new range went, judged as a whole against the range the task writes
@@ -4851,7 +4911,7 @@ class Session:
         before its first frame (the pop-out search build's fix round; the PI, 2026-11-07,
         "everything should be adjustable in the console"): realized once for each value, on the
         run's panel (`photometry.realized`, which keeps it), so no frame realizes one; **a value
-        the run has not written yet is the trial line's `realized`** -- by set name, a list of
+        the run has not written yet is the trial line's `color_realized`** -- by set name, a list of
         `_color_sets`' realizations -- once a run, never again on a later line. `None` where every
         one is written. A set that cannot be realized at a value is left to the trial's own
         drawing, which says why."""
@@ -6221,7 +6281,7 @@ class Session:
                     # at once share with the trial they show again (engine build C3's spec §5).
                     planned=drawn.planned,
                     # Each color set at a luminance the run had not written yet (`_realize`).
-                    realized=realized_now,
+                    color_realized=realized_now,
                     # Where each stimulus it showed was (XC-399), turned into positions as the
                     # line is written, between trials.
                     placed=result.placed,

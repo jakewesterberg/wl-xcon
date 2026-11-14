@@ -564,7 +564,11 @@ it; under a confirmed progression the stage's bar to move up, judged over every 
 also suggests widening it (`Scheduler.widening`, a `suggested` row of move `"widen"`, the frame's
 `widen`), the stage's move offered first in one prompt that one hold answers whole, the trainer
 widening with a `set`, which, as any change to the pool, starts both bars afresh and leaves the
-staircase where it is (`Session._repooled`); the pool carries into the next stage. **The trainer
+staircase where it is (`Session._repooled`); a widening standing is confirmed where the pool's value
+applied at a boundary adds a pairing, by a `set`, a hand-back or a revert, and the change row
+applying that value names it (`suggestion`, as a confirming move's control row does; XC-491,
+`taskd._pool_adds`, the one rule for both, and `Session._confirms`); the pool carries into the next
+stage. **The trainer
 taking one half of a prompt re-offers the other at once** (the PI, 2026-11-07, "Re-offer the other
 at once"): a move up taken, the widening beside it is made again in the next stage on the bar that
 met it (`Session._remake_widening`); a widening taken, the move up beside it is made again on its
@@ -851,8 +855,8 @@ names a color-set light's set by its name alone** (`record._written`; REC-27, re
 the build's final fixes), and each run's start row defines every set its task declares once
 (`color_sets`): as its file reads, and as the run's calibration drew it at each luminance its
 starting values give, each color as shown, the share of chroma given up together and each color's
-output levels; a luminance a later trial draws it at first is that trial line's `realized`, once a
-run (`taskd.Session._realize`); a task declaring two different
+output levels; a luminance a later trial draws it at first is that trial line's `color_realized`
+(wl-preproc's name for it, 2026-11-14, XC-491), once a run (`taskd.Session._realize`); a task declaring two different
 sets of one name is refused at load (`color-set-named-twice`). Cone colors
 still convert through the lab observer and hold V_F,10.
 
