@@ -38,7 +38,6 @@ from pathlib import Path
 import pytest
 
 from _calibrations import PRIMARIES, measured
-from _preproc import problems_beyond_xc461
 from _rig import DIRECT
 from wl_xcon import cones, photometry, simeye
 from wl_xcon.actor import Box
@@ -640,7 +639,7 @@ def test_the_record_reads_back_whole_through_wl_preproc(confirmed):
     fields, problems = change_fields([json.dumps(row) for row in changes])
 
     assert (trials.problems, runs.problems, rig.problems, records.problems,
-            problems_beyond_xc461(problems)) == ((), (), (), (), [])
+            problems) == ((), (), (), (), [])
     assert [(t.number, t.block, t.outcome, t.shown) for t in trials.trials] == [
         (line["trial_number"], line["block"], line["outcome"], line["shown"]) for line in lines]
     assert all(t.drawn["odd_color"] == "pool" for t in trials.trials)
@@ -1163,7 +1162,7 @@ def test_a_luminance_new_to_its_run_is_the_lines_color_realized_and_wl_preproc_r
     _, problems = change_fields(
         (session.directory / "parameter_changes.jsonl").read_text().splitlines())
     assert (trials.problems, runs.problems, rig.problems, records.problems,
-            problems_beyond_xc461(problems)) == ((), (), (), (), [])
+            problems) == ((), (), (), (), [])
     assert [t.number for t in trials.trials] == [line["trial_number"] for line in lines]
 
 

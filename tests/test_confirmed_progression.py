@@ -36,7 +36,6 @@ import pytest
 
 import _sessions
 from _frames import frame
-from _preproc import problems_beyond_xc461
 from _rig import DIRECT
 from wl_xcon import link as wire
 from wl_xcon import resume
@@ -676,7 +675,7 @@ def test_wl_preprocs_reader_takes_the_suggested_and_declined_rows(tmp_path):
     assert records.problems == ()
     assert [(change.name, change.sequence) for change in records.changes] == [
         ("block", None), ("block", None)]
-    assert problems_beyond_xc461(problems) == []
+    assert problems == []
     read = [(field.kind, field.change, field.block, json.loads(field.detail)) for field in fields]
     assert read == [
         ("suggested", 1, "Alone", {"move": "up", "block": "Alone", "bar": {"correct": 5, "of": 5},

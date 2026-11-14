@@ -57,8 +57,8 @@ from then). **Hardware verified: none.**
 ## What is next (the PI, 2026-11-07)
 1. **Tell wl-preproc this branch's merge commit** (XC-491). Its session answered on 2026-11-14, by message: every
    pop-out record shape accepted, the trial line's key renamed `color_realized`, and a widening's confirming change
-   row naming it (`suggestion`), both built here. Its pop-out reader is built and not merged; until it merges, its
-   reader does not list `suggested` and `declined` (XC-461; `tests/_preproc.py` lets that one note pass).
+   row naming it (`suggestion`), both built here. Its pop-out reader is on its main (`d8fe06b`, 2026-11-14): it
+   knows `suggested` and `declined` (XC-461 closed) and reads the line's `color_realized`, not a bare `realized`.
 2. **Demo mode**, with its own plan: its design (`docs/superpowers/specs/2026-10-06-demo-mode-design.md`) and its two
    `Service._open` welfare changes are approved by the PI (2026-11-07; XC-013).
 3. **Then the display (build E)**, designed with the PI; "done" includes a real screen.
