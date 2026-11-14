@@ -1,6 +1,6 @@
 # Where this build is
 
-**Last updated 2026-11-09**, at the commit this file was committed in (`git log -1 -- docs/CHECKPOINT.md`). **This page
+**Last updated 2026-11-14**, at the commit this file was committed in (`git log -1 -- docs/CHECKPOINT.md`). **This page
 is the current state only, and stays one page** (the PI, 2026-11-07, after a whole-project audit). Every earlier
 entry, 2026-08-31 to 2026-11-07, is in `docs/CHECKPOINT-history-2026-08-31-to-2026-11-07.md`, unchanged: read one
 there only when this page or a backlog line sends you to it. A session ends by updating this page (CLAUDE.md).
@@ -55,10 +55,10 @@ from then). **Hardware verified: none.**
 - **The record**: the session folder `xcon/` that wl-preproc reads (`record.py`).
 
 ## What is next (the PI, 2026-11-07)
-1. **Send wl-preproc the pop-out record's shapes** (XC-491, in `docs/pending-wl-preproc-amendments.md`'s pop-out
-   section): the color-set shapes, `luminance`, the `realized` list and line field with `xyz`, `remakes`, and the
-   start row's `left`. Its session was not running on 2026-11-08 and 09. Its reader does not list `suggested` and
-   `declined` yet (XC-461; `tests/_preproc.py` lets that one note pass until it does).
+1. **Tell wl-preproc this branch's merge commit** (XC-491). Its session answered on 2026-11-14, by message: every
+   pop-out record shape accepted, the trial line's key renamed `color_realized`, and a widening's confirming change
+   row naming it (`suggestion`), both built here. Its pop-out reader is built and not merged; until it merges, its
+   reader does not list `suggested` and `declined` (XC-461; `tests/_preproc.py` lets that one note pass).
 2. **Demo mode**, with its own plan: its design (`docs/superpowers/specs/2026-10-06-demo-mode-design.md`) and its two
    `Service._open` welfare changes are approved by the PI (2026-11-07; XC-013).
 3. **Then the display (build E)**, designed with the PI; "done" includes a real screen.
@@ -75,7 +75,7 @@ clean CI.
 - **Suite**: `WLX_REQUIRE_PREPROC=1 WLX_REQUIRE_BROWSER=1 WLX_REQUIRE_XTASKS=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p
   no:cacheprovider -n auto` (a `wl-preproc` checkout or link at the root, and a `wl-xtasks` one beside it, git-ignored
   at `/wl-xtasks`, holding `tasks/popout_search.py`; wl-sync installed at the commit `wl-preproc/pyproject.toml` pins).
-  **5837 passed on `main`** at the pop-out build's merge, none skipped.
+  **5858 passed on `main`** after wl-preproc's XC-491 answers, none skipped.
 - **CI**: each push sweeps the changed modules with mutants (`tools/mutation_gate.py`); the nightly sweeps all, in 36
     shards (the PI, 2026-11-09; a big branch starts the same sweep by hand before its merge,
   `gh workflow run ci.yml --ref <branch>`). A new branch's push sweeps against `main`, a later push only what changed
