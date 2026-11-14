@@ -15,7 +15,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 **Finding one.** Grep the ID, a package (`P9`, `b3`), a repository (`wl-sync`) or a file. The sections: brainstorms the PI asked to have later; features no plan covers yet; defects and review findings deliberately not fixed; debt (cleanup, stale wording, test hygiene); anything that needs the rig or other hardware, measurements included; and asks of, or waits on, other repositories.
 
-**Next free ID: XC-507.**
+**Next free ID: XC-508.**
 
 ## Brainstorms queued for the PI
 
@@ -116,6 +116,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 - **XC-466** The census (`simulate.simulate`, `run_session`) takes only a `simulate.Subject`; a census through the simulated eye would need them to accept a `simeye.Eye`. — 2026-11-07, [`wl_xcon/simulate.py`](../wl_xcon/simulate.py) — waits on: XC-146
 - **XC-467** A run that goes on from an earlier one (the pop-out search build's resume) carries the stage, the staircase level, the pool and a standing suggestion, but not a person's held values, any repeat waiting (a drum's try, a trial again at once, a placed repeat), the training settings (first answers, clear; every run starts with them off, XC-379) nor, for a progression that is not confirmed, the stage's own counts and fall-back window, so such a run re-earns its stage's rule from its first trial; the feed says "hold it again". — 2026-11-07, [`wl_xcon/resume.py`](../wl_xcon/resume.py) — waits on: nothing
 - **XC-493** A load check that warns when a task fixes a number in its declarations -- a literal size, time, luminance, bar, window or staircase count or step where a setting (`P`) could stand -- so the PI's rule that every number is a console setting holds for the next task; each literal a task keeps on purpose carries its reason beside it, which the check reads past. — 2026-11-07, [TSK-75](references/decisions.md#tsk-75--every-number-a-task-uses-is-a-setting-the-trainer-may-change-in-the-console-starting-at-the-pis-value-a-number-stays-fixed-only-with-its-reason-written-beside-it) — waits on: nothing
+- **XC-507** A demo's drawing within one of the page's report intervals: on the development machine the exact drawer took a median of 495 ms for the pop-out's heaviest screen at the smallest preview measured (480 px, supersample 2), about five of `demoscreen.GAZE_EVERY_MS`'s 100 ms, because it computes every item over every sample of the viewport, so no pair met the plan's rule and the fastest was taken; a preview path computing each item only where it can reach, held to `exact.draw` pixel for pixel, would let the rule choose a pair within it. — 2026-11-14, [the measurement](measurements/dev-machine/2026-11-14-demo-drawing.md#what-it-decides) — waits on: nothing
 
 ## Deferred defects
 

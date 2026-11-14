@@ -104,6 +104,7 @@ RETURNS: dict[str, str] = {
 EXEMPT: dict[str, str] = {
     "__init__": "package marker",
     "look": "dataclass definitions only; no functions to neuter",
+    "demoscreen": "the preview's measured size and the report interval alone; no functions to neuter",
 }
 
 #: Changes that alter what every test sees, so reasoning about a subset is not
