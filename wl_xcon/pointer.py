@@ -1,0 +1,659 @@
+"""Demo mode's eye: the mouse, through the rig's own gaze path (demo mode design §3.3-§3.5).
+
+**Why it exists.** Demo mode lets a person play a task with the mouse as the eye, scored by the
+rig's own eye rules (XC-013). A demo session's world is **`Pointing`, `gaze.Tracked` built as
+`simeye.Seeing` is**: the rig's map, staleness, saccade detector and saccade rules, unchanged, with a
+fresh `Tracker` and `Detector` each trial; it answers the guards no gaze world answers (keys, touch,
+`Onscreen`; §3.4) and paces each frame to the wall clock (§3.5). Its sample source, **`Source`**,
+gives one `eye.Sample` a frame from the newest pointer report the page sent, both eyes the pointer,
+read through the simulated eye's identity map under its own `why` (`MAPPING`). The map never
+changes in a demo: no recentering (§14 item 5).
+
+**A report** (`MESSAGE`, fixed-size binary, §3.8): `wlx serve`'s forwarding count (demo mode's
+Task 8), the pointer's x and y in degrees (+y up), whether it is over the drawing (`OVER`), B held
+(`B_HELD`), the mouse button down (`BUTTON`), the number keys held (bit `k - 1` for key `k`), and
+each key's running press count modulo 65536. **Presses are counted, not sampled**, so a press and
+release between two frames is seen once.
+
+**Signal states** (§3.3, §14 items 6 and 7):
+
+- **The newest report wins, in sequence order**: a frame reads at most `DRAIN` reports (bounded
+  work, whatever arrives) and keeps the one of highest sequence; one older than it, or than the
+  report in hand while that is current, is counted `stale`, and one of the wrong size or not finite
+  is counted `malformed` and dropped, as a malformed mark is.
+- **A report is current for `LIVE_S`**: through a page's stall the last position is held, with
+  fresh noise each frame, and counts toward holds; past it the source gives nothing, the tracker
+  goes stale (`eye.Tracker.staleness`) and the loop sees tracker loss under the task's
+  `tracker_lost`. **B held is tracker loss too**, never a blink (`gaze.Tracked.signal` never
+  answers `blink` until V3).
+- **Off the drawing is gaze off the screen**: `AWAY_DEG`, outside every window a rig shows, as an
+  animal looking away, so no fixation or a fixation break, never tracker loss.
+- **A report's move spans the frames it took** (§14 item 9): the position is eased from where it
+  was to where the report puts it on the minimum-jerk profile the simulated eye flies
+  (`10τ³ - 15τ⁴ + 6τ⁵`), over as many frames as passed since the previous report arrived, at most
+  `LIVE_S`, the arrival frame its first (planner's call). So a hand's path reaches the detector as
+  motion, and a one-report flick is still a saccade; reports one a frame are taken exactly.
+- **At a trial's first frame** everything waiting but the newest report is discarded and the key
+  counts are rebased, so a press in the gap between trials never fires the next trial's `Pressed`
+  (`new_trial`).
+
+**The keys** (§3.4): `inputs` numbers each input a task's states name, 1 to `KEYS`, in the order
+they first name them; a task naming more is refused (`TooManyInputs`), naming those past it.
+`Pressed` and `Response` fire on a key's down edge, `Released` on its up edge, `FeatureAbove` holds
+while its key is held and `ChairStill` while its key is not, `Touched(window)` while the mouse
+button is down with the pointer in the window (the mouse is both the eye and the hand), and
+`Onscreen` on the first frame after the display changed, as a light sensor would see it.
+
+**Real time** (§3.5): `Pace` waits each frame until its moment on `time.perf_counter`, in
+`Pointing.display`, where a rig's display blocks on its flip; a frame already late runs at once and
+moves the schedule on, never a catch-up burst. **No timing claim follows from it** (CLAUDE.md): the
+pacing makes a demo watchable and measures nothing.
+
+**Numbers fixed here, each with its reason** (the demo plan's Global Constraints; the PI's
+"everything adjustable in the console", 2026-11-07, is about a task's numbers, which stay settings):
+`KEYS` and `DRAIN`, bounded work a frame (§3.4, §3.8); `LIVE_S`, five of the page's slowest report
+intervals (`web.GAZE_EVERY_MS`, 100 ms, demo mode's Task 9), so a demo is playable, claiming
+nothing (§3.3); `AWAY_DEG`, beyond any field a rig shows; the noise, `simeye.NOISE_DEG`, imported,
+drawn from the run's seed (§14 item 16). **Planner's calls**: the ease's span; the agreement test.
+
+**Hot path.** `Pointing.display` and `happened` run every frame, and so do the source's `poll` and
+`Pace.wait`: a report is read into a buffer allocated once and read through views made with it,
+key state is kept in integers, and a frame builds only its sample (its reading's image position,
+the pair `(x, y)`; `tests/test_pointer.py` measures the whole frame, as `tests/test_simeye.py`
+does). Only a frame whose display changed copies what it shows (`Pointing._shown_now`).
+
+**Not yet**: the screen published to the page (`drawing`, `publish`) waits on demo mode's Task 3
+(`pointer.Drawing`, `link.Drawn`), and is refused until then (`_undrawn`).
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import math
+import random
+import struct
+import sys
+import time
+from typing import Callable
+
+from wl_xcon import simeye
+from wl_xcon.eye import EyeReading, Sample, Tracker
+from wl_xcon.gaze import Tracked
+from wl_xcon.task import (
+    After,
+    ChairStill,
+    FeatureAbove,
+    Guard,
+    Onscreen,
+    Pressed,
+    Released,
+    Response,
+    Touched,
+    Trial,
+)
+
+#: **A pointer report** (the module docstring): the sequence number, x and y in degrees, the flags,
+#: the keys held, and each of the `KEYS` keys' running press count modulo 65536. 41 bytes,
+#: little-endian, packed.
+MESSAGE = struct.Struct("<IddBH9H")
+#: The flags: over the drawing, B held, the mouse button down.
+OVER = 1
+B_HELD = 2
+BUTTON = 4
+#: How many number keys a demo gives a task's inputs, 1 to 9 (§3.4): bounded work a frame.
+KEYS = 9
+#: How many reports a frame reads at most, keeping the newest (§3.8): bounded work a frame.
+DRAIN = 64
+#: How long a report stays current, in seconds: five of the page's slowest report intervals
+#: (§3.3), so a page's stall is held and counts toward holds, and a page gone quiet is tracker
+#: loss. Playable, and claiming nothing.
+LIVE_S = 0.5
+#: **Where the pointer off the drawing looks**, in degrees: straight up, beyond any field a rig
+#: shows, so outside every window, as an animal looking away.
+AWAY_DEG = (0.0, 60.0)
+
+#: **The map a demo's samples are read through**: the simulated eye's identity, under its own
+#: `why`. It never changes in a demo (no recentering, §14 item 5).
+MAPPING = dataclasses.replace(simeye.MAPPING, why="the mouse, in degrees")
+
+#: Where each field of a report lies in its 41 bytes (`MESSAGE`).
+_SEQ = slice(0, 4)
+_XY = slice(4, 20)
+_FLAGS = 20
+_HELD = slice(21, 23)
+_PRESSES = slice(23, 41)
+#: The whole report, for copying one buffer into another without building a slice in a frame.
+_WHOLE = slice(0, MESSAGE.size)
+#: A press count's modulus, as `& _COUNT` takes it.
+_COUNT = 0xFFFF
+#: Where the pointer is off the drawing, per axis (`AWAY_DEG`), read without a tuple in a frame.
+_AWAY_X, _AWAY_Y = AWAY_DEG
+#: What a demo's reading carries that no gaze reads: its pupil, and P4 at the origin (`simeye`'s).
+_PUPIL = (0.0, 0.0)
+_PUPIL_AREA = 1.0
+_P4 = (0.0, 0.0)
+
+
+def pack(seq: int, x_deg: float, y_deg: float, *, over: bool, b: bool, button: bool,
+         held: int, presses) -> bytes:
+    """**A report as the page's sender packs it** (`MESSAGE`): `held` the keys held, bit `k - 1`
+    for key `k`; `presses` each of the `KEYS` keys' running press count, kept modulo 65536."""
+    if len(presses) != KEYS:
+        raise ValueError(f"a report carries {KEYS} keys' press counts, not {len(presses)}")
+    flags = (OVER if over else 0) | (B_HELD if b else 0) | (BUTTON if button else 0)
+    return MESSAGE.pack(seq, x_deg, y_deg, flags, held, *(count & _COUNT for count in presses))
+
+
+class _Fields:
+    """**A report's fields, read in place**: views of one buffer, made once, so a frame reads a
+    report's numbers without unpacking it into a tuple. Native order, which is the report's
+    little-endian order on the computers `Source` runs on (it refuses any other)."""
+
+    def __init__(self, buffer: bytearray) -> None:
+        whole = memoryview(buffer)
+        self.seq = whole[_SEQ].cast("I")
+        self.xy = whole[_XY].cast("d")
+        self.raw = whole
+        self.held = whole[_HELD].cast("H")
+        self.presses = whole[_PRESSES].cast("H")
+
+
+class Source:
+    """**The pointer as a gaze source** (the module docstring): `poll(at)` once a frame, as
+    `gaze.Tracked.display` polls a tracker, gives the frame's sample or `None`, and keeps the
+    frame's key edges. `receive(buffer)` reads one waiting report into the buffer and returns its
+    size, or -1 with none waiting, never blocking. One for a demo session, not a trial: its noise
+    generator carries the run's randomness (seeded from the run's seed, §14 item 16), and it holds
+    the newest report across trials."""
+
+    def __init__(self, receive: Callable[[bytearray], int], *, seed: int,
+                 noise_deg: float = simeye.NOISE_DEG) -> None:
+        if sys.byteorder != "little":
+            raise RuntimeError(
+                "a pointer report is read in place as little-endian numbers, and this computer "
+                "stores numbers big-end first: demo mode does not run on it")
+        self.receive = receive
+        self.seed = seed
+        self.noise_deg = noise_deg
+        self._noise = random.Random(f"{seed}: the mouse's noise")
+        #: Reports read and dropped: older than the newest in hand, or malformed.
+        self.stale = 0
+        self.malformed = 0
+        #: Whether the mouse button is down, by the report in hand.
+        self.button = False
+        #: What `receive` reads into, and the newest report a drain has kept, each read in place.
+        self._buffer = bytearray(MESSAGE.size)
+        self._best = bytearray(MESSAGE.size)
+        self._in = _Fields(self._buffer)
+        self._kept = _Fields(self._best)
+        #: A newer report kept and not yet taken (`_adopt`), and its sequence number.
+        self._pending = False
+        self._best_seq = -1
+        #: **The report in hand**: whether there is one, its sequence number, its flags, and when
+        #: it arrived, on the source's own clock (`poll`).
+        self._current = False
+        self._seq = -1
+        self._flags = 0
+        self._arrived = 0.0
+        #: **The source's own clock**: `at` plus an offset, so it runs on across trials, whose
+        #: worlds count `at` from each trial's start; the last poll's time, and the step between
+        #: polls, one frame.
+        self._offset = 0.0
+        self._last = 0.0
+        self._step = 0.0
+        self._polled = False
+        #: **Where the pointer is drawn, in degrees**: eased from `_from` to `_to` over `_span`
+        #: seconds from `_start`, landed when `_landed`.
+        self._x = self._y = 0.0
+        self._from_x = self._from_y = self._to_x = self._to_y = 0.0
+        self._start = 0.0
+        self._span = 0.0
+        self._landed = True
+        #: **The keys**: the held mask and the press counts in hand and as the previous frame had
+        #: them, and the frame's edges, bit `k - 1` for key `k`.
+        self._held_now = 0
+        self._held_was = 0
+        self._counts_now = [0] * KEYS
+        self._counts_was = [0] * KEYS
+        self._down = 0
+        self._up = 0
+        #: The next poll is a trial's first frame (`new_trial`); a new source's first poll is one.
+        self._rebase = True
+        self._samples = 0
+
+    # --- Between trials ---------------------------------------------------------------------
+
+    def new_trial(self) -> None:
+        """**Ready for a trial's first frame** (§3.3): everything waiting is read, the newest kept
+        to be taken on that frame and the rest counted stale; and that frame rebases the key counts,
+        so a press in the gap between trials never fires the trial's `Pressed`. Between trials, so
+        the drain is not bounded by `DRAIN`: what waits is what the socket holds."""
+        floor = self._seq if self._live(self._last) else -1
+        while self._drain(floor) == DRAIN:
+            pass
+        self._rebase = True
+
+    # --- Each frame ---------------------------------------------------------------------------
+
+    def poll(self, at: float) -> "Sample | None":
+        """**The frame's sample**, `at` its time on the trial's clock: the reports waiting read
+        (`_drain`) and the newest taken (`_adopt`); the frame's key edges (`_edges`); then `None`
+        while no report is current or B is held (tracker loss), `AWAY_DEG` off the drawing, else
+        where the pointer is drawn (`_ease`), with noise of `noise_deg` per axis, the same reading
+        for both eyes. Its image position is the one thing a frame builds."""
+        rebase = self._rebase
+        if rebase:
+            # A trial's first frame: its worlds count `at` from its start, and the source's clock
+            # runs on, a frame after the last.
+            self._offset = self._last + self._step - at
+        now = at + self._offset
+        if self._polled and not rebase:
+            self._step = now - self._last
+        self._last = now
+        self._polled = True
+        self._drain(self._seq if self._live(now) else -1)
+        if self._pending:
+            self._adopt(now)
+        self._edges(rebase)
+        self._rebase = False
+        if not self._live(now) or self._flags & B_HELD:
+            return None
+        if self._flags & OVER:
+            self._ease(now)
+            x = self._x
+            y = self._y
+        else:
+            x = _AWAY_X
+            y = _AWAY_Y
+        noise = self._noise
+        self._samples += 1
+        reading = EyeReading(self._samples, _PUPIL, _PUPIL_AREA,
+                             (x + noise.gauss(0.0, self.noise_deg),
+                              y + noise.gauss(0.0, self.noise_deg)), _P4)
+        return Sample(at, reading, reading)
+
+    def held(self, key: int) -> bool:
+        """Whether number key `key` (1 to `KEYS`) is held, by the report in hand."""
+        return (self._held_now >> (key - 1)) & 1 == 1
+
+    def went_down(self, key: int) -> bool:
+        """Whether key `key` went down since the previous frame: a press counted, or held now and
+        not then."""
+        return (self._down >> (key - 1)) & 1 == 1
+
+    def went_up(self, key: int) -> bool:
+        """Whether key `key` came up since the previous frame: a release, counted as the presses
+        less the change in whether it is held, or held then and not now."""
+        return (self._up >> (key - 1)) & 1 == 1
+
+    def _live(self, now: float) -> bool:
+        """Whether a report is in hand and current at `now`, on the source's clock: arrived less
+        than `LIVE_S` ago."""
+        return self._current and now - self._arrived < LIVE_S
+
+    def _drain(self, floor: int) -> int:
+        """**Read what waits, at most `DRAIN` reports**, keeping the one of highest sequence above
+        `floor` (the report in hand's while it is current, so an older one is stale) in `_best`,
+        `_pending` then true. One older than the one kept is counted `stale`, and so is the one it
+        replaces; one of the wrong size or not finite is counted `malformed` and dropped. How many
+        it read."""
+        receive = self.receive
+        buffer = self._buffer
+        fields = self._in
+        kept = self._pending
+        best = self._best_seq if kept else floor
+        count = 0
+        while count < DRAIN:
+            size = receive(buffer)
+            if size < 0:
+                break
+            count += 1
+            if size != MESSAGE.size:
+                self.malformed += 1
+                continue
+            xy = fields.xy
+            if not (math.isfinite(xy[0]) and math.isfinite(xy[1])):
+                self.malformed += 1
+                continue
+            seq = fields.seq[0]
+            if seq <= best:
+                self.stale += 1
+                continue
+            if kept:
+                self.stale += 1
+            self._best[_WHOLE] = buffer
+            best = seq
+            kept = True
+        self._pending = kept
+        self._best_seq = best
+        return count
+
+    def _adopt(self, now: float) -> None:
+        """**The kept report becomes the one in hand**, arriving `now`. Over the drawing, the
+        pointer is eased from where it is drawn now to the report's position, over the time since
+        the previous report arrived, at most `LIVE_S`, starting a frame before `now` so that the
+        arrival frame is the move's first (the module docstring); a first report is taken at once.
+        Off the drawing, it is at `AWAY_DEG` at once. Its keys and button are taken as they are;
+        the edges are `_edges`'."""
+        fields = self._kept
+        x = fields.xy[0]
+        y = fields.xy[1]
+        flags = fields.raw[_FLAGS]
+        if not flags & OVER:
+            self._x = self._to_x = _AWAY_X
+            self._y = self._to_y = _AWAY_Y
+            self._landed = True
+        elif self._current:
+            self._ease(now)
+            span = now - self._arrived
+            if span > LIVE_S:
+                span = LIVE_S
+            self._from_x = self._x
+            self._from_y = self._y
+            self._to_x = x
+            self._to_y = y
+            self._span = span
+            self._start = now - self._step
+            self._landed = False
+        else:
+            self._x = self._to_x = x
+            self._y = self._to_y = y
+            self._landed = True
+        self._seq = self._best_seq
+        self._flags = flags
+        self._arrived = now
+        self._current = True
+        self._pending = False
+        self.button = flags & BUTTON != 0
+        self._held_now = fields.held[0]
+        presses = fields.presses
+        counts = self._counts_now
+        key = 0
+        while key < KEYS:
+            counts[key] = presses[key]
+            key += 1
+
+    def _ease(self, now: float) -> None:
+        """**Where the pointer is drawn at `now`**, into `_x`, `_y`: `10τ³ - 15τ⁴ + 6τ⁵` of the
+        way from `_from` to `_to`, `τ` the share of the span gone (`simeye.Eye._fly`'s profile);
+        exactly `_to` once it is all gone."""
+        if self._landed:
+            return
+        span = self._span
+        tau = (now - self._start) / span if span > 0.0 else 1.0
+        if tau >= 1.0:
+            self._x = self._to_x
+            self._y = self._to_y
+            self._landed = True
+            return
+        if tau < 0.0:
+            tau = 0.0
+        share = tau * tau * tau * (10.0 - 15.0 * tau + 6.0 * tau * tau)
+        self._x = self._from_x + (self._to_x - self._from_x) * share
+        self._y = self._from_y + (self._to_y - self._from_y) * share
+
+    def _edges(self, rebase: bool) -> None:
+        """**The frame's key edges**, against the previous frame's counts and held mask: a key went
+        down if a press was counted or it is held now and was not; it came up if a release was
+        (the presses counted, less the change in whether it is held) or it was held and is not.
+        **A trial's first frame rebases**: the counts in hand become the previous frame's, and no
+        key has an edge on it."""
+        now = self._counts_now
+        was = self._counts_was
+        held = self._held_now
+        held_was = self._held_was
+        down = 0
+        up = 0
+        key = 0
+        while key < KEYS:
+            if not rebase:
+                bit = 1 << key
+                pressed = (now[key] - was[key]) & _COUNT
+                is_held = 1 if held & bit else 0
+                was_held = 1 if held_was & bit else 0
+                if pressed > 0 or (is_held and not was_held):
+                    down |= bit
+                if pressed - is_held + was_held > 0 or (was_held and not is_held):
+                    up |= bit
+            was[key] = now[key]
+            key += 1
+        self._held_was = held
+        self._down = down
+        self._up = up
+
+
+@dataclasses.dataclass(frozen=True)
+class Input:
+    """**A number key and the input it stands for** (§3.4): `guard` the first guard a state names
+    it by -- a `Pressed`, `Released` or `Response` device, a `FeatureAbove` source, or
+    `ChairStill`."""
+
+    key: int
+    guard: Guard
+
+    @property
+    def label(self) -> str:
+        """What the input is called on the key list and in a refusal: a device's name, a feature
+        source's, or the chair."""
+        guard = self.guard
+        if isinstance(guard, FeatureAbove):
+            return f"feature {guard.source}"
+        if isinstance(guard, ChairStill):
+            return "the chair"
+        return guard.device
+
+
+class TooManyInputs(ValueError):
+    """**A task naming more inputs than a demo has keys** (§3.4, the demo's pre-flight): refused,
+    naming those past `KEYS`, the one refusal of a task demo mode makes."""
+
+    def __init__(self, named: "tuple[Input, ...]") -> None:
+        self.inputs = named
+        past = ", ".join(item.label for item in named[KEYS:])
+        super().__init__(
+            f"a demo gives each input a task waits on a number key, 1 to {KEYS}, and this task "
+            f"names {len(named)}: {past} would have none, so it cannot be played by hand "
+            f"(demo mode §3.4)")
+
+
+def _identity(guard: Guard) -> "tuple | None":
+    """The input `guard` names, as one key stands for it: a device, a feature source, or the
+    chair; `None` for a guard that names none."""
+    if isinstance(guard, (Pressed, Released, Response)):
+        return ("device", guard.device)
+    if isinstance(guard, FeatureAbove):
+        return ("feature", guard.source)
+    if isinstance(guard, ChairStill):
+        return ("chair",)
+    return None
+
+
+def _named(trial: Trial):
+    """Every guard `trial`'s states name, in order: each edge's, then the guard its clock is timed
+    from (`After.since`)."""
+    for state in trial.states:
+        for edge in state.go:
+            guard = edge.guard
+            while guard is not None:
+                yield guard
+                guard = guard.since if isinstance(guard, After) else None
+
+
+def inputs(trial: Trial) -> "tuple[Input, ...]":
+    """**Each input `trial` waits on, numbered 1 to `KEYS`** in the order its states first name
+    them (§3.4): one key a `Pressed`, `Released` or `Response` device, one a `FeatureAbove` source,
+    one `ChairStill`. More than `KEYS` is refused (`TooManyInputs`), naming those past it."""
+    found: list = []
+    seen: set = set()
+    for guard in _named(trial):
+        identity = _identity(guard)
+        if identity is None or identity in seen:
+            continue
+        seen.add(identity)
+        found.append(Input(len(found) + 1, guard))
+    if len(found) > KEYS:
+        raise TooManyInputs(tuple(found))
+    return tuple(found)
+
+
+class Pace:
+    """**A demo's frames on the wall clock** (§3.5): `start()` on a trial's first frame, then
+    `wait(frame)` before each later one, sleeping until the frame's moment, `frame_period` apart.
+    **A frame already late runs at once and moves the schedule on**: the frames after it are timed
+    from it, never run back to back to catch up. Between trials it waits nothing. The clock and the
+    sleep are given, so a test injects both and never sleeps."""
+
+    def __init__(self, frame_period: float, *, clock: Callable[[], float] = time.perf_counter,
+                 sleep: Callable[[float], None] = time.sleep) -> None:
+        self.frame_period = frame_period
+        self._clock = clock
+        self._sleep = sleep
+        #: The moment of frame `_first`, from which each later frame's is counted.
+        self._zero = 0.0
+        self._first = 1
+
+    def start(self) -> None:
+        """A trial's first frame: its moment is now."""
+        self._zero = self._clock()
+        self._first = 1
+
+    def wait(self, frame: int) -> None:
+        """Until frame `frame`'s moment; at once, the schedule moved on to now, if it has passed."""
+        moment = self._zero + (frame - self._first) * self.frame_period
+        now = self._clock()
+        if now < moment:
+            self._sleep(moment - now)
+            return
+        self._zero = now
+        self._first = frame
+
+
+def _undrawn(drawing, publish) -> None:
+    """**The screen to the page is not built yet**: a drawing or a publisher given is refused, never
+    quietly dropped. Waits on demo mode's Task 3 (`pointer.Drawing`, `link.Drawn`)."""
+    if drawing is not None or publish is not None:
+        raise NotImplementedError(
+            "a demo world does not draw its screen yet: publishing it to the page waits on demo "
+            "mode's Task 3 (`pointer.Drawing`, `link.Drawn`)")
+
+
+class Pointing(Tracked):
+    """**`gaze.Tracked`, the rig's gaze world, whose tracker is the mouse** (`Source`; the module
+    docstring): every gaze guard, map, staleness and saccade rule is `Tracked`'s, with a fresh
+    `Tracker` and `Detector`, and it answers the guards no gaze world answers from the keys, the
+    button and the display (`happened`). `keys` numbers the trial's inputs (`inputs`), and must
+    number each one it names. `index` is the trial's in the run."""
+
+    def __init__(self, source: Source, trial: Trial, frame_period: float,
+                 values: "dict | None", *, pace: Pace, keys: "tuple[Input, ...]", index: int = 0,
+                 drawing=None, publish=None) -> None:
+        _undrawn(drawing, publish)
+        Tracked.__init__(self, Tracker(), MAPPING, trial, frame_period, values, source=source)
+        self.pace = pace
+        self.keys = keys
+        self.index = index
+        #: Each input's key by what names it, read in `happened` without building a lookup's key.
+        self._devices: dict = {}
+        self._features: dict = {}
+        self._chair = 0
+        keyed = set()
+        for item in keys:
+            guard = item.guard
+            keyed.add(_identity(guard))
+            if isinstance(guard, (Pressed, Released, Response)):
+                self._devices[guard.device] = item.key
+            elif isinstance(guard, FeatureAbove):
+                self._features[guard.source] = item.key
+            elif isinstance(guard, ChairStill):
+                self._chair = item.key
+        unkeyed = [item.label for item in inputs(trial) if _identity(item.guard) not in keyed]
+        if unkeyed:
+            raise ValueError(f"the keys given number none of {', '.join(unkeyed)}, which this "
+                             f"trial waits on: a demo world needs `inputs(trial)`")
+        #: **What the display showed last**, name by name, to tell the first frame after it changed
+        #: (`Onscreen`): blank at a trial's start, as the animal's screen is between trials.
+        self._names: list = []
+        self._stimuli: list = []
+        self._onscreen = 0
+
+    def display(self, visible, frame: int) -> None:
+        """**The frame**: paced first (`Pace.start` on the trial's first frame, `wait` on every
+        later one), where a rig's display blocks on its flip; then `Tracked.display`, which polls
+        the source for the frame's sample and key edges; then whether what the frame shows changed,
+        which `Onscreen` reports."""
+        if frame == 1:
+            self.pace.start()
+        else:
+            self.pace.wait(frame)
+        Tracked.display(self, visible, frame)
+        if self._changed(visible):
+            self._onscreen = frame
+            self._shown_now(visible)
+
+    def happened(self, guard: Guard, state: str, frame: int) -> bool:
+        """`Pressed` and `Response` on their key's down edge, `Released` on its up edge,
+        `FeatureAbove` while its key is held, `ChairStill` while its key is not, `Touched(window)`
+        while the mouse button is down with the pointer in the window, `Onscreen` on the first frame
+        after the display changed; every other guard `Tracked.happened`'s. **On the trial loop's
+        path**, so nothing is built."""
+        source = self.source
+        if isinstance(guard, Pressed):
+            return source.went_down(self._devices[guard.device])
+        if isinstance(guard, Response):
+            return source.went_down(self._devices[guard.device])
+        if isinstance(guard, Released):
+            return source.went_up(self._devices[guard.device])
+        if isinstance(guard, FeatureAbove):
+            return source.held(self._features[guard.source])
+        if isinstance(guard, ChairStill):
+            return not source.held(self._chair)
+        if isinstance(guard, Touched):
+            return source.button and self._touching(guard.window, frame)
+        if isinstance(guard, Onscreen):
+            return frame == self._onscreen
+        return Tracked.happened(self, guard, state, frame)
+
+    def _touching(self, window: str, frame: int) -> bool:
+        """Whether the pointer is in `window`, an array's alias at any of its objects, as
+        `Tracked.happened` judges a landing."""
+        members = self._members.get(window)
+        if members is None:
+            declared = self._windows.get(window)
+            return declared is not None and self.in_window(window, frame, declared.eye)
+        return self._landed(members, frame)
+
+    def _changed(self, visible) -> bool:
+        """Whether `visible` differs from what the display showed last: another count of stimuli,
+        or another stimulus under a name (an `Update` makes a new one). Walked by index."""
+        names = self._names
+        count = len(names)
+        if len(visible) != count:
+            return True
+        stimuli = self._stimuli
+        index = 0
+        while index < count:
+            if visible.get(names[index]) is not stimuli[index]:
+                return True
+            index += 1
+        return False
+
+    def _shown_now(self, visible) -> None:
+        """What the display shows now, kept, on a frame it changed."""
+        self._names = list(visible)
+        self._stimuli = list(visible.values())
+
+
+def worlds(source: Source, *, pace: Pace, drawing=None,
+           publish=None) -> "Callable[[Trial, dict, int], Pointing]":
+    """**A demo session's worlds**, one a trial, as `taskd.Session.world` takes them, `(trial,
+    values, index) -> Pointing`: the source readied for the trial's first frame (`new_trial`) and
+    the trial's inputs numbered (`inputs`), at the pace's frame period. One source and one pace for
+    the session."""
+    _undrawn(drawing, publish)
+
+    def make(trial: Trial, values: dict, index: int) -> Pointing:
+        source.new_trial()
+        return Pointing(source, trial, pace.frame_period, values, pace=pace, keys=inputs(trial),
+                        index=index)
+
+    return make
