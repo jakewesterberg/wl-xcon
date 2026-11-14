@@ -15,7 +15,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 **Finding one.** Grep the ID, a package (`P9`, `b3`), a repository (`wl-sync`) or a file. The sections: brainstorms the PI asked to have later; features no plan covers yet; defects and review findings deliberately not fixed; debt (cleanup, stale wording, test hygiene); anything that needs the rig or other hardware, measurements included; and asks of, or waits on, other repositories.
 
-**Next free ID: XC-501.**
+**Next free ID: XC-502.**
 
 ## Brainstorms queued for the PI
 
@@ -231,6 +231,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 - **XC-484** Check 8 still says "neither a two-sided range" for a ring radius written as a word, beside `bad-block`'s refusal of it (the sentence stands at `check.py` on `main`, `56ccca2`; not re-run for a word radius). — 2026-11-07, [`wl_xcon/check.py`](../wl_xcon/check.py) — waits on: nothing
 - **XC-496** A resumed session's first run hides the start's stage, level and pairing pickers (`web._start_rows`: `Preflight.continues` shows what it comes back with in their place), so the trainer cannot pick another stage for it from the console, only move by hand once it starts; the carried pool also overrides a start's pool (the build's review, M4; Task 6's concern 5). — 2026-11-07, [`wl_xcon/web.py`](../wl_xcon/web.py) — waits on: nothing
 - **XC-497** `Service._start_offers` runs in welfare-listed `Service._start`'s path (through `_preflight`) outside its `try`: `taskd.start_rows` and `Session.continues` are unguarded (only `went_on`'s errors are caught), so a raise there would fail a start; a fix touches the listed function and needs the PI's welfare review (the build's review, M5). — 2026-11-07, [`wl_xcon/service.py`](../wl_xcon/service.py) — waits on: the PI's welfare review of the change
+- **XC-501** `tests/test_fuzz_sessions.py::test_a_replay_control_is_found[pid-C1 -differing]` failed once on unchanged main (`dc30c0f`; nightly 43009700595, 2026-11-11, mutation-full shard 26's baseline: "replay control 'pid' injected and C1 found nothing on seed 0") and passed the nights before and after. Unlike `test_replay_agrees`, it never asserts that seed 0 ran, so a replay cut short by `WLX_FUZZ_CPU_S` (120 s) on a loaded runner reads as nothing found (not yet confirmed: the gate printed only the assertion's first line). A failed baseline stops that shard's whole sweep. — 2026-11-14, [tests/test_fuzz_sessions.py](../tests/test_fuzz_sessions.py) — waits on: nothing
 
 ## Debt
 

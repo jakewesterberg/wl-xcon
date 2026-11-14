@@ -658,3 +658,11 @@ review, by number):
    the simulated card and pump, and the stand-in field on an unmeasured rig) and this revised design: **"Approve both
    and the design"**. Demo mode is built in a plan of its own after the pop-out search build merges, with both
    changes and `tests/welfare_manifest.json` updated naming this approval.
+
+2. (From the plan, 2026-11-10.) A demo opened from a live rig's own page: where does its session folder go, beside
+   the real sessions (marked as a demo in its record) or in a demo folder of the rig's own?
+
+   **Answered 2026-11-14, asked in the UI:** **"A demo folder of its own (Recommended)"**: each rig that offers demos
+   names its demo folder when its service starts (`wlx taskd --demo-root DIR`), so demos never sit among real
+   sessions, nothing downstream has to skip them, and a crashed demo never holds up a real animal's session. This
+   changes no welfare-listed code (the plan, Task 4).
