@@ -8,7 +8,8 @@ Delivered 2026-10-11 as a dated section of wl-preproc's `HANDOVER-wl-expcontroll
 engine builds C2a, C2b and C3, XC-399's and the appearance-valued setting's are merged there: every field is read when
 the NWB file is built; a change row that strobed nothing is timed through the rig's clock fit; each change row's own
 fields are published as `parameter_changes.detail`; XC-442 (stop writing clears and switches twice) is unblocked. The
-sections below keep their headings as sent. **And one from the pop-out search, opened 2026-11-07**, the last section.
+sections below keep their headings as sent. **And one from the pop-out search, opened 2026-11-07**, and **one from
+demo mode, opened 2026-11-14**, the last two sections.
 
 **Updated 2026-10-11.** Of the four asks opened in August, **all four are done**; each is marked below
 with wl-preproc's evidence, and the headings are left as they were. What is open now is XC-288's ask
@@ -1073,3 +1074,41 @@ either: `rigtrials` takes any `params` object, `rigruns` passes over a start row
 `conditions.py` publishes the disc as the JSON text of its object, now naming its color in a few words. Yours to
 accept or rename; until your answer we build to these names.
 
+# OPEN — demo mode: a `demo` key in a demo session's `config.json` (new, 2026-11-14)
+
+**Not sent yet**: wl-preproc's session has not run since 2026-11-07. Sent with the pop-out search's open asks
+(XC-491) when it does (XC-502).
+
+## What changes on our side
+
+Demo mode lets a person play a task with the mouse standing in for an eye, on the rig's own gaze path, against the
+simulated card and pump (wl-xcon's `docs/superpowers/specs/2026-10-06-demo-mode-design.md`, approved by the PI
+2026-11-07). A demo session's `config.json` gains one key, written in a demo's session alone:
+
+```json
+"demo": {"gaze": "mouse", "noise_deg": 0.02, "stand_in_housings": true}
+```
+
+- `gaze`: what stood in for the eye, always `"mouse"` in this build.
+- `noise_deg`: the noise added to each pointer sample, in degrees (the simulated eye's own, `simeye.NOISE_DEG`).
+- `stand_in_housings`: whether the field's eye-tracker housings were stand-ins (a rig whose housings nobody has
+  measured) rather than measured ones.
+
+No trial line, run row or change-log row changes: a demo writes the record any session writes, for the test
+monkey `REFERENCE` alone.
+
+**Where one is.** A record carrying `demo` is a demo, never an animal's session. The PI, 2026-11-14: a rig that
+offers demos writes each one under a demo folder of its own (`wlx taskd --demo-root`), never beside its real
+sessions; `wlx demo` writes into a temporary folder deleted at its end unless `--keep` copies it. So a demo reaches
+you only when someone points you at one.
+
+## The ask
+
+1. Accept the key's name and shape, or rename it before we write it.
+2. Say what wl-preproc does with a session whose `config.json` carries `demo`. Our suggestion: refuse to build an
+   NWB file from it unless asked by name, with a sentence saying it is a demo, so none is ever read as an animal's
+   data.
+
+## What is deliberately not asked for
+
+Nothing in the trial lines marks a demo, and nothing should: the session is the unit, and its `config.json` says it.

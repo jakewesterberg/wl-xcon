@@ -15,7 +15,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 **Finding one.** Grep the ID, a package (`P9`, `b3`), a repository (`wl-sync`) or a file. The sections: brainstorms the PI asked to have later; features no plan covers yet; defects and review findings deliberately not fixed; debt (cleanup, stale wording, test hygiene); anything that needs the rig or other hardware, measurements included; and asks of, or waits on, other repositories.
 
-**Next free ID: XC-502.**
+**Next free ID: XC-503.**
 
 ## Brainstorms queued for the PI
 
@@ -376,3 +376,5 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 - **XC-491** wl-preproc: read each run's start row `color_sets` (every set the task declares by name, as its file reads and as the run's calibration drew it: `desaturation`, each color's shown `xy` and `drive`) and publish it, since a color-set light's lines now name the set only and the NWB conditions text would otherwise name no more; the ask is written under the pop-out section of the pending amendments, told before it was written. — 2026-11-07, [pending-wl-preproc-amendments.md](pending-wl-preproc-amendments.md) — waits on: the controller sending the ask, then wl-preproc's answer
 - **XC-492** wl-xtasks: `tasks/popout_search.py`'s repository has no `.gitignore` (Task 9's report), so anything else that imports a task without `PYTHONDONTWRITEBYTECODE` (an editor, a person's script) leaves an untracked `tasks/__pycache__`; the rig's own loader writes none since 2026-11-09 (`cli._from_source`). — 2026-11-07, [the pop-out search plan](superpowers/plans/2026-11-07-popout-search.md) — waits on: nothing (a wl-xtasks commit and its merge ask)
 - **XC-495** wl-xtasks: the pop-out's `hold_fix` state's `After(10.0)` bound to NO_FIXATION strobes no reason code, as `visual_search`'s does not, so its trial ends on the outcome's shared marker alone. — 2026-11-07, [the pop-out search plan](superpowers/plans/2026-11-07-popout-search.md) — waits on: the PI's merge of the pop-out search into wl-xtasks
+- **XC-502** wl-preproc: accept demo mode's `demo` key in a demo session's `config.json` (`{"gaze": "mouse", "noise_deg", "stand_in_housings"}`), and say what it does with a session carrying it (our suggestion: refuse to build an NWB file from one unless asked by name). Written 2026-11-14, not sent: its session has not run since 2026-11-07; sent with XC-491. — 2026-11-14, [pending-wl-preproc-amendments.md](pending-wl-preproc-amendments.md) — waits on: wl-preproc's session
+
