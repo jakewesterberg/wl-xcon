@@ -601,6 +601,7 @@ class Drawing:
             screen=resolved, windows=windows, outlines=outlines, viewports=self.viewports,
             housings=tuple(geometry.housings), stand_in=self.stand_in, mask_deg=geometry.mask_deg,
             keys=tuple(item.label for item in sorted(world.keys, key=lambda item: item.key)),
+            vergence_half_deg=geometry.vergence_half_deg,
         )
 
     def _resolved(self, world, visible, values, trial, frame):

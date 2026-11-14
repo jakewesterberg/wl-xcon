@@ -47,6 +47,24 @@ def viewports(rig: Rig, geometry: Geometry, *, pixels=None) -> tuple[Viewport, .
     )
 
 
+def preview(vp: Viewport, width_px: int) -> Viewport:
+    """**`vp` at a preview `width_px` wide** (demo mode §4.4): the same centimeters and degrees at
+    fewer pixels, the viewport `viewports(rig, geometry, pixels=(width_px, height))` makes, from
+    the viewport alone (`wlx serve` has a demo's viewports, not its rig file). `width_px` is the
+    whole panel's, both eyes' through the stereoscope, each eye taking half of it as `viewports`
+    gives it; the height is the panel's height to its width, rounded, so the preview's pixels are
+    as square as whole ones allow."""
+    halves = 1 if vp.eye == "both" else 2
+    if isinstance(width_px, bool) or not isinstance(width_px, int) or width_px < halves:
+        raise ValueError(f"a preview is a whole number of pixels wide, at least {halves} for "
+                         f"{halves} eye(s) side by side; got {width_px!r}")
+    panel_w = vp.width_px * halves * vp.pitch_cm[0]
+    panel_h = vp.height_px * vp.pitch_cm[1]
+    height = max(1, round(width_px * panel_h / panel_w))
+    return Viewport(vp.eye, width_px // halves, height, (panel_w / width_px, panel_h / height),
+                    vp.distance_cm, vp.ahead_cm)
+
+
 def sample_cm(vp: Viewport, supersample: int, region=None):
     """Every sample's position, cm from the eye's straight-ahead point: an `n × n` grid
     inside each pixel of `region` (`x0, y0, x1, y1` in pixels; the whole viewport by

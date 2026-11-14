@@ -239,8 +239,8 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: console` can say DEMO (§14 item 12). **And a third shape, `Drawn`** (phase `drawn`): the screen a
 #: demo's world shows, published whole inside a trial -- the `screen.Screen` in its wire form
 #: (`screen.to_wire`), the windows as the trial placed them, an array's target's flagged, what could
-#: not be drawn outlined, the setup's viewports, housings and field edge, and the keys -- or blank at
-#: a trial's end. Nothing else changed meaning. A reader of 20 refuses 21 and 21 refuses 20, by name,
+#: not be drawn outlined, the setup's viewports, housings and field edge, each eye's share of the
+#: vergence offset, and the keys -- or blank at a trial's end. Nothing else changed meaning. A reader of 20 refuses 21 and 21 refuses 20, by name,
 #: for all three shapes.
 SCHEMA = 21
 
@@ -1505,6 +1505,11 @@ class Drawn:
     mask_deg: float | None
     #: Key `k`'s input at index `k - 1`, for the page's key list (§3.4).
     keys: tuple
+    #: Each eye's share of the vergence offset, degrees (`geometry.Geometry.vergence_half_deg`): 0 in
+    #: direct view. Through the stereoscope the drawing reads a stimulus's disparity from its two
+    #: eyes' directions with it, L or R with its disparity (§4.4; `demoscreen`). Required on the
+    #: wire; the default only spares a construction that has no stereoscope.
+    vergence_half_deg: float = 0.0
 
 
 def _carried(value: object, choices=()) -> object:
@@ -1699,6 +1704,7 @@ def _drawn_out(drawn: Drawn) -> dict:
         "stand_in": drawn.stand_in,
         "mask_deg": drawn.mask_deg,
         "keys": list(drawn.keys),
+        "vergence_half_deg": drawn.vergence_half_deg,
     }
 
 
@@ -2033,6 +2039,7 @@ def _drawn_from(data: dict) -> Drawn:
         stand_in=_flag(data["stand_in"]),
         mask_deg=None if data["mask_deg"] is None else _real(data["mask_deg"]),
         keys=tuple(_word_of(key) for key in data["keys"]),
+        vergence_half_deg=_real(data["vergence_half_deg"]),
     )
 
 

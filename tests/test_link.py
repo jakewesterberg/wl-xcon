@@ -3639,9 +3639,11 @@ def test_drawn_round_trips_whole_under_the_schema_check():
 
     blank = _drawn(screen=None, windows=(), outlines=(), stand_in=False,
                    viewports=viewport.viewports(RIG, STEREOSCOPE), housings=(),
-                   mask_deg=STEREOSCOPE.mask_deg)
+                   mask_deg=STEREOSCOPE.mask_deg,
+                   vergence_half_deg=STEREOSCOPE.vergence_half_deg)
     assert decode(encode(blank)) == blank and decode(encode(blank)).screen is None
     assert decode(encode(blank)).mask_deg == 12.0
+    assert decode(encode(blank)).vergence_half_deg == STEREOSCOPE.vergence_half_deg > 1.0
 
     with pytest.raises(SchemaMismatch, match="carried schema 20 and this console reads schema 21"):
         decode(encode(replace(sent, schema=20)))
@@ -3661,6 +3663,8 @@ def test_drawn_round_trips_whole_under_the_schema_check():
         (lambda data: data.update(frame=True), "a count is a whole number from 0, not True"),
         (lambda data: data.update(stand_in="yes"), "a flag is true or false, not 'yes'"),
         (lambda data: data.update(mask_deg=float("inf")), "a drawing's number is a finite one, not inf"),
+        (lambda data: data.pop("vergence_half_deg"), "KeyError: 'vergence_half_deg'"),
+        (lambda data: data.update(vergence_half_deg=float("nan")), "a drawing's number is a finite one, not nan"),
         (lambda data: data.update(keys=["lever", 2]), "a name or a reason is a string, not 2"),
         (lambda data: data["viewports"][0].update(pitch_cm=[0.03]), "a pair is two numbers"),
         (lambda data: data["viewports"][0].update(width_px=1.5), "a count is a whole number from 0, not 1.5"),
@@ -3672,6 +3676,7 @@ def test_drawn_round_trips_whole_under_the_schema_check():
     ],
     ids=["no-windows", "window-no-eye", "target-not-a-flag", "x-nan", "size-a-word", "why-none",
          "windows-a-map", "trial-negative", "frame-a-bool", "stand-in-a-word", "mask-infinite",
+         "no-vergence", "vergence-nan",
          "key-a-number", "pitch-one-number", "pixels-a-fraction", "housing-inside-out",
          "screen-unknown-kind", "item-no-fill", "screen-other-schema"],
 )
