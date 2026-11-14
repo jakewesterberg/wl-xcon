@@ -6,10 +6,13 @@ bound, named kinds expanded into `look` blocks, an `Array` into an `Item` per ob
 direction computed (disparity, then the vergence offset), colors turned into CIE XYZ, a cone
 color against the background through the session's calibration (engine build A2) and a color
 set's light as its set is realized on that calibration (the pop-out search plan, Task 2).
-Its consumers -- the exact drawer now; the display process (build E), the screen log
-(build F), the simulated animal (build C) and demo mode later -- read the `Screen` and
-nothing else. It is versioned like telemetry: `SCHEMA`, which the display process's
-reader (build E) checks; nothing reads a `Screen` across a process boundary before it.
+Its consumers -- the exact drawer and demo mode now; the display process (build E), the screen log
+(build F) and the simulated animal (build C) later -- read the `Screen` and nothing else. It is
+versioned like telemetry: `SCHEMA`. **Demo mode's is the first `Screen` to cross a process
+boundary** (its design §3.9): a demo's world publishes it whole in a `link.Drawn`, in the wire form
+`to_wire` gives and `from_wire` reads back, each block by its class name from a closed list
+(`WIRE_KINDS`) and a `Screen` of another schema refused; the display process's reader (build E) will
+check the same number.
 """
 
 from __future__ import annotations
@@ -418,3 +421,84 @@ def resolve(visible, values, trial, geometry, *, frame_period, frame=0, onsets=N
                   background_left=to_xyz(left) if left else _BLACK,
                   background_right=to_xyz(right) if right else _BLACK,
                   items=tuple(items), frame=frame, frame_period=frame_period)
+
+
+# --- The wire (demo mode design §3.9) ---------------------------------------------------------
+
+#: **Every block a `Screen` is made of, which alone cross a process boundary** (`to_wire`,
+#: `from_wire`): `look`'s shapes, fills, edges and outline, this module's resolved fills and
+#: outline, `Item` and `Screen`. **A closed list**, so the reader builds only these by their class
+#: names, never a class a peer names; a block added to `look` or here joins it, and
+#: `tests/test_screen.py` fails on one left out. (Planner's call: the first `Screen` to cross a
+#: process boundary is demo mode's.)
+WIRE_KINDS = (
+    look.Circle, look.Ellipse, look.Rect, look.Cross, look.RegularPolygon, look.Vertices,
+    look.Ring, look.Path, look.WholeScreen,
+    look.Flat, look.SineGrating,
+    look.Hard, look.RaisedCosine, look.GaussianEdge,
+    look.Outline,
+    ResolvedFlat, ResolvedGrating, ResolvedOutline, Item, Screen,
+)
+_BY_NAME = {kind.__name__: kind for kind in WIRE_KINDS}
+#: The key that names a block's kind on the wire. No field of any `WIRE_KINDS` block is named so.
+KIND = "kind"
+
+
+def to_wire(screen: Screen) -> dict:
+    """**`screen` as plain data** (demo mode §3.9): each block a mapping of its fields with its
+    class name under `KIND`, each tuple a list, each number and word as it is, for msgpack.
+    Anything not made of `WIRE_KINDS` blocks, tuples, numbers, words and `None` is refused, so a
+    screen `from_wire` could not read back is never sent."""
+    if type(screen) is not Screen:
+        raise ValueError(f"a screen description on the wire is a Screen, not {screen!r}")
+    return _out(screen)
+
+
+def _out(value):
+    if value is None or isinstance(value, (bool, str)):
+        return value
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, float):
+        return float(value)
+    if type(value) is tuple:
+        return [_out(part) for part in value]
+    name = type(value).__name__
+    if _BY_NAME.get(name) is type(value):
+        return {KIND: name, **{f.name: _out(getattr(value, f.name)) for f in fields(value)}}
+    raise ValueError(f"{value!r} is no part of a screen description, so it cannot cross the wire: "
+                     f"a screen is made of {', '.join(_BY_NAME)}")
+
+
+def from_wire(data) -> Screen:
+    """**The `Screen` `to_wire` gave**: each mapping rebuilt as the block its `KIND` names, from
+    `WIRE_KINDS` alone, with exactly that block's fields, and each list a tuple. A kind not on the
+    list, a block missing a field or carrying one it has not, and a `Screen` of another `SCHEMA` are
+    refused (`ValueError`), never guessed at."""
+    built = _in(data)
+    if type(built) is not Screen:
+        raise ValueError(f"a screen description on the wire is a Screen, not {built!r}")
+    if built.schema != SCHEMA:
+        raise ValueError(f"a screen description of schema {built.schema!r} arrived, and this build "
+                         f"reads schema {SCHEMA}, so it is not drawn rather than guessed at")
+    return built
+
+
+def _in(value):
+    if isinstance(value, list):
+        return tuple(_in(part) for part in value)
+    if isinstance(value, dict):
+        name = value.get(KIND)
+        kind = _BY_NAME.get(name) if isinstance(name, str) else None
+        if kind is None:
+            raise ValueError(f"{name!r} is no kind a screen description is made of: it is made of "
+                             f"{', '.join(_BY_NAME)}")
+        given = {key: part for key, part in value.items() if key != KIND}
+        wanted = [f.name for f in fields(kind)]
+        if sorted(given) != sorted(wanted):
+            raise ValueError(f"a {name} carries {', '.join(wanted)}, and this one carries "
+                             f"{', '.join(str(key) for key in given) or 'nothing'}")
+        return kind(**{key: _in(part) for key, part in given.items()})
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    raise ValueError(f"{value!r} is no part of a screen description")

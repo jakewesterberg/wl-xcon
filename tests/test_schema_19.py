@@ -370,17 +370,17 @@ def test_moments_list_the_runs_changes_newest_first_and_keep_its_start_when_capp
 
 def test_a_reader_of_18_refuses_a_later_frame_and_a_later_reader_refuses_18_by_name(monkeypatch):
     """§3's schema rule: a frame of another schema is refused by name, before any other field is
-    read (`SchemaMismatch`), both ways round: a reader of this build's schema (20 since the pop-out
-    search build, `tests/test_confirmed_progression.py`) refuses an 18 frame, and a console still
+    read (`SchemaMismatch`), both ways round: a reader of this build's schema (21 since demo mode,
+    `tests/test_link.py`'s schema 21 test) refuses an 18 frame, and a console still
     built for 18 refuses a frame of this build rather than show a staged hand-back's `None` as a
     value."""
     sent = frame()
 
-    assert SCHEMA == sent.schema == 20
-    with pytest.raises(SchemaMismatch, match="carried schema 18 and this console reads schema 20"):
+    assert SCHEMA == sent.schema == 21
+    with pytest.raises(SchemaMismatch, match="carried schema 18 and this console reads schema 21"):
         decode(encode(replace(sent, schema=18)))
     monkeypatch.setattr(wire, "SCHEMA", 18)
-    with pytest.raises(SchemaMismatch, match="carried schema 20 and this console reads schema 18"):
+    with pytest.raises(SchemaMismatch, match="carried schema 21 and this console reads schema 18"):
         decode(encode(sent))
 
 

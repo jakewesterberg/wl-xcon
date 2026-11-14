@@ -333,3 +333,128 @@ def test_a_named_grating_s_color_waits_for_the_pattern_fills():
 
     with pytest.raises(screen.NotYetDrawable, match="engine build A3"):
         _one(stimulus)
+
+
+# --- The wire (demo mode design §3.9) ---------------------------------------------------------
+
+#: **A screen of every kind the drawer draws** (`exact.signed_distance`, `edge_profile`, `_light`):
+#: each shape, a flat light absolute and as a contrast, a grating about a mean and about what is
+#: behind it, each edge, an outline and none, a window, one eye's stimulus and a disparity, through
+#: the stereoscope so each eye's direction differs.
+_SHAPES = (
+    look.Circle(size=1.0), look.Ellipse(width=2.0, height=1.0), look.Rect(width=1.0, height=2.0),
+    look.Cross(size=0.5, thickness=0.1), look.RegularPolygon(sides=5, size=1.0),
+    look.Vertices(points=((0.0, 0.0), (1.0, 0.0), (0.0, 1.0))), look.Ring(inner=1.0, outer=2.0),
+    look.Path(points=((0.0, 0.0), (1.0, 1.0), (2.0, 0.0)), width=0.1), look.WholeScreen(),
+)
+_FILLS = (
+    look.Flat(color=Gray(40.0)), look.Flat(contrast=Weber(0.5)),
+    look.SineGrating(sf=2.0, phase=30.0, tf=1.0, contrast=Michelson(0.5), mean=Gray(20.0)),
+    look.SineGrating(sf=3.0, contrast=Michelson(0.25)),
+)
+_EDGES = (look.Hard(), look.RaisedCosine(width=0.1), look.GaussianEdge(sigma=0.5))
+
+
+def _every_kind() -> "screen.Screen":
+    visible = {}
+    for i, shape in enumerate(_SHAPES):
+        fill = _FILLS[i % len(_FILLS)]
+        edge = _EDGES[i % len(_EDGES)]
+        if isinstance(edge, look.GaussianEdge) and isinstance(fill, look.Flat):
+            edge = look.GaussianEdge(sigma=0.5, applies="opacity")
+        visible[f"s{i}"] = Stimulus(
+            f"s{i}", at=(float(i) - 4.0, 1.0),
+            looks=look.Look(shape=shape, fill=fill, edge=edge, orientation=15.0 * i,
+                            outline=look.Outline(width=0.05, color=Gray(60.0)) if i % 2 else None),
+            layer=i % 3, disparity=0.1 * (i % 2), eye=("both", "left", "right")[i % 3],
+            opacity=0.5 + 0.05 * i,
+        )
+    visible["hole"] = Stimulus("hole", at=(0.0, -3.0), looks=Disc(size=2.0), combine="window")
+    trial = Trial(start="s", states=[], background=Gray(20.0))
+    return screen.resolve(visible, {}, trial, STEREOSCOPE, frame_period=1 / 240, frame=9,
+                          onsets={"s2": 4}, calibration=SRGB)
+
+
+def _kinds(data) -> set:
+    if isinstance(data, list):
+        return set().union(*map(_kinds, data)) if data else set()
+    if isinstance(data, dict):
+        return {data[screen.KIND]}.union(*map(_kinds, data.values()))
+    return set()
+
+
+def test_screen_to_wire_and_back_is_equal_for_each_kind_the_drawer_draws():
+    """Demo mode §3.9: a demo's `Screen` crosses a process boundary, the first to, in `Drawn`;
+    `wlx serve` draws it with the exact drawer. **Whole and equal**: every block back as its own
+    class, every tuple a tuple, every number the number sent, through msgpack as the link packs it;
+    and the screen carries every kind the drawer draws, so none is left untested here."""
+    import msgpack
+
+    sent = _every_kind()
+    wire = screen.to_wire(sent)
+    back = screen.from_wire(msgpack.unpackb(msgpack.packb(wire, use_bin_type=True), raw=False))
+
+    assert back == sent
+    assert type(back.items[0].at_left) is tuple and type(back.items[0].order) is tuple
+    drawn = {type(item.shape) for item in sent.items} | {type(item.fill) for item in sent.items}
+    drawn |= {type(item.edge) for item in sent.items}
+    drawn |= {type(item.outline) for item in sent.items if item.outline is not None}
+    every = {look.Circle, look.Ellipse, look.Rect, look.Cross, look.RegularPolygon, look.Vertices,
+             look.Ring, look.Path, look.WholeScreen, screen.ResolvedFlat, screen.ResolvedGrating,
+             look.Hard, look.RaisedCosine, look.GaussianEdge, screen.ResolvedOutline}
+    assert drawn == every
+    assert _kinds(wire) == {kind.__name__ for kind in every} | {"Item", "Screen"}
+    assert any(item.fill.weber is not None for item in sent.items
+               if isinstance(item.fill, screen.ResolvedFlat))
+    assert any(item.fill.mean_xyz is None for item in sent.items
+               if isinstance(item.fill, screen.ResolvedGrating))
+    assert any(item.at_left != item.at_right for item in sent.items)
+    for vp in viewport.viewports(RIG, STEREOSCOPE, pixels=(64, 24)):
+        assert (exact.draw(back, vp, supersample=1) == exact.draw(sent, vp, supersample=1)).all()
+
+
+def test_every_block_a_screen_is_made_of_crosses_the_wire_and_nothing_else():
+    """The wire's list is closed: `look`'s shapes, fills, edges and outline, the resolved fills and
+    outline, `Item` and `Screen`, every one of them -- a block added to `look` without joining it
+    fails here -- and nothing a peer names besides. A kind not on it, a block with a field missing
+    or one too many, a `Screen` of another schema and anything that is no screen are refused."""
+    def every(base) -> set:
+        # The module's own classes only: `dataclass(slots=True)` makes a new class, and the one it
+        # replaced may still be listed among the base's subclasses until it is collected.
+        found = set()
+        for kind in base.__subclasses__():
+            if getattr(look, kind.__name__, None) is kind:
+                found |= {kind} | every(kind)
+        return found
+
+    expected = (every(look.Shape) | every(look.Fill) | every(look.Edge)
+                | {look.Outline, screen.ResolvedFlat, screen.ResolvedGrating,
+                   screen.ResolvedOutline, screen.Item, screen.Screen})
+    assert set(screen.WIRE_KINDS) == expected
+    assert len({kind.__name__ for kind in screen.WIRE_KINDS}) == len(screen.WIRE_KINDS)
+
+    wire = screen.to_wire(_one(Stimulus("fix", at=(0.0, 0.0), looks=Disc(color=Gray(40.0)))))
+
+    def changed(**at_the_shape) -> dict:
+        data = {**wire, "items": [{**wire["items"][0], "shape": {**wire["items"][0]["shape"]}}]}
+        data["items"][0]["shape"].update(at_the_shape)
+        return data
+
+    for data, said in (
+        (changed(kind="Disc"), "'Disc' is no kind a screen description is made of"),
+        (changed(kind="os.system"), "'os.system' is no kind"),
+        (changed(kind=None), "None is no kind"),
+        (changed(radius=1.0), "a Circle carries size, and this one carries size, radius"),
+        ({k: v for k, v in wire.items() if k != "frame"}, "a Screen carries"),
+        ({**wire, "schema": screen.SCHEMA + 1}, "schema 2 arrived, and this build reads schema 1"),
+        (wire["items"][0], "a screen description on the wire is a Screen, not Item"),
+        ({**wire, "frame": {1, 2}}, "is no part of a screen description"),
+    ):
+        with pytest.raises(ValueError, match=said):
+            screen.from_wire(data)
+    unwired = _one(Stimulus("fix", at=(0.0, 0.0), looks=Disc(color=Gray(40.0))))
+    item = replace(unwired.items[0], shape=Disc(size=1.0))
+    with pytest.raises(ValueError, match="is no part of a screen description, so it cannot cross"):
+        screen.to_wire(replace(unwired, items=(item,)))
+    with pytest.raises(ValueError, match="a screen description on the wire is a Screen"):
+        screen.to_wire(unwired.items[0])

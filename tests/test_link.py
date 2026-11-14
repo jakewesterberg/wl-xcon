@@ -20,8 +20,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from _builds import builds_of
 from _ports import endpoints as free_endpoints
-from _rig import DIRECT, STEREOSCOPE
+from _rig import DIRECT, RIG, STEREOSCOPE
+from wl_xcon import pointer, screen, viewport
 from wl_xcon.actor import Box
 from wl_xcon.bounds import Bounds, Ceiling, Floor
 from wl_xcon.findings import SESSION_KINDS
@@ -36,6 +38,9 @@ from wl_xcon.link import (
     CommandRefused,
     ConditionRow,
     Control,
+    Drawn,
+    DrawnOutline,
+    DrawnWindow,
     Drum,
     Training,
     Counts,
@@ -75,6 +80,7 @@ from wl_xcon.link import (
     WarningRow,
     ZmqCommands,
     ZmqConsole,
+    ZmqGaze,
     ZmqLink,
     ZmqMarks,
     _command_from,
@@ -2496,7 +2502,7 @@ def test_schema_8_reads_the_pause_the_schedule_and_the_feed_from_the_session():
 
     telemetry = Telemetry.of(session, Tally(), _scheduler(), index=40)
 
-    assert telemetry.schema == SCHEMA == 20
+    assert telemetry.schema == SCHEMA == 21
     assert telemetry.paused_at == 1_700_000_100.0
     assert telemetry.scheduled_stop == ScheduledStop(
         kind="trials", target=48.0, by=Box("jake"), said="after trial 48"
@@ -2559,15 +2565,15 @@ def test_a_frame_carries_the_setup_the_session_runs_in():
     assert decode(encode(stereo)).view == "stereoscope"
     assert decode(encode(stereo)).half_ipd_cm == 1.6
     assert decode(encode(_telemetry())).half_ipd_cm is None
-    assert SCHEMA == 20
+    assert SCHEMA == 21
 
 
-def test_a_schema_7_frame_is_refused_by_a_schema_20_reader():
-    """§3's schema rule: a reader built for 20 refuses 7 by name, before touching a
+def test_a_schema_7_frame_is_refused_by_a_schema_21_reader():
+    """§3's schema rule: a reader built for 21 refuses 7 by name, before touching a
     field (`SchemaMismatch`), and says which it reads."""
     old = encode(replace(_telemetry(), schema=7))
 
-    with pytest.raises(SchemaMismatch, match="carried schema 7 and this console reads schema 20"):
+    with pytest.raises(SchemaMismatch, match="carried schema 7 and this console reads schema 21"):
         decode(old)
 
 
@@ -2741,7 +2747,7 @@ def test_schema_10_survives_the_wire_with_its_absences_intact():
         assert decode(encode(original)) == original
     assert type(decode(encode(populated)).preflight.items[0]) is PreflightItem
     assert type(decode(encode(populated)).question) is Question
-    assert SCHEMA == 20
+    assert SCHEMA == 21
 
 
 def test_a_session_before_its_first_run_has_no_block_task_or_counts():
@@ -2797,7 +2803,7 @@ def test_an_idle_frame_carries_the_last_closed_sessions_summary_across_the_wire(
     assert type(restored.closed) is Telemetry and restored.closed.phase == "closed"
     assert (restored.closed.fluid_today_ml, restored.closed.shortfall_ml) == (None, None)
     assert decode(encode(replace(idle, closed=None))).closed is None
-    assert SCHEMA == 20
+    assert SCHEMA == 21
 
 
 def test_idle_of_carries_what_it_is_given_as_the_closed_summary():
@@ -2819,7 +2825,7 @@ def test_an_idle_frame_of_another_schema_is_refused_by_name():
         )
     )
 
-    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 20"):
+    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 21"):
         decode(old)
 
 
@@ -2963,7 +2969,7 @@ def test_the_strips_levels_and_the_return_survive_the_wire():
     assert decode(encode(original)) == original
     # 12 added `performance` (the strip's session, task, run and block counts) and
     # `returned_at` (the recorded return).
-    assert SCHEMA == 20
+    assert SCHEMA == 21
 
 
 def test_a_frame_between_runs_carries_the_session_alone():
@@ -3033,7 +3039,7 @@ def test_the_instant_a_session_was_resumed_survives_the_wire_and_none_stays_none
     assert decode(encode(resumed)).resumed_at == 1_700_000_050.0
     assert decode(encode(_telemetry())).resumed_at is None
     # 13 added `Stranded.resumable` and `why`, and `Telemetry.resumed_at`.
-    assert SCHEMA == 20
+    assert SCHEMA == 21
 
 
 def test_the_frame_reads_the_resume_from_the_session():
@@ -3050,7 +3056,7 @@ def test_the_frame_reads_the_resume_from_the_session():
 def test_a_schema_13_frame_is_refused_by_name():
     """b2b (schema 14): a frame whose `by`s are strings is refused by its schema, by
     name, before any `by` is read."""
-    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 20"):
+    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 21"):
         decode(encode(replace(_telemetry(), schema=13)))
 
 
@@ -3087,7 +3093,7 @@ def test_schema_15_carries_the_kind_the_calibration_and_the_warnings_both_ways()
         warnings=(WarningRow("default calibration", "the standard's", SESSION_KINDS, None, None),),
     )
 
-    assert (sent.schema, decode(encode(sent))) == (20, sent)
+    assert (sent.schema, decode(encode(sent))) == (21, sent)
     assert type(decode(encode(sent)).warnings[0]) is WarningRow
     assert decode(encode(unloaded)).calibration is None
     assert decode(encode(idle)) == idle
@@ -3126,7 +3132,7 @@ def test_schema_16_carries_each_shortfall_drumming_the_training_aids_and_each_co
         only = replace(sent, rule="streak", **flags)
         assert decode(encode(only)) == only
     assert decode(encode(replace(sent, rule=None))).rule is None
-    with pytest.raises(SchemaMismatch, match="carried schema 15 and this console reads schema 20"):
+    with pytest.raises(SchemaMismatch, match="carried schema 15 and this console reads schema 21"):
         decode(encode(replace(sent, schema=15)))
 
 
@@ -3214,7 +3220,7 @@ def test_a_schema_14_frame_of_either_shape_is_refused_by_name():
 
     for old in (replace(_telemetry(), schema=14), idle):
         with pytest.raises(
-                SchemaMismatch, match="carried schema 14 and this console reads schema 20"):
+                SchemaMismatch, match="carried schema 14 and this console reads schema 21"):
             decode(encode(old))
 
 
@@ -3270,7 +3276,7 @@ def test_schema_17_carries_the_plan_the_next_block_the_time_left_and_the_plans_o
     assert decode(encode(replace(sent, plan=None, next_block=None, block_left_s=None,
                                  run_left_s=None, preflight=replace(preflight, plan=None,
                                                                     plans=())))).plan is None
-    with pytest.raises(SchemaMismatch, match="carried schema 16 and this console reads schema 20"):
+    with pytest.raises(SchemaMismatch, match="carried schema 16 and this console reads schema 21"):
         decode(encode(replace(sent, schema=16)))
 
 
@@ -3432,9 +3438,9 @@ def test_schema_18_carries_a_settings_position_and_refuses_17_by_name():
         ParamRow("fix_hold", "s", 0.1, 1.0, 0.3, False),
     ))
 
-    assert (sent.schema, decode(encode(sent))) == (20, sent)
+    assert (sent.schema, decode(encode(sent))) == (21, sent)
     assert decode(encode(sent)).params[1].position is None
-    with pytest.raises(SchemaMismatch, match="carried schema 17 and this console reads schema 20"):
+    with pytest.raises(SchemaMismatch, match="carried schema 17 and this console reads schema 21"):
         decode(encode(replace(sent, schema=17)))
 
 
@@ -3529,3 +3535,317 @@ def test_an_integer_past_a_floats_range_is_said_plainly_as_no_position():
     assert target.position == "not a position: (x, y) (1e+400, 0)"
     assert cue.position == "not a position: -1e+5000° at 45°"
     assert decode(encode(frame)) == frame
+
+
+# ---------------------------------------------------------------------------
+# Demo mode (schema 21; its design §3.7-§3.9): `demo` on every frame, the `Drawn` shape, and
+# the gaze channel, the link's fourth socket
+# ---------------------------------------------------------------------------
+
+
+def _drawn(**overrides) -> Drawn:
+    """A demo's screen as `pointer.Drawing` publishes one: a fixation point and a Gabor resolved
+    with the default calibration, a declared window, an array's target object's window and another
+    judged for one eye, an outline, the direct view's viewport and its stand-in housings, and the
+    keys."""
+    from wl_xcon.photometry import Gray, Michelson
+    from wl_xcon.task import Disc, Gabor, Stimulus, Trial
+
+    visible = {
+        "fix": Stimulus("fix", at=(0.0, 0.0), looks=Disc(size=0.3, color=Gray(40.0))),
+        "g": Stimulus("g", at=(5.0, -2.0), looks=Gabor(sf=2.0, sigma=0.5, contrast=Michelson(0.8))),
+    }
+    resolved = screen.resolve(visible, {}, Trial(start="s", states=[]), DIRECT,
+                              frame_period=1 / 240, frame=12, calibration=SRGB)
+    base = Drawn(
+        schema=SCHEMA, phase="drawn", session_id="demo-2026-11-14_1012", trial=3, frame=12,
+        screen=resolved,
+        windows=(DrawnWindow("fix", 0.0, 0.0, 2.0, "both", False),
+                 DrawnWindow("search.0", 7.25, 3.5, 1.5, "both", True),
+                 DrawnWindow("search.1", -7.25, -3.5, 1.5, "left", False)),
+        outlines=(DrawnOutline("picture", 4.0, 4.0, 3.0,
+                               "not drawn yet: Picture is drawn in engine build A4"),),
+        viewports=viewport.viewports(RIG, DIRECT), housings=DIRECT.housings, stand_in=True,
+        mask_deg=None, keys=("lever", "bar"),
+    )
+    return replace(base, **overrides) if overrides else base
+
+
+def _repacked(frame, change) -> bytes:
+    """`frame` on the wire with `change` made to its mapping, as a peer might send it."""
+    import msgpack
+
+    data = msgpack.unpackb(encode(frame), raw=False)
+    change(data)
+    return msgpack.packb(data, use_bin_type=True)
+
+
+def test_schema_21_carries_demo_on_every_frame_idle_or_running():
+    """§3.7 (§14 item 12): every frame, idle or running, carries `demo`, and an idle frame `gaze`,
+    so every page and `wlx console` can say DEMO and offer a demo only where one can open. Both
+    round-trip either way, a closed summary's included; a frame without either is malformed, never
+    read as a real session's; and a frame of schema 20 is refused by name, each shape."""
+    from _frames import idle as idle_frame
+
+    assert SCHEMA == 21
+    running = _telemetry()
+    assert running.demo is False, "a real session's frame unless it says otherwise"
+    for demo in (True, False):
+        sent = replace(running, demo=demo)
+        assert decode(encode(sent)) == sent and decode(encode(sent)).demo is demo
+        idle = idle_frame(demo=demo, gaze=not demo, closed=sent)
+        back = decode(encode(idle))
+        assert back == idle
+        assert (back.demo, back.gaze, back.closed.demo) == (demo, not demo, demo)
+
+    said = dict(wall_at=1.0, stranded=(), question=None, refusals=(), refusals_dropped=0,
+                link=Absent(), animals=("REFERENCE",), offered_tasks=())
+    assert (Idle.of(**said).demo, Idle.of(**said).gaze) == (False, False)
+    assert (Idle.of(**said, demo=True).demo, Idle.of(**said, demo=True).gaze) == (True, False)
+    assert (Idle.of(**said, gaze=True).demo, Idle.of(**said, gaze=True).gaze) == (False, True)
+
+    for frame, key in ((running, "demo"), (idle_frame(), "demo"), (idle_frame(), "gaze")):
+        with pytest.raises(FrameError, match=f"KeyError: '{key}'"):
+            decode(_repacked(frame, lambda data: data.pop(key)))
+        with pytest.raises(FrameError, match="a flag is true or false, not 1"):
+            decode(_repacked(frame, lambda data: data.update({key: 1})))
+    with pytest.raises(FrameError, match="KeyError: 'demo'"):
+        decode(_repacked(idle_frame(closed=running), lambda data: data["closed"].pop("demo")))
+
+    for frame in (running, idle_frame(), _drawn()):
+        with pytest.raises(SchemaMismatch, match="carried schema 20 and this console reads schema 21"):
+            decode(encode(replace(frame, schema=20)))
+
+
+def test_drawn_round_trips_whole_under_the_schema_check():
+    """§3.9: a `Drawn` crosses the link whole -- its screen each block as its own class, its windows,
+    outlines, viewports and housings as theirs, every tuple a tuple -- and blank at a trial's end, and
+    through the stereoscope with its field's edge; checked for its schema first, as every frame is."""
+    from wl_xcon.geometry import Housing
+
+    sent = _drawn()
+    back = decode(encode(sent))
+
+    assert type(back) is Drawn and back == sent
+    assert type(back.screen) is screen.Screen and type(back.screen.items[0]) is screen.Item
+    assert [type(w) for w in back.windows] == [DrawnWindow] * 3
+    assert [type(o) for o in back.outlines] == [DrawnOutline]
+    assert [type(v) for v in back.viewports] == [viewport.Viewport]
+    assert [type(h) for h in back.housings] == [Housing, Housing]
+    assert type(back.viewports[0].pitch_cm) is tuple and type(back.keys) is tuple
+    assert [w.target for w in back.windows] == [False, True, False]
+
+    blank = _drawn(screen=None, windows=(), outlines=(), stand_in=False,
+                   viewports=viewport.viewports(RIG, STEREOSCOPE), housings=(),
+                   mask_deg=STEREOSCOPE.mask_deg)
+    assert decode(encode(blank)) == blank and decode(encode(blank)).screen is None
+    assert decode(encode(blank)).mask_deg == 12.0
+
+    with pytest.raises(SchemaMismatch, match="carried schema 20 and this console reads schema 21"):
+        decode(encode(replace(sent, schema=20)))
+
+
+@pytest.mark.parametrize(
+    ("change", "said"),
+    [
+        (lambda data: data.pop("windows"), "KeyError: 'windows'"),
+        (lambda data: data["windows"][0].pop("eye"), "KeyError: 'eye'"),
+        (lambda data: data["windows"][1].update(target=1), "a flag is true or false, not 1"),
+        (lambda data: data["windows"][0].update(x_deg=float("nan")), "a drawing's number is a finite one, not nan"),
+        (lambda data: data["outlines"][0].update(size_deg="3"), "a drawing's number is a finite one, not '3'"),
+        (lambda data: data["outlines"][0].update(why=None), "a name or a reason is a string, not None"),
+        (lambda data: data.update(windows={"name": "fix"}), "TypeError"),
+        (lambda data: data.update(trial=-1), "a count is a whole number from 0, not -1"),
+        (lambda data: data.update(frame=True), "a count is a whole number from 0, not True"),
+        (lambda data: data.update(stand_in="yes"), "a flag is true or false, not 'yes'"),
+        (lambda data: data.update(mask_deg=float("inf")), "a drawing's number is a finite one, not inf"),
+        (lambda data: data.update(keys=["lever", 2]), "a name or a reason is a string, not 2"),
+        (lambda data: data["viewports"][0].update(pitch_cm=[0.03]), "a pair is two numbers"),
+        (lambda data: data["viewports"][0].update(width_px=1.5), "a count is a whole number from 0, not 1.5"),
+        (lambda data: data["housings"][0].update(left_cm=9.0), "ValueError: a housing's left edge"),
+        (lambda data: data["screen"]["items"][0]["shape"].update(kind="Disc"),
+         "ValueError: 'Disc' is no kind a screen description is made of"),
+        (lambda data: data["screen"]["items"][0].pop("fill"), "ValueError: a Item carries"),
+        (lambda data: data["screen"].update(schema=2), "ValueError: a screen description of schema 2"),
+    ],
+    ids=["no-windows", "window-no-eye", "target-not-a-flag", "x-nan", "size-a-word", "why-none",
+         "windows-a-map", "trial-negative", "frame-a-bool", "stand-in-a-word", "mask-infinite",
+         "key-a-number", "pitch-one-number", "pixels-a-fraction", "housing-inside-out",
+         "screen-unknown-kind", "item-no-fill", "screen-other-schema"],
+)
+def test_a_malformed_drawn_is_a_frame_error(change, said):
+    """A `Drawn` whose fields do not hold what they say is a frame that cannot be shown --
+    `FrameError`, caught where frames are read (`wlx console`, `wlx serve`) -- never a drawing at a
+    guessed place: a field missing, a number not finite, a flag or a word of the wrong kind, a
+    housing inside out (`geometry.Housing`'s own rule), and a screen `screen.from_wire` refuses."""
+    with pytest.raises(FrameError, match="^a telemetry frame could not be decoded") as raised:
+        decode(_repacked(_drawn(), change))
+    assert said in str(raised.value)
+
+
+def _gazed_link(zmq_cleanup, **kwargs) -> ZmqLink:
+    return zmq_cleanup(ZmqLink("tcp://127.0.0.1:0", "tcp://127.0.0.1:0", None,
+                               "tcp://127.0.0.1:0", **kwargs))
+
+
+def _gazed(link, buffer, *, tries=400, pause=0.005) -> int:
+    """`link.gaze_into(buffer)` until a report is read, bounded as `_signalled` is and for its
+    reason: a report just sent is not visible to the very next statement."""
+    for _ in range(tries):
+        size = link.gaze_into(buffer)
+        if size >= 0:
+            return size
+        time.sleep(pause)
+    return -1
+
+
+def _sent(gaze, message, *, tries=400, pause=0.005) -> bool:
+    """`gaze.send(message)` until it goes: the PUSH connects in the background, and `IMMEDIATE`
+    refuses a send before it has."""
+    for _ in range(tries):
+        if gaze.send(message):
+            return True
+        time.sleep(pause)
+    return False
+
+
+_REPORT = pointer.pack(7, 1.5, -2.0, over=True, b=False, button=True, held=0b101,
+                       presses=(1, 2, 3, 4, 5, 6, 7, 8, 9))
+
+
+def test_the_gaze_endpoint_binds_loopback_only_even_with_allow_remote(zmq_cleanup):
+    """§3.8: the gaze socket moves a demo's eye, so it is loopback's alone, `--link-allow-remote`
+    or not -- refused before a context exists, as every remote bind is -- and a link told it may
+    bind remotely still binds it on loopback. Its queue holds `pointer.DRAIN` reports; a link given
+    no gaze endpoint has no gaze socket."""
+    import zmq
+
+    for allow_remote in (False, True):
+        for endpoint in ("tcp://0.0.0.0:5574", "tcp://192.168.1.50:5574", "tcp://*:5574",
+                         "tcp://eth0:5574", "tcp://[::]:5574", "udp://127.0.0.1:5574"):
+            with pytest.raises(RemoteBindRefused,
+                               match=r"PULL \(gaze\).*whatever --link-allow-remote says"):
+                ZmqLink("tcp://127.0.0.1:0", "tcp://127.0.0.1:0", None, endpoint,
+                        allow_remote=allow_remote)
+
+    link = _gazed_link(zmq_cleanup, allow_remote=True)
+    assert link.gaze_endpoint.startswith("tcp://127.0.0.1:")
+    assert link._gaze.getsockopt(zmq.RCVHWM) == pointer.DRAIN
+    assert link._gaze in link._sockets, "released with the rest (`_release`)"
+    plain = zmq_cleanup(ZmqLink("tcp://127.0.0.1:0", "tcp://127.0.0.1:0"))
+    assert plain.gaze_endpoint is None and plain._gaze is None
+    assert plain.gaze_into(bytearray(pointer.MESSAGE.size)) == -1
+
+
+def test_gaze_into_reads_one_message_allocating_nothing(zmq_cleanup):
+    """§3.8, hot-path discipline (CLAUDE.md): a demo's frame reads up to `pointer.DRAIN` reports
+    through `gaze_into`, each into the buffer the source made once, by `recv_into` -- no bytes
+    object -- one a call, each once, its size whole, so an oversize one is told from a report. Its
+    code builds nothing, and over a drain of reads it keeps nothing it allocates (`tracemalloc`, as
+    `test_the_per_frame_check_keeps_nothing_it_allocates`; what pyzmq takes and gives back inside
+    one call it does not see, `ZmqLink.gaze_into` says how much)."""
+    import tracemalloc
+
+    link = _gazed_link(zmq_cleanup)
+    gaze = zmq_cleanup(ZmqGaze(link.gaze_endpoint))
+    buffer = bytearray(pointer.MESSAGE.size)
+
+    assert _sent(gaze, _REPORT)
+    assert _gazed(link, buffer) == pointer.MESSAGE.size
+    assert bytes(buffer) == _REPORT
+    assert link.gaze_into(buffer) == -1, "each report is read once"
+    assert _sent(gaze, b"y" * 50)
+    assert _gazed(link, buffer) == 50 and bytes(buffer) == b"y" * pointer.MESSAGE.size
+    assert builds_of(ZmqLink.gaze_into) == []
+
+    for _ in range(pointer.DRAIN):
+        assert _sent(gaze, _REPORT)
+    take = link.gaze_into
+    # A first read outside the measure, as the mark check's warms up.
+    read = 1 if take(buffer) >= 0 else 0
+    tracemalloc.start()
+    try:
+        before = tracemalloc.take_snapshot()
+        calls = 0
+        while calls < 100_000:
+            if take(buffer) >= 0:
+                read += 1
+            calls += 1
+        after = tracemalloc.take_snapshot()
+    finally:
+        tracemalloc.stop()
+    while read < pointer.DRAIN and _gazed(link, buffer) >= 0:
+        read += 1
+
+    import wl_xcon.link as link_module
+
+    held = [stat for stat in after.compare_to(before, "filename")
+            if stat.size_diff > 0 and stat.traceback[0].filename == link_module.__file__]
+    assert held == []
+    assert read == pointer.DRAIN and bytes(buffer) == _REPORT
+
+
+def test_gaze_into_answers_minus_one_with_none_waiting(zmq_cleanup):
+    """With nothing waiting, `-1` every time, the buffer untouched; and the links with no gaze
+    socket answer the same: `Absent`, and `Simulated` with its reports spent, which hands each a
+    test sent over once, cut to the buffer, its size whole."""
+    link = _gazed_link(zmq_cleanup)
+    buffer = bytearray(pointer.MESSAGE.size)
+
+    assert [link.gaze_into(buffer) for _ in range(1000)] == [-1] * 1000
+    assert buffer == bytearray(pointer.MESSAGE.size), "nothing was written"
+    assert (Absent().gaze_endpoint, Absent().gaze_into(buffer)) == (None, -1)
+
+    simulated = Simulated()
+    assert simulated.gaze_endpoint == "simulated" and simulated.gaze_into(buffer) == -1
+    simulated.gazes.extend([_REPORT, b"z" * 50])
+    assert simulated.gaze_into(buffer) == pointer.MESSAGE.size and bytes(buffer) == _REPORT
+    assert simulated.gaze_into(buffer) == 50 and bytes(buffer) == b"z" * pointer.MESSAGE.size
+    assert simulated.gaze_into(buffer) == -1 and simulated.gazes == []
+    assert Simulated(gaze_endpoint=None).gaze_endpoint is None
+
+
+def test_a_gaze_report_with_no_rig_is_not_sent_and_never_waits(zmq_cleanup):
+    """§4.5: `wlx serve` pushes each report with ZeroMQ's non-blocking send. With no rig on the
+    gaze endpoint, `IMMEDIATE` queues nothing and `send` answers `False` at once; its queue, like the
+    rig's, holds `pointer.DRAIN` reports."""
+    import zmq
+
+    (endpoint,) = free_endpoints(1)
+    gaze = zmq_cleanup(ZmqGaze(endpoint))
+
+    started = time.monotonic()
+    assert [gaze.send(_REPORT) for _ in range(3)] == [False] * 3
+    assert time.monotonic() - started < 1.0
+    assert gaze._push.getsockopt(zmq.SNDHWM) == pointer.DRAIN
+    assert gaze._push.getsockopt(zmq.IMMEDIATE) == 1
+    assert gaze.endpoint == endpoint
+
+
+def test_close_releases_the_gaze_sockets_and_an_unclosed_one_is_released_by_the_collector(
+    zmq_cleanup,
+):
+    """Ruling 18, for the fourth socket and its sender: each appended to the list the finalizer
+    holds the moment it exists, so `close` releases it and collecting an unclosed one does not
+    hang on it."""
+    link = _gazed_link(zmq_cleanup)
+    with ZmqGaze(link.gaze_endpoint) as gaze:
+        assert not gaze._push.closed
+    assert gaze._push.closed and gaze._ctx.closed
+    link.close()
+    assert link._gaze.closed and link._ctx.closed
+
+    with _collector_paused():
+        unclosed = ZmqLink("tcp://127.0.0.1:0", "tcp://127.0.0.1:0", None, "tcp://127.0.0.1:0")
+        unclosed._cycle = unclosed
+        ctx, socket = unclosed._ctx, weakref.ref(unclosed._gaze)
+        sender = ZmqGaze(unclosed.gaze_endpoint)
+        sender._cycle = sender
+        sender_ctx, push = sender._ctx, weakref.ref(sender._push)
+        del unclosed, sender
+
+        returned = _collected_within(10.0)
+
+    assert returned, "collecting an unclosed link or gaze sender in a reference cycle hung for 10 s"
+    assert ctx.closed and sender_ctx.closed
+    assert socket() is None and push() is None

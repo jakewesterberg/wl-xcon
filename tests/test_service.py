@@ -34,7 +34,9 @@ from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.link import (
     NOTE_LIMIT,
     REFUSAL_HISTORY,
+    SCHEMA,
     CheckRun,
+    Drawn,
     EndSession,
     Idle,
     ManualReward,
@@ -2449,6 +2451,23 @@ def test_an_end_in_the_same_pass_as_a_start_ends_the_session_and_starts_nothing(
     assert (closed.refusals[-1].name, closed.refusals[-1].why) == (
         "start", "the session was ended in the same pass, so the run does not start",
     )
+
+
+def test_routed_publish_passes_a_drawn_through(tmp_path):
+    """Demo mode §3.9: a demo's world publishes its screen, a `Drawn`, through the session's link,
+    `_Routed`, inside a trial; `_Routed.publish` hands it to the real link as it is, and keeps it as
+    no closed frame -- only a session's `closed` frame is that."""
+    service = _service(tmp_path)
+    _step(service, _open())
+    routed, closed = service.session.link, service.closed
+    drawn = Drawn(schema=SCHEMA, phase="drawn", session_id="2027-01-14_01", trial=0, frame=1,
+                  screen=None, windows=(), outlines=(), viewports=(), housings=(),
+                  stand_in=False, mask_deg=None, keys=())
+
+    routed.publish(drawn)
+
+    assert service.link.published[-1] is drawn
+    assert service.closed is closed
 
 
 def test_a_run_checks_for_marks_through_the_links_own_method(tmp_path):

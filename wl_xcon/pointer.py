@@ -49,21 +49,31 @@ button is down with the pointer in the window (the mouse is both the eye and the
 moves the schedule on, never a catch-up burst. **No timing claim follows from it** (CLAUDE.md): the
 pacing makes a demo watchable and measures nothing.
 
+**The screen, to the page** (§3.9): `Drawing` resolves what a frame shows (`screen.resolve`, with
+the session's calibration, so a color set's light is its realized one) into a `link.Drawn`, whole:
+the screen, the trial's windows as `gaze.Tracked` judges them on that frame (an array's object
+windows where the trial placed them, its target's flagged), each stimulus it could not resolve
+outlined saying why, the setup's viewports, housings and field edge, and the keys. `Pointing`
+publishes one on the trial's first frame, on the first frame after its screen changed, and at least
+every `REDRAWN_EVERY_S`; and a blank one when the trial has ended (`Pointing.ended`, which the
+session calls at the boundary). A drawing and its publisher are given together or not at all.
+
 **Numbers fixed here, each with its reason** (the demo plan's Global Constraints; the PI's
 "everything adjustable in the console", 2026-11-07, is about a task's numbers, which stay settings):
 `KEYS` and `DRAIN`, bounded work a frame (§3.4, §3.8); `LIVE_S`, five of the page's slowest report
 intervals (`web.GAZE_EVERY_MS`, 100 ms, demo mode's Task 9), so a demo is playable, claiming
 nothing (§3.3); `AWAY_DEG`, beyond any field a rig shows; the noise, `simeye.NOISE_DEG`, imported,
-drawn from the run's seed (§14 item 16). **Planner's calls**: the ease's span; the agreement test.
+drawn from the run's seed (§14 item 16); `REDRAWN_EVERY_S`, inside `wlx console`'s 5 s timeout and
+a page's patience (§3.9); `OUTLINE_DEG`, a mark claiming no size. **Planner's calls**: the ease's
+span; the agreement test.
 
 **Hot path.** `Pointing.display` and `happened` run every frame, and so do the source's `poll` and
 `Pace.wait`: a report is read into a buffer allocated once and read through views made with it,
 key state is kept in integers, and a frame builds only its sample (its reading's image position,
 the pair `(x, y)`; `tests/test_pointer.py` measures the whole frame, as `tests/test_simeye.py`
-does). Only a frame whose display changed copies what it shows (`Pointing._shown_now`).
-
-**Not yet**: the screen published to the page (`drawing`, `publish`) waits on demo mode's Task 3
-(`pointer.Drawing`, `link.Drawn`), and is refused until then (`_undrawn`).
+does). Only a frame whose display changed copies what it shows (`Pointing._shown_now`), and only a
+frame that publishes builds its `Drawn` (`Pointing._publish`): a demo has no frame budget to protect
+(§3.9), and no rig world changes.
 """
 
 from __future__ import annotations
@@ -76,20 +86,28 @@ import sys
 import time
 from typing import Callable
 
-from wl_xcon import simeye
+from wl_xcon import screen, simeye, viewport
 from wl_xcon.eye import EyeReading, Sample, Tracker
 from wl_xcon.gaze import Tracked
+from wl_xcon.link import SCHEMA, Drawn, DrawnOutline, DrawnWindow
+from wl_xcon.look import GABOR_CUTOFF_SIGMAS
 from wl_xcon.task import (
     After,
+    Array,
     ChairStill,
     FeatureAbove,
+    Gabor,
     Guard,
     Onscreen,
+    P,
     Pressed,
     Released,
     Response,
     Touched,
     Trial,
+    Window,
+    _value,
+    position_of,
 )
 
 #: **A pointer report** (the module docstring): the sequence number, x and y in degrees, the flags,
@@ -111,6 +129,14 @@ LIVE_S = 0.5
 #: **Where the pointer off the drawing looks**, in degrees: straight up, beyond any field a rig
 #: shows, so outside every window, as an animal looking away.
 AWAY_DEG = (0.0, 60.0)
+#: **How often a demo's world publishes its screen with nothing changed**, in seconds of the
+#: trial's clock, which `Pace` holds to the wall's (§3.9): at least once a second, so `wlx
+#: console`'s 5 s receive timeout never ends a watch of a demo that is only drawing, and a page
+#: that attaches mid-trial has the screen within a second.
+REDRAWN_EVERY_S = 1.0
+#: **How wide a stimulus is outlined whose own size cannot be read** (a look with no value), in
+#: degrees: a mark to find it by, claiming no size (§4.4).
+OUTLINE_DEG = 1.0
 
 #: **The map a demo's samples are read through**: the simulated eye's identity, under its own
 #: `why`. It never changes in a demo (no recentering, §14 item 5).
@@ -528,13 +554,163 @@ class Pace:
         self._first = frame
 
 
-def _undrawn(drawing, publish) -> None:
-    """**The screen to the page is not built yet**: a drawing or a publisher given is refused, never
-    quietly dropped. Waits on demo mode's Task 3 (`pointer.Drawing`, `link.Drawn`)."""
-    if drawing is not None or publish is not None:
-        raise NotImplementedError(
-            "a demo world does not draw its screen yet: publishing it to the page waits on demo "
-            "mode's Task 3 (`pointer.Drawing`, `link.Drawn`)")
+def _paired(drawing, publish) -> None:
+    """**A drawing and its publisher come together, or neither does**: a drawing with no publisher
+    would be resolved for nobody, and a publisher with no drawing would never be called, a page
+    left blank with nothing raising. Neither is an in-process world's, which shows nobody."""
+    if (drawing is None) != (publish is None):
+        raise ValueError(
+            "a demo world draws its screen for the page and publishes it, or does neither: give a "
+            "`Drawing` and a publisher together (demo mode §3.9)")
+
+
+class Drawing:
+    """**What a demo's world shows, as the page draws it** (§3.9, §4.4; the module docstring): for a
+    session's rig, field and calibration, each `drawn` frame resolved into a `link.Drawn`. Built once
+    for a session, between trials; `drawn` and `blank` run on a frame that publishes, which a demo
+    may spend (§3.9)."""
+
+    def __init__(self, rig, geometry, calibration, *, session_id: str, stand_in: bool) -> None:
+        self.rig = rig
+        self.geometry = geometry
+        self.calibration = calibration
+        self.session_id = session_id
+        #: Whether the field's housings are the stand-ins (§3.6), which the page labels so.
+        self.stand_in = stand_in
+        #: The setup's viewports at the rig's own pixels: the page draws a preview of them.
+        self.viewports = viewport.viewports(rig, geometry)
+
+    def drawn(self, world, visible, values, trial: Trial, index: int, frame: int) -> Drawn:
+        """**Frame `frame` of trial `index` as `world` shows it**: `visible` resolved through
+        `screen.resolve` with the session's calibration, each stimulus it cannot resolve -- a kind
+        the drawer does not draw yet (`screen.NotYetDrawable`), a look with no value -- outlined
+        saying why and the rest resolved; the windows `world`'s own as `gaze.Tracked` judges them
+        on this frame (`drawn_windows`); and the setup and the keys."""
+        resolved, outlines = self._resolved(world, visible, values, trial, frame)
+        return self._made(world, index, frame, resolved, drawn_windows(world), outlines)
+
+    def blank(self, world, index: int, frame: int) -> Drawn:
+        """**The screen after trial `index` has ended**: blank, as the animal's is until the next
+        trial's first frame, with no windows; the setup and the keys as before."""
+        return self._made(world, index, frame, None, (), ())
+
+    def _made(self, world, index, frame, resolved, windows, outlines) -> Drawn:
+        geometry = self.geometry
+        return Drawn(
+            schema=SCHEMA, phase="drawn", session_id=self.session_id, trial=index, frame=frame,
+            screen=resolved, windows=windows, outlines=outlines, viewports=self.viewports,
+            housings=tuple(geometry.housings), stand_in=self.stand_in, mask_deg=geometry.mask_deg,
+            keys=tuple(item.label for item in sorted(world.keys, key=lambda item: item.key)),
+        )
+
+    def _resolved(self, world, visible, values, trial, frame):
+        """The screen and the outlines: the whole of `visible` resolved at once, and only where
+        that fails, each stimulus alone, so the one that cannot be drawn is outlined and the rest
+        are resolved together, in the order shown."""
+        onsets = world.onsets
+
+        def resolve(shown):
+            return screen.resolve(shown, values, trial, self.geometry,
+                                  frame_period=world.frame_period, frame=frame, onsets=onsets,
+                                  calibration=self.calibration)
+
+        try:
+            return resolve(visible), ()
+        except (KeyError, ValueError):
+            pass
+        kept: dict = {}
+        outlines: list = []
+        for name, stimulus in visible.items():
+            try:
+                resolve({name: stimulus})
+            except (KeyError, ValueError) as exc:
+                outlines.extend(_outlined(stimulus, values, _why(exc)))
+                continue
+            kept[name] = stimulus
+        return resolve(kept), tuple(outlines)
+
+
+def _why(exc: Exception) -> str:
+    """Why a stimulus is outlined, in the drawing's words (§4.4): a kind not drawn yet names the
+    build that draws it (`screen.NotYetDrawable`); a value it needs with none names the setting."""
+    if isinstance(exc, screen.NotYetDrawable):
+        return f"not drawn yet: {exc}"
+    if isinstance(exc, KeyError):
+        said = exc.args[0] if exc.args else exc
+        return f"it has no value to be drawn with: {said}"
+    return f"it cannot be drawn: {exc}"
+
+
+def _outlined(stimulus, values, why: str) -> "list[DrawnOutline]":
+    """**`stimulus` as outlines** where it is: one at its position the size its look says, or, for
+    an array whose objects can be placed, one an object; at the center, saying so, when its own
+    position has no value."""
+    try:
+        x, y = position_of(stimulus.at, values)
+    except (KeyError, TypeError, ValueError):
+        x, y = 0.0, 0.0
+        why = f"{why}; and its position has no value, so it is outlined at the center"
+    looks = stimulus.looks
+    if isinstance(looks, P):
+        looks = values.get(looks.name)
+    if isinstance(looks, Array):
+        try:
+            centers = looks.positions(values, (x, y))
+            return [DrawnOutline(f"{stimulus.name}.{i}", float(cx), float(cy),
+                                 _extent(looks.object_looks(i, values), values), why)
+                    for i, (cx, cy) in enumerate(centers)]
+        except (KeyError, TypeError, ValueError):
+            pass
+    return [DrawnOutline(stimulus.name, float(x), float(y), _extent(looks, values), why)]
+
+
+def _extent(looks, values) -> float:
+    """**How wide a look is drawn, in degrees**: its size, aperture, outer diameter or length,
+    whichever it has; a Gabor's cut-off, as `screen.as_look` draws it; `OUTLINE_DEG` where none can
+    be read -- a look with no value, or one whose size has none."""
+    if isinstance(looks, P):
+        looks = values.get(looks.name)
+    try:
+        if isinstance(looks, Gabor):
+            width = 2 * GABOR_CUTOFF_SIGMAS * float(_value(looks.sigma, values))
+        else:
+            shape = getattr(looks, "shape", looks)
+            named = next((getattr(shape, name) for name in ("size", "aperture", "outer", "length",
+                                                            "width")
+                          if getattr(shape, name, None) is not None), None)
+            width = OUTLINE_DEG if named is None else float(_value(named, values))
+    except (KeyError, TypeError, ValueError):
+        return OUTLINE_DEG
+    return width if math.isfinite(width) and width > 0.0 else OUTLINE_DEG
+
+
+def drawn_windows(world: Tracked) -> "tuple[DrawnWindow, ...]":
+    """**`world`'s windows as it judges them now** (§3.9, §14 item 4): each declared window and
+    array object window with the center and radius `gaze.Tracked.in_window` compares gaze with on
+    this frame -- an array's object windows where the trial placed them, switched with the array in
+    `Tracked.display` -- and the eye it is judged for; an array alias's own stand-in left out, never
+    drawn at the alias's nominal place, and an array's target's objects flagged, the scoring key.
+    A window the trial's values cannot place is drawn nowhere: the loop raises if a guard asks."""
+    aliases = world._members
+    targets = {name for alias, names in aliases.items() if alias.endswith(".target")
+               for name in names}
+    found = []
+    for name, declared in world._windows.items():
+        if declared is None or name in aliases:
+            continue
+        judged = world._judged.get(name)
+        if isinstance(judged, Window):
+            try:
+                cx, cy = position_of(judged.at, world._values)
+                judged = (cx, cy, _value(judged.radius, world._values))
+            except Exception:  # noqa: BLE001 -- unplaceable, as `gaze._judged` defers it
+                continue
+        if judged is None:
+            continue
+        cx, cy, radius = judged
+        found.append(DrawnWindow(name, float(cx), float(cy), float(radius), declared.eye,
+                                 name in targets))
+    return tuple(found)
 
 
 class Pointing(Tracked):
@@ -542,16 +718,33 @@ class Pointing(Tracked):
     docstring): every gaze guard, map, staleness and saccade rule is `Tracked`'s, with a fresh
     `Tracker` and `Detector`, and it answers the guards no gaze world answers from the keys, the
     button and the display (`happened`). `keys` numbers the trial's inputs (`inputs`), and must
-    number each one it names. `index` is the trial's in the run."""
+    number each one it names. `index` is the trial's in the run. **Given a `drawing` and
+    `publish`, it publishes its screen** (the module docstring): on the trial's first frame, on the
+    first frame after the screen changed, at least every `REDRAWN_EVERY_S`, and blank once the trial
+    has ended (`ended`); the two come together or not at all."""
 
     def __init__(self, source: Source, trial: Trial, frame_period: float,
                  values: "dict | None", *, pace: Pace, keys: "tuple[Input, ...]", index: int = 0,
-                 drawing=None, publish=None) -> None:
-        _undrawn(drawing, publish)
+                 drawing: "Drawing | None" = None, publish=None) -> None:
+        _paired(drawing, publish)
         Tracked.__init__(self, Tracker(), MAPPING, trial, frame_period, values, source=source)
         self.pace = pace
         self.keys = keys
         self.index = index
+        self.trial = trial
+        self.drawing = drawing
+        self.publish = publish
+        #: **When the screen is next published with nothing changed**: the first frame at least
+        #: `REDRAWN_EVERY_S` after the last one published, as a frame number, so a frame compares
+        #: two integers; 0 before the first, which every trial's first frame is past.
+        self._redraw_every = max(1, math.ceil(REDRAWN_EVERY_S / frame_period - 1e-9))
+        self._redraw_at = 0
+        #: The last frame displayed, which a blank screen at the trial's end is numbered by.
+        self._frame = 0
+        #: **Each stimulus shown's first frame**, by name, from which `screen.resolve` times a
+        #: drift: kept while it stays on the display, an `Update` included, and new with a `Show`
+        #: after a `Hide`. Rebuilt on a frame the display changed (`_shown_now`).
+        self.onsets: dict = {}
         #: Each input's key by what names it, read in `happened` without building a lookup's key.
         self._devices: dict = {}
         self._features: dict = {}
@@ -580,15 +773,35 @@ class Pointing(Tracked):
         """**The frame**: paced first (`Pace.start` on the trial's first frame, `wait` on every
         later one), where a rig's display blocks on its flip; then `Tracked.display`, which polls
         the source for the frame's sample and key edges; then whether what the frame shows changed,
-        which `Onscreen` reports."""
+        which `Onscreen` reports; then, given a drawing, the screen published if the frame is the
+        trial's first, its screen changed, or `REDRAWN_EVERY_S` has passed (`_publish`). A frame
+        that publishes nothing compares two integers for it, and builds nothing."""
         if frame == 1:
             self.pace.start()
         else:
             self.pace.wait(frame)
         Tracked.display(self, visible, frame)
-        if self._changed(visible):
+        self._frame = frame
+        changed = self._changed(visible)
+        if changed:
             self._onscreen = frame
-            self._shown_now(visible)
+            self._shown_now(visible, frame)
+        if self.publish is not None and (changed or frame >= self._redraw_at):
+            self._publish(visible, frame)
+
+    def ended(self) -> None:
+        """**The trial has ended** (§3.9): its screen published blank, as the animal's is until the
+        next trial's first frame, given a drawing; nothing without one. The session calls it at the
+        trial's boundary (demo mode's Task 4)."""
+        if self.publish is not None:
+            self.publish(self.drawing.blank(self, self.index, self._frame))
+
+    def _publish(self, visible, frame: int) -> None:
+        """The screen of `frame` drawn (`Drawing.drawn`) and published, whole, and the next redraw
+        due `REDRAWN_EVERY_S` on. **Only on a frame that publishes**, which a demo may spend
+        (§3.9)."""
+        self.publish(self.drawing.drawn(self, visible, self._values, self.trial, self.index, frame))
+        self._redraw_at = frame + self._redraw_every
 
     def happened(self, guard: Guard, state: str, frame: int) -> bool:
         """`Pressed` and `Response` on their key's down edge, `Released` on its up edge,
@@ -637,23 +850,27 @@ class Pointing(Tracked):
             index += 1
         return False
 
-    def _shown_now(self, visible) -> None:
-        """What the display shows now, kept, on a frame it changed."""
+    def _shown_now(self, visible, frame: int) -> None:
+        """What the display shows now, kept, on a frame it changed; and each stimulus's first
+        frame (`onsets`), its own while it stayed on the display, `frame` for one new to it."""
+        was = self.onsets
+        self.onsets = {name: was.get(name, frame) for name in visible}
         self._names = list(visible)
         self._stimuli = list(visible.values())
 
 
-def worlds(source: Source, *, pace: Pace, drawing=None,
+def worlds(source: Source, *, pace: Pace, drawing: "Drawing | None" = None,
            publish=None) -> "Callable[[Trial, dict, int], Pointing]":
     """**A demo session's worlds**, one a trial, as `taskd.Session.world` takes them, `(trial,
     values, index) -> Pointing`: the source readied for the trial's first frame (`new_trial`) and
-    the trial's inputs numbered (`inputs`), at the pace's frame period. One source and one pace for
-    the session."""
-    _undrawn(drawing, publish)
+    the trial's inputs numbered (`inputs`), at the pace's frame period, each publishing its screen
+    through `publish` drawn by `drawing`, given both. One source, one pace and one drawing for the
+    session."""
+    _paired(drawing, publish)
 
     def make(trial: Trial, values: dict, index: int) -> Pointing:
         source.new_trial()
         return Pointing(source, trial, pace.frame_period, values, pace=pace, keys=inputs(trial),
-                        index=index)
+                        index=index, drawing=drawing, publish=publish)
 
     return make

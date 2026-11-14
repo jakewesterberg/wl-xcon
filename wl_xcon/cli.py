@@ -857,10 +857,16 @@ def _refusal_lines(refusals: tuple, dropped: int) -> list[str]:
     return lines
 
 
+#: What starts the first line of a demo's frame, idle or running (demo mode §3.7, §4.2): the
+#: browser console's header tag, said first so it cannot be read past.
+DEMO_TAG = "DEMO  "
+
+
 def _render_idle(frame: _link.Idle) -> str:
     """`wlx taskd` with no session open (P4d-2b spec §6.1): any stranded animal first,
-    then a question owed, what a session may be opened with, and the refusals."""
-    lines = ["no session open  (wlx taskd, idle)"]
+    then a question owed, what a session may be opened with, and the refusals. A demo
+    service's says DEMO first (schema 21)."""
+    lines = [(DEMO_TAG if frame.demo else "") + "no session open  (wlx taskd, idle)"]
     for found in frame.stranded:
         if found.left_at is None:
             lines.append(
@@ -1017,11 +1023,17 @@ def render(frame: _link.Telemetry | _link.Idle) -> str:
     (engine build B); an idle frame's warnings are those an open asks to accept, one no kind
     accepts is said as what every run refuses, and a row saying they could not be listed is
     said as that.
+
+    **Schema 21 says DEMO** (demo mode §3.7, §4.2): a demo session's frame, and a demo service's
+    idle one, start with it, the frame's own `demo` field, never inferred from its animal or its
+    session's name. A `Drawn`, the demo's screen, is no frame for this screen: `wlx console` skips
+    it before it reaches here.
     """
     if isinstance(frame, _link.Idle):
         return _render_idle(frame)
     lines = [
-        f"session {_printable(frame.session_id)}  subject {_printable(frame.subject)}  "
+        (DEMO_TAG if frame.demo else "")
+        + f"session {_printable(frame.session_id)}  subject {_printable(frame.subject)}  "
         f"trial {frame.trial_index}  "
         f"block {'none yet' if frame.block is None else _printable(frame.block)}",
     ]
@@ -2324,6 +2336,11 @@ def main(argv: list[str] | None = None) -> int:
                 # exit on a natural end instead of after 5 idle seconds.
                 while True:
                     frame = console.receive()
+                    if isinstance(frame, _link.Drawn):
+                        # A demo's screen (demo mode §3.9): not a frame this console shows, and
+                        # alive all the same -- it ended this receive's wait, so a demo that is
+                        # only drawing never reads as a session gone quiet.
+                        continue
                     print(render(frame))
                     print()
                     # A session's stop ends the watch -- unless `wlx taskd` sent it,

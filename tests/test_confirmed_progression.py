@@ -633,16 +633,17 @@ def test_decline_and_a_confirmation_travel_the_wire_with_the_suggestion_they_ans
         _command_from({"kind": "decline", "suggestion": -1, "by": {"kind": "box", "name": "j"}})
 
 
-def test_a_reader_of_19_refuses_20_and_20_refuses_19_by_name(monkeypatch):
+def test_a_reader_of_19_refuses_a_later_frame_and_a_later_reader_refuses_19_by_name(monkeypatch):
     """Telemetry schema 20 carries the rig's suggestion: §3's schema rule, both ways round, so a
-    console built for 19 refuses a frame whose suggestion it would not show."""
+    console built for 19 refuses a frame whose suggestion it would not show, and a reader of this
+    build's schema (21 since demo mode, `tests/test_link.py`'s schema 21 test) refuses a 19 frame."""
     sent = frame()
 
-    assert SCHEMA == sent.schema == 20
-    with pytest.raises(SchemaMismatch, match="carried schema 19 and this console reads schema 20"):
+    assert SCHEMA == sent.schema == 21
+    with pytest.raises(SchemaMismatch, match="carried schema 19 and this console reads schema 21"):
         decode(encode(replace(sent, schema=19)))
     monkeypatch.setattr(wire, "SCHEMA", 19)
-    with pytest.raises(SchemaMismatch, match="carried schema 20 and this console reads schema 19"):
+    with pytest.raises(SchemaMismatch, match="carried schema 21 and this console reads schema 19"):
         decode(encode(sent))
 
 

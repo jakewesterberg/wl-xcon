@@ -3,7 +3,8 @@
 S9a §6-§10 designs the console; **§9, "The telemetry contract," is what this file
 implements.** This file holds the message (`Telemetry`, `Staged`, `Refused`), the
 idle frame `wlx taskd` publishes while no session is open (`Idle`, since schema 10;
-carrying the last closed session's summary since schema 11),
+carrying the last closed session's summary since schema 11), the screen a demo session's world
+publishes inside a trial (`Drawn`, since schema 21; demo mode's design §3.9),
 the commands a console sends back (`SetParameter`, `Stop`, and since b3a the service's
 `OpenSession`, `CheckRun`, `StartRun` and `EndSession`, since XC-026 its
 `ResumeSession`, since engine build C2a `ClearOwed`, `Drum` and `Training`, since C2b
@@ -12,7 +13,7 @@ search build `Decline`, the trainer's hold of the rig's `Suggestion`; `Command`)
 port a session publishes and drains through (`Link`, `Absent`, `Simulated`), its wire
 encoding (`encode`/`decode`, plus the command-side `_encode_command`/`_decode_command`),
 and the one live transport that carries all of it over a real socket (`ZmqLink`,
-`ZmqConsole`). Nothing here is deferred to a later module -- an earlier version of
+`ZmqConsole`; and since demo mode the pointer's reports, a fourth socket, `ZmqGaze` its sender). Nothing here is deferred to a later module -- an earlier version of
 this docstring said `encode`/`decode` would land "in a transport module", but Task 5's
 own brief puts them in this file instead, so that plan changed and this file is now
 current with the code rather than pointing at a module that does not exist.
@@ -51,9 +52,12 @@ from dataclasses import dataclass, field, fields
 from typing import ClassVar, Protocol
 
 from wl_xcon import actor as actors
+from wl_xcon import screen as screens
 from wl_xcon.actor import Actor
 from wl_xcon.findings import SESSION_KINDS
+from wl_xcon.geometry import Housing
 from wl_xcon.scheduler import DRUM_SCOPES, TRAINING
+from wl_xcon.viewport import Viewport
 from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 
 #: Bumped whenever a field changes meaning or disappears. ADR-0003: "schema-versioned
@@ -228,7 +232,17 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: fix round, also before 20 was released: `StaircaseRow.hardest`, the staircase's hardest step in
 #: the trainer's words (`task.Staircase.hardest`), which the prompt to move up says, empty where the
 #: task gives none. A reader of 19 refuses 20 and 20 refuses 19, by name.
-SCHEMA = 20
+#:
+#: 21 (demo mode, 2026-11-14; its design §3.7-§3.9): `Telemetry.demo`, whether a frame is a demo
+#: session's, on every frame; and `Idle.demo`, whether the service is a demo's (`wlx taskd --demo`),
+#: and `Idle.gaze`, whether a demo can be opened here, on every idle one, so every page and `wlx
+#: console` can say DEMO (§14 item 12). **And a third shape, `Drawn`** (phase `drawn`): the screen a
+#: demo's world shows, published whole inside a trial -- the `screen.Screen` in its wire form
+#: (`screen.to_wire`), the windows as the trial placed them, an array's target's flagged, what could
+#: not be drawn outlined, the setup's viewports, housings and field edge, and the keys -- or blank at
+#: a trial's end. Nothing else changed meaning. A reader of 20 refuses 21 and 21 refuses 20, by name,
+#: for all three shapes.
+SCHEMA = 21
 
 #: How many refusals a session keeps, per source, and therefore how many one
 #: `Telemetry` frame can carry.
@@ -806,6 +820,14 @@ class Idle:
     #: The warnings an open will ask to accept (schema 15), unaccepted: `WarningRow`s with no
     #: `by` or `at`.
     warnings: tuple = ()
+    #: **Whether this service is a demo's**, `wlx taskd --demo` (schema 21; demo mode §3.7), so
+    #: every page and `wlx console` says DEMO while no session is open too. `False` by default.
+    demo: bool = False
+    #: **Whether a demo can be opened here** (schema 21): the service has a gaze endpoint, the
+    #: link's fourth (§3.8), and, on a rig service, a demo root of its own (the PI, 2026-11-14), so a
+    #: page offers its demo choice only where one can open. `False` by default; demo mode's Task 4
+    #: sets it (`Service.publish`).
+    gaze: bool = False
 
     @classmethod
     def of(
@@ -821,10 +843,13 @@ class Idle:
         offered_tasks,
         closed: Telemetry | None = None,
         warnings=(),
+        demo: bool = False,
+        gaze: bool = False,
     ) -> "Idle":
         """One idle frame: the service's refusals and the link's, capped at
         `REFUSAL_HISTORY` and counted, as `Telemetry.of` caps a session's; and the last
-        closed session's summary and the warnings an open asks to accept, as given."""
+        closed session's summary, the warnings an open asks to accept, whether the service is a
+        demo's and whether a demo can open here, as given."""
         combined = tuple(refusals) + tuple(link.refused)
         kept = combined[-REFUSAL_HISTORY:]
         return cls(
@@ -839,6 +864,8 @@ class Idle:
             offered_tasks=tuple(offered_tasks),
             closed=closed,
             warnings=tuple(warnings),
+            demo=demo,
+            gaze=gaze,
         )
 
 
@@ -1171,6 +1198,11 @@ class Telemetry:
     #: words in its declared order, and its setting's value now, a `Pooled`, or `None` -- a task with
     #: no pool, and between runs. `None` by default.
     pool: "Pooled | None" = None
+    #: **Whether this is a demo session's frame** (schema 21; demo mode §3.7): the mouse is its
+    #: eye, `REFERENCE` its animal, its folder apart from the real sessions, so every page and `wlx
+    #: console` says DEMO on it. `False` by default, a real session's; `Telemetry.of` leaves it so
+    #: until demo mode's Task 4 gives a session something to read it from (`SessionSpec.demo`).
+    demo: bool = False
 
     @classmethod
     def of(cls, session, tally, scheduler, index: int) -> "Telemetry":
@@ -1410,6 +1442,68 @@ class Telemetry:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class DrawnWindow:
+    """**A window as the trial placed it** (schema 21; demo mode §3.9, §4.4): its center and radius
+    in degrees, as `gaze.Tracked` judges it on the frame drawn, the eye it is judged for, and whether
+    it is one of an array's target's objects, the scoring key the page labels *target* (§14 item
+    4)."""
+
+    name: str
+    x_deg: float
+    y_deg: float
+    radius_deg: float
+    eye: str
+    target: bool
+
+
+@dataclass(frozen=True, slots=True)
+class DrawnOutline:
+    """**A stimulus the drawing could not draw** (schema 21; demo mode §4.4, §14 item 3): a kind the
+    drawer does not draw yet, or a look with no value, outlined at its size where it is, with why."""
+
+    name: str
+    x_deg: float
+    y_deg: float
+    size_deg: float
+    why: str
+
+
+@dataclass(frozen=True, slots=True)
+class Drawn:
+    """**The screen a demo session's world shows** (schema 21; demo mode §3.9): published whole on
+    the PUB socket beside `Telemetry` and `Idle`, never a change, since telemetry is lossy and
+    latest-wins (S9a §9) -- on a trial's first frame, on the first frame after its screen changed, at
+    least every `pointer.REDRAWN_EVERY_S`, and blank, `screen` `None`, at the trial's end, as the
+    animal's screen is until the next trial's first frame (`pointer.Pointing`). Built by
+    `pointer.Drawing`; drawn by `wlx serve` with the exact drawer, never in the rig service's
+    process (§4.4); skipped by `wlx console`, which counts it alive."""
+
+    schema: int
+    #: Always `"drawn"`: the field `decode` tells the three shapes apart by.
+    phase: str
+    session_id: str
+    #: The trial's index in its run, and the frame drawn, counted from the trial's first.
+    trial: int
+    frame: int
+    #: The screen description resolved with the session's calibration (`screen.resolve`), or
+    #: `None`: blank, a trial's end.
+    screen: "screens.Screen | None"
+    #: The trial's windows as `gaze.Tracked` judges them on this frame, an array's object windows
+    #: where the trial placed them and its aliases' own stand-ins left out: `DrawnWindow`s.
+    windows: tuple
+    #: What could not be drawn, each saying why: `DrawnOutline`s.
+    outlines: tuple
+    #: The setup's viewports at the rig's pixels (`viewport.viewports`), and its light sensors'
+    #: housings, the stand-ins' where `stand_in`; the stereoscope's field edge, `None` in direct view.
+    viewports: tuple
+    housings: tuple
+    stand_in: bool
+    mask_deg: float | None
+    #: Key `k`'s input at index `k - 1`, for the page's key list (§3.4).
+    keys: tuple
+
+
 def _carried(value: object, choices=()) -> object:
     """A staged value as a frame carries it: a whole position -- a `Polar`, or a pair where its
     setting's `choices` declare one -- as the rig's words for it, eccentricity and direction first
@@ -1528,8 +1622,9 @@ def _warnings_in(data) -> tuple:
     )
 
 
-def encode(telemetry: Telemetry | Idle) -> bytes:
-    """`Telemetry` (or, while no session is open, `Idle`) to msgpack, the wire format ADR-0003 named alongside ZeroMQ.
+def encode(telemetry: Telemetry | Idle | Drawn) -> bytes:
+    """`Telemetry` (or, while no session is open, `Idle`; or a demo's screen, `Drawn`) to msgpack,
+    the wire format ADR-0003 named alongside ZeroMQ.
 
     Imports `msgpack` **lazily, inside this function** -- the same discipline as
     `ZmqLink`/`ZmqConsole` below and required by this task: `link.py` is imported by
@@ -1547,6 +1642,8 @@ def encode(telemetry: Telemetry | Idle) -> bytes:
     """
     import msgpack
 
+    if isinstance(telemetry, Drawn):
+        return msgpack.packb(_drawn_out(telemetry), use_bin_type=True)
     if isinstance(telemetry, Idle):
         return msgpack.packb(
             {
@@ -1567,10 +1664,39 @@ def encode(telemetry: Telemetry | Idle) -> bytes:
                 "offered_tasks": list(telemetry.offered_tasks),
                 "closed": None if telemetry.closed is None else _telemetry_out(telemetry.closed),
                 "warnings": _warnings_out(telemetry.warnings),
+                # Demo mode (schema 21).
+                "demo": telemetry.demo,
+                "gaze": telemetry.gaze,
             },
             use_bin_type=True,
         )
     return msgpack.packb(_telemetry_out(telemetry), use_bin_type=True)
+
+
+def _drawn_out(drawn: Drawn) -> dict:
+    """A `Drawn` as the plain mapping `encode` packs (schema 21), its screen in `screen.to_wire`'s
+    form, written out by name for `_drawn_from`."""
+    return {
+        "schema": drawn.schema,
+        "phase": drawn.phase,
+        "session_id": drawn.session_id,
+        "trial": drawn.trial,
+        "frame": drawn.frame,
+        "screen": None if drawn.screen is None else screens.to_wire(drawn.screen),
+        "windows": [{"name": w.name, "x_deg": w.x_deg, "y_deg": w.y_deg,
+                     "radius_deg": w.radius_deg, "eye": w.eye, "target": w.target}
+                    for w in drawn.windows],
+        "outlines": [{"name": o.name, "x_deg": o.x_deg, "y_deg": o.y_deg,
+                      "size_deg": o.size_deg, "why": o.why} for o in drawn.outlines],
+        "viewports": [{"eye": v.eye, "width_px": v.width_px, "height_px": v.height_px,
+                       "pitch_cm": list(v.pitch_cm), "distance_cm": v.distance_cm,
+                       "ahead_cm": list(v.ahead_cm)} for v in drawn.viewports],
+        "housings": [{"left_cm": h.left_cm, "right_cm": h.right_cm, "bottom_cm": h.bottom_cm,
+                      "top_cm": h.top_cm, "margin_cm": h.margin_cm} for h in drawn.housings],
+        "stand_in": drawn.stand_in,
+        "mask_deg": drawn.mask_deg,
+        "keys": list(drawn.keys),
+    }
 
 
 #: A `Suggestion`'s fields, in order, as a frame carries them (schema 20).
@@ -1728,6 +1854,8 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
             else {"setting": telemetry.pool.setting, "pairings": list(telemetry.pool.pairings),
                   "value": telemetry.pool.value}
         ),
+        # Demo mode (schema 21): on every frame.
+        "demo": telemetry.demo,
     }
 
 
@@ -1760,7 +1888,7 @@ class SchemaMismatch(FrameError):
         )
 
 
-def decode(payload: bytes) -> Telemetry | Idle:
+def decode(payload: bytes) -> Telemetry | Idle | Drawn:
     """The inverse of `encode`, rebuilding `Staged`/`Refused` rather than leaving
     them as the plain dicts msgpack hands back.
 
@@ -1780,8 +1908,10 @@ def decode(payload: bytes) -> Telemetry | Idle:
     exists to prevent, and a console showing it would be the same failure one hop
     further downstream.
 
-    **Two shapes, one schema** (b3a): a frame whose `phase` is `idle` is an `Idle`,
-    checked for its schema first like every other.
+    **Three shapes, one schema** (b3a; demo mode, schema 21): a frame whose `phase` is `idle` is
+    an `Idle`, one whose `phase` is `drawn` a `Drawn`, each checked for its schema first like every
+    other; a `Drawn` whose screen `screen.from_wire` refuses, or whose numbers, words or flags are
+    not what its fields hold, is a `FrameError` as any malformed frame is.
 
     **The schema is read and checked first, before any other field** (fix round 1,
     I3): see `SchemaMismatch`. Every other way this can fail -- bytes that are not
@@ -1805,10 +1935,13 @@ def decode(payload: bytes) -> Telemetry | Idle:
     if schema != SCHEMA:
         raise SchemaMismatch(schema)
     try:
-        if data.get("phase") == "idle":
+        phase = data.get("phase")
+        if phase == "idle":
             return _idle_from(data)
+        if phase == "drawn":
+            return _drawn_from(data)
         return _telemetry_from(data)
-    except (KeyError, TypeError, actors.NotAnActor) as exc:
+    except (KeyError, TypeError, ValueError) as exc:  # `actors.NotAnActor` is a `ValueError`
         raise FrameError(
             f"a telemetry frame could not be decoded, so it is not shown: "
             f"{_describe(exc)}"
@@ -1854,7 +1987,80 @@ def _idle_from(data: dict) -> Idle:
         offered_tasks=tuple(data["offered_tasks"]),
         closed=None if data["closed"] is None else _telemetry_from(data["closed"]),
         warnings=_warnings_in(data["warnings"]),
+        demo=_flag(data["demo"]),
+        gaze=_flag(data["gaze"]),
     )
+
+
+def _drawn_from(data: dict) -> Drawn:
+    """`_telemetry_from`'s twin for a demo's screen (schema 21): every number a finite one, every
+    count a whole one, every word a string and every flag a bool, the screen `screen.from_wire`'s,
+    and the housings `geometry.Housing`'s own rules; anything else a malformed frame (`TypeError` or
+    `ValueError`, which `decode` makes a `FrameError`)."""
+    return Drawn(
+        schema=data["schema"],
+        phase=data["phase"],
+        session_id=_word_of(data["session_id"]),
+        trial=_whole(data["trial"]),
+        frame=_whole(data["frame"]),
+        screen=None if data["screen"] is None else screens.from_wire(data["screen"]),
+        windows=tuple(
+            DrawnWindow(name=_word_of(w["name"]), x_deg=_real(w["x_deg"]), y_deg=_real(w["y_deg"]),
+                        radius_deg=_real(w["radius_deg"]), eye=_word_of(w["eye"]),
+                        target=_flag(w["target"]))
+            for w in data["windows"]
+        ),
+        outlines=tuple(
+            DrawnOutline(name=_word_of(o["name"]), x_deg=_real(o["x_deg"]), y_deg=_real(o["y_deg"]),
+                         size_deg=_real(o["size_deg"]), why=_word_of(o["why"]))
+            for o in data["outlines"]
+        ),
+        viewports=tuple(
+            Viewport(eye=_word_of(v["eye"]), width_px=_whole(v["width_px"]),
+                     height_px=_whole(v["height_px"]), pitch_cm=_pair(v["pitch_cm"]),
+                     distance_cm=_real(v["distance_cm"]), ahead_cm=_pair(v["ahead_cm"]))
+            for v in data["viewports"]
+        ),
+        housings=tuple(
+            Housing(left_cm=_real(h["left_cm"]), right_cm=_real(h["right_cm"]),
+                    bottom_cm=_real(h["bottom_cm"]), top_cm=_real(h["top_cm"]),
+                    margin_cm=_real(h["margin_cm"]))
+            for h in data["housings"]
+        ),
+        stand_in=_flag(data["stand_in"]),
+        mask_deg=None if data["mask_deg"] is None else _real(data["mask_deg"]),
+        keys=tuple(_word_of(key) for key in data["keys"]),
+    )
+
+
+def _real(value: object) -> float:
+    """A wire number a drawing is placed by: finite, and never a bool, or a malformed frame
+    (`TypeError`, which `decode` makes a `FrameError`)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise TypeError(f"a drawing's number is a finite one, not {value!r}")
+    return float(value)
+
+
+def _whole(value: object) -> int:
+    """A wire count -- a trial's index, a frame, a viewport's pixels: a whole number from 0, never
+    a bool, or a malformed frame (`TypeError`)."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise TypeError(f"a count is a whole number from 0, not {value!r}")
+    return value
+
+
+def _word_of(value: object) -> str:
+    """A wire word -- a name, an eye, a reason: a string, or a malformed frame (`TypeError`)."""
+    if not isinstance(value, str):
+        raise TypeError(f"a name or a reason is a string, not {value!r}")
+    return value
+
+
+def _pair(value: object) -> tuple[float, float]:
+    """A wire pair of finite numbers, or a malformed frame (`TypeError`)."""
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        raise TypeError(f"a pair is two numbers, not {value!r}")
+    return (_real(value[0]), _real(value[1]))
 
 
 def _flag(value: object) -> bool:
@@ -2019,6 +2225,7 @@ def _telemetry_from(data: dict) -> Telemetry:
         staircase=_staircase_in(data["staircase"]),
         bars=_bars_in(data["bars"]),
         pool=_pooled_in(data["pool"]),
+        demo=_flag(data["demo"]),
     )
 
 
@@ -3115,11 +3322,15 @@ class Link(Protocol):
     #: How many `refused` entries this link has already discarded to stay inside
     #: `REFUSAL_HISTORY`. Rolled into `Telemetry.refusals_dropped`.
     refused_dropped: int
+    #: **Where the page's pointer reports arrive** (demo mode §3.8), the link's fourth endpoint, or
+    #: `None` for a link with none, on which no demo can be steered.
+    gaze_endpoint: "str | None"
 
-    def publish(self, telemetry: Telemetry | Idle) -> None:
+    def publish(self, telemetry: Telemetry | Idle | Drawn) -> None:
         """Offer telemetry to whoever is listening. **Must never block**: latest-wins
         telemetry that could stall a trial boundary would make a view able to delay an
-        experiment."""
+        experiment. A demo's world also publishes its screen, a `Drawn`, inside a trial (demo
+        mode §3.9)."""
 
     def drain(self) -> list[Command]:
         """Every command that has arrived since the last call. Non-blocking, and each
@@ -3138,6 +3349,12 @@ class Link(Protocol):
         arrived, else `0`. A command is left for `drain`. The paused loop's one wait,
         so a mark is stamped and a resume is read as soon as either arrives."""
 
+    def gaze_into(self, buffer: bytearray) -> int:
+        """**One pointer report read into `buffer`** (demo mode §3.8): its size, which may be
+        larger than the buffer, a part then read; or `-1` with none waiting. **Called up to
+        `pointer.DRAIN` times a frame** by a demo's `pointer.Source`: it never blocks, does bounded
+        work, and on a live link allocates no bytes object (`ZmqLink.gaze_into`)."""
+
 
 @dataclass(frozen=True, slots=True)
 class Absent:
@@ -3154,8 +3371,10 @@ class Absent:
     refused: tuple = ()
     #: Always zero, for the same reason: nothing to keep, so nothing to discard.
     refused_dropped: int = 0
+    #: No gaze channel: no demo is steered without a console (demo mode §3.8).
+    gaze_endpoint: "str | None" = None
 
-    def publish(self, telemetry: Telemetry | Idle) -> None:
+    def publish(self, telemetry: Telemetry | Idle | Drawn) -> None:
         return None
 
     def drain(self) -> list[Command]:
@@ -3171,6 +3390,10 @@ class Absent:
         a paused loop would not spin."""
         time.sleep(timeout)
         return 0
+
+    def gaze_into(self, buffer: bytearray) -> int:
+        """Nothing ever arrives: `-1`, none waiting."""
+        return -1
 
 
 @dataclass
@@ -3193,11 +3416,17 @@ class Simulated:
     #: Mark signals a test has sent, oldest first: `mark_signal` and `idle` hand
     #: each over once (P4d-2b b2a).
     marks: list = field(default_factory=list)
+    #: **Pointer reports a test has sent, oldest first** (demo mode §3.8): `gaze_into` hands each
+    #: over once, as the gaze socket would.
+    gazes: list = field(default_factory=list)
+    #: A name for the gaze channel `gazes` is, so a simulated link is one a demo can be steered
+    #: on; `None` for a test of a link with none.
+    gaze_endpoint: "str | None" = "simulated"
 
     def queue(self, command) -> None:
         self._queued.append(command)
 
-    def publish(self, telemetry: Telemetry | Idle) -> None:
+    def publish(self, telemetry: Telemetry | Idle | Drawn) -> None:
         self.published.append(telemetry)
 
     def drain(self) -> list[Command]:
@@ -3211,6 +3440,16 @@ class Simulated:
         """Never waits: a simulated session's clocks are the test's, not this
         host's. A test that scripts what arrives while paused overrides this."""
         return self.mark_signal()
+
+    def gaze_into(self, buffer: bytearray) -> int:
+        """The oldest report a test sent, read into `buffer` as `recv_into` reads one, cut to the
+        buffer, and its whole size; `-1` with none waiting. Each is handed over once."""
+        if not self.gazes:
+            return -1
+        message = self.gazes.pop(0)
+        part = min(len(message), len(buffer))
+        buffer[:part] = message[:part]
+        return len(message)
 
 
 class RemoteBindRefused(Exception):
@@ -3452,6 +3691,7 @@ class ZmqLink:
         pub_endpoint: str,
         rep_endpoint: str,
         mark_endpoint: str | None = None,
+        gaze_endpoint: str | None = None,
         *,
         allow_remote: bool = False
     ):
@@ -3461,6 +3701,14 @@ class ZmqLink:
         PULL socket `mark_signal` checks once per frame, so an operator's mark is
         stamped in the frame it reaches the rig rather than at the next trial
         boundary (spec §5.0). Without it, this link has no marks, as in b1.
+
+        **A fourth, the gaze socket, when `gaze_endpoint` is given** (demo mode §3.8): a PULL
+        socket a demo's `pointer.Source` reads the page's pointer reports from, up to
+        `pointer.DRAIN` a frame, through `gaze_into`. **Loopback only, whatever `allow_remote`
+        says**: whoever reaches it moves a demo's eye, and nothing but `wlx serve` on this box is
+        meant to (`ZmqGaze`). Its queue holds `pointer.DRAIN` reports (`RCVHWM`), so what a frame
+        or a trial's first frame drains is bounded and recent. Without it, this link steers no
+        demo, as every link before demo mode.
 
         S9a §7 states the assumption this link runs on, in as many words: `taskd`
         trusts the actor named in a command *"because they are the same machine and
@@ -3492,6 +3740,15 @@ class ZmqLink:
         """
         import zmq
 
+        # Demo mode §3.8: the gaze socket is loopback's alone, `allow_remote` or not. Before the
+        # context, so a refusal leaves nothing to clean up.
+        if gaze_endpoint is not None and _binds_beyond_this_machine(gaze_endpoint):
+            raise RemoteBindRefused(
+                f"refusing to bind the PULL (gaze) endpoint on {gaze_endpoint!r}: it is reachable "
+                f"from other hosts, and whoever reaches it moves a demo's eye, which only `wlx "
+                f"serve` on this computer is meant to (demo mode §3.8). The gaze endpoint binds on "
+                f"loopback (tcp://127.0.0.1:PORT) whatever --link-allow-remote says"
+            )
         if not allow_remote:
             # Before the context, so a refusal leaves nothing to clean up.
             for role, endpoint in (
@@ -3565,6 +3822,22 @@ class ZmqLink:
                 self._mark.setsockopt(zmq.LINGER, 0)
                 self._mark.bind(mark_endpoint)
                 self.mark_endpoint = self._mark.getsockopt_string(zmq.LAST_ENDPOINT)
+
+            #: The gaze socket, or `None` for a link given no gaze endpoint (demo mode §3.8).
+            self._gaze = None
+            #: What ZeroMQ bound it to, for `wlx serve` and the idle frame; `None` without one.
+            self.gaze_endpoint: str | None = None
+            if gaze_endpoint is not None:
+                from wl_xcon.pointer import DRAIN
+
+                self._gaze = self._ctx.socket(zmq.PULL)
+                self._sockets.append(self._gaze)
+                self._gaze.setsockopt(zmq.LINGER, 0)
+                # Before the bind, so it holds for every connection: a frame drains at most
+                # `DRAIN`, and a trial's first frame everything waiting (`pointer.Source`).
+                self._gaze.setsockopt(zmq.RCVHWM, DRAIN)
+                self._gaze.bind(gaze_endpoint)
+                self.gaze_endpoint = self._gaze.getsockopt_string(zmq.LAST_ENDPOINT)
         except BaseException:
             # `close()`, now, rather than when this half-built object is freed: it
             # closes whichever sockets got that far, and an interrupted release leaves
@@ -3605,8 +3878,10 @@ class ZmqLink:
         #: Counted in the frame, where nothing may grow a list, and refused once at
         #: the next `drain()`.
         self.mark_malformed: int = 0
+        #: `zmq.Again`, read once, so `gaze_into` catches it without an import in a frame.
+        self._again = zmq.Again
 
-    def publish(self, telemetry: Telemetry | Idle) -> None:
+    def publish(self, telemetry: Telemetry | Idle | Drawn) -> None:
         """Offer telemetry to whoever is subscribed. **Never blocks** (S9a §9: "ZMQ
         PUB drops rather than blocks, because latest-wins telemetry must never stall
         a frame"): sent with `zmq.DONTWAIT`, and a full send queue -- `zmq.Again` --
@@ -3746,6 +4021,28 @@ class ZmqLink:
         if number == 0:
             self.mark_malformed += 1
         return number
+
+    def gaze_into(self, buffer: bytearray) -> int:
+        """**One pointer report read into `buffer`**, its size (which `recv_into` gives whole
+        even when the buffer is shorter, so an oversize report is told from a good one), or `-1`
+        with none waiting (the `Link` protocol; demo mode §3.8).
+
+        **On a demo's frame, up to `pointer.DRAIN` times**: with nothing waiting it is
+        `mark_signal`'s check, one `getsockopt(EVENTS)` and one `&`; with a report waiting, one
+        `recv_into`, which writes into the caller's buffer, allocated once by `pointer.Source`,
+        and builds no bytes object (pyzmq 27.1.0, as installed in this repository's venv:
+        `Socket.recv_into`, "storing the data into a buffer rather than allocating a new Frame").
+        A scratchpad `tracemalloc` probe, 2026-11-14, saw that call hold nothing once it returned,
+        and 312 bytes taken and given back inside it, whatever the count of reads: pyzmq's own,
+        not a measurement of this system's timing. `-1` too for a link with no gaze socket."""
+        gaze = self._gaze
+        if gaze is None or not gaze.getsockopt(self._events) & self._pollin:
+            return -1
+        try:
+            return gaze.recv_into(buffer, flags=self._dontwait)
+        except self._again:
+            # Gone between the check and the read: none waiting after all.
+            return -1
 
     def idle(self, timeout: float) -> int:
         """Wait up to `timeout` seconds for a mark signal or a command, whichever
@@ -4052,10 +4349,12 @@ class ZmqConsole:
         self._req.send(_encode_command(command))
         self._awaiting_reply = True
 
-    def receive(self) -> Telemetry:
+    def receive(self) -> Telemetry | Idle | Drawn:
         """Block for the next telemetry frame, up to the receive timeout set in
         `__init__`. Raises `TimeoutError` rather than leaking `zmq.Again` -- nothing
-        outside this file has a reason to know this link happens to be ZeroMQ."""
+        outside this file has a reason to know this link happens to be ZeroMQ. A demo's
+        screen, a `Drawn`, is returned as any frame is: the caller decides what it shows
+        (`wlx console` skips it, demo mode §3.9)."""
         import zmq
 
         try:
@@ -4151,6 +4450,67 @@ class ZmqMarks:
         self._finalizer.detach()
 
     def __enter__(self) -> "ZmqMarks":
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
+
+
+class ZmqGaze:
+    """**The console side of the gaze channel** (demo mode §3.8, §4.5): a PUSH socket connected
+    to a demo's gaze endpoint, which `wlx serve`'s gaze thread owns, sending each pointer report
+    the page posts, packed as `pointer.MESSAGE`.
+
+    **Never blocking**: `send` hands a report over with ZeroMQ's non-blocking send and answers
+    whether it went, so a rig that is not reading -- gone, or between runs -- costs a page one
+    `False`, never a wait. **`IMMEDIATE`**, as `ZmqMarks`, so a report is queued only to a
+    completed connection. **Its queue holds `pointer.DRAIN` reports** (`SNDHWM`), as the rig's
+    does (`ZmqLink`), so what waits for a rig that has stopped reading is a few frames' drains,
+    never a minute of a hand's path: a scratchpad probe, 2026-11-14, on loopback with pyzmq 27.1.0
+    and libzmq 4.3.5, queued 192 reports before a send was refused at this bound, and 3,000 at
+    ZeroMQ's default of 1,000 (a count, not a measurement of this system's timing). A report is
+    the newest wins on the rig (`pointer.Source`), so one refused here is one superseded.
+
+    Released the way `ZmqLink` and `ZmqMarks` are: `_release`, from `close()` or from its
+    finalizer, with its one socket in the list the finalizer holds.
+    """
+
+    def __init__(self, gaze_endpoint: str) -> None:
+        """Connect to `gaze_endpoint`. Nothing waits: ZeroMQ connects in the background."""
+        import zmq
+
+        from wl_xcon.pointer import DRAIN
+
+        self._ctx = zmq.Context()
+        self._sockets: list = []
+        self._finalizer = weakref.finalize(self, _release, self._ctx, self._sockets)
+        self._push = self._ctx.socket(zmq.PUSH)
+        self._sockets.append(self._push)
+        self._push.setsockopt(zmq.LINGER, 0)
+        self._push.setsockopt(zmq.IMMEDIATE, 1)
+        self._push.setsockopt(zmq.SNDHWM, DRAIN)
+        self._push.connect(gaze_endpoint)
+        #: Where this sends.
+        self.endpoint = gaze_endpoint
+
+    def send(self, message: bytes) -> bool:
+        """Hand `message`, one packed report, to the rig's socket without waiting: `True` if it
+        went, `False` if no rig is connected or its queue is full."""
+        import zmq
+
+        try:
+            self._push.send(message, flags=zmq.DONTWAIT)
+        except zmq.Again:
+            return False
+        return True
+
+    def close(self) -> None:
+        """See `ZmqLink.close`: the same release, with no grace, since this end sends no
+        replies."""
+        _release(self._ctx, self._sockets)
+        self._finalizer.detach()
+
+    def __enter__(self) -> "ZmqGaze":
         return self
 
     def __exit__(self, *exc_info: object) -> None:

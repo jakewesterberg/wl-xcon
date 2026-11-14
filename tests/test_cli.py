@@ -51,6 +51,7 @@ from wl_xcon.link import (
     SCHEMA,
     Control,
     Counts,
+    Drawn,
     ParamRow,
     Performance,
     Preflight,
@@ -1737,6 +1738,78 @@ def test_console_shows_a_schema_mismatch_as_a_sentence_not_a_traceback(
     assert "console: a telemetry frame carried schema 6" in captured.err
     assert f"this console reads schema {SCHEMA}" in captured.err
     assert "Traceback" not in captured.err
+
+
+# ---------------------------------------------------------------------------
+# `wlx console` and a demo (demo mode §3.7, §3.9; telemetry schema 21)
+# ---------------------------------------------------------------------------
+
+
+def test_render_says_demo_when_the_frame_does():
+    """§3.7, §4.2: a demo session's frame and a demo service's idle frame start with DEMO, the
+    frame's own `demo`, so a terminal watching one cannot be read as watching an animal; a real
+    session's and a rig service's never do."""
+    assert render(_telemetry(demo=True)).startswith("DEMO  session 2027-01-14_01  subject ")
+    assert render(idle(demo=True)).startswith("DEMO  no session open  (wlx taskd, idle)")
+    assert "DEMO" not in render(_telemetry()) and "DEMO" not in render(idle())
+
+
+def _a_demo_screen() -> Drawn:
+    """A demo's screen: its fixation point, as `pointer.Drawing` resolves one."""
+    from _rig import DIRECT
+    from wl_xcon import screen
+    from wl_xcon.photometry import SRGB, Gray
+    from wl_xcon.task import Disc, Stimulus, Trial
+
+    shown = {"fix": Stimulus("fix", at=(0.0, 0.0), looks=Disc(size=0.3, color=Gray(40.0)))}
+    return Drawn(
+        schema=SCHEMA, phase="drawn", session_id="2027-01-14_01", trial=0, frame=1,
+        screen=screen.resolve(shown, {}, Trial(start="s", states=[]), DIRECT,
+                              frame_period=1 / 240, calibration=SRGB),
+        windows=(), outlines=(), viewports=(), housings=(), stand_in=False, mask_deg=None,
+        keys=(),
+    )
+
+
+def test_wlx_console_skips_a_drawn_but_counts_it_alive(zmq_cleanup, capsys):
+    """§3.9 (§14 item 11): `wlx console` shows sessions, not screens, so a `Drawn` is never
+    printed -- and it is alive all the same: a demo drawing its screen and nothing else for 6 s
+    does not end the watch at the console's 5 s receive timeout. Then the session's stop is printed,
+    once, and the watch ends as for any session. A real `ZmqLink` and `wlx console` through `main()`
+    on a thread, as `test_console_shows_a_schema_mismatch_as_a_sentence_not_a_traceback` runs it."""
+    link = zmq_cleanup(
+        ZmqLink(pub_endpoint="tcp://127.0.0.1:0", rep_endpoint="tcp://127.0.0.1:0")
+    )
+    result: dict = {}
+
+    def _run_console() -> None:
+        result["exit_code"] = main(["console", "--sub", link.pub_endpoint, "--req",
+                                    link.rep_endpoint])
+
+    runner = threading.Thread(target=_run_console, daemon=True)
+    drawn = _a_demo_screen()
+    stopped = _telemetry(demo=True, stopped_because="stopped by jake", stop_kind="operator")
+    runner.start()
+    try:
+        started = time.monotonic()
+        while time.monotonic() - started < 6.0 and runner.is_alive():
+            link.publish(drawn)
+            time.sleep(0.1)
+        watched_past_the_timeout = runner.is_alive()
+        for _ in range(250):
+            link.publish(stopped)
+            if not runner.is_alive():
+                break
+            time.sleep(0.02)
+    finally:
+        runner.join(timeout=10)
+
+    captured = capsys.readouterr()
+    assert watched_past_the_timeout, f"the watch ended while only Drawns arrived: {captured.err}"
+    assert not runner.is_alive(), "wlx console never exited on the session's stop"
+    assert result.get("exit_code") == 0, captured.err
+    assert captured.out.startswith("DEMO  session 2027-01-14_01")
+    assert captured.out.count("subject REFERENCE") == 1, captured.out
 
 
 # ---------------------------------------------------------------------------

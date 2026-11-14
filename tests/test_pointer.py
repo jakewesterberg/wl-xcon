@@ -31,17 +31,19 @@ from pathlib import Path
 import pytest
 
 from _builds import built_on, builds_of
-from _rig import DIRECT
-from wl_xcon import pointer, run, saccade, simeye
+from _rig import DIRECT, RIG
+from wl_xcon import pointer, run, saccade, simeye, viewport
 from wl_xcon.bounds import Bounds, Ceiling, Floor
 from wl_xcon.dio import Simulated as Card
-from wl_xcon.link import Simulated, Stop
+from wl_xcon.geometry import polar_of_deg
+from wl_xcon.link import Simulated, Stop, decode, encode
 from wl_xcon.photometry import SRGB, Gray
 from wl_xcon.actor import Box
 from wl_xcon.run import Changed, Confirmed, Placed, Recorded, Shown, run_trial
 from wl_xcon.task import (
     REMEMBERED,
     After,
+    Array,
     ChairStill,
     Disc,
     Entered,
@@ -49,9 +51,12 @@ from wl_xcon.task import (
     FeatureAbove,
     Hide,
     Hold,
+    Noise,
     On,
     Onscreen,
     Outcome,
+    P,
+    Picture,
     Pressed,
     Released,
     Response,
@@ -64,6 +69,7 @@ from wl_xcon.task import (
     Touched,
     Trial,
     Window,
+    actions_of,
 )
 from wl_xcon.taskd import Session, SessionSpec
 from wl_xcon.welfare import Deployment, Simulated as Pump
@@ -677,14 +683,142 @@ def test_the_noise_is_drawn_from_the_runs_seed():
     assert noise(7, noise_deg=0.0) == [0.0] * 10
 
 
-def test_a_drawing_or_a_publisher_is_refused_until_the_drawing_is_built():
-    """Not yet (`pointer._undrawn`): the screen published to the page waits on demo mode's Task 3,
-    so a drawing or a publisher given is refused, never quietly dropped."""
+# --- The screen, to the page (§3.9) ------------------------------------------------------------
+
+
+def _drawing(**over) -> pointer.Drawing:
+    """A demo's drawing on this rig's direct view, its housings the stand-ins, on the default
+    calibration."""
+    return pointer.Drawing(RIG, DIRECT, SRGB, session_id=over.pop("session_id", "demo-1"),
+                           stand_in=over.pop("stand_in", True))
+
+
+def test_a_drawing_and_a_publisher_go_together():
+    """`pointer._paired`: a drawing with no publisher would be resolved for nobody, and a publisher
+    with no drawing would never be called, the page left blank with nothing raising; so either
+    alone is refused, by `worlds` and by `Pointing`. Neither is an in-process world's, which
+    publishes nothing, at its end too."""
     clock, page, source, pace = _rig()
-    with pytest.raises(NotImplementedError, match="Task 3"):
-        pointer.worlds(source, pace=pace, publish=print)
-    with pytest.raises(NotImplementedError, match="Task 3"):
-        pointer.Pointing(source, FIX, FRAME, {}, pace=pace, keys=(), drawing=object())
+    for given in (dict(publish=print), dict(drawing=_drawing())):
+        with pytest.raises(ValueError, match="give a `Drawing` and a publisher together"):
+            pointer.worlds(source, pace=pace, **given)
+        with pytest.raises(ValueError, match="give a `Drawing` and a publisher together"):
+            pointer.Pointing(source, FIX, FRAME, {}, pace=pace, keys=(), **given)
+    world = _world(FIX, source, pace)
+    assert world.drawing is None and world.publish is None
+    world.ended()
+
+
+#: **A trial whose screen changes once**: the dot from its first frame; a transition that changes
+#: nothing shown; the goal shown beside the dot; a key waited on, never pressed.
+_SHOWING = Trial(
+    start="a",
+    windows=[Window("fix", at=(0.0, 0.0), radius=2.0, on="dot"),
+             Window("goal", at=(8.0, 0.0), radius=2.0, on="goal")],
+    states=[
+        State("a", enter=[Show(DOT)], go=[On(After(1.2), "b")]),
+        State("b", go=[On(After(1.3), "c", do=[Show(TARGET)])]),
+        State("c", go=[On(After(1.2), Outcome.CORRECT), On(Pressed("lever"), Outcome.ABORT)]),
+    ],
+)
+
+
+def test_pointing_publishes_at_start_on_a_change_each_second_and_a_blank_at_the_end():
+    """§3.9: a demo's world publishes its screen whole on the trial's first frame, on the first
+    frame its screen changed (never for a transition that changed nothing shown), at least every
+    `REDRAWN_EVERY_S` of the trial's clock, and, once the trial has ended (`ended`, which the
+    session calls), blank: no screen and no windows, as the animal's is until the next trial. Each
+    carries the trial and frame, the setup's viewports, housings and field edge, the stand-in flag
+    and the keys, each stimulus's first frame (its onset, from which a drift is timed), and crosses
+    the wire whole. A trial's first frame is published though it shows nothing."""
+    clock, page, source, pace = _rig()
+    _still(page, 0.0, 0.0, range(1, 1000))
+    link = Simulated()
+    world = pointer.worlds(source, pace=pace, drawing=_drawing(session_id="demo-2026-11-14_1012"),
+                           publish=link.publish)(_SHOWING, {}, 4)
+    shown: dict = {}
+    display = world.display
+
+    def watched(visible, frame: int) -> None:
+        shown[frame] = tuple(visible)
+        display(visible, frame)
+
+    world.display = watched
+    result = run_trial(_SHOWING, world, FRAME, effects=Recorded())
+    world.ended()
+
+    assert result.outcome is Outcome.CORRECT and result.visited == ("a", "b", "c")
+    every = round(pointer.REDRAWN_EVERY_S / FRAME)
+    last = max(shown)
+    changed = min(frame for frame, names in shown.items() if "goal" in names)
+    assert shown[changed - 1] == ("dot",)
+    expected = [*range(1, changed, every), *range(changed, last + 1, every), last]
+    assert [drawn.frame for drawn in link.published] == expected
+    assert 1 + every < changed < changed + every < last, "redrawn before its change and after"
+
+    *drawings, blank = link.published
+    for drawn in link.published:
+        assert (drawn.phase, drawn.session_id, drawn.trial) == ("drawn", "demo-2026-11-14_1012", 4)
+        assert drawn.viewports == viewport.viewports(RIG, DIRECT)
+        assert drawn.housings == DIRECT.housings and drawn.stand_in is True
+        assert drawn.mask_deg is None and drawn.keys == ("lever",)
+        assert decode(encode(drawn)) == drawn
+    for drawn in drawings:
+        assert drawn.screen.frame == drawn.frame
+        onsets = {item.name: item.onset_frame for item in drawn.screen.items}
+        assert onsets == ({"dot": 1, "goal": changed} if drawn.frame >= changed else {"dot": 1})
+        assert [window.name for window in drawn.windows] == ["fix", "goal"]
+        assert drawn.outlines == ()
+    assert (blank.screen, blank.windows, blank.outlines) == (None, (), ())
+
+    clock, page, source, pace = _rig()
+    _still(page, 0.0, 0.0, range(1, 100))
+    link = Simulated()
+    later = Trial(start="a", states=[State("a", go=[On(After(0.1), "b", do=[Show(DOT)])]),
+                                     State("b", go=[On(After(0.1), Outcome.CORRECT)])])
+    world = pointer.worlds(source, pace=pace, drawing=_drawing(), publish=link.publish)(later, {}, 0)
+    run_trial(later, world, FRAME, effects=Recorded())
+    world.ended()
+    first, shown_later, blank = link.published
+    assert (first.frame, first.screen.items) == (1, ())
+    assert [item.name for item in shown_later.screen.items] == ["dot"] and blank.screen is None
+
+
+def test_an_undrawable_kind_and_a_look_with_no_value_are_outlines_saying_why():
+    """§4.4 (§14 item 3): a stimulus the drawer does not draw yet (`screen.NotYetDrawable` names
+    its build) and one whose look has no value are outlines where they are, at their size or
+    `OUTLINE_DEG` where it cannot be read, each saying why -- an array's, one an object -- and the
+    rest of the screen is resolved and drawn. Given its value, the look is drawn."""
+    clock, page, source, pace = _rig()
+    world = _world(FIX, source, pace)
+    ring = Array(n=3, radius=6.0, looks=Noise(aperture=2.0), among=Noise(aperture=2.0))
+    visible = {
+        "dot": DOT,
+        "picture": Stimulus("picture", at=(4.0, 4.0), looks=Picture(size=3.0)),
+        "odd": Stimulus("odd", at=(-4.0, 0.0), looks=P("odd_color")),
+        "ring": Stimulus("ring", at=(0.0, 0.0), looks=ring),
+    }
+
+    drawn = _drawing().drawn(world, visible, {}, FIX, 0, 7)
+
+    assert [item.name for item in drawn.screen.items] == ["dot"]
+    outlines = {outline.name: outline for outline in drawn.outlines}
+    assert list(outlines) == ["picture", "odd", "ring.0", "ring.1", "ring.2"]
+    picture, odd = outlines["picture"], outlines["odd"]
+    assert (picture.x_deg, picture.y_deg, picture.size_deg) == (4.0, 4.0, 3.0)
+    assert picture.why == "not drawn yet: Picture is drawn in engine build A4"
+    assert (odd.x_deg, odd.y_deg, odd.size_deg) == (-4.0, 0.0, pointer.OUTLINE_DEG)
+    assert odd.why == "it has no value to be drawn with: no value bound for parameter 'odd_color'"
+    for i, (x, y) in enumerate(ring.positions({}, (0.0, 0.0))):
+        outline = outlines[f"ring.{i}"]
+        assert (outline.x_deg, outline.y_deg, outline.size_deg) == (x, y, 2.0)
+        assert outline.why == "not drawn yet: Noise is drawn in engine build A3"
+    assert decode(encode(drawn)) == drawn
+
+    valued = _drawing().drawn(world, visible, {"odd_color": Disc(size=1.0, color=Gray(40.0))},
+                              FIX, 0, 7)
+    assert [item.name for item in valued.screen.items] == ["dot", "odd"]
+    assert [outline.name for outline in valued.outlines] == ["picture", "ring.0", "ring.1", "ring.2"]
 
 
 # --- The mouse and the simulated eye -----------------------------------------------------------
@@ -843,6 +977,54 @@ def test_the_mouse_and_the_simulated_eye_agree_on_the_popout(tmp_path, monkeypat
     assert source.stale == source.malformed == 0
 
 
+def _popout():
+    """The pop-out search, read from wl-xtasks as the agreement test reads it."""
+    if _XTASKS is None:
+        if os.environ.get("WLX_REQUIRE_XTASKS") == "1":  # pragma: no cover - CI's
+            pytest.fail("WLX_REQUIRE_XTASKS=1 but no wl-xtasks checkout holding "
+                        "tasks/popout_search.py was found")
+        pytest.skip("no wl-xtasks checkout holding tasks/popout_search.py")
+    from wl_xcon.cli import _load_task
+
+    return _load_task(_XTASKS / "tasks" / "popout_search.py")
+
+
+def test_the_drawn_windows_are_those_tracked_scores_with_the_target_flagged():
+    """§3.9, §4.4 (§14 item 4): the pop-out's ring of twelve, turned 33°, drawn as `gaze.Tracked`
+    scores it -- each window the center and radius the world judges gaze against on that frame,
+    the array's object windows where the trial placed them, its target's object flagged, at its
+    placed center, where the drawer draws the odd disc; and the aliases' own stand-ins, which no
+    gaze is scored against, never drawn."""
+    task = _popout()
+    trial = task.trial
+    values = {param.name: param.start for param in task.params if param.start is not None}
+    odd, among = task.pool.choices[0]
+    values.update(odd_color=odd, distractor_color=among, set_size=12, array_rotation=33.0)
+    (array,) = [action.stimulus for _, action in actions_of(trial)
+                if isinstance(action, Show) and action.stimulus.name == "search"]
+    clock, page, source, pace = _rig()
+    world = pointer.worlds(source, pace=pace)(trial, values, 0)
+    visible = {"search": array}
+    world.display(visible, 1)
+
+    drawn = _drawing().drawn(world, visible, values, trial, 0, 1)
+
+    names = [window.name for window in drawn.windows]
+    assert names == ["fix", "center", *(f"search.{i}" for i in range(12))]
+    for window in drawn.windows:
+        assert (window.x_deg, window.y_deg, window.radius_deg) == world._judged[window.name]
+        assert window.eye == "both"
+    (target,) = [window for window in drawn.windows if window.target]
+    placed = array.looks.positions(values, (0.0, 0.0))
+    assert target.name == "search.0" and (target.x_deg, target.y_deg) == placed[0]
+    assert target.radius_deg == values["object_window"]
+    # On the ring's true circle, the ring turned 33° (`task.Array.positions`).
+    assert polar_of_deg(*placed[0]) == pytest.approx((values["ring_radius"], 33.0))
+    odd_disc = next(item for item in drawn.screen.items if item.name == "search.0")
+    assert odd_disc.at_left == pytest.approx((target.x_deg, target.y_deg), abs=1e-12)
+    assert len(drawn.screen.items) == 12 and drawn.outlines == ()
+
+
 # --- The hot path -----------------------------------------------------------------------------
 
 #: **What a frame of a trial through `gaze.Tracked` builds** (`tests/test_simeye.py`'s
@@ -881,7 +1063,8 @@ _SEARCH = Trial(
 )
 
 
-def test_a_frame_with_no_screen_change_builds_only_the_sample(monkeypatch):
+@pytest.mark.parametrize("drawn", [False, True], ids=["in process", "drawn for the page"])
+def test_a_frame_with_no_screen_change_builds_only_the_sample(monkeypatch, drawn):
     """**Hot-path discipline** (CLAUDE.md; the demo plan's Global Constraints): every frame of a
     trial through `Pointing` whose screen does not change builds only what `gaze.Tracked` builds on
     a rig's frame and the mouse's sample, its keys kept in integers and its reports read into
@@ -889,7 +1072,10 @@ def test_a_frame_with_no_screen_change_builds_only_the_sample(monkeypatch):
     `tests/test_simeye.py` measures the simulated eye's (`_builds.built_on`, which reads what a
     tracemalloc snapshot could not tell apart: whose code built what). And every method a frame can
     run, read whole, builds nothing but the sample. A frame whose screen changed copies what it
-    shows (`Pointing._shown_now`), and is kept apart."""
+    shows (`Pointing._shown_now`), and is kept apart. **Drawn for the page** (§3.9), a frame that
+    publishes nothing builds nothing more -- whether one is due is two integers compared -- and a
+    frame that publishes, on a change or every `REDRAWN_EVERY_S`, builds its `Drawn`, which a demo
+    may spend, and is kept apart too."""
     records = {record.__new__.__code__: f"{record.__name__}.__new__"
                for record in (Shown, Placed, Changed, Confirmed)}
     clock, page, source, pace = _rig()
@@ -898,19 +1084,31 @@ def test_a_frame_with_no_screen_change_builds_only_the_sample(monkeypatch):
     for step in range(1, 7):
         page.pointer(frame_at(T0, 148 + 4 * step), 8.0 * step / 6, 0.0)
     _still(page, 8.0, 0.0, range(176, 600))
-    world = _world(_SEARCH, source, pace)
+    published: list = []
+    if drawn:
+        # Redrawn every quarter second, so this short trial is redrawn with nothing changed too.
+        monkeypatch.setattr(pointer, "REDRAWN_EVERY_S", 0.25)
+        world = pointer.worlds(source, pace=pace, drawing=_drawing(),
+                               publish=published.append)(_SEARCH, {}, 0)
+    else:
+        world = _world(_SEARCH, source, pace)
     frame_of = run._Loop.frame
-    measured, steady, took, redrawn = [], set(), set(), []
+    measured, steady, took, redrawn, republished = [], set(), set(), [], []
 
     def measured_frame(loop, frame: int) -> bool:
-        ended, states = [], len(loop.visited)
+        ended, states, sent = [], len(loop.visited), len(published)
 
         def step() -> None:
             ended.append(frame_of(loop, frame))
 
         built = set(built_on(step, named=records))
         measured.append(frame)
-        if ended[0] or len(loop.visited) != states:
+        if len(published) != sent:
+            # Kept apart whole: it builds its `Drawn`.
+            republished.append(frame)
+            if world._onscreen == frame:
+                redrawn.append(frame)
+        elif ended[0] or len(loop.visited) != states:
             took.update(built)
         elif world._onscreen == frame:
             redrawn.append(frame)
@@ -925,6 +1123,17 @@ def test_a_frame_with_no_screen_change_builds_only_the_sample(monkeypatch):
     assert result.visited == ("await_fix", "hold", "go", "on")
     assert measured == list(range(1, result.frames + 1))
     assert len(redrawn) == 2 and redrawn[0] == 1, redrawn
+    if drawn:
+        every = round(pointer.REDRAWN_EVERY_S / FRAME)
+        due, expected = 0, []
+        for frame in measured:
+            if frame in redrawn or frame >= due:
+                expected.append(frame)
+                due = frame + every
+        assert [d.frame for d in published] == expected == republished
+        assert set(expected) - set(redrawn), "redrawn with nothing changed too"
+    else:
+        assert published == [] and republished == []
     assert sorted(steady - _TRACKED_FRAME - _THE_SAMPLE) == []
     assert sorted(took - _TRACKED_FRAME - _THE_SAMPLE - _A_TRANSITION) == []
     on_a_frame = (pointer.Pointing.display, pointer.Pointing.happened, pointer.Pointing._touching,

@@ -308,7 +308,8 @@ class _Routed:
     methods, so the per-frame mark check is the call V12 measured, with nothing added.
     `publish`, once per trial boundary and never per frame, is the link's too, and also
     keeps the frame a session closes with for the idle frames that follow
-    (`Service.closed`)."""
+    (`Service.closed`); a demo's world also publishes its screen through it inside a trial, a
+    `link.Drawn`, which passes through as it is (demo mode §3.9)."""
 
     def __init__(self, link, service: "Service") -> None:
         self._link = link
