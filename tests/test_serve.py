@@ -38,7 +38,7 @@ from _sessions import OPEN_ACCEPTED
 # Autouse: every `ZmqLink`/`ZmqConsole` built here, `wlx serve`'s telemetry thread's and
 # `wlx run --link`'s included, has its context destroyed at teardown without `close()`.
 from _zmq_release import _every_zmq_context_released  # noqa: F401
-from wl_xcon import marks, serve
+from wl_xcon import demoscreen, marks, pointer, serve, viewport
 from wl_xcon.actor import Box
 from wl_xcon.cli import _load_allocation, main
 from wl_xcon.service import Service
@@ -50,6 +50,7 @@ from wl_xcon.link import (
     CancelScheduledStop,
     CheckRun,
     ClearOwed,
+    Drawn,
     Drum,
     EndSession,
     Idle,
@@ -192,10 +193,10 @@ def _teardown_without_close(server: Server) -> None:
         server._web.join(timeout=5)
     if telemetry_started:
         server._telemetry.join(timeout=5)
-    # P4d-2b b2a: the command and mark threads stop on `_stop` as well; joined here so
-    # their sockets are closed on their own threads before `_every_zmq_context_released`
-    # destroys the contexts.
-    for outbox in (server._commands, server._marks):
+    # P4d-2b b2a: the command and mark threads stop on `_stop` as well, and since demo mode
+    # the gaze thread; joined here so their sockets are closed on their own threads before
+    # `_every_zmq_context_released` destroys the contexts.
+    for outbox in (server._commands, server._marks, server._gaze):
         if outbox is not None and outbox.thread.ident is not None:
             outbox.thread.join(timeout=5)
 
@@ -501,6 +502,8 @@ def _served(
     hosts: frozenset = LOOPBACK_NAMES,
     dispatch=None,
     max_streams: int = serve.MAX_EVENT_STREAMS,
+    steer=None,
+    https_page: bool = False,
 ):
     """The handler on a real loopback socket, with no ZMQ anywhere."""
     server = ThreadingHTTPServer(
@@ -513,6 +516,8 @@ def _served(
             hosts=hosts,
             dispatch=dispatch,
             max_streams=max_streams,
+            steer=steer,
+            https_page=https_page,
         ),
     )
     # A short poll, so `shutdown()` returns in a twentieth of a second rather than
@@ -2162,12 +2167,16 @@ def test_wlx_serve_refuses_a_token_file_it_cannot_read(tmp_path):
     "link",
     [
         "tcp://127.0.0.1:5571",
-        "tcp://127.0.0.1:1,tcp://127.0.0.1:2,tcp://127.0.0.1:3,tcp://127.0.0.1:4",
+        "tcp://127.0.0.1:1,tcp://127.0.0.1:2,tcp://127.0.0.1:3,tcp://127.0.0.1:4,"
+        "tcp://127.0.0.1:5",
         ",tcp://127.0.0.1:5572",
+        "tcp://127.0.0.1:1,tcp://127.0.0.1:2,,tcp://127.0.0.1:4",
     ],
 )
-def test_wlx_serve_refuses_a_link_that_is_not_two_or_three_endpoints(tmp_path, link):
-    with pytest.raises(SystemExit, match="two or three"):
+def test_wlx_serve_refuses_a_link_that_is_not_two_three_or_four_endpoints(tmp_path, link):
+    """Demo mode §3.8 added the fourth, a demo's gaze endpoint: one, five, or an empty one
+    among them is still refused, before anything connects."""
+    with pytest.raises(SystemExit, match="two, three or four"):
         main(_serve_args(tmp_path, link=link))
 
 
@@ -2177,16 +2186,19 @@ def test_parse_link_strips_whitespace_around_each_endpoint():
     -- which the old `parse_link` returned with the leading space still on the
     second endpoint, still `"://"`-shaped, so it passed straight through and only
     ZeroMQ noticed, inside the telemetry thread, with no `try` around it (I1(b)).
-    Two endpoints give no mark endpoint (P4d-2b b2a); a third is it."""
+    Two endpoints give no mark endpoint (P4d-2b b2a); a third is it. Neither gives a gaze
+    endpoint (demo mode §3.8)."""
     assert serve.parse_link("tcp://127.0.0.1:5571, tcp://127.0.0.1:5572") == (
         "tcp://127.0.0.1:5571",
         "tcp://127.0.0.1:5572",
+        None,
         None,
     )
     assert serve.parse_link("tcp://127.0.0.1:1, tcp://127.0.0.1:2 ,tcp://127.0.0.1:3") == (
         "tcp://127.0.0.1:1",
         "tcp://127.0.0.1:2",
         "tcp://127.0.0.1:3",
+        None,
     )
 
 
@@ -2375,9 +2387,10 @@ class _Dispatch:
 POST_ANSWER_S = CONNECT_TIMEOUT_S + REPLY_TIMEOUT_S + 5.0
 
 
-def _post(port: int, body, headers: dict | None = None):
-    """`POST /commands` the way the box's own page sends it, unless `headers` says
-    otherwise: loopback `Host`, this page's `Origin`, and JSON."""
+def _post(port: int, body, headers: dict | None = None, *, path: str = "/commands"):
+    """`POST /commands` -- or `path`, `/gaze` (demo mode) -- the way the box's own page
+    sends it, unless `headers` says otherwise: loopback `Host`, this page's `Origin`, and
+    JSON."""
     raw = body if isinstance(body, bytes) else json.dumps(body).encode("utf-8")
     sent = {
         "Host": f"127.0.0.1:{port}",
@@ -2387,7 +2400,7 @@ def _post(port: int, body, headers: dict | None = None):
     sent.update(headers or {})
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=POST_ANSWER_S)
     try:
-        connection.putrequest("POST", "/commands", skip_host=True)
+        connection.putrequest("POST", path, skip_host=True)
         for name, value in sent.items():
             if value is not None:
                 connection.putheader(name, value)
@@ -4580,7 +4593,7 @@ def test_page_e2e_no_record_in_a_session_holds_a_string_actor(tmp_path, monkeypa
 
 # --- b2b: the https listener --------------------------------------------------------
 
-def _page_served(tmp_path, hub, *, dispatch=None, issuer=None, load=True):
+def _page_served(tmp_path, hub, *, dispatch=None, issuer=None, load=True, steer=None):
     """`make_handler` with a `Remote`, on a real loopback TLS socket: the rig's https
     page as a browser reaches it, with a fake wl.works behind its checker."""
     pytest.importorskip("jwt")
@@ -4598,7 +4611,10 @@ def _page_served(tmp_path, hub, *, dispatch=None, issuer=None, load=True):
         checker.load()
     server = _PageServer(
         ("127.0.0.1", port),
-        make_handler(hub, token=TOKEN, stale_after_s=30.0, dispatch=dispatch, remote=Remote(page, checker)),
+        make_handler(
+            hub, token=TOKEN, stale_after_s=30.0, dispatch=dispatch, remote=Remote(page, checker),
+            steer=steer,
+        ),
         tls_context(tls["cert"], tls["key"]),
     )
     thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
@@ -5876,6 +5892,8 @@ def test_a_body_declared_over_the_drain_limit_is_answered_and_the_connection_clo
         ("OPTIONS", "/commands", "POST"),
         ("HEAD", "/", "GET"),
         ("HEAD", "/commands", "POST"),
+        ("GET", "/gaze", "POST"),  # demo mode §4.5: a pointer report is posted, never read
+        ("OPTIONS", "/gaze", "POST"),
         ("BREW", "/events", "GET"),  # an unknown method, the stdlib's 501 turned into a 405
         ("POST", f"/fonts/{FONTS[0].file}", "GET"),
     ],
@@ -6205,3 +6223,754 @@ def test_the_wl_works_sees_pane_shows_the_readings_health_sends_streams_included
     pane = _pane_rows(first["frags"]["rt-health"])
     assert pane == [(r["label"], r["value"]) for r in sent]
     assert ("Streams", "1 open of at most 3") in pane
+
+
+# --- demo mode (Task 8): POST /gaze, steering, and a demo's screen on the stream (§4.4, §4.5) ---
+
+
+def _report(page: str = "page-a", seq: int = 1, **over) -> dict:
+    """A pointer report as a demo's page posts it (§3.8, §4.5): over the drawing, nothing held."""
+    body = {
+        "page": page, "seq": seq, "x": 1.5, "y": -2.25, "over": True, "b": False,
+        "button": False, "held": 0, "presses": [0] * pointer.KEYS,
+    }
+    body.update(over)
+    return body
+
+
+def _release(page: str = "page-a") -> dict:
+    return {"page": page, "release": True}
+
+
+class _Steer:
+    """What `Server.steer` would be, recording each report it is handed."""
+
+    def __init__(self, answer=(200, {"status": "sent", "said": "sent: test"})):
+        self.seen: list = []
+        self.answer = answer
+
+    def __call__(self, report):
+        self.seen.append(report)
+        return self.answer
+
+
+def _demo_screen(number: int = 1, x: float = 0.0) -> Drawn:
+    """A demo's screen as `pointer.Drawing` publishes one: a fixation disc at `x`, frame
+    `number`, on the test rig's direct view, its stand-in housings and viewports."""
+    from wl_xcon import screen
+    from wl_xcon.photometry import Gray
+    from wl_xcon.task import Disc, Stimulus, Trial
+
+    shown = {"fix": Stimulus("fix", at=(x, 0.0), looks=Disc(size=0.5, color=Gray(40.0)))}
+    return Drawn(
+        schema=SCHEMA, phase="drawn", session_id="demo-20261114-101200", trial=0, frame=number,
+        screen=screen.resolve(shown, {}, Trial(start="s", states=[]), DIRECT,
+                              frame_period=1 / 240, frame=number, calibration=SRGB),
+        windows=(), outlines=(), viewports=viewport.viewports(RIG, DIRECT),
+        housings=DIRECT.housings, stand_in=True, mask_deg=None, keys=(),
+    )
+
+
+#: The writes the box's page refuses (spec §2; b2b spec §3), as the headers that make each.
+_BOX_REFUSALS = {
+    "box, a token over plain http": {"Authorization": "Bearer not-a-real-token"},
+    "box, no origin": {"Origin": None},
+    "box, cross-site": {"Origin": "http://evil.example"},
+    "box, another port": {"Origin": "http://127.0.0.1:1"},
+    "box, text/plain": {"Content-Type": "text/plain"},
+    "box, no type": {"Content-Type": None},
+    "box, a LAN name": {"Host": "rig3.lab"},
+    "box, a LAN name beside an https page": {"Host": "rig3.lab"},
+    "box, a peer that is not the box": None,  # its headers name the port: built in the test
+}
+#: The writes the https page refuses (b2b spec §3): not from the page, or no token it accepts.
+_HTTPS_REFUSALS = (
+    "a foreign origin", "no origin", "no content type", "plain text", "no token", "expired",
+    "another rig", "signed out", "no keys", "a clock ahead", "a key wl.works never issued",
+)
+
+
+def _box_writes(case: str, dispatch, steer, monkeypatch) -> tuple:
+    """`case`'s write to `/commands` and to `/gaze` from the box's page, what each reached,
+    and the same two writes made as the page makes them, the control."""
+    hosts = LOOPBACK_NAMES | {"rig3.lab"}
+    https_page = case.endswith("https page")
+    with _served(_hub(), hosts=hosts, dispatch=dispatch, steer=steer,
+                 https_page=https_page) as port:
+        with monkeypatch.context() as patched:
+            headers = _BOX_REFUSALS[case]
+            if headers is None:
+                # As `test_a_write_from_a_peer_that_is_not_the_box_is_refused`: `localhost`
+                # names loopback by its literal, so the peer check alone can refuse.
+                patched.setattr(serve, "on_box", lambda host: False)
+                headers = {"Host": f"localhost:{port}", "Origin": f"http://localhost:{port}"}
+            refused = (
+                _post(port, {"kind": "stop", "by": "jake"}, headers),
+                _post(port, _report(), headers, path="/gaze"),
+            )
+        reached = (list(dispatch.seen), list(steer.seen))
+        accepted = (
+            _post(port, {"kind": "stop", "by": "jake"})[0],
+            _post(port, _report(), path="/gaze")[0],
+        )
+    return refused, reached, accepted
+
+
+def _https_writes(tmp_path, which: str, dispatch, steer) -> tuple:
+    """`which`'s write to `/commands` and to `/gaze` from the https page, what each reached,
+    and the two made with a good token, the control (none where the rig has no keys)."""
+    from _issuer import Issuer
+
+    issuer = None
+    if which == "no keys":
+        issuer = Issuer()
+        issuer.down = True  # wl.works unreachable: the checker never loads
+    hub = _hub()
+    server, thread, port, page, issuer, context = _page_served(
+        tmp_path, hub, dispatch=dispatch, issuer=issuer, steer=steer
+    )
+    try:
+        good = issuer.mint(aud=page.origin)
+        headers = {
+            "a foreign origin": {"Origin": "https://evil.example"},
+            "no origin": {"Origin": None},
+            "no content type": {"Content-Type": None},
+            "plain text": {"Content-Type": "text/plain"},
+        }.get(which, {})
+        token = {
+            "no token": lambda: None,
+            "expired": lambda: issuer.mint(aud=page.origin, exp_in=-3600, iat_in=-7200),
+            "another rig": lambda: issuer.mint(aud="https://rig-9.wl.works"),
+            "a clock ahead": lambda: issuer.mint(aud=page.origin, iat_in=3600, exp_in=7200),
+            "a key wl.works never issued": lambda: Issuer().mint(aud=page.origin),
+        }.get(which, lambda: good)()
+        if which == "signed out":
+            assert _from_page(port, context, page, "/signout", None, good)[0] == 200
+        refused = (
+            _from_page(port, context, page, "/commands", {"kind": "pause"}, token, headers=headers),
+            _from_page(port, context, page, "/gaze", _report(), token, headers=headers),
+        )
+        reached = (list(dispatch.seen), list(steer.seen))
+        accepted = None
+        if which != "no keys":
+            fresh = issuer.mint(aud=page.origin)
+            accepted = (
+                _from_page(port, context, page, "/commands", {"kind": "pause"}, fresh)[0],
+                _from_page(port, context, page, "/gaze", _report(), fresh)[0],
+            )
+    finally:
+        _stop_page(server, thread, hub)
+    return refused, reached, accepted
+
+
+@pytest.mark.parametrize("case", [*_BOX_REFUSALS, *(f"https, {which}" for which in _HTTPS_REFUSALS)])
+def test_gaze_is_gated_exactly_as_commands_is(tmp_path, monkeypatch, case):
+    """§4.5, §14 item 13: `POST /gaze` takes `_command`'s own write checks, factored out
+    (`_writer`), never `may_write` alone, which is false on the https page. Each write
+    `/commands` refuses -- a token over plain http and the box's four checks on its page; the
+    page's `Origin` and `Content-Type`, then every token the rig refuses, on the https page --
+    `/gaze` refuses with the same status and the same sentence, and neither route reaches the
+    rig. The control: the same two writes made as the page makes them both go through."""
+    dispatch, steer = _Dispatch(), _Steer()
+    if case.startswith("box, "):
+        refused, reached, accepted = _box_writes(case, dispatch, steer, monkeypatch)
+    else:
+        refused, reached, accepted = _https_writes(
+            tmp_path, case.removeprefix("https, "), dispatch, steer
+        )
+    commands, gaze = refused
+
+    assert commands[0] in (401, 403) and commands[1]["status"] == "refused", commands
+    assert gaze == commands
+    assert reached == ([], [])
+    if accepted is not None:
+        assert accepted == (200, 200)
+        assert (len(dispatch.seen), len(steer.seen)) == (1, 1)
+        assert isinstance(steer.seen[0], serve.GazeReport)
+
+
+@pytest.mark.parametrize(
+    ("body", "said"),
+    [
+        (b"not json", "a pointer report is one JSON object"),
+        (b"[1]", "a pointer report is one JSON object"),
+        (b"\xff", "a pointer report is one JSON object"),
+        (_report(page=""), "names its page"),
+        (_report(page="p" * (serve.PAGE_ID_LIMIT + 1)), "names its page"),
+        (_report(page="päge"), "names its page"),
+        (_report(page=7), "names its page"),
+        ({key: value for key, value in _report().items() if key != "seq"}, "lacks seq"),
+        (_report(why="x"), "takes no why"),
+        (_report(seq=-1), "seq is a whole number"),
+        (_report(seq=True), "seq is a whole number"),
+        (_report(seq=MARK_ID_LIMIT + 1), "seq is a whole number"),
+        (_report(seq=1.5), "seq is a whole number"),
+        (_report(x="1"), "x is the pointer's position"),
+        (_report(x=float("nan")), "x is the pointer's position"),
+        (_report(y=10**400), "y is the pointer's position"),
+        (_report(x=True), "x is the pointer's position"),
+        (_report(over=1), "over is true or false"),
+        (_report(b=None), "b is true or false"),
+        (_report(button="yes"), "button is true or false"),
+        (_report(held=2**pointer.KEYS), "held is the number keys held"),
+        (_report(held=-1), "held is the number keys held"),
+        (_report(presses=[0] * (pointer.KEYS - 1)), "presses are the 9 number keys'"),
+        (_report(presses=[0] * (pointer.KEYS - 1) + [-1]), "presses are the 9 number keys'"),
+        (_report(presses="0" * pointer.KEYS), "presses are the 9 number keys'"),
+        ({"page": "page-a", "release": False}, "a release is"),
+        ({**_release(), "seq": 1}, "a release is"),
+    ],
+)
+def test_a_malformed_gaze_body_is_refused_400_and_nothing_is_steered(body, said):
+    """§4.5: a body that is not a report or a release is answered 400 with a sentence, as a
+    command is, and nothing is sent: the rig never sees a report it would drop."""
+    steer = _Steer()
+    with _served(_hub(), steer=steer) as port:
+        status, answer = _post(port, body, path="/gaze")
+        still_serving = _request(port, "GET", "/")[0]
+
+    assert status == 400
+    assert answer["status"] == "refused"
+    assert answer["said"].startswith("not sent: ")
+    assert said in answer["said"]
+    assert steer.seen == []
+    assert still_serving == 200
+
+
+def test_a_gaze_body_longer_than_the_limit_or_without_a_length_is_refused_unread():
+    steer = _Steer()
+    with _served(_hub(), steer=steer) as port:
+        too_long = _post(port, _report(page="p" * 5000), path="/gaze")
+        answer = _raw(
+            port,
+            (
+                f"POST /gaze HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\n"
+                f"Origin: http://127.0.0.1:{port}\r\n"
+                f"Content-Type: application/json\r\n\r\n"
+            ).encode("ascii"),
+        )
+        steered = _post(port, _report(), path="/gaze")
+
+    assert too_long == (
+        413, {"status": "refused", "said": "a pointer report is at most 4096 bytes"}
+    )
+    assert answer.startswith(b"HTTP/1.0 400")
+    assert b"a pointer report needs a Content-Length" in answer
+    assert steered[0] == 200
+    assert steer.seen == [
+        serve.GazeReport(page="page-a", seq=1, x=1.5, y=-2.25, over=True, b=False,
+                         button=False, held=0, presses=(0,) * pointer.KEYS)
+    ]
+
+
+def _recorded_gaze(monkeypatch, *, takes: bool = True) -> list:
+    """`link.ZmqGaze` replaced by a recorder: each message handed to it, unpacked as the rig
+    reads one (`pointer.MESSAGE`), into the list returned, and taken when `takes`."""
+    pushed: list = []
+
+    class _Gaze:
+        def __init__(self, endpoint) -> None:
+            self.endpoint = endpoint
+
+        def send(self, message) -> bool:
+            pushed.append(pointer.MESSAGE.unpack(message))
+            return takes
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(serve._link, "ZmqGaze", _Gaze)
+    return pushed
+
+
+def _steered(monkeypatch, clock=None, *, demo: bool = True, takes: bool = True):
+    """A started `Server` with a gaze endpoint whose socket is a recorder (`_recorded_gaze`)
+    and, when `demo`, a demo session's frame. No rig: nothing publishes on its PUB endpoint."""
+    pushed = _recorded_gaze(monkeypatch, takes=takes)
+    pub, rep, gaze = free_endpoints(3)
+    server = Server(sub=pub, req=rep, http=("127.0.0.1", 0), token=TOKEN, gaze=gaze,
+                    steady=clock or _Clock(0.0))
+    server.start()
+    if demo:
+        server.hub.offer(frame(demo=True))
+    return server, pushed
+
+
+def test_gaze_answers_409_not_a_demo_with_none_running(monkeypatch):
+    """§4.5: with no demo running, `/gaze` answers 409, "not a demo", and sends nothing: before
+    any frame, on an idle frame, a demo service's included, and on a real session's frame. A
+    demo session's frame lets the next report through, numbered 1: none was numbered before."""
+    server, pushed = _steered(monkeypatch, demo=False)
+    port = server.address[1]
+    answers = [_post(port, _report(seq=1), path="/gaze")]
+    for latest in (idle(demo=True, gaze=True), idle(), frame()):
+        server.hub.offer(latest)
+        answers.append(_post(port, _report(seq=len(answers) + 1), path="/gaze"))
+
+    assert answers == [serve.NOT_A_DEMO] * 4
+    assert answers[0][1]["said"].startswith("not a demo")
+    assert pushed == []
+    server.hub.offer(frame(demo=True))
+    assert _post(port, _report(seq=9), path="/gaze") == (
+        200, {"status": "sent", "said": serve.GAZE_SENT}
+    )
+    assert [message[0] for message in pushed] == [1]
+
+
+def test_a_second_page_is_answered_409_until_release_or_the_steer_hold(monkeypatch):
+    """Review Focus 5 (§4.5): one page steers at a time. The first whose pointer is over the
+    drawing takes the steer and keeps it -- off the drawing included, and through a quiet spell
+    shorter than `STEER_HOLD_S` -- while another page is answered 409, "steered from another
+    page", and sends nothing. It ends when the page lets go (Escape, or the page closed), or is
+    quiet for the hold; a release from a page that does not steer changes nothing. The rig
+    reads them by `wlx serve`'s own count, rising whichever page steers."""
+    clock = _Clock(100.0)
+    server, pushed = _steered(monkeypatch, clock)
+    port = server.address[1]
+
+    def report(page, seq, **over):
+        return _post(port, _report(page, seq, **over), path="/gaze")
+
+    def release(page):
+        return _post(port, _release(page), path="/gaze")
+
+    sent = (200, {"status": "sent", "said": serve.GAZE_SENT})
+    assert report("b", 1, over=False) == serve.UNSTEERED  # no page steers, B is off the drawing
+    assert report("a", 1, x=1.0) == sent  # A's pointer enters the drawing: A steers
+    assert report("b", 2) == serve.STEERED_ELSEWHERE
+    assert report("b", 2)[1]["said"].startswith("steered from another page")
+    clock.t = 100.5
+    assert report("a", 2, x=2.0, over=False) == sent  # kept off the drawing
+    clock.t = 101.4  # A quiet for 0.9 s, inside the hold
+    assert report("b", 3) == serve.STEERED_ELSEWHERE
+    assert release("b") == serve.NOT_STEERING
+    assert report("b", 4) == serve.STEERED_ELSEWHERE
+    assert release("a") == serve.RELEASED  # A lets go: B may steer
+    assert report("b", 5, x=5.0) == sent
+    assert report("a", 3) == serve.STEERED_ELSEWHERE
+    clock.t = 102.3  # B quiet for 0.9 s: still B's
+    assert report("a", 4) == serve.STEERED_ELSEWHERE
+    clock.t = 102.5  # B quiet for 1.1 s, past the hold: A takes it
+    assert report("a", 5, x=6.0) == sent
+    assert report("b", 6) == serve.STEERED_ELSEWHERE
+
+    assert [(message[0], message[1], message[3] & pointer.OVER) for message in pushed] == [
+        (1, 1.0, pointer.OVER), (2, 2.0, 0), (3, 5.0, pointer.OVER), (4, 6.0, pointer.OVER),
+    ]
+
+
+def test_a_report_older_than_the_last_forwarded_from_its_page_is_dropped(monkeypatch):
+    """§4.5: a report whose `seq` is not newer than the last forwarded from its page is answered
+    *dropped* and not sent, so a late request never moves the eye back. Each page's `seq` is its
+    own: another page's numbers are never held against it, and a page that took the steer back
+    is held to its own last."""
+    server, pushed = _steered(monkeypatch)
+    port = server.address[1]
+
+    def report(page, seq, x):
+        return _post(port, _report(page, seq, x=x), path="/gaze")
+
+    assert report("a", 5, 1.0)[1]["status"] == "sent"
+    assert report("a", 5, 2.0) == serve.DROPPED
+    assert report("a", 3, 3.0) == serve.DROPPED
+    assert report("a", 6, 4.0)[1]["status"] == "sent"
+    assert _post(port, _release("a"), path="/gaze") == serve.RELEASED
+    assert report("b", 1, 5.0)[1]["status"] == "sent"
+    assert _post(port, _release("b"), path="/gaze") == serve.RELEASED
+    assert report("a", 6, 6.0) == serve.DROPPED
+    assert report("a", 7, 7.0)[1]["status"] == "sent"
+
+    assert [(message[0], message[1]) for message in pushed] == [
+        (1, 1.0), (2, 4.0), (3, 5.0), (4, 7.0),
+    ]
+
+
+def test_a_report_the_rig_does_not_take_is_said_not_delivered(monkeypatch):
+    """A report ZeroMQ would not queue -- no demo service connected, or one not reading between
+    runs with its queue full -- is answered *not delivered*, saying why, never *sent*."""
+    server, pushed = _steered(monkeypatch, takes=False)
+    status, answer = _post(server.address[1], _report(), path="/gaze")
+
+    assert (status, answer) == serve.not_delivered(serve.GAZE_NOT_TAKEN)
+    assert len(pushed) == 1
+
+
+def test_a_report_is_packed_and_pushed_as_the_rig_reads_it(zmq_cleanup):
+    """§3.8, §4.5: `wlx serve` packs each report as `pointer.MESSAGE` and pushes it to the
+    demo's gaze endpoint -- here a real `ZmqLink`'s, its PULL socket -- numbered with its own
+    count. Unpacked, the report is the page's: x and y, the three flags, the keys held, and each
+    press count modulo 65536. And the rig's own reader takes it so (`pointer.Source`): the
+    pointer where the page put it, the keys held and the mouse button down; B held is tracker
+    loss."""
+    rig = zmq_cleanup(
+        ZmqLink("tcp://127.0.0.1:0", "tcp://127.0.0.1:0", "tcp://127.0.0.1:0",
+                "tcp://127.0.0.1:0")
+    )
+    server = Server(sub=rig.pub_endpoint, req=rig.rep_endpoint, mark=rig.mark_endpoint,
+                    gaze=rig.gaze_endpoint, http=("127.0.0.1", 0), token=TOKEN)
+    server.start()
+    server.hub.offer(frame(demo=True))
+    port = server.address[1]
+    held = 0b100000101  # keys 1, 3 and 9
+    presses = [0, 3, 2, 0, 65536 + 7, 0, 0, 0, 1]
+    body = _report("page-a", x=-7.25, y=3.5, button=True, held=held, presses=presses)
+    answers: list = []
+
+    def sent() -> bool:
+        # ZeroMQ connects in the background, and a report sent before it has is not taken
+        # (`IMMEDIATE`): the page sends again, as it does every report interval.
+        answers.append(_post(port, {**body, "seq": len(answers) + 1}, path="/gaze"))
+        return answers[-1][0] == 200
+
+    assert _until(sent, 10.0), answers[-1]
+    buffer = bytearray(pointer.MESSAGE.size)
+    assert _until(lambda: rig.gaze_into(buffer) >= 0, 10.0)
+    seq, x, y, flags, keys, *counts = pointer.MESSAGE.unpack(buffer)
+
+    assert seq == len(answers)  # one number for each report forwarded, taken or not
+    assert (x, y) == (-7.25, 3.5)
+    assert flags == pointer.OVER | pointer.BUTTON
+    assert keys == held
+    assert counts == [0, 3, 2, 0, 7, 0, 0, 0, 1]
+
+    assert _post(port, {**body, "seq": len(answers) + 1, "b": True}, path="/gaze")[0] == 200
+    second = bytearray(pointer.MESSAGE.size)
+    assert _until(lambda: rig.gaze_into(second) >= 0, 10.0)
+    assert pointer.MESSAGE.unpack(second)[3] == pointer.OVER | pointer.BUTTON | pointer.B_HELD
+
+    waiting = [bytes(buffer)]
+
+    def receive(into: bytearray) -> int:
+        if not waiting:
+            return -1
+        message = waiting.pop(0)
+        into[: len(message)] = message
+        return len(message)
+
+    source = pointer.Source(receive, seed=1, noise_deg=0.0)
+    sample = source.poll(0.0)
+    assert sample.left.p1 == sample.right.p1 == (-7.25, 3.5)
+    assert [key for key in range(1, pointer.KEYS + 1) if source.held(key)] == [1, 3, 9]
+    assert source.button is True
+    waiting.append(bytes(second))
+    assert source.poll(1 / 240) is None  # B held: tracker loss, never a blink
+
+
+def test_the_count_the_rig_reads_by_goes_round_past_its_top(monkeypatch):
+    """A report's `seq` is 32 bits (`pointer.MESSAGE`): `wlx serve`'s count goes round to 0
+    past its top, never failing to pack. The rig, keeping its highest while one is current,
+    takes the wrapped ones once `pointer.LIVE_S` has passed (`Steering`'s docstring)."""
+    server, pushed = _steered(monkeypatch)
+    server._steering._forwarded = 0xFFFFFFFE
+    port = server.address[1]
+    for seq in (1, 2, 3):
+        assert _post(port, _report(seq=seq), path="/gaze")[1]["status"] == "sent"
+
+    assert [message[0] for message in pushed] == [0xFFFFFFFF, 0, 1]
+
+
+def test_a_console_without_the_gaze_endpoint_says_a_report_is_not_delivered():
+    """§4.5: a `wlx serve` given no fourth endpoint steers nothing: a report while a demo runs
+    is answered *not delivered*, naming the flag that fixes it, and a release changes nothing."""
+    pub, rep = free_endpoints(2)
+    server = Server(sub=pub, req=rep, http=("127.0.0.1", 0), token=TOKEN)
+    server.start()
+    server.hub.offer(frame(demo=True))
+    port = server.address[1]
+
+    assert _post(port, _report(), path="/gaze") == serve.not_delivered(serve.NO_GAZE_ENDPOINT)
+    assert "PUB,REP,MARK,GAZE" in serve.NO_GAZE_ENDPOINT
+    assert _post(port, _release(), path="/gaze") == serve.NOT_STEERING
+
+
+def test_a_full_gaze_thread_answers_its_own_busy():
+    """`GAZE_QUEUE_DEPTH` reports wait for the gaze thread at most; one past it is answered
+    *busy* in the gaze thread's own words, never the command thread's, and is not queued."""
+    stop = threading.Event()
+    outbox = Outbox("gaze-test", lambda: None, 1, stop, busy=serve.GAZE_BUSY)  # never started
+    first = outbox.post(lambda sender: (200, {}))
+    second = outbox.post(lambda sender: (200, {}))
+
+    assert not first.done.is_set()
+    assert (second.done.is_set(), second.answer) == (True, serve.GAZE_BUSY)
+    assert "pointer reports" in serve.GAZE_BUSY[1]["said"]
+    stop.set()
+    assert outbox.post(lambda sender: (200, {})).answer == serve.not_delivered(
+        "wlx serve is closing"
+    )
+
+    # The server's own gaze thread, not started, so nothing is taken off its queue.
+    pub, rep, gaze = free_endpoints(3)
+    server = Server(sub=pub, req=rep, http=("127.0.0.1", 0), token=TOKEN, gaze=gaze)
+    jobs = [server._gaze.post(lambda sender: (200, {}))
+            for _ in range(serve.GAZE_QUEUE_DEPTH + 1)]
+    assert [job.done.is_set() for job in jobs] == [False] * serve.GAZE_QUEUE_DEPTH + [True]
+    assert jobs[-1].answer == serve.GAZE_BUSY
+
+
+def test_the_https_page_steers_a_demo_through_the_server_as_the_box_page_does(
+    tmp_path, monkeypatch
+):
+    """§4.5, §14 item 13: the https page's `/gaze` reaches the server's steering as the box's
+    does -- a signed-in member's report, with the page's `Origin`, is sent -- where `may_write`,
+    false on that page, would have refused it."""
+    pytest.importorskip("jwt")
+    from _issuer import ISSUER, Issuer
+    from _tls import client_context, material
+    from wl_xcon import signin
+    from wl_xcon.serve import Remote, tls_context
+
+    pushed = _recorded_gaze(monkeypatch)
+    tls = material(tmp_path)
+    port = int(free_endpoints(1)[0].rsplit(":", 1)[1])
+    page = signin.parse_rig_page(f"rig-3=https://127.0.0.1:{port}/")
+    issuer = Issuer()
+    checker = signin.Checker(page=page, issuer=ISSUER, cache=tmp_path / "wl-works.json",
+                             fetch=issuer.fetch)
+    checker.load()
+    pub, rep, gaze = free_endpoints(3)
+    server = Server(
+        sub=pub, req=rep, gaze=gaze, http=("127.0.0.1", 0), token=TOKEN,
+        https=("127.0.0.1", port), tls=tls_context(tls["cert"], tls["key"]),
+        remote=Remote(page, checker),
+    )
+    try:
+        server.start()
+        server.hub.offer(frame(demo=True))
+        answer = _from_page(port, client_context(tls["ca"]), page, "/gaze", _report(),
+                            issuer.mint(aud=page.origin))
+    finally:
+        server.close()
+
+    assert answer == (200, {"status": "sent", "said": serve.GAZE_SENT})
+    assert [message[0] for message in pushed] == [1]
+
+
+def _named_events(response, *, deadline_s: float = 20.0):
+    """Each server-sent event as `(its name, its payload)`, a frame's and a drawing's alike, as
+    an `EventSource` with a listener for each would dispatch them; bounded as `_events` is."""
+    ends = time.monotonic() + deadline_s
+    name, data = None, None
+    while True:
+        if time.monotonic() > ends:
+            raise AssertionError(f"no event within {deadline_s} s")
+        line = response.readline()
+        if not line:
+            return
+        line = line.decode("utf-8").rstrip("\n")
+        if line == "":
+            if name is not None and data is not None:
+                yield name, json.loads(data)
+            name, data = None, None
+        elif line.startswith("event: "):
+            name = line[len("event: "):]
+        elif line.startswith("data: "):
+            data = line[len("data: "):]
+
+
+def _frame_of(svg: str) -> int:
+    return int(re.search(r'data-frame="(\d+)"', svg).group(1))
+
+
+def test_drawings_reach_the_stream_as_their_own_event_apart_from_frames():
+    """§3.9, §4.4 (§14 item 11): each `Drawn` the hub is offered is drawn with the exact drawer
+    on a thread of its own (`demoscreen.Drawer`), and the drawing goes to each stream as its own
+    event, `drawn`, carrying only its SVG -- never in a frame event, and never as a frame event
+    of its own. Screens offered faster than drawn arrive in order, the newest last; a frame
+    after them is a frame event as ever; and a stream that connects is sent the latest drawing
+    after its full render."""
+    hub = _hub()
+    screens = [_demo_screen(number, x=float(number)) for number in (1, 2, 3, 4)]
+    with _served(hub) as port, _stream(port) as response:
+        events = _named_events(response)
+        name, payload = next(events)
+        assert (name, sorted(payload)) == ("frame", ["age", "frags", "live"])
+        hub.offer(frame(demo=True))
+        name, payload = next(events)
+        assert name == "frame" and "svg" not in payload
+
+        hub.offer_drawn(screens[0])
+        assert next(events) == ("drawn", {"svg": demoscreen.render(screens[0])})
+        drawer = hub._drawer
+
+        for shown in screens[1:]:
+            hub.offer_drawn(shown)
+        assert hub._drawer is drawer, "one drawing thread for the hub, so drawings stay in order"
+        last = demoscreen.render(screens[-1])
+        arrived = []
+        for name, payload in events:
+            assert name == "drawn", "a drawing woke the stream, and it sent a frame event"
+            arrived.append(_frame_of(payload["svg"]))
+            if payload["svg"] == last:
+                break
+        assert arrived == sorted(set(arrived)) and arrived[-1] == 4, arrived
+
+        for trial in (41, 42):  # a drawing already sent is never sent again
+            hub.offer(frame(demo=True, trial_index=trial))
+            name, payload = next(events)
+            assert name == "frame" and f'data-trial="{trial}"' in payload["frags"]["head-id"]
+
+        with _stream(port) as second:
+            later = _named_events(second)
+            assert next(later)[0] == "frame"
+            assert next(later) == ("drawn", {"svg": last})
+    assert not drawer._thread.is_alive(), "the drawing thread ends with the hub"
+
+
+def test_a_drawing_never_pushes_a_frame_or_the_close_out_of_a_full_queue():
+    """§4.4: a stream's queue holds `QUEUE_DEPTH`; a drawing done while it is full wakes
+    nothing more and evicts nothing -- the stream wakes anyway, and looks for the newest
+    drawing at every wake-up -- so the frames waiting, and a `CLOSED` behind them, are kept.
+    `take` answers the frame over a drawing's wake-up, and `DRAWN` only when nothing else
+    waits."""
+    hub = _hub()
+    subscriber = hub.subscribe(on_box=True)
+    for number in range(QUEUE_DEPTH):
+        hub.offer(frame(trial_index=number))
+    hub._drawn(_demo_screen(), "<svg/>")
+    assert [subscriber.get_nowait().trial_index for _ in range(QUEUE_DEPTH)] == list(
+        range(QUEUE_DEPTH)
+    )
+    assert hub.drawing() == (1, "<svg/>")
+
+    hub.offer(frame(trial_index=50))
+    hub._drawn(_demo_screen(), "<svg>2</svg>")
+    assert hub.take(subscriber, timeout=1.0).trial_index == 50
+    hub._drawn(_demo_screen(), "<svg>3</svg>")
+    assert hub.take(subscriber, timeout=1.0) is serve.DRAWN
+    assert hub.drawing() == (3, "<svg>3</svg>")
+    hub._drawn(_demo_screen(), "<svg>4</svg>")
+    hub.close()
+    assert hub.take(subscriber, timeout=1.0) is CLOSED
+    hub._drawn(_demo_screen(), "<svg>5</svg>")
+    assert hub.drawing() == (4, "<svg>4</svg>"), "a closed hub keeps no drawing"
+    hub.offer_drawn(_demo_screen())
+    assert hub._drawer is None, "a closed hub starts no drawing thread"
+
+
+class _ScriptedConsole:
+    """A fake `ZmqConsole`: the frames of `script` in turn on `receive()`, then a
+    `TimeoutError` each call, as `_OneFrameThenNothingConsole` is."""
+
+    script: tuple = ()
+
+    def __init__(self, *args, **kwargs) -> None:
+        self._left = list(self.script)
+
+    def receive(self):
+        if not self._left:
+            raise TimeoutError("no more simulated frames")
+        return self._left.pop(0)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        return None
+
+
+def test_a_drawn_arriving_mid_stream_neither_ends_the_telemetry_thread_nor_reaches_offer(
+    monkeypatch,
+):
+    """§3.9 (Task 3's carried concern): `_listen` hands a `Drawn` to `Hub.offer_drawn`, never
+    `Hub.offer`, which reads a session's frame and raised on a demo's first screen, ending the
+    telemetry thread. A `Drawn` between two frames reaches `offer_drawn` alone, is drawn, and the
+    frame after it is offered and kept, the thread running and nothing fatal."""
+    first, shown, after = frame(demo=True, trial_index=1), _demo_screen(), frame(
+        demo=True, trial_index=2
+    )
+    monkeypatch.setattr(
+        serve._link, "ZmqConsole",
+        type("_Console", (_ScriptedConsole,), {"script": (first, shown, after)}),
+    )
+    offered, drawn = [], []
+    real_offer, real_offer_drawn = Hub.offer, Hub.offer_drawn
+
+    def offer(self, frame_):
+        offered.append(frame_)
+        real_offer(self, frame_)
+
+    def offer_drawn(self, drawn_):
+        drawn.append(drawn_)
+        real_offer_drawn(self, drawn_)
+
+    monkeypatch.setattr(Hub, "offer", offer)
+    monkeypatch.setattr(Hub, "offer_drawn", offer_drawn)
+    pub, rep = free_endpoints(2)
+    server = Server(sub=pub, req=rep, http=("127.0.0.1", 0), token=TOKEN)
+    server.start()
+
+    assert _until(lambda: len(offered) == 2, 10.0), offered
+    assert offered == [first, after]
+    assert drawn == [shown]
+    assert server.hub.snapshot(on_box=True, stale_after_s=30.0)[0] == after
+    assert _until(lambda: server.hub.drawing()[0] == 1, 20.0)
+    assert server.hub.drawing()[1] == demoscreen.render(shown)
+    assert not server._fatal.is_set()
+    assert server._telemetry.is_alive()
+
+
+def test_a_demos_screen_published_on_the_link_reaches_the_page_drawn(zmq_cleanup):
+    """The path (§3.9, §4.4): a demo's world publishes its screen on the rig's PUB socket, a real
+    `ZmqLink`'s, between its frames; `wlx serve` reads it, draws it and sends it to the page's
+    stream as a drawing, the exact drawer's, and its telemetry thread reads on."""
+    rig = zmq_cleanup(ZmqLink(pub_endpoint="tcp://127.0.0.1:0", rep_endpoint="tcp://127.0.0.1:0"))
+    server = Server(sub=rig.pub_endpoint, req=rig.rep_endpoint, http=("127.0.0.1", 0),
+                    token=TOKEN)
+    server.start()
+    shown = _demo_screen(7, x=2.0)
+    stop = threading.Event()
+
+    def publish() -> None:
+        # PUB/SUB joins late: published until it is seen, as a demo republishes each second.
+        while not stop.is_set():
+            rig.publish(frame(demo=True))
+            rig.publish(shown)
+            stop.wait(0.05)
+
+    publisher = threading.Thread(target=publish, daemon=True)
+    with _stream(server.address[1]) as response:
+        publisher.start()
+        try:
+            for name, payload in _named_events(response):
+                if name == "drawn":
+                    break
+        finally:
+            stop.set()
+            publisher.join(timeout=5)
+
+    assert payload == {"svg": demoscreen.render(shown)}
+    assert server.hub.demo_running()
+    assert not server._fatal.is_set()
+
+
+def test_parse_link_takes_a_fourth_endpoint(tmp_path, monkeypatch, capsys):
+    """§3.8: `--link PUB,REP,MARK,GAZE`, as `wlx taskd --link` binds a demo's, the fourth a
+    demo's gaze endpoint; `wlx serve` hands it to its server, whose every view says it has one
+    (`View.can_gaze`), and `wlx serve --help` names the four as `wlx taskd --help` says serve
+    takes them."""
+    four = "tcp://127.0.0.1:1, tcp://127.0.0.1:2,tcp://127.0.0.1:3 ,tcp://127.0.0.1:4"
+    assert serve.parse_link(four) == (
+        "tcp://127.0.0.1:1", "tcp://127.0.0.1:2", "tcp://127.0.0.1:3", "tcp://127.0.0.1:4",
+    )
+    pub, rep, gaze = free_endpoints(3)
+    steering = Server(sub=pub, req=rep, http=("127.0.0.1", 0), token=TOKEN, gaze=gaze)
+    without = Server(sub=pub, req=rep, http=("127.0.0.1", 0), token=TOKEN)
+    assert steering.hub.snapshot(on_box=True, stale_after_s=30.0)[1].can_gaze is True
+    assert without.hub.snapshot(on_box=True, stale_after_s=30.0)[1].can_gaze is False
+
+    for command in ("serve", "taskd"):
+        with pytest.raises(SystemExit):
+            main([command, "--help"])
+        assert "PUB,REP[,MARK[,GAZE]]" in capsys.readouterr().out, command
+
+    seen: dict = {}
+
+    def stop_at_construction(self, **kwargs) -> None:
+        seen.update(kwargs)
+        raise OSError("stopped here by the test")
+
+    monkeypatch.setattr(Server, "__init__", stop_at_construction)
+    with pytest.raises(SystemExit, match="stopped here by the test"):
+        main(_serve_args(tmp_path, link=four))
+    assert (seen["mark"], seen["gaze"]) == ("tcp://127.0.0.1:3", "tcp://127.0.0.1:4")

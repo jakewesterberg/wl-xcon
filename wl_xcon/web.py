@@ -96,6 +96,10 @@ class View:
     #: `(streams open, the cap)` for `/health`'s *streams* reading, which the *wl-works
     #: sees* pane shows too; `None` where the caller does not say (no such reading).
     streams: tuple[int, int] | None = None
+    #: Whether this console has a demo's gaze endpoint (`wlx serve --link PUB,REP,MARK,GAZE`;
+    #: demo mode §4.5), so a page may steer a demo from here through `POST /gaze`, under the
+    #: write checks every write takes. `False` unless `wlx serve` says otherwise.
+    can_gaze: bool = False
 
 
 @dataclass(frozen=True, slots=True)

@@ -26,6 +26,19 @@ already runs, so no new dependency:
   a drawn range changed live and a revert (`hand_back`, `range`, `revert`), and since the
   pop-out search build a block moved on or back naming the rig's suggestion it confirms, and a
   hold of one (`next_block`, `back_block`, `decline`; `_WIRE_KINDS`).
+- `POST /gaze` (demo mode §4.5) -- one pointer report from a demo's page, **gated exactly as
+  `/commands` is** (`_writer`, the write checks factored out of `_command`; §14 item 13), never
+  by `may_write`, then checked (`parse_gaze`), and, while the latest frame is a demo session's
+  and the page steers (`Steering`: one page at a time, until it releases the steer or is quiet
+  for `STEER_HOLD_S`), packed as the rig reads it (`pointer.MESSAGE`) and pushed to the demo's
+  gaze endpoint, `--link`'s fourth, with ZeroMQ's non-blocking send. **Each report costs a
+  request**, and on the https page a token check too: stated, not measured.
+
+**A demo's screen, drawn here** (demo mode §3.9, §4.4). A `link.Drawn` the telemetry thread
+reads goes to `Hub.offer_drawn`, never `Hub.offer`; the hub's `demoscreen.Drawer` draws it with
+the exact drawer on a thread of its own, never in the rig service's process, and each drawing
+goes to every stream as its own server-sent event, `event: drawn`, in order, apart from the
+frames; a stream that connects is sent the latest.
 
 **The rig's https page (b2b, `--https` and its five companion flags).** A second
 listener, TLS, serves the same routes plus `POST /whoami` and `POST /signout`. A command
@@ -48,7 +61,10 @@ The telemetry thread (`Server._listen`) owns a read-only `ZmqConsole`, its SUB
 socket. The command thread (an `Outbox`) owns a `ZmqCommands`, the REQ socket, and
 takes commands from a bounded queue. The mark thread (another `Outbox`) owns a
 `ZmqMarks`, the PUSH socket to the session's mark endpoint, so a mark's signal goes
-ahead of any command waiting on the rig's acknowledgment (spec §5.3). Each browser's
+ahead of any command waiting on the rig's acknowledgment (spec §5.3). Given a gaze endpoint,
+the gaze thread (a third `Outbox`) owns a `link.ZmqGaze`, the PUSH socket to a demo's gaze
+endpoint (demo mode §4.5). The drawing thread (`demoscreen.Drawer`, started at a hub's first
+`Drawn`) owns no socket: it draws, and hands each drawing to the hub. Each browser's
 `/events` and each `POST` runs on the HTTP server's thread for that connection. With
 `--https`, the https listener has a thread of its own, and each of its connections does
 its TLS handshake on that connection's thread (`_PageServer`), and the keys thread
@@ -59,9 +75,10 @@ stops `wlx serve`: the https page is off, saying why (§3.1).
 
 **No timing claim is made here.** `DEFAULT_STALE_AFTER_S` is a display choice (spec
 §3); `QUEUE_DEPTH`, `RATE_SAMPLE_S`, `KEEPALIVE_S`, `REQUEST_TIMEOUT_S`, `RETRY_MS`,
-`COMMAND_QUEUE_DEPTH`, `MARK_QUEUE_DEPTH`, `BODY_LIMIT`, `MAX_EVENT_STREAMS`, `MARKS_REMEMBERED`,
-`OUTBOX_POLL_S` and the link's `REPLY_TIMEOUT_S` and `CONNECT_TIMEOUT_S` are
-housekeeping, not a measurement of this system.
+`COMMAND_QUEUE_DEPTH`, `MARK_QUEUE_DEPTH`, `GAZE_QUEUE_DEPTH`, `BODY_LIMIT`, `MAX_EVENT_STREAMS`,
+`MARKS_REMEMBERED`, `PAGES_REMEMBERED`, `PAGE_ID_LIMIT`, `OUTBOX_POLL_S` and the link's
+`REPLY_TIMEOUT_S` and `CONNECT_TIMEOUT_S` are housekeeping, not a measurement of this system;
+`STEER_HOLD_S` is the demo plan's call, with its reason where it is defined.
 """
 
 from __future__ import annotations
@@ -87,8 +104,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from wl_xcon import actor as actors
+from wl_xcon import demoscreen as _demoscreen
 from wl_xcon import health as _health
 from wl_xcon import link as _link
+from wl_xcon import pointer as _pointer
 from wl_xcon import web as _web
 from wl_xcon import welfare as _welfare
 from wl_xcon.actor import Actor, Box, Member
@@ -111,6 +130,11 @@ RATE_SAMPLE_S = 1.0
 
 #: What `Hub.take` returns once the hub is closed: the stream ends.
 CLOSED = object()
+#: What `Hub.take` returns when only a new drawing woke a stream (demo mode §4.4): the stream
+#: sends the drawing, and no frame event.
+DRAWN = object()
+#: What a handler's write checks return once they have refused a request (`_writer`).
+_REFUSED = object()
 
 
 def _put_dropping_oldest(subscriber: queue.Queue, item: object) -> None:
@@ -126,6 +150,16 @@ def _put_dropping_oldest(subscriber: queue.Queue, item: object) -> None:
                 subscriber.get_nowait()
             except queue.Empty:
                 pass
+
+
+def _wake(subscriber: queue.Queue) -> None:
+    """Wake a stream to send the newest drawing (demo mode §4.4), **evicting nothing**: a full
+    queue wakes its stream anyway, and every wake-up looks for a newer drawing, so a drawing never
+    pushes out the frame or the `CLOSED` waiting there."""
+    try:
+        subscriber.put_nowait(DRAWN)
+    except queue.Full:
+        pass
 
 
 class StreamsFull(Exception):
@@ -156,6 +190,12 @@ class Hub:
     a real clock. **There is no wall clock here**: this process's host clock parts from
     a session's anchored one by any step it has taken since the session began, so
     nothing here subtracts it from a session instant.
+
+    **A demo's screens are kept apart from its frames** (demo mode §3.9, §4.4). `offer_drawn`,
+    on the telemetry thread, hands each `link.Drawn` to the hub's `demoscreen.Drawer`, made at
+    the first and closed with the hub, which draws on its own thread and gives each drawing to
+    `_drawn`: kept as the latest, numbered, and every stream woken (`_wake`) to send it as its
+    own event. A drawing never enters the frame, the rate window or `/health`.
     """
 
     def __init__(
@@ -164,6 +204,7 @@ class Hub:
         endpoint: str,
         steady: Callable[[], float] = _welfare.steady_seconds,
         marks: bool = False,
+        gaze: bool = False,
     ) -> None:
         #: The PUB endpoint the telemetry thread reads, handed to every `View` so a
         #: page with no frame names where it is listening (m4). No default: a hub
@@ -172,6 +213,9 @@ class Hub:
         #: Whether this console has the session's mark endpoint (P4d-2b b2a), for
         #: every `View`: without it the page greys its mark control.
         self._marks = marks
+        #: Whether this console has a demo's gaze endpoint (`--link`'s fourth; demo mode §4.5),
+        #: for every `View`: without it no page steers a demo here.
+        self._gaze = gaze
         self._steady = steady
         self._lock = threading.Lock()
         self._frame: _link.Telemetry | _link.Idle | None = None
@@ -186,6 +230,10 @@ class Hub:
         #: Each open stream's queue, and whether it is on the box.
         self._subscribers: dict[queue.Queue, bool] = {}
         self._closed = False
+        #: The thread a demo's screens are drawn on, made at the first `Drawn`; `None` before.
+        self._drawer: _demoscreen.Drawer | None = None
+        #: The latest drawing, `(its number, its SVG)`, counted from 1; `(0, None)` before any.
+        self._drawing: tuple[int, str | None] = (0, None)
 
     def offer(self, frame: _link.Telemetry | _link.Idle) -> None:
         """Keep `frame` as the latest and hand it to every open stream.
@@ -231,6 +279,43 @@ class Hub:
             subscribers = list(self._subscribers)
         for subscriber in subscribers:
             _put_dropping_oldest(subscriber, latest)
+
+    def offer_drawn(self, drawn: _link.Drawn) -> None:
+        """**A demo's screen, to be drawn** (demo mode §3.9, §4.4), from the telemetry thread:
+        handed to the hub's `demoscreen.Drawer`, made here at the first, which draws the newest
+        screen waiting once the drawing in progress is done. Never a frame: `offer` never sees
+        it. Dropped once the hub is closed."""
+        with self._lock:
+            if self._closed:
+                return
+            if self._drawer is None:
+                self._drawer = _demoscreen.Drawer(self._drawn)
+            drawer = self._drawer
+        drawer.offer(drawn)
+
+    def _drawn(self, drawn: _link.Drawn, svg: str) -> None:
+        """One drawing done, on the drawing thread: kept as the latest under the next number,
+        and every stream woken to send it (`_wake`)."""
+        with self._lock:
+            if self._closed:
+                return
+            self._drawing = (self._drawing[0] + 1, svg)
+            subscribers = list(self._subscribers)
+        for subscriber in subscribers:
+            _wake(subscriber)
+
+    def drawing(self) -> tuple[int, str | None]:
+        """The latest drawing, `(its number, its SVG)`, numbered from 1 in the order drawn, so a
+        stream sends one only when it is newer than the last it sent; `(0, None)` before any."""
+        with self._lock:
+            return self._drawing
+
+    def demo_running(self) -> bool:
+        """**Whether the latest frame is a demo session's** (`Telemetry.demo`; demo mode §4.5),
+        the one a page steers. An idle frame is no session's, a demo service's included."""
+        with self._lock:
+            latest = self._frame
+        return isinstance(latest, _link.Telemetry) and latest.demo
 
     def _rate(self) -> float | None:
         """Trials per minute over the window. The caller holds the lock."""
@@ -280,6 +365,7 @@ class Hub:
             endpoint=self._endpoint,
             can_write=can_write,
             can_mark=self._marks,
+            can_gaze=self._gaze,
             signin=signin,
             https_page=https_page,
             streams=None if streams_max is None else (streams, streams_max),
@@ -312,30 +398,39 @@ class Hub:
 
     def take(self, subscriber: queue.Queue, timeout: float) -> object:
         """The newest item waiting on `subscriber` -- a frame, `None` when a refusal
-        woke it before any frame arrived, or `CLOSED` -- waiting up to `timeout`
-        seconds and raising `queue.Empty` after that.
+        woke it before any frame arrived, `DRAWN` when only a new drawing did, or
+        `CLOSED` -- waiting up to `timeout` seconds and raising `queue.Empty` after that.
 
         **Older frames are skipped, not rendered**: telemetry is latest-wins, so a
         browser that fell behind catches up in one render rather than replaying what
-        it missed.
+        it missed. **A frame outranks a drawing** (demo mode §4.4): `DRAWN` is returned
+        only when no frame was waiting, so a drawing never hides a frame's wake-up, and
+        the stream looks for a newer drawing after every wake-up either way.
         """
         item = subscriber.get(timeout=timeout)
         while item is not CLOSED:
             try:
-                item = subscriber.get_nowait()
+                later = subscriber.get_nowait()
             except queue.Empty:
                 break
+            if later is not DRAWN or item is DRAWN:
+                item = later
         return item
 
     def close(self) -> None:
         """End every open stream, and any opened after this. The table is emptied so
-        no later frame can push a stream's `CLOSED` out of its queue."""
+        no later frame can push a stream's `CLOSED` out of its queue. The drawing thread
+        finishes the drawing in progress, keeps nothing more, and ends (`Drawer.close`),
+        outside the lock its last drawing asks for."""
         with self._lock:
             self._closed = True
             subscribers = list(self._subscribers)
             self._subscribers.clear()
+            drawer, self._drawer = self._drawer, None
         for subscriber in subscribers:
             _put_dropping_oldest(subscriber, CLOSED)
+        if drawer is not None:
+            drawer.close()
 
 
 #: Seconds between refreshes on a stream with no frame to send: an event re-rendered
@@ -365,7 +460,9 @@ MAX_EVENT_STREAMS = 16
 _FONTS = {f"/fonts/{font.file}": font for font in _web.FONTS}
 # `/whoami` and `/signout` are not here: they answer 404 to every method on the http
 # listener (b2b spec §3). Task 9 of the b2b plan routes them on https.
-_ROUTES = frozenset({"/", "/events", "/health", "/commands", *_FONTS})
+_ROUTES = frozenset({"/", "/events", "/health", "/commands", "/gaze", *_FONTS})
+#: The paths a `POST` writes to, which a 405 names as allowing `POST` alone.
+_WRITES = frozenset({"/commands", "/gaze"})
 #: What a command carrying a token to the plain-http listener is told (b2b spec §3).
 TOKEN_OVER_HTTP = "sign-in works only on the rig's https page"
 #: What the https page hears for a write that did not come from its own page (b2b spec §3).
@@ -506,10 +603,12 @@ def _console_at(host: str, port: int, name: str) -> str:
     )
 
 
-def event(payload: dict) -> bytes:
-    """One server-sent event named `frame`. `json.dumps` escapes every newline and
-    control character, so the payload is one `data:` line whatever telemetry held."""
-    return b"event: frame\ndata: " + json.dumps(payload).encode("utf-8") + b"\n\n"
+def event(payload: dict, *, name: str = "frame") -> bytes:
+    """One server-sent event named `name`: `frame`, or since demo mode `drawn`, a demo's
+    screen drawn (§4.4), its own kind so a page never takes one for the other. `json.dumps`
+    escapes every newline and control character, so the payload is one `data:` line
+    whatever telemetry held."""
+    return f"event: {name}\ndata: ".encode("ascii") + json.dumps(payload).encode("utf-8") + b"\n\n"
 
 
 def _csp(nonce: str, connect: str = "") -> str:
@@ -842,23 +941,41 @@ class Outbox:
         build: Callable[[], object],
         depth: int,
         stop: threading.Event,
+        *,
+        busy: tuple[int, dict] = BUSY,
     ) -> None:
         self._build = build
         self._queue: queue.Queue = queue.Queue(maxsize=depth)
         self._stop = stop
+        #: What a job is answered when the queue is full: `BUSY`, or the gaze thread's own.
+        self._busy = busy
         self.thread = threading.Thread(target=self._run, name=name, daemon=True)
 
     def start(self) -> None:
         self.thread.start()
 
     def submit(self, work: Callable[[object], tuple[int, dict]]) -> tuple[int, dict]:
-        if self._stop.is_set():
-            return not_delivered("wlx serve is closing")
+        return self.wait(self.post(work))
+
+    def post(self, work: Callable[[object], tuple[int, dict]]) -> _Job:
+        """**Queue `work`, never waiting**: the job, already answered *busy* when the queue
+        is full or *not delivered* when the server is closing. `submit` is `post` then
+        `wait`; the gaze thread's caller posts under its steering lock, so jobs run in the
+        order their reports were numbered, and waits after letting it go (`Steering`)."""
         job = _Job(work)
+        if self._stop.is_set():
+            job.answer = not_delivered("wlx serve is closing")
+            job.done.set()
+            return job
         try:
             self._queue.put_nowait(job)
         except queue.Full:
-            return BUSY
+            job.answer = self._busy
+            job.done.set()
+        return job
+
+    def wait(self, job: _Job) -> tuple[int, dict]:
+        """`job`'s answer, once its work is done (`post`)."""
         while not job.done.wait(OUTBOX_POLL_S):
             if not self.thread.is_alive():
                 # Fix round 1, Important 4: the thread may have answered this very
@@ -948,6 +1065,289 @@ def _rewarded(command: _link.ManualReward) -> Callable[[object], tuple[int, dict
     return work
 
 
+# --- a demo's pointer (demo mode §3.8, §4.5) -------------------------------------------
+
+#: **How long a page that steers a demo keeps the steer with nothing sent**, in seconds (§4.5):
+#: past `pointer.LIVE_S` (0.5 s), so a page's stall that the rig reads as tracker loss keeps the
+#: steer, and within a person's patience when a page closed without letting go. The demo plan's
+#: call, claiming nothing about a rig.
+STEER_HOLD_S = 1.0
+#: How many pointer reports may wait for the gaze thread before `POST /gaze` answers *busy*:
+#: one page steers, with one report in flight at a time (the page's own rule), so a few hold
+#: every report a hand makes. Housekeeping, as `MARK_QUEUE_DEPTH`.
+GAZE_QUEUE_DEPTH = 8
+#: The longest page id a report may carry: a page's random id is a few dozen characters (a
+#: UUID's 36). Housekeeping.
+PAGE_ID_LIMIT = 64
+#: How many pages' last forwarded sequence numbers are kept, so a report older than its page's
+#: last is dropped (`Steering`): as many pages as may stream at once (`MAX_EVENT_STREAMS`). A page
+#: forgotten past it has not steered since that many others did, and its next report is taken as
+#: its newest. Housekeeping.
+PAGES_REMEMBERED = MAX_EVENT_STREAMS
+#: The count `wlx serve` numbers the reports it forwards with is a report's 32-bit `seq`
+#: (`pointer.MESSAGE`), and goes round past its top. The rig keeps the highest it has while one
+#: is current (`pointer.Source`), so the wrap costs one `pointer.LIVE_S` of tracker loss, once in
+#: four billion reports.
+_FORWARDED_MASK = 0xFFFFFFFF
+
+#: What a page is told when its report was handed to the demo's gaze socket (§4.5): ZeroMQ queued
+#: it to the connected demo service (`link.ZmqGaze.send`), whose newest report is the eye's at its
+#: next frame. Whether a frame read it is not known here.
+GAZE_SENT = (
+    "sent: handed to the demo's gaze socket; the newest report there is the demo's eye at its "
+    "next frame"
+)
+#: What the page is told when another page steers (§4.5), which it shows.
+STEERED_ELSEWHERE = (
+    409,
+    {
+        "status": "steered_elsewhere",
+        "said": (
+            f"steered from another page: this page may steer once that page lets go (Escape, "
+            f"or closing it), or sends nothing for {STEER_HOLD_S:g} s"
+        ),
+    },
+)
+#: What a report is told while no demo session runs (§4.5): the latest frame is no demo's.
+NOT_A_DEMO = (
+    409,
+    {
+        "status": "not_a_demo",
+        "said": "not a demo: no demo session is running here, so there is no eye to steer",
+    },
+)
+#: A report not forwarded, and needing nothing done: older than its page's last, or off the
+#: drawing from a page that does not steer.
+DROPPED = (
+    200,
+    {
+        "status": "dropped",
+        "said": "not sent: a newer report from this page was sent already; the newest wins",
+    },
+)
+UNSTEERED = (
+    200,
+    {
+        "status": "dropped",
+        "said": (
+            "not sent: no page steers the demo, and this page takes the steer when its pointer "
+            "is over the drawing"
+        ),
+    },
+)
+RELEASED = (200, {"status": "released", "said": "released: another page may steer the demo now"})
+NOT_STEERING = (200, {"status": "released", "said": "released: this page was not steering"})
+#: What the page is told when the gaze thread is full (`GAZE_QUEUE_DEPTH`).
+GAZE_BUSY = (
+    503,
+    {
+        "status": "busy",
+        "said": (
+            "busy: wlx serve is still sending earlier pointer reports, so this one was not sent; "
+            "the next is sent in its place"
+        ),
+    },
+)
+#: Why a report was not sent: the rig's gaze socket took none, because no demo service is
+#: connected, or it is not reading them (between runs, paused) and its queue is full.
+GAZE_NOT_TAKEN = (
+    "the demo is not taking pointer reports now: it is between runs or paused, or its service "
+    "is gone; the next report is sent in its place"
+)
+#: Why a report is not sent from a console with no gaze endpoint.
+NO_GAZE_ENDPOINT = (
+    "this console was started without the demo's gaze endpoint: give wlx serve "
+    "--link PUB,REP,MARK,GAZE, as wlx taskd prints it"
+)
+
+#: A report's fields (§3.8), as the page sends them, and a release's.
+_REPORT_FIELDS = frozenset({"page", "seq", "x", "y", "over", "b", "button", "held", "presses"})
+_RELEASE_FIELDS = frozenset({"page", "release"})
+
+
+class BadGaze(ValueError):
+    """A `POST /gaze` body that is not a pointer report or a release. The message is the
+    sentence the page is answered; nothing was sent."""
+
+
+@dataclass(frozen=True, slots=True)
+class GazeReport:
+    """**One pointer report from a demo's page** (§3.8, §4.5): its page's random id, its `seq`
+    rising with each the page sends, the pointer's x and y in degrees (+y up), whether it is over
+    the drawing, B held, the mouse button down, the number keys held (bit `k - 1` for key `k`),
+    and each of the `pointer.KEYS` keys' running press count."""
+
+    page: str
+    seq: int
+    x: float
+    y: float
+    over: bool
+    b: bool
+    button: bool
+    held: int
+    presses: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class GazeRelease:
+    """A page letting go of the steer (§4.5): Escape, or the page closed."""
+
+    page: str
+
+
+def _whole(value: object, top: int) -> bool:
+    """Whether `value` is a whole number from 0 to `top`, a `bool` not being one."""
+    return not isinstance(value, bool) and isinstance(value, int) and 0 <= value <= top
+
+
+def parse_gaze(data: object) -> GazeReport | GazeRelease:
+    """One `POST /gaze` body (§4.5): `{"page", "seq", "x", "y", "over", "b", "button", "held",
+    "presses"}`, or `{"page", "release": true}`. **Checked whole before anything is sent**: a
+    field missing or extra, or of the wrong kind, is refused with a sentence (`BadGaze`). `seq`
+    and each press count are whole numbers a browser's JSON carries exactly (`MARK_ID_LIMIT`,
+    `Number.MAX_SAFE_INTEGER`); the counts are sent modulo 65536, as the rig reads them
+    (`pointer.pack`). x and y are finite: the rig drops a report that is not (`pointer.Source`),
+    and this answers it instead."""
+    if not isinstance(data, dict):
+        raise BadGaze("a pointer report is one JSON object")
+    page = data.get("page")
+    if (
+        not isinstance(page, str)
+        or not 1 <= len(page) <= PAGE_ID_LIMIT
+        or not page.isascii()
+        or not page.isprintable()
+    ):
+        raise BadGaze(
+            f"a pointer report names its page: an id of 1 to {PAGE_ID_LIMIT} printable ASCII "
+            f"characters"
+        )
+    if "release" in data:
+        if set(data) != _RELEASE_FIELDS or data["release"] is not True:
+            raise BadGaze("a release is the page's id and release: true, and nothing else")
+        return GazeRelease(page)
+    missing, extra = _REPORT_FIELDS - set(data), set(data) - _REPORT_FIELDS
+    if missing or extra:
+        said = [f"lacks {', '.join(sorted(missing))}"] if missing else []
+        said += [f"takes no {', '.join(sorted(extra))}"] if extra else []
+        raise BadGaze(f"a pointer report {' and '.join(said)}")
+    if not _whole(data["seq"], MARK_ID_LIMIT):
+        raise BadGaze(
+            f"a report's seq is a whole number from 0 to {MARK_ID_LIMIT}, rising with each "
+            f"report its page sends"
+        )
+    for axis in ("x", "y"):
+        value = data[axis]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not _finite(value):
+            raise BadGaze(
+                f"a report's {axis} is the pointer's position in degrees, a finite number"
+            )
+    for flag in ("over", "b", "button"):
+        if not isinstance(data[flag], bool):
+            raise BadGaze(f"a report's {flag} is true or false")
+    keys = _pointer.KEYS
+    if not _whole(data["held"], 2**keys - 1):
+        raise BadGaze(
+            f"a report's held is the number keys held, bit k - 1 for key k, from 0 to "
+            f"{2**keys - 1}"
+        )
+    presses = data["presses"]
+    if (
+        not isinstance(presses, list)
+        or len(presses) != keys
+        or not all(_whole(count, MARK_ID_LIMIT) for count in presses)
+    ):
+        raise BadGaze(
+            f"a report's presses are the {keys} number keys' press counts, each a whole number "
+            f"from 0 to {MARK_ID_LIMIT}"
+        )
+    return GazeReport(
+        page=page, seq=data["seq"], x=float(data["x"]), y=float(data["y"]),
+        over=data["over"], b=data["b"], button=data["button"], held=data["held"],
+        presses=tuple(presses),
+    )
+
+
+def _pushed(message: bytes) -> Callable[[object], tuple[int, dict]]:
+    """The gaze thread's work for one packed report: hand it to the demo's gaze socket without
+    waiting (`link.ZmqGaze.send`) and say whether it went."""
+
+    def work(gaze) -> tuple[int, dict]:
+        if gaze.send(message):
+            return 200, {"status": "sent", "said": GAZE_SENT}
+        return not_delivered(GAZE_NOT_TAKEN)
+
+    return work
+
+
+class Steering:
+    """**Who steers a demo's eye** (§4.5), and the count the rig reads reports by.
+
+    **One page steers at a time**: the first whose report says its pointer is over the drawing
+    takes the steer, and keeps it, off the drawing included, until it lets go (`release`) or
+    sends nothing for `STEER_HOLD_S` on `clock`. Another page's report meanwhile is answered
+    409 (`STEERED_ELSEWHERE`); one off the drawing while no page steers is not sent
+    (`UNSTEERED`). **A report not newer than the last forwarded from its page is dropped**
+    (`DROPPED`), its page's `seq` being the page's own count.
+
+    **The rig reads reports by `wlx serve`'s own count**, `forwarded`, rising with each report
+    sent whichever page steers (the demo plan's call: the rig keeps the highest, `pointer.Source`),
+    so a page that takes the steer is never taken for an older one. A report is numbered, packed
+    (`pointer.pack`) and queued on the gaze thread under one lock, so the thread sends them in the
+    order numbered; the answer is waited for after the lock is let go. `wlx serve` restarted
+    counts from 1 again, and the rig, keeping its highest while one is current, takes its reports
+    once `pointer.LIVE_S` has passed.
+    """
+
+    def __init__(self, outbox: Outbox, *, clock: Callable[[], float] = _welfare.steady_seconds):
+        self._outbox = outbox
+        self._clock = clock
+        self._lock = threading.Lock()
+        #: The page that steers, and when it was last heard from, on `clock`.
+        self._page: str | None = None
+        self._heard = 0.0
+        #: Each page's last forwarded `seq`, the newest `PAGES_REMEMBERED` pages.
+        self._seqs: OrderedDict[str, int] = OrderedDict()
+        #: The last number a forwarded report was sent with.
+        self._forwarded = 0
+
+    def report(self, report: GazeReport) -> tuple[int, dict]:
+        """Forward `report` if its page steers, or takes the steer, and it is its page's newest;
+        else say why not."""
+        now = self._clock()
+        with self._lock:
+            if self._page is not None and now - self._heard >= STEER_HOLD_S:
+                self._page = None  # quiet for the hold: the steer is free
+            if self._page is not None and self._page != report.page:
+                return STEERED_ELSEWHERE
+            if self._page is None and not report.over:
+                return UNSTEERED
+            if self._page == report.page:
+                self._heard = now
+            last = self._seqs.get(report.page)
+            if last is not None and report.seq <= last:
+                return DROPPED
+            self._page, self._heard = report.page, now
+            self._seqs[report.page] = report.seq
+            self._seqs.move_to_end(report.page)
+            while len(self._seqs) > PAGES_REMEMBERED:
+                self._seqs.popitem(last=False)
+            self._forwarded = (self._forwarded + 1) & _FORWARDED_MASK
+            message = _pointer.pack(
+                self._forwarded, report.x, report.y, over=report.over, b=report.b,
+                button=report.button, held=report.held, presses=report.presses,
+            )
+            job = self._outbox.post(_pushed(message))
+        return self._outbox.wait(job)
+
+    def release(self, page: str) -> tuple[int, dict]:
+        """`page` lets go of the steer, if it holds it."""
+        with self._lock:
+            if self._page != page:
+                return NOT_STEERING
+            self._page = None
+        return RELEASED
+
+
 @dataclass(frozen=True)
 class Remote:
     """The https page's sign-in (b2b spec §3-§5): this rig's page entry, and the checker
@@ -1011,6 +1411,7 @@ def make_handler(
     https_page: bool = False,
     https_off: str | None = None,
     max_streams: int = MAX_EVENT_STREAMS,
+    steer: Callable[[object], tuple[int, dict]] | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     """A handler class closing over `hub` and the token, built the way wl-preproc's
     `make_handler` is and for its reason: `BaseHTTPRequestHandler` handles the whole
@@ -1025,6 +1426,10 @@ def make_handler(
     became of it (`Server.dispatch`); a handler given none answers every command
     *not delivered*. `https_off` is why the rig's https page is off, shown on the box's own
     page (b2b-ready §3.1).
+
+    **Demo mode §4.5.** `steer` takes each `POST /gaze` body past the write checks and
+    `parse_gaze`, and says what became of it (`Server.steer`); a handler given none answers every
+    report *not delivered*.
     """
     if not token or not token.isascii():
         raise ValueError(
@@ -1049,6 +1454,7 @@ def make_handler(
         # A function stored on a class becomes a method; `staticmethod` keeps it the
         # plain callable it was given.
         _dispatch = None if dispatch is None else staticmethod(dispatch)
+        _steer = None if steer is None else staticmethod(steer)
         # No interpreter version in any `Server` header (wl-preproc's Important 5).
         server_version = ""
         sys_version = ""
@@ -1161,7 +1567,7 @@ def make_handler(
             elif status == 405:
                 # RFC 9110 §15.5.6: a 405 names the methods the path does answer. `HEAD`
                 # is refused (`do_HEAD`), so it is not among them.
-                self.send_header("Allow", "POST" if self._path() == "/commands" else "GET")
+                self.send_header("Allow", "POST" if self._path() in _WRITES else "GET")
             for name, value in headers:
                 self.send_header(name, value)
             self.end_headers()
@@ -1258,6 +1664,8 @@ def make_handler(
                 return
             if self.path == "/commands":
                 self._command()
+            elif self.path == "/gaze":
+                self._gaze()
             elif self._remote is not None and self.path in ("/whoami", "/signout"):
                 self._account(self.path)
             else:
@@ -1325,44 +1733,66 @@ def make_handler(
                 },
             )
 
+        def _writer(self):
+            """**The write checks**, factored out of `_command` so that `POST /commands` and
+            `POST /gaze` take them alike (demo mode §4.5, §14 item 13): `/gaze` is gated
+            exactly as `/commands` is, never by `may_write` alone, which is false on the https
+            page. Returns who may write -- the member a token names on the https page, `None`
+            on the box's -- or `_REFUSED` once the refusal is answered, its body read first
+            (`_refuse_after_reading`).
+
+            **A token never reaches the box's checks** (b2b spec §3): on the plain-http
+            listener a request carrying `Authorization` is refused first of all, then spec
+            §2's four checks (`_from_the_box`). On the https listener the write is the
+            signed-in member's: the page's `Origin` and `Content-Type`, then the token."""
+            refuse = self._refuse_after_reading
+            if self._remote is None and self.headers.get("Authorization") is not None:
+                refuse(403, {"status": "refused", "said": TOKEN_OVER_HTTP})
+                return _REFUSED
+            if self._remote is not None:
+                if not self._from_the_page():
+                    refuse(403, {"status": "refused", "said": FROM_THE_PAGE})
+                    return _REFUSED
+                accepted = self._signed_in()
+                return _REFUSED if accepted is None else accepted.member
+            if not self._from_the_box():
+                said = _web.CONTROLS_ELSEWHERE if self._https_page else _web.CONTROLS_AT_THE_BOX
+                refuse(403, {"status": "refused", "said": said})
+                return _REFUSED
+            return None
+
+        def _length(self, what: str) -> int | None:
+            """The body's declared length, at most `BODY_LIMIT`, or `None` once a body with
+            none, or a longer one, is refused unread (`_refuse_after_reading`). `what` names
+            it in the sentence: "a command", "a pointer report"."""
+            length = self.headers.get("Content-Length") or ""
+            if not length.isascii() or not length.isdecimal():
+                self._refuse_after_reading(
+                    400, {"status": "refused", "said": f"{what} needs a Content-Length"}
+                )
+                return None
+            if int(length) > BODY_LIMIT:
+                self._refuse_after_reading(
+                    413, {"status": "refused", "said": f"{what} is at most {BODY_LIMIT} bytes"}
+                )
+                return None
+            return int(length)
+
         def _command(self) -> None:
             """`POST /commands` (spec §5.3): one JSON command, checked and validated before
             anything is queued, then sent and answered *sent*, *not delivered* or *busy*.
 
-            **A token never reaches the box's checks** (b2b spec §3): on the plain-http
-            listener a request carrying `Authorization` is refused first of all. On the
-            https listener the command is the signed-in member's: the page's `Origin` and
-            `Content-Type`, then the token, then the body, which takes no `by`. Every
-            refusal before the body is read reads it first (`_refuse_after_reading`)."""
-            if self._remote is None and self.headers.get("Authorization") is not None:
-                self._refuse_after_reading(403, {"status": "refused", "said": TOKEN_OVER_HTTP})
+            The write checks are `_writer`'s; on the https listener the body takes no `by`,
+            the command being the signed-in member's. Every refusal before the body is read
+            reads it first (`_refuse_after_reading`)."""
+            member = self._writer()
+            if member is _REFUSED:
                 return
-            member = None
-            early = self._refuse_after_reading
-            if self._remote is not None:
-                if not self._from_the_page():
-                    early(403, {"status": "refused", "said": FROM_THE_PAGE})
-                    return
-                accepted = self._signed_in()
-                if accepted is None:
-                    return
-                member = accepted.member
-            if self._remote is None and not self._from_the_box():
-                said = _web.CONTROLS_ELSEWHERE if self._https_page else _web.CONTROLS_AT_THE_BOX
-                self._refuse_after_reading(403, {"status": "refused", "said": said})
-                return
-            length = self.headers.get("Content-Length") or ""
-            if not length.isascii() or not length.isdecimal():
-                early(400, {"status": "refused", "said": "a command needs a Content-Length"})
-                return
-            if int(length) > BODY_LIMIT:
-                early(
-                    413,
-                    {"status": "refused", "said": f"a command is at most {BODY_LIMIT} bytes"},
-                )
+            length = self._length("a command")
+            if length is None:
                 return
             try:
-                data = json.loads(self.rfile.read(int(length)).decode("utf-8"))
+                data = json.loads(self.rfile.read(length).decode("utf-8"))
                 request = parse_command(data, actor=member)
             except (UnicodeDecodeError, ValueError) as exc:
                 # `BadCommand` is a `ValueError`, and so is `json`'s own error.
@@ -1388,6 +1818,42 @@ def make_handler(
                 code, answer = not_delivered("this console has no command path")
             else:
                 code, answer = self._dispatch(request)
+            self._send_json(code, answer)
+
+        def _gaze(self) -> None:
+            """`POST /gaze` (demo mode §4.5): one pointer report, or a release, from a demo's
+            page. **Gated exactly as `/commands` is** (`_writer`), then its length and its body
+            checked (`parse_gaze`), each refusal a sentence; then `steer` (`Server.steer`) says
+            what became of it: *sent*, *dropped*, *released*, 409 *not a demo* or *steered from
+            another page*, *busy* or *not delivered*. Who steers is recorded nowhere: a demo's
+            eye is no command."""
+            if self._writer() is _REFUSED:
+                return
+            length = self._length("a pointer report")
+            if length is None:
+                return
+            try:
+                report = parse_gaze(json.loads(self.rfile.read(length).decode("utf-8")))
+            except (UnicodeDecodeError, ValueError) as exc:
+                # `BadGaze` is a `ValueError`, and so is `json`'s own error.
+                said = (
+                    str(exc) if isinstance(exc, BadGaze) else "a pointer report is one JSON object"
+                )
+                self._send_json(400, {"status": "refused", "said": f"not sent: {said}"})
+                return
+            except Exception:  # noqa: BLE001 -- answered, never a dead thread (`_command`'s)
+                self._send_json(
+                    400,
+                    {
+                        "status": "refused",
+                        "said": "not sent: this request could not be read as a pointer report",
+                    },
+                )
+                return
+            if self._steer is None:
+                code, answer = not_delivered("this console has no gaze path")
+            else:
+                code, answer = self._steer(report)
             self._send_json(code, answer)
 
         def do_GET(self) -> None:
@@ -1501,7 +1967,13 @@ def make_handler(
             `age`, and possibly no fragment at all.
 
             `take` is only ever used as a wake-up and to notice `CLOSED` -- never as
-            the frame that gets rendered (F2, below `_send_frame`)."""
+            the frame that gets rendered (F2, below `_send_frame`).
+
+            **A demo's drawings go as their own events** (demo mode §4.4): after the full
+            render on connect, the latest drawing if there is one; then after every wake-up
+            the latest drawing if it is newer than the last this stream sent, so they arrive
+            in order, the newest winning. A wake-up only a drawing made (`DRAWN`) sends no
+            frame event."""
             box = on_box(self.client_address[0])
             can_write = self.may_write()
             try:
@@ -1517,6 +1989,7 @@ def make_handler(
                 self.wfile.write(f"retry: {RETRY_MS}\n\n".encode("ascii"))
                 sent: dict[str, str] = {}
                 self._send_frame(box, can_write, sent)
+                drawn = self._send_drawing(0)
                 while True:
                     try:
                         item = self._hub.take(subscriber, timeout=self._keepalive_s)
@@ -1525,7 +1998,9 @@ def make_handler(
                         continue
                     if item is CLOSED:
                         return
-                    self._send_frame(box, can_write, sent)
+                    if item is not DRAWN:
+                        self._send_frame(box, can_write, sent)
+                    drawn = self._send_drawing(drawn)
             except OSError:
                 # A broken pipe, a reset, or a write that timed out: the browser went
                 # away. There is nobody to tell; `finally` forgets it.
@@ -1573,6 +2048,16 @@ def make_handler(
                     }
                 )
             )
+
+        def _send_drawing(self, after: int) -> int:
+            """The hub's latest drawing as its own event, `drawn`, its payload `{"svg": ...}`
+            (`demoscreen.render`'s fragment), if it is newer than drawing `after`, the last
+            this stream sent; the number of the last sent."""
+            number, svg = self._hub.drawing()
+            if number <= after:
+                return after
+            self.wfile.write(event({"svg": svg}, name="drawn"))
+            return number
 
     def _backstop(handler):
         """`handler` with a last resort (XC-042): one that raises answers `500` with a fixed
@@ -1636,6 +2121,11 @@ class Server:
     then a mark is answered *not delivered* and the page greys its control.
     `allow_hosts` is `--allow-host`. `reply_timeout_s` and `connect_timeout_s` are
     the command sender's (`link.ZmqCommands`), passed so a test need not wait them.
+
+    `gaze` is a demo's gaze endpoint, `--link`'s fourth (demo mode §4.5); given one, the gaze
+    thread (an `Outbox` owning a `link.ZmqGaze`) pushes each report `Steering` forwards. `None`
+    without one, and then a report is answered *not delivered*. `steady` is the clock the
+    steer's hold is read on (`STEER_HOLD_S`), injectable so no test waits it.
     """
 
     def __init__(
@@ -1656,6 +2146,8 @@ class Server:
         tls: ssl.SSLContext | None = None,
         remote: Remote | None = None,
         https_off: str | None = None,
+        gaze: str | None = None,
+        steady: Callable[[], float] = _welfare.steady_seconds,
     ) -> None:
         if (https is None) != (tls is None) or (https is None) != (remote is None):
             raise ValueError(
@@ -1664,7 +2156,7 @@ class Server:
             )
         if https is not None and https_off is not None:
             raise ValueError("an https page cannot be both given and off")
-        self.hub = Hub(endpoint=sub, marks=mark is not None)
+        self.hub = Hub(endpoint=sub, marks=mark is not None, gaze=gaze is not None)
         self._sub = sub
         # `req` is not kept on `self`: nothing reads it after this constructor --
         # the command thread's `Outbox` closes over it directly (fix round 1,
@@ -1691,6 +2183,21 @@ class Server:
                 self._stop,
             )
         )
+        #: The gaze thread (demo mode §4.5): it alone owns the PUSH socket to a demo's gaze
+        #: endpoint, and `Steering` queues each report it forwards here, in order. `None`
+        #: without a gaze endpoint, and so is `_steering`.
+        self._gaze = (
+            None
+            if gaze is None
+            else Outbox(
+                "wlx-serve-gaze",
+                lambda: _link.ZmqGaze(gaze),
+                GAZE_QUEUE_DEPTH,
+                self._stop,
+                busy=GAZE_BUSY,
+            )
+        )
+        self._steering = None if self._gaze is None else Steering(self._gaze, clock=steady)
         #: Each signalled mark's `(pressed_at, received_at)`, by number, for the note
         #: that follows it; the newest `MARKS_REMEMBERED`. HTTP threads share it.
         self._marked: OrderedDict = OrderedDict()
@@ -1723,6 +2230,7 @@ class Server:
                 dispatch=self.dispatch,
                 https_page=https is not None,
                 https_off=https_off,
+                steer=self.steer,
             ),
         )
         page_http = None
@@ -1733,6 +2241,7 @@ class Server:
                     make_handler(
                         self.hub, token=token, stale_after_s=stale_after_s,
                         keepalive_s=keepalive_s, dispatch=self.dispatch, remote=remote,
+                        steer=self.steer,
                     ),
                     tls,
                 )
@@ -1788,6 +2297,8 @@ class Server:
         self._commands.start()
         if self._marks is not None:
             self._marks.start()
+        if self._gaze is not None:
+            self._gaze.start()
         self._web.start()
         if self._keys is not None:
             self._keys.start()
@@ -1827,6 +2338,19 @@ class Server:
                 received_at=received_at,
             )
         return self._commands.submit(_delivered(request))
+
+    def steer(self, report: GazeReport | GazeRelease) -> tuple[int, dict]:
+        """**One `POST /gaze` past its checks** (demo mode §4.5): a release lets go of the
+        steer; a report is answered 409 *not a demo* unless the latest frame is a demo
+        session's (`Hub.demo_running`), *not delivered* by a console with no gaze endpoint,
+        and is otherwise `Steering`'s to forward or not."""
+        if isinstance(report, GazeRelease):
+            return NOT_STEERING if self._steering is None else self._steering.release(report.page)
+        if not self.hub.demo_running():
+            return NOT_A_DEMO
+        if self._steering is None:
+            return not_delivered(NO_GAZE_ENDPOINT)
+        return self._steering.report(report)
 
     def _signal(self, request: MarkSignal) -> tuple[int, dict]:
         """A mark's signal (spec §5.1, §5.3): a fresh number, the instant this
@@ -1886,6 +2410,10 @@ class Server:
         instead of serving on with a dead telemetry thread. Nothing here retries in
         a loop with no sleep: a fatal exception ends the thread on the first one,
         it does not spin.
+
+        **A demo's screen, a `link.Drawn`, goes to `Hub.offer_drawn`, never `Hub.offer`**
+        (demo mode §3.9), which reads a session's frame and would raise on it, ending this
+        thread at a demo's first screen.
         """
         try:
             # Read-only (P4d-2b b2a): no REQ socket here. Commands are the command
@@ -1901,7 +2429,10 @@ class Server:
                     except _link.FrameError as exc:
                         self.hub.reject(str(exc))
                         continue
-                    self.hub.offer(frame)
+                    if isinstance(frame, _link.Drawn):
+                        self.hub.offer_drawn(frame)
+                    else:
+                        self.hub.offer(frame)
         except Exception as exc:  # noqa: BLE001 -- ends the process, never hidden (I1)
             if self._stop.is_set():
                 return  # asked to stop; a transport error on the way out is not new
@@ -1963,8 +2494,8 @@ class Server:
         if telemetry_started:
             self._telemetry.join(timeout=5)
         # The outboxes stop on `_stop` too, answering anything still queued, and
-        # close their sockets on their own threads (P4d-2b b2a).
-        for outbox in (self._commands, self._marks):
+        # close their sockets on their own threads (P4d-2b b2a; demo mode's gaze thread).
+        for outbox in (self._commands, self._marks, self._gaze):
             if outbox is not None and outbox.thread.ident is not None:
                 outbox.thread.join(timeout=5)
 
@@ -2038,10 +2569,12 @@ def read_token(path: Path) -> str:
     return token
 
 
-def parse_link(text: str) -> tuple[str, str, str | None]:
-    """`PUB,REP` or `PUB,REP,MARK`, exactly as `wlx run --link` takes it (P4d-2b b2a
-    added the third): telemetry is read from the first, commands are sent to the
-    second, and mark signals to the third, which is `None` when not given.
+def parse_link(text: str) -> tuple[str, str, str | None, str | None]:
+    """`PUB,REP`, `PUB,REP,MARK` or `PUB,REP,MARK,GAZE`, exactly as `wlx run --link` or `wlx
+    taskd --link` takes it (P4d-2b b2a added the third, demo mode the fourth, §3.8): telemetry
+    is read from the first, commands are sent to the second, mark signals to the third, and a
+    demo's pointer reports to the fourth (`POST /gaze`), each of the last two `None` when not
+    given.
 
     **Fix round 1, I1(a).** This used to check only that each half contained
     `"://"` somewhere, which is what its docstring already claimed to do and did
@@ -2065,15 +2598,17 @@ def parse_link(text: str) -> tuple[str, str, str | None]:
     check anywhere would be inventing support this parser cannot verify.
     """
     parts = [part.strip() for part in text.split(",")]
-    if len(parts) not in (2, 3) or not all(parts):
+    if len(parts) not in (2, 3, 4) or not all(parts):
         raise SystemExit(
-            f"refused: --link expects PUB,REP or PUB,REP,MARK -- two or three "
-            f"comma-separated endpoints such as tcp://127.0.0.1:5571, as given to "
-            f"`wlx run --link` -- got {text!r}"
+            f"refused: --link expects PUB,REP, PUB,REP,MARK or PUB,REP,MARK,GAZE -- two, three "
+            f"or four comma-separated endpoints such as tcp://127.0.0.1:5571, as given to "
+            f"`wlx run --link` or `wlx taskd --link` -- got {text!r}"
         )
     for endpoint in parts:
         _refuse_unless_tcp_endpoint(endpoint, text)
-    return parts[0], parts[1], parts[2] if len(parts) == 3 else None
+    mark = parts[2] if len(parts) >= 3 else None
+    gaze = parts[3] if len(parts) == 4 else None
+    return parts[0], parts[1], mark, gaze
 
 
 def _refuse_unless_tcp_endpoint(endpoint: str, whole: str) -> None:
@@ -2232,7 +2767,7 @@ def run(args) -> int:
     process, and closing it commands nothing.
     """
     token = read_token(args.health_token_file)
-    sub, req, mark = parse_link(args.link)
+    sub, req, mark, gaze = parse_link(args.link)
     host, port = parse_http(args.http)
     stale_after = (
         DEFAULT_STALE_AFTER_S if args.stale_after is None else args.stale_after
@@ -2268,6 +2803,7 @@ def run(args) -> int:
             mark=mark,
             allow_hosts=tuple(args.allow_host),
             https_off=https_off,
+            gaze=gaze,
             **listener,
         )
     except OSError as exc:
@@ -2291,8 +2827,9 @@ def run(args) -> int:
         at = _console_at(bound_host, bound_port, socket.gethostname())
         print(
             f"wlx serve: the console is at {at}, reading "
-            f"{sub}, sending commands to {req} and marks to "
-            f"{mark or 'nowhere (no MARK endpoint given)'}; {controls}; GET /health "
+            f"{sub}, sending commands to {req}, marks to "
+            f"{mark or 'nowhere (no MARK endpoint given)'} and a demo's pointer reports to "
+            f"{gaze or 'nowhere (no GAZE endpoint given)'}; {controls}; GET /health "
             f"needs the bearer token",
             flush=True,
         )

@@ -1621,11 +1621,12 @@ def main(argv: list[str] | None = None) -> int:
     server_parser.add_argument(
         "--link",
         required=True,
-        metavar="PUB,REP[,MARK]",
-        help="the session's endpoints, exactly as given to `wlx run --link`. "
-        "Telemetry is read from the first, commands are sent to the second, and an "
-        "operator's mark signal to the third; without the third the page's mark "
-        "control is greyed",
+        metavar="PUB,REP[,MARK[,GAZE]]",
+        help="the session's endpoints, exactly as given to `wlx run --link` or `wlx taskd "
+        "--link`. Telemetry is read from the first, commands are sent to the second, an "
+        "operator's mark signal to the third, and a demo's pointer reports, the page's "
+        "POST /gaze, to the fourth; without the third the page's mark control is greyed, "
+        "and without the fourth no demo is steered from this page",
     )
     server_parser.add_argument(
         "--allow-host",
